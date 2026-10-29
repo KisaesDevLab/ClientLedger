@@ -1,19 +1,23 @@
-//! `cargo xtask unsafe-check`: `ClientLedger`'s own code has exactly one
-//! `unsafe` boundary (A03, Q-A03s): the Windows job limits for the reading
-//! worker and tesseract (memory cap, one process, no crash reporting) in
-//! [`ALLOWED`], one `SetInformationJobObject` call with a `// SAFETY:`
-//! comment. Adding limits to that call must not add a second block.
+//! `cargo xtask unsafe-check`: `ClientLedger`'s own code has two `unsafe`
+//! boundaries, both Windows API calls in cl-host:
+//!
+//! - [`ALLOWED`] (A03, Q-A03s): the Windows job limits for the reading
+//!   worker and tesseract (memory cap, one process, no crash reporting), one
+//!   `SetInformationJobObject` call. Adding limits to that call must not add
+//!   a second block.
+//! - [`WIN_PRINT`] (P19, Q-P19ae): Windows direct printing through GDI,
+//!   many small calls, each in its own block.
 //!
 //! The workspace lint `unsafe_code = "forbid"` can't be relaxed inside a
-//! crate, so cl-host denies it instead and that one module allows it. This
-//! check keeps the boundary that small:
+//! crate, so cl-host denies it instead and those two modules allow it. This
+//! check keeps the boundaries that small:
 //!
 //! 1. no `unsafe` token (blocks, functions, impls, traits, extern blocks,
 //!    macro bodies) in any `.rs` file under `crates/`, `apps/` or `xtask/`
-//!    except [`ALLOWED`]; comments and strings are not tokens;
-//! 2. no `allow(unsafe_code)` / `expect(unsafe_code)` outside it;
-//! 3. [`ALLOWED`] holds exactly one `unsafe` block, preceded by a
-//!    `// SAFETY:` comment;
+//!    except the two files; comments and strings are not tokens;
+//! 2. no `allow(unsafe_code)` / `expect(unsafe_code)` outside them;
+//! 3. every `unsafe` in them is preceded by a `// SAFETY:` comment, and
+//!    [`ALLOWED`] holds exactly one;
 //! 4. every package keeps `[lints] workspace = true`, except cl-host, which
 //!    must say `unsafe_code = "deny"`.
 
@@ -21,8 +25,11 @@ use anyhow::{Context, Result};
 use proc_macro2::{TokenStream, TokenTree};
 use std::path::{Path, PathBuf};
 
-/// The one file that may contain `unsafe`.
+/// The job-limits file: exactly one `unsafe` block.
 pub const ALLOWED: &str = "crates/cl-host/src/procs/win_job_memory.rs";
+
+/// The Windows direct-print file: any number of commented blocks.
+pub const WIN_PRINT: &str = "crates/cl-host/src/win_print.rs";
 
 /// The package that replaces the workspace lints (and must deny unsafe).
 const OWN_LINTS: &str = "crates/cl-host/Cargo.toml";
@@ -89,15 +96,24 @@ fn rel(root: &Path, p: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// Check the allowed file's content: one `unsafe` block with a `SAFETY`
-/// comment in the comment block right above it.
+/// Check the job-limits file: one `unsafe` block with a `SAFETY` comment
+/// in the comment block right above it.
 #[must_use]
 pub fn allowed_file_problems(src: &str) -> Vec<String> {
+    boundary_problems(ALLOWED, src, Some(1))
+}
+
+/// Check a boundary file: every `unsafe` has a `SAFETY` comment right above
+/// it, and there are exactly `exact` of them when given.
+#[must_use]
+pub fn boundary_problems(name: &str, src: &str, exact: Option<usize>) -> Vec<String> {
     let (lines, _) = unsafe_tokens(src);
     let mut out = Vec::new();
-    if lines.len() != 1 {
+    if let Some(n) = exact
+        && lines.len() != n
+    {
         out.push(format!(
-            "{ALLOWED}: expected exactly one `unsafe`, found {}",
+            "{name}: expected exactly {n} `unsafe`, found {}",
             lines.len()
         ));
     }
@@ -113,7 +129,7 @@ pub fn allowed_file_problems(src: &str) -> Vec<String> {
             .any(|t| t.trim_start().starts_with("// SAFETY:"));
         if !has_safety {
             out.push(format!(
-                "{ALLOWED}:{l}: `unsafe` without a `// SAFETY:` comment above it"
+                "{name}:{l}: `unsafe` without a `// SAFETY:` comment above it"
             ));
         }
     }
@@ -137,12 +153,20 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
             out.extend(allowed_file_problems(&src));
             continue;
         }
+        if r == WIN_PRINT {
+            out.extend(boundary_problems(WIN_PRINT, &src, None));
+            continue;
+        }
         let (unsafe_lines, allow_lines) = unsafe_tokens(&src);
         for l in unsafe_lines {
-            out.push(format!("{r}:{l}: `unsafe` outside {ALLOWED}"));
+            out.push(format!(
+                "{r}:{l}: `unsafe` outside {ALLOWED} and {WIN_PRINT}"
+            ));
         }
         for l in allow_lines {
-            out.push(format!("{r}:{l}: unsafe code allowed outside {ALLOWED}"));
+            out.push(format!(
+                "{r}:{l}: unsafe code allowed outside {ALLOWED} and {WIN_PRINT}"
+            ));
         }
     }
     for d in ["crates", "apps"] {
@@ -197,7 +221,18 @@ mod tests {
     }
 
     #[test]
-    fn the_repository_has_only_the_one_boundary() {
+    fn the_print_file_may_have_many_commented_blocks() {
+        let two = "fn f() {\n    // SAFETY: x\n    unsafe { g() };\n    // SAFETY: y\n    unsafe { g() };\n}\n";
+        assert_eq!(
+            boundary_problems(WIN_PRINT, two, None),
+            Vec::<String>::new()
+        );
+        let bare = "fn f() {\n    // SAFETY: x\n    unsafe { g() };\n    unsafe { g() };\n}\n";
+        assert_eq!(boundary_problems(WIN_PRINT, bare, None).len(), 1);
+    }
+
+    #[test]
+    fn the_repository_has_only_the_two_boundaries() {
         let root = crate::engine::repo_root().unwrap();
         assert_eq!(check(&root).unwrap(), Vec::<String>::new());
     }

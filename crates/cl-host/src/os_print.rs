@@ -23,7 +23,9 @@
 
 use crate::error::{HostError, Result};
 use crate::paths::{AppPaths, Os};
+use cl_print::{Document, PageSize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -86,7 +88,13 @@ impl CommandRunner for SystemRunner {
 /// What happened to a print request, for the UI to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrintOutcome {
-    /// Handed to the printer.
+    /// Printed straight to the printer (Windows print system).
+    Printed {
+        /// The PDF written alongside (for Save or a later reprint).
+        path: PathBuf,
+    },
+    /// Handed to the OS print command (`lp`, or the PDF app's print verb
+    /// on Windows: the app launched; whether it printed is up to it).
     Sent {
         /// The PDF.
         path: PathBuf,
@@ -122,18 +130,185 @@ pub fn valid_printer_name(name: &str) -> bool {
         && !name.chars().any(|c| c == '"' || c.is_control())
 }
 
+/// Why printing straight to the printer failed (the caller falls back to
+/// the PDF hand-off). Messages carry no document content.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DirectPrintError {
+    /// No printer named and no default printer.
+    #[error("there is no default printer")]
+    NoPrinter,
+    /// The printer could not be opened.
+    #[error("the printer could not be opened")]
+    OpenPrinter,
+    /// The built-in fonts could not be loaded for printing.
+    #[error("the print fonts could not be loaded")]
+    FontLoad,
+    /// A Windows print call failed (the step named).
+    #[error("the printer refused the job ({0})")]
+    Gdi(&'static str),
+    /// The layout could not be resolved.
+    #[error("the page could not be laid out: {0}")]
+    Layout(cl_print::PrintError),
+}
+
+/// Prints a laid-out document straight to a printer (Windows: the
+/// Windows print system, Q-P19ae). Tests pass a fake.
+pub trait DirectPrinter: Send + Sync {
+    /// Print `doc` on `printer` (the default when `None`), `copies` times.
+    ///
+    /// # Errors
+    /// Any [`DirectPrintError`]; the caller falls back to the PDF.
+    fn print(
+        &self,
+        doc: &Document,
+        printer: Option<&str>,
+        copies: u16,
+    ) -> std::result::Result<(), DirectPrintError>;
+}
+
+/// The Windows print system (GDI), drawing `cl-print`'s layout with the
+/// embedded Plex fonts.
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WindowsPrinter;
+
+#[cfg(windows)]
+impl DirectPrinter for WindowsPrinter {
+    fn print(
+        &self,
+        doc: &Document,
+        printer: Option<&str>,
+        copies: u16,
+    ) -> std::result::Result<(), DirectPrintError> {
+        crate::win_print::print(doc, printer, copies, None)
+    }
+}
+
+/// Millimetres on the page to printer device units: `dpi` from
+/// `LOGPIXELSX/Y`, and the printable area's offset from the physical page
+/// (`PHYSICALOFFSETX/Y`), so positions hold against the paper's edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceMap {
+    /// Dots per inch across.
+    pub dpi_x: i32,
+    /// Dots per inch down.
+    pub dpi_y: i32,
+    /// Unprintable margin on the left, in device units.
+    pub offset_x: i32,
+    /// Unprintable margin at the top, in device units.
+    pub offset_y: i32,
+}
+
+/// `v` rounded to the nearest `i32` (clamped). Page geometry only.
+#[allow(clippy::cast_possible_truncation)] // Clamped to the i32 range first.
+fn round_i32(v: f32) -> i32 {
+    if v.is_nan() {
+        return 0;
+    }
+    v.round().clamp(-2_147_483_000.0, 2_147_483_000.0) as i32
+}
+
+/// A device count as `f32` (DPI and offsets are far below 2^24, so exact).
+#[allow(clippy::cast_precision_loss)]
+fn dev_f32(v: i32) -> f32 {
+    v as f32
+}
+
+impl DeviceMap {
+    /// Device x for `mm` from the paper's left edge.
+    #[must_use]
+    pub fn x(&self, mm: f32) -> i32 {
+        round_i32(mm * dev_f32(self.dpi_x) / 25.4) - self.offset_x
+    }
+
+    /// Device y for `mm` from the paper's top edge.
+    #[must_use]
+    pub fn y(&self, mm: f32) -> i32 {
+        round_i32(mm * dev_f32(self.dpi_y) / 25.4) - self.offset_y
+    }
+
+    /// A horizontal length in device units.
+    #[must_use]
+    pub fn len_x(&self, mm: f32) -> i32 {
+        round_i32(mm * dev_f32(self.dpi_x) / 25.4)
+    }
+
+    /// A vertical length in device units.
+    #[must_use]
+    pub fn len_y(&self, mm: f32) -> i32 {
+        round_i32(mm * dev_f32(self.dpi_y) / 25.4)
+    }
+
+    /// `LOGFONT` height for `size_pt` (negative: the em size).
+    #[must_use]
+    pub fn font_height(&self, size_pt: f32) -> i32 {
+        -round_i32(size_pt * dev_f32(self.dpi_y) / 72.0).max(1)
+    }
+
+    /// Pen width for `width_pt`, at least one dot.
+    #[must_use]
+    pub fn pen_width(&self, width_pt: f32) -> i32 {
+        round_i32(width_pt * dev_f32(self.dpi_x) / 72.0).max(1)
+    }
+
+    /// `ExtTextOutW` spacing for glyphs starting at `x_mm` with these
+    /// advances (mm), one entry per UTF-16 unit of `text`: each glyph lands
+    /// where the layout put it, rounding once per glyph without drift.
+    #[must_use]
+    pub fn glyph_dx(&self, text: &str, x_mm: f32, advances_mm: &[f32]) -> Vec<i32> {
+        let mut out = Vec::with_capacity(text.len());
+        let mut pos = x_mm;
+        for (c, adv) in text.chars().zip(advances_mm.iter().copied()) {
+            let next = pos + adv;
+            out.push(self.x(next) - self.x(pos));
+            if c.len_utf16() == 2 {
+                out.push(0);
+            }
+            pos = next;
+        }
+        out
+    }
+
+    /// Back to millimetres across (the round trip stays within 0.5 mm).
+    #[must_use]
+    pub fn x_mm(&self, dev: i32) -> f32 {
+        dev_f32(dev + self.offset_x) * 25.4 / dev_f32(self.dpi_x)
+    }
+
+    /// Back to millimetres down.
+    #[must_use]
+    pub fn y_mm(&self, dev: i32) -> f32 {
+        dev_f32(dev + self.offset_y) * 25.4 / dev_f32(self.dpi_y)
+    }
+}
+
 /// The OS print hand-off.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OsPrint<R: CommandRunner> {
     os: Os,
     runner: R,
+    direct: Option<Arc<dyn DirectPrinter>>,
+}
+
+impl<R: CommandRunner + std::fmt::Debug> std::fmt::Debug for OsPrint<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OsPrint")
+            .field("os", &self.os)
+            .field("runner", &self.runner)
+            .field("direct", &self.direct.is_some())
+            .finish()
+    }
 }
 
 impl OsPrint<SystemRunner> {
-    /// The hand-off for this computer.
+    /// The hand-off for this computer: on Windows it prints straight
+    /// through the Windows print system first (Q-P19ae).
     #[must_use]
     pub fn system() -> OsPrint<SystemRunner> {
-        OsPrint::new(Os::current(), SystemRunner)
+        let os = OsPrint::new(Os::current(), SystemRunner);
+        #[cfg(windows)]
+        let os = os.with_direct(Arc::new(WindowsPrinter));
+        os
     }
 }
 
@@ -169,7 +344,51 @@ fn path_text(path: &Path) -> String {
 impl<R: CommandRunner> OsPrint<R> {
     /// The hand-off for `os` through `runner`.
     pub fn new(os: Os, runner: R) -> OsPrint<R> {
-        OsPrint { os, runner }
+        OsPrint {
+            os,
+            runner,
+            direct: None,
+        }
+    }
+
+    /// Print through `direct` first ([`OsPrint::print_document`]).
+    #[must_use]
+    pub fn with_direct(mut self, direct: Arc<dyn DirectPrinter>) -> OsPrint<R> {
+        self.direct = Some(direct);
+        self
+    }
+
+    /// Print a laid-out document: straight to the printer when this system
+    /// can (Windows, Letter pages), else, or when that fails, hand the
+    /// already written `pdf_path` to the OS ([`OsPrint::print_pdf`]: print
+    /// verb or `lp`, then the viewer). Envelope-sized documents always go
+    /// through the PDF (the direct path does not change the paper size).
+    pub fn print_document(
+        &self,
+        doc: &Document,
+        pdf_path: &Path,
+        printer: Option<&str>,
+        copies: u16,
+    ) -> PrintOutcome {
+        if printer.is_some_and(|p| !valid_printer_name(p)) {
+            return PrintOutcome::InvalidPrinter {
+                path: pdf_path.to_path_buf(),
+            };
+        }
+        if let Some(d) = &self.direct
+            && doc.size == PageSize::LETTER
+        {
+            match d.print(doc, printer, copies.clamp(1, MAX_COPIES)) {
+                Ok(()) => {
+                    tracing::info!(copies, "document printed directly");
+                    return PrintOutcome::Printed {
+                        path: pdf_path.to_path_buf(),
+                    };
+                }
+                Err(e) => tracing::warn!(error = %e, "direct print failed; using the PDF"),
+            }
+        }
+        self.print_pdf(pdf_path, printer, copies)
     }
 
     fn ok(&self, cmd: &CommandSpec) -> bool {
@@ -597,6 +816,158 @@ mod tests {
             PrintOutcome::InvalidPrinter { path: PDF.into() }
         );
         assert_eq!(fake.calls.borrow().len(), 0);
+    }
+
+    struct FakeDirect {
+        ok: bool,
+        calls: std::sync::Mutex<Vec<(Option<String>, u16)>>,
+    }
+
+    impl FakeDirect {
+        fn new(ok: bool) -> Arc<FakeDirect> {
+            Arc::new(FakeDirect {
+                ok,
+                calls: std::sync::Mutex::default(),
+            })
+        }
+    }
+
+    impl DirectPrinter for FakeDirect {
+        fn print(
+            &self,
+            _doc: &Document,
+            printer: Option<&str>,
+            copies: u16,
+        ) -> std::result::Result<(), DirectPrintError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((printer.map(str::to_string), copies));
+            if self.ok {
+                Ok(())
+            } else {
+                Err(DirectPrintError::Gdi("StartDoc"))
+            }
+        }
+    }
+
+    fn letter_doc() -> Document {
+        Document {
+            pages: vec![cl_print::Page::default()],
+            ..Document::default()
+        }
+    }
+
+    #[test]
+    fn documents_print_directly_first_and_fall_back_to_the_pdf() {
+        let direct = FakeDirect::new(true);
+        let fake = Fake::default();
+        let os = OsPrint::new(Os::Windows, &fake).with_direct(direct.clone());
+        assert_eq!(
+            os.print_document(&letter_doc(), Path::new(PDF), Some("Office Laser"), 200),
+            PrintOutcome::Printed { path: PDF.into() }
+        );
+        assert_eq!(
+            direct.calls.lock().unwrap()[0],
+            (Some("Office Laser".into()), MAX_COPIES)
+        );
+        assert_eq!(fake.calls.borrow().len(), 0);
+
+        // Direct fails: the print verb runs.
+        let fake = Fake::default();
+        let os = OsPrint::new(Os::Windows, &fake).with_direct(FakeDirect::new(false));
+        assert_eq!(
+            os.print_document(&letter_doc(), Path::new(PDF), None, 1),
+            PrintOutcome::Sent { path: PDF.into() }
+        );
+        assert!(
+            fake.calls.borrow()[0]
+                .args
+                .last()
+                .unwrap()
+                .contains("-Verb Print")
+        );
+
+        // Envelopes skip the direct path.
+        let direct = FakeDirect::new(true);
+        let fake = Fake::default();
+        let os = OsPrint::new(Os::Windows, &fake).with_direct(direct.clone());
+        let env = Document {
+            size: PageSize::ENVELOPE_10,
+            ..letter_doc()
+        };
+        assert!(matches!(
+            os.print_document(&env, Path::new(PDF), None, 1),
+            PrintOutcome::Sent { .. }
+        ));
+        assert_eq!(direct.calls.lock().unwrap().len(), 0);
+
+        // Bad printer names reach neither path.
+        assert!(matches!(
+            os.print_document(&letter_doc(), Path::new(PDF), Some("a\"b"), 1),
+            PrintOutcome::InvalidPrinter { .. }
+        ));
+        assert_eq!(direct.calls.lock().unwrap().len(), 0);
+
+        // Without a direct printer (macOS, Linux) it is the PDF path.
+        let fake = Fake::default();
+        let os = OsPrint::new(Os::Unix, &fake);
+        assert!(matches!(
+            os.print_document(&letter_doc(), Path::new("/x.pdf"), None, 1),
+            PrintOutcome::Sent { .. }
+        ));
+    }
+
+    #[test]
+    fn millimetres_map_to_device_units_within_half_a_millimetre() {
+        let points = [
+            0.0, 12.0, 17.0, 25.4, 30.0, 49.5, 88.9, 165.0, 177.8, 203.2, 215.9, 279.4,
+        ];
+        for (dpi, off) in [(300, 50), (600, 100), (1200, 211), (600, 0)] {
+            let m = DeviceMap {
+                dpi_x: dpi,
+                dpi_y: dpi,
+                offset_x: off,
+                offset_y: off + 7,
+            };
+            for mm in points {
+                assert!((m.x_mm(m.x(mm)) - mm).abs() <= 0.5, "{dpi} {mm}");
+                assert!((m.y_mm(m.y(mm)) - mm).abs() <= 0.5, "{dpi} {mm}");
+            }
+            assert!(m.pen_width(0.1) >= 1);
+        }
+        let m = DeviceMap {
+            dpi_x: 600,
+            dpi_y: 600,
+            offset_x: 50,
+            offset_y: 60,
+        };
+        assert_eq!(m.x(25.4), 550);
+        assert_eq!(m.y(25.4), 540);
+        assert_eq!(m.len_x(25.4), 600);
+        assert_eq!(m.len_y(2.54), 60);
+        assert_eq!(m.font_height(12.0), -100);
+        assert_eq!(m.pen_width(0.5), 4);
+    }
+
+    #[test]
+    fn glyph_spacing_adds_up_to_the_layout_width_without_drift() {
+        let m = DeviceMap {
+            dpi_x: 600,
+            dpi_y: 600,
+            offset_x: 37,
+            offset_y: 0,
+        };
+        let text = "9,999,999,999.99";
+        let font = cl_print::Font::Mono;
+        let adv: Vec<f32> = text.chars().map(|c| font.advance_mm(c, 10.0)).collect();
+        let x0 = 167.3;
+        let dx = m.glyph_dx(text, x0, &adv);
+        assert_eq!(dx.len(), text.len());
+        let total: i32 = dx.iter().sum();
+        assert_eq!(total, m.x(x0 + font.width_mm(text, 10.0)) - m.x(x0));
+        // A character outside the BMP takes two UTF-16 units.
+        assert_eq!(m.glyph_dx("a\u{1F600}", 0.0, &[1.0, 2.0]).len(), 3);
     }
 
     #[test]

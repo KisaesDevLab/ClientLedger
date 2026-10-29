@@ -1,7 +1,8 @@
 //! The Windows job limits for the reading worker and tesseract (A03,
 //! Q-A03s; plan review M2; security review M2, M3).
 //!
-//! **This is the only `unsafe` code in `ClientLedger`'s own crates.**
+//! **One of the two `unsafe` modules in `ClientLedger`'s own crates** (the
+//! other is `win_print.rs`, Windows direct printing, Q-P19ae).
 //! `win32job` (2.0.3) sets kill-on-close and working-set limits but not
 //! `JOB_OBJECT_LIMIT_PROCESS_MEMORY`, and a working-set cap is the wrong
 //! tool (it lets commit grow into the page file). Rather than open a pull
@@ -25,7 +26,8 @@
 //!
 //! The boundary is held by: `unsafe_code = "deny"` for cl-host (the
 //! workspace forbids it everywhere else), `#![allow(unsafe_code)]` only
-//! here, and `cargo xtask unsafe-check` (part of `cargo xtask ci`), which
+//! here and in `win_print.rs`, and `cargo xtask unsafe-check` (part of
+//! `cargo xtask ci`), which
 //! fails on `unsafe` in any other file or on a second block here.
 #![allow(unsafe_code)]
 

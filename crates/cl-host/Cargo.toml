@@ -20,6 +20,8 @@ cl-pg = { path = "../cl-pg" }
 cl-core = { path = "../cl-core" }
 # The reading worker's protocol and value types (A03); no parsers.
 cl-docread = { path = "../cl-docread" }
+# Printed layouts for Windows direct printing (Q-P19ae) and os_print.
+cl-print = { path = "../cl-print" }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 serde_json = "1.0.149"
@@ -30,7 +32,9 @@ listeners = "0.6.1"
 win32job = "2.0.3"
 # One SetInformationJobObject call: the per-process memory cap win32job
 # lacks (src/procs/win_job_memory.rs). MIT OR Apache-2.0.
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# Windows direct printing (Q-P19ae, src/win_print.rs): GDI, the print
+# spooler document calls (Xps) and the default printer (Printing).
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Graphics_Printing"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "user"] }
@@ -47,4 +51,5 @@ rustix = { version = "1.1.5", default-features = false, features = ["std", "proc
 test-support = []
 
 [dev-dependencies]
+rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 cl-host = { path = ".", features = ["test-support"] }

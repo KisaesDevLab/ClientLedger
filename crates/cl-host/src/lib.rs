@@ -6,11 +6,13 @@
 //! launch token, database passwords) travel only as [`cl_pg::Secret`] values
 //! and the child environment, never as command-line arguments.
 //!
-//! **One `unsafe` boundary** (A03, Q-A03s): `procs/win_job_memory.rs`
-//! makes the single `SetInformationJobObject` call for the Windows hard
-//! memory cap. The crate denies unsafe code (the workspace's `forbid` can't
-//! be relaxed in one module); `cargo xtask unsafe-check` fails on `unsafe`
-//! anywhere else.
+//! **Two `unsafe` boundaries**, both Windows API calls:
+//! `procs/win_job_memory.rs` makes the single `SetInformationJobObject`
+//! call for the Windows hard memory cap (A03, Q-A03s), and `win_print.rs`
+//! draws printed layouts through GDI (Q-P19ae). The crate denies unsafe
+//! code (the workspace's `forbid` can't be relaxed in one module); those two
+//! modules allow it, and `cargo xtask unsafe-check` fails on `unsafe`
+//! anywhere else or on a block without a `// SAFETY:` comment.
 #![deny(unsafe_code)]
 
 // Test hooks never reach an optimised build: feature unification
@@ -36,6 +38,8 @@ mod paths;
 mod procs;
 mod secrets;
 mod supervisor;
+#[cfg(windows)]
+mod win_print;
 
 pub use cl_pg::Secret;
 pub use database::{
@@ -53,9 +57,12 @@ pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
 pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
+#[cfg(windows)]
+pub use os_print::WindowsPrinter;
 pub use os_print::{
-    CommandOutput, CommandRunner, CommandSpec, MAX_COPIES, OsPrint, PrintOutcome, SystemRunner,
-    sweep_print_dir, write_temp_pdf,
+    CommandOutput, CommandRunner, CommandSpec, DeviceMap, DirectPrintError, DirectPrinter,
+    MAX_COPIES, MAX_PRINTER_NAME, OsPrint, PrintOutcome, SystemRunner, sweep_print_dir,
+    valid_printer_name, write_temp_pdf,
 };
 pub use paths::{
     AppPaths, Os, docread_exe_name, engine_exe_name, find_docread_exe, find_engine_exe,
