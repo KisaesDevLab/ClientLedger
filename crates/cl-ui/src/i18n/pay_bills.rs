@@ -24,6 +24,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("paybills.take_discounts.tip", "Ticking a bill takes the early-payment discount its terms give for the payment date. The books work out the discount."),
     ("paybills.grid_label", "Bills to pay"),
     ("paybills.col.select", "Pay"),
+    ("paybills.select_all", "Tick every listed bill"),
     ("paybills.col.select_help", "Tick a bill to pay it (Space). Its discount and the vendor's credits are applied for you."),
     ("paybills.col.due", "Due"),
     ("paybills.col.vendor", "Vendor"),

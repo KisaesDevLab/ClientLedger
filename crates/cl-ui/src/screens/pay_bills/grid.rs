@@ -26,7 +26,12 @@ pub(crate) const DISCOUNT: ColumnId = ColumnId(7);
 pub(crate) const CREDITS: ColumnId = ColumnId(8);
 pub(crate) const TO_PAY: ColumnId = ColumnId(9);
 
-fn column(id: ColumnId, header: &'static str, kind: CellKind, w: u16) -> Column {
+/// A column `w` wide; `flex` > 0 gives width first when the window is
+/// narrow, down to `min` (Vendor, then Ref. no. and Disc. date), so the
+/// amounts and Amt. to pay keep theirs (UI review 1). Narrower still (200%
+/// zoom), the columns scroll sideways to follow the cursor.
+fn column(id: ColumnId, header: &'static str, kind: CellKind, w: (u16, u16, u8)) -> Column {
+    let (min, preferred, flex) = w;
     Column {
         id,
         header: TextKey(header),
@@ -37,9 +42,9 @@ fn column(id: ColumnId, header: &'static str, kind: CellKind, w: u16) -> Column 
         line: Line::First,
         align: Align::Left,
         width: WidthSpec {
-            min: w.min(70),
-            preferred: w,
-            flex: u8::from(w > 150),
+            min,
+            preferred,
+            flex,
         },
         editable: false,
         mono: false,
@@ -61,26 +66,53 @@ pub(crate) fn spec() -> GridSpec {
             align: Align::Center,
             editable: true,
             help: Some(TextKey("paybills.col.select_help")),
-            ..column(SELECT, "paybills.col.select", CellKind::Checkbox, 44)
+            ..column(
+                SELECT,
+                "paybills.col.select",
+                CellKind::Checkbox,
+                (40, 40, 0),
+            )
         },
-        mono(column(DUE, "paybills.col.due", CellKind::Display, 70)),
-        column(VENDOR, "paybills.col.vendor", CellKind::Display, 240),
-        mono(column(REF, "paybills.col.ref", CellKind::Display, 100)),
+        mono(column(
+            DUE,
+            "paybills.col.due",
+            CellKind::Display,
+            (56, 56, 0),
+        )),
+        column(
+            VENDOR,
+            "paybills.col.vendor",
+            CellKind::Display,
+            (140, 240, 3),
+        ),
+        // Not mono: a mono column grows to its widest value and stops
+        // giving width (Q-P10o), and Ref. no. gives width at 960 x 640.
+        column(REF, "paybills.col.ref", CellKind::Display, (60, 100, 1)),
         mono(column(
             DISC_DATE,
             "paybills.col.disc_date",
             CellKind::Display,
-            90,
+            (56, 90, 1),
         )),
-        right(column(AMOUNT_DUE, "paybills.col.amount_due", money, 110)),
+        right(column(
+            AMOUNT_DUE,
+            "paybills.col.amount_due",
+            money,
+            (92, 92, 0),
+        )),
         Column {
             help: Some(TextKey("paybills.col.discount_help")),
-            ..right(column(DISCOUNT, "paybills.col.discount", money, 90))
+            ..right(column(
+                DISCOUNT,
+                "paybills.col.discount",
+                money,
+                (72, 72, 0),
+            ))
         },
-        right(column(CREDITS, "paybills.col.credits", money, 90)),
+        right(column(CREDITS, "paybills.col.credits", money, (72, 72, 0))),
         Column {
             editable: true,
-            ..right(column(TO_PAY, "paybills.col.to_pay", money, 120))
+            ..right(column(TO_PAY, "paybills.col.to_pay", money, (100, 100, 0)))
         },
     ])
 }
@@ -120,7 +152,8 @@ impl<'a> Rows<'a> {
 
     /// The note beside the vendor, as the mockup shows it under the name:
     /// the bill's memo, else its discount terms, else the vendor's open
-    /// credit.
+    /// credit (the engine's open amounts of its credits added up for show
+    /// only; the engine has no vendor credit total, Q-P18i).
     fn note(&self, r: &cl_model::forms::bill_payment::PayableRow) -> Option<String> {
         if let Some(n) = r.note.as_ref().filter(|n| !n.is_empty()) {
             return Some(n.clone());

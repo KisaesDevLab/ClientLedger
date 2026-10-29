@@ -243,6 +243,15 @@ pub struct PayBillsScreen {
     pub(crate) dialog: Option<Dialog>,
     /// The discount account picked in Set Discount for this run.
     pub(crate) discount_account: Option<AccountId>,
+    /// The button that opened Set Discount / Set Credits (focus returns
+    /// to it when the card closes).
+    pub(crate) return_focus: Option<eframe::egui::Id>,
+    /// Focus to move there next frame.
+    pub(crate) refocus: Option<eframe::egui::Id>,
+    /// The card just opened: focus goes to its first field.
+    pub(crate) focus_dialog: bool,
+    /// The width of Clear selections · Pay last frame (they sit right).
+    pub(crate) actions_w: f32,
     save_default_task: Option<Task<()>>,
     pub(crate) closing_prompt: ClosingPrompt<()>,
     pub(crate) money_style: cl_core::MoneyStyle,
@@ -329,6 +338,10 @@ impl PayBillsScreen {
             paid_count: 0,
             dialog: None,
             discount_account: None,
+            return_focus: None,
+            refocus: None,
+            focus_dialog: false,
+            actions_w: 0.0,
             save_default_task: None,
             closing_prompt: ClosingPrompt::default(),
             money_style: cl_core::MoneyStyle::default(),
@@ -590,14 +603,22 @@ impl PayBillsScreen {
         self.form.load(rows, credits);
         self.revision += 1;
         // The rows were read again: the grid follows without "That line
-        // is no longer here." (UI review 4). Another set of bills puts the
-        // cursor back on the first row.
-        let same = self.form.all_rows().iter().map(|r| r.bill).eq(before);
-        self.rows_replaced(!same);
+        // is no longer here." (UI review 4, as bill/mod.rs `lines_replaced`).
+        if before
+            != self
+                .form
+                .all_rows()
+                .iter()
+                .map(|r| r.bill)
+                .collect::<Vec<_>>()
+        {
+            self.rows_replaced();
+        }
     }
 
-    /// The grid follows rows the screen replaced.
-    fn rows_replaced(&mut self, reset: bool) {
+    /// The grid follows rows the screen replaced: the cursor stays where it
+    /// can and no row-gone notice shows.
+    fn rows_replaced(&mut self) {
         let label = String::new();
         let env = self.parts.env(
             &NoLookups,
@@ -605,11 +626,7 @@ impl PayBillsScreen {
             cl_grid::GridHeight::Rows { min: 1, max: 1 },
         );
         let mut rows = grid::Rows::new(&mut self.form, &mut self.revision);
-        if reset {
-            self.grid.reset(cl_grid::ModelRef::Edit(&mut rows), &env);
-        } else {
-            self.grid.rebind(cl_grid::ModelRef::Edit(&mut rows), &env);
-        }
+        self.grid.rebind(cl_grid::ModelRef::Edit(&mut rows), &env);
         self.snap = self.grid.snapshot(&cl_grid::ModelRef::Edit(&mut rows));
     }
 
@@ -923,6 +940,16 @@ impl PayBillsScreen {
             account: self.discount_account.or(self.discount_default),
             asked,
         });
+        self.focus_dialog = true;
+        self.return_focus = None;
+    }
+
+    /// Set Discount / Set Credits closes: focus goes back to the button
+    /// that opened it.
+    pub(crate) fn close_dialog(&mut self) {
+        if self.dialog.take().is_some() {
+            self.refocus = self.return_focus.take();
+        }
     }
 
     pub(crate) fn open_credits(&mut self, bill: TransactionId) {
@@ -946,6 +973,8 @@ impl PayBillsScreen {
             })
             .collect();
         self.dialog = Some(Dialog::Credits { bill, texts });
+        self.focus_dialog = true;
+        self.return_focus = None;
     }
 
     /// Set Discount's OK: the amount on the bill, and the account as this
@@ -984,7 +1013,7 @@ impl PayBillsScreen {
                 self.save_default(a);
             }
         }
-        self.dialog = None;
+        self.close_dialog();
         self.notice = None;
         true
     }
@@ -1037,7 +1066,7 @@ impl PayBillsScreen {
         }
         self.form.set_credits(bill, credits);
         self.revision += 1;
-        self.dialog = None;
+        self.close_dialog();
         self.notice = None;
         true
     }
@@ -1105,6 +1134,7 @@ impl PayBillsScreen {
             },
             "discount_account_set": self.discount_account.or(self.discount_default).is_some(),
             "cursor_row": self.snap.cursor_row,
+            "to_pay_shown": self.grid.column_shown(grid::TO_PAY),
             "focused": self.snap.focused,
             "published": self.published.iter().map(ToString::to_string).collect::<Vec<_>>(),
         });
@@ -1174,7 +1204,8 @@ impl Screen for PayBillsScreen {
                 true
             }
             "form.revert" => {
-                if self.dialog.take().is_some() {
+                if self.dialog.is_some() {
+                    self.close_dialog();
                     return true;
                 }
                 self.grid_command(GridCommand::Revert)

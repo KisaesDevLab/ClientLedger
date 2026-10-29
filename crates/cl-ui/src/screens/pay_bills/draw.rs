@@ -140,16 +140,13 @@ impl PayBillsScreen {
         ui.add_space(12.0);
         let wide = ui.available_width() >= SIDE_BY_SIDE;
         if wide {
-            ui.horizontal_top(|ui| {
-                let w = (ui.available_width() - 14.0) / 2.0;
-                ui.vertical(|ui| {
-                    ui.set_width(w);
-                    self.selected_ui(ui, tokens);
-                });
-                ui.add_space(14.0);
-                ui.vertical(|ui| {
-                    ui.set_width(w);
-                    self.payment_ui(ui, tokens);
+            // Two equal columns with the gap inside the width (UI review
+            // 3: the Payment card's border stays inside the window).
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                ui.columns(2, |cols| {
+                    self.selected_ui(&mut cols[0], tokens);
+                    self.payment_ui(&mut cols[1], tokens);
                 });
             });
         } else {
@@ -176,13 +173,14 @@ impl PayBillsScreen {
                         .desired_width(96.0)
                         .font(egui::TextStyle::Monospace),
                 );
+                // The field's name is its AccessKit label; its value is the
+                // typed date (UI review 5).
+                let now = self.through.text.clone();
                 r.widget_info(|| {
-                    egui::WidgetInfo::text_edit(
-                        true,
-                        before.clone(),
-                        t("paybills.show.due_date"),
-                        "",
-                    )
+                    let mut info =
+                        egui::WidgetInfo::text_edit(true, before.clone(), now.clone(), "");
+                    info.label = Some(t("paybills.show.due_date"));
+                    info
                 });
                 if r.changed() {
                     self.through.typed(&before, self.today);
@@ -285,21 +283,95 @@ impl PayBillsScreen {
         let env = self
             .parts
             .env(&NoLookups, &label, GridHeight::Rows { min: 3, max: 10 });
+        let header_fill = env.style.header_fill;
         let mut rows = Rows::new(&mut self.form, &mut self.revision);
         self.grid.show(ui, ModelRef::Edit(&mut rows), &env);
         self.snap = self.grid.snapshot(&ModelRef::Edit(&mut rows));
+        self.select_all_ui(ui, header_fill);
     }
 
-    /// Totals · n of m selected, then each column's total of the selected
-    /// bills (Q-P18b, owner 2026-10-28).
+    /// The tick box in the Pay column's heading (mockup): ticks every
+    /// listed bill, or clears them when all are ticked. The column keeps
+    /// its name "Pay" for screen readers.
+    fn select_all_ui(&mut self, ui: &mut Ui, fill: egui::Color32) {
+        let Some(cell) = self.grid.header_cell(super::grid::SELECT) else {
+            return;
+        };
+        let listed: Vec<_> = self.form.visible().iter().map(|r| r.bill).collect();
+        if listed.is_empty() {
+            return;
+        }
+        let all = listed.iter().all(|b| self.form.is_selected(*b));
+        ui.painter()
+            .rect_filled(cell, egui::CornerRadius::ZERO, fill);
+        let mut on = all;
+        let box_rect = egui::Rect::from_center_size(cell.center(), egui::vec2(18.0, 18.0));
+        let name = t("paybills.select_all");
+        // A child Ui over the heading (`put` would move the screen's
+        // layout back up to the heading).
+        let mut over = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(box_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let r = over
+            .add(egui::Checkbox::without_text(&mut on))
+            .on_hover_text(name.clone());
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, all, name.clone()));
+        if r.changed() {
+            if on {
+                self.form.select_all();
+            } else {
+                self.form.clear_bills(&listed);
+            }
+            self.revision += 1;
+        }
+    }
+
+    /// The totals row under the grid (UI review 8): "Totals · n of m
+    /// selected" under the first columns, and each amount column's total of
+    /// the selected bills right under it (Q-P18b, owner 2026-10-28). A
+    /// column scrolled out of view shows no total.
     fn totals_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        use super::grid::{AMOUNT_DUE, CREDITS, DISC_DATE, DISCOUNT, SELECT, TO_PAY};
         let Some(totals) = self.form.totals() else {
             return;
         };
         let style = self.money_style;
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
+        let pad = 8.0;
+        let height = 26.0;
+        let (row, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), height),
+            egui::Sense::hover(),
+        );
+        ui.painter().line_segment(
+            [row.left_top(), row.right_top()],
+            egui::Stroke::new(1.0, tokens.border_default),
+        );
+        let place = |ui: &mut Ui, x: f32, w: f32, right: bool, text: RichText| {
+            let r = egui::Rect::from_min_size(egui::pos2(x, row.top()), egui::vec2(w, height));
+            let layout = if right {
+                egui::Layout::right_to_left(egui::Align::Center)
+            } else {
+                egui::Layout::left_to_right(egui::Align::Center)
+            };
+            // A child Ui in the row: the screen's layout does not move.
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r.shrink2(egui::vec2(pad, 0.0)))
+                    .layout(layout),
+            );
+            cell.add(egui::Label::new(text).truncate());
+        };
+        // The label spans the columns before the amounts.
+        let first = self.grid.column_span(SELECT);
+        let last = self.grid.column_span(DISC_DATE);
+        if let (Some((x, _)), Some((lx, lw))) = (first, last) {
+            place(
+                ui,
+                x,
+                lx + lw - x,
+                false,
                 RichText::new(t_with(
                     "paybills.totals",
                     &[
@@ -310,17 +382,21 @@ impl PayBillsScreen {
                 .strong()
                 .color(tokens.text_primary),
             );
-            for (key, m) in [
-                ("paybills.col.amount_due", totals.amount_due),
-                ("paybills.col.discount", totals.discount),
-                ("paybills.col.credits", totals.credits),
-                ("paybills.col.to_pay", totals.cash),
-            ] {
-                ui.add_space(12.0);
-                ui.label(RichText::new(t(key)).color(tokens.text_secondary));
-                ui.label(mono(m.format(style)).color(tokens.text_primary));
+        }
+        for (col, m, strong) in [
+            (AMOUNT_DUE, totals.amount_due, false),
+            (DISCOUNT, totals.discount, false),
+            (CREDITS, totals.credits, false),
+            (TO_PAY, totals.cash, true),
+        ] {
+            if !self.grid.column_shown(col) {
+                continue;
             }
-        });
+            if let Some((x, w)) = self.grid.column_span(col) {
+                let text = mono(m.format(style)).color(tokens.text_primary);
+                place(ui, x, w, true, if strong { text.strong() } else { text });
+            }
+        }
     }
 
     fn selected_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -340,6 +416,7 @@ impl PayBillsScreen {
             },
         );
         let mut action = None;
+        let mut opener = None;
         kit::panel_card(ui, tokens, &heading, |ui| {
             let Some(r) = &row else {
                 form::hint(ui, tokens, &t("paybills.selected.none"));
@@ -384,22 +461,22 @@ impl PayBillsScreen {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 let has_credits = !self.form.credits_for(r.vendor).is_empty();
-                if ui
+                let r = ui
                     .add_enabled(
                         self.caps().discounts,
                         egui::Button::new(t("paybills.set_discount")),
                     )
-                    .on_disabled_hover_text(t("paybills.discount.needs_update"))
-                    .clicked()
-                {
+                    .on_disabled_hover_text(t("paybills.discount.needs_update"));
+                if r.clicked() {
                     action = Some(0);
+                    opener = Some(r.id);
                 }
-                if ui
+                let r = ui
                     .add_enabled(has_credits, egui::Button::new(t("paybills.set_credits")))
-                    .on_disabled_hover_text(t("paybills.credits.none"))
-                    .clicked()
-                {
+                    .on_disabled_hover_text(t("paybills.credits.none"));
+                if r.clicked() {
                     action = Some(1);
+                    opener = Some(r.id);
                 }
                 if ui.button(t("paybills.go_to_bill")).clicked() {
                     action = Some(2);
@@ -412,7 +489,42 @@ impl PayBillsScreen {
                 1 => self.open_credits(b),
                 _ => self.go_to_bill(b),
             }
+            // Focus moves into the card; it comes back here on close.
+            if opener.is_some() {
+                self.return_focus = opener;
+            }
         }
+        if let Some(id) = self.refocus.take() {
+            ui.memory_mut(|m| m.request_focus(id));
+        }
+    }
+
+    /// The card's OK (accent) and Cancel at one height (UI review 6).
+    fn dialog_buttons(ui: &mut Ui, extra: Option<&str>) -> (bool, bool, bool) {
+        let tokens = Tokens::of(ui.ctx());
+        let size = egui::vec2(72.0, 30.0);
+        let mut out = (false, false, false);
+        ui.horizontal(|ui| {
+            out.0 = ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(t("paybills.dialog.ok"))
+                            .color(tokens.on_accent)
+                            .strong(),
+                    )
+                    .fill(tokens.accent)
+                    .stroke(egui::Stroke::NONE)
+                    .min_size(size),
+                )
+                .clicked();
+            if let Some(label) = extra {
+                out.2 = ui.add(egui::Button::new(label).min_size(size)).clicked();
+            }
+            out.1 = ui
+                .add(egui::Button::new(t("paybills.dialog.cancel")).min_size(size))
+                .clicked();
+        });
+        out
     }
 
     fn dialog_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -430,6 +542,8 @@ impl PayBillsScreen {
         let mut ok = false;
         let mut cancel = false;
         let mut engine_discount = false;
+        // Focus goes to the card's first field when it opens (UI review 6).
+        let mut focus_first = std::mem::take(&mut self.focus_dialog);
         form::card(ui, tokens, |ui| match self.dialog.as_mut() {
             Some(Dialog::Discount {
                 text,
@@ -442,13 +556,17 @@ impl PayBillsScreen {
                     form::hint(ui, tokens, &t("paybills.discount.account_needed"));
                 }
                 let l = kit::above(ui, tokens, &t("paybills.discount.amount"));
-                ui.add(
-                    egui::TextEdit::singleline(text)
-                        .desired_width(120.0)
-                        .font(egui::TextStyle::Monospace)
-                        .align(egui::Align2::RIGHT_CENTER),
-                )
-                .labelled_by(l.id);
+                let r = ui
+                    .add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(120.0)
+                            .font(egui::TextStyle::Monospace)
+                            .align(egui::Align2::RIGHT_CENTER),
+                    )
+                    .labelled_by(l.id);
+                if std::mem::take(&mut focus_first) {
+                    r.request_focus();
+                }
                 let l = kit::above(ui, tokens, &t("paybills.discount.account"));
                 let shown = account
                     .and_then(|a| accounts.iter().find(|(id, _)| *id == a))
@@ -466,11 +584,8 @@ impl PayBillsScreen {
                     .response
                     .labelled_by(l.id);
                 form::hint(ui, tokens, &t("paybills.discount.account_hint"));
-                ui.horizontal(|ui| {
-                    ok = crate::widgets::primary_button(ui, &t("paybills.dialog.ok")).clicked();
-                    engine_discount = ui.button(t("paybills.discount.use_suggested")).clicked();
-                    cancel = ui.button(t("paybills.dialog.cancel")).clicked();
-                });
+                (ok, cancel, engine_discount) =
+                    Self::dialog_buttons(ui, Some(&t("paybills.discount.use_suggested")));
             }
             Some(Dialog::Credits { texts, .. }) => {
                 form::heading(ui, tokens, &t("paybills.credits.title"));
@@ -483,29 +598,31 @@ impl PayBillsScreen {
                     let name = t_with("paybills.credits.row", &[("memo", &label), ("open", &open)]);
                     ui.horizontal(|ui| {
                         let l = ui.label(name);
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .desired_width(110.0)
-                                .font(egui::TextStyle::Monospace)
-                                .align(egui::Align2::RIGHT_CENTER),
-                        )
-                        .labelled_by(l.id);
+                        let r = ui
+                            .add(
+                                egui::TextEdit::singleline(text)
+                                    .desired_width(110.0)
+                                    .font(egui::TextStyle::Monospace)
+                                    .align(egui::Align2::RIGHT_CENTER),
+                            )
+                            .labelled_by(l.id);
+                        if std::mem::take(&mut focus_first) {
+                            r.request_focus();
+                        }
                     });
                 }
-                ui.horizontal(|ui| {
-                    ok = crate::widgets::primary_button(ui, &t("paybills.dialog.ok")).clicked();
-                    cancel = ui.button(t("paybills.dialog.cancel")).clicked();
-                });
+                (ok, cancel, _) = Self::dialog_buttons(ui, None);
             }
             None => {}
         });
         if cancel {
-            self.dialog = None;
+            self.close_dialog();
         } else if engine_discount {
-            if let Some(Dialog::Discount { bill, .. }) = self.dialog.take() {
+            if let Some(Dialog::Discount { bill, .. }) = self.dialog.clone() {
                 self.form.set_discount(bill, None);
                 self.revision += 1;
             }
+            self.close_dialog();
         } else if ok {
             match self.dialog {
                 Some(Dialog::Discount { .. }) => {
@@ -610,12 +727,14 @@ impl PayBillsScreen {
                                         let name = t("paybills.numbers.first");
                                         let text = self.first_number.clone();
                                         r.widget_info(|| {
-                                            egui::WidgetInfo::text_edit(
+                                            let mut info = egui::WidgetInfo::text_edit(
                                                 true,
                                                 text.clone(),
-                                                &name,
+                                                text.clone(),
                                                 "",
-                                            )
+                                            );
+                                            info.label = Some(name.clone());
+                                            info
                                         });
                                     }
                                 });
@@ -711,7 +830,18 @@ impl PayBillsScreen {
             && !self.unknown;
         let mut pay = false;
         let mut clear = false;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // Right-aligned, but laid out left to right so Tab reaches Clear
+        // selections before Pay (UI review 9): the space before them is
+        // what is left after last frame's width of the row.
+        ui.horizontal(|ui| {
+            ui.add_space((ui.available_width() - self.actions_w).max(0.0));
+            let from = ui.cursor().left();
+            if self.pay_task.is_some() {
+                form::progress_line(ui, tokens, &t("paybills.paying"));
+            }
+            clear = ui
+                .add_enabled(n > 0, egui::Button::new(t("paybills.clear")))
+                .clicked();
             let text = t_with(
                 if n == 1 {
                     "paybills.pay.one"
@@ -728,11 +858,10 @@ impl PayBillsScreen {
                     .on_hover_text(kit::chip("form.save_close"))
                     .clicked();
             });
-            clear = ui
-                .add_enabled(n > 0, egui::Button::new(t("paybills.clear")))
-                .clicked();
-            if self.pay_task.is_some() {
-                form::progress_line(ui, tokens, &t("paybills.paying"));
+            let used = ui.min_rect().right() - from;
+            if (used - self.actions_w).abs() > 0.5 {
+                self.actions_w = used;
+                ui.ctx().request_repaint();
             }
         });
         if clear {
