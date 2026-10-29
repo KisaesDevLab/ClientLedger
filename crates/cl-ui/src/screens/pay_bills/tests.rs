@@ -329,3 +329,49 @@ fn the_grid_spec_is_valid_and_space_selects() {
     assert!(matches!(rows.cell(3, grid::DISCOUNT), cl_grid::CellValue::Money(x) if x == m("4.37")));
     assert_eq!(rows.row_label(3), "Ozark Office Supply 7781");
 }
+
+/// Q-P18f: a demo bill payment opens read-only; Void takes it off the bill.
+#[test]
+fn the_bill_payment_view_shows_and_voids_a_payment() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut pay = PayBillsScreen::new(Arc::clone(&link), None, today());
+    let first = pay.form.visible().first().map(|r| (r.bill, r.balance_due));
+    let (b, due) = first.expect("an open sample bill");
+    pay.form.toggle(b);
+    assert!(pay.start_pay(None), "{:?}", pay.state());
+    let id = {
+        let s = link.demo_state().expect("demo");
+        s.ledger
+            .transactions()
+            .last()
+            .map(crate::company::demo::register::DemoLedger::id_of)
+    }
+    .expect("posted");
+    pay.poll();
+    assert!(
+        !pay.form.all_rows().iter().any(|r| r.bill == b),
+        "paid in full"
+    );
+    let mut view = view::BillPaymentView::new(Arc::clone(&link));
+    assert!(view.open_record(id));
+    let st = view.state();
+    assert_eq!(st["loaded"], true, "{st}");
+    assert_eq!(st["bills"], 1);
+    assert_eq!(st["status"], "posted");
+    assert!(view.command(CommandId::new("edit.void_transaction")));
+    view.set_void_reason("paid twice");
+    view.confirm_void();
+    let st = view.state();
+    assert_eq!(st["voided"], true, "{st}");
+    assert_eq!(st["status"], "void");
+    pay.load_list();
+    pay.poll();
+    let again = pay
+        .form
+        .all_rows()
+        .iter()
+        .find(|r| r.bill == b)
+        .map(|r| r.balance_due);
+    assert_eq!(again, Some(due), "the bill is open again");
+}

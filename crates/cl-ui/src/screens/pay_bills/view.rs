@@ -223,6 +223,18 @@ impl BillPaymentView {
         }
     }
 
+    /// Tests: the void reason as typed.
+    #[cfg(test)]
+    pub(crate) fn set_void_reason(&mut self, reason: &str) {
+        reason.clone_into(&mut self.void_reason);
+    }
+
+    /// Tests: "Void payment" clicked.
+    #[cfg(test)]
+    pub(crate) fn confirm_void(&mut self) {
+        self.send_void(None);
+    }
+
     fn send_void(&mut self, password: Option<Secret>) {
         let Some(id) = self.id else { return };
         let reason = self.void_reason.trim().to_string();
@@ -290,6 +302,7 @@ impl BillPaymentView {
                     self.link.push(CompanyEvent::Toast("billpay.voided"));
                     if let Some(id) = self.id {
                         self.load(id);
+                        self.poll();
                     }
                 }
                 Err(e) => {
