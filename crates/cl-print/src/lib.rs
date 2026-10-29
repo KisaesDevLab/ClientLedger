@@ -11,11 +11,18 @@
 //! `cl-host::os_print` (Q-P19a).
 #![forbid(unsafe_code)]
 
+pub mod amount;
+pub mod checks;
 pub mod fonts;
 pub mod image;
 pub mod layout;
 pub mod pdf;
 
+pub use amount::{amount_in_words, check_figures, format_amount, format_quantity};
+pub use checks::{
+    AlignmentOffset, CheckData, CheckLabels, CheckOptions, CheckStyle, StubBill, StubCredit,
+    StubData, StubTotals, alignment_test, layout_checks,
+};
 pub use fonts::Font;
 pub use image::Logo;
 pub use layout::{Align, Document, Page, Rect, ResolvedPage, Run, TextBox, resolve};
@@ -33,4 +40,19 @@ pub enum PrintError {
     /// The logo file could not be used.
     #[error("the logo could not be used: {0}")]
     Logo(String),
+    /// A check amount below zero.
+    #[error("a check cannot be printed for a negative amount")]
+    NegativeAmount,
+    /// A check amount with a fraction of a cent.
+    #[error("the amount has a fraction of a cent, which a check cannot show")]
+    SubCent,
+    /// An amount too large to print or add up.
+    #[error("the amount is too large to print")]
+    AmountTooLarge,
+    /// An alignment offset beyond 10 mm.
+    #[error("the alignment adjustment must be within 10 mm in each direction")]
+    OffsetOutOfRange,
+    /// A first check position outside 1 to 3.
+    #[error("the first check position must be 1, 2 or 3")]
+    BadPosition,
 }

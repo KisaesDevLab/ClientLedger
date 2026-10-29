@@ -374,8 +374,13 @@ pub struct ResolvedPage {
 
 impl ResolvedPage {
     /// The runs of the box tagged `tag`.
-    pub fn runs_of<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a Run> + 'a {
-        self.runs.iter().filter(move |r| r.tag == tag)
+    #[must_use]
+    pub fn runs_of(&self, tag: &str) -> std::vec::IntoIter<&Run> {
+        self.runs
+            .iter()
+            .filter(|r| r.tag == tag)
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
 
