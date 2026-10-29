@@ -46,7 +46,7 @@ pub use docread_worker::{
     JobOutcome, OcrTools, RegionJob, RegionOutcome, sweep_docread_leftovers,
 };
 pub use engine::OfflineSetting;
-pub use error::{HostError, Result};
+pub use error::{HostError, Result, is_master_secret_message};
 pub use health::{HealthError, HealthReport, check_health, verify_listener};
 pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
