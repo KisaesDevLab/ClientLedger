@@ -20,6 +20,7 @@ pub mod forms;
 pub mod image;
 pub mod layout;
 pub mod pdf;
+pub mod print_queue;
 
 pub use amount::{amount_in_words, check_figures, format_amount, format_quantity};
 pub use checks::{
@@ -35,6 +36,9 @@ pub use forms::{
 pub use image::Logo;
 pub use layout::{Align, Document, Page, PageSize, Rect, ResolvedPage, Run, TextBox, resolve};
 pub use pdf::{render, render_resolved};
+pub use print_queue::{
+    Confirmation, DocKind, PrintQueue, PrintRun, QueueError, RunOutcome, RunState,
+};
 
 /// Why a document could not be laid out or rendered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
