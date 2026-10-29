@@ -240,6 +240,9 @@ pub(crate) struct Local {
     pub calendar: cl_settings::FiscalCalendar,
     /// The owner hid the setup checklist (kept with the company's prefs).
     pub checklist_dismissed: bool,
+    /// Printed checks wait for "Did all checks print correctly?" (Q-P19n;
+    /// read on open, on Refresh and on each data-bus notice, not per frame).
+    pub checks_unconfirmed: bool,
 }
 
 /// The clock Home shows a time in.
@@ -778,6 +781,8 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         .as_ref()
         .is_some_and(|r| r.prefs.setup_checklist_dismissed);
     let last = record.and_then(|r| r.last_backup);
+    let checks_unconfirmed =
+        tenant.is_some_and(|(id, _)| crate::screens::print_forms::waiting_answer(link, *id));
     if link.is_demo() {
         return Local {
             bills_due_days,
@@ -786,6 +791,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             zone: Zone::Fixed(utc()),
             calendar,
             checklist_dismissed,
+            checks_unconfirmed,
         };
     }
     let now = chrono::Utc::now();
@@ -797,6 +803,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         zone: Zone::Local,
         calendar,
         checklist_dismissed,
+        checks_unconfirmed,
     }
 }
 

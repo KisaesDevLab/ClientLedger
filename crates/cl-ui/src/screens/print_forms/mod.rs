@@ -237,6 +237,9 @@ pub struct PrintFormsScreen {
     preselect: Vec<TransactionId>,
     /// Reprint check: preview it once it is back in the queue.
     reprint: Option<TransactionId>,
+    /// Printed checks wait for an answer (read on open and after each change
+    /// of the file, never each frame).
+    unanswered: bool,
     /// A deposit summary to preview once the company block is read.
     pending_deposit: Option<(TransactionId, Box<cl_model::forms::deposit::DepositSummary>)>,
 }
@@ -361,9 +364,11 @@ impl PrintFormsScreen {
             notice: None,
             preselect: Vec::new(),
             reprint: None,
+            unanswered: false,
             pending_deposit: None,
         };
         s.sync_offset_fields();
+        s.unanswered = s.read_unanswered();
         s.start_setup();
         s.poll();
         s
@@ -948,6 +953,7 @@ impl PrintFormsScreen {
                         tracing::warn!("the printed batch could not be saved");
                     }
                 }
+                self.printing_changed();
                 self.remember_printer(PrintKind::Checks);
                 self.send_to_printer("checks", 1);
                 self.asking = true;
@@ -1015,6 +1021,7 @@ impl PrintFormsScreen {
         self.asking = false;
         self.preview = None;
         self.notice = Some("print.confirm.later_note");
+        self.printing_changed();
         self.load_queue();
     }
 
@@ -1028,6 +1035,7 @@ impl PrintFormsScreen {
                 tracing::warn!("the printed batch could not be updated");
             }
         }
+        self.printing_changed();
     }
 
     fn requeue(&mut self, ids: Vec<TransactionId>, password: Option<Secret>) {
@@ -1144,11 +1152,22 @@ impl PrintFormsScreen {
     }
 
     pub(crate) fn has_unanswered(&self) -> bool {
+        self.unanswered
+    }
+
+    fn read_unanswered(&self) -> bool {
         self.company_key().is_some_and(|c| {
             self.unconfirmed
                 .as_ref()
                 .is_some_and(|s| s.load().needs_attention(&c))
         })
+    }
+
+    /// The unanswered batches changed on this computer: read them again
+    /// here and tell Home (its reminder reads the file on that notice).
+    fn printing_changed(&mut self) {
+        self.unanswered = self.read_unanswered();
+        self.link.bus().publish(crate::data_bus::Change::Printing);
     }
 
     /// Printer Setup: save the offset for the chosen printer and the bank
@@ -1960,6 +1979,7 @@ impl Screen for PrintFormsScreen {
                     all.resolve(&c, &refs);
                     let _ = store.save(&all);
                 }
+                self.printing_changed();
                 self.preview = None;
                 self.run = None;
                 self.asking = false;

@@ -44,6 +44,9 @@ pub enum Change {
     /// Bills or vendor credits of this vendor were saved, voided or deleted
     /// (P17): its vendor panel and open-bill lists read them again.
     Bills(ContactId),
+    /// Printed checks were recorded, answered or put off (P19): Home's
+    /// "Did all checks print correctly?" reminder reads its file again.
+    Printing,
 }
 
 impl Change {
@@ -86,6 +89,8 @@ pub struct Changes {
     pub bill_vendors: BTreeSet<ContactId>,
     /// Bills of any vendor may have changed (a subscriber that fell behind).
     pub bills_all: bool,
+    /// Printing (P19).
+    pub printing: bool,
 }
 
 impl Changes {
@@ -101,6 +106,7 @@ impl Changes {
             templates: true,
             bill_vendors: BTreeSet::new(),
             bills_all: true,
+            printing: true,
         }
     }
 
@@ -153,6 +159,7 @@ impl Changes {
             Change::Tags => self.tags = true,
             Change::Items => self.items = true,
             Change::Templates => self.templates = true,
+            Change::Printing => self.printing = true,
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }

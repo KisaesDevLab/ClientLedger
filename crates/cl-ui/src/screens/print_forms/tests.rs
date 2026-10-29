@@ -77,13 +77,17 @@ fn decide_later_keeps_the_reminder_and_it_reopens() {
     s.poll();
     s.print_clicked();
     s.poll();
+    let mut bus = s.link.bus().subscribe();
     s.later();
+    assert!(s.link.bus().take(&mut bus).printing, "Home hears of it");
     assert!(s.has_unanswered());
     let tenant = s.tenant.as_ref().map(|(t, _)| *t).expect("tenant");
     assert!(waiting_answer(&s.link, tenant));
     s.reopen_question();
     assert!(s.asking);
     s.answer(true);
+    assert!(!s.has_unanswered());
+    assert!(s.link.bus().take(&mut bus).printing);
     assert!(!waiting_answer(&s.link, tenant));
 }
 
