@@ -721,3 +721,56 @@ async fn a_printed_check_edit_is_sent_again_with_the_owners_choice() {
     assert_eq!(e, ApiError::Local(LocalValidation::CheckEditUnavailable));
     assert!(requests(&server2, "PUT").await.is_empty());
 }
+
+/// PR-2 B2: the read-back reads a check loosely: a check voided while
+/// queued (no print status) still answers; a record that is gone is `None`.
+#[tokio::test]
+async fn print_state_reads_void_and_gone_checks() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{ID}")))
+        .respond_with(json(
+            200,
+            r#"{"transaction":{"id":"x","status":"void","printStatus":null,"checkNumber":null}}"#,
+        ))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{ID}")))
+        .respond_with(json(
+            200,
+            r#"{"transaction":{"status":"posted","printStatus":"printed","checkNumber":1001,"printBatchId":"b1"}}"#,
+        ))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{ID}")))
+        .respond_with(json(
+            404,
+            r#"{"error":{"message":"Transaction not found"}}"#,
+        ))
+        .mount(&server)
+        .await;
+    let s = company_session(&server);
+    let void = s
+        .checks()
+        .print_state(id())
+        .await
+        .expect("void")
+        .expect("some");
+    assert!(void.void);
+    assert_eq!(void.print_status, None);
+    assert!(!void.recorded_as(1001));
+    let printed = s
+        .checks()
+        .print_state(id())
+        .await
+        .expect("printed")
+        .expect("some");
+    assert!(printed.recorded_as(1001));
+    assert!(!printed.recorded_as(1002));
+    assert_eq!(printed.print_batch_id.as_deref(), Some("b1"));
+    assert_eq!(s.checks().print_state(id()).await.expect("gone"), None);
+}

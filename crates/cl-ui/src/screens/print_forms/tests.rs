@@ -608,3 +608,208 @@ fn open_with_during_the_record_keeps_the_run() {
     assert_eq!(s.run.as_ref().map(|r| r.items().len()), Some(2));
     assert!(s.has_unanswered());
 }
+
+/// PR-2 B2: plan [a, b]; the reply is lost and b is voided before the
+/// read-back: a is recorded (the question asks about it), b is not, and
+/// the intent is resolved. A void check never fails the whole read-back.
+#[test]
+fn a_void_check_in_a_lost_run_is_not_recorded_and_the_rest_is() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    lose_next(&s, LoseReply::VoidLast);
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking, "asked about the recorded check");
+    assert_eq!(s.notice, Some("print.recover.partial"));
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items().len(), 1);
+    assert_eq!(run.items()[0].number, Some(first));
+    let c = s.company_key().expect("company");
+    let all = saved(&s);
+    assert_eq!(all.intents_for(&c).count(), 0, "intent resolved");
+    assert_eq!(all.printed_for(&c).next().map(|b| b.checks.len()), Some(1));
+    assert_eq!(s.unresolved.len(), 0);
+}
+
+/// The read-back decides each check on its own: gone, void, not a check or
+/// numbered by another run is not recorded.
+#[test]
+fn decide_readback_is_per_check() {
+    use cl_api::{CheckPrintState, PrintStatus};
+    let ids: Vec<TransactionId> = (1..=5u128)
+        .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
+        .collect();
+    let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
+    let st = |n: Option<u32>, status: Option<PrintStatus>, void: bool, batch: Option<&str>| {
+        Some(CheckPrintState {
+            check_number: n,
+            print_status: status,
+            void,
+            print_batch_id: batch.map(str::to_string),
+        })
+    };
+    let states = vec![
+        st(Some(1001), Some(PrintStatus::Printed), false, Some("b1")),
+        None,
+        st(Some(1003), Some(PrintStatus::Printed), true, Some("b1")),
+        st(None, None, false, None),
+        st(Some(1005), Some(PrintStatus::Printed), false, Some("other")),
+    ];
+    let found = decide_readback(&planned, &states);
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    assert_eq!(recorded, vec![true, false, false, false, false]);
+    // No batch on the record: not numbered by a print run.
+    let nobatch = vec![st(Some(1001), Some(PrintStatus::Printed), false, None)];
+    assert!(!decide_readback(&planned[..1], &nobatch)[0].1);
+}
+
+/// Every saved intent is read back, one after the other: the second after
+/// the first one's question is answered.
+#[test]
+fn two_saved_intents_are_both_recovered() {
+    let (_d, s) = screen(false);
+    let ids: Vec<TransactionId> = s.checks.iter().map(|c| c.id).collect();
+    let bank = s.bank.expect("bank");
+    let company = s.company_key().expect("company");
+    let store = s.unconfirmed.clone().expect("store");
+    let link = Arc::clone(&s.link);
+    let tenant = s.tenant.clone();
+    drop(s);
+    let mut all = store.load();
+    for (i, id) in ids.iter().enumerate() {
+        let number = 3001 + i as u64;
+        if let Some(mut d) = link.demo_state() {
+            let req = PrintChecks {
+                bank_account: bank,
+                checks: vec![*id],
+                starting_number: number,
+                format: CheckFormat::Voucher,
+            };
+            crate::company::demo::printing::print(&mut d, &req, None).expect("recorded");
+        }
+        all.add(UnconfirmedBatch {
+            company_id: company.clone(),
+            bank_account_id: bank.to_string(),
+            printed_at: "2026-11-04T10:00:00Z".into(),
+            checks: vec![UnconfirmedCheck {
+                check_id: id.to_string(),
+                number,
+            }],
+            state: BatchState::Intent,
+            client_key: Some(format!("key-{i}")),
+            format: Some("voucher".into()),
+        });
+    }
+    store.save(&all).expect("save");
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let mut s = PrintFormsScreen::new(link, tenant, today, false);
+    s.poll();
+    s.poll();
+    assert!(s.asking, "the first intent's question");
+    assert_eq!(
+        saved(&s).intents_for(&company).count(),
+        1,
+        "one still to read back"
+    );
+    s.answer(true);
+    s.poll();
+    assert!(s.asking, "the second intent's question");
+    assert_eq!(saved(&s).intents_for(&company).count(), 0);
+    s.answer(true);
+    s.poll();
+    assert!(!s.asking);
+    assert!(!s.has_unanswered());
+}
+
+/// PR-2 #3: after the keyed resend any error reads back (here the engine
+/// had recorded the run: the pages go out and the question shows).
+#[test]
+fn an_error_after_the_keyed_resend_reads_back() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::KeyedThenRefused);
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking, "read back and found recorded");
+    assert_eq!(s.sent, Some(Sent::Printed));
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 0);
+    assert_eq!(saved(&s).printed_for(&c).count(), 1);
+}
+
+/// PR-2 #3: an answer that says the run was saved but can't be read reads
+/// back; a plain refusal drops the intent.
+#[test]
+fn saved_unreadable_reads_back_and_a_refusal_drops_the_intent() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::Unreadable);
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking);
+    assert_eq!(s.sent, Some(Sent::Printed));
+    assert!(keeps_key(&ApiError::SavedUnreadable { what: "x" }));
+    assert!(keeps_key(&ApiError::Timeout));
+    assert!(keeps_key(&ApiError::IdempotencyKeyReused { entity: None }));
+    assert!(!keeps_key(&ApiError::ClosingPasswordRequired));
+    assert!(!keeps_key(&ApiError::NotFound { code: None }));
+}
+
+/// PR-2 #4: the intent can't be saved: nothing is sent and the owner is
+/// told.
+#[test]
+fn an_unsaved_intent_sends_nothing() {
+    let (d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    // A file where the store's folder should be: every save fails.
+    let blocker = d.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").expect("file");
+    s.unconfirmed = Some(UnconfirmedChecksStore::in_dir(&blocker));
+    s.print_clicked();
+    s.poll();
+    assert_eq!(print_calls(&s), 0, "nothing sent");
+    assert_eq!(s.notice, Some("print.intent_unsaved"));
+    assert!(!s.asking);
+    assert!(!s.recording());
+    assert_eq!(
+        s.run.as_ref().map(cl_print::PrintRun::state),
+        Some(cl_print::RunState::Ready)
+    );
+}
+
+/// Q-PR2d: an intent the read-back can't decide is skipped this session
+/// and the owner may forget it; Home's reminder clears.
+#[test]
+fn an_undecided_intent_can_be_forgotten() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    // The engine can't be asked: the read-back fails.
+    s.readback_task = None;
+    s.readback_failed();
+    assert_eq!(s.notice, Some("print.recover.unknown"));
+    assert_eq!(s.unresolved.len(), 1);
+    let (key, numbers) = s.stuck_intent().expect("stuck");
+    assert_eq!(numbers, vec![first, first + 1]);
+    s.recover_intents();
+    assert!(!s.recording(), "not read back again this session");
+    let tenant = s.tenant.as_ref().map(|(t, _)| *t).expect("tenant");
+    assert!(waiting_answer(&s.link, tenant));
+    s.forget_intent(&key);
+    assert_eq!(s.notice, Some("print.recover.forgotten"));
+    assert_eq!(s.unresolved.len(), 0);
+    assert!(s.stuck_intent().is_none());
+    assert!(!waiting_answer(&s.link, tenant));
+}

@@ -163,6 +163,58 @@ struct TagRef {
     id: TagId,
 }
 
+/// What a print run left on one check ([`Checks::print_state`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckPrintState {
+    /// Its number, if any.
+    pub check_number: Option<u32>,
+    /// Its print status; `None` for a check voided while queued (U-115) or a
+    /// record that is not a check.
+    pub print_status: Option<PrintStatus>,
+    /// Voided (or deleted): not a check that printed.
+    pub void: bool,
+    /// The print run that numbered it, when the engine sends it.
+    pub print_batch_id: Option<String>,
+}
+
+impl CheckPrintState {
+    /// The engine recorded `number` for this check in a print run and it
+    /// still stands (not void).
+    #[must_use]
+    pub fn recorded_as(&self, number: u64) -> bool {
+        !self.void
+            && self.print_status == Some(PrintStatus::Printed)
+            && self.check_number.map(u64::from) == Some(number)
+    }
+}
+
+fn print_state_from(body: &[u8]) -> Result<CheckPrintState, ApiError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Wire {
+        #[serde(default)]
+        check_number: Option<u32>,
+        #[serde(default)]
+        print_status: Option<String>,
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        print_batch_id: Option<String>,
+    }
+    let decode = || ApiError::Decode {
+        what: "check print state",
+    };
+    let v: Value = serde_json::from_slice(body).map_err(|_| decode())?;
+    let t = v.get("transaction").ok_or_else(decode)?;
+    let w = Wire::deserialize(t).map_err(|_| decode())?;
+    Ok(CheckPrintState {
+        check_number: w.check_number,
+        print_status: w.print_status.as_deref().map(PrintStatus::from_wire),
+        void: matches!(w.status.as_deref(), Some("void" | "deleted")),
+        print_batch_id: w.print_batch_id,
+    })
+}
+
 /// Reads the same object twice: once as the [`Transaction`], once for the
 /// check fields. A record without a print status is not a check.
 impl<'de> Deserialize<'de> for CheckRecord {
@@ -563,6 +615,34 @@ impl Checks<'_> {
             "transaction",
         )
         .await
+    }
+
+    /// What a print run left on one check, read loosely so a void check
+    /// (print status cleared, U-115) or a record that is not a check still
+    /// answers (PR-2 B2 read-back). `None` when the record is gone.
+    ///
+    /// # Errors
+    /// `Decode` when the answer has no transaction; any [`ApiError`] but
+    /// `NotFound`.
+    pub async fn print_state(
+        &self,
+        id: TransactionId,
+    ) -> Result<Option<CheckPrintState>, ApiError> {
+        let path = format!("/api/v1/transactions/{id}");
+        let reply = match self
+            .0
+            .send(
+                &TXN_GET,
+                Call::new(Method::Get, TXN_GET.route(), path),
+                None,
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(ApiError::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        print_state_from(&reply.body).map(Some)
     }
 
     /// Checks drawn on `bank` (all banks when `None`) dated within

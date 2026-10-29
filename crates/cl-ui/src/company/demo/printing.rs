@@ -38,9 +38,15 @@ pub struct DemoPrinting {
     pub requeue_calls: u32,
     /// Tests: lose the next print's reply (B2).
     pub lose_next: Option<LoseReply>,
-    /// The answer of each print run by its key: the demo replays a key as
-    /// an engine with `idempotency-check-print-v1` does (U-116).
-    replays: BTreeMap<String, PrintedBatch>,
+    /// The request and answer of each print run by its key: the demo
+    /// replays a key as an engine with `idempotency-check-print-v1` does
+    /// (U-116) and refuses another request under it.
+    replays: BTreeMap<String, (PrintChecks, PrintedBatch)>,
+    /// Tests: checks voided after they printed (the seeded checks are not in
+    /// the register, so they are voided here).
+    pub voided: BTreeSet<TransactionId>,
+    /// Tests: the next replay of a key is refused ([`LoseReply::KeyedThenRefused`]).
+    refuse_replay: bool,
 }
 
 /// How the next print reply is lost (tests of B2).
@@ -57,6 +63,14 @@ pub enum LoseReply {
     /// Recorded, but the last check lost its number before the read-back
     /// (another window requeued it); unkeyed.
     Partial,
+    /// Recorded, then the last check was voided before the read-back
+    /// (another window); unkeyed.
+    VoidLast,
+    /// Recorded, but the answer could not be read (`SavedUnreadable`).
+    Unreadable,
+    /// Recorded, the reply lost on a keyed engine, and the resend under the
+    /// key refused (409).
+    KeyedThenRefused,
 }
 
 /// The demo's closing-date password.
@@ -241,7 +255,7 @@ pub fn print(
         return Err(ApiError::Local(LocalValidation::InvalidValue));
     }
     // As the fixed engine (U-115): a voided check is refused by name.
-    if req.checks.iter().any(|c| state.ledger.is_void(*c)) {
+    if req.checks.iter().any(|c| is_void(state, *c)) {
         return Err(refusal(400, cl_api::CHECK_VOID, "Check is void"));
     }
     let mut dates = Vec::new();
@@ -295,7 +309,18 @@ pub fn print_keyed(
     password: Option<&Secret>,
     key: &str,
 ) -> Result<PrintedBatch, ApiError> {
-    if let Some(b) = state.printing.replays.get(key) {
+    if let Some((first, b)) = state.printing.replays.get(key) {
+        // As the engine: another request under a used key is refused (422).
+        if first != req {
+            return Err(cl_api::engine_refusal(
+                422,
+                &json!({ "error": { "message": "Idempotency key reused for a different request",
+                    "code": "IDEMPOTENCY_KEY_REUSED" } }),
+            ));
+        }
+        if std::mem::take(&mut state.printing.refuse_replay) {
+            return Err(refusal(409, "CONFLICT", "Busy"));
+        }
         return Ok(b.clone());
     }
     let lost = |keyed: bool| ApiError::OutcomeUnknown {
@@ -310,21 +335,37 @@ pub fn print_keyed(
         }
         Some(mode) => {
             let b = print(state, req, password)?;
-            state.printing.replays.insert(key.to_string(), b.clone());
-            if mode == LoseReply::Partial
-                && let Some(last) = req.checks.last()
-            {
-                state.printing.printed.remove(last);
-                write_back(state, *last, None);
+            state
+                .printing
+                .replays
+                .insert(key.to_string(), (req.clone(), b.clone()));
+            match (mode, req.checks.last().copied()) {
+                (LoseReply::Partial, Some(final_check)) => {
+                    state.printing.printed.remove(&final_check);
+                    write_back(state, final_check, None);
+                }
+                (LoseReply::VoidLast, Some(final_check)) => {
+                    state.printing.voided.insert(final_check);
+                }
+                (LoseReply::Unreadable, _) => {
+                    return Err(ApiError::SavedUnreadable {
+                        what: "printed batch",
+                    });
+                }
+                (LoseReply::KeyedThenRefused, _) => state.printing.refuse_replay = true,
+                _ => {}
             }
             Err(lost(matches!(
                 mode,
-                LoseReply::AfterRecording { keyed: true }
+                LoseReply::AfterRecording { keyed: true } | LoseReply::KeyedThenRefused
             )))
         }
         None => {
             let b = print(state, req, password)?;
-            state.printing.replays.insert(key.to_string(), b.clone());
+            state
+                .printing
+                .replays
+                .insert(key.to_string(), (req.clone(), b.clone()));
             Ok(b)
         }
     }
@@ -349,7 +390,7 @@ pub fn requeue(
     // As the fixed engine (U-117): void checks are skipped and reported,
     // the others go back.
     let (skipped, live): (Vec<TransactionId>, Vec<TransactionId>) =
-        checks.iter().partition(|c| state.ledger.is_void(**c));
+        checks.iter().partition(|c| is_void(state, **c));
     if live.iter().any(|c| !state.printing.printed.contains_key(c)) {
         return Err(refusal(400, "CHECK_NOT_PRINTED", "Check was not printed"));
     }
@@ -378,8 +419,9 @@ pub fn requeue(
     })
 }
 
-/// Every check number in use on `bank`: the register's non-void checks
-/// (written or paying bills) and the ones the print queue numbered.
+/// Every check number in use on `bank`: the register's checks (written or
+/// paying bills; a void check keeps its number, Q-PR2a) and the ones the
+/// print queue numbered.
 #[must_use]
 pub fn used_numbers_of(state: &mut DemoState, bank: AccountId) -> BTreeSet<u64> {
     let chart = state.chart.get_or_insert_with(super::chart).clone();
@@ -387,7 +429,6 @@ pub fn used_numbers_of(state: &mut DemoState, bank: AccountId) -> BTreeSet<u64> 
         .ledger
         .check_numbers(&chart, bank)
         .into_iter()
-        .filter(|(_, _, void)| !*void)
         .map(|(_, n, _)| u64::from(n))
         .collect();
     used.extend(
@@ -419,6 +460,31 @@ fn write_back(state: &mut DemoState, id: TransactionId, number: Option<u64>) {
     if !super::pay_bills::set_printed(state, id, number) {
         super::checks::set_printed(state, id, number);
     }
+}
+
+/// Void in the register, or voided after it printed (tests).
+fn is_void(state: &DemoState, id: TransactionId) -> bool {
+    state.ledger.is_void(id) || state.printing.voided.contains(&id)
+}
+
+/// What a print run left on one check, as `GET /transactions/{id}` reads
+/// back (B2): `None` for a check the demo does not know.
+#[must_use]
+pub fn print_state(state: &DemoState, check: TransactionId) -> Option<cl_api::CheckPrintState> {
+    let printed = state.printing.printed.get(&check);
+    let known = printed.is_some()
+        || state.printing.voided.contains(&check)
+        || (1..=2).any(|n| id(n) == check);
+    known.then(|| cl_api::CheckPrintState {
+        check_number: printed.and_then(|(_, n, _)| u32::try_from(*n).ok()),
+        print_status: Some(if printed.is_some() {
+            cl_api::PrintStatus::Printed
+        } else {
+            cl_api::PrintStatus::Queue
+        }),
+        void: is_void(state, check),
+        print_batch_id: printed.map(|(_, _, b)| b.to_string()),
+    })
 }
 
 /// The number a printed check carries (demo).
@@ -680,6 +746,51 @@ mod tests {
         );
         assert_eq!(next_free(&used, highest, 2), highest + 1);
         assert_eq!(next_free(&BTreeSet::from([5, 7]), 4, 2), 8);
+    }
+
+    /// Q-PR2a: a void check keeps its number, so the number stays used.
+    #[test]
+    fn a_void_checks_number_stays_used() {
+        let mut s = DemoState::new();
+        let b = bank(&mut s);
+        let chart = s.chart.get_or_insert_with(super::super::chart).clone();
+        let voided = s
+            .ledger
+            .check_numbers(&chart, b)
+            .into_iter()
+            .filter(|(_, _, void)| !*void)
+            .find_map(|(id, n, _)| s.ledger.void(id).ok().map(|()| u64::from(n)))
+            .expect("a check the demo can void");
+        assert!(used_numbers_of(&mut s, b).contains(&voided));
+    }
+
+    /// As the engine (U-116): a key answers its own request again and
+    /// refuses another one (422 `IDEMPOTENCY_KEY_REUSED`).
+    #[test]
+    fn a_reused_print_key_with_another_request_is_refused() {
+        let mut s = DemoState::new();
+        let b = bank(&mut s);
+        let ids: Vec<_> = check_queue(&mut s, b).iter().map(|c| c.id).collect();
+        let req = PrintChecks {
+            bank_account: b,
+            checks: ids.clone(),
+            starting_number: 1001,
+            format: CheckFormat::Voucher,
+        };
+        let first = print_keyed(&mut s, &req, None, "k1").expect("print");
+        assert_eq!(
+            print_keyed(&mut s, &req, None, "k1")
+                .expect("replay")
+                .batch_id,
+            first.batch_id
+        );
+        let other = PrintChecks {
+            starting_number: 2001,
+            ..req
+        };
+        let e = print_keyed(&mut s, &other, None, "k1").expect_err("reused");
+        assert!(matches!(e, ApiError::IdempotencyKeyReused { .. }), "{e:?}");
+        assert_eq!(s.printing.print_calls, 1);
     }
 
     #[test]
