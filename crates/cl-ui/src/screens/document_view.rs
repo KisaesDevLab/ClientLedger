@@ -188,7 +188,8 @@ impl Screen for DocumentViewScreen {
             | OpenPayload::DocumentDraft(_)
             | OpenPayload::StatementDraft(_)
             | OpenPayload::PrintChecks(_)
-            | OpenPayload::ReprintCheck(..) => false,
+            | OpenPayload::ReprintCheck(..)
+            | OpenPayload::PrintDeposit(..) => false,
         }
     }
 

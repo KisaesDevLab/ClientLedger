@@ -152,6 +152,13 @@ pub enum OpenPayload {
     /// queue (closing-date password when closed) and previews with the
     /// next number.
     ReprintCheck(cl_core::ids::TransactionId, cl_core::CalendarDate),
+    /// P19 (Q-P19z): a saved deposit's summary, previewed in File > Print
+    /// Forms. The summary is the saved record's, with the names Make
+    /// Deposit already resolved (Print Forms has no name lists).
+    PrintDeposit(
+        cl_core::ids::TransactionId,
+        Box<cl_model::forms::deposit::DepositSummary>,
+    ),
 }
 
 /// Stand-in for a screen a later phase builds.

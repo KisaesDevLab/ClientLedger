@@ -197,9 +197,17 @@ steps:
   - assert_exists: {role: label, label: Deposit summary}
   - assert_exists: {role: label, label: Less cash back}
   - assert_exists: {role: label, label: "277.50"}
-  - assert_disabled: {role: button, label: Print}
+  - assert_enabled: {role: button, label: Print}
   - assert_no_clipping: {}
   - screenshot: summary
+  # P19 (Q-P19z): Print previews the saved deposit's summary in Print Forms.
+  - click: {role: button, label: Print}
+  - assert_exists: {role: tab, label_contains: "Print Forms"}
+  - assert_state: {key: screen.screen, equals: print_forms}
+  - assert_state: {key: screen.preview.kind, equals: deposit}
+  - screenshot: summary-print-preview
+  - command: file.close_window
+  - assert_state: {key: screen.screen, equals: deposit}
   - click: {role: button, label: Back to the deposit}
   - assert_state: {key: screen.summary_open, equals: false}
   - command: edit.void_transaction

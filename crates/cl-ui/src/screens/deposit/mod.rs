@@ -245,6 +245,8 @@ pub struct DepositScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// P19 (Q-P19z): Print saved the deposit; preview its summary once it is read back.
+    pub(crate) print_after_save: bool,
     /// Save as Template and the template this deposit came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
 }
@@ -324,6 +326,7 @@ impl DepositScreen {
             lists_stale: false,
             nav_prompt: None,
             after_save_nav: None,
+            print_after_save: false,
             template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();

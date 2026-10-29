@@ -392,6 +392,36 @@ pub(crate) fn form_lines(t: &Transaction) -> Vec<(String, Money)> {
         .collect()
 }
 
+/// A saved deposit's summary as the printed page lists it: the payments,
+/// then the other lines (fees negative), cash back and the engine's total.
+/// The subtotal is the exact sum of the rows.
+#[must_use]
+pub(crate) fn deposit_data(
+    s: &cl_model::forms::deposit::DepositSummary,
+) -> cl_print::forms::deposit_summary::DepositSummaryData {
+    use cl_print::forms::deposit_summary::{DepositLine, DepositSummaryData};
+    let rows: Vec<_> = s.items.iter().chain(&s.other).collect();
+    let subtotal = Money::sum(rows.iter().map(|r| r.amount))
+        .map_or_else(|_| dec(s.total) + opt_dec(s.cash_back), dec);
+    DepositSummaryData {
+        account: s.account.clone(),
+        date: crate::shell::us_date(s.date),
+        lines: rows
+            .iter()
+            .map(|r| DepositLine {
+                received_from: r.label.clone(),
+                memo: r.detail.clone(),
+                amount: dec(r.amount),
+                ..DepositLine::default()
+            })
+            .collect(),
+        subtotal,
+        cash_back: s.cash_back.map(dec),
+        total: dec(s.total),
+        memo: s.memo.clone(),
+    }
+}
+
 /// Several documents as one (forms print as one job, Q-P19t).
 #[must_use]
 pub(crate) fn join(mut docs: Vec<Document>, title: &str) -> Option<Document> {

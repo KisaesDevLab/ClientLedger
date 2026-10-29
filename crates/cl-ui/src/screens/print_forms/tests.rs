@@ -203,3 +203,39 @@ fn reprint_check_requeues_it_and_previews_with_the_next_number() {
     assert_eq!(run.items()[0].number, Some(first + 1), "the next number");
     assert!(s.preview.is_some());
 }
+
+#[test]
+fn a_deposit_summary_previews_with_its_rows_and_prints() {
+    use cl_model::forms::deposit::{DepositSummary, SummaryRow};
+    let (_d, mut s) = screen(false);
+    let m = |v: &str| Money::parse_wire(v).expect("money");
+    let row = |label: &str, amount: &str| SummaryRow {
+        label: label.into(),
+        detail: String::new(),
+        amount: m(amount),
+    };
+    let summary = DepositSummary {
+        date: CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+        account: "Operating Checking".into(),
+        memo: String::new(),
+        items: vec![row("Pat Doe", "300.00")],
+        other: vec![row("Bank fees", "-12.50")],
+        cash_back: Some(m("50.00")),
+        total: m("237.50"),
+    };
+    let id = s.checks.first().map(|c| c.id).expect("an id");
+    assert!(s.open_with(OpenPayload::PrintDeposit(id, Box::new(summary))));
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!(p.kind, PreviewKind::Deposit);
+    let page = &cl_print::resolve(&p.doc).expect("pages")[0];
+    let text = |tag: &str| page.runs_of(tag).next().map(|r| r.text.clone());
+    assert_eq!(text("title").as_deref(), Some("Deposit Summary"));
+    assert_eq!(text("row1.amount").as_deref(), Some("-12.50"));
+    assert_eq!(text("total0.value").as_deref(), Some("287.50"), "subtotal");
+    assert_eq!(text("total2.value").as_deref(), Some("237.50"));
+    assert_eq!(s.state()["preview"]["kind"], "deposit");
+    s.print_clicked();
+    s.poll();
+    assert_eq!(s.sent, Some(Sent::Printed));
+}

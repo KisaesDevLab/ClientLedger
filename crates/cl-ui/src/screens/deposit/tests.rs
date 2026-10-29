@@ -685,3 +685,42 @@ fn b2_after_an_unknown_outcome_a_second_save_sends_nothing_until_the_recheck_ans
     assert!(s.start_save(SaveIntent::Save, None));
     assert_eq!(log.lock().expect("log").saved.len(), 2);
 }
+
+#[test]
+fn print_saves_a_new_deposit_then_opens_its_summary_preview() {
+    use crate::company::CompanyEvent;
+    use crate::windows::OpenPayload;
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    assert!(!s.can_print(), "nothing to print on a blank deposit");
+    set_lines(&mut s, &[(4000, "300.00"), (6250, "-12.50")]);
+    set_cash_back(&mut s, 1020, "50.00");
+    let _ = link.drain();
+    assert!(s.print_summary(), "{:?}", s.save.error);
+    assert_eq!(s.save.count, 1);
+    assert_eq!(
+        s.state_json()["mode"],
+        "edit",
+        "the saved deposit is in front"
+    );
+    let printed: Vec<_> = link
+        .drain()
+        .into_iter()
+        .filter_map(|e| match e {
+            CompanyEvent::OpenWith(kind, p) => match *p {
+                OpenPayload::PrintDeposit(_, summary) => Some((kind, summary)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(printed.len(), 1);
+    assert_eq!(printed[0].0.as_str(), crate::screens::print_forms::KIND);
+    assert_eq!(printed[0].1.total, money("237.50"));
+    assert_eq!(printed[0].1.cash_back, Some(money("50.00")));
+    // Opened again from the register: clean, so Print previews at once.
+    assert!(s.can_print());
+    assert!(s.print_summary());
+    assert_eq!(s.save.count, 1, "no second save");
+}

@@ -119,6 +119,7 @@ pub(crate) enum PreviewKind {
     Forms,
     Envelopes,
     Alignment,
+    Deposit,
 }
 
 impl PreviewKind {
@@ -128,6 +129,7 @@ impl PreviewKind {
             PreviewKind::Forms => "forms",
             PreviewKind::Envelopes => "envelopes",
             PreviewKind::Alignment => "alignment",
+            PreviewKind::Deposit => "deposit",
         }
     }
 }
@@ -235,6 +237,8 @@ pub struct PrintFormsScreen {
     preselect: Vec<TransactionId>,
     /// Reprint check: preview it once it is back in the queue.
     reprint: Option<TransactionId>,
+    /// A deposit summary to preview once the company block is read.
+    pending_deposit: Option<(TransactionId, Box<cl_model::forms::deposit::DepositSummary>)>,
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -357,6 +361,7 @@ impl PrintFormsScreen {
             notice: None,
             preselect: Vec::new(),
             reprint: None,
+            pending_deposit: None,
         };
         s.sync_offset_fields();
         s.start_setup();
@@ -756,6 +761,30 @@ impl PrintFormsScreen {
         }
     }
 
+    /// Preview a saved deposit's summary (Q-P19z): laid out with
+    /// `cl_print::forms::deposit_summary` from the saved record's figures.
+    pub(crate) fn preview_deposit(&mut self) {
+        let Some((_, s)) = self.pending_deposit.take() else {
+            return;
+        };
+        self.clear_messages();
+        let data = job::deposit_data(&s);
+        let style = cl_print::FormStyle {
+            company: self.setup.company.clone(),
+            logo: self.logo.clone(),
+            footer: String::new(),
+            labels: job::form_labels(),
+        };
+        match cl_print::forms::deposit_summary::layout(&data, &style) {
+            Ok(mut doc) => {
+                doc.title = t("print.file.deposit");
+                let name = cl_print::pdf_file_name(&t("print.file.deposit"), &data.date, "");
+                self.show_preview(PreviewKind::Deposit, doc, name, Vec::new());
+            }
+            Err(e) => self.layout_failed(&e),
+        }
+    }
+
     pub(crate) fn preview_envelopes(&mut self) {
         let Some(p) = &self.preview else {
             return;
@@ -811,6 +840,10 @@ impl PrintFormsScreen {
         self.clear_messages();
         match kind {
             PreviewKind::Checks => self.record(None),
+            PreviewKind::Deposit => {
+                self.remember_printer(PrintKind::Forms);
+                self.send_to_printer("deposit", 1);
+            }
             PreviewKind::Forms => {
                 let copies = self
                     .copies
@@ -1348,6 +1381,16 @@ impl PrintFormsScreen {
             } else {
                 "print.save_failed"
             });
+        }
+        // A deposit summary waits for the company block and for any open
+        // "Did all checks print correctly?" question.
+        if self.pending_deposit.is_some()
+            && self.loaded
+            && self.setup_task.is_none()
+            && !self.asking
+            && self.record_task.is_none()
+        {
+            self.preview_deposit();
         }
     }
 
@@ -1944,6 +1987,13 @@ impl Screen for PrintFormsScreen {
                     self.bank = Some(*first);
                 }
                 self.load_queue();
+            }
+            return true;
+        }
+        if let OpenPayload::PrintDeposit(id, summary) = payload {
+            self.pending_deposit = Some((id, summary));
+            if self.loaded && self.setup_task.is_none() && !self.asking {
+                self.preview_deposit();
             }
             return true;
         }
