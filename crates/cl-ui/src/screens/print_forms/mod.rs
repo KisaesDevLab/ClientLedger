@@ -1343,6 +1343,7 @@ impl PrintFormsScreen {
 
     fn state_json(&self) -> Value {
         json!({
+            "screen": "print_forms",
             "kind": KIND,
             "loaded": self.loaded,
             "tab": match self.tab { Tab::Checks => "checks", Tab::Forms => "forms" },

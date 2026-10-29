@@ -1,0 +1,37 @@
+# Print Forms (P19) against `clientledger --demo`: the three synthetic forms
+# marked Print later (two invoices, one sales receipt), the preview (one
+# page each), #10 envelopes, two copies printed; printed forms leave the
+# queue. Nothing reaches a printer (the demo makes up the outcome). All
+# data is synthetic.
+name: print_forms
+description: Forms queue, preview, envelopes, copies, printed forms leave the queue.
+steps:
+  - resize: {width: 1280, height: 900}
+  - set_zoom: {percent: 100}
+  - command: file.print_forms
+  - assert_exists: {role: tab, label_contains: "Print Forms"}
+  - command: dev.demo_print_reset
+  - click: {label: "Invoices, receipts and credit memos"}
+  - assert_state: {key: screen.tab, equals: forms}
+  - assert_state: {key: screen.forms, equals: 3}
+  - assert_state: {key: screen.forms_picked, equals: 3}
+  - assert_exists: {label: "INV-1040"}
+  - assert_exists: {label: "2,450.00"}
+  - click: {role: text_input, label: Copies}
+  - key: Ctrl+A
+  - type: {text: "2"}
+  - screenshot: queue
+  - click: {role: button, label: Preview 3 forms}
+  - assert_state: {key: screen.preview.kind, equals: forms}
+  - assert_state: {key: screen.preview.pages, equals: 3}
+  - screenshot: preview
+  - click: {role: button, label: Envelopes}
+  - assert_state: {key: screen.preview.kind, equals: envelopes}
+  - screenshot: envelopes
+  - click: {role: button, label: Back to the list}
+  - click: {role: button, label: Preview 3 forms}
+  - click: {role: button, label: Print}
+  - assert_state: {key: screen.sent, equals: printed}
+  - assert_state: {key: screen.forms, equals: 0}
+  - command: dev.demo_print_reset
+  - command: file.close_window
