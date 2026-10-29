@@ -32,6 +32,8 @@ pub mod amount_words;
 pub mod batch;
 // P17: Enter Bill and vendor credits (WP3).
 pub mod bill;
+// P18: Pay Bills.
+pub mod bill_payment;
 pub mod card;
 pub mod check;
 pub mod daily_sales;
