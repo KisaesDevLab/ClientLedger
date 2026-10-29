@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cl_api::{
     ApiError, CheckLayout, DocType, DocumentNumber, FormFooters, LocalValidation, MarkedPrinted,
-    PrintChecks, PrintedBatch, QueuedCheck, QueuedCheckKind, QueuedForm, RequeuedCheck,
+    PrintChecks, PrintedBatch, QueuedCheck, QueuedCheckKind, QueuedForm, Requeued, RequeuedCheck,
     SpoiledNumber, SpoiledReason,
 };
 use cl_core::ids::{AccountId, TransactionId};
@@ -219,6 +219,10 @@ pub fn print(
     if req.checks.is_empty() || req.starting_number == 0 {
         return Err(ApiError::Local(LocalValidation::InvalidValue));
     }
+    // As the fixed engine (U-115): a voided check is refused by name.
+    if req.checks.iter().any(|c| state.ledger.is_void(*c)) {
+        return Err(refusal(400, cl_api::CHECK_VOID, "Check is void"));
+    }
     let mut dates = Vec::new();
     for c in &req.checks {
         dates.push(
@@ -269,20 +273,21 @@ pub fn requeue(
     checks: &[TransactionId],
     dates: &[CalendarDate],
     password: Option<&Secret>,
-) -> Result<Vec<RequeuedCheck>, ApiError> {
+) -> Result<Requeued, ApiError> {
     state.printing.requeue_calls += 1;
     if checks.is_empty() {
         return Err(ApiError::Local(LocalValidation::InvalidValue));
     }
-    if checks
-        .iter()
-        .any(|c| !state.printing.printed.contains_key(c))
-    {
+    // As the fixed engine (U-117): void checks are skipped and reported,
+    // the others go back.
+    let (skipped, live): (Vec<TransactionId>, Vec<TransactionId>) =
+        checks.iter().partition(|c| state.ledger.is_void(**c));
+    if live.iter().any(|c| !state.printing.printed.contains_key(c)) {
         return Err(refusal(400, "CHECK_NOT_PRINTED", "Check was not printed"));
     }
     super::register::check_closing(closing(state), dates, password)?;
     let mut out = Vec::new();
-    for c in checks {
+    for c in &live {
         if let Some((bank, number, _)) = state.printing.printed.remove(c) {
             write_back(state, *c, None);
             state.printing.spoiled.push(SpoiledNumber {
@@ -299,7 +304,10 @@ pub fn requeue(
             });
         }
     }
-    Ok(out)
+    Ok(Requeued {
+        checks: out,
+        skipped,
+    })
 }
 
 /// Every check number in use on `bank`: the register's non-void checks
@@ -559,7 +567,7 @@ mod tests {
         let next = layout(&mut s, b).0.expect("next");
         assert!(used_numbers_of(&mut s, b).iter().all(|n| *n < next));
         let r = requeue(&mut s, &ids[1..], &[d(2026, 11, 4)], None).expect("requeue");
-        assert_eq!(r[0].spoiled_number, Some(1002));
+        assert_eq!(r.checks[0].spoiled_number, Some(1002));
         assert_eq!(spoiled(&s)[0].number, 1002);
         assert_eq!(check_queue(&mut s, b).len(), 1);
         // 1002 may be used again.

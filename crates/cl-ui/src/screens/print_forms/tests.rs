@@ -352,3 +352,57 @@ fn print_and_company_info_widgets_have_accessible_names() {
     let u = unnamed_of(&mut info);
     assert!(u.is_empty(), "company information: {u:?}");
 }
+
+/// PR-2 S1: a $0.00 check is never ticked, and a forced pick never prints.
+#[test]
+fn zero_checks_stay_unticked_and_never_print() {
+    let (_d, mut s) = screen(false);
+    let mut zero = s.checks[0].clone();
+    zero.id = TransactionId::from_uuid(uuid::Uuid::from_u128(
+        0x5019_0000_0000_4000_8000_0000_0000_00ff,
+    ));
+    zero.amount = Money::ZERO;
+    s.checks.push(zero.clone());
+    assert!(!printable(&zero));
+    let picks = default_picks(&s.checks, &[]);
+    assert_eq!(picks.len(), 2);
+    assert!(!picks.contains(&zero.id));
+    assert!(default_picks(&s.checks, &[zero.id]).is_empty());
+    s.picked.insert(zero.id);
+    s.preview_checks();
+    s.poll();
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items().len(), 2, "the $0.00 check is left out");
+    assert!(run.items().iter().all(|i| i.id != zero.id));
+}
+
+/// PR-2 S2: a requeue whose answer skips a void check still answers it:
+/// the saved batch is resolved and Home's reminder clears.
+#[test]
+fn skipped_checks_resolve_the_saved_batch() {
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    assert!(s.has_unanswered());
+    let ids: Vec<TransactionId> = s
+        .run
+        .as_ref()
+        .expect("run")
+        .items()
+        .iter()
+        .map(|i| i.id)
+        .collect();
+    s.requeue_ids = vec![ids[0]];
+    s.requeued(Ok(Requeued {
+        checks: Vec::new(),
+        skipped: vec![ids[1]],
+    }));
+    // The first was asked for, the second skipped by the engine: both
+    // are answered.
+    let tenant = s.tenant.as_ref().map(|(t, _)| *t).expect("tenant");
+    assert!(!waiting_answer(&s.link, tenant));
+    assert!(!s.has_unanswered());
+    assert_eq!(s.notice, Some("print.confirm.skipped"));
+}

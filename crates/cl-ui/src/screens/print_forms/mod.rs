@@ -30,7 +30,7 @@ use std::sync::mpsc::Receiver;
 use cl_api::{
     Account, AccountFilter, ApiError, Capabilities, CheckFormat, CheckLayout,
     ClosedPeriodAuthorization, FormFooters, OrphanLabel, PostingOptions, PrintChecks, PrintProblem,
-    PrintedBatch, QueuedCheck, QueuedForm, RequestGroup, RequeuedCheck,
+    PrintedBatch, QueuedCheck, QueuedForm, RequestGroup, Requeued,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -222,7 +222,7 @@ pub struct PrintFormsScreen {
     run_dates: Vec<CalendarDate>,
     run_bank: Option<AccountId>,
     record_task: Option<Task<PrintedBatch>>,
-    requeue_task: Option<Task<Vec<RequeuedCheck>>>,
+    requeue_task: Option<Task<Requeued>>,
     requeue_ids: Vec<TransactionId>,
     mark_task: Option<Task<cl_api::MarkedPrinted>>,
     job: Option<Receiver<Sent>>,
@@ -286,6 +286,26 @@ fn address_lines(p: &cl_api::CompanyProfileUpdate) -> Vec<String> {
         out.push(last);
     }
     out
+}
+
+/// A check that may print: never a $0.00 one (S1; engines before U-117
+/// queue one for a vendor paid by credits or a discount alone).
+pub(crate) fn printable(c: &QueuedCheck) -> bool {
+    c.amount.is_positive()
+}
+
+/// The checks ticked when the queue loads: every printable one, or the
+/// printable ones of `preselect` (Print from a form).
+pub(crate) fn default_picks(
+    checks: &[QueuedCheck],
+    preselect: &[TransactionId],
+) -> BTreeSet<TransactionId> {
+    checks
+        .iter()
+        .filter(|c| printable(c))
+        .filter(|c| preselect.is_empty() || preselect.contains(&c.id))
+        .map(|c| c.id)
+        .collect()
 }
 
 fn banks_of(accounts: &[Account]) -> Vec<(AccountId, String)> {
@@ -554,7 +574,7 @@ impl PrintFormsScreen {
     pub(crate) fn picked_checks(&self) -> Vec<QueuedCheck> {
         self.checks
             .iter()
-            .filter(|c| self.picked.contains(&c.id))
+            .filter(|c| self.picked.contains(&c.id) && printable(c))
             .cloned()
             .collect()
     }
@@ -1160,15 +1180,22 @@ impl PrintFormsScreen {
         }
     }
 
-    fn requeued(&mut self, r: Result<Vec<RequeuedCheck>, ApiError>) {
+    fn requeued(&mut self, r: Result<Requeued, ApiError>) {
         match r {
-            Ok(_) => {
+            Ok(done) => {
                 self.closing_prompt.saved();
-                let ids = std::mem::take(&mut self.requeue_ids);
+                // Every id asked for is answered: sent back, or skipped by
+                // the engine because it is void (S2, U-117).
+                let mut ids = std::mem::take(&mut self.requeue_ids);
+                ids.extend(done.skipped.iter().copied());
                 self.resolve(&ids);
                 self.preview = None;
                 self.run = None;
-                self.notice = Some("print.confirm.requeued");
+                self.notice = Some(if done.skipped.is_empty() {
+                    "print.confirm.requeued"
+                } else {
+                    "print.confirm.skipped"
+                });
                 if let Some(id) = self.reprint.take() {
                     self.preselect = vec![id];
                 }
@@ -1396,15 +1423,7 @@ impl PrintFormsScreen {
                         }
                         self.preselect.clear();
                     }
-                    self.picked = if self.preselect.is_empty() {
-                        q.checks.iter().map(|c| c.id).collect()
-                    } else {
-                        q.checks
-                            .iter()
-                            .filter(|c| self.preselect.contains(&c.id))
-                            .map(|c| c.id)
-                            .collect()
-                    };
+                    self.picked = default_picks(&q.checks, &self.preselect);
                     if self.first_number.trim().is_empty() || self.run.is_none() {
                         self.first_number = q.next.map(|n| n.to_string()).unwrap_or_default();
                     }
@@ -1608,6 +1627,7 @@ impl PrintFormsScreen {
                 (PrintProblem::NumberInUse, None) => t("print.problem.number_in_use"),
                 (PrintProblem::QueueChanged, _) => t("print.problem.queue_changed"),
                 (PrintProblem::NotPrinted, _) => t("print.problem.not_printed"),
+                (PrintProblem::Voided, _) => t("print.problem.voided"),
             };
             form::inline_warning(ui, &tokens, &text);
             if let Some(n) = self.offer.filter(|_| p == PrintProblem::NumberInUse)
@@ -1740,8 +1760,15 @@ impl PrintFormsScreen {
                 amount_head(ui);
                 ui.end_row();
                 for c in &self.checks {
+                    // S1: a $0.00 check (credits or a discount paid it all)
+                    // never prints; it can't be ticked and says why.
+                    let printable = printable(c);
                     let mut on = self.picked.contains(&c.id);
-                    if named_box(ui, &mut on, &c.payee).changed() {
+                    let changed = ui
+                        .add_enabled_ui(printable, |ui| named_box(ui, &mut on, &c.payee))
+                        .inner
+                        .changed();
+                    if changed {
                         if on {
                             self.picked.insert(c.id);
                         } else {
@@ -1751,6 +1778,11 @@ impl PrintFormsScreen {
                     ui.label(crate::shell::us_date(c.date));
                     ui.label(&c.payee);
                     amount_cell(ui, &c.amount.format(style));
+                    if !printable {
+                        ui.label(
+                            RichText::new(t("print.zero_amount")).color(tokens.text_secondary),
+                        );
+                    }
                     ui.end_row();
                 }
             });
