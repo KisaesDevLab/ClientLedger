@@ -120,6 +120,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-110 | `GET /company/logo` returns the uploaded logo bytes (company-scoped); capability `company-logo-v1` | P19 | `clientledger/check-printing` | Proposed |
 | U-111 | Document numbering per type (invoice, cash_sale, credit_memo, statement) with prefix, `GET /document-numbers/next?type=` peek, duplicate warning (`warnOnly`); fix the invoice counter that moves every company in the tenant; company-scoped `footerText` with optional per-type `footerOverrides`; capability `document-numbers-v1` | P19/P20 | `clientledger/document-numbers` | Proposed |
 | U-112 | Customer statement data: `GET /reports/customer-statement?contactId=&start=&end=` (opening balance, activity, aging) | P22 | - | Proposed (P19 builds the layout against a local struct, Q-P19d) |
+| U-113 | Print later for forms: a `printLater` flag on invoices, cash sales and credit memos, a forms print queue `GET /forms/print-queue?type=` and mark printed (Q-P19t) | P19 | `clientledger/document-numbers` | Proposed |
 
 Engine issue #162 (flaky pgboss-owner-role test) is open; not caused by PR #160 or #161.
 
