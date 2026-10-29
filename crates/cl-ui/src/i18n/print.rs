@@ -24,6 +24,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.col.type", "Type"),
     ("print.col.number", "No."),
     ("print.col.customer", "Customer"),
+    ("print.pick", "Print {name}"),
     ("print.pick.tip", "Tick to include it in this print run."),
     ("print.preview_checks", "Preview {n} checks"),
     ("print.preview_forms", "Preview {n} forms"),
@@ -142,6 +143,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("company_info.numbers.bad", "Prefixes have no spaces (up to 20 characters) and next numbers run from 1 to 999,999,999."),
     ("company_info.save", "Save"),
     ("company_info.saved", "Company information saved."),
+    ("prefs.company.checks_moved", "Check style, the company block on checks and printer alignment are in File > Printer Setup. Logo, form footers and numbering are in Company > Company Information."),
     // Write Check / Pay Bills.
     ("print.check.print_now", "Print"),
     ("print.check.print_now.tip", "Print this check now; you'll see a preview first."),

@@ -207,7 +207,10 @@ mod tests {
         assert_eq!(Font::Sans.weight(), 400);
         assert_eq!(Font::SansSemiBold.weight(), 600);
         assert_eq!(Font::SansBold.weight(), 700);
-        let w: f32 = "Total".chars().map(|c| Font::Sans.advance_mm(c, 10.0)).sum();
+        let w: f32 = "Total"
+            .chars()
+            .map(|c| Font::Sans.advance_mm(c, 10.0))
+            .sum();
         assert!((w - Font::Sans.width_mm("Total", 10.0)).abs() < 0.001);
     }
 

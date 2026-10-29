@@ -1536,12 +1536,7 @@ impl PrintFormsScreen {
                 ui.end_row();
                 for c in &self.checks {
                     let mut on = self.picked.contains(&c.id);
-                    if ui
-                        .checkbox(&mut on, "")
-                        .on_hover_text(t("print.pick.tip"))
-                        .labelled_by(ui.scope_id())
-                        .changed()
-                    {
+                    if named_box(ui, &mut on, &c.payee).changed() {
                         if on {
                             self.picked.insert(c.id);
                         } else {
@@ -1594,12 +1589,7 @@ impl PrintFormsScreen {
                 ui.end_row();
                 for f in &self.forms {
                     let mut on = self.forms_picked.contains(&f.id);
-                    if ui
-                        .checkbox(&mut on, "")
-                        .on_hover_text(t("print.pick.tip"))
-                        .labelled_by(ui.scope_id())
-                        .changed()
-                    {
+                    if named_box(ui, &mut on, f.number.as_deref().unwrap_or_default()).changed() {
                         if on {
                             self.forms_picked.insert(f.id);
                         } else {
@@ -1814,6 +1804,18 @@ impl PrintFormsScreen {
             _ => {}
         }
     }
+}
+
+/// A tick box named "Print <name>" for screen readers and the control
+/// channel (the row's text sits in the columns beside it).
+fn named_box(ui: &mut Ui, on: &mut bool, name: &str) -> egui::Response {
+    let r = ui.checkbox(on, "").on_hover_text(t("print.pick.tip"));
+    let label = t_with("print.pick", &[("name", name)]);
+    let value = *on;
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::CheckBox, true, value, label.clone())
+    });
+    r
 }
 
 fn style_key(f: CheckFormat) -> &'static str {
