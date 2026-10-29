@@ -201,6 +201,13 @@ impl AppPaths {
         self.root.join("docread")
     }
 
+    /// PDFs handed to the OS to print or view (P19, Q-P19a); old files are
+    /// swept by `os_print::sweep_print_dir`.
+    #[must_use]
+    pub fn print_dir(&self) -> PathBuf {
+        self.root.join("print")
+    }
+
     /// Create the folders (owner-only permissions on Unix).
     ///
     /// # Errors

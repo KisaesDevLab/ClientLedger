@@ -31,6 +31,7 @@ mod health;
 mod http;
 mod instance_lock;
 mod logs;
+mod os_print;
 mod paths;
 mod procs;
 mod secrets;
@@ -52,6 +53,10 @@ pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
 pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
+pub use os_print::{
+    CommandOutput, CommandRunner, CommandSpec, MAX_COPIES, OsPrint, PrintOutcome, SystemRunner,
+    sweep_print_dir, write_temp_pdf,
+};
 pub use paths::{
     AppPaths, Os, docread_exe_name, engine_exe_name, find_docread_exe, find_engine_exe,
     find_ocr_dir, tesseract_exe_name,
