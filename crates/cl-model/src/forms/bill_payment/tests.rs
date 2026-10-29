@@ -81,7 +81,9 @@ fn the_mockup_totals_to_the_penny() {
     select_mockup(&mut f);
     let t = f.totals().expect("totals");
     assert_eq!((t.listed, t.selected), (5, 4));
-    assert_eq!(t.amount_due, m("7471.90"), "every listed bill (Q-P18b)");
+    // Q-P18b (owner 2026-10-28): every column totals the selected bills;
+    // the five listed bills owe 7,471.90, the four selected 6,831.90.
+    assert_eq!(t.amount_due, m("6831.90"));
     assert_eq!(t.discount, m("4.37"));
     assert_eq!(t.credits, m("250.00"));
     assert_eq!(t.cash, m("6577.53"));
@@ -138,6 +140,22 @@ fn a_partial_payment_leaves_the_rest_owed() {
         "what the bill still owes"
     );
     assert_eq!(f.ending_after(m("84210.55")), Some(m("83210.55")));
+}
+
+/// Owner answer 2026-10-28: paid by credit card, the card's amount owed
+/// goes up by the cash (the engine stores a card's balance as a credit).
+#[test]
+fn a_card_preview_shows_the_amount_owed_rising() {
+    let mut f = mockup();
+    select_mockup(&mut f);
+    assert_eq!(
+        f.preview(m("-1250.00"), true),
+        Some((m("1250.00"), m("7827.53")))
+    );
+    assert_eq!(
+        f.preview(m("84210.55"), false),
+        Some((m("84210.55"), m("77633.02")))
+    );
 }
 
 #[test]

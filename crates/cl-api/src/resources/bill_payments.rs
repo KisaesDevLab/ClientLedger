@@ -122,7 +122,8 @@ impl BillPayments<'_> {
         decode::<W>(&reply, "bill payments").map(|w| w.data)
     }
 
-    /// Pays bills (`POST /bill-payments`): one check per vendor, in the
+    /// Pays bills (`POST /bill-payments`): one payment (a check, or a card
+    /// charge) per vendor, in the
     /// order the engine lists them. See the module notes for `amount`.
     ///
     /// # Errors
@@ -376,6 +377,31 @@ pub enum CheckNumbering {
     },
 }
 
+/// How the bills are paid (Q-P18d as the owner answered it 2026-10-28):
+/// by check from a bank account, or charged to a credit card account.
+#[derive(Clone, PartialEq, Eq)]
+pub enum PayMethod {
+    /// Checks drawn on a bank account (`method: "check"`).
+    Check(CheckNumbering),
+    /// Charged to a credit card account (`method: "credit_card"`; the
+    /// card account goes as `bankAccountId`). No check number, nothing
+    /// queued to print.
+    CreditCard {
+        /// The card's confirmation or authorization number (owner data).
+        reference: Option<String>,
+    },
+}
+
+/// The numbering only; the card reference is owner data.
+impl fmt::Debug for PayMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PayMethod::Check(n) => f.debug_tuple("Check").field(n).finish(),
+            PayMethod::CreditCard { .. } => f.write_str("CreditCard"),
+        }
+    }
+}
+
 /// One bill in a pay.
 #[derive(Clone, PartialEq, Eq)]
 pub struct BillToPay {
@@ -398,10 +424,12 @@ pub struct CreditToApply {
     pub amount: Money,
 }
 
-/// A Pay Bills run: checks from one bank account on one date.
+/// A Pay Bills run: checks from one bank account (or charges to one credit
+/// card account) on one date.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PayBillsRequest {
-    /// The bank account the checks are drawn on.
+    /// The bank account the checks are drawn on, or the credit card
+    /// account charged (`bankAccountId`).
     pub bank_account: AccountId,
     /// Payment date.
     pub date: CalendarDate,
@@ -411,8 +439,8 @@ pub struct PayBillsRequest {
     pub credits: Vec<CreditToApply>,
     /// Where discounts post (`None`: the company's default, Q-P18a).
     pub discount_account: Option<AccountId>,
-    /// Print later or numbers now.
-    pub numbering: CheckNumbering,
+    /// Check (print later or numbers now) or credit card.
+    pub method: PayMethod,
     /// Bookkeeping memo (owner data).
     pub memo: Option<String>,
 }
@@ -425,7 +453,7 @@ impl fmt::Debug for PayBillsRequest {
             .field("date", &self.date)
             .field("bills", &self.bills.len())
             .field("credits", &self.credits.len())
-            .field("numbering", &self.numbering)
+            .field("method", &self.method)
             .finish_non_exhaustive()
     }
 }
@@ -518,10 +546,14 @@ pub(crate) fn pay_body(req: &PayBillsRequest, caps: &Capabilities) -> Result<Val
             })
         })
         .collect();
+    let method = match req.method {
+        PayMethod::Check(_) => "check",
+        PayMethod::CreditCard { .. } => "credit_card",
+    };
     let mut body = json!({
         "bankAccountId": req.bank_account.to_string(),
         "txnDate": req.date.to_wire(),
-        "method": "check",
+        "method": method,
         "bills": bills,
     });
     let Value::Object(map) = &mut body else {
@@ -533,16 +565,28 @@ pub(crate) fn pay_body(req: &PayBillsRequest, caps: &Capabilities) -> Result<Val
     if let Some(a) = req.discount_account {
         map.insert("discountAccountId".into(), Value::String(a.to_string()));
     }
-    match req.numbering {
-        CheckNumbering::PrintLater => {
+    match &req.method {
+        PayMethod::Check(CheckNumbering::PrintLater) => {
             map.insert("printLater".into(), Value::Bool(true));
         }
-        CheckNumbering::Assign { first } => {
-            if !caps.has(Capabilities::BILL_PAYMENT_CHECK_NUMBER) || first == 0 {
+        PayMethod::Check(CheckNumbering::Assign { first }) => {
+            if !caps.has(Capabilities::BILL_PAYMENT_CHECK_NUMBER) || *first == 0 {
                 return Err(unsupported());
             }
             map.insert("printLater".into(), Value::Bool(false));
             map.insert("checkNumber".into(), Value::String(first.to_string()));
+        }
+        PayMethod::CreditCard { reference } => {
+            if let Some(r) = reference
+                .as_deref()
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+            {
+                if r.chars().count() > 100 {
+                    return Err(invalid());
+                }
+                map.insert("referenceNumber".into(), Value::String(r.to_string()));
+            }
         }
     }
     if let Some(m) = req.memo.as_deref().map(str::trim).filter(|m| !m.is_empty()) {

@@ -8,7 +8,7 @@
 
 use cl_api::{
     AccountType, BillDraft, BillLineDraft, BillTerms, BillToPay, Capabilities, CheckNumbering,
-    ContactFields, ContactType, CreditToApply, NewContact, PayBillsRequest, PayProblem,
+    ContactFields, ContactType, CreditToApply, NewContact, PayBillsRequest, PayMethod, PayProblem,
     PayableFilter, Percent, PostingOptions, Session, TxnStatus, VendorCreditDraft, pay_problem,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
@@ -109,7 +109,7 @@ fn request(bank: AccountId, bills: Vec<BillToPay>, credits: Vec<CreditToApply>) 
         bills,
         credits,
         discount_account: None,
-        numbering: CheckNumbering::PrintLater,
+        method: PayMethod::Check(CheckNumbering::PrintLater),
         memo: None,
     }
 }
@@ -204,6 +204,46 @@ pub fn partial_payment_with_credit_live(h: &Harness) {
         bill_balance(h, s, b),
         m("3915.00"),
         "void restores the bill"
+    );
+}
+
+/// A card payment (pinned engine; owner answer 2026-10-28): the bill is
+/// paid from a credit card account, the card's balance owed goes up by the
+/// amount, no check number and nothing to print.
+pub fn card_payment_live(h: &Harness) {
+    let s = &h.s1;
+    let expense = account(h, s, AccountType::Expense, "Card paid bill");
+    let card = detail_account(h, s, AccountType::Liability, "credit_card");
+    let v = vendor(h, s, "Monett Tire & Lube");
+    let b = bill(h, s, v, expense.id, "640.00", None, date(2026, 11, 8));
+    let before = balance(h, s, card);
+    let mut req = request(
+        card,
+        vec![BillToPay {
+            bill: b,
+            cash: m("640.00"),
+            discount: Money::ZERO,
+        }],
+        Vec::new(),
+    );
+    req.method = PayMethod::CreditCard {
+        reference: Some("AUTH-77".into()),
+    };
+    let paid = h
+        .run(
+            s.bill_payments()
+                .pay(&req, &PostingOptions::default(), key()),
+        )
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(paid.len(), 1);
+    assert_eq!(paid[0].check_number, None);
+    assert_ne!(paid[0].print_status.as_deref(), Some("queue"));
+    assert_eq!(bill_balance(h, s, b), Money::ZERO);
+    // Credit-normal: the stored balance (debits - credits) falls by 640.00,
+    // i.e. the amount owed on the card rises by it.
+    assert_eq!(
+        before.checked_sub(balance(h, s, card)).expect("delta"),
+        m("640.00")
     );
 }
 
@@ -380,7 +420,7 @@ pub fn check_numbers_now_u103(h: &Harness) {
         ],
         Vec::new(),
     );
-    req.numbering = CheckNumbering::Assign { first: 7001 };
+    req.method = PayMethod::Check(CheckNumbering::Assign { first: 7001 });
     let paid = h
         .run(
             s.bill_payments()
@@ -400,7 +440,7 @@ pub fn check_numbers_now_u103(h: &Harness) {
         }],
         Vec::new(),
     );
-    again.numbering = CheckNumbering::Assign { first: 7002 };
+    again.method = PayMethod::Check(CheckNumbering::Assign { first: 7002 });
     let e = h
         .run(
             s.bill_payments()

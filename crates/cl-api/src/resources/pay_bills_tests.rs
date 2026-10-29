@@ -127,6 +127,10 @@ async fn a_float_where_money_belongs_is_refused() {
 /// The mockup's run: 7781 with its 4.37 discount, 8813 with the 250.00
 /// credit (CM-114). `amount` is cash plus credits (the engine's meaning).
 fn mockup_request(numbering: CheckNumbering) -> PayBillsRequest {
+    with_method(PayMethod::Check(numbering))
+}
+
+fn with_method(method: PayMethod) -> PayBillsRequest {
     PayBillsRequest {
         bank_account: AccountId::parse(BANK).expect("bank"),
         date: day(2026, 11, 4),
@@ -148,7 +152,7 @@ fn mockup_request(numbering: CheckNumbering) -> PayBillsRequest {
             amount: m("250.00"),
         }],
         discount_account: Some(AccountId::parse(DISC).expect("disc")),
-        numbering,
+        method,
         memo: Some(" canary ".into()),
     }
 }
@@ -195,6 +199,39 @@ fn the_pay_body_sends_coverage_discount_and_credits() {
     );
 }
 
+/// Owner answer 2026-10-28: a card payment is `method: "credit_card"` from
+/// the card account, with the reference and no check fields.
+#[test]
+fn a_card_payment_sends_credit_card_and_its_reference() {
+    let caps: Capabilities = [Capabilities::BILL_DISCOUNTS].into_iter().collect();
+    let card = with_method(PayMethod::CreditCard {
+        reference: Some(" AUTH-77 ".into()),
+    });
+    let body = pay_body(&card, &caps).expect("body");
+    assert_eq!(body["method"], "credit_card");
+    assert_eq!(body["referenceNumber"], "AUTH-77");
+    assert_eq!(body["bankAccountId"], BANK, "the card account");
+    for k in ["printLater", "checkNumber"] {
+        assert!(body.get(k).is_none(), "{k}");
+    }
+    let plain = with_method(PayMethod::CreditCard { reference: None });
+    assert!(
+        pay_body(&plain, &caps)
+            .expect("body")
+            .get("referenceNumber")
+            .is_none()
+    );
+    let long = with_method(PayMethod::CreditCard {
+        reference: Some("x".repeat(101)),
+    });
+    assert_eq!(
+        pay_body(&long, &caps),
+        Err(ApiError::Local(LocalValidation::InvalidValue))
+    );
+    let shown = format!("{card:?}");
+    assert!(!shown.contains("AUTH"), "{shown}");
+}
+
 #[test]
 fn the_pay_body_refuses_what_the_engine_cannot_take() {
     let none = Capabilities::default();
@@ -213,7 +250,7 @@ fn the_pay_body_refuses_what_the_engine_cannot_take() {
     assert!(body["bills"][0].get("discountAmount").is_none());
     // Numbers now without `bill-payment-check-number-v1`.
     let mut numbered = plain.clone();
-    numbered.numbering = CheckNumbering::Assign { first: 4419 };
+    numbered.method = PayMethod::Check(CheckNumbering::Assign { first: 4419 });
     assert_eq!(pay_body(&numbered, &none), unsupported);
     // Nothing to pay, fractions of a cent, a negative cash, a stray credit.
     let mut empty = plain.clone();

@@ -698,6 +698,10 @@ fn main() -> std::process::ExitCode {
             contract_pay_bills::partial_payment_with_credit_live,
         ),
         (
+            "pay_bills::card_payment_live",
+            contract_pay_bills::card_payment_live,
+        ),
+        (
             "pay_bills::mockup_run_with_discount_u101",
             contract_pay_bills::mockup_run_with_discount_u101,
         ),

@@ -15,8 +15,7 @@
 //!
 //! The rules: cash ≥ 0; cash + discount + credits ≤ balance due; something
 //! is applied; a credit is never used beyond what it has left. Totals
-//! (Q-P18b): Amt. due adds every listed bill, the other columns the
-//! selected ones. The ending balance after is the engine's account balance
+//! (Q-P18b, owner 2026-10-28): every column adds the selected bills. The ending balance after is the engine's account balance
 //! minus the selected cash (Q-P18c): a preview, not a balance worked out
 //! here.
 
@@ -231,7 +230,8 @@ impl fmt::Debug for PlannedCredit {
 /// The figures under the grid.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PayTotals {
-    /// Every listed bill's balance due (Q-P18b).
+    /// Selected bills' balance due (Q-P18b as the owner answered it:
+    /// every column totals the selected bills).
     pub amount_due: Money,
     /// Selected bills' discounts.
     pub discount: Money,
@@ -581,8 +581,13 @@ impl PayBillsForm {
     #[must_use]
     pub fn totals(&self) -> Option<PayTotals> {
         let visible = self.visible();
-        let amount_due = Money::sum(visible.iter().map(|r| r.balance_due)).ok()?;
         let selected = self.selected();
+        let amount_due = Money::sum(
+            selected
+                .iter()
+                .filter_map(|b| self.row(*b).map(|r| r.balance_due)),
+        )
+        .ok()?;
         let sum = |f: &dyn Fn(TransactionId) -> Money| Money::sum(selected.iter().map(|b| f(*b)));
         Some(PayTotals {
             amount_due,
@@ -599,6 +604,22 @@ impl PayBillsForm {
     #[must_use]
     pub fn ending_after(&self, engine_balance: Money) -> Option<Money> {
         engine_balance.checked_sub(self.totals()?.cash).ok()
+    }
+
+    /// The pay-from account's figure before → after, as shown (Q-P18c):
+    /// `engine_balance` is the engine's stored balance (debits − credits).
+    /// A bank account shows its balance, which falls by the cash; a credit
+    /// card account (`card`) shows the amount owed (the stored balance with
+    /// its sign turned, Q-241), which rises by it.
+    #[must_use]
+    pub fn preview(&self, engine_balance: Money, card: bool) -> Option<(Money, Money)> {
+        let cash = self.totals()?.cash;
+        if card {
+            let owed = engine_balance.checked_neg().ok()?;
+            Some((owed, owed.checked_add(cash).ok()?))
+        } else {
+            Some((engine_balance, engine_balance.checked_sub(cash).ok()?))
+        }
     }
 
     /// Checks the run. `discounts`: the engine takes discounts
