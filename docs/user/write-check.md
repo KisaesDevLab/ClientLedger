@@ -17,7 +17,7 @@ When you pick a name you have paid before, ClientLedger copies the accounts, mem
 
 ## Print later
 
-Tick **Print later** if you will print the check from ClientLedger instead of writing it by hand. The number shows **To print**: the check gets its number when you print it. Printing checks comes in a later update.
+Tick **Print later** if you will print the check from ClientLedger instead of writing it by hand. The number shows **To print**: the check gets its number when you print it. To print one check right away, click **Print** instead; you see a preview first. To reprint a check that was lost or spoiled, open it and click **Reprint check**. See [Printing checks](printing-checks.md).
 
 ## Open bills
 
