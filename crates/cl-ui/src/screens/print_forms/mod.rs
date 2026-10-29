@@ -1725,6 +1725,12 @@ impl PrintFormsScreen {
                         self.preselect.clear();
                     }
                     self.picked = default_picks(&q.checks, &self.preselect);
+                    // Only a $0.00 check was asked for (S1): nothing to
+                    // print, said plainly; the request is not kept.
+                    if !self.preselect.is_empty() && self.picked.is_empty() {
+                        self.preselect.clear();
+                        self.notice = Some("print.nothing_picked");
+                    }
                     if self.first_number.trim().is_empty() || self.run.is_none() {
                         self.first_number = q.next.map(|n| n.to_string()).unwrap_or_default();
                     }
