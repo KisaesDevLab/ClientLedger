@@ -435,6 +435,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_card_digits",
         "Demo Card Digits On/Off (developer)",
     ),
+    // P18: the Pay Bills scenario runs light and dark in one app; this
+    // voids the demo's bill payments so the second run sees the same list.
+    dev_action(
+        "dev.demo_pay_bills_reset",
+        "Reset Demo Bill Payments (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

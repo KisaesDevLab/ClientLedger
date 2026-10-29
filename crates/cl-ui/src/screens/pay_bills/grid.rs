@@ -118,6 +118,25 @@ impl<'a> Rows<'a> {
             .map(|i| RowKey(i as u64 + 1))
     }
 
+    /// The note beside the vendor, as the mockup shows it under the name:
+    /// the bill's memo, else its discount terms, else the vendor's open
+    /// credit.
+    fn note(&self, r: &cl_model::forms::bill_payment::PayableRow) -> Option<String> {
+        if let Some(n) = r.note.as_ref().filter(|n| !n.is_empty()) {
+            return Some(n.clone());
+        }
+        if r.discount_date.is_some() {
+            return r.terms.clone();
+        }
+        let open = cl_core::Money::sum(self.form.credits_for(r.vendor).iter().map(|c| c.open))
+            .ok()
+            .filter(|m| m.is_positive())?;
+        Some(crate::i18n::t_with(
+            "paybills.vendor.credit_available",
+            &[("amount", &open.format(cl_core::MoneyStyle::default()))],
+        ))
+    }
+
     fn bill_at(&self, index: usize) -> Option<TransactionId> {
         self.ids.get(index).copied()
     }
@@ -156,9 +175,9 @@ impl RowModel for Rows<'_> {
         match col {
             SELECT => CellValue::Bool(self.form.is_selected(bill)),
             DUE => CellValue::Text(Cow::Owned(r.due.map(month_day).unwrap_or_default())),
-            VENDOR => CellValue::Text(Cow::Owned(match &r.note {
-                Some(n) if !n.is_empty() => format!("{} \u{b7} {n}", r.vendor_name),
-                _ => r.vendor_name.clone(),
+            VENDOR => CellValue::Text(Cow::Owned(match self.note(r) {
+                Some(n) => format!("{} \u{b7} {n}", r.vendor_name),
+                None => r.vendor_name.clone(),
             })),
             REF => CellValue::Text(Cow::Owned(r.reference.clone().unwrap_or_default())),
             DISC_DATE => CellValue::Text(Cow::Owned(

@@ -90,7 +90,7 @@ steps:
   - assert_state: {key: screen.attention.health_check, equals: null}
   - assert_state: {key: screen.backup_due, equals: false}
   - assert_exists: {role: label, label: 37 bank transactions to review}
-  - assert_exists: {role: label, label: 3 bills overdue or due within 7 days}
+  - assert_exists: {role: label, label: 5 bills overdue or due within 7 days}
   - assert_exists: {role: label, label_contains: arrive in a later update}
   - assert_exists: {role: label, label: Backed up today 8:12 AM}
   - assert_exists: {role: link, label: Review}

@@ -699,6 +699,20 @@ pub fn void(
     Ok(())
 }
 
+/// The developer command `dev.demo_pay_bills_reset` (the control-channel
+/// scenario runs light and dark in one app): every demo payment is voided
+/// and the default discount account forgotten.
+pub fn reset(state: &mut DemoState) {
+    let ids: Vec<TransactionId> = state.pay_bills.payments.iter().map(|p| p.id).collect();
+    let pw = Secret::new(super::register::DEMO_CLOSING_PASSWORD);
+    for id in ids {
+        if !state.ledger.is_void(id) {
+            let _ = void(state, id, Some(&pw));
+        }
+    }
+    state.pay_bills.discount_account = None;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

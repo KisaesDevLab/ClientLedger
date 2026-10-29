@@ -318,7 +318,17 @@ impl PayBillsScreen {
 
     /// The accounts a discount can post to: income and expense accounts.
     pub(crate) fn discount_accounts(&self) -> Vec<&Account> {
-        self.accounts_of(AccountClass::IncomeOrExpense)
+        use cl_api::AccountType as T;
+        self.accounts
+            .iter()
+            .filter(|a| {
+                a.is_active
+                    && matches!(
+                        a.fields.account_type,
+                        T::Revenue | T::OtherRevenue | T::Cogs | T::Expense | T::OtherExpense
+                    )
+            })
+            .collect()
     }
 
     /// Reads the pay-from account's balance and, for checks, the numbers.
@@ -976,6 +986,32 @@ impl Screen for PayBillsScreen {
                     return true;
                 }
                 self.grid_command(GridCommand::Revert)
+            }
+            // Demo only: void the demo's bill payments (the scenario's
+            // second theme run starts from the same list).
+            "dev.demo_pay_bills_reset" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                crate::company::demo::pay_bills::reset(&mut d);
+                drop(d);
+                self.discount_default = None;
+                self.discount_account = None;
+                self.last_paid = None;
+                self.form.clear();
+                self.form.take_discounts = true;
+                self.form.vendor = None;
+                self.show_all = false;
+                if let Some(d) = self.through.value {
+                    self.form.show = cl_model::forms::bill_payment::ShowBills::DueOnOrBefore(d);
+                }
+                self.method = Method::Check;
+                self.print_later = true;
+                self.reference.clear();
+                self.revision += 1;
+                self.load_list();
+                self.fetch_account_facts();
+                true
             }
             "form.prev_record" => self.grid_command(GridCommand::PageUp),
             "form.next_record" => self.grid_command(GridCommand::PageDown),

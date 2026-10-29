@@ -15,6 +15,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("paybills.show.all", "All bills"),
     ("paybills.vendor", "Vendor"),
     ("paybills.vendor.all", "All vendors"),
+    ("paybills.vendor.credit_available", "Credit available {amount}"),
     ("paybills.sort", "Sort by"),
     ("paybills.sort.due", "Due date"),
     ("paybills.sort.vendor", "Vendor"),

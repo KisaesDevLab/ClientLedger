@@ -94,6 +94,10 @@ impl PayBillsScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
+        // Set Discount / Set Credits stay in view above the list.
+        if self.dialog.is_some() {
+            self.dialog_ui(ui, tokens);
+        }
     }
 
     fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -394,10 +398,6 @@ impl PayBillsScreen {
                 1 => self.open_credits(b),
                 _ => self.go_to_bill(b),
             }
-        }
-        if self.dialog.is_some() {
-            ui.add_space(8.0);
-            self.dialog_ui(ui, tokens);
         }
     }
 
