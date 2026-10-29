@@ -70,6 +70,13 @@ steps:
   - assert_exists: {role: label, label: "#4380"}
   - assert_no_clipping: {}
   - screenshot: prefill
+  # P18 (Q-P13e): the open-bill note links to Pay Bills.
+  - click: {role: link, label: Go to Pay Bills}
+  - assert_state: {key: screen.screen, equals: pay_bills}
+  - assert_exists: {role: tab, label_contains: "Pay Bills"}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
 
   # --- 4. Number, amount (in words), memo -------------------------------------
   - click: {role: text_input, label: "No."}
