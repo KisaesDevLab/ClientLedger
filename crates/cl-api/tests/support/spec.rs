@@ -247,6 +247,12 @@ pub fn keyable_pay_bills_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-pay-bills")
 }
 
+/// The `keyable-check-print` (`idempotency-check-print-v1`) rows of
+/// `operations.txt`: `(METHOD, route)`, sorted.
+pub fn keyable_check_print_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-check-print")
+}
+
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = txt
         .lines()

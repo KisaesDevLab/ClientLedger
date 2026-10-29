@@ -1,0 +1,7 @@
+# The engine's `idempotency-check-print-v1` route set (U-116, engine branch
+# clientledger/pr2-fixes): the check print run, `x-idempotency: true` in its
+# openapi.json once merged. Client-declared until the pin has it (PR-2 B2).
+# Append-only for this capability name: `keyable-check-print` in
+# operations.txt (`KeySet::CheckPrintV1`), keyed only while the engine
+# advertises `idempotency-check-print-v1`.
+POST /api/v1/checks/print

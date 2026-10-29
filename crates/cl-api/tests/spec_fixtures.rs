@@ -94,12 +94,13 @@ fn every_operation_is_recorded_and_in_the_spec() {
 /// `document-drafts-attach-v1` (U-95), sorted and disjoint.
 type Routes = Vec<(String, String)>;
 
-fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes, Routes) {
+fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes, Routes, Routes) {
     let v1 = spec::route_lines(&fixture("idempotency_v1_routes.txt"));
     let ap = spec::route_lines(&fixture("idempotency_ap_v1_routes.txt"));
     let docs = spec::route_lines(&fixture("idempotency_docs_v1_routes.txt"));
     let attach = spec::route_lines(&fixture("idempotency_docs_attach_v1_routes.txt"));
     let pay = spec::route_lines(&fixture("idempotency_pay_bills_v1_routes.txt"));
+    let print = spec::route_lines(&fixture("idempotency_check_print_v1_routes.txt"));
     assert_eq!(v1.len(), 20, "the idempotency-v1 set has 20 routes");
     assert_eq!(ap.len(), 6, "the idempotency-ap-v1 set has 6 routes");
     assert_eq!(docs.len(), 2, "the idempotency-docs-v1 set has 2 routes");
@@ -130,7 +131,20 @@ fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes, Routes) {
             && !attach.contains(r)),
         "idempotency-pay-bills-v1 only adds routes"
     );
-    (v1, ap, docs, attach, pay)
+    assert_eq!(
+        print.len(),
+        1,
+        "the idempotency-check-print-v1 set has 1 route"
+    );
+    assert!(
+        print.iter().all(|r| !v1.contains(r)
+            && !ap.contains(r)
+            && !docs.contains(r)
+            && !attach.contains(r)
+            && !pay.contains(r)),
+        "idempotency-check-print-v1 only adds routes"
+    );
+    (v1, ap, docs, attach, pay, print)
 }
 
 /// The rows `operations.txt` must class `keyable` (every `idempotency-v1`
@@ -138,7 +152,7 @@ fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes, Routes) {
 /// six) and `keyable-docs` (every `idempotency-docs-v1` route; A03 covers
 /// both) and `keyable-docs-attach` (the `document-drafts-attach-v1` route;
 /// A04 covers it). A route is keyed only under its own set's capability.
-fn expected_keyable() -> (Routes, Routes, Routes, Routes, Routes) {
+fn expected_keyable() -> (Routes, Routes, Routes, Routes, Routes, Routes) {
     recorded_idempotency_sets()
 }
 
@@ -161,10 +175,12 @@ fn typed_keyable(set: cl_api::KeySet) -> Routes {
 /// No engine checkout needed.
 #[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
-    let (v1, ap, docs, attach, pay) = expected_keyable();
+    let (v1, ap, docs, attach, pay, print) = expected_keyable();
     assert_eq!(spec::keyable_operations(OPERATIONS_TXT), v1);
     assert_eq!(spec::keyable_pay_bills_operations(OPERATIONS_TXT), pay);
     assert_eq!(typed_keyable(cl_api::KeySet::PayBillsV1), pay);
+    assert_eq!(spec::keyable_check_print_operations(OPERATIONS_TXT), print);
+    assert_eq!(typed_keyable(cl_api::KeySet::CheckPrintV1), print);
     assert_eq!(spec::keyable_ap_operations(OPERATIONS_TXT), ap);
     assert_eq!(spec::keyable_docs_operations(OPERATIONS_TXT), docs);
     assert_eq!(spec::keyable_docs_attach_operations(OPERATIONS_TXT), attach);
@@ -174,7 +190,7 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
     assert_eq!(typed_keyable(cl_api::KeySet::DocsAttachV1), attach);
     assert_eq!(
         cl_api::OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-        v1.len() + ap.len() + docs.len() + attach.len() + pay.len()
+        v1.len() + ap.len() + docs.len() + attach.len() + pay.len() + print.len()
     );
 }
 
@@ -230,7 +246,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         );
         return;
     }
-    let (v1, ap, docs, attach, pay) = recorded_idempotency_sets();
+    let (v1, ap, docs, attach, pay, print) = recorded_idempotency_sets();
     let mut sets = v1.clone();
     sets.extend(ap.iter().cloned());
     // A keyed set that arrived after `idempotency-v1` (U-92a with engine
@@ -241,7 +257,19 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     let has_docs = later_set(&marked, &docs, "idempotency-docs-v1", "U-92a", &path);
     let has_attach = later_set(&marked, &attach, "document-drafts-attach-v1", "U-95", &path);
     let has_pay = later_set(&marked, &pay, "idempotency-pay-bills-v1", "U-102", &path);
-    for (has, set) in [(has_docs, &docs), (has_attach, &attach), (has_pay, &pay)] {
+    let has_print = later_set(
+        &marked,
+        &print,
+        "idempotency-check-print-v1",
+        "U-116",
+        &path,
+    );
+    for (has, set) in [
+        (has_docs, &docs),
+        (has_attach, &attach),
+        (has_pay, &pay),
+        (has_print, &print),
+    ] {
         if has {
             sets.extend(set.iter().cloned());
         }
@@ -253,6 +281,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     let keyable_docs = spec::keyable_docs_operations(OPERATIONS_TXT);
     let keyable_attach = spec::keyable_docs_attach_operations(OPERATIONS_TXT);
     let keyable_pay = spec::keyable_pay_bills_operations(OPERATIONS_TXT);
+    let keyable_print = spec::keyable_check_print_operations(OPERATIONS_TXT);
     assert!(
         keyable
             .iter()
@@ -272,6 +301,11 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             } else {
                 [].iter()
             })
+            .chain(if has_print {
+                keyable_print.iter()
+            } else {
+                [].iter()
+            })
             .all(|r| marked.contains(r)),
         "every keyable row is marked by the engine"
     );
@@ -288,6 +322,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     assert_eq!(
         keyable_pay, pay,
         "keyable-pay-bills = the idempotency-pay-bills-v1 set"
+    );
+    assert_eq!(
+        keyable_print, print,
+        "keyable-check-print = the idempotency-check-print-v1 set"
     );
 }
 

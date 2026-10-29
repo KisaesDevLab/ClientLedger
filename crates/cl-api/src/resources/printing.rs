@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, ErrorCode, LocalValidation};
+use crate::idempotency::IdempotencyKey;
 // 409 on print: a number in the range is held by another check on the
 // account (`details.checkNumber`); the same code as Pay Bills' U-103.
 use crate::resources::bill_payments::CHECK_NUMBER_IN_USE;
@@ -805,11 +806,16 @@ impl Printing<'_> {
     /// sent); `Conflict` code `CHECK_NUMBER_IN_USE` (a number in the range
     /// is used: [`print_problem`]); `NotFound` or `Validation` (the queue
     /// changed); `ClosedPeriod`, `ClosingPasswordRejected`; any
-    /// [`ApiError`].
+    /// [`ApiError`]; `OutcomeUnknown` after a lost reply, `keyed` when the
+    /// engine replays `key` on this route (`idempotency-check-print-v1`,
+    /// U-116): then send the same request under the same `key` again and
+    /// the first batch comes back. Without it the key is not sent and a
+    /// lost reply must be read back (PR-2 B2).
     pub async fn print_checks(
         &self,
         req: &PrintChecks,
         opts: &PostingOptions,
+        key: IdempotencyKey,
     ) -> Result<PrintedBatch, ApiError> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -829,7 +835,8 @@ impl Printing<'_> {
             "format": req.format.print_wire(),
         });
         let body = posting_body(self.0, value, opts)?;
-        let call = Call::at(Method::Post, CHECKS_PRINT.route()).json_body(body);
+        let mut call = Call::at(Method::Post, CHECKS_PRINT.route()).json_body(body);
+        call.idempotency_key = Some(key);
         let reply = self.0.send(&CHECKS_PRINT, call, None).await?;
         let w: W = decode(&reply, "printed checks")?;
         let batch_id = Uuid::parse_str(&w.batch_id).map_err(|_| ApiError::Decode {

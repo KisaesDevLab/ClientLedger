@@ -131,6 +131,9 @@ impl Client {
         self.exec().set_idempotency_pay_bills_v1(
             info.capabilities.has(Capabilities::IDEMPOTENCY_PAY_BILLS),
         );
+        self.exec().set_idempotency_check_print_v1(
+            info.capabilities.has(Capabilities::IDEMPOTENCY_CHECK_PRINT),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

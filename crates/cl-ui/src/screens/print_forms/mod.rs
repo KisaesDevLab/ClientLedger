@@ -995,7 +995,9 @@ impl PrintFormsScreen {
             key: None,
         };
         let r = group.write(&session, label, move |s| async move {
-            s.printing().print_checks(&req, &options(password)).await
+            s.printing()
+                .print_checks(&req, &options(password), cl_api::IdempotencyKey::new())
+                .await
         });
         match r {
             Ok(p) => self.record_task = Some(Task::Pending(p)),

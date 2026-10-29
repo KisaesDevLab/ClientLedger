@@ -120,7 +120,11 @@ async fn print_records_numbers_and_classifies_refusals() {
             "pw-canary",
         ))),
     };
-    let b = s.printing().print_checks(&req, &opts).await.expect("print");
+    let b = s
+        .printing()
+        .print_checks(&req, &opts, IdempotencyKey::new())
+        .await
+        .expect("print");
     assert_eq!(b.batch_id.to_string(), BATCH);
     assert_eq!(b.checks_printed, 2);
     let body = body_of(&server, "POST", 0).await;
@@ -131,7 +135,7 @@ async fn print_records_numbers_and_classifies_refusals() {
     assert_eq!(body["closingPassword"], "pw-canary");
     let e = s
         .printing()
-        .print_checks(&req, &PostingOptions::default())
+        .print_checks(&req, &PostingOptions::default(), IdempotencyKey::new())
         .await
         .expect_err("409");
     assert_eq!(print_problem(&e), Some(PrintProblem::NumberInUse));
@@ -142,7 +146,7 @@ async fn print_records_numbers_and_classifies_refusals() {
     };
     assert_eq!(
         s.printing()
-            .print_checks(&empty, &PostingOptions::default())
+            .print_checks(&empty, &PostingOptions::default(), IdempotencyKey::new())
             .await,
         Err(ApiError::Local(LocalValidation::InvalidValue))
     );
@@ -152,7 +156,7 @@ async fn print_records_numbers_and_classifies_refusals() {
     };
     assert!(
         s.printing()
-            .print_checks(&zero, &PostingOptions::default())
+            .print_checks(&zero, &PostingOptions::default(), IdempotencyKey::new())
             .await
             .is_err()
     );
@@ -208,6 +212,51 @@ async fn requeue_and_reprint_carry_the_closing_password_and_read_spoiled_numbers
     );
 }
 
+/// PR-2 B2 (U-116): the print run's key goes on the wire only while the
+/// engine replays it (`idempotency-check-print-v1`).
+#[tokio::test]
+async fn the_print_key_is_sent_only_under_its_capability() {
+    let req = PrintChecks {
+        bank_account: bank(),
+        checks: vec![tid(C1)],
+        starting_number: 1001,
+        format: CheckFormat::Voucher,
+    };
+    let mut headers = Vec::new();
+    for caps in [
+        &[Capabilities::IDEMPOTENCY][..],
+        &[
+            Capabilities::IDEMPOTENCY,
+            Capabilities::IDEMPOTENCY_CHECK_PRINT,
+        ][..],
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/checks/print"))
+            .respond_with(json(
+                200,
+                &format!(r#"{{"batchId":"{BATCH}","checksPrinted":1}}"#),
+            ))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, caps).await;
+        let key = IdempotencyKey::new();
+        s.printing()
+            .print_checks(&req, &PostingOptions::default(), key.clone())
+            .await
+            .expect("print");
+        let posts = requests(&server, "POST").await;
+        let sent = posts
+            .iter()
+            .find(|r| r.url.path() == "/api/v1/checks/print")
+            .and_then(|r| r.headers.get("idempotency-key"))
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        headers.push((sent, key.to_string()));
+    }
+    assert_eq!(headers[0].0, None, "not keyed without the capability");
+    assert_eq!(headers[1].0.as_deref(), Some(headers[1].1.as_str()));
+}
 /// PR-2 S2 (U-117): a requeue skips void checks and lists them (as ids or
 /// rows).
 #[tokio::test]

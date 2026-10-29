@@ -62,6 +62,7 @@ fn print(
             format: CheckFormat::Voucher,
         },
         &PostingOptions::default(),
+        cl_api::IdempotencyKey::new(),
     ))
 }
 

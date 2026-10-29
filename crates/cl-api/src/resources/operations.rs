@@ -43,6 +43,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::DocsV1) => "keyable-docs",
             RetryClass::Keyable(KeySet::DocsAttachV1) => "keyable-docs-attach",
             RetryClass::Keyable(KeySet::PayBillsV1) => "keyable-pay-bills",
+            RetryClass::Keyable(KeySet::CheckPrintV1) => "keyable-check-print",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -82,6 +83,9 @@ pub enum KeySet {
     DocsAttachV1,
     /// `idempotency-pay-bills-v1` (U-102): Pay Bills (`POST /bill-payments`).
     PayBillsV1,
+    /// `idempotency-check-print-v1` (U-116, PR-2 B2): the check print run
+    /// (`POST /checks/print`).
+    CheckPrintV1,
 }
 
 impl KeySet {
@@ -94,6 +98,7 @@ impl KeySet {
             KeySet::DocsV1 => crate::wire::Capabilities::IDEMPOTENCY_DOCS,
             KeySet::DocsAttachV1 => crate::wire::Capabilities::DOCUMENT_DRAFTS_ATTACH,
             KeySet::PayBillsV1 => crate::wire::Capabilities::IDEMPOTENCY_PAY_BILLS,
+            KeySet::CheckPrintV1 => crate::wire::Capabilities::IDEMPOTENCY_CHECK_PRINT,
         }
     }
 }
@@ -261,6 +266,19 @@ const fn keyable_pay_bills(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::PayBillsV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-check-print-v1` route set
+/// (U-116): keyed only while the engine advertises that capability.
+const fn keyable_check_print(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::CheckPrintV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -865,7 +883,8 @@ pub(crate) const BILL_PAYMENT_GET: Operation = read("/api/v1/bill-payments/{id}"
 pub(crate) const CHECKS_PRINT_QUEUE: Operation = read("/api/v1/checks/print-queue");
 /// Numbers queued checks and marks them printed (the numbers are recorded
 /// before anything goes to the printer).
-pub(crate) const CHECKS_PRINT: Operation = write(Method::Post, "/api/v1/checks/print");
+pub(crate) const CHECKS_PRINT: Operation =
+    keyable_check_print(Method::Post, "/api/v1/checks/print");
 /// Sends printed checks back to the queue (numbers spoiled and logged).
 pub(crate) const CHECKS_REQUEUE: Operation = write(Method::Post, "/api/v1/checks/requeue");
 /// Sends a whole printed batch back to the queue.
@@ -1229,6 +1248,8 @@ mod tests {
                 Some(KeySet::DocsAttachV1)
             } else if KEYABLE_PAY_BILLS.contains(&route) {
                 Some(KeySet::PayBillsV1)
+            } else if KEYABLE_CHECK_PRINT.contains(&route) {
+                Some(KeySet::CheckPrintV1)
             } else {
                 None
             };
@@ -1254,7 +1275,8 @@ mod tests {
                 + KEYABLE_AP.len()
                 + KEYABLE_DOCS.len()
                 + KEYABLE_DOCS_ATTACH.len()
-                + KEYABLE_PAY_BILLS.len(),
+                + KEYABLE_PAY_BILLS.len()
+                + KEYABLE_CHECK_PRINT.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1317,6 +1339,10 @@ mod tests {
     /// `tests/fixtures/idempotency_pay_bills_v1_routes.txt` records it.
     const KEYABLE_PAY_BILLS: [(&str, &str); 1] = [("POST", "/api/v1/bill-payments")];
 
+    /// The engine's `idempotency-check-print-v1` route set (U-116), as
+    /// `tests/fixtures/idempotency_check_print_v1_routes.txt` records it.
+    const KEYABLE_CHECK_PRINT: [(&str, &str); 1] = [("POST", "/api/v1/checks/print")];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
@@ -1346,6 +1372,16 @@ mod tests {
         );
         assert_eq!(BILL_PAYMENTS_CREATE.key_set(), Some(KeySet::PayBillsV1));
         assert_eq!(BILL_PAYMENT_GET.key_set(), None);
+        assert_eq!(
+            KeySet::CheckPrintV1.capability(),
+            "idempotency-check-print-v1"
+        );
+        assert_eq!(
+            RetryClass::Keyable(KeySet::CheckPrintV1).as_str(),
+            "keyable-check-print"
+        );
+        assert_eq!(CHECKS_PRINT.key_set(), Some(KeySet::CheckPrintV1));
+        assert_eq!(CHECKS_REQUEUE.key_set(), None);
     }
 
     /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
@@ -1359,6 +1395,7 @@ mod tests {
             KeySet::DocsV1,
             KeySet::DocsAttachV1,
             KeySet::PayBillsV1,
+            KeySet::CheckPrintV1,
         ] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),
