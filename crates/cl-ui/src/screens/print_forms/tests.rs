@@ -498,10 +498,12 @@ fn a_lost_print_reply_reads_back_and_continues_as_recorded() {
     assert!(!s.has_unanswered());
 }
 
-/// B2: the reply was lost before anything was recorded: the intent goes,
-/// nothing is printed or asked, and Print can run again.
+/// S-a: the reply was lost before anything was recorded. In this session
+/// the first send may still record, so the saved run stays undecided:
+/// nothing is printed or asked and Print can't run it again; the next open
+/// reads it back, finds nothing and drops it.
 #[test]
-fn a_lost_print_reply_not_recorded_drops_the_intent() {
+fn a_lost_print_reply_not_recorded_stays_undecided_until_the_next_open() {
     use crate::company::demo::printing::LoseReply;
     let (_d, mut s) = screen(false);
     s.preview_checks();
@@ -511,18 +513,47 @@ fn a_lost_print_reply_not_recorded_drops_the_intent() {
     s.poll();
     assert!(!s.asking);
     assert_eq!(s.sent, None, "nothing went to the printer");
-    assert_eq!(s.notice, Some("print.recover.not_recorded"));
-    assert!(!s.has_unanswered());
-    assert_eq!(saved(&s).batches.len(), 0);
-    assert_eq!(
-        s.run.as_ref().map(cl_print::PrintRun::state),
-        Some(cl_print::RunState::Ready)
-    );
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 1, "kept, undecided");
+    assert!(s.stuck_intent().is_some(), "Forget this print is offered");
+    assert!(s.run.is_none(), "not printed again from this run");
+    let link = Arc::clone(&s.link);
+    let tenant = s.tenant.clone();
+    drop(s);
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let mut s = PrintFormsScreen::new(link, tenant, today, false);
+    s.poll();
+    s.poll();
+    assert!(!s.asking);
+    assert_eq!(saved(&s).batches.len(), 0, "read back on the next open");
+    assert_eq!(s.unresolved.len(), 0);
+    s.preview_checks();
+    s.poll();
     s.print_clicked();
     s.poll();
-    assert!(s.asking, "printed on the second try");
+    assert!(s.asking, "printed on the next try");
 }
 
+/// S-a: a keyed resend that gives up while the first send is still in
+/// progress, and the read-back finds nothing yet: kept as undecided.
+#[test]
+fn a_resend_that_gave_up_in_progress_keeps_the_run_undecided() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::KeyedStillRunning);
+    s.print_clicked();
+    s.poll();
+    s.poll();
+    assert!(!s.asking);
+    assert_eq!(s.sent, None);
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 1, "kept, undecided");
+    assert_eq!(s.unresolved.len(), 1);
+}
 /// B2: only some checks carry the planned numbers: those are treated as
 /// printed (nothing is sent: the preview has pages for the others) and the
 /// question asks about them; the others stay in the list.
@@ -656,14 +687,70 @@ fn decide_readback_is_per_check() {
         None,
         st(Some(1003), Some(PrintStatus::Printed), true, Some("b1")),
         st(None, None, false, None),
-        st(Some(1005), Some(PrintStatus::Printed), false, Some("other")),
+        st(Some(1099), Some(PrintStatus::Printed), false, Some("b1")),
     ];
-    let found = decide_readback(&planned, &states);
+    let found = decide_readback(&planned, &states).expect("one batch");
     let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
     assert_eq!(recorded, vec![true, false, false, false, false]);
     // No batch on the record: not numbered by a print run.
     let nobatch = vec![st(Some(1001), Some(PrintStatus::Printed), false, None)];
-    assert!(!decide_readback(&planned[..1], &nobatch)[0].1);
+    assert!(!decide_readback(&planned[..1], &nobatch).expect("decided")[0].1);
+}
+
+/// S-b: 1001 was later reprinted alone under its number in batch B; 1002
+/// and 1003 still name batch A, the majority: those stay recorded. Two
+/// batches with no majority leave the run undecided.
+#[test]
+fn decide_readback_picks_the_majority_batch() {
+    use cl_api::{CheckPrintState, PrintStatus};
+    let ids: Vec<TransactionId> = (1..=4u128)
+        .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
+        .collect();
+    let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
+    let st = |n: u32, batch: &str| {
+        Some(CheckPrintState {
+            check_number: Some(n),
+            print_status: Some(PrintStatus::Printed),
+            void: false,
+            print_batch_id: Some(batch.to_string()),
+        })
+    };
+    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A")];
+    let found = decide_readback(&planned[..3], &states).expect("A is the majority");
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    assert_eq!(recorded, vec![false, true, true]);
+    // 2 of 4 is not more than half.
+    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A"), None];
+    assert!(decide_readback(&planned, &states).is_none(), "undecided");
+    let states = vec![st(1001, "B"), st(1002, "A")];
+    assert!(
+        decide_readback(&planned[..2], &states).is_none(),
+        "undecided"
+    );
+}
+
+/// Nits: Preview while "Did all checks print correctly?" waits says so;
+/// "Forget this print" is refused while the question is open.
+#[test]
+fn the_open_question_blocks_preview_and_forget() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    s.readback_task = None;
+    s.readback_failed();
+    let (key, _) = s.stuck_intent().expect("stuck");
+    s.asking = true;
+    s.preview_checks();
+    assert_eq!(s.notice, Some("print.answer_first"));
+    s.forget_intent(&key);
+    assert_ne!(s.notice, Some("print.recover.forgotten"));
+    assert!(s.stuck_intent().is_some(), "not forgotten while asking");
+    s.asking = false;
+    s.forget_intent(&key);
+    assert_eq!(s.notice, Some("print.recover.forgotten"));
 }
 
 /// Every saved intent is read back, one after the other: the second after

@@ -173,6 +173,9 @@ pub(crate) struct Intent {
 /// whether this window sent it (else it was found on open).
 type Readback = (String, Vec<(TransactionId, u64)>, bool);
 
+/// A read-back's answer per check (recorded or not); `None`: undecided (S-b).
+type Decided = Option<Vec<(TransactionId, bool)>>;
+
 /// Read once.
 #[derive(Clone, Default)]
 pub(crate) struct Setup {
@@ -244,7 +247,7 @@ pub struct PrintFormsScreen {
     run_bank: Option<AccountId>,
     record_task: Option<Task<PrintedBatch>>,
     intent: Option<Intent>,
-    readback_task: Option<Task<Vec<(TransactionId, bool)>>>,
+    readback_task: Option<Task<Decided>>,
     readback: Option<Readback>,
     /// Saved intents whose read-back could not decide this session (their
     /// keys): skipped by [`Self::recover_intents`] until the window opens
@@ -356,27 +359,51 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
 
 /// Which planned checks the engine recorded, from each check's state read
 /// back (`None`: the record is gone). Recorded: it carries its planned
-/// number, prints as printed, is not void, and was numbered by this run (its
-/// print batch is the one the first such check names; a check with no batch
-/// was not numbered by a print run).
+/// number, prints as printed, is not void, and was numbered by this run (a
+/// check with no batch was not numbered by a print run).
+///
+/// This run's batch: the only one the checks name, or, when they name more
+/// than one (a check reprinted alone later under its old number), the one
+/// more than half of the planned checks name. With no such majority the run
+/// can't be told apart and the answer is `None` (undecided: the saved run
+/// waits for the next open or "Forget this print").
 pub(crate) fn decide_readback(
     planned: &[(TransactionId, u64)],
     states: &[Option<cl_api::CheckPrintState>],
-) -> Vec<(TransactionId, bool)> {
+) -> Decided {
     let as_planned = |n: u64, s: &Option<cl_api::CheckPrintState>| {
         s.as_ref()
             .filter(|s| s.recorded_as(n) && s.print_batch_id.is_some())
             .and_then(|s| s.print_batch_id.clone())
     };
-    let batch = planned
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for b in planned
         .iter()
         .zip(states)
-        .find_map(|((_, n), s)| as_planned(*n, s));
-    planned
-        .iter()
-        .zip(states)
-        .map(|((id, n), s)| (*id, batch.is_some() && as_planned(*n, s) == batch))
-        .collect()
+        .filter_map(|((_, n), s)| as_planned(*n, s))
+    {
+        match counts.iter_mut().find(|(x, _)| *x == b) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((b, 1)),
+        }
+    }
+    let batch = match counts.as_slice() {
+        [] => None,
+        [(only, _)] => Some(only.clone()),
+        many => Some(
+            many.iter()
+                .find(|(_, c)| c.saturating_mul(2) > planned.len())?
+                .0
+                .clone(),
+        ),
+    };
+    Some(
+        planned
+            .iter()
+            .zip(states)
+            .map(|((id, n), s)| (*id, batch.is_some() && as_planned(*n, s) == batch))
+            .collect(),
+    )
 }
 
 /// A check that may print: never a $0.00 one (S1; engines before U-117
@@ -701,6 +728,7 @@ impl PrintFormsScreen {
             return;
         }
         if self.asking {
+            self.notice = Some("print.answer_first");
             return;
         }
         self.clear_messages();
@@ -1355,7 +1383,19 @@ impl PrintFormsScreen {
             .filter(|(_, r)| *r)
             .map(|(id, _)| *id)
             .collect();
-        if recorded.is_empty() {
+        if recorded.is_empty() && in_session {
+            // S-a: this read-back follows an unknown outcome (a lost reply,
+            // or a resend that gave up while the first send was still in
+            // progress), so the first send may still record the numbers:
+            // the saved run stays undecided and the next open reads it back.
+            self.preview = None;
+            self.run = None;
+            if !self.unresolved.contains(&key) {
+                self.unresolved.push(key);
+            }
+            self.notice = Some("print.recover.not_yet");
+            self.printing_changed();
+        } else if recorded.is_empty() {
             if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
                 let mut all = store.load();
                 all.drop_intent(&company, &key);
@@ -1365,15 +1405,10 @@ impl PrintFormsScreen {
                     self.unresolved.push(key.clone());
                 }
             }
+            // On the next open the first send has long finished: nothing
+            // recorded means nothing printed.
             self.printing_changed();
-            if in_session {
-                if let Some(run) = self.run.as_mut() {
-                    let _ = run.record_failed();
-                }
-                self.notice = Some("print.recover.not_recorded");
-            } else {
-                self.notice = None;
-            }
+            self.notice = None;
         } else {
             self.notice = None;
             self.record_succeeded(&key, &planned, &recorded);
@@ -1420,7 +1455,8 @@ impl PrintFormsScreen {
     /// not decide (owner 2026-10-29, Q-PR2d). Logged; Home's reminder
     /// clears when nothing else waits.
     pub(crate) fn forget_intent(&mut self, key: &str) {
-        if self.recording() {
+        // Never while the question is open: the answer may resolve it.
+        if self.recording() || self.asking {
             return;
         }
         if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
@@ -1915,8 +1951,9 @@ impl PrintFormsScreen {
         if let Some(r) = self.readback_task.as_mut().and_then(Task::try_take) {
             self.readback_task = None;
             match r {
-                Ok(found) => self.read_back(&found),
-                Err(_) => self.readback_failed(),
+                Ok(Some(found)) => self.read_back(&found),
+                // S-b: the checks name batches with no majority: undecided.
+                Ok(None) | Err(_) => self.readback_failed(),
             }
         }
         if let Some(r) = self.requeue_task.as_mut().and_then(Task::try_take) {
@@ -2082,7 +2119,7 @@ impl PrintFormsScreen {
                 &tokens,
                 &t_with("print.recover.stuck", &[("range", &range)]),
             );
-            if ui.button(t("print.recover.forget")).clicked() {
+            if !self.asking && ui.button(t("print.recover.forget")).clicked() {
                 self.forget_intent(&key);
             }
         }

@@ -47,6 +47,9 @@ pub struct DemoPrinting {
     pub voided: BTreeSet<TransactionId>,
     /// Tests: the next replay of a key is refused ([`LoseReply::KeyedThenRefused`]).
     refuse_replay: bool,
+    /// Tests: the next request is answered `IDEMPOTENCY_IN_PROGRESS`
+    /// ([`LoseReply::KeyedStillRunning`]).
+    still_running: bool,
 }
 
 /// How the next print reply is lost (tests of B2).
@@ -71,6 +74,10 @@ pub enum LoseReply {
     /// Recorded, the reply lost on a keyed engine, and the resend under the
     /// key refused (409).
     KeyedThenRefused,
+    /// Not recorded yet: the first send is still running on a keyed engine,
+    /// its reply is lost and the resend under the key gives up on 409
+    /// `IDEMPOTENCY_IN_PROGRESS` (S-a).
+    KeyedStillRunning,
 }
 
 /// The demo's closing-date password.
@@ -309,6 +316,9 @@ pub fn print_keyed(
     password: Option<&Secret>,
     key: &str,
 ) -> Result<PrintedBatch, ApiError> {
+    if std::mem::take(&mut state.printing.still_running) {
+        return Err(refusal(409, "IDEMPOTENCY_IN_PROGRESS", "In progress"));
+    }
     if let Some((first, b)) = state.printing.replays.get(key) {
         // As the engine: another request under a used key is refused (422).
         if first != req {
@@ -332,6 +342,11 @@ pub fn print_keyed(
         Some(LoseReply::BeforeRecording) => {
             state.printing.print_calls += 1;
             Err(lost(false))
+        }
+        Some(LoseReply::KeyedStillRunning) => {
+            state.printing.print_calls += 1;
+            state.printing.still_running = true;
+            Err(lost(true))
         }
         Some(mode) => {
             let b = print(state, req, password)?;
