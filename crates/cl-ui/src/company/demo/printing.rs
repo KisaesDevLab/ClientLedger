@@ -168,10 +168,16 @@ pub fn stub(state: &mut DemoState, check: &QueuedCheck) -> cl_print::StubData {
 /// The next check number and the check style of `bank`.
 #[must_use]
 pub fn layout(state: &mut DemoState, bank: AccountId) -> (Option<u64>, CheckLayout) {
-    let next = state.printing.next.get(&bank).copied().or_else(|| {
-        let (_, n) = super::checks::numbers(state, bank);
-        n.map(u64::from)
-    });
+    // The register's own next number (the highest check number + 1), and
+    // never below what an earlier print run used (B1).
+    let ledger = used_numbers_of(state, bank)
+        .into_iter()
+        .max()
+        .map(|n| n.saturating_add(1));
+    let next = match (state.printing.next.get(&bank).copied(), ledger) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    };
     let layout = state
         .printing
         .layouts
@@ -221,14 +227,8 @@ pub fn print(
         );
     }
     let last = req.starting_number + req.checks.len() as u64 - 1;
-    let used = |n: u64| {
-        state
-            .printing
-            .printed
-            .values()
-            .any(|(b, num, _)| *b == req.bank_account && *num == n)
-    };
-    if let Some(n) = (req.starting_number..=last).find(|n| used(*n)) {
+    let used = used_numbers_of(state, req.bank_account);
+    if let Some(n) = (req.starting_number..=last).find(|n| used.contains(n)) {
         return Err(cl_api::engine_refusal(
             409,
             &json!({ "error": { "message": format!("Check #{n} already exists"),
@@ -238,10 +238,13 @@ pub fn print(
     super::register::check_closing(closing(state), &dates, password)?;
     let batch = uuid::Uuid::new_v4();
     for (i, c) in req.checks.iter().enumerate() {
-        state.printing.printed.insert(
-            *c,
-            (req.bank_account, req.starting_number + i as u64, batch),
-        );
+        let number = req.starting_number + i as u64;
+        state
+            .printing
+            .printed
+            .insert(*c, (req.bank_account, number, batch));
+        // The check carries its number in the register (B2).
+        write_back(state, *c, Some(number));
     }
     let next = state
         .printing
@@ -281,6 +284,7 @@ pub fn requeue(
     let mut out = Vec::new();
     for c in checks {
         if let Some((bank, number, _)) = state.printing.printed.remove(c) {
+            write_back(state, *c, None);
             state.printing.spoiled.push(SpoiledNumber {
                 number,
                 check: *c,
@@ -296,6 +300,49 @@ pub fn requeue(
         }
     }
     Ok(out)
+}
+
+/// Every check number in use on `bank`: the register's non-void checks
+/// (written or paying bills) and the ones the print queue numbered.
+#[must_use]
+pub fn used_numbers_of(state: &mut DemoState, bank: AccountId) -> BTreeSet<u64> {
+    let chart = state.chart.get_or_insert_with(super::chart).clone();
+    let mut used: BTreeSet<u64> = state
+        .ledger
+        .check_numbers(&chart, bank)
+        .into_iter()
+        .filter(|(_, _, void)| !*void)
+        .map(|(_, n, _)| u64::from(n))
+        .collect();
+    used.extend(
+        state
+            .printing
+            .printed
+            .values()
+            .filter(|(b, _, _)| *b == bank)
+            .map(|(_, n, _)| *n),
+    );
+    used
+}
+
+/// The first number at or after `from` that, with the `count - 1` after
+/// it, is free on `bank` (the offer after a number-in-use refusal, Q-94).
+#[must_use]
+pub fn next_free(used: &BTreeSet<u64>, from: u64, count: u64) -> u64 {
+    let mut n = from.max(1);
+    while (n..n.saturating_add(count.max(1))).any(|x| used.contains(&x)) {
+        n = n.saturating_add(1);
+    }
+    n
+}
+
+/// Records the print run's number (or its removal) on the written check or
+/// bill payment itself.
+fn write_back(state: &mut DemoState, id: TransactionId, number: Option<u64>) {
+    // A bill payment is in the ledger too: the payment list decides first.
+    if !super::pay_bills::set_printed(state, id, number) {
+        super::checks::set_printed(state, id, number);
+    }
 }
 
 /// The number a printed check carries (demo).
@@ -491,7 +538,8 @@ mod tests {
         assert_eq!(batch.checks_printed, 2);
         assert_eq!(check_queue(&mut s, b).len(), 0);
         assert_eq!(printed_number(&s, ids[1]), Some(1002));
-        assert_eq!(layout(&mut s, b).0, Some(1003));
+        let next = layout(&mut s, b).0.expect("next");
+        assert!(used_numbers_of(&mut s, b).iter().all(|n| *n < next));
         let r = requeue(&mut s, &ids[1..], &[d(2026, 11, 4)], None).expect("requeue");
         assert_eq!(r[0].spoiled_number, Some(1002));
         assert_eq!(spoiled(&s)[0].number, 1002);
@@ -514,6 +562,30 @@ mod tests {
         .expect_err("printed already");
         assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
         assert!(requeue(&mut s, &[id(99)], &[], None).is_err());
+    }
+
+    #[test]
+    fn the_proposed_number_follows_the_register_and_a_used_one_is_refused() {
+        let mut s = DemoState::new();
+        let b = bank(&mut s);
+        let used = used_numbers_of(&mut s, b);
+        let highest = *used.iter().max().expect("the demo has checks");
+        assert_eq!(layout(&mut s, b).0, Some(highest + 1));
+        let q = check_queue(&mut s, b);
+        let req = PrintChecks {
+            bank_account: b,
+            checks: vec![q[0].id],
+            starting_number: highest,
+            format: CheckFormat::Voucher,
+        };
+        let e = print(&mut s, &req, None).expect_err("in use");
+        assert_eq!(
+            cl_api::print_problem(&e),
+            Some(cl_api::PrintProblem::NumberInUse),
+            "{e:?}"
+        );
+        assert_eq!(next_free(&used, highest, 2), highest + 1);
+        assert_eq!(next_free(&BTreeSet::from([5, 7]), 4, 2), 8);
     }
 
     #[test]

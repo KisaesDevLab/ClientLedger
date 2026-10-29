@@ -59,6 +59,7 @@ use crate::screens::company::form::DateInput;
 use crate::screens::register::lists::RegisterLists;
 use crate::windows::Screen;
 
+pub(crate) use prefill::billing_address;
 pub use save::to_draft;
 
 /// The command and window kind.

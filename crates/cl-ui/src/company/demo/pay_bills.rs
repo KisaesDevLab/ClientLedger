@@ -119,6 +119,8 @@ struct DemoPayment {
     cash: Money,
     check_number: Option<u64>,
     print_later: bool,
+    /// Numbered by the print queue (P19).
+    printed: bool,
     bills: Vec<(TransactionId, Money, Money)>,
     credits: Vec<(TransactionId, TransactionId, Money)>,
     /// The bills' and credits' numbers as a voucher stub lists them (U-108).
@@ -586,6 +588,7 @@ pub fn pay(
             cash,
             check_number,
             print_later,
+            printed: false,
             bills: paid.clone(),
             credits: credits.clone(),
             docs: applied_docs(&listed, &paid, &credits),
@@ -655,28 +658,51 @@ pub fn print_queue(
     bank: AccountId,
     printed: &dyn Fn(TransactionId) -> bool,
 ) -> Vec<cl_api::QueuedCheck> {
-    let names = vendors(state);
+    let contacts = state.contacts_mut().clone();
     state
         .pay_bills
         .payments
         .iter()
         .filter(|p| p.bank == bank && p.print_later && !printed(p.id))
         .filter(|p| !state.ledger.is_void(p.id))
-        .map(|p| cl_api::QueuedCheck {
-            id: p.id,
-            date: p.date,
-            amount: p.cash,
-            payee: names
-                .iter()
-                .find(|(id, _)| *id == p.vendor)
-                .map(|(_, n)| n.clone())
-                .unwrap_or_default(),
-            memo: String::new(),
-            kind: cl_api::QueuedCheckKind::BillPayment,
-            bank_account: Some(bank),
-            address: Vec::new(),
+        .map(|p| {
+            let vendor = contacts.iter().find(|c| c.id == p.vendor);
+            // The engine sends the vendor's billing address (U-107).
+            let address = vendor
+                .map(crate::screens::write_check::billing_address)
+                .unwrap_or_default();
+            cl_api::QueuedCheck {
+                id: p.id,
+                date: p.date,
+                amount: p.cash,
+                payee: vendor
+                    .map(|c| c.fields.display_name.clone())
+                    .unwrap_or_default(),
+                memo: String::new(),
+                kind: cl_api::QueuedCheckKind::BillPayment,
+                bank_account: Some(bank),
+                address: address
+                    .lines()
+                    .map(str::to_string)
+                    .filter(|l| !l.trim().is_empty())
+                    .collect(),
+            }
         })
         .collect()
+}
+
+/// The print run numbered a bill-payment check (`Some`) or put it back in
+/// the queue (`None`), P19. False for an id that is not a demo payment.
+pub fn set_printed(state: &mut DemoState, id: TransactionId, number: Option<u64>) -> bool {
+    let Some(p) = state.pay_bills.payments.iter_mut().find(|p| p.id == id) else {
+        return false;
+    };
+    p.check_number = number;
+    p.print_later = number.is_none();
+    p.printed = number.is_some();
+    let text = number.map(|n| n.to_string()).unwrap_or_default();
+    state.ledger.set_number(id, &text);
+    true
 }
 
 /// `GET /bill-payments/{id}`.
@@ -689,7 +715,13 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
         contact_id: Some(p.vendor),
         total: Some(p.cash),
         check_number: p.check_number,
-        print_status: p.print_later.then(|| "queue".to_string()),
+        print_status: if p.print_later {
+            Some("queue".to_string())
+        } else if p.printed {
+            Some("printed".to_string())
+        } else {
+            None
+        },
         status: if state.ledger.is_void(id) {
             cl_api::TxnStatus::Void
         } else {

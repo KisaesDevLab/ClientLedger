@@ -449,6 +449,41 @@ pub fn mark_printed(state: &mut DemoState, id: TransactionId) -> bool {
     }
 }
 
+/// The print run numbered a written check (`Some`) or put it back in the
+/// queue without its number (`None`), as `POST /checks/print` and
+/// `/checks/requeue` do (P19). False for an id that is not a demo check.
+pub fn set_printed(state: &mut DemoState, id: TransactionId, number: Option<u64>) -> bool {
+    let text = number.map(|n| n.to_string()).unwrap_or_default();
+    if !state.ledger.set_number(id, &text) {
+        return false;
+    }
+    let status = if number.is_some() {
+        PrintStatus::Printed
+    } else {
+        PrintStatus::Queue
+    };
+    match state.checks.info.get_mut(&id) {
+        Some(i) => i.print_status = status,
+        None => {
+            let payee_name = transaction(state, id)
+                .and_then(|t| t.contact_name)
+                .unwrap_or_default();
+            state.checks.info.insert(
+                id,
+                CheckInfo {
+                    print_status: status,
+                    payee_name,
+                    address: None,
+                    printed_memo: None,
+                    tag_ids: Vec::new(),
+                    lines: Vec::new(),
+                },
+            );
+        }
+    }
+    true
+}
+
 /// Voids a check (its number is free again).
 ///
 /// # Errors
@@ -1122,6 +1157,35 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn a_printed_check_carries_its_number_and_a_requeue_takes_it_off() {
+        use super::super::printing;
+        let mut s = DemoState::new();
+        let bank = by_number(&mut s, "1010");
+        let d = draft(&mut s, None, true);
+        let id = create(&mut s, &d, None).expect("saved");
+        assert!(printing::check_queue(&mut s, bank).iter().any(|c| c.id == id));
+        assert_eq!(printing::layout(&mut s, bank).0, Some(4418));
+        let req = cl_api::PrintChecks {
+            bank_account: bank,
+            checks: vec![id],
+            starting_number: 4418,
+            format: cl_api::CheckFormat::Voucher,
+        };
+        printing::print(&mut s, &req, None).expect("print");
+        let got = get(&mut s, id).expect("get").record;
+        assert_eq!(got.print_status, PrintStatus::Printed);
+        assert_eq!(got.check_number, Some(4418));
+        let row = list(&mut s, bank).into_iter().find(|r| r.id == id);
+        assert_eq!(row.and_then(|r| r.number), Some(4418));
+        assert_eq!(printing::layout(&mut s, bank).0, Some(4419));
+        printing::requeue(&mut s, &[id], &[d.date], None).expect("requeue");
+        let got = get(&mut s, id).expect("get").record;
+        assert_eq!(got.print_status, PrintStatus::Queue);
+        assert_eq!(got.check_number, None);
+        assert!(printing::check_queue(&mut s, bank).iter().any(|c| c.id == id));
     }
 
     #[test]

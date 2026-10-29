@@ -99,7 +99,7 @@ pub(crate) fn last_of(t: &Transaction) -> LastTxn {
 }
 
 /// The contact's billing address as lines (name first, as printed).
-fn billing_address(c: &cl_api::Contact) -> String {
+pub(crate) fn billing_address(c: &cl_api::Contact) -> String {
     let f = &c.fields;
     let city = [
         f.billing_city.clone(),
