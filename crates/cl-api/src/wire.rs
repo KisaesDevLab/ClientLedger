@@ -292,6 +292,16 @@ impl Capabilities {
     /// printed later; one consecutive number per vendor, 409
     /// `CHECK_NUMBER_IN_USE`.
     pub const BILL_PAYMENT_CHECK_NUMBER: &'static str = "bill-payment-check-number-v1";
+    /// U-106 to U-109: check requeue and reprint with spoiled numbers and
+    /// audit rows, the print queue's mailing rows, `bill`/`credit` on a bill
+    /// payment's applications and the check style per bank account.
+    pub const CHECK_REPRINT_AUDIT: &'static str = "check-reprint-audit-v1";
+    /// U-110: `GET /company/logo` streams the uploaded logo.
+    pub const COMPANY_LOGO: &'static str = "company-logo-v1";
+    /// U-111: document numbering per company and per-type footers.
+    pub const DOCUMENT_NUMBERS: &'static str = "document-numbers-v1";
+    /// U-113: Print later for invoices, sales receipts and credit memos.
+    pub const FORMS_PRINT_QUEUE: &'static str = "forms-print-queue-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

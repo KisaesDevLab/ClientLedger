@@ -857,6 +857,48 @@ pub(crate) const BILL_PAYMENTS_CREATE: Operation =
 /// One bill payment with its bill and credit applications.
 pub(crate) const BILL_PAYMENT_GET: Operation = read("/api/v1/bill-payments/{id}");
 
+// ---- P19: form printing (engine U-106 to U-111, U-113) ------------------------
+// None of these routes is in an idempotency set: the print routes are plain
+// mutations (retried only when provably not sent).
+
+/// Checks waiting to print (`check-reprint-audit-v1` adds the mailing rows).
+pub(crate) const CHECKS_PRINT_QUEUE: Operation = read("/api/v1/checks/print-queue");
+/// Numbers queued checks and marks them printed (the numbers are recorded
+/// before anything goes to the printer).
+pub(crate) const CHECKS_PRINT: Operation = write(Method::Post, "/api/v1/checks/print");
+/// Sends printed checks back to the queue (numbers spoiled and logged).
+pub(crate) const CHECKS_REQUEUE: Operation = write(Method::Post, "/api/v1/checks/requeue");
+/// Sends a whole printed batch back to the queue.
+pub(crate) const CHECKS_REPRINT: Operation =
+    write(Method::Post, "/api/v1/checks/reprint/{batchId}");
+/// Check numbers spoiled by reprints (reusable; listing only).
+pub(crate) const CHECKS_SPOILED: Operation = read("/api/v1/checks/spoiled");
+/// Check settings update (the per-account check style, U-109).
+pub(crate) const CHECK_SETTINGS_PUT: Operation = write(Method::Put, "/api/v1/checks/settings");
+/// The company's uploaded logo bytes (`company-logo-v1`).
+pub(crate) const COMPANY_LOGO: Operation = read("/api/v1/company/logo");
+/// Uploads the company logo (multipart field `logo`).
+pub(crate) const COMPANY_LOGO_UPLOAD: Operation = write(Method::Post, "/api/v1/company/logo");
+/// The company's form template with the footer each form type prints.
+pub(crate) const INVOICE_TEMPLATE: Operation = read("/api/v1/company/invoice-template");
+/// Updates the footer text and the per-type overrides.
+pub(crate) const INVOICE_TEMPLATE_PUT: Operation =
+    write(Method::Put, "/api/v1/company/invoice-template");
+/// Prefix and next number of every document type (`document-numbers-v1`).
+pub(crate) const DOCUMENT_NUMBERS: Operation = read("/api/v1/document-numbers");
+/// The number the next document of a type would get (nothing taken).
+pub(crate) const DOCUMENT_NUMBER_NEXT: Operation = read("/api/v1/document-numbers/next");
+/// Sets the prefix and/or next number of one type.
+pub(crate) const DOCUMENT_NUMBER_PUT: Operation =
+    write(Method::Put, "/api/v1/document-numbers/{type}");
+/// Takes the next number of a type (statements).
+pub(crate) const DOCUMENT_NUMBER_CLAIM: Operation =
+    write(Method::Post, "/api/v1/document-numbers/claim");
+/// Invoices, sales receipts and credit memos marked Print later (U-113).
+pub(crate) const FORMS_PRINT_QUEUE: Operation = read("/api/v1/forms/print-queue");
+/// Clears the Print later mark after printing; one audit row each.
+pub(crate) const FORMS_MARK_PRINTED: Operation = write(Method::Post, "/api/v1/forms/mark-printed");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -869,7 +911,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 203] = [
+pub const OPERATIONS: [Operation; 219] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1084,6 +1126,23 @@ pub const OPERATIONS: [Operation; 203] = [
     // P18
     BILL_PAYMENTS_CREATE,
     BILL_PAYMENT_GET,
+    // P19
+    CHECKS_PRINT_QUEUE,
+    CHECKS_PRINT,
+    CHECKS_REQUEUE,
+    CHECKS_REPRINT,
+    CHECKS_SPOILED,
+    CHECK_SETTINGS_PUT,
+    COMPANY_LOGO,
+    COMPANY_LOGO_UPLOAD,
+    INVOICE_TEMPLATE,
+    INVOICE_TEMPLATE_PUT,
+    DOCUMENT_NUMBERS,
+    DOCUMENT_NUMBER_NEXT,
+    DOCUMENT_NUMBER_PUT,
+    DOCUMENT_NUMBER_CLAIM,
+    FORMS_PRINT_QUEUE,
+    FORMS_MARK_PRINTED,
 ];
 
 /// Looks up a covered operation.
