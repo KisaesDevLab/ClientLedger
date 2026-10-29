@@ -14,6 +14,7 @@
 pub mod amount;
 pub mod checks;
 pub mod fonts;
+pub mod forms;
 pub mod image;
 pub mod layout;
 pub mod pdf;
@@ -24,6 +25,9 @@ pub use checks::{
     StubData, StubTotals, alignment_test, layout_checks,
 };
 pub use fonts::Font;
+pub use forms::{
+    CompanyInfo, FormDoc, FormLabels, FormStyle, ItemLine, layout_form, resolve_footer,
+};
 pub use image::Logo;
 pub use layout::{Align, Document, Page, Rect, ResolvedPage, Run, TextBox, resolve};
 pub use pdf::{render, render_resolved};
@@ -55,4 +59,7 @@ pub enum PrintError {
     /// A first check position outside 1 to 3.
     #[error("the first check position must be 1, 2 or 3")]
     BadPosition,
+    /// A form with more header fields than the template holds.
+    #[error("the form has more header fields than fit")]
+    TooManyFields,
 }
