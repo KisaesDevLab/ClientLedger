@@ -17,6 +17,11 @@
 //!   `idempotency-pay-bills-v1`. A closed-period date takes the closing-date
 //!   password. A refusal because the bills changed reads the list again
 //!   (Q-P18g).
+//! - A pay whose reply was lost (outcome unknown) blocks paying until the
+//!   list is read again. The bills and credits it sent are remembered: if
+//!   any is gone from the list or its amount changed, the pay went through
+//!   and the screen clears it; if all are as they were, the same pay goes
+//!   again under the same key.
 //!
 //! `state` carries counts, flags and ids only: no amounts or names.
 
@@ -26,6 +31,8 @@ mod grid;
 pub mod view;
 
 use std::sync::Arc;
+
+use std::fmt;
 
 use cl_api::{
     Account, AccountFilter, ApiError, BillToPay, Capabilities, CheckNumbering,
@@ -73,7 +80,7 @@ pub(crate) enum Method {
 }
 
 /// The open dialog under the selected-bill panel.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Dialog {
     /// Set Discount: the amount typed and the discount account.
     Discount {
@@ -88,6 +95,95 @@ pub(crate) enum Dialog {
         bill: TransactionId,
         texts: Vec<(TransactionId, String)>,
     },
+}
+
+/// Ids only: the typed amounts stay out of logs.
+impl fmt::Debug for Dialog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Dialog::Discount {
+                bill,
+                account,
+                asked,
+                ..
+            } => f
+                .debug_struct("Discount")
+                .field("bill", bill)
+                .field("account", account)
+                .field("asked", asked)
+                .finish_non_exhaustive(),
+            Dialog::Credits { bill, texts } => f
+                .debug_struct("Credits")
+                .field("bill", bill)
+                .field("credits", &texts.len())
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+/// A pay whose reply was lost: what its bills owed and its credits had
+/// left when it was sent, to tell from the list read again whether it went
+/// through.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct SentPay {
+    bills: Vec<(TransactionId, Money)>,
+    credits: Vec<(TransactionId, Money)>,
+}
+
+impl fmt::Debug for SentPay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SentPay")
+            .field("bills", &self.bills.len())
+            .field("credits", &self.credits.len())
+            .finish()
+    }
+}
+
+impl SentPay {
+    /// The bills and credits of `req` as `form` lists them now.
+    fn of(req: &PayBillsRequest, form: &PayBillsForm) -> SentPay {
+        let owed = |b: TransactionId| {
+            form.all_rows()
+                .iter()
+                .find(|r| r.bill == b)
+                .map_or(Money::ZERO, |r| r.balance_due)
+        };
+        let left = |c: TransactionId| {
+            form.open_credits()
+                .iter()
+                .find(|x| x.credit == c)
+                .map_or(Money::ZERO, |x| x.open)
+        };
+        let mut credits: Vec<(TransactionId, Money)> = Vec::new();
+        for c in &req.credits {
+            if !credits.iter().any(|(id, _)| *id == c.credit) {
+                credits.push((c.credit, left(c.credit)));
+            }
+        }
+        SentPay {
+            bills: req.bills.iter().map(|b| (b.bill, owed(b.bill))).collect(),
+            credits,
+        }
+    }
+
+    /// Whether `list` shows the pay went through: one of its bills is gone
+    /// or owes another amount, or one of its credits has another amount
+    /// left (or none).
+    fn went_through(&self, list: &PayableList) -> bool {
+        let bill_moved = self.bills.iter().any(|(id, owed)| {
+            list.bills
+                .iter()
+                .find(|b| b.id == *id)
+                .is_none_or(|b| b.balance_due != *owed)
+        });
+        let credit_moved = self.credits.iter().any(|(id, left)| {
+            list.credits
+                .iter()
+                .find(|c| c.id == *id)
+                .is_none_or(|c| c.balance_due != *left)
+        });
+        bill_moved || credit_moved
+    }
 }
 
 /// What a pay sends, for its idempotency key (never the password).
@@ -131,6 +227,13 @@ pub struct PayBillsScreen {
     balance_task: Option<Task<Option<Money>>>,
     pay_task: Option<Task<Vec<CreatedPayment>>>,
     key: Option<(PayIdentity, IdempotencyKey)>,
+    /// The pay on its way: its bills (they come off the selection once
+    /// paid) and what they owed.
+    sent: Option<(Vec<TransactionId>, SentPay)>,
+    /// The pay whose outcome is unknown, until the list tells.
+    pub(crate) pending: Option<SentPay>,
+    /// The first check number last proposed (a typed one is kept).
+    proposed_number: Option<String>,
     pub(crate) problems: Vec<PayProblem>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
@@ -215,6 +318,9 @@ impl PayBillsScreen {
             balance_task: None,
             pay_task: None,
             key: None,
+            sent: None,
+            pending: None,
+            proposed_number: None,
             problems: Vec::new(),
             error: None,
             notice: None,
@@ -244,7 +350,6 @@ impl PayBillsScreen {
             discounts: c.has(Capabilities::BILL_DISCOUNTS),
             numbers: c.has(Capabilities::BILL_PAYMENT_CHECK_NUMBER),
             closing: c.has(Capabilities::AP_CLOSING) && c.has(Capabilities::CLOSING_PASSWORD),
-            keyed: c.has(Capabilities::IDEMPOTENCY_PAY_BILLS),
         }
     }
 
@@ -301,6 +406,11 @@ impl PayBillsScreen {
         }
     }
 
+    /// The list is being read (Pay waits for it).
+    pub(crate) fn list_task_running(&self) -> bool {
+        self.list_task.is_some()
+    }
+
     /// The account the bills are paid from (by the method).
     pub(crate) fn pay_from(&self) -> Option<AccountId> {
         match self.method {
@@ -329,6 +439,14 @@ impl PayBillsScreen {
                     )
             })
             .collect()
+    }
+
+    /// The method or the pay-from account changed: a first number typed
+    /// for the old account goes, the new account's is proposed.
+    pub(crate) fn account_changed(&mut self) {
+        self.first_number.clear();
+        self.proposed_number = None;
+        self.fetch_account_facts();
     }
 
     /// Reads the pay-from account's balance and, for checks, the numbers.
@@ -401,7 +519,15 @@ impl PayBillsScreen {
         if let Some(r) = self.numbers_task.as_mut().and_then(Task::try_take) {
             self.numbers_task = None;
             if let Ok((next, highest)) = r {
-                self.first_number = propose_number(next, highest).to_string();
+                // A number the owner typed stays (review, Low); the
+                // proposal follows the account while untouched.
+                let proposal = propose_number(next, highest).to_string();
+                if self.first_number.trim().is_empty()
+                    || self.proposed_number.as_deref() == Some(self.first_number.trim())
+                {
+                    self.first_number.clone_from(&proposal);
+                }
+                self.proposed_number = Some(proposal);
             }
         }
         if let Some(r) = self.save_default_task.as_mut().and_then(Task::try_take) {
@@ -419,8 +545,17 @@ impl PayBillsScreen {
         }
     }
 
-    /// The engine's list as the form keeps it.
+    /// The engine's list as the form keeps it. After a pay whose outcome
+    /// was unknown, the list tells whether it went through (review fix 1).
     fn take_list(&mut self, l: &PayableList) {
+        if let Some(p) = self.pending.take() {
+            if p.went_through(l) {
+                self.went_through();
+            } else {
+                self.pending = Some(p);
+            }
+        }
+        let before: Vec<TransactionId> = self.form.all_rows().iter().map(|r| r.bill).collect();
         let rows: Vec<PayableRow> = l
             .bills
             .iter()
@@ -454,6 +589,44 @@ impl PayBillsScreen {
             .collect();
         self.form.load(rows, credits);
         self.revision += 1;
+        // The rows were read again: the grid follows without "That line
+        // is no longer here." (UI review 4). Another set of bills puts the
+        // cursor back on the first row.
+        let same = self.form.all_rows().iter().map(|r| r.bill).eq(before);
+        self.rows_replaced(!same);
+    }
+
+    /// The grid follows rows the screen replaced.
+    fn rows_replaced(&mut self, reset: bool) {
+        let label = String::new();
+        let env = self.parts.env(
+            &NoLookups,
+            &label,
+            cl_grid::GridHeight::Rows { min: 1, max: 1 },
+        );
+        let mut rows = grid::Rows::new(&mut self.form, &mut self.revision);
+        if reset {
+            self.grid.reset(cl_grid::ModelRef::Edit(&mut rows), &env);
+        } else {
+            self.grid.rebind(cl_grid::ModelRef::Edit(&mut rows), &env);
+        }
+        self.snap = self.grid.snapshot(&cl_grid::ModelRef::Edit(&mut rows));
+    }
+
+    /// The pay whose outcome was unknown went through: its selection and
+    /// key go, and the screen says so.
+    fn went_through(&mut self) {
+        crate::forms::publish_saved(&self.link, &self.bus, &self.published);
+        self.closing_prompt.saved();
+        self.form.clear();
+        self.key = None;
+        self.sent = None;
+        self.unknown = false;
+        self.dialog = None;
+        self.last_paid = None;
+        self.paid_count += 1;
+        self.notice = Some("paybills.unknown.went_through");
+        self.fetch_account_facts();
     }
 
     /// Saves elsewhere (Q-262): the list and the balance come again.
@@ -560,9 +733,11 @@ impl PayBillsScreen {
         })
     }
 
-    /// Checks and pays. Nothing is sent unless the check passes.
+    /// Checks and pays. Nothing is sent unless the check passes, and
+    /// nothing while the list is being read again (its discounts are for
+    /// the payment date).
     pub(crate) fn start_pay(&mut self, password: Option<Secret>) -> bool {
-        if self.pay_task.is_some() || self.unknown {
+        if self.pay_task.is_some() || self.unknown || self.list_task.is_some() {
             return false;
         }
         self.problems.clear();
@@ -589,9 +764,17 @@ impl PayBillsScreen {
             .into_iter()
             .flatten()
             .collect();
+        let key = self.key_for(&PayIdentity {
+            request: req.clone(),
+            password: password.is_some(),
+        });
+        self.sent = Some((
+            req.bills.iter().map(|b| b.bill).collect(),
+            SentPay::of(&req, &self.form),
+        ));
         let link = Arc::clone(&self.link);
         if let Some(local) = self.local.as_mut() {
-            let r = local.pay(&link, &req, password.as_ref());
+            let r = local.pay(&link, &req, password.as_ref(), &key);
             match r {
                 Ok(p) => {
                     self.paid(&p);
@@ -603,10 +786,6 @@ impl PayBillsScreen {
                 }
             }
         }
-        let key = self.key_for(&PayIdentity {
-            request: req.clone(),
-            password: password.is_some(),
-        });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             self.pay_failed(ApiError::NoCompanyOpen);
             return false;
@@ -642,13 +821,18 @@ impl PayBillsScreen {
         self.closing_prompt.saved();
         self.key = None;
         self.unknown = false;
+        self.pending = None;
         let bills: usize = payments
             .iter()
             .map(|p| usize::try_from(p.bills_paid).unwrap_or(0))
             .sum();
         self.last_paid = Some((payments.len(), bills));
         self.paid_count += 1;
-        self.form.clear();
+        // Only the bills paid come off; selected bills a filter hid stay.
+        match self.sent.take() {
+            Some((bills, _)) => self.form.clear_bills(&bills),
+            None => self.form.clear(),
+        }
         self.revision += 1;
         self.dialog = None;
         self.link.push(CompanyEvent::Toast("paybills.paid.toast"));
@@ -660,6 +844,12 @@ impl PayBillsScreen {
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
         }
+        let sent = self.sent.take();
+        self.pending = if matches!(e, ApiError::OutcomeUnknown { .. }) {
+            sent.map(|(_, p)| p)
+        } else {
+            None
+        };
         if self
             .closing_prompt
             .failed(&e, (), self.caps().closing, self.closing)
@@ -759,8 +949,8 @@ impl PayBillsScreen {
     }
 
     /// Set Discount's OK: the amount on the bill, and the account as this
-    /// run's (and, when the company has none or the owner picked another,
-    /// the company's default, Q-P18a).
+    /// run's (and, only when the company has none yet, the company's
+    /// default, Q-P18a).
     pub(crate) fn apply_discount(&mut self) -> bool {
         let Some(Dialog::Discount {
             bill,
@@ -790,7 +980,7 @@ impl PayBillsScreen {
         self.revision += 1;
         if let Some(a) = account {
             self.discount_account = Some(a);
-            if self.discount_default != Some(a) {
+            if self.discount_default.is_none() {
                 self.save_default(a);
             }
         }
@@ -888,7 +1078,9 @@ impl PayBillsScreen {
             "list_failed": self.list_failed,
             "listed": totals.map(|t| t.listed),
             "selected": totals.map(|t| t.selected),
-            "take_discounts": self.form.take_discounts,
+            "take_discounts": self.form.take_discounts(),
+            "hidden_selected": totals.map(|t| t.hidden),
+            "pending": self.pending.is_some(),
             "show": if self.show_all { "all" } else { "due" },
             "sort": format!("{:?}", self.form.sort).to_lowercase(),
             "vendor_filtered": self.form.vendor.is_some(),
@@ -999,8 +1191,15 @@ impl Screen for PayBillsScreen {
                 self.discount_account = None;
                 self.last_paid = None;
                 self.form.clear();
-                self.form.take_discounts = true;
+                self.form.set_take_discounts(true);
                 self.form.vendor = None;
+                self.pending = None;
+                self.sent = None;
+                self.key = None;
+                self.unknown = false;
+                self.notice = None;
+                self.first_number.clear();
+                self.proposed_number = None;
                 self.show_all = false;
                 if let Some(d) = self.through.value {
                     self.form.show = cl_model::forms::bill_payment::ShowBills::DueOnOrBefore(d);

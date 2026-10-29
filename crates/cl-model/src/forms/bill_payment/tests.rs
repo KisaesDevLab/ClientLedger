@@ -163,7 +163,7 @@ fn discounts_follow_the_switch_and_set_discount() {
     let mut f = mockup();
     f.toggle(tid(OFFICE));
     assert_eq!(f.cash(tid(OFFICE)), m("214.07"));
-    f.take_discounts = false;
+    f.set_take_discounts(false);
     assert_eq!(f.discount(tid(OFFICE)), Money::ZERO);
     assert_eq!(
         f.cash(tid(OFFICE)),
@@ -174,7 +174,7 @@ fn discounts_follow_the_switch_and_set_discount() {
     f.set_discount(tid(OFFICE), Some(m("5.00")));
     assert_eq!(f.discount(tid(OFFICE)), m("5.00"));
     assert_eq!(f.cash(tid(OFFICE)), m("213.44"));
-    f.take_discounts = true;
+    f.set_take_discounts(true);
     f.set_discount(tid(OFFICE), None);
     assert_eq!(f.discount(tid(OFFICE)), m("4.37"));
     // An unselected bill takes no discount.
@@ -204,9 +204,10 @@ fn the_rules_refuse_what_the_engine_would() {
         f.plan(true, true),
         Err(vec![PayProblem::MoreThanDue(tid(NURSERY))])
     );
-    // Nothing applied.
-    f.set_credits(tid(NURSERY), Vec::new());
+    // Nothing applied: no cash (typed while the credit was on) and then no
+    // credit.
     f.set_cash(tid(NURSERY), Money::ZERO);
+    f.set_credits(tid(NURSERY), Vec::new());
     assert_eq!(
         f.plan(true, true),
         Err(vec![PayProblem::NothingApplied(tid(NURSERY))])
@@ -267,12 +268,16 @@ fn filters_sort_and_reload() {
     f.vendor = Some(vid(FUEL));
     assert_eq!(f.visible().len(), 1);
     assert_eq!(f.vendors().len(), 5);
-    // A filtered-out selection is not paid.
+    // A filtered-out selection is kept, counted apart and not paid.
     f.vendor = None;
     f.toggle(tid(FEED));
     f.vendor = Some(vid(FUEL));
-    assert_eq!(f.totals().expect("t").selected, 0);
+    let t = f.totals().expect("t");
+    assert_eq!((t.selected, t.hidden), (0, 1));
+    assert!(f.is_selected(tid(FEED)));
+    assert_eq!(f.plan(true, true), Err(vec![PayProblem::NothingSelected]));
     f.vendor = None;
+    assert_eq!(f.totals().expect("t").hidden, 0);
     // A reload keeps what is still listed.
     let rows: Vec<PayableRow> = f
         .all_rows()
@@ -303,4 +308,56 @@ fn debug_shows_no_amounts_or_names() {
     for owner in ["7471", "6577", "218", "Ozark", "7781", "CM-114", "250"] {
         assert!(!shown.contains(owner), "{owner}: {shown}");
     }
+}
+
+/// Review (Low): credits fitted when the bill was ticked are fitted again
+/// when the discount changes, so credits + discount never pass the bill.
+#[test]
+fn credits_are_fitted_again_when_the_discount_changes() {
+    let mut f = mockup();
+    // Table Rock's 250.00 credit against a 218.44 bill with a 4.37 discount
+    // available on another date.
+    let mut rows = f.all_rows().to_vec();
+    let mut small = row(11, "Table Rock Nursery", "8815", day(11, 9), "218.44");
+    small.vendor = Some(vid(NURSERY));
+    rows.push(small.clone());
+    let credits = f.open_credits().to_vec();
+    f.load(rows.clone(), credits.clone());
+    f.set_take_discounts(false);
+    f.toggle(tid(11));
+    assert_eq!(f.credit_total(tid(11)), m("218.44"), "the credit covers it");
+    // The payment date moves into the discount window: the list is read
+    // again with the engine's 4.37.
+    small.discount_available = m("4.37");
+    let rows: Vec<PayableRow> = rows
+        .into_iter()
+        .map(|r| if r.bill == tid(11) { small.clone() } else { r })
+        .collect();
+    f.load(rows, credits);
+    f.set_take_discounts(true);
+    assert_eq!(f.discount(tid(11)), m("4.37"));
+    assert_eq!(f.credit_total(tid(11)), m("214.07"), "fitted again");
+    assert!(f.plan(true, true).is_ok());
+    // Set Credits' choice is kept.
+    f.set_credits(tid(11), vec![(tid(CM114), m("100.00"))]);
+    f.set_take_discounts(false);
+    assert_eq!(f.credit_total(tid(11)), m("100.00"));
+}
+
+/// Review (Low): typing 0 on a bill with nothing else on it clears it.
+#[test]
+fn typing_zero_clears_a_plain_bill() {
+    let mut f = mockup();
+    f.toggle(tid(FEED));
+    f.set_cash(tid(FEED), Money::ZERO);
+    assert!(!f.is_selected(tid(FEED)));
+    // A bill with a credit keeps it (the credit pays).
+    f.toggle(tid(NURSERY));
+    f.set_cash(tid(NURSERY), Money::ZERO);
+    assert!(f.is_selected(tid(NURSERY)));
+    // Paid bills come off the selection; the others stay.
+    f.toggle(tid(FUEL));
+    f.clear_bills(&[tid(NURSERY)]);
+    assert!(!f.is_selected(tid(NURSERY)));
+    assert!(f.is_selected(tid(FUEL)));
 }

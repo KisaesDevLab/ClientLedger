@@ -3,7 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use cl_api::{
-    Account, ApiError, CreatedPayment, PayBillsRequest, PayMethod, PayableFilter, PayableList,
+    Account, ApiError, CreatedPayment, IdempotencyKey, PayBillsRequest, PayMethod, PayableFilter,
+    PayableList,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -24,8 +25,11 @@ fn today() -> CalendarDate {
 #[derive(Default)]
 struct Seen {
     pays: Vec<PayBillsRequest>,
+    keys: Vec<IdempotencyKey>,
     passwords: usize,
     discount_default: Option<AccountId>,
+    /// The list it answers (tests change it between reads).
+    list: Option<PayableList>,
 }
 
 /// The mockup's list: five bills, 7781 with the engine's 4.37, the Table
@@ -84,7 +88,6 @@ impl LocalPayBills for Fake {
             discounts: true,
             numbers: true,
             closing: true,
-            keyed: true,
         }
     }
     fn setup(&mut self, _link: &CompanyLink) -> Result<Setup, ApiError> {
@@ -95,7 +98,13 @@ impl LocalPayBills for Fake {
         })
     }
     fn payable(&mut self, _l: &CompanyLink, _f: &PayableFilter) -> Result<PayableList, ApiError> {
-        Ok(list())
+        Ok(self
+            .seen
+            .lock()
+            .expect("seen")
+            .list
+            .clone()
+            .unwrap_or_else(list))
     }
     fn balance(&mut self, _l: &CompanyLink, account: AccountId) -> Option<Money> {
         Some(if Some(account) == card_account() {
@@ -112,9 +121,11 @@ impl LocalPayBills for Fake {
         _l: &CompanyLink,
         req: &PayBillsRequest,
         password: Option<&Secret>,
+        key: &IdempotencyKey,
     ) -> Result<Vec<CreatedPayment>, ApiError> {
         let mut s = self.seen.lock().expect("seen");
         s.pays.push(req.clone());
+        s.keys.push(key.clone());
         s.passwords += usize::from(password.is_some());
         if let Some(e) = self.refuse.take() {
             return Err(e);
@@ -374,4 +385,184 @@ fn the_bill_payment_view_shows_and_voids_a_payment() {
         .find(|r| r.bill == b)
         .map(|r| r.balance_due);
     assert_eq!(again, Some(due), "the bill is open again");
+}
+
+fn lost_reply() -> ApiError {
+    ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000003")
+            .expect("id"),
+        idempotency_key: Some(IdempotencyKey::new()),
+        keyed: false,
+    }
+}
+
+/// 8813 with 1,000.00 cash and CM-114, sent with the reply lost.
+fn lost_partial_pay() -> (tempfile::TempDir, PayBillsScreen, Arc<Mutex<Seen>>) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let fake = Fake {
+        seen: Arc::clone(&seen),
+        refuse: Some(lost_reply()),
+        discount_default: None,
+    };
+    let mut s = PayBillsScreen::with_local(link, None, today(), Some(Box::new(fake)));
+    s.form.set_cash(bill(5), m("1000.00"));
+    assert!(!s.start_pay(None));
+    (dir, s, seen)
+}
+
+/// Review 6: an unknown outcome blocks paying and closing quietly.
+#[test]
+fn an_unknown_outcome_blocks_paying() {
+    let (_d, mut s, seen) = lost_partial_pay();
+    let st = s.state();
+    assert_eq!(st["unknown"], true);
+    assert_eq!(st["pending"], true);
+    assert!(s.save_unconfirmed(), "closing asks first");
+    s.poll();
+    assert!(!s.start_pay(None), "blocked until Look again");
+    assert_eq!(seen.lock().expect("seen").pays.len(), 1);
+}
+
+/// Review 6: the list as it was (the pay did not go through): Look again
+/// and the identical pay goes under the same key.
+#[test]
+fn an_identical_retry_after_look_again_reuses_the_key() {
+    let (_d, mut s, seen) = lost_partial_pay();
+    s.poll();
+    assert_eq!(s.state()["pending"], true, "the list did not move");
+    s.recheck();
+    s.poll();
+    assert!(s.form.is_selected(bill(5)), "the entries stay");
+    assert_eq!(s.form.cash(bill(5)), m("1000.00"));
+    assert!(s.start_pay(None));
+    let seen = seen.lock().expect("seen");
+    assert_eq!(seen.pays.len(), 2);
+    assert_eq!(seen.pays[0], seen.pays[1], "the same pay");
+    assert_eq!(seen.keys[0], seen.keys[1], "under the same key");
+}
+
+/// Review 1: the list read again shows the pay went through (8813 owes
+/// 2,665.00, CM-114 is used up): the form and the key are cleared, nothing
+/// is paid twice, and the screen says so.
+#[test]
+fn a_changed_list_after_an_unknown_outcome_does_not_pay_twice() {
+    let (_d, mut s, seen) = lost_partial_pay();
+    {
+        let mut l = list();
+        if let Some(b) = l.bills.iter_mut().find(|b| b.id == bill(5)) {
+            b.balance_due = m("2665.00");
+        }
+        l.credits.clear();
+        seen.lock().expect("seen").list = Some(l);
+    }
+    // The list read at once still had them; Look again reads it anew.
+    s.poll();
+    assert_eq!(s.state()["pending"], true);
+    s.recheck();
+    s.poll();
+    let st = s.state();
+    assert_eq!(st["pending"], false);
+    assert_eq!(st["unknown"], false);
+    assert_eq!(st["selected"], 0, "{st}");
+    assert_eq!(st["notice"], "paybills.unknown.went_through");
+    assert!(!s.form.is_selected(bill(5)));
+    assert!(!s.start_pay(None), "nothing selected");
+    assert_eq!(seen.lock().expect("seen").pays.len(), 1, "paid once");
+}
+
+/// Review 6: a failure that is not an unknown outcome forgets the pending
+/// pay.
+#[test]
+fn a_refusal_is_not_an_unknown_outcome() {
+    let (_d, mut s, _seen) = lost_partial_pay();
+    s.pay_failed(ApiError::NotFound { code: None });
+    assert_eq!(s.state()["pending"], false);
+}
+
+/// Review 4 (Q-P18a): the company's default discount account is set only
+/// when it has none; another pick is for this run.
+#[test]
+fn another_discount_account_does_not_replace_the_default() {
+    let (_d, mut s, seen) = screen(Some(by_number("6210")));
+    s.form.toggle(bill(4));
+    s.open_discount(bill(4), false);
+    if let Some(Dialog::Discount { account, .. }) = s.dialog.as_mut() {
+        *account = Some(by_number("5200"));
+    }
+    assert!(s.apply_discount());
+    s.poll();
+    assert_eq!(
+        seen.lock().expect("seen").discount_default,
+        None,
+        "not saved"
+    );
+    assert_eq!(s.discount_account, Some(by_number("5200")));
+    assert!(s.start_pay(None));
+    assert_eq!(
+        seen.lock().expect("seen").pays[0].discount_account,
+        Some(by_number("5200"))
+    );
+}
+
+/// Review (Low): a first check number the owner typed stays when the
+/// numbers are read again; another account proposes its own.
+#[test]
+fn a_typed_first_number_is_kept() {
+    let (_d, mut s, _) = screen(None);
+    assert_eq!(s.first_number, "4419");
+    s.first_number = "5000".into();
+    s.fetch_account_facts();
+    s.poll();
+    assert_eq!(s.first_number, "5000", "kept");
+    s.account_changed();
+    s.poll();
+    assert_eq!(s.first_number, "4419", "the new account's proposal");
+}
+
+/// Review (Low): Pay waits while the list is read again for a new date.
+#[test]
+fn pay_waits_for_the_list() {
+    let (_d, mut s, seen) = screen(None);
+    s.form.toggle(bill(1));
+    s.date_changed();
+    assert!(!s.start_pay(None), "the list is being read");
+    s.poll();
+    assert!(s.start_pay(None));
+    assert_eq!(seen.lock().expect("seen").pays.len(), 1);
+}
+
+/// Review (Low): selected bills a filter hides are kept, not paid, and
+/// stay selected after the others are paid.
+#[test]
+fn hidden_selected_bills_are_counted_and_kept() {
+    let (_d, mut s, seen) = screen(None);
+    s.form.toggle(bill(1));
+    s.form.toggle(bill(2));
+    s.form.vendor = s.form.all_rows()[0].vendor;
+    let st = s.state();
+    assert_eq!(
+        (st["selected"].clone(), st["hidden_selected"].clone()),
+        (1.into(), 1.into())
+    );
+    assert!(s.start_pay(None));
+    assert_eq!(seen.lock().expect("seen").pays[0].bills.len(), 1);
+    assert!(s.form.is_selected(bill(2)), "the hidden one stays");
+}
+
+#[test]
+fn debug_shows_no_typed_amounts() {
+    let d = Dialog::Discount {
+        bill: bill(4),
+        text: "4.37".into(),
+        account: None,
+        asked: false,
+    };
+    let c = Dialog::Credits {
+        bill: bill(5),
+        texts: vec![(bill(9), "250.00".into())],
+    };
+    let shown = format!("{d:?} {c:?}");
+    assert!(!shown.contains("4.37") && !shown.contains("250"), "{shown}");
 }

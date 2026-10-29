@@ -123,6 +123,20 @@ impl PayBillsScreen {
             self.grid_ui(ui);
             self.totals_ui(ui, tokens);
         }
+        // Selected bills a filter hides stay selected and are not paid
+        // (review, Low): say so rather than drop them quietly.
+        let hidden = self.form.hidden_selected();
+        if hidden > 0 && self.list_loaded {
+            form::hint(
+                ui,
+                tokens,
+                &if hidden == 1 {
+                    t("paybills.hidden_selected.one")
+                } else {
+                    t_with("paybills.hidden_selected", &[("n", &hidden.to_string())])
+                },
+            );
+        }
         ui.add_space(12.0);
         let wide = ui.available_width() >= SIDE_BY_SIDE;
         if wide {
@@ -188,13 +202,13 @@ impl PayBillsScreen {
                 ui.add_space(12.0);
                 self.vendor_combo(ui, tokens);
                 self.sort_combo(ui, tokens);
-                let mut take = self.form.take_discounts;
+                let mut take = self.form.take_discounts();
                 if ui
                     .checkbox(&mut take, t("paybills.take_discounts"))
                     .on_hover_text(t("paybills.take_discounts.tip"))
                     .changed()
                 {
-                    self.form.take_discounts = take;
+                    self.form.set_take_discounts(take);
                     self.revision += 1;
                 }
             });
@@ -552,7 +566,7 @@ impl PayBillsScreen {
                             && m != self.method
                         {
                             self.method = m;
-                            self.fetch_account_facts();
+                            self.account_changed();
                         }
                     });
                 });
@@ -683,7 +697,7 @@ impl PayBillsScreen {
                 Method::Check => self.bank = Some(a),
                 Method::Card => self.card = Some(a),
             }
-            self.fetch_account_facts();
+            self.account_changed();
         }
     }
 
@@ -691,7 +705,10 @@ impl PayBillsScreen {
         let totals = self.form.totals();
         let n = totals.map_or(0, |t| t.selected);
         let cash = totals.map_or(cl_core::Money::ZERO, |t| t.cash);
-        let idle = self.pay_task.is_none() && !self.closing_prompt.dialog_open() && !self.unknown;
+        let idle = self.pay_task.is_none()
+            && !self.list_task_running()
+            && !self.closing_prompt.dialog_open()
+            && !self.unknown;
         let mut pay = false;
         let mut clear = false;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -703,7 +720,7 @@ impl PayBillsScreen {
                 },
                 &[
                     ("n", &n.to_string()),
-                    ("total", &format!("${}", cash.format(self.money_style))),
+                    ("total", &cash.format(self.money_style)),
                 ],
             );
             ui.add_enabled_ui(idle && n > 0, |ui| {

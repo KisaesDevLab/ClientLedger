@@ -11,11 +11,15 @@
 //!   Nothing here multiplies a percent (the engine computes it, U-101).
 //! - **credits**: vendor credits applied to the bill. Selecting a bill
 //!   applies the vendor's open credits to it automatically (oldest first,
-//!   as far as the bill needs them; Q-P18i); Set Credits changes them.
+//!   as far as the bill needs them after its discount; Q-P18i); they are
+//!   fitted again when the discount changes (Take discounts, a new payment
+//!   date) or the list is read again, until Set Credits sets them.
 //!
 //! The rules: cash ≥ 0; cash + discount + credits ≤ balance due; something
 //! is applied; a credit is never used beyond what it has left. Totals
-//! (Q-P18b, owner 2026-10-28): every column adds the selected bills. The ending balance after is the engine's account balance
+//! (Q-P18b, owner 2026-10-28): every column adds the selected bills the
+//! list shows; selected bills a filter hides are kept, counted apart and
+//! not paid. The ending balance after is the engine's account balance
 //! minus the selected cash (Q-P18c): a preview, not a balance worked out
 //! here.
 
@@ -117,6 +121,8 @@ struct Entry {
     discount: Option<Money>,
     /// Credits applied: (credit, amount).
     credits: Vec<(TransactionId, Money)>,
+    /// Set Credits chose them (else they are fitted automatically).
+    credits_set: bool,
 }
 
 /// Why the run can't be paid.
@@ -243,6 +249,8 @@ pub struct PayTotals {
     pub listed: usize,
     /// Selected (and listed) bills.
     pub selected: usize,
+    /// Selected bills a filter hides (kept, not paid).
+    pub hidden: usize,
 }
 
 impl fmt::Debug for PayTotals {
@@ -250,6 +258,7 @@ impl fmt::Debug for PayTotals {
         f.debug_struct("PayTotals")
             .field("listed", &self.listed)
             .field("selected", &self.selected)
+            .field("hidden", &self.hidden)
             .finish_non_exhaustive()
     }
 }
@@ -267,7 +276,7 @@ pub struct PayBillsForm {
     /// The order.
     pub sort: SortBy,
     /// Take the engine's discounts on selected bills.
-    pub take_discounts: bool,
+    take_discounts: bool,
 }
 
 impl fmt::Debug for PayBillsForm {
@@ -303,7 +312,8 @@ impl PayBillsForm {
     }
 
     /// Takes a fresh list from the engine. What the owner set on bills still
-    /// listed is kept (a credit no longer open is dropped from them).
+    /// listed is kept (a credit no longer open is dropped from them), and
+    /// the credits not chosen in Set Credits are fitted again.
     pub fn load(&mut self, rows: Vec<PayableRow>, credits: Vec<OpenCredit>) {
         self.entries
             .retain(|b, _| rows.iter().any(|r| r.bill == *b));
@@ -313,6 +323,74 @@ impl PayBillsForm {
         }
         self.rows = rows;
         self.credits = credits;
+        self.refit_credits();
+    }
+
+    /// Whether the engine's discounts are taken on selected bills.
+    #[must_use]
+    pub fn take_discounts(&self) -> bool {
+        self.take_discounts
+    }
+
+    /// "Take discounts I qualify for": the discounts change, so the
+    /// automatic credits are fitted again.
+    pub fn set_take_discounts(&mut self, on: bool) {
+        if self.take_discounts != on {
+            self.take_discounts = on;
+            self.refit_credits();
+        }
+    }
+
+    /// The credits a bill gets automatically: the vendor's open credits,
+    /// oldest first, as far as the bill needs them after its discount
+    /// (Q-P18i).
+    fn fit_credits(&self, bill: TransactionId) -> Vec<(TransactionId, Money)> {
+        let Some(row) = self.row(bill) else {
+            return Vec::new();
+        };
+        let mut need = row
+            .balance_due
+            .checked_sub(self.discount(bill))
+            .unwrap_or(Money::ZERO);
+        let mut applied = Vec::new();
+        for c in self.credits_for(row.vendor) {
+            if !need.is_positive() {
+                break;
+            }
+            let left = self.credit_left(c.credit, Some(bill));
+            let take = if left < need { left } else { need };
+            if take.is_positive() {
+                applied.push((c.credit, take));
+                need = need.checked_sub(take).unwrap_or(Money::ZERO);
+            }
+        }
+        applied
+    }
+
+    /// Fits the automatic credits of every selected bill again, in list
+    /// order (Set Credits' choices stay).
+    fn refit_credits(&mut self) {
+        let auto: Vec<TransactionId> = self
+            .rows
+            .iter()
+            .map(|r| r.bill)
+            .filter(|b| {
+                self.entries
+                    .get(b)
+                    .is_some_and(|e| e.selected && !e.credits_set)
+            })
+            .collect();
+        for b in &auto {
+            if let Some(e) = self.entries.get_mut(b) {
+                e.credits.clear();
+            }
+        }
+        for b in auto {
+            let fitted = self.fit_credits(b);
+            if let Some(e) = self.entries.get_mut(&b) {
+                e.credits = fitted;
+            }
+        }
     }
 
     /// Every bill the engine listed.
@@ -468,9 +546,9 @@ impl PayBillsForm {
     /// (as far as the bill needs them) and fills the cash from the bill;
     /// clearing forgets what was set on it.
     pub fn set_selected(&mut self, bill: TransactionId, on: bool) {
-        let Some(row) = self.row(bill).cloned() else {
+        if self.row(bill).is_none() {
             return;
-        };
+        }
         if !on {
             self.entries.remove(&bill);
             return;
@@ -479,22 +557,7 @@ impl PayBillsForm {
             return;
         }
         self.entries.entry(bill).or_default().selected = true;
-        let mut need = row
-            .balance_due
-            .checked_sub(self.discount(bill))
-            .unwrap_or(Money::ZERO);
-        let mut applied = Vec::new();
-        for c in self.credits_for(row.vendor) {
-            if !need.is_positive() {
-                break;
-            }
-            let left = self.credit_left(c.credit, Some(bill));
-            let take = if left < need { left } else { need };
-            if take.is_positive() {
-                applied.push((c.credit, take));
-                need = need.checked_sub(take).unwrap_or(Money::ZERO);
-            }
-        }
+        let applied = self.fit_credits(bill);
         if let Some(e) = self.entries.get_mut(&bill) {
             e.credits = applied;
         }
@@ -507,7 +570,7 @@ impl PayBillsForm {
     }
 
     /// Types the cash on `bill`: a positive amount selects it; zero on a
-    /// bill with no credit or discount clears it.
+    /// bill with no credit or discount clears it (nothing would be paid).
     pub fn set_cash(&mut self, bill: TransactionId, cash: Money) {
         if self.row(bill).is_none() {
             return;
@@ -517,6 +580,10 @@ impl PayBillsForm {
                 return;
             }
             self.set_selected(bill, true);
+        }
+        if cash.is_zero() && self.discount(bill).is_zero() && self.credit_total(bill).is_zero() {
+            self.set_selected(bill, false);
+            return;
         }
         if let Some(e) = self.entries.get_mut(&bill) {
             e.cash = Some(cash);
@@ -540,6 +607,7 @@ impl PayBillsForm {
         if let Some(e) = self.entries.get_mut(&bill) {
             e.discount = discount;
         }
+        self.refit_credits();
     }
 
     /// Set Credits: the credits on `bill` (zero amounts dropped). Selects
@@ -551,6 +619,7 @@ impl PayBillsForm {
         self.set_selected(bill, true);
         if let Some(e) = self.entries.get_mut(&bill) {
             e.credits = credits.into_iter().filter(|(_, m)| !m.is_zero()).collect();
+            e.credits_set = true;
         }
     }
 
@@ -565,6 +634,23 @@ impl PayBillsForm {
     /// Clears every selection ("Clear selections").
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    /// Clears the selection of these bills (the ones just paid).
+    pub fn clear_bills(&mut self, bills: &[TransactionId]) {
+        for b in bills {
+            self.entries.remove(b);
+        }
+    }
+
+    /// Selected bills a filter hides: kept, not paid, counted apart.
+    #[must_use]
+    pub fn hidden_selected(&self) -> usize {
+        let visible: Vec<TransactionId> = self.visible().iter().map(|r| r.bill).collect();
+        self.entries
+            .iter()
+            .filter(|(b, e)| e.selected && !visible.contains(b) && self.row(**b).is_some())
+            .count()
     }
 
     /// The listed bills that are selected, in list order.
@@ -596,6 +682,7 @@ impl PayBillsForm {
             cash: sum(&|b| self.cash(b)).ok()?,
             listed: visible.len(),
             selected: selected.len(),
+            hidden: self.hidden_selected(),
         })
     }
 

@@ -3,8 +3,8 @@
 //! answers at once (the screen wraps it in `Task::ready`).
 
 use cl_api::{
-    Account, ApiError, BillPaymentRecord, CreatedPayment, LocalValidation, PayBillsRequest,
-    PayableFilter, PayableList,
+    Account, ApiError, BillPaymentRecord, CreatedPayment, IdempotencyKey, LocalValidation,
+    PayBillsRequest, PayableFilter, PayableList,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -31,8 +31,6 @@ pub(crate) struct PayCaps {
     pub numbers: bool,
     /// `ap-closing-v1` (a closing-date password on the pay).
     pub closing: bool,
-    /// `idempotency-pay-bills-v1`.
-    pub keyed: bool,
 }
 
 /// Pay Bills' engine when it is not the live one.
@@ -42,11 +40,13 @@ pub(crate) trait LocalPayBills: Send {
     fn payable(&mut self, link: &CompanyLink, f: &PayableFilter) -> Result<PayableList, ApiError>;
     fn balance(&mut self, link: &CompanyLink, account: AccountId) -> Option<Money>;
     fn numbers(&mut self, link: &CompanyLink, account: AccountId) -> (Option<u32>, Option<u32>);
+    /// `key`: the pay's idempotency key (the same on an identical retry).
     fn pay(
         &mut self,
         link: &CompanyLink,
         req: &PayBillsRequest,
         password: Option<&Secret>,
+        key: &IdempotencyKey,
     ) -> Result<Vec<CreatedPayment>, ApiError>;
     fn set_discount_account(
         &mut self,
@@ -93,7 +93,6 @@ impl LocalPayBills for DemoPayBills {
             discounts: true,
             numbers: true,
             closing: true,
-            keyed: true,
         }
     }
 
@@ -137,6 +136,7 @@ impl LocalPayBills for DemoPayBills {
         link: &CompanyLink,
         req: &PayBillsRequest,
         password: Option<&Secret>,
+        _key: &IdempotencyKey,
     ) -> Result<Vec<CreatedPayment>, ApiError> {
         let mut s = demo(link)?;
         crate::company::demo::pay_bills::pay(&mut s, req, password)
