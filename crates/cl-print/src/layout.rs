@@ -326,11 +326,39 @@ impl Page {
     }
 }
 
-/// A document: Letter pages and an optional logo.
+/// A page size in millimetres (portrait as given; an envelope is wider
+/// than tall).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageSize {
+    /// Width.
+    pub w: f32,
+    /// Height.
+    pub h: f32,
+}
+
+impl PageSize {
+    /// US Letter, 8.5 x 11 in.
+    pub const LETTER: PageSize = PageSize {
+        w: LETTER_W_MM,
+        h: LETTER_H_MM,
+    };
+    /// A #10 envelope, 9.5 x 4.125 in, landscape.
+    pub const ENVELOPE_10: PageSize = PageSize { w: 241.3, h: 104.8 };
+}
+
+impl Default for PageSize {
+    fn default() -> PageSize {
+        PageSize::LETTER
+    }
+}
+
+/// A document: pages of one size and an optional logo.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Document {
     /// The PDF title (document information).
     pub title: String,
+    /// The page size (Letter unless stated).
+    pub size: PageSize,
     /// The pages.
     pub pages: Vec<Page>,
     /// The logo `Element::Logo` boxes draw.
@@ -370,6 +398,8 @@ pub struct ResolvedPage {
     pub logos: Vec<LogoPlacement>,
     /// Text runs, drawn last, in order.
     pub runs: Vec<Run>,
+    /// The page size.
+    pub size: PageSize,
 }
 
 impl ResolvedPage {
@@ -395,7 +425,10 @@ pub fn resolve(doc: &Document) -> Result<Vec<ResolvedPage>, PrintError> {
     Ok(doc
         .pages
         .iter()
-        .map(|p| resolve_page(p, doc.logo.as_ref()))
+        .map(|p| ResolvedPage {
+            size: doc.size,
+            ..resolve_page(p, doc.logo.as_ref())
+        })
         .collect())
 }
 

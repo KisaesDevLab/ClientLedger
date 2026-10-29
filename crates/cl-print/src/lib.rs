@@ -13,6 +13,8 @@
 
 pub mod amount;
 pub mod checks;
+pub mod envelopes;
+pub mod files;
 pub mod fonts;
 pub mod forms;
 pub mod image;
@@ -24,12 +26,14 @@ pub use checks::{
     AlignmentOffset, CheckData, CheckLabels, CheckOptions, CheckStyle, StubBill, StubCredit,
     StubData, StubTotals, alignment_test, layout_checks,
 };
+pub use envelopes::{EnvelopeOptions, layout_envelope, layout_envelopes};
+pub use files::{default_save_dir, pdf_file_name};
 pub use fonts::Font;
 pub use forms::{
     CompanyInfo, FormDoc, FormLabels, FormStyle, ItemLine, layout_form, resolve_footer,
 };
 pub use image::Logo;
-pub use layout::{Align, Document, Page, Rect, ResolvedPage, Run, TextBox, resolve};
+pub use layout::{Align, Document, Page, PageSize, Rect, ResolvedPage, Run, TextBox, resolve};
 pub use pdf::{render, render_resolved};
 
 /// Why a document could not be laid out or rendered.

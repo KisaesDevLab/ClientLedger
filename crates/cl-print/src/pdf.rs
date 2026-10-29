@@ -10,7 +10,7 @@
 use crate::PrintError;
 use crate::fonts::{Font, MM_PER_PT};
 use crate::image::{ColorSpace, Logo, LogoData};
-use crate::layout::{Document, LETTER_H_MM, LETTER_W_MM, ResolvedPage, Run, Shape, resolve};
+use crate::layout::{Document, ResolvedPage, Run, Shape, resolve};
 use pdf_writer::types::{CidFontType, FontFlags, SystemInfo};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect as PdfRect, Ref, Str, TextStr};
 use std::collections::BTreeMap;
@@ -158,7 +158,7 @@ pub fn render_resolved(
         .count(i32::try_from(pages.len()).unwrap_or(0));
     for (page, (pid, cid)) in pages.iter().zip(&page_ids) {
         let mut p = pdf.page(*pid);
-        p.media_box(PdfRect::new(0.0, 0.0, pt(LETTER_W_MM), pt(LETTER_H_MM)))
+        p.media_box(PdfRect::new(0.0, 0.0, pt(page.size.w), pt(page.size.h)))
             .parent(tree)
             .contents(*cid);
         let mut res = p.resources();
@@ -231,7 +231,7 @@ fn content(
     has_logo: bool,
 ) -> Vec<u8> {
     let mut c = Content::new();
-    let top = pt(LETTER_H_MM);
+    let top = pt(page.size.h);
     for s in &page.shapes {
         match s {
             Shape::Line {
@@ -372,7 +372,7 @@ mod tests {
     use super::read_back::{content_streams, text_origins};
     use super::*;
     use crate::image::tests::{jpeg_header, png_rgba};
-    use crate::layout::{Page, Rect, TextBox};
+    use crate::layout::{LETTER_H_MM, Page, Rect, TextBox};
 
     fn doc() -> Document {
         let mut p = Page::default();
@@ -406,6 +406,7 @@ mod tests {
             fill_gray: Some(0.9),
         });
         Document {
+            size: crate::layout::PageSize::LETTER,
             title: "Test".into(),
             pages: vec![p.clone(), p],
             logo: None,

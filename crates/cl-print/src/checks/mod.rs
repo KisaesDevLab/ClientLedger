@@ -438,6 +438,7 @@ pub fn layout_checks(checks: &[CheckData], opts: &CheckOptions) -> Result<Docume
             .collect::<Result<_, PrintError>>()?,
     };
     Ok(Document {
+        size: crate::layout::PageSize::LETTER,
         title: "Checks".into(),
         pages,
         logo: logo_for(opts),
@@ -487,6 +488,7 @@ pub fn alignment_test(opts: &CheckOptions) -> Result<Document, PrintError> {
         }
     }
     Ok(Document {
+        size: crate::layout::PageSize::LETTER,
         title: "Check alignment test".into(),
         pages: vec![page],
         logo: logo_for(opts),

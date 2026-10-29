@@ -414,6 +414,7 @@ pub fn layout_form(form: &FormDoc, style: &FormStyle) -> Result<Document, PrintE
         }
     }
     Ok(Document {
+        size: crate::layout::PageSize::LETTER,
         title: title_line(form),
         pages,
         logo: style.logo.clone(),
