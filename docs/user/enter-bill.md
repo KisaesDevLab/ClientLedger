@@ -2,7 +2,7 @@
 
 Use Enter Bill to record a bill from a vendor that you will pay later, or a credit a vendor owes you. Open it from **Vendors > Enter Bill** or press `Ctrl+B`.
 
-A bill adds to what you owe (your accounts payable, or A/P). To pay it, use Pay Bills.
+A bill adds to what you owe (your accounts payable, or A/P). To pay it, use Pay Bills (**Vendors > Pay Bills** or `Ctrl+Shift+B`; see [Pay Bills](pay-bills.md)).
 
 ## Bill or vendor credit
 
@@ -68,7 +68,7 @@ When you save, a window asks about it. Choose **Save anyway** if it really is a 
 Use **Prev** and **Next** (`Page Up` / `Page Down`) to move through saved bills.
 
 - **Void** keeps the bill in your books with a zero amount. Delete removes it; the audit trail keeps a record of it. To start, open the saved bill. You'll be asked for a reason when you void.
-- **A bill with payments or credits applied can't be voided or deleted**, and its vendor, date and amount can't change. Void those payments or credits first.
+- **A bill with payments or credits applied can't be voided or deleted**, and its vendor, date and amount can't change. Void those payments or credits first (see [Pay Bills](pay-bills.md) for voiding a bill payment).
 - A bill that has already been billed to a customer on one of its lines can't change.
 - A **vendor credit that is applied to bills, or refunded, can't be changed, voided or deleted.**
 - A bill dated on or before your **closing date** needs the closing-date password to change, void or delete. The audit trail records the change.

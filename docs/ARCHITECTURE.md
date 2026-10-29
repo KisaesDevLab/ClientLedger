@@ -312,6 +312,10 @@ One widget for every line grid: split lines, registers, Pay Bills-style fixed li
 - **Screens.** cl-ui's `GridForm` keeps a form's `FormState` and its grid together, so every save, leave and record move commits the open cell first. `grid_env` supplies date order, money style, theme and the modal flag per viewport; column widths live in `grid-widths.json`.
 - **Checks.** `cl-grid/tests` (state tables, keyboard in consecutive frames, virtualization work counts, AccessKit), `cl-ui/tests/grid_keyboard.rs` (the demo in the real shell), `ui-check grid_demo` (`--demo` only), and `cargo xtask grid-bench` (p95 frame time with 200k rows).
 
+## Pay Bills (P18)
+
+`cl_model::forms::bill_payment` owns the selection, the per-bill amounts and the totals (selected bills only); the screen never sums. The engine computes early-payment discounts and checks credits; the UI shows what it returns. Each bill's amount is cash plus credits, and discount is separate. The payment request carries an idempotency key that is kept when the outcome is unknown, so "Look again" and a retry can't pay twice. Decisions are Q-P18a-i.
+
 ## Document viewer (cl-ui, P17)
 
 One widget shows bills, receipts and other attachments everywhere: the Enter Bill source-document card, the receipt inbox, Write Check's attachment Preview and the full-size Document Preview tab (`nav.document_view`, Q-P17l). PDFs, PNGs and JPEGs only; the bytes decide the type.
