@@ -25,10 +25,11 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 # "scanned" pictures (rendered with the pinned PDFium, then degraded). Font
 # metrics through skrifa (already in the tree; ttf-parser is unmaintained,
 # RUSTSEC-2026-0192).
-# xtask only; never in a shipped crate. All MIT OR Apache-2.0.
-pdf-writer = "0.15.0"
-subsetter = { version = "0.2.6", default-features = false }
-skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
+# pdf-writer, subsetter and skrifa are workspace dependencies (also used by
+# cl-print since P19). All MIT OR Apache-2.0.
+pdf-writer.workspace = true
+subsetter.workspace = true
+skrifa.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 syn = { version = "3", default-features = false, features = ["full", "visit", "parsing", "proc-macro", "derive", "clone-impls"] }

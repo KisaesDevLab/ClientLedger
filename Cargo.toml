@@ -9,6 +9,13 @@ license = "MIT"
 repository = "https://github.com/KisaesDevLab/ClientLedger"
 publish = false
 
+# Shared by xtask (synthetic test documents) and cl-print (printed forms).
+# All MIT OR Apache-2.0.
+[workspace.dependencies]
+pdf-writer = "0.15.0"
+subsetter = { version = "0.2.6", default-features = false }
+skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

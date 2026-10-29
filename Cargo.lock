@@ -942,6 +942,15 @@ dependencies = [
 [[package]]
 name = "cl-print"
 version = "0.0.0"
+dependencies = [
+ "flate2",
+ "pdf-writer",
+ "png",
+ "rust_decimal",
+ "skrifa",
+ "subsetter",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "cl-settings"
