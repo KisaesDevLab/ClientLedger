@@ -239,6 +239,8 @@ pub struct PayBillsScreen {
     pub(crate) notice: Option<&'static str>,
     pub(crate) unknown: bool,
     pub(crate) last_paid: Option<(usize, usize)>,
+    /// The checks the last pay queued (Print now, P19).
+    pub(crate) to_print: Vec<TransactionId>,
     pub(crate) paid_count: u32,
     pub(crate) dialog: Option<Dialog>,
     /// The discount account picked in Set Discount for this run.
@@ -335,6 +337,7 @@ impl PayBillsScreen {
             notice: None,
             unknown: false,
             last_paid: None,
+            to_print: Vec::new(),
             paid_count: 0,
             dialog: None,
             discount_account: None,
@@ -844,6 +847,12 @@ impl PayBillsScreen {
             .map(|p| usize::try_from(p.bills_paid).unwrap_or(0))
             .sum();
         self.last_paid = Some((payments.len(), bills));
+        // P19 (Q-P19s): the checks just queued can print now.
+        self.to_print = payments
+            .iter()
+            .filter(|p| p.print_status.as_deref() == Some("queue"))
+            .map(|p| p.id)
+            .collect();
         self.paid_count += 1;
         // Only the bills paid come off; selected bills a filter hid stay.
         match self.sent.take() {

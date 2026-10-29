@@ -1279,7 +1279,8 @@ impl Screen for EnterBillScreen {
             }
             OpenPayload::Document(_)
             | OpenPayload::StatementDraft(_)
-            | OpenPayload::PrintChecks(_) => false,
+            | OpenPayload::PrintChecks(_)
+            | OpenPayload::ReprintCheck(..) => false,
         }
     }
 

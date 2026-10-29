@@ -148,6 +148,10 @@ pub enum OpenPayload {
     /// P19: checks to print now (Write Check / Pay Bills `Print`, Reprint
     /// check): File > Print Forms opens on their preview.
     PrintChecks(Vec<cl_core::ids::TransactionId>),
+    /// P19: Reprint check (Q-P19ab): the printed check goes back to the
+    /// queue (closing-date password when closed) and previews with the
+    /// next number.
+    ReprintCheck(cl_core::ids::TransactionId, cl_core::CalendarDate),
 }
 
 /// Stand-in for a screen a later phase builds.

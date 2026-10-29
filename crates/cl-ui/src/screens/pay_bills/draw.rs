@@ -89,6 +89,18 @@ impl PayBillsScreen {
                 ),
             );
         }
+        if !self.to_print.is_empty() && self.last_paid.is_some() {
+            let r = ui
+                .button(t("print.check.print_now"))
+                .on_hover_text(t("print.check.print_now.tip"));
+            if r.clicked() {
+                let ids = std::mem::take(&mut self.to_print);
+                self.link.push(crate::company::CompanyEvent::OpenWith(
+                    cl_model::CommandId::new(crate::screens::print_forms::KIND),
+                    Box::new(crate::windows::OpenPayload::PrintChecks(ids)),
+                ));
+            }
+        }
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         if let Some(e) = &self.error {

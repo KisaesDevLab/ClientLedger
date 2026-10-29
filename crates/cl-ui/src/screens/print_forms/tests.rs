@@ -176,3 +176,30 @@ fn opening_with_checks_previews_them() {
     assert!(s.preview.is_some());
     assert!(!s.state().is_null());
 }
+
+#[test]
+fn reprint_check_requeues_it_and_previews_with_the_next_number() {
+    let (_d, mut s) = screen(false);
+    let first: u64 = s.first_number.parse().expect("next");
+    let id = s.checks[0].id;
+    let date = s.checks[0].date;
+    s.picked = [id].into_iter().collect();
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    s.answer(true);
+    s.poll();
+    assert!(s.open_with(OpenPayload::ReprintCheck(id, date)));
+    s.poll();
+    let spoiled = s
+        .link
+        .demo_state()
+        .map(|d| crate::company::demo::printing::spoiled(&d))
+        .unwrap_or_default();
+    assert_eq!(spoiled[0].number, first, "the old number is logged");
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items()[0].id, id);
+    assert_eq!(run.items()[0].number, Some(first + 1), "the next number");
+    assert!(s.preview.is_some());
+}

@@ -312,6 +312,19 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             )),
         }
     }
+    // P19 (Q-P19n): printed checks waiting for "Did all checks print
+    // correctly?" (saved on this computer).
+    if home
+        .tenant
+        .as_ref()
+        .is_some_and(|(id, _)| crate::screens::print_forms::waiting_answer(&home.link, *id))
+    {
+        out.push(Line::task(
+            t("home.attention.checks_unconfirmed"),
+            "home.attention.checks_unconfirmed.open",
+            Some(crate::screens::print_forms::KIND),
+        ));
+    }
     if later {
         out.push(Line::muted(t("home.attention.later")));
     }

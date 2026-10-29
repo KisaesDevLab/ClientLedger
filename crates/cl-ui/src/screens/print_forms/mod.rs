@@ -233,6 +233,8 @@ pub struct PrintFormsScreen {
     pub(crate) problem: Option<PrintProblem>,
     pub(crate) notice: Option<&'static str>,
     preselect: Vec<TransactionId>,
+    /// Reprint check: preview it once it is back in the queue.
+    reprint: Option<TransactionId>,
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -354,6 +356,7 @@ impl PrintFormsScreen {
             problem: None,
             notice: None,
             preselect: Vec::new(),
+            reprint: None,
         };
         s.sync_offset_fields();
         s.start_setup();
@@ -1024,6 +1027,9 @@ impl PrintFormsScreen {
                 self.preview = None;
                 self.run = None;
                 self.notice = Some("print.confirm.requeued");
+                if let Some(id) = self.reprint.take() {
+                    self.preselect = vec![id];
+                }
                 self.link
                     .bus()
                     .publish(crate::data_bus::Change::ledger(self.run_bank));
@@ -1906,6 +1912,13 @@ impl Screen for PrintFormsScreen {
             if !self.checks.is_empty() {
                 self.load_queue();
             }
+            return true;
+        }
+        if let OpenPayload::ReprintCheck(id, date) = payload {
+            self.tab = Tab::Checks;
+            self.run_dates = vec![date];
+            self.reprint = Some(id);
+            self.requeue(vec![id], None);
             return true;
         }
         false

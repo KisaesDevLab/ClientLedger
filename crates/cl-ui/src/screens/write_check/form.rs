@@ -28,6 +28,8 @@ use crate::screens::company::form;
 use crate::screens::register::account_text;
 use crate::screens::register::lists::NAMES;
 use crate::theme::Tokens;
+use crate::windows::OpenPayload;
+use cl_api::PrintStatus;
 
 /// Below this width the side panel goes under the form (README §6).
 const SIDE_BY_SIDE: f32 = 1100.0;
@@ -176,6 +178,36 @@ impl WriteCheckScreen {
                 .on_hover_text(t("check.print_later.tip"));
             if r.changed() {
                 self.set_print_later(later);
+            }
+            // P19 (Q-P19s, Q-P19ab): print this check now, or reprint a
+            // printed one with the next number; both preview first.
+            if let Some(e) = self.editing.as_ref().filter(|e| !e.read_only) {
+                let clean = !self.header.is_dirty();
+                let payload = match e.print_status {
+                    PrintStatus::Queue => ui
+                        .add_enabled(
+                            clean && !working,
+                            egui::Button::new(t("print.check.print_now")),
+                        )
+                        .on_hover_text(t("print.check.print_now.tip"))
+                        .clicked()
+                        .then(|| OpenPayload::PrintChecks(vec![e.id])),
+                    PrintStatus::Printed => ui
+                        .add_enabled(
+                            clean && !working,
+                            egui::Button::new(t("print.check.reprint")),
+                        )
+                        .on_hover_text(t("print.check.reprint.tip"))
+                        .clicked()
+                        .then_some(OpenPayload::ReprintCheck(e.id, e.old_date)),
+                    _ => None,
+                };
+                if let Some(p) = payload {
+                    self.link.push(crate::company::CompanyEvent::OpenWith(
+                        CommandId::new(crate::screens::print_forms::KIND),
+                        Box::new(p),
+                    ));
+                }
             }
         });
     }
