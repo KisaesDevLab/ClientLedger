@@ -451,8 +451,8 @@ jobs:
           # Fail instead of skipping when the engine, PostgreSQL or engine/ are missing.
           CL_API_REQUIRE: "1"
           # Capabilities the pinned engine has (Q-P05h): a missing one fails
-          # instead of going PENDING. Pin e45658fb: engine PR-A, PR-B, U-18, U-90, U-91, U-93, U-92, U-92d, U-95, U-97, U-94, U-101, U-102, U-103, U-104.
-          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1,intake-settings-v1,document-drafts-v1,idempotency-docs-v1,document-assist-v1,document-drafts-attach-v1,document-drafts-statement-v1,bill-discounts-v1,idempotency-pay-bills-v1,bill-payment-check-number-v1"
+          # instead of going PENDING. Pin 12187716: engine PR-A, PR-B, U-18, U-90, U-91, U-93, U-92, U-92d, U-95, U-97, U-94, U-101, U-102, U-103, U-104, U-106, U-107, U-108, U-109, U-110, U-111, U-113.
+          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1,intake-settings-v1,document-drafts-v1,idempotency-docs-v1,document-assist-v1,document-drafts-attach-v1,document-drafts-statement-v1,bill-discounts-v1,idempotency-pay-bills-v1,bill-payment-check-number-v1,check-reprint-audit-v1,company-logo-v1,document-numbers-v1,forms-print-queue-v1"
           # Same hosted-runner override as the cl-host step above (cold start is
           # slower than the 15 s product budget on shared runners). The contract
           # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).
