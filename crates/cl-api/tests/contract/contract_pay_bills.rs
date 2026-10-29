@@ -603,6 +603,12 @@ pub fn voided_payment_leaves_the_queue_u115(h: &Harness) {
     assert!(!in_queue(h, s, bank, id), "a void payment leaves the queue");
     let e = print_keyed(h, s, bank, vec![id], 6401, key()).expect_err("void");
     assert_eq!(print_problem(&e), Some(PrintProblem::Voided), "{e:?}");
+    // Write Check still opens it (read-only, void, not printable).
+    let c = h
+        .run(s.checks().get(id))
+        .unwrap_or_else(|e| panic!("get voided payment check: {e:?}"));
+    assert_eq!(c.record.txn.status, cl_api::TxnStatus::Void);
+    assert!(!c.record.print_status.is_printable());
 }
 
 /// PR-2 U-117: a vendor paid by a credit alone, To be printed, gets no

@@ -755,6 +755,10 @@ fn main() -> std::process::ExitCode {
             contract_printing::voided_check_leaves_the_queue_u115,
         ),
         (
+            "printing::voided_checks_read_back",
+            contract_printing::voided_checks_read_back,
+        ),
+        (
             "printing::keyed_print_replays_u116",
             contract_printing::keyed_print_replays_u116,
         ),

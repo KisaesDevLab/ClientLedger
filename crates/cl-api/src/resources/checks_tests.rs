@@ -141,14 +141,49 @@ fn the_golden_check_record_parses_exactly() {
 }
 
 #[test]
+fn void_checks_decode_with_or_without_a_print_status() {
+    // U-115: voided while queued, the engine clears printStatus and keeps
+    // isCheck.
+    let mut v = inner(QUEUED);
+    v["status"] = Value::String("void".into());
+    v["printStatus"] = Value::Null;
+    v["isCheck"] = Value::Bool(true);
+    let r = CheckRecord::deserialize(&v).expect("void queued check");
+    assert_eq!(r.txn.status, TxnStatus::Void);
+    assert_eq!(r.print_status, PrintStatus::Unqueued);
+    assert!(!r.print_status.is_printable());
+    assert_eq!(r.print_status.as_wire(), None);
+    assert_eq!(
+        serde_json::to_value(&r.print_status).ok(),
+        Some(Value::Null)
+    );
+    // isCheck absent but the status cleared: no longer recognisable.
+    v.as_object_mut().expect("obj").remove("isCheck");
+    assert!(CheckRecord::deserialize(&v).is_err());
+
+    // Voided after printing: keeps its number and status.
+    let mut v = inner(RECORD);
+    v["status"] = Value::String("void".into());
+    v["printStatus"] = Value::String("printed".into());
+    v["isCheck"] = Value::Bool(true);
+    let r = CheckRecord::deserialize(&v).expect("void printed check");
+    assert_eq!(r.txn.status, TxnStatus::Void);
+    assert_eq!(r.print_status, PrintStatus::Printed);
+    assert!(!r.print_status.is_printable());
+    assert!(PrintStatus::Queue.is_printable());
+}
+
+#[test]
 fn unknown_statuses_are_kept_and_a_plain_expense_is_not_a_check() {
     let mut v = inner(RECORD);
     v["printStatus"] = Value::String("reprint_pending".into());
     let r = CheckRecord::deserialize(&v).expect("unknown status");
     assert_eq!(r.print_status, PrintStatus::Other("reprint_pending".into()));
-    assert_eq!(r.print_status.as_wire(), "reprint_pending");
+    assert_eq!(r.print_status.as_wire(), Some("reprint_pending"));
     v["printStatus"] = Value::Null;
     assert!(CheckRecord::deserialize(&v).is_err(), "not a check");
+    v["isCheck"] = Value::Bool(false);
+    assert!(CheckRecord::deserialize(&v).is_err(), "isCheck false");
     let mut v = inner(RECORD);
     // A JSON number where money belongs (parsed from text: no float here).
     v["lines"][0]["debit"] = serde_json::from_str::<Value>("842.15").expect("number");

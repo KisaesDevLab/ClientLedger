@@ -1147,7 +1147,7 @@ impl WriteCheckScreen {
             "mode": if self.editing.is_some() { "edit" } else { "new" },
             "read_only": self.editing.as_ref().is_some_and(|e| e.read_only),
             "read_only_note": self.editing.as_ref().filter(|e| e.read_only).map(|e| e.read_only_note),
-            "edit_print_status": self.editing.as_ref().map(|e| e.print_status.as_wire().to_string()),
+            "edit_print_status": self.editing.as_ref().map(|e| e.print_status.as_wire().unwrap_or("unqueued").to_string()),
             "locked": self.editing_locked(),
             "bank_id": f.bank.map(|b| b.to_string()),
             "ending_balance_shown": self.balance.is_some(),

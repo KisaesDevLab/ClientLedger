@@ -499,6 +499,13 @@ pub fn void(
         .ok_or(ApiError::NotFound { code: None })?;
     check_closing(closing(state), &[old], password)?;
     state.ledger.void(id)?;
+    // U-115: a check voided while waiting to print leaves the queue with
+    // no print status.
+    if let Some(i) = state.checks.info.get_mut(&id)
+        && i.print_status == PrintStatus::Queue
+    {
+        i.print_status = PrintStatus::Unqueued;
+    }
     state.checks.history.push((id, "void"));
     Ok(())
 }
@@ -1244,6 +1251,12 @@ mod tests {
         let got = get(&mut s, id).expect("get").record;
         assert_eq!(got.check_number, None);
         assert_eq!(got.print_status, PrintStatus::Queue);
+        // U-115: voided while queued, it reads back void with no status.
+        void(&mut s, id, None).expect("void");
+        let got = get(&mut s, id).expect("get void").record;
+        assert_eq!(got.txn.status, cl_api::TxnStatus::Void);
+        assert_eq!(got.print_status, PrintStatus::Unqueued);
+        assert!(!got.print_status.is_printable());
         let mut off = draft(&mut s, Some(5000), false);
         off.amount = money("1286.39");
         assert_eq!(create(&mut s, &off, None), Err(invalid()));

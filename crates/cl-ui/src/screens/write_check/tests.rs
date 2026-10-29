@@ -342,6 +342,33 @@ fn prev_opens_the_newest_check_and_void_frees_its_number() {
 }
 
 #[test]
+fn a_queued_check_voided_opens_read_only_and_unqueued() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    s.set_print_later(true);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["edit_print_status"], "queue");
+    assert!(s.start_void());
+    s.send_void("Wrong vendor", None);
+    s.poll();
+    assert_eq!(s.state()["last_action"], "void");
+    // U-115: the engine cleared its print status; it still opens, as void.
+    s.navigate(true);
+    s.poll();
+    let st = s.state();
+    assert_eq!(st["mode"], "edit");
+    assert_eq!(st["read_only"], true);
+    assert_eq!(st["read_only_note"], "check.read_only");
+    assert_eq!(st["edit_print_status"], "unqueued");
+    assert_eq!(st["print_later"], false);
+    assert_eq!(st["save"]["error"], false);
+}
+
+#[test]
 fn prev_on_unsaved_work_asks_save_discard_or_keep_editing() {
     use crate::windows::PromptAnswer;
     let (_d, link) = link();

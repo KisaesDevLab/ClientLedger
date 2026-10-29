@@ -115,6 +115,44 @@ pub fn voided_check_leaves_the_queue_u115(h: &Harness) {
     assert_eq!(st.check_number, None, "never numbered");
 }
 
+/// PR-2: a voided check still reads as a check. Voided while queued (U-115
+/// clears its print status) it reads as `Unqueued`; voided after printing
+/// it keeps its number and `Printed`. Both read as void.
+pub fn voided_checks_read_back(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-115") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let void = |id| {
+        h.run(
+            s.transactions()
+                .void(id, "contract clean-up", &PostingOptions::default(), key()),
+        )
+        .expect("void");
+    };
+
+    let queued_id = queued(h, s, bank, date(2026, 11, 10));
+    void(queued_id);
+    let c = h
+        .run(s.checks().get(queued_id))
+        .unwrap_or_else(|e| panic!("get voided queued check: {e:?}"));
+    assert_eq!(c.record.txn.status, cl_api::TxnStatus::Void);
+    assert_eq!(c.record.print_status, cl_api::PrintStatus::Unqueued);
+    assert!(!c.record.print_status.is_printable());
+    assert_eq!(c.record.check_number, None);
+
+    let printed_id = queued(h, s, bank, date(2026, 11, 10));
+    print(h, s, bank, vec![printed_id], 6301).expect("print");
+    void(printed_id);
+    let c = h
+        .run(s.checks().get(printed_id))
+        .unwrap_or_else(|e| panic!("get voided printed check: {e:?}"));
+    assert_eq!(c.record.txn.status, cl_api::TxnStatus::Void);
+    assert_eq!(c.record.print_status, cl_api::PrintStatus::Printed);
+    assert_eq!(c.record.check_number, Some(6301));
+}
+
 /// PR-2 U-116: the same key twice is one print run: the replay returns the
 /// first batch and the counter moves once.
 pub fn keyed_print_replays_u116(h: &Harness) {
