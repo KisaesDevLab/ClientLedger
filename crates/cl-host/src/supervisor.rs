@@ -745,6 +745,10 @@ impl Worker {
         // A crash while reading may have left a reader running and its
         // scratch folders behind (A03 security review M1, L10). The
         // single-instance lock is held, so none of them is in use.
+        // PDFs handed to the printer or viewer last time hold payee names
+        // and amounts; none is in use by this instance, so all go (a file
+        // a viewer still has open is skipped).
+        let _ = crate::os_print::sweep_print_dir(&self.paths, std::time::Duration::ZERO);
         let swept = crate::docread_worker::sweep_docread_leftovers(&self.paths);
         if swept.stopped > 0 {
             self.log

@@ -101,6 +101,25 @@ pub enum PrintOutcome {
         /// The PDF.
         path: PathBuf,
     },
+    /// The printer name can't be passed on safely (a `"` or a control
+    /// character, blank, or over 256 characters); nothing was printed.
+    InvalidPrinter {
+        /// The PDF.
+        path: PathBuf,
+    },
+}
+
+/// Longest printer name passed to the OS.
+pub const MAX_PRINTER_NAME: usize = 256;
+
+/// True when `name` may be passed to the print commands: not blank, at
+/// most [`MAX_PRINTER_NAME`] characters, no `"` (it would end the quoted
+/// `PrintTo` argument) and no control characters.
+#[must_use]
+pub fn valid_printer_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.chars().count() <= MAX_PRINTER_NAME
+        && !name.chars().any(|c| c == '"' || c.is_control())
 }
 
 /// The OS print hand-off.
@@ -212,6 +231,11 @@ impl<R: CommandRunner> OsPrint<R> {
     /// Print `path` on `printer` (the default when `None`), `copies` times
     /// (1 to [`MAX_COPIES`]); if printing fails, open it in the viewer.
     pub fn print_pdf(&self, path: &Path, printer: Option<&str>, copies: u16) -> PrintOutcome {
+        if printer.is_some_and(|p| !valid_printer_name(p)) {
+            return PrintOutcome::InvalidPrinter {
+                path: path.to_path_buf(),
+            };
+        }
         let sent = self
             .print_commands(path, printer, copies)
             .iter()
@@ -556,6 +580,23 @@ mod tests {
                 .unwrap()
                 .ends_with("Start-Process -FilePath $env:CL_PRINT_FILE")
         );
+    }
+
+    #[test]
+    fn printer_names_that_cannot_be_passed_safely_are_refused() {
+        assert!(valid_printer_name("Office Laser"));
+        assert!(valid_printer_name(r"\\server\HP 400"));
+        for bad in ["", "  ", "Office\" & calc", "a\nb"] {
+            assert!(!valid_printer_name(bad), "{bad:?}");
+        }
+        assert!(!valid_printer_name(&"x".repeat(MAX_PRINTER_NAME + 1)));
+        let fake = Fake::default();
+        let os = OsPrint::new(Os::Windows, &fake);
+        assert_eq!(
+            os.print_pdf(Path::new(PDF), Some("Office\" & calc"), 1),
+            PrintOutcome::InvalidPrinter { path: PDF.into() }
+        );
+        assert_eq!(fake.calls.borrow().len(), 0);
     }
 
     #[test]
