@@ -349,14 +349,119 @@ pub fn mockup_run_with_discount_u101(h: &Harness) {
         before.checked_sub(balance(h, s, bank)).expect("delta"),
         m("6577.53")
     );
+    // Stored balances are debits - credits: the discount is credited to
+    // the OtherRevenue account (review 5: a debit would read +4.37).
     assert_eq!(
-        balance(h, s, disc.id).abs(),
-        m("4.37"),
-        "the discount posts"
+        balance(h, s, disc.id),
+        m("-4.37"),
+        "the discount is credited"
     );
     for b in [b1, b2, b3, b4] {
         assert_eq!(bill_balance(h, s, b), Money::ZERO);
     }
+    // Voiding the discounted payment opens 7781 again and takes the
+    // discount back off its account.
+    let office_pay = paid
+        .iter()
+        .find(|p| p.contact_id == Some(office))
+        .expect("the 7781 payment");
+    h.run(
+        s.ap_voids()
+            .bill_payment(office_pay.id, "contract clean-up", key()),
+    )
+    .expect("void");
+    assert_eq!(bill_balance(h, s, b3), m("218.44"), "7781 open again");
+    assert_eq!(
+        balance(h, s, disc.id),
+        Money::ZERO,
+        "the discount is undone"
+    );
+}
+
+/// U-101 (the widened check): a bill paid with no cash, by a credit and
+/// the discount. The bank does not move, the discount is credited, the
+/// bill is paid; a void restores the bill and the credit and takes the
+/// discount back.
+pub fn credit_and_discount_without_cash_u101(h: &Harness) {
+    if !h.require_cap(Capabilities::BILL_DISCOUNTS, "U-101") {
+        return;
+    }
+    let s = &h.s1;
+    let expense = account(h, s, AccountType::Expense, "No cash supplies");
+    let disc = account(h, s, AccountType::OtherRevenue, "No cash discounts");
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let v = vendor(h, s, "Ozark Office Supply");
+    let terms = BillTerms {
+        code: "custom".into(),
+        days: Some(15),
+        discount_percent: Percent::parse("2").ok(),
+        discount_days: Some(5),
+    };
+    let b = bill(
+        h,
+        s,
+        v,
+        expense.id,
+        "218.44",
+        Some(terms),
+        date(2026, 11, 16),
+    );
+    let c = credit(h, s, v, expense.id, "214.07");
+    let before = balance(h, s, bank);
+    let mut req = request(
+        bank,
+        vec![BillToPay {
+            bill: b,
+            cash: Money::ZERO,
+            discount: m("4.37"),
+        }],
+        vec![CreditToApply {
+            credit: c,
+            bill: b,
+            amount: m("214.07"),
+        }],
+    );
+    req.discount_account = Some(disc.id);
+    let paid = h
+        .run(
+            s.bill_payments()
+                .pay(&req, &PostingOptions::default(), key()),
+        )
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(paid.len(), 1);
+    assert_eq!(paid[0].net_payment, Money::ZERO, "no cash");
+    assert_eq!(bill_balance(h, s, b), Money::ZERO, "paid");
+    assert_eq!(balance(h, s, bank), before, "the bank does not move");
+    assert_eq!(
+        balance(h, s, disc.id),
+        m("-4.37"),
+        "the discount is credited"
+    );
+    let rec = h.run(s.bill_payments().get(paid[0].id)).expect("get");
+    assert_eq!(rec.credit_applications.len(), 1);
+    h.run(
+        s.ap_voids()
+            .bill_payment(paid[0].id, "contract clean-up", key()),
+    )
+    .expect("void");
+    assert_eq!(bill_balance(h, s, b), m("218.44"), "open again");
+    assert_eq!(
+        balance(h, s, disc.id),
+        Money::ZERO,
+        "the discount is undone"
+    );
+    let list = h
+        .run(s.bills().payable_list(&PayableFilter {
+            vendor: Some(v),
+            ..PayableFilter::default()
+        }))
+        .expect("payable");
+    let back = list
+        .credits
+        .iter()
+        .find(|x| x.id == c)
+        .expect("credit open");
+    assert_eq!(back.balance_due, m("214.07"), "the credit is back");
 }
 
 /// U-102: the same key twice makes one set of payments.

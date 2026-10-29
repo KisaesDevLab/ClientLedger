@@ -706,6 +706,10 @@ fn main() -> std::process::ExitCode {
             contract_pay_bills::mockup_run_with_discount_u101,
         ),
         (
+            "pay_bills::credit_and_discount_without_cash_u101",
+            contract_pay_bills::credit_and_discount_without_cash_u101,
+        ),
+        (
             "pay_bills::keyed_pay_u102",
             contract_pay_bills::keyed_pay_u102,
         ),
