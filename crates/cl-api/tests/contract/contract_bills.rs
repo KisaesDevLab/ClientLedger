@@ -60,7 +60,7 @@ fn mockup_bill(v: ContactId, a: AccountId, b: AccountId, reference: &str) -> Bil
     }
 }
 
-fn payables_account(h: &Harness, s: &Session) -> AccountId {
+pub(crate) fn payables_account(h: &Harness, s: &Session) -> AccountId {
     h.run(s.accounts().list_all(&AccountFilter::default()))
         .expect("accounts")
         .into_iter()

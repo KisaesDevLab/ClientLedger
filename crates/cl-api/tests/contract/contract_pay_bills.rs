@@ -9,13 +9,16 @@
 use cl_api::{
     AccountType, BillDraft, BillLineDraft, BillTerms, BillToPay, Capabilities, CheckNumbering,
     ContactFields, ContactType, CreditToApply, NewContact, PayBillsRequest, PayMethod, PayProblem,
-    PayableFilter, Percent, PostingOptions, Session, TxnStatus, VendorCreditDraft, pay_problem,
+    PayableFilter, Percent, PostingOptions, PrintProblem, Session, TxnStatus, VendorCreditDraft,
+    pay_problem, print_problem,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money};
 
 use crate::common::{account, date, key, m};
 use crate::contract_bank_postings::detail_account;
+use crate::contract_bills::payables_account;
+use crate::contract_printing::{in_queue, print_keyed};
 use crate::support::{Harness, unique};
 
 fn vendor(h: &Harness, s: &Session, name: &str) -> ContactId {
@@ -553,4 +556,176 @@ pub fn check_numbers_now_u103(h: &Harness) {
         )
         .expect_err("used");
     assert_eq!(pay_problem(&e), Some(PayProblem::CheckNumberInUse), "{e:?}");
+}
+
+/// A one-bill To be printed payment of `amount` from `bank` (no credits).
+fn pay_one(
+    h: &Harness,
+    s: &Session,
+    bank: AccountId,
+    b: TransactionId,
+    amount: &str,
+) -> TransactionId {
+    let paid = h
+        .run(s.bill_payments().pay(
+            &request(
+                bank,
+                vec![BillToPay {
+                    bill: b,
+                    cash: m(amount),
+                    discount: Money::ZERO,
+                }],
+                Vec::new(),
+            ),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    paid[0].id
+}
+
+/// PR-2 U-115: a bill-payment check To be printed and then voided leaves
+/// the print queue, and print refuses it with `CHECK_VOID`. (U-115 has no
+/// capability of its own: the pin's `idempotency-check-print-v1` names it.)
+pub fn voided_payment_leaves_the_queue_u115(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-115") {
+        return;
+    }
+    let s = &h.s1;
+    let expense = account(h, s, AccountType::Expense, "Voided pay");
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let v = vendor(h, s, "Voided pay vendor");
+    let b = bill(h, s, v, expense.id, "410.00", None, date(2026, 11, 8));
+    let id = pay_one(h, s, bank, b, "410.00");
+    assert!(in_queue(h, s, bank, id), "queued to print");
+    h.run(s.ap_voids().bill_payment(id, "contract clean-up", key()))
+        .expect("void");
+    assert!(!in_queue(h, s, bank, id), "a void payment leaves the queue");
+    let e = print_keyed(h, s, bank, vec![id], 6401, key()).expect_err("void");
+    assert_eq!(print_problem(&e), Some(PrintProblem::Voided), "{e:?}");
+}
+
+/// PR-2 U-117: a vendor paid by a credit alone, To be printed, gets no
+/// $0.00 check in the print queue.
+pub fn credits_only_queues_no_check_u117(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-117") {
+        return;
+    }
+    let s = &h.s1;
+    let expense = account(h, s, AccountType::Expense, "Credit only pay");
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let v = vendor(h, s, "Credit only vendor");
+    let b = bill(h, s, v, expense.id, "300.00", None, date(2026, 11, 8));
+    let c = credit(h, s, v, expense.id, "300.00");
+    let paid = h
+        .run(s.bill_payments().pay(
+            &request(
+                bank,
+                vec![BillToPay {
+                    bill: b,
+                    cash: Money::ZERO,
+                    discount: Money::ZERO,
+                }],
+                vec![CreditToApply {
+                    credit: c,
+                    bill: b,
+                    amount: m("300.00"),
+                }],
+            ),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(bill_balance(h, s, b), Money::ZERO, "paid by the credit");
+    for p in &paid {
+        assert_eq!(p.net_payment, Money::ZERO);
+        assert_ne!(p.print_status.as_deref(), Some("queue"), "no $0 check");
+        assert!(!in_queue(h, s, bank, p.id), "nothing to print");
+    }
+}
+
+/// PR-2 U-115/U-117: after voiding a payment made of cash, a credit and a
+/// discount, Accounts Payable moved by exactly the open bill less the open
+/// credit, all figures as the engine reports them.
+pub fn void_with_cash_credit_discount_restores_ap_u117(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-117")
+        || !h.require_cap(Capabilities::BILL_DISCOUNTS, "U-101")
+    {
+        return;
+    }
+    let s = &h.s1;
+    let expense = account(h, s, AccountType::Expense, "Void mix supplies");
+    let disc = account(h, s, AccountType::OtherRevenue, "Void mix discounts");
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let ap = payables_account(h, s);
+    let v = vendor(h, s, "Void mix vendor");
+    let ap_before = balance(h, s, ap);
+    let terms = BillTerms {
+        code: "custom".into(),
+        days: Some(15),
+        discount_percent: Percent::parse("2").ok(),
+        discount_days: Some(5),
+    };
+    let b = bill(
+        h,
+        s,
+        v,
+        expense.id,
+        "1000.00",
+        Some(terms),
+        date(2026, 11, 16),
+    );
+    let c = credit(h, s, v, expense.id, "200.00");
+    let mut req = request(
+        bank,
+        vec![BillToPay {
+            bill: b,
+            cash: m("780.00"),
+            discount: m("20.00"),
+        }],
+        vec![CreditToApply {
+            credit: c,
+            bill: b,
+            amount: m("200.00"),
+        }],
+    );
+    req.discount_account = Some(disc.id);
+    let paid = h
+        .run(
+            s.bill_payments()
+                .pay(&req, &PostingOptions::default(), key()),
+        )
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(bill_balance(h, s, b), Money::ZERO);
+    assert_eq!(
+        balance(h, s, ap),
+        ap_before,
+        "paid in full: A/P back where it was"
+    );
+    h.run(
+        s.ap_voids()
+            .bill_payment(paid[0].id, "contract clean-up", key()),
+    )
+    .expect("void");
+    let list = h
+        .run(s.bills().payable_list(&PayableFilter {
+            vendor: Some(v),
+            ..PayableFilter::default()
+        }))
+        .expect("payable");
+    let open_bills = Money::sum(list.bills.iter().map(|r| r.balance_due)).expect("bills");
+    let open_credits = Money::sum(list.credits.iter().map(|r| r.balance_due)).expect("credits");
+    assert_eq!(open_bills, m("1000.00"), "the bill is open again");
+    assert_eq!(open_credits, m("200.00"), "the credit is open again");
+    // Stored balances are debits - credits: A/P is credit-normal.
+    assert_eq!(
+        ap_before.checked_sub(balance(h, s, ap)).expect("delta"),
+        open_bills.checked_sub(open_credits).expect("net"),
+        "A/P = open bills - open credits"
+    );
+    assert_eq!(
+        balance(h, s, disc.id),
+        Money::ZERO,
+        "the discount is undone"
+    );
 }

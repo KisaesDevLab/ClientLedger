@@ -739,6 +739,30 @@ fn main() -> std::process::ExitCode {
             contract_printing::forms_queue_live,
         ),
         (
+            "pay_bills::voided_payment_leaves_the_queue_u115",
+            contract_pay_bills::voided_payment_leaves_the_queue_u115,
+        ),
+        (
+            "pay_bills::credits_only_queues_no_check_u117",
+            contract_pay_bills::credits_only_queues_no_check_u117,
+        ),
+        (
+            "pay_bills::void_with_cash_credit_discount_restores_ap_u117",
+            contract_pay_bills::void_with_cash_credit_discount_restores_ap_u117,
+        ),
+        (
+            "printing::voided_check_leaves_the_queue_u115",
+            contract_printing::voided_check_leaves_the_queue_u115,
+        ),
+        (
+            "printing::keyed_print_replays_u116",
+            contract_printing::keyed_print_replays_u116,
+        ),
+        (
+            "printing::requeue_skips_void_u117",
+            contract_printing::requeue_skips_void_u117,
+        ),
+        (
             "bills::backup_restore_keeps_the_bill_file_live",
             contract_bills::backup_restore_keeps_the_bill_file_live,
         ),
