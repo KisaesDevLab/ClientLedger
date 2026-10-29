@@ -142,7 +142,7 @@ enum Found {
 }
 
 /// Canonicalize the deepest existing ancestor and re-append the rest.
-fn resolve(path: &Path) -> PathBuf {
+pub(crate) fn resolve(path: &Path) -> PathBuf {
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = path.to_path_buf();
     loop {
