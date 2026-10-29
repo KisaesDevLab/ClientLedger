@@ -176,6 +176,10 @@ fn the_pay_body_sends_coverage_discount_and_credits() {
     let amount = |i: usize, k: &str| m(body["bills"][i][k].as_str().expect(k));
     assert_eq!(amount(0, "amount"), m("214.07"));
     assert_eq!(amount(0, "discountAmount"), m("4.37"));
+    // Two places on the wire (the engine refuses more on discountAmount).
+    assert_eq!(body["bills"][0]["discountAmount"], "4.37");
+    assert_eq!(body["bills"][1]["amount"], "3915.00");
+    assert_eq!(body["credits"][0]["amount"], "250.00");
     assert_eq!(amount(1, "amount"), m("3915.00"), "cash 3,665.00 + credit");
     assert!(body["bills"][1].get("discountAmount").is_none());
     assert_eq!(body["credits"][0]["creditId"], CREDIT);

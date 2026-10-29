@@ -480,6 +480,15 @@ fn cents(m: Money) -> bool {
     m.to_ten_thousandths() % 100 == 0
 }
 
+/// A cents amount as the engine's two-place text (`discountAmount` takes at
+/// most two places; the amounts go the same way).
+fn wire2(m: Money) -> String {
+    let units = m.to_ten_thousandths() / 100;
+    let sign = if units < 0 { "-" } else { "" };
+    let abs = units.unsigned_abs();
+    format!("{sign}{}.{:02}", abs / 100, abs % 100)
+}
+
 /// The engine's `amount` for `bill`: its cash plus the credits applied to
 /// it.
 fn coverage(req: &PayBillsRequest, b: &BillToPay) -> Result<Money, ApiError> {
@@ -529,9 +538,9 @@ pub(crate) fn pay_body(req: &PayBillsRequest, caps: &Capabilities) -> Result<Val
         }
         let mut row = Map::new();
         row.insert("billId".into(), Value::String(b.bill.to_string()));
-        row.insert("amount".into(), Value::String(amount.to_wire()));
+        row.insert("amount".into(), Value::String(wire2(amount)));
         if discounts && !b.discount.is_zero() {
-            row.insert("discountAmount".into(), Value::String(b.discount.to_wire()));
+            row.insert("discountAmount".into(), Value::String(wire2(b.discount)));
         }
         bills.push(Value::Object(row));
     }
@@ -542,7 +551,7 @@ pub(crate) fn pay_body(req: &PayBillsRequest, caps: &Capabilities) -> Result<Val
             json!({
                 "creditId": c.credit.to_string(),
                 "billId": c.bill.to_string(),
-                "amount": c.amount.to_wire(),
+                "amount": wire2(c.amount),
             })
         })
         .collect();
