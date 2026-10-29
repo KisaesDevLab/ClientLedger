@@ -1,0 +1,61 @@
+# Company Information (P19) against `clientledger --demo`: the logo picked
+# with Browse (a controlled run answers the file window with the synthetic
+# fixture picture), the company footer and one form's own footer, the
+# numbering rows with their own names, the duplicate warning when a typed
+# next number is already used (Q-94: a warning, never a refusal), the
+# unsaved dot and Save & Close (Alt+S).
+#
+# Light and dark run in the same app, so the scenario puts the footers and
+# the invoice number back at the end. All data is synthetic.
+name: company_info
+description: Logo browse, footer override, numbering names, duplicate warning, unsaved dot, Save & Close.
+steps:
+  - resize: {width: 1280, height: 900}
+  - set_zoom: {percent: 100}
+  - command: company.information
+  - assert_exists: {role: tab, label_contains: "Company Information"}
+  - assert_state: {key: screen.screen, equals: company_info}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
+  # --- Logo: Browse, answered with the synthetic fixture -----------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/docs/receipt.png"]}
+  - click: {role: button, label: "Browse…"}
+  - assert_state: {key: screen.logo, equals: true}
+  - assert_state: {key: screen.logo_hidden, equals: false}
+  - assert_state: {key: screen.notice, equals: company_info.logo.saved}
+  - assert_exists: {role: button, label: Remove}
+  # --- Footers: the company's and the invoice's own -----------------------------
+  - type: {text: "Thank you for your business.", target: {role: multiline_text_input, label: Company footer}}
+  - type: {text: "Payment due in 30 days.", target: {role: text_input, label: "Footer for Invoice (optional)"}}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_exists: {role: tab, label_contains: "Company Information"}
+  # --- Numbering: each box has its own name; INV- fits ---------------------------
+  - assert_value: {target: {role: text_input, label: Invoice prefix}, equals: "INV-"}
+  - assert_value: {target: {role: text_input, label: Invoice next number}, equals: "1042"}
+  - assert_exists: {role: text_input, label: Sales Receipt prefix}
+  - click: {role: text_input, label: Invoice next number}
+  - key: Ctrl+A
+  - type: {text: "1041"}
+  - assert_state: {key: screen.duplicates, equals: [invoice]}
+  - assert_exists: {label_contains: "INV-1041 is already the number of another"}
+  - screenshot: company-info
+  # Back to a free number: the warning goes.
+  - click: {role: text_input, label: Invoice next number}
+  - key: Ctrl+A
+  - type: {text: "1042"}
+  - assert_state: {key: screen.duplicates, equals: []}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.notice, equals: company_info.saved}
+  - assert_state: {key: screen.overrides, equals: 1}
+  - assert_state: {key: screen.footer_set, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
+  # --- Put the footers back; Save & Close (Alt+S) closes the window ------------
+  - click: {role: multiline_text_input, label: Company footer}
+  - key: Ctrl+A
+  - key: Delete
+  - click: {role: text_input, label: "Footer for Invoice (optional)"}
+  - key: Ctrl+A
+  - key: Delete
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+S
+  - assert_not_exists: {role: tab, label_contains: "Company Information"}

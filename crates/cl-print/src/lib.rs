@@ -1,16 +1,78 @@
-//! `cl-print` crate (stub; filled in by a later phase).
+//! `cl-print`: checks and forms as PDF bytes (P19).
+//!
+//! Layouts are specs in millimetres on US Letter ([`layout`]); the renderer
+//! ([`pdf`]) embeds IBM Plex and draws every text run exactly where the
+//! layout resolved it. Amounts arrive as `rust_decimal::Decimal` parsed by
+//! the caller from the engine's strings (Q-P19c); this crate formats them
+//! and, for voucher stubs only, adds them up (Q-213). Never floating point
+//! for money: `f32` is page geometry in millimetres.
+//!
+//! This crate makes bytes only. Sending a PDF to a printer or a viewer is
+//! `cl-host::os_print` (Q-P19a).
 #![forbid(unsafe_code)]
 
-/// Returns the crate name; placeholder so the skeleton has a testable item.
-#[must_use]
-pub fn crate_name() -> &'static str {
-    "cl-print"
-}
+pub mod amount;
+pub mod checks;
+pub mod envelopes;
+pub mod files;
+pub mod fonts;
+pub mod forms;
+pub mod image;
+pub mod layout;
+pub mod pdf;
+pub mod print_queue;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches() {
-        assert_eq!(super::crate_name(), "cl-print");
-    }
+pub use amount::{amount_in_words, check_figures, format_amount, format_quantity};
+pub use checks::{
+    AlignmentOffset, CheckData, CheckLabels, CheckOptions, CheckStyle, StubBill, StubCredit,
+    StubData, StubTotals, alignment_test, layout_checks,
+};
+pub use envelopes::{EnvelopeOptions, layout_envelope, layout_envelopes};
+pub use files::{default_save_dir, pdf_file_name};
+pub use fonts::Font;
+pub use forms::{
+    CompanyInfo, FormDoc, FormLabels, FormStyle, ItemLine, layout_form, resolve_footer,
+};
+pub use image::{Logo, LogoProblem};
+pub use layout::{Align, Document, Page, PageSize, Rect, ResolvedPage, Run, TextBox, resolve};
+pub use pdf::{render, render_resolved};
+pub use print_queue::{
+    Confirmation, DocKind, PendingChecks, PrintQueue, PrintRun, QueueError, RecordPrint,
+    RequeueCall, RunOutcome, RunState,
+};
+
+/// Why a document could not be laid out or rendered.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PrintError {
+    /// A document without pages.
+    #[error("there is nothing to print")]
+    NoPages,
+    /// An embedded font could not be read or subset (a build defect).
+    #[error("a built-in font could not be used: {0}")]
+    Font(String),
+    /// Compressing a font or picture failed (not expected).
+    #[error("the PDF could not be compressed: {0}")]
+    Compress(String),
+    /// A check amount below zero.
+    #[error("a check cannot be printed for a negative amount")]
+    NegativeAmount,
+    /// A check amount with a fraction of a cent.
+    #[error("the amount has a fraction of a cent, which a check cannot show")]
+    SubCent,
+    /// An amount too large to print or add up.
+    #[error("the amount is too large to print")]
+    AmountTooLarge,
+    /// An alignment offset beyond 10 mm.
+    #[error("the alignment adjustment must be within 10 mm in each direction")]
+    OffsetOutOfRange,
+    /// A number too wide for its box even at the smallest size (the tag
+    /// names the box).
+    #[error("a number is too wide to print in its space")]
+    DoesNotFit(String),
+    /// A voucher stub's total differs from the check amount.
+    #[error("the stub's total does not match the check amount")]
+    StubMismatch,
+    /// A form with more header fields than the template holds.
+    #[error("the form has more header fields than fit")]
+    TooManyFields,
 }

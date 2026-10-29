@@ -195,13 +195,14 @@ pub fn accounting(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits, loaded: &Load
     });
 }
 
-/// Check options and default accounts: later phases.
+/// Check options live in File > Printer Setup (P19); finance charges and
+/// 1099 mapping arrive later.
 pub fn checks_forms(ui: &mut Ui, tokens: &Tokens) {
     form::heading(ui, tokens, &t("prefs.cat.checks"));
     form::hint(ui, tokens, &t("prefs.company.checks_intro"));
     ui.add_space(8.0);
     form::card(ui, tokens, |ui| {
-        ui.add(egui::Label::new(t("prefs.company.checks_later")).selectable(false));
+        ui.add(egui::Label::new(t("prefs.company.checks_moved")).selectable(false));
         form::hint(ui, tokens, &t("prefs.company.finance_later"));
         form::hint(ui, tokens, &t("prefs.company.ten99_later"));
     });

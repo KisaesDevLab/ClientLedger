@@ -144,8 +144,14 @@ impl DepositScreen {
                 self.navigate(nav.older());
             }
             ui.separator();
-            ui.add_enabled(false, egui::Button::new(t("deposit.print")))
-                .on_disabled_hover_text(t("deposit.print.later"));
+            if ui
+                .add_enabled(self.can_print(), egui::Button::new(t("deposit.print")))
+                .on_hover_text(t("deposit.print.tip"))
+                .on_disabled_hover_text(t("deposit.print.unavailable"))
+                .clicked()
+            {
+                self.print_summary();
+            }
             let saved = self.record.is_some();
             let label = if self.show_summary {
                 t("deposit.form")
@@ -665,6 +671,44 @@ impl DepositScreen {
         }
     }
 
+    /// Print can run: a saved deposit (a void one too: it still has a
+    /// summary), or a new or changed one that can be saved.
+    pub(crate) fn can_print(&self) -> bool {
+        if self.save.task.is_some() || self.closing_prompt.dialog_open() {
+            return false;
+        }
+        let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
+        let dirty = self.is_dirty();
+        match (&self.record, self.editing.is_some()) {
+            (Some(_), true) if !dirty => true,
+            _ => dirty && !read_only,
+        }
+    }
+
+    /// Print deposit summary (Q-P19z): a saved deposit opens on its
+    /// summary's preview in File > Print Forms; a new or changed one is
+    /// saved first, read back, then previewed.
+    pub(crate) fn print_summary(&mut self) -> bool {
+        if !self.can_print() {
+            return false;
+        }
+        if !self.is_dirty()
+            && let (Some(e), Some(s)) = (self.editing.as_ref(), self.summary())
+        {
+            self.link.push(crate::company::CompanyEvent::OpenWith(
+                CommandId::new(crate::screens::print_forms::KIND),
+                Box::new(crate::windows::OpenPayload::PrintDeposit(e.id, Box::new(s))),
+            ));
+            return true;
+        }
+        self.print_after_save = true;
+        let started = self.start_save(SaveIntent::Save, None);
+        if !started && self.save.task.is_none() {
+            self.print_after_save = false;
+        }
+        started
+    }
+
     /// Keymap commands the grid and the closing dialog did not take.
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
@@ -690,7 +734,9 @@ impl DepositScreen {
                 true
             }
             "file.print" => {
-                self.save.notice = Some("deposit.print.later");
+                if !self.print_summary() && !self.print_after_save {
+                    self.save.notice = Some("deposit.print.unavailable");
+                }
                 true
             }
             "edit.void_transaction" => self.start_void(),

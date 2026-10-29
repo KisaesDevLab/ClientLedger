@@ -29,22 +29,27 @@ impl DepositScreen {
             items: r
                 .payments
                 .iter()
-                .map(|p| SummaryRow {
-                    label: name(p.contact),
-                    detail: p.memo.clone().unwrap_or_default(),
-                    amount: p.amount,
+                .map(|p| {
+                    let (check_no, method) =
+                        self.panel.seen.get(&p.source).cloned().unwrap_or_default();
+                    SummaryRow {
+                        label: name(p.contact),
+                        detail: p.memo.clone().unwrap_or_default(),
+                        check_no,
+                        method,
+                        amount: p.amount,
+                    }
                 })
                 .collect(),
             other: r
                 .lines
                 .iter()
+                // Received from is the payer, or blank (never the account).
                 .map(|l| SummaryRow {
-                    label: if l.contact.is_some() {
-                        name(l.contact)
-                    } else {
-                        account(l.account)
-                    },
+                    label: name(l.contact),
                     detail: l.memo.clone().unwrap_or_default(),
+                    check_no: String::new(),
+                    method: String::new(),
                     amount: l.amount,
                 })
                 .collect(),

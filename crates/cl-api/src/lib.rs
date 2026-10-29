@@ -161,7 +161,7 @@ pub use resources::bill_ocr::{
 pub use resources::bill_payments::{BillPaymentSummary, BillPayments};
 // P18: Pay Bills (engine U-101 to U-104).
 pub use resources::bill_payments::{
-    BILL_NOT_PAYABLE, BILL_NOT_RECEIVED, BillApplication, BillPaymentRecord, BillToPay,
+    AppliedDoc, BILL_NOT_PAYABLE, BILL_NOT_RECEIVED, BillApplication, BillPaymentRecord, BillToPay,
     CHECK_NUMBER_IN_USE, CREDIT_NOT_AVAILABLE, CheckNumbering, CreatedPayment, CreditApplication,
     CreditToApply, DISCOUNT_ACCOUNT_INVALID, DISCOUNT_ACCOUNT_REQUIRED, PayBillsRequest, PayMethod,
     PayProblem, PayableBill, PayableCredit, PayableFilter, PayableList, pay_problem,
@@ -171,6 +171,14 @@ pub use resources::bills::{
     TermsSource,
 };
 pub use resources::contacts::{SuggestSource, SuggestedAccount};
+pub use resources::printing::{
+    CHECK_BANK_ACCOUNT_UNKNOWN, CHECK_NOT_ON_BANK_ACCOUNT, CHECK_NOT_PRINTED, CheckFormat,
+    CheckLayout, ClaimedNumber, DocType, DocumentNumber, DocumentNumberUpdate,
+    DocumentNumberWarning, FormFooters, MAX_FOOTER_CHARS, MAX_LOGO_UPLOAD_BYTES, MAX_MARK_PRINTED,
+    MAX_NEXT_NUMBER, MAX_PREFIX_CHARS, MarkedPrinted, PrintChecks, PrintProblem, PrintedBatch,
+    Printing, QueuedCheck, QueuedCheckKind, QueuedForm, RequeuedCheck, SpoiledNumber,
+    SpoiledReason, number_warnings, print_problem, print_queue_from_json,
+};
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};
 pub use resources::vendor_credits::{
     AvailableCredit, CreditListQuery, CreditSort, CreditSummary, VendorCreditDraft, VendorCredits,

@@ -28,6 +28,7 @@ pub mod home;
 pub mod keymap;
 pub mod lists;
 pub mod lookup;
+pub mod numbering;
 pub mod register;
 pub mod rowkey;
 pub mod statement_match;

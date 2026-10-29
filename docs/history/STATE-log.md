@@ -2,6 +2,22 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-26 — A03 (ADD-01) complete on `phase/A03-local-reading`; PR with auto-merge. Shipped:
+  - `cl-docread` (rules: amounts, dates, header fields, kind, line tables, reconciliation checks, vendor and card matching, vendor layout templates, duplicate keys, AI amount gate) and the sandboxed `clientledger-docread` worker started by cl-host (protocol v3). Untrusted PDFs and pictures are parsed only in the worker or tesseract.
+  - OCR: Tesseract 5.5.3 + Leptonica 1.87.0 built from pinned source by `xtask ocr-build` (no network code, linkage allowlist), `tessdata_fast` eng + osd and `tessdata_best` eng for a second read of unsure pages (`xtask ocr-models`, SHA-256 pinned); clean-up, orientation, levelling, OCR fallback for PDFs without a usable text layer.
+  - Limits: Windows job object (commit cap, one process, no WER; confined `unsafe` in cl-host), Linux/macOS watchdog + RLIMIT_CPU/CORE (+ data limit, PDEATHSIG, netns on Linux), 30 s/page, leftover sweep; `docread-netcheck` CI (strace) and static no-network checks.
+  - Enter Bill "Read document" (offline, AI off; Accept required; checks shown, never adjust; Cancel; "Couldn't read…"), one button with "Ask AI to help" behind the new cloud consents (text / pictures, off for all; P17's receipt OCR path closed); CLI `clientledger-cli read`; "Card ends in" on credit card accounts.
+  - cl-api: document drafts, vendor templates, card last 4, assist, consent switches, archive omit/reset; engine U-92 (#178) and U-92d (#179) merged, pin 38cf97eb; a88337e3 archive restores.
+  - Synthetic set (25 layouts + held-out, scans and photos) via `xtask gen-invoices` and the accuracy harness/CI gate.
+  Acceptance (addenda/ADD-01-document-intake.md A03; Q-285 as amended by the owner 2026-10-26):
+  - [x] AI off, network off: header fields ≥ 95 % on text PDFs (100 % seen and held-out) and ≥ 85 % on scans/photos (scan 95–100 %, photo 88–100 %, PDFs without a text layer 85.7–100 %), 750 documents.
+  - [x] Saved template: ≥ 98 % on text PDFs (100 %); scans/photos with a template ≥ 85 % (owner amendment).
+  - [x] Non-reconciling totals flagged, never adjusted (T10/T11 incl. AI-filled values and no-subtotal receipts).
+  - [x] Speed: text 0.1 s/page, OCR p95 ≤ 2 s/page (CI timings; owner has no minimum-hardware machine, Q-A03n).
+  - [x] Malformed or hostile files can't crash or hang the desktop (sandbox, limits, hostile fixtures, security review).
+  Reviews: plan review (process-reviewer/opus xhigh: 8 must-change, fixed in the revised plan); security reviews of the sandbox (5 Medium, fixed), U-92 (2 Medium + 10 Low, fixed) and U-92d (3 Medium + 7 Low, fixed); fresh-eyes review (2 blocking: consent display vs engine, AI-filled values unreconciled; 8 should-fix; all fixed); ui-verifier (bill scenario wait, stray grid notice, outdated AI notice, accessibility; fixed). Deviation: the reading banner uses warning colours and an Accept button (non-negotiable 4) where the mockup shows an info banner.
+  Also: ADD-02 (A06, read a vendor statement into Match Vendor Statement) added on owner request; P18 on hold by the owner.
+  Agents: scout/opus, architect/opus ×2, process-reviewer/opus xhigh, impl/opus (WP-0, A, B, C, A2 ×2, F, G, G-cloud, card last 4, sandbox fix, review fixes ×2, pin, docs), engine-impl/opus (U-92, U-92 fixes, U-92d, U-92d fixes, U-92d CI), security-review/opus ×3, review/opus, ui-verifier/opus.
 - 2026-10-26 — A01 (ADD-01) complete on `phase/A01-intake-folders`; PR with auto-merge. Shipped:
   - Intake folders as a setting of each company, stored in the engine (U-93, engine PR #177, migration 0232, security-reviewed with 10 fixes) and carried by backups; transfer files drop them (`omitIntakeSettings` / `resetIntakeSettings`).
   - Preferences › Document intake (owner-only until P29): add with **Browse…** or a typed path, rename, remove, Test, kind, "Leave originals where they are", auto-read stored for A03/A04; each computer confirms a folder before it is watched (never archived).

@@ -29,7 +29,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("check.next.tip", "Next check (Page Down)"),
     ("check.find", "Find"),
     ("check.print", "Print"),
-    ("check.print.later", "Printing checks comes in a later update."),
+    ("check.print.unavailable", "Fill in the check to print it. A printed check uses Reprint check."),
     ("check.attach", "Attach"),
     ("check.attach.tip", "Attach a receipt or bill to this check"),
     ("check.attach.drop", "Drop a receipt here or choose a file"),

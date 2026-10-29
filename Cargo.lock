@@ -888,8 +888,10 @@ dependencies = [
  "cl-docread",
  "cl-host",
  "cl-pg",
+ "cl-print",
  "listeners",
  "nix",
+ "rust_decimal",
  "rustix 1.1.5",
  "serde_json",
  "sysinfo",
@@ -942,6 +944,16 @@ dependencies = [
 [[package]]
 name = "cl-print"
 version = "0.0.0"
+dependencies = [
+ "flate2",
+ "pdf-writer",
+ "png",
+ "rust_decimal",
+ "skrifa",
+ "subsetter",
+ "thiserror 2.0.21",
+ "zune-jpeg",
+]
 
 [[package]]
 name = "cl-settings"
@@ -971,6 +983,7 @@ dependencies = [
  "cl-host",
  "cl-import",
  "cl-model",
+ "cl-print",
  "cl-settings",
  "eframe",
  "fax",
@@ -979,6 +992,7 @@ dependencies = [
  "image",
  "pdfium-render",
  "rfd",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",

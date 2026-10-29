@@ -185,6 +185,9 @@ pub(crate) struct Loaded {
 #[derive(Default)]
 pub(crate) struct Panel {
     pub pending: Option<PendingDeposits>,
+    /// Every waiting payment seen this session: its check number and
+    /// payment method (plain words), for the printed summary.
+    pub seen: std::collections::BTreeMap<cl_core::ids::TransactionId, (String, String)>,
     pub pending_task: Option<Task<PendingDeposits>>,
     pub pending_failed: bool,
     pub waiting: Vec<FeedDeposit>,
@@ -245,6 +248,8 @@ pub struct DepositScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// P19 (Q-P19z): Print saved the deposit; preview its summary once it is read back.
+    pub(crate) print_after_save: bool,
     /// Save as Template and the template this deposit came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
 }
@@ -324,6 +329,7 @@ impl DepositScreen {
             lists_stale: false,
             nav_prompt: None,
             after_save_nav: None,
+            print_after_save: false,
             template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();

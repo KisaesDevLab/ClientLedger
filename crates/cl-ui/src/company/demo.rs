@@ -20,6 +20,7 @@ pub mod lists;
 pub mod money;
 // P18: Pay Bills.
 pub mod pay_bills;
+pub mod printing;
 pub mod register;
 pub mod template_store;
 pub mod templates;
@@ -111,6 +112,8 @@ pub struct DemoState {
     pub bills: bills::DemoBills,
     /// Bill payments made in the demo (P18).
     pub pay_bills: pay_bills::DemoPayBills,
+    /// Form printing (P19).
+    pub printing: printing::DemoPrinting,
     /// Intake folders as the demo engine keeps them (A01, U-93).
     pub intake: intake::DemoIntake,
     /// Document drafts as the demo engine keeps them (A04, WP-D).
@@ -230,6 +233,7 @@ impl DemoState {
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
             pay_bills: pay_bills::DemoPayBills::default(),
+            printing: printing::DemoPrinting::default(),
             intake: intake::DemoIntake::default(),
             // The demo engine has document drafts and attach (A04).
             drafts: drafts::DemoDrafts::on(),

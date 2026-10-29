@@ -490,6 +490,14 @@ impl DepositScreen {
             intent
         };
         self.follow_up(intent);
+        // Print (Q-P19z): read the saved deposit back; its summary
+        // previews once it is in front (`show_txn`).
+        if self.print_after_save {
+            match self.account() {
+                Some(account) => self.load_deposit(s.id, account),
+                None => self.print_after_save = false,
+            }
+        }
         self.refresh_pending();
         self.refresh_facts();
         // Prev/Next asked before the save (the unsaved-changes prompt).
@@ -556,6 +564,7 @@ impl DepositScreen {
 
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
+        self.print_after_save = false;
         self.after_save_nav = None;
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
@@ -776,6 +785,7 @@ impl DepositScreen {
         let r = match self.record_of(&v.record) {
             Ok(r) => r,
             Err(e) => {
+                self.print_after_save = false;
                 self.save.error = Some(e);
                 return;
             }
@@ -816,6 +826,9 @@ impl DepositScreen {
         self.panel.chosen = None;
         self.sync_inputs();
         self.refresh_facts();
+        if std::mem::take(&mut self.print_after_save) {
+            self.print_summary();
+        }
     }
 
     /// The edited deposit was changed elsewhere: read it again.

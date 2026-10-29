@@ -16,6 +16,10 @@
 //!   up, the backup history (`path`, `sha256`, `archiveId`, `createdAt`),
 //!   and the setup flags that wait for U-25 (fiscal calendar, sales tax,
 //!   inventory) (Q-P08a, Q-P08c).
+//! - [`printer_prefs`]: per-printer check alignment offsets and the last
+//!   printer used for checks and forms (P19), on this computer only.
+//! - [`unconfirmed_checks`]: printed check batches not yet confirmed, so
+//!   the Needs-attention reminder survives a restart (P19, Q-P19n).
 //! - [`secrets`]: a small keychain-backed secret store for the backup
 //!   passphrase (Q-P02i). Secrets never touch the JSON file.
 //!
@@ -27,10 +31,12 @@ pub mod ai;
 pub mod company_prefs;
 pub mod inbox_state;
 pub mod migrate_inbox;
+pub mod printer_prefs;
 pub mod recent;
 pub mod secrets;
 pub mod smtp;
 mod store;
+pub mod unconfirmed_checks;
 pub mod user_prefs;
 
 pub use ai::{
@@ -39,12 +45,16 @@ pub use ai::{
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
 };
+pub use printer_prefs::{OffsetError, PrintKind, PrinterOffset, PrinterPrefs, PrinterPrefsStore};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
     RecentCompanies, RecentError, RecentStore,
 };
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
 pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};
+pub use unconfirmed_checks::{
+    UnconfirmedBatch, UnconfirmedCheck, UnconfirmedChecks, UnconfirmedChecksStore,
+};
 pub use user_prefs::{
     DateFormat, DateWarnings, NegativeStyle, StartScreen, ThemeChoice, UpdateCheck, UserPrefs,
     UserPrefsStore,

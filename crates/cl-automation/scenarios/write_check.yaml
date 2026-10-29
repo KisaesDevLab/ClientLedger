@@ -10,9 +10,10 @@
 # Light and dark run in the same app, so the scenario is repeatable: it voids
 # 4418 at the end to free the number (Q-P13w), deletes the closed-period
 # check in the register, and every pass starts on the story's ending balance
-# (84,210.55) and next number (4418). The demo has no check printing before
-# P19; `dev.check_mark_printed` (a `--demo`-only developer command) marks the
-# check in front as printed. All data is synthetic.
+# (84,210.55) and next number (4418). `dev.check_mark_printed` (a
+# `--demo`-only developer command) marks the check in front as printed for
+# the printed-check question; P19's Print and Reprint check run on the
+# print-later check before it is voided. All data is synthetic.
 name: write_check
 description: Mockup example, refused mismatch, register, Print later, AI suggestion on/off, closing password, Prev prompt, printed check.
 steps:
@@ -38,7 +39,8 @@ steps:
   - assert_state: {key: screen.ending_balance_shown, equals: true}
   - assert_exists: {role: label, label: "84,210.55"}
   - assert_state: {key: screen.number, equals: 4418}
-  # Not before P15 / P20 (Q-P13a, Q-P13b); Print waits for P19 (Q-P13c).
+  # Not before P20 (Q-P13b). Print (P19, Q-P19s) needs a check to print: a
+  # blank form has none.
   - assert_exists: {role: button, label: Save as Template}
   - assert_not_exists: {role: button, label: Pay online}
   - assert_not_exists: {label_contains: Items}
@@ -335,6 +337,36 @@ steps:
   # again, so the next run's prefill and panel match step 3.
   - key: PageUp
   - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.edit_print_status, equals: queue}
+  - assert_state: {key: screen.number_text, equals: "To print"}
+  # P19 (Q-P19s): Print opens this check on its preview in Print Forms;
+  # after "All printed correctly" the check shows its number, Printed and
+  # Reprint check (B2).
+  - assert_enabled: {role: button, label: Print}
+  - click: {role: button, label: Print}
+  - assert_exists: {role: tab, label_contains: "Print Forms"}
+  - assert_state: {key: screen.screen, equals: print_forms}
+  - assert_state: {key: screen.preview.kind, equals: checks}
+  - assert_state: {key: screen.preview.pages, equals: 1}
+  - click: {role: button, label: Print}
+  - assert_state: {key: screen.asking, equals: true}
+  - click: {role: button, label: All printed correctly}
+  - assert_state: {key: screen.asking, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.edit_print_status, equals: printed}
+  - assert_exists: {role: button, label: Reprint check}
+  - assert_disabled: {role: button, label: Print}
+  - screenshot: printed
+  # Reprint check (Q-P19ab): back to the queue, its number spoiled, preview
+  # first; closing the preview leaves it waiting to print.
+  - click: {role: button, label: Reprint check}
+  - assert_state: {key: screen.screen, equals: print_forms}
+  - assert_state: {key: screen.preview.kind, equals: checks}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
   - assert_state: {key: screen.edit_print_status, equals: queue}
   - assert_state: {key: screen.number_text, equals: "To print"}
   - command: edit.void_transaction

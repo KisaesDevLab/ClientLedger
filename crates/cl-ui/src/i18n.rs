@@ -107,9 +107,11 @@ mod doc_form;
 mod doc_review;
 // P18.
 mod pay_bills;
+// P19.
+mod print;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 33] = [
+const TABLES: [&[(&str, &str)]; 34] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -143,6 +145,7 @@ const TABLES: [&[(&str, &str)]; 33] = [
     doc_form::ENGLISH,
     compare::ENGLISH,
     pay_bills::ENGLISH,
+    print::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -269,10 +272,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.lan_sub", "Another computer here is sharing it"),
     ("open.practice", "Try the practice company"),
     ("open.practice_sub", "Explore without touching real books"),
-    ("open.practice_later", "The practice company is not set up on this computer yet."),
+    ("open.practice_later", "Sign in first; the practice company opens right after."),
+    ("open.practice_after_signin", "The practice company opens as soon as you sign in."),
+    ("open.practice_after_signin_sub", "Opens right after you sign in"),
     ("open.practice_loading", "Building the practice company (about a minute)\u{2026}"),
     ("open.footer.offline", "Works fully offline"),
-    ("open.footer.not_affiliated", "Not affiliated with Intuit Inc. Intuit and QuickBooks are trademarks of Intuit Inc."),
     ("open.probing", "Getting ready\u{2026}"),
     ("open.engine_not_ready", "ClientLedger is still starting up. The status bar shows how it is doing."),
     ("open.opening", "Opening\u{2026}"),

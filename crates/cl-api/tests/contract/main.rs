@@ -40,6 +40,7 @@ mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
 mod contract_preferences;
+mod contract_printing;
 mod contract_register;
 mod contract_register_property;
 mod contract_resources;
@@ -716,6 +717,26 @@ fn main() -> std::process::ExitCode {
         (
             "pay_bills::check_numbers_now_u103",
             contract_pay_bills::check_numbers_now_u103,
+        ),
+        (
+            "printing::check_print_cycle",
+            contract_printing::check_print_cycle,
+        ),
+        (
+            "printing::reprint_closed_period",
+            contract_printing::reprint_closed_period,
+        ),
+        (
+            "printing::logo_and_footers",
+            contract_printing::logo_and_footers,
+        ),
+        (
+            "printing::document_numbers_live",
+            contract_printing::document_numbers_live,
+        ),
+        (
+            "printing::forms_queue_live",
+            contract_printing::forms_queue_live,
         ),
         (
             "bills::backup_restore_keeps_the_bill_file_live",

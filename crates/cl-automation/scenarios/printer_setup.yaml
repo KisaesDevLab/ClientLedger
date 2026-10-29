@@ -1,0 +1,38 @@
+# Printer Setup (P19) against `clientledger --demo`: the made-up printers,
+# the alignment offset in millimetres for the chosen printer (this
+# computer), the check style and company block for Operating Checking, the
+# plain-paper ruler test page. An offset over 10 mm is refused. Nothing
+# reaches a printer. All data is synthetic.
+name: printer_setup
+description: Offset per printer, check style per account, alignment test.
+steps:
+  - resize: {width: 1280, height: 900}
+  - set_zoom: {percent: 100}
+  - command: file.printer_setup
+  - assert_exists: {role: tab, label_contains: "Print Forms"}
+  - command: dev.demo_print_reset
+  - assert_state: {key: screen.setup_open, equals: true}
+  - assert_state: {key: screen.printers, equals: 2}
+  - assert_value: {target: {role: combo_box, label: Printer}, equals: "Office Laser"}
+  - click: {role: text_input, label: Move right (mm)}
+  - key: Ctrl+A
+  - type: {text: "12"}
+  - click: {role: button, label: Save setup}
+  - assert_state: {key: screen.notice, equals: print.setup.bad_offset}
+  - click: {role: text_input, label: Move right (mm)}
+  - key: Ctrl+A
+  - type: {text: "1.5"}
+  - click: {role: text_input, label: Move down (mm)}
+  - key: Ctrl+A
+  - type: {text: "-0.5"}
+  - click: {role: check_box, label: "Print company name and logo on this account's checks"}
+  - click: {role: button, label: Save setup}
+  - assert_state: {key: screen.notice, equals: print.setup.saved}
+  - assert_state: {key: screen.company_block, equals: true}
+  - screenshot: setup
+  - click: {role: button, label: Print alignment test…}
+  - assert_state: {key: screen.preview.kind, equals: alignment}
+  - screenshot: alignment
+  - click: {role: button, label: Back to the list}
+  - command: dev.demo_print_reset
+  - command: file.close_window

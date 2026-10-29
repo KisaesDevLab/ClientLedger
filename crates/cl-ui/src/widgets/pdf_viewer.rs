@@ -919,7 +919,14 @@ fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Respons
     } else {
         ui.add_enabled(false, button)
     };
-    r.widget_info(|| WidgetInfo::labeled(Role::Button, ready, t("viewer.zoom.label")));
+    // The name stays "Zoom"; the zoom it shows ("Fit width") is its value,
+    // so a screen reader reads both.
+    let shown = zoom_text(state.zoom);
+    r.widget_info(|| {
+        let mut info = WidgetInfo::labeled(Role::Button, ready, t("viewer.zoom.label"));
+        info.current_text_value = Some(shown.clone());
+        info
+    });
     if let Some(z) = picked {
         state.set_zoom(z);
         state.want_focus = true;

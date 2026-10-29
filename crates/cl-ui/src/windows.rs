@@ -145,6 +145,20 @@ pub enum OpenPayload {
     /// A06: a statement draft (U-94) opened in Match Vendor Statement
     /// (`nav.statement_match`), its file read there.
     StatementDraft(cl_api::DocumentDraftId),
+    /// P19: checks to print now (Write Check / Pay Bills `Print`, Reprint
+    /// check): File > Print Forms opens on their preview.
+    PrintChecks(Vec<cl_core::ids::TransactionId>),
+    /// P19: Reprint check (Q-P19ab): the printed check goes back to the
+    /// queue (closing-date password when closed) and previews with the
+    /// next number.
+    ReprintCheck(cl_core::ids::TransactionId, cl_core::CalendarDate),
+    /// P19 (Q-P19z): a saved deposit's summary, previewed in File > Print
+    /// Forms. The summary is the saved record's, with the names Make
+    /// Deposit already resolved (Print Forms has no name lists).
+    PrintDeposit(
+        cl_core::ids::TransactionId,
+        Box<cl_model::forms::deposit::DepositSummary>,
+    ),
 }
 
 /// Stand-in for a screen a later phase builds.

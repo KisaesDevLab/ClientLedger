@@ -231,6 +231,21 @@ fn the_mockup_run_totals_and_pays_to_the_penny() {
     assert_eq!(r.credits[0].amount, m("250.00"));
     assert_eq!(s.state()["paid_count"], 1);
     assert_eq!(s.state()["selected"], 0, "cleared after paying");
+    // Ctrl+P prints the check just written (Print later), then nothing
+    // is left to print.
+    assert!(s.command(CommandId::new("file.print")));
+    assert_eq!(s.to_print.len(), 0);
+    assert!(s.command(CommandId::new("file.print")));
+    assert_eq!(s.notice, Some("paybills.print.nothing"));
+}
+
+#[test]
+fn the_paid_line_counts_in_words() {
+    assert_eq!(super::draw::paid_text(1, 1), "Paid 1 bill with 1 payment.");
+    assert_eq!(
+        super::draw::paid_text(3, 2),
+        "Paid 3 bills with 2 payments."
+    );
 }
 
 #[test]

@@ -37,6 +37,10 @@ pub enum PickUse {
     IntakeFolder,
     /// A file to attach to a bill or a check.
     Attachment,
+    /// Where to save a printed form as PDF (P19, Q-P19x).
+    SavePdf,
+    /// The company logo (P19, Q-P19v).
+    Logo,
 }
 
 impl PickUse {
@@ -45,6 +49,8 @@ impl PickUse {
         match self {
             PickUse::IntakeFolder => "picker.title.intake_folder",
             PickUse::Attachment => "picker.title.attachment",
+            PickUse::SavePdf => "picker.title.save_pdf",
+            PickUse::Logo => "picker.title.logo",
         }
     }
 }
@@ -63,6 +69,12 @@ pub struct Filter {
 pub const DOCUMENTS: Filter = Filter {
     name_key: "picker.filter.documents",
     extensions: &["pdf", "jpg", "jpeg", "png", "tif", "tiff"],
+};
+
+/// A company logo: PNG or JPEG (Q-P19v).
+pub const IMAGES: Filter = Filter {
+    name_key: "picker.filter.images",
+    extensions: &["png", "jpg", "jpeg"],
 };
 
 /// One queued answer for the [`PickerHook`].
@@ -280,6 +292,52 @@ pub fn pick_files(
         });
     if spawned.is_err() {
         tracing::warn!("the Browse dialog could not start");
+    }
+    rx
+}
+
+/// Asks where to save `file_name` (a PDF), opening in the last folder
+/// chosen for `use_`, else `start`. `None` when cancelled.
+#[must_use]
+pub fn save_file(
+    ctx: &Context,
+    use_: PickUse,
+    start: Option<&Path>,
+    file_name: &str,
+) -> Receiver<Option<PathBuf>> {
+    let (tx, rx) = channel();
+    let last = last_folders(ctx);
+    if let Some(hook) = active_hook(ctx) {
+        let chosen = match hook.take() {
+            Answer::Paths(p) => p.into_iter().next(),
+            Answer::Cancel => None,
+        };
+        remember(&last, use_, chosen.as_deref().and_then(Path::parent));
+        let _ = tx.send(chosen);
+        return rx;
+    }
+    let start = last_folder(ctx, use_).or_else(|| start.map(Path::to_path_buf));
+    let title = crate::i18n::t(use_.title_key());
+    let filter = crate::i18n::t("picker.filter.pdf");
+    let name = file_name.to_string();
+    let repaint = ctx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("cl-browse".into())
+        .spawn(move || {
+            let mut d = rfd::AsyncFileDialog::new()
+                .set_title(title)
+                .add_filter(filter.as_str(), &["pdf"])
+                .set_file_name(name);
+            if let Some(dir) = start {
+                d = d.set_directory(dir);
+            }
+            let chosen = block_on(d.save_file()).map(|h| h.path().to_path_buf());
+            remember(&last, use_, chosen.as_deref().and_then(Path::parent));
+            let _ = tx.send(chosen);
+            repaint.request_repaint();
+        });
+    if spawned.is_err() {
+        tracing::warn!("the Save dialog could not start");
     }
     rx
 }

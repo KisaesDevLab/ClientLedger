@@ -791,6 +791,42 @@ fn a_printed_check_edit_asks_reprint_or_keep_the_number() {
     assert_eq!(s.state()["last_saved"]["print_status"], "queue");
 }
 
+/// B2: a print run numbers the saved check in front; the form reads it
+/// again and shows the number, the printed state and Reprint check.
+#[test]
+fn a_print_run_refreshes_the_saved_check_in_front() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.hear_changes();
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    s.set_print_later(true);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["edit_print_status"], "queue");
+    let (id, bank) = s.editing.as_ref().map(|e| (e.id, e.bank)).expect("editing");
+    {
+        let mut d = link.demo_state().expect("demo");
+        let n = crate::company::demo::printing::layout(&mut d, bank)
+            .0
+            .expect("next");
+        assert_eq!(n, 4418);
+        let req = cl_api::PrintChecks {
+            bank_account: bank,
+            checks: vec![id],
+            starting_number: n,
+            format: cl_api::CheckFormat::Voucher,
+        };
+        crate::company::demo::printing::print(&mut d, &req, None).expect("print");
+    }
+    link.bus().publish(crate::data_bus::Change::Printing);
+    s.hear_changes();
+    s.poll();
+    assert_eq!(s.state()["edit_print_status"], "printed");
+    assert_eq!(s.state()["number"], 4418);
+    assert!(!s.can_print_now(), "a printed check reprints instead");
+}
+
 /// The demo-only `dev.check_mark_printed` (the scenario's way to the
 /// printed-check question before P19): only a saved check, then the edit
 /// asks.
@@ -1001,7 +1037,7 @@ fn every_input_is_named_by_its_label_and_the_toolbar_matches_the_plan() {
             .iter()
             .find(|(r, n, _)| *r == Role::Button && n == "Print")
             .expect("Print");
-        assert!(print.2, "Print is off until P19");
+        assert!(!print.2, "Print works on a filled-in check (Q-P19s)");
         // P15 adds Save as Template (Q-256); the rest stay out.
         assert!(has(Role::Button, "Save as Template"));
         for name in ["Memorize", "Pay online", "Items"] {
@@ -1710,4 +1746,38 @@ fn b2_a_recheck_that_finds_the_check_shows_it() {
     assert!(!s.header.is_unconfirmed());
     assert_eq!(s.editing.as_ref().map(|e| e.id), other.first().copied());
     assert!(!s.is_dirty());
+}
+
+#[test]
+fn print_on_a_new_check_saves_it_to_print_and_opens_the_preview() {
+    use crate::company::CompanyEvent;
+    use crate::windows::OpenPayload;
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // A blank check has nothing to print.
+    assert!(!s.can_print_now());
+    fill(&mut s, "100.00", &[("5110", "100.00")]);
+    assert!(s.can_print_now());
+    let _ = link.drain();
+    assert!(s.print_now());
+    s.poll();
+    assert_eq!(s.state()["last_saved"]["print_status"], "queue");
+    assert_eq!(s.state()["last_saved"]["number"], Value::Null);
+    let opened: Vec<_> = link
+        .drain()
+        .into_iter()
+        .filter_map(|e| match e {
+            CompanyEvent::OpenWith(kind, p) => match *p {
+                OpenPayload::PrintChecks(ids) => Some((kind, ids)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened.len(), 1, "Print Forms opens on the check");
+    assert_eq!(opened[0].0.as_str(), crate::screens::print_forms::KIND);
+    assert_eq!(opened[0].1.len(), 1);
+    // Save & New: a fresh check is in front.
+    assert!(s.editing.is_none());
+    assert!(!s.print_after_save);
 }

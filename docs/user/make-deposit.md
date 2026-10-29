@@ -27,6 +27,10 @@ Press **Refund from a vendor** when a vendor paid you back.
 - **Something I already paid for** adds a line that takes the refund off what you spent. Pick the vendor and type the amount.
 - **A vendor credit or overpayment** uses up a credit the vendor owes you.
 
+## Printing the deposit summary
+
+Click **Print** to print the deposit summary. A new or changed deposit is saved first, and you see a preview before anything prints. See [Printing forms](printing-forms.md).
+
 ## Changing or voiding a deposit
 
 Use **Prev** and **Next** (`Page Up`, `Page Down`) to look at earlier deposits, or press `Ctrl+E` on a deposit in a register. **Summary** shows what went into a saved deposit.

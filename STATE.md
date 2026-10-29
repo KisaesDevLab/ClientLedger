@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P19 — Form printing (next). P18 done 2026-10-28. A05 runs right after P26.
-**Status:** P18 PR open with auto-merge.
-**Engine commit:** `e45658fb` (`main`, pinned 2026-10-28 after engine PR #193 (U-101–U-104, Pay Bills discounts, idempotent pay, check numbers, company scope; migrations 0236–0238); before that `5a9a8700` (pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
-**Last updated:** 2026-10-28
+**Current phase:** PR-2 — Purchasing lifecycle checkpoint (next), then P20 — Create Invoice. P19 done 2026-10-29. A05 runs right after P26.
+**Status:** P19 PR open with auto-merge.
+**Engine commit:** `12187716` (`main`, pinned 2026-10-29 after engine PRs #194 (U-106–U-110, check printing, migration 0239) and #195 (U-111, U-113, document numbering and forms print queue, migration 0240); before that `e45658fb` (pinned 2026-10-28 after engine PR #193 (U-101–U-104, Pay Bills discounts, idempotent pay, check numbers, company scope; migrations 0236–0238); before that `5a9a8700` (pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
+**Last updated:** 2026-10-29
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -31,7 +31,7 @@
 | PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Done 2026-10-25 |
 | P18 | Pay Bills (checks) | M | Done 2026-10-28 |
-| P19 | Form printing | L | |
+| P19 | Form printing | L | Done 2026-10-29 |
 | P20 | Create Invoice | M | |
 | P21 | Receive Payment | H | |
 | P22 | Credit memos, refunds, statements, finance charges | M | |
@@ -191,12 +191,30 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 4. Engine main CI (npm-audit) is failing; pre-existing, not caused by PR #159.
 5. The vendor A/P aging summary lists bills only; vendor refunds are not reflected there (the vendor statement shows them).
 
+## Follow-ups from P19
+
+1. A deposit opened later prints blank Check no. and Payment method columns on its summary (the saved deposit record doesn't carry them).
+2. If a save stops at the closing-date password, Print after save is dropped; the owner clicks Print again.
+3. Two rare lock-order deadlocks in the engine (printChecks vs updateCheck; document-number claim vs check edits): PostgreSQL fails one request.
+4. U-114: no engine route to delete a company logo; Remove hides it locally.
+5. Open Company keeps plain circles until an icon set exists (Q-P19aq).
+6. Old PR #50 commits with the owner's path may be reachable by SHA on GitHub until purged.
+
 ## Follow-ups from P15
 
 1. Engine issue #162: flaky pgboss-owner-role test (not caused by PRs #160 or #161).
 2. Make Journal Entry has no side panel and no History yet (Q-P15z).
 3. The demo ledger doesn't store basis.
 4. A `--demo` launch skips the catch-up (File > Open Company runs it).
+
+## Follow-ups from P19
+
+1. A deposit opened later prints blank Check no. and Payment method columns on its summary (the saved deposit record doesn't carry them).
+2. If a save stops at the closing-date password, Print after save is dropped; the owner clicks Print again.
+3. Two rare lock-order deadlocks in the engine (printChecks vs updateCheck; document-number claim vs check edits): PostgreSQL fails one request.
+4. U-114: no engine route to delete a company logo; Remove hides it locally.
+5. Open Company keeps plain circles until an icon set exists (Q-P19aq).
+6. Old PR #50 commits with the owner's path may be reachable by SHA on GitHub until purged.
 
 ## Follow-ups from P15A
 
@@ -322,6 +340,17 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-29 — P19 Form printing complete on `phase/P19-form-printing`; PR with auto-merge. Shipped:
+  - Engine PRs #194 (U-106–U-110: reprint/requeue audit with closed-period password and the old number logged and reusable, company scope and counter lock on print, payee address in the queue, bill details on bill-payment applications, check style and company block per bank account, logo download; migration 0239) and #195 (U-111, U-113: numbering per company and type with prefix and duplicate warnings, company footers with per-type overrides, Print later for forms; migration 0240); pin 12187716.
+  - `cl-print`: PDF engine on pdf-writer with embedded Plex; checks standard / voucher / z-fold (stubs list bills paid or expense lines, totals must match the check), amount in words in capitals, company block optional; invoice, sales receipt, credit memo, statement (own data, U-112 for P22), deposit summary; #10 window positions, #10 envelopes, hide-$0 lines, footer, logo with size limits; numbers shrink, never clip.
+  - `cl-host` OS print: Windows direct printing through GDI (`win_print.rs`, documented unsafe), print verb / `lp`, then open the PDF; printer list, copies, temp PDFs swept at startup. `cl-settings` per-printer offsets, last printer per kind, unanswered print batches.
+  - `cl-ui`: File > Print Forms (checks and forms queues, preview, Print / Save PDF / Envelopes; numbers recorded at Print; "Did all checks print correctly?" with reprint of the bad ones and a Home reminder), Printer Setup (offsets per printer, ruler test, style and company block per account), Print and Reprint check on Write Check, Print checks on Pay Bills (Ctrl+P), Print deposit summary on Make Deposit, Company > Company Information (logo, footers, numbering with duplicate warning). Open Company: scrolls, practice company reachable before sign-in, File > Open Practice Company (Q-P19ao); Intuit notice removed from Open Company, kept in About (Q-P19ap).
+  - Help `docs/user/printing-checks.md`, `printing-forms.md`; scenarios `print_checks`, `print_forms`, `printer_setup`, `company_info`, updated `write_check`, `pay_bills`, `deposit`, `open_company`.
+  - Acceptance: [x] field positions within ±0.5 mm at 100% (layout and PDF content-stream tests for every check style, window addresses and envelopes); [x] reprint logs the original number (engine audit row per check; per owner Q-P19b the number is logged and may be reused, not voided).
+  - Checks: full local `cargo xtask ci` green (4 build jobs / 4 test threads after one run was stopped for low memory); 5 live printing contract tests; ui-check light and dark for all eight scenarios.
+  - Also merged in: PR #50 (secret names changed after the first start on Windows; owner's company would not open), with review fixes.
+  - Decisions: Q-P19a–aq (owner answered b, f–q, s–ad, ae, af, ao, ap); P20 and P21 decisions taken early (Q-P20a–m, Q-P21a–f). Proposed: U-112 (P22), U-114 (logo delete).
+  - Agents: engine-scout, engine-implementer ×2 (build, review fixes), rust-implementer ×5 (cl-print, fixes + Windows print, API + screens, gaps, screen fixes; three were turn- or context-limited and continued fresh), reviewer ×2 (phase, PR #50) and ui-verifier on opus; docs-writer on sonnet. Exceeds the 2-implementer rule (Q-301) because of context limits; noted for the owner.
 - 2026-10-28 — P18 Pay Bills (checks and credit card) complete on `phase/P18-pay-bills`; PR with auto-merge. Shipped:
   - Engine PR #193 (U-101–U-104, pin e45658fb, migration 0238): early-payment discounts (`discountAmount`, discount account, company default `billDiscountAccountId`, engine-rounded `discountAvailable`), keyed pay (Idempotency-Key), first `checkNumber` for checks numbered now, company scope on payable and bill-payment reads; also voiding now reopens bills settled only by the payment's credits.
   - `cl-api` pay, payable list, read-back, void, discount-account setting, plain-language errors; `cl-model::forms::bill_payment` (selection, filters, discounts and credits auto-applied and refitted, partial payments, totals over selected bills, request with amount = cash + credits); `cl-ui` Pay Bills screen (Ctrl+Shift+B; Check or Credit card; To be printed / Assign check numbers; balance before → after), Set Discount / Set Credits, read-only Bill Payment view with Void (OpenRecord from registers), Write Check "Go to Pay Bills" link, Home and Vendors placeholders removed; an unknown pay outcome never pays twice. `cl-grid` columns scroll sideways to keep the cursor in view.
@@ -357,22 +386,6 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Reviews: plan review (opus), security reviews of U-95 and protocol 4 (2 Medium + 7 Low, fixed), combined review (2 blocking: closing password before the register search, failed search posts; 5 should-fix, 6 low; all fixed), ui-verifier (12 items, fixed).
   Also: xtask finds the shared build dir through cargo metadata; usage rules Q-301 in force from this phase; owner answered A06's balance line (CSV report amounts) and U-94 (go).
   Agents: scout/opus, architect/opus, impl/opus (WPs, fix pass), engine-impl/opus (U-95, U-97), security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
-- 2026-10-26 — A03 (ADD-01) complete on `phase/A03-local-reading`; PR with auto-merge. Shipped:
-  - `cl-docread` (rules: amounts, dates, header fields, kind, line tables, reconciliation checks, vendor and card matching, vendor layout templates, duplicate keys, AI amount gate) and the sandboxed `clientledger-docread` worker started by cl-host (protocol v3). Untrusted PDFs and pictures are parsed only in the worker or tesseract.
-  - OCR: Tesseract 5.5.3 + Leptonica 1.87.0 built from pinned source by `xtask ocr-build` (no network code, linkage allowlist), `tessdata_fast` eng + osd and `tessdata_best` eng for a second read of unsure pages (`xtask ocr-models`, SHA-256 pinned); clean-up, orientation, levelling, OCR fallback for PDFs without a usable text layer.
-  - Limits: Windows job object (commit cap, one process, no WER; confined `unsafe` in cl-host), Linux/macOS watchdog + RLIMIT_CPU/CORE (+ data limit, PDEATHSIG, netns on Linux), 30 s/page, leftover sweep; `docread-netcheck` CI (strace) and static no-network checks.
-  - Enter Bill "Read document" (offline, AI off; Accept required; checks shown, never adjust; Cancel; "Couldn't read…"), one button with "Ask AI to help" behind the new cloud consents (text / pictures, off for all; P17's receipt OCR path closed); CLI `clientledger-cli read`; "Card ends in" on credit card accounts.
-  - cl-api: document drafts, vendor templates, card last 4, assist, consent switches, archive omit/reset; engine U-92 (#178) and U-92d (#179) merged, pin 38cf97eb; a88337e3 archive restores.
-  - Synthetic set (25 layouts + held-out, scans and photos) via `xtask gen-invoices` and the accuracy harness/CI gate.
-  Acceptance (addenda/ADD-01-document-intake.md A03; Q-285 as amended by the owner 2026-10-26):
-  - [x] AI off, network off: header fields ≥ 95 % on text PDFs (100 % seen and held-out) and ≥ 85 % on scans/photos (scan 95–100 %, photo 88–100 %, PDFs without a text layer 85.7–100 %), 750 documents.
-  - [x] Saved template: ≥ 98 % on text PDFs (100 %); scans/photos with a template ≥ 85 % (owner amendment).
-  - [x] Non-reconciling totals flagged, never adjusted (T10/T11 incl. AI-filled values and no-subtotal receipts).
-  - [x] Speed: text 0.1 s/page, OCR p95 ≤ 2 s/page (CI timings; owner has no minimum-hardware machine, Q-A03n).
-  - [x] Malformed or hostile files can't crash or hang the desktop (sandbox, limits, hostile fixtures, security review).
-  Reviews: plan review (process-reviewer/opus xhigh: 8 must-change, fixed in the revised plan); security reviews of the sandbox (5 Medium, fixed), U-92 (2 Medium + 10 Low, fixed) and U-92d (3 Medium + 7 Low, fixed); fresh-eyes review (2 blocking: consent display vs engine, AI-filled values unreconciled; 8 should-fix; all fixed); ui-verifier (bill scenario wait, stray grid notice, outdated AI notice, accessibility; fixed). Deviation: the reading banner uses warning colours and an Accept button (non-negotiable 4) where the mockup shows an info banner.
-  Also: ADD-02 (A06, read a vendor statement into Match Vendor Statement) added on owner request; P18 on hold by the owner.
-  Agents: scout/opus, architect/opus ×2, process-reviewer/opus xhigh, impl/opus (WP-0, A, B, C, A2 ×2, F, G, G-cloud, card last 4, sandbox fix, review fixes ×2, pin, docs), engine-impl/opus (U-92, U-92 fixes, U-92d, U-92d fixes, U-92d CI), security-review/opus ×3, review/opus, ui-verifier/opus.
 - 2026-10-26 — A02 (ADD-01) complete on `phase/A02-popout-viewer`; PR with auto-merge. Shipped:
   - Viewer formats: PDF (PDFium), JPG, PNG and multi-page TIFF (`tiff` 0.11, deflate/LZW/fax only; JPEG-in-TIFF refused before any decode, Q-A02k); zoom menu (fit page, fit width, %), rotate (view only, Q-A02b), pan, page thumbnails.
   - Pop out / Dock (button and Ctrl+Shift+D): one deferred egui viewport (Q-A02a) that follows the active form or inbox item, titled with the form's name and the company stripe; placement and zoom remembered per OS user in `doc-viewer.json`, clamped to visible monitors, brought back beside the main window when its monitor is gone (Q-A02c); closing it never touches the form. F6 moves focus between form and viewer (Q-A02g).

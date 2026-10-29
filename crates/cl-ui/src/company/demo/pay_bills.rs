@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use cl_api::{
-    ApiError, BillApplication, BillPaymentRecord, CheckNumbering, CreatedPayment,
+    ApiError, AppliedDoc, BillApplication, BillPaymentRecord, CheckNumbering, CreatedPayment,
     CreditApplication, LocalValidation, PayBillsRequest, PayMethod, PayableBill, PayableCredit,
     PayableFilter, PayableList,
 };
@@ -113,12 +113,18 @@ pub fn story_credit_id() -> TransactionId {
 struct DemoPayment {
     id: TransactionId,
     vendor: ContactId,
+    /// The bank or card account it was paid from.
+    bank: AccountId,
     date: CalendarDate,
     cash: Money,
     check_number: Option<u64>,
     print_later: bool,
+    /// Numbered by the print queue (P19).
+    printed: bool,
     bills: Vec<(TransactionId, Money, Money)>,
     credits: Vec<(TransactionId, TransactionId, Money)>,
+    /// The bills' and credits' numbers as a voucher stub lists them (U-108).
+    docs: BTreeMap<TransactionId, AppliedDoc>,
 }
 
 /// What Pay Bills did in the demo.
@@ -577,12 +583,15 @@ pub fn pay(
         state.pay_bills.payments.push(DemoPayment {
             id,
             vendor,
+            bank: req.bank_account,
             date: req.date,
             cash,
             check_number,
             print_later,
+            printed: false,
             bills: paid.clone(),
             credits: credits.clone(),
+            docs: applied_docs(&listed, &paid, &credits),
         });
         out.push(CreatedPayment {
             id,
@@ -605,6 +614,97 @@ pub fn pay(
     Ok(out)
 }
 
+/// The stub numbers of what a payment applied, from the payable list read
+/// before it posted.
+fn applied_docs(
+    listed: &PayableList,
+    bills: &[(TransactionId, Money, Money)],
+    credits: &[(TransactionId, TransactionId, Money)],
+) -> BTreeMap<TransactionId, AppliedDoc> {
+    let mut out = BTreeMap::new();
+    for (id, _, _) in bills {
+        if let Some(b) = listed.bills.iter().find(|b| b.id == *id) {
+            out.insert(
+                *id,
+                AppliedDoc {
+                    txn_number: b.number.clone(),
+                    vendor_invoice_number: b.vendor_invoice_number.clone(),
+                    txn_date: Some(b.txn_date),
+                    total: b.total,
+                },
+            );
+        }
+    }
+    for (id, _, _) in credits {
+        if let Some(c) = listed.credits.iter().find(|c| c.id == *id) {
+            out.insert(
+                *id,
+                AppliedDoc {
+                    txn_number: c.number.clone(),
+                    vendor_invoice_number: c.vendor_invoice_number.clone(),
+                    txn_date: Some(c.txn_date),
+                    total: c.total,
+                },
+            );
+        }
+    }
+    out
+}
+
+/// The demo's bill-payment checks waiting to print on `bank` (P19), with
+/// the vendor's name; `printed` are the ones the print queue numbered.
+pub fn print_queue(
+    state: &mut DemoState,
+    bank: AccountId,
+    printed: &dyn Fn(TransactionId) -> bool,
+) -> Vec<cl_api::QueuedCheck> {
+    let contacts = state.contacts_mut().clone();
+    state
+        .pay_bills
+        .payments
+        .iter()
+        .filter(|p| p.bank == bank && p.print_later && !printed(p.id))
+        .filter(|p| !state.ledger.is_void(p.id))
+        .map(|p| {
+            let vendor = contacts.iter().find(|c| c.id == p.vendor);
+            // The engine sends the vendor's billing address (U-107).
+            let address = vendor
+                .map(crate::screens::write_check::billing_address)
+                .unwrap_or_default();
+            cl_api::QueuedCheck {
+                id: p.id,
+                date: p.date,
+                amount: p.cash,
+                payee: vendor
+                    .map(|c| c.fields.display_name.clone())
+                    .unwrap_or_default(),
+                memo: String::new(),
+                kind: cl_api::QueuedCheckKind::BillPayment,
+                bank_account: Some(bank),
+                address: address
+                    .lines()
+                    .map(str::to_string)
+                    .filter(|l| !l.trim().is_empty())
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+/// The print run numbered a bill-payment check (`Some`) or put it back in
+/// the queue (`None`), P19. False for an id that is not a demo payment.
+pub fn set_printed(state: &mut DemoState, id: TransactionId, number: Option<u64>) -> bool {
+    let Some(p) = state.pay_bills.payments.iter_mut().find(|p| p.id == id) else {
+        return false;
+    };
+    p.check_number = number;
+    p.print_later = number.is_none();
+    p.printed = number.is_some();
+    let text = number.map(|n| n.to_string()).unwrap_or_default();
+    state.ledger.set_number(id, &text);
+    true
+}
+
 /// `GET /bill-payments/{id}`.
 #[must_use]
 pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
@@ -615,7 +715,13 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
         contact_id: Some(p.vendor),
         total: Some(p.cash),
         check_number: p.check_number,
-        print_status: p.print_later.then(|| "queue".to_string()),
+        print_status: if p.print_later {
+            Some("queue".to_string())
+        } else if p.printed {
+            Some("printed".to_string())
+        } else {
+            None
+        },
         status: if state.ledger.is_void(id) {
             cl_api::TxnStatus::Void
         } else {
@@ -630,6 +736,7 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
                 bill_id: *bill,
                 amount: *cash,
                 discount_amount: Some(*discount),
+                bill: p.docs.get(bill).cloned(),
             })
             .collect(),
         credit_applications: p
@@ -639,6 +746,7 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
                 credit_id: *credit,
                 bill_id: *bill,
                 amount: *amount,
+                credit: p.docs.get(credit).cloned(),
             })
             .collect(),
     })

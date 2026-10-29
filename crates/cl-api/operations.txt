@@ -266,3 +266,21 @@ POST    /api/v1/document-drafts/{id}/attach     keyable-docs-attach
 # under idempotency-pay-bills-v1)
 POST    /api/v1/bill-payments                   keyable-pay-bills
 GET     /api/v1/bill-payments/{id}              idempotent
+# P19: form printing (engine U-106 to U-111, U-113; in the pin since 12187716;
+# plain mutations, no idempotency set)
+GET     /api/v1/checks/print-queue              idempotent
+POST    /api/v1/checks/print                    pre-handler-only
+POST    /api/v1/checks/requeue                  pre-handler-only
+POST    /api/v1/checks/reprint/{batchId}        pre-handler-only
+GET     /api/v1/checks/spoiled                  idempotent
+PUT     /api/v1/checks/settings                 pre-handler-only
+GET     /api/v1/company/logo                    idempotent
+POST    /api/v1/company/logo                    pre-handler-only
+GET     /api/v1/company/invoice-template        idempotent
+PUT     /api/v1/company/invoice-template        pre-handler-only
+GET     /api/v1/document-numbers                idempotent
+GET     /api/v1/document-numbers/next           idempotent
+PUT     /api/v1/document-numbers/{type}         pre-handler-only
+POST    /api/v1/document-numbers/claim          pre-handler-only
+GET     /api/v1/forms/print-queue               idempotent
+POST    /api/v1/forms/mark-printed              pre-handler-only

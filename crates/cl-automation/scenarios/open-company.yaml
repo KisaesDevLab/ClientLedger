@@ -39,7 +39,8 @@ steps:
   - assert_exists: {role: button, label: Try the practice company}
   - assert_exists: {role: button, label: Open}
   - assert_exists: {role: label, label: Works fully offline}
-  - assert_exists: {role: label, label_contains: "Intuit and QuickBooks are trademarks of Intuit Inc."}
+  # Q-P19ap: the non-affiliation notice is in Help > About, not here.
+  - assert_not_exists: {role: label, label_contains: "Intuit and QuickBooks are trademarks"}
   - assert_state: {key: screen.companies, equals: 4}
   - assert_no_clipping: {}
   - screenshot: open-company
@@ -61,8 +62,22 @@ steps:
   - click: {role: button, label: Cancel}
   - assert_state: {key: screen.restore_open, equals: false}
 
-  # --- Practice company opens from the side button --------------------------
+  # --- Practice company on a short window (Q-P19ao): the card scrolls, the
+  # Start column stays reachable --------------------------------------------
+  - resize: {width: 900, height: 520}
+  - assert_exists: {role: button, label: Try the practice company}
+  - scroll: {target: {role: button, label: Try the practice company}, to: end}
+  - screenshot: open-company-short
   - click: {role: button, label: Try the practice company}
+  - assert_state: {key: company_open, equals: true}
+  - assert_exists: {role: label, label_contains: Practice company}
+  - resize: {width: 1440, height: 940}
+
+  # --- File > Open Practice Company from another company --------------------
+  - command: file.close_company
+  - key: Enter
+  - assert_state: {key: company_open, equals: true}
+  - command: file.open_practice
   - assert_state: {key: company_open, equals: true}
   - assert_exists: {role: label, label_contains: Practice company}
 

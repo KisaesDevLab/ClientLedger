@@ -69,6 +69,10 @@ pub struct OpenCompanyScreen {
     /// A switch refused because of unsaved windows; retried once they are
     /// saved or discarded.
     retry_open: Option<usize>,
+    /// "Try the practice company" (or File > Open Practice Company) was
+    /// asked for before it could run: it runs once signed in, the list is
+    /// read and no window has unsaved changes (Q-P19ao).
+    practice_pending: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +131,7 @@ impl OpenCompanyScreen {
             notice: None,
             loaded_once: false,
             retry_open: None,
+            practice_pending: false,
         }
     }
 
@@ -353,6 +358,35 @@ impl OpenCompanyScreen {
             .await
         })
         .ok();
+    }
+
+    /// Try the practice company / File > Open Practice Company (Q-P19ao):
+    /// open the practice company if this computer has it, else build it.
+    /// Before sign-in (or while the list is read, or while a window has
+    /// unsaved changes) it waits and runs by itself afterwards.
+    fn practice(&mut self) {
+        self.practice_pending = true;
+        if self.stage != Stage::Ready {
+            self.notice = Some(t("open.practice_after_signin"));
+            return;
+        }
+        if !self.loaded_once || self.list_task.is_some() || self.busy.is_some() {
+            return;
+        }
+        if let Some(i) = self.companies.iter().position(|c| c.is_sample) {
+            // `open_selected` asks about unsaved windows and retries.
+            self.practice_pending = false;
+            self.selected = i;
+            self.open_selected();
+            return;
+        }
+        if self.link.dirty_windows() > 0 {
+            self.notice = Some(t("open.save_first"));
+            self.link.push(CompanyEvent::PromptDirty);
+            return;
+        }
+        self.practice_pending = false;
+        self.load_sample();
     }
 
     /// Builds the practice company (live engine) and opens it.
@@ -797,7 +831,66 @@ impl Screen for OpenCompanyScreen {
                 self.selected = i.min(self.companies.len().saturating_sub(1));
                 self.open_selected();
             }
+            if self.practice_pending
+                && self.loaded_once
+                && self.list_task.is_none()
+                && self.busy.is_none()
+                && self.retry_open.is_none()
+                && self.link.dirty_windows() == 0
+            {
+                self.practice();
+            }
         }
+        // A short window scrolls rather than hiding the Start column.
+        egui::ScrollArea::vertical()
+            .id_salt("open_company/scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.card(ui, &tokens));
+    }
+
+    fn command(&mut self, id: CommandId) -> bool {
+        match id.as_str() {
+            "file.restore" => {
+                self.restore_open = true;
+                true
+            }
+            "file.open_practice" => {
+                self.practice();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn state(&self) -> Value {
+        self.state_json()
+    }
+}
+
+impl OpenCompanyScreen {
+    /// The Start column before sign-in: Try the practice company opens it
+    /// right after signing in (Q-P19ao).
+    fn early_start(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        ui.add_space(14.0);
+        eyebrow(ui, &t("open.start"));
+        ui.add_space(6.0);
+        if Self::side_button(
+            ui,
+            tokens,
+            &t("open.practice"),
+            &t("open.practice_after_signin_sub"),
+        )
+        .clicked()
+        {
+            self.practice();
+        }
+        if self.practice_pending {
+            form::hint(ui, tokens, &t("open.practice_after_signin"));
+        }
+    }
+
+    fn card(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let tokens = *tokens;
         let max = ui.available_width().min(980.0);
         let offset = ((ui.available_width() - max) / 2.0).max(0.0);
         ui.add_space(12.0);
@@ -834,37 +927,23 @@ impl Screen for OpenCompanyScreen {
                         }
                         if self.stage == Stage::Ready {
                             self.body(ui, &tokens);
+                        } else {
+                            self.early_start(ui, &tokens);
                         }
                         ui.add_space(14.0);
                         ui.separator();
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(
-                                RichText::new(t("open.footer.offline"))
-                                    .size(12.0)
-                                    .color(tokens.text_secondary),
-                            );
-                            ui.label(
-                                RichText::new(t("open.footer.not_affiliated"))
-                                    .size(12.0)
-                                    .color(tokens.text_secondary),
-                            );
-                        });
+                        // Q-P19ap: the non-affiliation notice lives in Help > About.
+                        ui.label(
+                            RichText::new(t("open.footer.offline"))
+                                .size(12.0)
+                                .color(tokens.text_secondary),
+                        );
                     });
             });
         });
     }
 
-    fn command(&mut self, id: CommandId) -> bool {
-        match id.as_str() {
-            "file.restore" => {
-                self.restore_open = true;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn state(&self) -> Value {
+    fn state_json(&self) -> Value {
         json!({
             "screen": "open_company",
             "stage": format!("{:?}", self.stage).to_ascii_lowercase(),
@@ -874,6 +953,7 @@ impl Screen for OpenCompanyScreen {
             "restored": self.restore_result.is_some(),
             "busy": self.busy.is_some(),
             "error": self.error.is_some(),
+            "practice_pending": self.practice_pending,
         })
     }
 }
@@ -985,12 +1065,7 @@ impl OpenCompanyScreen {
             self.open_selected();
         }
         if practice {
-            if let Some(i) = self.companies.iter().position(|c| c.is_sample) {
-                self.selected = i;
-                self.open_selected();
-            } else {
-                self.load_sample();
-            }
+            self.practice();
         }
         if let Some(id) = action {
             self.link.push(CompanyEvent::OpenWindow(id));
@@ -1000,5 +1075,76 @@ impl OpenCompanyScreen {
             self.restore_panel(ui, tokens);
         }
         let _ = DateInput::new; // date helpers are shared with the other screens
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::accesskit::Role;
+
+    /// The button labels drawn at `size`.
+    fn buttons(s: &mut OpenCompanyScreen, size: Vec2) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut out = Vec::new();
+        for _ in 0..3 {
+            let mut o = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..egui::RawInput::default()
+                },
+                |ui| s.ui(ui),
+            );
+            o.textures_delta.clear();
+            out.extend(
+                o.platform_output
+                    .accesskit_update
+                    .map(|u| u.nodes)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(_, n)| n.role() == Role::Button)
+                    .filter_map(|(_, n)| n.label().map(str::to_string)),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn the_practice_company_waits_for_sign_in_then_opens() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = OpenCompanyScreen::new(Arc::clone(&link));
+        s.stage = Stage::SignIn;
+        // Before sign-in, on a short window, the button is there.
+        let b = buttons(&mut s, Vec2::new(900.0, 520.0));
+        assert!(b.iter().any(|l| l == "Try the practice company"), "{b:?}");
+        assert!(s.command(CommandId::new("file.open_practice")));
+        assert!(s.practice_pending);
+        assert_eq!(
+            s.notice.as_deref(),
+            Some(t("open.practice_after_signin").as_str())
+        );
+        let _ = link.drain();
+        // Signed in: it opens by itself once the list is read.
+        s.stage = Stage::Ready;
+        let _ = buttons(&mut s, Vec2::new(1440.0, 940.0));
+        assert!(!s.practice_pending);
+        let opened = link
+            .drain()
+            .into_iter()
+            .any(|e| matches!(e, CompanyEvent::Opened { ref name, .. } if name.contains("sample")));
+        assert!(opened, "the practice company opened");
+    }
+
+    #[test]
+    fn the_start_column_is_reachable_on_a_short_window() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = OpenCompanyScreen::new(link);
+        let b = buttons(&mut s, Vec2::new(900.0, 420.0));
+        assert!(b.iter().any(|l| l == "Try the practice company"), "{b:?}");
     }
 }

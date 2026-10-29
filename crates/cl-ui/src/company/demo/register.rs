@@ -609,6 +609,17 @@ impl DemoLedger {
             .map(|n| n.saturating_add(1))
     }
 
+    /// Sets (or clears, with `""`) a transaction's number, as the engine's
+    /// print run records it (P19). False when the transaction is unknown.
+    pub fn set_number(&mut self, id: TransactionId, number: &str) -> bool {
+        let Some(mut t) = sample_id(id).and_then(|n| self.find(n)) else {
+            return false;
+        };
+        number.clone_into(&mut t.number);
+        self.changed.insert(t.id, t);
+        true
+    }
+
     /// Records what a deposit took in (replacing any earlier set).
     pub fn link_deposit(&mut self, deposit: TransactionId, sources: &[(TransactionId, Money)]) {
         let Some(d) = sample_id(deposit) else { return };

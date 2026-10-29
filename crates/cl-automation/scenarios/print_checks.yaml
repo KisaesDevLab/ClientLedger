@@ -1,0 +1,99 @@
+# Print Checks (P19) against `clientledger --demo`: the two synthetic checks
+# waiting on Operating Checking, the voucher preview (one check per page),
+# numbers recorded at Print, "Did all checks print correctly?" answered
+# with the first bad number (2002 goes back to the queue, its number logged
+# as spoiled), then all printed; "Decide later" keeps Home's reminder.
+#
+# Nothing reaches a printer: the demo makes up a Printed outcome. Light and
+# dark run in the same app; `dev.demo_print_reset` (a `--demo`-only
+# developer command) puts the demo's print queue back. All data is
+# synthetic.
+name: print_checks
+description: Preview, numbers recorded at Print, first bad number, decide later.
+steps:
+  - resize: {width: 1280, height: 900}
+  - set_zoom: {percent: 100}
+  - command: file.print_forms
+  - assert_exists: {role: tab, label_contains: "Print Forms"}
+  - command: dev.demo_print_reset
+  - assert_state: {key: screen.screen, equals: print_forms}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.checks, equals: 2}
+  - assert_state: {key: screen.picked, equals: 2}
+  - assert_state: {key: screen.style, equals: voucher}
+  - assert_exists: {label: "Feed & Seed Supply"}
+  - assert_exists: {label: "1,286.40"}
+  # The proposed first number is the register's next one (B1).
+  - assert_state: {key: screen.first_number, equals: "4418"}
+  # A number already used in the register is refused before the preview,
+  # in plain words, with the next free one offered (Q-94).
+  - click: {role: text_input, label: First check number}
+  - key: Ctrl+A
+  - type: {text: "4417"}
+  - click: {role: button, label: Preview 2 checks}
+  - assert_state: {key: screen.problem, equals: NumberInUse}
+  - assert_state: {key: screen.offer, equals: 4418}
+  - assert_state: {key: screen.preview, equals: null}
+  - assert_exists: {label_contains: "The next free number is 4418."}
+  - screenshot: number-in-use
+  - click: {role: button, label: Use 4418}
+  - assert_state: {key: screen.first_number, equals: "4418"}
+  - assert_state: {key: screen.problem, equals: null}
+  - click: {role: text_input, label: First check number}
+  - key: Ctrl+A
+  - type: {text: "2001"}
+  - screenshot: queue
+  # --- Preview: nothing is recorded yet --------------------------------------
+  - click: {role: button, label: Preview 2 checks}
+  - assert_state: {key: screen.preview.kind, equals: checks}
+  - assert_state: {key: screen.preview.pages, equals: 2}
+  - assert_state: {key: screen.run.state, equals: Ready}
+  - assert_exists: {role: button, label: Save PDF…}
+  - assert_exists: {role: button, label: Envelopes}
+  - screenshot: preview
+  # --- Print records 2001-2002, then asks ----------------------------------
+  - click: {role: button, label: Print}
+  - assert_state: {key: screen.asking, equals: true}
+  - assert_state: {key: screen.sent, equals: printed}
+  - assert_state: {key: screen.unanswered, equals: true}
+  - assert_exists: {label: "Did all checks print correctly?"}
+  - screenshot: confirm
+  - click: {role: text_input, label: "First check that didn't print right"}
+  - type: {text: "2002"}
+  - click: {role: button, label: Print those again}
+  - assert_state: {key: screen.asking, equals: false}
+  - assert_state: {key: screen.notice, equals: print.confirm.requeued}
+  - assert_state: {key: screen.checks, equals: 1}
+  - assert_state: {key: screen.unanswered, equals: false}
+  # --- The reprint, then Decide later ----------------------------------------
+  - click: {role: text_input, label: First check number}
+  - key: Ctrl+A
+  - type: {text: "2003"}
+  - click: {role: button, label: Preview 1 checks}
+  - click: {role: button, label: Print}
+  - assert_state: {key: screen.asking, equals: true}
+  - click: {role: button, label: Decide later}
+  - assert_state: {key: screen.unanswered, equals: true}
+  - assert_exists: {role: button, label: Answer now}
+  - screenshot: reminder
+  - click: {role: button, label: Answer now}
+  - click: {role: button, label: All printed correctly}
+  - assert_state: {key: screen.unanswered, equals: false}
+  - assert_state: {key: screen.checks, equals: 0}
+  - command: dev.demo_print_reset
+  # Minimum window (960 x 640) at 200%: the list still fits, nothing drawn
+  # over anything.
+  - assert_state: {key: screen.checks, equals: 2}
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: text_input, label: First check number}
+  - screenshot: print-checks-960x640-z200
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The queue list scrolls under the status bar.
+        - {x: -4000, y: 260, width: 8480, height: 200}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1280, height: 900}
+  - command: file.close_window

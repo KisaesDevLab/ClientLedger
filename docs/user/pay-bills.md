@@ -75,6 +75,8 @@ Click **Pay 4 bills** (the button shows the count and the total) or press `Alt+S
 
 **Clear selections** unticks everything.
 
+To print the checks you just made, press `Ctrl+P`. You see a preview first. See [Printing checks](printing-checks.md).
+
 ## Looking at a bill payment
 
 Open a payment from a register, where it appears as BILLPMT. It opens as a read-only page: vendor, date, check number ("To print" if not printed yet), the account it was paid from, the total, and each bill with what was paid, the discount and the credit.

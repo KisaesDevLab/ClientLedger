@@ -152,7 +152,7 @@ pub(crate) fn run_unsafe_check() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(
         "unsafe-check",
-        "no unsafe code outside the one Windows job limits call",
+        "no unsafe code outside the Windows job limits call and direct printing",
         &unsafe_check::check(&root)?,
     )
 }

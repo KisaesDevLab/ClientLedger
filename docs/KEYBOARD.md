@@ -167,7 +167,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 
 Find these from the menus or with `Ctrl+K`.
 
-- **File:** New Company, Close Company, Back Up Company, Restore a Backup, Export All Data, Full Database Backup (Utilities), Delete Company
+- **File:** New Company, Close Company, Open Practice Company, Back Up Company, Restore a Backup, Export All Data, Full Database Backup (Utilities), Delete Company, Print Forms, Printer Setup
 - **Edit:** Void Transaction
 - **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
 - **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements
@@ -175,5 +175,5 @@ Find these from the menus or with `Ctrl+K`.
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet
-- **Company:** Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail
+- **Company:** Company Information, Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail
 - **Help:** Privacy Notice, Support ClientLedger on Ko-fi, About ClientLedger

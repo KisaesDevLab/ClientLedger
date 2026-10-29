@@ -30,6 +30,7 @@ pub mod list_csv;
 pub mod operations;
 pub mod payments;
 pub mod posting;
+pub mod printing;
 pub(crate) mod reconcile;
 pub mod recovery;
 pub mod recurring;

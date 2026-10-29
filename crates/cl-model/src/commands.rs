@@ -228,12 +228,17 @@ pub const COMMANDS: &[Command] = &[
     built("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O')),
     built("file.new_company", "New Company", Some(Menu::File), 0, None),
     cmd("file.close_company", "Close Company", Some(Menu::File), 0, None, Scope::Global),
+    // P19 (Q-P19ao): close the company the normal way and open the practice company.
+    cmd("file.open_practice", "Open Practice Company", Some(Menu::File), 0, None, Scope::Global),
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
     built("file.delete_company", "Delete Company", Some(Menu::File), 2, None),
     cmd("file.print", "Print", Some(Menu::File), 3, ctrl('P'), Scope::Global),
+    // P19: the print queues and the printer's alignment (no shortcut)
+    built("file.print_forms", "Print Forms", Some(Menu::File), 3, None),
+    built("file.printer_setup", "Printer Setup", Some(Menu::File), 3, None),
     cmd("file.close_window", "Close Window", Some(Menu::File), 4, key(Mods::CMD, Key::F(4)), Scope::Global),
     cmd("file.quit", "Quit ClientLedger", Some(Menu::File), 5, ctrl('Q'), Scope::Global),
     // Edit
@@ -386,6 +391,8 @@ pub const COMMANDS: &[Command] = &[
     screen("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T'), "P28"),
     // Company
     built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
+    // P19: logo, form footers and document numbering (no shortcut)
+    built("company.information", "Company Information", Some(Menu::Company), 0, None),
     screen("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None, "P29"),
     screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
@@ -437,6 +444,9 @@ pub const DEV_COMMANDS: &[Command] = &[
     ),
     // P18: the Pay Bills scenario runs light and dark in one app; this
     // voids the demo's bill payments so the second run sees the same list.
+    // P19: the print scenarios run light and dark in one app; this puts
+    // the demo's print queue back.
+    dev_action("dev.demo_print_reset", "Demo Print Reset (developer)"),
     dev_action(
         "dev.demo_pay_bills_reset",
         "Reset Demo Bill Payments (developer)",
@@ -553,6 +563,10 @@ mod tests {
             // P18
             "vendors.pay_bills",
             "vendors.bill_payment",
+            // P19
+            "file.print_forms",
+            "file.printer_setup",
+            "company.information",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

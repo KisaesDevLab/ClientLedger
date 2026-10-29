@@ -59,6 +59,7 @@ use crate::screens::company::form::DateInput;
 use crate::screens::register::lists::RegisterLists;
 use crate::windows::Screen;
 
+pub(crate) use prefill::billing_address;
 pub use save::to_draft;
 
 /// The command and window kind.
@@ -301,6 +302,8 @@ pub struct WriteCheckScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// P19 (Q-P19s): Print saved the check; preview it once the save lands.
+    pub(crate) print_after_save: bool,
     /// The printed-check question after a 409 `CHECK_PRINTED`.
     pub(crate) printed: Option<PrintedPrompt>,
     /// Saves in other windows (Q-262).
@@ -425,6 +428,7 @@ impl WriteCheckScreen {
             suggest: suggest::SuggestState::default(),
             nav_prompt: None,
             after_save_nav: None,
+            print_after_save: false,
             printed: None,
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
@@ -769,6 +773,25 @@ impl WriteCheckScreen {
             && changes.ledger_touches(bank)
         {
             self.fetch_bank_facts();
+        }
+        // A print run numbered (or requeued) checks: the saved check in
+        // front is read again so it shows its number, its printed state
+        // and Reprint check (B2). Never over unsaved edits or a question.
+        let touched = changes.printing
+            || self
+                .editing
+                .as_ref()
+                .is_some_and(|e| changes.ledger_touches(e.bank));
+        if touched
+            && self.editing.is_some()
+            && !self.is_dirty()
+            && self.save.task.is_none()
+            && self.printed.is_none()
+            && self.nav_prompt.is_none()
+            && !self.void.open
+            && self.load_task.is_none()
+        {
+            self.reload();
         }
         if changes.ledger_any() || changes.contacts {
             self.refresh_panel();
