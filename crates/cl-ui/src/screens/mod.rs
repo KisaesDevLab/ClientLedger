@@ -43,6 +43,7 @@ pub mod doc_review;
 pub mod pay_bills;
 
 // P19: form printing.
+pub mod company_info;
 pub mod print_forms;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
@@ -79,7 +80,8 @@ pub(crate) const P18_SCREENS: [crate::shell::MakeScreen; 2] =
     [pay_bills::make, pay_bills::view::make];
 
 /// Every P19 screen's `make` (the shell tries each after P18's).
-pub(crate) const P19_SCREENS: [crate::shell::MakeScreen; 1] = [print_forms::make];
+pub(crate) const P19_SCREENS: [crate::shell::MakeScreen; 2] =
+    [print_forms::make, company_info::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];

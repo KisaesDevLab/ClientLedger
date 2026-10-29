@@ -389,6 +389,8 @@ pub const COMMANDS: &[Command] = &[
     screen("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T'), "P28"),
     // Company
     built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
+    // P19: logo, form footers and document numbering (no shortcut)
+    built("company.information", "Company Information", Some(Menu::Company), 0, None),
     screen("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None, "P29"),
     screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
@@ -562,6 +564,7 @@ mod tests {
             // P19
             "file.print_forms",
             "file.printer_setup",
+            "company.information",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

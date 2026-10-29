@@ -1199,7 +1199,10 @@ impl PrintFormsScreen {
                 Ok(s) => {
                     self.logo = None;
                     self.logo_notice = false;
-                    if let Some(bytes) = &s.logo {
+                    let hidden = self.tenant.as_ref().is_some_and(|(id, _)| {
+                        crate::screens::company_info::logo_hidden(&self.link, *id)
+                    });
+                    if let Some(bytes) = s.logo.as_ref().filter(|_| !hidden) {
                         match Logo::from_bytes(bytes) {
                             Ok(l) => self.logo = Some(l),
                             Err(_) => self.logo_notice = true,

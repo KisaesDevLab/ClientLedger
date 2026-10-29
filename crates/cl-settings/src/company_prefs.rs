@@ -81,6 +81,10 @@ pub struct CompanyPrefs {
     /// The owner hid Home's setup checklist (Q-63). It travels with the
     /// company, so a restored company does not show it again.
     pub setup_checklist_dismissed: bool,
+    /// Company Information's Remove (Q-P19an): forms and checks print
+    /// without the uploaded logo until a new one is uploaded (the engine
+    /// can't delete it yet, U-114).
+    pub hide_logo: bool,
 }
 
 impl Default for CompanyPrefs {
@@ -96,6 +100,7 @@ impl Default for CompanyPrefs {
             sensitive_accounts: BTreeSet::new(),
             required_tag_groups: BTreeMap::new(),
             setup_checklist_dismissed: false,
+            hide_logo: false,
         }
     }
 }
@@ -200,6 +205,7 @@ impl CompanyPrefs {
             sensitive_accounts: self.sensitive_accounts.clone(),
             required_tag_groups: self.required_tag_groups.clone(),
             setup_checklist_dismissed: self.setup_checklist_dismissed,
+            hide_logo: self.hide_logo,
         }
     }
 
@@ -235,6 +241,7 @@ impl CompanyPrefs {
             sensitive_accounts: archive.sensitive_accounts.clone(),
             required_tag_groups: archive.required_tag_groups.clone(),
             setup_checklist_dismissed: archive.setup_checklist_dismissed,
+            hide_logo: archive.hide_logo,
         };
         out.normalize();
         out
