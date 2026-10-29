@@ -903,6 +903,30 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn numeric_cells_shrink_to_fit_and_refuse_what_cannot_fit() {
+        let mut f = form(1);
+        f.rows[0][1] = "1,234,567.8901".into(); // qty: wider than 20 mm at 9 pt
+        f.rows[0][3] = "9,999,999,999.99".into();
+        let pages = resolve(&layout_form(&f, &style()).unwrap()).unwrap();
+        let q = pages[0].runs_of("row0.quantity").next().unwrap();
+        assert_eq!(q.text, "1,234,567.8901");
+        assert!(q.size_pt < BODY_PT);
+        assert!(
+            q.x >= LEFT + 103.0 && q.x + Font::Mono.width_mm(&q.text, q.size_pt) <= LEFT + 125.0
+        );
+        assert_eq!(
+            pages[0].runs_of("row0.amount").next().unwrap().text,
+            "9,999,999,999.99"
+        );
+        f.rows[0][1] = "123,456,789,012,345.678".into();
+        let doc = layout_form(&f, &style()).unwrap();
+        assert_eq!(
+            resolve(&doc),
+            Err(PrintError::DoesNotFit("row0.quantity".into()))
+        );
+    }
+
+    #[test]
     fn too_many_header_fields_are_refused() {
         let mut f = form(1);
         f.fields = vec![("a".into(), "b".into()); 6];

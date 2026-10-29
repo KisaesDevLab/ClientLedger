@@ -1,14 +1,41 @@
 //! The company logo (Q-92): PNG or JPEG bytes from the caller, checked and
 //! prepared for embedding. PNGs are decoded to 8-bit samples (alpha becomes
-//! a soft mask); JPEGs are embedded as they are (`DCTDecode`), with only
-//! their frame header read for size and colour components.
+//! a soft mask); JPEGs are embedded in PDFs as they are (`DCTDecode`), with
+//! only their frame header read for size and colour components, and decoded
+//! only when a printer needs pixels ([`Logo::rgb_on_white`]).
+//!
+//! A logo that can't be used (`WebP`, which `MyBooks` Online accepts; over
+//! 2 MB or 16 megapixels; unreadable) is a [`LogoProblem`]: the caller
+//! prints without the logo and shows a notice (Q-P19af, Q-P19v). It never
+//! stops a print.
 
-use crate::PrintError;
-
-/// Largest logo file accepted.
-pub const MAX_LOGO_BYTES: usize = 10 * 1024 * 1024;
+/// Largest logo file accepted (Q-P19v).
+pub const MAX_LOGO_BYTES: usize = 2 * 1024 * 1024;
+/// Largest logo, in pixels (16 megapixels).
+pub const MAX_LOGO_PIXELS: u64 = 16_000_000;
 /// Largest logo side, in pixels.
 pub const MAX_LOGO_SIDE: u32 = 10_000;
+
+/// Why a logo can't be printed. The caller prints without it and tells the
+/// owner to use a PNG or JPEG in Company Information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum LogoProblem {
+    /// A WebP picture.
+    #[error("the logo is a WebP picture; use a PNG or JPEG")]
+    WebP,
+    /// Neither PNG nor JPEG.
+    #[error("the logo is not a PNG or JPEG picture")]
+    NotPngOrJpeg,
+    /// The file is over 2 MB.
+    #[error("the logo file is larger than 2 MB")]
+    TooLarge,
+    /// Over 16 megapixels or 10,000 pixels on a side, or empty.
+    #[error("the logo has too many pixels (over 16 megapixels)")]
+    TooManyPixels,
+    /// The file could not be read.
+    #[error("the logo file could not be read")]
+    Unreadable,
+}
 
 /// Colour model of the samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,57 +75,126 @@ pub struct Logo {
     pub data: LogoData,
 }
 
+/// Opaque 8-bit RGB pixels, row-major from the top.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RgbImage {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// `width * height * 3` bytes.
+    pub rgb: Vec<u8>,
+}
+
+fn check_size(width: u32, height: u32) -> Result<(), LogoProblem> {
+    let pixels = u64::from(width) * u64::from(height);
+    if width == 0
+        || height == 0
+        || width > MAX_LOGO_SIDE
+        || height > MAX_LOGO_SIDE
+        || pixels > MAX_LOGO_PIXELS
+    {
+        return Err(LogoProblem::TooManyPixels);
+    }
+    Ok(())
+}
+
 impl Logo {
     /// Read a PNG or JPEG file's bytes.
     ///
     /// # Errors
-    /// [`PrintError::Logo`] when the bytes are not a readable PNG or JPEG,
-    /// are larger than [`MAX_LOGO_BYTES`], or a side exceeds
-    /// [`MAX_LOGO_SIDE`].
-    pub fn from_bytes(bytes: &[u8]) -> Result<Logo, PrintError> {
+    /// The [`LogoProblem`] to tell the owner about.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Logo, LogoProblem> {
         if bytes.len() > MAX_LOGO_BYTES {
-            return Err(PrintError::Logo(
-                "the picture file is larger than 10 MB".into(),
-            ));
+            return Err(LogoProblem::TooLarge);
+        }
+        if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            return Err(LogoProblem::WebP);
         }
         let logo = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
             png_logo(bytes)?
         } else if bytes.starts_with(&[0xFF, 0xD8]) {
             jpeg_logo(bytes)?
         } else {
-            return Err(PrintError::Logo(
-                "the picture is not a PNG or JPEG file".into(),
-            ));
+            return Err(LogoProblem::NotPngOrJpeg);
         };
-        if logo.width == 0
-            || logo.height == 0
-            || logo.width > MAX_LOGO_SIDE
-            || logo.height > MAX_LOGO_SIDE
-        {
-            return Err(PrintError::Logo(
-                "the picture is empty or larger than 10,000 pixels on a side".into(),
-            ));
-        }
+        check_size(logo.width, logo.height)?;
         Ok(logo)
+    }
+
+    /// The picture as opaque RGB over white (for printers that take
+    /// pixels, such as the Windows print path).
+    ///
+    /// # Errors
+    /// [`LogoProblem::Unreadable`] when the JPEG data can't be decoded.
+    pub fn rgb_on_white(&self) -> Result<RgbImage, LogoProblem> {
+        let n = usize::try_from(u64::from(self.width) * u64::from(self.height))
+            .map_err(|_| LogoProblem::TooManyPixels)?;
+        let rgb = match &self.data {
+            LogoData::Jpeg(bytes) => decode_jpeg_rgb(bytes, n)?,
+            LogoData::Raw { samples, alpha } => {
+                let ch = if self.color == ColorSpace::Gray { 1 } else { 3 };
+                if samples.len() != n * ch {
+                    return Err(LogoProblem::Unreadable);
+                }
+                let mut out = Vec::with_capacity(n * 3);
+                for i in 0..n {
+                    let a = alpha
+                        .as_ref()
+                        .and_then(|a| a.get(i))
+                        .copied()
+                        .unwrap_or(255);
+                    for k in 0..3 {
+                        let v = samples[i * ch + if ch == 1 { 0 } else { k }];
+                        out.push(over_white(v, a));
+                    }
+                }
+                out
+            }
+        };
+        Ok(RgbImage {
+            width: self.width,
+            height: self.height,
+            rgb,
+        })
     }
 }
 
-fn png_logo(bytes: &[u8]) -> Result<Logo, PrintError> {
-    let bad = |e: png::DecodingError| PrintError::Logo(format!("the PNG could not be read ({e})"));
+/// `v` with opacity `a` over white, exactly in integers.
+fn over_white(v: u8, a: u8) -> u8 {
+    let (v, a) = (u32::from(v), u32::from(a));
+    // (v*a + 255*(255-a)) / 255, rounded; always <= 255.
+    u8::try_from((v * a + 255 * (255 - a) + 127) / 255).unwrap_or(255)
+}
+
+fn decode_jpeg_rgb(bytes: &[u8], pixels: usize) -> Result<Vec<u8>, LogoProblem> {
+    use zune_jpeg::zune_core::colorspace::ColorSpace as Zcs;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+    let side = usize::try_from(MAX_LOGO_SIDE).unwrap_or(10_000);
+    let opts = DecoderOptions::default()
+        .jpeg_set_out_colorspace(Zcs::RGB)
+        .set_max_width(side)
+        .set_max_height(side);
+    let mut dec = zune_jpeg::JpegDecoder::new_with_options(std::io::Cursor::new(bytes), opts);
+    let rgb = dec.decode().map_err(|_| LogoProblem::Unreadable)?;
+    if rgb.len() != pixels * 3 {
+        return Err(LogoProblem::Unreadable);
+    }
+    Ok(rgb)
+}
+
+fn png_logo(bytes: &[u8]) -> Result<Logo, LogoProblem> {
+    let bad = |_: png::DecodingError| LogoProblem::Unreadable;
     let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = dec.read_info().map_err(bad)?;
     {
         let info = reader.info();
-        if info.width > MAX_LOGO_SIDE || info.height > MAX_LOGO_SIDE {
-            return Err(PrintError::Logo(
-                "the picture is larger than 10,000 pixels on a side".into(),
-            ));
-        }
+        check_size(info.width, info.height)?;
     }
     let size = reader
         .output_buffer_size()
-        .ok_or_else(|| PrintError::Logo("the PNG is too large".into()))?;
+        .ok_or(LogoProblem::TooManyPixels)?;
     let mut buf = vec![0; size];
     let frame = reader.next_frame(&mut buf).map_err(bad)?;
     buf.truncate(frame.buffer_size());
@@ -107,14 +203,10 @@ fn png_logo(bytes: &[u8]) -> Result<Logo, PrintError> {
         png::ColorType::GrayscaleAlpha => (ColorSpace::Gray, 2, true),
         png::ColorType::Rgb => (ColorSpace::Rgb, 3, false),
         png::ColorType::Rgba => (ColorSpace::Rgb, 4, true),
-        png::ColorType::Indexed => {
-            return Err(PrintError::Logo(
-                "the PNG palette could not be expanded".into(),
-            ));
-        }
+        png::ColorType::Indexed => return Err(LogoProblem::Unreadable),
     };
     if frame.bit_depth != png::BitDepth::Eight {
-        return Err(PrintError::Logo("the PNG is not 8 bits per sample".into()));
+        return Err(LogoProblem::Unreadable);
     }
     let (samples, alpha) = if has_alpha {
         let n_colour = channels - 1;
@@ -137,8 +229,8 @@ fn png_logo(bytes: &[u8]) -> Result<Logo, PrintError> {
 }
 
 /// Width, height and components from the JPEG frame header (`SOFn`).
-fn jpeg_logo(bytes: &[u8]) -> Result<Logo, PrintError> {
-    let bad = || PrintError::Logo("the JPEG could not be read".into());
+fn jpeg_logo(bytes: &[u8]) -> Result<Logo, LogoProblem> {
+    let bad = || LogoProblem::Unreadable;
     let mut i = 2usize;
     while i + 4 <= bytes.len() {
         if bytes[i] != 0xFF {
@@ -205,7 +297,7 @@ pub(crate) mod tests {
     }
 
     /// A minimal JPEG header (SOI, APP0, SOF0 for 3 components, EOI) —
-    /// enough for the frame reader.
+    /// enough for the frame reader, not for decoding.
     pub(crate) fn jpeg_header(w: u16, h: u16) -> Vec<u8> {
         let mut v = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00];
         v.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08]);
@@ -228,20 +320,56 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn png_pixels_are_composited_over_white() {
+        let img = Logo::from_bytes(&png_rgba(3, 2))
+            .unwrap()
+            .rgb_on_white()
+            .unwrap();
+        assert_eq!((img.width, img.height, img.rgb.len()), (3, 2, 18));
+        // Pixel 0: (0, 10, 20) at alpha 128 over white.
+        assert_eq!(&img.rgb[..3], &[127, 132, 137]);
+        assert_eq!(over_white(0, 255), 0);
+        assert_eq!(over_white(0, 0), 255);
+    }
+
+    #[test]
     fn jpeg_frame_header_gives_size_and_components() {
         let l = Logo::from_bytes(&jpeg_header(640, 200)).unwrap();
         assert_eq!((l.width, l.height, l.color), (640, 200, ColorSpace::Rgb));
         assert!(matches!(l.data, LogoData::Jpeg(_)));
+        // A header without image data can't be decoded to pixels.
+        assert_eq!(l.rgb_on_white(), Err(LogoProblem::Unreadable));
     }
 
     #[test]
-    fn other_files_and_oversized_pictures_are_refused() {
-        assert!(Logo::from_bytes(b"GIF89a").is_err());
-        assert!(Logo::from_bytes(&[0xFF, 0xD8, 0xFF]).is_err());
-        assert!(Logo::from_bytes(&jpeg_header(20_000, 10)).is_err());
-        assert!(Logo::from_bytes(&jpeg_header(0, 10)).is_err());
+    fn unusable_logos_give_a_reason() {
+        assert_eq!(Logo::from_bytes(b"GIF89a"), Err(LogoProblem::NotPngOrJpeg));
+        assert_eq!(
+            Logo::from_bytes(b"RIFF\0\0\0\0WEBPVP8 "),
+            Err(LogoProblem::WebP)
+        );
+        assert_eq!(
+            Logo::from_bytes(&[0xFF, 0xD8, 0xFF]),
+            Err(LogoProblem::Unreadable)
+        );
+        assert_eq!(
+            Logo::from_bytes(&jpeg_header(20_000, 10)),
+            Err(LogoProblem::TooManyPixels)
+        );
+        assert_eq!(
+            Logo::from_bytes(&jpeg_header(5000, 4000)),
+            Err(LogoProblem::TooManyPixels)
+        );
+        assert!(Logo::from_bytes(&jpeg_header(4000, 4000)).is_ok());
+        assert_eq!(
+            Logo::from_bytes(&jpeg_header(0, 10)),
+            Err(LogoProblem::TooManyPixels)
+        );
+        let mut big = jpeg_header(10, 10);
+        big.resize(MAX_LOGO_BYTES + 1, 0);
+        assert_eq!(Logo::from_bytes(&big), Err(LogoProblem::TooLarge));
         let mut truncated = png_rgba(3, 2);
         truncated.truncate(30);
-        assert!(Logo::from_bytes(&truncated).is_err());
+        assert_eq!(Logo::from_bytes(&truncated), Err(LogoProblem::Unreadable));
     }
 }

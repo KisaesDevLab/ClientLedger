@@ -19,6 +19,8 @@ use crate::image::Logo;
 pub const LETTER_W_MM: f32 = 215.9;
 /// US Letter height (11 in).
 pub const LETTER_H_MM: f32 = 279.4;
+/// The smallest a shrink-to-fit box goes, as a share of its size.
+pub const MIN_SHRINK: f32 = 0.6;
 /// Line height as a multiple of the font size.
 pub const LINE_HEIGHT: f32 = 1.2;
 
@@ -110,12 +112,18 @@ pub struct TextBox {
     /// the far edge of the box — after the text when left-aligned, before
     /// it when right-aligned. Single-line boxes only.
     pub fill: Option<char>,
+    /// Numbers (owner review S1): never cut off. When the text is wider
+    /// than the box it shrinks in half-point steps down to
+    /// [`MIN_SHRINK`] of its size (baseline unchanged); if it still does
+    /// not fit, resolving fails with [`PrintError::DoesNotFit`].
+    pub shrink: bool,
     /// The text.
     pub text: String,
 }
 
 impl TextBox {
-    /// A left-aligned, single-line, clipped box.
+    /// A left-aligned, single-line, clipped box. Plex Mono boxes hold
+    /// numbers (DESIGN.md tokens), so they shrink to fit instead of clipping.
     #[must_use]
     pub fn new(
         tag: impl Into<String>,
@@ -133,6 +141,7 @@ impl TextBox {
             wrap: false,
             clip: true,
             fill: None,
+            shrink: font == Font::Mono,
             text: text.into(),
         }
     }
@@ -155,6 +164,13 @@ impl TextBox {
     #[must_use]
     pub fn unclipped(mut self) -> TextBox {
         self.clip = false;
+        self
+    }
+
+    /// Shrink to fit, never clip (numbers).
+    #[must_use]
+    pub fn shrink_to_fit(mut self) -> TextBox {
+        self.shrink = true;
         self
     }
 
@@ -422,17 +438,18 @@ pub fn resolve(doc: &Document) -> Result<Vec<ResolvedPage>, PrintError> {
     if doc.pages.is_empty() {
         return Err(PrintError::NoPages);
     }
-    Ok(doc
-        .pages
+    doc.pages
         .iter()
-        .map(|p| ResolvedPage {
-            size: doc.size,
-            ..resolve_page(p, doc.logo.as_ref())
+        .map(|p| {
+            Ok(ResolvedPage {
+                size: doc.size,
+                ..resolve_page(p, doc.logo.as_ref())?
+            })
         })
-        .collect())
+        .collect()
 }
 
-fn resolve_page(page: &Page, logo: Option<&Logo>) -> ResolvedPage {
+fn resolve_page(page: &Page, logo: Option<&Logo>) -> Result<ResolvedPage, PrintError> {
     let mut out = ResolvedPage::default();
     for e in &page.elements {
         match e {
@@ -444,10 +461,10 @@ fn resolve_page(page: &Page, logo: Option<&Logo>) -> ResolvedPage {
                     });
                 }
             }
-            Element::Text(b) => resolve_text(b, &mut out.runs),
+            Element::Text(b) => resolve_text(b, &mut out.runs)?,
         }
     }
-    out
+    Ok(out)
 }
 
 /// `w`×`h` pixels scaled to fit `r`, top-left aligned.
@@ -470,9 +487,37 @@ fn px_f32(v: u32) -> f32 {
     f32::from(u16::try_from(v).unwrap_or(u16::MAX))
 }
 
-fn resolve_text(b: &TextBox, runs: &mut Vec<Run>) {
-    let lh = line_height_mm(b.size_pt);
+/// The size a shrink-to-fit box prints at.
+fn fitted(b: &TextBox) -> Result<TextBox, PrintError> {
+    let min = b.size_pt * MIN_SHRINK;
+    let mut size = b.size_pt;
+    loop {
+        if b.font.width_mm(&b.text, size) <= b.rect.w + 0.001 {
+            return Ok(TextBox {
+                size_pt: size,
+                clip: false,
+                shrink: false,
+                ..b.clone()
+            });
+        }
+        if size - 0.5 < min - 0.001 {
+            return Err(PrintError::DoesNotFit(b.tag.clone()));
+        }
+        size -= 0.5;
+    }
+}
+
+fn resolve_text(b: &TextBox, runs: &mut Vec<Run>) -> Result<(), PrintError> {
+    // A shrunk number keeps the baseline of its full size.
     let ascent = b.font.ascent_mm(b.size_pt);
+    let fit;
+    let b = if b.shrink && !b.wrap && !b.text.contains('\n') {
+        fit = fitted(b)?;
+        &fit
+    } else {
+        b
+    };
+    let lh = line_height_mm(b.size_pt);
     let lines = b.lines();
     let single = lines.len() == 1;
     let mut baseline = b.rect.y + ascent;
@@ -499,6 +544,7 @@ fn resolve_text(b: &TextBox, runs: &mut Vec<Run>) {
         }
         baseline += lh;
     }
+    Ok(())
 }
 
 fn fill_text(line: &str, c: char, b: &TextBox) -> String {
@@ -548,7 +594,7 @@ mod tests {
         ] {
             let mut p = Page::default();
             p.text(tb("Total", 50.0, 6.0).align(align));
-            let r = &resolve_page(&p, None).runs[0];
+            let r = &resolve_page(&p, None).unwrap().runs[0];
             let w = Font::Sans.width_mm("Total", 10.0);
             let x = match align {
                 Align::Left => expect,
@@ -596,7 +642,7 @@ mod tests {
         let mut p = Page::default();
         p.text(left);
         p.text(tb("1.00", 30.0, 6.0).align(Align::Right).filled('*'));
-        let rp = resolve_page(&p, None);
+        let rp = resolve_page(&p, None).unwrap();
         let a = &rp.runs[0];
         assert!(a.text.starts_with("One and 00/100 *") && a.text.ends_with('*'));
         let w = Font::Sans.width_mm(&a.text, 10.0);
@@ -605,6 +651,56 @@ mod tests {
         let b = &rp.runs[1];
         assert!(b.text.starts_with('*') && b.text.ends_with(" 1.00"));
         assert!((b.x + Font::Sans.width_mm(&b.text, 10.0) - 40.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn numbers_shrink_to_fit_and_never_clip() {
+        let mut p = Page::default();
+        let fits = Font::Mono.width_mm("1,234.56", 10.0);
+        p.text(
+            TextBox::new(
+                "a",
+                Rect::new(10.0, 20.0, fits, 6.0),
+                Font::Mono,
+                10.0,
+                "1,234.56",
+            )
+            .align(Align::Right)
+            .shrink_to_fit(),
+        );
+        p.text(
+            TextBox::new(
+                "b",
+                Rect::new(10.0, 30.0, fits * 0.8, 6.0),
+                Font::Mono,
+                10.0,
+                "1,234.56",
+            )
+            .align(Align::Right)
+            .shrink_to_fit(),
+        );
+        let rp = resolve_page(&p, None).unwrap();
+        assert!((rp.runs[0].size_pt - 10.0).abs() < 0.001);
+        let b = &rp.runs[1];
+        assert_eq!(b.text, "1,234.56");
+        assert!(b.size_pt < 10.0 && b.size_pt >= 6.0);
+        assert!(b.x + Font::Mono.width_mm(&b.text, b.size_pt) <= 10.0 + fits * 0.8 + 0.001);
+        assert!((b.baseline - (30.0 + Font::Mono.ascent_mm(10.0))).abs() < 0.001);
+        let mut p = Page::default();
+        p.text(
+            TextBox::new(
+                "c",
+                Rect::new(0.0, 0.0, fits * 0.5, 6.0),
+                Font::Mono,
+                10.0,
+                "1,234.56",
+            )
+            .shrink_to_fit(),
+        );
+        assert_eq!(
+            resolve_page(&p, None),
+            Err(PrintError::DoesNotFit("c".into()))
+        );
     }
 
     #[test]

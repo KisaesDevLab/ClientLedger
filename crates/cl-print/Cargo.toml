@@ -18,6 +18,9 @@ subsetter.workspace = true
 skrifa.workspace = true
 # Logo PNGs are decoded to 8-bit samples (JPEGs pass through as DCTDecode).
 png = "0.18.1"
+# JPEG logos decoded to pixels for printers that take pixels (Windows
+# direct print). MIT OR Apache-2.0 OR Zlib; already in the tree via image.
+zune-jpeg = "0.5.15"
 flate2 = "1.1.10"
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 thiserror = "2.0.21"

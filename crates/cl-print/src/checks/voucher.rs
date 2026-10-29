@@ -169,6 +169,15 @@ fn place_stub(
         ));
     }
     let t = c.stub.totals()?;
+    let paid = if c.stub.is_bill_payment() {
+        t.amount_paid
+    } else {
+        t.lines
+    };
+    let listed = c.stub.is_bill_payment() || !c.stub.lines.is_empty();
+    if listed && paid != c.amount {
+        return Err(PrintError::StubMismatch);
+    }
     let table = if c.stub.is_bill_payment() {
         Table {
             cols: &BILL_COLS,
@@ -395,6 +404,7 @@ mod tests {
                 amount: Decimal::new(2_500, 2),
             })
             .collect();
+        c.amount = c.stub.totals().unwrap().amount_paid;
         c
     }
 
@@ -416,7 +426,12 @@ mod tests {
                 offset: off,
                 ..CheckOptions::default()
             };
-            let doc = layout_checks(&[with_stub(2, 1)], &opts).unwrap();
+            let mut c = sample(1);
+            c.stub.lines = vec![StubLine {
+                name: "Rent".into(),
+                amount: c.amount,
+            }];
+            let doc = layout_checks(&[c], &opts).unwrap();
             assert_eq!(doc.pages.len(), 1);
             let page = &resolve(&doc).unwrap()[0];
             assert_check_at(page, 1, 0.0, off, WINDOW_ON_VOUCHER);
@@ -453,7 +468,7 @@ mod tests {
             assert_eq!(s("total.discount"), "30.00");
             assert_eq!(s("total.credit"), "25.00");
             assert_eq!(s("total.amount_paid"), "1,470.00");
-            assert_eq!(s("check_amount"), "1,234.56");
+            assert_eq!(s("check_amount"), "1,470.00");
             assert_eq!(s("number"), "Check no. 1001");
             assert_eq!(s("memo"), "Memo: Account 7781");
             assert_eq!(s("more"), "");
@@ -515,6 +530,41 @@ mod tests {
         assert!(total.baseline < crate::layout::LETTER_H_MM - 5.0);
         let first_total = page.runs_of("stub1.check_amount").next().unwrap();
         assert!(first_total.baseline < STUB_TOPS[1]);
+    }
+
+    #[test]
+    fn stub_numbers_at_the_largest_amounts_shrink_but_print_whole() {
+        let big = Decimal::new(99_999_999_999, 2); // 999,999,999.99
+        let mut c = sample(1);
+        c.stub.bills = (0..10)
+            .map(|i| StubBill {
+                ref_no: format!("B-{i}"),
+                bill_total: big,
+                discount: big,
+                amount_paid: big,
+                ..StubBill::default()
+            })
+            .collect();
+        c.stub.credits = vec![StubCredit {
+            amount: Decimal::new(999_999_999_999, 2),
+            ..StubCredit::default()
+        }];
+        c.amount = c.stub.totals().unwrap().amount_paid;
+        let doc = layout_checks(&[c], &CheckOptions::default()).unwrap();
+        let page = &resolve(&doc).unwrap()[0];
+        for (tag, want) in [
+            ("stub1.total.bill_total", "9,999,999,999.90"),
+            ("stub1.total.discount", "9,999,999,999.90"),
+            ("stub1.total.credit", "9,999,999,999.99"),
+            ("stub1.total.amount_paid", "9,999,999,999.90"),
+            ("stub1.check_amount", "9,999,999,999.90"),
+            ("stub1.row0.discount", "999,999,999.99"),
+        ] {
+            let r = page.runs_of(tag).next().unwrap();
+            assert_eq!(r.text, want, "{tag}");
+        }
+        // The narrow discount total had to shrink.
+        assert!(page.runs_of("stub1.total.discount").next().unwrap().size_pt < 8.0);
     }
 
     #[test]

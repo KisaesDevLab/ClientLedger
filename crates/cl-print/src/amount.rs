@@ -6,8 +6,9 @@ use crate::PrintError;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive as _;
 
-/// Largest check amount (999,999,999,999.99).
-pub const MAX_CHECK_DOLLARS: u64 = 999_999_999_999;
+/// Largest check amount, 9,999,999,999.99: the most the amount box holds at
+/// full size (16 characters of Plex Mono 10 pt in 36 mm; owner review S1).
+pub const MAX_CHECK_DOLLARS: u64 = 9_999_999_999;
 
 /// `1234.5` → `1,234.50`; `-3` → `-3.00`; `0.125` → `0.125`. At least two
 /// decimals, more only when they are not zero (a value is never rounded).
@@ -225,8 +226,12 @@ mod tests {
             "TWO BILLION SEVENTEEN THOUSAND ONE AND 01/100"
         );
         assert_eq!(
-            amount_in_words(d("999999999999.99")).unwrap(),
-            "NINE HUNDRED NINETY-NINE BILLION NINE HUNDRED NINETY-NINE MILLION NINE HUNDRED NINETY-NINE THOUSAND NINE HUNDRED NINETY-NINE AND 99/100"
+            amount_in_words(d("9999999999.99")).unwrap(),
+            "NINE BILLION NINE HUNDRED NINETY-NINE MILLION NINE HUNDRED NINETY-NINE THOUSAND NINE HUNDRED NINETY-NINE AND 99/100"
+        );
+        assert_eq!(
+            check_figures(d("9999999999.99")).unwrap(),
+            "9,999,999,999.99"
         );
     }
 
@@ -239,7 +244,7 @@ mod tests {
         );
         assert_eq!(amount_in_words(d("1.005")), Err(PrintError::SubCent));
         assert_eq!(
-            amount_in_words(d("1000000000000.00")),
+            amount_in_words(d("10000000000.00")),
             Err(PrintError::AmountTooLarge)
         );
         assert_eq!(check_figures(d("-5")), Err(PrintError::NegativeAmount));

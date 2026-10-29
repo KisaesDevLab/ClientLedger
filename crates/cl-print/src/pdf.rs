@@ -126,7 +126,7 @@ pub fn render_resolved(
             .cap_height(scale(face.cap_height()))
             .stem_v(80.0)
             .font_file2(file);
-        let compressed = deflate(&sub);
+        let compressed = deflate(&sub)?;
         pdf.stream(file, &compressed)
             .filter(Filter::FlateDecode)
             .pair(Name(b"Length1"), i32::try_from(sub.len()).unwrap_or(0));
@@ -145,7 +145,7 @@ pub fn render_resolved(
         Some(l) if pages.iter().any(|p| !p.logos.is_empty()) => {
             let r = alloc();
             let mask = alloc();
-            write_logo(&mut pdf, r, mask, l);
+            write_logo(&mut pdf, r, mask, l)?;
             Some(r)
         }
         _ => None,
@@ -181,7 +181,7 @@ pub fn render_resolved(
     Ok(pdf.finish())
 }
 
-fn write_logo(pdf: &mut Pdf, id: Ref, mask: Ref, logo: &Logo) {
+fn write_logo(pdf: &mut Pdf, id: Ref, mask: Ref, logo: &Logo) -> Result<(), PrintError> {
     let w = i32::try_from(logo.width).unwrap_or(1);
     let h = i32::try_from(logo.height).unwrap_or(1);
     let space: &[u8] = match logo.color {
@@ -199,7 +199,7 @@ fn write_logo(pdf: &mut Pdf, id: Ref, mask: Ref, logo: &Logo) {
                 .bits_per_component(8);
         }
         LogoData::Raw { samples, alpha } => {
-            let data = deflate(samples);
+            let data = deflate(samples)?;
             let mut img = pdf.image_xobject(id, &data);
             img.filter(Filter::FlateDecode);
             img.width(w)
@@ -211,7 +211,7 @@ fn write_logo(pdf: &mut Pdf, id: Ref, mask: Ref, logo: &Logo) {
             }
             img.finish();
             if let Some(a) = alpha {
-                let data = deflate(a);
+                let data = deflate(a)?;
                 let mut sm = pdf.image_xobject(mask, &data);
                 sm.filter(Filter::FlateDecode);
                 sm.width(w)
@@ -221,6 +221,7 @@ fn write_logo(pdf: &mut Pdf, id: Ref, mask: Ref, logo: &Logo) {
             }
         }
     }
+    Ok(())
 }
 
 /// The page's drawing operators.
@@ -312,12 +313,12 @@ fn draw_run(
     c.end_text();
 }
 
-fn deflate(data: &[u8]) -> Vec<u8> {
+fn deflate(data: &[u8]) -> Result<Vec<u8>, PrintError> {
     use std::io::Write as _;
     let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    // Writing to a Vec cannot fail.
-    let _ = e.write_all(data);
-    e.finish().unwrap_or_default()
+    e.write_all(data)
+        .and_then(|()| e.finish())
+        .map_err(|err| PrintError::Compress(err.to_string()))
 }
 
 /// Test helpers: read text positions back out of a rendered PDF.

@@ -65,13 +65,16 @@ pub fn safe_component(s: &str) -> String {
             .trim_end()
             .to_string();
     }
-    let stem = out.split('.').next().unwrap_or("").to_ascii_uppercase();
+    // Windows reserves device names with any extension (`con.x`), so the
+    // check is on the part before the first dot, and the `_` goes there.
+    let stem_len = out.find('.').unwrap_or(out.len());
+    let stem = out[..stem_len].trim_end().to_ascii_uppercase();
     let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ((stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.len() == 4
             && stem.as_bytes()[3].is_ascii_digit());
     if reserved {
-        out.push('_');
+        out.insert(stem_len, '_');
     }
     out
 }
@@ -103,6 +106,9 @@ mod tests {
     #[test]
     fn device_names_and_dots_are_neutralised() {
         assert_eq!(safe_component("CON"), "CON_");
+        assert_eq!(safe_component("con.x"), "con_.x");
+        assert_eq!(safe_component("Lpt1.tar.gz"), "Lpt1_.tar.gz");
+        assert_eq!(pdf_file_name("", "", "aux.pdf"), "aux_.pdf.pdf");
         assert_eq!(safe_component("com1"), "com1_");
         assert_eq!(safe_component("Comfort"), "Comfort");
         assert_eq!(safe_component(" .hidden. "), "hidden");

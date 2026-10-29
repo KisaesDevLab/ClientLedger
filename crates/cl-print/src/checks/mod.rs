@@ -217,7 +217,7 @@ pub struct StubBill {
     pub bill_total: Decimal,
     /// Early-payment discount taken.
     pub discount: Decimal,
-    /// Paid by this check.
+    /// Paid by this check (the bills add up to the check amount).
     pub amount_paid: Decimal,
 }
 
@@ -237,13 +237,16 @@ pub struct StubCredit {
 pub struct StubLine {
     /// Account or item name.
     pub name: String,
-    /// The line amount.
+    /// The line amount (the lines add up to the check amount).
     pub amount: Decimal,
 }
 
 /// What a voucher stub lists: bills paid and credits used for a bill
 /// payment; expense and item lines for a plain check (owner 2026-10-29).
 /// A stub with bills or credits shows the bills table; otherwise the lines.
+/// On voucher stock the amounts paid (bill payments) or the line amounts
+/// (plain checks) must add up to the check amount, else
+/// [`PrintError::StubMismatch`]; credits used are listed beside them.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StubData {
     /// Bills paid.
@@ -920,7 +923,7 @@ pub(crate) mod tests {
         for (amount, single_line) in [
             (Decimal::new(123_456, 2), true),
             (Decimal::new(1_999_999_999, 2), true),
-            (Decimal::new(77_777_777_777_777, 2), false),
+            (Decimal::new(777_777_777_777, 2), false),
         ] {
             let mut c = sample(1);
             c.amount = amount;
@@ -947,6 +950,60 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_largest_check_amount_prints_whole_at_full_size() {
+        let mut c = sample(1);
+        c.amount = Decimal::new(999_999_999_999, 2);
+        for style in [CheckStyle::Standard, CheckStyle::Voucher, CheckStyle::ZFold] {
+            let doc = layout_checks(
+                &[c.clone()],
+                &CheckOptions {
+                    style,
+                    ..CheckOptions::default()
+                },
+            )
+            .unwrap();
+            let page = &resolve(&doc).unwrap()[0];
+            let a = page.runs_of("check1.amount").next().unwrap();
+            assert!(a.text.ends_with("9,999,999,999.99"), "{}", a.text);
+            assert!((a.size_pt - 10.0).abs() < 0.001);
+            assert!(a.x >= FIELDS.amount.x - 0.001);
+        }
+        c.amount = Decimal::new(1_000_000_000_000, 2);
+        assert_eq!(
+            layout_checks(&[c], &CheckOptions::default()),
+            Err(PrintError::AmountTooLarge)
+        );
+    }
+
+    #[test]
+    fn a_stub_total_that_differs_from_the_check_amount_is_refused() {
+        let mut c = sample(1);
+        c.stub.lines = vec![StubLine {
+            name: "Rent".into(),
+            amount: Decimal::new(100, 2),
+        }];
+        assert_eq!(
+            layout_checks(&[c.clone()], &CheckOptions::default()),
+            Err(PrintError::StubMismatch)
+        );
+        c.stub.lines.clear();
+        c.stub.bills = vec![StubBill {
+            amount_paid: Decimal::new(123_455, 2),
+            ..StubBill::default()
+        }];
+        assert_eq!(
+            layout_checks(&[c.clone()], &CheckOptions::default()),
+            Err(PrintError::StubMismatch)
+        );
+        // Standard and z-fold stock print no stub, so nothing to compare.
+        let opts = CheckOptions {
+            style: CheckStyle::Standard,
+            ..CheckOptions::default()
+        };
+        assert!(layout_checks(&[c], &opts).is_ok());
     }
 
     #[test]

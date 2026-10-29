@@ -950,6 +950,7 @@ dependencies = [
  "skrifa",
  "subsetter",
  "thiserror 2.0.21",
+ "zune-jpeg",
 ]
 
 [[package]]

@@ -33,7 +33,7 @@ pub use fonts::Font;
 pub use forms::{
     CompanyInfo, FormDoc, FormLabels, FormStyle, ItemLine, layout_form, resolve_footer,
 };
-pub use image::Logo;
+pub use image::{Logo, LogoProblem};
 pub use layout::{Align, Document, Page, PageSize, Rect, ResolvedPage, Run, TextBox, resolve};
 pub use pdf::{render, render_resolved};
 pub use print_queue::{
@@ -49,9 +49,9 @@ pub enum PrintError {
     /// An embedded font could not be read or subset (a build defect).
     #[error("a built-in font could not be used: {0}")]
     Font(String),
-    /// The logo file could not be used.
-    #[error("the logo could not be used: {0}")]
-    Logo(String),
+    /// Compressing a font or picture failed (not expected).
+    #[error("the PDF could not be compressed: {0}")]
+    Compress(String),
     /// A check amount below zero.
     #[error("a check cannot be printed for a negative amount")]
     NegativeAmount,
@@ -64,6 +64,13 @@ pub enum PrintError {
     /// An alignment offset beyond 10 mm.
     #[error("the alignment adjustment must be within 10 mm in each direction")]
     OffsetOutOfRange,
+    /// A number too wide for its box even at the smallest size (the tag
+    /// names the box).
+    #[error("a number is too wide to print in its space")]
+    DoesNotFit(String),
+    /// A voucher stub's total differs from the check amount.
+    #[error("the stub's total does not match the check amount")]
+    StubMismatch,
     /// A form with more header fields than the template holds.
     #[error("the form has more header fields than fit")]
     TooManyFields,
