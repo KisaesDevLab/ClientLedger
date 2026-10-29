@@ -239,11 +239,15 @@ fn the_summary_shows_the_engines_total() {
         items: vec![SummaryRow {
             label: "Hollister".into(),
             detail: "5521".into(),
+            check_no: "5521".into(),
+            method: "Check".into(),
             amount: money("1250.00"),
         }],
         other: vec![SummaryRow {
             label: "Card fees".into(),
             detail: String::new(),
+            check_no: String::new(),
+            method: String::new(),
             amount: money("-12.50"),
         }],
         cash_back: Some(money("50.00")),

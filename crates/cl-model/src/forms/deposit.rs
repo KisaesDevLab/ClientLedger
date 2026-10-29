@@ -545,6 +545,10 @@ pub struct SummaryRow {
     pub label: String,
     /// Reference (check number) or memo.
     pub detail: String,
+    /// The payer's check number (empty when not known).
+    pub check_no: String,
+    /// How it was paid, in plain words (empty when not known).
+    pub method: String,
     /// The engine's amount (signed for other lines).
     pub amount: Money,
 }

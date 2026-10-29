@@ -160,6 +160,8 @@ pub(crate) struct Setup {
     company: CompanyInfo,
     logo: Option<Vec<u8>>,
     footers: FormFooters,
+    /// Every account's full name (check stubs).
+    names: std::collections::BTreeMap<AccountId, String>,
 }
 
 /// One bank account's queue.
@@ -173,10 +175,14 @@ pub(crate) struct Queue {
     used: BTreeSet<u64>,
 }
 
+/// One form's bill-to address (name first) and its lines.
+pub(crate) type FormData = (Vec<String>, Vec<(String, Money)>);
+
 /// The pages' data, read for a preview.
 pub(crate) enum Built {
     Checks(Vec<cl_print::StubData>),
-    Forms(Vec<Vec<(String, Money)>>),
+    /// Per form: the bill-to address (name first) and its lines.
+    Forms(Vec<FormData>),
 }
 
 /// The Print Forms window.
@@ -410,6 +416,7 @@ impl PrintFormsScreen {
                 ),
                 logo: crate::company::demo::printing::logo(&d),
                 footers: crate::company::demo::printing::footers(&d),
+                names: job::full_names(&chart),
             };
             drop(d);
             self.setup_task = Some(Task::ready(setup));
@@ -446,6 +453,7 @@ impl PrintFormsScreen {
                 company,
                 logo,
                 footers,
+                names: job::full_names(&accounts),
             })
         }) {
             Ok(p) => self.setup_task = Some(Task::Pending(p)),
@@ -617,6 +625,7 @@ impl PrintFormsScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        let names = self.setup.names.clone();
         if let Ok(p) = group.read(&session, move |s| async move {
             let mut stubs = Vec::new();
             for c in &picked {
@@ -629,7 +638,7 @@ impl PrintFormsScreen {
                     s.transactions()
                         .get(c.id)
                         .await
-                        .map(|t| job::stub_of_check(&t.record))
+                        .map(|t| job::stub_of_check(&t.record, &names))
                 };
                 stubs.push(stub.unwrap_or_default());
             }
@@ -650,7 +659,12 @@ impl PrintFormsScreen {
         if self.link.is_demo() {
             let lines = picked
                 .iter()
-                .map(|f| vec![(t("print.demo.services"), f.total.unwrap_or(Money::ZERO))])
+                .map(|f| {
+                    (
+                        crate::company::demo::printing::form_address(f),
+                        vec![(t("print.demo.services"), f.total.unwrap_or(Money::ZERO))],
+                    )
+                })
                 .collect();
             self.build_task = Some(Task::ready(Built::Forms(lines)));
             return;
@@ -661,13 +675,32 @@ impl PrintFormsScreen {
         if let Ok(p) = group.read(&session, move |s| async move {
             let mut all = Vec::new();
             for f in &picked {
-                all.push(
-                    s.transactions()
-                        .get(f.id)
+                let txn = s.transactions().get(f.id).await.ok();
+                let lines = txn
+                    .as_ref()
+                    .map(|t| job::form_lines(&t.record))
+                    .unwrap_or_default();
+                // The bill-to address is the customer's billing address.
+                let contact = txn.as_ref().and_then(|t| t.record.contact_id);
+                let address = match contact {
+                    Some(id) => s
+                        .contacts()
+                        .get(id)
                         .await
-                        .map(|t| job::form_lines(&t.record))
+                        .ok()
+                        .map(|c| crate::screens::write_check::billing_address(&c.record))
                         .unwrap_or_default(),
-                );
+                    None => String::new(),
+                };
+                let mut address: Vec<String> = address
+                    .lines()
+                    .map(str::to_string)
+                    .filter(|l| !l.trim().is_empty())
+                    .collect();
+                if address.is_empty() {
+                    address.extend(f.customer.clone());
+                }
+                all.push((address, lines));
             }
             Ok(Built::Forms(all))
         }) {
@@ -756,14 +789,14 @@ impl PrintFormsScreen {
             (Some(PreviewKind::Forms), Built::Forms(lines)) => {
                 let picked = self.picked_forms();
                 let mut docs = Vec::new();
-                for (f, l) in picked.iter().zip(&lines) {
+                for (f, (address, l)) in picked.iter().zip(&lines) {
                     let style = cl_print::FormStyle {
                         company: self.setup.company.clone(),
                         logo: self.logo.clone(),
                         footer: self.setup.footers.resolved_for(f.kind).to_string(),
                         labels: job::form_labels(),
                     };
-                    match cl_print::layout_form(&job::form_doc(f, l), &style) {
+                    match cl_print::layout_form(&job::form_doc(f, address, l), &style) {
                         Ok(d) => docs.push(d),
                         Err(e) => {
                             self.layout_failed(&e);
@@ -771,10 +804,7 @@ impl PrintFormsScreen {
                         }
                     }
                 }
-                let addresses = picked
-                    .iter()
-                    .map(|f| f.customer.clone().into_iter().collect())
-                    .collect();
+                let addresses = lines.iter().map(|(a, _)| a.clone()).collect();
                 let name = picked.first().map_or_else(String::new, |f| {
                     cl_print::pdf_file_name(
                         &job::kind_word(f.kind),
@@ -1582,7 +1612,10 @@ impl PrintFormsScreen {
             form::inline_warning(ui, &tokens, &text);
             if let Some(n) = self.offer.filter(|_| p == PrintProblem::NumberInUse)
                 && ui
-                    .button(t_with("print.problem.use_next", &[("next", &n.to_string())]))
+                    .button(t_with(
+                        "print.problem.use_next",
+                        &[("next", &n.to_string())],
+                    ))
                     .clicked()
             {
                 self.take_offer();

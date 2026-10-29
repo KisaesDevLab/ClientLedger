@@ -185,6 +185,9 @@ pub(crate) struct Loaded {
 #[derive(Default)]
 pub(crate) struct Panel {
     pub pending: Option<PendingDeposits>,
+    /// Every waiting payment seen this session: its check number and
+    /// payment method (plain words), for the printed summary.
+    pub seen: std::collections::BTreeMap<cl_core::ids::TransactionId, (String, String)>,
     pub pending_task: Option<Task<PendingDeposits>>,
     pub pending_failed: bool,
     pub waiting: Vec<FeedDeposit>,

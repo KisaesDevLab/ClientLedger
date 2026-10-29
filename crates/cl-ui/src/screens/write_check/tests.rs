@@ -807,7 +807,9 @@ fn a_print_run_refreshes_the_saved_check_in_front() {
     let (id, bank) = s.editing.as_ref().map(|e| (e.id, e.bank)).expect("editing");
     {
         let mut d = link.demo_state().expect("demo");
-        let n = crate::company::demo::printing::layout(&mut d, bank).0.expect("next");
+        let n = crate::company::demo::printing::layout(&mut d, bank)
+            .0
+            .expect("next");
         assert_eq!(n, 4418);
         let req = cl_api::PrintChecks {
             bank_account: bank,

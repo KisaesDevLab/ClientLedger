@@ -479,11 +479,18 @@ fn first_page(form: &FormDoc, style: &FormStyle) -> Page {
             8.5,
             label.clone(),
         ));
+        // Numbers, dates and codes in the figure face; words (an account or
+        // terms name) in the text face.
+        let font = if value.chars().any(char::is_lowercase) {
+            Font::Sans
+        } else {
+            Font::Mono
+        };
         p.text(
             TextBox::new(
                 format!("field{i}.value"),
                 Rect::new(163.0, y, RIGHT - 163.0, 4.5),
-                Font::Mono,
+                font,
                 9.0,
                 value.clone(),
             )

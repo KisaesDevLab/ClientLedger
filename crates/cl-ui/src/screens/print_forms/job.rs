@@ -200,16 +200,50 @@ pub(crate) fn stub_of_payment(r: &BillPaymentRecord) -> cl_print::StubData {
     }
 }
 
-/// A written check's voucher stub: its expense lines (Q-P19o).
+/// Every account's `Parent:Child` name (stubs name accounts the way the
+/// lists and the print queue do).
 #[must_use]
-pub(crate) fn stub_of_check(t: &Transaction) -> cl_print::StubData {
+pub(crate) fn full_names(
+    accounts: &[cl_api::Account],
+) -> std::collections::BTreeMap<cl_core::ids::AccountId, String> {
+    let by_id: std::collections::BTreeMap<_, _> = accounts.iter().map(|a| (a.id, a)).collect();
+    accounts
+        .iter()
+        .map(|a| {
+            let mut parts = vec![a.fields.name.clone()];
+            let mut parent = a.fields.parent_id;
+            // A parent chain never loops in the engine; the bound guards it.
+            for _ in 0..16 {
+                let Some(p) = parent.and_then(|p| by_id.get(&p)) else {
+                    break;
+                };
+                parts.push(p.fields.name.clone());
+                parent = p.fields.parent_id;
+            }
+            parts.reverse();
+            (a.id, parts.join(":"))
+        })
+        .collect()
+}
+
+/// A written check's voucher stub: its expense lines (Q-P19o), each named
+/// with its full account name when known.
+#[must_use]
+pub(crate) fn stub_of_check(
+    t: &Transaction,
+    names: &std::collections::BTreeMap<cl_core::ids::AccountId, String>,
+) -> cl_print::StubData {
     cl_print::StubData {
         lines: t
             .lines
             .iter()
             .filter(|l| l.debit.is_positive())
             .map(|l| StubLine {
-                name: l.account_name.clone().unwrap_or_default(),
+                name: names
+                    .get(&l.account_id)
+                    .cloned()
+                    .or_else(|| l.account_name.clone())
+                    .unwrap_or_default(),
                 amount: dec(l.debit),
             })
             .collect(),
@@ -224,7 +258,17 @@ pub(crate) fn check_data(
     number: Option<u64>,
     stub: cl_print::StubData,
 ) -> CheckData {
-    let mut address = vec![c.payee.clone()];
+    // The address may already start with the payee's name (Write Check's
+    // address box does); the name is printed once.
+    let named = c
+        .address
+        .first()
+        .is_some_and(|l| l.trim().eq_ignore_ascii_case(c.payee.trim()));
+    let mut address = if named {
+        Vec::new()
+    } else {
+        vec![c.payee.clone()]
+    };
     address.extend(c.address.iter().cloned());
     CheckData {
         number: number.map(|n| n.to_string()).unwrap_or_default(),
@@ -343,7 +387,7 @@ pub(crate) fn kind_word(kind: DocType) -> String {
 /// transaction (description or account, amount), the total from the
 /// engine. `lines` empty when the transaction could not be read.
 #[must_use]
-pub(crate) fn form_doc(f: &QueuedForm, lines: &[(String, Money)]) -> FormDoc {
+pub(crate) fn form_doc(f: &QueuedForm, address: &[String], lines: &[(String, Money)]) -> FormDoc {
     let rows = lines
         .iter()
         .map(|(name, amount)| vec![name.clone(), cl_print::format_amount(dec(*amount))])
@@ -359,8 +403,15 @@ pub(crate) fn form_doc(f: &QueuedForm, lines: &[(String, Money)]) -> FormDoc {
         } else {
             "print.pdf.sold_to"
         }),
-        address: f.customer.clone().into_iter().collect(),
-        fields: vec![(t("print.pdf.date"), crate::shell::us_date(f.date))],
+        address: address.to_vec(),
+        fields: f
+            .number
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .map(|n| (t("print.pdf.number"), n))
+            .into_iter()
+            .chain([(t("print.pdf.date"), crate::shell::us_date(f.date))])
+            .collect(),
         columns: vec![
             Column::text("description", &t("print.pdf.description"), 140.0),
             Column::number("amount", &t("print.pdf.amount"), 50.5),
@@ -411,8 +462,9 @@ pub(crate) fn deposit_data(
             .map(|r| DepositLine {
                 received_from: r.label.clone(),
                 memo: r.detail.clone(),
+                check_no: r.check_no.clone(),
+                payment_method: r.method.clone(),
                 amount: dec(r.amount),
-                ..DepositLine::default()
             })
             .collect(),
         subtotal,
@@ -471,6 +523,12 @@ mod tests {
         assert_eq!(c.number, "1001");
         assert_eq!(c.address[0], "Feed & Seed");
         assert_eq!(c.address.len(), 3);
+        // An address that already starts with the name prints it once.
+        let mut named = check();
+        named.address.insert(0, "Feed & Seed".into());
+        let c = check_data(&named, Some(1001), cl_print::StubData::default());
+        assert_eq!(c.address.len(), 3);
+        assert_eq!(c.address[0], "Feed & Seed");
         assert_eq!(c.date, "11/04/2026");
     }
 
@@ -541,9 +599,16 @@ mod tests {
             footer: "Thanks".into(),
             labels: cl_print::FormLabels::default(),
         };
-        let one = cl_print::layout_form(&form_doc(&f, &[("Design".into(), m("2450.00"))]), &style)
-            .expect("form");
-        let two = cl_print::layout_form(&form_doc(&f, &[]), &style).expect("form");
+        let address = [
+            "Hollister Family Trust".to_string(),
+            "200 Riverbend Pkwy".into(),
+        ];
+        let doc = form_doc(&f, &address, &[("Design".into(), m("2450.00"))]);
+        // The invoice prints its number and its bill-to address.
+        assert_eq!(doc.fields[0].1, "INV-1040");
+        assert_eq!(doc.address.len(), 2);
+        let one = cl_print::layout_form(&doc, &style).expect("form");
+        let two = cl_print::layout_form(&form_doc(&f, &[], &[]), &style).expect("form");
         let joined = join(vec![one, two], "Forms").expect("joined");
         assert_eq!(joined.pages.len(), 2);
         assert!(join(Vec::new(), "x").is_none());

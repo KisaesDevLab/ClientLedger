@@ -652,12 +652,20 @@ pub fn print_queue(
 
 /// A check's expense lines (account name, amount) for its voucher stub.
 pub fn stub_lines(state: &mut DemoState, id: TransactionId) -> Vec<(String, Money)> {
+    let names = crate::screens::print_forms::job::full_names(&chart(state));
     transaction(state, id)
         .map(|t| {
             t.lines
                 .into_iter()
                 .filter(|l| l.debit.is_positive())
-                .map(|l| (l.account_name.unwrap_or_default(), l.debit))
+                .map(|l| {
+                    let name = names
+                        .get(&l.account_id)
+                        .cloned()
+                        .or(l.account_name)
+                        .unwrap_or_default();
+                    (name, l.debit)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -1165,7 +1173,11 @@ mod tests {
         let bank = by_number(&mut s, "1010");
         let d = draft(&mut s, None, true);
         let id = create(&mut s, &d, None).expect("saved");
-        assert!(printing::check_queue(&mut s, bank).iter().any(|c| c.id == id));
+        assert!(
+            printing::check_queue(&mut s, bank)
+                .iter()
+                .any(|c| c.id == id)
+        );
         assert_eq!(printing::layout(&mut s, bank).0, Some(4418));
         let req = cl_api::PrintChecks {
             bank_account: bank,
@@ -1184,7 +1196,11 @@ mod tests {
         let got = get(&mut s, id).expect("get").record;
         assert_eq!(got.print_status, PrintStatus::Queue);
         assert_eq!(got.check_number, None);
-        assert!(printing::check_queue(&mut s, bank).iter().any(|c| c.id == id));
+        assert!(
+            printing::check_queue(&mut s, bank)
+                .iter()
+                .any(|c| c.id == id)
+        );
     }
 
     #[test]

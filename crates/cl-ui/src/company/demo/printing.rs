@@ -473,6 +473,24 @@ fn seeded_forms() -> Vec<QueuedForm> {
     ]
 }
 
+/// A queued form's bill-to address, name first (synthetic, as the engine
+/// would read it from the customer's billing address).
+#[must_use]
+pub fn form_address(f: &QueuedForm) -> Vec<String> {
+    let rest: &[&str] = if f.id == id(11) {
+        &["200 Riverbend Pkwy", "Hollister, MO 65672"]
+    } else if f.id == id(12) {
+        &["PO Box 410", "Kimberling City, MO 65686"]
+    } else {
+        &[]
+    };
+    f.customer
+        .clone()
+        .into_iter()
+        .chain(rest.iter().map(|s| (*s).to_string()))
+        .collect()
+}
+
 /// The numbers the demo's documents of `kind` already have (Company
 /// Information's duplicate warning, Q-94).
 #[must_use]

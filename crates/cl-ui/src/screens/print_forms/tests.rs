@@ -250,6 +250,16 @@ fn a_deposit_summary_previews_with_its_rows_and_prints() {
     let row = |label: &str, amount: &str| SummaryRow {
         label: label.into(),
         detail: String::new(),
+        check_no: if amount.starts_with('-') {
+            String::new()
+        } else {
+            "5521".into()
+        },
+        method: if amount.starts_with('-') {
+            String::new()
+        } else {
+            "Check".into()
+        },
         amount: m(amount),
     };
     let summary = DepositSummary {
@@ -270,6 +280,8 @@ fn a_deposit_summary_previews_with_its_rows_and_prints() {
     let text = |tag: &str| page.runs_of(tag).next().map(|r| r.text.clone());
     assert_eq!(text("title").as_deref(), Some("Deposit Summary"));
     assert_eq!(text("row1.amount").as_deref(), Some("-12.50"));
+    assert_eq!(text("row0.check_no").as_deref(), Some("5521"));
+    assert_eq!(text("row0.payment_method").as_deref(), Some("Check"));
     assert_eq!(text("total0.value").as_deref(), Some("287.50"), "subtotal");
     assert_eq!(text("total2.value").as_deref(), Some("237.50"));
     assert_eq!(s.state()["preview"]["kind"], "deposit");

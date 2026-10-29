@@ -179,6 +179,18 @@ impl DepositScreen {
     /// (deposited elsewhere) are dropped from the form.
     fn pending_arrived(&mut self, p: cl_api::PendingDeposits) {
         let waiting: Vec<_> = p.items.iter().map(|i| i.source).collect();
+        // Kept for the printed summary's Check no. and Payment method: the
+        // saved deposit's lines don't carry them (Q-P19z).
+        for i in &p.items {
+            let method = i.method.as_deref().map(|m| t(method_key(m)));
+            self.panel.seen.insert(
+                i.source,
+                (
+                    i.ref_no.clone().unwrap_or_default(),
+                    method.unwrap_or_default(),
+                ),
+            );
+        }
         self.panel.pending = Some(p);
         // Only unsaved picks can go stale; a saved deposit keeps its own.
         if self.editing.is_some() || !self.header.is_dirty() {
