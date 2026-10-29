@@ -239,3 +239,66 @@ fn a_deposit_summary_previews_with_its_rows_and_prints() {
     s.poll();
     assert_eq!(s.sent, Some(Sent::Printed));
 }
+
+/// The interactive widgets one screen draws that have no accessible name.
+fn unnamed_of(s: &mut dyn Screen) -> Vec<String> {
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 940.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ui| s.ui(ui),
+        );
+        out.textures_delta.clear();
+        nodes.extend(
+            out.platform_output
+                .accesskit_update
+                .map(|u| u.nodes)
+                .unwrap_or_default(),
+        );
+    }
+    assert!(
+        nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::Button),
+        "drawn"
+    );
+    crate::screens::unnamed_widgets(&nodes)
+}
+
+/// Every widget of the Print Forms queues, the preview, Printer Setup and
+/// Company Information has an accessible name (screen readers and the
+/// control channel).
+#[test]
+fn print_and_company_info_widgets_have_accessible_names() {
+    let (_d, mut s) = screen(false);
+    assert_ne!(s.checks.len(), 0);
+    let u = unnamed_of(&mut s);
+    assert!(u.is_empty(), "checks queue: {u:?}");
+    s.tab = Tab::Forms;
+    s.load_forms();
+    s.poll();
+    assert_ne!(s.forms.len(), 0);
+    let u = unnamed_of(&mut s);
+    assert!(u.is_empty(), "forms queue: {u:?}");
+    let (_d2, mut setup) = screen(true);
+    let u = unnamed_of(&mut setup);
+    assert!(u.is_empty(), "printer setup: {u:?}");
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let tenant = link
+        .demo_state()
+        .and_then(|d| d.companies.first().map(|c| (c.tenant_id, c.name.clone())));
+    let mut info = crate::screens::company_info::CompanyInfoScreen::new(link, tenant);
+    let u = unnamed_of(&mut info);
+    assert!(u.is_empty(), "company information: {u:?}");
+}
