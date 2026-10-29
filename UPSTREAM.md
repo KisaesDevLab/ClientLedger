@@ -113,6 +113,13 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-103 | Starting `checkNumber` on `POST /bill-payments` (check, not print later): one number per vendor payment in order, counter moves forward, `CHECK_NUMBER_IN_USE` 409; capability `bill-payment-check-number-v1` | P18 | `clientledger/pay-bills`, migration 0238 | Merged (engine main e45658fb, pinned), PR #193 |
 | U-104 | Fix: company scope on `/bills/payable` (bills and credits), `GET /bill-payments` and `GET /bill-payments/:id` | P18 (scout) | `clientledger/pay-bills`, migration 0238 | Merged (engine main e45658fb, pinned), PR #193 |
 | U-105 | Per-bill `expectedUpdatedAt` on `POST /bill-payments` → 409 STALE instead of 400 for a stale Pay Bills screen | P18 follow-up | - | Proposed |
+| U-106 | Check reprint (Q-55): `POST /checks/requeue` and `/checks/reprint/:batchId` take the user, write an audit row with the before state and the spoiled `checkNumber`, and clear the number; spoiled numbers are kept per bank account and count as used by the duplicate check; company scope on requeue, reprint, print (checks must belong to `bankAccountId`) and the counter update; capability `check-reprint-audit-v1` | P19 | `clientledger/check-printing` | Proposed |
+| U-107 | Print queue rows add `payeeAddress`, `txnType`, `bankAccountId` (window-envelope address without one read per check) | P19 | `clientledger/check-printing` | Proposed |
+| U-108 | `GET /bill-payments/:id` bill and credit applications carry the bill's `txnNumber`, `vendorInvoiceNumber`, `txnDate`, `total` (voucher stubs, Q-213) | P19 | `clientledger/check-printing` | Proposed |
+| U-109 | Check layout and alignment per bank account: `checkSettings.layouts[bankAccountId] = {format, offsetX, offsetY}` (mm), falling back to the company setting | P19 | `clientledger/check-printing` | Proposed |
+| U-110 | `GET /company/logo` returns the uploaded logo bytes (company-scoped); capability `company-logo-v1` | P19 | `clientledger/check-printing` | Proposed |
+| U-111 | Document numbering per type (invoice, cash_sale, credit_memo, statement) with prefix, `GET /document-numbers/next?type=` peek, duplicate warning (`warnOnly`); fix the invoice counter that moves every company in the tenant; company-scoped `footerText`; capability `document-numbers-v1` | P19/P20 | `clientledger/document-numbers` | Proposed |
+| U-112 | Customer statement data: `GET /reports/customer-statement?contactId=&start=&end=` (opening balance, activity, aging) | P22 | - | Proposed (P19 builds the layout against a local struct, Q-P19d) |
 
 Engine issue #162 (flaky pgboss-owner-role test) is open; not caused by PR #160 or #161.
 
