@@ -78,6 +78,9 @@ pub(crate) const P17_SCREENS: [crate::shell::MakeScreen; 4] = [
 pub(crate) const P18_SCREENS: [crate::shell::MakeScreen; 2] =
     [pay_bills::make, pay_bills::view::make];
 
+/// Every P19 screen's `make` (the shell tries each after P18's).
+pub(crate) const P19_SCREENS: [crate::shell::MakeScreen; 1] = [print_forms::make];
+
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

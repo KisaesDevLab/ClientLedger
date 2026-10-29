@@ -1592,6 +1592,7 @@ fn make_any(
             .chain(&crate::screens::P17_SCREENS)
             .chain(&crate::screens::A04_SCREENS)
             .chain(&crate::screens::P18_SCREENS)
+            .chain(&crate::screens::P19_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

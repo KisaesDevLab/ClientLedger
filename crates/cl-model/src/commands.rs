@@ -234,6 +234,9 @@ pub const COMMANDS: &[Command] = &[
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
     built("file.delete_company", "Delete Company", Some(Menu::File), 2, None),
     cmd("file.print", "Print", Some(Menu::File), 3, ctrl('P'), Scope::Global),
+    // P19: the print queues and the printer's alignment (no shortcut)
+    built("file.print_forms", "Print Forms", Some(Menu::File), 3, None),
+    built("file.printer_setup", "Printer Setup", Some(Menu::File), 3, None),
     cmd("file.close_window", "Close Window", Some(Menu::File), 4, key(Mods::CMD, Key::F(4)), Scope::Global),
     cmd("file.quit", "Quit ClientLedger", Some(Menu::File), 5, ctrl('Q'), Scope::Global),
     // Edit
@@ -437,6 +440,9 @@ pub const DEV_COMMANDS: &[Command] = &[
     ),
     // P18: the Pay Bills scenario runs light and dark in one app; this
     // voids the demo's bill payments so the second run sees the same list.
+    // P19: the print scenarios run light and dark in one app; this puts
+    // the demo's print queue back.
+    dev_action("dev.demo_print_reset", "Demo Print Reset (developer)"),
     dev_action(
         "dev.demo_pay_bills_reset",
         "Reset Demo Bill Payments (developer)",
@@ -553,6 +559,9 @@ mod tests {
             // P18
             "vendors.pay_bills",
             "vendors.bill_payment",
+            // P19
+            "file.print_forms",
+            "file.printer_setup",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

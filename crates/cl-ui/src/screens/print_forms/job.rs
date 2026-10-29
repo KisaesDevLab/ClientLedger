@@ -6,8 +6,6 @@
 //!
 //! Amounts arrive as [`Money`] and go to `cl-print` as exact decimals.
 
-#![allow(dead_code)] // the Print Forms screen uses these (next commit)
-
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, channel};
 

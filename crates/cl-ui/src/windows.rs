@@ -145,6 +145,9 @@ pub enum OpenPayload {
     /// A06: a statement draft (U-94) opened in Match Vendor Statement
     /// (`nav.statement_match`), its file read there.
     StatementDraft(cl_api::DocumentDraftId),
+    /// P19: checks to print now (Write Check / Pay Bills `Print`, Reprint
+    /// check): File > Print Forms opens on their preview.
+    PrintChecks(Vec<cl_core::ids::TransactionId>),
 }
 
 /// Stand-in for a screen a later phase builds.

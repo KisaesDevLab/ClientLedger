@@ -107,9 +107,11 @@ mod doc_form;
 mod doc_review;
 // P18.
 mod pay_bills;
+// P19.
+mod print;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 33] = [
+const TABLES: [&[(&str, &str)]; 34] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -143,6 +145,7 @@ const TABLES: [&[(&str, &str)]; 33] = [
     doc_form::ENGLISH,
     compare::ENGLISH,
     pay_bills::ENGLISH,
+    print::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
