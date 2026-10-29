@@ -1156,6 +1156,22 @@ impl PayBillsScreen {
     }
 }
 
+impl PayBillsScreen {
+    /// Print checks: the payments just written to print later open on
+    /// their preview in File > Print Forms. False when none wait.
+    pub(crate) fn print_checks(&mut self) -> bool {
+        if self.to_print.is_empty() {
+            return false;
+        }
+        let ids = std::mem::take(&mut self.to_print);
+        self.link.push(crate::company::CompanyEvent::OpenWith(
+            CommandId::new(crate::screens::print_forms::KIND),
+            Box::new(crate::windows::OpenPayload::PrintChecks(ids)),
+        ));
+        true
+    }
+}
+
 impl Screen for PayBillsScreen {
     fn title(&self) -> String {
         crate::i18n::t("cmd.vendors.pay_bills")
@@ -1210,6 +1226,14 @@ impl Screen for PayBillsScreen {
             "form.clear" => {
                 self.form.clear();
                 self.revision += 1;
+                true
+            }
+            // Ctrl+P: print the checks just written (Print later), preview
+            // first; nothing to print says so.
+            "file.print" => {
+                if !self.print_checks() {
+                    self.notice = Some("paybills.print.nothing");
+                }
                 true
             }
             "form.revert" => {

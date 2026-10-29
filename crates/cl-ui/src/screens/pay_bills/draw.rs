@@ -36,6 +36,34 @@ fn fact(ui: &mut Ui, tokens: &Tokens, label: &str, figure: RichText) {
     });
 }
 
+/// "Paid 1 bill with 1 payment." with the counts in the right number.
+pub(crate) fn paid_text(bills: usize, payments: usize) -> String {
+    let count = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            t(one)
+        } else {
+            t_with(many, &[("n", &n.to_string())])
+        }
+    };
+    t_with(
+        "paybills.paid",
+        &[
+            (
+                "bills",
+                &count(bills, "paybills.paid.bills.one", "paybills.paid.bills"),
+            ),
+            (
+                "payments",
+                &count(
+                    payments,
+                    "paybills.paid.payments.one",
+                    "paybills.paid.payments",
+                ),
+            ),
+        ],
+    )
+}
+
 impl PayBillsScreen {
     pub(super) fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
@@ -77,28 +105,16 @@ impl PayBillsScreen {
         if let Some((payments, bills)) = self.last_paid
             && self.notice.is_none()
         {
-            form::hint(
-                ui,
-                tokens,
-                &t_with(
-                    "paybills.paid",
-                    &[
-                        ("bills", &bills.to_string()),
-                        ("payments", &payments.to_string()),
-                    ],
-                ),
-            );
+            form::hint(ui, tokens, &paid_text(bills, payments));
         }
         if !self.to_print.is_empty() && self.last_paid.is_some() {
-            let r = ui
-                .button(t("print.check.print_now"))
-                .on_hover_text(t("print.check.print_now.tip"));
+            let r = ui.button(t("paybills.print_checks")).on_hover_text(format!(
+                "{} ({})",
+                t("paybills.print_checks.tip"),
+                kit::chip("file.print")
+            ));
             if r.clicked() {
-                let ids = std::mem::take(&mut self.to_print);
-                self.link.push(crate::company::CompanyEvent::OpenWith(
-                    cl_model::CommandId::new(crate::screens::print_forms::KIND),
-                    Box::new(crate::windows::OpenPayload::PrintChecks(ids)),
-                ));
+                self.print_checks();
             }
         }
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
