@@ -288,6 +288,16 @@ fn address_lines(p: &cl_api::CompanyProfileUpdate) -> Vec<String> {
     out
 }
 
+/// The first number to offer after the engine refused `first` as used
+/// (N3): the engine's next number when it is past `first`, else the number
+/// after `first` (the engine's next is at or below a used number, so the
+/// next free one is further on; a second refusal moves on again).
+pub(crate) fn offer_after(engine_next: Option<u64>, first: u64) -> u64 {
+    engine_next
+        .filter(|n| *n > first)
+        .unwrap_or_else(|| first.saturating_add(1))
+}
+
 /// A check that may print: never a $0.00 one (S1; engines before U-117
 /// queue one for a vendor paid by credits or a discount alone).
 pub(crate) fn printable(c: &QueuedCheck) -> bool {
@@ -1063,7 +1073,7 @@ impl PrintFormsScreen {
         let Some(bank) = self.run_bank else {
             return;
         };
-        let count = self.picked.len() as u64;
+        let count = self.picked_checks().len() as u64;
         let first = self.first().unwrap_or(1);
         if let Some(mut d) = self.link.demo_state() {
             let used = crate::company::demo::printing::used_numbers_of(&mut d, bank);
@@ -1079,20 +1089,30 @@ impl PrintFormsScreen {
         };
         if let Ok(p) = group.read(&session, move |s| async move {
             let (settings, _) = s.printing().check_layout(bank).await?;
-            Ok(settings
-                .next_for(bank)
-                .map(u64::from)
-                .filter(|n| *n > first))
+            Ok(Some(offer_after(
+                settings.next_for(bank).map(u64::from),
+                first,
+            )))
         }) {
             self.offer_task = Some(Task::Pending(p));
         }
     }
 
-    /// Use the offered first number.
+    /// Use the offered first number: the run and the preview are numbered
+    /// again from it, so Print records exactly the number shown (N3).
     pub(crate) fn take_offer(&mut self) {
         if let Some(n) = self.offer.take() {
             self.first_number = n.to_string();
             self.problem = None;
+            let ready = self
+                .run
+                .as_ref()
+                .is_some_and(|r| r.state() == cl_print::RunState::Ready);
+            if ready {
+                self.preview = None;
+                self.run = None;
+                self.preview_checks();
+            }
         }
     }
 

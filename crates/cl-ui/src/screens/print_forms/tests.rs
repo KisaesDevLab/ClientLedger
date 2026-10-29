@@ -146,6 +146,32 @@ fn a_used_first_number_is_refused_and_the_preview_stays() {
     assert_eq!(s.offer, Some(after));
     assert!(!s.asking);
     assert!(s.preview.is_some());
+    // N3: "Use next N" renumbers the run and the preview, and Print sends N.
+    let remaining = s.checks[0].id;
+    s.take_offer();
+    s.poll();
+    assert_eq!(s.first_number, after.to_string());
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items()[0].number, Some(after), "the run follows");
+    assert!(s.preview.is_some(), "the preview is laid out again");
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking);
+    let printed = s
+        .link
+        .demo_state()
+        .and_then(|d| crate::company::demo::printing::printed_number(&d, remaining));
+    assert_eq!(printed, Some(after), "Print sent the offered number");
+}
+
+/// N3: the offer after a used number is the engine's next when it is past
+/// the typed one, else the next number on.
+#[test]
+fn the_offer_moves_past_the_used_number() {
+    assert_eq!(offer_after(Some(4420), 4418), 4420);
+    assert_eq!(offer_after(Some(4418), 4418), 4419);
+    assert_eq!(offer_after(Some(4000), 4418), 4419);
+    assert_eq!(offer_after(None, 4418), 4419);
 }
 
 #[test]
