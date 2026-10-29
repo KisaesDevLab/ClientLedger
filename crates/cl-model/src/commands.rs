@@ -228,6 +228,8 @@ pub const COMMANDS: &[Command] = &[
     built("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O')),
     built("file.new_company", "New Company", Some(Menu::File), 0, None),
     cmd("file.close_company", "Close Company", Some(Menu::File), 0, None, Scope::Global),
+    // P19 (Q-P19ao): close the company the normal way and open the practice company.
+    cmd("file.open_practice", "Open Practice Company", Some(Menu::File), 0, None, Scope::Global),
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),

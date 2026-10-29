@@ -818,6 +818,16 @@ impl Shell {
         }
         match id.as_str() {
             "file.close_company" => self.close_company(),
+            // Q-P19ao: Open Company opens the practice company the way it
+            // opens any other (unsaved windows are asked about first).
+            "file.open_practice" => {
+                let open = CommandId::new("file.open_company");
+                self.open_screen(open);
+                let _ = self
+                    .windows
+                    .active_mut()
+                    .is_some_and(|w| w.screen.command(CommandId::new("file.open_practice")));
+            }
             "file.restore" => {
                 let open = CommandId::new("file.open_company");
                 self.open_screen(open);
