@@ -23,6 +23,22 @@ steps:
   - assert_state: {key: screen.style, equals: voucher}
   - assert_exists: {label: "Feed & Seed Supply"}
   - assert_exists: {label: "1,286.40"}
+  # The proposed first number is the register's next one (B1).
+  - assert_state: {key: screen.first_number, equals: "4418"}
+  # A number already used in the register is refused before the preview,
+  # in plain words, with the next free one offered (Q-94).
+  - click: {role: text_input, label: First check number}
+  - key: Ctrl+A
+  - type: {text: "4417"}
+  - click: {role: button, label: Preview 2 checks}
+  - assert_state: {key: screen.problem, equals: NumberInUse}
+  - assert_state: {key: screen.offer, equals: 4418}
+  - assert_state: {key: screen.preview, equals: null}
+  - assert_exists: {label_contains: "The next free number is 4418."}
+  - screenshot: number-in-use
+  - click: {role: button, label: Use 4418}
+  - assert_state: {key: screen.first_number, equals: "4418"}
+  - assert_state: {key: screen.problem, equals: null}
   - click: {role: text_input, label: First check number}
   - key: Ctrl+A
   - type: {text: "2001"}
@@ -65,4 +81,19 @@ steps:
   - assert_state: {key: screen.unanswered, equals: false}
   - assert_state: {key: screen.checks, equals: 0}
   - command: dev.demo_print_reset
+  # Minimum window (960 x 640) at 200%: the list still fits, nothing drawn
+  # over anything.
+  - assert_state: {key: screen.checks, equals: 2}
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: text_input, label: First check number}
+  - screenshot: print-checks-960x640-z200
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The queue list scrolls under the status bar.
+        - {x: -4000, y: 260, width: 8480, height: 200}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1280, height: 900}
   - command: file.close_window
