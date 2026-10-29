@@ -206,7 +206,6 @@ pub(crate) fn form_of(
     f.due_date = r.due_date;
     f.discount_date = r.discount_date;
     f.memo = r.txn.memo.clone().unwrap_or_default();
-    f.bill_received = r.bill_received;
     let expenses = r
         .lines
         .iter()
@@ -272,7 +271,7 @@ impl EnterBillScreen {
             BillField::Date => self.focus = Some(Field::Date),
             BillField::Reference => self.focus = Some(Field::Reference),
             BillField::Terms | BillField::Discount => self.focus = Some(Field::Terms),
-            BillField::DueDate | BillField::DiscountDate | BillField::Received => {
+            BillField::DueDate | BillField::DiscountDate => {
                 self.focus = Some(Field::DueDate);
             }
             BillField::AmountDue => self.focus = Some(Field::Amount),

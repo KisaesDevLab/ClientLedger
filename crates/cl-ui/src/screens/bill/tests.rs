@@ -117,7 +117,10 @@ fn ctrl_b_opens_a_blank_bill_with_the_engine_capabilities() {
     assert_eq!(st["mode"], "new");
     assert_eq!(st["date"], "2026-11-04");
     assert_eq!(st["dirty"], false);
-    assert_eq!(st["bill_received"], true);
+    assert!(
+        st.get("bill_received").is_none(),
+        "no received flag (Q-P18h)"
+    );
     // The demo plays an engine with the P17 work.
     assert_eq!(st["items_tab"], true);
     assert_eq!(st["caps"]["closing"], true);

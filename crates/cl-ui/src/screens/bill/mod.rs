@@ -18,7 +18,8 @@
 //! the Items tab, line customers and Billable (`bill-lines-v1`), the
 //! closing-date password (`ap-closing-v1`; a closed-period bill is refused
 //! before sending without it), editing credits and Delete (`ap-edit-v1`),
-//! discount terms (`bill-terms-v1`) and Bill received (`bill-received-v1`).
+//! discount terms (`bill-terms-v1`) and `billReceived` always true
+//! (`bill-received-v1`; "Not received yet" was removed, Q-P18h).
 //!
 //! The vendor panel (WP8) and the document reading (WP7) are their own
 //! files; this screen calls their fixed entry points. Every engine call
@@ -1072,7 +1073,6 @@ impl EnterBillScreen {
             "has_ref": !f.reference.trim().is_empty(),
             "amount_set": f.amount_due.is_some(),
             "amount_from_lines": f.amount_from_lines,
-            "bill_received": f.bill_received,
             "expense_lines": form.expenses.used().count(),
             "item_lines": form.items.used().count(),
             "tab": match self.tab { Tab::Expenses => "expenses", Tab::Items => "items" },

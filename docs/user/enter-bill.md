@@ -28,10 +28,6 @@ When you pick a vendor you have entered a bill for before, ClientLedger copies d
 
 The dates are worked out from the terms and the bill date. To use your own date, type it in **Bill due** or **Discount date**. Clear the field to go back to the terms. The discount date must fall between the bill date and the due date.
 
-### Bill received
-
-**Bill received** is ticked by default. Untick it when the goods or work arrived before the vendor's bill. The bill still counts in what you owe, but isn't offered for payment yet.
-
 ## Expenses and items
 
 Lines go on one of two tabs. Each tab shows its own total.

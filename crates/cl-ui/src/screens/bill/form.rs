@@ -1,6 +1,6 @@
 //! Drawing Enter Bill (mockup EnterBill.html, plan §3 WP4): the toolbar
 //! (Prev/Next, Find, Attach, Save as Template disabled with a tooltip (D8),
-//! History; the Bill / Vendor credit radio; Bill received), the
+//! History; the Bill / Vendor credit radio), the
 //! source-document banner (WP7), the header card in the mockup's 6-column
 //! order (Vendor, Date, Ref. no., Address read-only from the vendor, Terms,
 //! Amount due, Discount date, Bill due, Memo) plus the header Tags field
@@ -138,7 +138,6 @@ impl EnterBillScreen {
         let saved = self.editing.is_some();
         let working = self.save.task.is_some();
         let dirty = self.is_dirty();
-        let caps = self.caps();
         header::toolbar(ui, tokens, dirty, &t("bill.unsaved"), |ui| {
             if let Some(nav) = header::nav_buttons(
                 ui,
@@ -193,14 +192,14 @@ impl EnterBillScreen {
             more.response.on_hover_text(t("bill.more.tip"));
             if !self.compact {
                 ui.separator();
-                self.kind_row(ui, working, caps.received);
+                self.kind_row(ui, working);
             }
         });
     }
 
-    /// Bill / Vendor credit and Bill received: in the toolbar, or under the
-    /// title in a narrow window.
-    fn kind_row(&mut self, ui: &mut Ui, working: bool, received_cap: bool) {
+    /// Bill / Vendor credit: in the toolbar, or under the title in a narrow
+    /// window. ("Not received yet" was removed, Q-P18h.)
+    fn kind_row(&mut self, ui: &mut Ui, working: bool) {
         let kind = self.kind();
         // A04: a draft converts as a bill only.
         let can_switch = !working && self.editing.is_none() && self.draft.is_none();
@@ -214,20 +213,6 @@ impl EnterBillScreen {
                 .clicked()
             {
                 self.set_kind(k);
-            }
-        }
-        if kind == BillKind::Bill {
-            let mut received = self.header.current().bill_received;
-            let enabled = !working && received_cap;
-            let r = ui
-                .add_enabled(
-                    enabled,
-                    egui::Checkbox::new(&mut received, t("bill.received")),
-                )
-                .on_hover_text(t("bill.received.tip"))
-                .on_disabled_hover_text(t("bill.received.needs_update"));
-            if r.changed() {
-                self.header.edit_step(|h| h.bill_received = received);
             }
         }
     }
@@ -392,8 +377,7 @@ impl EnterBillScreen {
         header::title_left(ui, tokens, &title);
         if self.compact {
             let working = self.save.task.is_some();
-            let received = self.caps().received;
-            ui.horizontal_wrapped(|ui| self.kind_row(ui, working, received));
+            ui.horizontal_wrapped(|ui| self.kind_row(ui, working));
         }
         ui.add_space(6.0);
         if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
