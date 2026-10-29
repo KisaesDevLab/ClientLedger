@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** PR-2 — Purchasing lifecycle checkpoint (next), then P20 — Create Invoice. P19 done 2026-10-29. A05 runs right after P26.
-**Status:** P19 PR open with auto-merge.
+**Current phase:** P20 — Create Invoice (next). PR-2 done 2026-10-29. A05 runs right after P26.
+**Status:** P19 merged (PR #51); PR-2 fixes PR open with auto-merge.
 **Engine commit:** `129deff7` (`main`, pinned 2026-10-29 after engine PR #196 (U-115–U-117, PR-2 purchasing fixes, migration 0241); before that `12187716` (pinned 2026-10-29 after engine PRs #194 (U-106–U-110, check printing, migration 0239) and #195 (U-111, U-113, document numbering and forms print queue, migration 0240); before that `e45658fb` (pinned 2026-10-28 after engine PR #193 (U-101–U-104, Pay Bills discounts, idempotent pay, check numbers, company scope; migrations 0236–0238); before that `5a9a8700` (pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-29
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -32,6 +32,7 @@
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Done 2026-10-25 |
 | P18 | Pay Bills (checks) | M | Done 2026-10-28 |
 | P19 | Form printing | L | Done 2026-10-29 |
+| PR-2 | Checkpoint: purchasing lifecycle process review | — | Done 2026-10-29 (fixes on `fix/PR-2`; engine PR #196 merged) |
 | P20 | Create Invoice | M | |
 | P21 | Receive Payment | H | |
 | P22 | Credit memos, refunds, statements, finance charges | M | |
@@ -332,6 +333,12 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-29 — Checkpoint PR-2 Purchasing lifecycle complete; fixes on `fix/PR-2`, PR with auto-merge. Review `target/reviews/PR-2.md` (main 3ac92c2, engine 12187716): 2 blocking, 7 should-fix, 4 nits; all fixed.
+  - Engine PR #196 (U-115–U-117, migration 0241 `transactions.is_check`), pin 129deff7: a void takes a check out of the print queue and print refuses it (`CHECK_VOID`, B1); `POST /checks/print` keyed (`idempotency-check-print-v1`, B2); no $0 checks, requeue skips void/deleted, settings saved per key under a lock, deadlock order, void audit keeps applications (S1–S5); vendor credit numbers and print audit (N1, N2); company scope on the bill, vendor credit and check render routes (security note).
+  - `cl-api`/`cl-ui`: the check batch is saved before printing and a lost reply is resent or read back per check; undecided runs stay saved with a Home reminder; "Forget this print" when the outcome can't be read (Q-PR2d) (B2); Reprint check on bill-payment checks (S6); a lost Pay Bills reply resends under the same key (S7); "Use next N" renumbers the run and preview (N3); Pay Bills names the bill with a fraction of a cent (N4); demo backend matches the fixed engine.
+  - Owner decisions: Q-PR2a (a voided check keeps its number), Q-PR2b (hand-written Pay Bills numbers per company), Q-PR2c (check styles merged per account), Q-PR2d, Q-PR2e (only transactions created as checks are checks).
+  - Checks: full local `cargo xtask ci` green; live PR-2 contract tests for U-115–U-117; ui-check pay_bills, print_checks, write_check light and dark.
+  - Agents: checkpoint review by process-reviewer (opus, xhigh) per docs/AGENTS.md; the fix-pass agents were not recorded in the fix commits.
 - 2026-10-29 — P19 Form printing complete on `phase/P19-form-printing`; PR with auto-merge. Shipped:
   - Engine PRs #194 (U-106–U-110: reprint/requeue audit with closed-period password and the old number logged and reusable, company scope and counter lock on print, payee address in the queue, bill details on bill-payment applications, check style and company block per bank account, logo download; migration 0239) and #195 (U-111, U-113: numbering per company and type with prefix and duplicate warnings, company footers with per-type overrides, Print later for forms; migration 0240); pin 12187716.
   - `cl-print`: PDF engine on pdf-writer with embedded Plex; checks standard / voucher / z-fold (stubs list bills paid or expense lines, totals must match the check), amount in words in capitals, company block optional; invoice, sales receipt, credit memo, statement (own data, U-112 for P22), deposit summary; #10 window positions, #10 envelopes, hide-$0 lines, footer, logo with size limits; numbers shrink, never clip.
@@ -364,31 +371,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - [x] A malformed or hostile file can't crash or hang the desktop (worker limits, page and line caps, reply cap tested).
   Reviews: one combined review (2 blocking: credits under Charges became charges; save could file on the wrong vendor; 7 should-fix; all fixed except S5, settled by the owner's photo amendment), ui-verifier (statement above the lines, Create credit on a payment, and 6 more; fixed). Full local CI once; GitHub CI on the PR.
   Agents: scout/opus, impl/opus ×2 (WP-S1 reading, WP-S2 screen), engine-impl/opus (U-94 + 3 follow-ups), review/opus, impl/opus (review fixes), ui-verifier/opus, impl/opus (screen fixes), impl/sonnet (pin bump), docs-writer/sonnet. Plan by the orchestrator (Tier M, Q-301).
-- 2026-10-27 — A04 (ADD-01) complete on `phase/A04-review-queue`; PR with auto-merge. Shipped:
-  - Review queue: files from intake folders become document drafts on arrival (claim on arrival, inbox state v3, `DraftLink`); rows show kind, arrival date and file name; keyboard through the whole queue.
-  - Draft → form: "Enter this as" bill, card charge or check; the form opens filled from the read with the document beside it (docked or popped out); convert or attach through `DraftSession`; HMAC digest over the request body actually sent (`ConvertBody::wire_body`).
-  - Compare tools: highlights linking each filled field to its spot on the page, click to fill, the check list; one "Filled from" banner naming a saved layout.
-  - Duplicates: the register is searched before any closing-date password; a failed search never posts (Try again / Enter as new / Back); an engine match attaches only at the exact total, ±7 days and an allowed kind (`register_match` allowlist by `Probe.side`); attach never changes the books.
-  - Reading in the worker gained a region re-read (protocol v4); "Ask AI to help" in drafts; vendor layouts learned on accept; demo drafts backend.
-  - Engine PRs #180 (U-95, document-drafts-attach-v1) and #182 (U-97, archive reader splits no multi-byte characters) merged; pin 97d4d4cf.
-  Acceptance (addenda/ADD-01-document-intake.md A04):
-  - [x] A folder of mixed bills and receipts is read and worked through by keyboard, each accepted draft posting exactly what was reviewed (`doc_review_flow`, `doc_review_post` light and dark; form-to-body digest tests for bill, card and check).
-  - [x] Every filled field links to its spot in the docked and popped-out viewer; click to fill works (compare unit tests, `doc_compare`; pointer drags not scriptable, see follow-ups).
-  - [x] No duplicate expense for a receipt already in the register (`doc_review_attach`: closed-period attach adds no record, the file lands on check 4401).
-  Reviews: plan review (opus), security reviews of U-95 and protocol 4 (2 Medium + 7 Low, fixed), combined review (2 blocking: closing password before the register search, failed search posts; 5 should-fix, 6 low; all fixed), ui-verifier (12 items, fixed).
-  Also: xtask finds the shared build dir through cargo metadata; usage rules Q-301 in force from this phase; owner answered A06's balance line (CSV report amounts) and U-94 (go).
-  Agents: scout/opus, architect/opus, impl/opus (WPs, fix pass), engine-impl/opus (U-95, U-97), security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
-- 2026-10-26 — A02 (ADD-01) complete on `phase/A02-popout-viewer`; PR with auto-merge. Shipped:
-  - Viewer formats: PDF (PDFium), JPG, PNG and multi-page TIFF (`tiff` 0.11, deflate/LZW/fax only; JPEG-in-TIFF refused before any decode, Q-A02k); zoom menu (fit page, fit width, %), rotate (view only, Q-A02b), pan, page thumbnails.
-  - Pop out / Dock (button and Ctrl+Shift+D): one deferred egui viewport (Q-A02a) that follows the active form or inbox item, titled with the form's name and the company stripe; placement and zoom remembered per OS user in `doc-viewer.json`, clamped to visible monitors, brought back beside the main window when its monitor is gone (Q-A02c); closing it never touches the form. F6 moves focus between form and viewer (Q-A02g).
-  - Viewer everywhere: Enter Bill, Write Check (docked pane), receipt inbox, document tab, and new attachments on card charges (draft linked after save, save waits for uploads, Q-A02e) and register items ("Show document", Q-A02f).
-  - Control channel drives a second window (`viewport: doc_viewer` on every step, `state.doc_viewer`, per-window screenshots).
-  - HEIC research (owner, Q-292): no permissive decoder; the "save as JPG or PDF" tip stays (Q-A02d).
-  Acceptance (addenda/ADD-01-document-intake.md A02):
-  - [x] Formats, zoom, rotate, pan, thumbnails (WP-A tests; document-view scenario).
-  - [x] Pop out / Dock, one reused window following the active form, title and stripe, placement and zoom remembered, closing never affects the form (shell tests incl. two Shells on one store for restart, Q-A02j; doc_viewer scenario).
-  - [x] F6 and Ctrl+Shift+D in the keymap, Window menu and KEYBOARD.md; keymap conflict test.
-  - [x] Every attachment: bills, checks, card charges, register items (scenarios bill, write_check, card_charge, register, receipt_inbox; contract test for draft files linking onto a saved record).
-  - [x] Tests: doc_viewer scenario (pop out, follow, dock, F6, rotate, page, placement move); gone-monitor clamp (seeded 20k-case loop).
-  Reviews: fresh-eyes review (2 blocking: a JPEG-in-TIFF memory bomb and card-charge files lost when Save beat an upload; 6 should-fix), ui-verifier (toolbar overflow in narrow panels, Bill card cut off, 200% pop-out clipping, a clipping check that missed it). All fixed in one fix pass except those listed in Follow-ups from A02. ui-checks doc_viewer, bill, write_check, card_charge, register, receipt_inbox and document-view pass light and dark.
-  Agents: architect/opus, impl/opus (WP-A, WP-B, WP-C, WP-D, fix pass), review/opus, ui-verifier/opus.
