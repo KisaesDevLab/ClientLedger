@@ -614,6 +614,9 @@ pub struct CreatedPayment {
     pub print_status: Option<String>,
     /// The cash the check pays.
     pub net_payment: Money,
+    /// The early-payment discounts it took (`bill-discounts-v1`).
+    #[serde(default)]
+    pub discount_total: Option<Money>,
     /// Bills it paid.
     #[serde(default)]
     pub bills_paid: u32,
@@ -729,6 +732,9 @@ impl fmt::Debug for BillPaymentRecord {
 /// 400: a discount was taken but no discount account was sent and the
 /// company has none (U-101).
 pub const DISCOUNT_ACCOUNT_REQUIRED: &str = "DISCOUNT_ACCOUNT_REQUIRED";
+/// 400: the discount account can't take discounts (another company's,
+/// inactive, Accounts Payable, or the paying account itself; U-101).
+pub const DISCOUNT_ACCOUNT_INVALID: &str = "DISCOUNT_ACCOUNT_INVALID";
 /// 409: a check number is already used in this bank account (U-103).
 pub const CHECK_NUMBER_IN_USE: &str = "CHECK_NUMBER_IN_USE";
 /// 400: a bill is void or deleted.
@@ -743,6 +749,8 @@ pub const BILL_NOT_RECEIVED: &str = "BILL_NOT_RECEIVED";
 pub enum PayProblem {
     /// A discount needs a discount account (Set Discount asks, Q-P18a).
     DiscountAccountRequired,
+    /// The discount account can't take discounts; choose another.
+    DiscountAccountInvalid,
     /// The first check number is taken.
     CheckNumberInUse,
     /// The bills or credits changed since the list was read (paid,
@@ -762,6 +770,7 @@ pub fn pay_problem(e: &ApiError) -> Option<PayProblem> {
     };
     match code {
         Some(DISCOUNT_ACCOUNT_REQUIRED) => Some(PayProblem::DiscountAccountRequired),
+        Some(DISCOUNT_ACCOUNT_INVALID) => Some(PayProblem::DiscountAccountInvalid),
         Some(CHECK_NUMBER_IN_USE) => Some(PayProblem::CheckNumberInUse),
         // Before U-105 the engine says "exceeds balance due" with no code
         // (Q-P18g): an uncoded refusal of a pay the screen checked is a

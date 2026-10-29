@@ -290,7 +290,7 @@ async fn a_pay_posts_once_and_reads_the_payments() {
             &format!(
                 r#"{{"payments":[{{"id":"{BILL_A}","contactId":"{VENDOR}","txnDate":"2026-11-04",
                 "checkNumber":null,"printStatus":"queue","total":"3879.0700","netPayment":"3879.0700",
-                "billsPaid":2,"creditsApplied":1,"memo":"canary"}}]}}"#
+                "billsPaid":2,"creditsApplied":1,"discountTotal":"4.3700","memo":"canary"}}]}}"#
             ),
         ))
         .mount(&server)
@@ -307,6 +307,7 @@ async fn a_pay_posts_once_and_reads_the_payments() {
         .expect("paid");
     assert_eq!(paid.len(), 1);
     assert_eq!(paid[0].net_payment, m("3879.07"));
+    assert_eq!(paid[0].discount_total, Some(m("4.37")));
     assert_eq!(paid[0].print_status.as_deref(), Some("queue"));
     assert_eq!((paid[0].bills_paid, paid[0].credits_applied), (2, 1));
     let shown = format!("{paid:?}");
@@ -372,6 +373,11 @@ fn pay_refusals_are_classified() {
         pay_problem(&validation(Some(DISCOUNT_ACCOUNT_REQUIRED))),
         Some(PayProblem::DiscountAccountRequired)
     );
+    assert_eq!(
+        pay_problem(&validation(Some(DISCOUNT_ACCOUNT_INVALID))),
+        Some(PayProblem::DiscountAccountInvalid)
+    );
+    assert_eq!(pay_problem(&validation(Some("VALIDATION_ERROR"))), None);
     assert_eq!(
         pay_problem(&conflict(CHECK_NUMBER_IN_USE)),
         Some(PayProblem::CheckNumberInUse)

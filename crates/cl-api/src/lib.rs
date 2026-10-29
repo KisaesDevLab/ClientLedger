@@ -163,8 +163,8 @@ pub use resources::bill_payments::{BillPaymentSummary, BillPayments};
 pub use resources::bill_payments::{
     BILL_NOT_PAYABLE, BILL_NOT_RECEIVED, BillApplication, BillPaymentRecord, BillToPay,
     CHECK_NUMBER_IN_USE, CREDIT_NOT_AVAILABLE, CheckNumbering, CreatedPayment, CreditApplication,
-    CreditToApply, DISCOUNT_ACCOUNT_REQUIRED, PayBillsRequest, PayMethod, PayProblem, PayableBill,
-    PayableCredit, PayableFilter, PayableList, pay_problem,
+    CreditToApply, DISCOUNT_ACCOUNT_INVALID, DISCOUNT_ACCOUNT_REQUIRED, PayBillsRequest, PayMethod,
+    PayProblem, PayableBill, PayableCredit, PayableFilter, PayableList, pay_problem,
 };
 pub use resources::bills::{
     BillDraft, BillListQuery, BillSort, BillSummary, PaymentTerm, TermsDates, TermsDatesQuery,
