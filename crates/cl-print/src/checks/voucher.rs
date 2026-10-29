@@ -1,6 +1,8 @@
 //! Voucher check stock: the check on top, then two identical stubs (one
-//! for the payee, one for the records) listing the bills paid and the
-//! credits used, with exact column totals (Q-213).
+//! for the payee, one for the records). A bill payment's stubs list the
+//! bills paid and the credits used, with exact column totals (Q-213); a
+//! plain check's stubs list its expense and item lines and their total
+//! (owner 2026-10-29).
 
 use super::{CheckData, CheckLabels, CheckOptions, StubData, place_check};
 use crate::PrintError;
@@ -11,7 +13,7 @@ use rust_decimal::Decimal;
 
 /// Top of each stub on the sheet.
 pub const STUB_TOPS: [f32; 2] = [88.9, 184.15];
-/// Bill and credit rows a stub can list; more become an "and N more" row.
+/// Rows a stub can list; more become an "and N more" row.
 pub const STUB_MAX_ROWS: usize = 12;
 /// Left margin of the stub content.
 const LEFT: f32 = 12.7;
@@ -30,44 +32,28 @@ struct Col {
     align: Align,
 }
 
-const COLS: [Col; 7] = [
-    Col {
-        x: LEFT,
-        w: 20.0,
-        align: Align::Left,
-    }, // date
-    Col {
-        x: 32.7,
-        w: 25.0,
-        align: Align::Left,
-    }, // ref no
-    Col {
-        x: 57.7,
-        w: 30.0,
-        align: Align::Left,
-    }, // vendor invoice
-    Col {
-        x: 87.7,
-        w: 30.0,
-        align: Align::Right,
-    }, // bill total
-    Col {
-        x: 117.7,
-        w: 25.0,
-        align: Align::Right,
-    }, // discount
-    Col {
-        x: 142.7,
-        w: 28.0,
-        align: Align::Right,
-    }, // credit
-    Col {
-        x: 170.7,
-        w: 32.5,
-        align: Align::Right,
-    }, // amount paid
+impl Col {
+    const fn new(x: f32, w: f32, align: Align) -> Col {
+        Col { x, w, align }
+    }
+
+    fn right_edge(self) -> f32 {
+        self.x + self.w
+    }
+}
+
+/// Bill-payment columns: date, ref no, vendor invoice, bill total,
+/// discount, credit, amount paid.
+const BILL_COLS: [Col; 7] = [
+    Col::new(LEFT, 20.0, Align::Left),
+    Col::new(32.7, 25.0, Align::Left),
+    Col::new(57.7, 30.0, Align::Left),
+    Col::new(87.7, 30.0, Align::Right),
+    Col::new(117.7, 25.0, Align::Right),
+    Col::new(142.7, 28.0, Align::Right),
+    Col::new(170.7, 32.5, Align::Right),
 ];
-const COL_NAMES: [&str; 7] = [
+const BILL_NAMES: [&str; 7] = [
     "date",
     "ref",
     "vendor_invoice",
@@ -76,6 +62,15 @@ const COL_NAMES: [&str; 7] = [
     "credit",
     "amount_paid",
 ];
+const BILL_MONO: [bool; 7] = [true, false, false, true, true, true, true];
+
+/// Plain-check columns: account or item, amount.
+const LINE_COLS: [Col; 2] = [
+    Col::new(LEFT, 150.0, Align::Left),
+    Col::new(170.7, 32.5, Align::Right),
+];
+const LINE_NAMES: [&str; 2] = ["name", "amount"];
+const LINE_MONO: [bool; 2] = [false, true];
 
 /// One page per check.
 pub(super) fn pages(checks: &[CheckData], opts: &CheckOptions) -> Result<Vec<Page>, PrintError> {
@@ -83,7 +78,7 @@ pub(super) fn pages(checks: &[CheckData], opts: &CheckOptions) -> Result<Vec<Pag
         .iter()
         .map(|c| {
             let mut page = Page::default();
-            place_check(&mut page, c, 1, 0.0, opts.offset)?;
+            place_check(&mut page, c, 1, 0.0, opts)?;
             for (i, top) in STUB_TOPS.iter().enumerate() {
                 place_stub(&mut page, c, i + 1, *top, opts)?;
             }
@@ -92,7 +87,37 @@ pub(super) fn pages(checks: &[CheckData], opts: &CheckOptions) -> Result<Vec<Pag
         .collect()
 }
 
-#[allow(clippy::too_many_lines, clippy::many_single_char_names)] // One linear stub layout.
+/// A stub table: columns, tag names, headings, which columns are numbers,
+/// rows, and the totals row (label column and text, then value columns).
+struct Table<'a> {
+    cols: &'a [Col],
+    names: &'a [&'a str],
+    heads: Vec<String>,
+    mono: &'a [bool],
+    rows: Vec<Vec<String>>,
+    total_label: (usize, String),
+    totals: Vec<(usize, Decimal)>,
+}
+
+/// Positions within one stub, offset applied.
+struct StubFrame {
+    n: usize,
+    top: f32,
+    dx: f32,
+    dy: f32,
+}
+
+impl StubFrame {
+    fn at(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect::new(x + self.dx, self.top + y + self.dy, w, h)
+    }
+
+    fn tag(&self, name: &str) -> String {
+        format!("stub{}.{name}", self.n)
+    }
+}
+
+#[allow(clippy::too_many_lines)] // One linear stub layout.
 fn place_stub(
     page: &mut Page,
     c: &CheckData,
@@ -100,22 +125,24 @@ fn place_stub(
     top: f32,
     opts: &CheckOptions,
 ) -> Result<(), PrintError> {
-    let (dx, dy) = (opts.offset.dx_mm(), opts.offset.dy_mm());
-    let at = |x: f32, y: f32, w: f32, h: f32| Rect::new(x + dx, top + y + dy, w, h);
+    let fr = StubFrame {
+        n,
+        top,
+        dx: opts.offset.dx_mm(),
+        dy: opts.offset.dy_mm(),
+    };
     let l: &CheckLabels = &opts.labels;
-    let tag = |name: &str| format!("stub{n}.{name}");
-
     page.text(TextBox::new(
-        tag("payee"),
-        at(LEFT, 6.0, 120.0, 5.0),
+        fr.tag("payee"),
+        fr.at(LEFT, 6.0, 120.0, 5.0),
         Font::SansSemiBold,
         10.0,
         c.payee.clone(),
     ));
     page.text(
         TextBox::new(
-            tag("number"),
-            at(140.0, 6.0, RIGHT - 140.0, 5.0),
+            fr.tag("number"),
+            fr.at(140.0, 6.0, RIGHT - 140.0, 5.0),
             Font::Sans,
             9.0,
             format!("{} {}", l.check_no, c.number),
@@ -124,8 +151,8 @@ fn place_stub(
     );
     page.text(
         TextBox::new(
-            tag("date"),
-            at(140.0, 11.0, RIGHT - 140.0, 5.0),
+            fr.tag("date"),
+            fr.at(140.0, 11.0, RIGHT - 140.0, 5.0),
             Font::Mono,
             9.0,
             c.date.clone(),
@@ -134,125 +161,79 @@ fn place_stub(
     );
     if !c.memo.is_empty() {
         page.text(TextBox::new(
-            tag("memo"),
-            at(LEFT, 11.0, 120.0, 5.0),
+            fr.tag("memo"),
+            fr.at(LEFT, 11.0, 120.0, 5.0),
             Font::Sans,
             9.0,
             format!("{}: {}", l.memo, c.memo),
         ));
     }
-
-    let heads = [
-        &l.date,
-        &l.ref_no,
-        &l.vendor_invoice,
-        &l.bill_total,
-        &l.discount,
-        &l.credit,
-        &l.amount_paid,
-    ];
-    for ((col, name), head) in COLS.iter().zip(COL_NAMES).zip(heads) {
-        page.text(
-            TextBox::new(
-                tag(&format!("head.{name}")),
-                at(col.x, 18.0, col.w, 4.0),
-                Font::SansSemiBold,
-                7.5,
-                head.clone(),
-            )
-            .align(col.align),
-        );
-    }
-    page.shape(rule(at(LEFT, 22.5, RIGHT - LEFT, 0.0)));
-
-    let rows = stub_rows(&c.stub, l);
-    let shown = if rows.len() > STUB_MAX_ROWS {
-        STUB_MAX_ROWS - 1
-    } else {
-        rows.len()
-    };
-    let mut y = FIRST_ROW;
-    for (i, row) in rows.iter().take(shown).enumerate() {
-        for (k, (col, cell)) in COLS.iter().zip(row).enumerate() {
-            if cell.is_empty() {
-                continue;
-            }
-            let font = if k >= 3 || k == 0 {
-                Font::Mono
-            } else {
-                Font::Sans
-            };
-            page.text(
-                TextBox::new(
-                    tag(&format!("row{i}.{}", COL_NAMES[k])),
-                    at(col.x, y, col.w - 1.0, ROW_H),
-                    font,
-                    8.0,
-                    cell.clone(),
-                )
-                .align(col.align),
-            );
-        }
-        y += ROW_H;
-    }
-    if shown < rows.len() {
-        let more = l
-            .more_rows
-            .replace("{n}", &(rows.len() - shown).to_string());
-        page.text(TextBox::new(
-            tag("more"),
-            at(LEFT, y, RIGHT - LEFT, ROW_H),
-            Font::Sans,
-            8.0,
-            more,
-        ));
-    }
-
     let t = c.stub.totals()?;
-    let rule_y = FIRST_ROW + ROW_H * as_f32(STUB_MAX_ROWS) + 1.0;
-    page.shape(rule(at(COLS[3].x, rule_y, RIGHT - COLS[3].x, 0.0)));
-    let ty = rule_y + 1.0;
-    page.text(TextBox::new(
-        tag("total.label"),
-        at(COLS[2].x, ty, COLS[2].w, ROW_H),
-        Font::SansSemiBold,
-        8.0,
-        l.totals.clone(),
-    ));
-    for (k, v) in [
-        (3, t.bill_total),
-        (4, t.discount),
-        (5, t.credits),
-        (6, t.amount_paid),
-    ] {
-        let col = COLS[k];
-        page.text(
-            TextBox::new(
-                tag(&format!("total.{}", COL_NAMES[k])),
-                at(col.x, ty, col.w - 1.0, ROW_H),
-                Font::Mono,
-                8.0,
-                format_amount(v),
-            )
-            .align(Align::Right),
-        );
-    }
-    let cy = ty + ROW_H + 1.5;
+    let table = if c.stub.is_bill_payment() {
+        Table {
+            cols: &BILL_COLS,
+            names: &BILL_NAMES,
+            heads: [
+                &l.date,
+                &l.ref_no,
+                &l.vendor_invoice,
+                &l.bill_total,
+                &l.discount,
+                &l.credit,
+                &l.amount_paid,
+            ]
+            .into_iter()
+            .cloned()
+            .collect(),
+            mono: &BILL_MONO,
+            rows: bill_rows(&c.stub, l),
+            total_label: (2, l.totals.clone()),
+            totals: vec![
+                (3, t.bill_total),
+                (4, t.discount),
+                (5, t.credits),
+                (6, t.amount_paid),
+            ],
+        }
+    } else {
+        Table {
+            cols: &LINE_COLS,
+            names: &LINE_NAMES,
+            heads: vec![l.account_or_item.clone(), l.amount.clone()],
+            mono: &LINE_MONO,
+            rows: c
+                .stub
+                .lines
+                .iter()
+                .map(|x| vec![x.name.clone(), format_amount(x.amount)])
+                .collect(),
+            total_label: (0, l.total.clone()),
+            totals: vec![(1, t.lines)],
+        }
+    };
+    place_table(page, &fr, &table, l);
+
+    let cy = FIRST_ROW + ROW_H * as_f32(STUB_MAX_ROWS) + 2.0 + ROW_H + 1.5;
     page.text(
         TextBox::new(
-            tag("check_amount.label"),
-            at(COLS[4].x, cy, COLS[5].right_edge() - COLS[4].x, ROW_H),
+            fr.tag("check_amount.label"),
+            fr.at(
+                BILL_COLS[4].x,
+                cy,
+                BILL_COLS[5].right_edge() - BILL_COLS[4].x,
+                ROW_H,
+            ),
             Font::SansSemiBold,
             8.5,
             l.check_amount.clone(),
         )
         .align(Align::Right),
     );
-    let col = COLS[6];
+    let col = BILL_COLS[6];
     page.text(
         TextBox::new(
-            tag("check_amount"),
-            at(col.x, cy, col.w - 1.0, ROW_H),
+            fr.tag("check_amount"),
+            fr.at(col.x, cy, col.w - 1.0, ROW_H),
             Font::Mono,
             8.5,
             check_figures(c.amount)?,
@@ -262,9 +243,81 @@ fn place_stub(
     Ok(())
 }
 
-impl Col {
-    fn right_edge(self) -> f32 {
-        self.x + self.w
+fn place_table(page: &mut Page, fr: &StubFrame, t: &Table<'_>, l: &CheckLabels) {
+    for ((col, name), head) in t.cols.iter().zip(t.names).zip(&t.heads) {
+        page.text(
+            TextBox::new(
+                fr.tag(&format!("head.{name}")),
+                fr.at(col.x, 18.0, col.w, 4.0),
+                Font::SansSemiBold,
+                7.5,
+                head.clone(),
+            )
+            .align(col.align),
+        );
+    }
+    page.shape(rule(fr.at(LEFT, 22.5, RIGHT - LEFT, 0.0)));
+    let shown = if t.rows.len() > STUB_MAX_ROWS {
+        STUB_MAX_ROWS - 1
+    } else {
+        t.rows.len()
+    };
+    let mut y = FIRST_ROW;
+    for (i, row) in t.rows.iter().take(shown).enumerate() {
+        for (k, (col, cell)) in t.cols.iter().zip(row).enumerate() {
+            if cell.is_empty() {
+                continue;
+            }
+            let font = if t.mono[k] { Font::Mono } else { Font::Sans };
+            page.text(
+                TextBox::new(
+                    fr.tag(&format!("row{i}.{}", t.names[k])),
+                    fr.at(col.x, y, col.w - 1.0, ROW_H),
+                    font,
+                    8.0,
+                    cell.clone(),
+                )
+                .align(col.align),
+            );
+        }
+        y += ROW_H;
+    }
+    if shown < t.rows.len() {
+        let more = l
+            .more_rows
+            .replace("{n}", &(t.rows.len() - shown).to_string());
+        page.text(TextBox::new(
+            fr.tag("more"),
+            fr.at(LEFT, y, RIGHT - LEFT, ROW_H),
+            Font::Sans,
+            8.0,
+            more,
+        ));
+    }
+    let rule_y = FIRST_ROW + ROW_H * as_f32(STUB_MAX_ROWS) + 1.0;
+    let rx = t.cols[t.totals.first().map_or(0, |(k, _)| *k)].x;
+    page.shape(rule(fr.at(rx, rule_y, RIGHT - rx, 0.0)));
+    let ty = rule_y + 1.0;
+    let lc = t.cols[t.total_label.0];
+    page.text(TextBox::new(
+        fr.tag("total.label"),
+        fr.at(lc.x, ty, lc.w, ROW_H),
+        Font::SansSemiBold,
+        8.0,
+        t.total_label.1.clone(),
+    ));
+    for (k, v) in &t.totals {
+        let col = t.cols[*k];
+        page.text(
+            TextBox::new(
+                fr.tag(&format!("total.{}", t.names[*k])),
+                fr.at(col.x, ty, col.w - 1.0, ROW_H),
+                Font::Mono,
+                8.0,
+                format_amount(*v),
+            )
+            .align(Align::Right),
+        );
     }
 }
 
@@ -282,17 +335,14 @@ fn as_f32(n: usize) -> f32 {
     f32::from(u16::try_from(n).unwrap_or(u16::MAX))
 }
 
-fn money(v: Decimal) -> String {
-    format_amount(v)
-}
-
 /// Bill rows, then credit rows, as cell text.
-fn stub_rows(s: &StubData, l: &CheckLabels) -> Vec<[String; 7]> {
-    let mut rows: Vec<[String; 7]> = s
+fn bill_rows(s: &StubData, l: &CheckLabels) -> Vec<Vec<String>> {
+    let money = format_amount;
+    let mut rows: Vec<Vec<String>> = s
         .bills
         .iter()
         .map(|b| {
-            [
+            vec![
                 b.date.clone(),
                 b.ref_no.clone(),
                 b.vendor_invoice_no.clone(),
@@ -304,7 +354,7 @@ fn stub_rows(s: &StubData, l: &CheckLabels) -> Vec<[String; 7]> {
         })
         .collect();
     rows.extend(s.credits.iter().map(|c| {
-        [
+        vec![
             c.date.clone(),
             c.ref_no.clone(),
             l.credit_row.clone(),
@@ -319,7 +369,7 @@ fn stub_rows(s: &StubData, l: &CheckLabels) -> Vec<[String; 7]> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{origin, sample};
+    use super::super::tests::{assert_check_at, origin, sample};
     use super::super::*;
     use super::{STUB_MAX_ROWS, STUB_TOPS};
     use crate::layout::resolve;
@@ -369,28 +419,7 @@ mod tests {
             let doc = layout_checks(&[with_stub(2, 1)], &opts).unwrap();
             assert_eq!(doc.pages.len(), 1);
             let page = &resolve(&doc).unwrap()[0];
-            for (name, font, size, rect) in [
-                ("date", Font::Mono, 10.0, FIELDS.date),
-                ("payee", Font::Sans, 10.0, FIELDS.payee),
-                ("words", Font::Sans, 9.5, FIELDS.words),
-                ("address", Font::Sans, 10.0, FIELDS.address),
-                ("memo", Font::Sans, 9.0, FIELDS.memo),
-            ] {
-                let r = page.runs_of(&format!("check1.{name}")).next().unwrap();
-                let (x, y) = origin(rect.moved(off.dx_mm(), off.dy_mm()), font, size);
-                assert!(
-                    (r.x - x).abs() <= TOL && (r.baseline - y).abs() <= TOL,
-                    "{name}"
-                );
-            }
-            let a = page.runs_of("check1.amount").next().unwrap();
-            let right = a.x + Font::Mono.width_mm(&a.text, 10.0);
-            assert!((right - (FIELDS.amount.right() + off.dx_mm())).abs() <= TOL);
-            let window = WINDOW_ON_VOUCHER.moved(off.dx_mm(), off.dy_mm());
-            for l in page.runs_of("check1.address") {
-                assert!(l.x >= window.x && l.baseline <= window.bottom());
-                assert!(l.baseline - Font::Sans.ascent_mm(10.0) >= window.y - 0.001);
-            }
+            assert_check_at(page, 1, 0.0, off, WINDOW_ON_VOUCHER);
             // The stubs start at their tops, moved by the offset.
             for (n, top) in STUB_TOPS.iter().enumerate() {
                 let p = page
@@ -409,14 +438,7 @@ mod tests {
 
     #[test]
     fn both_stubs_list_bills_and_credits_with_exact_totals() {
-        let doc = layout_checks(
-            &[with_stub(3, 1)],
-            &CheckOptions {
-                style: CheckStyle::Voucher,
-                ..CheckOptions::default()
-            },
-        )
-        .unwrap();
+        let doc = layout_checks(&[with_stub(3, 1)], &CheckOptions::default()).unwrap();
         let page = &resolve(&doc).unwrap()[0];
         for n in 1..=2 {
             let s = |t: &str| text_of(page, &format!("stub{n}.{t}"));
@@ -439,15 +461,37 @@ mod tests {
     }
 
     #[test]
-    fn long_stubs_show_a_more_row_but_total_everything() {
-        let doc = layout_checks(
-            &[with_stub(15, 2)],
-            &CheckOptions {
-                style: CheckStyle::Voucher,
-                ..CheckOptions::default()
+    fn a_plain_check_stub_lists_its_lines_and_total() {
+        let mut c = sample(1);
+        c.stub.lines = vec![
+            StubLine {
+                name: "Rent".into(),
+                amount: Decimal::new(100_000, 2),
             },
-        )
-        .unwrap();
+            StubLine {
+                name: "Utilities".into(),
+                amount: Decimal::new(23_456, 2),
+            },
+        ];
+        let doc = layout_checks(&[c], &CheckOptions::default()).unwrap();
+        let page = &resolve(&doc).unwrap()[0];
+        for n in 1..=2 {
+            let s = |t: &str| text_of(page, &format!("stub{n}.{t}"));
+            assert_eq!(s("head.name"), "Account or item");
+            assert_eq!(s("row0.name"), "Rent");
+            assert_eq!(s("row1.amount"), "234.56");
+            assert_eq!(s("total.label"), "Total");
+            assert_eq!(s("total.amount"), "1,234.56");
+            assert_eq!(s("check_amount"), "1,234.56");
+            assert_eq!(s("payee"), "Acme Supply Co.");
+            assert_eq!(s("memo"), "Memo: Account 7781");
+            assert_eq!(s("head.bill_total"), "");
+        }
+    }
+
+    #[test]
+    fn long_stubs_show_a_more_row_but_total_everything() {
+        let doc = layout_checks(&[with_stub(15, 2)], &CheckOptions::default()).unwrap();
         let page = &resolve(&doc).unwrap()[0];
         let last = STUB_MAX_ROWS - 2;
         assert!(
@@ -462,11 +506,11 @@ mod tests {
         );
         assert_eq!(
             text_of(page, "stub1.more"),
-            "and 6 more (see the bill payment)"
+            "and 6 more (see the check in ClientLedger)"
         );
         assert_eq!(text_of(page, "stub1.total.discount"), "150.00");
         assert_eq!(text_of(page, "stub1.total.credit"), "50.00");
-        // The more row and the totals stay inside the stub.
+        // The totals stay inside their stub.
         let total = page.runs_of("stub2.check_amount").next().unwrap();
         assert!(total.baseline < crate::layout::LETTER_H_MM - 5.0);
         let first_total = page.runs_of("stub1.check_amount").next().unwrap();
@@ -475,14 +519,7 @@ mod tests {
 
     #[test]
     fn one_page_per_voucher_check() {
-        let doc = layout_checks(
-            &[sample(1), sample(2)],
-            &CheckOptions {
-                style: CheckStyle::Voucher,
-                ..CheckOptions::default()
-            },
-        )
-        .unwrap();
+        let doc = layout_checks(&[sample(1), sample(2)], &CheckOptions::default()).unwrap();
         assert_eq!(doc.pages.len(), 2);
     }
 }

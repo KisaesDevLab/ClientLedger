@@ -56,9 +56,6 @@ pub enum PrintError {
     /// An alignment offset beyond 10 mm.
     #[error("the alignment adjustment must be within 10 mm in each direction")]
     OffsetOutOfRange,
-    /// A first check position outside 1 to 3.
-    #[error("the first check position must be 1, 2 or 3")]
-    BadPosition,
     /// A form with more header fields than the template holds.
     #[error("the form has more header fields than fit")]
     TooManyFields,

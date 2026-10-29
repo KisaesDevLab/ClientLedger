@@ -102,20 +102,16 @@ pub fn check_figures(v: Decimal) -> Result<String, PrintError> {
     Ok(format!("{s}{c:02}"))
 }
 
-/// The written amount: `1234.56` → `One thousand two hundred thirty-four
-/// and 56/100`.
+/// The written amount in capitals (Q-P19u): `1234.56` → `ONE THOUSAND TWO
+/// HUNDRED THIRTY-FOUR AND 56/100`. The check layout adds the asterisk
+/// fill.
 ///
 /// # Errors
 /// As [`dollars_cents`].
 pub fn amount_in_words(v: Decimal) -> Result<String, PrintError> {
     let (dollars, cents) = dollars_cents(v)?;
-    let words = number_words(dollars);
-    let mut chars = words.chars();
-    let cap: String = match chars.next() {
-        Some(f) => f.to_uppercase().chain(chars).collect(),
-        None => String::new(),
-    };
-    Ok(format!("{cap} and {cents:02}/100"))
+    let words = number_words(dollars).to_uppercase();
+    Ok(format!("{words} AND {cents:02}/100"))
 }
 
 const ONES: [&str; 20] = [
@@ -201,36 +197,36 @@ mod tests {
 
     #[test]
     fn words_for_the_required_amounts() {
-        assert_eq!(amount_in_words(d("0.00")).unwrap(), "Zero and 00/100");
-        assert_eq!(amount_in_words(d("0.05")).unwrap(), "Zero and 05/100");
+        assert_eq!(amount_in_words(d("0.00")).unwrap(), "ZERO AND 00/100");
+        assert_eq!(amount_in_words(d("0.05")).unwrap(), "ZERO AND 05/100");
         assert_eq!(
             amount_in_words(d("1000000.00")).unwrap(),
-            "One million and 00/100"
+            "ONE MILLION AND 00/100"
         );
         assert_eq!(
             amount_in_words(d("19999999.99")).unwrap(),
-            "Nineteen million nine hundred ninety-nine thousand nine hundred ninety-nine and 99/100"
+            "NINETEEN MILLION NINE HUNDRED NINETY-NINE THOUSAND NINE HUNDRED NINETY-NINE AND 99/100"
         );
         assert_eq!(
             amount_in_words(d("1234.56")).unwrap(),
-            "One thousand two hundred thirty-four and 56/100"
+            "ONE THOUSAND TWO HUNDRED THIRTY-FOUR AND 56/100"
         );
         assert_eq!(
             amount_in_words(d("1234.5600")).unwrap(),
-            "One thousand two hundred thirty-four and 56/100"
+            "ONE THOUSAND TWO HUNDRED THIRTY-FOUR AND 56/100"
         );
-        assert_eq!(amount_in_words(d("40.1")).unwrap(), "Forty and 10/100");
+        assert_eq!(amount_in_words(d("40.1")).unwrap(), "FORTY AND 10/100");
         assert_eq!(
             amount_in_words(d("115")).unwrap(),
-            "One hundred fifteen and 00/100"
+            "ONE HUNDRED FIFTEEN AND 00/100"
         );
         assert_eq!(
             amount_in_words(d("2000017001.01")).unwrap(),
-            "Two billion seventeen thousand one and 01/100"
+            "TWO BILLION SEVENTEEN THOUSAND ONE AND 01/100"
         );
         assert_eq!(
             amount_in_words(d("999999999999.99")).unwrap(),
-            "Nine hundred ninety-nine billion nine hundred ninety-nine million nine hundred ninety-nine thousand nine hundred ninety-nine and 99/100"
+            "NINE HUNDRED NINETY-NINE BILLION NINE HUNDRED NINETY-NINE MILLION NINE HUNDRED NINETY-NINE THOUSAND NINE HUNDRED NINETY-NINE AND 99/100"
         );
     }
 
@@ -248,7 +244,7 @@ mod tests {
         );
         assert_eq!(check_figures(d("-5")), Err(PrintError::NegativeAmount));
         // Negative zero is zero.
-        assert_eq!(amount_in_words(d("-0.00")).unwrap(), "Zero and 00/100");
+        assert_eq!(amount_in_words(d("-0.00")).unwrap(), "ZERO AND 00/100");
     }
 
     #[test]
