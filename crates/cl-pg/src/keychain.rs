@@ -45,15 +45,16 @@ pub trait PasswordStore: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct KeyringStore {
     account: String,
+    /// Names the same secret may have been saved under by earlier versions
+    /// (Q-K1); read only when `account` has nothing.
+    legacy_accounts: Vec<String>,
 }
 
 impl KeyringStore {
     /// Entry for the cluster stored at `data_dir`.
     #[must_use]
     pub fn for_data_dir(data_dir: &Path) -> Self {
-        KeyringStore {
-            account: format!("postgres-superuser-{}", dir_tag(data_dir)),
-        }
+        Self::named(data_dir, "postgres-superuser")
     }
 
     /// Entry for another secret that belongs to the cluster at `data_dir`,
@@ -65,40 +66,81 @@ impl KeyringStore {
     #[must_use]
     pub fn for_purpose(data_dir: &Path, purpose: &str) -> Self {
         assert!(valid_purpose(purpose), "invalid secret purpose");
+        Self::named(data_dir, purpose)
+    }
+
+    fn named(data_dir: &Path, prefix: &str) -> Self {
+        let tags = DirTags::of(data_dir);
         KeyringStore {
-            account: format!("{purpose}-{}", dir_tag(data_dir)),
+            account: format!("{prefix}-{}", tags.current),
+            legacy_accounts: tags
+                .legacy
+                .iter()
+                .map(|t| format!("{prefix}-{t}"))
+                .collect(),
         }
     }
 
-    fn entry(&self) -> Result<keyring::Entry> {
-        keyring::Entry::new(SERVICE, &self.account).map_err(|e| PgError::SecretStore(e.to_string()))
+    fn entry(account: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(SERVICE, account).map_err(|e| PgError::SecretStore(e.to_string()))
     }
 
-    /// Remove the saved password (used when a cluster is deleted).
-    ///
-    /// # Errors
-    /// Fails when the keychain refuses; a missing entry is not an error.
-    pub fn delete(&self) -> Result<()> {
-        match self.entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(PgError::SecretStore(e.to_string())),
-        }
-    }
-}
-
-impl PasswordStore for KeyringStore {
-    fn get(&self) -> Result<Option<Secret>> {
-        match self.entry()?.get_password() {
+    fn get_account(account: &str) -> Result<Option<Secret>> {
+        match Self::entry(account)?.get_password() {
             Ok(p) => Ok(Some(Secret::new(p))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(PgError::SecretStore(e.to_string())),
         }
     }
 
-    fn set(&self, secret: &Secret) -> Result<()> {
-        self.entry()?
+    fn set_account(account: &str, secret: &Secret) -> Result<()> {
+        Self::entry(account)?
             .set_password(secret.expose())
             .map_err(|e| PgError::SecretStore(e.to_string()))
+    }
+
+    fn delete_account(account: &str) -> Result<()> {
+        match Self::entry(account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(PgError::SecretStore(e.to_string())),
+        }
+    }
+
+    /// Remove the saved password (used when a cluster is deleted), under its
+    /// current name and any earlier name, so a deleted password never comes
+    /// back through the legacy lookup. Earlier names go first and the current
+    /// name last, so a partial failure never leaves only a legacy copy.
+    ///
+    /// The earlier names are the ones this folder's path computes to (as
+    /// given, absolute, canonical, and the Windows `\\?\` form). An entry
+    /// saved through a different spelling of the same folder (another
+    /// symlink, a mapped drive letter, an 8.3 short name) is not reached.
+    ///
+    /// # Errors
+    /// Fails when the keychain refuses; a missing entry is not an error.
+    pub fn delete(&self) -> Result<()> {
+        delete_all(&self.account, &self.legacy_accounts, Self::delete_account)
+    }
+}
+
+impl PasswordStore for KeyringStore {
+    fn get(&self) -> Result<Option<Secret>> {
+        lookup_with_legacy(
+            &self.account,
+            &self.legacy_accounts,
+            Self::get_account,
+            Self::set_account,
+        )
+    }
+
+    fn set(&self, secret: &Secret) -> Result<()> {
+        set_and_retire(
+            &self.account,
+            &self.legacy_accounts,
+            secret,
+            Self::set_account,
+            Self::delete_account,
+        )
     }
 
     fn kind(&self) -> &'static str {
@@ -106,12 +148,148 @@ impl PasswordStore for KeyringStore {
     }
 }
 
-/// Stable short tag for a data directory path (first 8 bytes of SHA-256).
-fn dir_tag(data_dir: &Path) -> String {
-    let canon = data_dir
-        .canonicalize()
-        .unwrap_or_else(|_| data_dir.to_path_buf());
-    let digest = Sha256::digest(canon.to_string_lossy().to_lowercase().as_bytes());
+/// Read `account`; when it has nothing, try each of `legacy` in turn and copy
+/// the first hit to `account` (Q-K1). The legacy entry is kept (until the
+/// next [`set_and_retire`]) and no new secret is ever made here. A failed
+/// copy is logged and the secret is still returned, so a read that found the
+/// secret never fails because of it. A legacy name that cannot be read is
+/// logged and skipped.
+fn lookup_with_legacy(
+    account: &str,
+    legacy: &[String],
+    get: impl Fn(&str) -> Result<Option<Secret>>,
+    set: impl Fn(&str, &Secret) -> Result<()>,
+) -> Result<Option<Secret>> {
+    if let Some(s) = get(account)? {
+        return Ok(Some(s));
+    }
+    for old in legacy {
+        let (from, to) = (tag_part(old), tag_part(account));
+        let s = match get(old) {
+            Ok(Some(s)) => s,
+            Ok(None) => continue,
+            Err(_) => {
+                tracing::warn!(
+                    from_tag = from,
+                    "could not read a secret under an earlier name; skipped it"
+                );
+                continue;
+            }
+        };
+        if set(account, &s).is_ok() {
+            tracing::info!(
+                from_tag = from,
+                to_tag = to,
+                "found a saved secret under an earlier name; copied it to the current name"
+            );
+        } else {
+            tracing::warn!(
+                from_tag = from,
+                to_tag = to,
+                "found a saved secret under an earlier name but could not copy it"
+            );
+        }
+        return Ok(Some(s));
+    }
+    Ok(None)
+}
+
+/// Save `secret` under `account`, then remove every `legacy` entry: once the
+/// current name holds the new value they only hold superseded ones. A failed
+/// removal is logged; the save still counts.
+fn set_and_retire(
+    account: &str,
+    legacy: &[String],
+    secret: &Secret,
+    set: impl Fn(&str, &Secret) -> Result<()>,
+    delete: impl Fn(&str) -> Result<()>,
+) -> Result<()> {
+    set(account, secret)?;
+    for old in legacy {
+        if delete(old).is_err() {
+            tracing::warn!(
+                from_tag = tag_part(old),
+                "could not remove a superseded secret under an earlier name"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Remove `legacy` entries first and `account` last; stop at the first error.
+fn delete_all(account: &str, legacy: &[String], delete: impl Fn(&str) -> Result<()>) -> Result<()> {
+    for old in legacy {
+        delete(old)?;
+    }
+    delete(account)
+}
+
+/// The trailing folder tag of an account name (for logs).
+fn tag_part(account: &str) -> &str {
+    account.rsplit('-').next().unwrap_or(account)
+}
+
+/// The tag a data folder's secrets are saved under now, plus the tags earlier
+/// versions may have used for the same folder.
+struct DirTags {
+    current: String,
+    legacy: Vec<String>,
+}
+
+impl DirTags {
+    fn of(data_dir: &Path) -> Self {
+        let absolute = std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+        let resolved = crate::paths::resolve(&absolute);
+        let normalized = strip_verbatim(&resolved.to_string_lossy());
+        let current = tag_of(&normalized);
+        let mut legacy = Vec::new();
+        let mut add = |text: &str| {
+            let t = tag_of(text);
+            if t != current && !legacy.contains(&t) {
+                legacy.push(t);
+            }
+        };
+        // What earlier versions computed: the canonical path when the folder
+        // existed (with `\\?\` on Windows), the path as given otherwise.
+        add(&data_dir
+            .canonicalize()
+            .unwrap_or_else(|_| data_dir.to_path_buf())
+            .to_string_lossy());
+        if cfg!(windows) {
+            add(&verbatim(&normalized));
+        }
+        // First-run secrets on systems where a parent is a link (macOS /var).
+        add(&absolute.to_string_lossy());
+        add(&data_dir.to_string_lossy());
+        DirTags { current, legacy }
+    }
+}
+
+/// A path without the Windows verbatim prefix: `\\?\C:\x` → `C:\x`,
+/// `\\?\UNC\server\share` → `\\server\share`. Other text is unchanged.
+fn strip_verbatim(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+/// The verbatim form Windows `canonicalize` returns for a normalized path.
+fn verbatim(normalized: &str) -> String {
+    if let Some(rest) = normalized.strip_prefix(r"\\") {
+        format!(r"\\?\UNC\{rest}")
+    } else {
+        format!(r"\\?\{normalized}")
+    }
+}
+
+/// Stable short tag for a path's text: first 8 bytes of SHA-256 of the
+/// lowercased text (lowercased everywhere, as earlier versions did).
+fn tag_of(text: &str) -> String {
+    let digest = Sha256::digest(text.to_lowercase().as_bytes());
     hex(&digest[..8])
 }
 
@@ -496,6 +674,260 @@ mod tests {
             EncryptedFileStore::beside_for_purpose(data, "engine-app").path(),
             Path::new("/tmp/c-does-not-exist/pgdata.engine-app.secret")
         );
+    }
+
+    /// A made-up Windows data folder (not anyone's real path).
+    const SAMPLE_DIR: &str = r"C:\Users\alex.sample\AppData\Local\ClientLedger\pgdata";
+
+    #[test]
+    fn verbatim_prefixes_are_stripped() {
+        assert_eq!(strip_verbatim(r"\\?\C:\a\pgdata"), r"C:\a\pgdata");
+        assert_eq!(
+            strip_verbatim(r"\\?\UNC\server\share\pgdata"),
+            r"\\server\share\pgdata"
+        );
+        assert_eq!(strip_verbatim(r"C:\a\pgdata"), r"C:\a\pgdata");
+        assert_eq!(strip_verbatim("/var/x/pgdata"), "/var/x/pgdata");
+        assert_eq!(verbatim(r"C:\a"), r"\\?\C:\a");
+        assert_eq!(verbatim(r"\\server\share"), r"\\?\UNC\server\share");
+    }
+
+    #[test]
+    fn a_first_run_tag_is_the_new_tag() {
+        // First run wrote under the plain path; later runs looked under the
+        // canonical `\\?\` form. The new tag must equal the first-run one.
+        assert_eq!(tag_of(SAMPLE_DIR), "ff61f0171e214704");
+        assert_eq!(
+            tag_of(&strip_verbatim(&format!(r"\\?\{SAMPLE_DIR}"))),
+            "ff61f0171e214704"
+        );
+        assert_eq!(tag_of(&verbatim(SAMPLE_DIR)), "1d2f0ad9f7eec027");
+    }
+
+    #[test]
+    fn the_tag_is_the_same_before_and_after_the_folder_exists() {
+        let d = scratch("tag");
+        let data = d.join("pgdata");
+        // The name the old code wrote first-run secrets under: the folder did
+        // not exist yet, so it hashed the path as given.
+        let first_run = tag_of(&data.to_string_lossy());
+        let before = DirTags::of(&data);
+        fs::create_dir_all(&data).unwrap();
+        let after = DirTags::of(&data);
+        assert_eq!(before.current, after.current);
+        // The exact bug: once the folder exists, that first-run name must still
+        // be reachable (macOS /var -> /private/var, Windows `\\?\` and 8.3
+        // short names, plain Linux paths).
+        assert!(
+            first_run == after.current || after.legacy.contains(&first_run),
+            "first-run tag lost"
+        );
+        // Once it exists, the old computation (canonical path) is a legacy tag.
+        let old = tag_of(&data.canonicalize().unwrap().to_string_lossy());
+        assert!(old == after.current || after.legacy.contains(&old));
+        assert!(!after.legacy.contains(&after.current));
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_the_canonical_verbatim_tag_is_legacy() {
+        let d = scratch("verb");
+        let data = d.join("pgdata");
+        fs::create_dir_all(&data).unwrap();
+        let tags = DirTags::of(&data);
+        let canon = data.canonicalize().unwrap();
+        let canon = canon.to_string_lossy();
+        assert!(canon.starts_with(r"\\?\"));
+        assert_eq!(tags.current, tag_of(&strip_verbatim(&canon)));
+        assert!(tags.legacy.contains(&tag_of(&canon)));
+        let _ = fs::remove_dir_all(d);
+    }
+
+    type Map = Mutex<std::collections::HashMap<String, String>>;
+
+    fn map_get(m: &Map) -> impl Fn(&str) -> Result<Option<Secret>> + '_ {
+        |a| Ok(m.lock().unwrap().get(a).map(|v| Secret::new(v.clone())))
+    }
+
+    fn map_set(m: &Map) -> impl Fn(&str, &Secret) -> Result<()> + '_ {
+        |a, s| {
+            m.lock()
+                .unwrap()
+                .insert(a.to_string(), s.expose().to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_secret_under_the_legacy_canonical_name_is_found_and_copied() {
+        let d = scratch("legacy");
+        let data = d.join("pgdata");
+        fs::create_dir_all(&data).unwrap();
+        let store = KeyringStore::for_purpose(&data, "host-master");
+        let old_name = format!("host-master-{}", tag_of(&verbatim(SAMPLE_DIR)));
+        let legacy = vec![
+            format!("host-master-{}", tag_of(SAMPLE_DIR)),
+            old_name.clone(),
+        ];
+        let m: Map = Mutex::default();
+        m.lock()
+            .unwrap()
+            .insert(old_name.clone(), "the-master".into());
+        let got = lookup_with_legacy(&store.account, &legacy, map_get(&m), map_set(&m)).unwrap();
+        assert_eq!(got, Some(Secret::new("the-master")));
+        let map = m.lock().unwrap();
+        assert_eq!(
+            map.get(&store.account).map(String::as_str),
+            Some("the-master")
+        );
+        assert_eq!(
+            map.get(&old_name).map(String::as_str),
+            Some("the-master"),
+            "kept"
+        );
+        assert_eq!(map.len(), 2, "nothing else written");
+        drop(map);
+        // The real store lists the canonical form of its folder as legacy.
+        let canon = tag_of(&data.canonicalize().unwrap().to_string_lossy());
+        assert!(
+            store.account.ends_with(&canon)
+                || store
+                    .legacy_accounts
+                    .contains(&format!("host-master-{canon}"))
+        );
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn the_current_name_wins_and_nothing_found_stays_nothing() {
+        let m: Map = Mutex::default();
+        let legacy = vec!["p-old".to_string()];
+        assert_eq!(
+            lookup_with_legacy("p-new", &legacy, map_get(&m), map_set(&m)).unwrap(),
+            None
+        );
+        assert!(m.lock().unwrap().is_empty(), "no secret is ever invented");
+        m.lock().unwrap().insert("p-new".into(), "new".into());
+        m.lock().unwrap().insert("p-old".into(), "old".into());
+        assert_eq!(
+            lookup_with_legacy("p-new", &legacy, map_get(&m), map_set(&m)).unwrap(),
+            Some(Secret::new("new"))
+        );
+        assert_eq!(
+            m.lock().unwrap().get("p-old").map(String::as_str),
+            Some("old")
+        );
+    }
+
+    #[test]
+    fn a_failed_copy_still_returns_the_secret() {
+        let m: Map = Mutex::default();
+        m.lock().unwrap().insert("p-old".into(), "old".into());
+        let got = lookup_with_legacy("p-new", &["p-old".to_string()], map_get(&m), |_, _| {
+            Err(PgError::SecretStore("locked".into()))
+        })
+        .unwrap();
+        assert_eq!(got, Some(Secret::new("old")));
+    }
+
+    #[test]
+    fn an_unreadable_legacy_name_is_skipped() {
+        let m: Map = Mutex::default();
+        m.lock().unwrap().insert("p-old2".into(), "old".into());
+        let legacy = vec!["p-old1".to_string(), "p-old2".to_string()];
+        let get = |a: &str| {
+            if a == "p-old1" {
+                Err(PgError::SecretStore("denied".into()))
+            } else {
+                map_get(&m)(a)
+            }
+        };
+        let got = lookup_with_legacy("p-new", &legacy, get, map_set(&m)).unwrap();
+        assert_eq!(got, Some(Secret::new("old")));
+        // An error on the current name still fails the read.
+        let failing = |_: &str| Err(PgError::SecretStore("locked".into()));
+        assert!(lookup_with_legacy("p-new", &legacy, failing, map_set(&m)).is_err());
+    }
+
+    fn map_delete(m: &Map) -> impl Fn(&str) -> Result<()> + '_ {
+        |a| {
+            m.lock().unwrap().remove(a);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_set_retires_the_legacy_names() {
+        let m: Map = Mutex::default();
+        let legacy = vec!["p-old1".to_string(), "p-old2".to_string()];
+        m.lock().unwrap().insert("p-old2".into(), "old".into());
+        // A read copies forward and keeps the legacy entry ...
+        assert_eq!(
+            lookup_with_legacy("p-new", &legacy, map_get(&m), map_set(&m)).unwrap(),
+            Some(Secret::new("old"))
+        );
+        assert!(m.lock().unwrap().contains_key("p-old2"));
+        // ... until the next set, which removes every legacy entry.
+        set_and_retire(
+            "p-new",
+            &legacy,
+            &Secret::new("fresh"),
+            map_set(&m),
+            map_delete(&m),
+        )
+        .unwrap();
+        let map = m.lock().unwrap();
+        assert_eq!(map.get("p-new").map(String::as_str), Some("fresh"));
+        assert_eq!(map.len(), 1, "only the current name remains");
+    }
+
+    #[test]
+    fn a_failed_set_retires_nothing_and_a_failed_retire_still_saves() {
+        let m: Map = Mutex::default();
+        m.lock().unwrap().insert("p-old".into(), "old".into());
+        let legacy = vec!["p-old".to_string()];
+        let err = set_and_retire(
+            "p-new",
+            &legacy,
+            &Secret::new("fresh"),
+            |_, _| Err(PgError::SecretStore("locked".into())),
+            map_delete(&m),
+        );
+        assert!(err.is_err());
+        assert!(m.lock().unwrap().contains_key("p-old"), "kept on failure");
+        set_and_retire("p-new", &legacy, &Secret::new("fresh"), map_set(&m), |_| {
+            Err(PgError::SecretStore("denied".into()))
+        })
+        .unwrap();
+        assert_eq!(
+            m.lock().unwrap().get("p-new").map(String::as_str),
+            Some("fresh")
+        );
+    }
+
+    #[test]
+    fn delete_removes_legacy_names_first_and_the_current_name_last() {
+        let order = Mutex::new(Vec::<String>::new());
+        let legacy = vec!["p-old1".to_string(), "p-old2".to_string()];
+        delete_all("p-new", &legacy, |a| {
+            order.lock().unwrap().push(a.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*order.lock().unwrap(), ["p-old1", "p-old2", "p-new"]);
+        // A failure stops before the current name is touched.
+        order.lock().unwrap().clear();
+        let err = delete_all("p-new", &legacy, |a| {
+            order.lock().unwrap().push(a.to_string());
+            if a == "p-old1" {
+                Err(PgError::SecretStore("denied".into()))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(err.is_err());
+        assert_eq!(*order.lock().unwrap(), ["p-old1"]);
     }
 
     #[test]
