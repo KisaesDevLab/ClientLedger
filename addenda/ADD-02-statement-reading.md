@@ -13,7 +13,7 @@ Models: as ADD-01 (Q-277, Q-294): opus for all work, stepping up to effort xhigh
 The build was in A03 (ADD-01) when this was added, with P18 on hold by the owner.
 
 1. A06 needs A03 (local reading: worker, OCR, line tables) and A04 (the compare tools and document-beside-form layout). Run **A06 right after A04 merges**, before the beta track resumes.
-2. The owner's P18 hold still applies: after A06, stop and report; do not start P18 until the owner says so.
+2. The owner's P18 hold applied until the owner said go on 2026-10-28 (P18 started then).
 3. Before PR-A1 (ADD-01's checkpoint) runs, A06 is included in its scope ("Document to books" covers statements too).
 
 Mark A06 in STATE.md like any other phase. Branch `phase/A06-statement-reading`; PR `A06 — Read a vendor statement`; final commit `docs(state): complete A06, next <phase>`.

@@ -21,7 +21,7 @@ Tick **Print later** if you will print the check from ClientLedger instead of wr
 
 ## Open bills
 
-If you have an unpaid bill from the same vendor, the panel on the right says so, for example: "You have an open bill from this vendor for 1,286.40, due 11/05." If this check pays that bill, use Pay Bills instead, so the bill shows as paid. The note doesn't stop you from saving the check.
+If you have an unpaid bill from the same vendor, the panel on the right says so, for example: "You have an open bill from this vendor for 1,286.40, due 11/05." If this check pays that bill, use Pay Bills instead, so the bill shows as paid. Click **Go to Pay Bills** in the note to open it (see [Pay Bills](pay-bills.md)). The note doesn't stop you from saving the check.
 
 ## Account suggestions
 

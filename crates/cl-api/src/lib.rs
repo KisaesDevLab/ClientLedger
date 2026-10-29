@@ -159,6 +159,13 @@ pub use resources::bill_ocr::{
     ReadField, ReadLine, ReadStatus, reading_from_json,
 };
 pub use resources::bill_payments::{BillPaymentSummary, BillPayments};
+// P18: Pay Bills (engine U-101 to U-104).
+pub use resources::bill_payments::{
+    BILL_NOT_PAYABLE, BILL_NOT_RECEIVED, BillApplication, BillPaymentRecord, BillToPay,
+    CHECK_NUMBER_IN_USE, CREDIT_NOT_AVAILABLE, CheckNumbering, CreatedPayment, CreditApplication,
+    CreditToApply, DISCOUNT_ACCOUNT_INVALID, DISCOUNT_ACCOUNT_REQUIRED, PayBillsRequest, PayMethod,
+    PayProblem, PayableBill, PayableCredit, PayableFilter, PayableList, pay_problem,
+};
 pub use resources::bills::{
     BillDraft, BillListQuery, BillSort, BillSummary, PaymentTerm, TermsDates, TermsDatesQuery,
     TermsSource,

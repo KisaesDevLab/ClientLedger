@@ -105,9 +105,11 @@ mod cloud_reading;
 mod compare;
 mod doc_form;
 mod doc_review;
+// P18.
+mod pay_bills;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 32] = [
+const TABLES: [&[(&str, &str)]; 33] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -140,6 +142,7 @@ const TABLES: [&[(&str, &str)]; 32] = [
     doc_review::ENGLISH,
     doc_form::ENGLISH,
     compare::ENGLISH,
+    pay_bills::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -215,6 +218,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.shortcuts", "shortcuts"),
     ("status.hint.help", "help"),
     ("status.hint.record", "record"),
+    ("status.hint.select_bill", "select bill"),
+    ("status.hint.move", "move"),
+    ("status.hint.pay", "pay"),
     ("status.hint.dates", "dates"),
     ("status.hint.delete", "delete"),
     ("status.hint.next_field", "next field"),

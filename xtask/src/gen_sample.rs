@@ -335,7 +335,9 @@ const CLIENT_NAMES: &[&str] = &[
 ];
 const VENDOR_NAMES: &[&str] = &[
     "Ozark Mulch Supply",
-    "Tri-Lakes Nursery Wholesale",
+    // P18: four vendors carry the Pay Bills mockup's names (same slots, so
+    // the random stream is unchanged).
+    "Table Rock Nursery",
     "Branson Equipment Rental",
     "Hollister Fuel Stop",
     "White River Stone Yard",
@@ -348,16 +350,16 @@ const VENDOR_NAMES: &[&str] = &[
     "City of Hollister Water",
     "Shepherd Hills Office Supply",
     "Cedar Hollow Signs",
-    "Highway 65 Tire & Lube",
+    "Monett Tire & Lube",
     "Riverbend Hardware",
     "Bluff View Trucking",
-    "Forsyth Print Shop",
+    "Ozark Office Supply",
     "Kimberling Fertilizer",
     "Lampe Seed & Feed",
     "Reeds Spring Welding",
     "Stone County Permits",
     "Pine Ridge Storage Units",
-    "Walnut Shade Diesel",
+    "Riverbend Fuel",
     "Mountain Software Co",
     "Oak Grove Uniforms",
     "Galena Gravel",
@@ -427,6 +429,69 @@ fn push_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
         attachment: false,
         paid: false,
     });
+}
+
+/// The Pay Bills story (P18, mockup `PayBills.html`): with the Write Check
+/// story's Ozark Feed & Seed bill (1,286.40 due 11/05), the five bills due
+/// by 11/11 are (vendor, bill date, due date, account, cents). They add up
+/// to the design figure "Bills due within 7 days" (7,471.90), so no plug
+/// bill is needed. Pushed before the plugs, which absorb October.
+const PAY_BILLS_STORY: &[(&str, Day, Day, &str, i64)] = &[
+    (
+        "Riverbend Fuel",
+        Day(2026, 10, 7),
+        Day(2026, 11, 6),
+        "6100",
+        141_206,
+    ),
+    (
+        "Monett Tire & Lube",
+        Day(2026, 10, 9),
+        Day(2026, 11, 8),
+        "6700",
+        64_000,
+    ),
+    (
+        "Ozark Office Supply",
+        Day(2026, 10, 26),
+        Day(2026, 11, 10),
+        "6250",
+        21_844,
+    ),
+    (
+        "Table Rock Nursery",
+        Day(2026, 10, 12),
+        Day(2026, 11, 11),
+        "5100",
+        391_500,
+    ),
+];
+
+/// Pushes the Pay Bills story bills. Any other unpaid bill due by 11/11 is
+/// moved a week later, so the mockup's list is exactly the story's.
+fn push_pay_bills_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
+    let through = Day(2026, 11, 11);
+    for t in txns.iter_mut() {
+        let story = t.contact.as_deref() == Some(STORY_VENDOR);
+        if t.kind == "bill" && !t.paid && !story && t.due.is_some_and(|d| d <= through) {
+            t.due = Some(Day(2026, 11, 18));
+        }
+    }
+    for &(vendor, date, due, account, amount) in PAY_BILLS_STORY {
+        *bill_seq += 1;
+        txns.push(Txn {
+            date,
+            kind: "bill",
+            number: format!("B-{bill_seq}"),
+            contact: Some(vendor.into()),
+            memo: "Vendor bill".into(),
+            lines: vec![line(account, amount, 0), line(AP, 0, amount)],
+            due: Some(due),
+            cleared: false,
+            attachment: false,
+            paid: false,
+        });
+    }
 }
 
 /// A bill's amount: its credit to A/P.
@@ -808,6 +873,7 @@ fn generate() -> Fixture {
         }
     }
     push_story(&mut txns, &mut bill_seq);
+    push_pay_bills_story(&mut txns, &mut bill_seq);
 
     // ---- Plugs that make the design figures exact --------------------------
     let ni = |txns: &[Txn], from: Day, to: Day| -> i64 {
@@ -902,21 +968,7 @@ fn generate() -> Fixture {
             .map(bill_amount)
             .sum()
     };
-    let bills_diff = BILLS_DUE_7 - due_soon(&txns);
-    assert!(bills_diff > 0, "bills plug must be positive: {bills_diff}");
-    bill_seq += 1;
-    txns.push(Txn {
-        date: Day(2026, 11, 1),
-        kind: "bill",
-        number: format!("B-{bill_seq}"),
-        contact: Some("Ozark Mulch Supply".into()),
-        memo: "Fall mulch delivery".into(),
-        lines: vec![line("5200", bills_diff, 0), line(AP, 0, bills_diff)],
-        due: Some(Day(2026, 11, 8)),
-        cleared: false,
-        attachment: true,
-        paid: false,
-    });
+    // The Pay Bills story makes it exact (P18): no plug bill.
     assert_eq!(due_soon(&txns), BILLS_DUE_7);
 
     // (7) Books balance of 1010 on the story date (uncleared owner move).

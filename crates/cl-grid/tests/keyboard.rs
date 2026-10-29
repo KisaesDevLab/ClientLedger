@@ -421,3 +421,35 @@ fn block_paste_needs_an_editable_grid() {
         Err(cl_grid::SpecError::EditFlagsWithoutEditing)
     );
 }
+
+/// Columns wider than the grid scroll sideways to show the cursor's
+/// column as Tab moves across (a small window or a large zoom; P18 UI
+/// review 1).
+#[test]
+fn tab_scrolls_the_cursor_column_into_view() {
+    let mut r = rig(2);
+    r.size = egui::Vec2::new(200.0, 600.0);
+    r.focus_cell(0, ACCOUNT);
+    r.frame(vec![]);
+    let wide = r.grid.column_layout().content_width;
+    assert!(wide > 200.0, "the columns ({wide}) are wider than the grid");
+    assert!(r.grid.column_shown(ACCOUNT));
+    let mut seen = vec![r.at().1];
+    for _ in 0..5 {
+        r.frame(tab());
+        r.frame(vec![]);
+        let col = r.at().1;
+        assert!(r.grid.column_shown(col), "{col:?} in view");
+        assert!(r.grid.column_span(col).is_some());
+        seen.push(col);
+    }
+    assert!(seen.contains(&TAGS), "{seen:?}");
+    assert!(
+        !r.grid.column_shown(ACCOUNT),
+        "scrolled past the first column"
+    );
+    // Back to the first column scrolls back.
+    r.focus_cell(0, ACCOUNT);
+    r.frame(vec![]);
+    assert!(r.grid.column_shown(ACCOUNT));
+}

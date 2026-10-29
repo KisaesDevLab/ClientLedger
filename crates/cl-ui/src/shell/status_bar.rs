@@ -121,6 +121,22 @@ pub fn hints_for(active: Option<CommandId>, mode: EnterMode) -> Vec<Hint> {
 fn base_hints(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
+        // Pay Bills (mockup PayBills.html): Space ticks the bill, the
+        // arrows move, Alt+S pays.
+        Some("vendors.pay_bills") => {
+            let mut out = vec![
+                Hint {
+                    chips: vec!["Space".to_string()],
+                    label: t("status.hint.select_bill"),
+                },
+                Hint {
+                    chips: ["\u{2191}", "\u{2193}"].map(str::to_string).to_vec(),
+                    label: t("status.hint.move"),
+                },
+            ];
+            out.extend(keymap_hints(&[("form.save_close", "status.hint.pay")]));
+            return out;
+        }
         Some(kind @ ("lists.templates" | "lists.templates_due")) => {
             let (enter, rest): (&str, &[(&str, &str)]) = if kind == "lists.templates" {
                 ("status.hint.use", &TEMPLATES_HINTS)

@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** none — **STOP: P18 waits for the owner's go-ahead (2026-10-26).** ADD-01 A01–A04 and ADD-02 A06 are done; A05 runs right after P26.
-**Status:** A06 built on `phase/A06-statement-reading`; PR open with auto-merge. A04 merged (PR #45). Engine PR #183 (U-94) merged; pin 5a9a8700
-**Engine commit:** `5a9a8700` (`main`, pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
-**Last updated:** 2026-10-27
+**Current phase:** P19 — Form printing (next). P18 done 2026-10-28. A05 runs right after P26.
+**Status:** P18 PR open with auto-merge.
+**Engine commit:** `e45658fb` (`main`, pinned 2026-10-28 after engine PR #193 (U-101–U-104, Pay Bills discounts, idempotent pay, check numbers, company scope; migrations 0236–0238); before that `5a9a8700` (pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
+**Last updated:** 2026-10-28
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -30,7 +30,7 @@
 | P16 | Home workspace | L | Done 2026-10-24 |
 | PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Done 2026-10-25 |
-| P18 | Pay Bills (checks) | M | STOP — waits for the owner's go-ahead (2026-10-26) |
+| P18 | Pay Bills (checks) | M | Done 2026-10-28 |
 | P19 | Form printing | L | |
 | P20 | Create Invoice | M | |
 | P21 | Receive Payment | H | |
@@ -65,7 +65,7 @@
 | A04 | Review queue and compare tools | M | Done 2026-10-27 |
 | A05 | Match document drafts in the Bank Feed | M | After P26 |
 
-**ADD-02 — Read a vendor statement into Match Vendor Statement** (`addenda/ADD-02-statement-reading.md`; part of the beta; owner request 2026-10-26). Scheduling: A06 runs right after A04 merges; P18 stays on hold until the owner says go.
+**ADD-02 — Read a vendor statement into Match Vendor Statement** (`addenda/ADD-02-statement-reading.md`; part of the beta; owner request 2026-10-26). Scheduling: A06 runs right after A04 merges (done); P18 started when the owner said go (2026-10-28).
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
@@ -216,6 +216,15 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from P18
+
+1. U-105: per-bill `expectedUpdatedAt` on pay so a stale Pay Bills screen gets 409 STALE instead of 400 (Q-P18g).
+2. A vendor paid only by credits with "To be printed": the engine queues a $0.00 check, the demo engine doesn't. Decide in P19 (skip $0 checks when printing) or upstream.
+3. A04 drafts saved before P18 with `billReceived:false` never match the form (always true now) and keep a "differs" mark; pre-release data only.
+4. Amt. to pay is shown as text in the grid, not as input boxes (mockup); typing goes through the row editor.
+5. Live contract tests in a worktree need `CL_ENGINE_EXE` set to the worktree's `target\engine\windows-x64\clientledger-engine.exe`: the harness doesn't find the engine since the per-worktree `build-dir` change. Teach it to ask `cargo metadata`.
+6. The full local `cargo xtask ci` is killed by low memory on this 16 GB machine (twice on 2026-10-28). Page file or a lighter CI profile needed.
+
 ## Follow-ups from A06
 
 1. Photos of statements read 79.6 % (seen) / 73.5 % (held-out) of lines right; most misses are OCR letter errors in reference numbers. Revisit at PR-A1 with `private-fixtures/`.
@@ -273,7 +282,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 1. Scanned (image-only) PDFs can't be read with AI: no permissive rasterizer, poppler is GPL. The app says so (Q-P17o). ADD-01 A03 (local OCR) is the fix.
 2. "Add as a new vendor?" after a reading opens the vendor list, not a prefilled vendor form (Q-P17u).
-3. `OpenRecord` on a bill-payment row opens Enter Bill empty; Pay Bills (P18) owns bill payments.
+3. Done in P18: a bill-payment row opens the read-only Bill Payment view with Void.
 4. No automatic backup is taken before the engine runs its database migrations on an engine upgrade (non-negotiable 9). Build it with the upgrade flow (P36) or sooner; no release before then.
 5. Engine download tokens can be replayed for 60 seconds (stateless signed tokens; U-90 review L1). Revisit before P33 LAN mode.
 6. Bill templates: the engine has no `bill` template kind (Save as Template disabled, Q-P17a). Propose a U-row when bill templates are wanted.
@@ -313,6 +322,14 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-28 — P18 Pay Bills (checks and credit card) complete on `phase/P18-pay-bills`; PR with auto-merge. Shipped:
+  - Engine PR #193 (U-101–U-104, pin e45658fb, migration 0238): early-payment discounts (`discountAmount`, discount account, company default `billDiscountAccountId`, engine-rounded `discountAvailable`), keyed pay (Idempotency-Key), first `checkNumber` for checks numbered now, company scope on payable and bill-payment reads; also voiding now reopens bills settled only by the payment's credits.
+  - `cl-api` pay, payable list, read-back, void, discount-account setting, plain-language errors; `cl-model::forms::bill_payment` (selection, filters, discounts and credits auto-applied and refitted, partial payments, totals over selected bills, request with amount = cash + credits); `cl-ui` Pay Bills screen (Ctrl+Shift+B; Check or Credit card; To be printed / Assign check numbers; balance before → after), Set Discount / Set Credits, read-only Bill Payment view with Void (OpenRecord from registers), Write Check "Go to Pay Bills" link, Home and Vendors placeholders removed; an unknown pay outcome never pays twice. `cl-grid` columns scroll sideways to keep the cursor in view.
+  - "Not received yet" removed from Enter Bill (owner, Q-P18h).
+  - Sample company and demo engine carry the mockup's bills; scenario `pay_bills.yaml` (light and dark, 960×640 and 200%, compare); help `docs/user/pay-bills.md`.
+  - Acceptance: [x] mockup totals exact under the owner's selected-bills rule (Amt due 6,831.90, discount 4.37, credits 250.00, pay 6,577.53, 84,210.55 → 77,633.02; model, demo and live contract tests); [x] partial payments (2,665.00 left) and discount posting (discount account credited 4.37, void restores) live; [x] ui-check `pay_bills --compare` reviewed by ui-verifier; deviations in the PR and Q-P18b/d.
+  - Checks: unit tests, 6/6 live pay-bills contract tests, ui-check pay_bills, write_check, register, home, batch_entry, client-center, vendor-center, opening-balances (light and dark). The full local `cargo xtask ci` was stopped twice by the machine running low on memory; GitHub CI is the full run. `bill` ui-check needs local tesseract (environment, not P18).
+  - Decisions: Q-P18a–i (owner answered a, b, d, e, f, h; Q-10 amended for card). Agents: engine-scout, engine-implementer, two rust-implementers (build, fresh fix pass), reviewer and ui-verifier on opus; docs-writer on sonnet.
 - 2026-10-27 — A06 (ADD-02) complete on `phase/A06-statement-reading`; PR with auto-merge. Shipped:
   - `cl-docread` statement reading in the sandboxed worker (protocol v5): header (statement date, period, opening and closing), line table with the sign from its column (single / charges / credits / payments, running balance), multi-page tables, balance-forward, subtotal, total and aging rows left out (Q-296); checks for sum, running balance, period and duplicates, flagged and never adjusted; 20 pages and 2,000 lines per statement (Q-300); `stmt:` statement layouts kept apart from bill layouts (Q-A06e).
   - Match Vendor Statement "Read a statement file" (Browse, drop, Review Documents, Vendor statements intake folders): read lines become the box's rows and go through the existing Match (Q-A06b); statement beside its lines with line ↔ spot highlights; read marks; Accept / Alt+A before Match; "Ask AI to help" suggests only vendor and closing balance, each needing "Use this…"; wrong-vendor warning; "Couldn't read this statement…".

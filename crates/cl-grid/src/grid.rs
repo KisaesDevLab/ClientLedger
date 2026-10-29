@@ -188,6 +188,12 @@ pub struct Grid {
     menu_rect: Option<Rect>,
     /// The cursor cell's rect last painted (the keyboard menu's anchor).
     cursor_rect: Option<Rect>,
+    /// The cursor's column last frame: when it changes, the columns
+    /// scroll sideways to show it.
+    follow_col: Option<ColumnId>,
+    /// Where the cells (after the gutter, before the scroll bar) and the
+    /// header were drawn last frame, in screen points.
+    drawn: Option<(Rect, Rect)>,
 }
 
 fn group(n: usize) -> String {
@@ -261,7 +267,52 @@ impl Grid {
             menu_at: None,
             menu_rect: None,
             cursor_rect: None,
+            follow_col: None,
+            drawn: None,
         })
+    }
+
+    /// Where `id` was drawn last frame: its left edge and width in screen
+    /// points, cut to the part in view (`None` when scrolled out of view
+    /// or not drawn yet). Screens align a totals row under the columns
+    /// with it.
+    #[must_use]
+    pub fn column_span(&self, id: ColumnId) -> Option<(f32, f32)> {
+        let (cells, _) = self.drawn?;
+        let p = self.layout.place(id)?;
+        let left = cells.left() + p.x - self.hscroll;
+        let l = left.max(cells.left());
+        let r = (left + p.width).min(cells.right());
+        (r > l).then_some((l, r - l))
+    }
+
+    /// Whether all of column `id` was in view last frame.
+    #[must_use]
+    pub fn column_shown(&self, id: ColumnId) -> bool {
+        let (Some((cells, _)), Some(p)) = (self.drawn, self.layout.place(id)) else {
+            return false;
+        };
+        let left = cells.left() + p.x - self.hscroll;
+        left >= cells.left() - 0.5 && left + p.width <= cells.right() + 0.5
+    }
+
+    /// The header cell of column `id` last frame, cut to the part in view.
+    #[must_use]
+    pub fn header_cell(&self, id: ColumnId) -> Option<Rect> {
+        let (_, header) = self.drawn?;
+        let (x, w) = self.column_span(id)?;
+        let p = self.layout.place(id)?;
+        let top = if p.line == Line::Second {
+            header.top() + header.height() / 2.0
+        } else {
+            header.top()
+        };
+        let h = if self.layout.two_lines {
+            header.height() / 2.0
+        } else {
+            header.height()
+        };
+        Some(Rect::from_min_size(pos2(x, top), vec2(w, h)))
     }
 
     /// The open context menu's id (its `Menu` node; entries are
@@ -1187,6 +1238,21 @@ impl Grid {
             }
         }
 
+        // The cursor moved to another column: scroll sideways so it shows
+        // (columns wider than the grid, a small window or a large zoom).
+        let cursor_col = self.core.cursor().map(|c| c.col);
+        if cursor_col != self.follow_col {
+            self.follow_col = cursor_col;
+            if let Some(p) = cursor_col.and_then(|c| self.layout.place(c)) {
+                let view = avail_w - BAR - gutter;
+                if p.x < self.hscroll {
+                    self.hscroll = p.x;
+                } else if p.x + p.width > self.hscroll + view {
+                    self.hscroll = (p.x + p.width - view).min(p.x);
+                }
+                self.hscroll = self.hscroll.clamp(0.0, overflow);
+            }
+        }
         if self.pending_reset {
             self.reset_editor(&ctx);
         }
@@ -1521,6 +1587,7 @@ impl Grid {
         let gutter = self.gutter();
         let cells_body = Rect::from_min_max(pos2(body.left() + gutter, body.top()), body.max);
         let cells_left = cells_body.left();
+        self.drawn = Some((cells_body, header));
         let mut gutter_presses = Vec::new();
         let mut gutters = Vec::new();
         let mut menu_req = None;

@@ -83,10 +83,9 @@ fn problems(form: &BillForm, c: &BillContext<'_>) -> Vec<BillProblem> {
 }
 
 #[test]
-fn a_new_form_is_a_received_bill() {
+fn a_new_form_is_a_bill() {
     let f = BillForm::default();
     assert_eq!(f.kind, BillKind::Bill);
-    assert!(f.bill_received, "received by default (D7)");
 }
 
 #[test]
@@ -550,31 +549,22 @@ fn preview_dates_for_custom_terms_are_calendar_days() {
 }
 
 #[test]
-fn received_flag_rules() {
+fn every_bill_is_sent_received() {
+    // Q-P18h: "Not received yet" was removed; a bill goes as received
+    // whenever the engine has the flag.
     let mut keys = RowKeyGen::new();
     let tags = no_tags();
     let terms = PaymentTerm::fixed();
-    let mut f = mockup(&mut keys);
-    f.bill_received = false;
+    let f = mockup(&mut keys);
     let no_recv = BillCaps {
         received: false,
         ..ALL
     };
-    assert_eq!(
-        problems(&f, &ctx(&tags, &terms, no_recv)),
-        vec![BillProblem::ReceivedNeedsUpdate]
-    );
-    assert_eq!(
-        BillProblem::ReceivedNeedsUpdate.field(),
-        BillField::Received
-    );
     let c = check(&f, &ctx(&tags, &terms, ALL)).expect("ok");
-    assert_eq!(c.bill_received, Some(false));
-    f.bill_received = true;
+    assert_eq!(c.bill_received, Some(true));
     let c = check(&f, &ctx(&tags, &terms, no_recv)).expect("ok");
     assert_eq!(c.bill_received, None, "not sent without the capability");
 }
-
 #[test]
 fn a_credit_carries_no_terms_due_date_or_received_flag() {
     let mut keys = RowKeyGen::new();
@@ -585,7 +575,6 @@ fn a_credit_carries_no_terms_due_date_or_received_flag() {
     f.terms = Some("net_45".into());
     f.set_due_by_owner(Some(ymd(2020, 1, 1)));
     f.set_discount_by_owner(Some(ymd(2020, 1, 1)));
-    f.bill_received = false;
     f.items.lines[0].billable = true;
     let no_caps = BillCaps {
         closing: true,
@@ -721,7 +710,6 @@ fn every_problem_has_a_bill_key() {
         BillProblem::DiscountNeedsUpdate,
         BillProblem::DueBeforeDate,
         BillProblem::DiscountDateInvalid,
-        BillProblem::ReceivedNeedsUpdate,
         BillProblem::AmountMissing,
         BillProblem::AmountNotPositive,
         BillProblem::NoLines,

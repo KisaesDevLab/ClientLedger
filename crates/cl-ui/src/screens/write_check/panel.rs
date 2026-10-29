@@ -6,8 +6,8 @@
 //! the vendor summary's `totalOwed`, a bill's amount its `balanceDue`, a
 //! recent check its total. Nothing is added up (non-negotiable 7).
 //!
-//! The open-bill note only explains (Q-248): it never stops a save, and it
-//! names Pay Bills without a link until that window exists (P18).
+//! The open-bill note only explains (Q-248): it never stops a save. Since
+//! P18 it links to Pay Bills (Q-P13e).
 //!
 //! Each card loads on its own; one that fails says so with Try again.
 
@@ -258,6 +258,7 @@ impl WriteCheckScreen {
             .and_then(|p| self.lists.name_text(p))
             .map(str::to_string);
         let mut retry = false;
+        let mut go_pay_bills = false;
         if let Some(name) = name {
             form::card_tight(ui, tokens, |ui| {
                 ui.label(RichText::new(&name).strong().color(tokens.text_primary));
@@ -302,6 +303,10 @@ impl WriteCheckScreen {
                                 )
                                 .wrap(),
                             );
+                            // P18 (Q-P13e): the note links to Pay Bills.
+                            if ui.link(t("check.panel.go_pay_bills")).clicked() {
+                                go_pay_bills = true;
+                            }
                         });
                 } else if matches!(self.panel.bills, Some(Card::Failed)) {
                     retry |= failed(ui, tokens);
@@ -356,6 +361,11 @@ impl WriteCheckScreen {
         if retry {
             let payee = self.panel.payee;
             self.load_panel(payee);
+        }
+        if go_pay_bills {
+            self.link.push(crate::company::CompanyEvent::OpenWindow(
+                cl_model::CommandId::new(crate::screens::pay_bills::KIND),
+            ));
         }
         self.attachments_ui(ui, tokens);
     }

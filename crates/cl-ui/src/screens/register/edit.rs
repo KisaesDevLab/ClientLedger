@@ -119,6 +119,8 @@ pub fn form_for(
         !v.is_empty() && v.iter().all(|x| *x == Some(c))
     };
     Some(match t.txn_type {
+        // P18: a bill payment opens read-only with Void (Q-P18f).
+        TxnType::BillPayment => crate::screens::pay_bills::view::KIND,
         TxnType::DailySales => daily_sales::KIND,
         TxnType::JournalEntry => journal_entry::KIND,
         TxnType::Transfer => transfer::KIND,

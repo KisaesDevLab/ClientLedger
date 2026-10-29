@@ -64,8 +64,6 @@ pub struct DemoBills {
     pub lines_off: bool,
     /// Behave like an engine without `bill-terms-v1` (tests).
     pub terms_off: bool,
-    /// Behave like an engine without `bill-received-v1` (tests).
-    pub received_off: bool,
     /// The next save answers "outcome unknown" after writing (tests of the
     /// PR-1 rule).
     pub lose_next_reply: bool,
@@ -100,7 +98,6 @@ struct BillInfo {
     terms: Option<String>,
     terms_days: Option<u32>,
     due: Option<CalendarDate>,
-    received: bool,
     lines: Vec<LineInfo>,
     /// Paid or applied so far (tests mark a bill paid).
     paid: Money,
@@ -116,7 +113,8 @@ pub fn caps(state: &DemoState) -> BillCaps {
         closing: !b.closing_off,
         lines: !b.lines_off,
         terms: !b.terms_off,
-        received: !b.received_off,
+        // Every bill is received (Q-P18h): the flag is always sent true.
+        received: true,
     }
 }
 
@@ -219,7 +217,6 @@ struct Doc<'a> {
     lines: &'a [BillLineDraft],
     terms: Option<&'a cl_api::BillTerms>,
     due: Option<CalendarDate>,
-    received: bool,
     draft: Option<DraftKey>,
 }
 
@@ -235,7 +232,6 @@ impl<'a> Doc<'a> {
             lines: &d.lines,
             terms: d.terms.as_ref(),
             due: d.due_date,
-            received: d.received,
             draft: d.draft_attachment,
         }
     }
@@ -251,7 +247,6 @@ impl<'a> Doc<'a> {
             lines: &d.lines,
             terms: None,
             due: None,
-            received: true,
             draft: d.draft_attachment,
         }
     }
@@ -416,7 +411,6 @@ fn save(
             terms: doc.terms.map(|t| t.code.clone()),
             terms_days: doc.terms.and_then(|t| t.days),
             due,
-            received: doc.received,
             lines: doc
                 .lines
                 .iter()
@@ -481,7 +475,6 @@ fn check_caps(state: &DemoState, doc: &Doc<'_>, password: Option<&Secret>) -> Re
             || (doc.credit && l.tag.is_some())
     });
     let unsupported = (b.lines_off && (line_fields || doc.draft.is_some()))
-        || (b.received_off && !doc.received)
         || (b.closing_off && password.is_some());
     if unsupported {
         return Err(ApiError::Local(LocalValidation::Unsupported));
@@ -789,7 +782,7 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<BillRec
         amount_paid: (!credit).then_some(paid),
         credits_applied: None,
         bill_status: status.filter(|_| !credit),
-        bill_received: info.as_ref().is_none_or(|i| i.received),
+        bill_received: true,
         discount_percent: None,
         discount_days: None,
         discount_date: None,

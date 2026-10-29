@@ -38,6 +38,7 @@ mod contract_logging;
 mod contract_merges;
 mod contract_money;
 mod contract_money_helpers;
+mod contract_pay_bills;
 mod contract_preferences;
 mod contract_register;
 mod contract_register_property;
@@ -692,6 +693,30 @@ fn main() -> std::process::ExitCode {
         ("bills::item_lines_u85", contract_bills::item_lines_u85),
         ("bills::terms_dates_u86", contract_bills::terms_dates_u86),
         ("bills::received_u87", contract_bills::received_u87),
+        (
+            "pay_bills::partial_payment_with_credit_live",
+            contract_pay_bills::partial_payment_with_credit_live,
+        ),
+        (
+            "pay_bills::card_payment_live",
+            contract_pay_bills::card_payment_live,
+        ),
+        (
+            "pay_bills::mockup_run_with_discount_u101",
+            contract_pay_bills::mockup_run_with_discount_u101,
+        ),
+        (
+            "pay_bills::credit_and_discount_without_cash_u101",
+            contract_pay_bills::credit_and_discount_without_cash_u101,
+        ),
+        (
+            "pay_bills::keyed_pay_u102",
+            contract_pay_bills::keyed_pay_u102,
+        ),
+        (
+            "pay_bills::check_numbers_now_u103",
+            contract_pay_bills::check_numbers_now_u103,
+        ),
         (
             "bills::backup_restore_keeps_the_bill_file_live",
             contract_bills::backup_restore_keeps_the_bill_file_live,

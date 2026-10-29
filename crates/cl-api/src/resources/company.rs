@@ -318,6 +318,10 @@ pub struct CompanySettings {
     /// leniently: an unknown type is `None`.
     #[serde(default, deserialize_with = "lenient_entity")]
     pub entity_type: Option<EntityType>,
+    /// Where Pay Bills posts early-payment discounts by default
+    /// (`billDiscountAccountId`, `bill-discounts-v1`, Q-P18a).
+    #[serde(default)]
+    pub bill_discount_account_id: Option<AccountId>,
 }
 
 /// Accounting basis of the company (`accountingMethod`, Q-44).
@@ -490,6 +494,37 @@ impl Session {
             lock_date: change.closing_date.map(CalendarDate::to_wire),
             closing_password: change.closing_password.as_ref().map(Secret::expose),
         })?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply)
+    }
+
+    /// Sets (or with `None` clears) the account Pay Bills posts early-payment
+    /// discounts to by default (`billDiscountAccountId`, Q-P18a). Refused
+    /// locally without `bill-discounts-v1`: an older engine would drop the
+    /// field and answer success.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without the capability (nothing sent);
+    /// `NoCompanyOpen`; `Validation` (not an account of this company); any
+    /// [`ApiError`].
+    pub async fn set_bill_discount_account(
+        &self,
+        account: Option<AccountId>,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        self.require_company()?;
+        if !self
+            .client()
+            .capabilities()
+            .has(Capabilities::BILL_DISCOUNTS)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        let body = json_body(&serde_json::json!({
+            "billDiscountAccountId": account.map(|a| a.to_string()),
+        }))?;
         let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;

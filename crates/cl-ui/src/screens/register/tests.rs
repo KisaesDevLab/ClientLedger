@@ -855,6 +855,12 @@ fn form_for_names_each_p14_form_by_the_shape_of_the_lines() {
         edit::form_for(&t, &is(C::OtherAsset)),
         Some(crate::screens::daily_sales::KIND)
     );
+    // P18: a bill payment opens read-only with Void (Q-P18f).
+    t.txn_type = cl_api::TxnType::BillPayment;
+    assert_eq!(
+        edit::form_for(&t, &is(C::OtherAsset)),
+        Some(crate::screens::pay_bills::view::KIND)
+    );
     // Any journal entry: Make Journal Entry (P15, Ctrl+E).
     t.txn_type = cl_api::TxnType::JournalEntry;
     assert_eq!(
@@ -2184,7 +2190,11 @@ fn ap_rows_never_open_an_in_place_edit() {
             ),
             "{t:?}"
         );
-        assert_eq!(edit::form_for(&v.record, &|_| None), None, "{t:?}");
+        // P18: a bill payment opens its read-only view (Q-P18f); bills and
+        // credits stay in the register's read-only lines.
+        let want =
+            (t == cl_api::TxnType::BillPayment).then_some(crate::screens::pay_bills::view::KIND);
+        assert_eq!(edit::form_for(&v.record, &|_| None), want, "{t:?}");
     }
 }
 

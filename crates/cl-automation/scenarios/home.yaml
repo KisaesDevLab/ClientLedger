@@ -80,7 +80,8 @@ steps:
   # --- Needs attention: counts equal the (demo) engine's answers -------------
   - assert_exists: {role: label, label: Needs attention}
   - assert_state: {key: screen.attention.bank_waiting, equals: 37}
-  - assert_state: {key: screen.attention.bills_due, equals: 3}
+  # P18: the Pay Bills story bills (the mockup's five, 7,471.90).
+  - assert_state: {key: screen.attention.bills_due, equals: 5}
   - assert_state: {key: screen.attention.reconcile_unfinished, equals: 1}
   - assert_state: {key: screen.attention.invoices_overdue, equals: 2}
   - assert_state: {key: screen.attention.payroll_unposted, equals: 1}
@@ -89,7 +90,7 @@ steps:
   - assert_state: {key: screen.attention.health_check, equals: null}
   - assert_state: {key: screen.backup_due, equals: false}
   - assert_exists: {role: label, label: 37 bank transactions to review}
-  - assert_exists: {role: label, label: 3 bills overdue or due within 7 days}
+  - assert_exists: {role: label, label: 5 bills overdue or due within 7 days}
   - assert_exists: {role: label, label_contains: arrive in a later update}
   - assert_exists: {role: label, label: Backed up today 8:12 AM}
   - assert_exists: {role: link, label: Review}
@@ -138,7 +139,8 @@ steps:
   - key: Alt+H
   - click: {role: button, label: Refresh}
   - assert_state: {key: screen.loading, equals: false}
-  - assert_state: {key: screen.attention.bills_due, equals: 3}
+  # P18: the Pay Bills story bills (the mockup's five, 7,471.90).
+  - assert_state: {key: screen.attention.bills_due, equals: 5}
 
   # --- A chart month drills into Profit & Loss (a placeholder until P28) ----
   - click: {role: button, label_contains: "October: income "}

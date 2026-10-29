@@ -890,11 +890,11 @@ mod tests {
 
     #[test]
     fn placeholder_titles_come_from_the_command_table() {
-        let p = Placeholder::for_command(id("vendors.pay_bills"));
-        assert_eq!(p.title(), "Pay Bills");
+        let p = Placeholder::for_command(id("clients.receive_payment"));
+        assert_eq!(p.title(), "Receive Payment");
         assert!(!p.dirty());
         assert!(
-            Placeholder::for_command(id("vendors.pay_bills"))
+            Placeholder::for_command(id("clients.receive_payment"))
                 .with_dirty(true)
                 .dirty()
         );

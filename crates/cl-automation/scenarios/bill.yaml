@@ -36,8 +36,8 @@ steps:
   - assert_state: {key: screen.mode, equals: new}
   - assert_state: {key: screen.kind, equals: bill}
   - assert_state: {key: screen.date, equals: "2026-11-04"}
-  - assert_state: {key: screen.bill_received, equals: true}
-  - assert_exists: {role: check_box, label: Bill received}
+  # Q-P18h: no "Not received yet" / Bill received tick box.
+  - assert_not_exists: {role: check_box, label: Bill received}
   - assert_disabled: {role: button, label: Save as Template}
   - assert_exists: {label: Vendor credit}
   - assert_exists: {label_contains: "Items"}

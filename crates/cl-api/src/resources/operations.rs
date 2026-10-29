@@ -42,6 +42,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::ApV1) => "keyable-ap",
             RetryClass::Keyable(KeySet::DocsV1) => "keyable-docs",
             RetryClass::Keyable(KeySet::DocsAttachV1) => "keyable-docs-attach",
+            RetryClass::Keyable(KeySet::PayBillsV1) => "keyable-pay-bills",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -79,6 +80,8 @@ pub enum KeySet {
     /// `document-drafts-attach-v1` (U-95): the document draft attach, keyed
     /// with `idempotency-docs-v1`'s contract under its own capability.
     DocsAttachV1,
+    /// `idempotency-pay-bills-v1` (U-102): Pay Bills (`POST /bill-payments`).
+    PayBillsV1,
 }
 
 impl KeySet {
@@ -90,6 +93,7 @@ impl KeySet {
             KeySet::ApV1 => crate::wire::Capabilities::IDEMPOTENCY_AP,
             KeySet::DocsV1 => crate::wire::Capabilities::IDEMPOTENCY_DOCS,
             KeySet::DocsAttachV1 => crate::wire::Capabilities::DOCUMENT_DRAFTS_ATTACH,
+            KeySet::PayBillsV1 => crate::wire::Capabilities::IDEMPOTENCY_PAY_BILLS,
         }
     }
 }
@@ -244,6 +248,19 @@ const fn keyable_docs_attach(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::DocsAttachV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-pay-bills-v1` route set (U-102):
+/// keyed only while the engine advertises that capability.
+const fn keyable_pay_bills(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::PayBillsV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -829,6 +846,17 @@ pub(crate) const DOCUMENT_READING_ASSIST: Operation =
 pub(crate) const DOCUMENT_DRAFT_ATTACH: Operation =
     keyable_docs_attach(Method::Post, "/api/v1/document-drafts/{id}/attach");
 
+// ---- P18: Pay Bills (engine U-101 to U-104) --------------------------------
+// Both routes are in the pinned spec; U-101 to U-103 add body fields under
+// their capabilities and U-102 keys the pay (`idempotency-pay-bills-v1`).
+
+/// Pays bills: one bill payment per vendor in one database transaction
+/// (keyed only under `idempotency-pay-bills-v1`).
+pub(crate) const BILL_PAYMENTS_CREATE: Operation =
+    keyable_pay_bills(Method::Post, "/api/v1/bill-payments");
+/// One bill payment with its bill and credit applications.
+pub(crate) const BILL_PAYMENT_GET: Operation = read("/api/v1/bill-payments/{id}");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -841,7 +869,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 201] = [
+pub const OPERATIONS: [Operation; 203] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1053,6 +1081,9 @@ pub const OPERATIONS: [Operation; 201] = [
     DOCUMENT_READING_ASSIST,
     // A04
     DOCUMENT_DRAFT_ATTACH,
+    // P18
+    BILL_PAYMENTS_CREATE,
+    BILL_PAYMENT_GET,
 ];
 
 /// Looks up a covered operation.
@@ -1137,6 +1168,8 @@ mod tests {
                 Some(KeySet::DocsV1)
             } else if KEYABLE_DOCS_ATTACH.contains(&route) {
                 Some(KeySet::DocsAttachV1)
+            } else if KEYABLE_PAY_BILLS.contains(&route) {
+                Some(KeySet::PayBillsV1)
             } else {
                 None
             };
@@ -1158,8 +1191,12 @@ mod tests {
         }
         assert_eq!(
             OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-            KEYABLE.len() + KEYABLE_AP.len() + KEYABLE_DOCS.len() + KEYABLE_DOCS_ATTACH.len(),
-            "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1 and document-drafts-attach-v1 route is covered"
+            KEYABLE.len()
+                + KEYABLE_AP.len()
+                + KEYABLE_DOCS.len()
+                + KEYABLE_DOCS_ATTACH.len()
+                + KEYABLE_PAY_BILLS.len(),
+            "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
             find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
@@ -1217,6 +1254,10 @@ mod tests {
     const KEYABLE_DOCS_ATTACH: [(&str, &str); 1] =
         [("POST", "/api/v1/document-drafts/{id}/attach")];
 
+    /// The engine's `idempotency-pay-bills-v1` route set (U-102), as
+    /// `tests/fixtures/idempotency_pay_bills_v1_routes.txt` records it.
+    const KEYABLE_PAY_BILLS: [(&str, &str); 1] = [("POST", "/api/v1/bill-payments")];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
@@ -1239,6 +1280,13 @@ mod tests {
         assert_eq!(BILLS_CREATE.key_set(), Some(KeySet::V1));
         assert_eq!(BILL_PUT.key_set(), Some(KeySet::ApV1));
         assert_eq!(BILL_GET.key_set(), None);
+        assert_eq!(KeySet::PayBillsV1.capability(), "idempotency-pay-bills-v1");
+        assert_eq!(
+            RetryClass::Keyable(KeySet::PayBillsV1).as_str(),
+            "keyable-pay-bills"
+        );
+        assert_eq!(BILL_PAYMENTS_CREATE.key_set(), Some(KeySet::PayBillsV1));
+        assert_eq!(BILL_PAYMENT_GET.key_set(), None);
     }
 
     /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
@@ -1251,6 +1299,7 @@ mod tests {
             KeySet::ApV1,
             KeySet::DocsV1,
             KeySet::DocsAttachV1,
+            KeySet::PayBillsV1,
         ] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),

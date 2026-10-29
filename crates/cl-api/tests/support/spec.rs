@@ -241,6 +241,12 @@ pub fn keyable_docs_attach_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-docs-attach")
 }
 
+/// The `keyable-pay-bills` (`idempotency-pay-bills-v1`) rows of
+/// `operations.txt`: `(METHOD, route)`, sorted.
+pub fn keyable_pay_bills_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-pay-bills")
+}
+
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = txt
         .lines()

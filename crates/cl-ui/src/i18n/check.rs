@@ -50,6 +50,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("check.panel.open_balance", "Open balance"),
     ("check.panel.one_bill", "You have an open bill from this vendor for {amount}, due {due}. Pay it in Pay Bills so the bill closes."),
     ("check.panel.one_bill_no_due", "You have an open bill from this vendor for {amount}. Pay it in Pay Bills so the bill closes."),
+    ("check.panel.go_pay_bills", "Go to Pay Bills"),
     ("check.panel.many_bills", "You have {count} open bills from this vendor for {amount}. Pay them in Pay Bills so the bills close."),
     ("check.panel.recent", "Recent checks"),
     ("check.panel.recent.none", "No checks to this payee yet."),

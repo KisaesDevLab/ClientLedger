@@ -1,0 +1,232 @@
+# Pay Bills (P18) against `clientledger --demo`: the mockup's list (five
+# bills due by 11/11, 7781 with the engine's 4.37 discount, Table Rock's
+# credit CM-114 250.00), four of five ticked: totals of the selected bills
+# 6,831.90 / 4.37 / 250.00 / 6,577.53 and Operating Checking 84,210.55 ->
+# 77,633.02 (mockup); a partial payment on 8813 leaving 2,665.00; the
+# discount account asked once (Q-P18a); one payment per vendor; then 2214
+# paid by credit card (the card's amount owed rises by 640.00); a bill
+# payment opened read-only from the register and voided; the smallest
+# window and 200% zoom keep Amt. to pay in view.
+#
+# Light and dark run in the same app, so the scenario is repeatable:
+# `dev.demo_pay_bills_reset` (a `--demo`-only developer command) voids the
+# demo's bill payments at the start and the end. All data is synthetic.
+name: pay_bills
+description: Mockup totals to the penny, partial payment, discount account, check run, card payment.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- 1. The window and the mockup's list ------------------------------------
+  - key: Ctrl+Shift+B
+  - assert_exists: {role: tab, label_contains: "Pay Bills"}
+  - assert_state: {key: screen.screen, equals: pay_bills}
+  - command: dev.demo_pay_bills_reset
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.list_loaded, equals: true}
+  - assert_state: {key: screen.listed, equals: 5}
+  - assert_state: {key: screen.selected, equals: 0}
+  - assert_state: {key: screen.method, equals: check}
+  - assert_state: {key: screen.numbering, equals: print_later}
+  - assert_state: {key: screen.take_discounts, equals: true}
+  - assert_exists: {label: "Pick the bills to pay, adjust amounts, then pay them all at once."}
+  - assert_exists: {role: check_box, label: Take discounts I qualify for}
+  - assert_value: {target: {label: "Ref. no., line 4"}, equals: "7781"}
+  - assert_value: {target: {label: "Disc. date, line 4"}, equals: "11/06"}
+  - assert_value: {target: {label: "Amt. due, line 5"}, equals: "3,915.00"}
+  - assert_value: {target: {label: "Vendor, line 2"}, equals: "Riverbend Fuel · October statement"}
+  - assert_value: {target: {label: "Vendor, line 4"}, equals: "Ozark Office Supply · 2% 5, Net 15"}
+  - assert_value: {target: {label: "Vendor, line 5"}, equals: "Table Rock Nursery · Credit available 250.00"}
+  - assert_value: {target: {role: combo_box, label: Pay from}, equals: "1010 · Operating Checking"}
+  - assert_value: {target: {role: text_input, label: Due on or before date}, equals: "11/11/2026"}
+  # The heading's tick box ticks every listed bill, then clears them.
+  - click: {role: check_box, label: Tick every listed bill}
+  - assert_state: {key: screen.selected, equals: 5}
+  - click: {role: check_box, label: Tick every listed bill}
+  - assert_state: {key: screen.selected, equals: 0}
+
+  # --- 2. Four of five ticked: the mockup's totals to the penny -------------
+  # Space ticks the row under the cursor (a click on a tick box under the
+  # cursor depends on where the cursor was, so the scenario uses keys).
+  - click: {label: "Due, line 1"}
+  - key: Shift+Tab
+  - assert_state: {key: screen.cursor_row, equals: 0}
+  - key: Space
+  - key: Down
+  - key: Space
+  - key: Down
+  - key: Down
+  - key: Space
+  - key: Down
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 4}
+  - assert_value: {target: {label: "Discount, line 4"}, equals: "4.37"}
+  - assert_value: {target: {label: "Amt. to pay, line 4"}, equals: "214.07"}
+  - assert_value: {target: {label: "Credits, line 5"}, equals: "250.00"}
+  - assert_value: {target: {label: "Amt. to pay, line 5"}, equals: "3,665.00"}
+  - assert_value: {target: {label: "Amt. to pay, line 3"}, equals: "0.00"}
+  - assert_exists: {label: "Totals · 4 of 5 selected"}
+  - assert_exists: {role: label, label: "6,831.90"}
+  - assert_exists: {role: label, label: "4.37"}
+  - assert_exists: {role: label, label: "6,577.53"}
+  - assert_exists: {role: label, label: "84,210.55 → 77,633.02"}
+  - assert_exists: {role: button, label: "Pay 4 bills · $6,577.53"}
+  - assert_exists: {label: "Selected bill · Table Rock Nursery 8813"}
+  - assert_exists: {role: label, label: "250.00 (credit memo CM-114)"}
+  - assert_no_clipping: {}
+  - screenshot: mockup
+  # Set credits by keyboard: focus goes into the card, and back to the
+  # button when it closes.
+  - focus: {role: button, label: Set credits}
+  - key: Enter
+  - assert_state: {key: screen.dialog, equals: credits}
+  - assert_focused: {role: text_input, label_contains: "Credit CM-114"}
+  - screenshot: set-credits
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.dialog, equals: null}
+  - assert_focused: {role: button, label: Set credits}
+  - assert_state: {key: screen.selected, equals: 4}
+
+  # --- 3. A partial payment on 8813 -------------------------------------------
+  - click: {label: "Amt. to pay, line 5"}
+  - type: {text: "1000"}
+  - key: Enter
+  - assert_value: {target: {label: "Amt. to pay, line 5"}, equals: "1,000.00"}
+  - assert_exists: {role: label, label: "3,912.53"}
+  - assert_exists: {role: button, label: "Pay 4 bills · $3,912.53"}
+
+  # --- 4. Pay: the discount account is asked once (Q-P18a) ------------------
+  - key: Alt+S
+  - assert_state: {key: screen.paid_count, equals: 0}
+  - assert_state: {key: screen.dialog, equals: discount}
+  - assert_state: {key: screen.notice, equals: paybills.discount.account_needed}
+  - click: {role: combo_box, label: Discount account}
+  - click: {role: button, label_contains: "5200 · Project Supplies"}
+  - click: {role: button, label: OK}
+  - assert_state: {key: screen.dialog, equals: null}
+  - assert_state: {key: screen.discount_account_set, equals: true}
+  - key: Alt+S
+  - assert_state: {key: screen.paid_count, equals: 1}
+  - assert_state: {key: screen.last_payments, equals: 4}
+  - assert_state: {key: screen.last_bills, equals: 4}
+  - assert_state: {key: screen.error, equals: false}
+  - assert_exists: {label: "Paid 4 bills with 4 payments."}
+  - assert_state: {key: screen.listed, equals: 2}
+  # The grid follows the list read again (UI review 4).
+  - assert_not_exists: {label_contains: "no longer here"}
+  # The partial payment leaves the rest of 8813 owed.
+  - assert_value: {target: {label: "Amt. due, line 2"}, equals: "2,665.00"}
+  - screenshot: paid
+
+  # --- 5. 2214 by credit card: the amount owed rises ------------------------
+  - click: {label: "Due, line 1"}
+  - key: Shift+Tab
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 1}
+  - click: {role: combo_box, label: Method}
+  - click: {role: button, label: Credit card}
+  - assert_state: {key: screen.method, equals: card}
+  - assert_not_exists: {role: radio_button, label: To be printed}
+  - assert_value: {target: {role: combo_box, label: Pay from}, equals: "2050 · Business Credit Card"}
+  - type: {text: "AUTH-77", target: {role: text_input, label: Reference (optional)}}
+  - assert_exists: {label: Amount owed on the card}
+  - assert_exists: {role: label, label: "289.63 → 929.63"}
+  - screenshot: card
+  - key: Alt+S
+  - assert_state: {key: screen.paid_count, equals: 2}
+  - assert_state: {key: screen.last_payments, equals: 1}
+  - assert_not_exists: {label_contains: "no longer here"}
+
+  # --- 5b. A bill payment opens read-only from the register; Void -----------
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  # Shift+Tab leaves the entry row for the newest row: the run's last check,
+  # Table Rock Nursery's (the other theme's voided one is older).
+  - key: Shift+Tab
+  - assert_state: {key: screen.focused, equals: true}
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: bill_payment}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.status, equals: posted}
+  - assert_state: {key: screen.bills, equals: 1}
+  - assert_state: {key: screen.credits, equals: 1}
+  - assert_exists: {label: "Bill payments can't be changed. To change one, void it and pay the bills again."}
+  - assert_exists: {role: label, label: "1010 · Operating Checking"}
+  - screenshot: bill-payment-view
+  - click: {role: button, label: Void}
+  - type: {text: Paid twice, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.voided, equals: true}
+  - assert_state: {key: screen.status, equals: void}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Pay Bills"}
+  - assert_state: {key: screen.screen, equals: pay_bills}
+  # The void put 8813's payment back on the list (A/P was told); 2214 went
+  # by card.
+  - assert_value: {target: {label: "Amt. due, line 1"}, equals: "3,915.00"}
+
+  # --- 6. Back to the story's list for the other theme ----------------------
+  - click: {role: radio_button, label: All bills}
+  - assert_state: {key: screen.show, equals: all}
+  - command: dev.demo_pay_bills_reset
+  - assert_state: {key: screen.show, equals: due}
+  - assert_state: {key: screen.method, equals: check}
+  - assert_state: {key: screen.listed, equals: 5}
+  # --- 7. The smallest window and 200% zoom: Amt. to pay stays in view -------
+  - resize: {width: 960, height: 640}
+  # Every column fits at 960 x 640 (Vendor gives width first, UI review 1).
+  - assert_state: {key: screen.to_pay_shown, equals: true}
+  - assert_value: {target: {label: "Amt. to pay, line 1"}, equals: "0.00"}
+  # The body scrolls under the fixed title and buttons (Q-265).
+  - assert_exists: {role: combo_box, label: Pay from}
+  - assert_no_clipping: &small
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The body scrolls under the action row.
+        - {x: -4000, y: 540, width: 8480, height: 2000}
+  - screenshot: pay-bills-960x640
+  # 200%: the columns scroll sideways to follow the cursor; Tab from the
+  # tick box goes to Amt. to pay, which comes into view.
+  - click: {label: "Due, line 1"}
+  - key: Shift+Tab
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 1}
+  - set_zoom: {percent: 200}
+  - key: Tab
+  - assert_state: {key: screen.to_pay_shown, equals: true}
+  - screenshot: pay-bills-960x640-z200
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The body scrolls under the action row.
+        - {x: -4000, y: 230, width: 8480, height: 2000}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+  - click: {role: button, label: Clear selections}
+  - assert_state: {key: screen.selected, equals: 0}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Pay Bills"}
+
+# The mockup's state for `ui-check pay_bills --compare`: four of five bills
+# ticked (lines 1, 2, 4 and 5), 8813 under the cursor.
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+Shift+B
+  - assert_state: {key: screen.screen, equals: pay_bills}
+  - command: dev.demo_pay_bills_reset
+  - assert_state: {key: screen.listed, equals: 5}
+  - click: {label: "Due, line 1"}
+  - key: Shift+Tab
+  - key: Space
+  - key: Down
+  - key: Space
+  - key: Down
+  - key: Down
+  - key: Space
+  - key: Down
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 4}
+  - assert_exists: {role: button, label: "Pay 4 bills · $6,577.53"}

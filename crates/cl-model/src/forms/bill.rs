@@ -11,7 +11,7 @@
 //! - item amounts are `rate × qty` rounded half away from zero to cents
 //!   ([`crate::forms::item_lines::item_amount`], D6);
 //! - fields read from a document must be accepted first (non-negotiable 4);
-//! - a credit carries no terms, due date, discount or received flag: the
+//! - a credit carries no terms, due date or discount: the
 //!   values stay on the form (switching back restores them) but
 //!   [`CheckedBill`] leaves them out.
 //!
@@ -64,8 +64,7 @@ pub enum BillKind {
     /// A bill (`POST /bills`): A/P goes up.
     #[default]
     Bill,
-    /// A vendor credit (`POST /vendor-credits`): no terms, due date or
-    /// received flag.
+    /// A vendor credit (`POST /vendor-credits`): no terms or due date.
     Credit,
 }
 
@@ -214,8 +213,6 @@ pub struct BillForm {
     pub memo: String,
     /// Header tags, one per one-per-group group (Q-P13g, Q-178).
     pub header_tags: Vec<TagId>,
-    /// Bill received (D7): unticked = not payable yet. Bills only.
-    pub bill_received: bool,
     /// The Expenses tab.
     pub expenses: FormLines,
     /// The Items tab.
@@ -245,7 +242,6 @@ impl Default for BillForm {
             discount_overridden: false,
             memo: String::new(),
             header_tags: Vec::new(),
-            bill_received: true,
             expenses: FormLines::default(),
             items: ItemLines::default(),
             attachments: Vec::new(),
@@ -273,7 +269,6 @@ impl fmt::Debug for BillForm {
             .field("discount_overridden", &self.discount_overridden)
             .field("memo", &!self.memo.is_empty())
             .field("header_tags", &self.header_tags.len())
-            .field("bill_received", &self.bill_received)
             .field("expenses", &self.expenses.lines.len())
             .field("items", &self.items.lines.len())
             .field("attachments", &self.attachments.len())
@@ -283,7 +278,7 @@ impl fmt::Debug for BillForm {
 }
 
 impl BillForm {
-    /// A blank bill dated `date`, received, with one blank entry line on
+    /// A blank bill dated `date`, with one blank entry line on
     /// each tab.
     #[must_use]
     pub fn new(date: Option<CalendarDate>, keys: &mut RowKeyGen) -> BillForm {
@@ -462,7 +457,8 @@ pub struct BillCaps {
     pub lines: bool,
     /// `bill-terms-v1`: discount terms and the discount date.
     pub terms: bool,
-    /// `bill-received-v1`: the Bill received flag.
+    /// `bill-received-v1`: the engine takes `billReceived` (always sent
+    /// true: "Not received yet" was removed, Q-P18h).
     pub received: bool,
 }
 
@@ -501,8 +497,6 @@ pub enum BillField {
     DiscountDate,
     /// Amount due.
     AmountDue,
-    /// Bill received.
-    Received,
     /// The lines as a whole.
     Lines,
     /// The Items tab.
@@ -547,8 +541,6 @@ pub enum BillProblem {
     DueBeforeDate,
     /// The discount date is before the bill date or after the due date.
     DiscountDateInvalid,
-    /// Unticking Bill received needs `bill-received-v1`.
-    ReceivedNeedsUpdate,
     /// No amount due and no lines.
     AmountMissing,
     /// The amount due is zero or less.
@@ -604,7 +596,6 @@ impl BillProblem {
             BillProblem::DiscountNeedsUpdate => TextKey("bill.problem.discount_needs_update"),
             BillProblem::DueBeforeDate => TextKey("bill.problem.due_before_date"),
             BillProblem::DiscountDateInvalid => TextKey("bill.problem.discount_date_invalid"),
-            BillProblem::ReceivedNeedsUpdate => TextKey("bill.problem.received_needs_update"),
             BillProblem::AmountMissing => TextKey("bill.problem.amount_missing"),
             BillProblem::AmountNotPositive => TextKey("bill.problem.amount_not_positive"),
             BillProblem::NoLines => TextKey("bill.problem.no_lines"),
@@ -641,7 +632,6 @@ impl BillProblem {
             BillProblem::DiscountInvalid | BillProblem::DiscountNeedsUpdate => BillField::Discount,
             BillProblem::DueBeforeDate => BillField::DueDate,
             BillProblem::DiscountDateInvalid => BillField::DiscountDate,
-            BillProblem::ReceivedNeedsUpdate => BillField::Received,
             BillProblem::AmountMissing | BillProblem::AmountNotPositive => BillField::AmountDue,
             BillProblem::NoLines
             | BillProblem::TooManyLines
@@ -741,8 +731,8 @@ pub struct CheckedBill {
     pub expense_lines: Vec<PostingLine>,
     /// Item lines, each with its effective tag.
     pub item_lines: Vec<CheckedItemLine>,
-    /// Bill received; `None` for a credit, or when the engine has no flag
-    /// yet (then it is always true).
+    /// Bill received: always `Some(true)` for a bill when the engine has
+    /// the flag (Q-P18h), `None` for a credit or an engine without it.
     pub bill_received: Option<bool>,
     /// Draft files to link.
     pub attachments: Vec<AttachmentRef>,
@@ -938,7 +928,7 @@ fn check_expenses(
 ///
 /// # Errors
 /// Every problem found, in field order: vendor, date, ref, terms, dates,
-/// received, amount, the lines, then the read-from-document state.
+/// amount, the lines, then the read-from-document state.
 pub fn check(form: &BillForm, ctx: &BillContext<'_>) -> Result<CheckedBill, Vec<BillProblem>> {
     let mut problems = Vec::new();
     let is_bill = form.kind == BillKind::Bill;
@@ -968,9 +958,6 @@ pub fn check(form: &BillForm, ctx: &BillContext<'_>) -> Result<CheckedBill, Vec<
     let terms = if is_bill {
         let t = check_terms(form, ctx, &mut problems);
         check_dates(form, ctx, &mut problems);
-        if !form.bill_received && !ctx.caps.received {
-            problems.push(BillProblem::ReceivedNeedsUpdate);
-        }
         t
     } else {
         None
@@ -1035,7 +1022,7 @@ pub fn check(form: &BillForm, ctx: &BillContext<'_>) -> Result<CheckedBill, Vec<
             header_tags: form.header_tags.clone(),
             expense_lines,
             item_lines,
-            bill_received: (is_bill && ctx.caps.received).then_some(form.bill_received),
+            bill_received: (is_bill && ctx.caps.received).then_some(true),
             attachments: form.attachments.clone(),
             needs_closing_password,
         }),
