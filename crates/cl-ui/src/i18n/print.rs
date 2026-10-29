@@ -176,6 +176,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("company_info.numbers.shows", "Next form gets"),
     ("company_info.numbers.prefix_of", "Prefix for {type} numbers (no spaces, up to 20 characters)"),
     ("company_info.numbers.next_of", "The next {type} number"),
+    ("company_info.numbers.duplicate", "{number} is already the number of another {type}. Two forms with the same number are hard to tell apart; choose a higher next number."),
     ("company_info.numbers.bad", "Prefixes have no spaces (up to 20 characters) and next numbers run from 1 to 999,999,999."),
     ("company_info.save", "Save"),
     ("company_info.saved", "Company information saved."),

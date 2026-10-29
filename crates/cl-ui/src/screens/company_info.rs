@@ -7,7 +7,7 @@
 //!
 //! Engine calls go through the request queue; the demo answers at once.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
@@ -95,6 +95,23 @@ pub struct CompanyInfoScreen {
     pub(crate) numbering: bool,
     pub(crate) notice: Option<&'static str>,
     pub(crate) error: Option<ApiError>,
+    /// Types whose typed next number needs a duplicate check (Q-94).
+    dup_stale: BTreeSet<DocType>,
+    /// The running check: the type, the number looked for, the numbers found.
+    dup_task: Option<(DocType, String, Task<Vec<String>>)>,
+    /// Types whose next number is already used: the number as it is used.
+    pub(crate) duplicates: BTreeMap<DocType, String>,
+}
+
+/// The transaction type a form type's documents are, when it has any
+/// (statements are not documents with numbers).
+fn txn_type_of(kind: DocType) -> Option<cl_api::TxnType> {
+    match kind {
+        DocType::Invoice => Some(cl_api::TxnType::Invoice),
+        DocType::SalesReceipt => Some(cl_api::TxnType::CashSale),
+        DocType::CreditMemo => Some(cl_api::TxnType::CreditMemo),
+        DocType::Statement => None,
+    }
 }
 
 impl CompanyInfoScreen {
@@ -128,6 +145,9 @@ impl CompanyInfoScreen {
             numbering,
             notice: None,
             error: None,
+            dup_stale: BTreeSet::new(),
+            dup_task: None,
+            duplicates: BTreeMap::new(),
         };
         s.load();
         s.poll();
@@ -229,6 +249,79 @@ impl CompanyInfoScreen {
         }
     }
 
+    /// The next number `kind` would give, as typed (`None` when the next
+    /// number is not a number).
+    fn typed_next(&self, kind: DocType) -> Option<String> {
+        let (_, prefix, next) = self.numbers.iter().find(|(k, _, _)| *k == kind)?;
+        let n = next.trim().parse::<u64>().ok()?;
+        Some(cl_model::numbering::format_number(prefix.trim(), n))
+    }
+
+    /// Duplicate check (Q-94): look for documents of the type that already
+    /// have the typed next number. One check runs at a time; a warning
+    /// never stops the save.
+    fn check_duplicates(&mut self) {
+        if let Some((kind, wanted, task)) = self.dup_task.as_mut()
+            && let Some(r) = task.try_take()
+        {
+            let (kind, wanted) = (*kind, wanted.clone());
+            self.dup_task = None;
+            let still = self.typed_next(kind).as_deref() == Some(wanted.as_str());
+            match r {
+                Ok(found) if still => {
+                    match cl_model::numbering::check_duplicate(
+                        &wanted,
+                        found.iter().map(String::as_str),
+                    ) {
+                        Some(cl_model::numbering::NumberWarning::Duplicate { existing }) => {
+                            self.duplicates.insert(kind, existing);
+                        }
+                        None => {
+                            self.duplicates.remove(&kind);
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    // No answer: say nothing rather than guess.
+                    self.duplicates.remove(&kind);
+                }
+            }
+        }
+        if self.dup_task.is_some() {
+            return;
+        }
+        let Some(kind) = self.dup_stale.pop_first() else {
+            return;
+        };
+        let (Some(wanted), Some(txn_type)) = (self.typed_next(kind), txn_type_of(kind)) else {
+            self.duplicates.remove(&kind);
+            return;
+        };
+        if let Some(d) = self.link.demo_state() {
+            drop(d);
+            let found = crate::company::demo::printing::used_numbers(kind);
+            self.dup_task = Some((kind, wanted, Task::ready(found)));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        let search = wanted.clone();
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let filter = cl_api::TransactionFilter {
+                txn_type: Some(txn_type),
+                search: Some(search),
+                ..cl_api::TransactionFilter::default()
+            };
+            let page = cl_api::PageRequest::new(50, 0)?;
+            let rows = s.transactions().list(&filter, page).await?.data;
+            Ok(rows.into_iter().filter_map(|r| r.txn_number).collect())
+        }) {
+            self.dup_task = Some((kind, wanted, Task::Pending(p)));
+        }
+    }
+
     /// Save the footers and every changed numbering row.
     pub(crate) fn save(&mut self) {
         self.notice = None;
@@ -297,6 +390,7 @@ impl CompanyInfoScreen {
     }
 
     fn poll(&mut self) {
+        self.check_duplicates();
         if let Some(r) = self.load_task.as_mut().and_then(Task::try_take) {
             self.load_task = None;
             self.loaded = true;
@@ -313,6 +407,7 @@ impl CompanyInfoScreen {
                         .map(|n| (n.kind, n.prefix.clone(), n.next_number.to_string()))
                         .collect();
                     self.loaded_numbers = l.numbers;
+                    self.duplicates.clear();
                     self.show_logo(l.logo);
                 }
                 Err(e) => self.error = Some(e),
@@ -474,6 +569,7 @@ impl CompanyInfoScreen {
     }
 
     fn numbers_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let mut changed = Vec::new();
         kit::panel_card(ui, tokens, &t("company_info.numbers"), |ui| {
             if !self.numbering {
                 form::hint(ui, tokens, &t("company_info.numbers.unavailable"));
@@ -489,18 +585,23 @@ impl CompanyInfoScreen {
                 for (k, prefix, next) in &mut self.numbers {
                     let name = t(type_key(*k));
                     let l = ui.label(&name);
-                    ui.add(egui::TextEdit::singleline(prefix).desired_width(80.0))
+                    let a = ui
+                        .add(egui::TextEdit::singleline(prefix).desired_width(80.0))
                         .labelled_by(l.id)
                         .on_hover_text(crate::i18n::t_with(
                             "company_info.numbers.prefix_of",
                             &[("type", &name)],
                         ));
-                    ui.add(egui::TextEdit::singleline(next).desired_width(100.0))
+                    let b = ui
+                        .add(egui::TextEdit::singleline(next).desired_width(100.0))
                         .labelled_by(l.id)
                         .on_hover_text(crate::i18n::t_with(
                             "company_info.numbers.next_of",
                             &[("type", &name)],
                         ));
+                    if a.changed() || b.changed() {
+                        changed.push(*k);
+                    }
                     ui.label(cl_model::numbering::format_number(
                         prefix,
                         next.trim().parse().unwrap_or(0),
@@ -508,7 +609,25 @@ impl CompanyInfoScreen {
                     ui.end_row();
                 }
             });
+            for (k, existing) in &self.duplicates {
+                form::inline_warning(
+                    ui,
+                    tokens,
+                    &crate::i18n::t_with(
+                        "company_info.numbers.duplicate",
+                        &[("number", existing), ("type", &t(type_key(*k)))],
+                    ),
+                );
+            }
         });
+        for k in changed {
+            self.number_typed(k);
+        }
+    }
+
+    /// The owner typed a number (also the control channel's way in).
+    pub(crate) fn number_typed(&mut self, kind: DocType) {
+        self.dup_stale.insert(kind);
     }
 
     fn state_json(&self) -> Value {
@@ -522,6 +641,7 @@ impl CompanyInfoScreen {
             "overrides": self.overrides.values().filter(|v| !v.trim().is_empty()).count(),
             "numbers": self.numbers.iter().map(|(k, p, n)| json!([k.as_wire(), p, n])).collect::<Vec<_>>(),
             "numbering": self.numbering,
+            "duplicates": self.duplicates.keys().map(|k| k.as_wire()).collect::<Vec<_>>(),
             "notice": self.notice,
             "error": self.error.is_some(),
         })
@@ -537,6 +657,8 @@ impl Screen for CompanyInfoScreen {
         self.poll();
         self.draw(ui);
         let busy = self.load_task.is_some()
+            || self.dup_task.is_some()
+            || !self.dup_stale.is_empty()
             || self.upload_task.is_some()
             || self.save_task.is_some()
             || self.pick_rx.is_some()
@@ -619,6 +741,37 @@ mod tests {
         s.numbers[0].1 = "A B".into();
         s.save();
         assert_eq!(s.notice, Some("company_info.numbers.bad"));
+    }
+
+    #[test]
+    fn a_next_number_already_used_is_warned_and_still_saves() {
+        let (_d, mut s) = screen();
+        assert_eq!(s.numbers[0].0, DocType::Invoice);
+        // The demo has INV-1040 and INV-1041.
+        s.numbers[0].2 = "1041".into();
+        s.number_typed(DocType::Invoice);
+        s.poll();
+        s.poll();
+        assert_eq!(
+            s.duplicates.get(&DocType::Invoice).map(String::as_str),
+            Some("INV-1041")
+        );
+        assert_eq!(s.state()["duplicates"][0], "invoice");
+        // A warning, not a refusal (Q-94).
+        s.save();
+        s.poll();
+        assert_eq!(s.notice, Some("company_info.saved"));
+        for _ in 0..10 {
+            s.poll();
+        }
+        // Read back after the save: the warning was about the typed number.
+        assert!(s.duplicates.is_empty());
+        s.numbers[0].2 = "1050".into();
+        s.number_typed(DocType::Invoice);
+        for _ in 0..10 {
+            s.poll();
+        }
+        assert!(s.duplicates.is_empty());
     }
 
     #[test]

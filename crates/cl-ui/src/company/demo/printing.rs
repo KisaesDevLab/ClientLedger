@@ -426,6 +426,17 @@ fn seeded_forms() -> Vec<QueuedForm> {
     ]
 }
 
+/// The numbers the demo's documents of `kind` already have (Company
+/// Information's duplicate warning, Q-94).
+#[must_use]
+pub fn used_numbers(kind: DocType) -> Vec<String> {
+    seeded_forms()
+        .into_iter()
+        .filter(|f| f.kind == kind)
+        .filter_map(|f| f.number)
+        .collect()
+}
+
 /// `GET /forms/print-queue`.
 #[must_use]
 pub fn form_queue(state: &DemoState) -> Vec<QueuedForm> {
