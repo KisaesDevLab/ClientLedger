@@ -1428,6 +1428,7 @@ impl PrintFormsScreen {
             all.drop_intent(&company, key);
             if store.save(&all).is_err() {
                 tracing::warn!("the forgotten check batch could not be cleared");
+                self.notice = Some("print.recover.forget_failed");
                 return;
             }
         }

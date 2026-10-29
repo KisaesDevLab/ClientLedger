@@ -60,6 +60,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.recover.unknown", "We couldn't tell whether the check numbers were recorded. Close this window and open Print Forms again to check."),
     ("print.recover.stuck", "We still can't tell whether check numbers {range} were recorded. Open the bank register and look for those numbers before you print these checks again."),
     ("print.recover.forget", "Forget this print"),
+    ("print.recover.forget_failed", "That print couldn't be forgotten: the file on this computer couldn't be saved. Check that the disk has free space, then try again."),
     ("print.recover.forgotten", "Forgotten. If those check numbers are in the register, don't use them again."),
     ("print.intent_unsaved", "The print run couldn't be saved on this computer first, so nothing was sent to the printer. Check that the disk has free space, then try again."),
     ("print.confirm.skipped", "Voided checks were left out; the others are back in the list to print again."),
