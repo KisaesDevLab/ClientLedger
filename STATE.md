@@ -199,6 +199,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 4. U-114: no engine route to delete a company logo; Remove hides it locally.
 5. Open Company keeps plain circles until an icon set exists (Q-P19aq).
 6. Old PR #50 commits with the owner's path may be reachable by SHA on GitHub until purged.
+7. Engine `payBills` with method check, Print later off and no check number saves isCheck=false, while migration 0241 marks such voided rows as checks. API-only path (the app always sends Print later or a number); align later.
 
 ## Follow-ups from P15
 
@@ -206,15 +207,6 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 2. Make Journal Entry has no side panel and no History yet (Q-P15z).
 3. The demo ledger doesn't store basis.
 4. A `--demo` launch skips the catch-up (File > Open Company runs it).
-
-## Follow-ups from P19
-
-1. A deposit opened later prints blank Check no. and Payment method columns on its summary (the saved deposit record doesn't carry them).
-2. If a save stops at the closing-date password, Print after save is dropped; the owner clicks Print again.
-3. Two rare lock-order deadlocks in the engine (printChecks vs updateCheck; document-number claim vs check edits): PostgreSQL fails one request.
-4. U-114: no engine route to delete a company logo; Remove hides it locally.
-5. Open Company keeps plain circles until an icon set exists (Q-P19aq).
-6. Old PR #50 commits with the owner's path may be reachable by SHA on GitHub until purged.
 
 ## Follow-ups from P15A
 
