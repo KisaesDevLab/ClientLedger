@@ -1108,13 +1108,14 @@ mod tests {
         let added = Money::sum(due.iter().map(|_| each)).expect("sum");
         assert_eq!(added, m("98.00"));
         // Debits minus credits: the card is owed 289.63 before, 387.63
-        // after; software 7,805.73 before, 7,903.73 after.
+        // after; software 8,024.17 before, 8,122.17 after (P18: the Ozark Office
+        // Supply bill 7781 is on 6250).
         let card_before = s.balance("2050", story);
         let soft_before = s.balance("6250", story);
         assert_eq!(card_before, m("-289.63"));
-        assert_eq!(soft_before, m("7805.73"));
+        assert_eq!(soft_before, m("8024.17"));
         assert_eq!(card_before.checked_sub(added), Ok(m("-387.63")));
-        assert_eq!(soft_before.checked_add(added), Ok(m("7903.73")));
+        assert_eq!(soft_before.checked_add(added), Ok(m("8122.17")));
         let je = &s.templates.templates[2];
         assert!(je.api_schedule().is_none(), "Don't remind me");
         let cl_api::TemplateDraft::Journal(e) = je.draft(story, account, vendor).expect("je")

@@ -207,7 +207,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-01-03",
       "due": null,
       "id": 9,
@@ -368,7 +368,7 @@
     {
       "attachment": true,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-01-05",
       "due": "2026-02-04",
       "id": 16,
@@ -1040,7 +1040,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-01-13",
       "due": "2026-02-12",
       "id": 45,
@@ -1620,7 +1620,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-01-20",
       "due": null,
       "id": 70,
@@ -2154,7 +2154,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-01-26",
       "due": null,
       "id": 93,
@@ -2729,7 +2729,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-02-02",
       "due": null,
       "id": 118,
@@ -2752,7 +2752,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-02-02",
       "due": null,
       "id": 119,
@@ -3028,7 +3028,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-02-05",
       "due": null,
       "id": 131,
@@ -3815,7 +3815,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-02-14",
       "due": null,
       "id": 165,
@@ -4303,7 +4303,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-02-18",
       "due": null,
       "id": 186,
@@ -4832,7 +4832,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-02-22",
       "due": "2026-03-24",
       "id": 209,
@@ -5872,7 +5872,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-03-04",
       "due": null,
       "id": 254,
@@ -5918,7 +5918,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-03-04",
       "due": "2026-04-03",
       "id": 256,
@@ -6033,7 +6033,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-03-05",
       "due": null,
       "id": 261,
@@ -6056,7 +6056,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-03-05",
       "due": null,
       "id": 262,
@@ -8095,7 +8095,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-03-23",
       "due": null,
       "id": 350,
@@ -10055,7 +10055,7 @@
     {
       "attachment": true,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-04-10",
       "due": "2026-05-10",
       "id": 435,
@@ -11583,7 +11583,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-04-23",
       "due": "2026-05-23",
       "id": 501,
@@ -11675,7 +11675,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-04-24",
       "due": null,
       "id": 505,
@@ -12687,7 +12687,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-05-04",
       "due": "2026-06-03",
       "id": 549,
@@ -12917,7 +12917,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-05-06",
       "due": null,
       "id": 559,
@@ -14169,7 +14169,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-05-18",
       "due": null,
       "id": 613,
@@ -14190,7 +14190,7 @@
       "type": "bill_payment"
     },
     {
-      "attachment": false,
+      "attachment": true,
       "cleared": true,
       "contact": "Pine Ridge Storage Units",
       "date": "2026-05-18",
@@ -14353,7 +14353,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-05-19",
       "due": "2026-06-18",
       "id": 621,
@@ -15370,7 +15370,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-05-28",
       "due": null,
       "id": 665,
@@ -15600,7 +15600,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-05-30",
       "due": null,
       "id": 675,
@@ -15738,7 +15738,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-05-31",
       "due": "2026-06-30",
       "id": 681,
@@ -16083,7 +16083,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-06-05",
       "due": null,
       "id": 696,
@@ -16451,7 +16451,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-06-07",
       "due": null,
       "id": 712,
@@ -16755,7 +16755,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-06-09",
       "due": null,
       "id": 725,
@@ -16870,7 +16870,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-06-11",
       "due": null,
       "id": 730,
@@ -17381,7 +17381,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-06-15",
       "due": null,
       "id": 752,
@@ -17634,7 +17634,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-06-17",
       "due": "2026-07-17",
       "id": 763,
@@ -17749,7 +17749,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-06-18",
       "due": null,
       "id": 768,
@@ -18352,7 +18352,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-06-24",
       "due": null,
       "id": 794,
@@ -18398,7 +18398,7 @@
     {
       "attachment": true,
       "cleared": false,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-06-24",
       "due": "2026-07-24",
       "id": 796,
@@ -19134,7 +19134,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-01",
       "due": null,
       "id": 828,
@@ -19272,7 +19272,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-03",
       "due": "2026-08-02",
       "id": 834,
@@ -19502,7 +19502,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-07-04",
       "due": null,
       "id": 844,
@@ -19640,7 +19640,7 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-07-06",
       "due": null,
       "id": 850,
@@ -19686,7 +19686,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-07-07",
       "due": null,
       "id": 852,
@@ -19778,7 +19778,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-07-08",
       "due": null,
       "id": 856,
@@ -20174,7 +20174,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-12",
       "due": null,
       "id": 873,
@@ -20197,7 +20197,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-07-12",
       "due": null,
       "id": 874,
@@ -20220,7 +20220,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-07-12",
       "due": "2026-08-11",
       "id": 875,
@@ -20335,7 +20335,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-13",
       "due": null,
       "id": 880,
@@ -20892,7 +20892,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-18",
       "due": null,
       "id": 904,
@@ -21283,7 +21283,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-07-22",
       "due": null,
       "id": 921,
@@ -21702,7 +21702,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-07-25",
       "due": null,
       "id": 939,
@@ -22438,7 +22438,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-08-01",
       "due": null,
       "id": 971,
@@ -22852,7 +22852,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-08-05",
       "due": null,
       "id": 989,
@@ -22944,7 +22944,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-08-06",
       "due": null,
       "id": 993,
@@ -23128,7 +23128,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-08-08",
       "due": null,
       "id": 1001,
@@ -23478,7 +23478,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-08-12",
       "due": null,
       "id": 1016,
@@ -25245,7 +25245,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-08-29",
       "due": "2026-09-28",
       "id": 1092,
@@ -25360,7 +25360,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-08-30",
       "due": "2026-09-29",
       "id": 1097,
@@ -26722,7 +26722,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-09-10",
       "due": "2026-10-10",
       "id": 1156,
@@ -27044,7 +27044,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-09-13",
       "due": null,
       "id": 1170,
@@ -27578,7 +27578,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-09-18",
       "due": null,
       "id": 1193,
@@ -27748,7 +27748,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-09-19",
       "due": null,
       "id": 1200,
@@ -28047,7 +28047,7 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-09-22",
       "due": "2026-10-22",
       "id": 1213,
@@ -28443,7 +28443,7 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-09-25",
       "due": null,
       "id": 1230,
@@ -30004,10 +30004,33 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Ridgedale Chapel",
+      "contact": "Riverbend Fuel",
       "date": "2026-10-07",
       "due": "2026-11-06",
       "id": 1297,
+      "lines": [
+        {
+          "account": "6100",
+          "credit": "0.00",
+          "debit": "1412.06"
+        },
+        {
+          "account": "20100",
+          "credit": "1412.06",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Vendor bill",
+      "number": "B-194",
+      "type": "bill"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
+      "contact": "Ridgedale Chapel",
+      "date": "2026-10-07",
+      "due": "2026-11-06",
+      "id": 1298,
       "lines": [
         {
           "account": "10200",
@@ -30030,7 +30053,7 @@
       "contact": "White River Stone Yard",
       "date": "2026-10-08",
       "due": null,
-      "id": 1298,
+      "id": 1299,
       "lines": [
         {
           "account": "20100",
@@ -30053,7 +30076,7 @@
       "contact": "Crane Creek Tree Service",
       "date": "2026-10-08",
       "due": null,
-      "id": 1299,
+      "id": 1300,
       "lines": [
         {
           "account": "5200",
@@ -30076,7 +30099,7 @@
       "contact": "Persimmon Hill Plants",
       "date": "2026-10-08",
       "due": null,
-      "id": 1300,
+      "id": 1301,
       "lines": [
         {
           "account": "6250",
@@ -30099,7 +30122,7 @@
       "contact": "Sycamore Fence Co",
       "date": "2026-10-08",
       "due": "2026-11-07",
-      "id": 1301,
+      "id": 1302,
       "lines": [
         {
           "account": "6500",
@@ -30122,7 +30145,7 @@
       "contact": "Pine Ridge Storage Units",
       "date": "2026-10-08",
       "due": "2026-11-07",
-      "id": 1302,
+      "id": 1303,
       "lines": [
         {
           "account": "6400",
@@ -30145,7 +30168,7 @@
       "contact": "Oak Grove Uniforms",
       "date": "2026-10-08",
       "due": "2026-11-07",
-      "id": 1303,
+      "id": 1304,
       "lines": [
         {
           "account": "5000",
@@ -30168,7 +30191,7 @@
       "contact": "Roark Creek Dentistry",
       "date": "2026-10-08",
       "due": "2026-11-07",
-      "id": 1304,
+      "id": 1305,
       "lines": [
         {
           "account": "10200",
@@ -30191,7 +30214,7 @@
       "contact": "Bluff View Estates",
       "date": "2026-10-08",
       "due": null,
-      "id": 1305,
+      "id": 1306,
       "lines": [
         {
           "account": "1010",
@@ -30214,7 +30237,7 @@
       "contact": null,
       "date": "2026-10-08",
       "due": null,
-      "id": 1306,
+      "id": 1307,
       "lines": [
         {
           "account": "6550",
@@ -30242,7 +30265,7 @@
       "contact": "Powersite Trailer Sales",
       "date": "2026-10-09",
       "due": null,
-      "id": 1307,
+      "id": 1308,
       "lines": [
         {
           "account": "20100",
@@ -30265,7 +30288,7 @@
       "contact": "Mountain Software Co",
       "date": "2026-10-09",
       "due": null,
-      "id": 1308,
+      "id": 1309,
       "lines": [
         {
           "account": "6000",
@@ -30288,7 +30311,7 @@
       "contact": "Persimmon Hill Plants",
       "date": "2026-10-09",
       "due": "2026-11-08",
-      "id": 1309,
+      "id": 1310,
       "lines": [
         {
           "account": "6300",
@@ -30311,7 +30334,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-10-09",
       "due": "2026-11-08",
-      "id": 1310,
+      "id": 1311,
       "lines": [
         {
           "account": "5200",
@@ -30330,11 +30353,34 @@
     },
     {
       "attachment": false,
+      "cleared": false,
+      "contact": "Monett Tire & Lube",
+      "date": "2026-10-09",
+      "due": "2026-11-08",
+      "id": 1312,
+      "lines": [
+        {
+          "account": "6700",
+          "credit": "0.00",
+          "debit": "640.00"
+        },
+        {
+          "account": "20100",
+          "credit": "640.00",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Vendor bill",
+      "number": "B-195",
+      "type": "bill"
+    },
+    {
+      "attachment": false,
       "cleared": true,
       "contact": "Ozark Mulch Supply",
       "date": "2026-10-10",
       "due": null,
-      "id": 1311,
+      "id": 1313,
       "lines": [
         {
           "account": "20100",
@@ -30357,7 +30403,7 @@
       "contact": "Lakeside Insurance Agency",
       "date": "2026-10-10",
       "due": null,
-      "id": 1312,
+      "id": 1314,
       "lines": [
         {
           "account": "6100",
@@ -30380,7 +30426,7 @@
       "contact": "Oak Grove Uniforms",
       "date": "2026-10-10",
       "due": null,
-      "id": 1313,
+      "id": 1315,
       "lines": [
         {
           "account": "20100",
@@ -30403,7 +30449,7 @@
       "contact": "Mincy Hollow Ranch",
       "date": "2026-10-10",
       "due": null,
-      "id": 1314,
+      "id": 1316,
       "lines": [
         {
           "account": "1010",
@@ -30426,7 +30472,7 @@
       "contact": "Hickory Ridge Apartments",
       "date": "2026-10-10",
       "due": null,
-      "id": 1315,
+      "id": 1317,
       "lines": [
         {
           "account": "1010",
@@ -30449,7 +30495,7 @@
       "contact": "Forsyth Public Library",
       "date": "2026-10-10",
       "due": null,
-      "id": 1316,
+      "id": 1318,
       "lines": [
         {
           "account": "1010",
@@ -30472,7 +30518,7 @@
       "contact": "Bear Creek Campground",
       "date": "2026-10-10",
       "due": null,
-      "id": 1317,
+      "id": 1319,
       "lines": [
         {
           "account": "1010",
@@ -30495,7 +30541,7 @@
       "contact": "Silver Dollar Rentals",
       "date": "2026-10-10",
       "due": null,
-      "id": 1318,
+      "id": 1320,
       "lines": [
         {
           "account": "1010",
@@ -30518,7 +30564,7 @@
       "contact": "Oak Grove Uniforms",
       "date": "2026-10-11",
       "due": null,
-      "id": 1319,
+      "id": 1321,
       "lines": [
         {
           "account": "5200",
@@ -30541,7 +30587,7 @@
       "contact": "Lakeside Insurance Agency",
       "date": "2026-10-11",
       "due": null,
-      "id": 1320,
+      "id": 1322,
       "lines": [
         {
           "account": "6700",
@@ -30564,7 +30610,7 @@
       "contact": "Cedar Creek Winery",
       "date": "2026-10-11",
       "due": null,
-      "id": 1321,
+      "id": 1323,
       "lines": [
         {
           "account": "1010",
@@ -30587,7 +30633,7 @@
       "contact": "Cardinal Hill Daycare",
       "date": "2026-10-11",
       "due": null,
-      "id": 1322,
+      "id": 1324,
       "lines": [
         {
           "account": "1010",
@@ -30607,10 +30653,10 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-10-12",
       "due": null,
-      "id": 1323,
+      "id": 1325,
       "lines": [
         {
           "account": "6350",
@@ -30630,10 +30676,10 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-10-12",
       "due": null,
-      "id": 1324,
+      "id": 1326,
       "lines": [
         {
           "account": "6100",
@@ -30656,7 +30702,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-10-12",
       "due": null,
-      "id": 1325,
+      "id": 1327,
       "lines": [
         {
           "account": "20100",
@@ -30679,7 +30725,7 @@
       "contact": "Pine Ridge Storage Units",
       "date": "2026-10-12",
       "due": null,
-      "id": 1326,
+      "id": 1328,
       "lines": [
         {
           "account": "6000",
@@ -30701,8 +30747,8 @@
       "cleared": false,
       "contact": "Crane Creek Tree Service",
       "date": "2026-10-12",
-      "due": "2026-11-11",
-      "id": 1327,
+      "due": "2026-11-18",
+      "id": 1329,
       "lines": [
         {
           "account": "6350",
@@ -30722,10 +30768,33 @@
     {
       "attachment": false,
       "cleared": false,
+      "contact": "Table Rock Nursery",
+      "date": "2026-10-12",
+      "due": "2026-11-11",
+      "id": 1330,
+      "lines": [
+        {
+          "account": "5100",
+          "credit": "0.00",
+          "debit": "3915.00"
+        },
+        {
+          "account": "20100",
+          "credit": "3915.00",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Vendor bill",
+      "number": "B-197",
+      "type": "bill"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
       "contact": "Rockaway Beach Diner",
       "date": "2026-10-12",
       "due": "2026-11-11",
-      "id": 1328,
+      "id": 1331,
       "lines": [
         {
           "account": "10200",
@@ -30748,7 +30817,7 @@
       "contact": "Thunder Ridge Subcontracting",
       "date": "2026-10-13",
       "due": null,
-      "id": 1329,
+      "id": 1332,
       "lines": [
         {
           "account": "20100",
@@ -30771,7 +30840,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-10-13",
       "due": null,
-      "id": 1330,
+      "id": 1333,
       "lines": [
         {
           "account": "20100",
@@ -30791,10 +30860,10 @@
     {
       "attachment": true,
       "cleared": false,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-10-13",
       "due": "2026-11-12",
-      "id": 1331,
+      "id": 1334,
       "lines": [
         {
           "account": "5200",
@@ -30817,7 +30886,7 @@
       "contact": "Barn Owl Books",
       "date": "2026-10-13",
       "due": null,
-      "id": 1332,
+      "id": 1335,
       "lines": [
         {
           "account": "1010",
@@ -30840,7 +30909,7 @@
       "contact": "Indian Point Resort",
       "date": "2026-10-13",
       "due": null,
-      "id": 1333,
+      "id": 1336,
       "lines": [
         {
           "account": "1010",
@@ -30860,10 +30929,10 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-10-14",
       "due": null,
-      "id": 1334,
+      "id": 1337,
       "lines": [
         {
           "account": "20100",
@@ -30886,7 +30955,7 @@
       "contact": "Stone County Permits",
       "date": "2026-10-14",
       "due": null,
-      "id": 1335,
+      "id": 1338,
       "lines": [
         {
           "account": "6250",
@@ -30909,7 +30978,7 @@
       "contact": "Reeds Spring Hardware",
       "date": "2026-10-14",
       "due": "2026-11-13",
-      "id": 1336,
+      "id": 1339,
       "lines": [
         {
           "account": "10200",
@@ -30932,7 +31001,7 @@
       "contact": "Pine Ridge Storage",
       "date": "2026-10-14",
       "due": "2026-11-13",
-      "id": 1337,
+      "id": 1340,
       "lines": [
         {
           "account": "10200",
@@ -30955,7 +31024,7 @@
       "contact": "Juniper Court Condos",
       "date": "2026-10-14",
       "due": null,
-      "id": 1338,
+      "id": 1341,
       "lines": [
         {
           "account": "1010",
@@ -30978,7 +31047,7 @@
       "contact": "Branson Equipment Rental",
       "date": "2026-10-15",
       "due": null,
-      "id": 1339,
+      "id": 1342,
       "lines": [
         {
           "account": "20100",
@@ -31001,7 +31070,7 @@
       "contact": "Cedar Hollow Signs",
       "date": "2026-10-15",
       "due": null,
-      "id": 1340,
+      "id": 1343,
       "lines": [
         {
           "account": "6700",
@@ -31024,7 +31093,7 @@
       "contact": "Lakeview Credit Union",
       "date": "2026-10-15",
       "due": null,
-      "id": 1341,
+      "id": 1344,
       "lines": [
         {
           "account": "2200",
@@ -31049,10 +31118,10 @@
     {
       "attachment": true,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-10-15",
       "due": null,
-      "id": 1342,
+      "id": 1345,
       "lines": [
         {
           "account": "6350",
@@ -31075,7 +31144,7 @@
       "contact": "Barn Owl Books",
       "date": "2026-10-15",
       "due": null,
-      "id": 1343,
+      "id": 1346,
       "lines": [
         {
           "account": "1010",
@@ -31098,7 +31167,7 @@
       "contact": "Compton Ridge Church",
       "date": "2026-10-15",
       "due": null,
-      "id": 1344,
+      "id": 1347,
       "lines": [
         {
           "account": "1010",
@@ -31121,7 +31190,7 @@
       "contact": "Lakeside Insurance Agency",
       "date": "2026-10-17",
       "due": null,
-      "id": 1345,
+      "id": 1348,
       "lines": [
         {
           "account": "20100",
@@ -31144,7 +31213,7 @@
       "contact": "Blue Eye Lumber",
       "date": "2026-10-17",
       "due": null,
-      "id": 1346,
+      "id": 1349,
       "lines": [
         {
           "account": "6700",
@@ -31167,7 +31236,7 @@
       "contact": "Cedar Hollow Signs",
       "date": "2026-10-17",
       "due": "2026-11-16",
-      "id": 1347,
+      "id": 1350,
       "lines": [
         {
           "account": "5200",
@@ -31190,7 +31259,7 @@
       "contact": "Maple Street Bakery",
       "date": "2026-10-17",
       "due": "2026-11-16",
-      "id": 1348,
+      "id": 1351,
       "lines": [
         {
           "account": "10200",
@@ -31213,7 +31282,7 @@
       "contact": "Bluff View Trucking",
       "date": "2026-10-18",
       "due": "2026-11-17",
-      "id": 1349,
+      "id": 1352,
       "lines": [
         {
           "account": "6500",
@@ -31236,7 +31305,7 @@
       "contact": "Timber Lake Lodge",
       "date": "2026-10-18",
       "due": null,
-      "id": 1350,
+      "id": 1353,
       "lines": [
         {
           "account": "1010",
@@ -31259,7 +31328,7 @@
       "contact": "Oak Grove Uniforms",
       "date": "2026-10-19",
       "due": null,
-      "id": 1351,
+      "id": 1354,
       "lines": [
         {
           "account": "20100",
@@ -31282,7 +31351,7 @@
       "contact": "Indian Point Resort",
       "date": "2026-10-19",
       "due": "2026-11-18",
-      "id": 1352,
+      "id": 1355,
       "lines": [
         {
           "account": "10200",
@@ -31305,7 +31374,7 @@
       "contact": "Cardinal Hill Daycare",
       "date": "2026-10-19",
       "due": null,
-      "id": 1353,
+      "id": 1356,
       "lines": [
         {
           "account": "1010",
@@ -31328,7 +31397,7 @@
       "contact": "Ridgedale Chapel",
       "date": "2026-10-19",
       "due": null,
-      "id": 1354,
+      "id": 1357,
       "lines": [
         {
           "account": "1010",
@@ -31351,7 +31420,7 @@
       "contact": "Mountain Software Co",
       "date": "2026-10-20",
       "due": null,
-      "id": 1355,
+      "id": 1358,
       "lines": [
         {
           "account": "5200",
@@ -31374,7 +31443,7 @@
       "contact": "Business Credit Card",
       "date": "2026-10-20",
       "due": null,
-      "id": 1356,
+      "id": 1359,
       "lines": [
         {
           "account": "2050",
@@ -31397,7 +31466,7 @@
       "contact": "Persimmon Hill Plants",
       "date": "2026-10-20",
       "due": null,
-      "id": 1357,
+      "id": 1360,
       "lines": [
         {
           "account": "20100",
@@ -31420,7 +31489,7 @@
       "contact": "Oak Grove Uniforms",
       "date": "2026-10-20",
       "due": null,
-      "id": 1358,
+      "id": 1361,
       "lines": [
         {
           "account": "6350",
@@ -31443,7 +31512,7 @@
       "contact": "Riverbend HOA",
       "date": "2026-10-21",
       "due": "2026-11-20",
-      "id": 1359,
+      "id": 1362,
       "lines": [
         {
           "account": "10200",
@@ -31466,7 +31535,7 @@
       "contact": "Sycamore Fence Co",
       "date": "2026-10-22",
       "due": "2026-11-21",
-      "id": 1360,
+      "id": 1363,
       "lines": [
         {
           "account": "6350",
@@ -31486,10 +31555,10 @@
     {
       "attachment": true,
       "cleared": false,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-10-22",
       "due": "2026-11-21",
-      "id": 1361,
+      "id": 1364,
       "lines": [
         {
           "account": "6500",
@@ -31512,7 +31581,7 @@
       "contact": "Shepherd Hills Clinic",
       "date": "2026-10-22",
       "due": null,
-      "id": 1362,
+      "id": 1365,
       "lines": [
         {
           "account": "1010",
@@ -31535,7 +31604,7 @@
       "contact": "Tri-Lakes Insurance",
       "date": "2026-10-22",
       "due": null,
-      "id": 1363,
+      "id": 1366,
       "lines": [
         {
           "account": "1010",
@@ -31558,7 +31627,7 @@
       "contact": null,
       "date": "2026-10-22",
       "due": null,
-      "id": 1364,
+      "id": 1367,
       "lines": [
         {
           "account": "6550",
@@ -31586,7 +31655,7 @@
       "contact": "Sycamore Fence Co",
       "date": "2026-10-23",
       "due": null,
-      "id": 1365,
+      "id": 1368,
       "lines": [
         {
           "account": "20100",
@@ -31609,7 +31678,7 @@
       "contact": "Copper Kettle Catering",
       "date": "2026-10-23",
       "due": null,
-      "id": 1366,
+      "id": 1369,
       "lines": [
         {
           "account": "20100",
@@ -31632,7 +31701,7 @@
       "contact": "White River Stone Yard",
       "date": "2026-10-23",
       "due": "2026-11-22",
-      "id": 1367,
+      "id": 1370,
       "lines": [
         {
           "account": "6400",
@@ -31655,7 +31724,7 @@
       "contact": "Stone Mill Bistro",
       "date": "2026-10-23",
       "due": "2026-11-22",
-      "id": 1368,
+      "id": 1371,
       "lines": [
         {
           "account": "10200",
@@ -31678,7 +31747,7 @@
       "contact": "Indian Point Resort",
       "date": "2026-10-23",
       "due": "2026-11-22",
-      "id": 1369,
+      "id": 1372,
       "lines": [
         {
           "account": "10200",
@@ -31701,7 +31770,7 @@
       "contact": "Oak Grove Orchard",
       "date": "2026-10-23",
       "due": null,
-      "id": 1370,
+      "id": 1373,
       "lines": [
         {
           "account": "1010",
@@ -31724,7 +31793,7 @@
       "contact": "Riverbend Hardware",
       "date": "2026-10-24",
       "due": null,
-      "id": 1371,
+      "id": 1374,
       "lines": [
         {
           "account": "20100",
@@ -31747,7 +31816,7 @@
       "contact": "Empire Electric Cooperative",
       "date": "2026-10-24",
       "due": null,
-      "id": 1372,
+      "id": 1375,
       "lines": [
         {
           "account": "6700",
@@ -31770,7 +31839,7 @@
       "contact": "Persimmon Hill Plants",
       "date": "2026-10-24",
       "due": null,
-      "id": 1373,
+      "id": 1376,
       "lines": [
         {
           "account": "20100",
@@ -31790,10 +31859,10 @@
     {
       "attachment": false,
       "cleared": true,
-      "contact": "Walnut Shade Diesel",
+      "contact": "Riverbend Fuel",
       "date": "2026-10-24",
       "due": null,
-      "id": 1374,
+      "id": 1377,
       "lines": [
         {
           "account": "20100",
@@ -31816,7 +31885,7 @@
       "contact": "Wildwood Pediatrics",
       "date": "2026-10-24",
       "due": "2026-11-23",
-      "id": 1375,
+      "id": 1378,
       "lines": [
         {
           "account": "10200",
@@ -31839,7 +31908,7 @@
       "contact": "Bull Shoals Cabins",
       "date": "2026-10-24",
       "due": null,
-      "id": 1376,
+      "id": 1379,
       "lines": [
         {
           "account": "1010",
@@ -31862,7 +31931,7 @@
       "contact": "Table Rock Small Engine",
       "date": "2026-10-25",
       "due": null,
-      "id": 1377,
+      "id": 1380,
       "lines": [
         {
           "account": "6000",
@@ -31885,7 +31954,7 @@
       "contact": "Valley View Assisted Living",
       "date": "2026-10-25",
       "due": null,
-      "id": 1378,
+      "id": 1381,
       "lines": [
         {
           "account": "1010",
@@ -31908,7 +31977,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-10-26",
       "due": null,
-      "id": 1379,
+      "id": 1382,
       "lines": [
         {
           "account": "20100",
@@ -31931,7 +32000,7 @@
       "contact": "Midwest Irrigation Parts",
       "date": "2026-10-26",
       "due": null,
-      "id": 1380,
+      "id": 1383,
       "lines": [
         {
           "account": "6100",
@@ -31951,10 +32020,33 @@
     {
       "attachment": false,
       "cleared": false,
+      "contact": "Ozark Office Supply",
+      "date": "2026-10-26",
+      "due": "2026-11-10",
+      "id": 1384,
+      "lines": [
+        {
+          "account": "6250",
+          "credit": "0.00",
+          "debit": "218.44"
+        },
+        {
+          "account": "20100",
+          "credit": "218.44",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Vendor bill",
+      "number": "B-196",
+      "type": "bill"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
       "contact": "Hollister Family Trust",
       "date": "2026-10-26",
       "due": "2026-11-25",
-      "id": 1381,
+      "id": 1385,
       "lines": [
         {
           "account": "10200",
@@ -31977,7 +32069,7 @@
       "contact": "Forsyth Public Library",
       "date": "2026-10-26",
       "due": "2026-11-25",
-      "id": 1382,
+      "id": 1386,
       "lines": [
         {
           "account": "10200",
@@ -32000,7 +32092,7 @@
       "contact": "Elm Street Flats",
       "date": "2026-10-26",
       "due": null,
-      "id": 1383,
+      "id": 1387,
       "lines": [
         {
           "account": "1010",
@@ -32023,7 +32115,7 @@
       "contact": "Reeds Spring Hardware",
       "date": "2026-10-26",
       "due": null,
-      "id": 1384,
+      "id": 1388,
       "lines": [
         {
           "account": "1010",
@@ -32046,7 +32138,7 @@
       "contact": "Lampe Country Store",
       "date": "2026-10-26",
       "due": null,
-      "id": 1385,
+      "id": 1389,
       "lines": [
         {
           "account": "1010",
@@ -32069,7 +32161,7 @@
       "contact": "Stone County Permits",
       "date": "2026-10-27",
       "due": null,
-      "id": 1386,
+      "id": 1390,
       "lines": [
         {
           "account": "6250",
@@ -32092,7 +32184,7 @@
       "contact": "Reeds Spring Hardware",
       "date": "2026-10-27",
       "due": null,
-      "id": 1387,
+      "id": 1391,
       "lines": [
         {
           "account": "1010",
@@ -32115,7 +32207,7 @@
       "contact": "Forsyth Public Library",
       "date": "2026-10-27",
       "due": null,
-      "id": 1388,
+      "id": 1392,
       "lines": [
         {
           "account": "1010",
@@ -32138,7 +32230,7 @@
       "contact": "Hollister Family Trust",
       "date": "2026-10-27",
       "due": null,
-      "id": 1389,
+      "id": 1393,
       "lines": [
         {
           "account": "1010",
@@ -32161,7 +32253,7 @@
       "contact": "Pine Ridge Storage Units",
       "date": "2026-10-28",
       "due": null,
-      "id": 1390,
+      "id": 1394,
       "lines": [
         {
           "account": "20100",
@@ -32184,7 +32276,7 @@
       "contact": "Stone County Permits",
       "date": "2026-10-28",
       "due": null,
-      "id": 1391,
+      "id": 1395,
       "lines": [
         {
           "account": "6700",
@@ -32207,7 +32299,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-10-28",
       "due": null,
-      "id": 1392,
+      "id": 1396,
       "lines": [
         {
           "account": "30170",
@@ -32230,7 +32322,7 @@
       "contact": "Copper Kettle Coffee",
       "date": "2026-10-28",
       "due": "2026-11-27",
-      "id": 1393,
+      "id": 1397,
       "lines": [
         {
           "account": "10200",
@@ -32253,7 +32345,7 @@
       "contact": "Copper Kettle Coffee",
       "date": "2026-10-28",
       "due": "2026-11-27",
-      "id": 1394,
+      "id": 1398,
       "lines": [
         {
           "account": "10200",
@@ -32276,7 +32368,7 @@
       "contact": "Maple Street Bakery",
       "date": "2026-10-28",
       "due": null,
-      "id": 1395,
+      "id": 1399,
       "lines": [
         {
           "account": "1010",
@@ -32299,7 +32391,7 @@
       "contact": "Pine Ridge Storage",
       "date": "2026-10-28",
       "due": null,
-      "id": 1396,
+      "id": 1400,
       "lines": [
         {
           "account": "1010",
@@ -32322,7 +32414,7 @@
       "contact": "Cedar Hollow Signs",
       "date": "2026-10-29",
       "due": null,
-      "id": 1397,
+      "id": 1401,
       "lines": [
         {
           "account": "6350",
@@ -32345,7 +32437,7 @@
       "contact": "Taney County Landfill",
       "date": "2026-10-29",
       "due": null,
-      "id": 1398,
+      "id": 1402,
       "lines": [
         {
           "account": "6350",
@@ -32368,7 +32460,7 @@
       "contact": "Midwest Irrigation Parts",
       "date": "2026-10-29",
       "due": "2026-11-28",
-      "id": 1399,
+      "id": 1403,
       "lines": [
         {
           "account": "6500",
@@ -32391,7 +32483,7 @@
       "contact": "Sugar Creek Bakery",
       "date": "2026-10-29",
       "due": null,
-      "id": 1400,
+      "id": 1404,
       "lines": [
         {
           "account": "1010",
@@ -32414,7 +32506,7 @@
       "contact": "Taney County Landfill",
       "date": "2026-10-30",
       "due": "2026-11-29",
-      "id": 1401,
+      "id": 1405,
       "lines": [
         {
           "account": "5200",
@@ -32437,7 +32529,7 @@
       "contact": "Northfork Veterinary",
       "date": "2026-10-30",
       "due": "2026-11-29",
-      "id": 1402,
+      "id": 1406,
       "lines": [
         {
           "account": "10200",
@@ -32460,16 +32552,16 @@
       "contact": "Riverbend HOA",
       "date": "2026-10-30",
       "due": "2026-11-29",
-      "id": 1403,
+      "id": 1407,
       "lines": [
         {
           "account": "5200",
           "credit": "0.00",
-          "debit": "32717.18"
+          "debit": "26531.68"
         },
         {
           "account": "10200",
-          "credit": "32717.18",
+          "credit": "26531.68",
           "debit": "0.00"
         }
       ],
@@ -32483,7 +32575,7 @@
       "contact": "Dogwood Canyon Rentals",
       "date": "2026-10-30",
       "due": null,
-      "id": 1404,
+      "id": 1408,
       "lines": [
         {
           "account": "1010",
@@ -32506,7 +32598,7 @@
       "contact": "Cedar Creek Winery",
       "date": "2026-10-30",
       "due": null,
-      "id": 1405,
+      "id": 1409,
       "lines": [
         {
           "account": "1010",
@@ -32529,7 +32621,7 @@
       "contact": "Ozark Mountain Daycare",
       "date": "2026-10-30",
       "due": null,
-      "id": 1406,
+      "id": 1410,
       "lines": [
         {
           "account": "1010",
@@ -32552,7 +32644,7 @@
       "contact": "Pine Ridge Storage",
       "date": "2026-10-30",
       "due": null,
-      "id": 1407,
+      "id": 1411,
       "lines": [
         {
           "account": "1010",
@@ -32575,7 +32667,7 @@
       "contact": "Hickory Ridge Apartments",
       "date": "2026-10-30",
       "due": null,
-      "id": 1408,
+      "id": 1412,
       "lines": [
         {
           "account": "1010",
@@ -32595,10 +32687,10 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Forsyth Print Shop",
+      "contact": "Ozark Office Supply",
       "date": "2026-10-31",
       "due": null,
-      "id": 1409,
+      "id": 1413,
       "lines": [
         {
           "account": "6250",
@@ -32621,7 +32713,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-10-31",
       "due": null,
-      "id": 1410,
+      "id": 1414,
       "lines": [
         {
           "account": "30170",
@@ -32644,7 +32736,7 @@
       "contact": "Persimmon Hill Plants",
       "date": "2026-10-31",
       "due": "2026-11-30",
-      "id": 1411,
+      "id": 1415,
       "lines": [
         {
           "account": "6300",
@@ -32664,10 +32756,10 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Tri-Lakes Nursery Wholesale",
+      "contact": "Table Rock Nursery",
       "date": "2026-10-31",
       "due": "2026-11-30",
-      "id": 1412,
+      "id": 1416,
       "lines": [
         {
           "account": "6350",
@@ -32690,7 +32782,7 @@
       "contact": "Bear Creek Campground",
       "date": "2026-10-31",
       "due": "2026-11-30",
-      "id": 1413,
+      "id": 1417,
       "lines": [
         {
           "account": "10200",
@@ -32713,7 +32805,7 @@
       "contact": "Ridgedale Chapel",
       "date": "2026-10-31",
       "due": "2026-11-30",
-      "id": 1414,
+      "id": 1418,
       "lines": [
         {
           "account": "10200",
@@ -32736,7 +32828,7 @@
       "contact": "Wildwood Pediatrics",
       "date": "2026-10-31",
       "due": null,
-      "id": 1415,
+      "id": 1419,
       "lines": [
         {
           "account": "1010",
@@ -32759,7 +32851,7 @@
       "contact": "Maple Street Bakery",
       "date": "2026-10-31",
       "due": null,
-      "id": 1416,
+      "id": 1420,
       "lines": [
         {
           "account": "1010",
@@ -32777,35 +32869,12 @@
       "type": "payment"
     },
     {
-      "attachment": true,
-      "cleared": false,
-      "contact": "Ozark Mulch Supply",
-      "date": "2026-11-01",
-      "due": "2026-11-08",
-      "id": 1417,
-      "lines": [
-        {
-          "account": "5200",
-          "credit": "0.00",
-          "debit": "5200.81"
-        },
-        {
-          "account": "20100",
-          "credit": "5200.81",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Fall mulch delivery",
-      "number": "B-194",
-      "type": "bill"
-    },
-    {
       "attachment": false,
       "cleared": false,
       "contact": "Hollister Family Trust",
       "date": "2026-11-01",
       "due": "2026-12-01",
-      "id": 1418,
+      "id": 1421,
       "lines": [
         {
           "account": "10200",
@@ -32828,7 +32897,7 @@
       "contact": "Maple Street Bakery",
       "date": "2026-11-01",
       "due": "2026-12-01",
-      "id": 1419,
+      "id": 1422,
       "lines": [
         {
           "account": "10200",
@@ -32851,7 +32920,7 @@
       "contact": "Kimberling Marina",
       "date": "2026-11-01",
       "due": null,
-      "id": 1420,
+      "id": 1423,
       "lines": [
         {
           "account": "1010",
@@ -32874,7 +32943,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-11-02",
       "due": null,
-      "id": 1421,
+      "id": 1424,
       "lines": [
         {
           "account": "6350",
@@ -32897,7 +32966,7 @@
       "contact": "Hollister Family Trust",
       "date": "2026-11-02",
       "due": null,
-      "id": 1422,
+      "id": 1425,
       "lines": [
         {
           "account": "10150",
@@ -32920,7 +32989,7 @@
       "contact": "White River Lumber",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1423,
+      "id": 1426,
       "lines": [
         {
           "account": "10200",
@@ -32943,7 +33012,7 @@
       "contact": "Copper Kettle Coffee",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1424,
+      "id": 1427,
       "lines": [
         {
           "account": "10200",
@@ -32966,16 +33035,16 @@
       "contact": "Riverbend HOA",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1425,
+      "id": 1428,
       "lines": [
         {
           "account": "10200",
           "credit": "0.00",
-          "debit": "297443.98"
+          "debit": "291258.48"
         },
         {
           "account": "4000",
-          "credit": "297443.98",
+          "credit": "291258.48",
           "debit": "0.00"
         }
       ],
@@ -32989,7 +33058,7 @@
       "contact": "Kimberling Marina",
       "date": "2026-11-02",
       "due": null,
-      "id": 1426,
+      "id": 1429,
       "lines": [
         {
           "account": "1010",
@@ -33012,7 +33081,7 @@
       "contact": "Lampe Country Store",
       "date": "2026-11-02",
       "due": null,
-      "id": 1427,
+      "id": 1430,
       "lines": [
         {
           "account": "1010",
@@ -33035,7 +33104,7 @@
       "contact": "Pine Ridge Storage",
       "date": "2026-11-02",
       "due": null,
-      "id": 1428,
+      "id": 1431,
       "lines": [
         {
           "account": "1010",
@@ -33058,7 +33127,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-03",
       "due": null,
-      "id": 1429,
+      "id": 1432,
       "lines": [
         {
           "account": "30170",
@@ -33081,7 +33150,7 @@
       "contact": "Maple Street Bakery",
       "date": "2026-11-03",
       "due": null,
-      "id": 1430,
+      "id": 1433,
       "lines": [
         {
           "account": "10150",
@@ -33104,7 +33173,7 @@
       "contact": "Bluff View Trucking",
       "date": "2026-11-03",
       "due": "2026-12-03",
-      "id": 1431,
+      "id": 1434,
       "lines": [
         {
           "account": "5200",
@@ -33127,7 +33196,7 @@
       "contact": "Cedar Hollow Church",
       "date": "2026-11-03",
       "due": null,
-      "id": 1432,
+      "id": 1435,
       "lines": [
         {
           "account": "1010",
@@ -33150,7 +33219,7 @@
       "contact": "Walnut Shade Farmhouse",
       "date": "2026-11-03",
       "due": null,
-      "id": 1433,
+      "id": 1436,
       "lines": [
         {
           "account": "1010",
@@ -33173,7 +33242,7 @@
       "contact": "Roark Creek Dentistry",
       "date": "2026-11-03",
       "due": null,
-      "id": 1434,
+      "id": 1437,
       "lines": [
         {
           "account": "1010",
@@ -33196,7 +33265,7 @@
       "contact": "Riverbend HOA",
       "date": "2026-11-03",
       "due": null,
-      "id": 1435,
+      "id": 1438,
       "lines": [
         {
           "account": "1010",
@@ -33216,10 +33285,10 @@
     {
       "attachment": false,
       "cleared": false,
-      "contact": "Highway 65 Tire & Lube",
+      "contact": "Monett Tire & Lube",
       "date": "2026-11-04",
       "due": null,
-      "id": 1436,
+      "id": 1439,
       "lines": [
         {
           "account": "6100",
@@ -33242,7 +33311,7 @@
       "contact": "Elm Street Accountants",
       "date": "2026-11-04",
       "due": null,
-      "id": 1437,
+      "id": 1440,
       "lines": [
         {
           "account": "5200",
@@ -33265,7 +33334,7 @@
       "contact": "Pine Ridge Storage Units",
       "date": "2026-11-04",
       "due": "2026-12-04",
-      "id": 1438,
+      "id": 1441,
       "lines": [
         {
           "account": "6500",
@@ -33288,7 +33357,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1439,
+      "id": 1442,
       "lines": [
         {
           "account": "1020",
@@ -33311,7 +33380,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1440,
+      "id": 1443,
       "lines": [
         {
           "account": "1020",
@@ -33334,7 +33403,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1441,
+      "id": 1444,
       "lines": [
         {
           "account": "1020",
@@ -33357,7 +33426,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1442,
+      "id": 1445,
       "lines": [
         {
           "account": "1020",
@@ -33380,7 +33449,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1443,
+      "id": 1446,
       "lines": [
         {
           "account": "1020",
@@ -33403,7 +33472,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1444,
+      "id": 1447,
       "lines": [
         {
           "account": "1020",
@@ -33426,7 +33495,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1445,
+      "id": 1448,
       "lines": [
         {
           "account": "1020",
@@ -33449,7 +33518,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1446,
+      "id": 1449,
       "lines": [
         {
           "account": "1020",
@@ -33472,7 +33541,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1447,
+      "id": 1450,
       "lines": [
         {
           "account": "1020",
@@ -33495,7 +33564,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1448,
+      "id": 1451,
       "lines": [
         {
           "account": "1020",
@@ -33518,7 +33587,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1449,
+      "id": 1452,
       "lines": [
         {
           "account": "1020",
@@ -33541,7 +33610,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1450,
+      "id": 1453,
       "lines": [
         {
           "account": "1020",
@@ -33564,7 +33633,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1451,
+      "id": 1454,
       "lines": [
         {
           "account": "1020",
@@ -33587,7 +33656,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1452,
+      "id": 1455,
       "lines": [
         {
           "account": "1020",
@@ -33610,7 +33679,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1453,
+      "id": 1456,
       "lines": [
         {
           "account": "1020",
@@ -33633,7 +33702,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1454,
+      "id": 1457,
       "lines": [
         {
           "account": "1020",
@@ -33656,7 +33725,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1455,
+      "id": 1458,
       "lines": [
         {
           "account": "1020",
@@ -33679,7 +33748,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1456,
+      "id": 1459,
       "lines": [
         {
           "account": "1020",
@@ -33702,7 +33771,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1457,
+      "id": 1460,
       "lines": [
         {
           "account": "1020",
@@ -33725,7 +33794,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1458,
+      "id": 1461,
       "lines": [
         {
           "account": "1020",
@@ -33748,7 +33817,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1459,
+      "id": 1462,
       "lines": [
         {
           "account": "1020",
@@ -33771,7 +33840,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1460,
+      "id": 1463,
       "lines": [
         {
           "account": "1020",
@@ -33794,7 +33863,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1461,
+      "id": 1464,
       "lines": [
         {
           "account": "1020",
@@ -33817,7 +33886,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1462,
+      "id": 1465,
       "lines": [
         {
           "account": "1020",
@@ -33840,7 +33909,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1463,
+      "id": 1466,
       "lines": [
         {
           "account": "1020",
@@ -33863,7 +33932,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1464,
+      "id": 1467,
       "lines": [
         {
           "account": "1020",
@@ -33886,7 +33955,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1465,
+      "id": 1468,
       "lines": [
         {
           "account": "1020",
@@ -33909,7 +33978,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1466,
+      "id": 1469,
       "lines": [
         {
           "account": "1020",
@@ -33932,7 +34001,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1467,
+      "id": 1470,
       "lines": [
         {
           "account": "1020",
@@ -33955,7 +34024,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1468,
+      "id": 1471,
       "lines": [
         {
           "account": "1020",
@@ -33978,7 +34047,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1469,
+      "id": 1472,
       "lines": [
         {
           "account": "1020",
@@ -34001,7 +34070,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1470,
+      "id": 1473,
       "lines": [
         {
           "account": "1020",
@@ -34024,7 +34093,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1471,
+      "id": 1474,
       "lines": [
         {
           "account": "1020",
@@ -34047,7 +34116,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1472,
+      "id": 1475,
       "lines": [
         {
           "account": "1020",
@@ -34070,7 +34139,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1473,
+      "id": 1476,
       "lines": [
         {
           "account": "1020",
@@ -34093,7 +34162,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1474,
+      "id": 1477,
       "lines": [
         {
           "account": "1020",
@@ -34116,7 +34185,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1475,
+      "id": 1478,
       "lines": [
         {
           "account": "1020",
@@ -34139,7 +34208,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1476,
+      "id": 1479,
       "lines": [
         {
           "account": "1020",
@@ -34162,7 +34231,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1477,
+      "id": 1480,
       "lines": [
         {
           "account": "1020",
@@ -34185,7 +34254,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1478,
+      "id": 1481,
       "lines": [
         {
           "account": "1020",
@@ -34208,7 +34277,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1479,
+      "id": 1482,
       "lines": [
         {
           "account": "1020",
@@ -34231,7 +34300,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1480,
+      "id": 1483,
       "lines": [
         {
           "account": "1020",
@@ -34254,7 +34323,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1481,
+      "id": 1484,
       "lines": [
         {
           "account": "1020",
@@ -34277,7 +34346,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1482,
+      "id": 1485,
       "lines": [
         {
           "account": "1020",
@@ -34300,7 +34369,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1483,
+      "id": 1486,
       "lines": [
         {
           "account": "1020",
@@ -34323,7 +34392,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1484,
+      "id": 1487,
       "lines": [
         {
           "account": "1020",
@@ -34346,7 +34415,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1485,
+      "id": 1488,
       "lines": [
         {
           "account": "1020",
@@ -34369,7 +34438,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1486,
+      "id": 1489,
       "lines": [
         {
           "account": "1020",
@@ -34392,7 +34461,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1487,
+      "id": 1490,
       "lines": [
         {
           "account": "1020",
@@ -34415,7 +34484,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1488,
+      "id": 1491,
       "lines": [
         {
           "account": "1020",
@@ -34438,7 +34507,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1489,
+      "id": 1492,
       "lines": [
         {
           "account": "1020",
@@ -34461,7 +34530,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1490,
+      "id": 1493,
       "lines": [
         {
           "account": "1020",
@@ -34484,7 +34553,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1491,
+      "id": 1494,
       "lines": [
         {
           "account": "1020",
@@ -34507,7 +34576,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1492,
+      "id": 1495,
       "lines": [
         {
           "account": "1020",
@@ -34530,7 +34599,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1493,
+      "id": 1496,
       "lines": [
         {
           "account": "1020",
@@ -34553,7 +34622,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1494,
+      "id": 1497,
       "lines": [
         {
           "account": "1020",
@@ -34576,7 +34645,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1495,
+      "id": 1498,
       "lines": [
         {
           "account": "1020",
@@ -34599,7 +34668,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1496,
+      "id": 1499,
       "lines": [
         {
           "account": "1020",
@@ -34622,7 +34691,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1497,
+      "id": 1500,
       "lines": [
         {
           "account": "1020",
@@ -34645,7 +34714,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1498,
+      "id": 1501,
       "lines": [
         {
           "account": "1020",
@@ -34668,7 +34737,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1499,
+      "id": 1502,
       "lines": [
         {
           "account": "1020",
@@ -34691,7 +34760,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1500,
+      "id": 1503,
       "lines": [
         {
           "account": "1020",
@@ -34714,7 +34783,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1501,
+      "id": 1504,
       "lines": [
         {
           "account": "1020",
@@ -34737,7 +34806,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1502,
+      "id": 1505,
       "lines": [
         {
           "account": "1020",
@@ -34760,7 +34829,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1503,
+      "id": 1506,
       "lines": [
         {
           "account": "1020",
@@ -34783,7 +34852,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1504,
+      "id": 1507,
       "lines": [
         {
           "account": "1020",
@@ -34806,75 +34875,6 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1505,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "30160",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-7",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
-      "id": 1506,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "30160",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-70",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
-      "id": 1507,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "30160",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-71",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
       "id": 1508,
       "lines": [
         {
@@ -34889,7 +34889,7 @@
         }
       ],
       "memo": "Owner contribution to savings",
-      "number": "DEP-72",
+      "number": "DEP-7",
       "type": "deposit"
     },
     {

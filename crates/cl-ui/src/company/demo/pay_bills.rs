@@ -212,19 +212,95 @@ fn vendors(state: &mut DemoState) -> Vec<(ContactId, String)> {
         .collect()
 }
 
+/// The open bills at the story date as (vendor name, bill, number, due
+/// date, amount owed before the demo's payments): a sample bill is settled
+/// by a bill payment to the same vendor for the same amount on or after
+/// its date (the fixture pays bills in full, `Sample::bills_due`), and the
+/// bills entered in the demo owe what the demo engine says. Void bills are
+/// left out.
+fn open_bills(
+    state: &mut DemoState,
+) -> Vec<(String, TransactionId, String, Option<CalendarDate>, Money)> {
+    let sample = cl_company::Sample::load();
+    let ap = sample.company.system_accounts.accounts_payable.clone();
+    let today = DemoState::today();
+    let mut out = Vec::new();
+    let mut sample_ids = std::collections::BTreeSet::new();
+    for t in &sample.transactions {
+        let id = super::register::DemoLedger::id_of(t);
+        sample_ids.insert(id);
+        if t.kind != "bill" || t.date > today || state.ledger.is_void(id) {
+            continue;
+        }
+        let Some(name) = t.contact.clone() else {
+            continue;
+        };
+        let amount = Money::sum(t.lines.iter().filter(|l| l.account == ap).map(|l| l.credit))
+            .unwrap_or(Money::ZERO);
+        let settled = sample.transactions.iter().any(|p| {
+            p.kind == "bill_payment"
+                && p.contact == t.contact
+                && p.date >= t.date
+                && p.lines.first().is_some_and(|l| l.debit == amount)
+        });
+        if !settled && amount.is_positive() {
+            out.push((name, id, t.number.clone(), t.due, amount));
+        }
+    }
+    for (id, _) in super::bills::list(state, false) {
+        if sample_ids.contains(&id) || state.ledger.is_void(id) {
+            continue;
+        }
+        let Some(v) = super::bills::get(state, id) else {
+            continue;
+        };
+        let r = v.record;
+        let owed = r.balance_due.unwrap_or(Money::ZERO);
+        let name = r.txn.contact_name.clone().unwrap_or_default();
+        if owed.is_positive() && r.bill_received {
+            out.push((
+                name,
+                id,
+                r.txn.txn_number.clone().unwrap_or_default(),
+                r.due_date,
+                owed,
+            ));
+        }
+    }
+    out
+}
+
 /// What the demo engine lists as payable (`GET /bills/payable`).
 #[must_use]
 pub fn payable(state: &mut DemoState, filter: &PayableFilter) -> PayableList {
     let mut bills = Vec::new();
-    for (vendor, name) in vendors(state) {
+    let all_vendors = vendors(state);
+    let vendor_of = |name: &str, state: &DemoState| {
+        all_vendors
+            .iter()
+            .find(|(_, n)| n == name)
+            .map(|(id, _)| *id)
+            .or_else(|| {
+                state
+                    .contact_names
+                    .iter()
+                    .find(|(_, n)| n.as_str() == name)
+                    .map(|(id, _)| *id)
+            })
+    };
+    for (name, id, number, due, owed) in open_bills(state) {
+        let Some(vendor) = vendor_of(&name, state) else {
+            continue;
+        };
         if filter.vendor.is_some_and(|v| v != vendor) {
             continue;
         }
-        let open = super::contacts::open_bills(state, vendor);
-        for (id, number, due, owed) in open {
-            if let Some(b) = row(state, filter, vendor, &name, id, Some(&number), due, owed) {
-                bills.push(b);
-            }
+        let shown = all_vendors
+            .iter()
+            .find(|(v, _)| *v == vendor)
+            .map_or(name.clone(), |(_, n)| n.clone());
+        if let Some(b) = row(state, filter, vendor, &shown, id, Some(&number), due, owed) {
+            bills.push(b);
         }
     }
     bills.sort_by(|a, b| {
@@ -232,7 +308,7 @@ pub fn payable(state: &mut DemoState, filter: &PayableFilter) -> PayableList {
     });
     let mut credits = Vec::new();
     let (name, label, amount) = STORY_CREDIT;
-    let vendor = vendors(state)
+    let vendor = all_vendors
         .into_iter()
         .find(|(_, n)| n == name)
         .map(|(id, _)| id);
@@ -626,6 +702,91 @@ pub fn void(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mockup's list, figures and run through the demo engine.
+    #[test]
+    fn the_demo_lists_and_pays_the_mockup_bills() {
+        let mut s = DemoState::new();
+        let filter = PayableFilter {
+            due_on_or_before: CalendarDate::from_ymd(2026, 11, 11).ok(),
+            payment_date: Some(DemoState::today()),
+            ..PayableFilter::default()
+        };
+        let list = payable(&mut s, &filter);
+        let refs: Vec<_> = list
+            .bills
+            .iter()
+            .map(|b| b.vendor_invoice_number.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(refs, ["20931", "STMT-1031", "2214", "7781", "8813"]);
+        let due = Money::sum(list.bills.iter().map(|b| b.balance_due)).expect("sum");
+        assert_eq!(due, m("7471.90"));
+        let office = &list.bills[3];
+        assert_eq!(office.discount_available, Some(m("4.37")));
+        assert_eq!(list.credits.len(), 1);
+        assert_eq!(list.credits[0].balance_due, m("250.00"));
+        // After the discount date: no discount.
+        let late = payable(
+            &mut s,
+            &PayableFilter {
+                payment_date: CalendarDate::from_ymd(2026, 11, 7).ok(),
+                ..filter
+            },
+        );
+        assert_eq!(late.bills[3].discount_available, Some(Money::ZERO));
+        // The run: 1010 falls by exactly the cash.
+        let bank = super::super::account_id(1010);
+        let before = super::super::checks::balance(&mut s, bank).expect("balance");
+        assert_eq!(before, m("84210.55"));
+        let pick = |i: usize, cash: &str, disc: &str| cl_api::BillToPay {
+            bill: list.bills[i].id,
+            cash: m(cash),
+            discount: m(disc),
+        };
+        let req = PayBillsRequest {
+            bank_account: bank,
+            date: DemoState::today(),
+            bills: vec![
+                pick(0, "1286.40", "0"),
+                pick(1, "1412.06", "0"),
+                pick(3, "214.07", "4.37"),
+                pick(4, "3665.00", "0"),
+            ],
+            credits: vec![cl_api::CreditToApply {
+                credit: story_credit_id(),
+                bill: list.bills[4].id,
+                amount: m("250.00"),
+            }],
+            discount_account: Some(super::super::account_id(5200)),
+            method: PayMethod::Check(CheckNumbering::PrintLater),
+            memo: None,
+        };
+        let paid = pay(&mut s, &req, None).expect("paid");
+        assert_eq!(paid.len(), 4, "one payment per vendor");
+        let after = super::super::checks::balance(&mut s, bank).expect("balance");
+        assert_eq!(after, m("77633.02"));
+        let left = payable(&mut s, &filter);
+        assert_eq!(left.bills.len(), 1, "only 2214 is left");
+        assert!(left.credits.is_empty(), "CM-114 is used up");
+        // Without a discount account the engine refuses.
+        let mut s2 = DemoState::new();
+        let l2 = payable(&mut s2, &filter);
+        let r2 = PayBillsRequest {
+            bills: vec![cl_api::BillToPay {
+                bill: l2.bills[3].id,
+                cash: m("214.07"),
+                discount: m("4.37"),
+            }],
+            credits: Vec::new(),
+            discount_account: None,
+            ..req
+        };
+        let e = pay(&mut s2, &r2, None).expect_err("no account");
+        assert_eq!(
+            cl_api::pay_problem(&e),
+            Some(cl_api::PayProblem::DiscountAccountRequired)
+        );
+    }
 
     #[test]
     fn the_discount_is_worked_out_the_engine_way() {
