@@ -153,8 +153,18 @@ fn flush(token: &mut String, prev_key: &mut String, out: &mut String) {
 /// Remove from one log line what must not leave the machine.
 #[must_use]
 pub fn scrub_line(line: &str) -> String {
+    // The host's master-secret messages name a folder and give guidance; they
+    // never hold a secret, so the word "secret" alone does not withhold them.
+    // The host decides by matching the whole message (fixed opening, folder,
+    // fixed ending), so any added text loses the waiver. Every other
+    // credential word still withholds them, and the path and token passes
+    // below still run.
+    let master = cl_host::is_master_secret_message(line);
     let lower = line.to_ascii_lowercase();
-    if SECRET_WORDS.iter().any(|w| lower.contains(w)) {
+    if SECRET_WORDS
+        .iter()
+        .any(|w| lower.contains(w) && !(master && *w == "secret"))
+    {
         return "[line withheld: may contain a credential]".to_string();
     }
     let line = scrub_user_path(line);
@@ -419,6 +429,75 @@ mod tests {
         ] {
             assert!(scrub_line(l).starts_with("[line withheld"), "{l}");
         }
+    }
+
+    fn sample_dir() -> PathBuf {
+        PathBuf::from(r"C:\Users\alex.sample\AppData\Local\ClientLedger\pgdata")
+    }
+
+    #[test]
+    fn master_secret_messages_are_shown_not_withheld() {
+        let dir = sample_dir();
+        for e in [
+            cl_host::HostError::MasterSecretMissing {
+                data_dir: dir.clone(),
+            },
+            cl_host::HostError::MasterSecretMismatch {
+                data_dir: dir.clone(),
+            },
+        ] {
+            let shown = scrub_line(&e.to_string());
+            assert!(shown.starts_with("the engine's master secret"), "{shown}");
+            assert!(
+                shown.contains(r"C:\Users\<user>\AppData\Local\ClientLedger\pgdata"),
+                "{shown}"
+            );
+            assert!(!shown.contains("alex.sample"), "{shown}");
+        }
+        let fault = cl_host::HostFault {
+            component: cl_host::Component::Database,
+            reason: cl_host::HostError::MasterSecretMissing { data_dir: dir }.to_string(),
+            restarts: 0,
+            log_paths: vec![],
+            last_output: vec![],
+        };
+        assert!(!crate::engine_link::fault_text(&fault).contains("withheld"));
+    }
+
+    #[test]
+    fn the_master_secret_waiver_needs_the_whole_message() {
+        // Without the exact message, "secret" still withholds the line.
+        assert!(scrub_line("master secret sk-abcdefghijklmnop").starts_with("[line withheld"));
+        let p = "the engine's master secret ";
+        assert!(scrub_line(&format!("{p}for x")).starts_with("[line withheld"));
+        let text = cl_host::HostError::MasterSecretMissing {
+            data_dir: sample_dir(),
+        }
+        .to_string();
+        // Anything appended or prepended (a hex value, another word, a second
+        // line) loses the waiver ...
+        for line in [
+            format!("{text} 9f3a2b7c4d5e6f708192a3b4c5d6e7f8"),
+            format!("{text} password=hunter2"),
+            format!("{text}\nsecret=abc"),
+            format!("token abc {text}"),
+        ] {
+            assert!(scrub_line(&line).starts_with("[line withheld"), "{line}");
+        }
+        // ... and a credential word inside the folder name still withholds it.
+        let odd = cl_host::HostError::MasterSecretMissing {
+            data_dir: PathBuf::from("/srv/password=hunter2/pgdata"),
+        }
+        .to_string();
+        assert!(scrub_line(&odd).starts_with("[line withheld"));
+        // Credential-shaped tokens in the folder are still removed.
+        let tok = cl_host::HostError::MasterSecretMissing {
+            data_dir: PathBuf::from("/srv/old sk-abcdefghijklmnop"),
+        }
+        .to_string();
+        let shown = scrub_line(&tok);
+        assert!(!shown.contains("sk-abcdefghijklmnop"), "{shown}");
+        assert!(shown.contains("[credential]"), "{shown}");
     }
 
     #[test]

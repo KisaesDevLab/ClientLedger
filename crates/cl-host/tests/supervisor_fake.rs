@@ -571,6 +571,13 @@ fn an_existing_cluster_with_no_master_secret_is_never_given_a_new_one() {
         panic!("expected a fault");
     };
     assert!(fault.reason.contains("master secret"), "{}", fault.reason);
+    // The fault carries the bare message, so the UI's whole-message check
+    // (which lets it through the status-bar scrubber) recognises it.
+    assert!(
+        cl_host::is_master_secret_message(&fault.reason),
+        "{}",
+        fault.reason
+    );
     assert_eq!(
         db.starts.load(Ordering::SeqCst),
         0,
