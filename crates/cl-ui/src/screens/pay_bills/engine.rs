@@ -66,8 +66,26 @@ pub(crate) trait LocalPayBills: Send {
 #[derive(Clone)]
 pub(crate) struct Viewed {
     pub record: BillPaymentRecord,
-    /// The bank or card account it was paid from.
+    /// The bank or card account it was paid from (none when credits and a
+    /// discount paid it).
     pub account: Option<AccountId>,
+    /// Every account on its ledger lines (a void touches them all).
+    pub line_accounts: Vec<AccountId>,
+}
+
+/// The account a payment was paid from: the bank or credit card account
+/// among its lines (not the discount account, not A/P).
+pub(crate) fn paid_from(accounts: &[Account], lines: &[AccountId]) -> Option<AccountId> {
+    use cl_model::register::AccountClass;
+    lines.iter().copied().find(|id| {
+        accounts.iter().any(|a| {
+            a.id == *id
+                && matches!(
+                    crate::screens::register::class_of(a),
+                    Some(AccountClass::Bank | AccountClass::CreditCard)
+                )
+        })
+    })
 }
 
 impl std::fmt::Debug for Viewed {
@@ -155,8 +173,16 @@ impl LocalPayBills for DemoPayBills {
         let mut s = demo(link)?;
         let record = crate::company::demo::pay_bills::get(&s, id)
             .ok_or(ApiError::NotFound { code: None })?;
-        let account = crate::company::demo::pay_bills::account_of(&mut s, id);
-        Ok(Viewed { record, account })
+        let line_accounts = crate::company::demo::pay_bills::line_accounts(&mut s, id);
+        let chart = s
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        Ok(Viewed {
+            record,
+            account: paid_from(&chart, &line_accounts),
+            line_accounts,
+        })
     }
 
     fn void(

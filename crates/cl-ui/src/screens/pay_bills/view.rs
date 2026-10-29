@@ -58,6 +58,8 @@ struct Shown {
     account: String,
     rows: Vec<PaidRow>,
     closing: Option<CalendarDate>,
+    /// Accounts Payable.
+    ap: Option<AccountId>,
 }
 
 /// The read-only Bill Payment window.
@@ -76,29 +78,64 @@ pub struct BillPaymentView {
     closing_prompt: ClosingPrompt<String>,
 }
 
+/// The account's name, or a dash when there is none (a payment made only
+/// from credits and a discount).
 fn names(accounts: &[Account], id: Option<AccountId>) -> String {
     id.and_then(|a| accounts.iter().find(|x| x.id == a))
-        .map(account_text)
-        .unwrap_or_default()
+        .map_or_else(|| "\u{2014}".to_string(), account_text)
 }
 
-/// The rows of a payment: cash and discount per bill, its credits beside.
-fn rows_of(v: &Viewed, label: &dyn Fn(TransactionId) -> String) -> Vec<PaidRow> {
-    v.record
+/// Accounts Payable in the chart.
+fn ap_of(accounts: &[Account]) -> Option<AccountId> {
+    accounts
+        .iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_payable"))
+        .map(|a| a.id)
+}
+
+/// Every bill the payment touched, in order: the bills it paid cash or a
+/// discount on, then those settled by credits alone (the engine writes no
+/// bill application for them).
+fn bills_of(v: &Viewed) -> Vec<TransactionId> {
+    let mut out: Vec<TransactionId> = Vec::new();
+    let all = v
+        .record
         .bill_applications
         .iter()
-        .map(|a| PaidRow {
-            label: label(a.bill_id),
-            cash: a.amount,
-            discount: a.discount_amount.unwrap_or(Money::ZERO),
-            credit: Money::sum(
-                v.record
-                    .credit_applications
-                    .iter()
-                    .filter(|c| c.bill_id == a.bill_id)
-                    .map(|c| c.amount),
-            )
-            .unwrap_or(Money::ZERO),
+        .map(|a| a.bill_id)
+        .chain(v.record.credit_applications.iter().map(|c| c.bill_id));
+    for b in all {
+        if !out.contains(&b) {
+            out.push(b);
+        }
+    }
+    out
+}
+
+/// The rows of a payment: cash and discount per bill (zero for a bill
+/// settled by credits alone), its credits beside (review 2).
+fn rows_of(v: &Viewed, label: &dyn Fn(TransactionId) -> String) -> Vec<PaidRow> {
+    bills_of(v)
+        .into_iter()
+        .map(|bill| {
+            let a = v
+                .record
+                .bill_applications
+                .iter()
+                .find(|a| a.bill_id == bill);
+            PaidRow {
+                label: label(bill),
+                cash: a.map_or(Money::ZERO, |a| a.amount),
+                discount: a.and_then(|a| a.discount_amount).unwrap_or(Money::ZERO),
+                credit: Money::sum(
+                    v.record
+                        .credit_applications
+                        .iter()
+                        .filter(|c| c.bill_id == bill)
+                        .map(|c| c.amount),
+                )
+                .unwrap_or(Money::ZERO),
+            }
         })
         .collect()
 }
@@ -163,6 +200,7 @@ impl BillPaymentView {
                         account,
                         rows,
                         closing: setup.closing,
+                        ap: ap_of(&setup.accounts),
                     }));
                 }
                 Err(e) => self.error = Some(e),
@@ -177,21 +215,19 @@ impl BillPaymentView {
             let txn = s.transactions().get(id).await?.record;
             let accounts = s.accounts().list_all(&AccountFilter::default()).await?;
             let closing = s.company_settings().await.ok().and_then(|c| c.lock_date);
-            let ap = accounts
-                .iter()
-                .find(|a| a.system_tag.as_deref() == Some("accounts_payable"))
-                .map(|a| a.id);
-            // The bank or card line comes before the discount line.
-            let account = txn
-                .lines
-                .iter()
-                .find(|l| l.credit.is_positive() && Some(l.account_id) != ap)
-                .map(|l| l.account_id);
+            let line_accounts: Vec<AccountId> = txn.lines.iter().map(|l| l.account_id).collect();
+            // The bank or card line (not the discount line).
+            let account = super::engine::paid_from(&accounts, &line_accounts);
+            let viewed = Viewed {
+                record,
+                account,
+                line_accounts,
+            };
             let mut labels = Vec::new();
-            for a in &record.bill_applications {
+            for bill in bills_of(&viewed) {
                 let label = s
                     .bills()
-                    .get(a.bill_id)
+                    .get(bill)
                     .await
                     .ok()
                     .and_then(|b| {
@@ -201,9 +237,8 @@ impl BillPaymentView {
                             .or_else(|| b.record.txn.txn_number.clone())
                     })
                     .unwrap_or_default();
-                labels.push((a.bill_id, label));
+                labels.push((bill, label));
             }
-            let viewed = Viewed { record, account };
             let rows = rows_of(&viewed, &|b| {
                 labels
                     .iter()
@@ -214,6 +249,7 @@ impl BillPaymentView {
             Ok(Shown {
                 vendor: txn.contact_name.clone().unwrap_or_default(),
                 account: names(&accounts, viewed.account),
+                ap: ap_of(&accounts),
                 viewed,
                 rows,
                 closing,
@@ -291,12 +327,17 @@ impl BillPaymentView {
                     self.closing_prompt.saved();
                     self.void_open = false;
                     self.voided = true;
-                    let accounts: Vec<AccountId> = self
+                    // Every account the payment's lines touched (A/P, the
+                    // bank or card, the discount account): an open Pay
+                    // Bills and the registers read again (review 3).
+                    let mut accounts: Vec<AccountId> = self
                         .shown
                         .as_ref()
-                        .and_then(|s| s.viewed.account)
-                        .into_iter()
-                        .collect();
+                        .map(|s| s.viewed.line_accounts.clone())
+                        .unwrap_or_default();
+                    accounts.extend(self.shown.as_ref().and_then(|s| s.ap));
+                    accounts.sort_unstable();
+                    accounts.dedup();
                     let sub = self.link.bus().subscribe();
                     crate::forms::publish_saved(&self.link, &sub, &accounts);
                     self.link.push(CompanyEvent::Toast("billpay.voided"));
@@ -488,5 +529,75 @@ impl Screen for BillPaymentView {
             m.extend(c);
         }
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::company::demo::{account_id, chart};
+    use cl_api::{BillApplication, BillPaymentRecord, CreditApplication};
+
+    fn id(n: u8) -> TransactionId {
+        TransactionId::parse(&format!("d0000000-0000-4000-8000-0000000000{n:02x}")).expect("id")
+    }
+
+    fn m(s: &str) -> Money {
+        Money::parse_wire(s).expect("money")
+    }
+
+    /// Review 2: a bill settled by a credit alone has no bill application
+    /// from the engine; the view still lists it (cash and discount zero).
+    #[test]
+    fn a_bill_settled_by_credits_alone_is_listed() {
+        let record = BillPaymentRecord {
+            id: id(20),
+            txn_date: CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+            contact_id: None,
+            total: Some(m("100.00")),
+            check_number: None,
+            print_status: None,
+            status: TxnStatus::Posted,
+            memo: None,
+            updated_at: None,
+            bill_applications: vec![BillApplication {
+                bill_id: id(1),
+                amount: m("100.00"),
+                discount_amount: Some(Money::ZERO),
+            }],
+            credit_applications: vec![CreditApplication {
+                credit_id: id(9),
+                bill_id: id(2),
+                amount: m("80.00"),
+            }],
+        };
+        let v = Viewed {
+            record,
+            account: None,
+            line_accounts: Vec::new(),
+        };
+        let rows = rows_of(&v, &|b| if b == id(2) { "B2".into() } else { "B1".into() });
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].label, "B2");
+        assert_eq!(
+            (rows[1].cash, rows[1].discount, rows[1].credit),
+            (Money::ZERO, Money::ZERO, m("80.00"))
+        );
+    }
+
+    /// Review (Low): "Paid from" is the bank or card line, never the
+    /// discount account; with neither it shows a dash.
+    #[test]
+    fn paid_from_is_the_bank_or_card_line() {
+        let accounts = chart();
+        let ap = ap_of(&accounts).expect("A/P");
+        let (bank, discount) = (account_id(1010), account_id(5200));
+        assert_eq!(
+            super::super::engine::paid_from(&accounts, &[ap, discount, bank]),
+            Some(bank)
+        );
+        let none = super::super::engine::paid_from(&accounts, &[ap, discount]);
+        assert_eq!(none, None);
+        assert_eq!(names(&accounts, none), "\u{2014}");
     }
 }

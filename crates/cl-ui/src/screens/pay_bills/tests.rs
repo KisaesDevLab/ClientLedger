@@ -372,10 +372,21 @@ fn the_bill_payment_view_shows_and_voids_a_payment() {
     assert_eq!(st["status"], "posted");
     assert!(view.command(CommandId::new("edit.void_transaction")));
     view.set_void_reason("paid twice");
+    let mut sub = link.bus().subscribe();
     view.confirm_void();
     let st = view.state();
     assert_eq!(st["voided"], true, "{st}");
     assert_eq!(st["status"], "void");
+    // Review 3: the void tells A/P and the bank (an open Pay Bills reads
+    // its list again).
+    let changes = link.bus().take(&mut sub);
+    let ap = crate::company::demo::chart()
+        .iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_payable"))
+        .map(|a| a.id)
+        .expect("A/P");
+    assert!(changes.ledger_touches(ap), "A/P");
+    assert!(changes.ledger_touches(by_number("1010")), "the bank");
     pay.load_list();
     pay.poll();
     let again = pay

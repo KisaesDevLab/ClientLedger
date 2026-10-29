@@ -644,21 +644,17 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
     })
 }
 
-/// The payment's bank or card account (its credit line), read from the
-/// ledger.
+/// The accounts on the payment's ledger lines (A/P, the bank or card, the
+/// discount account), in line order.
 #[must_use]
-pub fn account_of(state: &mut DemoState, id: TransactionId) -> Option<AccountId> {
+pub fn line_accounts(state: &mut DemoState, id: TransactionId) -> Vec<AccountId> {
     let chart = chart(state);
     let contacts = state.contacts_mut().clone();
-    let txn = state.ledger.get(&chart, &contacts, id)?.record;
-    let ap = chart
-        .iter()
-        .find(|a| a.system_tag.as_deref() == Some("accounts_payable"))
-        .map(|a| a.id);
-    txn.lines
-        .iter()
-        .find(|l| l.credit.is_positive() && Some(l.account_id) != ap)
-        .map(|l| l.account_id)
+    state
+        .ledger
+        .get(&chart, &contacts, id)
+        .map(|t| t.record.lines.iter().map(|l| l.account_id).collect())
+        .unwrap_or_default()
 }
 
 /// `POST /bill-payments/{id}/void`: the payment comes off the bills and
