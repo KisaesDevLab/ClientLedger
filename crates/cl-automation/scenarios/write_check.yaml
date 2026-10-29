@@ -353,6 +353,7 @@ steps:
   - click: {role: button, label: All printed correctly}
   - assert_state: {key: screen.asking, equals: false}
   - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
   - assert_state: {key: screen.screen, equals: write_check}
   - assert_state: {key: screen.edit_print_status, equals: printed}
   - assert_exists: {role: button, label: Reprint check}
@@ -364,6 +365,7 @@ steps:
   - assert_state: {key: screen.screen, equals: print_forms}
   - assert_state: {key: screen.preview.kind, equals: checks}
   - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
   - assert_state: {key: screen.screen, equals: write_check}
   - assert_state: {key: screen.edit_print_status, equals: queue}
   - assert_state: {key: screen.number_text, equals: "To print"}

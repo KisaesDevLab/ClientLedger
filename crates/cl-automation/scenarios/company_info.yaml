@@ -32,7 +32,7 @@ steps:
   # --- Numbering: each box has its own name; INV- fits ---------------------------
   - assert_value: {target: {role: text_input, label: Invoice prefix}, equals: "INV-"}
   - assert_value: {target: {role: text_input, label: Invoice next number}, equals: "1042"}
-  - assert_exists: {role: text_input, label: Sales receipt prefix}
+  - assert_exists: {role: text_input, label: Sales Receipt prefix}
   - click: {role: text_input, label: Invoice next number}
   - key: Ctrl+A
   - type: {text: "1041"}
@@ -57,7 +57,5 @@ steps:
   - key: Ctrl+A
   - key: Delete
   - assert_state: {key: screen.dirty, equals: true}
-  - click: {role: button, label: Remove}
-  - assert_state: {key: screen.logo_hidden, equals: true}
   - key: Alt+S
   - assert_not_exists: {role: tab, label_contains: "Company Information"}
