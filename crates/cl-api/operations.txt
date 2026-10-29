@@ -10,9 +10,10 @@
 # same for the idempotency-ap-v1 route set (U-83 to U-87), keyed only while the
 # engine advertises idempotency-ap-v1; keyable-docs = the same for the
 # idempotency-docs-v1 route set (U-92a); keyable-docs-attach = the same for the
-# document-drafts-attach-v1 route set (U-95). Only keyable, keyable-ap,
-# keyable-docs and keyable-docs-attach routes are upgraded; never = auth and
-# company-creation routes.
+# document-drafts-attach-v1 route set (U-95); keyable-pay-bills = the same for
+# the idempotency-pay-bills-v1 route set (U-102). Only keyable, keyable-ap,
+# keyable-docs, keyable-docs-attach and keyable-pay-bills routes are upgraded;
+# never = auth and company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
 # `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
@@ -260,3 +261,8 @@ POST    /api/v1/document-reading/assist         pre-handler-only
 # A04: attach a document draft (engine U-95, document-drafts-attach-v1; in the pin since
 # 4e0593c3; keyable-docs-attach = keyed only under document-drafts-attach-v1)
 POST    /api/v1/document-drafts/{id}/attach     keyable-docs-attach
+# P18: Pay Bills (engine U-101 to U-104; both routes in the pin, the new fields and
+# the key client-declared until the pin has them; keyable-pay-bills = keyed only
+# under idempotency-pay-bills-v1)
+POST    /api/v1/bill-payments                   keyable-pay-bills
+GET     /api/v1/bill-payments/{id}              idempotent

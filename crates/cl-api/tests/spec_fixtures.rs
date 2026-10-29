@@ -94,11 +94,12 @@ fn every_operation_is_recorded_and_in_the_spec() {
 /// `document-drafts-attach-v1` (U-95), sorted and disjoint.
 type Routes = Vec<(String, String)>;
 
-fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes) {
+fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes, Routes) {
     let v1 = spec::route_lines(&fixture("idempotency_v1_routes.txt"));
     let ap = spec::route_lines(&fixture("idempotency_ap_v1_routes.txt"));
     let docs = spec::route_lines(&fixture("idempotency_docs_v1_routes.txt"));
     let attach = spec::route_lines(&fixture("idempotency_docs_attach_v1_routes.txt"));
+    let pay = spec::route_lines(&fixture("idempotency_pay_bills_v1_routes.txt"));
     assert_eq!(v1.len(), 20, "the idempotency-v1 set has 20 routes");
     assert_eq!(ap.len(), 6, "the idempotency-ap-v1 set has 6 routes");
     assert_eq!(docs.len(), 2, "the idempotency-docs-v1 set has 2 routes");
@@ -121,7 +122,15 @@ fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes) {
             .all(|r| !v1.contains(r) && !ap.contains(r) && !docs.contains(r)),
         "document-drafts-attach-v1 only adds routes"
     );
-    (v1, ap, docs, attach)
+    assert_eq!(pay.len(), 1, "the idempotency-pay-bills-v1 set has 1 route");
+    assert!(
+        pay.iter().all(|r| !v1.contains(r)
+            && !ap.contains(r)
+            && !docs.contains(r)
+            && !attach.contains(r)),
+        "idempotency-pay-bills-v1 only adds routes"
+    );
+    (v1, ap, docs, attach, pay)
 }
 
 /// The rows `operations.txt` must class `keyable` (every `idempotency-v1`
@@ -129,7 +138,7 @@ fn recorded_idempotency_sets() -> (Routes, Routes, Routes, Routes) {
 /// six) and `keyable-docs` (every `idempotency-docs-v1` route; A03 covers
 /// both) and `keyable-docs-attach` (the `document-drafts-attach-v1` route;
 /// A04 covers it). A route is keyed only under its own set's capability.
-fn expected_keyable() -> (Routes, Routes, Routes, Routes) {
+fn expected_keyable() -> (Routes, Routes, Routes, Routes, Routes) {
     recorded_idempotency_sets()
 }
 
@@ -152,8 +161,10 @@ fn typed_keyable(set: cl_api::KeySet) -> Routes {
 /// No engine checkout needed.
 #[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
-    let (v1, ap, docs, attach) = expected_keyable();
+    let (v1, ap, docs, attach, pay) = expected_keyable();
     assert_eq!(spec::keyable_operations(OPERATIONS_TXT), v1);
+    assert_eq!(spec::keyable_pay_bills_operations(OPERATIONS_TXT), pay);
+    assert_eq!(typed_keyable(cl_api::KeySet::PayBillsV1), pay);
     assert_eq!(spec::keyable_ap_operations(OPERATIONS_TXT), ap);
     assert_eq!(spec::keyable_docs_operations(OPERATIONS_TXT), docs);
     assert_eq!(spec::keyable_docs_attach_operations(OPERATIONS_TXT), attach);
@@ -163,7 +174,7 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
     assert_eq!(typed_keyable(cl_api::KeySet::DocsAttachV1), attach);
     assert_eq!(
         cl_api::OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-        v1.len() + ap.len() + docs.len() + attach.len()
+        v1.len() + ap.len() + docs.len() + attach.len() + pay.len()
     );
 }
 
@@ -174,6 +185,22 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
 /// `engine/openapi.json`. A spec without any mark is an engine without
 /// `idempotency-v1` (pins before f3ce33fd): PENDING, unless `CL_API_REQUIRE_CAPS`
 /// lists the capability.
+/// Whether the spec marks any route of a keyed set that arrived later; when
+/// it marks none, PENDING unless `CL_API_REQUIRE_CAPS` lists `cap`.
+fn later_set(marked: &Routes, set: &Routes, cap: &str, item: &str, path: &Path) -> bool {
+    if set.iter().any(|r| marked.contains(r)) {
+        return true;
+    }
+    let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
+    assert!(
+        !caps.split(',').any(|c| c.trim() == cap),
+        "CL_API_REQUIRE_CAPS lists {cap} but {} marks none of its routes",
+        path.display()
+    );
+    eprintln!("PENDING({item}): {} marks no {cap} route", path.display());
+    false
+}
+
 #[test]
 fn engine_idempotency_marks_equal_the_keyable_rows() {
     let path = std::env::var_os("CL_ENGINE_OPENAPI")
@@ -203,46 +230,21 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         );
         return;
     }
-    let (v1, ap, docs, attach) = recorded_idempotency_sets();
+    let (v1, ap, docs, attach, pay) = recorded_idempotency_sets();
     let mut sets = v1.clone();
     sets.extend(ap.iter().cloned());
-    // `idempotency-docs-v1` (U-92a) arrives with engine PR #178: a spec
-    // that marks none of its routes is a pin from before it (PENDING,
-    // unless `CL_API_REQUIRE_CAPS` lists the capability); one that marks
-    // any must mark exactly the recorded set.
-    let has_docs = docs.iter().any(|r| marked.contains(r));
-    if has_docs {
-        sets.extend(docs.iter().cloned());
-    } else {
-        let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
-        assert!(
-            !caps.split(',').any(|c| c.trim() == "idempotency-docs-v1"),
-            "CL_API_REQUIRE_CAPS lists idempotency-docs-v1 but {} marks none of its routes",
-            path.display()
-        );
-        eprintln!(
-            "PENDING(U-92a): {} marks no idempotency-docs-v1 route",
-            path.display()
-        );
-    }
-    // `document-drafts-attach-v1` (U-95) arrives with engine PR #180, the
-    // same way.
-    let has_attach = attach.iter().any(|r| marked.contains(r));
-    if has_attach {
-        sets.extend(attach.iter().cloned());
-    } else {
-        let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
-        assert!(
-            !caps
-                .split(',')
-                .any(|c| c.trim() == "document-drafts-attach-v1"),
-            "CL_API_REQUIRE_CAPS lists document-drafts-attach-v1 but {} marks none of its routes",
-            path.display()
-        );
-        eprintln!(
-            "PENDING(U-95): {} marks no document-drafts-attach-v1 route",
-            path.display()
-        );
+    // A keyed set that arrived after `idempotency-v1` (U-92a with engine
+    // PR #178, U-95 with PR #180, U-102 with the P18 engine PR): a spec that
+    // marks none of its routes is a pin from before it (PENDING, unless
+    // `CL_API_REQUIRE_CAPS` lists the capability); one that marks any must
+    // mark exactly the recorded set.
+    let has_docs = later_set(&marked, &docs, "idempotency-docs-v1", "U-92a", &path);
+    let has_attach = later_set(&marked, &attach, "document-drafts-attach-v1", "U-95", &path);
+    let has_pay = later_set(&marked, &pay, "idempotency-pay-bills-v1", "U-102", &path);
+    for (has, set) in [(has_docs, &docs), (has_attach, &attach), (has_pay, &pay)] {
+        if has {
+            sets.extend(set.iter().cloned());
+        }
     }
     sets.sort();
     assert_eq!(marked, sets, "the engine's keyed routes changed");
@@ -250,6 +252,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     let keyable_ap = spec::keyable_ap_operations(OPERATIONS_TXT);
     let keyable_docs = spec::keyable_docs_operations(OPERATIONS_TXT);
     let keyable_attach = spec::keyable_docs_attach_operations(OPERATIONS_TXT);
+    let keyable_pay = spec::keyable_pay_bills_operations(OPERATIONS_TXT);
     assert!(
         keyable
             .iter()
@@ -261,6 +264,11 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             })
             .chain(if has_attach {
                 keyable_attach.iter()
+            } else {
+                [].iter()
+            })
+            .chain(if has_pay {
+                keyable_pay.iter()
             } else {
                 [].iter()
             })
@@ -276,6 +284,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     assert_eq!(
         keyable_attach, attach,
         "keyable-docs-attach = the document-drafts-attach-v1 set"
+    );
+    assert_eq!(
+        keyable_pay, pay,
+        "keyable-pay-bills = the idempotency-pay-bills-v1 set"
     );
 }
 

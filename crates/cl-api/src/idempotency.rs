@@ -265,6 +265,9 @@ pub(crate) struct Executor {
     /// The engine replays keys on the document draft attach
     /// (`document-drafts-attach-v1`, U-95).
     idempotency_docs_attach_v1: AtomicBool,
+    /// The engine replays keys on Pay Bills (`idempotency-pay-bills-v1`,
+    /// U-102).
+    idempotency_pay_bills_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -314,6 +317,7 @@ impl Executor {
             idempotency_ap_v1: AtomicBool::new(false),
             idempotency_docs_v1: AtomicBool::new(false),
             idempotency_docs_attach_v1: AtomicBool::new(false),
+            idempotency_pay_bills_v1: AtomicBool::new(false),
         }
     }
 
@@ -344,6 +348,12 @@ impl Executor {
         self.idempotency_docs_attach_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `idempotency-pay-bills-v1`
+    /// (U-102): it replays keys on Pay Bills.
+    pub(crate) fn set_idempotency_pay_bills_v1(&self, on: bool) {
+        self.idempotency_pay_bills_v1.store(on, Ordering::Relaxed);
+    }
+
     /// The engine replays a key on routes of `set` (it advertises that
     /// set's capability).
     fn replays(&self, set: KeySet) -> bool {
@@ -352,6 +362,7 @@ impl Executor {
             KeySet::ApV1 => self.idempotency_ap_v1.load(Ordering::Relaxed),
             KeySet::DocsV1 => self.idempotency_docs_v1.load(Ordering::Relaxed),
             KeySet::DocsAttachV1 => self.idempotency_docs_attach_v1.load(Ordering::Relaxed),
+            KeySet::PayBillsV1 => self.idempotency_pay_bills_v1.load(Ordering::Relaxed),
         }
     }
 
@@ -2061,6 +2072,54 @@ pub(crate) mod tests {
         ex.set_idempotency_docs_attach_v1(true);
         let key = IdempotencyKey::new();
         let mut call = attach();
+        call.idempotency_key = Some(key.clone());
+        let e = ex.run(&op, call, &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, idempotency_key: Some(ref k), .. } if *k == key),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        let sent: Vec<_> = reqs[1..]
+            .iter()
+            .map(|r| r.headers.get("idempotency-key").cloned())
+            .collect();
+        assert_eq!(sent.len(), 3, "retried with the key");
+        assert!(sent.iter().all(|k| {
+            k.as_ref()
+                .is_some_and(|k| k.to_str().ok() == Some(key.as_header().as_str()))
+        }));
+    }
+
+    /// Pay Bills is keyed only under `idempotency-pay-bills-v1` (U-102):
+    /// with every other set it sends no key and is never blind-retried (a
+    /// lost reply is `OutcomeUnknown { keyed: false }`); with it, the same
+    /// key is retried.
+    #[tokio::test]
+    async fn pay_bills_is_keyed_only_under_its_own_capability() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let route = "/api/v1/bill-payments";
+        let op = *find(Method::Post, route).expect("covered");
+        let pay = || Call::new(Method::Post, route, route).json_body(b"{}".to_vec());
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        ex.set_idempotency_ap_v1(true);
+        ex.set_idempotency_docs_v1(true);
+        ex.set_idempotency_docs_attach_v1(true);
+        let e = ex.run(&op, pay(), &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: false, .. }),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), 1, "never blind-retried");
+        assert!(reqs[0].headers.get("idempotency-key").is_none());
+        ex.set_idempotency_pay_bills_v1(true);
+        let key = IdempotencyKey::new();
+        let mut call = pay();
         call.idempotency_key = Some(key.clone());
         let e = ex.run(&op, call, &none(), None).await.expect_err("5xx");
         assert!(

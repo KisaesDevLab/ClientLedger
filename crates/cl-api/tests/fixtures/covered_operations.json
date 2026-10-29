@@ -199,5 +199,7 @@
   {"method":"PUT","path":"/api/v1/vendor-layout-templates","inSpec":true,"fragmentHash":"5ff85ec42f88489844ea0a425e440d8fe3d2148276555e3100d0bceddc9fc344"},
   {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":true,"fragmentHash":"dcf151b7a5a5af7c6c5b07a5066d382fc35f3cb7e5501dbe08c6eaa7b8408ab8"},
   {"method":"POST","path":"/api/v1/document-reading/assist","inSpec":true,"fragmentHash":"1b2210380ba3a58e281a1fc02a0367e79c0a531bac78595972b77f20fdf85eac"},
-  {"method":"POST","path":"/api/v1/document-drafts/{id}/attach","inSpec":true,"fragmentHash":"8ceaf18e08b2f382e191e95e8ee083ebd50561311dd9c100b50fb8f1b2c37917"}
+  {"method":"POST","path":"/api/v1/document-drafts/{id}/attach","inSpec":true,"fragmentHash":"8ceaf18e08b2f382e191e95e8ee083ebd50561311dd9c100b50fb8f1b2c37917"},
+  {"method":"POST","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":"6f49c757feed03508e2de5e8066f255ad243eec41b9564e07718fd4b011e31ea"},
+  {"method":"GET","path":"/api/v1/bill-payments/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"}
 ]

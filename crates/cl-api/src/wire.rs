@@ -278,6 +278,21 @@ impl Capabilities {
     /// converts) and the intake folder kind `statements`.
     pub const DOCUMENT_DRAFTS_STATEMENT: &'static str = "document-drafts-statement-v1";
 
+    // ---- P18: Pay Bills (engine U-101 to U-103; client-declared until the
+    // pin has them)
+    /// U-101: early-payment discounts on `POST /bill-payments`
+    /// (`bills[].discountAmount`, `discountAccountId`, 400
+    /// `DISCOUNT_ACCOUNT_REQUIRED`), the company setting
+    /// `billDiscountAccountId`, and `/bills/payable?paymentDate=` rows with
+    /// the engine's `discountAvailable` and `updatedAt`.
+    pub const BILL_DISCOUNTS: &'static str = "bill-discounts-v1";
+    /// U-102: `Idempotency-Key` on `POST /bill-payments`.
+    pub const IDEMPOTENCY_PAY_BILLS: &'static str = "idempotency-pay-bills-v1";
+    /// U-103: `checkNumber` (the first number) on a check run that is not
+    /// printed later; one consecutive number per vendor, 409
+    /// `CHECK_NUMBER_IN_USE`.
+    pub const BILL_PAYMENT_CHECK_NUMBER: &'static str = "bill-payment-check-number-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
