@@ -432,3 +432,179 @@ fn skipped_checks_resolve_the_saved_batch() {
     assert!(!s.has_unanswered());
     assert_eq!(s.notice, Some("print.confirm.skipped"));
 }
+
+fn lose_next(s: &PrintFormsScreen, mode: crate::company::demo::printing::LoseReply) {
+    if let Some(mut d) = s.link.demo_state() {
+        d.printing.lose_next = Some(mode);
+    }
+}
+
+fn print_calls(s: &PrintFormsScreen) -> u32 {
+    s.link.demo_state().map_or(0, |d| d.printing.print_calls)
+}
+
+fn saved(s: &PrintFormsScreen) -> cl_settings::UnconfirmedChecks {
+    s.unconfirmed.as_ref().expect("store").load()
+}
+
+/// B2: a lost reply on an engine that replays the key: the same request
+/// goes again under the same key, the first batch comes back (numbered
+/// once), the pages go out and the question shows.
+#[test]
+fn a_lost_print_reply_on_a_keyed_engine_resends_under_the_key() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: true });
+    s.print_clicked();
+    s.poll();
+    assert_eq!(print_calls(&s), 1, "numbered once; the resend was replayed");
+    assert!(s.asking);
+    assert_eq!(s.sent, Some(Sent::Printed));
+    let all = saved(&s);
+    let c = s.company_key().expect("company");
+    assert_eq!(all.printed_for(&c).count(), 1);
+    assert_eq!(all.intents_for(&c).count(), 0);
+}
+
+/// B2: a lost reply on an unkeyed engine after the numbers were recorded:
+/// read back, found recorded: the batch is saved as printed, the pages
+/// go out and "Did all checks print correctly?" shows.
+#[test]
+fn a_lost_print_reply_reads_back_and_continues_as_recorded() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    let c = s.company_key().expect("company");
+    assert_eq!(
+        saved(&s).intents_for(&c).count(),
+        1,
+        "saved before the answer"
+    );
+    assert!(s.recording());
+    s.poll();
+    assert!(!s.recording());
+    assert!(s.asking, "the question shows");
+    assert_eq!(s.sent, Some(Sent::Printed));
+    assert!(s.has_unanswered());
+    let all = saved(&s);
+    assert_eq!(all.intents_for(&c).count(), 0);
+    assert_eq!(all.printed_for(&c).next().map(|b| b.checks.len()), Some(2));
+    s.answer(true);
+    assert!(!s.has_unanswered());
+}
+
+/// B2: the reply was lost before anything was recorded: the intent goes,
+/// nothing is printed or asked, and Print can run again.
+#[test]
+fn a_lost_print_reply_not_recorded_drops_the_intent() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::BeforeRecording);
+    s.print_clicked();
+    s.poll();
+    assert!(!s.asking);
+    assert_eq!(s.sent, None, "nothing went to the printer");
+    assert_eq!(s.notice, Some("print.recover.not_recorded"));
+    assert!(!s.has_unanswered());
+    assert_eq!(saved(&s).batches.len(), 0);
+    assert_eq!(
+        s.run.as_ref().map(cl_print::PrintRun::state),
+        Some(cl_print::RunState::Ready)
+    );
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking, "printed on the second try");
+}
+
+/// B2: only some checks carry the planned numbers: those are treated as
+/// printed (nothing is sent: the preview has pages for the others) and the
+/// question asks about them; the others stay in the list.
+#[test]
+fn a_partial_read_back_asks_about_the_recorded_checks_only() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    lose_next(&s, LoseReply::Partial);
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking);
+    assert_eq!(s.sent, None);
+    assert_eq!(s.notice, Some("print.recover.partial"));
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items().len(), 1);
+    assert_eq!(run.items()[0].number, Some(first));
+    let c = s.company_key().expect("company");
+    assert_eq!(
+        saved(&s).printed_for(&c).next().map(|b| b.checks.len()),
+        Some(1)
+    );
+    s.first_bad = first.to_string();
+    s.answer(false);
+    s.poll();
+    assert!(!s.has_unanswered());
+    assert_eq!(s.checks.len(), 2, "both wait to print again");
+}
+
+/// B2: a crash after the engine recorded the numbers but before the answer
+/// was handled: on the next open the saved intent is read back, the batch
+/// is saved as printed and the question shows.
+#[test]
+fn a_saved_intent_is_recovered_on_the_next_open() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    // The window goes before the read-back is handled.
+    let link = Arc::clone(&s.link);
+    let tenant = s.tenant.clone();
+    let tid = tenant.as_ref().map(|(t, _)| *t).expect("tenant");
+    drop(s);
+    assert!(waiting_answer(&link, tid), "Home reminds meanwhile");
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let mut s = PrintFormsScreen::new(link, tenant, today, false);
+    s.poll();
+    s.poll();
+    assert!(s.asking, "the question for the recovered batch");
+    let c = s.company_key().expect("company");
+    let all = saved(&s);
+    assert_eq!(all.intents_for(&c).count(), 0);
+    assert_eq!(all.printed_for(&c).count(), 1);
+    assert_eq!(s.run.as_ref().map(|r| r.items().len()), Some(2));
+    s.answer(true);
+    assert!(!s.has_unanswered());
+}
+
+/// B2: while the numbers are out, Print from a form and a new preview
+/// don't replace the run; the reply is handled for the run that was sent.
+#[test]
+fn open_with_during_the_record_keeps_the_run() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    let ids: Vec<TransactionId> = s.checks.iter().map(|c| c.id).collect();
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    assert!(s.recording());
+    assert!(s.open_with(OpenPayload::PrintChecks(vec![ids[1]])));
+    assert_eq!(s.notice, Some("print.busy_recording"));
+    s.preview_checks();
+    let run = s.run.as_ref().expect("run");
+    assert_eq!(run.items().len(), 2, "the run sent stays");
+    assert!(s.open_with(OpenPayload::ReprintCheck(ids[0], s.checks[0].date)));
+    s.poll();
+    assert!(s.asking, "the reply was handled for the run that was sent");
+    assert_eq!(s.run.as_ref().map(|r| r.items().len()), Some(2));
+    assert!(s.has_unanswered());
+}

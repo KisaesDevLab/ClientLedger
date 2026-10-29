@@ -36,6 +36,27 @@ pub struct DemoPrinting {
     pub print_calls: u32,
     /// `POST /checks/requeue` calls that reached the demo (tests).
     pub requeue_calls: u32,
+    /// Tests: lose the next print's reply (B2).
+    pub lose_next: Option<LoseReply>,
+    /// The answer of each print run by its key: the demo replays a key as
+    /// an engine with `idempotency-check-print-v1` does (U-116).
+    replays: BTreeMap<String, PrintedBatch>,
+}
+
+/// How the next print reply is lost (tests of B2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoseReply {
+    /// Recorded, then the reply is lost; `keyed`: the engine replays the
+    /// key (a resend gets the first answer).
+    AfterRecording {
+        /// `OutcomeUnknown { keyed }`.
+        keyed: bool,
+    },
+    /// Never reached the engine; the reply is lost (unkeyed).
+    BeforeRecording,
+    /// Recorded, but the last check lost its number before the read-back
+    /// (another window requeued it); unkeyed.
+    Partial,
 }
 
 /// The demo's closing-date password.
@@ -260,6 +281,53 @@ pub fn print(
         batch_id: batch,
         checks_printed: u32::try_from(req.checks.len()).unwrap_or(u32::MAX),
     })
+}
+
+/// `POST /checks/print` with its `Idempotency-Key`: a key already answered
+/// gets the same answer again (nothing is numbered twice); `lose_next`
+/// loses the reply as the tests ask.
+///
+/// # Errors
+/// As [`print`]; `OutcomeUnknown` for a lost reply.
+pub fn print_keyed(
+    state: &mut DemoState,
+    req: &PrintChecks,
+    password: Option<&Secret>,
+    key: &str,
+) -> Result<PrintedBatch, ApiError> {
+    if let Some(b) = state.printing.replays.get(key) {
+        return Ok(b.clone());
+    }
+    let lost = |keyed: bool| ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::from_uuid(uuid::Uuid::new_v4()),
+        idempotency_key: None,
+        keyed,
+    };
+    match state.printing.lose_next.take() {
+        Some(LoseReply::BeforeRecording) => {
+            state.printing.print_calls += 1;
+            Err(lost(false))
+        }
+        Some(mode) => {
+            let b = print(state, req, password)?;
+            state.printing.replays.insert(key.to_string(), b.clone());
+            if mode == LoseReply::Partial
+                && let Some(last) = req.checks.last()
+            {
+                state.printing.printed.remove(last);
+                write_back(state, *last, None);
+            }
+            Err(lost(matches!(
+                mode,
+                LoseReply::AfterRecording { keyed: true }
+            )))
+        }
+        None => {
+            let b = print(state, req, password)?;
+            state.printing.replays.insert(key.to_string(), b.clone());
+            Ok(b)
+        }
+    }
 }
 
 /// `POST /checks/requeue`: the numbers are spoiled and the checks wait to
