@@ -17,6 +17,8 @@ cl-grid = { path = "../cl-grid" }
 cl-host = { path = "../cl-host" }
 cl-import = { path = "../cl-import" }
 cl-model = { path = "../cl-model" }
+# P19: checks and forms laid out as PDF pages.
+cl-print = { path = "../cl-print" }
 cl-settings = { path = "../cl-settings" }
 # No `default_fonts`: those bundle fonts under licenses outside the cargo-deny
 # allowlist. The UI embeds IBM Plex (OFL, ATTRIBUTION.md) instead.
@@ -45,6 +47,9 @@ pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfi
 # reached through the system libdbus-1 loaded at run time (rfd's own FFI),
 # with the system `zenity` as rfd's fallback. Windows: IFileDialog
 # (windows-sys); macOS: NSOpenPanel (objc2).
+# P19: exact amounts handed to cl-print (already in the tree through cl-core;
+# MIT).
+rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

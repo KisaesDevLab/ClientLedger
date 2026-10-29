@@ -113,6 +113,8 @@ pub fn story_credit_id() -> TransactionId {
 struct DemoPayment {
     id: TransactionId,
     vendor: ContactId,
+    /// The bank or card account it was paid from.
+    bank: AccountId,
     date: CalendarDate,
     cash: Money,
     check_number: Option<u64>,
@@ -579,6 +581,7 @@ pub fn pay(
         state.pay_bills.payments.push(DemoPayment {
             id,
             vendor,
+            bank: req.bank_account,
             date: req.date,
             cash,
             check_number,
@@ -643,6 +646,37 @@ fn applied_docs(
         }
     }
     out
+}
+
+/// The demo's bill-payment checks waiting to print on `bank` (P19), with
+/// the vendor's name; `printed` are the ones the print queue numbered.
+pub fn print_queue(
+    state: &mut DemoState,
+    bank: AccountId,
+    printed: &dyn Fn(TransactionId) -> bool,
+) -> Vec<cl_api::QueuedCheck> {
+    let names = vendors(state);
+    state
+        .pay_bills
+        .payments
+        .iter()
+        .filter(|p| p.bank == bank && p.print_later && !printed(p.id))
+        .filter(|p| !state.ledger.is_void(p.id))
+        .map(|p| cl_api::QueuedCheck {
+            id: p.id,
+            date: p.date,
+            amount: p.cash,
+            payee: names
+                .iter()
+                .find(|(id, _)| *id == p.vendor)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default(),
+            memo: String::new(),
+            kind: cl_api::QueuedCheckKind::BillPayment,
+            bank_account: Some(bank),
+            address: Vec::new(),
+        })
+        .collect()
 }
 
 /// `GET /bill-payments/{id}`.

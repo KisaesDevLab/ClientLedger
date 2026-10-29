@@ -42,6 +42,9 @@ pub mod doc_review;
 // P18: Pay Bills and the read-only Bill Payment view.
 pub mod pay_bills;
 
+// P19: form printing.
+pub mod print_forms;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,

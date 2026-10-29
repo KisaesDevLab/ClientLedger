@@ -573,6 +573,62 @@ pub fn list(state: &mut DemoState, bank: AccountId) -> Vec<CheckSummary> {
         .collect()
 }
 
+/// The demo's written checks waiting to print on `bank` (P19); `printed`
+/// are the ones the print queue numbered.
+pub fn print_queue(
+    state: &mut DemoState,
+    bank: AccountId,
+    printed: &dyn Fn(TransactionId) -> bool,
+) -> Vec<cl_api::QueuedCheck> {
+    list(state, bank)
+        .into_iter()
+        .filter(|r| {
+            r.print_status == PrintStatus::Queue
+                && r.status != cl_api::TxnStatus::Void
+                && !printed(r.id)
+        })
+        .filter_map(|r| {
+            let RegisterAmount::Exact(amount) = r.amount? else {
+                return None;
+            };
+            let info = state.checks.info.get(&r.id);
+            Some(cl_api::QueuedCheck {
+                id: r.id,
+                date: r.date?,
+                amount,
+                payee: r.payee.unwrap_or_default(),
+                memo: info
+                    .and_then(|i| i.printed_memo.clone())
+                    .unwrap_or_default(),
+                kind: cl_api::QueuedCheckKind::Check,
+                bank_account: Some(bank),
+                address: info
+                    .and_then(|i| i.address.as_deref())
+                    .map(|a| {
+                        a.lines()
+                            .map(str::to_string)
+                            .filter(|l| !l.trim().is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// A check's expense lines (account name, amount) for its voucher stub.
+pub fn stub_lines(state: &mut DemoState, id: TransactionId) -> Vec<(String, Money)> {
+    transaction(state, id)
+        .map(|t| {
+            t.lines
+                .into_iter()
+                .filter(|l| l.debit.is_positive())
+                .map(|l| (l.account_name.unwrap_or_default(), l.debit))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A check's history in the demo (what this run did to it).
 #[must_use]
 pub fn history(state: &DemoState, id: TransactionId) -> Vec<HistoryEntry> {
