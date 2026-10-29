@@ -301,6 +301,8 @@ pub struct WriteCheckScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// P19 (Q-P19s): Print saved the check; preview it once the save lands.
+    pub(crate) print_after_save: bool,
     /// The printed-check question after a 409 `CHECK_PRINTED`.
     pub(crate) printed: Option<PrintedPrompt>,
     /// Saves in other windows (Q-262).
@@ -425,6 +427,7 @@ impl WriteCheckScreen {
             suggest: suggest::SuggestState::default(),
             nav_prompt: None,
             after_save_nav: None,
+            print_after_save: false,
             printed: None,
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,

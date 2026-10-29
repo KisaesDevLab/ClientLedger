@@ -689,6 +689,13 @@ impl WriteCheckScreen {
             e.old_date = s.date;
         }
         self.follow_up(intent);
+        // Print (Q-P19s): the check is in the print queue now.
+        if std::mem::take(&mut self.print_after_save) {
+            self.link.push(CompanyEvent::OpenWith(
+                cl_model::CommandId::new(crate::screens::print_forms::KIND),
+                Box::new(crate::windows::OpenPayload::PrintChecks(vec![s.id])),
+            ));
+        }
         // The engine's balance and next number after the save.
         self.fetch_bank_facts();
         // Prev/Next asked before the save (the unsaved-changes prompt).
@@ -760,6 +767,7 @@ impl WriteCheckScreen {
 
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
+        self.print_after_save = false;
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
         }

@@ -1223,6 +1223,25 @@ impl PrintFormsScreen {
             self.queue_task = None;
             match r {
                 Ok(q) => {
+                    // Print from Write Check: the check may be on another
+                    // bank account; look there before giving up.
+                    if !self.preselect.is_empty()
+                        && !q.checks.iter().any(|c| self.preselect.contains(&c.id))
+                    {
+                        let at = self
+                            .setup
+                            .banks
+                            .iter()
+                            .position(|(id, _)| Some(*id) == self.bank);
+                        let next = at.and_then(|i| self.setup.banks.get(i + 1)).map(|b| b.0);
+                        if let Some(b) = next {
+                            self.bank = Some(b);
+                            self.first_number.clear();
+                            self.load_queue();
+                            return;
+                        }
+                        self.preselect.clear();
+                    }
                     self.picked = if self.preselect.is_empty() {
                         q.checks.iter().map(|c| c.id).collect()
                     } else {
@@ -1916,7 +1935,14 @@ impl Screen for PrintFormsScreen {
         if let OpenPayload::PrintChecks(ids) = payload {
             self.preselect = ids;
             self.tab = Tab::Checks;
-            if !self.checks.is_empty() {
+            if self.loaded && self.setup_task.is_none() {
+                // Look from the first bank account on (see `poll`).
+                if let Some((first, _)) = self.setup.banks.first() {
+                    if self.bank != Some(*first) {
+                        self.first_number.clear();
+                    }
+                    self.bank = Some(*first);
+                }
                 self.load_queue();
             }
             return true;
