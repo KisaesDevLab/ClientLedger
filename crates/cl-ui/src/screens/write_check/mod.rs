@@ -329,6 +329,37 @@ pub(crate) fn blank(bank: Option<AccountId>, date: CalendarDate, number: NumberF
     f
 }
 
+/// The engine's next check number for `bank` and the highest check number
+/// in it (a check written here or a bill payment), for the Q-P13m proposal.
+/// Shared with Pay Bills (P18).
+pub(crate) async fn check_numbers(
+    s: &cl_api::Session,
+    bank: AccountId,
+) -> (Option<u32>, Option<u32>) {
+    let next = s
+        .checks()
+        .settings()
+        .await
+        .ok()
+        .and_then(|c| c.next_for(bank));
+    let mut highest: Option<u32> = None;
+    for kind in [cl_api::TxnType::Expense, cl_api::TxnType::BillPayment] {
+        let mut q = cl_api::RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
+        q.txn_type = Some(kind);
+        q.sort = cl_api::RegisterSort::Number;
+        q.dir = cl_api::SortDir::Desc;
+        let top = s
+            .register()
+            .page(bank, &q, 1, 1)
+            .await
+            .ok()
+            .and_then(|page| page.lines.first().and_then(|l| l.check_number))
+            .and_then(|n| u32::try_from(n).ok());
+        highest = highest.max(top);
+    }
+    (next, highest)
+}
+
 impl WriteCheckScreen {
     /// A new check in the open company.
     #[must_use]
@@ -615,30 +646,7 @@ impl WriteCheckScreen {
             return;
         };
         if let Ok(p) = group.read(&session, move |s| async move {
-            let next = s
-                .checks()
-                .settings()
-                .await
-                .ok()
-                .and_then(|c| c.next_for(bank));
-            // The highest number on a check: written here (an expense) or
-            // paying bills (a bill payment).
-            let mut highest: Option<u32> = None;
-            for kind in [cl_api::TxnType::Expense, cl_api::TxnType::BillPayment] {
-                let mut q = cl_api::RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
-                q.txn_type = Some(kind);
-                q.sort = cl_api::RegisterSort::Number;
-                q.dir = cl_api::SortDir::Desc;
-                let top = s
-                    .register()
-                    .page(bank, &q, 1, 1)
-                    .await
-                    .ok()
-                    .and_then(|page| page.lines.first().and_then(|l| l.check_number))
-                    .and_then(|n| u32::try_from(n).ok());
-                highest = highest.max(top);
-            }
-            Ok((next, highest))
+            Ok(check_numbers(&s, bank).await)
         }) {
             self.numbers_task = Some(Task::Pending(p));
         }

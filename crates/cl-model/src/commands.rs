@@ -350,7 +350,7 @@ pub const COMMANDS: &[Command] = &[
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     built("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B')),
-    screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
+    built("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B')),
     built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
     built("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C')),
     built("vendors.personal_funds", "Paid with Personal Funds", Some(Menu::Vendors), 1, None),
@@ -363,6 +363,9 @@ pub const COMMANDS: &[Command] = &[
     built("vendors.review_documents", "Review Documents", Some(Menu::Vendors), 2, None),
     // P17: a document in its own tab ("Open full size"); no menu entry
     built("nav.document_view", "Document Preview", None, 2, None),
+    // P18: a bill payment, read-only with Void (OpenRecord, Q-P18f); no
+    // menu entry
+    built("vendors.bill_payment", "Bill Payment", None, 2, None),
     // Banking
     built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
     built("banking.deposit", "Make Deposit", Some(Menu::Banking), 0, ctrl('D')),
@@ -541,6 +544,9 @@ mod tests {
             "nav.document_view",
             // A04
             "vendors.review_documents",
+            // P18
+            "vendors.pay_bills",
+            "vendors.bill_payment",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

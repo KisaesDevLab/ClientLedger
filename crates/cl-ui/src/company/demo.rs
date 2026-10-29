@@ -18,6 +18,8 @@ pub mod intake;
 pub mod journal;
 pub mod lists;
 pub mod money;
+// P18: Pay Bills.
+pub mod pay_bills;
 pub mod register;
 pub mod template_store;
 pub mod templates;
@@ -107,6 +109,8 @@ pub struct DemoState {
     pub batch: batch::DemoBatches,
     /// Bills and vendor credits entered in the demo (P17).
     pub bills: bills::DemoBills,
+    /// Bill payments made in the demo (P18).
+    pub pay_bills: pay_bills::DemoPayBills,
     /// Intake folders as the demo engine keeps them (A01, U-93).
     pub intake: intake::DemoIntake,
     /// Document drafts as the demo engine keeps them (A04, WP-D).
@@ -225,6 +229,7 @@ impl DemoState {
             templates_owner_revoked: std::collections::BTreeSet::new(),
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
+            pay_bills: pay_bills::DemoPayBills::default(),
             intake: intake::DemoIntake::default(),
             // The demo engine has document drafts and attach (A04).
             drafts: drafts::DemoDrafts::on(),

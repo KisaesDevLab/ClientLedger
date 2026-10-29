@@ -175,6 +175,35 @@ impl BillPayments<'_> {
     }
 }
 
+impl BillPayments<'_> {
+    /// Voids a bill payment (`POST /bill-payments/{id}/void`) with the A/P
+    /// options: the closing-date password (`ap-closing-v1`) and the stale
+    /// guard (`ap-edit-v1`). The engine takes it off the bills and credits
+    /// it paid. A reason is required.
+    ///
+    /// # Errors
+    /// As `ApVoids::bill_payment`; `Local(Unsupported)` for a password
+    /// without `ap-closing-v1` (nothing sent).
+    pub async fn void(
+        &self,
+        id: TransactionId,
+        reason: &str,
+        opts: &crate::resources::ap_doc::ApWriteOptions,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        crate::resources::ap_void::void_with(
+            self.0,
+            &crate::resources::operations::BILL_PAYMENT_VOID,
+            "/api/v1/bill-payments",
+            id,
+            reason,
+            opts,
+            key,
+        )
+        .await
+    }
+}
+
 // ---- P18: the payable list ----------------------------------------------
 
 /// What Pay Bills lists (`GET /bills/payable`).
