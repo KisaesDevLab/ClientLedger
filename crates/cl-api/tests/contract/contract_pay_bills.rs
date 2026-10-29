@@ -456,12 +456,12 @@ pub fn credit_and_discount_without_cash_u101(h: &Harness) {
             ..PayableFilter::default()
         }))
         .expect("payable");
-    let back = list
+    let reopened = list
         .credits
         .iter()
         .find(|x| x.id == c)
         .expect("credit open");
-    assert_eq!(back.balance_due, m("214.07"), "the credit is back");
+    assert_eq!(reopened.balance_due, m("214.07"), "the credit is back");
 }
 
 /// U-102: the same key twice makes one set of payments.
