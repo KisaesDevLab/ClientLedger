@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use cl_api::{
-    ApiError, BillApplication, BillPaymentRecord, CheckNumbering, CreatedPayment,
+    ApiError, AppliedDoc, BillApplication, BillPaymentRecord, CheckNumbering, CreatedPayment,
     CreditApplication, LocalValidation, PayBillsRequest, PayMethod, PayableBill, PayableCredit,
     PayableFilter, PayableList,
 };
@@ -119,6 +119,8 @@ struct DemoPayment {
     print_later: bool,
     bills: Vec<(TransactionId, Money, Money)>,
     credits: Vec<(TransactionId, TransactionId, Money)>,
+    /// The bills' and credits' numbers as a voucher stub lists them (U-108).
+    docs: BTreeMap<TransactionId, AppliedDoc>,
 }
 
 /// What Pay Bills did in the demo.
@@ -583,6 +585,7 @@ pub fn pay(
             print_later,
             bills: paid.clone(),
             credits: credits.clone(),
+            docs: applied_docs(&listed, &paid, &credits),
         });
         out.push(CreatedPayment {
             id,
@@ -603,6 +606,43 @@ pub fn pay(
         });
     }
     Ok(out)
+}
+
+/// The stub numbers of what a payment applied, from the payable list read
+/// before it posted.
+fn applied_docs(
+    listed: &PayableList,
+    bills: &[(TransactionId, Money, Money)],
+    credits: &[(TransactionId, TransactionId, Money)],
+) -> BTreeMap<TransactionId, AppliedDoc> {
+    let mut out = BTreeMap::new();
+    for (id, _, _) in bills {
+        if let Some(b) = listed.bills.iter().find(|b| b.id == *id) {
+            out.insert(
+                *id,
+                AppliedDoc {
+                    txn_number: b.number.clone(),
+                    vendor_invoice_number: b.vendor_invoice_number.clone(),
+                    txn_date: Some(b.txn_date),
+                    total: b.total,
+                },
+            );
+        }
+    }
+    for (id, _, _) in credits {
+        if let Some(c) = listed.credits.iter().find(|c| c.id == *id) {
+            out.insert(
+                *id,
+                AppliedDoc {
+                    txn_number: c.number.clone(),
+                    vendor_invoice_number: c.vendor_invoice_number.clone(),
+                    txn_date: Some(c.txn_date),
+                    total: c.total,
+                },
+            );
+        }
+    }
+    out
 }
 
 /// `GET /bill-payments/{id}`.
@@ -630,6 +670,7 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
                 bill_id: *bill,
                 amount: *cash,
                 discount_amount: Some(*discount),
+                bill: p.docs.get(bill).cloned(),
             })
             .collect(),
         credit_applications: p
@@ -639,6 +680,7 @@ pub fn get(state: &DemoState, id: TransactionId) -> Option<BillPaymentRecord> {
                 credit_id: *credit,
                 bill_id: *bill,
                 amount: *amount,
+                credit: p.docs.get(credit).cloned(),
             })
             .collect(),
     })

@@ -564,11 +564,13 @@ mod tests {
                 bill_id: id(1),
                 amount: m("100.00"),
                 discount_amount: Some(Money::ZERO),
+                bill: None,
             }],
             credit_applications: vec![CreditApplication {
                 credit_id: id(9),
                 bill_id: id(2),
                 amount: m("80.00"),
+                credit: None,
             }],
         };
         let v = Viewed {

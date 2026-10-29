@@ -687,6 +687,10 @@ pub struct BillApplication {
     /// Early-payment discount (`None` before U-101).
     #[serde(default)]
     pub discount_amount: Option<Money>,
+    /// The bill's numbers for a voucher stub (U-108,
+    /// `check-reprint-audit-v1`; `None` before it or when the bill is gone).
+    #[serde(default)]
+    pub bill: Option<AppliedDoc>,
 }
 
 /// A credit a payment applied (`creditApplications[]`).
@@ -699,6 +703,36 @@ pub struct CreditApplication {
     pub bill_id: TransactionId,
     /// How much.
     pub amount: Money,
+    /// The credit's numbers for a voucher stub (U-108).
+    #[serde(default)]
+    pub credit: Option<AppliedDoc>,
+}
+
+/// A bill or credit as a voucher stub lists it (U-108, Q-213).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedDoc {
+    /// Its reference number.
+    #[serde(default)]
+    pub txn_number: Option<String>,
+    /// The vendor's invoice number.
+    #[serde(default)]
+    pub vendor_invoice_number: Option<String>,
+    /// Date.
+    #[serde(default)]
+    pub txn_date: Option<CalendarDate>,
+    /// Its total (decimal string on the wire).
+    #[serde(default)]
+    pub total: Option<Money>,
+}
+
+/// Date only.
+impl fmt::Debug for AppliedDoc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppliedDoc")
+            .field("txn_date", &self.txn_date)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for BillApplication {
