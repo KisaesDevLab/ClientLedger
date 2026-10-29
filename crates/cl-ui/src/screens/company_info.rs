@@ -17,7 +17,7 @@ use cl_api::{
 };
 use cl_core::CalendarDate;
 use cl_core::ids::TenantId;
-use cl_model::CommandId;
+use cl_model::{CommandId, Scope};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -101,7 +101,18 @@ pub struct CompanyInfoScreen {
     dup_task: Option<(DocType, String, Task<Vec<String>>)>,
     /// Types whose next number is already used: the number as it is used.
     pub(crate) duplicates: BTreeMap<DocType, String>,
+    /// What was read last (the unsaved dot compares with it).
+    baseline: Baseline,
+    /// Save & Close: the window closes once the save lands.
+    close_after_save: bool,
 }
+
+/// The editable values as read: footer, overrides, numbering rows.
+type Baseline = (
+    String,
+    BTreeMap<DocType, String>,
+    Vec<(DocType, String, String)>,
+);
 
 /// The transaction type a form type's documents are, when it has any
 /// (statements are not documents with numbers).
@@ -148,6 +159,8 @@ impl CompanyInfoScreen {
             dup_stale: BTreeSet::new(),
             dup_task: None,
             duplicates: BTreeMap::new(),
+            baseline: Baseline::default(),
+            close_after_save: false,
         };
         s.load();
         s.poll();
@@ -408,6 +421,7 @@ impl CompanyInfoScreen {
                         .collect();
                     self.loaded_numbers = l.numbers;
                     self.duplicates.clear();
+                    self.baseline = self.current();
                     self.show_logo(l.logo);
                 }
                 Err(e) => self.error = Some(e),
@@ -456,11 +470,37 @@ impl CompanyInfoScreen {
             match r {
                 Ok(()) => {
                     self.notice = Some("company_info.saved");
+                    self.baseline = self.current();
+                    if std::mem::take(&mut self.close_after_save) {
+                        self.link
+                            .push(crate::company::CompanyEvent::CloseWindow(CommandId::new(
+                                KIND,
+                            )));
+                    }
                     self.load();
                 }
-                Err(e) => self.error = Some(e),
+                Err(e) => {
+                    self.close_after_save = false;
+                    self.error = Some(e);
+                }
             }
         }
+    }
+
+    /// The editable values now.
+    fn current(&self) -> Baseline {
+        let overrides = self
+            .overrides
+            .iter()
+            .filter(|(_, v)| !v.trim().is_empty())
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        (self.footer.clone(), overrides, self.numbers.clone())
+    }
+
+    /// Unsaved edits (the tab's dot, the close prompt).
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.loaded && self.current() != self.baseline
     }
 
     fn draw(&mut self, ui: &mut Ui) {
@@ -584,21 +624,33 @@ impl CompanyInfoScreen {
                 ui.end_row();
                 for (k, prefix, next) in &mut self.numbers {
                     let name = t(type_key(*k));
-                    let l = ui.label(&name);
-                    let a = ui
-                        .add(egui::TextEdit::singleline(prefix).desired_width(80.0))
-                        .labelled_by(l.id)
-                        .on_hover_text(crate::i18n::t_with(
-                            "company_info.numbers.prefix_of",
+                    ui.label(&name);
+                    // Each box has its own name ("Invoice prefix", "Invoice
+                    // next number") for screen readers and the control
+                    // channel.
+                    let a = named_edit(
+                        ui,
+                        prefix,
+                        120.0,
+                        &crate::i18n::t_with(
+                            "company_info.numbers.prefix_name",
                             &[("type", &name)],
-                        ));
-                    let b = ui
-                        .add(egui::TextEdit::singleline(next).desired_width(100.0))
-                        .labelled_by(l.id)
-                        .on_hover_text(crate::i18n::t_with(
-                            "company_info.numbers.next_of",
-                            &[("type", &name)],
-                        ));
+                        ),
+                    )
+                    .on_hover_text(crate::i18n::t_with(
+                        "company_info.numbers.prefix_of",
+                        &[("type", &name)],
+                    ));
+                    let b = named_edit(
+                        ui,
+                        next,
+                        110.0,
+                        &crate::i18n::t_with("company_info.numbers.next_name", &[("type", &name)]),
+                    )
+                    .on_hover_text(crate::i18n::t_with(
+                        "company_info.numbers.next_of",
+                        &[("type", &name)],
+                    ));
                     if a.changed() || b.changed() {
                         changed.push(*k);
                     }
@@ -641,6 +693,7 @@ impl CompanyInfoScreen {
             "overrides": self.overrides.values().filter(|v| !v.trim().is_empty()).count(),
             "numbers": self.numbers.iter().map(|(k, p, n)| json!([k.as_wire(), p, n])).collect::<Vec<_>>(),
             "numbering": self.numbering,
+            "dirty": self.is_dirty(),
             "duplicates": self.duplicates.keys().map(|k| k.as_wire()).collect::<Vec<_>>(),
             "notice": self.notice,
             "error": self.error.is_some(),
@@ -648,9 +701,36 @@ impl CompanyInfoScreen {
     }
 }
 
+/// A one-line box named `name` (its AccessKit label).
+fn named_edit(ui: &mut Ui, text: &mut String, width: f32, name: &str) -> egui::Response {
+    let before = text.clone();
+    let r = ui.add(egui::TextEdit::singleline(text).desired_width(width));
+    let now = text.clone();
+    r.widget_info(|| {
+        let mut info = egui::WidgetInfo::text_edit(true, before.clone(), now.clone(), "");
+        info.label = Some(name.to_string());
+        info
+    });
+    r
+}
+
 impl Screen for CompanyInfoScreen {
     fn title(&self) -> String {
         t("cmd.company.information")
+    }
+
+    fn dirty(&self) -> bool {
+        self.is_dirty()
+    }
+
+    fn scope(&self) -> Scope {
+        // Form shortcuts (Alt+S Save & Close, Esc) apply here.
+        Scope::Form
+    }
+
+    fn save(&mut self) -> bool {
+        self.save();
+        self.save_task.is_some()
     }
 
     fn ui(&mut self, ui: &mut Ui) {
@@ -672,7 +752,15 @@ impl Screen for CompanyInfoScreen {
     fn command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
-            "form.save_close" | "form.save_new" => {
+            "form.save_close" => {
+                self.close_after_save = true;
+                self.save();
+                if self.save_task.is_none() {
+                    self.close_after_save = false;
+                }
+                true
+            }
+            "form.save_new" => {
                 self.save();
                 true
             }
@@ -772,6 +860,20 @@ mod tests {
             s.poll();
         }
         assert!(s.duplicates.is_empty());
+    }
+
+    #[test]
+    fn edits_show_the_unsaved_dot_and_save_and_close_clears_it() {
+        let (_d, mut s) = screen();
+        assert!(!Screen::dirty(&s));
+        s.footer = "Pay within 30 days".into();
+        assert!(Screen::dirty(&s));
+        assert_eq!(s.state()["dirty"], true);
+        assert!(Screen::command(&mut s, CommandId::new("form.save_close")));
+        s.poll();
+        assert_eq!(s.notice, Some("company_info.saved"));
+        assert!(!Screen::dirty(&s));
+        assert_eq!(Screen::scope(&s), Scope::Form);
     }
 
     #[test]
