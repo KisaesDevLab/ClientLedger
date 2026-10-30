@@ -253,6 +253,9 @@ pub struct PrintFormsScreen {
     /// keys): skipped by [`Self::recover_intents`] until the window opens
     /// again; the first one offers "Forget this print".
     pub(crate) unresolved: Vec<String>,
+    /// The first of them, read from the file when it or `unresolved`
+    /// changes (drawn each frame, never read each frame).
+    stuck: Option<(String, Vec<u64>)>,
     requeue_task: Option<Task<Requeued>>,
     requeue_ids: Vec<TransactionId>,
     mark_task: Option<Task<cl_api::MarkedPrinted>>,
@@ -483,6 +486,7 @@ impl PrintFormsScreen {
             readback_task: None,
             readback: None,
             unresolved: Vec::new(),
+            stuck: None,
             requeue_task: None,
             requeue_ids: Vec::new(),
             mark_task: None,
@@ -1424,13 +1428,23 @@ impl PrintFormsScreen {
         if !self.unresolved.contains(&key) {
             self.unresolved.push(key);
         }
+        self.printing_changed();
         self.notice = Some("print.recover.unknown");
         self.recover_intents();
     }
 
     /// The first saved intent the read-back could not decide: its key and
-    /// planned numbers (for "Forget this print").
+    /// planned numbers (for "Forget this print"). Cached: see
+    /// [`Self::printing_changed`].
     pub(crate) fn stuck_intent(&self) -> Option<(String, Vec<u64>)> {
+        self.stuck.clone()
+    }
+
+    /// [`Self::stuck_intent`] read from the file.
+    fn read_stuck(&self) -> Option<(String, Vec<u64>)> {
+        if self.unresolved.is_empty() {
+            return None;
+        }
         let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
             return None;
         };
@@ -1755,8 +1769,11 @@ impl PrintFormsScreen {
 
     /// The unanswered batches changed on this computer: read them again
     /// here and tell Home (its reminder reads the file on that notice).
+    /// Also the place [`Self::stuck_intent`] is read again: call it after
+    /// every change of `unresolved`.
     fn printing_changed(&mut self) {
         self.unanswered = self.read_unanswered();
+        self.stuck = self.read_stuck();
         self.link.bus().publish(crate::data_bus::Change::Printing);
     }
 
@@ -2097,9 +2114,8 @@ impl PrintFormsScreen {
             form::hint(ui, &tokens, &t(k));
         }
         // Q-PR2d: an intent the read-back could not decide can be forgotten.
-        if !self.unresolved.is_empty()
-            && !self.recording()
-            && let Some((key, numbers)) = self.stuck_intent()
+        if !self.recording()
+            && let Some((key, numbers)) = self.stuck.clone()
         {
             let range = match (numbers.iter().min(), numbers.iter().max()) {
                 (Some(a), Some(b)) if a != b => format!("{a}\u{2013}{b}"),

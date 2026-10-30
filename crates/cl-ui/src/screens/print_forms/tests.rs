@@ -900,6 +900,26 @@ fn an_unsaved_intent_sends_nothing() {
     );
 }
 
+/// PR-2 review #3: "Forget this print" is drawn each frame from a value
+/// read when the run became undecided, never from the file each frame.
+#[test]
+fn the_stuck_intent_is_read_once_not_each_frame() {
+    use crate::company::demo::printing::LoseReply;
+    let (d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    s.readback_task = None;
+    s.readback_failed();
+    let stuck = s.stuck_intent().expect("stuck");
+    // The file can't be read any more: the drawn value stays.
+    let blocker = d.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").expect("file");
+    s.unconfirmed = Some(UnconfirmedChecksStore::in_dir(&blocker));
+    assert_eq!(s.stuck_intent(), Some(stuck));
+}
+
 /// PR-2 review #9: with the file full of other companies' unanswered
 /// batches, Print sends nothing and says why; nothing saved is dropped.
 #[test]
