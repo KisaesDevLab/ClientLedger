@@ -483,6 +483,13 @@ fn a_page_lying_on_its_side_is_turned_and_read() {
     let s = Scratch::new("docread-osd");
     let mut c = config(&s);
     c.ocr = Some(tools);
+    // This page is read twice (sideways, then turned) in a debug build. On
+    // the slow macOS Intel runner that went past the 30 s page limits, so
+    // the host retried and `ocr_pages` came out 4. The test is about
+    // turning, not timing (the limits have their own tests above).
+    c.limits.first_page = Duration::from_secs(120);
+    c.limits.per_page = Duration::from_secs(120);
+    c.limits.ocr_page = Duration::from_secs(120);
     let mut host = DocreadHost::new(c);
     let mut page = turned_text(80, 72, 22, "INVOICE Riverbend Electric Co.");
     for i in 0..14 {
