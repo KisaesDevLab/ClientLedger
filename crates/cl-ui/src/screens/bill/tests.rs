@@ -322,12 +322,12 @@ fn prefill_copies_the_last_bill_without_amounts_and_a_new_vendor_gets_its_defaul
 
 /// Picks account `n` on expense line `i` (no amount), as the grid does,
 /// and runs the frame's remaining fill (Q-304).
-fn pick_line(s: &mut EnterBillScreen, i: usize, n: &str) {
-    let a = account(s, n);
-    let mut v = s.expenses.value().clone();
-    v.lines[i].account = Some(a);
-    v.ensure_entry(&mut s.expenses.form_mut().adapter_mut().keys);
-    s.expenses.form_mut().edit_step(|x| *x = v);
+fn pick_line(s: &mut EnterBillScreen, line: usize, number: &str) {
+    let picked = account(s, number);
+    let mut lines = s.expenses.value().clone();
+    lines.lines[line].account = Some(picked);
+    lines.ensure_entry(&mut s.expenses.form_mut().adapter_mut().keys);
+    s.expenses.form_mut().edit_step(|now| *now = lines);
     s.fill_remaining();
 }
 

@@ -307,12 +307,12 @@ fn the_check_amount_follows_a_single_line_and_takes_the_lines_when_blank() {
 
 /// Picks account `n` on line `i` (no amount), as the grid does, and runs
 /// the frame's remaining fill (Q-304).
-fn pick_line(s: &mut WriteCheckScreen, i: usize, n: &str) {
-    let a = account(s, n);
-    let mut v = s.lines.value().clone();
-    v.lines[i].account = Some(a);
-    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
-    s.lines.form_mut().edit_step(|x| *x = v);
+fn pick_line(s: &mut WriteCheckScreen, line: usize, number: &str) {
+    let picked = account(s, number);
+    let mut lines = s.lines.value().clone();
+    lines.lines[line].account = Some(picked);
+    lines.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|now| *now = lines);
     s.fill_remaining();
 }
 

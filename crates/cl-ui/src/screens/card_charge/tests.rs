@@ -741,12 +741,12 @@ fn files_ride_onto_a_saved_charge_and_its_credit_counterpart() {
 
 /// Picks account `n` on line `i` (no amount), as the grid does, and runs
 /// the frame's remaining fill (Q-304).
-fn pick_line(s: &mut CardChargeScreen, i: usize, n: &str) {
-    let a = s.books.by_number(n).expect("account");
-    let mut v = s.lines.value().clone();
-    v.lines[i].account = Some(a);
-    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
-    s.lines.form_mut().edit_step(|x| *x = v);
+fn pick_line(s: &mut CardChargeScreen, line: usize, number: &str) {
+    let picked = s.books.by_number(number).expect("account");
+    let mut lines = s.lines.value().clone();
+    lines.lines[line].account = Some(picked);
+    lines.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|now| *now = lines);
     s.fill_remaining();
 }
 
