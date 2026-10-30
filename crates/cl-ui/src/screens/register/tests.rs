@@ -769,6 +769,40 @@ fn splits_record_a_check_once_the_lines_add_up() {
     assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], true);
 }
 
+#[test]
+fn a_new_split_line_takes_what_is_left_of_the_payment() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let repairs = demo_account(&link, "6350");
+    s.entry.form.edit_step(|d| {
+        d.account = Some(fuel);
+        d.payment = Some(money("1500.01"));
+    });
+    s.toggle_splits();
+    s.splits_fill_remaining();
+    // The opening line keeps its amount; the owner types over it.
+    s.splits
+        .as_mut()
+        .expect("panel")
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("1000.00")));
+    s.splits_fill_remaining();
+    // A new line picked with no amount takes what is left.
+    s.splits.as_mut().expect("panel").form_mut().edit_step(|v| {
+        let mut extra = splits::SplitRow::blank(v.lines[1].key);
+        extra.account = Some(repairs);
+        v.lines[1] = extra;
+    });
+    s.splits_fill_remaining();
+    let lines = s.splits.as_ref().expect("panel").value().lines.clone();
+    assert_eq!(lines[0].amount, Some(money("1000.00")));
+    assert_eq!(lines[1].amount, Some(money("500.01")));
+    assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], true);
+    assert!(lines.last().is_some_and(splits::SplitRow::is_blank));
+}
+
 /// The register's row key of `id` (loads every row).
 fn key_of(s: &mut RegisterScreen, id: cl_core::ids::TransactionId) -> cl_grid::RowKey {
     let total = s.model.total().expect("total");
