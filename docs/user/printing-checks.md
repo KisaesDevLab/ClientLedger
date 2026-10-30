@@ -10,7 +10,7 @@ You always see a preview first. Nothing goes to the printer until you click **Pr
 
 - **Voucher (check on top, two stubs)**: one check at the top of the page with two stubs below it. This is the style a new bank account starts with.
 - **Standard (three checks per page)**: three checks on one sheet.
-- **Z-fold (folds into a window envelope)**: one check per page that folds so the payee's address shows through a #10 window envelope.
+- **Z-fold pressure seal (self-mailer, no envelope)**: one sheet per check, the same layout as MyBooks. The top panel is the stub, the middle panel is the check (between the tear lines), and the bottom panel is the mailing side with your return address and the payee's address. Light dashed lines show where the sheet folds. Fold and seal it; no envelope is needed. If a payee has no address on file, the mailing side says "no mailing address on file", so add the address before you mail it.
 
 All three are for US Letter paper (8.5 x 11 inches). The style is saved for each bank account, so you can use different paper for different accounts.
 
@@ -53,12 +53,12 @@ You can also print from Pay Bills. After you pay, press `Ctrl+P` and ClientLedge
 Other buttons in the preview:
 
 - **Save PDF...** saves the pages as a file instead of sending them to a printer.
-- **Envelopes** prints #10 envelopes with your return address and the payee's address.
+- **Envelopes** prints #10 envelopes with your return address and the payee's address. It isn't offered for z-fold checks, which mail themselves.
 - **Back to the list** returns without printing.
 
 ### What prints on a check
 
-The date, the payee, the amount in figures and in words (in capitals, like `ONE THOUSAND TWO HUNDRED THIRTY-FOUR AND 56/100*****`), the memo, and the payee's address in the right place for a window envelope. Long amounts in words get smaller to fit.
+The date, the payee, the amount in figures and in words (in capitals, like `ONE THOUSAND TWO HUNDRED THIRTY-FOUR AND 56/100*****`), the memo, and the payee's address in the right place for a window envelope (on z-fold checks the address prints on the mailing side instead). Long amounts in words get smaller to fit.
 
 The largest amount ClientLedger will print on a check is 9,999,999,999.99.
 
