@@ -1,7 +1,7 @@
 # Printer Setup (P19) against `clientledger --demo`: the made-up printers,
 # the alignment offset in millimetres for the chosen printer (this
 # computer), the check style and company block for Operating Checking, the
-# plain-paper ruler test page. An offset over 10 mm is refused. Nothing
+# plain-paper ruler test page, also for z-fold stock. An offset over 10 mm is refused. Nothing
 # reaches a printer. All data is synthetic.
 name: printer_setup
 description: Offset per printer, check style per account, alignment test.
@@ -33,6 +33,18 @@ steps:
   - click: {role: button, label: Print alignment test…}
   - assert_state: {key: screen.preview.kind, equals: alignment}
   - screenshot: alignment
+  - click: {role: button, label: Back to the list}
+  # Z-fold (Q-P19ar): the pressure-seal self-mailer's alignment page shows
+  # the fold guides, the compact check and the mailing panel.
+  - click: {role: combo_box, label: Check style}
+  - click: {role: button, label: "Z-fold pressure seal (self-mailer, no envelope)"}
+  - click: {role: button, label: Save setup}
+  - assert_state: {key: screen.notice, equals: print.setup.saved}
+  - assert_state: {key: screen.style, equals: z_fold}
+  - click: {role: button, label: Print alignment test…}
+  - assert_state: {key: screen.preview.kind, equals: alignment}
+  - assert_state: {key: screen.preview.envelopes, equals: false}
+  - screenshot: alignment-zfold
   - click: {role: button, label: Back to the list}
   - command: dev.demo_print_reset
   - command: file.close_window

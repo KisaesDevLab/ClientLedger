@@ -303,6 +303,7 @@ pub(crate) fn check_labels() -> CheckLabels {
         more_rows: t("print.pdf.more_rows"),
         sample_payee: t("print.pdf.sample_payee"),
         sample_memo: t("print.pdf.sample_memo"),
+        no_address: t("print.pdf.no_address"),
     }
 }
 

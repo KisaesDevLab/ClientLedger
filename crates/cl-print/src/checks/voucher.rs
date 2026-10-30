@@ -24,6 +24,59 @@ const ROW_H: f32 = 4.2;
 /// First row, below the stub top.
 const FIRST_ROW: f32 = 24.0;
 
+/// Where a stub's content goes across the sheet and how many rows it
+/// lists. The column positions are drawn for [`VOUCHER_STUB`]'s margins and
+/// scaled into another geometry's margins.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct StubGeometry {
+    /// Left margin of the content.
+    pub left: f32,
+    /// Right edge of the content.
+    pub right: f32,
+    /// Rows the stub can list; more become an "and N more" row.
+    pub max_rows: usize,
+}
+
+/// The voucher stock's stubs.
+pub(super) const VOUCHER_STUB: StubGeometry = StubGeometry {
+    left: LEFT,
+    right: RIGHT,
+    max_rows: STUB_MAX_ROWS,
+};
+
+impl StubGeometry {
+    /// An x position drawn for the voucher margins, in this geometry.
+    fn x(self, x: f32) -> f32 {
+        self.left + (x - LEFT) * self.scale()
+    }
+
+    /// A width drawn for the voucher margins, in this geometry.
+    fn w(self, w: f32) -> f32 {
+        w * self.scale()
+    }
+
+    fn scale(self) -> f32 {
+        (self.right - self.left) / (RIGHT - LEFT)
+    }
+
+    /// A column in this geometry.
+    fn col(self, c: Col) -> Col {
+        Col::new(self.x(c.x), self.w(c.w), c.align)
+    }
+
+    /// Height of the stub content from its top to the bottom of the check
+    /// amount row.
+    #[cfg(test)]
+    pub fn content_height(self) -> f32 {
+        check_amount_y(self.max_rows) + ROW_H
+    }
+}
+
+/// The check amount row, below the stub top.
+fn check_amount_y(max_rows: usize) -> f32 {
+    FIRST_ROW + ROW_H * as_f32(max_rows) + 2.0 + ROW_H + 1.5
+}
+
 /// A stub column: left edge, width, alignment.
 #[derive(Debug, Clone, Copy)]
 struct Col {
@@ -80,7 +133,7 @@ pub(super) fn pages(checks: &[CheckData], opts: &CheckOptions) -> Result<Vec<Pag
             let mut page = Page::default();
             place_check(&mut page, c, 1, 0.0, opts)?;
             for (i, top) in STUB_TOPS.iter().enumerate() {
-                place_stub(&mut page, c, i + 1, *top, opts)?;
+                place_stub(&mut page, c, i + 1, *top, VOUCHER_STUB, opts)?;
             }
             Ok(page)
         })
@@ -90,7 +143,7 @@ pub(super) fn pages(checks: &[CheckData], opts: &CheckOptions) -> Result<Vec<Pag
 /// A stub table: columns, tag names, headings, which columns are numbers,
 /// rows, and the totals row (label column and text, then value columns).
 struct Table<'a> {
-    cols: &'a [Col],
+    cols: Vec<Col>,
     names: &'a [&'a str],
     heads: Vec<String>,
     mono: &'a [bool],
@@ -105,11 +158,18 @@ struct StubFrame {
     top: f32,
     dx: f32,
     dy: f32,
+    g: StubGeometry,
 }
 
 impl StubFrame {
+    /// A box at page `x` (already in this geometry), `y` below the stub top.
     fn at(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::new(x + self.dx, self.top + y + self.dy, w, h)
+    }
+
+    /// A box drawn for the voucher margins, scaled into this geometry.
+    fn scaled(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
+        self.at(self.g.x(x), y, self.g.w(w), h)
     }
 
     fn tag(&self, name: &str) -> String {
@@ -117,12 +177,18 @@ impl StubFrame {
     }
 }
 
+/// One stub, tagged `stub{n}.*`, its content `top` mm down the sheet.
+///
+/// # Errors
+/// [`PrintError::StubMismatch`] when the listed amounts don't add up to
+/// the check amount, and the amount errors.
 #[allow(clippy::too_many_lines)] // One linear stub layout.
-fn place_stub(
+pub(super) fn place_stub(
     page: &mut Page,
     c: &CheckData,
     n: usize,
     top: f32,
+    geom: StubGeometry,
     opts: &CheckOptions,
 ) -> Result<(), PrintError> {
     let fr = StubFrame {
@@ -130,11 +196,12 @@ fn place_stub(
         top,
         dx: opts.offset.dx_mm(),
         dy: opts.offset.dy_mm(),
+        g: geom,
     };
     let l: &CheckLabels = &opts.labels;
     page.text(TextBox::new(
         fr.tag("payee"),
-        fr.at(LEFT, 6.0, 120.0, 5.0),
+        fr.scaled(LEFT, 6.0, 120.0, 5.0),
         Font::SansSemiBold,
         10.0,
         c.payee.clone(),
@@ -142,7 +209,7 @@ fn place_stub(
     page.text(
         TextBox::new(
             fr.tag("number"),
-            fr.at(140.0, 6.0, RIGHT - 140.0, 5.0),
+            fr.scaled(140.0, 6.0, RIGHT - 140.0, 5.0),
             Font::Sans,
             9.0,
             format!("{} {}", l.check_no, c.number),
@@ -152,7 +219,7 @@ fn place_stub(
     page.text(
         TextBox::new(
             fr.tag("date"),
-            fr.at(140.0, 11.0, RIGHT - 140.0, 5.0),
+            fr.scaled(140.0, 11.0, RIGHT - 140.0, 5.0),
             Font::Mono,
             9.0,
             c.date.clone(),
@@ -162,7 +229,7 @@ fn place_stub(
     if !c.memo.is_empty() {
         page.text(TextBox::new(
             fr.tag("memo"),
-            fr.at(LEFT, 11.0, 120.0, 5.0),
+            fr.scaled(LEFT, 11.0, 120.0, 5.0),
             Font::Sans,
             9.0,
             format!("{}: {}", l.memo, c.memo),
@@ -180,7 +247,7 @@ fn place_stub(
     }
     let table = if c.stub.is_bill_payment() {
         Table {
-            cols: &BILL_COLS,
+            cols: BILL_COLS.iter().map(|c| geom.col(*c)).collect(),
             names: &BILL_NAMES,
             heads: [
                 &l.date,
@@ -206,7 +273,7 @@ fn place_stub(
         }
     } else {
         Table {
-            cols: &LINE_COLS,
+            cols: LINE_COLS.iter().map(|c| geom.col(*c)).collect(),
             names: &LINE_NAMES,
             heads: vec![l.account_or_item.clone(), l.amount.clone()],
             mono: &LINE_MONO,
@@ -222,23 +289,19 @@ fn place_stub(
     };
     place_table(page, &fr, &table, l);
 
-    let cy = FIRST_ROW + ROW_H * as_f32(STUB_MAX_ROWS) + 2.0 + ROW_H + 1.5;
+    let cy = check_amount_y(geom.max_rows);
+    let (c4, c5) = (geom.col(BILL_COLS[4]), geom.col(BILL_COLS[5]));
     page.text(
         TextBox::new(
             fr.tag("check_amount.label"),
-            fr.at(
-                BILL_COLS[4].x,
-                cy,
-                BILL_COLS[5].right_edge() - BILL_COLS[4].x,
-                ROW_H,
-            ),
+            fr.at(c4.x, cy, c5.right_edge() - c4.x, ROW_H),
             Font::SansSemiBold,
             8.5,
             l.check_amount.clone(),
         )
         .align(Align::Right),
     );
-    let col = BILL_COLS[6];
+    let col = geom.col(BILL_COLS[6]);
     page.text(
         TextBox::new(
             fr.tag("check_amount"),
@@ -265,9 +328,10 @@ fn place_table(page: &mut Page, fr: &StubFrame, t: &Table<'_>, l: &CheckLabels) 
             .align(col.align),
         );
     }
-    page.shape(rule(fr.at(LEFT, 22.5, RIGHT - LEFT, 0.0)));
-    let shown = if t.rows.len() > STUB_MAX_ROWS {
-        STUB_MAX_ROWS - 1
+    let (left, right, max_rows) = (fr.g.left, fr.g.right, fr.g.max_rows);
+    page.shape(rule(fr.at(left, 22.5, right - left, 0.0)));
+    let shown = if t.rows.len() > max_rows {
+        max_rows - 1
     } else {
         t.rows.len()
     };
@@ -297,15 +361,15 @@ fn place_table(page: &mut Page, fr: &StubFrame, t: &Table<'_>, l: &CheckLabels) 
             .replace("{n}", &(t.rows.len() - shown).to_string());
         page.text(TextBox::new(
             fr.tag("more"),
-            fr.at(LEFT, y, RIGHT - LEFT, ROW_H),
+            fr.at(left, y, right - left, ROW_H),
             Font::Sans,
             8.0,
             more,
         ));
     }
-    let rule_y = FIRST_ROW + ROW_H * as_f32(STUB_MAX_ROWS) + 1.0;
+    let rule_y = FIRST_ROW + ROW_H * as_f32(max_rows) + 1.0;
     let rx = t.cols[t.totals.first().map_or(0, |(k, _)| *k)].x;
-    page.shape(rule(fr.at(rx, rule_y, RIGHT - rx, 0.0)));
+    page.shape(rule(fr.at(rx, rule_y, right - rx, 0.0)));
     let ty = rule_y + 1.0;
     let lc = t.cols[t.total_label.0];
     page.text(TextBox::new(
@@ -434,7 +498,7 @@ mod tests {
             let doc = layout_checks(&[c], &opts).unwrap();
             assert_eq!(doc.pages.len(), 1);
             let page = &resolve(&doc).unwrap()[0];
-            assert_check_at(page, 1, 0.0, off, WINDOW_ON_VOUCHER);
+            assert_check_at(page, 1, 0.0, off, CheckStyle::Voucher);
             // The stubs start at their tops, moved by the offset.
             for (n, top) in STUB_TOPS.iter().enumerate() {
                 let p = page

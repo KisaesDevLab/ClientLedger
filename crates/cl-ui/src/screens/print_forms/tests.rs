@@ -230,6 +230,44 @@ fn printer_setup_saves_the_offset_per_printer_and_the_style_per_account() {
     assert_eq!(s.preview.as_ref().map(|p| p.doc.pages.len()), Some(1));
 }
 
+/// Q-P19ar: z-fold checks are pressure-seal self-mailers, so the preview
+/// offers no #10 envelopes; each page carries its own mailing panel.
+#[test]
+fn zfold_checks_mail_themselves_so_envelopes_are_not_offered() {
+    let (_d, mut s) = screen(true);
+    s.setup_style = CheckFormat::ZFold;
+    s.save_setup();
+    s.poll();
+    s.poll();
+    assert_eq!(s.layout.format, CheckFormat::ZFold);
+    s.preview = None;
+    s.preview_checks();
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!(p.kind, PreviewKind::Checks);
+    assert_eq!(p.doc.pages.len(), 2, "z-fold: one check per sheet");
+    let page = &cl_print::resolve(&p.doc).expect("pages")[0];
+    assert!(page.runs_of("mail.to").next().is_some(), "mailing panel");
+    assert!(page.runs_of("check1.address").next().is_none());
+    assert!(!s.envelopes_offered());
+    assert_eq!(s.state()["preview"]["envelopes"], false);
+    s.preview_envelopes();
+    assert_eq!(
+        s.preview.as_ref().map(|p| p.kind),
+        Some(PreviewKind::Checks),
+        "no envelopes for self-mailers"
+    );
+    // Back on voucher stock, Envelopes is offered again.
+    s.setup_style = CheckFormat::Voucher;
+    s.save_setup();
+    s.poll();
+    s.poll();
+    s.preview = None;
+    s.preview_checks();
+    s.poll();
+    assert!(s.envelopes_offered());
+}
+
 #[test]
 fn opening_with_checks_previews_them() {
     let (_d, mut s) = screen(false);

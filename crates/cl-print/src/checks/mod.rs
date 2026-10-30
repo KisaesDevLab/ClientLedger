@@ -1,7 +1,8 @@
 //! Checks on pre-printed stock (Q-14, Q-P19g): standard (three per page),
 //! voucher (one check and two stubs; the default style, owner 2026-10-29)
-//! and z-fold (one check per page, folded into a #10 double-window
-//! envelope). No MICR line and no signature (Q-14, Q-212): the bank
+//! and z-fold (the engine's pressure-seal self-mailer: stub, check and
+//! mailing panel on one sheet, Q-P19ar). No MICR line and no signature
+//! (Q-14, Q-212): the bank
 //! details and the check number are already on the stock. An optional
 //! company block (logo, name, address) prints on the check, off by
 //! default.
@@ -18,17 +19,22 @@
 //!   blank.
 //! - **Voucher:** the check is the top 88.9 mm; the two 3.75 in (95.25 mm)
 //!   stubs start at 88.9 and 184.15 mm.
-//! - **Z-fold:** one check in the bottom 88.9 mm of the sheet (top 190.5);
-//!   the sheet z-folds in thirds (folds at 93.1 and 186.3 mm) and goes in
-//!   with the bottom panel facing the windows.
-//! - **#10 double-window envelope (Q-93):** 9.5 × 4.125 in; the recipient
-//!   window is 4.5 × 1.125 in, 7/8 in from the left and 5/8 in from the
-//!   bottom. A check whose bottom edge sits on the envelope's bottom
-//!   (standard checks, and the z-fold's bottom panel) sees the window
-//!   44.4–73.0 mm below the check's top; the voucher sheet's top panel
-//!   (folded at 93.1 mm, fold at the bottom) sees it 48.6–77.2 mm down.
-//!   The address block (49.5–71.5 mm down, from 25.4 mm across) shows
-//!   through both, even if the check slides 12.7 mm sideways.
+//! - **Z-fold (Q-P19ar):** the engine's pressure-seal self-mailer,
+//!   number for number ([`zfold`]): folds at 93.1 and 186.3 mm (3.667 and
+//!   7.333 in); the remittance stub in the top panel (from 7.6 mm, ending
+//!   10 pt above the first fold); the check is the 70.4 mm (2.771 in)
+//!   coupon between the tear perforations at 103.2 and 173.6 mm, with its
+//!   own compact field positions inside 17 mm / 15 mm margins; the bottom
+//!   panel (from 190.5 mm) is the mailing face with the return address and
+//!   the payee's delivery address, clear of the bottom 5/8 in. No envelope.
+//! - **#10 double-window envelope (Q-93), standard and voucher:**
+//!   9.5 × 4.125 in; the recipient window is 4.5 × 1.125 in, 7/8 in from
+//!   the left and 5/8 in from the bottom. A standard check, its bottom edge
+//!   on the envelope's bottom, sees the window 44.4–73.0 mm below the
+//!   check's top; the voucher sheet's top panel (folded at 93.1 mm, fold at
+//!   the bottom) sees it 48.6–77.2 mm down. The address block (49.5–71.5 mm
+//!   down, from 25.4 mm across) shows through both, even if the check
+//!   slides 12.7 mm sideways.
 //!
 //! The alignment offset ([`AlignmentOffset`], ±10 mm) is saved per printer
 //! on this computer by `cl-settings` (owner 2026-10-29; the stock style
@@ -38,27 +44,24 @@
 
 pub mod standard;
 pub mod voucher;
+pub mod zfold;
 
 use crate::PrintError;
 use crate::amount::{amount_in_words, check_figures};
 use crate::fonts::Font;
 use crate::forms::CompanyInfo;
 use crate::image::Logo;
-use crate::layout::{
-    Align, Document, Element, LETTER_H_MM, LETTER_W_MM, Page, Rect, Shape, TextBox,
-};
+use crate::layout::{Align, Document, Element, LETTER_W_MM, Page, Rect, Shape, TextBox};
 use rust_decimal::Decimal;
 
 /// Height of one check.
 pub const CHECK_H_MM: f32 = 88.9;
 /// Largest alignment offset either way.
 pub const MAX_OFFSET_MM: f32 = 10.0;
-/// Top of the check on z-fold stock.
-pub const ZFOLD_TOP: f32 = LETTER_H_MM - CHECK_H_MM;
 
 /// The recipient window of a #10 double-window envelope, in the
 /// coordinates of a check whose bottom edge sits on the envelope's bottom
-/// (standard checks, the z-fold check).
+/// (standard checks).
 pub const WINDOW_ON_STANDARD: Rect = Rect::new(22.2, 44.4, 114.3, 28.6);
 /// The recipient window over a tri-folded voucher sheet's check.
 pub const WINDOW_ON_VOUCHER: Rect = Rect::new(22.2, 48.6, 114.3, 28.6);
@@ -74,20 +77,50 @@ pub struct CheckFields {
     pub amount: Rect,
     /// The amount in words (asterisk fill on the right).
     pub words: Rect,
-    /// The payee's address block (#10 window).
-    pub address: Rect,
+    /// The payee's address block (#10 window); none on the z-fold, whose
+    /// address prints on the mailing panel.
+    pub address: Option<Rect>,
     /// The memo line.
     pub memo: Rect,
 }
 
-/// The one check layout every style shares.
+/// The check layout standard and voucher stock share (the z-fold's
+/// compact coupon has its own, [`zfold::face`]).
 pub const FIELDS: CheckFields = CheckFields {
     date: Rect::new(165.0, 17.0, 38.0, 6.0),
     payee: Rect::new(30.0, 30.0, 125.0, 6.0),
     amount: Rect::new(167.0, 30.0, 36.0, 6.0),
     words: Rect::new(12.0, 40.0, 150.0, 6.0),
-    address: Rect::new(25.4, 49.5, 95.0, 22.0),
+    address: Some(Rect::new(25.4, 49.5, 95.0, 22.0)),
     memo: Rect::new(20.0, 76.0, 80.0, 6.0),
+};
+
+/// How one stock's check face prints: where the fields go and the type in
+/// them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CheckFace {
+    /// Field positions, relative to the check's top-left corner.
+    pub fields: CheckFields,
+    /// How the date sits in its box.
+    pub date_align: Align,
+    /// The payee's face.
+    pub payee_font: Font,
+    /// The payee's size.
+    pub payee_pt: f32,
+    /// The memo's size.
+    pub memo_pt: f32,
+    /// Height of the check (the alignment ruler covers it).
+    pub height: f32,
+}
+
+/// Standard and voucher checks.
+pub const STANDARD_FACE: CheckFace = CheckFace {
+    fields: FIELDS,
+    date_align: Align::Left,
+    payee_font: Font::Sans,
+    payee_pt: 10.0,
+    memo_pt: 9.0,
+    height: CHECK_H_MM,
 };
 
 /// The optional company block on a check (top left, above the date line).
@@ -106,22 +139,25 @@ impl CheckFields {
             payee: self.payee.moved(dx, dy),
             amount: self.amount.moved(dx, dy),
             words: self.words.moved(dx, dy),
-            address: self.address.moved(dx, dy),
+            address: self.address.map(|r| r.moved(dx, dy)),
             memo: self.memo.moved(dx, dy),
         }
     }
 
     /// The fields with their names (for outlines and tests).
     #[must_use]
-    pub fn named(&self) -> [(&'static str, Rect); 6] {
-        [
+    pub fn named(&self) -> Vec<(&'static str, Rect)> {
+        let mut out = vec![
             ("date", self.date),
             ("payee", self.payee),
             ("amount", self.amount),
             ("words", self.words),
-            ("address", self.address),
-            ("memo", self.memo),
-        ]
+        ];
+        if let Some(a) = self.address {
+            out.push(("address", a));
+        }
+        out.push(("memo", self.memo));
+        out
     }
 }
 
@@ -134,7 +170,8 @@ pub enum CheckStyle {
     Voucher,
     /// Three checks per page.
     Standard,
-    /// One check at the bottom of the page, z-folded into the envelope.
+    /// The engine's pressure-seal self-mailer: stub, check coupon and
+    /// mailing panel on one sheet (Q-P19ar).
     ZFold,
 }
 
@@ -145,17 +182,36 @@ impl CheckStyle {
         match self {
             CheckStyle::Standard => &standard::POSITION_TOPS,
             CheckStyle::Voucher => &[0.0],
-            CheckStyle::ZFold => &[ZFOLD_TOP],
+            CheckStyle::ZFold => &[zfold::COUPON_TOP],
         }
     }
 
-    /// The envelope window over the check, in the check's coordinates.
+    /// The check face: field positions and type.
     #[must_use]
-    pub fn window(self) -> Rect {
+    pub fn face(self) -> CheckFace {
         match self {
-            CheckStyle::Voucher => WINDOW_ON_VOUCHER,
-            CheckStyle::Standard | CheckStyle::ZFold => WINDOW_ON_STANDARD,
+            CheckStyle::Standard | CheckStyle::Voucher => STANDARD_FACE,
+            CheckStyle::ZFold => zfold::face(),
         }
+    }
+
+    /// The #10 envelope window over the check, in the check's
+    /// coordinates; none for the z-fold self-mailer, which needs no
+    /// envelope.
+    #[must_use]
+    pub fn window(self) -> Option<Rect> {
+        match self {
+            CheckStyle::Voucher => Some(WINDOW_ON_VOUCHER),
+            CheckStyle::Standard => Some(WINDOW_ON_STANDARD),
+            CheckStyle::ZFold => None,
+        }
+    }
+
+    /// True when the checks go out in a #10 envelope (Envelopes is
+    /// offered); the z-fold mails itself.
+    #[must_use]
+    pub fn uses_envelope(self) -> bool {
+        self.window().is_some()
     }
 }
 
@@ -361,6 +417,8 @@ pub struct CheckLabels {
     pub sample_payee: String,
     /// Memo shown on the alignment test page.
     pub sample_memo: String,
+    /// The z-fold mailing panel's note when the payee has no address.
+    pub no_address: String,
 }
 
 impl Default for CheckLabels {
@@ -384,6 +442,7 @@ impl Default for CheckLabels {
             more_rows: "and {n} more (see the check in ClientLedger)".into(),
             sample_payee: "Sample Payee Name".into(),
             sample_memo: "Alignment test".into(),
+            no_address: "\u{2014} no mailing address on file \u{2014}".into(),
         }
     }
 }
@@ -419,7 +478,9 @@ impl Default for CheckOptions {
 }
 
 /// Lay out checks: three per standard sheet from position 1, one page
-/// per voucher or z-fold check.
+/// per voucher or z-fold check. Voucher and z-fold stubs whose listed
+/// amounts don't add up to the check amount are refused
+/// ([`PrintError::StubMismatch`]).
 ///
 /// # Errors
 /// [`PrintError::NoPages`] for no checks, and the amount errors of
@@ -431,14 +492,7 @@ pub fn layout_checks(checks: &[CheckData], opts: &CheckOptions) -> Result<Docume
     let pages = match opts.style {
         CheckStyle::Standard => standard::pages(checks, opts)?,
         CheckStyle::Voucher => voucher::pages(checks, opts)?,
-        CheckStyle::ZFold => checks
-            .iter()
-            .map(|c| {
-                let mut page = Page::default();
-                place_check(&mut page, c, 1, ZFOLD_TOP, opts)?;
-                Ok(page)
-            })
-            .collect::<Result<_, PrintError>>()?,
+        CheckStyle::ZFold => zfold::pages(checks, opts)?,
     };
     Ok(Document {
         size: crate::layout::PageSize::LETTER,
@@ -459,7 +513,8 @@ fn logo_for(opts: &CheckOptions) -> Option<Logo> {
 /// The alignment test page, printed on plain paper: a filled-in sample
 /// check (offset applied) with its field outlines, over a millimetre ruler
 /// grid at fixed paper positions, for every check position of the stock.
-/// The owner holds it over a blank check to see how far to move.
+/// On z-fold stock the fold guides and the mailing panel print too. The
+/// owner holds it over a blank check to see how far to move.
 ///
 /// # Errors
 /// Only if the sample amount could not be written (not expected).
@@ -478,11 +533,15 @@ pub fn alignment_test(opts: &CheckOptions) -> Result<Document, PrintError> {
         stub: StubData::default(),
     };
     let mut page = Page::default();
+    let height = opts.style.face().height;
+    if opts.style == CheckStyle::ZFold {
+        zfold::place_mailer(&mut page, &sample, opts);
+    }
     for (i, top) in opts.style.check_tops().iter().enumerate() {
-        ruler_grid(&mut page, *top, i + 1);
+        ruler_grid(&mut page, *top, height, i + 1);
         let pos = u8::try_from(i + 1).unwrap_or(1);
         place_check(&mut page, &sample, pos, *top, opts)?;
-        for (_, r) in fields_at(*top, opts.offset).named() {
+        for (_, r) in fields_at(opts.style, *top, opts.offset).named() {
             page.shape(Shape::Box {
                 rect: r,
                 stroke_pt: Some(0.6),
@@ -498,11 +557,11 @@ pub fn alignment_test(opts: &CheckOptions) -> Result<Document, PrintError> {
     })
 }
 
-/// Grid lines every 5 mm (heavier every 10 mm) over one check panel, with
-/// millimetre numbers every 10 mm along its top and left edges, measured
-/// from the panel's top-left corner. Never offset.
-fn ruler_grid(page: &mut Page, top: f32, pos: usize) {
-    let bottom = top + CHECK_H_MM;
+/// Grid lines every 5 mm (heavier every 10 mm) over one check panel
+/// `height` tall, with millimetre numbers every 10 mm along its top and
+/// left edges, measured from the panel's top-left corner. Never offset.
+fn ruler_grid(page: &mut Page, top: f32, height: f32, pos: usize) {
+    let bottom = top + height;
     let mut step = 0u16;
     loop {
         let d = f32::from(step) * 5.0;
@@ -534,7 +593,7 @@ fn ruler_grid(page: &mut Page, top: f32, pos: usize) {
     let mut step = 0u16;
     loop {
         let d = f32::from(step) * 5.0;
-        if d > CHECK_H_MM {
+        if d > height {
             break;
         }
         let major = step.is_multiple_of(2);
@@ -581,10 +640,13 @@ fn words_box(tag: String, r: Rect, words: String) -> TextBox {
     TextBox::new(tag, r, Font::Sans, WORDS_MIN_PT, words).wrapped()
 }
 
-/// Page coordinates of a check's fields at `top` with `offset`.
+/// Page coordinates of a `style` check's fields at `top` with `offset`.
 #[must_use]
-pub fn fields_at(top: f32, offset: AlignmentOffset) -> CheckFields {
-    FIELDS.moved(offset.dx_mm(), top + offset.dy_mm())
+pub fn fields_at(style: CheckStyle, top: f32, offset: AlignmentOffset) -> CheckFields {
+    style
+        .face()
+        .fields
+        .moved(offset.dx_mm(), top + offset.dy_mm())
 }
 
 /// Place one check's fields, tagged `check{pos}.{field}`, and the company
@@ -597,20 +659,17 @@ fn place_check(
     opts: &CheckOptions,
 ) -> Result<(), PrintError> {
     let off = opts.offset;
-    let f = fields_at(top, off);
+    let face = opts.style.face();
+    let f = face.fields.moved(off.dx_mm(), top + off.dy_mm());
     let tag = |name: &str| format!("check{pos}.{name}");
-    page.text(TextBox::new(
-        tag("date"),
-        f.date,
-        Font::Mono,
-        10.0,
-        c.date.clone(),
-    ));
+    page.text(
+        TextBox::new(tag("date"), f.date, Font::Mono, 10.0, c.date.clone()).align(face.date_align),
+    );
     page.text(TextBox::new(
         tag("payee"),
         f.payee,
-        Font::Sans,
-        10.0,
+        face.payee_font,
+        face.payee_pt,
         c.payee.clone(),
     ));
     page.text(
@@ -625,21 +684,25 @@ fn place_check(
         .filled('*'),
     );
     page.text(words_box(tag("words"), f.words, amount_in_words(c.amount)?));
-    page.text(TextBox::new(
-        tag("address"),
-        f.address,
-        Font::Sans,
-        10.0,
-        c.address.join("\n"),
-    ));
+    if let Some(address) = f.address {
+        page.text(TextBox::new(
+            tag("address"),
+            address,
+            Font::Sans,
+            10.0,
+            c.address.join("\n"),
+        ));
+    }
     page.text(TextBox::new(
         tag("memo"),
         f.memo,
         Font::Sans,
-        9.0,
+        face.memo_pt,
         c.memo.clone(),
     ));
-    if opts.show_company {
+    if opts.show_company && opts.style == CheckStyle::ZFold {
+        zfold::place_company(page, pos, top, opts);
+    } else if opts.show_company {
         let (dx, dy) = (off.dx_mm(), top + off.dy_mm());
         let x = if opts.logo.is_some() {
             page.elements
@@ -692,24 +755,32 @@ pub(crate) mod tests {
         (r.x, r.y + font.ascent_mm(size))
     }
 
-    /// Every check field's first run against spec + top + offset (±0.5
-    /// mm), and every address line inside the envelope window.
+    /// Every check field's first run against the style's spec + top +
+    /// offset (±0.5 mm), and every address line inside the envelope window
+    /// (no address on the face when the style has no window).
     pub(crate) fn assert_check_at(
         page: &crate::ResolvedPage,
         pos: usize,
         top: f32,
         off: AlignmentOffset,
-        window: Rect,
+        style: CheckStyle,
     ) {
         const TOL: f32 = 0.5;
+        let face = style.face();
+        let f = face.fields;
         let spec = |r: Rect| r.moved(off.dx_mm(), top + off.dy_mm());
-        for (name, font, size, rect) in [
-            ("date", Font::Mono, 10.0, FIELDS.date),
-            ("payee", Font::Sans, 10.0, FIELDS.payee),
-            ("words", Font::Sans, 9.5, FIELDS.words),
-            ("address", Font::Sans, 10.0, FIELDS.address),
-            ("memo", Font::Sans, 9.0, FIELDS.memo),
-        ] {
+        let mut fields = vec![
+            ("payee", face.payee_font, face.payee_pt, f.payee),
+            ("words", Font::Sans, 9.5, f.words),
+            ("memo", Font::Sans, face.memo_pt, f.memo),
+        ];
+        if face.date_align == Align::Left {
+            fields.push(("date", Font::Mono, 10.0, f.date));
+        }
+        if let Some(a) = f.address {
+            fields.push(("address", Font::Sans, 10.0, a));
+        }
+        for (name, font, size, rect) in fields {
             let r = page
                 .runs_of(&format!("check{pos}.{name}"))
                 .next()
@@ -722,17 +793,28 @@ pub(crate) mod tests {
                 r.baseline
             );
         }
+        if face.date_align == Align::Center {
+            let d = page.runs_of(&format!("check{pos}.date")).next().unwrap();
+            let s = spec(f.date);
+            let mid = d.x + Font::Mono.width_mm(&d.text, 10.0) / 2.0;
+            assert!((mid - (s.x + s.w / 2.0)).abs() <= TOL, "date centre {mid}");
+            assert!((d.baseline - (s.y + Font::Mono.ascent_mm(10.0))).abs() <= TOL);
+        }
         let a = page.runs_of(&format!("check{pos}.amount")).next().unwrap();
         let right = a.x + Font::Mono.width_mm(&a.text, 10.0);
-        let s = spec(FIELDS.amount);
+        let s = spec(f.amount);
         assert!(
             (right - s.right()).abs() <= TOL && a.x >= s.x - 0.001,
             "amount {right}"
         );
         assert!((a.baseline - (s.y + Font::Mono.ascent_mm(10.0))).abs() <= TOL);
         assert!(a.text.ends_with("1,234.56") && a.text.starts_with('*'));
-        let w = spec(window);
         let lines: Vec<_> = page.runs_of(&format!("check{pos}.address")).collect();
+        let Some(window) = style.window() else {
+            assert!(lines.is_empty(), "no address on a {style:?} check face");
+            return;
+        };
+        let w = spec(window);
         assert_eq!(lines.len(), 3);
         for l in lines {
             assert!(l.x >= w.x && l.baseline <= w.bottom());
@@ -765,40 +847,20 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_address_block_shows_through_the_envelope_window_on_every_stock() {
-        assert!(WINDOW_ON_STANDARD.contains(FIELDS.address));
-        assert!(WINDOW_ON_VOUCHER.contains(FIELDS.address));
+    fn the_address_block_shows_through_the_envelope_window_on_envelope_stock() {
+        let address = FIELDS.address.unwrap();
+        assert!(WINDOW_ON_STANDARD.contains(address));
+        assert!(WINDOW_ON_VOUCHER.contains(address));
         // Sliding 12.7 mm sideways in the envelope keeps it in the window.
-        assert!(
-            WINDOW_ON_STANDARD
-                .moved(-12.7, 0.0)
-                .contains(FIELDS.address)
-        );
-        assert_eq!(crate::layout::max_lines(FIELDS.address.h, 10.0), 5);
-        // The z-fold check's bottom is the sheet's bottom.
-        assert!((ZFOLD_TOP + CHECK_H_MM - LETTER_H_MM).abs() < 0.001);
-    }
-
-    #[test]
-    fn zfold_fields_are_within_half_a_millimetre_and_the_address_is_in_the_window() {
-        for off in [
-            AlignmentOffset::NONE,
-            AlignmentOffset::new(-2.5, 3.0).unwrap(),
-        ] {
-            let opts = CheckOptions {
-                style: CheckStyle::ZFold,
-                offset: off,
-                ..CheckOptions::default()
-            };
-            let doc = layout_checks(&[sample(1), sample(2)], &opts).unwrap();
-            assert_eq!(doc.pages.len(), 2);
-            for page in &resolve(&doc).unwrap() {
-                assert_check_at(page, 1, ZFOLD_TOP, off, WINDOW_ON_STANDARD);
-            }
-        }
-        // In page terms the window is 234.9-263.5 mm down.
-        let w = WINDOW_ON_STANDARD.moved(0.0, ZFOLD_TOP);
-        assert!((w.y - 234.9).abs() < 0.05 && (w.bottom() - 263.5).abs() < 0.05);
+        assert!(WINDOW_ON_STANDARD.moved(-12.7, 0.0).contains(address));
+        assert_eq!(crate::layout::max_lines(address.h, 10.0), 5);
+        // Standard and voucher keep their shared fields; the z-fold mails
+        // itself, so it has no window, no envelope and no face address.
+        assert_eq!(CheckStyle::Standard.face().fields, FIELDS);
+        assert_eq!(CheckStyle::Voucher.face().fields, FIELDS);
+        assert!(CheckStyle::Standard.uses_envelope() && CheckStyle::Voucher.uses_envelope());
+        assert!(!CheckStyle::ZFold.uses_envelope());
+        assert!(CheckStyle::ZFold.face().fields.address.is_none());
     }
 
     #[test]
@@ -902,7 +964,7 @@ pub(crate) mod tests {
             let page = &resolve(&doc).unwrap()[0];
             for (i, top) in style.check_tops().iter().enumerate() {
                 let pos = i + 1;
-                assert_check_at(page, pos, *top, off, style.window());
+                assert_check_at(page, pos, *top, off, style);
                 // The ruler is not offset: "50" sits just right of x = 50 mm.
                 let mark = page.runs_of(&format!("ruler{pos}.x50")).next().unwrap();
                 assert!((mark.x - 50.3).abs() < 0.001);
@@ -912,9 +974,19 @@ pub(crate) mod tests {
             let outlines = page
                 .shapes
                 .iter()
-                .filter(|s| matches!(s, Shape::Box { .. }))
+                .filter(|s| {
+                    matches!(
+                        s,
+                        Shape::Box {
+                            stroke_pt: Some(_),
+                            ..
+                        }
+                    )
+                })
                 .count();
-            assert_eq!(outlines, style.check_tops().len() * 6);
+            let per_check = style.face().fields.named().len();
+            assert_eq!(per_check, if style == CheckStyle::ZFold { 5 } else { 6 });
+            assert_eq!(outlines, style.check_tops().len() * per_check);
         }
     }
 
@@ -969,7 +1041,9 @@ pub(crate) mod tests {
             let a = page.runs_of("check1.amount").next().unwrap();
             assert!(a.text.ends_with("9,999,999,999.99"), "{}", a.text);
             assert!((a.size_pt - 10.0).abs() < 0.001);
-            assert!(a.x >= FIELDS.amount.x - 0.001);
+            let box_ = style.face().fields.amount;
+            assert!(a.x >= box_.x - 0.001, "{style:?}");
+            assert!(a.x + Font::Mono.width_mm(&a.text, 10.0) <= box_.right() + 0.001);
         }
         c.amount = Decimal::new(1_000_000_000_000, 2);
         assert_eq!(
@@ -998,7 +1072,16 @@ pub(crate) mod tests {
             layout_checks(&[c.clone()], &CheckOptions::default()),
             Err(PrintError::StubMismatch)
         );
-        // Standard and z-fold stock print no stub, so nothing to compare.
+        // The z-fold's top-panel stub follows the same rule.
+        let zfold = CheckOptions {
+            style: CheckStyle::ZFold,
+            ..CheckOptions::default()
+        };
+        assert_eq!(
+            layout_checks(&[c.clone()], &zfold),
+            Err(PrintError::StubMismatch)
+        );
+        // Standard stock prints no stub, so nothing to compare.
         let opts = CheckOptions {
             style: CheckStyle::Standard,
             ..CheckOptions::default()

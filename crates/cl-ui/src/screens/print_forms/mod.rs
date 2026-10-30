@@ -1031,7 +1031,20 @@ impl PrintFormsScreen {
         }
     }
 
+    /// Envelopes are offered for forms and for checks that go in a #10
+    /// envelope; z-fold checks mail themselves (Q-P19ar).
+    pub(crate) fn envelopes_offered(&self) -> bool {
+        match self.preview.as_ref().map(|p| p.kind) {
+            Some(PreviewKind::Forms) => true,
+            Some(PreviewKind::Checks) => job::style_of(self.layout.format).uses_envelope(),
+            _ => false,
+        }
+    }
+
     pub(crate) fn preview_envelopes(&mut self) {
+        if !self.envelopes_offered() {
+            return;
+        }
         let Some(p) = &self.preview else {
             return;
         };
@@ -2158,6 +2171,7 @@ impl PrintFormsScreen {
             "preview": self.preview.as_ref().map(|p| json!({
                 "kind": p.kind.wire(),
                 "pages": p.doc.pages.len(),
+                "envelopes": self.envelopes_offered(),
                 "viewer": p.viewer.state_json(),
             })),
             "run": self.run.as_ref().map(|r| json!({
@@ -2486,6 +2500,7 @@ impl PrintFormsScreen {
 
     fn preview_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let kind = self.preview.as_ref().map(|p| p.kind);
+        let envelopes = self.envelopes_offered();
         let mut act = None;
         ui.horizontal_wrapped(|ui| {
             ui.vertical(|ui| self.printer_combo(ui, tokens));
@@ -2495,9 +2510,7 @@ impl PrintFormsScreen {
             if ui.button(t("print.save_pdf")).clicked() {
                 act = Some("save");
             }
-            if matches!(kind, Some(PreviewKind::Checks | PreviewKind::Forms))
-                && ui.button(t("print.envelopes")).clicked()
-            {
+            if envelopes && ui.button(t("print.envelopes")).clicked() {
                 act = Some("envelopes");
             }
             if ui.button(t("print.back")).clicked() {

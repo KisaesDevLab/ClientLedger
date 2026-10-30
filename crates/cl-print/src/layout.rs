@@ -117,6 +117,8 @@ pub struct TextBox {
     /// [`MIN_SHRINK`] of its size (baseline unchanged); if it still does
     /// not fit, resolving fails with [`PrintError::DoesNotFit`].
     pub shrink: bool,
+    /// Text grey level (0 = black, the default; 1 = white).
+    pub gray: f32,
     /// The text.
     pub text: String,
 }
@@ -142,6 +144,7 @@ impl TextBox {
             clip: true,
             fill: None,
             shrink: font == Font::Mono,
+            gray: 0.0,
             text: text.into(),
         }
     }
@@ -171,6 +174,13 @@ impl TextBox {
     #[must_use]
     pub fn shrink_to_fit(mut self) -> TextBox {
         self.shrink = true;
+        self
+    }
+
+    /// Printed in grey (`level`: 0 = black, 1 = white).
+    #[must_use]
+    pub fn gray(mut self, level: f32) -> TextBox {
+        self.gray = level;
         self
     }
 
@@ -394,6 +404,8 @@ pub struct Run {
     pub font: Font,
     /// Size in points.
     pub size_pt: f32,
+    /// Grey level (0 = black).
+    pub gray: f32,
     /// The text, fill included.
     pub text: String,
 }
@@ -539,6 +551,7 @@ fn resolve_text(b: &TextBox, runs: &mut Vec<Run>) -> Result<(), PrintError> {
                 baseline,
                 font: b.font,
                 size_pt: b.size_pt,
+                gray: b.gray,
                 text,
             });
         }
