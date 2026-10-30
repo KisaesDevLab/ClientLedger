@@ -788,7 +788,8 @@ fn two_saved_intents_are_both_recovered() {
             state: BatchState::Intent,
             client_key: Some(format!("key-{i}")),
             format: Some("voucher".into()),
-        });
+        })
+        .expect("room");
     }
     store.save(&all).expect("save");
     let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
@@ -870,6 +871,38 @@ fn an_unsaved_intent_sends_nothing() {
         s.run.as_ref().map(cl_print::PrintRun::state),
         Some(cl_print::RunState::Ready)
     );
+}
+
+/// PR-2 review #9: with the file full of other companies' unanswered
+/// batches, Print sends nothing and says why; nothing saved is dropped.
+#[test]
+fn a_full_file_sends_nothing_and_drops_nothing() {
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let store = s.unconfirmed.clone().expect("store");
+    let mut all = store.load();
+    for i in 0..cl_settings::unconfirmed_checks::MAX_BATCHES {
+        all.add(UnconfirmedBatch {
+            company_id: "another-company".into(),
+            bank_account_id: "b".into(),
+            printed_at: "2026-11-04T10:00:00Z".into(),
+            checks: vec![UnconfirmedCheck {
+                check_id: format!("c{i}"),
+                number: 1,
+            }],
+            state: BatchState::Printed,
+            client_key: None,
+            format: None,
+        })
+        .expect("room");
+    }
+    store.save(&all).expect("save");
+    s.print_clicked();
+    s.poll();
+    assert_eq!(print_calls(&s), 0, "nothing sent");
+    assert_eq!(s.notice, Some("print.too_many_waiting"));
+    assert_eq!(saved(&s), all, "nothing dropped");
 }
 
 /// Q-PR2d: an intent the read-back can't decide is skipped this session

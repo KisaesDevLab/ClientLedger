@@ -64,6 +64,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.recover.forget_failed", "That print couldn't be forgotten: the file on this computer couldn't be saved. Check that the disk has free space, then try again."),
     ("print.recover.forgotten", "Forgotten. If those check numbers are in the register, don't use them again."),
     ("print.intent_unsaved", "The print run couldn't be saved on this computer first, so nothing was sent to the printer. Check that the disk has free space, then try again."),
+    ("print.too_many_waiting", "Too many printed checks on this computer are still waiting for your answer, so nothing was sent to the printer. Answer \u{201c}Did all checks print correctly?\u{201d} for them (in each company), then print again."),
     ("print.confirm.skipped", "Voided checks were left out; the others are back in the list to print again."),
     ("print.problem.stub", "A check's stub doesn't add up to the check amount, so it wasn't printed. Open the check and fix its lines."),
     ("print.problem.too_large", "An amount is too large to print on a check."),

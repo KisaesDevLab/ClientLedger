@@ -53,7 +53,8 @@ pub use recent::{
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
 pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};
 pub use unconfirmed_checks::{
-    BatchState, UnconfirmedBatch, UnconfirmedCheck, UnconfirmedChecks, UnconfirmedChecksStore,
+    BatchState, TooManyBatches, UnconfirmedBatch, UnconfirmedCheck, UnconfirmedChecks,
+    UnconfirmedChecksStore,
 };
 pub use user_prefs::{
     DateFormat, DateWarnings, NegativeStyle, StartScreen, ThemeChoice, UpdateCheck, UserPrefs,

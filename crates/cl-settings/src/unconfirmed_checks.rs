@@ -16,8 +16,16 @@ use std::path::{Path, PathBuf};
 
 /// The file name.
 pub const UNCONFIRMED_CHECKS_FILE: &str = "unconfirmed-checks.json";
-/// Batches kept at most (the oldest beyond are dropped).
+/// Batches kept at most, all companies together. Every saved batch waits
+/// for an answer (answered checks leave the file), so none is ever dropped
+/// to make room: a new one is refused instead ([`TooManyBatches`]).
 pub const MAX_BATCHES: usize = 200;
+
+/// [`UnconfirmedChecks::add`] refused a batch: [`MAX_BATCHES`] already wait
+/// for an answer on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("too many printed check batches wait for an answer")]
+pub struct TooManyBatches;
 
 /// One check and the number it printed with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,11 +89,11 @@ impl UnconfirmedChecks {
         u
     }
 
+    /// Drops empty and company-less batches only: an unanswered batch or an
+    /// intent is never evicted (PR-2 review #9).
     fn normalize(&mut self) {
         self.batches
             .retain(|b| !b.checks.is_empty() && !b.company_id.is_empty());
-        let extra = self.batches.len().saturating_sub(MAX_BATCHES);
-        self.batches.drain(..extra);
     }
 
     /// Text to store.
@@ -94,10 +102,19 @@ impl UnconfirmedChecks {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Save a batch the engine just recorded.
-    pub fn add(&mut self, batch: UnconfirmedBatch) {
+    /// Save a batch (an intent before it is sent, B2).
+    ///
+    /// # Errors
+    /// [`TooManyBatches`] when [`MAX_BATCHES`] already wait: nothing is
+    /// added and nothing else is dropped.
+    pub fn add(&mut self, batch: UnconfirmedBatch) -> Result<(), TooManyBatches> {
+        self.normalize();
+        if self.batches.len() >= MAX_BATCHES {
+            return Err(TooManyBatches);
+        }
         self.batches.push(batch);
         self.normalize();
+        Ok(())
     }
 
     /// The company's unanswered batches, oldest first.
@@ -246,7 +263,7 @@ mod tests {
         let mut i = batch("co1", &[("c1", 1001), ("c2", 1002)]);
         i.state = BatchState::Intent;
         i.client_key = Some("k1".into());
-        u.add(i.clone());
+        u.add(i.clone()).expect("room");
         assert!(u.needs_attention("co1"));
         assert_eq!(u.intents_for("co1").count(), 1);
         assert_eq!(u.printed_for("co1").count(), 0);
@@ -256,7 +273,7 @@ mod tests {
         assert_eq!(b.checks.len(), 1);
         assert_eq!(b.checks[0].number, 1001);
         assert_eq!(u.intents_for("co1").count(), 0);
-        u.add(i);
+        u.add(i).expect("room");
         u.drop_intent("co1", "k1");
         assert_eq!(u.intents_for("co1").count(), 0);
         assert_eq!(u.printed_for("co1").count(), 1, "the printed one stays");
@@ -272,8 +289,9 @@ mod tests {
     fn batches_drive_the_reminder_until_every_check_is_answered() {
         let mut u = UnconfirmedChecks::default();
         assert!(!u.needs_attention("co1"));
-        u.add(batch("co1", &[("c1", 1001), ("c2", 1002)]));
-        u.add(batch("co2", &[("c9", 5)]));
+        u.add(batch("co1", &[("c1", 1001), ("c2", 1002)]))
+            .expect("room");
+        u.add(batch("co2", &[("c9", 5)])).expect("room");
         assert!(u.needs_attention("co1") && u.needs_attention("co2"));
         assert_eq!(u.for_company("co1").count(), 1);
         u.resolve("co1", &["c1"]);
@@ -291,7 +309,7 @@ mod tests {
         let store = UnconfirmedChecksStore::in_dir(dir.path());
         assert_eq!(store.load(), UnconfirmedChecks::default());
         let mut u = UnconfirmedChecks::default();
-        u.add(batch("co1", &[("c1", 1001)]));
+        u.add(batch("co1", &[("c1", 1001)])).expect("room");
         store.save(&u).expect("save");
         assert_eq!(store.load(), u);
         assert!(store.path().ends_with(UNCONFIRMED_CHECKS_FILE));
@@ -303,11 +321,35 @@ mod tests {
             r#"{"batches":[{"company_id":"co1","bank_account_id":"b","printed_at":"x","checks":[]}]}"#,
         );
         assert_eq!(empty.batches.len(), 0);
+    }
+
+    /// PR-2 review #9: a full file refuses a new batch; it never drops
+    /// another company's unanswered batch or a pending intent to make room.
+    #[test]
+    fn a_full_file_refuses_and_evicts_nothing() {
         let mut many = UnconfirmedChecks::default();
-        for i in 0..(MAX_BATCHES + 3) {
-            many.add(batch("co1", &[("c", u64::try_from(i).unwrap())]));
+        let mut intent = batch("co2", &[("x", 7)]);
+        intent.state = BatchState::Intent;
+        intent.client_key = Some("k2".into());
+        many.add(intent).expect("room");
+        for i in 1..MAX_BATCHES {
+            many.add(batch("co1", &[("c", u64::try_from(i).unwrap())]))
+                .expect("room");
         }
         assert_eq!(many.batches.len(), MAX_BATCHES);
-        assert_eq!(many.batches[0].checks[0].number, 3);
+        let before = many.clone();
+        assert_eq!(many.add(batch("co3", &[("y", 1)])), Err(TooManyBatches));
+        assert_eq!(many, before, "nothing evicted");
+        assert_eq!(many.intents_for("co2").count(), 1);
+        // A file written with more than the cap keeps every batch.
+        let mut text = UnconfirmedChecks::default();
+        text.batches = (0..MAX_BATCHES + 3)
+            .map(|i| batch("co1", &[("c", u64::try_from(i).unwrap())]))
+            .collect();
+        let read = UnconfirmedChecks::parse(&text.to_text());
+        assert_eq!(read.batches.len(), MAX_BATCHES + 3);
+        // Answering one makes room again.
+        many.resolve("co1", &["c"]);
+        assert!(many.add(batch("co3", &[("y", 1)])).is_ok());
     }
 }

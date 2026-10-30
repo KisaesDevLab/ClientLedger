@@ -1122,11 +1122,11 @@ impl PrintFormsScreen {
         // lost reply or a crash can be read back.
         let key = IdempotencyKey::new();
         // PR-2 #4: no record of the run on this computer, nothing sent.
-        if self.save_intent(&key, &req, &planned).is_err() {
+        if let Err(why) = self.save_intent(&key, &req, &planned) {
             if let Some(run) = self.run.as_mut() {
                 let _ = run.record_failed();
             }
-            self.notice = Some("print.intent_unsaved");
+            self.notice = Some(why);
             return;
         }
         self.intent = Some(Intent {
@@ -1140,20 +1140,21 @@ impl PrintFormsScreen {
     }
 
     /// Saves the intended batch (ids, planned numbers, the run's key).
-    /// `Err` when it could not be saved (no store, no company, or the write
+    /// `Err` (the notice to show) when it could not be saved (no store, no
+    /// company, the file is full of unanswered batches, or the write
     /// failed): the run must not be sent.
     fn save_intent(
         &self,
         key: &IdempotencyKey,
         req: &PrintChecks,
         planned: &[(TransactionId, u64)],
-    ) -> Result<(), ()> {
+    ) -> Result<(), &'static str> {
         let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
             tracing::warn!("no place to save the intended check batch; nothing sent");
-            return Err(());
+            return Err("print.intent_unsaved");
         };
         let mut all = store.load();
-        all.add(UnconfirmedBatch {
+        let added = all.add(UnconfirmedBatch {
             company_id: company,
             bank_account_id: req.bank_account.to_string(),
             printed_at: chrono::Utc::now().to_rfc3339(),
@@ -1168,8 +1169,14 @@ impl PrintFormsScreen {
             client_key: Some(key.to_string()),
             format: Some(req.format.as_wire().to_string()),
         });
+        // PR-2 review #9: never room made by dropping another batch.
+        if added.is_err() {
+            tracing::warn!("too many check batches wait for an answer; nothing sent");
+            return Err("print.too_many_waiting");
+        }
         store.save(&all).map_err(|_| {
             tracing::warn!("the intended check batch could not be saved; nothing sent");
+            "print.intent_unsaved"
         })
     }
 
