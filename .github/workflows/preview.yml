@@ -31,11 +31,11 @@ jobs:
         os: [windows-latest, macos-14, macos-15-intel, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: Swatinem/rust-cache@v2
@@ -43,11 +43,11 @@ jobs:
         id: engine
         shell: bash
         run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/engine/.cache
           key: engine-${{ matrix.os }}-${{ steps.engine.outputs.commit }}-node24
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
@@ -73,7 +73,7 @@ jobs:
           name=$(ls target/preview/*.sha256 | head -n 1 | xargs basename)
           plat=$(echo "$name" | sed -E 's/.*-(windows|macos|linux)-(x64|arm64)\..*/\1-\2/')
           echo "platform=$plat" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: clientledger-preview-${{ steps.label.outputs.label }}-${{ steps.platform.outputs.platform }}
           path: |

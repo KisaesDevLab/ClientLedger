@@ -23,7 +23,7 @@ jobs:
     name: ci (ubuntu-22.04)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -31,13 +31,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
         run: cargo xtask pg-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
@@ -49,7 +49,7 @@ jobs:
       # every optional dependency off (minutes, once per cache key), then the
       # pinned model data. Worker and host tests that need OCR fail instead of
       # skipping when it is missing (CL_OCR_REQUIRE below).
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             target/ocr
@@ -86,7 +86,7 @@ jobs:
       CL_PDFIUM_REQUIRE: "1"
       CL_OCR_REQUIRE: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -95,13 +95,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y strace
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             target/ocr
@@ -170,7 +170,7 @@ jobs:
             exit "$rc"
           done
           ./target/debug/xtask docread-netcheck "$RUNNER_TEMP/net.log"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         # A job cancelled by its time limit is not a failure(); upload then too.
         if: failure() || cancelled()
         with:
@@ -190,7 +190,7 @@ jobs:
         os: [windows-latest, macos-14, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -198,13 +198,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
         run: cargo xtask pg-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
@@ -216,7 +216,7 @@ jobs:
       # every optional dependency off (minutes, once per cache key), then the
       # pinned model data. Worker and host tests that need OCR fail instead of
       # skipping when it is missing (CL_OCR_REQUIRE below).
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             target/ocr
@@ -246,18 +246,18 @@ jobs:
         os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             target/ocr
@@ -268,7 +268,7 @@ jobs:
         run: cargo xtask ocr-build
       - name: Fetch pinned OCR models (hash-verified)
         run: cargo xtask ocr-models
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/docread-fonts
           key: docread-fonts-${{ hashFiles('docread-fonts.lock') }}
@@ -276,7 +276,7 @@ jobs:
         run: cargo xtask gen-invoices --holdout
       - name: Reading accuracy against Q-285
         run: cargo xtask docread-accuracy --gate
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: docread-accuracy-${{ runner.os }}
@@ -290,7 +290,7 @@ jobs:
     name: ui-check (ubuntu-22.04)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -299,7 +299,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 libgl1
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
@@ -311,7 +311,7 @@ jobs:
         run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check grid_demo --no-build
       - name: Document viewer scenario under Xvfb
         run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check document-view --no-build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ui-check-linux
@@ -327,12 +327,12 @@ jobs:
         os: [windows-latest, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
@@ -344,7 +344,7 @@ jobs:
         run: cargo xtask ui-check grid_demo --no-build
       - name: Document viewer scenario
         run: cargo xtask ui-check document-view --no-build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ui-check-${{ runner.os }}
@@ -356,7 +356,7 @@ jobs:
     name: secret scan
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -375,7 +375,7 @@ jobs:
     name: coverage
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -383,19 +383,19 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL
         run: cargo xtask pg-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pdfium/.cache
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
       - name: Fetch pinned PDFium
         run: cargo xtask pdfium-fetch
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             target/ocr
@@ -428,11 +428,11 @@ jobs:
       # The supervisor tests with the real engine and PostgreSQL fail instead of skipping (Q-P04i).
       CL_HOST_REQUIRE: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: Swatinem/rust-cache@v2
@@ -440,7 +440,7 @@ jobs:
         id: engine
         shell: bash
         run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/engine/.cache
           key: engine-${{ matrix.os }}-${{ steps.engine.outputs.commit }}-node24
@@ -459,7 +459,7 @@ jobs:
         run: cargo xtask engine --smoke
       - name: Executable runs without Node on PATH
         run: cargo test -p xtask -- built_executable_runs_without_node_on_path
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
@@ -594,7 +594,7 @@ jobs:
           sudo pkill -u cltest || true
           sudo userdel --remove cltest || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: engine-${{ runner.os }}-${{ runner.arch }}
           path: target/engine/*/

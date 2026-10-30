@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-22.04, windows-latest, macos-14, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: false
@@ -31,7 +31,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/pg/.cache
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
