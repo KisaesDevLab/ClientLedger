@@ -456,7 +456,7 @@ fn reprinting_a_void_check_keeps_the_skipped_notice() {
         s.poll();
     }
     assert_eq!(s.notice, Some("print.confirm.skipped"));
-    assert!(s.preselect.is_empty());
+    assert_eq!(s.preselect, Vec::<TransactionId>::new());
     assert!(s.preview.is_none());
     assert_eq!(s.bank, bank, "no hunt through the other accounts");
 }

@@ -1501,6 +1501,7 @@ impl PrintFormsScreen {
     /// The first saved intent the read-back could not decide: its key and
     /// planned numbers (for "Forget this print"). Cached: see
     /// [`Self::printing_changed`].
+    #[cfg(test)]
     pub(crate) fn stuck_intent(&self) -> Option<(String, Vec<u64>)> {
         self.stuck.clone()
     }

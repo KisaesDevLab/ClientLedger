@@ -433,10 +433,11 @@ mod tests {
         assert_eq!(many, before, "nothing evicted");
         assert_eq!(many.intents_for("co2").count(), 1);
         // A file written with more than the cap keeps every batch.
-        let mut text = UnconfirmedChecks::default();
-        text.batches = (0..MAX_BATCHES + 3)
-            .map(|i| batch("co1", &[("c", u64::try_from(i).unwrap())]))
-            .collect();
+        let text = UnconfirmedChecks {
+            batches: (0..MAX_BATCHES + 3)
+                .map(|i| batch("co1", &[("c", u64::try_from(i).unwrap())]))
+                .collect(),
+        };
         let read = UnconfirmedChecks::parse(&text.to_text());
         assert_eq!(read.batches.len(), MAX_BATCHES + 3);
         // Answering one makes room again.
