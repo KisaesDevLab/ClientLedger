@@ -668,6 +668,29 @@ fn open_with_during_the_record_keeps_the_run() {
     assert!(s.has_unanswered());
 }
 
+/// PR-2 review #2: Print from a form while a run is recording: once the
+/// run settles with no question (here it stays undecided), the checks are
+/// previewed and the undecided run is still said.
+#[test]
+fn print_from_a_form_during_the_record_previews_once_settled() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    let ids: Vec<TransactionId> = s.checks.iter().map(|c| c.id).collect();
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::BeforeRecording);
+    s.print_clicked();
+    assert!(s.recording());
+    assert!(s.open_with(OpenPayload::PrintChecks(vec![ids[1]])));
+    s.poll();
+    s.poll();
+    assert!(!s.asking);
+    assert_eq!(s.picked, [ids[1]].into_iter().collect());
+    let p = s.preview.as_ref().expect("previewed once settled");
+    assert_eq!(p.kind, PreviewKind::Checks);
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+}
+
 /// PR-2 B2: plan [a, b]; the reply is lost and b is voided before the
 /// read-back: a is recorded (the question asks about it), b is not, and
 /// the intent is resolved. A void check never fails the whole read-back.

@@ -283,6 +283,9 @@ pub struct PrintFormsScreen {
     used: BTreeSet<u64>,
     pub(crate) notice: Option<&'static str>,
     preselect: Vec<TransactionId>,
+    /// `preselect` came while a run was recording: looked for once it is
+    /// settled.
+    preselect_waiting: bool,
     /// Reprint check: preview it once it is back in the queue.
     reprint: Option<TransactionId>,
     /// Printed checks wait for an answer (read on open and after each change
@@ -511,6 +514,7 @@ impl PrintFormsScreen {
             used: BTreeSet::new(),
             notice: None,
             preselect: Vec::new(),
+            preselect_waiting: false,
             reprint: None,
             unanswered: false,
             pending_deposit: None,
@@ -625,6 +629,19 @@ impl PrintFormsScreen {
         }) {
             self.queue_task = Some(Task::Pending(p));
         }
+    }
+
+    /// Print from a form: read the queue from the first bank account on;
+    /// `poll` moves to the next account until the checks are found and
+    /// previews them.
+    fn look_for_preselect(&mut self) {
+        if let Some((first, _)) = self.setup.banks.first() {
+            if self.bank != Some(*first) {
+                self.first_number.clear();
+            }
+            self.bank = Some(*first);
+        }
+        self.load_queue();
     }
 
     pub(crate) fn load_forms(&mut self) {
@@ -1923,7 +1940,12 @@ impl PrintFormsScreen {
                     self.checks = q.checks;
                     if !self.preselect.is_empty() && !self.picked.is_empty() && !self.recording() {
                         self.preselect.clear();
+                        // A run that stays undecided is still said.
+                        let recover = self.notice.filter(|n| n.starts_with("print.recover."));
                         self.preview_checks();
+                        if self.notice.is_none() {
+                            self.notice = recover;
+                        }
                     }
                 }
                 Err(e) => self.error = Some(e),
@@ -2023,6 +2045,20 @@ impl PrintFormsScreen {
             } else {
                 "print.save_failed"
             });
+        }
+        // Print from a form while a run was recording (PR-2 review #2): the
+        // checks are looked for once the run is settled and no question
+        // waits (an answer reads the list itself).
+        if self.preselect_waiting
+            && self.loaded
+            && self.setup_task.is_none()
+            && !self.asking
+            && !self.recording()
+        {
+            self.preselect_waiting = false;
+            if !self.preselect.is_empty() && self.queue_task.is_none() {
+                self.look_for_preselect();
+            }
         }
         // A deposit summary waits for the company block and for any open
         // "Did all checks print correctly?" question.
@@ -2693,20 +2729,14 @@ impl Screen for PrintFormsScreen {
             self.preselect = ids;
             self.tab = Tab::Checks;
             // B2: the run whose numbers are out stays; the checks wait
-            // (previewed once the answer is in and the list is read).
+            // (previewed once the answer is in, see `poll`).
             if self.recording() {
+                self.preselect_waiting = true;
                 self.notice = Some("print.busy_recording");
                 return true;
             }
             if self.loaded && self.setup_task.is_none() {
-                // Look from the first bank account on (see `poll`).
-                if let Some((first, _)) = self.setup.banks.first() {
-                    if self.bank != Some(*first) {
-                        self.first_number.clear();
-                    }
-                    self.bank = Some(*first);
-                }
-                self.load_queue();
+                self.look_for_preselect();
             }
             return true;
         }
