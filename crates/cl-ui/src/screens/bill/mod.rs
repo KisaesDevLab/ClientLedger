@@ -885,16 +885,21 @@ impl EnterBillScreen {
     /// An expense line that just got its account with no amount takes what
     /// is left of the typed amount due after the item lines and the other
     /// expense lines (Q-304). Item lines (quantity × cost) are never
-    /// touched; an amount due taken from the lines fills nothing.
+    /// touched; an amount due taken from the lines, or read from a document
+    /// and not accepted yet, fills nothing, and read lines not accepted yet
+    /// are never filled (non-negotiable 4).
     pub(crate) fn fill_remaining(&mut self) {
         let h = self.header.current();
         let items = cl_model::forms::item_lines::items_total(self.items.value());
-        let total = h
-            .amount_due
-            .filter(|_| !h.amount_from_lines && items.is_some());
+        let total = h.amount_due.filter(|_| {
+            !h.amount_from_lines
+                && items.is_some()
+                && !h.read.is_unaccepted(cl_model::forms::doc_read::ReadTarget::AmountDue)
+        });
+        let held = h.read.unaccepted_lines();
         let allowed = self.lines_editable();
         self.expenses
-            .fill_remaining(total, items.unwrap_or(Money::ZERO), allowed);
+            .fill_remaining(total, items.unwrap_or(Money::ZERO), allowed, &held);
     }
 
     /// The owner typed the amount due.
@@ -1411,7 +1416,7 @@ impl EnterBillScreen {
     /// A fresh set of grid lines (a new bill, a load).
     pub(crate) fn load_lines(&mut self, expenses: FormLines, items: ItemLines) {
         let lists = Arc::clone(&self.lists);
-        self.expenses.form_mut().load(expenses, &*lists);
+        self.expenses.load(expenses, &*lists);
         self.items.load(items);
     }
 

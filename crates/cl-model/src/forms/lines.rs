@@ -199,16 +199,22 @@ pub fn fill_remaining(
 
 /// Fills every line that just got its account (see [`fresh_account_lines`])
 /// with what is left, in line order, so the first takes the whole total
-/// and later ones what the earlier left (often nothing). True when a line
-/// changed.
+/// and later ones what the earlier left (often nothing). Lines in `held`
+/// (read from a document and not accepted yet) are never filled: an amount
+/// put there would count as the owner's (non-negotiable 4). True when a
+/// line changed.
 pub fn fill_fresh_lines(
     header: Option<Money>,
     elsewhere: Money,
     seen: &FormLines,
     lines: &mut FormLines,
+    held: &[RowKey],
 ) -> bool {
     let mut changed = false;
     for key in fresh_account_lines(seen, lines) {
+        if held.contains(&key) {
+            continue;
+        }
         changed |= fill_remaining(header, elsewhere, lines, key);
     }
     changed
@@ -412,7 +418,7 @@ mod tests {
         let seen = v.clone();
         let first = pick(&mut v, &mut keys, 0, 1500);
         assert_eq!(fresh_account_lines(&seen, &v), vec![first]);
-        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v));
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
         assert_eq!(v.lines[0].amount, Some(money("1500.01")));
         // The owner types 1,000.00 over it; the next line takes 500.01.
         v.lines[0].amount = Some(money("1000.00"));
@@ -422,7 +428,7 @@ mod tests {
             remaining_for(total, Money::ZERO, &v, next),
             Some(money("500.01"))
         );
-        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v));
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
         assert_eq!(v.lines[1].amount, Some(money("500.01")));
         assert_eq!(v.lines[0].amount, Some(money("1000.00")), "typed, kept");
         assert_eq!(remaining(total, &v), Some(Money::ZERO));
@@ -430,7 +436,7 @@ mod tests {
         let seen = v.clone();
         let third = pick(&mut v, &mut keys, 2, 6200);
         assert_eq!(remaining_for(total, Money::ZERO, &v, third), None);
-        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v));
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
         assert_eq!(v.lines[2].amount, None);
     }
 
@@ -444,7 +450,7 @@ mod tests {
         let seen = v.clone();
         let key = pick(&mut v, &mut keys, 1, 6200);
         assert_eq!(remaining_for(None, Money::ZERO, &v, key), None);
-        assert!(!fill_fresh_lines(None, Money::ZERO, &seen, &mut v));
+        assert!(!fill_fresh_lines(None, Money::ZERO, &seen, &mut v, &[]));
         assert_eq!(
             remaining_for(Some(money("75.00")), Money::ZERO, &v, key),
             None,
@@ -487,7 +493,7 @@ mod tests {
         let seen = v.clone();
         v.lines[0].amount = None;
         assert_eq!(fresh_account_lines(&seen, &v), Vec::<RowKey>::new());
-        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v));
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
         assert_eq!(v.lines[0].amount, None);
         // A changed account on a line with an account is not new either.
         let seen = v.clone();
@@ -504,9 +510,33 @@ mod tests {
             account: Some(account(2)),
             ..FormLine::blank(keys.next_key())
         });
-        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut w));
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut w, &[]));
         assert_eq!(w.lines[0].amount, Some(money("50.00")));
         assert_eq!(w.lines[1].amount, None);
+    }
+
+    #[test]
+    fn a_held_line_is_never_filled_but_the_others_are() {
+        let mut keys = RowKeyGen::new();
+        let mut v = FormLines::from_lines(Vec::new(), &mut keys);
+        let total = Some(money("50.00"));
+        let seen = v.clone();
+        v.lines[0].account = Some(account(1));
+        v.lines.push(FormLine {
+            account: Some(account(2)),
+            ..FormLine::blank(keys.next_key())
+        });
+        let held = [v.lines[0].key];
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &held));
+        assert_eq!(v.lines[0].amount, None, "read, not accepted: left blank");
+        assert_eq!(v.lines[1].amount, Some(money("50.00")));
+        // Only held lines: nothing changes.
+        let mut w = FormLines::from_lines(Vec::new(), &mut keys);
+        let seen = w.clone();
+        w.lines[0].account = Some(account(1));
+        let held = [w.lines[0].key];
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut w, &held));
+        assert_eq!(w.lines[0].amount, None);
     }
 
     #[test]

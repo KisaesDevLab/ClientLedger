@@ -258,7 +258,7 @@ impl RegisterScreen {
             && !self.view_only()
             && !self.entry.form.form().is_unconfirmed();
         if let Some(s) = self.splits.as_mut() {
-            s.grid.fill_remaining(header, Money::ZERO, allowed);
+            s.grid.fill_remaining(header, Money::ZERO, allowed, &[]);
         }
     }
 

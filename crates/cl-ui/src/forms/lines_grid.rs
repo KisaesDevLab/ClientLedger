@@ -839,29 +839,53 @@ impl<L: LineLists + 'static> LinesGrid<L> {
         applied
     }
 
+    /// Shows other lines (a record, draft, template or Prev/Next): they
+    /// are not "just picked", so [`LinesGrid::fill_remaining`] leaves them.
+    pub fn load(&mut self, lines: FormLines, lookups: &dyn Lookups) {
+        self.form.load(lines, lookups);
+        self.seen = self.value().clone();
+    }
+
+    /// Throws the unsaved edits away (Clear, Discard); the lines put back
+    /// are not "just picked" either.
+    pub fn revert_form(&mut self, lookups: &dyn Lookups) {
+        self.form.revert_form(lookups);
+        self.seen = self.value().clone();
+    }
+
     /// A line that just got its account (picked in the grid, filled by a
     /// prefill or an accepted suggestion) with no amount takes what is left
     /// of the typed `header` total, less `elsewhere` (Q-304, as Q-P15n):
-    /// the first line takes the whole total, the next what is left. One
-    /// undo step; typing overwrites it, Tab keeps it; a typed amount is
-    /// never changed. Screens call it every frame after drawing, with
-    /// `header` `None` when the total is not the owner's (taken from the
-    /// lines) and `allowed` false while read-only or busy (the lines are
-    /// still remembered). True when a line was filled.
+    /// the first line takes the whole total, the next what is left. The
+    /// fill is an undo step of its own after the pick; typing overwrites
+    /// it, Tab keeps it; a typed amount is never changed. Screens call it
+    /// every frame after drawing, with `header` `None` when the total is
+    /// not the owner's (taken from the lines, or read from a document and
+    /// not accepted), `held` the read lines not accepted yet (never
+    /// filled, non-negotiable 4) and `allowed` false while read-only or
+    /// busy (the lines are still remembered). Nothing is filled while Redo
+    /// is available: the change came from Undo/Redo, and a fill would wipe
+    /// the redo history. True when a line was filled.
     pub fn fill_remaining(
         &mut self,
         header: Option<Money>,
         elsewhere: Money,
         allowed: bool,
+        held: &[RowKey],
     ) -> bool {
         if *self.value() == self.seen {
             return false;
         }
+        let allowed = allowed && !self.form.form().can_redo();
         let mut v = self.value().clone();
-        let mut filled = allowed && fill_fresh_lines(header, elsewhere, &self.seen, &mut v);
+        let mut filled = allowed && fill_fresh_lines(header, elsewhere, &self.seen, &mut v, held);
         if filled {
             v.ensure_entry(&mut self.form.adapter_mut().keys);
-            filled = self.form.edit_step(|x| *x = v);
+            // The step is recorded only when the value really changed (the
+            // revision moves then); a save in flight refuses it.
+            let rev = self.form.form().revision();
+            self.form.edit_step(|x| *x = v);
+            filled = self.form.form().revision() != rev;
         }
         self.seen = self.value().clone();
         filled

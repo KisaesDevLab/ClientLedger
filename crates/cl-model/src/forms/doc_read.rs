@@ -158,6 +158,25 @@ impl ReadState {
         self.fields.clear();
     }
 
+    /// `target` was read from the document and not accepted yet.
+    #[must_use]
+    pub fn is_unaccepted(&self, target: ReadTarget) -> bool {
+        matches!(self.state(target), Some(ReadField::Read { .. }))
+    }
+
+    /// The read lines not accepted yet: a split-line fill (Q-304) must not
+    /// put an amount on them (non-negotiable 4).
+    #[must_use]
+    pub fn unaccepted_lines(&self) -> Vec<RowKey> {
+        self.fields
+            .iter()
+            .filter_map(|(t, f)| match (t, f) {
+                (ReadTarget::Line(k), ReadField::Read { .. }) => Some(*k),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The read fields not accepted yet, in field order.
     #[must_use]
     pub fn unaccepted(&self) -> Vec<ReadTarget> {
@@ -444,6 +463,21 @@ mod tests {
         );
         assert_eq!(r.entries().count(), 2);
         assert_eq!(r.unaccepted(), Vec::new());
+    }
+
+    #[test]
+    fn unaccepted_lines_and_fields_are_only_the_read_ones() {
+        let mut r = ReadState::default();
+        r.mark_read(ReadTarget::Total, Confidence::High);
+        r.mark_read(ReadTarget::Line(RowKey(1)), Confidence::High);
+        r.mark_read(ReadTarget::Line(RowKey(2)), Confidence::Low);
+        r.edited(ReadTarget::Line(RowKey(2)));
+        assert!(r.is_unaccepted(ReadTarget::Total));
+        assert!(!r.is_unaccepted(ReadTarget::Payee), "not read");
+        assert_eq!(r.unaccepted_lines(), vec![RowKey(1)]);
+        r.accept_all();
+        assert!(!r.is_unaccepted(ReadTarget::Total));
+        assert_eq!(r.unaccepted_lines(), Vec::new());
     }
 
     fn reading() -> DocReading {
