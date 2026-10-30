@@ -221,3 +221,19 @@ fn esc_reverts_the_focused_field_first() {
     assert!(!s.is_dirty());
     assert!(!s.command(CommandId::new("form.revert")));
 }
+
+#[test]
+fn a_new_line_takes_what_is_left_of_the_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "100.00", &[("6400", "60.00")]);
+    s.fill_remaining();
+    let a = s.books.by_number("6400").expect("account");
+    let mut v = s.lines.value().clone();
+    v.lines[1].account = Some(a);
+    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|x| *x = v);
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("40.00")));
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("60.00")));
+}

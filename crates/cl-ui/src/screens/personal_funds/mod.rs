@@ -474,6 +474,16 @@ impl PersonalFundsScreen {
         self.inputs.rev = self.header.revision();
     }
 
+    /// A line that just got its account with no amount takes what is left
+    /// of the typed amount (Q-304); an amount taken from the lines fills
+    /// nothing.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let total = h.amount.filter(|_| !h.amount_from_lines);
+        let allowed = self.flow.idle();
+        self.lines.fill_remaining(total, Money::ZERO, allowed);
+    }
+
     fn left_lines(&mut self) {
         let mut f = self.compose();
         f.leave_lines();
@@ -1352,6 +1362,7 @@ impl Screen for PersonalFundsScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        self.fill_remaining();
         // A refused save's problems follow the owner's fixes.
         self.recheck_problems();
         let in_grid = self.lines.has_focus();
