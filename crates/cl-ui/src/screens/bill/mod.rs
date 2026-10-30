@@ -872,6 +872,31 @@ impl EnterBillScreen {
         }
     }
 
+    /// The lines take edits: no save running, no closing-date prompt, not
+    /// read-only, not a locked draft.
+    pub(crate) fn lines_editable(&self) -> bool {
+        let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
+        self.save.task.is_none()
+            && !self.closing_prompt.dialog_open()
+            && !read_only
+            && !self.draft_locked()
+    }
+
+    /// An expense line that just got its account with no amount takes what
+    /// is left of the typed amount due after the item lines and the other
+    /// expense lines (Q-304). Item lines (quantity × cost) are never
+    /// touched; an amount due taken from the lines fills nothing.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let items = cl_model::forms::item_lines::items_total(self.items.value());
+        let total = h
+            .amount_due
+            .filter(|_| !h.amount_from_lines && items.is_some());
+        let allowed = self.lines_editable();
+        self.expenses
+            .fill_remaining(total, items.unwrap_or(Money::ZERO), allowed);
+    }
+
     /// The owner typed the amount due.
     pub(crate) fn amount_typed(&mut self, amount: Option<Money>) {
         self.header
@@ -1178,6 +1203,7 @@ impl Screen for EnterBillScreen {
         self.panel_tick();
         self.compare_before();
         self.draw(ui);
+        self.fill_remaining();
         self.compare_after();
         if let Some(d) = self.draft.as_mut() {
             d.dialogs_ui(ui.ctx(), self.money_style);
