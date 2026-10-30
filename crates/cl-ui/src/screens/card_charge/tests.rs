@@ -738,3 +738,32 @@ fn files_ride_onto_a_saved_charge_and_its_credit_counterpart() {
     );
     assert_eq!(on.len(), 1, "the file is the credit's");
 }
+
+/// Picks account `n` on line `i` (no amount), as the grid does, and runs
+/// the frame's remaining fill (Q-304).
+fn pick_line(s: &mut CardChargeScreen, i: usize, n: &str) {
+    let a = s.books.by_number(n).expect("account");
+    let mut v = s.lines.value().clone();
+    v.lines[i].account = Some(a);
+    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|x| *x = v);
+    s.fill_remaining();
+}
+
+#[test]
+fn a_new_card_line_takes_what_is_left_of_the_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("1500.01")));
+    pick_line(&mut s, 0, "6400");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("1500.01")));
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("1000.00")));
+    s.fill_remaining();
+    pick_line(&mut s, 1, "6400");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("1000.00")));
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("500.01")));
+    pick_line(&mut s, 2, "6400");
+    assert_eq!(s.lines.value().lines[2].amount, None, "nothing left");
+}

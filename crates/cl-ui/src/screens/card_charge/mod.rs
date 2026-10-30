@@ -305,6 +305,16 @@ impl CardChargeScreen {
         }
     }
 
+    /// A line that just got its account with no amount takes what is left
+    /// of the typed amount (Q-304); an amount taken from the lines fills
+    /// nothing.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let total = h.amount.filter(|_| !h.amount_from_lines);
+        let allowed = self.flow.idle() && !self.draft_locked();
+        self.lines.fill_remaining(total, Money::ZERO, allowed);
+    }
+
     /// The owner typed the amount: one line follows it.
     pub(crate) fn amount_typed(&mut self, amount: Option<Money>) {
         let mut f = self.compose();
@@ -1394,6 +1404,7 @@ impl Screen for CardChargeScreen {
         }
         self.compare_before();
         self.draw(ui);
+        self.fill_remaining();
         self.compare_after();
         self.track_draft_read();
         if let Some(d) = self.draft.session.as_mut() {
