@@ -114,4 +114,4 @@ Phases that may run in parallel with the critical path (rules in docs/AGENTS.md)
 
 ## Beta scope summary
 
-Small business owners in the US; offline; Rust/egui native app on the MyBooks engine; companies as engine tenants; checks only on pre-printed stock; average-cost inventory without assemblies; bank file import (no Plaid); optional AI with the owner's key or local Ollama; QBD import via the shared report-export importer with tie-out; transfer to MyBooks Online by file; LAN multi-user up to five users; free MIT app with the engine under PolyForm plus the ClientLedger grant. Full decision list: QUESTIONS.md.
+Small business owners in the US; offline; Rust/egui native app on the MyBooks engine; companies as engine tenants; checks only on pre-printed stock; average-cost inventory without assemblies; bank file import (no Plaid); optional AI with the owner's key or local Ollama; QBD import via the shared report-export importer with tie-out; transfer to MyBooks Online by file; LAN multi-user up to five users; free app under PolyForm Internal Use 1.0.0 with the engine licensed to ClientLedger (Q-303). Full decision list: QUESTIONS.md.

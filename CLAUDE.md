@@ -1,12 +1,12 @@
 # CLAUDE.md — ClientLedger
 
-ClientLedger is a free, open-source (MIT), fully offline, native, cross-platform desktop bookkeeping app for **US small business owners**. It gives QuickBooks Desktop switchers the workflow they know — form-first entry, two-line registers, keyboard-driven everything — on top of the existing **Vibe MyBooks engine**. When the owner's accountant needs the books, ClientLedger exports a transfer file the accountant imports into MyBooks Online (the firm's browser-based MyBooks).
+ClientLedger is a free, source-available (PolyForm Internal Use 1.0.0), fully offline, native, cross-platform desktop bookkeeping app for **US small business owners**. It gives QuickBooks Desktop switchers the workflow they know — form-first entry, two-line registers, keyboard-driven everything — on top of the existing **Vibe MyBooks engine**. When the owner's accountant needs the books, ClientLedger exports a transfer file the accountant imports into MyBooks Online (the firm's browser-based MyBooks).
 
 - **UI:** Rust + egui (eframe), the same approach as PdfCraft. Windows x64, macOS, Linux from one codebase.
 - **Engine:** the existing MyBooks TypeScript engine (public repo, PolyForm Internal Use 1.0.0, unmodified), compiled to a single executable with Node SEA and run locally as a sidecar process.
 - **Database:** PostgreSQL 16, bundled with the app and managed by ClientLedger.
 - **Network:** none required. The only online features are optional and owner-configured: AI suggestions with the owner's own Anthropic or OpenAI key (or fully offline with a local Ollama model), emailing invoices through the owner's SMTP server, and the manual update check.
-- **License and repo:** ClientLedger code is MIT; the repo is public; outside pull requests are not accepted. No license keys, activation, or seat limits.
+- **License and repo:** ClientLedger code is PolyForm Internal Use 1.0.0 (owner 2026-10-30, Q-303; it was MIT before); the engine is licensed to ClientLedger and used inside it under ClientLedger's license (NOTICE.md); the repo is public; outside pull requests are not accepted. No license keys, activation, or seat limits.
 - **Owner:** KisaesDevLab (Kurt). Branding: "ClientLedger — powered by Vibe MyBooks". The ClientLedger name and ClientLedger.net belong to this desktop app; MyBooks markets under its own name (Q-120).
 
 Read these before every session, in order. Read only what your task needs (token rules, owner 2026-10-18):
@@ -97,14 +97,14 @@ ClientLedger/
 ├── .claude/
 │   ├── agents/               # subagent definitions (models, tools, effort)
 │   └── settings.json         # max 4 concurrent subagents
-├── LICENSE                   # MIT — ClientLedger code only
-├── NOTICE.md                 # engine/ is PolyForm Internal Use 1.0.0, not MIT (Q-31)
+├── LICENSE                   # PolyForm Internal Use 1.0.0 — ClientLedger code only (Q-303)
+├── NOTICE.md                 # what LICENSE covers; engine/ licensed to ClientLedger (Q-31, Q-303)
 ├── CONTRIBUTING.md           # issues welcome; pull requests not accepted (Q-32)
 ├── ATTRIBUTION.md            # every bundled font, icon, binary, and license
 ├── Cargo.toml                # workspace
 ├── deny.toml                 # cargo-deny license allowlist + advisories + bans
 ├── rust-toolchain.toml
-├── engine/                   # git submodule: public MyBooks engine repo (pinned tag), NOT MIT
+├── engine/                   # git submodule: public MyBooks engine repo (pinned tag), its own license
 ├── crates/
 │   ├── cl-core/              # shared types: Money, ids, dates, fiscal calendars, errors (no I/O)
 │   ├── cl-api/               # typed client for the local engine API + contract tests

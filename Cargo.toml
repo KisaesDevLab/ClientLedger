@@ -5,7 +5,8 @@ members = ["crates/*", "apps/*", "xtask"]
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-license = "MIT"
+# PolyForm Internal Use 1.0.0 (LICENSE); not on the SPDX list, hence LicenseRef.
+license = "LicenseRef-PolyForm-Internal-Use-1.0.0"
 repository = "https://github.com/KisaesDevLab/ClientLedger"
 publish = false
 

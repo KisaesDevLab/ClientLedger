@@ -80,9 +80,11 @@ paste them into the issue. Please do not attach real business data.
 
 LICENSES
 --------
-ClientLedger's own code is MIT licensed (LICENSE). The books engine is the
-Vibe MyBooks engine under the PolyForm Internal Use License 1.0.0 (see
-NOTICE.md). Fonts and bundled programs, including PostgreSQL, are listed with
-their licenses in ATTRIBUTION.md.
+ClientLedger is licensed under the PolyForm Internal Use License 1.0.0
+(LICENSE): you may use it, and change it, for your own organization's internal
+business, but not share or distribute it. The books engine is the Vibe MyBooks
+engine, licensed by Kisaes LLC to ClientLedger; inside ClientLedger you use it
+under ClientLedger's license (see NOTICE.md). Fonts and bundled programs,
+including PostgreSQL, are listed with their licenses in ATTRIBUTION.md.
 
 ClientLedger is not affiliated with Intuit or QuickBooks.

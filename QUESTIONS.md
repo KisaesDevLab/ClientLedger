@@ -1,6 +1,6 @@
 # QUESTIONS.md — ClientLedger
 
-| Q-302 | Owner-facing word for work done for a customer: Job or Project? | **Project** (owner 2026-10-28, to avoid looking like QuickBooks). Every owner-facing label, help page, scenario and identifier says Project/Projects; amends Q-90, Q-235, Q-255, Q-258 and wins over the mockups in docs/design (Q-226). QBD import (P31) and IIF export map QuickBooks `Customer:Job` to and from projects; only that import/export text may name QuickBooks' "Job". | all (P11 Client center, P13-P17 lines grids, P18+, P31, P47) |
+| Q-303 | ClientLedger's own license | **PolyForm Internal Use License 1.0.0** (owner 2026-10-30), replacing MIT (Q-01). `LICENSE` names Kisaes LLC dba KisaesDevLab as licensor; crates say `LicenseRef-PolyForm-Internal-Use-1.0.0` and cargo-deny skips them (`[licenses.private]`, all `publish = false`). The engine keeps its own license and is licensed by Kisaes LLC to ClientLedger: inside ClientLedger it is used under ClientLedger's license (owner 2026-10-30). Copies obtained under MIT keep those terms. Dependency rules (Q-07) are unchanged. | LICENSE, NOTICE.md, README, About, README-PREVIEW, P35 installer | Owner-facing word for work done for a customer: Job or Project? | **Project** (owner 2026-10-28, to avoid looking like QuickBooks). Every owner-facing label, help page, scenario and identifier says Project/Projects; amends Q-90, Q-235, Q-255, Q-258 and wins over the mockups in docs/design (Q-226). QBD import (P31) and IIF export map QuickBooks `Customer:Job` to and from projects; only that import/export text may name QuickBooks' "Job". | all (P11 Client center, P13-P17 lines grids, P18+, P31, P47) |
 # QUESTIONS.md — ClientLedger
 
 Decisions and open questions. **Follow the default until the owner answers.** New questions get the next number, the phase that raised them, and a default that keeps the build moving. Irreversible decisions are marked **STOP** — wait for the owner.
@@ -11,7 +11,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 
 | ID | Decision | Affects |
 | --- | --- | --- |
-| Q-01 | ClientLedger is **free and MIT-licensed**. Public GitHub repo. Outside pull requests are not accepted. | P00, P35, P39 |
+| Q-01 | ClientLedger is **free** and, since 2026-10-30, licensed under **PolyForm Internal Use 1.0.0** (Q-303; MIT before). Public GitHub repo. Outside pull requests are not accepted. | P00, P35, P39 |
 | Q-03 | Engine packaged as a **Node single executable application (SEA)**. | P01 |
 | Q-07 | Direct Rust deps: MIT or Apache-2.0 only. Transitive deps may also use BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, Boost 1.0, Apache-2.0 WITH LLVM-exception. Bundled fonts: SIL OFL 1.1. | P00 onward |
 | Q-08 | **No licensing system.** No keys, activation, entitlements, or grace periods. (Original P09 removed.) | — |
@@ -144,8 +144,8 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-130 | **Dated notes and simple to-dos** on contacts and projects; to-dos feed Needs attention. (Q-302) | P11, P16 |
 | Q-131 | **No client credit limits.** | P11 |
 | Q-132 | Scope follows PolyForm Internal Use: ClientLedger users may use the bundled engine for the **internal business operations of their own organization** (their own books). Bookkeeping for others is not internal use and needs a separate license from Kisaes LLC. The earlier explicit allowance for outside accountants is gone with the grant; ordinary file transfer to the accountant is unaffected. | NOTICE.md, P38 docs |
-| Q-133 | Only **Licensor's official releases** may include the engine, because recipients may not distribute it. Forks of the MIT code may not bundle, download, or install the engine. | NOTICE.md, P35 |
-| Q-134 | Installers show a **license acceptance screen** (MIT + PolyForm Internal Use). | P35 |
+| Q-133 | Only **Licensor's official releases** may include the engine, because recipients may not distribute it. Changed or rebuilt copies of ClientLedger may not be shared and may not bundle, download, or install the engine (Q-303). | NOTICE.md, P35 |
+| Q-134 | Installers show a **license acceptance screen** (PolyForm Internal Use 1.0.0 for ClientLedger, which covers the engine inside it; Q-303). | P35 |
 | Q-135 | **Short privacy notice** in the app and on ClientLedger.net. | P06, P38 |
 | Q-136 | Cloud AI enablement records **dated consent in the audit trail**. | P09 |
 | Q-137 | The engine's internal-business-use scope (Q-132) appears **in About and docs only**. | P06, P38 |
