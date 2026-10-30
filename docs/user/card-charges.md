@@ -12,7 +12,7 @@ Use Record Card Charge for purchases on your business credit card. Open it from 
 
 When you have typed the amount and pick the account on a line with no amount, the line gets what is left to assign: the whole amount on the first line, then whatever the earlier lines leave. Type over it to change it, or press `Tab` to keep it. ClientLedger never changes an amount you typed.
 
-When you pick a vendor you've bought from before, the accounts from last time are filled in. Amounts are never copied: the first line gets what is left of the amount you typed, and the others stay blank.
+When you pick a vendor you've bought from before, the accounts from last time are filled in. Amounts are never copied. If you typed the amount first, the first line gets what is left of it; the others stay blank.
 
 A charge raises the balance owed on the card; a credit lowers it. Both show in the card's register right away.
 

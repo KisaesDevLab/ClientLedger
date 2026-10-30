@@ -22,7 +22,7 @@ A saved bill stays a bill and a saved credit stays a credit.
 5. Enter the lines (see below). Add a **Memo** and **Tags** if you want.
 6. Press **Save & New** (`Alt+N`) or **Save & Close** (`Alt+S`).
 
-When you pick a vendor you have entered a bill for before, ClientLedger copies details from their last bill, such as the account and terms. Amounts are never copied: if you typed the amount due, the first expense line gets what is left of it, and the others stay blank for you to fill in.
+When you pick a vendor you have entered a bill for before, ClientLedger copies details from their last bill, such as the account and terms. Amounts are never copied. If you typed the amount due first, the first expense line gets what is left of it; the others stay blank for you to fill in.
 
 ### Changing the due and discount dates
 
