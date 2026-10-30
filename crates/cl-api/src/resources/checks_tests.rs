@@ -184,6 +184,14 @@ fn unknown_statuses_are_kept_and_a_plain_expense_is_not_a_check() {
     assert!(CheckRecord::deserialize(&v).is_err(), "not a check");
     v["isCheck"] = Value::Bool(false);
     assert!(CheckRecord::deserialize(&v).is_err(), "isCheck false");
+    // Q-PR2e: isCheck false wins over a print status (a plain expense the
+    // engine says is no check); without isCheck the status still decides.
+    let mut v = inner(RECORD);
+    v["printStatus"] = Value::String("hand_written".into());
+    v["isCheck"] = Value::Bool(false);
+    assert!(CheckRecord::deserialize(&v).is_err(), "isCheck false wins");
+    v.as_object_mut().expect("obj").remove("isCheck");
+    assert!(CheckRecord::deserialize(&v).is_ok(), "older engine");
     let mut v = inner(RECORD);
     // A JSON number where money belongs (parsed from text: no float here).
     v["lines"][0]["debit"] = serde_json::from_str::<Value>("842.15").expect("number");

@@ -236,18 +236,21 @@ fn print_state_from(body: &[u8]) -> Result<CheckPrintState, ApiError> {
 }
 
 /// Reads the same object twice: once as the [`Transaction`], once for the
-/// check fields. A record is a check when it has a print status or the
-/// engine marks it `isCheck`; a check with no print status (voided while
-/// queued, U-115) reads as [`PrintStatus::Unqueued`].
+/// check fields. A record is a check when the engine marks it `isCheck`, or
+/// (older engines, no `isCheck`) when it has a print status; `isCheck:
+/// false` is never a check (Q-PR2e). A check with no print status (voided
+/// while queued, U-115) reads as [`PrintStatus::Unqueued`].
 impl<'de> Deserialize<'de> for CheckRecord {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
         let txn = Transaction::deserialize(&v).map_err(|_| de::Error::custom("transaction"))?;
         let w = CheckWire::deserialize(&v).map_err(|_| de::Error::custom("check fields"))?;
+        // Q-PR2e: an engine that says `isCheck: false` is believed even when
+        // the row carries a print status; older engines send no `isCheck`.
         let print_status = match (w.print_status.as_deref(), w.is_check) {
+            (_, Some(false)) | (None, None) => return Err(de::Error::custom("not a check")),
             (Some(s), _) => PrintStatus::from_wire(s),
             (None, Some(true)) => PrintStatus::Unqueued,
-            (None, _) => return Err(de::Error::custom("not a check")),
         };
         Ok(CheckRecord {
             txn,

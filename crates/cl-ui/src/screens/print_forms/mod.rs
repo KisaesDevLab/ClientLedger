@@ -173,8 +173,24 @@ pub(crate) struct Intent {
 /// whether this window sent it (else it was found on open).
 type Readback = (String, Vec<(TransactionId, u64)>, bool);
 
-/// A read-back's answer per check (recorded or not); `None`: undecided (S-b).
-type Decided = Option<Vec<(TransactionId, bool)>>;
+/// One planned check after the read-back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// The engine recorded its planned number in this run.
+    Recorded,
+    /// It did not (gone, void, not a check, another number or run).
+    NotRecorded,
+    /// Its read failed: undecided for this check only (PR-2 review #6).
+    Unknown,
+}
+
+/// A read-back's answer per check; `None`: the whole run is undecided
+/// (S-b).
+type Decided = Option<Vec<(TransactionId, Found)>>;
+
+/// One check read back: its state, `Ok(None)` when the record is gone, or
+/// the error that kept it from being read.
+pub(crate) type ReadState = Result<Option<cl_api::CheckPrintState>, ApiError>;
 
 /// Read once.
 #[derive(Clone, Default)]
@@ -253,6 +269,9 @@ pub struct PrintFormsScreen {
     /// keys): skipped by [`Self::recover_intents`] until the window opens
     /// again; the first one offers "Forget this print".
     pub(crate) unresolved: Vec<String>,
+    /// The first of them, read from the file when it or `unresolved`
+    /// changes (drawn each frame, never read each frame).
+    stuck: Option<(String, Vec<u64>)>,
     requeue_task: Option<Task<Requeued>>,
     requeue_ids: Vec<TransactionId>,
     mark_task: Option<Task<cl_api::MarkedPrinted>>,
@@ -280,6 +299,9 @@ pub struct PrintFormsScreen {
     used: BTreeSet<u64>,
     pub(crate) notice: Option<&'static str>,
     preselect: Vec<TransactionId>,
+    /// `preselect` came while a run was recording: looked for once it is
+    /// settled.
+    preselect_waiting: bool,
     /// Reprint check: preview it once it is back in the queue.
     reprint: Option<TransactionId>,
     /// Printed checks wait for an answer (read on open and after each change
@@ -333,28 +355,13 @@ pub(crate) fn offer_after(engine_next: Option<u64>, first: u64) -> u64 {
 /// the run (PR-2 #3): its outcome is read back and the saved intent kept
 /// until then. False only for a refusal that recorded nothing (the input,
 /// the closed period, the password, permissions, a refusal before sending).
+///
+/// The same rule as every other keyed save
+/// ([`crate::screens::register::keeps_key`]): a busy refusal
+/// (`IDEMPOTENCY_IN_PROGRESS`: the first send is still running) keeps it;
+/// print adds no case of its own.
 pub(crate) fn keeps_key(e: &ApiError) -> bool {
-    !matches!(
-        e,
-        ApiError::Validation(_)
-            | ApiError::Local(_)
-            | ApiError::Conflict { .. }
-            | ApiError::ClosedPeriod(_)
-            | ApiError::ClosingPasswordRejected
-            | ApiError::ClosingPasswordRequired
-            | ApiError::ClosingPasswordOwnerRequired
-            | ApiError::ClosingPasswordRateLimited { .. }
-            | ApiError::Unauthorized(_)
-            | ApiError::Forbidden { .. }
-            | ApiError::NotFound { .. }
-            | ApiError::Unsupported { .. }
-            | ApiError::NoCompanyOpen
-            | ApiError::RateLimited { .. }
-            | ApiError::PayloadTooLarge
-            | ApiError::Protocol { .. }
-            | ApiError::OfflineUnavailable { .. }
-            | ApiError::FeatureNotEnabled { .. }
-    )
+    crate::screens::register::keeps_key(e)
 }
 
 /// Which planned checks the engine recorded, from each check's state read
@@ -367,12 +374,14 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
 /// more than half of the planned checks name. With no such majority the run
 /// can't be told apart and the answer is `None` (undecided: the saved run
 /// waits for the next open or "Forget this print").
-pub(crate) fn decide_readback(
-    planned: &[(TransactionId, u64)],
-    states: &[Option<cl_api::CheckPrintState>],
-) -> Decided {
-    let as_planned = |n: u64, s: &Option<cl_api::CheckPrintState>| {
+///
+/// A check whose read failed is [`Found::Unknown`] and counts for no
+/// batch; the others are still decided (PR-2 review #6).
+pub(crate) fn decide_readback(planned: &[(TransactionId, u64)], states: &[ReadState]) -> Decided {
+    let as_planned = |n: u64, s: &ReadState| {
         s.as_ref()
+            .ok()
+            .and_then(Option::as_ref)
             .filter(|s| s.recorded_as(n) && s.print_batch_id.is_some())
             .and_then(|s| s.print_batch_id.clone())
     };
@@ -401,7 +410,16 @@ pub(crate) fn decide_readback(
         planned
             .iter()
             .zip(states)
-            .map(|((id, n), s)| (*id, batch.is_some() && as_planned(*n, s) == batch))
+            .map(|((id, n), s)| {
+                let found = if s.is_err() {
+                    Found::Unknown
+                } else if batch.is_some() && as_planned(*n, s) == batch {
+                    Found::Recorded
+                } else {
+                    Found::NotRecorded
+                };
+                (*id, found)
+            })
             .collect(),
     )
 }
@@ -498,6 +516,7 @@ impl PrintFormsScreen {
             readback_task: None,
             readback: None,
             unresolved: Vec::new(),
+            stuck: None,
             requeue_task: None,
             requeue_ids: Vec::new(),
             mark_task: None,
@@ -522,6 +541,7 @@ impl PrintFormsScreen {
             used: BTreeSet::new(),
             notice: None,
             preselect: Vec::new(),
+            preselect_waiting: false,
             reprint: None,
             unanswered: false,
             pending_deposit: None,
@@ -636,6 +656,19 @@ impl PrintFormsScreen {
         }) {
             self.queue_task = Some(Task::Pending(p));
         }
+    }
+
+    /// Print from a form: read the queue from the first bank account on;
+    /// `poll` moves to the next account until the checks are found and
+    /// previews them.
+    fn look_for_preselect(&mut self) {
+        if let Some((first, _)) = self.setup.banks.first() {
+            if self.bank != Some(*first) {
+                self.first_number.clear();
+            }
+            self.bank = Some(*first);
+        }
+        self.load_queue();
     }
 
     pub(crate) fn load_forms(&mut self) {
@@ -1122,11 +1155,11 @@ impl PrintFormsScreen {
         // lost reply or a crash can be read back.
         let key = IdempotencyKey::new();
         // PR-2 #4: no record of the run on this computer, nothing sent.
-        if self.save_intent(&key, &req, &planned).is_err() {
+        if let Err(why) = self.save_intent(&key, &req, &planned) {
             if let Some(run) = self.run.as_mut() {
                 let _ = run.record_failed();
             }
-            self.notice = Some("print.intent_unsaved");
+            self.notice = Some(why);
             return;
         }
         self.intent = Some(Intent {
@@ -1140,20 +1173,21 @@ impl PrintFormsScreen {
     }
 
     /// Saves the intended batch (ids, planned numbers, the run's key).
-    /// `Err` when it could not be saved (no store, no company, or the write
+    /// `Err` (the notice to show) when it could not be saved (no store, no
+    /// company, the file is full of unanswered batches, or the write
     /// failed): the run must not be sent.
     fn save_intent(
         &self,
         key: &IdempotencyKey,
         req: &PrintChecks,
         planned: &[(TransactionId, u64)],
-    ) -> Result<(), ()> {
+    ) -> Result<(), &'static str> {
         let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
             tracing::warn!("no place to save the intended check batch; nothing sent");
-            return Err(());
+            return Err("print.intent_unsaved");
         };
         let mut all = store.load();
-        all.add(UnconfirmedBatch {
+        let added = all.add(UnconfirmedBatch {
             company_id: company,
             bank_account_id: req.bank_account.to_string(),
             printed_at: chrono::Utc::now().to_rfc3339(),
@@ -1168,8 +1202,14 @@ impl PrintFormsScreen {
             client_key: Some(key.to_string()),
             format: Some(req.format.as_wire().to_string()),
         });
+        // PR-2 review #9: never room made by dropping another batch.
+        if added.is_err() {
+            tracing::warn!("too many check batches wait for an answer; nothing sent");
+            return Err("print.too_many_waiting");
+        }
         store.save(&all).map_err(|_| {
             tracing::warn!("the intended check batch could not be saved; nothing sent");
+            "print.intent_unsaved"
         })
     }
 
@@ -1222,7 +1262,7 @@ impl PrintFormsScreen {
         match r {
             Ok(_) => {
                 let all: Vec<TransactionId> = intent.planned.iter().map(|(id, _)| *id).collect();
-                self.record_succeeded(&intent.key.to_string(), &intent.planned, &all);
+                self.record_succeeded(&intent.key.to_string(), &intent.planned, &all, &[]);
             }
             // The engine replays the key: the same request again, once.
             Err(ApiError::OutcomeUnknown { keyed: true, .. }) if !intent.resent => {
@@ -1274,19 +1314,23 @@ impl PrintFormsScreen {
     /// `planned` after a partial read-back): the saved intent becomes the
     /// printed batch. All of them: the pages go to the printer and the
     /// question shows. Some: nothing is sent (the preview has pages for
-    /// checks without numbers) and the question asks about those.
+    /// checks without numbers) and the question asks about those. Checks
+    /// whose read-back failed (`undecided`) stay saved under the key.
     fn record_succeeded(
         &mut self,
         key: &str,
         planned: &[(TransactionId, u64)],
         recorded: &[TransactionId],
+        undecided: &[TransactionId],
     ) {
         self.closing_prompt.saved();
         if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
             let mut all = store.load();
             let ids: Vec<String> = recorded.iter().map(ToString::to_string).collect();
             let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            all.promote(&company, key, &refs);
+            let open: Vec<String> = undecided.iter().map(ToString::to_string).collect();
+            let open: Vec<&str> = open.iter().map(String::as_str).collect();
+            all.promote(&company, key, &refs, &open);
             if store.save(&all).is_err() {
                 tracing::warn!("the printed batch could not be saved");
                 // Not read back again this session (no second question).
@@ -1342,9 +1386,9 @@ impl PrintFormsScreen {
         self.notice = Some("print.recover.checking");
         self.readback = Some((key, planned.clone(), in_session));
         if let Some(d) = self.link.demo_state() {
-            let states: Vec<Option<cl_api::CheckPrintState>> = planned
+            let states: Vec<ReadState> = planned
                 .iter()
-                .map(|(id, _)| crate::company::demo::printing::print_state(&d, *id))
+                .map(|(id, _)| Ok(crate::company::demo::printing::print_state(&d, *id)))
                 .collect();
             drop(d);
             self.readback_task = Some(Task::ready(decide_readback(&planned, &states)));
@@ -1356,12 +1400,13 @@ impl PrintFormsScreen {
             return;
         };
         // Decided per check (PR-2 B2): a check that is gone, void or no
-        // longer a check is not recorded; only an engine that can't answer
-        // leaves the whole run unknown.
+        // longer a check is not recorded; a read that fails leaves only that
+        // check undecided (review #6). One read per check: the checks list
+        // (`GET /checks`) carries no print batch, which the decision needs.
         if let Ok(p) = group.read(&session, move |s| async move {
             let mut states = Vec::with_capacity(planned.len());
             for (id, _) in &planned {
-                states.push(s.checks().print_state(*id).await?);
+                states.push(s.checks().print_state(*id).await);
             }
             Ok(decide_readback(&planned, &states))
         }) {
@@ -1374,15 +1419,27 @@ impl PrintFormsScreen {
 
     /// The read-back answered: continue as recorded, drop the intent, or
     /// treat the recorded part as printed.
-    fn read_back(&mut self, found: &[(TransactionId, bool)]) {
+    /// Checks whose read failed keep the run saved (review #6): with none
+    /// recorded the whole run waits, as when the read-back failed; else the
+    /// recorded ones print and the others wait under the key.
+    fn read_back(&mut self, found: &[(TransactionId, Found)]) {
         let Some((key, planned, in_session)) = self.readback.take() else {
             return;
         };
-        let recorded: Vec<TransactionId> = found
-            .iter()
-            .filter(|(_, r)| *r)
-            .map(|(id, _)| *id)
-            .collect();
+        let with = |want: Found| -> Vec<TransactionId> {
+            found
+                .iter()
+                .filter(|(_, f)| *f == want)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let recorded = with(Found::Recorded);
+        let undecided = with(Found::Unknown);
+        if recorded.is_empty() && !undecided.is_empty() {
+            self.readback = Some((key, planned, in_session));
+            self.readback_failed();
+            return;
+        }
         if recorded.is_empty() && in_session {
             // S-a: this read-back follows an unknown outcome (a lost reply,
             // or a resend that gave up while the first send was still in
@@ -1411,7 +1468,11 @@ impl PrintFormsScreen {
             self.notice = None;
         } else {
             self.notice = None;
-            self.record_succeeded(&key, &planned, &recorded);
+            if !undecided.is_empty() && !self.unresolved.contains(&key) {
+                // The rest waits for the next open or "Forget this print".
+                self.unresolved.push(key.clone());
+            }
+            self.record_succeeded(&key, &planned, &recorded, &undecided);
         }
         if !self.asking {
             self.recover_intents();
@@ -1432,13 +1493,24 @@ impl PrintFormsScreen {
         if !self.unresolved.contains(&key) {
             self.unresolved.push(key);
         }
+        self.printing_changed();
         self.notice = Some("print.recover.unknown");
         self.recover_intents();
     }
 
     /// The first saved intent the read-back could not decide: its key and
-    /// planned numbers (for "Forget this print").
+    /// planned numbers (for "Forget this print"). Cached: see
+    /// [`Self::printing_changed`].
+    #[cfg(test)]
     pub(crate) fn stuck_intent(&self) -> Option<(String, Vec<u64>)> {
+        self.stuck.clone()
+    }
+
+    /// [`Self::stuck_intent`] read from the file.
+    fn read_stuck(&self) -> Option<(String, Vec<u64>)> {
+        if self.unresolved.is_empty() {
+            return None;
+        }
         let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
             return None;
         };
@@ -1662,7 +1734,11 @@ impl PrintFormsScreen {
                 } else {
                     "print.confirm.skipped"
                 });
-                if let Some(id) = self.reprint.take() {
+                // A reprinted check the engine skipped as void is not in
+                // any queue: nothing to preview, the skipped notice stays.
+                if let Some(id) = self.reprint.take()
+                    && !done.skipped.contains(&id)
+                {
                     self.preselect = vec![id];
                 }
                 self.link
@@ -1763,8 +1839,11 @@ impl PrintFormsScreen {
 
     /// The unanswered batches changed on this computer: read them again
     /// here and tell Home (its reminder reads the file on that notice).
+    /// Also the place [`Self::stuck_intent`] is read again: call it after
+    /// every change of `unresolved`.
     fn printing_changed(&mut self) {
         self.unanswered = self.read_unanswered();
+        self.stuck = self.read_stuck();
         self.link.bus().publish(crate::data_bus::Change::Printing);
     }
 
@@ -1910,7 +1989,12 @@ impl PrintFormsScreen {
                     self.checks = q.checks;
                     if !self.preselect.is_empty() && !self.picked.is_empty() && !self.recording() {
                         self.preselect.clear();
+                        // A run that stays undecided is still said.
+                        let recover = self.notice.filter(|n| n.starts_with("print.recover."));
                         self.preview_checks();
+                        if self.notice.is_none() {
+                            self.notice = recover;
+                        }
                     }
                 }
                 Err(e) => self.error = Some(e),
@@ -2011,6 +2095,20 @@ impl PrintFormsScreen {
                 "print.save_failed"
             });
         }
+        // Print from a form while a run was recording (PR-2 review #2): the
+        // checks are looked for once the run is settled and no question
+        // waits (an answer reads the list itself).
+        if self.preselect_waiting
+            && self.loaded
+            && self.setup_task.is_none()
+            && !self.asking
+            && !self.recording()
+        {
+            self.preselect_waiting = false;
+            if !self.preselect.is_empty() && self.queue_task.is_none() {
+                self.look_for_preselect();
+            }
+        }
         // A deposit summary waits for the company block and for any open
         // "Did all checks print correctly?" question.
         if self.pending_deposit.is_some()
@@ -2105,9 +2203,8 @@ impl PrintFormsScreen {
             form::hint(ui, &tokens, &t(k));
         }
         // Q-PR2d: an intent the read-back could not decide can be forgotten.
-        if !self.unresolved.is_empty()
-            && !self.recording()
-            && let Some((key, numbers)) = self.stuck_intent()
+        if !self.recording()
+            && let Some((key, numbers)) = self.stuck.clone()
         {
             let range = match (numbers.iter().min(), numbers.iter().max()) {
                 (Some(a), Some(b)) if a != b => format!("{a}\u{2013}{b}"),
@@ -2681,20 +2778,14 @@ impl Screen for PrintFormsScreen {
             self.preselect = ids;
             self.tab = Tab::Checks;
             // B2: the run whose numbers are out stays; the checks wait
-            // (previewed once the answer is in and the list is read).
+            // (previewed once the answer is in, see `poll`).
             if self.recording() {
+                self.preselect_waiting = true;
                 self.notice = Some("print.busy_recording");
                 return true;
             }
             if self.loaded && self.setup_task.is_none() {
-                // Look from the first bank account on (see `poll`).
-                if let Some((first, _)) = self.setup.banks.first() {
-                    if self.bank != Some(*first) {
-                        self.first_number.clear();
-                    }
-                    self.bank = Some(*first);
-                }
-                self.load_queue();
+                self.look_for_preselect();
             }
             return true;
         }

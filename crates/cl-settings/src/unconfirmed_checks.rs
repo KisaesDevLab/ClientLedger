@@ -16,8 +16,16 @@ use std::path::{Path, PathBuf};
 
 /// The file name.
 pub const UNCONFIRMED_CHECKS_FILE: &str = "unconfirmed-checks.json";
-/// Batches kept at most (the oldest beyond are dropped).
+/// Batches kept at most, all companies together. Every saved batch waits
+/// for an answer (answered checks leave the file), so none is ever dropped
+/// to make room: a new one is refused instead ([`TooManyBatches`]).
 pub const MAX_BATCHES: usize = 200;
+
+/// [`UnconfirmedChecks::add`] refused a batch: [`MAX_BATCHES`] already wait
+/// for an answer on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("too many printed check batches wait for an answer")]
+pub struct TooManyBatches;
 
 /// One check and the number it printed with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,11 +89,11 @@ impl UnconfirmedChecks {
         u
     }
 
+    /// Drops empty and company-less batches only: an unanswered batch or an
+    /// intent is never evicted (PR-2 review #9).
     fn normalize(&mut self) {
         self.batches
             .retain(|b| !b.checks.is_empty() && !b.company_id.is_empty());
-        let extra = self.batches.len().saturating_sub(MAX_BATCHES);
-        self.batches.drain(..extra);
     }
 
     /// Text to store.
@@ -94,10 +102,19 @@ impl UnconfirmedChecks {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Save a batch the engine just recorded.
-    pub fn add(&mut self, batch: UnconfirmedBatch) {
+    /// Save a batch (an intent before it is sent, B2).
+    ///
+    /// # Errors
+    /// [`TooManyBatches`] when [`MAX_BATCHES`] already wait: nothing is
+    /// added and nothing else is dropped.
+    pub fn add(&mut self, batch: UnconfirmedBatch) -> Result<(), TooManyBatches> {
+        self.normalize();
+        if self.batches.len() >= MAX_BATCHES {
+            return Err(TooManyBatches);
+        }
         self.batches.push(batch);
         self.normalize();
+        Ok(())
     }
 
     /// The company's unanswered batches, oldest first.
@@ -129,18 +146,47 @@ impl UnconfirmedChecks {
     }
 
     /// The engine recorded the intent `key`'s numbers for `recorded` (check
-    /// ids): it becomes a printed batch of those checks; the others leave it.
-    /// False when there is no such intent.
-    pub fn promote(&mut self, company_id: &str, key: &str, recorded: &[&str]) -> bool {
-        let Some(b) = self.batches.iter_mut().find(|b| {
+    /// ids): they become a printed batch. Checks whose read-back could not
+    /// be made (`undecided`) stay in the intent under the same key, to be
+    /// read back again; the others leave it. False when there is no such
+    /// intent.
+    pub fn promote(
+        &mut self,
+        company_id: &str,
+        key: &str,
+        recorded: &[&str],
+        undecided: &[&str],
+    ) -> bool {
+        let Some(at) = self.batches.iter().position(|b| {
             b.company_id == company_id
                 && b.state == BatchState::Intent
                 && b.client_key.as_deref() == Some(key)
         }) else {
             return false;
         };
-        b.checks.retain(|c| recorded.contains(&c.check_id.as_str()));
-        b.state = BatchState::Printed;
+        let intent = &mut self.batches[at];
+        let mut printed = intent.clone();
+        printed
+            .checks
+            .retain(|c| recorded.contains(&c.check_id.as_str()));
+        printed.state = BatchState::Printed;
+        intent
+            .checks
+            .retain(|c| undecided.contains(&c.check_id.as_str()));
+        // Oldest first: the printed part where the intent was.
+        self.batches.insert(at, printed);
+        // PR-2 review #1: a check is numbered by one print run only. Any
+        // other intent of the company that planned these checks did not
+        // number them (this run did), so they leave it; read back later it
+        // would take this run's batch for its own and ask twice.
+        for b in self.batches.iter_mut().filter(|b| {
+            b.company_id == company_id
+                && b.state == BatchState::Intent
+                && b.client_key.as_deref() != Some(key)
+        }) {
+            b.checks
+                .retain(|c| !recorded.contains(&c.check_id.as_str()));
+        }
         self.normalize();
         true
     }
@@ -246,17 +292,17 @@ mod tests {
         let mut i = batch("co1", &[("c1", 1001), ("c2", 1002)]);
         i.state = BatchState::Intent;
         i.client_key = Some("k1".into());
-        u.add(i.clone());
+        u.add(i.clone()).expect("room");
         assert!(u.needs_attention("co1"));
         assert_eq!(u.intents_for("co1").count(), 1);
         assert_eq!(u.printed_for("co1").count(), 0);
-        assert!(!u.promote("co1", "other", &["c1"]));
-        assert!(u.promote("co1", "k1", &["c1"]), "partial");
+        assert!(!u.promote("co1", "other", &["c1"], &[]));
+        assert!(u.promote("co1", "k1", &["c1"], &[]), "partial");
         let b = u.printed_for("co1").next().expect("printed");
         assert_eq!(b.checks.len(), 1);
         assert_eq!(b.checks[0].number, 1001);
         assert_eq!(u.intents_for("co1").count(), 0);
-        u.add(i);
+        u.add(i).expect("room");
         u.drop_intent("co1", "k1");
         assert_eq!(u.intents_for("co1").count(), 0);
         assert_eq!(u.printed_for("co1").count(), 1, "the printed one stays");
@@ -268,12 +314,75 @@ mod tests {
         assert_eq!(UnconfirmedChecks::parse(&text), u);
     }
 
+    /// PR-2 review #6: a check whose read-back failed stays in the intent
+    /// (same key, read back again); the recorded ones are printed; a check
+    /// found not recorded leaves.
+    #[test]
+    fn undecided_checks_stay_in_the_intent() {
+        let mut u = UnconfirmedChecks::default();
+        let mut i = batch("co1", &[("c1", 1001), ("c2", 1002), ("c3", 1003)]);
+        i.state = BatchState::Intent;
+        i.client_key = Some("k1".into());
+        u.add(i).expect("room");
+        assert!(u.promote("co1", "k1", &["c1"], &["c3"]));
+        let p: Vec<u64> = u
+            .printed_for("co1")
+            .flat_map(|b| b.checks.iter().map(|c| c.number))
+            .collect();
+        assert_eq!(p, vec![1001]);
+        let left = u.intents_for("co1").next().expect("still an intent");
+        assert_eq!(left.client_key.as_deref(), Some("k1"));
+        assert_eq!(left.checks.len(), 1);
+        assert_eq!(left.checks[0].number, 1003);
+        assert!(u.promote("co1", "k1", &["c3"], &[]));
+        assert_eq!(u.intents_for("co1").count(), 0);
+        assert_eq!(u.printed_for("co1").count(), 2);
+    }
+
+    /// PR-2 review #1: an older intent that planned the same checks loses
+    /// them when a later run records them (it can't have numbered them);
+    /// its other checks and other companies' intents stay.
+    #[test]
+    fn a_recorded_run_settles_older_intents_for_its_checks() {
+        let mut u = UnconfirmedChecks::default();
+        let intent = |company: &str, key: &str, ids: &[(&str, u64)]| {
+            let mut i = batch(company, ids);
+            i.state = BatchState::Intent;
+            i.client_key = Some(key.into());
+            i
+        };
+        u.add(intent(
+            "co1",
+            "k1",
+            &[("c1", 1001), ("c2", 1002), ("c9", 1003)],
+        ))
+        .expect("room");
+        u.add(intent("co2", "kx", &[("c1", 1001)])).expect("room");
+        u.add(intent("co1", "k2", &[("c1", 1001), ("c2", 1002)]))
+            .expect("room");
+        assert!(u.promote("co1", "k2", &["c1", "c2"], &[]));
+        let k1 = u.intents_for("co1").next().expect("k1 keeps c9");
+        assert_eq!(k1.client_key.as_deref(), Some("k1"));
+        assert_eq!(k1.checks.len(), 1);
+        assert_eq!(k1.checks[0].check_id, "c9");
+        assert_eq!(u.intents_for("co2").count(), 1, "another company");
+        assert_eq!(u.printed_for("co1").count(), 1);
+        // All of an older intent's checks recorded later: it goes.
+        let mut u = UnconfirmedChecks::default();
+        u.add(intent("co1", "k1", &[("c1", 1001)])).expect("room");
+        u.add(intent("co1", "k2", &[("c1", 1001)])).expect("room");
+        assert!(u.promote("co1", "k2", &["c1"], &[]));
+        assert_eq!(u.intents_for("co1").count(), 0);
+        assert_eq!(u.for_company("co1").count(), 1);
+    }
+
     #[test]
     fn batches_drive_the_reminder_until_every_check_is_answered() {
         let mut u = UnconfirmedChecks::default();
         assert!(!u.needs_attention("co1"));
-        u.add(batch("co1", &[("c1", 1001), ("c2", 1002)]));
-        u.add(batch("co2", &[("c9", 5)]));
+        u.add(batch("co1", &[("c1", 1001), ("c2", 1002)]))
+            .expect("room");
+        u.add(batch("co2", &[("c9", 5)])).expect("room");
         assert!(u.needs_attention("co1") && u.needs_attention("co2"));
         assert_eq!(u.for_company("co1").count(), 1);
         u.resolve("co1", &["c1"]);
@@ -291,7 +400,7 @@ mod tests {
         let store = UnconfirmedChecksStore::in_dir(dir.path());
         assert_eq!(store.load(), UnconfirmedChecks::default());
         let mut u = UnconfirmedChecks::default();
-        u.add(batch("co1", &[("c1", 1001)]));
+        u.add(batch("co1", &[("c1", 1001)])).expect("room");
         store.save(&u).expect("save");
         assert_eq!(store.load(), u);
         assert!(store.path().ends_with(UNCONFIRMED_CHECKS_FILE));
@@ -303,11 +412,36 @@ mod tests {
             r#"{"batches":[{"company_id":"co1","bank_account_id":"b","printed_at":"x","checks":[]}]}"#,
         );
         assert_eq!(empty.batches.len(), 0);
+    }
+
+    /// PR-2 review #9: a full file refuses a new batch; it never drops
+    /// another company's unanswered batch or a pending intent to make room.
+    #[test]
+    fn a_full_file_refuses_and_evicts_nothing() {
         let mut many = UnconfirmedChecks::default();
-        for i in 0..(MAX_BATCHES + 3) {
-            many.add(batch("co1", &[("c", u64::try_from(i).unwrap())]));
+        let mut intent = batch("co2", &[("x", 7)]);
+        intent.state = BatchState::Intent;
+        intent.client_key = Some("k2".into());
+        many.add(intent).expect("room");
+        for i in 1..MAX_BATCHES {
+            many.add(batch("co1", &[("c", u64::try_from(i).unwrap())]))
+                .expect("room");
         }
         assert_eq!(many.batches.len(), MAX_BATCHES);
-        assert_eq!(many.batches[0].checks[0].number, 3);
+        let before = many.clone();
+        assert_eq!(many.add(batch("co3", &[("y", 1)])), Err(TooManyBatches));
+        assert_eq!(many, before, "nothing evicted");
+        assert_eq!(many.intents_for("co2").count(), 1);
+        // A file written with more than the cap keeps every batch.
+        let text = UnconfirmedChecks {
+            batches: (0..MAX_BATCHES + 3)
+                .map(|i| batch("co1", &[("c", u64::try_from(i).unwrap())]))
+                .collect(),
+        };
+        let read = UnconfirmedChecks::parse(&text.to_text());
+        assert_eq!(read.batches.len(), MAX_BATCHES + 3);
+        // Answering one makes room again.
+        many.resolve("co1", &["c"]);
+        assert!(many.add(batch("co3", &[("y", 1)])).is_ok());
     }
 }

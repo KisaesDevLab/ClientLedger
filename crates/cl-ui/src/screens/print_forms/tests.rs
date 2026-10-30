@@ -433,6 +433,34 @@ fn skipped_checks_resolve_the_saved_batch() {
     assert_eq!(s.notice, Some("print.confirm.skipped"));
 }
 
+/// PR-2 review #8: Reprint on a check the engine skips as void: it is not
+/// looked for in the list (it isn't there) and the skipped notice stays.
+#[test]
+fn reprinting_a_void_check_keeps_the_skipped_notice() {
+    let (_d, mut s) = screen(false);
+    let id = s.checks[0].id;
+    let date = s.checks[0].date;
+    let bank = s.bank;
+    s.picked = [id].into_iter().collect();
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    s.answer(true);
+    s.poll();
+    if let Some(mut d) = s.link.demo_state() {
+        d.printing.voided.insert(id);
+    }
+    assert!(s.open_with(OpenPayload::ReprintCheck(id, date)));
+    for _ in 0..4 {
+        s.poll();
+    }
+    assert_eq!(s.notice, Some("print.confirm.skipped"));
+    assert_eq!(s.preselect, Vec::<TransactionId>::new());
+    assert!(s.preview.is_none());
+    assert_eq!(s.bank, bank, "no hunt through the other accounts");
+}
+
 fn lose_next(s: &PrintFormsScreen, mode: crate::company::demo::printing::LoseReply) {
     if let Some(mut d) = s.link.demo_state() {
         d.printing.lose_next = Some(mode);
@@ -533,6 +561,57 @@ fn a_lost_print_reply_not_recorded_stays_undecided_until_the_next_open() {
     s.print_clicked();
     s.poll();
     assert!(s.asking, "printed on the next try");
+}
+
+/// PR-2 review #1: run K1 never reached the engine and stays undecided; the
+/// owner prints the same checks again (K2, same numbers) and decides later.
+/// On the next open K1 must not take K2's batch for its own: one printed
+/// batch, one question.
+#[test]
+fn a_later_run_of_the_same_checks_settles_the_undecided_one() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    lose_next(&s, LoseReply::BeforeRecording);
+    s.print_clicked();
+    s.poll();
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+    assert!(s.stuck_intent().is_some());
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking, "K2 recorded");
+    assert_eq!(print_calls(&s), 2);
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 0, "K1 settled by K2");
+    assert!(s.stuck_intent().is_none());
+    s.later();
+    let link = Arc::clone(&s.link);
+    let tenant = s.tenant.clone();
+    drop(s);
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let mut s = PrintFormsScreen::new(link, tenant, today, false);
+    s.poll();
+    s.poll();
+    let all = saved(&s);
+    assert_eq!(all.intents_for(&c).count(), 0);
+    assert_eq!(all.printed_for(&c).count(), 1, "one printed batch");
+    s.reopen_question();
+    assert_eq!(
+        s.run.as_ref().map(|r| r
+            .items()
+            .iter()
+            .filter_map(|i| i.number)
+            .collect::<Vec<_>>()),
+        Some(vec![first, first + 1])
+    );
+    s.answer(true);
+    s.poll();
+    assert!(!s.asking, "no second question");
+    assert!(!s.has_unanswered());
 }
 
 /// S-a: a keyed resend that gives up while the first send is still in
@@ -640,6 +719,29 @@ fn open_with_during_the_record_keeps_the_run() {
     assert!(s.has_unanswered());
 }
 
+/// PR-2 review #2: Print from a form while a run is recording: once the
+/// run settles with no question (here it stays undecided), the checks are
+/// previewed and the undecided run is still said.
+#[test]
+fn print_from_a_form_during_the_record_previews_once_settled() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    let ids: Vec<TransactionId> = s.checks.iter().map(|c| c.id).collect();
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::BeforeRecording);
+    s.print_clicked();
+    assert!(s.recording());
+    assert!(s.open_with(OpenPayload::PrintChecks(vec![ids[1]])));
+    s.poll();
+    s.poll();
+    assert!(!s.asking);
+    assert_eq!(s.picked, [ids[1]].into_iter().collect());
+    let p = s.preview.as_ref().expect("previewed once settled");
+    assert_eq!(p.kind, PreviewKind::Checks);
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+}
+
 /// PR-2 B2: plan [a, b]; the reply is lost and b is voided before the
 /// read-back: a is recorded (the question asks about it), b is not, and
 /// the intent is resolved. A void check never fails the whole read-back.
@@ -675,26 +777,29 @@ fn decide_readback_is_per_check() {
         .collect();
     let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
     let st = |n: Option<u32>, status: Option<PrintStatus>, void: bool, batch: Option<&str>| {
-        Some(CheckPrintState {
+        Ok(Some(CheckPrintState {
             check_number: n,
             print_status: status,
             void,
             print_batch_id: batch.map(str::to_string),
-        })
+        }))
     };
     let states = vec![
         st(Some(1001), Some(PrintStatus::Printed), false, Some("b1")),
-        None,
+        Ok(None),
         st(Some(1003), Some(PrintStatus::Printed), true, Some("b1")),
         st(None, None, false, None),
         st(Some(1099), Some(PrintStatus::Printed), false, Some("b1")),
     ];
     let found = decide_readback(&planned, &states).expect("one batch");
-    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r == Found::Recorded).collect();
     assert_eq!(recorded, vec![true, false, false, false, false]);
     // No batch on the record: not numbered by a print run.
     let nobatch = vec![st(Some(1001), Some(PrintStatus::Printed), false, None)];
-    assert!(!decide_readback(&planned[..1], &nobatch).expect("decided")[0].1);
+    assert_eq!(
+        decide_readback(&planned[..1], &nobatch).expect("decided")[0].1,
+        Found::NotRecorded
+    );
 }
 
 /// S-b: 1001 was later reprinted alone under its number in batch B; 1002
@@ -707,25 +812,101 @@ fn decide_readback_picks_the_majority_batch() {
         .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
         .collect();
     let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
-    let st = |n: u32, batch: &str| {
-        Some(CheckPrintState {
+    let st = |n: u32, batch: &str| -> ReadState {
+        Ok(Some(CheckPrintState {
             check_number: Some(n),
             print_status: Some(PrintStatus::Printed),
             void: false,
             print_batch_id: Some(batch.to_string()),
-        })
+        }))
     };
     let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A")];
     let found = decide_readback(&planned[..3], &states).expect("A is the majority");
-    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r == Found::Recorded).collect();
     assert_eq!(recorded, vec![false, true, true]);
     // 2 of 4 is not more than half.
-    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A"), None];
+    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A"), Ok(None)];
     assert!(decide_readback(&planned, &states).is_none(), "undecided");
     let states = vec![st(1001, "B"), st(1002, "A")];
     assert!(
         decide_readback(&planned[..2], &states).is_none(),
         "undecided"
+    );
+}
+
+/// PR-2 review #6: a check whose read fails is undecided on its own; the
+/// others are still decided.
+#[test]
+fn decide_readback_leaves_a_failed_read_undecided() {
+    use cl_api::{CheckPrintState, PrintStatus};
+    let ids: Vec<TransactionId> = (1..=3u128)
+        .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
+        .collect();
+    let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
+    let st = |n: u32| -> ReadState {
+        Ok(Some(CheckPrintState {
+            check_number: Some(n),
+            print_status: Some(PrintStatus::Printed),
+            void: false,
+            print_batch_id: Some("A".into()),
+        }))
+    };
+    let states = vec![st(1001), Err(ApiError::Timeout), st(1003)];
+    let found = decide_readback(&planned, &states).expect("decided");
+    let f: Vec<Found> = found.iter().map(|(_, f)| *f).collect();
+    assert_eq!(f, vec![Found::Recorded, Found::Unknown, Found::Recorded]);
+    let states = vec![Err(ApiError::Timeout), Ok(None), Err(ApiError::Timeout)];
+    let f: Vec<Found> = decide_readback(&planned, &states)
+        .expect("decided")
+        .iter()
+        .map(|(_, f)| *f)
+        .collect();
+    assert_eq!(f, vec![Found::Unknown, Found::NotRecorded, Found::Unknown]);
+}
+
+/// PR-2 review #6: the read-back of one check fails: the recorded check is
+/// asked about, the other stays saved under the run's key (undecided, may
+/// be forgotten), and Home keeps reminding.
+#[test]
+fn a_failed_read_keeps_only_that_check_saved() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    let ids: Vec<TransactionId> = s.picked_checks().iter().map(|c| c.id).collect();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    // The demo's answer is dropped; the engine's per-check answer instead.
+    s.readback_task = None;
+    s.read_back(&[(ids[0], Found::Recorded), (ids[1], Found::Unknown)]);
+    assert!(s.asking, "asked about the recorded check");
+    assert_eq!(s.run.as_ref().map(|r| r.items().len()), Some(1));
+    let c = s.company_key().expect("company");
+    let all = saved(&s);
+    let left = all
+        .intents_for(&c)
+        .next()
+        .expect("the undecided check waits");
+    assert_eq!(left.checks.len(), 1);
+    assert_eq!(left.checks[0].number, first + 1);
+    assert_eq!(all.printed_for(&c).next().map(|b| b.checks.len()), Some(1));
+    assert_eq!(s.stuck_intent().map(|(_, n)| n), Some(vec![first + 1]));
+    // Nothing recorded and one read failed: the whole run waits.
+    let (_d2, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let ids: Vec<TransactionId> = s.picked_checks().iter().map(|c| c.id).collect();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    s.readback_task = None;
+    s.read_back(&[(ids[0], Found::NotRecorded), (ids[1], Found::Unknown)]);
+    assert!(!s.asking);
+    assert_eq!(s.notice, Some("print.recover.unknown"));
+    let c = s.company_key().expect("company");
+    assert_eq!(
+        saved(&s).intents_for(&c).next().map(|b| b.checks.len()),
+        Some(2)
     );
 }
 
@@ -788,7 +969,8 @@ fn two_saved_intents_are_both_recovered() {
             state: BatchState::Intent,
             client_key: Some(format!("key-{i}")),
             format: Some("voucher".into()),
-        });
+        })
+        .expect("room");
     }
     store.save(&all).expect("save");
     let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
@@ -849,6 +1031,33 @@ fn saved_unreadable_reads_back_and_a_refusal_drops_the_intent() {
     assert!(!keeps_key(&ApiError::NotFound { code: None }));
 }
 
+/// PR-2 review #5: print keeps the key exactly as the other keyed saves: a
+/// first send answered "still in progress" is read back, never dropped as
+/// a refusal; refusals that record nothing drop it.
+#[test]
+fn a_busy_first_send_reads_back_like_every_keyed_save() {
+    let busy = ApiError::Conflict {
+        reason: cl_api::ConflictReason::Busy,
+        current_version: None,
+        code: cl_api::ErrorCode::parse("IDEMPOTENCY_IN_PROGRESS"),
+        message: cl_api::UserText::default(),
+    };
+    assert!(keeps_key(&busy));
+    assert!(!keeps_key(&ApiError::AccountPasswordRejected));
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    // The first send is answered 409 IDEMPOTENCY_IN_PROGRESS.
+    if let Some(mut d) = s.link.demo_state() {
+        d.printing.still_running = true;
+    }
+    s.print_clicked();
+    s.poll();
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 1, "kept, read back");
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+}
+
 /// PR-2 #4: the intent can't be saved: nothing is sent and the owner is
 /// told.
 #[test]
@@ -870,6 +1079,58 @@ fn an_unsaved_intent_sends_nothing() {
         s.run.as_ref().map(cl_print::PrintRun::state),
         Some(cl_print::RunState::Ready)
     );
+}
+
+/// PR-2 review #3: "Forget this print" is drawn each frame from a value
+/// read when the run became undecided, never from the file each frame.
+#[test]
+fn the_stuck_intent_is_read_once_not_each_frame() {
+    use crate::company::demo::printing::LoseReply;
+    let (d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    s.readback_task = None;
+    s.readback_failed();
+    let stuck = s.stuck_intent().expect("stuck");
+    // The file can't be read any more: the drawn value stays.
+    let blocker = d.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").expect("file");
+    s.unconfirmed = Some(UnconfirmedChecksStore::in_dir(&blocker));
+    assert_eq!(s.stuck_intent(), Some(stuck));
+}
+
+/// PR-2 review #9: with the file full of other companies' unanswered
+/// batches, Print sends nothing and says why; nothing saved is dropped.
+#[test]
+fn a_full_file_sends_nothing_and_drops_nothing() {
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let store = s.unconfirmed.clone().expect("store");
+    let mut all = store.load();
+    for i in 0..cl_settings::unconfirmed_checks::MAX_BATCHES {
+        all.add(UnconfirmedBatch {
+            company_id: "another-company".into(),
+            bank_account_id: "b".into(),
+            printed_at: "2026-11-04T10:00:00Z".into(),
+            checks: vec![UnconfirmedCheck {
+                check_id: format!("c{i}"),
+                number: 1,
+            }],
+            state: BatchState::Printed,
+            client_key: None,
+            format: None,
+        })
+        .expect("room");
+    }
+    store.save(&all).expect("save");
+    s.print_clicked();
+    s.poll();
+    assert_eq!(print_calls(&s), 0, "nothing sent");
+    assert_eq!(s.notice, Some("print.too_many_waiting"));
+    assert_eq!(saved(&s), all, "nothing dropped");
 }
 
 /// Q-PR2d: an intent the read-back can't decide is skipped this session

@@ -49,7 +49,7 @@ pub struct DemoPrinting {
     refuse_replay: bool,
     /// Tests: the next request is answered `IDEMPOTENCY_IN_PROGRESS`
     /// ([`LoseReply::KeyedStillRunning`]).
-    still_running: bool,
+    pub(crate) still_running: bool,
 }
 
 /// How the next print reply is lost (tests of B2).

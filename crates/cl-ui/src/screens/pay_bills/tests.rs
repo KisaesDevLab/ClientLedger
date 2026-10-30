@@ -32,6 +32,8 @@ struct Seen {
     list: Option<PayableList>,
     /// Pays whose reply is lost on a keyed engine (S7), from the next.
     lose_keyed: u32,
+    /// Pays whose reply is lost on an engine that ignores the key.
+    lose_unkeyed: u32,
 }
 
 /// The mockup's list: five bills, 7781 with the engine's 4.37, the Table
@@ -136,6 +138,15 @@ impl LocalPayBills for Fake {
                     .expect("id"),
                 idempotency_key: Some(key.clone()),
                 keyed: true,
+            });
+        }
+        if s.lose_unkeyed > 0 {
+            s.lose_unkeyed -= 1;
+            return Err(ApiError::OutcomeUnknown {
+                request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000005")
+                    .expect("id"),
+                idempotency_key: None,
+                keyed: false,
             });
         }
         if let Some(e) = self.refuse.take() {
@@ -642,4 +653,27 @@ fn lost_twice_on_a_keyed_engine_look_again_resends() {
     assert_eq!(seen.pays.len(), 3);
     assert!(seen.keys.iter().all(|k| *k == seen.keys[0]));
     assert_eq!(s.state()["paid_count"], 1);
+}
+
+/// PR-2 review #7: Look again resends the pay as it was sent, and what its
+/// bills owed then (not what the form shows after the list was read again)
+/// is what tells whether it went through.
+#[test]
+fn look_again_keeps_what_the_pay_owed_when_sent() {
+    let (_d, mut s, seen) = screen(None);
+    seen.lock().expect("seen").lose_keyed = 2;
+    s.form.set_cash(bill(5), m("1000.00"));
+    assert!(!s.start_pay(None));
+    // The list read again shows bill 5 owing another amount.
+    let mut changed = list();
+    if let Some(b) = changed.bills.iter_mut().find(|b| b.id == bill(5)) {
+        b.balance_due = m("2915.00");
+    }
+    seen.lock().expect("seen").list = Some(changed);
+    s.load_list();
+    s.poll();
+    seen.lock().expect("seen").lose_unkeyed = 1;
+    s.recheck();
+    let p = s.pending.as_ref().expect("the pay's outcome is unknown");
+    assert_eq!(p.bills, vec![(bill(5), m("3915.00"))], "as sent");
 }
