@@ -278,8 +278,8 @@ The contract binaries use their own runner (`harness = false`), so the order, th
 | Job | Runs | Does |
 | --- | --- | --- |
 | `ci (ubuntu-22.04)` | every push | fetches the pinned PostgreSQL, then `cargo xtask ci` |
-| `ci (windows-latest, macos-14, macos-15-intel)` | pull requests | the same |
-| `engine (ubuntu-22.04, windows-latest, macos-14, macos-15-intel)` | pull requests and `main` | builds and smoke-tests the engine, runs the real-engine `cl-host` tests, `api-spec --check`, then `cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures` with `CL_API_REQUIRE=1` |
+| `ci (windows-latest, macos-15, macos-15-intel)` | pull requests | the same |
+| `engine (ubuntu-22.04, windows-latest, macos-15, macos-15-intel)` | pull requests and `main` | builds and smoke-tests the engine, runs the real-engine `cl-host` tests, `api-spec --check`, then `cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures` with `CL_API_REQUIRE=1` |
 | network-blocked run (steps of the Linux `engine` job) | pull requests and `main` | after every download and build, creates a non-root user `cltest`, adds `iptables` and `ip6tables` owner-match rules that reject all of that user's non-loopback traffic, runs `network_probe` first (it must print `blocked OK`), then runs `contract` and `contract_offline` as `cltest` with `CL_NETWORK_BLOCKED=1`; the rules and user are removed in an `if: always()` step |
 | `coverage` | every push and pull request | `cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80` (Q-116) |
 
