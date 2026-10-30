@@ -48,7 +48,7 @@ mod tests {
         assert_eq!(doc.pages.len(), 1);
         let page = &resolve(&doc).unwrap()[0];
         for (i, top) in POSITION_TOPS.iter().enumerate() {
-            assert_check_at(page, i + 1, *top, off, WINDOW_ON_STANDARD);
+            assert_check_at(page, i + 1, *top, off, CheckStyle::Standard);
         }
     }
 
