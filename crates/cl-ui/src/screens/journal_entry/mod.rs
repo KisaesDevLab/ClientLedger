@@ -647,19 +647,7 @@ impl JournalScreen {
         if now == self.seen_lines {
             return;
         }
-        let fresh: Vec<_> = now
-            .lines
-            .iter()
-            .filter(|l| l.account.is_some() && l.amount.is_none())
-            .filter(|l| {
-                self.seen_lines
-                    .lines
-                    .iter()
-                    .find(|o| o.key == l.key)
-                    .is_none_or(|o| o.account.is_none())
-            })
-            .map(|l| l.key)
-            .collect();
+        let fresh = cl_model::forms::lines::fresh_account_lines(&self.seen_lines, &now);
         if let Some(key) = fresh.first().copied()
             && self.idle()
             && self.read_only().is_none()
