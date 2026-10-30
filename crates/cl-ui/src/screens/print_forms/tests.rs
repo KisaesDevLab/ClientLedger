@@ -433,6 +433,34 @@ fn skipped_checks_resolve_the_saved_batch() {
     assert_eq!(s.notice, Some("print.confirm.skipped"));
 }
 
+/// PR-2 review #8: Reprint on a check the engine skips as void: it is not
+/// looked for in the list (it isn't there) and the skipped notice stays.
+#[test]
+fn reprinting_a_void_check_keeps_the_skipped_notice() {
+    let (_d, mut s) = screen(false);
+    let id = s.checks[0].id;
+    let date = s.checks[0].date;
+    let bank = s.bank;
+    s.picked = [id].into_iter().collect();
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    s.answer(true);
+    s.poll();
+    if let Some(mut d) = s.link.demo_state() {
+        d.printing.voided.insert(id);
+    }
+    assert!(s.open_with(OpenPayload::ReprintCheck(id, date)));
+    for _ in 0..4 {
+        s.poll();
+    }
+    assert_eq!(s.notice, Some("print.confirm.skipped"));
+    assert!(s.preselect.is_empty());
+    assert!(s.preview.is_none());
+    assert_eq!(s.bank, bank, "no hunt through the other accounts");
+}
+
 fn lose_next(s: &PrintFormsScreen, mode: crate::company::demo::printing::LoseReply) {
     if let Some(mut d) = s.link.demo_state() {
         d.printing.lose_next = Some(mode);

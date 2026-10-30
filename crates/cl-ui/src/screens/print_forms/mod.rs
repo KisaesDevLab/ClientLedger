@@ -1668,7 +1668,11 @@ impl PrintFormsScreen {
                 } else {
                     "print.confirm.skipped"
                 });
-                if let Some(id) = self.reprint.take() {
+                // A reprinted check the engine skipped as void is not in
+                // any queue: nothing to preview, the skipped notice stays.
+                if let Some(id) = self.reprint.take()
+                    && !done.skipped.contains(&id)
+                {
                     self.preselect = vec![id];
                 }
                 self.link
