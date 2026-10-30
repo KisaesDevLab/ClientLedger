@@ -1462,9 +1462,15 @@ mod bridge_tests {
         /// A rig with a second, separate window open (viewports not
         /// embedded), the way eframe runs the pop-out viewer.
         pub fn with_child() -> Rig {
-            let rig = Rig::new();
+            let mut rig = Rig::new();
             rig.ctx.set_embed_viewports(false);
             *rig.child.lock().unwrap() = Some(vec2(400.0, 300.0));
+            // Draw the child before any script runs: otherwise a script's
+            // first call can be answered before the child's first pass and
+            // find no window (seen on a slow CI runner).
+            for _ in 0..2 {
+                rig.frame();
+            }
             rig
         }
 
