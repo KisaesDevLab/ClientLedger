@@ -305,6 +305,69 @@ fn the_check_amount_follows_a_single_line_and_takes_the_lines_when_blank() {
     assert!(s.header.current().amount_from_lines);
 }
 
+/// Picks account `n` on line `i` (no amount), as the grid does, and runs
+/// the frame's remaining fill (Q-304).
+fn pick_line(s: &mut WriteCheckScreen, i: usize, n: &str) {
+    let a = account(s, n);
+    let mut v = s.lines.value().clone();
+    v.lines[i].account = Some(a);
+    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|x| *x = v);
+    s.fill_remaining();
+}
+
+#[test]
+fn a_new_line_takes_what_is_left_of_the_check_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("1500.01")));
+    assert_eq!(s.lines.value().used().count(), 0);
+    // The first line takes the whole amount, as one undo step.
+    pick_line(&mut s, 0, "5100");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("1500.01")));
+    assert!(s.is_dirty());
+    assert_eq!(s.state()["totals"], "balanced");
+    assert!(s.lines.form_mut().form_mut().undo());
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].amount, None, "undo takes it back");
+    assert_eq!(s.lines.value().lines[0].account, Some(account(&s, "5100")));
+    assert!(s.lines.form_mut().form_mut().redo());
+    // The owner types over it; the next line takes what is left.
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("1000.00")));
+    s.fill_remaining();
+    assert_eq!(s.state()["totals"], "remaining");
+    pick_line(&mut s, 1, "5110");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("1000.00")));
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("500.01")));
+    assert_eq!(s.state()["totals"], "balanced");
+    // Fully assigned: a third line gets nothing.
+    pick_line(&mut s, 2, "5100");
+    assert_eq!(s.lines.value().lines[2].amount, None);
+}
+
+#[test]
+fn no_fill_without_a_typed_check_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // Account first, amount later: the single line follows the amount
+    // (Q-P13r a), so both orders end with the whole amount on line 1.
+    pick_line(&mut s, 0, "5100");
+    assert_eq!(s.lines.value().lines[0].amount, None, "no check amount");
+    s.amount_typed(Some(money("75.00")));
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("75.00")));
+    // An amount taken from the lines is not the owner's total.
+    s.amount_typed(None);
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("12.34")));
+    s.left_lines();
+    assert!(s.header.current().amount_from_lines);
+    pick_line(&mut s, 1, "5110");
+    assert_eq!(s.lines.value().lines[1].amount, None);
+}
+
 #[test]
 fn prev_opens_the_newest_check_and_void_frees_its_number() {
     let (_d, link) = link();

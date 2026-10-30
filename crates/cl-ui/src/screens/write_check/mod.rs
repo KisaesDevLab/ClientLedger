@@ -877,6 +877,26 @@ impl WriteCheckScreen {
         }
     }
 
+    /// The lines take edits: no save running, no closing-date prompt, not
+    /// read-only, not a locked draft.
+    pub(crate) fn lines_editable(&self) -> bool {
+        let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
+        self.save.task.is_none()
+            && !self.closing_prompt.dialog_open()
+            && !read_only
+            && !self.draft_locked()
+    }
+
+    /// A line that just got its account with no amount takes what is left
+    /// of the typed check amount (Q-304); an amount taken from the lines is
+    /// not the owner's total, so it fills nothing.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let total = h.amount.filter(|_| !h.amount_from_lines);
+        let allowed = self.lines_editable();
+        self.lines.fill_remaining(total, Money::ZERO, allowed);
+    }
+
     /// The owner typed the check amount (Q-P13r a): one used line with no
     /// amount (or the old amount) follows it.
     pub(crate) fn amount_typed(&mut self, amount: Option<Money>) {
@@ -983,6 +1003,7 @@ impl Screen for WriteCheckScreen {
         }
         self.compare_before();
         self.draw(ui);
+        self.fill_remaining();
         self.compare_after();
         self.track_draft_read();
         if let Some(d) = self.draft.session.as_mut() {

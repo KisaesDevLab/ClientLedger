@@ -411,10 +411,7 @@ impl WriteCheckScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
-        let enabled = self.save.task.is_none()
-            && !self.closing_prompt.dialog_open()
-            && !read_only
-            && !self.draft_locked();
+        let enabled = self.lines_editable();
         // A read-only check keeps readable text (contrast >= 4.5:1).
         header::locked_scope(ui, true, read_only, |ui| self.bank_row(ui, tokens, enabled));
         ui.add_space(10.0);
