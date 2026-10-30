@@ -19,8 +19,10 @@ steps:
   - assert_no_clipping:
       ignore:
         # Home's body scrolls under its title (P16): a row cut by the bottom
-        # of the body reports its full bounds past the window's edge.
-        - {x: 212, y: 760, width: 10000, height: 200}
+        # of the body reports its full bounds past the window's edge. From
+        # y 590: the macOS 15 runner's screen caps the window at 1280x656,
+        # where the body ends near 617 (at 820 tall it ends near 780).
+        - {x: 212, y: 590, width: 10000, height: 400}
   - screenshot: home
 
   # --- Tabs ----------------------------------------------------------------
