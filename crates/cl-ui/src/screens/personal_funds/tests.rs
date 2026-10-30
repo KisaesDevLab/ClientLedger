@@ -237,3 +237,61 @@ fn a_new_line_takes_what_is_left_of_the_amount() {
     assert_eq!(s.lines.value().lines[1].amount, Some(money("40.00")));
     assert_eq!(s.lines.value().lines[0].amount, Some(money("60.00")));
 }
+
+/// Picks account `number` on line `line` (no amount), as the grid does,
+/// and runs the frame's remaining fill (Q-304).
+fn pick_line(s: &mut PersonalFundsScreen, line: usize, number: &str) {
+    let a = s.books.by_number(number).expect("account");
+    let mut v = s.lines.value().clone();
+    v.lines[line].account = Some(a);
+    v.ensure_entry(&mut s.lines.form_mut().adapter_mut().keys);
+    s.lines.form_mut().edit_step(|x| *x = v);
+    s.fill_remaining();
+}
+
+#[test]
+fn an_amount_taken_from_the_lines_fills_nothing() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "12.34", &[("6400", "12.34")]);
+    s.header.edit_step(|h| h.amount = None);
+    s.left_lines();
+    assert!(s.header.current().amount_from_lines);
+    assert_eq!(s.header.current().amount, Some(money("12.34")));
+    pick_line(&mut s, 1, "6250");
+    assert_eq!(s.lines.value().lines[1].amount, None);
+}
+
+#[test]
+fn no_fill_while_busy_or_read_only() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // The closing-date password is being asked: nothing typed changes.
+    fill(&mut s, "30.00", &[("6250", "30.00")]);
+    let closed = CalendarDate::from_ymd(2026, 9, 15).expect("date");
+    s.header.edit_step(|h| h.date = Some(closed));
+    s.sync_inputs();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(s.flow.closing_prompt.dialog_open());
+    assert!(!s.flow.idle());
+    s.header.edit_step(|h| h.amount = Some(money("50.00")));
+    pick_line(&mut s, 1, "6400");
+    assert_eq!(s.lines.value().lines[1].amount, None);
+    // A void record shown read-only.
+    let mut s = screen(&link);
+    fill(&mut s, "42.18", &[("6250", "42.18")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.flow.last.expect("saved").id;
+    s.command(CommandId::new("form.prev_record"));
+    s.command(CommandId::new("edit.void_transaction"));
+    s.flow.void_reason = "paid twice".into();
+    s.void_now(None);
+    assert!(link.demo_state().expect("demo").ledger.is_void(id));
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id));
+    assert!(s.flow.read_only().is_some());
+    s.header.edit_step(|h| h.amount = Some(money("90.00")));
+    let entry = s.lines.value().lines.len() - 1;
+    pick_line(&mut s, entry, "6400");
+    assert_eq!(s.lines.value().lines[entry].amount, None);
+}
