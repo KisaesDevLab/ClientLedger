@@ -767,3 +767,114 @@ fn a_new_card_line_takes_what_is_left_of_the_amount() {
     pick_line(&mut s, 2, "6400");
     assert_eq!(s.lines.value().lines[2].amount, None, "nothing left");
 }
+
+#[test]
+fn loaded_lines_and_saved_charges_are_not_filled() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    save_charge(&mut s, "11.25");
+    save_charge(&mut s, "22.50");
+    // Prev, Prev, Next: each opened charge stays as saved and clean.
+    for cmd in ["form.prev_record", "form.prev_record", "form.next_record"] {
+        s.command(CommandId::new(cmd));
+        let before = s.lines.value().clone();
+        s.fill_remaining();
+        assert_eq!(*s.lines.value(), before);
+        assert!(!s.is_dirty());
+    }
+    // Lines loaded with an account and no amount are not "just picked".
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("80.00")));
+    let a = s.books.by_number("6400");
+    let key = s.lines.form_mut().adapter_mut().keys.next_key();
+    let lines = FormLines::from_lines(
+        vec![FormLine {
+            account: a,
+            ..FormLine::blank(key)
+        }],
+        &mut s.lines.form_mut().adapter_mut().keys,
+    );
+    let lists = Arc::clone(&s.books.lists);
+    s.lines.load(lines, &*lists);
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    assert!(!s.lines.dirty());
+}
+
+#[test]
+fn a_read_total_or_read_line_is_never_filled() {
+    use cl_model::forms::doc_read::{DocReading, ReadField, ReadLine};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let reading = DocReading {
+        total: Some(money("80.00")),
+        lines: vec![ReadLine {
+            description: "Fuel".into(),
+            amount: None,
+            account: s.books.by_number("6400"),
+            confidence: None,
+        }],
+        ..DocReading::default()
+    };
+    let mut form = s.compose();
+    {
+        let keys = &mut s.lines.form_mut().adapter_mut().keys;
+        cl_model::forms::card::apply(&reading, &mut form, keys);
+    }
+    let lines = std::mem::take(&mut form.lines);
+    s.header.load(form);
+    // Even arriving as an edit, the read line is held and the read total
+    // is not the owner's (non-negotiable 4).
+    s.lines.form_mut().edit_step(|v| *v = lines);
+    s.fill_remaining();
+    let key = s.lines.value().lines[0].key;
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    pick_line(&mut s, 1, "6250");
+    assert_eq!(s.lines.value().lines[1].amount, None, "total not accepted");
+    // The total accepted: an owner line fills, the read line stays held.
+    s.header.edit_step(|h| h.read.edited(ReadTarget::Total));
+    pick_line(&mut s, 2, "6250");
+    assert_eq!(s.lines.value().lines[2].amount, Some(money("80.00")));
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    assert!(matches!(
+        s.header.current().read.state(ReadTarget::Line(key)),
+        Some(ReadField::Read { .. })
+    ));
+    // Clear and type it myself: the read line goes with no amount left.
+    s.clear_read();
+    assert!(s.lines.value().lines.iter().all(|l| l.key != key));
+}
+
+#[test]
+fn a_read_only_charge_is_never_filled() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let id = save_charge(&mut s, "40.00");
+    let mut other = screen(&link);
+    assert!(other.open_saved(id));
+    other.flow.void_reason = "duplicate".into();
+    other.void_now(None);
+    let mut s = screen(&link);
+    s.open_saved(id);
+    assert_eq!(s.state()["read_only"], "helper.read_only.void");
+    s.header.edit_step(|h| h.amount = Some(money("90.00")));
+    let entry = s.lines.value().lines.len() - 1;
+    pick_line(&mut s, entry, "6400");
+    assert_eq!(s.lines.value().lines[entry].amount, None);
+}
+
+#[test]
+fn a_new_card_credit_line_takes_what_is_left_of_the_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.set_mode(CardMode::Credit);
+    s.amount_typed(Some(money("19.99")));
+    pick_line(&mut s, 0, "6250");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("19.99")));
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("15.00")));
+    s.fill_remaining();
+    pick_line(&mut s, 1, "6400");
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("4.99")));
+}
