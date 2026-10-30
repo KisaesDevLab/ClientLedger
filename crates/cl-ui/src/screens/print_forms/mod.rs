@@ -333,28 +333,13 @@ pub(crate) fn offer_after(engine_next: Option<u64>, first: u64) -> u64 {
 /// the run (PR-2 #3): its outcome is read back and the saved intent kept
 /// until then. False only for a refusal that recorded nothing (the input,
 /// the closed period, the password, permissions, a refusal before sending).
+///
+/// The same rule as every other keyed save
+/// ([`crate::screens::register::keeps_key`]): a busy refusal
+/// (`IDEMPOTENCY_IN_PROGRESS`: the first send is still running) keeps it;
+/// print adds no case of its own.
 pub(crate) fn keeps_key(e: &ApiError) -> bool {
-    !matches!(
-        e,
-        ApiError::Validation(_)
-            | ApiError::Local(_)
-            | ApiError::Conflict { .. }
-            | ApiError::ClosedPeriod(_)
-            | ApiError::ClosingPasswordRejected
-            | ApiError::ClosingPasswordRequired
-            | ApiError::ClosingPasswordOwnerRequired
-            | ApiError::ClosingPasswordRateLimited { .. }
-            | ApiError::Unauthorized(_)
-            | ApiError::Forbidden { .. }
-            | ApiError::NotFound { .. }
-            | ApiError::Unsupported { .. }
-            | ApiError::NoCompanyOpen
-            | ApiError::RateLimited { .. }
-            | ApiError::PayloadTooLarge
-            | ApiError::Protocol { .. }
-            | ApiError::OfflineUnavailable { .. }
-            | ApiError::FeatureNotEnabled { .. }
-    )
+    crate::screens::register::keeps_key(e)
 }
 
 /// Which planned checks the engine recorded, from each check's state read

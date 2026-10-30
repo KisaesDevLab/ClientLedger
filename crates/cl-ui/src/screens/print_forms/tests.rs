@@ -850,6 +850,33 @@ fn saved_unreadable_reads_back_and_a_refusal_drops_the_intent() {
     assert!(!keeps_key(&ApiError::NotFound { code: None }));
 }
 
+/// PR-2 review #5: print keeps the key exactly as the other keyed saves: a
+/// first send answered "still in progress" is read back, never dropped as
+/// a refusal; refusals that record nothing drop it.
+#[test]
+fn a_busy_first_send_reads_back_like_every_keyed_save() {
+    let busy = ApiError::Conflict {
+        reason: cl_api::ConflictReason::Busy,
+        current_version: None,
+        code: cl_api::ErrorCode::parse("IDEMPOTENCY_IN_PROGRESS"),
+        message: cl_api::UserText::default(),
+    };
+    assert!(keeps_key(&busy));
+    assert!(!keeps_key(&ApiError::AccountPasswordRejected));
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    // The first send is answered 409 IDEMPOTENCY_IN_PROGRESS.
+    if let Some(mut d) = s.link.demo_state() {
+        d.printing.still_running = true;
+    }
+    s.print_clicked();
+    s.poll();
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 1, "kept, read back");
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+}
+
 /// PR-2 #4: the intent can't be saved: nothing is sent and the owner is
 /// told.
 #[test]
