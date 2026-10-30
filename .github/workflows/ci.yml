@@ -78,6 +78,8 @@ jobs:
   docread-netcheck:
     name: docread-netcheck (ubuntu-22.04)
     runs-on: ubuntu-22.04
+    # strace has hung this job to GitHub's 6-hour limit; fail in minutes instead.
+    timeout-minutes: 40
     env:
       CL_PDFIUM_REQUIRE: "1"
       CL_OCR_REQUIRE: "1"
@@ -127,15 +129,26 @@ jobs:
           # offline so cargo can't look anything up either.
           # strace 5.16 (ubuntu-22.04) sometimes dies with
           # "ptrace(PTRACE_LISTEN...): Input/output error" while a test kills
-          # a worker; that alone is retried (twice). Any other failure fails.
+          # a worker, or wedges. --seccomp-bpf stops the tracees only at the
+          # traced calls, so far fewer ptrace stops race with those kills.
+          # Each attempt is time-limited; a strace error or a timeout is
+          # retried (twice) after reaping leftover tracees. Any other failure
+          # fails.
+          reap() {
+            pkill -CONT -f clientledger-docread || true
+            pkill -KILL -f clientledger-docread || true
+            pkill -KILL -f docread_worker- || true
+          }
           for attempt in 1 2 3; do
             rc=0
-            CARGO_NET_OFFLINE=true strace -f -qq -o "$RUNNER_TEMP/net.log" \
+            CARGO_NET_OFFLINE=true timeout -k 30s 15m strace -f --seccomp-bpf -qq -o "$RUNNER_TEMP/net.log" \
               -e trace=execve,socket,connect,sendto,sendmsg \
               "$DOCREAD_TESTS" --test-threads=1 2> >(tee "$RUNNER_TEMP/strace-err.txt" >&2) || rc=$?
             if [ "$rc" -eq 0 ]; then break; fi
-            if [ "$attempt" -lt 3 ] && grep -q 'ptrace(PTRACE_LISTEN' "$RUNNER_TEMP/strace-err.txt"; then
-              echo "::warning::strace PTRACE_LISTEN error (attempt $attempt); retrying"
+            reap
+            if [ "$attempt" -lt 3 ] && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] \
+                || grep -q 'ptrace(PTRACE_LISTEN' "$RUNNER_TEMP/strace-err.txt"; }; then
+              echo "::warning::strace error or timeout (rc $rc, attempt $attempt); retrying"
               continue
             fi
             exit "$rc"
