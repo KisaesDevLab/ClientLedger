@@ -6,12 +6,13 @@
 //! `docs/design/mockups/OpenCompany.html`.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cl_api::LoginOutcome;
 use cl_company::{CompanyEntry, CompanyError, RestoreOutcome, RestoreRequest};
 use cl_core::Secret;
 use cl_core::ids::TenantId;
-use cl_host::{AdminAccount, CompanySeed};
+use cl_host::{AdminAccount, CompanySeed, HostState};
 use cl_model::{CommandId, Scope};
 use cl_settings::Accent;
 use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Ui, Vec2};
@@ -39,6 +40,16 @@ enum Stage {
     Ready,
 }
 
+/// How often "still starting up" looks at the engine again.
+const REPROBE_EVERY: Duration = Duration::from_secs(1);
+
+/// Whether a window stuck at [`Stage::EngineNotReady`] should ask the engine
+/// again: only once the engine is running, and not before `retry_at` (so a
+/// probe that keeps failing while the engine runs isn't sent every frame).
+fn reprobe_due(engine_running: bool, retry_at: Option<Instant>, now: Instant) -> bool {
+    engine_running && retry_at.is_none_or(|at| now >= at)
+}
+
 /// The Open Company window.
 pub struct OpenCompanyScreen {
     link: Arc<CompanyLink>,
@@ -49,6 +60,8 @@ pub struct OpenCompanyScreen {
     list_task: Option<Task<Result<Vec<CompanyEntry>, CompanyError>>>,
     open_task: Option<Task<Result<Opened, CompanyError>>>,
     probe_task: Option<Task<Result<bool, CompanyError>>>,
+    /// After a failed probe, not before this (see [`reprobe_due`]).
+    reprobe_at: Option<Instant>,
     signin_task: Option<Task<Result<SignedIn, CompanyError>>>,
     restore_task: Option<Task<Result<RestoreOutcome, CompanyError>>>,
     sample_task: Option<Task<Result<cl_company::Created, CompanyError>>>,
@@ -115,6 +128,7 @@ impl OpenCompanyScreen {
             list_task: None,
             open_task: None,
             probe_task: None,
+            reprobe_at: None,
             signin_task: None,
             restore_task: None,
             sample_task: None,
@@ -411,7 +425,10 @@ impl OpenCompanyScreen {
             match r {
                 Ok(true) => self.stage = Stage::SignIn,
                 Ok(false) => self.stage = Stage::FirstRun,
-                Err(_) => self.stage = Stage::EngineNotReady,
+                Err(_) => {
+                    self.stage = Stage::EngineNotReady;
+                    self.reprobe_at = Some(Instant::now() + REPROBE_EVERY);
+                }
             }
         }
         if let Some(t) = self.signin_task.as_mut()
@@ -815,6 +832,19 @@ impl Screen for OpenCompanyScreen {
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         self.poll();
+        // A window opened before the engine was up asks again once it runs;
+        // otherwise it would say "still starting up" for good.
+        if self.stage == Stage::EngineNotReady {
+            let running = self
+                .link
+                .supervisor()
+                .is_some_and(|s| matches!(s.status().state, HostState::Running));
+            if reprobe_due(running, self.reprobe_at, Instant::now()) {
+                self.stage = Stage::Probing;
+            } else {
+                ui.ctx().request_repaint_after(REPROBE_EVERY);
+            }
+        }
         if self.stage == Stage::Probing && self.probe_task.is_none() {
             self.probe();
         }
@@ -1137,6 +1167,19 @@ mod tests {
             .into_iter()
             .any(|e| matches!(e, CompanyEvent::Opened { ref name, .. } if name.contains("sample")));
         assert!(opened, "the practice company opened");
+    }
+
+    #[test]
+    fn still_starting_up_asks_again_once_the_engine_runs() {
+        let now = Instant::now();
+        // Engine not running yet: keep waiting.
+        assert!(!reprobe_due(false, None, now));
+        assert!(!reprobe_due(false, Some(now), now));
+        // Running: ask again, but not sooner than the retry time.
+        assert!(reprobe_due(true, None, now));
+        assert!(reprobe_due(true, Some(now), now));
+        assert!(!reprobe_due(true, Some(now + REPROBE_EVERY), now));
+        assert!(reprobe_due(true, Some(now), now + REPROBE_EVERY));
     }
 
     #[test]
