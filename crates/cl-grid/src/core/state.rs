@@ -31,6 +31,9 @@ use super::spec::{GridCommand, GridEvent, GridSpec};
 
 /// Popup rows shown at once (paging moves by this many).
 pub const POPUP_ROWS: usize = 8;
+/// Most matches typing offers; the popup shows [`POPUP_ROWS`] at a time
+/// and the wheel or the arrows reach the rest.
+pub const TYPEAHEAD_MAX: usize = 50;
 /// Shown when the cursor's row vanished after a reload.
 pub const ROW_GONE: TextKey = TextKey("grid.row.gone");
 /// Shown when the model changed a cell while the owner was typing in it.
@@ -821,7 +824,7 @@ impl Core {
             edit.popup = None;
             return;
         }
-        edit.popup = Some(match lookups.suggest(list, &q, POPUP_ROWS) {
+        edit.popup = Some(match lookups.suggest(list, &q, TYPEAHEAD_MAX) {
             LookupResult::Ready(items) => {
                 let exact = lookups.exact(list, &q).is_some();
                 Popup {

@@ -19,13 +19,16 @@ use crate::view::overlay::{PopupView, window_top};
 pub const MIN_WIDTH: f32 = 220.0;
 
 /// What the popup shows this frame. `header` is the column's resolved
-/// header, `top` the first entry shown last frame.
+/// header, `top` the first entry shown last frame (or scrolled to by the
+/// wheel); `follow` brings the highlight into view (it moved since last
+/// frame), otherwise the list stays where the wheel left it.
 #[must_use]
 pub fn view<'p>(
     popup: &'p Popup,
     header: String,
     width: f32,
     top: usize,
+    follow: bool,
     text: &dyn Fn(TextKey) -> String,
 ) -> PopupView<'p> {
     let status = if popup.loading {
@@ -48,7 +51,12 @@ pub fn view<'p>(
     PopupView {
         items: &popup.items,
         highlight: popup.highlight,
-        top: window_top(top, popup.highlight, POPUP_ROWS, popup.items.len()),
+        top: window_top(
+            top,
+            popup.highlight.filter(|_| follow),
+            POPUP_ROWS,
+            popup.items.len(),
+        ),
         rows: POPUP_ROWS,
         add_new,
         status,
@@ -89,33 +97,47 @@ mod tests {
     #[test]
     fn labels_status_and_add_new() {
         let p = popup(PopupKind::Full, 3, None);
-        let v = view(&p, "Account".into(), 100.0, 0, &t);
+        let v = view(&p, "Account".into(), 100.0, 0, true, &t);
         assert_eq!(v.label, "All Account");
         assert!((v.width - MIN_WIDTH).abs() < 0.01);
         assert!(v.status.is_none());
         let mut p = popup(PopupKind::List, 0, None);
         p.add_new = Some("Zebra".into());
-        let v = view(&p, "Account".into(), 300.0, 0, &t);
+        let v = view(&p, "Account".into(), 300.0, 0, true, &t);
         assert_eq!(v.add_new.as_deref(), Some("Add \"Zebra\""));
         assert!(v.status.is_none(), "Add is the answer, not 'no matches'");
         let p = Popup {
             loading: true,
             ..popup(PopupKind::List, 0, None)
         };
-        let v = view(&p, "Account".into(), 300.0, 0, &t);
+        let v = view(&p, "Account".into(), 300.0, 0, true, &t);
         assert_eq!(v.status.as_deref(), Some("grid.popup.loading"));
     }
 
     #[test]
     fn the_window_follows_the_highlight() {
         let p = popup(PopupKind::Full, 50, Some(20));
-        let v = view(&p, "Account".into(), 300.0, 0, &t);
+        let v = view(&p, "Account".into(), 300.0, 0, true, &t);
         assert_eq!(v.top, 20 + 1 - POPUP_ROWS);
         let p = popup(PopupKind::Full, 50, Some(3));
-        let v = view(&p, "Account".into(), 300.0, 13, &t);
+        let v = view(&p, "Account".into(), 300.0, 13, true, &t);
         assert_eq!(v.top, 3);
         let p = popup(PopupKind::Full, 5, None);
-        let v = view(&p, "Account".into(), 300.0, 40, &t);
+        let v = view(&p, "Account".into(), 300.0, 40, true, &t);
         assert_eq!(v.top, 0, "never past the end");
+    }
+
+    #[test]
+    fn the_wheel_scrolls_away_from_a_highlight_that_did_not_move() {
+        // The wheel moved the list to entry 30; the highlight stays at 2.
+        let p = popup(PopupKind::Full, 50, Some(2));
+        let v = view(&p, "Account".into(), 300.0, 30, false, &t);
+        assert_eq!(v.top, 30, "stays where the wheel left it");
+        // Past the end is still clamped.
+        let v = view(&p, "Account".into(), 300.0, 49, false, &t);
+        assert_eq!(v.top, 50 - POPUP_ROWS);
+        // An arrow key moved the highlight: the list follows it again.
+        let v = view(&p, "Account".into(), 300.0, 30, true, &t);
+        assert_eq!(v.top, 2);
     }
 }

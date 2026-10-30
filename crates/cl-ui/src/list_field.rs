@@ -92,6 +92,22 @@ pub fn popup<'a>(
     current: Option<usize>,
 ) -> Option<usize> {
     let mut picked = None;
+    // Bring the current entry into view once, when the list opens or the
+    // current entry changes; after that the owner scrolls freely (scrolling
+    // to it every frame pulled the list straight back).
+    let shown_id = field.id.with("list_shown_current");
+    let ctx = ui.ctx();
+    let frame = ctx.cumulative_frame_nr();
+    // (current entry, last frame drawn, frame it opened or the current
+    // entry changed). A few frames, because a new popup's first pass only
+    // measures it.
+    let last = ctx.data(|d| d.get_temp::<(Option<usize>, u64, u64)>(shown_id));
+    let since = match last {
+        Some((was, at, since)) if was == current && frame <= at + 1 => since,
+        _ => frame,
+    };
+    let reveal = frame <= since + 2;
+    ctx.data_mut(|d| d.insert_temp(shown_id, (current, frame, since)));
     egui::Area::new(field.id.with("list"))
         .order(egui::Order::Foreground)
         .fixed_pos(field.rect.left_bottom() + Vec2::new(0.0, 2.0))
@@ -109,7 +125,7 @@ pub fn popup<'a>(
                                 egui::Button::selectable(current == Some(i), label)
                                     .sense(egui::Sense::CLICK),
                             );
-                            if current == Some(i) && field.has_focus() {
+                            if reveal && current == Some(i) && field.has_focus() {
                                 r.scroll_to_me(None);
                             }
                             if r.clicked() {
@@ -230,6 +246,75 @@ mod tests {
             "typed text filters"
         );
         assert!(f.focused, "focus stays in the field");
+    }
+
+    /// The list shows the current entry when it opens, then scrolls freely:
+    /// the wheel takes it to the top and it stays there.
+    #[test]
+    fn the_list_scrolls_away_from_the_current_entry() {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let labels: Vec<String> = (0..100).map(|i| format!("Entry {i}")).collect();
+        let field_rect = std::cell::Cell::new(Rect::NOTHING);
+        // The y of `label`'s row and whether it is inside the list's window.
+        let run = |events: Vec<Event>| -> Vec<(String, f64)> {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 600.0))),
+                events,
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let r = ui.add(egui::TextEdit::singleline(&mut String::new()).id_salt("payee"));
+                    r.request_focus();
+                    field_rect.set(r.rect);
+                    let _ = super::popup(ui, &r, labels.iter().map(String::as_str), Some(80));
+                });
+            });
+            out.textures_delta.clear();
+            out.platform_output
+                .accesskit_update
+                .map(|u| u.nodes)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|(_, n)| Some((n.label()?.to_string(), n.bounds()?.y0)))
+                .collect()
+        };
+        let y_of = |nodes: &[(String, f64)], label: &str| {
+            nodes.iter().find(|(l, _)| l == label).map(|(_, y)| *y)
+        };
+        let mut nodes = Vec::new();
+        // Scrolling to the current entry is animated over a few frames.
+        for _ in 0..60 {
+            nodes = run(vec![]);
+        }
+        let list_top = f64::from(field_rect.get().bottom());
+        let list_bottom = list_top + 260.0;
+        let shown = |y: Option<f64>| y.is_some_and(|y| y >= list_top && y < list_bottom);
+        assert!(
+            shown(y_of(&nodes, "Entry 80")),
+            "opens on the current entry"
+        );
+        assert!(!shown(y_of(&nodes, "Entry 0")), "the top is out of view");
+        // Wheel up over the list, then let it settle.
+        let over = field_rect.get().left_bottom() + vec2(30.0, 60.0);
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 5000.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        };
+        run(vec![Event::PointerMoved(over), wheel]);
+        for _ in 0..60 {
+            nodes = run(vec![Event::PointerMoved(over)]);
+        }
+        assert!(
+            shown(y_of(&nodes, "Entry 0")),
+            "the wheel reached the top and it stays"
+        );
     }
 
     /// Tab with the list open goes to the next field, never into the list

@@ -54,6 +54,38 @@ pub fn window_top(top: usize, highlight: Option<usize>, rows: usize, len: usize)
     top
 }
 
+/// The thin bar on the right of a popup with more entries than rows.
+fn paint_scroll_bar(ui: &egui::Ui, view: &PopupView<'_>, left: f32, top: f32, style: &GridStyle) {
+    if let Some(bar) = scroll_bar(
+        left + view.width - 4.0,
+        top,
+        ui.cursor().top(),
+        view.top,
+        view.rows,
+        view.items.len(),
+    ) {
+        ui.painter()
+            .rect_filled(bar, CornerRadius::same(2), style.accent_border);
+    }
+}
+
+/// The scroll bar of a list showing `rows` of `len` entries from `top`,
+/// drawn 3 points wide at `x` between `y0` and `y1`; none when every entry
+/// shows.
+// Geometry only: list lengths are small.
+#[allow(clippy::cast_precision_loss)]
+#[must_use]
+pub fn scroll_bar(x: f32, y0: f32, y1: f32, top: usize, rows: usize, len: usize) -> Option<Rect> {
+    if len <= rows || y1 <= y0 {
+        return None;
+    }
+    let h = y1 - y0;
+    let len = len as f32;
+    let bar_h = (h * rows as f32 / len).max(8.0).min(h);
+    let y = y0 + (h - bar_h) * (top as f32 / (len - rows as f32)).clamp(0.0, 1.0);
+    Some(Rect::from_min_size(Pos2::new(x, y), vec2(3.0, bar_h)))
+}
+
 /// The id of a popup entry's node (`list` is the popup's id).
 #[must_use]
 pub fn item_id(list: Id, index: usize) -> Id {
@@ -146,6 +178,8 @@ pub fn popup(
                                 let _ = row(ui, id.with("status"), status, false, true);
                             }
                             let end = (view.top + view.rows.max(1)).min(view.items.len());
+                            let list_top = ui.cursor().top();
+                            let list_left = ui.cursor().left();
                             for i in view.top.min(end)..end {
                                 let s = &view.items[i];
                                 if row(
@@ -158,6 +192,10 @@ pub fn popup(
                                     hit = Some(PopupHit::Item(i));
                                 }
                             }
+                            // More entries than rows: a thin bar on the
+                            // right shows where the window is (the wheel
+                            // and the arrows move it).
+                            paint_scroll_bar(ui, view, list_left, list_top, style);
                             if let Some(add) = &view.add_new
                                 && row(ui, add_new_id(id), add, false, true)
                             {
@@ -205,4 +243,27 @@ pub fn caption(ctx: &Context, id: Id, at: Pos2, text: &str, style: &GridStyle) {
                     });
                 });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_bar;
+
+    #[test]
+    fn the_scroll_bar_shows_only_when_entries_are_hidden_and_tracks_the_window() {
+        assert!(
+            scroll_bar(100.0, 0.0, 160.0, 0, 8, 8).is_none(),
+            "every entry shows"
+        );
+        let first = scroll_bar(100.0, 0.0, 160.0, 0, 8, 40).unwrap();
+        assert!((first.top() - 0.0).abs() < 0.01, "at the top");
+        assert!(
+            (first.height() - 32.0).abs() < 0.01,
+            "8 of 40 rows: a fifth"
+        );
+        let last = scroll_bar(100.0, 0.0, 160.0, 32, 8, 40).unwrap();
+        assert!((last.bottom() - 160.0).abs() < 0.01, "at the bottom");
+        let tiny = scroll_bar(100.0, 0.0, 160.0, 0, 8, 10_000).unwrap();
+        assert!(tiny.height() >= 8.0, "never too small to see");
+    }
 }
