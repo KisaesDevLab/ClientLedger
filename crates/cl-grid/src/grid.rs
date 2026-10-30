@@ -184,7 +184,9 @@ pub struct Grid {
     popup_wheel: f32,
     /// The highlight the popup showed last frame: the list follows the
     /// highlight only when it moves, so the wheel can scroll away from it.
-    popup_seen: Option<Option<usize>>,
+    popup_seen: Option<usize>,
+    /// Whether a popup was drawn last frame (`popup_seen` is its highlight).
+    popup_drawn: bool,
     /// Select checkboxes drawn last frame (AccessKit Click targets).
     gutters: Vec<(Id, RowKey)>,
     /// Where the open context menu sits: the pointer of the right-click,
@@ -285,6 +287,7 @@ impl Grid {
             popup_row_h: 18.0,
             popup_wheel: 0.0,
             popup_seen: None,
+            popup_drawn: false,
             gutters: Vec::new(),
             menu_at: None,
             menu_rect: None,
@@ -812,7 +815,7 @@ impl Grid {
             env.t(col.header),
             width,
             self.popup_top,
-            self.popup_seen != Some(popup.highlight),
+            !self.popup_drawn || self.popup_seen != popup.highlight,
             env.text,
         ))
     }
@@ -1247,7 +1250,9 @@ impl Grid {
         // (`popup_rect` is last frame's; the list's end is clamped when
         // it is drawn).
         if let Some(r) = self.popup_rect
-            && ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p))
+            && ctx
+                .input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| r.contains(p))
         {
             let dy = ctx.input_mut(|i| {
                 let d = i.smooth_scroll_delta.y;
@@ -2265,7 +2270,8 @@ impl Grid {
                 );
                 let (shown_top, shown_highlight) = (view.top, view.highlight);
                 self.popup_top = shown_top;
-                self.popup_seen = Some(shown_highlight);
+                self.popup_seen = shown_highlight;
+                self.popup_drawn = true;
                 self.popup_row_h = style.row_one.max(18.0);
                 popup_hit = hit;
                 self.popup_rect = Some(r);
@@ -2290,6 +2296,7 @@ impl Grid {
             self.popup_top = 0;
             self.popup_wheel = 0.0;
             self.popup_seen = None;
+            self.popup_drawn = false;
         }
         // The caption under the open cell: calculator preview, error, notice.
         if let (Some(pos), Some((top, x))) = (cursor, caption_top)

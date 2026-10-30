@@ -54,6 +54,21 @@ pub fn window_top(top: usize, highlight: Option<usize>, rows: usize, len: usize)
     top
 }
 
+/// The thin bar on the right of a popup with more entries than rows.
+fn paint_scroll_bar(ui: &egui::Ui, view: &PopupView<'_>, left: f32, top: f32, style: &GridStyle) {
+    if let Some(bar) = scroll_bar(
+        left + view.width - 4.0,
+        top,
+        ui.cursor().top(),
+        view.top,
+        view.rows,
+        view.items.len(),
+    ) {
+        ui.painter()
+            .rect_filled(bar, CornerRadius::same(2), style.accent_border);
+    }
+}
+
 /// The scroll bar of a list showing `rows` of `len` entries from `top`,
 /// drawn 3 points wide at `x` between `y0` and `y1`; none when every entry
 /// shows.
@@ -180,20 +195,7 @@ pub fn popup(
                             // More entries than rows: a thin bar on the
                             // right shows where the window is (the wheel
                             // and the arrows move it).
-                            if let Some(bar) = scroll_bar(
-                                list_left + view.width - 4.0,
-                                list_top,
-                                ui.cursor().top(),
-                                view.top,
-                                view.rows,
-                                view.items.len(),
-                            ) {
-                                ui.painter().rect_filled(
-                                    bar,
-                                    CornerRadius::same(2),
-                                    style.accent_border,
-                                );
-                            }
+                            paint_scroll_bar(ui, view, list_left, list_top, style);
                             if let Some(add) = &view.add_new
                                 && row(ui, add_new_id(id), add, false, true)
                             {
@@ -249,10 +251,16 @@ mod tests {
 
     #[test]
     fn the_scroll_bar_shows_only_when_entries_are_hidden_and_tracks_the_window() {
-        assert!(scroll_bar(100.0, 0.0, 160.0, 0, 8, 8).is_none(), "every entry shows");
+        assert!(
+            scroll_bar(100.0, 0.0, 160.0, 0, 8, 8).is_none(),
+            "every entry shows"
+        );
         let first = scroll_bar(100.0, 0.0, 160.0, 0, 8, 40).unwrap();
         assert!((first.top() - 0.0).abs() < 0.01, "at the top");
-        assert!((first.height() - 32.0).abs() < 0.01, "8 of 40 rows: a fifth");
+        assert!(
+            (first.height() - 32.0).abs() < 0.01,
+            "8 of 40 rows: a fifth"
+        );
         let last = scroll_bar(100.0, 0.0, 160.0, 32, 8, 40).unwrap();
         assert!((last.bottom() - 160.0).abs() < 0.01, "at the bottom");
         let tiny = scroll_bar(100.0, 0.0, 160.0, 0, 8, 10_000).unwrap();

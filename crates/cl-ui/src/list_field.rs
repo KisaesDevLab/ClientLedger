@@ -293,7 +293,10 @@ mod tests {
         let list_top = f64::from(field_rect.get().bottom());
         let list_bottom = list_top + 260.0;
         let shown = |y: Option<f64>| y.is_some_and(|y| y >= list_top && y < list_bottom);
-        assert!(shown(y_of(&nodes, "Entry 80")), "opens on the current entry");
+        assert!(
+            shown(y_of(&nodes, "Entry 80")),
+            "opens on the current entry"
+        );
         assert!(!shown(y_of(&nodes, "Entry 0")), "the top is out of view");
         // Wheel up over the list, then let it settle.
         let over = field_rect.get().left_bottom() + vec2(30.0, 60.0);
@@ -308,7 +311,10 @@ mod tests {
         for _ in 0..60 {
             nodes = run(vec![Event::PointerMoved(over)]);
         }
-        assert!(shown(y_of(&nodes, "Entry 0")), "the wheel reached the top and it stays");
+        assert!(
+            shown(y_of(&nodes, "Entry 0")),
+            "the wheel reached the top and it stays"
+        );
     }
 
     /// Tab with the list open goes to the next field, never into the list
