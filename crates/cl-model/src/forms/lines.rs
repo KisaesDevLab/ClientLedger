@@ -486,13 +486,13 @@ mod tests {
         // A line whose amount the owner cleared keeps its account: not new.
         let seen = v.clone();
         v.lines[0].amount = None;
-        assert!(fresh_account_lines(&seen, &v).is_empty());
+        assert_eq!(fresh_account_lines(&seen, &v), Vec::<RowKey>::new());
         assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v));
         assert_eq!(v.lines[0].amount, None);
         // A changed account on a line with an account is not new either.
         let seen = v.clone();
         v.lines[0].account = Some(account(6200));
-        assert!(fresh_account_lines(&seen, &v).is_empty());
+        assert_eq!(fresh_account_lines(&seen, &v), Vec::<RowKey>::new());
         // A line that arrives with an account and no amount is.
         let seen = FormLines::default();
         assert_eq!(fresh_account_lines(&seen, &v), vec![v.lines[0].key]);
