@@ -811,7 +811,7 @@ fn a_read_total_or_read_line_is_never_filled() {
         lines: vec![ReadLine {
             description: "Fuel".into(),
             amount: None,
-            account: s.books.by_number("6400"),
+            account: None,
             confidence: None,
         }],
         ..DocReading::default()
@@ -831,8 +831,15 @@ fn a_read_total_or_read_line_is_never_filled() {
     assert_eq!(s.lines.value().lines[0].amount, None);
     pick_line(&mut s, 1, "6250");
     assert_eq!(s.lines.value().lines[1].amount, None, "total not accepted");
-    // The total accepted: an owner line fills, the read line stays held.
+    // The total accepted, then an account suggestion accepted on the read
+    // line: its amount stays blank; an owner line takes the total.
     s.header.edit_step(|h| h.read.edited(ReadTarget::Total));
+    let fuel = s.books.by_number("6400");
+    s.lines.set_suggestion(key, fuel);
+    assert!(s.lines.accept_suggestion(key));
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].account, fuel);
+    assert_eq!(s.lines.value().lines[0].amount, None);
     pick_line(&mut s, 2, "6250");
     assert_eq!(s.lines.value().lines[2].amount, Some(money("80.00")));
     assert_eq!(s.lines.value().lines[0].amount, None);

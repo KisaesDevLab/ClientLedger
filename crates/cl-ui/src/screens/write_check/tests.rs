@@ -467,12 +467,13 @@ fn an_accepted_total_fills_owner_lines_but_not_a_read_line() {
     let (_d, link) = link();
     let mut s = screen(&link);
     let a = account(&s, "5100");
+    // A read line with no account and no amount.
     let reading = DocReading {
         total: Some(money("80.00")),
         lines: vec![ReadLine {
             description: "Feed".into(),
             amount: None,
-            account: Some(a),
+            account: None,
             confidence: None,
         }],
         ..DocReading::default()
@@ -487,15 +488,22 @@ fn an_accepted_total_fills_owner_lines_but_not_a_read_line() {
     let lists = Arc::clone(&s.lists);
     s.lines.load(lines, &*lists);
     let key = s.lines.value().lines[0].key;
-    // The owner accepts the total only.
+    // The owner accepts the total only, then an account suggestion on
+    // the read line: it gets its account, but its amount stays the
+    // document's (blank), never the total (non-negotiable 4).
     s.header.edit_step(|h| h.read.edited(ReadTarget::Total));
-    pick_line(&mut s, 1, "5110");
-    assert_eq!(s.lines.value().lines[1].amount, Some(money("80.00")));
+    s.lines.set_suggestion(key, Some(a));
+    assert!(s.lines.accept_suggestion(key));
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].account, Some(a));
     assert_eq!(s.lines.value().lines[0].amount, None, "read line held");
     assert!(matches!(
         s.header.current().read.state(ReadTarget::Line(key)),
         Some(ReadField::Read { .. })
     ));
+    // An owner line takes the accepted total.
+    pick_line(&mut s, 1, "5110");
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("80.00")));
 }
 
 #[test]

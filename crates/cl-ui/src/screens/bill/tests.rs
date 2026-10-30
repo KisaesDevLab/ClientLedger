@@ -807,7 +807,7 @@ fn a_read_amount_due_or_read_line_is_never_filled() {
         lines: vec![ReadLine {
             description: "Lift rental".into(),
             amount: None,
-            account: Some(account(&s, "6210")),
+            account: None,
             confidence: None,
         }],
         ..DocReading::default()
@@ -825,8 +825,17 @@ fn a_read_amount_due_or_read_line_is_never_filled() {
     assert!(s.header.current().read.is_unaccepted(ReadTarget::AmountDue));
     pick_line(&mut s, 1, "6210");
     assert_eq!(s.expenses.value().lines[1].amount, None, "not accepted");
-    // The amount due accepted: an owner line fills, the read line is held.
+    // The amount due accepted, then Tab accepts an account suggestion on
+    // the read line: its amount stays blank (non-negotiable 4) and it is
+    // still not accepted; an owner line takes the amount due.
     s.header.edit_step(|h| h.read.edited(ReadTarget::AmountDue));
+    let rental = account(&s, "6210");
+    s.expenses.set_suggestion(key, Some(rental));
+    assert!(s.expenses.accept_suggestion(key));
+    s.fill_remaining();
+    s.track_read();
+    assert_eq!(s.expenses.value().lines[0].account, Some(rental));
+    assert_eq!(s.expenses.value().lines[0].amount, None);
     pick_line(&mut s, 2, "6210");
     assert_eq!(s.expenses.value().lines[2].amount, Some(money("80.00")));
     assert_eq!(s.expenses.value().lines[0].amount, None);
