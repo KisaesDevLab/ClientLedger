@@ -78,8 +78,10 @@ jobs:
   docread-netcheck:
     name: docread-netcheck (ubuntu-22.04)
     runs-on: ubuntu-22.04
-    # strace has hung this job to GitHub's 6-hour limit; fail in minutes instead.
-    timeout-minutes: 40
+    # strace has hung this job to GitHub's 6-hour limit. Room for a cold
+    # cache (tesseract and the cl-host tests built from scratch) plus three
+    # traced attempts of at most 10.5 minutes each.
+    timeout-minutes: 60
     env:
       CL_PDFIUM_REQUIRE: "1"
       CL_OCR_REQUIRE: "1"
@@ -131,34 +133,51 @@ jobs:
           # "ptrace(PTRACE_LISTEN...): Input/output error" while a test kills
           # a worker, or wedges. --seccomp-bpf stops the tracees only at the
           # traced calls, so far fewer ptrace stops race with those kills.
-          # Each attempt is time-limited; a strace error or a timeout is
-          # retried (twice) after reaping leftover tracees. Any other failure
-          # fails.
+          # (If the worker ever installs its own seccomp filter, an ERRNO or
+          # KILL action wins over strace's TRACE and those calls would not be
+          # logged; revisit this flag then.)
+          # Each attempt is time-limited. An attempt that fails or times out
+          # is retried (twice) only when strace itself reported an error, so
+          # a real hang or failure in the worker code still fails the job.
+          # Leftover tracees from a failed attempt are reaped by their exact
+          # program paths first.
+          ws="$GITHUB_WORKSPACE"
           reap() {
-            pkill -CONT -f clientledger-docread || true
-            pkill -KILL -f clientledger-docread || true
-            pkill -KILL -f docread_worker- || true
+            for pat in "^$ws/target/docread-test/debug/clientledger-docread" \
+                       "^$DOCREAD_TESTS" \
+                       "^$ws/(crates/cl-host/\.\./\.\./)?target/ocr/[^ ]*/tesseract"; do
+              pkill -CONT -f "$pat" || true
+              pkill -KILL -f "$pat" || true
+            done
           }
           for attempt in 1 2 3; do
             rc=0
-            CARGO_NET_OFFLINE=true timeout -k 30s 15m strace -f --seccomp-bpf -qq -o "$RUNNER_TEMP/net.log" \
+            # strace's own messages go straight to a file (no tee), so the
+            # retry check below never reads a half-written log.
+            CARGO_NET_OFFLINE=true timeout -k 30s 10m strace -f --seccomp-bpf -qq -o "$RUNNER_TEMP/net.log" \
               -e trace=execve,socket,connect,sendto,sendmsg \
-              "$DOCREAD_TESTS" --test-threads=1 2> >(tee "$RUNNER_TEMP/strace-err.txt" >&2) || rc=$?
+              "$DOCREAD_TESTS" --test-threads=1 2> "$RUNNER_TEMP/strace-err.txt" || rc=$?
+            cat "$RUNNER_TEMP/strace-err.txt" >&2
             if [ "$rc" -eq 0 ]; then break; fi
             reap
-            if [ "$attempt" -lt 3 ] && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] \
-                || grep -q 'ptrace(PTRACE_LISTEN' "$RUNNER_TEMP/strace-err.txt"; }; then
-              echo "::warning::strace error or timeout (rc $rc, attempt $attempt); retrying"
+            if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+              echo "::warning::attempt $attempt timed out after 10 minutes"
+            fi
+            if [ "$attempt" -lt 3 ] && grep -q '^strace: ' "$RUNNER_TEMP/strace-err.txt"; then
+              echo "::warning::strace error (rc $rc, attempt $attempt); retrying"
               continue
             fi
             exit "$rc"
           done
           ./target/debug/xtask docread-netcheck "$RUNNER_TEMP/net.log"
       - uses: actions/upload-artifact@v4
-        if: failure()
+        # A job cancelled by its time limit is not a failure(); upload then too.
+        if: failure() || cancelled()
         with:
           name: docread-netcheck-log
-          path: ${{ runner.temp }}/net.log
+          path: |
+            ${{ runner.temp }}/net.log
+            ${{ runner.temp }}/strace-err.txt
           if-no-files-found: ignore
 
   # Pull requests only: the other two platforms (Q-114).
