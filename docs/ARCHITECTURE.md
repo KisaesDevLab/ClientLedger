@@ -278,8 +278,8 @@ The contract binaries use their own runner (`harness = false`), so the order, th
 | Job | Runs | Does |
 | --- | --- | --- |
 | `ci (ubuntu-22.04)` | every push | fetches the pinned PostgreSQL, then `cargo xtask ci` |
-| `ci (windows-latest, macos-14, macos-15-intel)` | pull requests | the same |
-| `engine (ubuntu-22.04, windows-latest, macos-14, macos-15-intel)` | pull requests and `main` | builds and smoke-tests the engine, runs the real-engine `cl-host` tests, `api-spec --check`, then `cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures` with `CL_API_REQUIRE=1` |
+| `ci (windows-latest, macos-15, macos-15-intel)` | pull requests | the same |
+| `engine (ubuntu-22.04, windows-latest, macos-15, macos-15-intel)` | pull requests and `main` | builds and smoke-tests the engine, runs the real-engine `cl-host` tests, `api-spec --check`, then `cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures` with `CL_API_REQUIRE=1` |
 | network-blocked run (steps of the Linux `engine` job) | pull requests and `main` | after every download and build, creates a non-root user `cltest`, adds `iptables` and `ip6tables` owner-match rules that reject all of that user's non-loopback traffic, runs `network_probe` first (it must print `blocked OK`), then runs `contract` and `contract_offline` as `cltest` with `CL_NETWORK_BLOCKED=1`; the rules and user are removed in an `if: always()` step |
 | `coverage` | every push and pull request | `cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80` (Q-116) |
 
@@ -465,8 +465,8 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 
 | Component | License | Ships in installer |
 | --- | --- | --- |
-| ClientLedger Rust code (`crates/`, `apps/`, `xtask/`) | MIT | yes |
-| MyBooks engine (`engine/` submodule, public repo) | PolyForm Internal Use 1.0.0, unmodified (Q-31) | yes, as `clientledger-engine` |
+| ClientLedger Rust code (`crates/`, `apps/`, `xtask/`) | PolyForm Internal Use 1.0.0 (Q-303) | yes |
+| MyBooks engine (`engine/` submodule, public repo) | Kisaes LLC's engine license; licensed to ClientLedger and used inside it under ClientLedger's license (Q-31, Q-303) | yes, as `clientledger-engine` |
 | Node.js runtime inside the engine executable | MIT (plus bundled third-party notices) | yes |
 | PostgreSQL 16 binaries | PostgreSQL License | yes |
 | PDFium binaries | BSD-3-Clause / Apache-2.0 | yes |
@@ -477,4 +477,4 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | IBM Plex fonts | SIL OFL 1.1 | yes |
 | Rust crates | MIT / Apache-2.0 direct; permissive transitive per Q-07 | yes |
 
-The installer and Help › About show all of these. `NOTICE.md` states plainly that the MIT license does not cover `engine/`.
+The installer and Help › About show all of these. `NOTICE.md` states plainly what `LICENSE` covers and how the engine is licensed to ClientLedger.
