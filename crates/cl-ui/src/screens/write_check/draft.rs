@@ -212,7 +212,7 @@ impl WriteCheckScreen {
         let lines = std::mem::take(&mut form.lines);
         self.header.load(form);
         let lists = Arc::clone(&self.lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         if let Some(s) = self.draft.session.as_mut() {
             s.filled(&filled);
         }
@@ -397,7 +397,7 @@ impl WriteCheckScreen {
         let header = self.header.current().clone();
         self.header.load(header);
         let lines: FormLines = self.lines.value().clone();
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         // The file moved with the convert.
         self.attach.draft = None;
         match intent {
@@ -538,7 +538,7 @@ impl WriteCheckScreen {
         let lines = std::mem::take(&mut f.lines);
         self.header.load(f);
         let lists = Arc::clone(&self.lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.draft.snap = Some(self.snap());
         self.sync_inputs();
     }

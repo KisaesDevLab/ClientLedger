@@ -347,7 +347,7 @@ impl JournalScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.lines.value().clone();
-            self.lines.form_mut().load(lines, &*lists);
+            self.lines.load(lines, &*lists);
             if let Some(id) = found {
                 self.template
                     .form_saved(&self.link, self.group.as_ref(), id);
@@ -381,7 +381,7 @@ impl JournalScreen {
         }
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines.clone(), &*lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.seen_lines = self.lines.value().clone();
         let accounts = self.published.clone();
         match self.editing.as_mut() {
@@ -686,7 +686,7 @@ impl JournalScreen {
             PromptAnswer::Discard => {
                 let lists = Arc::clone(&self.books.lists);
                 self.header.revert_form();
-                self.lines.form_mut().revert_form(&*lists);
+                self.lines.revert_form(&*lists);
                 self.seen_lines = self.lines.value().clone();
                 self.problems.clear();
                 self.sync_inputs();

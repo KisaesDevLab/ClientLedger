@@ -474,6 +474,16 @@ impl PersonalFundsScreen {
         self.inputs.rev = self.header.revision();
     }
 
+    /// A line that just got its account with no amount takes what is left
+    /// of the typed amount (Q-304); an amount taken from the lines fills
+    /// nothing. Not while busy or while a record is shown read-only.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let total = h.amount.filter(|_| !h.amount_from_lines);
+        let allowed = self.flow.idle() && self.flow.read_only().is_none();
+        self.lines.fill_remaining(total, Money::ZERO, allowed, &[]);
+    }
+
     fn left_lines(&mut self) {
         let mut f = self.compose();
         f.leave_lines();
@@ -666,7 +676,7 @@ impl PersonalFundsScreen {
         }
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines.clone(), &*lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         if let Some(a) = self.header.current().offset {
             self.balances.fetch(&self.link, self.group.as_ref(), a);
         }
@@ -685,7 +695,7 @@ impl PersonalFundsScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.lines.value().clone();
-            self.lines.form_mut().load(lines, &*lists);
+            self.lines.load(lines, &*lists);
             if let Some(a) = self.header.current().offset {
                 self.balances.fetch(&self.link, self.group.as_ref(), a);
             }
@@ -734,7 +744,7 @@ impl PersonalFundsScreen {
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
-        self.lines.form_mut().load(fresh, &*lists);
+        self.lines.load(fresh, &*lists);
         self.problems.clear();
         self.inputs.payee = NameInput::default();
         self.flow.new_record();
@@ -875,7 +885,7 @@ impl PersonalFundsScreen {
         let lists = Arc::clone(&self.books.lists);
         self.treatment_default = form.treatment == default_treatment(self.books.entity);
         self.header.load(form);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.flow.opened_txn(v, fits);
 
         self.offset_source = None;
@@ -1352,6 +1362,7 @@ impl Screen for PersonalFundsScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        self.fill_remaining();
         // A refused save's problems follow the owner's fixes.
         self.recheck_problems();
         let in_grid = self.lines.has_focus();
@@ -1445,7 +1456,7 @@ impl RecordForm for PersonalFundsScreen {
     fn discard_edits(&mut self) {
         let lists = Arc::clone(&self.books.lists);
         self.header.revert_form();
-        self.lines.form_mut().revert_form(&*lists);
+        self.lines.revert_form(&*lists);
         self.problems.clear();
         self.sync_inputs();
     }

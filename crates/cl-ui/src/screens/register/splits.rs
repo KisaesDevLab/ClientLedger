@@ -247,6 +247,21 @@ impl RegisterScreen {
         }
     }
 
+    /// A split line that just got its account with no amount takes what is
+    /// left of the typed payment or deposit (Q-304).
+    pub(super) fn splits_fill_remaining(&mut self) {
+        let header = {
+            let d = self.entry.draft();
+            d.payment.or(d.deposit)
+        };
+        let allowed = self.entry.task.is_none()
+            && !self.view_only()
+            && !self.entry.form.form().is_unconfirmed();
+        if let Some(s) = self.splits.as_mut() {
+            s.grid.fill_remaining(header, Money::ZERO, allowed, &[]);
+        }
+    }
+
     /// Draws the panel (inside the entry row's frame).
     pub(super) fn splits_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let header = {
@@ -264,6 +279,10 @@ impl RegisterScreen {
                 .color(tokens.text_primary),
         );
         let out = s.grid.ui(ui);
+        self.splits_fill_remaining();
+        let Some(s) = self.splits.as_ref() else {
+            return;
+        };
         let left = remaining(header, s.value());
         let mut record = false;
         for e in out.events {

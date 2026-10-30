@@ -320,6 +320,70 @@ fn prefill_copies_the_last_bill_without_amounts_and_a_new_vendor_gets_its_defaul
     assert_eq!(f.memo, "Rental");
 }
 
+/// Picks account `n` on expense line `i` (no amount), as the grid does,
+/// and runs the frame's remaining fill (Q-304).
+fn pick_line(s: &mut EnterBillScreen, line: usize, number: &str) {
+    let picked = account(s, number);
+    let mut lines = s.expenses.value().clone();
+    lines.lines[line].account = Some(picked);
+    lines.ensure_entry(&mut s.expenses.form_mut().adapter_mut().keys);
+    s.expenses.form_mut().edit_step(|now| *now = lines);
+    s.fill_remaining();
+}
+
+#[test]
+fn a_new_expense_line_takes_what_is_left_of_the_amount_due() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("1500.01")));
+    pick_line(&mut s, 0, "6210");
+    assert_eq!(s.expenses.value().lines[0].amount, Some(money("1500.01")));
+    assert!(s.is_dirty());
+    assert_eq!(s.state()["totals"], "balanced");
+    // Typed over, the next line takes what is left.
+    s.expenses
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("1000.00")));
+    s.fill_remaining();
+    pick_line(&mut s, 1, "6210");
+    assert_eq!(s.expenses.value().lines[0].amount, Some(money("1000.00")));
+    assert_eq!(s.expenses.value().lines[1].amount, Some(money("500.01")));
+    assert_eq!(s.state()["totals"], "balanced");
+    pick_line(&mut s, 2, "6210");
+    assert_eq!(s.expenses.value().lines[2].amount, None, "nothing left");
+}
+
+#[test]
+fn item_lines_count_and_the_vendor_default_line_takes_the_amount_due() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // The amount due first, then the vendor: its default account line
+    // takes the whole amount (the owner's 2026-10-30 report).
+    s.amount_typed(Some(money("1480.00")));
+    let v = contact(&s, demo_bills::STORY_VENDOR);
+    s.pick_vendor(v);
+    s.fill_remaining();
+    let first = s.expenses.value().lines[0].clone();
+    assert_eq!(first.account, Some(account(&s, "6210")));
+    assert_eq!(first.amount, Some(money("1480.00")));
+    // Item lines (quantity × cost) count as assigned and are not touched.
+    s.clear();
+    s.amount_typed(Some(money("1480.00")));
+    let rental = account(&s, "6210");
+    let mut item = cl_model::forms::item_lines::ItemLine::blank(s.items.keys().next_key());
+    item.account = Some(rental);
+    item.set_qty(Some(cl_core::Quantity::parse_wire("2").expect("q")));
+    item.set_rate(Some(money("665.00")));
+    let entry = cl_model::forms::item_lines::ItemLine::blank(s.items.keys().next_key());
+    s.items
+        .form_mut()
+        .edit_step(|v| v.lines = vec![item, entry]);
+    pick_line(&mut s, 0, "6210");
+    assert_eq!(s.expenses.value().lines[0].amount, Some(money("150.00")));
+    assert_eq!(s.items.value().lines[0].amount, Some(money("1330.00")));
+    assert_eq!(s.state()["totals"], "balanced");
+}
+
 #[test]
 fn an_unknown_outcome_blocks_the_save_in_every_window_until_answered() {
     let (_d, link) = link();
@@ -689,4 +753,110 @@ fn the_form_draws_wide_and_narrow() {
     frames(&mut s, 1440.0, 2);
     assert!(s.is_dirty());
     let _ = Secret::new("unused");
+}
+
+#[test]
+fn loaded_lines_and_saved_bills_are_not_filled() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    for amount in ["40.00", "12.50"] {
+        fill(
+            &mut s,
+            demo_bills::STORY_VENDOR,
+            amount,
+            &[("6210", amount)],
+        );
+        assert!(s.start_save(SaveIntent::SaveAndNew, None), "{}", s.state());
+        s.poll();
+    }
+    // Prev, Prev, Next: each opened bill stays as saved and clean.
+    for older in [true, true, false] {
+        s.navigate(older);
+        s.poll();
+        let before = s.expenses.value().clone();
+        s.fill_remaining();
+        assert_eq!(*s.expenses.value(), before);
+        assert!(!s.is_dirty());
+    }
+    // Lines loaded with an account and no amount are not "just picked".
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("80.00")));
+    let a = account(&s, "6210");
+    let key = s.expenses.form_mut().adapter_mut().keys.next_key();
+    let lines = FormLines::from_lines(
+        vec![FormLine {
+            account: Some(a),
+            ..FormLine::blank(key)
+        }],
+        &mut s.expenses.form_mut().adapter_mut().keys,
+    );
+    let lists = Arc::clone(&s.lists);
+    s.expenses.load(lines, &*lists);
+    s.fill_remaining();
+    assert_eq!(s.expenses.value().lines[0].amount, None);
+    assert!(!s.expenses.dirty());
+}
+
+#[test]
+fn a_read_amount_due_or_read_line_is_never_filled() {
+    use cl_model::forms::doc_read::{DocReading, ReadField, ReadLine, ReadTarget};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let reading = DocReading {
+        total: Some(money("80.00")),
+        lines: vec![ReadLine {
+            description: "Lift rental".into(),
+            amount: None,
+            account: None,
+            confidence: None,
+        }],
+        ..DocReading::default()
+    };
+    let mut form = s.compose();
+    {
+        let keys = &mut s.expenses.form_mut().adapter_mut().keys;
+        cl_model::forms::doc_read::apply(&reading, &mut form, keys);
+    }
+    // A local reading fills the form as an edit (take_form).
+    s.take_form(form);
+    s.fill_remaining();
+    let key = s.expenses.value().lines[0].key;
+    assert_eq!(s.expenses.value().lines[0].amount, None);
+    assert!(s.header.current().read.is_unaccepted(ReadTarget::AmountDue));
+    pick_line(&mut s, 1, "6210");
+    assert_eq!(s.expenses.value().lines[1].amount, None, "not accepted");
+    // The amount due accepted, then Tab accepts an account suggestion on
+    // the read line: its amount stays blank (non-negotiable 4) and it is
+    // still not accepted; an owner line takes the amount due.
+    s.header.edit_step(|h| h.read.edited(ReadTarget::AmountDue));
+    let rental = account(&s, "6210");
+    s.expenses.set_suggestion(key, Some(rental));
+    assert!(s.expenses.accept_suggestion(key));
+    s.fill_remaining();
+    s.track_read();
+    assert_eq!(s.expenses.value().lines[0].account, Some(rental));
+    assert_eq!(s.expenses.value().lines[0].amount, None);
+    pick_line(&mut s, 2, "6210");
+    assert_eq!(s.expenses.value().lines[2].amount, Some(money("80.00")));
+    assert_eq!(s.expenses.value().lines[0].amount, None);
+    assert!(matches!(
+        s.header.current().read.state(ReadTarget::Line(key)),
+        Some(ReadField::Read { .. })
+    ));
+}
+
+#[test]
+fn a_new_vendor_credit_line_takes_what_is_left_of_the_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.set_kind(BillKind::Credit);
+    s.amount_typed(Some(money("150.00")));
+    pick_line(&mut s, 0, "6210");
+    assert_eq!(s.expenses.value().lines[0].amount, Some(money("150.00")));
+    s.expenses
+        .form_mut()
+        .edit_step(|v| v.lines[0].amount = Some(money("100.00")));
+    s.fill_remaining();
+    pick_line(&mut s, 1, "6210");
+    assert_eq!(s.expenses.value().lines[1].amount, Some(money("50.00")));
 }

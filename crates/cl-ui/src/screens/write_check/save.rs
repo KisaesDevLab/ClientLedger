@@ -745,7 +745,7 @@ impl WriteCheckScreen {
         self.header.load(blank(bank, date, number));
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
-        self.lines.form_mut().load(fresh, &*lists);
+        self.lines.load(fresh, &*lists);
         self.editing = None;
         self.template.forget();
         self.nav.at = None;
@@ -881,7 +881,7 @@ impl WriteCheckScreen {
             crate::windows::PromptAnswer::Discard => {
                 let lists = Arc::clone(&self.lists);
                 self.header.revert_form();
-                self.lines.form_mut().revert_form(&*lists);
+                self.lines.revert_form(&*lists);
                 self.reset_suggestions();
                 self.sync_inputs();
                 self.navigate(older);
@@ -1116,7 +1116,7 @@ impl WriteCheckScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.lines.value().clone();
-            self.lines.form_mut().load(lines, &*lists);
+            self.lines.load(lines, &*lists);
             if let (Some(id), Some(bank)) = (found, self.header.current().bank) {
                 self.template
                     .form_saved(&self.link, self.group.as_ref(), id);
@@ -1192,7 +1192,7 @@ impl WriteCheckScreen {
                 None
             };
         self.header.load(form);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.template.forget();
         self.editing = Some(Editing {
             id: r.txn.id,

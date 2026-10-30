@@ -649,7 +649,7 @@ impl LoanPaymentScreen {
         }
         let lines = self.extras.value().clone();
         self.extras.form_mut().save_ok(lines.clone(), &*lists);
-        self.extras.form_mut().load(lines, &*lists);
+        self.extras.load(lines, &*lists);
         // The engine's balance after the save (never `before − principal`).
         if let Some(loan) = self.header.current().loan {
             self.balances.fetch(&self.link, self.group.as_ref(), loan);
@@ -682,7 +682,7 @@ impl LoanPaymentScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.extras.value().clone();
-            self.extras.form_mut().load(lines, &*lists);
+            self.extras.load(lines, &*lists);
             if let Some(loan) = self.header.current().loan {
                 self.balances.fetch(&self.link, self.group.as_ref(), loan);
             }
@@ -740,7 +740,7 @@ impl LoanPaymentScreen {
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.extras.form_mut().adapter_mut().keys);
-        self.extras.form_mut().load(fresh, &*lists);
+        self.extras.load(fresh, &*lists);
         self.problems.clear();
         self.prefill_applied = false;
         self.inputs.lender = NameInput::default();
@@ -902,7 +902,7 @@ impl LoanPaymentScreen {
         let (form, extras, fits) = self.form_of(v, loan);
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
-        self.extras.form_mut().load(extras, &*lists);
+        self.extras.load(extras, &*lists);
         self.flow.opened_txn(v, fits);
 
         self.problems.clear();
@@ -1557,7 +1557,7 @@ impl RecordForm for LoanPaymentScreen {
     fn discard_edits(&mut self) {
         let lists = Arc::clone(&self.books.lists);
         self.header.revert_form();
-        self.extras.form_mut().revert_form(&*lists);
+        self.extras.revert_form(&*lists);
         self.problems.clear();
         self.sync_inputs();
     }

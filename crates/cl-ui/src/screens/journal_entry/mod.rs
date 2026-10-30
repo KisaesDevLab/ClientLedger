@@ -554,7 +554,7 @@ impl JournalScreen {
         let (form, lines, fits) = self.form_of(v);
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.seen_lines = self.lines.value().clone();
         let void = v.record.status == cl_api::TxnStatus::Void;
         let mut accounts: Vec<AccountId> = v.record.lines.iter().map(|l| l.account_id).collect();
@@ -602,7 +602,7 @@ impl JournalScreen {
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
-        self.lines.form_mut().load(fresh, &*lists);
+        self.lines.load(fresh, &*lists);
         self.seen_lines = self.lines.value().clone();
         self.editing = None;
         self.new_basis = Basis::Both;
@@ -647,19 +647,7 @@ impl JournalScreen {
         if now == self.seen_lines {
             return;
         }
-        let fresh: Vec<_> = now
-            .lines
-            .iter()
-            .filter(|l| l.account.is_some() && l.amount.is_none())
-            .filter(|l| {
-                self.seen_lines
-                    .lines
-                    .iter()
-                    .find(|o| o.key == l.key)
-                    .is_none_or(|o| o.account.is_none())
-            })
-            .map(|l| l.key)
-            .collect();
+        let fresh = cl_model::forms::lines::fresh_account_lines(&self.seen_lines, &now);
         if let Some(key) = fresh.first().copied()
             && self.idle()
             && self.read_only().is_none()

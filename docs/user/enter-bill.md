@@ -22,7 +22,7 @@ A saved bill stays a bill and a saved credit stays a credit.
 5. Enter the lines (see below). Add a **Memo** and **Tags** if you want.
 6. Press **Save & New** (`Alt+N`) or **Save & Close** (`Alt+S`).
 
-When you pick a vendor you have entered a bill for before, ClientLedger copies details from their last bill, such as the account and terms. Amounts stay blank, so you always enter them yourself.
+When you pick a vendor you have entered a bill for before, ClientLedger copies details from their last bill, such as the account and terms. Amounts are never copied. If you typed the amount due first, the first expense line gets what is left of it; the others stay blank for you to fill in.
 
 ### Changing the due and discount dates
 
@@ -38,6 +38,8 @@ Lines go on one of two tabs. Each tab shows its own total.
 Use `Ctrl+Insert` to add a line and `Ctrl+Delete` to remove one. A bill can have up to 500 lines.
 
 **The lines must add up to the amount due.** Below the lines you see "Lines total = amount due" with a check mark, or how much is left to assign, or how much the lines are over. ClientLedger won't save the bill until they match to the cent.
+
+When you have typed the amount due and pick the account on an **Expenses** line with no amount, the line gets what is left to assign after the other lines (items included): the whole amount due on the first line, then whatever is left. Type over it to change it, or press `Tab` to keep it. ClientLedger never changes an amount you typed, and never changes an item line.
 
 ## Attachments and preview
 

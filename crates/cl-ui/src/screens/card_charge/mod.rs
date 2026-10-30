@@ -28,6 +28,7 @@ use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::card::{CardField, CardForm, CardMode, CardProblem, CheckedCard, check};
+use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::lines::{FormLine, FormLines, TotalsStatus, lines_total};
 use cl_model::forms::{FormState, SaveIntent, SaveStart};
 use cl_model::register::AccountClass;
@@ -303,6 +304,22 @@ impl CardChargeScreen {
             });
             self.sync_inputs();
         }
+    }
+
+    /// A line that just got its account with no amount takes what is left
+    /// of the typed amount (Q-304); an amount taken from the lines, or read
+    /// from a document and not accepted yet, fills nothing, and read lines
+    /// not accepted yet are never filled (non-negotiable 4). Not while a
+    /// record is shown read-only.
+    pub(crate) fn fill_remaining(&mut self) {
+        let h = self.header.current();
+        let total = h
+            .amount
+            .filter(|_| !h.amount_from_lines && !h.read.is_unaccepted(ReadTarget::Total));
+        let held = h.read.unaccepted_lines();
+        let allowed = self.flow.idle() && self.flow.read_only().is_none() && !self.draft_locked();
+        self.lines
+            .fill_remaining(total, Money::ZERO, allowed, &held);
     }
 
     /// The owner typed the amount: one line follows it.
@@ -625,7 +642,7 @@ impl CardChargeScreen {
         }
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines.clone(), &*lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
         }
@@ -657,7 +674,7 @@ impl CardChargeScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.lines.value().clone();
-            self.lines.form_mut().load(lines, &*lists);
+            self.lines.load(lines, &*lists);
             if let Some(card) = self.card() {
                 self.balances.fetch(&self.link, self.group.as_ref(), card);
             }
@@ -696,7 +713,7 @@ impl CardChargeScreen {
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
-        self.lines.form_mut().load(fresh, &*lists);
+        self.lines.load(fresh, &*lists);
         self.template.forget();
         self.problems.clear();
         self.inputs.payee = NameInput::default();
@@ -851,7 +868,7 @@ impl CardChargeScreen {
         let (form, lines, fits) = self.form_of(v);
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.template.forget();
         self.flow.opened_txn(v, fits);
 
@@ -1394,6 +1411,7 @@ impl Screen for CardChargeScreen {
         }
         self.compare_before();
         self.draw(ui);
+        self.fill_remaining();
         self.compare_after();
         self.track_draft_read();
         if let Some(d) = self.draft.session.as_mut() {
@@ -1544,7 +1562,7 @@ impl RecordForm for CardChargeScreen {
     fn discard_edits(&mut self) {
         let lists = Arc::clone(&self.books.lists);
         self.header.revert_form();
-        self.lines.form_mut().revert_form(&*lists);
+        self.lines.revert_form(&*lists);
         self.problems.clear();
         self.lock_columns();
         self.sync_inputs();

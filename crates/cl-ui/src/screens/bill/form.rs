@@ -366,10 +366,7 @@ impl EnterBillScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
-        let enabled = self.save.task.is_none()
-            && !self.closing_prompt.dialog_open()
-            && !read_only
-            && !self.draft_locked();
+        let enabled = self.lines_editable();
         let title = match self.kind() {
             BillKind::Bill => t("cmd.vendors.enter_bill"),
             BillKind::Credit => t("bill.title.credit"),

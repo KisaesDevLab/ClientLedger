@@ -9,7 +9,7 @@ Use this when you paid a business expense with your own money, for example with 
    - **The business will pay me back**: the business owes you the money until it pays you back. If you don't have an account for this yet, press **Add "Due to owner"**.
 
    ClientLedger picks a starting choice for your type of business and says so, for example "Default for a single-member LLC". You can change it each time.
-4. On **What it was for**, choose the expense account and amount. The lines must add up to the amount.
+4. On **What it was for**, choose the expense account and amount. The lines must add up to the amount. A line whose account you pick before its amount gets what is left of the amount you typed; type over it to change it.
 5. Press **Save & New** (`Alt+N`) or **Save & Close** (`Alt+S`).
 
 The name of who paid is kept at the start of the memo ("Paid by …"). Ask your accountant if you're not sure which choice fits.

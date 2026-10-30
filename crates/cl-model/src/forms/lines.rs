@@ -135,6 +135,91 @@ pub fn remaining(header: Option<Money>, v: &FormLines) -> Option<Money> {
     header?.checked_sub(lines_total(v)?).ok()
 }
 
+/// The lines that just got their account (Q-304, as Q-P15n): an account and
+/// no amount now, and no account (or no such line) in `seen`. In line order.
+#[must_use]
+pub fn fresh_account_lines(seen: &FormLines, now: &FormLines) -> Vec<RowKey> {
+    now.lines
+        .iter()
+        .filter(|l| l.account.is_some() && l.amount.is_none())
+        .filter(|l| {
+            seen.lines
+                .iter()
+                .find(|o| o.key == l.key)
+                .is_none_or(|o| o.account.is_none())
+        })
+        .map(|l| l.key)
+        .collect()
+}
+
+/// What line `key` takes when it gets its account with no amount (Q-304):
+/// the typed `header` total, less `elsewhere` (amounts assigned outside
+/// these lines, e.g. a bill's item lines), less the other lines' amounts.
+/// `None` without a header total, when nothing is left (fully or over
+/// assigned), when the line already has an amount, or for an unknown key.
+/// Form arithmetic on the owner's own input only.
+#[must_use]
+pub fn remaining_for(
+    header: Option<Money>,
+    elsewhere: Money,
+    lines: &FormLines,
+    key: RowKey,
+) -> Option<Money> {
+    let header = header?;
+    let line = lines.lines.iter().find(|l| l.key == key)?;
+    if line.amount.is_some() {
+        return None;
+    }
+    // The line's own amount is blank, so the lines total is the others'.
+    let left = header
+        .checked_sub(elsewhere)
+        .ok()?
+        .checked_sub(lines_total(lines)?)
+        .ok()?;
+    left.is_positive().then_some(left)
+}
+
+/// Puts [`remaining_for`] on line `key`. False (and nothing changed) when
+/// there is nothing to put; an amount the owner typed is never changed.
+pub fn fill_remaining(
+    header: Option<Money>,
+    elsewhere: Money,
+    lines: &mut FormLines,
+    key: RowKey,
+) -> bool {
+    let Some(left) = remaining_for(header, elsewhere, lines, key) else {
+        return false;
+    };
+    let Some(line) = lines.lines.iter_mut().find(|l| l.key == key) else {
+        return false;
+    };
+    line.amount = Some(left);
+    true
+}
+
+/// Fills every line that just got its account (see [`fresh_account_lines`])
+/// with what is left, in line order, so the first takes the whole total
+/// and later ones what the earlier left (often nothing). Lines in `held`
+/// (read from a document and not accepted yet) are never filled: an amount
+/// put there would count as the owner's (non-negotiable 4). True when a
+/// line changed.
+pub fn fill_fresh_lines(
+    header: Option<Money>,
+    elsewhere: Money,
+    seen: &FormLines,
+    lines: &mut FormLines,
+    held: &[RowKey],
+) -> bool {
+    let mut changed = false;
+    for key in fresh_account_lines(seen, lines) {
+        if held.contains(&key) {
+            continue;
+        }
+        changed |= fill_remaining(header, elsewhere, lines, key);
+    }
+    changed
+}
+
 /// The footer line under a form's lines (tri-state, P13 plan WP6): the
 /// header amount against the typed lines total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +401,142 @@ mod tests {
         let ks: Vec<u64> = v.lines.iter().map(|l| l.key.0).collect();
         assert_eq!(ks, vec![41, 42, 43]);
         assert!(v.lines[2].is_blank());
+    }
+
+    /// Sets line `i`'s account (no amount), as picking it in the grid does.
+    fn pick(v: &mut FormLines, keys: &mut RowKeyGen, i: usize, n: u32) -> RowKey {
+        v.lines[i].account = Some(account(n));
+        v.ensure_entry(keys);
+        v.lines[i].key
+    }
+
+    #[test]
+    fn the_first_line_takes_the_whole_total_and_the_next_what_is_left() {
+        let mut keys = RowKeyGen::new();
+        let mut v = FormLines::from_lines(Vec::new(), &mut keys);
+        let total = Some(money("1500.01"));
+        let seen = v.clone();
+        let first = pick(&mut v, &mut keys, 0, 1500);
+        assert_eq!(fresh_account_lines(&seen, &v), vec![first]);
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
+        assert_eq!(v.lines[0].amount, Some(money("1500.01")));
+        // The owner types 1,000.00 over it; the next line takes 500.01.
+        v.lines[0].amount = Some(money("1000.00"));
+        let seen = v.clone();
+        let next = pick(&mut v, &mut keys, 1, 6100);
+        assert_eq!(
+            remaining_for(total, Money::ZERO, &v, next),
+            Some(money("500.01"))
+        );
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
+        assert_eq!(v.lines[1].amount, Some(money("500.01")));
+        assert_eq!(v.lines[0].amount, Some(money("1000.00")), "typed, kept");
+        assert_eq!(remaining(total, &v), Some(Money::ZERO));
+        // Fully assigned: a third line gets nothing.
+        let seen = v.clone();
+        let third = pick(&mut v, &mut keys, 2, 6200);
+        assert_eq!(remaining_for(total, Money::ZERO, &v, third), None);
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
+        assert_eq!(v.lines[2].amount, None);
+    }
+
+    #[test]
+    fn nothing_is_filled_without_a_total_or_when_over_assigned() {
+        let mut keys = RowKeyGen::new();
+        let mut v = FormLines {
+            lines: vec![line(&mut keys, 6100, "80.00")],
+        };
+        v.ensure_entry(&mut keys);
+        let seen = v.clone();
+        let key = pick(&mut v, &mut keys, 1, 6200);
+        assert_eq!(remaining_for(None, Money::ZERO, &v, key), None);
+        assert!(!fill_fresh_lines(None, Money::ZERO, &seen, &mut v, &[]));
+        assert_eq!(
+            remaining_for(Some(money("75.00")), Money::ZERO, &v, key),
+            None,
+            "over-assigned"
+        );
+        assert_eq!(
+            remaining_for(Some(money("80.00")), Money::ZERO, &v, key),
+            None,
+            "fully assigned"
+        );
+        // Amounts outside these lines (a bill's items) count as assigned.
+        assert_eq!(
+            remaining_for(Some(money("100.00")), money("15.00"), &v, key),
+            Some(money("5.00"))
+        );
+        assert_eq!(
+            remaining_for(Some(money("100.00")), money("20.00"), &v, key),
+            None
+        );
+        assert_eq!(
+            remaining_for(Some(money("100.00")), Money::ZERO, &v, RowKey(999)),
+            None,
+            "unknown key"
+        );
+    }
+
+    #[test]
+    fn a_typed_amount_is_never_changed_and_only_new_accounts_count() {
+        let mut keys = RowKeyGen::new();
+        let mut v = FormLines {
+            lines: vec![line(&mut keys, 6100, "10.00")],
+        };
+        v.ensure_entry(&mut keys);
+        let total = Some(money("50.00"));
+        let typed = v.lines[0].key;
+        assert_eq!(remaining_for(total, Money::ZERO, &v, typed), None);
+        assert!(!fill_remaining(total, Money::ZERO, &mut v, typed));
+        assert_eq!(v.lines[0].amount, Some(money("10.00")));
+        // A line whose amount the owner cleared keeps its account: not new.
+        let seen = v.clone();
+        v.lines[0].amount = None;
+        assert_eq!(fresh_account_lines(&seen, &v), Vec::<RowKey>::new());
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &[]));
+        assert_eq!(v.lines[0].amount, None);
+        // A changed account on a line with an account is not new either.
+        let seen = v.clone();
+        v.lines[0].account = Some(account(6200));
+        assert_eq!(fresh_account_lines(&seen, &v), Vec::<RowKey>::new());
+        // A line that arrives with an account and no amount is.
+        let seen = FormLines::default();
+        assert_eq!(fresh_account_lines(&seen, &v), vec![v.lines[0].key]);
+        // Two new lines at once: the first takes it all, the second nothing.
+        let mut w = FormLines::from_lines(Vec::new(), &mut keys);
+        let seen = w.clone();
+        w.lines[0].account = Some(account(1));
+        w.lines.push(FormLine {
+            account: Some(account(2)),
+            ..FormLine::blank(keys.next_key())
+        });
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut w, &[]));
+        assert_eq!(w.lines[0].amount, Some(money("50.00")));
+        assert_eq!(w.lines[1].amount, None);
+    }
+
+    #[test]
+    fn a_held_line_is_never_filled_but_the_others_are() {
+        let mut keys = RowKeyGen::new();
+        let mut v = FormLines::from_lines(Vec::new(), &mut keys);
+        let total = Some(money("50.00"));
+        let seen = v.clone();
+        v.lines[0].account = Some(account(1));
+        v.lines.push(FormLine {
+            account: Some(account(2)),
+            ..FormLine::blank(keys.next_key())
+        });
+        let held = [v.lines[0].key];
+        assert!(fill_fresh_lines(total, Money::ZERO, &seen, &mut v, &held));
+        assert_eq!(v.lines[0].amount, None, "read, not accepted: left blank");
+        assert_eq!(v.lines[1].amount, Some(money("50.00")));
+        // Only held lines: nothing changes.
+        let mut w = FormLines::from_lines(Vec::new(), &mut keys);
+        let seen = w.clone();
+        w.lines[0].account = Some(account(1));
+        let held = [w.lines[0].key];
+        assert!(!fill_fresh_lines(total, Money::ZERO, &seen, &mut w, &held));
+        assert_eq!(w.lines[0].amount, None);
     }
 
     #[test]
