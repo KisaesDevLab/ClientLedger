@@ -1,6 +1,6 @@
 # ClientLedger
 
-Free, open-source, fully offline desktop bookkeeping for US small business
+Free, source-available, fully offline desktop bookkeeping for US small business
 owners. Form-first entry, two-line registers, and keyboard-driven everything,
 powered by the Vibe MyBooks engine.
 
@@ -31,10 +31,12 @@ come later (phase P35).
 
 ## Licensing
 
-- ClientLedger code: MIT, see [LICENSE](LICENSE).
-- The bundled engine in `engine/`: PolyForm Internal Use License 1.0.0, see
-  [NOTICE.md](NOTICE.md). Recipients may not distribute it, and forks may not
-  bundle, download, or install the engine.
+- ClientLedger code: PolyForm Internal Use License 1.0.0, see
+  [LICENSE](LICENSE). Use it, and change it, for your own organization's
+  internal business; it may not be distributed.
+- The bundled engine in `engine/`: Kisaes LLC's own license, licensed to
+  ClientLedger so that you use it inside ClientLedger under ClientLedger's
+  license. See [NOTICE.md](NOTICE.md). Only official releases include it.
 
 ## Contributing
 
