@@ -27,8 +27,8 @@ use cl_api::{
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_model::amount_entry::AmountRules;
-use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::card::{CardField, CardForm, CardMode, CardProblem, CheckedCard, check};
+use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::lines::{FormLine, FormLines, TotalsStatus, lines_total};
 use cl_model::forms::{FormState, SaveIntent, SaveStart};
 use cl_model::register::AccountClass;
@@ -317,9 +317,9 @@ impl CardChargeScreen {
             .amount
             .filter(|_| !h.amount_from_lines && !h.read.is_unaccepted(ReadTarget::Total));
         let held = h.read.unaccepted_lines();
-        let allowed =
-            self.flow.idle() && self.flow.read_only().is_none() && !self.draft_locked();
-        self.lines.fill_remaining(total, Money::ZERO, allowed, &held);
+        let allowed = self.flow.idle() && self.flow.read_only().is_none() && !self.draft_locked();
+        self.lines
+            .fill_remaining(total, Money::ZERO, allowed, &held);
     }
 
     /// The owner typed the amount: one line follows it.

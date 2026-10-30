@@ -42,8 +42,8 @@ use cl_api::{
 use cl_core::ids::{AccountId, TagId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money};
 use cl_model::forms::FormState;
-use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::check::{CheckForm, CheckProblem, NumberField, propose_number};
+use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::lines::FormLines;
 use cl_model::lists::tags::TagList;
 use cl_model::register::AccountClass;
@@ -900,7 +900,8 @@ impl WriteCheckScreen {
             .filter(|_| !h.amount_from_lines && !h.read.is_unaccepted(ReadTarget::Total));
         let held = h.read.unaccepted_lines();
         let allowed = self.lines_editable();
-        self.lines.fill_remaining(total, Money::ZERO, allowed, &held);
+        self.lines
+            .fill_remaining(total, Money::ZERO, allowed, &held);
     }
 
     /// The owner typed the check amount (Q-P13r a): one used line with no

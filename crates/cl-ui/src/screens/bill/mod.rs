@@ -894,7 +894,9 @@ impl EnterBillScreen {
         let total = h.amount_due.filter(|_| {
             !h.amount_from_lines
                 && items.is_some()
-                && !h.read.is_unaccepted(cl_model::forms::doc_read::ReadTarget::AmountDue)
+                && !h
+                    .read
+                    .is_unaccepted(cl_model::forms::doc_read::ReadTarget::AmountDue)
         });
         let held = h.read.unaccepted_lines();
         let allowed = self.lines_editable();

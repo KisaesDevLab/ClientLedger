@@ -368,6 +368,217 @@ fn no_fill_without_a_typed_check_amount() {
     assert_eq!(s.lines.value().lines[1].amount, None);
 }
 
+/// The lines with their amounts, for "nothing changed" checks.
+fn amounts(s: &WriteCheckScreen) -> Vec<Option<Money>> {
+    s.lines.value().lines.iter().map(|l| l.amount).collect()
+}
+
+#[test]
+fn loading_lines_is_not_picking_their_accounts() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("80.00")));
+    // A template or draft with an account and no amount, shown as is.
+    let a = account(&s, "5100");
+    let key = s.lines.form_mut().adapter_mut().keys.next_key();
+    let lines = FormLines::from_lines(
+        vec![FormLine {
+            account: Some(a),
+            ..FormLine::blank(key)
+        }],
+        &mut s.lines.form_mut().adapter_mut().keys,
+    );
+    let lists = Arc::clone(&s.lists);
+    s.lines.load(lines, &*lists);
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].amount, None, "loaded, not picked");
+    assert!(!s.lines.dirty());
+    // A saved check opened by Prev and Next: nothing changes, not dirty.
+    let (_d, link) = self::link();
+    let mut s = screen(&link);
+    fill(&mut s, "40.00", &[("5110", "25.00"), ("5100", "15.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    for older in [true, true, false] {
+        s.navigate(older);
+        s.poll();
+        let before = amounts(&s);
+        s.fill_remaining();
+        assert_eq!(amounts(&s), before);
+        assert!(!s.is_dirty());
+    }
+}
+
+#[test]
+fn a_read_total_or_read_line_is_never_filled_and_clear_leaves_nothing() {
+    use cl_model::forms::doc_read::{DocReading, ReadField, ReadLine, ReadTarget};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let a = account(&s, "5100");
+    // A draft reading with a total and a line with an account and no
+    // amount (non-negotiable 4: the amount is the document's or the
+    // owner's, never computed onto a read line).
+    let reading = DocReading {
+        total: Some(money("80.00")),
+        lines: vec![ReadLine {
+            description: "Feed".into(),
+            amount: None,
+            account: Some(a),
+            confidence: None,
+        }],
+        ..DocReading::default()
+    };
+    let mut form = s.compose();
+    {
+        let keys = &mut s.lines.form_mut().adapter_mut().keys;
+        cl_model::forms::check::apply(&reading, &mut form, keys);
+    }
+    let lines = std::mem::take(&mut form.lines);
+    s.header.load(form);
+    // Even arriving as an edit (as if the load were missed), the read
+    // line is held and the read total is not the owner's.
+    s.lines.form_mut().edit_step(|v| *v = lines);
+    s.fill_remaining();
+    let key = s.lines.value().lines[0].key;
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    let read = &s.header.current().read;
+    assert!(matches!(
+        read.state(ReadTarget::Line(key)),
+        Some(ReadField::Read { .. })
+    ));
+    assert!(read.is_unaccepted(ReadTarget::Total));
+    // An owner-picked line while the total is still unaccepted: nothing.
+    pick_line(&mut s, 1, "5110");
+    assert_eq!(s.lines.value().lines[1].amount, None);
+    // "Clear and type it myself": the read line and total go, and no
+    // computed amount stays behind.
+    s.clear_read();
+    assert!(s.lines.value().lines.iter().all(|l| l.key != key));
+    assert!(s.lines.value().lines.iter().all(|l| l.amount.is_none()));
+    assert_eq!(s.header.current().amount, None);
+}
+
+#[test]
+fn an_accepted_total_fills_owner_lines_but_not_a_read_line() {
+    use cl_model::forms::doc_read::{DocReading, ReadField, ReadLine, ReadTarget};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let a = account(&s, "5100");
+    let reading = DocReading {
+        total: Some(money("80.00")),
+        lines: vec![ReadLine {
+            description: "Feed".into(),
+            amount: None,
+            account: Some(a),
+            confidence: None,
+        }],
+        ..DocReading::default()
+    };
+    let mut form = s.compose();
+    {
+        let keys = &mut s.lines.form_mut().adapter_mut().keys;
+        cl_model::forms::check::apply(&reading, &mut form, keys);
+    }
+    let lines = std::mem::take(&mut form.lines);
+    s.header.load(form);
+    let lists = Arc::clone(&s.lists);
+    s.lines.load(lines, &*lists);
+    let key = s.lines.value().lines[0].key;
+    // The owner accepts the total only.
+    s.header.edit_step(|h| h.read.edited(ReadTarget::Total));
+    pick_line(&mut s, 1, "5110");
+    assert_eq!(s.lines.value().lines[1].amount, Some(money("80.00")));
+    assert_eq!(s.lines.value().lines[0].amount, None, "read line held");
+    assert!(matches!(
+        s.header.current().read.state(ReadTarget::Line(key)),
+        Some(ReadField::Read { .. })
+    ));
+}
+
+#[test]
+fn no_fill_while_read_only_or_saving() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // A save starts between the pick and the frame's fill: the lines
+    // refuse the fill, and nothing is reported filled.
+    s.amount_typed(Some(money("30.00")));
+    let a = account(&s, "5100");
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].account = Some(a));
+    assert!(matches!(
+        s.lines.form_mut().form_mut().begin_save(SaveIntent::Save),
+        cl_model::forms::SaveStart::Send(_)
+    ));
+    let h = s.header.current().amount;
+    assert!(!s.lines.fill_remaining(h, Money::ZERO, true, &[]));
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    // Read-only (a void check): no fill either.
+    let (_d, link) = self::link();
+    let mut s = screen(&link);
+    fill(&mut s, "30.00", &[("5110", "10.00"), ("5100", "20.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    s.navigate(true);
+    s.poll();
+    assert!(s.start_void());
+    s.send_void("Wrong vendor", None);
+    s.poll();
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["read_only"], true);
+    s.header.edit_step(|h| h.amount = Some(money("50.00")));
+    let entry = s.lines.value().lines.len() - 1;
+    pick_line(&mut s, entry, "5100");
+    assert_eq!(s.lines.value().lines[entry].amount, None);
+}
+
+#[test]
+fn an_accepted_suggestion_takes_what_is_left_of_the_typed_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("64.00")));
+    let key = s.lines.value().lines[0].key;
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].memo = "Hardwood mulch".into());
+    s.lines.set_suggestion(key, Some(account(&s, "5110")));
+    assert!(s.lines.accept_suggestion(key));
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].account, Some(account(&s, "5110")));
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("64.00")));
+}
+
+#[test]
+fn redo_after_undoing_a_pick_keeps_the_redo_history() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("90.00")));
+    pick_line(&mut s, 0, "5100");
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("90.00")));
+    // Undo the fill, then the pick.
+    assert!(s.lines.form_mut().form_mut().undo());
+    s.fill_remaining();
+    assert!(s.lines.form_mut().form_mut().undo());
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].account, None);
+    // Redo the pick: the account is back with no amount and no new step.
+    assert!(s.lines.form_mut().form_mut().redo());
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].amount, None);
+    assert!(
+        s.lines.form().form().can_redo(),
+        "the fill is still redoable"
+    );
+    assert!(s.lines.form_mut().form_mut().redo());
+    s.fill_remaining();
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("90.00")));
+    assert!(!s.lines.form().form().can_redo());
+}
+
 #[test]
 fn prev_opens_the_newest_check_and_void_frees_its_number() {
     let (_d, link) = link();
