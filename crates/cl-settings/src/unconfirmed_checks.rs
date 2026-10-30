@@ -146,18 +146,35 @@ impl UnconfirmedChecks {
     }
 
     /// The engine recorded the intent `key`'s numbers for `recorded` (check
-    /// ids): it becomes a printed batch of those checks; the others leave it.
-    /// False when there is no such intent.
-    pub fn promote(&mut self, company_id: &str, key: &str, recorded: &[&str]) -> bool {
-        let Some(b) = self.batches.iter_mut().find(|b| {
+    /// ids): they become a printed batch. Checks whose read-back could not
+    /// be made (`undecided`) stay in the intent under the same key, to be
+    /// read back again; the others leave it. False when there is no such
+    /// intent.
+    pub fn promote(
+        &mut self,
+        company_id: &str,
+        key: &str,
+        recorded: &[&str],
+        undecided: &[&str],
+    ) -> bool {
+        let Some(at) = self.batches.iter().position(|b| {
             b.company_id == company_id
                 && b.state == BatchState::Intent
                 && b.client_key.as_deref() == Some(key)
         }) else {
             return false;
         };
-        b.checks.retain(|c| recorded.contains(&c.check_id.as_str()));
-        b.state = BatchState::Printed;
+        let intent = &mut self.batches[at];
+        let mut printed = intent.clone();
+        printed
+            .checks
+            .retain(|c| recorded.contains(&c.check_id.as_str()));
+        printed.state = BatchState::Printed;
+        intent
+            .checks
+            .retain(|c| undecided.contains(&c.check_id.as_str()));
+        // Oldest first: the printed part where the intent was.
+        self.batches.insert(at, printed);
         self.normalize();
         true
     }
@@ -267,8 +284,8 @@ mod tests {
         assert!(u.needs_attention("co1"));
         assert_eq!(u.intents_for("co1").count(), 1);
         assert_eq!(u.printed_for("co1").count(), 0);
-        assert!(!u.promote("co1", "other", &["c1"]));
-        assert!(u.promote("co1", "k1", &["c1"]), "partial");
+        assert!(!u.promote("co1", "other", &["c1"], &[]));
+        assert!(u.promote("co1", "k1", &["c1"], &[]), "partial");
         let b = u.printed_for("co1").next().expect("printed");
         assert_eq!(b.checks.len(), 1);
         assert_eq!(b.checks[0].number, 1001);
@@ -283,6 +300,31 @@ mod tests {
         assert_eq!(old.batches[0].state, BatchState::Printed);
         let text = u.to_text();
         assert_eq!(UnconfirmedChecks::parse(&text), u);
+    }
+
+    /// PR-2 review #6: a check whose read-back failed stays in the intent
+    /// (same key, read back again); the recorded ones are printed; a check
+    /// found not recorded leaves.
+    #[test]
+    fn undecided_checks_stay_in_the_intent() {
+        let mut u = UnconfirmedChecks::default();
+        let mut i = batch("co1", &[("c1", 1001), ("c2", 1002), ("c3", 1003)]);
+        i.state = BatchState::Intent;
+        i.client_key = Some("k1".into());
+        u.add(i).expect("room");
+        assert!(u.promote("co1", "k1", &["c1"], &["c3"]));
+        let p: Vec<u64> = u
+            .printed_for("co1")
+            .flat_map(|b| b.checks.iter().map(|c| c.number))
+            .collect();
+        assert_eq!(p, vec![1001]);
+        let left = u.intents_for("co1").next().expect("still an intent");
+        assert_eq!(left.client_key.as_deref(), Some("k1"));
+        assert_eq!(left.checks.len(), 1);
+        assert_eq!(left.checks[0].number, 1003);
+        assert!(u.promote("co1", "k1", &["c3"], &[]));
+        assert_eq!(u.intents_for("co1").count(), 0);
+        assert_eq!(u.printed_for("co1").count(), 2);
     }
 
     #[test]

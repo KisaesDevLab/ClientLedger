@@ -726,26 +726,29 @@ fn decide_readback_is_per_check() {
         .collect();
     let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
     let st = |n: Option<u32>, status: Option<PrintStatus>, void: bool, batch: Option<&str>| {
-        Some(CheckPrintState {
+        Ok(Some(CheckPrintState {
             check_number: n,
             print_status: status,
             void,
             print_batch_id: batch.map(str::to_string),
-        })
+        }))
     };
     let states = vec![
         st(Some(1001), Some(PrintStatus::Printed), false, Some("b1")),
-        None,
+        Ok(None),
         st(Some(1003), Some(PrintStatus::Printed), true, Some("b1")),
         st(None, None, false, None),
         st(Some(1099), Some(PrintStatus::Printed), false, Some("b1")),
     ];
     let found = decide_readback(&planned, &states).expect("one batch");
-    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r == Found::Recorded).collect();
     assert_eq!(recorded, vec![true, false, false, false, false]);
     // No batch on the record: not numbered by a print run.
     let nobatch = vec![st(Some(1001), Some(PrintStatus::Printed), false, None)];
-    assert!(!decide_readback(&planned[..1], &nobatch).expect("decided")[0].1);
+    assert_eq!(
+        decide_readback(&planned[..1], &nobatch).expect("decided")[0].1,
+        Found::NotRecorded
+    );
 }
 
 /// S-b: 1001 was later reprinted alone under its number in batch B; 1002
@@ -758,25 +761,101 @@ fn decide_readback_picks_the_majority_batch() {
         .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
         .collect();
     let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
-    let st = |n: u32, batch: &str| {
-        Some(CheckPrintState {
+    let st = |n: u32, batch: &str| -> ReadState {
+        Ok(Some(CheckPrintState {
             check_number: Some(n),
             print_status: Some(PrintStatus::Printed),
             void: false,
             print_batch_id: Some(batch.to_string()),
-        })
+        }))
     };
     let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A")];
     let found = decide_readback(&planned[..3], &states).expect("A is the majority");
-    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r).collect();
+    let recorded: Vec<bool> = found.iter().map(|(_, r)| *r == Found::Recorded).collect();
     assert_eq!(recorded, vec![false, true, true]);
     // 2 of 4 is not more than half.
-    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A"), None];
+    let states = vec![st(1001, "B"), st(1002, "A"), st(1003, "A"), Ok(None)];
     assert!(decide_readback(&planned, &states).is_none(), "undecided");
     let states = vec![st(1001, "B"), st(1002, "A")];
     assert!(
         decide_readback(&planned[..2], &states).is_none(),
         "undecided"
+    );
+}
+
+/// PR-2 review #6: a check whose read fails is undecided on its own; the
+/// others are still decided.
+#[test]
+fn decide_readback_leaves_a_failed_read_undecided() {
+    use cl_api::{CheckPrintState, PrintStatus};
+    let ids: Vec<TransactionId> = (1..=3u128)
+        .map(|n| TransactionId::from_uuid(uuid::Uuid::from_u128(n)))
+        .collect();
+    let planned: Vec<(TransactionId, u64)> = ids.iter().copied().zip(1001..).collect();
+    let st = |n: u32| -> ReadState {
+        Ok(Some(CheckPrintState {
+            check_number: Some(n),
+            print_status: Some(PrintStatus::Printed),
+            void: false,
+            print_batch_id: Some("A".into()),
+        }))
+    };
+    let states = vec![st(1001), Err(ApiError::Timeout), st(1003)];
+    let found = decide_readback(&planned, &states).expect("decided");
+    let f: Vec<Found> = found.iter().map(|(_, f)| *f).collect();
+    assert_eq!(f, vec![Found::Recorded, Found::Unknown, Found::Recorded]);
+    let states = vec![Err(ApiError::Timeout), Ok(None), Err(ApiError::Timeout)];
+    let f: Vec<Found> = decide_readback(&planned, &states)
+        .expect("decided")
+        .iter()
+        .map(|(_, f)| *f)
+        .collect();
+    assert_eq!(f, vec![Found::Unknown, Found::NotRecorded, Found::Unknown]);
+}
+
+/// PR-2 review #6: the read-back of one check fails: the recorded check is
+/// asked about, the other stays saved under the run's key (undecided, may
+/// be forgotten), and Home keeps reminding.
+#[test]
+fn a_failed_read_keeps_only_that_check_saved() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    let ids: Vec<TransactionId> = s.picked_checks().iter().map(|c| c.id).collect();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    // The demo's answer is dropped; the engine's per-check answer instead.
+    s.readback_task = None;
+    s.read_back(&[(ids[0], Found::Recorded), (ids[1], Found::Unknown)]);
+    assert!(s.asking, "asked about the recorded check");
+    assert_eq!(s.run.as_ref().map(|r| r.items().len()), Some(1));
+    let c = s.company_key().expect("company");
+    let all = saved(&s);
+    let left = all
+        .intents_for(&c)
+        .next()
+        .expect("the undecided check waits");
+    assert_eq!(left.checks.len(), 1);
+    assert_eq!(left.checks[0].number, first + 1);
+    assert_eq!(all.printed_for(&c).next().map(|b| b.checks.len()), Some(1));
+    assert_eq!(s.stuck_intent().map(|(_, n)| n), Some(vec![first + 1]));
+    // Nothing recorded and one read failed: the whole run waits.
+    let (_d2, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let ids: Vec<TransactionId> = s.picked_checks().iter().map(|c| c.id).collect();
+    lose_next(&s, LoseReply::AfterRecording { keyed: false });
+    s.print_clicked();
+    s.readback_task = None;
+    s.read_back(&[(ids[0], Found::NotRecorded), (ids[1], Found::Unknown)]);
+    assert!(!s.asking);
+    assert_eq!(s.notice, Some("print.recover.unknown"));
+    let c = s.company_key().expect("company");
+    assert_eq!(
+        saved(&s).intents_for(&c).next().map(|b| b.checks.len()),
+        Some(2)
     );
 }
 

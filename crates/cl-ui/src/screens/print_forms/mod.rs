@@ -173,8 +173,24 @@ pub(crate) struct Intent {
 /// whether this window sent it (else it was found on open).
 type Readback = (String, Vec<(TransactionId, u64)>, bool);
 
-/// A read-back's answer per check (recorded or not); `None`: undecided (S-b).
-type Decided = Option<Vec<(TransactionId, bool)>>;
+/// One planned check after the read-back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// The engine recorded its planned number in this run.
+    Recorded,
+    /// It did not (gone, void, not a check, another number or run).
+    NotRecorded,
+    /// Its read failed: undecided for this check only (PR-2 review #6).
+    Unknown,
+}
+
+/// A read-back's answer per check; `None`: the whole run is undecided
+/// (S-b).
+type Decided = Option<Vec<(TransactionId, Found)>>;
+
+/// One check read back: its state, `Ok(None)` when the record is gone, or
+/// the error that kept it from being read.
+pub(crate) type ReadState = Result<Option<cl_api::CheckPrintState>, ApiError>;
 
 /// Read once.
 #[derive(Clone, Default)]
@@ -358,12 +374,14 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
 /// more than half of the planned checks name. With no such majority the run
 /// can't be told apart and the answer is `None` (undecided: the saved run
 /// waits for the next open or "Forget this print").
-pub(crate) fn decide_readback(
-    planned: &[(TransactionId, u64)],
-    states: &[Option<cl_api::CheckPrintState>],
-) -> Decided {
-    let as_planned = |n: u64, s: &Option<cl_api::CheckPrintState>| {
+///
+/// A check whose read failed is [`Found::Unknown`] and counts for no
+/// batch; the others are still decided (PR-2 review #6).
+pub(crate) fn decide_readback(planned: &[(TransactionId, u64)], states: &[ReadState]) -> Decided {
+    let as_planned = |n: u64, s: &ReadState| {
         s.as_ref()
+            .ok()
+            .and_then(Option::as_ref)
             .filter(|s| s.recorded_as(n) && s.print_batch_id.is_some())
             .and_then(|s| s.print_batch_id.clone())
     };
@@ -392,7 +410,16 @@ pub(crate) fn decide_readback(
         planned
             .iter()
             .zip(states)
-            .map(|((id, n), s)| (*id, batch.is_some() && as_planned(*n, s) == batch))
+            .map(|((id, n), s)| {
+                let found = if s.is_err() {
+                    Found::Unknown
+                } else if batch.is_some() && as_planned(*n, s) == batch {
+                    Found::Recorded
+                } else {
+                    Found::NotRecorded
+                };
+                (*id, found)
+            })
             .collect(),
     )
 }
@@ -1235,7 +1262,7 @@ impl PrintFormsScreen {
         match r {
             Ok(_) => {
                 let all: Vec<TransactionId> = intent.planned.iter().map(|(id, _)| *id).collect();
-                self.record_succeeded(&intent.key.to_string(), &intent.planned, &all);
+                self.record_succeeded(&intent.key.to_string(), &intent.planned, &all, &[]);
             }
             // The engine replays the key: the same request again, once.
             Err(ApiError::OutcomeUnknown { keyed: true, .. }) if !intent.resent => {
@@ -1287,19 +1314,23 @@ impl PrintFormsScreen {
     /// `planned` after a partial read-back): the saved intent becomes the
     /// printed batch. All of them: the pages go to the printer and the
     /// question shows. Some: nothing is sent (the preview has pages for
-    /// checks without numbers) and the question asks about those.
+    /// checks without numbers) and the question asks about those. Checks
+    /// whose read-back failed (`undecided`) stay saved under the key.
     fn record_succeeded(
         &mut self,
         key: &str,
         planned: &[(TransactionId, u64)],
         recorded: &[TransactionId],
+        undecided: &[TransactionId],
     ) {
         self.closing_prompt.saved();
         if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
             let mut all = store.load();
             let ids: Vec<String> = recorded.iter().map(ToString::to_string).collect();
             let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-            all.promote(&company, key, &refs);
+            let open: Vec<String> = undecided.iter().map(ToString::to_string).collect();
+            let open: Vec<&str> = open.iter().map(String::as_str).collect();
+            all.promote(&company, key, &refs, &open);
             if store.save(&all).is_err() {
                 tracing::warn!("the printed batch could not be saved");
                 // Not read back again this session (no second question).
@@ -1355,9 +1386,9 @@ impl PrintFormsScreen {
         self.notice = Some("print.recover.checking");
         self.readback = Some((key, planned.clone(), in_session));
         if let Some(d) = self.link.demo_state() {
-            let states: Vec<Option<cl_api::CheckPrintState>> = planned
+            let states: Vec<ReadState> = planned
                 .iter()
-                .map(|(id, _)| crate::company::demo::printing::print_state(&d, *id))
+                .map(|(id, _)| Ok(crate::company::demo::printing::print_state(&d, *id)))
                 .collect();
             drop(d);
             self.readback_task = Some(Task::ready(decide_readback(&planned, &states)));
@@ -1369,12 +1400,13 @@ impl PrintFormsScreen {
             return;
         };
         // Decided per check (PR-2 B2): a check that is gone, void or no
-        // longer a check is not recorded; only an engine that can't answer
-        // leaves the whole run unknown.
+        // longer a check is not recorded; a read that fails leaves only that
+        // check undecided (review #6). One read per check: the checks list
+        // (`GET /checks`) carries no print batch, which the decision needs.
         if let Ok(p) = group.read(&session, move |s| async move {
             let mut states = Vec::with_capacity(planned.len());
             for (id, _) in &planned {
-                states.push(s.checks().print_state(*id).await?);
+                states.push(s.checks().print_state(*id).await);
             }
             Ok(decide_readback(&planned, &states))
         }) {
@@ -1387,15 +1419,27 @@ impl PrintFormsScreen {
 
     /// The read-back answered: continue as recorded, drop the intent, or
     /// treat the recorded part as printed.
-    fn read_back(&mut self, found: &[(TransactionId, bool)]) {
+    /// Checks whose read failed keep the run saved (review #6): with none
+    /// recorded the whole run waits, as when the read-back failed; else the
+    /// recorded ones print and the others wait under the key.
+    fn read_back(&mut self, found: &[(TransactionId, Found)]) {
         let Some((key, planned, in_session)) = self.readback.take() else {
             return;
         };
-        let recorded: Vec<TransactionId> = found
-            .iter()
-            .filter(|(_, r)| *r)
-            .map(|(id, _)| *id)
-            .collect();
+        let with = |want: Found| -> Vec<TransactionId> {
+            found
+                .iter()
+                .filter(|(_, f)| *f == want)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let recorded = with(Found::Recorded);
+        let undecided = with(Found::Unknown);
+        if recorded.is_empty() && !undecided.is_empty() {
+            self.readback = Some((key, planned, in_session));
+            self.readback_failed();
+            return;
+        }
         if recorded.is_empty() && in_session {
             // S-a: this read-back follows an unknown outcome (a lost reply,
             // or a resend that gave up while the first send was still in
@@ -1424,7 +1468,11 @@ impl PrintFormsScreen {
             self.notice = None;
         } else {
             self.notice = None;
-            self.record_succeeded(&key, &planned, &recorded);
+            if !undecided.is_empty() && !self.unresolved.contains(&key) {
+                // The rest waits for the next open or "Forget this print".
+                self.unresolved.push(key.clone());
+            }
+            self.record_succeeded(&key, &planned, &recorded, &undecided);
         }
         if !self.asking {
             self.recover_intents();
