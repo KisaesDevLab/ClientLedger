@@ -563,6 +563,57 @@ fn a_lost_print_reply_not_recorded_stays_undecided_until_the_next_open() {
     assert!(s.asking, "printed on the next try");
 }
 
+/// PR-2 review #1: run K1 never reached the engine and stays undecided; the
+/// owner prints the same checks again (K2, same numbers) and decides later.
+/// On the next open K1 must not take K2's batch for its own: one printed
+/// batch, one question.
+#[test]
+fn a_later_run_of_the_same_checks_settles_the_undecided_one() {
+    use crate::company::demo::printing::LoseReply;
+    let (_d, mut s) = screen(false);
+    s.preview_checks();
+    s.poll();
+    let first: u64 = s.first_number.parse().expect("n");
+    lose_next(&s, LoseReply::BeforeRecording);
+    s.print_clicked();
+    s.poll();
+    assert_eq!(s.notice, Some("print.recover.not_yet"));
+    assert!(s.stuck_intent().is_some());
+    s.preview_checks();
+    s.poll();
+    s.print_clicked();
+    s.poll();
+    assert!(s.asking, "K2 recorded");
+    assert_eq!(print_calls(&s), 2);
+    let c = s.company_key().expect("company");
+    assert_eq!(saved(&s).intents_for(&c).count(), 0, "K1 settled by K2");
+    assert!(s.stuck_intent().is_none());
+    s.later();
+    let link = Arc::clone(&s.link);
+    let tenant = s.tenant.clone();
+    drop(s);
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let mut s = PrintFormsScreen::new(link, tenant, today, false);
+    s.poll();
+    s.poll();
+    let all = saved(&s);
+    assert_eq!(all.intents_for(&c).count(), 0);
+    assert_eq!(all.printed_for(&c).count(), 1, "one printed batch");
+    s.reopen_question();
+    assert_eq!(
+        s.run.as_ref().map(|r| r
+            .items()
+            .iter()
+            .filter_map(|i| i.number)
+            .collect::<Vec<_>>()),
+        Some(vec![first, first + 1])
+    );
+    s.answer(true);
+    s.poll();
+    assert!(!s.asking, "no second question");
+    assert!(!s.has_unanswered());
+}
+
 /// S-a: a keyed resend that gives up while the first send is still in
 /// progress, and the read-back finds nothing yet: kept as undecided.
 #[test]

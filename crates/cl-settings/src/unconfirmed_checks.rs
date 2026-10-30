@@ -175,6 +175,18 @@ impl UnconfirmedChecks {
             .retain(|c| undecided.contains(&c.check_id.as_str()));
         // Oldest first: the printed part where the intent was.
         self.batches.insert(at, printed);
+        // PR-2 review #1: a check is numbered by one print run only. Any
+        // other intent of the company that planned these checks did not
+        // number them (this run did), so they leave it; read back later it
+        // would take this run's batch for its own and ask twice.
+        for b in self.batches.iter_mut().filter(|b| {
+            b.company_id == company_id
+                && b.state == BatchState::Intent
+                && b.client_key.as_deref() != Some(key)
+        }) {
+            b.checks
+                .retain(|c| !recorded.contains(&c.check_id.as_str()));
+        }
         self.normalize();
         true
     }
@@ -325,6 +337,43 @@ mod tests {
         assert!(u.promote("co1", "k1", &["c3"], &[]));
         assert_eq!(u.intents_for("co1").count(), 0);
         assert_eq!(u.printed_for("co1").count(), 2);
+    }
+
+    /// PR-2 review #1: an older intent that planned the same checks loses
+    /// them when a later run records them (it can't have numbered them);
+    /// its other checks and other companies' intents stay.
+    #[test]
+    fn a_recorded_run_settles_older_intents_for_its_checks() {
+        let mut u = UnconfirmedChecks::default();
+        let intent = |company: &str, key: &str, ids: &[(&str, u64)]| {
+            let mut i = batch(company, ids);
+            i.state = BatchState::Intent;
+            i.client_key = Some(key.into());
+            i
+        };
+        u.add(intent(
+            "co1",
+            "k1",
+            &[("c1", 1001), ("c2", 1002), ("c9", 1003)],
+        ))
+        .expect("room");
+        u.add(intent("co2", "kx", &[("c1", 1001)])).expect("room");
+        u.add(intent("co1", "k2", &[("c1", 1001), ("c2", 1002)]))
+            .expect("room");
+        assert!(u.promote("co1", "k2", &["c1", "c2"], &[]));
+        let k1 = u.intents_for("co1").next().expect("k1 keeps c9");
+        assert_eq!(k1.client_key.as_deref(), Some("k1"));
+        assert_eq!(k1.checks.len(), 1);
+        assert_eq!(k1.checks[0].check_id, "c9");
+        assert_eq!(u.intents_for("co2").count(), 1, "another company");
+        assert_eq!(u.printed_for("co1").count(), 1);
+        // All of an older intent's checks recorded later: it goes.
+        let mut u = UnconfirmedChecks::default();
+        u.add(intent("co1", "k1", &[("c1", 1001)])).expect("room");
+        u.add(intent("co1", "k2", &[("c1", 1001)])).expect("room");
+        assert!(u.promote("co1", "k2", &["c1"], &[]));
+        assert_eq!(u.intents_for("co1").count(), 0);
+        assert_eq!(u.for_company("co1").count(), 1);
     }
 
     #[test]
