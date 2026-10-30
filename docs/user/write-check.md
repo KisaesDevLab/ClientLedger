@@ -13,7 +13,9 @@ Use Write Check to record a check you wrote by hand, or one you want to print la
 
 **The lines must add up to the check amount.** Below the lines you see how much is left to assign, or that the lines match. ClientLedger won't save the check until they match to the cent.
 
-When you pick a name you have paid before, ClientLedger copies the accounts, memos and tags from your last check to them. The amounts stay blank, so you always enter them yourself.
+When you have typed the check amount and pick the account on a line with no amount, the line gets what is left to assign: the whole check amount on the first line, then whatever the earlier lines leave. Type over it to change it, or press `Tab` to keep it. ClientLedger never changes an amount you typed.
+
+When you pick a name you have paid before, ClientLedger copies the accounts, memos and tags from your last check to them. It never copies an amount: the first copied line gets what is left of the amount you typed, and the others stay blank for you to fill in.
 
 ## Print later
 
