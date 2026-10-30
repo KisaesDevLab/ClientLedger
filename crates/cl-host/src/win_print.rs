@@ -320,6 +320,8 @@ fn draw_page(
             .map(|c| run.font.advance_mm(c, run.size_pt))
             .collect();
         let dx = map.glyph_dx(&run.text, run.x, &adv);
+        // SAFETY: `dc` is a live DC; this sets drawing state only.
+        unsafe { SetTextColor(dc.0, gray(run.gray)) };
         let n = u32::try_from(text.len()).map_err(|_| DirectPrintError::Gdi("ExtTextOut"))?;
         // SAFETY: `text` and `dx` both hold `n` entries (one spacing per
         // UTF-16 unit) and outlive the call; no clip rectangle.

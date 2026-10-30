@@ -306,11 +306,19 @@ fn draw_run(
         let new = e.remap.get(old).unwrap_or(0);
         bytes.extend_from_slice(&new.to_be_bytes());
     }
+    let grey = run.gray > 0.0;
+    if grey {
+        c.save_state();
+        c.set_fill_gray(run.gray);
+    }
     c.begin_text();
     c.set_font(Name(name.as_bytes()), run.size_pt);
     c.set_text_matrix([1.0, 0.0, 0.0, 1.0, pt(run.x), top - pt(run.baseline)]);
     c.show(Str(&bytes));
     c.end_text();
+    if grey {
+        c.restore_state();
+    }
 }
 
 fn deflate(data: &[u8]) -> Result<Vec<u8>, PrintError> {
