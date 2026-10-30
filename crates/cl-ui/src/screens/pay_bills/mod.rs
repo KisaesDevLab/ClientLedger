@@ -232,9 +232,10 @@ pub struct PayBillsScreen {
     sent: Option<(Vec<TransactionId>, SentPay)>,
     /// The pay whose outcome is unknown, until the list tells.
     pub(crate) pending: Option<SentPay>,
-    /// The last pay sent and its closing-date password, for the same-key
-    /// resend after a lost reply on a keyed engine (S7; memory only).
-    resend: Option<(PayBillsRequest, Option<Secret>)>,
+    /// The last pay sent, its closing-date password and what its bills and
+    /// credits were when it was sent, for the same-key resend after a lost
+    /// reply on a keyed engine (S7; memory only).
+    resend: Option<(PayBillsRequest, Option<Secret>, SentPay)>,
     /// The keyed resend went out once already.
     resent: bool,
     /// Lost twice on a keyed engine: Look again resends under the key.
@@ -803,11 +804,9 @@ impl PayBillsScreen {
             request: req.clone(),
             password: password.is_some(),
         });
-        self.sent = Some((
-            req.bills.iter().map(|b| b.bill).collect(),
-            SentPay::of(&req, &self.form),
-        ));
-        self.resend = Some((req.clone(), password.clone()));
+        let as_sent = SentPay::of(&req, &self.form);
+        self.sent = Some((req.bills.iter().map(|b| b.bill).collect(), as_sent.clone()));
+        self.resend = Some((req.clone(), password.clone(), as_sent));
         self.resent = false;
         self.send_pay(req, password, key)
     }
@@ -912,7 +911,7 @@ impl PayBillsScreen {
             let same = self.key.as_ref().is_some_and(|(_, k)| k == lost);
             if same
                 && !self.resent
-                && let Some((req, password)) = self.resend.clone()
+                && let Some((req, password, _)) = self.resend.clone()
             {
                 self.resent = true;
                 self.send_pay(req, password, lost.clone());
@@ -970,13 +969,12 @@ impl PayBillsScreen {
     pub(crate) fn recheck(&mut self) {
         self.unknown = false;
         if std::mem::take(&mut self.keyed_unknown)
-            && let (Some((req, password)), Some((_, key))) = (self.resend.clone(), self.key.clone())
+            && let (Some((req, password, as_sent)), Some((_, key))) =
+                (self.resend.clone(), self.key.clone())
         {
-            // S7: a keyed engine answers the same pay again; no guess.
-            self.sent = Some((
-                req.bills.iter().map(|b| b.bill).collect(),
-                SentPay::of(&req, &self.form),
-            ));
+            // S7: a keyed engine answers the same pay again; no guess. What
+            // it owed is as it was sent, not as the form shows it now.
+            self.sent = Some((req.bills.iter().map(|b| b.bill).collect(), as_sent));
             self.send_pay(req, password, key);
             return;
         }
