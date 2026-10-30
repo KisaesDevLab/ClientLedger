@@ -178,6 +178,13 @@ pub struct Grid {
     popup_rect: Option<Rect>,
     /// The popup's first shown entry.
     popup_top: usize,
+    /// A popup row's height last frame (the wheel scrolls whole rows).
+    popup_row_h: f32,
+    /// Wheel points not yet a whole popup row.
+    popup_wheel: f32,
+    /// The highlight the popup showed last frame: the list follows the
+    /// highlight only when it moves, so the wheel can scroll away from it.
+    popup_seen: Option<Option<usize>>,
     /// Select checkboxes drawn last frame (AccessKit Click targets).
     gutters: Vec<(Id, RowKey)>,
     /// Where the open context menu sits: the pointer of the right-click,
@@ -227,6 +234,18 @@ fn wheel_units(dy: f32) -> i64 {
     -((dy * 64.0).round() as i64)
 }
 
+/// The popup's first entry after the wheel moved `wheel` points (positive
+/// is up, toward the top) with rows `row_h` tall: the new first entry and
+/// the points left over (less than one row).
+// Geometry only: a few rows per wheel step.
+#[allow(clippy::cast_possible_truncation)]
+fn popup_wheel(top: usize, wheel: f32, row_h: f32) -> (usize, f32) {
+    let row_h = row_h.max(1.0);
+    let rows = (wheel / row_h).trunc();
+    let left = wheel - rows * row_h;
+    (top.saturating_add_signed(-(rows as isize)), left)
+}
+
 impl Grid {
     /// A grid with this spec.
     ///
@@ -263,6 +282,9 @@ impl Grid {
             measured: std::cell::RefCell::new(None),
             popup_rect: None,
             popup_top: 0,
+            popup_row_h: 18.0,
+            popup_wheel: 0.0,
+            popup_seen: None,
             gutters: Vec::new(),
             menu_at: None,
             menu_rect: None,
@@ -790,6 +812,7 @@ impl Grid {
             env.t(col.header),
             width,
             self.popup_top,
+            self.popup_seen != Some(popup.highlight),
             env.text,
         ))
     }
@@ -1218,6 +1241,21 @@ impl Grid {
                 Request::Gutter(key) => gutter_presses.push((key, Mods::NONE)),
                 Request::Menu(pos) => menu_reqs.push((ContextTarget::Cell(pos), None)),
             }
+        }
+
+        // The wheel over an open popup scrolls its list, not the grid
+        // (`popup_rect` is last frame's; the list's end is clamped when
+        // it is drawn).
+        if let Some(r) = self.popup_rect
+            && ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p))
+        {
+            let dy = ctx.input_mut(|i| {
+                let d = i.smooth_scroll_delta.y;
+                i.smooth_scroll_delta = Vec2::ZERO;
+                d
+            });
+            (self.popup_top, self.popup_wheel) =
+                popup_wheel(self.popup_top, self.popup_wheel + dy, self.popup_row_h);
         }
 
         // The wheel scrolls the grid, not the screen around it (§12 R3).
@@ -2225,7 +2263,10 @@ impl Grid {
                     &view,
                     style,
                 );
-                self.popup_top = view.top;
+                let (shown_top, shown_highlight) = (view.top, view.highlight);
+                self.popup_top = shown_top;
+                self.popup_seen = Some(shown_highlight);
+                self.popup_row_h = style.row_one.max(18.0);
                 popup_hit = hit;
                 self.popup_rect = Some(r);
                 top = r.bottom();
@@ -2243,6 +2284,12 @@ impl Grid {
                 }
             }
             caption_top = Some((top, place.x));
+        }
+        // No popup this frame: the next one opens on its highlight.
+        if self.popup_rect.is_none() {
+            self.popup_top = 0;
+            self.popup_wheel = 0.0;
+            self.popup_seen = None;
         }
         // The caption under the open cell: calculator preview, error, notice.
         if let (Some(pos), Some((top, x))) = (cursor, caption_top)
@@ -2481,4 +2528,25 @@ pub fn check(painter: &egui::Painter, r: Rect, color: Color32) {
     let c = pos2(r.right(), r.top());
     painter.line_segment([a, b], Stroke::new(1.8, color));
     painter.line_segment([b, c], Stroke::new(1.8, color));
+}
+
+#[cfg(test)]
+mod popup_wheel_tests {
+    use super::popup_wheel;
+
+    #[test]
+    fn the_wheel_moves_the_popup_whole_rows_at_a_time() {
+        // Up three rows and a bit: three rows nearer the top, the bit kept.
+        let (top, left) = popup_wheel(10, 3.5 * 20.0, 20.0);
+        assert_eq!(top, 7);
+        assert!((left - 10.0).abs() < 0.01);
+        // Down two rows.
+        let (top, left) = popup_wheel(10, -40.0, 20.0);
+        assert_eq!(top, 12);
+        assert!(left.abs() < 0.01);
+        // Never above the first entry.
+        assert_eq!(popup_wheel(1, 200.0, 20.0).0, 0);
+        // Less than a row moves nothing yet.
+        assert_eq!(popup_wheel(5, 12.0, 20.0), (5, 12.0));
+    }
 }
