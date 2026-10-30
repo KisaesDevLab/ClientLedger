@@ -390,7 +390,7 @@ impl EnterBillScreen {
         let header = self.header.current().clone();
         self.header.load(header);
         let lines: FormLines = self.expenses.value().clone();
-        self.expenses.form_mut().load(lines, &*lists);
+        self.expenses.load(lines, &*lists);
         let items: ItemLines = self.items.value().clone();
         self.items.load(items);
         // The draft's files moved with the convert.

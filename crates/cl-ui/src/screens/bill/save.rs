@@ -859,7 +859,7 @@ impl EnterBillScreen {
             crate::windows::PromptAnswer::Discard => {
                 let lists = Arc::clone(&self.lists);
                 self.header.revert_form();
-                self.expenses.form_mut().revert_form(&*lists);
+                self.expenses.revert_form(&*lists);
                 let item_lists = self.items.lists();
                 self.items.form_mut().revert_form(&*item_lists);
                 self.sync_inputs();
@@ -918,7 +918,7 @@ impl EnterBillScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.expenses.value().clone();
-            self.expenses.form_mut().load(lines, &*lists);
+            self.expenses.load(lines, &*lists);
             let items = self.items.value().clone();
             self.items.load(items);
             if let Some(id) = found {

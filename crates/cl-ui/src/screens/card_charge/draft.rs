@@ -202,7 +202,7 @@ impl CardChargeScreen {
                     Vec::new(),
                     &mut self.lines.form_mut().adapter_mut().keys,
                 );
-                self.lines.form_mut().load(fresh, &*lists);
+                self.lines.load(fresh, &*lists);
                 self.draft.snap = None;
                 self.sync_inputs();
             }
@@ -288,7 +288,7 @@ impl CardChargeScreen {
         let lines = std::mem::take(&mut f.lines);
         self.header.load(f);
         let lists = Arc::clone(&self.books.lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.draft.snap = Some(self.snap());
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
@@ -362,7 +362,7 @@ impl CardChargeScreen {
         let lines = std::mem::take(&mut form.lines);
         self.header.load(form);
         let lists = Arc::clone(&self.books.lists);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         if let Some(s) = self.draft.session.as_mut() {
             s.filled(&filled);
         }
@@ -640,7 +640,7 @@ impl CardChargeScreen {
         let header = self.header.current().clone();
         self.header.load(header);
         let lines = self.lines.value().clone();
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         // The files moved with the convert: nothing moves after it.
         self.attach.draft = None;
         self.records.forget();

@@ -446,7 +446,7 @@ impl DepositScreen {
             let header = self.header.current().clone();
             self.header.load(header);
             let lines = self.lines.value().clone();
-            self.lines.form_mut().load(lines, &*lists);
+            self.lines.load(lines, &*lists);
             self.refresh_pending();
             self.refresh_facts();
             if let (Some(id), Some(account)) = (found, self.header.current().account) {
@@ -534,7 +534,7 @@ impl DepositScreen {
         self.header.load(blank(account, date));
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
-        self.lines.form_mut().load(fresh, &*lists);
+        self.lines.load(fresh, &*lists);
         self.editing = None;
         self.template.forget();
         self.record = None;
@@ -663,7 +663,7 @@ impl DepositScreen {
             crate::windows::PromptAnswer::Discard => {
                 let lists = Arc::clone(&self.lists);
                 self.header.revert_form();
-                self.lines.form_mut().revert_form(&*lists);
+                self.lines.revert_form(&*lists);
                 self.sync_inputs();
                 self.navigate(older);
             }
@@ -805,7 +805,7 @@ impl DepositScreen {
             self.panel.balance = None;
         }
         self.header.load(form);
-        self.lines.form_mut().load(lines, &*lists);
+        self.lines.load(lines, &*lists);
         self.template.forget();
         self.editing = Some(Editing {
             id: r.txn.id,
