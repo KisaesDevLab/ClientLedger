@@ -79,6 +79,8 @@ pub fn items() -> Vec<Item> {
                 unit_price: p.and_then(price),
                 income_account_id: account_id(4000),
                 is_taxable: *taxable,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
             },
             is_active: *active,
             default_tag_id: None,

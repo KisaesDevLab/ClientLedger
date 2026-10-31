@@ -269,6 +269,8 @@ pub fn field_census(h: &Harness) {
                 unit_price: Some(Money::parse_wire("3.2500").expect("money")),
                 income_account_id: income.id,
                 is_taxable: false,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
             },
             key(),
         ))

@@ -616,6 +616,8 @@ impl ItemsScreen {
             unit_price: checked.price,
             income_account_id: checked.income_account,
             is_taxable: checked.taxable,
+            item_type: cl_api::ItemType::Service,
+            discount_percent: None,
         };
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());

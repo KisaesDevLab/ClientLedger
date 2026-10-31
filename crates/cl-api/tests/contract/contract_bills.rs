@@ -920,6 +920,8 @@ pub fn item_lines_u85(h: &Harness) {
                 unit_price: None,
                 income_account_id: income.id,
                 is_taxable: false,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
             },
             key(),
         ))
