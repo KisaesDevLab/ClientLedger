@@ -637,7 +637,7 @@ impl InvoiceScreen {
             "balance_after": after,
             "preview_problem": self.preview_problem,
             "open_balance": self.sales.as_ref().and_then(|(_, s)| s.open_balance).map(|m| m.format(style)),
-            "unbilled": self.billable.unbilled_json(&f),
+            "unbilled": if self.read_only().is_some() { serde_json::json!(self.billable.costs.len()) } else { self.billable.unbilled_json(&f) },
             "billable_dialog": self.billable.dialog_json(),
             "email": self.email.state_json(),
             "email_after_save": self.email_after_save,
