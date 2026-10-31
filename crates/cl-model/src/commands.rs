@@ -331,6 +331,7 @@ pub const COMMANDS: &[Command] = &[
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
+    built("lists.price_levels", "Price Levels", Some(Menu::Lists), 0, None),
     built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
     built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
     built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
@@ -577,6 +578,7 @@ mod tests {
             // P20
             "clients.create_invoice",
             "clients.outbox",
+            "lists.price_levels",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

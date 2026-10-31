@@ -357,7 +357,13 @@ impl InvoiceScreen {
         let taxable: HashMap<ItemId, bool> = self
             .items
             .iter()
-            .map(|i| (i.id, i.fields.is_taxable))
+            // A subtotal is never taxed.
+            .map(|i| {
+                (
+                    i.id,
+                    i.fields.is_taxable && i.fields.item_type != cl_api::ItemType::Subtotal,
+                )
+            })
             .collect();
         self.grid.set_lists(
             Arc::new(ItemLists::new(Arc::clone(&self.books.lists), &active)),

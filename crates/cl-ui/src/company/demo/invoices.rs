@@ -313,6 +313,17 @@ struct Priced {
     price: Decimal,
     source: &'static str,
     account: Option<AccountId>,
+    /// A subtotal line shows the sum of its group and posts nothing.
+    display: Option<Decimal>,
+}
+
+/// round2(quantity × rate) of the priced lines of `group` that post.
+fn group_sum(group: &[Priced]) -> Decimal {
+    group
+        .iter()
+        .filter(|p| p.display.is_none())
+        .map(|p| round(p.input.quantity * p.input.unit_price, 2))
+        .sum()
 }
 
 fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, ApiError> {
@@ -320,7 +331,11 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
         return Err(invalid());
     }
     let items = state.items.get_or_insert_with(super::lists::items).clone();
-    let mut out = Vec::with_capacity(new.lines.len());
+    let mut out: Vec<Priced> = Vec::with_capacity(new.lines.len());
+    // U-39a: a discount covers the lines since the last subtotal; right
+    // under a subtotal it covers that subtotal's lines.
+    let mut group_start = 0;
+    let mut prev_group: Option<usize> = None;
     for l in &new.lines {
         let item = l
             .item_id
@@ -350,6 +365,55 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 price: fig.rate,
                 source: "billable",
                 account,
+                display: None,
+            });
+            continue;
+        }
+        let kind = item.map_or(cl_api::ItemType::Service, |i| i.fields.item_type);
+        if kind == cl_api::ItemType::Subtotal {
+            let shown = group_sum(&out[group_start..]);
+            out.push(Priced {
+                input: SalesLineIn {
+                    quantity: Decimal::ZERO,
+                    unit_price: Decimal::ZERO,
+                    taxable: false,
+                    tax_rate: None,
+                },
+                price: shown,
+                source: "computed",
+                account,
+                display: Some(shown),
+            });
+            prev_group = Some(group_start);
+            group_start = out.len();
+            continue;
+        }
+        if kind == cl_api::ItemType::Discount {
+            let from = if out.last().is_some_and(|p| p.display.is_some()) {
+                prev_group.unwrap_or(0)
+            } else {
+                group_start
+            };
+            let base = group_sum(&out[from..]);
+            let amount = match item.and_then(|i| i.fields.discount_percent) {
+                Some(p) => -round(base * p.as_decimal() / Decimal::ONE_HUNDRED, 2),
+                None => -round(
+                    item.and_then(|i| i.fields.unit_price)
+                        .map_or(Decimal::ZERO, |m| m.as_decimal().abs()),
+                    2,
+                ),
+            };
+            out.push(Priced {
+                input: SalesLineIn {
+                    quantity: Decimal::ONE,
+                    unit_price: amount,
+                    taxable,
+                    tax_rate: None,
+                },
+                price: amount,
+                source: "computed",
+                account,
+                display: None,
             });
             continue;
         }
@@ -372,6 +436,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
             price,
             source,
             account,
+            display: None,
         });
     }
     Ok(out)
@@ -407,7 +472,7 @@ pub fn preview(state: &mut DemoState, new: &NewInvoice) -> Result<InvoicePreview
             json!({
                 "unitPrice": p.price.to_string(),
                 "unitPriceSource": p.source,
-                "amount": o.amount.to_string(),
+                "amount": p.display.unwrap_or(o.amount).to_string(),
                 "taxAmount": o.tax_amount.to_string(),
             })
         })

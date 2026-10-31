@@ -1,7 +1,8 @@
 # Create Invoice (P20 AC1-AC3) against `clientledger --demo`: the mockup's
 # lines for Long Creek Marina (18 x 65.00 non-taxable, 24 x 32.50 and
 # 6 x 48.00 taxable) plus the client's unbilled cost (842.15, no markup)
-# added with Add Billable Costs (Ctrl+Shift+B, Q-P20c) total 3,234.87 —
+# added with Add Billable Costs (Ctrl+Shift+B, Q-P20c) total 3,234.87; a
+# level-priced line, a subtotal and a 10 % discount then total 2,982.91 —
 # every figure from the engine's preview (Q-P20n). Once saved, the cost
 # leaves the client's unbilled list (AC2); Prev opens the invoice and Void
 # brings the cost back, so light and dark repeat in one app. Synthetic.
@@ -72,6 +73,28 @@ steps:
   - assert_count: {target: {role: label, label: "3,234.87"}, count: 2}
   - assert_no_clipping: {}
   - screenshot: mockup-totals
+  # --- A level price, a subtotal and a 10 % discount (U-40, U-39a) ---------
+  # Long Creek Marina is on the Commercial level (7.5 % down): Weekly Mowing
+  # 45.00 prices at 41.63; the subtotal shows 3,163.41; the taxable discount
+  # right under it takes 316.34 off and lowers the taxable base (Q-P20t).
+  - click: {label_contains: "Item, line 5"}
+  - type: {text: "Weekly"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 5"}
+  - type: {text: "2"}
+  - key: Tab
+  - click: {label_contains: "Item, line 6"}
+  - type: {text: "Subtotal"}
+  - key: Tab
+  - click: {label_contains: "Item, line 7"}
+  - type: {text: "Loyalty"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.subtotal, equals: "2,847.07"}
+  - assert_state: {key: screen.tax, equals: "135.84"}
+  - assert_state: {key: screen.total, equals: "2,982.91"}
+  - screenshot: pricing
   # --- Save & New: the cost is billed and leaves the list (AC2) -------------
   - key: Alt+N
   - assert_state: {key: screen.saved_count, equals: 1}
@@ -85,7 +108,7 @@ steps:
   - command: form.prev_record
   - assert_state: {key: screen.mode, equals: edit}
   - wait: {ms: 600}
-  - assert_state: {key: screen.total, equals: "3,234.87"}
+  - assert_state: {key: screen.total, equals: "2,982.91"}
   - screenshot: saved
   - click: {role: button, label: Void}
   - assert_state: {key: screen.void_open, equals: true}

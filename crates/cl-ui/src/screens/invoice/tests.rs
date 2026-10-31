@@ -99,6 +99,54 @@ fn the_mockup_invoice_totals_3234_87_from_the_engine() {
     assert_eq!(v["lines"].as_array().map(Vec::len), Some(4));
 }
 
+/// U-40, U-39a: an unpriced line takes the client's level price (45.00 −
+/// 7.5 % = 41.63); a subtotal shows its group; a taxable 10 % discount
+/// right under it covers that group and lowers the taxable base (Q-P20t).
+#[test]
+fn a_level_price_a_subtotal_and_a_discount_come_from_the_engine() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    let find = |s: &InvoiceScreen, name: &str| {
+        s.items
+            .iter()
+            .find(|i| i.fields.name == name)
+            .map(|i| i.id)
+            .expect(name)
+    };
+    let (mowing, sub, disc) = (
+        find(&s, "Weekly Mowing"),
+        find(&s, "Subtotal"),
+        find(&s, "Loyalty discount"),
+    );
+    s.grid.edit(|v, keys| {
+        let at = v.lines.len() - 1;
+        let mut add = |item, qty: Option<Quantity>| InvoiceLine {
+            item: Some(item),
+            quantity: qty,
+            ..InvoiceLine::blank(keys.next_key())
+        };
+        let lines = [add(mowing, Some(q("2"))), add(sub, None), add(disc, None)];
+        for (i, l) in lines.into_iter().enumerate() {
+            v.lines.insert(at + i, l);
+        }
+    });
+    settle(&mut s);
+    let TotalsView::Ready(t) = s.tracker.totals() else {
+        panic!("{:?}", s.tracker.totals());
+    };
+    assert_eq!(t.subtotal, m("2847.07"));
+    assert_eq!(t.tax_total, m("135.84"));
+    assert_eq!(t.total, m("2982.91"));
+    let lines = s.state_json()["lines"].clone();
+    assert_eq!(lines[4]["amount"], "83.26");
+    assert_eq!(lines[4]["rate_source"], "pricelevel");
+    assert_eq!(
+        lines[5]["amount"], "3,163.41",
+        "the subtotal shows its group"
+    );
+    assert_eq!(lines[6]["amount"], "-316.34");
+}
+
 #[test]
 fn an_edit_shows_updating_never_an_old_figure() {
     let (_d, mut s) = screen();

@@ -22,6 +22,7 @@
 
 mod form;
 pub mod model;
+mod sales;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -181,6 +182,8 @@ pub struct CenterScreen {
     role: Role,
     link: Arc<CompanyLink>,
     group: Option<RequestGroup>,
+    /// The client form's price level and markup (P20).
+    sales: sales::SalesEdit,
     today: CalendarDate,
     contacts: Vec<Contact>,
     accounts: Vec<Account>,
@@ -264,6 +267,7 @@ impl CenterScreen {
             role,
             link,
             group,
+            sales: sales::SalesEdit::default(),
             today,
             contacts: Vec::new(),
             accounts: Vec::new(),
@@ -592,6 +596,7 @@ impl CenterScreen {
 
     fn form_dirty(&self) -> bool {
         matches!(&self.panel, Panel::Form(f) if f.form.is_dirty())
+            || (matches!(&self.panel, Panel::Form(_)) && self.sales.dirty())
     }
 
     fn busy_panel(&mut self) -> bool {
@@ -612,6 +617,7 @@ impl CenterScreen {
         }
         self.warn = None;
         self.panel = Panel::Form(Box::new(FormPanel::new_contact(self.role)));
+        self.open_sales(None);
     }
 
     /// Enter or Ctrl+E on a row.
@@ -633,6 +639,7 @@ impl CenterScreen {
             .filter(|d| d.id == id)
             .and_then(|d| d.profile_value.clone());
         self.panel = Panel::Form(Box::new(FormPanel::edit(&c, profile.as_ref())));
+        self.open_sales(Some(id));
     }
 
     /// Ctrl+Shift+I: make the selected contact inactive, or active again.
@@ -922,7 +929,17 @@ impl CenterScreen {
         clippy::too_many_lines,
         reason = "one poll per running task, each short"
     )]
+    /// The Sales section of a client's form (P20).
+    fn open_sales(&mut self, client: Option<ContactId>) {
+        self.sales = if self.role == cl_model::lists::contacts::Role::Client {
+            sales::SalesEdit::open(&self.link, self.group.as_ref(), client)
+        } else {
+            sales::SalesEdit::default()
+        };
+    }
+
     fn poll(&mut self) {
+        self.sales.poll();
         if let Some(task) = self.load.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -1715,6 +1732,7 @@ impl Screen for CenterScreen {
             "selected_active": selected.map(|e| e.active),
             "selected_both": selected.map(|e| e.roles == Roles::Both),
             "panel": self.panel.name(),
+            "sales": self.sales.state_json(),
             "tab": self.tab.name(),
             "dirty": form_dirty,
             "problem": problems.first(),
