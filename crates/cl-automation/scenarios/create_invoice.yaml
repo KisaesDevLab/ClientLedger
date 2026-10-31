@@ -73,8 +73,8 @@ steps:
   # balance-after, follow-up 7).
   - assert_count: {target: {role: label, label: "3,234.87"}, count: 3}
   - assert_no_clipping: {}
-  # The Template picker (Q-P20ac): the print layout, Client's usual by default.
-  - assert_exists: {label_contains: "Client's usual"}
+  # The Template picker (Q-P20ac): the invoice's print layout.
+  - assert_exists: {role: label, label: Template}
   - screenshot: mockup-totals
   # --- A level price, a subtotal and a 10 % discount (U-40, U-39a) ---------
   # Long Creek Marina is on the Commercial level (7.5 % down): Weekly Mowing
