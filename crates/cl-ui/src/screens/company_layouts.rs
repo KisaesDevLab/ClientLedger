@@ -247,110 +247,115 @@ impl LayoutsPanel {
         }
         let mut act = None;
         let busy = self.busy();
-        form::heading(ui, tokens, &t("layouts.title"));
-        form::hint(ui, tokens, &t("layouts.intro"));
-        form::card(ui, tokens, |ui| {
-            for archived in [false, true] {
-                let rows: Vec<&InvoiceLayout> = self
-                    .layouts
-                    .iter()
-                    .filter(|l| l.is_archived == archived)
-                    .collect();
-                if archived && !rows.is_empty() {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(t("layouts.archived")).strong());
-                }
-                for l in rows {
-                    ui.horizontal(|ui| {
-                        ui.label(&l.name);
-                        if l.is_default {
-                            ui.label(
-                                RichText::new(t("layouts.default_badge"))
-                                    .color(tokens.text_secondary),
-                            );
+        // Folded until opened, so the form above keeps its place.
+        egui::CollapsingHeader::new(RichText::new(t("layouts.title")).strong())
+            .id_salt("company/layouts")
+            .default_open(false)
+            .show(ui, |ui| {
+                form::hint(ui, tokens, &t("layouts.intro"));
+                form::card(ui, tokens, |ui| {
+                    for archived in [false, true] {
+                        let rows: Vec<&InvoiceLayout> = self
+                            .layouts
+                            .iter()
+                            .filter(|l| l.is_archived == archived)
+                            .collect();
+                        if archived && !rows.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(t("layouts.archived")).strong());
                         }
-                        ui.add_enabled_ui(!busy, |ui| {
-                            if !archived && ui.small_button(t("layouts.edit")).clicked() {
-                                act = Some(Act::Edit(l.id));
-                            }
-                            if !archived
-                                && !l.is_default
-                                && ui.small_button(t("layouts.make_default")).clicked()
-                            {
-                                act = Some(Act::Default(l.id));
-                            }
-                            if !l.is_default {
-                                let k = if archived {
-                                    "layouts.unarchive"
-                                } else {
-                                    "layouts.archive"
-                                };
-                                if ui.small_button(t(k)).clicked() {
-                                    act = Some(Act::Archive(l.id, !archived));
+                        for l in rows {
+                            ui.horizontal(|ui| {
+                                ui.label(&l.name);
+                                if l.is_default {
+                                    ui.label(
+                                        RichText::new(t("layouts.default_badge"))
+                                            .color(tokens.text_secondary),
+                                    );
                                 }
-                            }
-                        });
-                    });
-                }
-            }
-            ui.add_space(6.0);
-            if ui
-                .add_enabled(
-                    !busy && self.editing.is_none(),
-                    egui::Button::new(t("layouts.new")),
-                )
-                .clicked()
-            {
-                act = Some(Act::New);
-            }
-            if let Some(e) = &mut self.editing {
-                ui.separator();
-                ui.horizontal(|ui| {
-                    let l = ui.label(t("layouts.name"));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut e.draft.name)
-                            .desired_width(220.0)
-                            .char_limit(cl_api::LAYOUT_NAME_MAX),
-                    )
-                    .labelled_by(l.id);
-                });
-                ui.label(RichText::new(t("layouts.columns")).strong());
-                ui.horizontal_wrapped(|ui| {
-                    let c = &mut e.draft.columns;
-                    ui.checkbox(&mut c.item, t("layouts.col.item"));
-                    ui.checkbox(&mut c.description, t("layouts.col.description"));
-                    ui.checkbox(&mut c.service_date, t("layouts.col.service_date"));
-                    ui.checkbox(&mut c.quantity, t("layouts.col.quantity"));
-                    ui.checkbox(&mut c.rate, t("layouts.col.rate"));
-                });
-                ui.horizontal_wrapped(|ui| {
-                    ui.checkbox(&mut e.draft.show_ship_to, t("layouts.show_ship_to"));
-                    ui.checkbox(&mut e.draft.show_po_number, t("layouts.show_po"));
-                    ui.checkbox(&mut e.draft.show_terms, t("layouts.show_terms"));
-                });
-                let l = ui.label(t("layouts.footer"));
-                ui.add(
-                    egui::TextEdit::multiline(&mut e.draft.footer_text)
-                        .desired_rows(2)
-                        .desired_width(360.0),
-                )
-                .labelled_by(l.id);
-                ui.horizontal(|ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if !archived && ui.small_button(t("layouts.edit")).clicked() {
+                                        act = Some(Act::Edit(l.id));
+                                    }
+                                    if !archived
+                                        && !l.is_default
+                                        && ui.small_button(t("layouts.make_default")).clicked()
+                                    {
+                                        act = Some(Act::Default(l.id));
+                                    }
+                                    if !l.is_default {
+                                        let k = if archived {
+                                            "layouts.unarchive"
+                                        } else {
+                                            "layouts.archive"
+                                        };
+                                        if ui.small_button(t(k)).clicked() {
+                                            act = Some(Act::Archive(l.id, !archived));
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    ui.add_space(6.0);
                     if ui
-                        .add_enabled(!busy, egui::Button::new(t("layouts.save")))
+                        .add_enabled(
+                            !busy && self.editing.is_none(),
+                            egui::Button::new(t("layouts.new")),
+                        )
                         .clicked()
                     {
-                        act = Some(Act::Save);
+                        act = Some(Act::New);
                     }
-                    if ui.button(t("layouts.cancel")).clicked() {
-                        act = Some(Act::Cancel);
+                    if let Some(e) = &mut self.editing {
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            let l = ui.label(t("layouts.name"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.draft.name)
+                                    .desired_width(220.0)
+                                    .char_limit(cl_api::LAYOUT_NAME_MAX),
+                            )
+                            .labelled_by(l.id);
+                        });
+                        ui.label(RichText::new(t("layouts.columns")).strong());
+                        ui.horizontal_wrapped(|ui| {
+                            let c = &mut e.draft.columns;
+                            ui.checkbox(&mut c.item, t("layouts.col.item"));
+                            ui.checkbox(&mut c.description, t("layouts.col.description"));
+                            ui.checkbox(&mut c.service_date, t("layouts.col.service_date"));
+                            ui.checkbox(&mut c.quantity, t("layouts.col.quantity"));
+                            ui.checkbox(&mut c.rate, t("layouts.col.rate"));
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut e.draft.show_ship_to, t("layouts.show_ship_to"));
+                            ui.checkbox(&mut e.draft.show_po_number, t("layouts.show_po"));
+                            ui.checkbox(&mut e.draft.show_terms, t("layouts.show_terms"));
+                        });
+                        let l = ui.label(t("layouts.footer"));
+                        ui.add(
+                            egui::TextEdit::multiline(&mut e.draft.footer_text)
+                                .desired_rows(2)
+                                .desired_width(360.0),
+                        )
+                        .labelled_by(l.id);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(!busy, egui::Button::new(t("layouts.save")))
+                                .clicked()
+                            {
+                                act = Some(Act::Save);
+                            }
+                            if ui.button(t("layouts.cancel")).clicked() {
+                                act = Some(Act::Cancel);
+                            }
+                        });
+                    }
+                    if let Some(p) = self.problem {
+                        ui.label(RichText::new(t(p)).color(tokens.warn_text));
                     }
                 });
-            }
-            if let Some(p) = self.problem {
-                ui.label(RichText::new(t(p)).color(tokens.warn_text));
-            }
-        });
+            });
         match act {
             Some(Act::New) => self.start_new(),
             Some(Act::Edit(id)) => self.start_edit(id),

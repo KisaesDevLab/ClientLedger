@@ -12,14 +12,14 @@ steps:
   - command: company.information
   - assert_state: {key: screen.screen, equals: company_info}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_exists: {label_contains: "Invoice templates"}
+  - click: {label_contains: "Invoice templates"}
   - assert_state: {key: screen.layouts.on, equals: true}
   - assert_state: {key: screen.layouts.active, equals: 2}
   - assert_state: {key: screen.layouts.default, equals: Standard}
   - assert_count: {target: {role: button, label: Delete}, count: 0}
   - click: {role: button, label: Archive}
   - assert_state: {key: screen.layouts.archived, equals: 1}
-  - assert_exists: {label_contains: "Archived"}
+  - assert_exists: {role: label, label: Archived}
   - screenshot: archived
   - click: {role: button, label: Unarchive}
   - assert_state: {key: screen.layouts.archived, equals: 0}
@@ -30,4 +30,6 @@ steps:
   - screenshot: new-template
   - click: {role: button, label: Cancel}
   - assert_state: {key: screen.layouts.editing, equals: false}
+  # Fold the card again (its open state outlives the window).
+  - click: {label_contains: "Invoice templates"}
   - command: file.close_window

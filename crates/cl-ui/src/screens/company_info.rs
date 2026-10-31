@@ -107,6 +107,8 @@ pub struct CompanyInfoScreen {
     close_after_save: bool,
     /// Invoice templates (U-130).
     pub(crate) layouts: crate::screens::company_layouts::LayoutsPanel,
+    /// The first frame reset the scroll position.
+    scrolled: bool,
 }
 
 /// The editable values as read: footer, overrides, numbering rows.
@@ -164,6 +166,7 @@ impl CompanyInfoScreen {
             baseline: Baseline::default(),
             close_after_save: false,
             layouts: crate::screens::company_layouts::LayoutsPanel::default(),
+            scrolled: false,
         };
         s.layouts = crate::screens::company_layouts::LayoutsPanel::open(&s.link, s.group.as_ref());
         s.load();
@@ -527,15 +530,18 @@ impl CompanyInfoScreen {
             form::progress_line(ui, &tokens, &t("company_info.loading"));
             return;
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        // A new window starts at the top (the scroll state outlives it).
+        let mut area = egui::ScrollArea::vertical();
+        if !self.scrolled {
+            self.scrolled = true;
+            area = area.vertical_scroll_offset(0.0);
+        }
+        area.show(ui, |ui| {
             self.logo_ui(ui, &tokens);
             ui.add_space(10.0);
             self.footer_ui(ui, &tokens);
             ui.add_space(10.0);
             self.numbers_ui(ui, &tokens);
-            ui.add_space(10.0);
-            self.layouts
-                .ui(ui, &tokens, &self.link, self.group.as_ref());
             ui.add_space(10.0);
             if ui
                 .add_enabled(
@@ -546,6 +552,11 @@ impl CompanyInfoScreen {
             {
                 self.save();
             }
+            // Invoice templates save on their own (U-130), below the
+            // form's Save.
+            ui.add_space(16.0);
+            self.layouts
+                .ui(ui, &tokens, &self.link, self.group.as_ref());
         });
     }
 
