@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 use super::InvoiceScreen;
 use super::engine::{self, Job, label};
 use crate::company::CompanyEvent;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::theme::Tokens;
 
 /// What a finished email flow did.
@@ -65,6 +65,73 @@ pub(crate) struct EmailFlow {
     unknown_fields: usize,
     done: Option<(Outcome, Option<SaveIntent>)>,
     last: Option<Outcome>,
+    /// The key of this send (or Outbox put), kept while the same message
+    /// is tried again after an unknown outcome (B5; `invoice-email-v1`
+    /// replays it, so the client never gets it twice).
+    key: Option<(String, IdempotencyKey)>,
+}
+
+/// The owner's message for a send that failed.
+pub(crate) fn send_problem(r: Option<InvoiceRefusal>) -> &'static str {
+    match r {
+        Some(InvoiceRefusal::SmtpNotConfigured) => "invoice.email.no_smtp",
+        Some(InvoiceRefusal::SmtpLoginFailed) => "invoice.email.login_failed",
+        Some(InvoiceRefusal::Offline) => "invoice.email.offline",
+        Some(InvoiceRefusal::AttachmentTooLarge) => "invoice.email.too_large",
+        Some(InvoiceRefusal::OutboxItemGone) => "invoice.email.outbox_gone",
+        _ => "invoice.email.not_sent",
+    }
+}
+
+/// Terms as words for the printed invoice: the known codes from the
+/// catalog; a discount code (`2_10_net_30`) as "2% 10 Net 30" (S11).
+pub(crate) fn terms_text(code: Option<&str>) -> String {
+    let Some(c) = code.filter(|c| !c.is_empty()) else {
+        return String::new();
+    };
+    let key = format!("invoice.terms.{c}");
+    if crate::i18n::has(&key) {
+        return t(&key);
+    }
+    let parts: Vec<&str> = c.split('_').collect();
+    match parts.as_slice() {
+        [p, d, "net", n] => t_with(
+            "invoice.terms.discount",
+            &[("percent", p), ("days", d), ("net", n)],
+        ),
+        ["net", n] => t_with("invoice.terms.net", &[("net", n)]),
+        _ => c.replace('_', " "),
+    }
+}
+
+/// The company block, labels and footer of an invoice PDF.
+pub(crate) fn pdf_style(company: &str) -> cl_print::FormStyle {
+    cl_print::FormStyle {
+        company: crate::screens::print_forms::job::company(company, Vec::new()),
+        logo: None,
+        footer: String::new(),
+        labels: crate::screens::print_forms::job::form_labels(),
+    }
+}
+
+/// Makes an invoice PDF (`Invoice-<number>.pdf`). Called on the request
+/// queue, never in a frame (S10).
+///
+/// # Errors
+/// `Local(InvalidValue)` when the PDF can't be made;
+/// `Local(AttachmentTooLarge)` over 10 MB.
+pub(crate) fn render_pdf(
+    data: &cl_print::forms::invoice::InvoiceData,
+    style: &cl_print::FormStyle,
+) -> Result<(String, Vec<u8>), cl_api::ApiError> {
+    let bytes = cl_print::forms::invoice::pdf_bytes(data, style)
+        .map_err(|_| cl_api::ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
+    if bytes.len() > cl_api::EMAIL_PDF_MAX_BYTES {
+        return Err(cl_api::ApiError::Local(
+            cl_api::LocalValidation::AttachmentTooLarge,
+        ));
+    }
+    Ok((invoice_pdf_name(&data.number), bytes))
 }
 
 fn list(s: &str) -> Vec<String> {
@@ -107,10 +174,18 @@ impl EmailFlow {
                     self.done = Some((o, self.then.take()));
                 }
                 Err(e) => {
+                    let refusal = invoice_refusal(&e);
+                    if !crate::screens::register::keeps_key(&e)
+                        && refusal != Some(InvoiceRefusal::Retry)
+                    {
+                        self.key = None;
+                    }
                     self.failed = true;
-                    self.problem = Some(match invoice_refusal(&e) {
-                        Some(InvoiceRefusal::SmtpNotConfigured) => "invoice.email.no_smtp",
-                        _ => "invoice.email.not_sent",
+                    self.problem = Some(match e {
+                        cl_api::ApiError::Local(cl_api::LocalValidation::InvalidValue) => {
+                            "invoice.email.pdf_failed"
+                        }
+                        _ => send_problem(refusal),
                     });
                 }
             }
@@ -141,6 +216,23 @@ impl EmailFlow {
             bcc: list(&self.bcc),
             subject: self.subject.clone(),
             body: self.body.clone(),
+        }
+    }
+
+    /// The key for this send: the stored one when the same message goes
+    /// again, a fresh one otherwise.
+    fn key_for(&mut self, what: &str, msg: &EmailMessage) -> IdempotencyKey {
+        let identity = format!(
+            "{what}|{:?}|{:?}|{:?}|{}|{}",
+            msg.to, msg.cc, msg.bcc, msg.subject, msg.body
+        );
+        match &self.key {
+            Some((i, k)) if *i == identity => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.key = Some((identity, k.clone()));
+                k
+            }
         }
     }
 }
@@ -174,15 +266,32 @@ pub(crate) fn print_data(
         .filter(|l| !l.trim().is_empty())
         .collect()
     });
+    // Built as bill-to is (name, street, "city state zip") so the form can
+    // tell a ship-to that only repeats the bill-to (Q-P20m).
     let ship_to = client.map_or_else(Vec::new, |c| {
         let f = &c.fields;
-        [
-            f.shipping_line1.clone(),
-            f.shipping_line2.clone(),
-            f.shipping_city.clone(),
+        let street = [f.shipping_line1.as_deref(), f.shipping_line2.as_deref()];
+        if street.iter().flatten().all(|l| l.trim().is_empty()) {
+            return Vec::new();
+        }
+        let city = [
+            f.shipping_city.as_deref(),
+            f.shipping_state.as_deref(),
+            f.shipping_zip.as_deref(),
         ]
         .into_iter()
         .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+        [
+            Some(f.display_name.clone()),
+            f.shipping_line1.clone(),
+            f.shipping_line2.clone(),
+            Some(city),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|l| !l.trim().is_empty())
         .collect()
     });
     let total = r
@@ -202,8 +311,10 @@ pub(crate) fn print_data(
             .iter()
             .map(|l| cl_print::forms::ItemLine {
                 description: l.description.clone().unwrap_or_default(),
-                quantity: Some(l.quantity.as_decimal()),
-                rate: dec(l.unit_price),
+                quantity: l.quantity.map(cl_core::Quantity::as_decimal),
+                // A billable line prints the engine's display rate and its
+                // amount with the markup in (Q-P20w).
+                rate: dec(l.display_rate.or(l.unit_price)),
                 amount: Some(l.amount.as_decimal()),
                 service_date: l
                     .service_date
@@ -229,29 +340,53 @@ impl InvoiceScreen {
             .unwrap_or_default()
     }
 
-    /// The PDF of the open saved invoice.
-    pub(crate) fn pdf(&self) -> Option<(String, Vec<u8>)> {
+    /// Makes the open saved invoice's PDF on the queue and opens it full
+    /// size when done (S10: never in a frame).
+    pub(crate) fn open_pdf(&mut self) {
+        let Some((data, style)) = self.pdf_parts() else {
+            self.notice = Some("invoice.email.pdf_failed");
+            return;
+        };
+        let (d2, s2) = (data.clone(), style.clone());
+        self.pdf_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            move |_| render_pdf(&d2, &s2),
+            move |_| async move { render_pdf(&data, &style) },
+        ));
+        self.poll_pdf();
+    }
+
+    pub(crate) fn poll_pdf(&mut self) {
+        match engine::poll(&mut self.pdf_job) {
+            Some(Ok((name, bytes))) => self.link.push(CompanyEvent::OpenWith(
+                cl_model::CommandId::new(crate::screens::document_view::KIND),
+                Box::new(crate::windows::OpenPayload::Document(
+                    crate::widgets::pdf_viewer::DocSource {
+                        name,
+                        bytes: Arc::from(bytes),
+                    },
+                )),
+            )),
+            Some(Err(_)) => self.notice = Some("invoice.email.pdf_failed"),
+            None => {}
+        }
+    }
+
+    /// What the PDF of the open saved invoice is made from (cheap; the PDF
+    /// itself is made on the queue).
+    pub(crate) fn pdf_parts(
+        &self,
+    ) -> Option<(cl_print::forms::invoice::InvoiceData, cl_print::FormStyle)> {
         let e = self.editing.as_ref()?;
         let client = e
             .record
             .txn
             .contact_id
             .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
-        let terms = e
-            .record
-            .payment_terms
-            .as_deref()
-            .map(|c| t(&format!("invoice.terms.{c}")))
-            .unwrap_or_default();
+        let terms = terms_text(e.record.payment_terms.as_deref());
         let data = print_data(&e.record, client, &terms);
-        let style = cl_print::FormStyle {
-            company: crate::screens::print_forms::job::company(&self.company_name(), Vec::new()),
-            logo: None,
-            footer: String::new(),
-            labels: crate::screens::print_forms::job::form_labels(),
-        };
-        let bytes = cl_print::forms::invoice::pdf_bytes(&data, &style).ok()?;
-        Some((invoice_pdf_name(&data.number), bytes))
+        Some((data, pdf_style(&self.company_name())))
     }
 
     /// Email… (Ctrl+Shift+M): the saved invoice only; `then` runs when the
@@ -334,6 +469,7 @@ impl InvoiceScreen {
         f.mark_sent = false;
         f.failed = false;
         f.problem = None;
+        f.key = None;
         f.invoice = Some(e.record.clone());
         f.then = then;
         f.open = true;
@@ -362,24 +498,25 @@ impl InvoiceScreen {
             self.email.problem = Some("invoice.email.to_needed");
             return;
         }
-        let Some((name, pdf)) = self.pdf() else {
+        let Some((data, style)) = self.pdf_parts() else {
             self.email.problem = Some("invoice.email.pdf_failed");
             return;
         };
-        if pdf.len() > cl_api::EMAIL_PDF_MAX_BYTES {
-            self.email.problem = Some("invoice.email.too_large");
-            return;
-        }
         self.email.problem = None;
-        let key = IdempotencyKey::new();
-        let to = msg.to.clone();
+        let key = self.email.key_for(&format!("send|{id}"), &msg);
+        let (m2, d2, s2) = (msg.clone(), data.clone(), style.clone());
+        // The PDF is made on the queue, not in the frame (S10).
         self.email.job = Some(engine::write(
             &self.link,
             self.group.as_ref(),
             label("orphan.invoice_email", Some(key.clone())),
-            |d| crate::company::demo::invoices::email(d, id, &to).map(|_| Outcome::Sent),
+            |d| {
+                render_pdf(&d2, &s2)?;
+                crate::company::demo::invoices::email(d, id, &m2, None).map(|_| Outcome::Sent)
+            },
             move |s| async move {
-                s.invoices().email(id, &msg, &name, &pdf, key).await?;
+                let (name, pdf) = render_pdf(&data, &style)?;
+                s.invoices().email(id, &msg, &name, &pdf, None, key).await?;
                 Ok(Outcome::Sent)
             },
         ));
@@ -396,7 +533,7 @@ impl InvoiceScreen {
             self.email.problem = Some("invoice.email.to_needed");
             return;
         }
-        let key = IdempotencyKey::new();
+        let key = self.email.key_for(&format!("later|{id}"), &msg);
         let m2 = msg.clone();
         self.email.job = Some(engine::write(
             &self.link,
@@ -419,19 +556,11 @@ impl InvoiceScreen {
         let Some(id) = self.email_target() else {
             return;
         };
-        let Some((name, bytes)) = self.pdf() else {
+        if self.pdf_parts().is_none() {
             self.email.problem = Some("invoice.email.pdf_failed");
             return;
-        };
-        self.link.push(CompanyEvent::OpenWith(
-            cl_model::CommandId::new(crate::screens::document_view::KIND),
-            Box::new(crate::windows::OpenPayload::Document(
-                crate::widgets::pdf_viewer::DocSource {
-                    name,
-                    bytes: Arc::from(bytes),
-                },
-            )),
-        ));
+        }
+        self.open_pdf();
         if self.email.mark_sent {
             let key = IdempotencyKey::new();
             let sent = SendRecord {

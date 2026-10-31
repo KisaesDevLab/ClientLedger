@@ -76,7 +76,7 @@ fn mockup(s: &mut InvoiceScreen) {
     });
     s.open_billable();
     s.billable.markup.clear();
-    let line = s.billable.costs[0].line_id;
+    let line = s.billable.costs[0].source_line_id;
     s.billable
         .choose_income(line, crate::company::demo::account_id(4000));
     s.add_billable();
@@ -139,7 +139,7 @@ fn a_level_price_a_subtotal_and_a_discount_come_from_the_engine() {
     assert_eq!(t.total, m("2982.91"));
     let lines = s.state_json()["lines"].clone();
     assert_eq!(lines[4]["amount"], "83.26");
-    assert_eq!(lines[4]["rate_source"], "pricelevel");
+    assert_eq!(lines[4]["rate_source"], "pricelevelpercent");
     assert_eq!(
         lines[5]["amount"], "3,163.41",
         "the subtotal shows its group"
@@ -277,4 +277,83 @@ fn every_screen_key_is_in_the_catalog() {
     for c in TERMS {
         assert!(crate::i18n::has(&format!("invoice.terms.{c}")), "{c}");
     }
+}
+
+/// B3 (review): create → GET → the form → PUT unchanged posts the same
+/// total, with a level-priced line, a subtotal, a % discount and a
+/// marked-up billable cost; the billable line goes back with only its
+/// source, account and markup, and nothing is released.
+#[test]
+fn a_saved_invoice_round_trips_without_changing_the_money() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    let find = |s: &InvoiceScreen, name: &str| {
+        s.items
+            .iter()
+            .find(|i| i.fields.name == name)
+            .map(|i| i.id)
+            .expect(name)
+    };
+    let (sub, disc) = (find(&s, "Subtotal"), find(&s, "Loyalty discount"));
+    s.grid.edit(|v, keys| {
+        let at = v.lines.len() - 1;
+        for (i, item) in [sub, disc].into_iter().enumerate() {
+            v.lines.insert(
+                at + i,
+                InvoiceLine {
+                    item: Some(item),
+                    ..InvoiceLine::blank(keys.next_key())
+                },
+            );
+        }
+        for l in &mut v.lines {
+            if let Some(b) = l.billable.as_mut() {
+                b.markup_percent = Some(q("10"));
+            }
+        }
+    });
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let saved = s.editing.clone().expect("saved").record;
+    assert_eq!(saved.billable_sources().len(), 1);
+    let mut keys = cl_grid::RowKeyGen::new();
+    let (mut form, lines) = save::form_of(&saved, &mut keys);
+    form.lines = lines;
+    let req = form.to_new_invoice(&s.context()).expect("valid as read");
+    let new = engine::new_invoice(&req).expect("maps");
+    let body = serde_json::to_value(&new).expect("json");
+    let billable: Vec<&serde_json::Value> = body["lines"]
+        .as_array()
+        .expect("lines")
+        .iter()
+        .filter(|l| l.get("billableSourceLineId").is_some())
+        .collect();
+    assert_eq!(billable.len(), 1, "the markup line is not sent");
+    let b = billable[0];
+    assert!(b.get("accountId").is_some());
+    assert_eq!(b["markupPercent"], "10");
+    for k in ["itemId", "quantity", "unitPrice", "discountPercent"] {
+        assert!(b.get(k).is_none(), "{k} is the cost's");
+    }
+    assert!(
+        body["lines"]
+            .as_array()
+            .expect("lines")
+            .iter()
+            .any(|l| l.get("discountPercent").is_some()),
+        "the % discount keeps its stored percent"
+    );
+    assert_eq!(save::released(&saved, &req), Vec::new());
+    let mut d = s.link.demo_state().expect("demo");
+    let again = crate::company::demo::invoices::update(
+        &mut d,
+        saved.txn.id,
+        saved.txn.updated_at,
+        &new,
+        None,
+    )
+    .expect("unchanged edit");
+    assert_eq!(again.record.txn.total, saved.txn.total);
+    assert_eq!(again.record.tax_amount, saved.tax_amount);
 }

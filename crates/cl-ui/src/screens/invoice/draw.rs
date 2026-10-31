@@ -151,20 +151,9 @@ impl InvoiceScreen {
         }
     }
 
-    /// Preview: the saved invoice's PDF, full size.
+    /// Preview: the saved invoice's PDF, full size (made on the queue).
     fn preview_pdf(&mut self) {
-        match self.pdf() {
-            Some((name, bytes)) => self.link.push(crate::company::CompanyEvent::OpenWith(
-                CommandId::new(crate::screens::document_view::KIND),
-                Box::new(crate::windows::OpenPayload::Document(
-                    crate::widgets::pdf_viewer::DocSource {
-                        name,
-                        bytes: std::sync::Arc::from(bytes),
-                    },
-                )),
-            )),
-            None => self.notice = Some("invoice.email.pdf_failed"),
-        }
+        self.open_pdf();
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -560,7 +549,7 @@ impl InvoiceScreen {
             TotalsView::Ready(t) => t.tax_rate.map(|r| {
                 format!(
                     "{}%",
-                    (r.as_decimal() * rust_decimal::Decimal::ONE_HUNDRED).round_dp(3)
+                    (r.as_decimal() * rust_decimal::Decimal::ONE_HUNDRED).normalize()
                 )
             }),
             _ => None,
@@ -569,11 +558,15 @@ impl InvoiceScreen {
             || t("invoice.totals.tax"),
             |r| t_with("invoice.totals.tax_rate", &[("rate", &r)]),
         );
-        let editing = self.editing.as_ref().filter(|_| !self.is_dirty());
-        let paid = editing.and_then(|e| e.record.amount_paid);
-        let balance = match editing {
-            Some(e) => e.record.balance_due.map_or(Figure::Dash, Figure::Value),
-            None => fig(|t| t.total),
+        // Payments are the record's while editing (S7); the balance due is
+        // the engine's: the record's when nothing changed, a dash until
+        // the edit is saved (the UI subtracts nothing).
+        let paid = self.editing.as_ref().and_then(|e| e.record.amount_paid);
+        let has_paid = paid.is_some_and(|p| !p.is_zero());
+        let balance = match self.editing.as_ref() {
+            Some(e) if !self.is_dirty() => e.record.balance_due.map_or(Figure::Dash, Figure::Value),
+            Some(_) if has_paid => Figure::Dash,
+            _ => fig(|t| t.total),
         };
         egui::Frame::new()
             .fill(tokens.surface_subtle)

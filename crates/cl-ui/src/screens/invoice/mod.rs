@@ -155,6 +155,10 @@ pub struct InvoiceScreen {
     pub(crate) inputs: Inputs,
     pub(crate) tracker: PreviewTracker,
     pub(crate) preview_job: Option<(PreviewTicket, Job<InvoicePreview>)>,
+    /// Print is waiting for its print-later save to open Print Forms.
+    pub(crate) print_after_save: bool,
+    /// A PDF being made on the queue (Preview, Save PDF), opened when done.
+    pub(crate) pdf_job: Option<Job<(String, Vec<u8>)>>,
     pub(crate) preview_problem: Option<&'static str>,
     pub(crate) clock: Instant,
     pub(crate) editing: Option<Editing>,
@@ -229,6 +233,8 @@ impl InvoiceScreen {
             },
             tracker: PreviewTracker::new(),
             preview_job: None,
+            pdf_job: None,
+            print_after_save: false,
             preview_problem: None,
             clock: Instant::now(),
             editing: None,
@@ -316,10 +322,16 @@ impl InvoiceScreen {
 
     /// A void invoice can't change.
     pub(crate) fn read_only(&self) -> Option<&'static str> {
-        self.editing
-            .as_ref()
-            .filter(|e| e.void())
-            .map(|_| "invoice.read_only.void")
+        let e = self.editing.as_ref()?;
+        if e.void() {
+            Some("invoice.read_only.void")
+        } else if e.record.invoice_status == Some(cl_api::InvoiceStatus::Paid) {
+            // The engine refuses an edit of a paid invoice (400); say so up
+            // front (N6).
+            Some("invoice.paid.read_only")
+        } else {
+            None
+        }
     }
 
     pub(crate) fn busy(&self) -> bool {
@@ -431,6 +443,7 @@ impl InvoiceScreen {
             }
         }
         self.billable.poll();
+        self.poll_pdf();
         self.email.poll();
         if let Some(done) = self.email.take_done() {
             self.email_done(done);
@@ -446,7 +459,16 @@ impl InvoiceScreen {
                 None => self.preview_job = Some((ticket, job)),
                 Some(Ok(p)) => {
                     self.preview_problem = None;
-                    self.tracker.apply_preview(ticket, engine::figures_of(&p));
+                    let figures = engine::figures_of(&p);
+                    let held = !figures.billed_on.is_empty();
+                    if self.tracker.apply_preview(ticket, figures) && held {
+                        // Another invoice bills a cost on this one (U-128):
+                        // the list is read again; the lines say which.
+                        if let Some(c) = self.header.current().client {
+                            let link = std::sync::Arc::clone(&self.link);
+                            self.billable.fetch(&link, self.group.as_ref(), c);
+                        }
+                    }
                 }
                 Some(Err(e)) => {
                     self.preview_problem = Some(match e {
@@ -471,7 +493,7 @@ impl InvoiceScreen {
                     let job = engine::read(
                         &self.link,
                         self.group.as_ref(),
-                        |d| crate::company::demo::invoices::preview(d, &new),
+                        |d| crate::company::demo::invoices::preview(d, &new, editing),
                         {
                             let new = new.clone();
                             move |s| async move { s.invoices().preview(&new, editing).await }

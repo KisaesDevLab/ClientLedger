@@ -100,7 +100,7 @@ fn a_valid_invoice_becomes_its_request_without_any_sum() {
     let a = &r.lines[0];
     assert_eq!(a.item, Some(item()));
     assert_eq!(a.unit_price, None, "the engine prices it");
-    assert_eq!(a.quantity, q("24"));
+    assert_eq!(a.quantity, Some(q("24")));
     assert_eq!(a.description.as_deref(), Some("Shrubs, 3 gal\nplanted"));
     assert_eq!(a.service_date, Some(day(1)));
     assert_eq!(a.taxable, None, "the item's flag");
@@ -112,11 +112,38 @@ fn a_valid_invoice_becomes_its_request_without_any_sum() {
     assert_eq!(r.customer_message.as_deref(), Some(""));
     assert_eq!(r.header_tags, Some(vec![]));
     assert_eq!(r.hide_zero_lines, Some(false));
-    // A blank quantity goes out as 1.
+    // A blank quantity is left out (the engine takes 1); before
+    // invoice-pricing-v1 it goes out as 1.
     let mut f = f;
     f.lines[1].quantity = None;
     let r = f.to_new_invoice(&ctx()).expect("valid");
-    assert_eq!(r.lines[1].quantity, q("1"));
+    assert_eq!(r.lines[1].quantity, None);
+    let old = InvoiceContext {
+        caps: InvoiceCaps {
+            pricing: false,
+            ..ALL
+        },
+        ..InvoiceContext::default()
+    };
+    f.lines[0].rate = Some(m("32.50"));
+    let r = f.to_new_invoice(&old).expect("valid");
+    assert_eq!(r.lines[1].quantity, Some(q("1")));
+}
+
+#[test]
+fn changing_the_item_clears_the_old_price_and_discount() {
+    let mut keys = RowKeyGen::new();
+    let mut l = InvoiceLine {
+        item: Some(item()),
+        rate: Some(m("45.00")),
+        discount_percent: Some(q("10")),
+        ..InvoiceLine::blank(keys.next_key())
+    };
+    l.item_changed(Some(item()));
+    assert_eq!(l.rate, Some(m("45.00")), "same item keeps its price");
+    l.item_changed(None);
+    assert_eq!(l.rate, None);
+    assert_eq!(l.discount_percent, None);
 }
 
 #[test]
@@ -218,11 +245,9 @@ fn billable_costs_become_locked_taxable_lines_once() {
     let mut f = form(&mut keys);
     let seed = BillableSeed {
         source_line: source(),
-        item: None,
         account: Some(income()),
         description: "Stump grinder".into(),
-        quantity: q("1"),
-        unit_cost: m("842.15"),
+        quantity: Some(q("2")),
         markup_percent: Some(q("10")),
     };
     assert_eq!(f.add_billable(std::slice::from_ref(&seed), &mut keys), 1);
@@ -235,12 +260,28 @@ fn billable_costs_become_locked_taxable_lines_once() {
     let b = &f.lines[2];
     assert!(b.amounts_locked());
     assert_eq!(b.taxable, Some(true));
-    assert_eq!(b.rate, Some(m("842.15")));
+    assert_eq!(b.rate, None, "the engine's display rate fills it");
     assert!(f.lines[3].is_blank());
     assert_eq!(f.billable_sources(), vec![source()]);
     let r = f.to_new_invoice(&ctx()).expect("valid");
-    assert_eq!(r.lines[2].billable_source_line, Some(source()));
-    assert_eq!(r.lines[2].markup_percent, Some(q("10")));
+    let bl = &r.lines[2];
+    assert_eq!(bl.billable_source_line, Some(source()));
+    assert_eq!(bl.markup_percent, Some(q("10")));
+    assert_eq!(bl.account, Some(income()));
+    // Item, quantity and price are the source's: never sent (U-128).
+    assert_eq!(
+        (bl.item, bl.quantity, bl.unit_price, bl.discount_percent),
+        (None, None, None, None)
+    );
+    let k = f.lines[2].key;
+    let mut no_account = f.clone();
+    if let Some(l) = no_account.line_mut(k) {
+        l.account = None;
+    }
+    assert_eq!(
+        check_invoice(&no_account, &ctx()),
+        Err(vec![InvoiceProblem::BillableAccountMissing(k)])
+    );
     let no_e3 = InvoiceContext {
         caps: InvoiceCaps {
             billable: false,
@@ -248,7 +289,6 @@ fn billable_costs_become_locked_taxable_lines_once() {
         },
         ..InvoiceContext::default()
     };
-    let k = f.lines[2].key;
     assert_eq!(
         check_invoice(&f, &no_e3),
         Err(vec![InvoiceProblem::BillableNeedsUpdate(k)])
@@ -270,6 +310,8 @@ fn figures(n: usize, total: &str) -> PreviewFigures {
                 source: RateSource::Item,
                 amount: m("780.00"),
                 tax_amount: Some(m("63.18")),
+                display_rate: None,
+                billed_elsewhere: false,
             })
             .collect(),
         totals: PreviewTotals {
@@ -280,6 +322,7 @@ fn figures(n: usize, total: &str) -> PreviewFigures {
             due_date: Some(day(18)),
             balance_after: Some(m("3013.18")),
         },
+        billed_on: Vec::new(),
     }
 }
 

@@ -55,6 +55,53 @@ fn conflict(code: &str) -> ApiError {
     }
 }
 
+/// The engine's 400 with `code` (and `details`), mapped as cl-api maps it.
+fn refused(code: &str, details: &Value) -> ApiError {
+    cl_api::engine_refusal(
+        400,
+        &json!({"error": {"message": "refused", "code": code, "details": details}}),
+    )
+}
+
+/// The billable line rules the engine checks before anything else
+/// (`invoice.service.ts` resolveInvoiceLines, U-128): item, quantity, price
+/// and discount come from the cost (400 `BILLABLE_FIELDS_READONLY`); the
+/// income account is required (400 `BILLABLE_INCOME_ACCOUNT_REQUIRED`); a
+/// cost once (400 `BILLABLE_DUPLICATE_LINE`); markup 0 to 1000.
+fn billable_rules(new: &NewInvoice) -> Result<(), ApiError> {
+    let mut seen = BTreeSet::new();
+    for (i, l) in new.lines.iter().enumerate() {
+        let Some(src) = l.billable_source_line_id else {
+            continue;
+        };
+        if l.item_id.is_some()
+            || l.quantity.is_some()
+            || l.unit_price.is_some()
+            || l.discount_percent.is_some()
+        {
+            return Err(refused("BILLABLE_FIELDS_READONLY", &json!({"line": i})));
+        }
+        if l.account_id.is_none() {
+            return Err(refused(
+                "BILLABLE_INCOME_ACCOUNT_REQUIRED",
+                &json!({"line": i}),
+            ));
+        }
+        if !seen.insert(src) {
+            return Err(refused(
+                "BILLABLE_DUPLICATE_LINE",
+                &json!({"sourceLineId": src}),
+            ));
+        }
+        if l.markup_percent
+            .is_some_and(cl_api::SignedPercent::is_negative)
+        {
+            return Err(refused("VALIDATION_ERROR", &json!({})));
+        }
+    }
+    Ok(())
+}
+
 /// Half away from zero to `dp` places.
 #[must_use]
 pub fn round(d: Decimal, dp: u32) -> Decimal {
@@ -296,6 +343,16 @@ pub struct DemoInvoices {
     /// The demo company has no email server (WP-B): sending then fails
     /// with `SMTP_NOT_CONFIGURED`, as an engine without one.
     pub no_smtp: bool,
+    /// The account markups post to (company `billableMarkupAccountId`);
+    /// `None`: the demo's income account 4000.
+    pub markup_account: Option<AccountId>,
+}
+
+impl DemoInvoices {
+    fn markup_account(&self) -> AccountId {
+        self.markup_account
+            .unwrap_or_else(|| super::account_id(4000))
+    }
 }
 
 impl fmt::Debug for DemoInvoices {
@@ -310,11 +367,19 @@ impl fmt::Debug for DemoInvoices {
 /// A line as priced: the engine's request line with its rate resolved.
 struct Priced {
     input: SalesLineIn,
-    price: Decimal,
+    /// The quantity stored (`None` on subtotal, discount and billable
+    /// lines whose source has none).
+    quantity: Option<Decimal>,
+    /// The unit price stored (`None` on a subtotal or a percent discount).
+    price: Option<Decimal>,
     source: &'static str,
     account: Option<AccountId>,
     /// A subtotal line shows the sum of its group and posts nothing.
     display: Option<Decimal>,
+    /// A discount line's percent.
+    discount_percent: Option<Decimal>,
+    /// A billable line: its source, figures and source quantity.
+    billable: Option<(JournalLineId, super::billable::BillableFigures, Decimal)>,
 }
 
 /// round2(quantity × rate) of the priced lines of `group` that post.
@@ -345,30 +410,51 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
         if account.is_none() {
             return Err(invalid());
         }
-        let quantity = parse_quantity(&l.quantity.to_wire())?;
-        let taxable = l
-            .is_taxable
-            .unwrap_or(item.is_some_and(|i| i.fields.is_taxable));
+        let quantity = match l.quantity {
+            Some(q) => parse_quantity(&q.to_wire())?,
+            None => Decimal::ONE,
+        };
         if let Some(src) = l.billable_source_line_id {
             // Q-P20w: one line whose amount includes the markup; the rate
-            // shown is amount ÷ quantity, the amount itself is exact.
-            let cost = super::billable::cost(state, src).ok_or_else(invalid)?;
+            // shown is amount ÷ quantity, the amount itself is exact. The
+            // quantity is the source's (U-128).
+            let (owner, cost) = super::billable::cost(state, src).ok_or_else(|| {
+                cl_api::engine_refusal(
+                    409,
+                    &json!({"error": {"message": "x", "code": "BILLABLE_COST_UNAVAILABLE"}}),
+                )
+            })?;
+            if owner != new.contact_id {
+                return Err(refused(
+                    "BILLABLE_CONTACT_MISMATCH",
+                    &json!({"sourceLineId": src}),
+                ));
+            }
+            let q = cost
+                .quantity
+                .map_or(Decimal::ONE, cl_core::Quantity::as_decimal);
             let markup = l.markup_percent.map(cl_api::SignedPercent::as_decimal);
-            let fig = super::billable::figures(cost.amount.as_decimal(), quantity, markup);
+            let fig = super::billable::figures(cost.cost_amount.as_decimal(), q, markup);
             out.push(Priced {
                 input: SalesLineIn {
                     quantity: Decimal::ONE,
                     unit_price: fig.amount,
-                    taxable,
+                    taxable: l.is_taxable.unwrap_or(true),
                     tax_rate: None,
                 },
-                price: fig.rate,
-                source: "billable",
+                quantity: cost.quantity.map(cl_core::Quantity::as_decimal),
+                price: None,
+                source: "billable_cost",
                 account,
                 display: None,
+                discount_percent: None,
+                billable: Some((src, fig, q)),
             });
             continue;
         }
+        let taxable = l
+            .is_taxable
+            .unwrap_or(item.is_some_and(|i| i.fields.is_taxable));
         let kind = item.map_or(cl_api::ItemType::Service, |i| i.fields.item_type);
         if kind == cl_api::ItemType::Subtotal {
             let shown = group_sum(&out[group_start..]);
@@ -379,10 +465,13 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                     taxable: false,
                     tax_rate: None,
                 },
-                price: shown,
-                source: "computed",
+                quantity: None,
+                price: None,
+                source: "none",
                 account,
                 display: Some(shown),
+                discount_percent: None,
+                billable: None,
             });
             prev_group = Some(group_start);
             group_start = out.len();
@@ -395,9 +484,23 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 group_start
             };
             let base = group_sum(&out[from..]);
-            let amount = match item.and_then(|i| i.fields.discount_percent) {
-                Some(p) => -round(base * p.as_decimal() / Decimal::ONE_HUNDRED, 2),
-                None => -round(
+            // The line's own percent (as stored), else its amount off, else
+            // the item's (U-129).
+            let percent = l
+                .discount_percent
+                .map(cl_api::SignedPercent::as_decimal)
+                .or_else(|| {
+                    l.unit_price
+                        .is_none()
+                        .then(|| item.and_then(|i| i.fields.discount_percent))
+                        .flatten()
+                        .map(cl_api::SignedPercent::as_decimal)
+                });
+            let typed = l.discount_percent.is_some() || l.unit_price.is_some();
+            let amount = match (percent, l.unit_price) {
+                (Some(p), _) => -round(base * p / Decimal::ONE_HUNDRED, 2),
+                (None, Some(off)) => -round(off.as_decimal().abs(), 2),
+                (None, None) => -round(
                     item.and_then(|i| i.fields.unit_price)
                         .map_or(Decimal::ZERO, |m| m.as_decimal().abs()),
                     2,
@@ -410,10 +513,13 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                     taxable,
                     tax_rate: None,
                 },
-                price: amount,
-                source: "computed",
+                quantity: None,
+                price: percent.is_none().then_some(amount),
+                source: if typed { "input" } else { "item" },
                 account,
                 display: None,
+                discount_percent: percent,
+                billable: None,
             });
             continue;
         }
@@ -433,13 +539,38 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 taxable,
                 tax_rate: None,
             },
-            price,
+            quantity: Some(quantity),
+            price: Some(price),
             source,
             account,
             display: None,
+            discount_percent: None,
+            billable: None,
         });
     }
     Ok(out)
+}
+
+/// The invoice that already bills `src` (not `editing`), with its number.
+fn held_by(
+    state: &DemoState,
+    src: JournalLineId,
+    editing: Option<TransactionId>,
+) -> Option<(TransactionId, String)> {
+    state
+        .invoices
+        .stored
+        .iter()
+        .find(|(id, s)| Some(**id) != editing && s.claims.contains(&src))
+        .map(|(id, s)| {
+            (
+                *id,
+                s.record["txnNumber"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
 }
 
 /// The due date of terms `net_N` / `due_on_receipt` from `date`.
@@ -452,12 +583,20 @@ fn due_of(code: &str, days: Option<u32>, date: CalendarDate) -> Option<CalendarD
     date.add_days(n).ok()
 }
 
-/// `POST /invoices/preview` as the demo engine answers it.
+/// `POST /invoices/preview` as the demo engine answers it (`editing`: the
+/// invoice an edit previews, whose own total leaves the client's balance
+/// first and whose costs are its own).
 ///
 /// # Errors
-/// `Local(InvalidValue)` for what the engine refuses (no lines, unknown
-/// item, a line with neither account nor item, bad decimals).
-pub fn preview(state: &mut DemoState, new: &NewInvoice) -> Result<InvoicePreview, ApiError> {
+/// The billable line refusals; `Local(InvalidValue)` for what the engine
+/// refuses (no lines, unknown item, a line with neither account nor item,
+/// bad decimals).
+pub fn preview(
+    state: &mut DemoState,
+    new: &NewInvoice,
+    editing: Option<TransactionId>,
+) -> Result<InvoicePreview, ApiError> {
+    billable_rules(new)?;
     let priced = price_lines(state, new)?;
     let ins: Vec<SalesLineIn> = priced.iter().map(|p| p.input).collect();
     let doc = compute(&ins, default_rate())?;
@@ -465,18 +604,46 @@ pub fn preview(state: &mut DemoState, new: &NewInvoice) -> Result<InvoicePreview
     let due = new
         .due_date
         .or_else(|| due_of(terms, new.terms_days, new.txn_date));
+    let s = |d: Option<Decimal>| d.map(|d| d.to_string());
     let lines: Vec<Value> = priced
         .iter()
         .zip(&doc.lines)
         .map(|(p, o)| {
-            json!({
-                "unitPrice": p.price.to_string(),
+            let mut v = json!({
+                "quantity": s(p.quantity),
+                "unitPrice": s(p.billable.map(|(_, f, _)| f.rate).or(p.price)),
                 "unitPriceSource": p.source,
+                "discountPercent": s(p.discount_percent),
                 "amount": p.display.unwrap_or(o.amount).to_string(),
                 "taxAmount": o.tax_amount.to_string(),
-            })
+            });
+            if let Some((src, f, _)) = p.billable {
+                let error = held_by(state, src, editing).map(|(id, n)| {
+                    json!({"code": cl_api::BILLABLE_ALREADY_BILLED, "invoiceId": id, "invoiceNumber": n})
+                });
+                v["billableSourceLineId"] = json!(src);
+                v["costAmount"] = json!(f.cost.to_string());
+                v["markupAmount"] = json!(f.markup.to_string());
+                v["displayRate"] = json!(f.rate.to_string());
+                v["error"] = error.unwrap_or(Value::Null);
+            }
+            v
         })
         .collect();
+    // The client's balance (U-38) with this invoice's total; an edit's own
+    // posted total leaves it first.
+    let before = client_sales(state, new.contact_id)
+        .open_balance
+        .map_or(Decimal::ZERO, Money::as_decimal);
+    let own = editing
+        .and_then(|id| state.invoices.stored.get(&id))
+        .filter(|s| {
+            s.record["status"] != "void"
+                && s.record["contactId"].as_str() == Some(new.contact_id.to_string().as_str())
+        })
+        .and_then(|s| s.record["balanceDue"].as_str())
+        .and_then(|b| Decimal::from_str(b).ok())
+        .unwrap_or_default();
     let v = json!({
         "lines": lines,
         "subtotal": doc.subtotal.to_string(),
@@ -485,6 +652,8 @@ pub fn preview(state: &mut DemoState, new: &NewInvoice) -> Result<InvoicePreview
         "taxTotal": doc.tax_total.to_string(),
         "total": doc.total.to_string(),
         "dueDate": due,
+        "contactBalanceBefore": round(before - own, 2).to_string(),
+        "contactBalanceAfter": round(before - own + doc.total, 2).to_string(),
     });
     serde_json::from_value(v).map_err(|_| ApiError::Internal)
 }
@@ -523,30 +692,74 @@ fn record_json(
         }
     };
     let line_id = |n: usize| format!("d3{:06}-0000-4000-8000-{:012}", id_seq(id), n);
+    // The engine's journal (`buildInvoiceJournal`): A/R, then each line
+    // (a subtotal posts $0 with no quantity or price; a discount keeps its
+    // percent; a billable cost posts its cost line and, when not zero, a
+    // markup line to the markup account), then sales tax.
     let mut lines = vec![json!({
         "id": line_id(0), "accountId": AR, "debit": m4(doc.total)?, "credit": m4(Decimal::ZERO)?,
-        "lineOrder": 0, "quantity": null,
+        "lineOrder": 0, "quantity": null, "unitPriceSource": null, "lineRole": null,
     })];
     let mut claims = Vec::new();
-    for (i, ((p, o), l)) in priced.iter().zip(&doc.lines).zip(&new.lines).enumerate() {
-        let (debit, credit) = side(o.amount)?;
-        if let Some(src) = l.billable_source_line_id {
-            claims.push(src);
-        }
-        lines.push(json!({
-            "id": line_id(i + 1), "accountId": p.account, "debit": debit, "credit": credit,
-            "description": l.description, "lineOrder": i + 1, "tagId": l.tag_id, "itemId": l.item_id,
-            "quantity": l.quantity.to_wire(), "unitPrice": money(p.price)?.to_wire(),
+    let mut costs = Vec::new();
+    let markup_account = state.invoices.markup_account();
+    let opt = |d: Option<Decimal>| -> Result<Option<String>, ApiError> {
+        d.map(|d| money(d).map(Money::to_wire)).transpose()
+    };
+    for ((p, o), l) in priced.iter().zip(&doc.lines).zip(&new.lines) {
+        let n = lines.len();
+        let posted = if p.display.is_some() {
+            Decimal::ZERO
+        } else {
+            p.billable.map_or(o.amount, |(_, f, _)| f.cost)
+        };
+        let (debit, credit) = side(posted)?;
+        let mut line = json!({
+            "id": line_id(n), "accountId": p.account, "debit": debit, "credit": credit,
+            "description": l.description, "lineOrder": n, "tagId": l.tag_id,
+            "itemId": if p.billable.is_some() { None } else { l.item_id },
+            "quantity": opt(p.quantity)?, "unitPrice": opt(p.price)?,
+            "discountPercent": p.discount_percent.map(|d| round(d, 4).to_string()),
+            "unitPriceSource": p.source,
             "isTaxable": p.input.taxable, "taxRate": round(o.tax_rate, 4).to_string(),
             "taxAmount": m4(o.tax_amount)?, "serviceDate": l.service_date,
-            "billableSourceLineId": l.billable_source_line_id, "markupPercent": l.markup_percent,
-        }));
+        });
+        if let Some((src, f, q)) = p.billable {
+            claims.push(src);
+            line["lineRole"] = json!("billable_cost");
+            line["billableSourceLineId"] = json!(src);
+            lines.push(line);
+            if !f.markup.is_zero() {
+                let (debit, credit) = side(f.markup)?;
+                let n = lines.len();
+                lines.push(json!({
+                    "id": line_id(n), "accountId": markup_account, "debit": debit, "credit": credit,
+                    "description": l.description, "lineOrder": n, "unitPriceSource": "billable_cost",
+                    "lineRole": "billable_markup", "billableSourceLineId": src,
+                    "isTaxable": p.input.taxable, "taxAmount": m4(Decimal::ZERO)?,
+                }));
+            }
+            let source = super::billable::cost(state, src).map(|(_, c)| c.source_transaction_id);
+            costs.push(json!({
+                "sourceLineId": src, "sourceTransactionId": source,
+                "costAmount": round(f.cost, 2).to_string(),
+                "markupPercent": l.markup_percent.map_or_else(|| "0.0000".to_string(), |m| round(m.as_decimal(), 4).to_string()),
+                "markupAmount": round(f.markup, 2).to_string(), "amount": round(f.amount, 2).to_string(),
+                "quantity": q.to_string(), "displayRate": f.rate.to_string(),
+                "incomeAccountId": p.account,
+                "markupAccountId": (!f.markup.is_zero()).then_some(markup_account),
+                "billed": true,
+            }));
+            continue;
+        }
+        lines.push(line);
     }
     if !doc.tax_total.is_zero() {
         let (debit, credit) = side(doc.tax_total)?;
+        let n = lines.len();
         lines.push(json!({
-            "id": line_id(new.lines.len() + 1), "accountId": SALES_TAX, "debit": debit,
-            "credit": credit, "description": "Sales Tax", "lineOrder": new.lines.len() + 1,
+            "id": line_id(n), "accountId": SALES_TAX, "debit": debit,
+            "credit": credit, "description": "Sales Tax", "lineOrder": n,
             "quantity": null,
         }));
     }
@@ -566,7 +779,8 @@ fn record_json(
         "termsDays": new.terms_days, "poNumber": new.po_number, "customerMessage": new.customer_message,
         "hideZeroLines": new.hide_zero_lines.unwrap_or(false), "tagIds": new.tag_ids.clone().unwrap_or_default(),
         "sentAt": null, "sendHistory": [], "printLater": new.print_later.unwrap_or(false),
-        "updatedAt": DemoState::now(), "lines": lines,
+        "updatedAt": DemoState::now(), "lines": lines, "billableCosts": costs,
+        "layoutId": new.layout_id.id(),
     });
     Ok((v, claims))
 }
@@ -591,6 +805,10 @@ pub fn create(
     new: &NewInvoice,
     password: Option<&Secret>,
 ) -> Result<Versioned<InvoiceRecord>, ApiError> {
+    billable_rules(new)?;
+    if !new.release_billable_source_line_ids.is_empty() {
+        return Err(refused("VALIDATION_ERROR", &json!({})));
+    }
     cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
     check_closing(closing(state), &[new.txn_date], password)?;
     if new
@@ -758,6 +976,7 @@ pub fn update(
     new: &NewInvoice,
     password: Option<&Secret>,
 ) -> Result<Versioned<InvoiceRecord>, ApiError> {
+    billable_rules(new)?;
     cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
     let close = closing(state);
     let old = state
@@ -766,8 +985,30 @@ pub fn update(
         .get(&id)
         .cloned()
         .ok_or(ApiError::NotFound { code: None })?;
-    if old.record["status"] == "void" {
-        return Err(invalid());
+    if old.record["status"] == "void" || old.record["invoiceStatus"] == "paid" {
+        return Err(refused("VALIDATION_ERROR", &json!({})));
+    }
+    // U-128: every cost the invoice bills is resent or released (409
+    // BILLABLE_LINES_MISSING otherwise); not both.
+    let sent: BTreeSet<JournalLineId> = new
+        .lines
+        .iter()
+        .filter_map(|l| l.billable_source_line_id)
+        .collect();
+    let release: BTreeSet<JournalLineId> = new
+        .release_billable_source_line_ids
+        .iter()
+        .copied()
+        .collect();
+    if sent.intersection(&release).next().is_some() {
+        return Err(refused("VALIDATION_ERROR", &json!({})));
+    }
+    if old
+        .claims
+        .iter()
+        .any(|c| !sent.contains(c) && !release.contains(c))
+    {
+        return Err(conflict("BILLABLE_LINES_MISSING"));
     }
     let old_date = old.record["txnDate"]
         .as_str()
@@ -808,6 +1049,13 @@ pub fn update(
     for k in ["sendHistory", "sentAt", "invoiceStatus"] {
         record[k] = old.record[k].clone();
     }
+    // Omitted fields keep their values on an edit (layout, print later).
+    if new.layout_id.is_omitted() {
+        record["layoutId"] = old.record["layoutId"].clone();
+    }
+    if new.print_later.is_none() {
+        record["printLater"] = old.record["printLater"].clone();
+    }
     state.invoices.writes += 1;
     record["updatedAt"] = json!(stamp(state));
     let saved = versioned(&record)?;
@@ -826,27 +1074,52 @@ pub fn list(state: &DemoState) -> Vec<TransactionId> {
 }
 
 /// `POST /invoices/{id}/email`: sends (the demo has no network: it records
-/// the send) unless the demo has no email server.
+/// the send, to + cc + bcc, as the engine does) unless the demo has no
+/// email server. With `outbox_id` the Outbox message goes in the same
+/// commit (404 `OUTBOX_ITEM_NOT_FOUND` when it is already gone).
 ///
 /// # Errors
-/// `SMTP_NOT_CONFIGURED` as the engine's 409; `NotFound`.
+/// `SMTP_NOT_CONFIGURED` as the engine's 400; `NotFound`.
 pub fn email(
     state: &mut DemoState,
     id: TransactionId,
-    to: &[String],
+    message: &cl_api::EmailMessage,
+    outbox_id: Option<cl_api::OutboxId>,
 ) -> Result<Versioned<InvoiceRecord>, ApiError> {
-    if state.invoices.no_smtp {
-        return Err(conflict(cl_api::SMTP_NOT_CONFIGURED));
+    if let Some(o) = outbox_id
+        && !state
+            .invoices
+            .outbox
+            .iter()
+            .any(|v| v["id"].as_str() == Some(o.to_string().as_str()))
+    {
+        return Err(ApiError::NotFound {
+            code: cl_api::ErrorCode::parse("OUTBOX_ITEM_NOT_FOUND"),
+        });
     }
-    record_sent(
+    if state.invoices.no_smtp {
+        return Err(refused(cl_api::SMTP_NOT_CONFIGURED, &json!({})));
+    }
+    let recipients: Vec<String> = message
+        .to
+        .iter()
+        .chain(&message.cc)
+        .chain(&message.bcc)
+        .cloned()
+        .collect();
+    let saved = record_sent(
         state,
         id,
         &SendRecord {
             method: SendMethod::Email,
-            recipients: to.to_vec(),
+            recipients,
             sent_at: None,
         },
-    )
+    )?;
+    if let Some(o) = outbox_id {
+        let _ = remove_from_outbox(state, o);
+    }
+    Ok(saved)
 }
 
 /// `POST /invoices/{id}/email-later`: the message waits in the Outbox.
@@ -890,13 +1163,24 @@ pub fn outbox(state: &DemoState) -> Vec<cl_api::OutboxItem> {
         .collect()
 }
 
-/// `DELETE /forms/email-queue/{id}`.
-pub fn remove_from_outbox(state: &mut DemoState, id: cl_api::OutboxId) {
+/// `DELETE /forms/email-queue/{id}`: 204, or 404 `OUTBOX_ITEM_NOT_FOUND`
+/// when it is already gone.
+///
+/// # Errors
+/// `NotFound`.
+pub fn remove_from_outbox(state: &mut DemoState, id: cl_api::OutboxId) -> Result<(), ApiError> {
     let id = id.to_string();
+    let before = state.invoices.outbox.len();
     state
         .invoices
         .outbox
         .retain(|v| v["id"].as_str() != Some(id.as_str()));
+    if state.invoices.outbox.len() == before {
+        return Err(ApiError::NotFound {
+            code: cl_api::ErrorCode::parse("OUTBOX_ITEM_NOT_FOUND"),
+        });
+    }
+    Ok(())
 }
 
 /// The client's sales figures (U-38 open balance from the demo invoices,

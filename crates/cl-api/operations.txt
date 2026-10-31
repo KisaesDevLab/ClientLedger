@@ -293,8 +293,8 @@ PUT     /api/v1/invoices/{id}                   keyable-invoice
 POST    /api/v1/invoices/{id}/void              keyable-invoice
 POST    /api/v1/invoices/{id}/sent              keyable-invoice
 POST    /api/v1/invoices/preview                pre-handler-only
-POST    /api/v1/invoices/{id}/email             pre-handler-only
-POST    /api/v1/invoices/{id}/email-later       pre-handler-only
+POST    /api/v1/invoices/{id}/email             keyable-invoice-email
+POST    /api/v1/invoices/{id}/email-later       keyable-invoice-email
 GET     /api/v1/forms/email-queue               idempotent
 DELETE  /api/v1/forms/email-queue/{id}          pre-handler-only
 GET     /api/v1/billable-costs                  idempotent

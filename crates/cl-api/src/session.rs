@@ -136,6 +136,8 @@ impl Client {
         );
         self.exec()
             .set_idempotency_invoice_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_INVOICE));
+        self.exec()
+            .set_invoice_email_v1(info.capabilities.has(Capabilities::INVOICE_EMAIL));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

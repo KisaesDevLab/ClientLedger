@@ -75,12 +75,71 @@ pub const INVOICE_TERMS_DAYS_MAX: u32 = 3650;
 pub const INVOICE_HAS_PAYMENTS: &str = "INVOICE_HAS_PAYMENTS";
 /// 400: a void invoice can't be recorded as sent (U-126).
 pub const INVOICE_VOID_CODE: &str = "INVOICE_VOID";
-/// 409: the billable cost was invoiced meanwhile (U-128; contract, E3).
+/// 409: the billable cost was invoiced meanwhile (U-128;
+/// `details.conflicts`).
 pub const BILLABLE_ALREADY_BILLED: &str = "BILLABLE_ALREADY_BILLED";
-/// 4xx: the company has no SMTP server set up (U-127; contract, E4).
+/// 400: the company has no SMTP server set up, or its host changed (U-127).
 pub const SMTP_NOT_CONFIGURED: &str = "SMTP_NOT_CONFIGURED";
-/// 5xx/4xx: the SMTP server refused the message (U-127; contract, E4).
+/// 400: the SMTP server refused the message (`details.reason: "auth"` for a
+/// login failure; U-127).
 pub const SMTP_SEND_FAILED: &str = "SMTP_SEND_FAILED";
+
+/// Every engine code [`invoice_refusal`] knows, with its refusal.
+const REFUSAL_CODES: &[(&str, InvoiceRefusal)] = &[
+    (crate::resources::ap_doc::STALE, InvoiceRefusal::Stale),
+    (INVOICE_HAS_PAYMENTS, InvoiceRefusal::HasPayments),
+    (INVOICE_VOID_CODE, InvoiceRefusal::Void),
+    (
+        BILLABLE_ALREADY_BILLED,
+        InvoiceRefusal::BillableAlreadyBilled,
+    ),
+    (
+        "BILLABLE_COST_UNAVAILABLE",
+        InvoiceRefusal::BillableUnavailable,
+    ),
+    (
+        "BILLABLE_LINES_MISSING",
+        InvoiceRefusal::BillableLinesMissing,
+    ),
+    (
+        "INVOICE_LINES_MISSING",
+        InvoiceRefusal::BillableLinesMissing,
+    ),
+    (
+        "BILLABLE_CONTACT_MISMATCH",
+        InvoiceRefusal::BillableClientMismatch,
+    ),
+    ("BILLABLE_DUPLICATE_LINE", InvoiceRefusal::BillableDuplicate),
+    (
+        "BILLABLE_FIELDS_READONLY",
+        InvoiceRefusal::BillableFieldsReadOnly,
+    ),
+    (
+        "BILLABLE_INCOME_ACCOUNT_REQUIRED",
+        InvoiceRefusal::BillableAccountRequired,
+    ),
+    ("BILLABLE_LINK_BROKEN", InvoiceRefusal::BillableUnavailable),
+    (
+        "MARKUP_ACCOUNT_REQUIRED",
+        InvoiceRefusal::MarkupAccountRequired,
+    ),
+    (
+        "MARKUP_ACCOUNT_INVALID",
+        InvoiceRefusal::MarkupAccountInvalid,
+    ),
+    ("INVOICE_TOTAL_BELOW_PAID", InvoiceRefusal::TotalBelowPaid),
+    (
+        "RECURRING_HAS_BILLABLE_COSTS",
+        InvoiceRefusal::RecurringHasBillable,
+    ),
+    ("RETRY", InvoiceRefusal::Retry),
+    ("ATTACHMENT_TOO_LARGE", InvoiceRefusal::AttachmentTooLarge),
+    ("OUTBOX_ITEM_NOT_FOUND", InvoiceRefusal::OutboxItemGone),
+    ("OFFLINE_UNAVAILABLE", InvoiceRefusal::Offline),
+    (SMTP_NOT_CONFIGURED, InvoiceRefusal::SmtpNotConfigured),
+    ("INVOICE_LAYOUT_NOT_FOUND", InvoiceRefusal::LayoutGone),
+    ("INVOICE_LAYOUT_ARCHIVED", InvoiceRefusal::LayoutArchived),
+];
 
 /// The engine's refusal of an invoice save, void or send, for the form's
 /// plain-language message (plan §5).
@@ -94,10 +153,70 @@ pub enum InvoiceRefusal {
     Void,
     /// A billable cost was billed meanwhile: reload the costs.
     BillableAlreadyBilled,
+    /// A billable cost is gone (voided or changed; `BILLABLE_COST_UNAVAILABLE`).
+    BillableUnavailable,
+    /// The edit leaves out a billed cost without releasing it (409
+    /// `BILLABLE_LINES_MISSING`).
+    BillableLinesMissing,
+    /// The cost belongs to another client (`BILLABLE_CONTACT_MISMATCH`).
+    BillableClientMismatch,
+    /// The same cost twice (`BILLABLE_DUPLICATE_LINE`).
+    BillableDuplicate,
+    /// Item, quantity or rate sent on a billable line.
+    BillableFieldsReadOnly,
+    /// A billable line without its income account.
+    BillableAccountRequired,
+    /// A markup with no markup account set (Preferences).
+    MarkupAccountRequired,
+    /// The markup account is not an income account.
+    MarkupAccountInvalid,
+    /// The edit would make the total less than what was paid.
+    TotalBelowPaid,
+    /// A recurring schedule can't copy billable costs.
+    RecurringHasBillable,
+    /// The engine asks to try again (409 `RETRY`; same key).
+    Retry,
+    /// The PDF is over 10 MB.
+    AttachmentTooLarge,
+    /// The Outbox message is gone (sent or removed meanwhile).
+    OutboxItemGone,
+    /// The engine is offline for email (503 `OFFLINE_UNAVAILABLE`).
+    Offline,
     /// No SMTP server set up: link to Preferences.
     SmtpNotConfigured,
     /// The mail server refused it: offer the Outbox or Save PDF.
     SmtpSendFailed,
+    /// The mail server refused the login (`SMTP_SEND_FAILED`, reason
+    /// `auth`).
+    SmtpLoginFailed,
+    /// The invoice layout is gone.
+    LayoutGone,
+    /// The invoice layout is archived.
+    LayoutArchived,
+}
+
+impl InvoiceRefusal {
+    /// True when the mail server can't send anything now (Send all stops).
+    #[must_use]
+    pub const fn stops_sending(self) -> bool {
+        matches!(
+            self,
+            InvoiceRefusal::SmtpNotConfigured
+                | InvoiceRefusal::SmtpLoginFailed
+                | InvoiceRefusal::Offline
+        )
+    }
+}
+
+fn error_code(e: &ApiError) -> Option<&str> {
+    match e {
+        ApiError::Conflict { code: Some(c), .. }
+        | ApiError::NotFound { code: Some(c) }
+        | ApiError::Forbidden { code: Some(c) }
+        | ApiError::Server { code: Some(c), .. } => Some(c.as_str()),
+        ApiError::Validation(v) => v.code().map(crate::errors::ErrorCode::as_str),
+        _ => None,
+    }
 }
 
 /// Classifies `e` (`None` for anything else: closed periods, passwords,
@@ -105,39 +224,49 @@ pub enum InvoiceRefusal {
 #[must_use]
 pub fn invoice_refusal(e: &ApiError) -> Option<InvoiceRefusal> {
     use crate::errors::ConflictReason;
-    let code = match e {
+    match e {
         ApiError::Conflict {
             reason: ConflictReason::Stale,
             ..
         } => return Some(InvoiceRefusal::Stale),
-        ApiError::Conflict { code: Some(c), .. } => c.as_str(),
-        ApiError::Validation(v) => v.code().map_or("", |c| c.as_str()),
-        _ => return None,
-    };
-    Some(match code {
-        crate::resources::ap_doc::STALE => InvoiceRefusal::Stale,
-        INVOICE_HAS_PAYMENTS => InvoiceRefusal::HasPayments,
-        INVOICE_VOID_CODE => InvoiceRefusal::Void,
-        BILLABLE_ALREADY_BILLED => InvoiceRefusal::BillableAlreadyBilled,
-        SMTP_NOT_CONFIGURED => InvoiceRefusal::SmtpNotConfigured,
-        SMTP_SEND_FAILED => InvoiceRefusal::SmtpSendFailed,
-        _ => return None,
-    })
+        ApiError::OfflineUnavailable { .. } => return Some(InvoiceRefusal::Offline),
+        ApiError::PayloadTooLarge | ApiError::Local(LocalValidation::AttachmentTooLarge) => {
+            return Some(InvoiceRefusal::AttachmentTooLarge);
+        }
+        ApiError::Validation(v) if v.code().is_some_and(|c| c.as_str() == SMTP_SEND_FAILED) => {
+            let auth = v.reason().is_some_and(|r| r.as_str() == "AUTH");
+            return Some(if auth {
+                InvoiceRefusal::SmtpLoginFailed
+            } else {
+                InvoiceRefusal::SmtpSendFailed
+            });
+        }
+        _ => {}
+    }
+    let code = error_code(e)?;
+    if code == SMTP_SEND_FAILED {
+        return Some(InvoiceRefusal::SmtpSendFailed);
+    }
+    REFUSAL_CODES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, r)| *r)
 }
 
 // ---- A signed percent ----------------------------------------------------------
 
 /// A percent such as a price level's `-7.5` or a markup's `10`: at most 4
-/// decimals, above -100 and below 1000. Exact; never a float.
+/// decimals, above -100 and at most 1000 (the engine's markup range is 0 to
+/// 1000 inclusive). Exact; never a float.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignedPercent(Decimal);
 
 impl SignedPercent {
-    /// The largest percent (exclusive).
+    /// The largest percent (inclusive).
     const MAX: Decimal = Decimal::from_parts(1000, 0, 0, false, 0);
 
     /// Strict parse: an optional `-`, digits with an optional `.` and 1 to 4
-    /// decimals, above -100 and below 1000.
+    /// decimals, above -100 and at most 1000.
     ///
     /// # Errors
     /// `InvalidValue` for anything else.
@@ -146,7 +275,7 @@ impl SignedPercent {
         let (int, frac) = body.split_once('.').unwrap_or((body, ""));
         let digits = |p: &str| p.bytes().all(|b| b.is_ascii_digit());
         if int.is_empty()
-            || int.len() > 3
+            || int.len() > 4
             || !digits(int)
             || !digits(frac)
             || frac.len() > 4
@@ -155,7 +284,7 @@ impl SignedPercent {
             return Err(LocalValidation::InvalidValue);
         }
         let d = Decimal::from_str(s).map_err(|_| LocalValidation::InvalidValue)?;
-        if d <= -Decimal::ONE_HUNDRED || d >= Self::MAX {
+        if d <= -Decimal::ONE_HUNDRED || d > Self::MAX {
             return Err(LocalValidation::InvalidValue);
         }
         Ok(SignedPercent(d.normalize()))
@@ -214,6 +343,11 @@ uuid_id!(
 uuid_id!(
     /// One message waiting in the Outbox (U-127).
     OutboxId
+);
+
+uuid_id!(
+    /// One invoice print layout (U-130).
+    InvoiceLayoutId
 );
 
 // ---- The saved invoice -----------------------------------------------------------
@@ -306,12 +440,17 @@ pub struct InvoiceRecordLine {
     pub description: Option<String>,
     /// Service date.
     pub service_date: Option<CalendarDate>,
-    /// Quantity.
-    pub quantity: Quantity,
-    /// Unit price as stored.
+    /// Quantity (`None` on a subtotal or discount line).
+    pub quantity: Option<Quantity>,
+    /// Unit price as stored (`None` on a subtotal or a percent discount).
     pub unit_price: Option<Money>,
+    /// A percent discount line's percent as stored (resent on an edit so
+    /// the line keeps it even if the item's percent changed).
+    pub discount_percent: Option<SignedPercent>,
+    /// Where the engine took the price from.
+    pub price_source: Option<PriceSource>,
     /// The line amount the engine posted (negative for a discount or a
-    /// return line).
+    /// return line; a billable line's cost and markup together, Q-P20w).
     pub amount: Money,
     /// Taxable.
     pub is_taxable: bool,
@@ -323,8 +462,61 @@ pub struct InvoiceRecordLine {
     pub tag: Option<TagId>,
     /// The billable cost it invoices (U-128; contract, E3).
     pub billable_source_line_id: Option<JournalLineId>,
-    /// Markup on that cost (U-128; contract, E3).
+    /// Markup on that cost (U-128).
     pub markup_percent: Option<SignedPercent>,
+    /// A billable line's rate as shown (amount / quantity, 4 places).
+    pub display_rate: Option<Money>,
+}
+
+impl InvoiceRecordLine {
+    /// A subtotal line (posts $0; the engine shows the group's sum).
+    #[must_use]
+    pub fn is_subtotal(&self) -> bool {
+        self.quantity.is_none()
+            && self.unit_price.is_none()
+            && self.discount_percent.is_none()
+            && self.price_source == Some(PriceSource::Unpriced)
+    }
+}
+
+/// One billable cost an invoice bills (`GET /invoices/{id}`
+/// `billableCosts[]`, U-128): the cost and markup journal lines joined
+/// again into the one row the form shows (Q-P20w).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvoiceBillableCost {
+    /// The source cost line.
+    pub source_line_id: JournalLineId,
+    /// The bill, check or expense it is on.
+    #[serde(default)]
+    pub source_transaction_id: Option<TransactionId>,
+    /// The cost billed (before markup).
+    pub cost_amount: Money,
+    /// The markup percent.
+    #[serde(default)]
+    pub markup_percent: Option<SignedPercent>,
+    /// The markup amount.
+    #[serde(default)]
+    pub markup_amount: Option<Money>,
+    /// Cost plus markup: the row's amount.
+    pub amount: Money,
+    /// The source's quantity (1 when it had none).
+    #[serde(default)]
+    pub quantity: Option<Quantity>,
+    /// amount / quantity, 4 places.
+    #[serde(default)]
+    pub display_rate: Option<Money>,
+    /// The income account the cost credits.
+    #[serde(default)]
+    pub income_account_id: Option<AccountId>,
+}
+
+impl fmt::Debug for InvoiceBillableCost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InvoiceBillableCost")
+            .field("source_line_id", &self.source_line_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for InvoiceRecordLine {
@@ -378,9 +570,28 @@ pub struct InvoiceRecord {
     pub send_history: Vec<SendEvent>,
     /// Waiting to be printed.
     pub print_later: bool,
+    /// The billable costs it bills (U-128).
+    pub billable_costs: Vec<InvoiceBillableCost>,
+    /// The print layout (`None`: the company default; U-130).
+    pub layout_id: Option<InvoiceLayoutId>,
 }
 
 impl InvoiceRecord {
+    /// The billable source lines this invoice bills (sent back on an edit
+    /// or released, U-128).
+    #[must_use]
+    pub fn billable_sources(&self) -> Vec<JournalLineId> {
+        let mut v: Vec<JournalLineId> = self
+            .lines
+            .iter()
+            .filter_map(|l| l.billable_source_line_id)
+            .chain(self.billable_costs.iter().map(|c| c.source_line_id))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
     /// True once payments or credits are applied (void is refused).
     #[must_use]
     pub fn has_payments(&self) -> bool {
@@ -458,6 +669,10 @@ struct RecordWire {
     print_later: bool,
     #[serde(default)]
     lines: Vec<LineWire>,
+    #[serde(default)]
+    billable_costs: Option<Vec<InvoiceBillableCost>>,
+    #[serde(default)]
+    layout_id: Option<InvoiceLayoutId>,
 }
 
 #[derive(Deserialize)]
@@ -469,6 +684,12 @@ struct LineWire {
     quantity: Option<Quantity>,
     #[serde(default)]
     unit_price: Option<Money>,
+    #[serde(default)]
+    discount_percent: Option<SignedPercent>,
+    #[serde(default)]
+    unit_price_source: Option<PriceSource>,
+    #[serde(default)]
+    line_role: Option<String>,
     #[serde(default, deserialize_with = "null_false")]
     is_taxable: bool,
     #[serde(default)]
@@ -484,10 +705,13 @@ struct LineWire {
 }
 
 /// Reads the object as the [`Transaction`] and again for the invoice
-/// fields. The document lines are the ones with a quantity (the engine
-/// writes none on its A/R and sales tax lines); their amount is credit less
-/// debit, so a discount line reads negative. A record that is not an
-/// invoice is refused.
+/// fields. The document lines are the ones the engine marks as such (a
+/// price source, a line role, an item or a quantity; its A/R and sales tax
+/// lines carry none): subtotal and discount lines have no quantity and are
+/// kept. A billable cost's markup line (`lineRole: billable_markup`) is
+/// merged into its cost line from `billableCosts[]` (Q-P20w). Amounts are
+/// credit less debit, so a discount line reads negative. A record that is
+/// not an invoice is refused.
 impl<'de> Deserialize<'de> for InvoiceRecord {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
@@ -501,13 +725,31 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
         }
         let mut pairs: Vec<_> = txn.lines.iter().zip(w.lines).collect();
         pairs.sort_by_key(|(l, _)| l.line_order.unwrap_or(0));
+        let costs = w.billable_costs.clone().unwrap_or_default();
         let mut lines = Vec::new();
         for (l, x) in pairs {
-            let Some(quantity) = x.quantity else { continue };
-            let amount = l
+            let document = x.unit_price_source.is_some()
+                || x.line_role.is_some()
+                || x.item_id.is_some()
+                || x.quantity.is_some();
+            if !document || x.line_role.as_deref() == Some("billable_markup") {
+                continue;
+            }
+            let mut amount = l
                 .credit
                 .checked_sub(l.debit)
                 .map_err(|_| de::Error::custom("line amount"))?;
+            let mut quantity = x.quantity;
+            let mut markup_percent = x.markup_percent;
+            let mut display_rate = None;
+            if let Some(src) = x.billable_source_line_id
+                && let Some(c) = costs.iter().find(|c| c.source_line_id == src)
+            {
+                amount = c.amount;
+                quantity = c.quantity.or(quantity);
+                markup_percent = c.markup_percent.or(markup_percent);
+                display_rate = c.display_rate;
+            }
             lines.push(InvoiceRecordLine {
                 account: l.account_id,
                 item: x.item_id,
@@ -515,13 +757,16 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
                 service_date: x.service_date,
                 quantity,
                 unit_price: x.unit_price,
+                discount_percent: x.discount_percent,
+                price_source: x.unit_price_source,
                 amount,
                 is_taxable: x.is_taxable,
                 tax_rate: x.tax_rate,
                 tax_amount: x.tax_amount,
                 tag: l.tag_id,
                 billable_source_line_id: x.billable_source_line_id,
-                markup_percent: x.markup_percent,
+                markup_percent,
+                display_rate,
             });
         }
         Ok(InvoiceRecord {
@@ -543,6 +788,8 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
             sent_at: w.sent_at,
             send_history: w.send_history.unwrap_or_default(),
             print_later: w.print_later,
+            billable_costs: costs,
+            layout_id: w.layout_id,
         })
     }
 }
@@ -568,6 +815,7 @@ impl EditableFields for InvoiceRecord {
         "lines.serviceDate",
         "lines.quantity",
         "lines.unitPrice",
+        "lines.discountPercent",
         "lines.amount",
         "lines.isTaxable",
         "lines.tagId",
@@ -585,8 +833,9 @@ impl EditableFields for InvoiceRecord {
                     "itemId": l.item,
                     "description": l.description.as_deref().filter(|d| !d.is_empty()),
                     "serviceDate": l.service_date,
-                    "quantity": l.quantity.to_wire(),
+                    "quantity": l.quantity.map(Quantity::to_wire),
                     "unitPrice": l.unit_price.map(Money::to_wire),
+                    "discountPercent": l.discount_percent,
                     "amount": l.amount.to_wire(),
                     "isTaxable": l.is_taxable,
                     "tagId": l.tag,
@@ -715,43 +964,88 @@ impl fmt::Debug for InvoiceSummary {
 
 // ---- Preview (U-129, E2) -----------------------------------------------------------
 
-/// Where a line's unit price came from (U-129; contract per P20 plan §2,
-/// verify when E2 lands).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+/// Where a line's unit price came from (`unitPriceSource`, U-129; the
+/// engine's `invoice-compute.ts` names).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PriceSource {
     /// The owner typed it.
     Input,
     /// The item's price.
     Item,
-    /// The client's price level (a % of the item's price).
+    /// The price the client's level sets for this item.
     PriceLevel,
-    /// A price the client's level sets for this item.
-    PriceLevelItem,
-    /// A discount or subtotal line the engine figured.
-    Computed,
+    /// The client's level's % of the item's price.
+    PriceLevelPercent,
+    /// No price (a subtotal line).
+    #[serde(rename = "none")]
+    Unpriced,
     /// A billable cost (with any markup).
-    Billable,
+    BillableCost,
     /// A source this version does not know.
     #[serde(other)]
     Other,
+}
+
+/// A previewed line the engine could not bill as asked (U-128): another
+/// invoice holds the cost.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLineError {
+    /// `BILLABLE_ALREADY_BILLED`.
+    pub code: String,
+    /// The invoice that bills it.
+    #[serde(default)]
+    pub invoice_id: Option<TransactionId>,
+    /// Its number (display).
+    #[serde(default)]
+    pub invoice_number: Option<String>,
+}
+
+impl fmt::Debug for PreviewLineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreviewLineError")
+            .field("invoice_id", &self.invoice_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One previewed line.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewLine {
+    /// The quantity it used (`None` on subtotal and discount lines).
+    #[serde(default)]
+    pub quantity: Option<Quantity>,
     /// The unit price the engine used.
     #[serde(default)]
     pub unit_price: Option<Money>,
     /// Where it came from.
     #[serde(default)]
     pub unit_price_source: Option<PriceSource>,
+    /// A discount line's percent.
+    #[serde(default)]
+    pub discount_percent: Option<SignedPercent>,
     /// The line amount.
     pub amount: Money,
     /// The line's share of the tax.
     #[serde(default)]
     pub tax_amount: Option<Money>,
+    /// A billable line's cost (U-128).
+    #[serde(default)]
+    pub cost_amount: Option<Money>,
+    /// A billable line's markup percent.
+    #[serde(default)]
+    pub markup_percent: Option<SignedPercent>,
+    /// A billable line's markup amount.
+    #[serde(default)]
+    pub markup_amount: Option<Money>,
+    /// A billable line's rate as shown (amount / quantity, 4 places).
+    #[serde(default)]
+    pub display_rate: Option<Money>,
+    /// Another invoice holds this line's cost.
+    #[serde(default)]
+    pub error: Option<PreviewLineError>,
 }
 
 impl fmt::Debug for PreviewLine {
@@ -935,23 +1229,22 @@ impl fmt::Debug for OutboxItem {
 
 // ---- Billable costs (U-128, E3) -------------------------------------------------------
 
-/// One unbilled cost of a client (`GET /billable-costs`, U-128; contract
-/// per P20 plan §2, verify when E3 lands).
+/// One unbilled cost of a client (`GET /billable-costs` `items[]`, U-128).
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillableCost {
     /// The source line (sent back as `billableSourceLineId`).
-    pub line_id: JournalLineId,
+    pub source_line_id: JournalLineId,
     /// The bill, check or expense it is on.
-    pub transaction_id: TransactionId,
-    /// Its kind.
+    pub source_transaction_id: TransactionId,
+    /// Its kind (`bill`, `check`, `expense`, …).
     #[serde(default)]
-    pub txn_type: Option<TxnType>,
-    /// Its date.
-    pub txn_date: CalendarDate,
+    pub source_txn_type: Option<String>,
     /// Its number or reference.
     #[serde(default)]
-    pub txn_number: Option<String>,
+    pub source_number: Option<String>,
+    /// Its date.
+    pub source_date: CalendarDate,
     /// Who it was paid to (display).
     #[serde(default)]
     pub vendor_name: Option<String>,
@@ -959,10 +1252,8 @@ pub struct BillableCost {
     #[serde(default)]
     pub description: Option<String>,
     /// The expense account it posted to.
-    #[serde(default)]
-    pub account_id: Option<AccountId>,
-    /// The item, when it came with one (its income account is the line's,
-    /// Q-P20p).
+    pub expense_account_id: AccountId,
+    /// The item, when it came with one.
     #[serde(default)]
     pub item_id: Option<ItemId>,
     /// Quantity on the source.
@@ -970,21 +1261,53 @@ pub struct BillableCost {
     pub quantity: Option<Quantity>,
     /// Cost per unit on the source.
     #[serde(default)]
-    pub unit_price: Option<Money>,
-    /// The cost.
-    pub amount: Money,
+    pub unit_cost: Option<Money>,
+    /// The source line's amount, 4 places.
+    #[serde(default)]
+    pub source_amount: Option<Money>,
+    /// What the invoice bills before markup (2 places).
+    pub cost_amount: Money,
+    /// The engine's suggestion for the invoice line's income account (the
+    /// cost item's), sent back as `accountId` unless the owner picks one.
+    #[serde(default)]
+    pub suggested_income_account_id: Option<AccountId>,
 }
 
 impl fmt::Debug for BillableCost {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BillableCost")
-            .field("line_id", &self.line_id)
-            .field("transaction_id", &self.transaction_id)
-            .field("txn_date", &self.txn_date)
+            .field("source_line_id", &self.source_line_id)
+            .field("source_transaction_id", &self.source_transaction_id)
+            .field("source_date", &self.source_date)
             .finish_non_exhaustive()
     }
 }
 
+/// A client's unbilled costs (`GET /billable-costs`): one page of
+/// `items`, with the count and total over every page (the side panel shows
+/// `total_amount` as the engine summed it).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BillableCosts {
+    /// This page.
+    pub items: Vec<BillableCost>,
+    /// Costs over every page.
+    pub total_count: u64,
+    /// Sum of `costAmount` over every page.
+    pub total_amount: Money,
+    /// The client's suggested markup.
+    #[serde(default)]
+    pub default_markup_percent: Option<SignedPercent>,
+}
+
+impl fmt::Debug for BillableCosts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BillableCosts")
+            .field("items", &self.items.len())
+            .field("total_count", &self.total_count)
+            .finish_non_exhaustive()
+    }
+}
 // ---- Price levels (U-40, E2) -----------------------------------------------------------
 
 /// A price set for one item by a price level.
@@ -1176,7 +1499,11 @@ pub fn check_invoice(new: &NewInvoice, caps: &Capabilities) -> Result<(), ApiErr
     if (header_fields || line_fields) && !fields {
         return local(LocalValidation::Unsupported);
     }
-    if new.lines.iter().any(|l| l.unit_price.is_none()) && !caps.has(Capabilities::INVOICE_PRICING)
+    if new
+        .lines
+        .iter()
+        .any(|l| l.unit_price.is_none() && l.billable_source_line_id.is_none())
+        && !caps.has(Capabilities::INVOICE_PRICING)
     {
         return local(LocalValidation::Unsupported);
     }
@@ -1189,7 +1516,17 @@ pub fn check_invoice(new: &NewInvoice, caps: &Capabilities) -> Result<(), ApiErr
         return local(LocalValidation::Unsupported);
     }
     for l in &new.lines {
-        let bad = (l.account_id.is_none() && l.item_id.is_none())
+        // A billable cost's item, quantity and price are the source's
+        // (400 BILLABLE_FIELDS_READONLY) and its income account is required
+        // (400 BILLABLE_INCOME_ACCOUNT_REQUIRED).
+        let billable_bad = l.billable_source_line_id.is_some()
+            && (l.account_id.is_none()
+                || l.item_id.is_some()
+                || l.quantity.is_some()
+                || l.unit_price.is_some()
+                || l.discount_percent.is_some());
+        let bad = billable_bad
+            || (l.account_id.is_none() && l.item_id.is_none())
             || (l.markup_percent.is_some() && l.billable_source_line_id.is_none())
             || l.markup_percent.is_some_and(SignedPercent::is_negative)
             || l.description
@@ -1469,8 +1806,11 @@ impl Invoices<'_> {
 
     /// Emails the invoice through the company SMTP with `pdf` attached
     /// (`Invoice-<number>.pdf`) and records an "email" send (`POST
-    /// /invoices/{id}/email`, `invoice-email-v1`; contract per P20 plan §2,
-    /// verify when E4 lands). The same key on a retry sends once.
+    /// /invoices/{id}/email`, `invoice-email-v1`). Keyed under that
+    /// capability: the same key on a retry sends once, so keep one key per
+    /// send and reuse it. `outbox_id` (Send all) takes the Outbox message
+    /// out in the same commit (a second Send all gets 404
+    /// `OUTBOX_ITEM_NOT_FOUND`, never a second email).
     ///
     /// # Errors
     /// `Local(Unsupported)` without the capability; `Local(InvalidValue)`
@@ -1483,6 +1823,7 @@ impl Invoices<'_> {
         message: &EmailMessage,
         pdf_file_name: &str,
         pdf: &[u8],
+        outbox_id: Option<OutboxId>,
         key: IdempotencyKey,
     ) -> Result<Versioned<InvoiceRecord>, ApiError> {
         require(self.0, Capabilities::INVOICE_EMAIL)?;
@@ -1499,6 +1840,9 @@ impl Invoices<'_> {
             "pdfFileName".into(),
             Value::String(pdf_file_name.to_string()),
         );
+        if let Some(o) = outbox_id {
+            m.insert("outboxId".into(), Value::String(o.to_string()));
+        }
         let mut call = Call::new(
             Method::Post,
             INVOICE_EMAIL.route(),
@@ -1512,8 +1856,8 @@ impl Invoices<'_> {
 
     /// Puts the message in the Outbox, stored with the company in the
     /// engine (Q-P20q); it goes when the owner clicks Send all (`POST
-    /// /invoices/{id}/email-later`; contract per P20 plan §2, verify when E4
-    /// lands).
+    /// /invoices/{id}/email-later`; keyed under `invoice-email-v1`: reuse
+    /// the key on a retry).
     ///
     /// # Errors
     /// As [`Invoices::email`] without the PDF checks.
@@ -1558,10 +1902,13 @@ impl Invoices<'_> {
         decode::<W>(&reply, "outbox").map(|w| w.data)
     }
 
-    /// Takes a message out of the Outbox (sent, or the owner removed it).
+    /// Takes a message out of the Outbox (the owner removed it). Already
+    /// gone (404 `OUTBOX_ITEM_NOT_FOUND`: sent or removed meanwhile) is
+    /// success.
     ///
     /// # Errors
-    /// `Local(Unsupported)` without `invoice-email-v1`; any [`ApiError`].
+    /// `Local(Unsupported)` without `invoice-email-v1`; any other
+    /// [`ApiError`].
     pub async fn remove_from_outbox(&self, id: OutboxId) -> Result<(), ApiError> {
         require(self.0, Capabilities::INVOICE_EMAIL)?;
         let call = Call::new(
@@ -1569,8 +1916,10 @@ impl Invoices<'_> {
             EMAIL_QUEUE_DELETE.route(),
             format!("/api/v1/forms/email-queue/{id}"),
         );
-        self.0.send(&EMAIL_QUEUE_DELETE, call, None).await?;
-        Ok(())
+        match self.0.send(&EMAIL_QUEUE_DELETE, call, None).await {
+            Ok(_) | Err(ApiError::NotFound { .. }) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     /// A client's unbilled costs, one page (`GET /billable-costs`,
@@ -1583,13 +1932,33 @@ impl Invoices<'_> {
         &self,
         client: ContactId,
         page: PageRequest,
-    ) -> Result<Page<BillableCost>, ApiError> {
+    ) -> Result<BillableCosts, ApiError> {
         require(self.0, Capabilities::BILLABLE_COSTS)?;
         let mut call = Call::at(Method::Get, BILLABLE_COSTS.route());
         call.query = vec![("contactId".into(), client.to_string())];
         call.query.extend(page.query());
         let reply = self.0.send(&BILLABLE_COSTS, call, None).await?;
-        Page::from_json(&reply.body, "data")
+        decode::<BillableCosts>(&reply, "billable costs")
+    }
+
+    /// Every unbilled cost of a client, page by page until
+    /// `totalCount` is read.
+    ///
+    /// # Errors
+    /// As [`Invoices::billable_costs`].
+    pub async fn all_billable_costs(&self, client: ContactId) -> Result<BillableCosts, ApiError> {
+        let mut first = self
+            .billable_costs(client, PageRequest::first_max())
+            .await?;
+        while (first.items.len() as u64) < first.total_count {
+            let page = PageRequest::new(PageRequest::MAX_LIMIT, first.items.len() as u64)?;
+            let next = self.billable_costs(client, page).await?;
+            if next.items.is_empty() {
+                break;
+            }
+            first.items.extend(next.items);
+        }
+        Ok(first)
     }
 
     /// The fixed payment terms (`invoice-terms-v1` or `bill-terms-v1`).
@@ -1798,15 +2167,18 @@ impl PriceLevels<'_> {
     }
 }
 
-/// The file name of an invoice PDF (Q-P20q): `Invoice-<number>.pdf`, with
-/// characters a file system refuses replaced by `-`.
+/// The file name of an invoice PDF (Q-P20q): `Invoice-<number>.pdf`,
+/// matching the engine's `pdfFileName` rule
+/// (`^[A-Za-z0-9][A-Za-z0-9 ._()#-]{0,115}\.pdf$`): ASCII letters and
+/// digits and ` ._()#-` only (anything else becomes `-`), at most 116
+/// characters before `.pdf`.
 #[must_use]
 pub fn invoice_pdf_name(number: &str) -> String {
     let clean: String = number
         .trim()
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '(' | ')' | '#') {
                 c
             } else {
                 '-'
@@ -1814,10 +2186,11 @@ pub fn invoice_pdf_name(number: &str) -> String {
         })
         .collect();
     if clean.is_empty() {
-        "Invoice.pdf".to_string()
-    } else {
-        format!("Invoice-{clean}.pdf")
+        return "Invoice.pdf".to_string();
     }
+    let mut stem = format!("Invoice-{clean}");
+    stem.truncate(116);
+    format!("{stem}.pdf")
 }
 
 #[cfg(test)]

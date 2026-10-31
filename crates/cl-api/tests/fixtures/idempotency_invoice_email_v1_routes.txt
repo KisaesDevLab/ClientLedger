@@ -1,0 +1,9 @@
+# The engine's `invoice-email-v1` keyed set (U-127, engine PR #200,
+# branch clientledger/invoice-email): POST /invoices/:id/email and
+# /email-later replay an Idempotency-Key (idempotency-v1's contract,
+# capabilities.ts), `x-idempotency: true` in its openapi.json.
+# Client-declared until the pin has it. Append-only for this capability
+# name: `keyable-invoice-email` in operations.txt (`KeySet::InvoiceEmailV1`),
+# keyed only while the engine advertises `invoice-email-v1`.
+POST /api/v1/invoices/{id}/email
+POST /api/v1/invoices/{id}/email-later

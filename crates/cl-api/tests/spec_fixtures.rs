@@ -189,6 +189,17 @@ fn typed_keyable(set: cl_api::KeySet) -> Routes {
 /// `idempotency_ap_v1_routes.txt`), and the typed table agrees set by set.
 /// No engine checkout needed.
 #[test]
+fn keyable_invoice_email_rows_are_the_recorded_set() {
+    let email = spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt"));
+    assert_eq!(email.len(), 2, "the invoice-email-v1 set has 2 routes");
+    assert_eq!(
+        spec::keyable_invoice_email_operations(OPERATIONS_TXT),
+        email
+    );
+    assert_eq!(typed_keyable(cl_api::KeySet::InvoiceEmailV1), email);
+}
+
+#[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
     let (v1, ap, docs, attach, pay, print, invoice) = expected_keyable();
     assert_eq!(spec::keyable_invoice_operations(OPERATIONS_TXT), invoice);
@@ -207,7 +218,14 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
     assert_eq!(typed_keyable(cl_api::KeySet::DocsAttachV1), attach);
     assert_eq!(
         cl_api::OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-        v1.len() + ap.len() + docs.len() + attach.len() + pay.len() + print.len() + invoice.len()
+        v1.len()
+            + ap.len()
+            + docs.len()
+            + attach.len()
+            + pay.len()
+            + print.len()
+            + invoice.len()
+            + spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt")).len()
     );
 }
 
@@ -283,7 +301,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         &path,
     );
     let has_invoice = later_set(&marked, &invoice, "idempotency-invoice-v1", "U-124", &path);
+    let email = spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt"));
+    let has_email = later_set(&marked, &email, "invoice-email-v1", "U-127", &path);
     for (has, set) in [
+        (has_email, &email),
         (has_docs, &docs),
         (has_attach, &attach),
         (has_pay, &pay),

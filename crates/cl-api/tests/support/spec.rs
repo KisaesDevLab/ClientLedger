@@ -276,6 +276,12 @@ pub fn keyable_invoice_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-invoice")
 }
 
+/// The `keyable-invoice-email` (`invoice-email-v1`) rows of
+/// `operations.txt`, sorted.
+pub fn keyable_invoice_email_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-invoice-email")
+}
+
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = txt
         .lines()

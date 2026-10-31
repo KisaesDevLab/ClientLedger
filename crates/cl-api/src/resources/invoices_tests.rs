@@ -662,7 +662,7 @@ async fn email_carries_the_pdf_and_the_outbox_round_trips() {
     let s = session_with_caps(&other, &E1).await;
     assert_eq!(
         s.invoices()
-            .email(id(), &msg, pdf_name, b"%PDF", IdempotencyKey::new())
+            .email(id(), &msg, pdf_name, b"%PDF", None, IdempotencyKey::new())
             .await
             .expect_err("cap"),
         ApiError::Local(LocalValidation::Unsupported)
@@ -674,7 +674,14 @@ async fn email_carries_the_pdf_and_the_outbox_round_trips() {
     };
     assert_eq!(
         s.invoices()
-            .email(id(), &nobody, pdf_name, b"%PDF", IdempotencyKey::new())
+            .email(
+                id(),
+                &nobody,
+                pdf_name,
+                b"%PDF",
+                None,
+                IdempotencyKey::new()
+            )
             .await
             .expect_err("to"),
         ApiError::Local(LocalValidation::InvalidValue)
@@ -682,13 +689,13 @@ async fn email_carries_the_pdf_and_the_outbox_round_trips() {
     let big = vec![0u8; EMAIL_PDF_MAX_BYTES + 1];
     assert_eq!(
         s.invoices()
-            .email(id(), &msg, pdf_name, &big, IdempotencyKey::new())
+            .email(id(), &msg, pdf_name, &big, None, IdempotencyKey::new())
             .await
             .expect_err("size"),
         ApiError::Local(LocalValidation::AttachmentTooLarge)
     );
     s.invoices()
-        .email(id(), &msg, pdf_name, b"%PDF", IdempotencyKey::new())
+        .email(id(), &msg, pdf_name, b"%PDF", None, IdempotencyKey::new())
         .await
         .expect("email");
     assert_eq!(
@@ -732,9 +739,12 @@ async fn billable_costs_price_levels_and_client_sales() {
         .respond_with(json(
             200,
             &format!(
-                r#"{{"data":[{{"lineId":"{SOURCE_LINE}","transactionId":"{ID}","txnType":"bill",
-                "txnDate":"2026-10-20","vendorName":"Canary Rental","description":"Stump grinder",
-                "accountId":"{INCOME}","amount":"842.15"}}],"total":1}}"#
+                r#"{{"items":[{{"sourceLineId":"{SOURCE_LINE}","sourceTransactionId":"{ID}",
+                "sourceTxnType":"bill","sourceNumber":"B-17","sourceDate":"2026-10-20","contactId":"{CLIENT}",
+                "vendorName":"Canary Rental","description":"Stump grinder","expenseAccountId":"{TAX}",
+                "itemId":null,"quantity":null,"unitCost":null,"sourceAmount":"842.1500","costAmount":"842.15",
+                "suggestedIncomeAccountId":"{INCOME}","suggestedIncomeAccountSource":"item"}}],
+                "totalCount":1,"totalAmount":"842.15","defaultMarkupPercent":"10.0000","limit":50,"offset":0}}"#
             ),
         ))
         .mount(&server)
@@ -790,8 +800,24 @@ async fn billable_costs_price_levels_and_client_sales() {
         .billable_costs(client(), page)
         .await
         .expect("costs");
-    assert_eq!(costs.data[0].amount.to_wire(), "842.1500");
-    assert_eq!(costs.data[0].txn_type, Some(TxnType::Bill));
+    assert_eq!(costs.items[0].cost_amount.to_wire(), "842.1500");
+    assert_eq!(costs.items[0].source_txn_type.as_deref(), Some("bill"));
+    assert_eq!(costs.items[0].suggested_income_account_id, Some(income()));
+    assert_eq!(costs.total_count, 1);
+    assert_eq!(costs.total_amount.to_wire(), "842.1500");
+    assert_eq!(
+        costs
+            .default_markup_percent
+            .map(SignedPercent::to_wire)
+            .as_deref(),
+        Some("10")
+    );
+    let all = s
+        .invoices()
+        .all_billable_costs(client())
+        .await
+        .expect("all");
+    assert_eq!(all.items.len(), 1);
     let gets = requests(&server, "GET").await;
     let qs = query(gets.last().expect("get"));
     assert!(qs.contains(&format!("contactId={CLIENT}")), "{qs}");
@@ -867,12 +893,23 @@ fn signed_percent_is_exact_and_bounded() {
         ("10", "10"),
         ("0", "0"),
         ("999.9999", "999.9999"),
+        ("1000", "1000"),
         ("-99.9999", "-99.9999"),
     ] {
         assert_eq!(SignedPercent::parse(s).expect(s).to_wire(), want);
     }
     for bad in [
-        "-100", "1000", "1e1", "1.", ".5", "1.23456", " 2", "2%", "", "--1",
+        "-100",
+        "1000.0001",
+        "10000",
+        "1e1",
+        "1.",
+        ".5",
+        "1.23456",
+        " 2",
+        "2%",
+        "",
+        "--1",
     ] {
         assert_eq!(
             SignedPercent::parse(bad),
@@ -893,6 +930,14 @@ fn pdf_names_are_safe_file_names() {
     assert_eq!(invoice_pdf_name("INV-1042"), "Invoice-INV-1042.pdf");
     assert_eq!(invoice_pdf_name("A/B:7"), "Invoice-A-B-7.pdf");
     assert_eq!(invoice_pdf_name("  "), "Invoice.pdf");
+    assert_eq!(
+        invoice_pdf_name("Ré-7"),
+        "Invoice-R--7.pdf",
+        "ASCII only (N1)"
+    );
+    let long = invoice_pdf_name(&"9".repeat(300));
+    assert_eq!(long.len(), 120, "116 characters before .pdf");
+    assert_eq!(&long[116..], ".pdf");
 }
 
 #[test]
@@ -904,4 +949,222 @@ fn a_record_that_is_not_an_invoice_is_refused() {
     let paid = record("").replace(r#""amountPaid":"0.0000""#, r#""amountPaid":"5.0000""#);
     let r: InvoiceRecord = serde_json::from_str(&paid).expect("invoice");
     assert!(r.has_payments());
+}
+
+/// A saved invoice as the engine writes it with a subtotal, a percent
+/// discount, and a billable cost with its markup line (E2/E3 shapes:
+/// `invoice.service.ts` buildInvoiceJournal, getInvoice billableCosts).
+pub(crate) fn rich_record() -> String {
+    format!(
+        r#"{{"id":"{ID}","txnType":"invoice","txnNumber":"1097","txnDate":"2026-11-03","status":"posted",
+        "contactId":"{CLIENT}","total":"1083.94","subtotal":"1028.00","taxAmount":"55.94","balanceDue":"1083.94",
+        "amountPaid":"0","invoiceStatus":"draft","updatedAt":"2026-11-03T10:00:00.120Z","layoutId":null,
+        "billableCosts":[{{"sourceLineId":"{SOURCE_LINE}","sourceTransactionId":"{ID}","sourceTxnType":"bill",
+          "sourceNumber":"B-17","costAmount":"100.00","markupPercent":"10.0000","markupAmount":"10.00",
+          "amount":"110.00","quantity":"2","displayRate":"55.0000","incomeAccountId":"{INCOME}",
+          "markupAccountId":"{TAX}","costLineId":null,"markupLineId":null,"billed":true}}],
+        "lines":[
+        {{"id":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{AR}","debit":"1083.9400","credit":"0",
+          "lineOrder":0,"quantity":null,"unitPrice":null,"unitPriceSource":null,"lineRole":null}},
+        {{"id":"8b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{INCOME}","debit":"0","credit":"1068.0000",
+          "description":"Mulch","lineOrder":1,"itemId":"{ITEM}","quantity":"24.0000","unitPrice":"44.5000",
+          "unitPriceSource":"price_level","isTaxable":true,"taxRate":"0.0810","taxAmount":"78.4100"}},
+        {{"id":"8c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{INCOME}","debit":"0","credit":"0",
+          "description":"Subtotal","lineOrder":2,"itemId":"{ITEM}","quantity":null,"unitPrice":null,
+          "unitPriceSource":"none","isTaxable":false}},
+        {{"id":"8d0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{INCOME}","debit":"106.8000","credit":"0",
+          "description":"10% off","lineOrder":3,"itemId":"{ITEM}","quantity":null,"unitPrice":null,
+          "discountPercent":"10.0000","unitPriceSource":"item","isTaxable":true,"taxAmount":"-8.6500"}},
+        {{"id":"8e0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{INCOME}","debit":"0","credit":"100.0000",
+          "description":"Stump grinder","lineOrder":4,"itemId":null,"quantity":null,"unitPrice":null,
+          "unitPriceSource":"billable_cost","lineRole":"billable_cost","billableSourceLineId":"{SOURCE_LINE}",
+          "isTaxable":true,"taxAmount":"8.1000"}},
+        {{"id":"8f0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{TAX}","debit":"0","credit":"10.0000",
+          "description":"Stump grinder","lineOrder":5,"unitPriceSource":"billable_cost","lineRole":"billable_markup",
+          "billableSourceLineId":"{SOURCE_LINE}","isTaxable":true,"taxAmount":"0"}},
+        {{"id":"9f0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{TAX}","debit":"0","credit":"55.9400",
+          "description":"Sales Tax","lineOrder":6}}]}}"#
+    )
+}
+
+#[test]
+fn a_record_keeps_subtotal_discount_and_billable_lines() {
+    let r: InvoiceRecord = serde_json::from_str(&rich_record()).expect("decodes");
+    assert_eq!(
+        r.lines.len(),
+        4,
+        "A/R, markup and tax lines are not document lines"
+    );
+    assert_eq!(r.lines[0].price_source, Some(PriceSource::PriceLevel));
+    assert!(r.lines[1].is_subtotal());
+    assert_eq!(r.lines[1].quantity, None);
+    let disc = &r.lines[2];
+    assert_eq!(disc.amount.to_wire(), "-106.8000");
+    assert_eq!(
+        disc.discount_percent.map(SignedPercent::to_wire).as_deref(),
+        Some("10")
+    );
+    let bill = &r.lines[3];
+    assert_eq!(
+        bill.amount.to_wire(),
+        "110.0000",
+        "cost and markup as one row"
+    );
+    assert_eq!(
+        bill.markup_percent.map(SignedPercent::to_wire).as_deref(),
+        Some("10")
+    );
+    assert_eq!(
+        bill.quantity.map(Quantity::to_wire).as_deref(),
+        Some("2.0000")
+    );
+    assert_eq!(
+        bill.display_rate.map(Money::to_wire).as_deref(),
+        Some("55.0000")
+    );
+    assert_eq!(r.billable_sources().len(), 1);
+    assert_eq!(r.layout_id, None);
+}
+
+#[test]
+fn refusals_name_every_engine_code() {
+    let v = |code: &str, details: Value| {
+        crate::errors::engine_refusal(
+            400,
+            &json!({"error": {"message": "x", "code": code, "details": details}}),
+        )
+    };
+    assert_eq!(
+        invoice_refusal(&v("SMTP_SEND_FAILED", json!({"reason": "auth"}))),
+        Some(InvoiceRefusal::SmtpLoginFailed)
+    );
+    assert_eq!(
+        invoice_refusal(&v("SMTP_SEND_FAILED", json!({"reason": "timeout"}))),
+        Some(InvoiceRefusal::SmtpSendFailed)
+    );
+    for (code, want) in [
+        (
+            "BILLABLE_FIELDS_READONLY",
+            InvoiceRefusal::BillableFieldsReadOnly,
+        ),
+        (
+            "BILLABLE_INCOME_ACCOUNT_REQUIRED",
+            InvoiceRefusal::BillableAccountRequired,
+        ),
+        (
+            "MARKUP_ACCOUNT_REQUIRED",
+            InvoiceRefusal::MarkupAccountRequired,
+        ),
+        (
+            "RECURRING_HAS_BILLABLE_COSTS",
+            InvoiceRefusal::RecurringHasBillable,
+        ),
+    ] {
+        assert_eq!(invoice_refusal(&v(code, json!({}))), Some(want), "{code}");
+    }
+    let c = |code: &str| {
+        crate::errors::engine_refusal(409, &json!({"error": {"message": "x", "code": code}}))
+    };
+    for (code, want) in [
+        (
+            "BILLABLE_LINES_MISSING",
+            InvoiceRefusal::BillableLinesMissing,
+        ),
+        (
+            "INVOICE_LINES_MISSING",
+            InvoiceRefusal::BillableLinesMissing,
+        ),
+        ("INVOICE_TOTAL_BELOW_PAID", InvoiceRefusal::TotalBelowPaid),
+        ("RETRY", InvoiceRefusal::Retry),
+    ] {
+        assert_eq!(invoice_refusal(&c(code)), Some(want), "{code}");
+    }
+    let gone = crate::errors::engine_refusal(
+        404,
+        &json!({"error": {"message": "x", "code": "OUTBOX_ITEM_NOT_FOUND"}}),
+    );
+    assert_eq!(invoice_refusal(&gone), Some(InvoiceRefusal::OutboxItemGone));
+    let off = crate::errors::engine_refusal(
+        503,
+        &json!({"error": {"message": "x", "code": "OFFLINE_UNAVAILABLE", "feature": "smtp"}}),
+    );
+    assert_eq!(invoice_refusal(&off), Some(InvoiceRefusal::Offline));
+    assert!(InvoiceRefusal::Offline.stops_sending());
+    assert!(InvoiceRefusal::SmtpLoginFailed.stops_sending());
+    assert!(!InvoiceRefusal::SmtpSendFailed.stops_sending());
+}
+
+#[test]
+fn a_billable_line_sends_only_what_the_engine_takes() {
+    let src = JournalLineId::parse(SOURCE_LINE).expect("id");
+    let line = InvoiceLine {
+        markup_percent: Some(SignedPercent::parse("1000").expect("1000 is allowed")),
+        ..InvoiceLine::billable(src, income())
+    };
+    let v = serde_json::to_value(&line).expect("json");
+    assert_eq!(
+        v,
+        json!({"accountId": INCOME, "billableSourceLineId": SOURCE_LINE, "markupPercent": "1000"})
+    );
+    let mut n = NewInvoice::new(client(), day(), vec![line]);
+    n.release_billable_source_line_ids = vec![src];
+    n.layout_id = crate::resources::sales::LayoutChoice::CompanyDefault;
+    let v = serde_json::to_value(&n).expect("json");
+    assert_eq!(v["releaseBillableSourceLineIds"], json!([SOURCE_LINE]));
+    assert_eq!(v["layoutId"], Value::Null);
+    let plain = serde_json::to_value(NewInvoice::new(client(), day(), vec![])).expect("json");
+    assert!(plain.get("layoutId").is_none());
+    assert!(plain.get("releaseBillableSourceLineIds").is_none());
+}
+
+#[tokio::test]
+async fn send_all_passes_the_outbox_id_and_a_gone_message_is_removed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/invoices/{ID}/email")))
+        .respond_with(json(200, &format!(r#"{{"invoice":{}}}"#, record(""))))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v1/forms/email-queue/{OUTBOX}")))
+        .respond_with(json(
+            404,
+            r#"{"error":{"message":"gone","code":"OUTBOX_ITEM_NOT_FOUND"}}"#,
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &all_caps()).await;
+    let msg = EmailMessage {
+        to: vec!["ap@example.test".into()],
+        subject: "s".into(),
+        body: "b".into(),
+        ..EmailMessage::default()
+    };
+    let outbox = OutboxId::parse(OUTBOX).expect("id");
+    let key = IdempotencyKey::new();
+    s.invoices()
+        .email(
+            id(),
+            &msg,
+            "Invoice-1.pdf",
+            b"%PDF",
+            Some(outbox),
+            key.clone(),
+        )
+        .await
+        .expect("sent");
+    let b = body_of(&server, "POST", 0).await;
+    assert_eq!(b["outboxId"], json!(OUTBOX));
+    let sent = &requests(&server, "POST").await[0];
+    assert_eq!(
+        sent.headers
+            .get("idempotency-key")
+            .and_then(|v| v.to_str().ok()),
+        Some(key.as_header().as_str()),
+        "keyed under invoice-email-v1"
+    );
+    s.invoices()
+        .remove_from_outbox(outbox)
+        .await
+        .expect("already gone is success");
 }
