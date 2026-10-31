@@ -17,7 +17,7 @@
 //!   outcome in the shared lost-save book; Void takes a reason.
 //! - A sent invoice shows when and to whom it went (Q-P20f) and, after an
 //!   edit is saved, offers to send the updated copy.
-//! - Add Billable Costs (Ctrl+Shift+B, Q-P20c) and Email (Ctrl+Shift+M,
+//! - Add Billable Costs (Ctrl+Shift+U, Q-P20c) and Email (Ctrl+Shift+M,
 //!   Q-P20aa) live in [`billable`] and [`email`].
 
 mod billable;

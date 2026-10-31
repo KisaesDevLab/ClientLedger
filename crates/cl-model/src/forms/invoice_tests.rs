@@ -458,10 +458,18 @@ fn email_and_billable_shortcuts_resolve_in_forms_only() {
             .map(crate::CommandId::as_str),
         Some("edit.edit_transaction")
     );
+    // Q-P20aa: Add Billable Costs is Ctrl+Shift+U; Pay Bills keeps
+    // Ctrl+Shift+B in forms too.
+    let ctrl_shift_u = Shortcut::new(Mods::CMD_SHIFT, Key::Letter('U'));
+    assert_eq!(
+        km.resolve(Scope::Form, ctrl_shift_u)
+            .map(crate::CommandId::as_str),
+        Some("invoice.add_billable")
+    );
     assert_eq!(
         km.resolve(Scope::Form, ctrl_shift_b)
             .map(crate::CommandId::as_str),
-        Some("invoice.add_billable")
+        Some("vendors.pay_bills")
     );
     assert_eq!(
         km.resolve(Scope::Window, ctrl_e)

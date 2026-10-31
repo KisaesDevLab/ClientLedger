@@ -1,4 +1,4 @@
-//! Add Billable Costs (P20 WP-B step 3, Ctrl+Shift+B; Q-P20b/c/p/w/y/z).
+//! Add Billable Costs (P20 WP-B step 3, Ctrl+Shift+U; Q-P20b/c/p/w/y/z).
 //!
 //! The client's unbilled costs come from the engine (`GET /billable-costs`,
 //! U-128). Nothing is added by itself (Q-P20c): the side panel says "N
@@ -214,7 +214,7 @@ impl Billable {
 }
 
 impl InvoiceScreen {
-    /// Add Billable Costs (Ctrl+Shift+B).
+    /// Add Billable Costs (Ctrl+Shift+U).
     pub(crate) fn open_billable(&mut self) {
         if self.read_only().is_some() {
             return;

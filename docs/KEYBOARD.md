@@ -79,7 +79,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Alt+A` | Accept These Values | `form.accept_read` |
 | `Alt+T` | Attach to Selected Transaction | `form.attach_selected` |
 | `Alt+E` | Enter as New | `form.enter_as_new` |
-| `Ctrl+Shift+B` | Add Billable Costs… | `invoice.add_billable` |
+| `Ctrl+Shift+U` | Add Billable Costs… | `invoice.add_billable` |
 | `Ctrl+Shift+M` | Email… | `invoice.email` |
 
 ## In a grid
