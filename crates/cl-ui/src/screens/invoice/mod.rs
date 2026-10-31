@@ -371,6 +371,7 @@ impl InvoiceScreen {
     pub(crate) fn start_lists(&mut self) {
         self.books.start(&self.link, self.group.as_ref());
         self.fetch_own_address();
+        self.load_email_prefs();
         self.print_books_job = Some(email::print_books_job(&self.link, self.group.as_ref()));
         if let Some(Ok(b)) = engine::poll(&mut self.print_books_job) {
             self.print_books = b;

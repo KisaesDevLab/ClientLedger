@@ -63,6 +63,10 @@ pub(crate) struct EmailFlow {
     /// of the send history shown (Q-P20ab).
     pub(crate) own: Option<String>,
     own_job: Option<Job<String>>,
+    /// The company's email templates and BCC-self, read from the local
+    /// preferences off the frame (S10).
+    pub(crate) prefs: Option<cl_settings::EmailPrefs>,
+    prefs_rx: Option<std::sync::mpsc::Receiver<cl_settings::EmailPrefs>>,
     /// Sending failed: offer the Outbox or a PDF.
     failed: bool,
     problem: Option<&'static str>,
@@ -163,6 +167,12 @@ impl EmailFlow {
     }
 
     pub(crate) fn poll(&mut self) {
+        if let Some(rx) = &self.prefs_rx
+            && let Ok(p) = rx.try_recv()
+        {
+            self.prefs = Some(p);
+            self.prefs_rx = None;
+        }
         if let Some(Ok(from)) = engine::poll(&mut self.own_job)
             && from.contains('@')
         {
@@ -517,17 +527,10 @@ impl InvoiceScreen {
             self.notice = Some("invoice.read_only.void");
             return;
         }
-        let prefs = self
-            .tenant
-            .as_ref()
-            .and_then(|(id, _)| {
-                self.link
-                    .store()
-                    .load()
-                    .ok()
-                    .and_then(|l| l.get(*id).map(|r| r.prefs.email.clone()))
-            })
-            .unwrap_or_default();
+        // Read off the frame when the window opened (and again now, for the
+        // next email after a change in Preferences).
+        let prefs = self.email.prefs.clone().unwrap_or_default();
+        self.load_email_prefs();
         let client = e
             .record
             .txn
@@ -592,6 +595,33 @@ impl InvoiceScreen {
             ));
         }
         self.offer_send = false;
+    }
+
+    /// Reads the company's email templates from the local preferences on
+    /// a background thread (S10: never on the frame).
+    pub(crate) fn load_email_prefs(&mut self) {
+        let Some((id, _)) = self.tenant.clone() else {
+            return;
+        };
+        if self.email.prefs_rx.is_some() {
+            return;
+        }
+        let store = self.link.store().clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        if std::thread::Builder::new()
+            .name("email-prefs".into())
+            .spawn(move || {
+                let p = store
+                    .load()
+                    .ok()
+                    .and_then(|l| l.get(id).map(|r| r.prefs.email.clone()))
+                    .unwrap_or_default();
+                let _ = tx.send(p);
+            })
+            .is_ok()
+        {
+            self.email.prefs_rx = Some(rx);
+        }
     }
 
     /// Reads the company's From address once (for the send history).
