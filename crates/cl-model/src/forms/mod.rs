@@ -39,6 +39,7 @@ pub mod check;
 pub mod daily_sales;
 pub mod deposit;
 pub mod doc_read;
+pub mod invoice;
 pub mod item_lines;
 pub mod journal;
 pub mod lines;
