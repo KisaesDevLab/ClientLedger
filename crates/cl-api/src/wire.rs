@@ -328,6 +328,13 @@ impl Capabilities {
     /// discounts, subtotals). Contract per P20 plan §2; verify when E2
     /// lands.
     pub const INVOICE_PRICING: &'static str = "invoice-pricing-v1";
+    /// An invoice PUT may say its line list is complete
+    /// (`pricingLinesComplete: true`): discount and subtotal lines it
+    /// leaves out were removed on purpose (no 409 `INVOICE_LINES_MISSING`).
+    pub const INVOICE_PRICING_LINES: &'static str = "invoice-pricing-lines-v1";
+    /// U-130: invoice print layouts (`/company/invoice-layouts`, invoice
+    /// `layoutId`, contact `defaultInvoiceLayoutId`).
+    pub const INVOICE_LAYOUTS: &'static str = "invoice-layouts-v1";
     /// U-128: billable costs and markup. Contract per P20 plan §2; verify
     /// when E3 lands.
     pub const BILLABLE_COSTS: &'static str = "billable-costs-v1";

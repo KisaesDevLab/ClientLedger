@@ -1678,9 +1678,20 @@ impl Invoices<'_> {
         let s = &self.0.pinned();
         require(s, Capabilities::INVOICE_EDIT)?;
         check_invoice(new, &s.client().capabilities())?;
-        let body = invoice_body(s, new, opts, expected.txn.updated_at)?;
-        let mut call =
-            Call::new(Method::Put, INVOICE_PUT.route(), format!("{BASE}/{id}")).json_body(body);
+        let mut body: Value =
+            serde_json::from_slice(&invoice_body(s, new, opts, expected.txn.updated_at)?)
+                .map_err(|_| ApiError::Decode { what: "invoice" })?;
+        // The desktop always sends the whole line list: a discount or
+        // subtotal line it leaves out was removed by the owner.
+        if s.client()
+            .capabilities()
+            .has(Capabilities::INVOICE_PRICING_LINES)
+            && let Value::Object(m) = &mut body
+        {
+            m.insert("pricingLinesComplete".into(), Value::Bool(true));
+        }
+        let mut call = Call::new(Method::Put, INVOICE_PUT.route(), format!("{BASE}/{id}"))
+            .json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
         let reply = s.send(&INVOICE_PUT, call, None).await?;
         saved_invoice(&reply.body)

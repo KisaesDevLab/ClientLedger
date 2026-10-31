@@ -385,6 +385,33 @@ async fn update_sends_the_stale_guard_and_its_key_to_put() {
     let b: Value = serde_json::from_slice(&puts[0].body).expect("json");
     assert_eq!(b["expectedUpdatedAt"], "2026-11-03T10:00:00.120Z");
     assert_eq!(b["lines"][0]["unitPrice"], "32.5000");
+    assert!(b.get("pricingLinesComplete").is_none(), "not advertised");
+}
+
+#[tokio::test]
+async fn an_edit_says_its_lines_are_complete_when_the_engine_asks() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v1/invoices/{ID}")))
+        .respond_with(json(200, &saved("[]")))
+        .mount(&server)
+        .await;
+    let read: InvoiceRecord = serde_json::from_str(&record("")).expect("record");
+    let mut caps = E1.to_vec();
+    caps.push(Capabilities::INVOICE_PRICING_LINES);
+    let s = session_with_caps(&server, &caps).await;
+    s.invoices()
+        .update(
+            id(),
+            &read,
+            &invoice(),
+            &PostingOptions::default(),
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect("update");
+    let b: Value = serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+    assert_eq!(b["pricingLinesComplete"], true);
 }
 
 #[tokio::test]
