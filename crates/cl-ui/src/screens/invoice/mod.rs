@@ -214,6 +214,12 @@ pub struct InvoiceScreen {
     pub(crate) last_saved: Option<TransactionId>,
     pub(crate) focused: Option<u64>,
     pub(crate) after_frame: Option<CommandId>,
+    /// A dialog over the form was open last frame.
+    pub(crate) dialog_was_open: bool,
+    /// The dialog's first field takes the keyboard (once, on open).
+    pub(crate) dialog_focus: bool,
+    /// The widget that had the keyboard before the dialog opened.
+    pub(crate) return_focus: Option<eframe::egui::Id>,
     pub(crate) layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     pub(crate) bus: crate::data_bus::Subscription,
@@ -293,6 +299,9 @@ impl InvoiceScreen {
             last_saved: None,
             focused: None,
             after_frame: None,
+            dialog_was_open: false,
+            dialog_focus: false,
+            return_focus: None,
             layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             lists_stale: false,

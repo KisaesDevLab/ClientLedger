@@ -42,6 +42,18 @@ impl InvoiceScreen {
             form::progress_line(ui, &tokens, &t("invoice.loading"));
             return;
         }
+        // A dialog opening takes the keyboard into its first field; on
+        // close it goes back where it was (the grid takes its own back).
+        let dialog = self.dialog_open();
+        if dialog != self.dialog_was_open {
+            self.dialog_was_open = dialog;
+            if dialog {
+                self.return_focus = ui.ctx().memory(egui::Memory::focused);
+                self.dialog_focus = true;
+            } else if let Some(id) = self.return_focus.take() {
+                ui.ctx().memory_mut(|m| m.request_focus(id));
+            }
+        }
         let mut frame = FixedFrame::begin(ui, "create_invoice", FrameOpts::default());
         frame.top(|ui| {
             self.toolbar(ui, &tokens);

@@ -365,6 +365,7 @@ impl InvoiceScreen {
             .collect();
         let mut add = false;
         let mut cancel = false;
+        let mut focus_first = std::mem::take(&mut self.dialog_focus);
         let width = (ctx.content_rect().width() - 48.0).clamp(300.0, 640.0);
         egui::Window::new(t("invoice.billable.title"))
             .id(egui::Id::unique("invoice/billable"))
@@ -379,7 +380,9 @@ impl InvoiceScreen {
                     ui.label(t("invoice.billable.none"));
                 }
                 for c in &rows {
-                    ui.horizontal_wrapped(|ui| {
+                    // The cost on one row, its income account on its own
+                    // row under it (nothing wraps at narrow widths).
+                    ui.vertical(|ui| {
                         let mut on = b.picks.contains(&c.source_line_id);
                         let source = t_with(
                             "invoice.billable.source",
@@ -395,14 +398,21 @@ impl InvoiceScreen {
                             source,
                             c.cost_amount.format(style)
                         );
-                        if ui.checkbox(&mut on, label).changed() {
+                        let r = ui.checkbox(&mut on, label);
+                        // Opening the dialog puts the keyboard on the first
+                        // cost.
+                        if std::mem::take(&mut focus_first) {
+                            r.request_focus();
+                        }
+                        if r.changed() {
                             if on {
                                 b.picks.insert(c.source_line_id);
                             } else {
                                 b.picks.remove(&c.source_line_id);
                             }
                         }
-                        {
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
                             let chosen = b.income_for(c);
                             let text = chosen
                                 .and_then(|a| incomes.iter().find(|(id, _)| *id == a))
@@ -425,8 +435,9 @@ impl InvoiceScreen {
                             })
                             .response
                             .labelled_by(l.id);
-                        }
+                        });
                     });
+                    ui.add_space(4.0);
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

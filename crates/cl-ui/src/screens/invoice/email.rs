@@ -780,6 +780,7 @@ impl InvoiceScreen {
             return;
         }
         let mut click = None;
+        let mut focus_first = std::mem::take(&mut self.dialog_focus);
         let width = (ctx.content_rect().width() - 48.0).clamp(300.0, 560.0);
         egui::Window::new(t("invoice.email.title"))
             .id(egui::Id::unique("invoice/email"))
@@ -796,8 +797,13 @@ impl InvoiceScreen {
                     ("invoice.email.subject", &mut f.subject),
                 ] {
                     let l = ui.label(t(key));
-                    ui.add(egui::TextEdit::singleline(text).desired_width(width - 16.0))
+                    let r = ui
+                        .add(egui::TextEdit::singleline(text).desired_width(width - 16.0))
                         .labelled_by(l.id);
+                    // Opening the dialog puts the keyboard in To.
+                    if std::mem::take(&mut focus_first) {
+                        r.request_focus();
+                    }
                 }
                 let l = ui.label(t("invoice.email.body"));
                 ui.add(
