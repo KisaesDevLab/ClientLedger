@@ -109,9 +109,12 @@ mod doc_review;
 mod pay_bills;
 // P19.
 mod print;
+// P20 WP-A (form model problems, rate sources, email templates); WP-B adds
+// its screens' module beside it.
+mod invoice_model;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 34] = [
+const TABLES: [&[(&str, &str)]; 35] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -146,6 +149,7 @@ const TABLES: [&[(&str, &str)]; 34] = [
     compare::ENGLISH,
     pay_bills::ENGLISH,
     print::ENGLISH,
+    invoice_model::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

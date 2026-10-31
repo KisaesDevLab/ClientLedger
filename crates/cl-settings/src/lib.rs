@@ -20,6 +20,8 @@
 //!   printer used for checks and forms (P19), on this computer only.
 //! - [`unconfirmed_checks`]: printed check batches not yet confirmed, so
 //!   the Needs-attention reminder survives a restart (P19, Q-P19n).
+//! - [`email_templates`]: the company's email templates (one per document
+//!   type, fields like `{invoice_number}`) and the BCC-self choice (P20).
 //! - [`secrets`]: a small keychain-backed secret store for the backup
 //!   passphrase (Q-P02i). Secrets never touch the JSON file.
 //!
@@ -29,6 +31,7 @@
 
 pub mod ai;
 pub mod company_prefs;
+pub mod email_templates;
 pub mod inbox_state;
 pub mod migrate_inbox;
 pub mod printer_prefs;
@@ -44,6 +47,10 @@ pub use ai::{
 };
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
+};
+pub use email_templates::{
+    EmailPrefs, EmailTemplate, Field as EmailField, FieldValues, Filled, TemplateDoc,
+    TemplateSource, fill as fill_template, unknown_fields,
 };
 pub use printer_prefs::{OffsetError, PrintKind, PrinterOffset, PrinterPrefs, PrinterPrefsStore};
 pub use recent::{

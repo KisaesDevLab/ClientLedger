@@ -327,6 +327,8 @@ pub(crate) fn form_labels() -> FormLabels {
         due_date: t("print.pdf.due_date"),
         terms: t("print.pdf.terms"),
         po_number: t("print.pdf.po_number"),
+        ship_to: t("print.pdf.ship_to"),
+        service_date: t("print.pdf.service_date"),
         payment_method: t("print.pdf.payment_method"),
         reference: t("print.pdf.reference"),
         statement_date: t("print.pdf.statement_date"),
@@ -421,6 +423,7 @@ pub(crate) fn form_doc(f: &QueuedForm, address: &[String], lines: &[(String, Mon
         totals: vec![TotalRow::new(&t("print.pdf.total"), dec(total), true)],
         message: String::new(),
         boxes: Vec::new(),
+        ..FormDoc::default()
     }
 }
 

@@ -299,6 +299,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.attach_selected", "Attach to Selected Transaction", None, 7, alt('T'), Scope::Form),
     cmd("form.enter_as_new", "Enter as New", None, 7, alt('E'), Scope::Form),
     cmd("form.discard_document", "Discard Document\u{2026}", None, 7, None, Scope::Form),
+    // Create Invoice (P20; Page Up/Down, Alt+N, Alt+S, Ctrl+P and Attach above apply too).
+    // In a form Ctrl+Shift+B shadows Pay Bills. Email is Ctrl+Shift+M, not the
+    // plan's Ctrl+E: Ctrl+E is Edit Transaction in the register entry row,
+    // which is Form scope too (P12; Q-P20aa).
+    cmd("invoice.add_billable", "Add Billable Costs\u{2026}", None, 7, ctrl_shift('B'), Scope::Form),
+    cmd("invoice.email", "Email\u{2026}", None, 7, ctrl_shift('M'), Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
     cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),

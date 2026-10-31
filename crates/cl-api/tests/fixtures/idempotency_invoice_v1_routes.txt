@@ -1,0 +1,9 @@
+# The engine's `idempotency-invoice-v1` route set (U-124, engine PR #197,
+# branch clientledger/invoice-core): invoice edit, void and sent,
+# `x-idempotency: true` in its openapi.json. Client-declared until the pin has it.
+# Append-only for this capability name: `keyable-invoice` in operations.txt
+# (`KeySet::InvoiceV1`), keyed only while the engine advertises
+# `idempotency-invoice-v1`.
+POST /api/v1/invoices/{id}/sent
+POST /api/v1/invoices/{id}/void
+PUT /api/v1/invoices/{id}

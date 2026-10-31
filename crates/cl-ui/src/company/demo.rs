@@ -6,6 +6,8 @@ use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod batch;
+// P20: Create Invoice (the engine's sales money rule, held to the golden file).
+pub mod billable;
 pub mod bills;
 pub mod checks;
 pub mod contacts;
@@ -15,11 +17,13 @@ pub mod deposits;
 pub mod drafts;
 pub mod home;
 pub mod intake;
+pub mod invoices;
 pub mod journal;
 pub mod lists;
 pub mod money;
 // P18: Pay Bills.
 pub mod pay_bills;
+pub mod price_levels;
 pub mod printing;
 pub mod register;
 pub mod template_store;
@@ -123,6 +127,10 @@ pub struct DemoState {
     /// developer command `dev.demo_card_digits` turns it on and off for
     /// the Chart of Accounts scenario.
     pub card_digits: bool,
+    /// Invoices the demo engine keeps (P20).
+    pub invoices: invoices::DemoInvoices,
+    /// Price levels and the clients on them (P20).
+    pub price_levels: price_levels::DemoPriceLevels,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -238,6 +246,8 @@ impl DemoState {
             // The demo engine has document drafts and attach (A04).
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
+            invoices: invoices::DemoInvoices::default(),
+            price_levels: price_levels::DemoPriceLevels::default(),
         }
     }
 
