@@ -1,0 +1,35 @@
+# Invoice templates in Company Information (P20, U-130, Q-P20ac/ae/af)
+# against `clientledger --demo`: Standard (the default) and Simple; the
+# default can't be archived (it has no Archive button), Simple archives to
+# the Archived list and comes back with Unarchive; never Delete. A new
+# template needs a name. Light and dark repeat in one app, so the scenario
+# leaves the list as it found it. Synthetic data.
+name: invoice_layouts
+description: Invoice templates list, archive and unarchive, a new template needs a name.
+steps:
+  - resize: {width: 1280, height: 1000}
+  - set_zoom: {percent: 100}
+  - command: company.information
+  - assert_state: {key: screen.screen, equals: company_info}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {label_contains: "Invoice templates"}
+  - assert_state: {key: screen.layouts.on, equals: true}
+  - assert_state: {key: screen.layouts.active, equals: 2}
+  - assert_state: {key: screen.layouts.default, equals: Standard}
+  - assert_count: {target: {role: button, label: Delete}, count: 0}
+  - click: {role: button, label: Archive}
+  - assert_state: {key: screen.layouts.archived, equals: 1}
+  - assert_exists: {role: label, label: Archived}
+  - screenshot: archived
+  - click: {role: button, label: Unarchive}
+  - assert_state: {key: screen.layouts.archived, equals: 0}
+  - click: {role: button, label: "New template"}
+  - assert_state: {key: screen.layouts.editing, equals: true}
+  - click: {role: button, label: "Save template"}
+  - assert_state: {key: screen.layouts.problem, equals: layouts.name_needed}
+  - screenshot: new-template
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.layouts.editing, equals: false}
+  # Fold the card again (its open state outlives the window).
+  - click: {label_contains: "Invoice templates"}
+  - command: file.close_window

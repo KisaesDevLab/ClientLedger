@@ -116,6 +116,7 @@ pub struct ValidationError {
     code: Option<ErrorCode>,
     message: UserText,
     issues: Vec<ValidationIssue>,
+    reason: Option<ErrorCode>,
 }
 
 impl ValidationError {
@@ -143,6 +144,13 @@ impl ValidationError {
         &self.issues
     }
 
+    /// The engine's `details.reason` token upper-cased (`AUTH` for an SMTP
+    /// login failure, U-127), when it is code-shaped. Never free text.
+    #[must_use]
+    pub fn reason(&self) -> Option<&ErrorCode> {
+        self.reason.as_ref()
+    }
+
     /// A refusal naming one field, as the engine's object-shaped
     /// `details: {field, ...}` reads (demo twins build the same).
     pub(crate) fn for_field(code: &str, field: &str, message: &str) -> ValidationError {
@@ -153,6 +161,7 @@ impl ValidationError {
                 path: Some(FieldPath(field.to_string())),
                 message: UserText::new(message),
             }],
+            reason: None,
         }
     }
 }
@@ -931,6 +940,10 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
         code: body.code.clone(),
         message: body.text(),
         issues,
+        reason: body
+            .pointer("/error/details/reason")
+            .and_then(Value::as_str)
+            .and_then(|r| ErrorCode::parse(&r.to_ascii_uppercase())),
     }
 }
 

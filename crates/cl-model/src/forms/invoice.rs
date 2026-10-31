@@ -82,8 +82,12 @@ pub struct InvoiceLine {
     /// Quantity; blank sends 1.
     pub quantity: Option<Quantity>,
     /// The rate the owner typed; blank lets the engine price the line from
-    /// the item and the client's price level.
+    /// the item and the client's price level. On a billable line it is the
+    /// engine's display rate, shown only and never sent.
     pub rate: Option<Money>,
+    /// A percent discount line's stored percent (from the saved invoice;
+    /// resent so the line keeps it). Cleared when the item changes.
+    pub discount_percent: Option<Quantity>,
     /// Taxable as the owner set it; `None` follows the item.
     pub taxable: Option<bool>,
     /// Line tag.
@@ -105,6 +109,7 @@ impl InvoiceLine {
             service_date: None,
             quantity: None,
             rate: None,
+            discount_percent: None,
             taxable: None,
             tag: None,
             billable: None,
@@ -120,19 +125,31 @@ impl InvoiceLine {
             && self.service_date.is_none()
             && self.quantity.is_none()
             && self.rate.is_none()
+            && self.discount_percent.is_none()
             && self.taxable.is_none()
             && self.tag.is_none()
             && self.billable.is_none()
     }
 
-    /// Quantity and rate come from a billable cost and can't be edited.
+    /// Item, quantity and rate come from a billable cost and can't be
+    /// edited (the engine refuses them, `BILLABLE_FIELDS_READONLY`).
     #[must_use]
     pub fn amounts_locked(&self) -> bool {
         self.billable.is_some()
     }
 
+    /// The owner picked another item: the old item's price and discount
+    /// percent no longer apply (the engine prices the new item).
+    pub fn item_changed(&mut self, item: Option<ItemId>) {
+        if self.item != item {
+            self.item = item;
+            self.rate = None;
+            self.discount_percent = None;
+        }
+    }
+
     fn priceable(&self) -> bool {
-        self.item.is_some() || self.account.is_some()
+        self.item.is_some() || self.account.is_some() || self.billable.is_some()
     }
 }
 
@@ -158,17 +175,14 @@ impl fmt::Debug for InvoiceLine {
 pub struct BillableSeed {
     /// The source expense line.
     pub source_line: JournalLineId,
-    /// The source's item (its income account is the line's, Q-P20p).
-    pub item: Option<ItemId>,
-    /// The income account for a cost without an item (the owner's pick,
-    /// remembered per expense account).
+    /// The income account the cost is billed to: the owner's pick
+    /// (remembered per expense account), else the engine's suggestion
+    /// (`suggestedIncomeAccountId`). Required by the engine.
     pub account: Option<AccountId>,
     /// The source's description.
     pub description: String,
-    /// The source's quantity (1 when it has none).
-    pub quantity: Quantity,
-    /// The source's cost per unit (its amount when it has no quantity).
-    pub unit_cost: Money,
+    /// The source's quantity (shown only).
+    pub quantity: Option<Quantity>,
     /// Markup in percent, defaulted from the client.
     pub markup_percent: Option<Quantity>,
 }
@@ -177,9 +191,22 @@ impl fmt::Debug for BillableSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BillableSeed")
             .field("source_line", &self.source_line)
-            .field("item", &self.item)
+            .field("account", &self.account)
             .finish_non_exhaustive()
     }
+}
+
+/// The invoice's print layout as the owner chose it (U-130).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LayoutPick {
+    /// Not chosen: a new invoice takes the client's default layout; an
+    /// edit keeps its own.
+    #[default]
+    Unset,
+    /// The company's default layout.
+    CompanyDefault,
+    /// This layout (its id as the engine wrote it).
+    Layout(String),
 }
 
 /// The whole editable invoice.
@@ -211,6 +238,8 @@ pub struct InvoiceForm {
     pub hide_zero_lines: bool,
     /// Waiting to be printed.
     pub print_later: bool,
+    /// The print layout (Template, Q-P20ac).
+    pub layout: LayoutPick,
     /// Lines, ending with a blank entry line.
     pub lines: Vec<InvoiceLine>,
 }
@@ -311,11 +340,9 @@ impl InvoiceForm {
             self.lines.insert(
                 pos,
                 InvoiceLine {
-                    item: s.item,
                     account: s.account,
                     description: s.description.clone(),
-                    quantity: Some(s.quantity),
-                    rate: Some(s.unit_cost),
+                    quantity: s.quantity,
                     taxable: Some(true),
                     billable: Some(BillableRef {
                         source_line: s.source_line,
@@ -382,6 +409,7 @@ impl InvoiceForm {
             header_tags: None,
             hide_zero_lines: None,
             print_later: false,
+            layout: LayoutPick::Unset,
             ..self.request(client, date, lines, caps)
         })
     }
@@ -407,6 +435,7 @@ impl InvoiceForm {
             header_tags: caps.fields.then(|| self.header_tags.clone()),
             hide_zero_lines: caps.fields.then_some(self.hide_zero_lines),
             print_later: self.print_later,
+            layout: self.layout.clone(),
             lines,
         }
     }
@@ -501,8 +530,10 @@ pub enum InvoiceProblem {
     LineRateMissing(RowKey),
     /// A billable line needs an engine update (`billable-costs-v1`).
     BillableNeedsUpdate(RowKey),
-    /// A markup below zero.
+    /// A markup below zero or above 1000%.
     MarkupNegative(RowKey),
+    /// A billable line without the income account it is billed to.
+    BillableAccountMissing(RowKey),
 }
 
 impl InvoiceProblem {
@@ -532,6 +563,9 @@ impl InvoiceProblem {
                 TextKey("invoice.problem.billable_needs_update")
             }
             InvoiceProblem::MarkupNegative(_) => TextKey("invoice.problem.markup_negative"),
+            InvoiceProblem::BillableAccountMissing(_) => {
+                TextKey("invoice.problem.billable_account_missing")
+            }
         }
     }
 
@@ -551,9 +585,9 @@ impl InvoiceProblem {
             InvoiceProblem::FieldsNeedUpdate
             | InvoiceProblem::NoLines
             | InvoiceProblem::TooManyLines => InvoiceField::Lines,
-            InvoiceProblem::LineItemMissing(k) | InvoiceProblem::BillableNeedsUpdate(k) => {
-                InvoiceField::LineItem(k)
-            }
+            InvoiceProblem::LineItemMissing(k)
+            | InvoiceProblem::BillableNeedsUpdate(k)
+            | InvoiceProblem::BillableAccountMissing(k) => InvoiceField::LineItem(k),
             InvoiceProblem::LineDescriptionTooLong(k) => InvoiceField::LineDescription(k),
             InvoiceProblem::LineRateMissing(k) => InvoiceField::LineRate(k),
             InvoiceProblem::MarkupNegative(k) => InvoiceField::LineMarkup(k),
@@ -574,10 +608,14 @@ pub struct RequestLine {
     pub description: Option<String>,
     /// Service date.
     pub service_date: Option<CalendarDate>,
-    /// Quantity (1 when left blank).
-    pub quantity: Quantity,
-    /// The typed rate (`None`: priced by the engine).
+    /// Quantity (`None`: left out; the engine takes 1. Never on a
+    /// billable line).
+    pub quantity: Option<Quantity>,
+    /// The typed rate (`None`: priced by the engine; never on a billable
+    /// line).
     pub unit_price: Option<Money>,
+    /// A discount line's stored percent (never on a billable line).
+    pub discount_percent: Option<Quantity>,
     /// Taxable as set (`None`: the item's).
     pub taxable: Option<bool>,
     /// Line tag.
@@ -629,6 +667,8 @@ pub struct InvoiceRequest {
     pub hide_zero_lines: Option<bool>,
     /// Print later.
     pub print_later: bool,
+    /// The print layout.
+    pub layout: LayoutPick,
     /// The used lines, in order.
     pub lines: Vec<RequestLine>,
 }
@@ -647,14 +687,29 @@ impl fmt::Debug for InvoiceRequest {
 
 fn request_line(l: &InvoiceLine, caps: InvoiceCaps) -> RequestLine {
     let one = Quantity::parse_wire("1").unwrap_or(Quantity::ZERO);
+    // A billable cost sends only its source, account, markup, description,
+    // taxable, service date and tag: its item, quantity and price are the
+    // source's (U-128; the engine refuses them).
+    let billable = l.billable.is_some();
+    // Before invoice-pricing-v1 the engine needs a quantity on every line.
+    let quantity = if caps.pricing {
+        l.quantity
+    } else {
+        Some(l.quantity.unwrap_or(one))
+    };
     RequestLine {
         key: l.key,
         account: l.account,
-        item: if caps.fields { l.item } else { None },
+        item: if caps.fields && !billable {
+            l.item
+        } else {
+            None
+        },
         description: Some(l.description.trim_end().to_string()).filter(|d| !d.trim().is_empty()),
         service_date: if caps.fields { l.service_date } else { None },
-        quantity: l.quantity.unwrap_or(one),
-        unit_price: l.rate,
+        quantity: if billable { None } else { quantity },
+        unit_price: if billable { None } else { l.rate },
+        discount_percent: if billable { None } else { l.discount_percent },
         taxable: l.taxable,
         tag: l.tag,
         billable_source_line: l.billable.map(|b| b.source_line),
@@ -729,14 +784,18 @@ pub fn check_invoice(
         if l.description.chars().count() > TEXT_MAX {
             problems.push(InvoiceProblem::LineDescriptionTooLong(l.key));
         }
-        if l.rate.is_none() && !caps.pricing {
+        if l.rate.is_none() && l.billable.is_none() && !caps.pricing {
             problems.push(InvoiceProblem::LineRateMissing(l.key));
         }
         if let Some(b) = l.billable {
             if !caps.billable {
                 problems.push(InvoiceProblem::BillableNeedsUpdate(l.key));
             }
-            if b.markup_percent.is_some_and(Quantity::is_negative) {
+            if l.account.is_none() {
+                problems.push(InvoiceProblem::BillableAccountMissing(l.key));
+            }
+            let max = Quantity::parse_wire("1000").unwrap_or(Quantity::ZERO);
+            if b.markup_percent.is_some_and(|m| m.is_negative() || m > max) {
                 problems.push(InvoiceProblem::MarkupNegative(l.key));
             }
         }
@@ -753,20 +812,20 @@ pub fn check_invoice(
 
 // ---- The preview ----------------------------------------------------------------
 
-/// Where a line's rate came from (from the engine's preview).
+/// Where a line's rate came from (the engine's `unitPriceSource`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RateSource {
-    /// The owner typed it.
+    /// The owner typed it (`input`).
     Typed,
-    /// The item's price.
+    /// The item's price (`item`).
     Item,
-    /// The client's price level.
+    /// The price the client's level sets for this item (`price_level`).
     PriceLevel,
-    /// A price the client's level sets for this item.
-    PriceLevelItem,
-    /// A discount or subtotal line.
-    Computed,
-    /// A billable cost with any markup.
+    /// The client's level's % of the item's price (`price_level_percent`).
+    PriceLevelPercent,
+    /// No price: a subtotal line (`none`).
+    Unpriced,
+    /// A billable cost with any markup (`billable_cost`).
     Billable,
     /// Unknown or not sent.
     Other,
@@ -780,8 +839,8 @@ impl RateSource {
             RateSource::Typed => TextKey("invoice.rate_source.typed"),
             RateSource::Item => TextKey("invoice.rate_source.item"),
             RateSource::PriceLevel => TextKey("invoice.rate_source.price_level"),
-            RateSource::PriceLevelItem => TextKey("invoice.rate_source.price_level_item"),
-            RateSource::Computed => TextKey("invoice.rate_source.computed"),
+            RateSource::PriceLevelPercent => TextKey("invoice.rate_source.price_level_percent"),
+            RateSource::Unpriced => TextKey("invoice.rate_source.unpriced"),
             RateSource::Billable => TextKey("invoice.rate_source.billable"),
             RateSource::Other => TextKey("invoice.rate_source.other"),
         }
@@ -799,6 +858,10 @@ pub struct PreviewLineFigures {
     pub amount: Money,
     /// The line's share of the tax.
     pub tax_amount: Option<Money>,
+    /// A billable line's rate as shown (amount / quantity).
+    pub display_rate: Option<Money>,
+    /// Another invoice already bills this line's cost (U-128).
+    pub billed_elsewhere: bool,
 }
 
 impl fmt::Debug for PreviewLineFigures {
@@ -841,6 +904,21 @@ pub struct PreviewFigures {
     pub lines: Vec<PreviewLineFigures>,
     /// The totals.
     pub totals: PreviewTotals,
+    /// The numbers of the invoices that already bill a cost on this one
+    /// (preview `lines[].error`, U-128).
+    pub billed_on: Vec<String>,
+}
+
+impl PreviewTracker {
+    /// The invoice numbers that already bill a cost on the form (empty
+    /// unless the shown figures say so).
+    #[must_use]
+    pub fn billed_on(&self) -> &[String] {
+        match &self.applied {
+            Some(a) if self.wanted.is_none() => &a.figures.billed_on,
+            _ => &[],
+        }
+    }
 }
 
 /// The tag of one preview request: a reply is applied only if its ticket is

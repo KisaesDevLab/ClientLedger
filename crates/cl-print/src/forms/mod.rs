@@ -244,6 +244,7 @@ pub struct FormLabels {
     pub reference: String,
     pub statement_date: String,
     pub deposit_to: String,
+    pub item: String,
     pub description: String,
     pub quantity: String,
     pub rate: String,
@@ -299,6 +300,7 @@ impl Default for FormLabels {
             reference: s("Reference"),
             statement_date: s("Statement date"),
             deposit_to: s("Deposit to"),
+            item: s("Item"),
             description: s("Description"),
             quantity: s("Qty"),
             rate: s("Rate"),
@@ -369,7 +371,7 @@ pub(crate) fn item_columns_dated(l: &FormLabels) -> Vec<Column> {
     ]
 }
 
-fn shown(lines: &[ItemLine], hide_zero: bool) -> impl Iterator<Item = &ItemLine> {
+pub(crate) fn shown(lines: &[ItemLine], hide_zero: bool) -> impl Iterator<Item = &ItemLine> {
     lines
         .iter()
         .filter(move |l| !(hide_zero && l.amount.is_some_and(|a| a.is_zero())))

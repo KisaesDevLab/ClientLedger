@@ -1,7 +1,7 @@
 # Create Invoice (P20 AC1-AC3) against `clientledger --demo`: the mockup's
 # lines for Long Creek Marina (18 x 65.00 non-taxable, 24 x 32.50 and
 # 6 x 48.00 taxable) plus the client's unbilled cost (842.15, no markup)
-# added with Add Billable Costs (Ctrl+Shift+B, Q-P20c) total 3,234.87; a
+# added with Add Billable Costs (Ctrl+Shift+U, Q-P20c) total 3,234.87; a
 # level-priced line, a subtotal and a 10 % discount then total 2,982.91 —
 # every figure from the engine's preview (Q-P20n). Once saved, the cost
 # leaves the client's unbilled list (AC2); Prev opens the invoice and Void
@@ -51,8 +51,8 @@ steps:
   - key: Tab
   - type: {text: "48"}
   - key: Tab
-  # --- Add billable costs (Ctrl+Shift+B): one line, at cost ------------------
-  - key: Ctrl+Shift+B
+  # --- Add billable costs (Ctrl+Shift+U): one line, at cost ------------------
+  - key: Ctrl+Shift+U
   - assert_state: {key: screen.billable_dialog.open, equals: true}
   - assert_exists: {role: button, label: "Add to invoice"}
   - screenshot: billable-dialog
@@ -69,9 +69,12 @@ steps:
   - assert_state: {key: screen.subtotal, equals: "3,080.15"}
   - assert_state: {key: screen.tax, equals: "154.72"}
   - assert_state: {key: screen.total, equals: "3,234.87"}
-  # Total and Balance due.
-  - assert_count: {target: {role: label, label: "3,234.87"}, count: 2}
+  # Total, Balance due and the side panel's After this invoice (the demo's
+  # balance-after, follow-up 7).
+  - assert_count: {target: {role: label, label: "3,234.87"}, count: 3}
   - assert_no_clipping: {}
+  # The Template picker (Q-P20ac): the invoice's print layout.
+  - assert_exists: {role: label, label: Template}
   - screenshot: mockup-totals
   # --- A level price, a subtotal and a 10 % discount (U-40, U-39a) ---------
   # Long Creek Marina is on the Commercial level (7.5 % down): Weekly Mowing

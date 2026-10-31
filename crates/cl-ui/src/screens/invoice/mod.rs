@@ -17,9 +17,10 @@
 //!   outcome in the shared lost-save book; Void takes a reason.
 //! - A sent invoice shows when and to whom it went (Q-P20f) and, after an
 //!   edit is saved, offers to send the updated copy.
-//! - Add Billable Costs (Ctrl+Shift+B, Q-P20c) and Email (Ctrl+Shift+M,
+//! - Add Billable Costs (Ctrl+Shift+U, Q-P20c) and Email (Ctrl+Shift+M,
 //!   Q-P20aa) live in [`billable`] and [`email`].
 
+mod attach;
 mod billable;
 mod draw;
 pub(crate) mod email;
@@ -155,10 +156,27 @@ pub struct InvoiceScreen {
     pub(crate) inputs: Inputs,
     pub(crate) tracker: PreviewTracker,
     pub(crate) preview_job: Option<(PreviewTicket, Job<InvoicePreview>)>,
+    /// The number the next invoice gets from the company's counter
+    /// (`document-numbers-v1`, Q-P20ad): shown while Invoice # is blank;
+    /// never sent (a typed number skips the counter).
+    pub(crate) next_number: Option<String>,
+    next_job: Option<Job<String>>,
+    /// The number typed is in use on another invoice (Q-94): saved with a
+    /// warning.
+    pub(crate) duplicate_number: bool,
+    /// Layouts and item names for the PDF (U-130).
+    pub(crate) print_books: email::PrintBooks,
+    print_books_job: Option<Job<email::PrintBooks>>,
+    /// Print is waiting for its print-later save to open Print Forms.
+    pub(crate) print_after_save: bool,
+    /// A PDF being made on the queue (Preview, Save PDF), opened when done.
+    pub(crate) pdf_job: Option<Job<(String, Vec<u8>)>>,
     pub(crate) preview_problem: Option<&'static str>,
     pub(crate) clock: Instant,
     pub(crate) editing: Option<Editing>,
-    pub(crate) save_job: Option<Job<Versioned<InvoiceRecord>>>,
+    /// The save in flight: the invoice and whether its typed number is in
+    /// use elsewhere (Q-94).
+    pub(crate) save_job: Option<Job<(Versioned<InvoiceRecord>, bool)>>,
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(String, IdempotencyKey)>,
     pub(crate) void_job: Option<(Pending, Job<Versioned<InvoiceRecord>>)>,
@@ -171,6 +189,8 @@ pub struct InvoiceScreen {
     pub(crate) sales_job: Option<(ContactId, Job<ClientSales>)>,
     pub(crate) sales: Option<(ContactId, ClientSales)>,
     pub(crate) billable: billable::Billable,
+    /// Files on the saved invoice (Q-P20v).
+    pub(crate) attach: attach::InvoiceAttach,
     pub(crate) email: email::EmailFlow,
     pub(crate) problems: Vec<InvoiceProblem>,
     pub(crate) error: Option<ApiError>,
@@ -187,6 +207,8 @@ pub struct InvoiceScreen {
     pub(crate) unknown_client: Option<String>,
     /// The client form was opened for this name: picked once it arrives.
     pub(crate) setting_up: Option<String>,
+    /// Set Up of an item typed on a line (Q-P20i): the line and the name.
+    pub(crate) setting_up_item: Option<(cl_grid::RowKey, String)>,
     pub(crate) saved_count: u32,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) last_saved: Option<TransactionId>,
@@ -229,6 +251,13 @@ impl InvoiceScreen {
             },
             tracker: PreviewTracker::new(),
             preview_job: None,
+            pdf_job: None,
+            print_after_save: false,
+            print_books: email::PrintBooks::default(),
+            print_books_job: None,
+            next_number: None,
+            next_job: None,
+            duplicate_number: false,
             preview_problem: None,
             clock: Instant::now(),
             editing: None,
@@ -245,6 +274,7 @@ impl InvoiceScreen {
             sales_job: None,
             sales: None,
             billable: billable::Billable::default(),
+            attach: attach::InvoiceAttach::default(),
             email: email::EmailFlow::default(),
             problems: Vec::new(),
             error: None,
@@ -257,6 +287,7 @@ impl InvoiceScreen {
             email_after_save: false,
             unknown_client: None,
             setting_up: None,
+            setting_up_item: None,
             saved_count: 0,
             last_action: None,
             last_saved: None,
@@ -316,10 +347,16 @@ impl InvoiceScreen {
 
     /// A void invoice can't change.
     pub(crate) fn read_only(&self) -> Option<&'static str> {
-        self.editing
-            .as_ref()
-            .filter(|e| e.void())
-            .map(|_| "invoice.read_only.void")
+        let e = self.editing.as_ref()?;
+        if e.void() {
+            Some("invoice.read_only.void")
+        } else if e.record.invoice_status == Some(cl_api::InvoiceStatus::Paid) {
+            // The engine refuses an edit of a paid invoice (400); say so up
+            // front (N6).
+            Some("invoice.paid.read_only")
+        } else {
+            None
+        }
     }
 
     pub(crate) fn busy(&self) -> bool {
@@ -333,6 +370,15 @@ impl InvoiceScreen {
     /// Reads the accounts, names, tags, closing date and items.
     pub(crate) fn start_lists(&mut self) {
         self.books.start(&self.link, self.group.as_ref());
+        self.fetch_own_address();
+        self.load_email_prefs();
+        self.print_books_job = Some(email::print_books_job(&self.link, self.group.as_ref()));
+        if let Some(Ok(b)) = engine::poll(&mut self.print_books_job) {
+            self.print_books = b;
+        }
+        if self.editing.is_none() {
+            self.fetch_next_number();
+        }
         self.items_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
@@ -383,6 +429,7 @@ impl InvoiceScreen {
             self.unknown_client = None;
             self.pick_client(id);
         }
+        self.item_set_up_back();
     }
 
     pub(crate) fn poll(&mut self) {
@@ -396,7 +443,15 @@ impl InvoiceScreen {
         }
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
-                Ok(v) => self.saved(&v),
+                Ok((v, duplicate)) => {
+                    self.saved(&v);
+                    self.duplicate_number = duplicate;
+                    if duplicate {
+                        self.link.push(crate::company::CompanyEvent::Toast(
+                            "invoice.number.duplicate",
+                        ));
+                    }
+                }
                 Err(e) => self.save_failed(e),
             }
         }
@@ -431,6 +486,14 @@ impl InvoiceScreen {
             }
         }
         self.billable.poll();
+        self.poll_attach();
+        if let Some(Ok(b)) = engine::poll(&mut self.print_books_job) {
+            self.print_books = b;
+        }
+        if let Some(r) = engine::poll(&mut self.next_job) {
+            self.next_number = r.ok();
+        }
+        self.poll_pdf();
         self.email.poll();
         if let Some(done) = self.email.take_done() {
             self.email_done(done);
@@ -446,7 +509,16 @@ impl InvoiceScreen {
                 None => self.preview_job = Some((ticket, job)),
                 Some(Ok(p)) => {
                     self.preview_problem = None;
-                    self.tracker.apply_preview(ticket, engine::figures_of(&p));
+                    let figures = engine::figures_of(&p);
+                    let held = !figures.billed_on.is_empty();
+                    if self.tracker.apply_preview(ticket, figures) && held {
+                        // Another invoice bills a cost on this one (U-128):
+                        // the list is read again; the lines say which.
+                        if let Some(c) = self.header.current().client {
+                            let link = std::sync::Arc::clone(&self.link);
+                            self.billable.fetch(&link, self.group.as_ref(), c);
+                        }
+                    }
                 }
                 Some(Err(e)) => {
                     self.preview_problem = Some(match e {
@@ -471,7 +543,7 @@ impl InvoiceScreen {
                     let job = engine::read(
                         &self.link,
                         self.group.as_ref(),
-                        |d| crate::company::demo::invoices::preview(d, &new),
+                        |d| crate::company::demo::invoices::preview(d, &new, editing),
                         {
                             let new = new.clone();
                             move |s| async move { s.invoices().preview(&new, editing).await }
@@ -566,7 +638,31 @@ impl InvoiceScreen {
         self.sales = None;
         self.billable.forget();
         self.unknown_client = None;
+        self.duplicate_number = false;
+        self.attach = attach::InvoiceAttach::default();
         self.sync_inputs();
+        self.fetch_next_number();
+    }
+
+    /// Reads the next invoice number (nothing is taken).
+    pub(crate) fn fetch_next_number(&mut self) {
+        if !self.link.is_demo() && !self.has(Capabilities::DOCUMENT_NUMBERS) {
+            return;
+        }
+        self.next_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| Ok(crate::company::demo::invoices::next_number(d)),
+            |s| async move {
+                Ok(s.printing()
+                    .next_number(cl_api::DocType::Invoice)
+                    .await?
+                    .next)
+            },
+        ));
+        if let Some(Ok(n)) = engine::poll(&mut self.next_job) {
+            self.next_number = Some(n);
+        }
     }
 
     /// Clear: throw the unsaved edits away.
@@ -668,6 +764,9 @@ impl InvoiceScreen {
             "lost": self.lost.state_json(),
             "grid": { "focused": self.grid.has_focus() },
         });
+        v["next_number"] = json!(self.next_number);
+        v["attachments"] = self.attach.state_json();
+        v["duplicate_number"] = json!(self.duplicate_number);
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
             self.closing_prompt.state_json(self.closing_supported()),
@@ -696,7 +795,7 @@ impl InvoiceScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
-        let waiting = self.setting_up.is_some();
+        let waiting = self.setting_up.is_some() || self.setting_up_item.is_some();
         if self.lists_stale && (waiting || !self.is_dirty()) && !self.books.busy() {
             self.lists_stale = false;
             self.start_lists();
@@ -705,6 +804,12 @@ impl InvoiceScreen {
             self.listed = false;
             if let Some(c) = self.header.current().client {
                 self.client_changed_quiet(c);
+            }
+            // Printed in Print Forms, emailed from the Outbox, marked sent
+            // elsewhere: the open invoice is read again so its send history
+            // and `updatedAt` are current (the next edit isn't STALE).
+            if !self.is_dirty() && !self.busy() && self.load_job.is_none() {
+                self.reload();
             }
         }
     }

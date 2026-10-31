@@ -1,21 +1,22 @@
-//! Add Billable Costs (P20 WP-B step 3, Ctrl+Shift+B; Q-P20b/c/p/w/y/z).
+//! Add Billable Costs (P20 WP-B step 3, Ctrl+Shift+U; Q-P20b/c/p/w/y/z).
 //!
 //! The client's unbilled costs come from the engine (`GET /billable-costs`,
 //! U-128). Nothing is added by itself (Q-P20c): the side panel says "N
 //! unbilled costs" with an Add button; the dialog lists each cost with its
 //! source, a check box and one markup percent defaulted from the client
-//! (blank: none). A cost from an expense-only line takes an income account
-//! the owner picks (remembered per expense account while the window is
-//! open, Q-P20p). A cost is billed whole (Q-P20y); a negative cost gets no
-//! markup (Q-P20z). The amounts — markup included — are the engine's
-//! (Q-P20w): the line shows them from the preview.
+//! (blank: none). Every cost is billed to an income account (the engine
+//! requires it): the engine's suggestion (the cost item's), else the
+//! owner's pick, remembered per expense account (Q-P20p). A cost is billed
+//! whole (Q-P20y); a negative cost gets no markup (Q-P20z). The amounts —
+//! markup included — are the engine's (Q-P20w): the line shows them from
+//! the preview, and the note shows the engine's `totalAmount`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cl_api::{AccountType, ApiError, BillableCost, Page, PageRequest, RequestGroup, SignedPercent};
+use cl_api::{AccountType, ApiError, BillableCost, BillableCosts, RequestGroup, SignedPercent};
 use cl_core::ids::{AccountId, ContactId, JournalLineId};
-use cl_core::{MoneyStyle, Quantity};
+use cl_core::{Money, Quantity};
 use cl_model::forms::invoice::{BillableSeed, InvoiceForm};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
@@ -30,17 +31,26 @@ use crate::theme::Tokens;
 #[derive(Default)]
 pub(crate) struct Billable {
     client: Option<ContactId>,
-    job: Option<Job<Page<BillableCost>>>,
+    job: Option<Job<BillableCosts>>,
     /// The client's unbilled costs (the engine's).
     pub costs: Vec<BillableCost>,
+    /// The engine's count and sum of every unbilled cost.
+    total: Option<(u64, Money)>,
+    /// The client's suggested markup (the engine's `defaultMarkupPercent`).
+    default_markup: Option<SignedPercent>,
     open: bool,
     picks: HashSet<JournalLineId>,
     /// Markup percent as typed.
     pub markup: String,
     /// The income account chosen for a cost without an item.
     accounts: HashMap<JournalLineId, AccountId>,
-    /// The last income account chosen per expense account.
-    remembered: HashMap<AccountId, AccountId>,
+    /// The last income account chosen per expense account (persisted per
+    /// company, Q-P20p).
+    pub(crate) remembered: HashMap<AccountId, AccountId>,
+    /// `remembered` changed since it was saved.
+    pub(crate) remembered_dirty: bool,
+    /// `remembered` was read from the preferences.
+    remembered_loaded: bool,
     problem: Option<&'static str>,
     /// Costs added by the dialog so far (control channel).
     added: usize,
@@ -56,24 +66,15 @@ impl Billable {
     ) {
         if self.client != Some(c) {
             self.costs.clear();
+            self.total = None;
             self.picks.clear();
         }
         self.client = Some(c);
         self.job = Some(engine::read(
             link,
             group,
-            |d| {
-                Ok(crate::company::demo::billable::costs(
-                    d,
-                    c,
-                    PageRequest::first_max(),
-                ))
-            },
-            move |s| async move {
-                s.invoices()
-                    .billable_costs(c, PageRequest::first_max())
-                    .await
-            },
+            |d| Ok(crate::company::demo::billable::costs(d, c)),
+            move |s| async move { s.invoices().all_billable_costs(c).await },
         ));
         self.poll();
     }
@@ -81,8 +82,15 @@ impl Billable {
     pub(crate) fn poll(&mut self) {
         if let Some(r) = engine::poll(&mut self.job) {
             match r {
-                Ok(p) => self.costs = p.data,
-                Err(ApiError::Local(_)) => self.costs.clear(),
+                Ok(p) => {
+                    self.total = Some((p.total_count, p.total_amount));
+                    self.default_markup = p.default_markup_percent;
+                    self.costs = p.items;
+                }
+                Err(ApiError::Local(_)) => {
+                    self.costs.clear();
+                    self.total = None;
+                }
                 Err(_) => self.problem = Some("invoice.billable.load_failed"),
             }
         }
@@ -99,16 +107,29 @@ impl Billable {
         if let Some(exp) = self
             .costs
             .iter()
-            .find(|c| c.line_id == line)
-            .and_then(|c| c.account_id)
+            .find(|c| c.source_line_id == line)
+            .map(|c| c.expense_account_id)
+            && self.remembered.insert(exp, income) != Some(income)
         {
-            self.remembered.insert(exp, income);
+            self.remembered_dirty = true;
         }
+    }
+
+    /// The income account a cost is billed to: the owner's pick, else the
+    /// one remembered for its expense account, else the engine's
+    /// suggestion.
+    fn income_for(&self, c: &BillableCost) -> Option<AccountId> {
+        self.accounts
+            .get(&c.source_line_id)
+            .copied()
+            .or_else(|| self.remembered.get(&c.expense_account_id).copied())
+            .or(c.suggested_income_account_id)
     }
 
     pub(crate) fn forget(&mut self) {
         self.client = None;
         self.costs.clear();
+        self.total = None;
         self.picks.clear();
         self.open = false;
     }
@@ -127,8 +148,22 @@ impl Billable {
         let on = form.billable_sources();
         self.costs
             .iter()
-            .filter(|c| !on.contains(&c.line_id))
+            .filter(|c| !on.contains(&c.source_line_id))
             .collect()
+    }
+
+    /// The side panel's note: the engine's count and sum when none of the
+    /// costs is on the form yet, else the count left (the UI adds nothing
+    /// up, Q-P20n).
+    pub(crate) fn note(&self, form: &InvoiceForm) -> Option<(usize, Option<Money>)> {
+        let n = self.unbilled(form).len();
+        if n == 0 {
+            return None;
+        }
+        let whole = self
+            .total
+            .filter(|(count, _)| usize::try_from(*count).is_ok_and(|c| c == n));
+        Some((n, whole.map(|(_, sum)| sum)))
     }
 
     pub(crate) fn unbilled_json(&self, form: &InvoiceForm) -> Value {
@@ -159,28 +194,21 @@ impl Billable {
             }
             Some(Quantity::parse_wire(&p.to_wire()).ok()?)
         };
-        let one = Quantity::parse_wire("1").ok()?;
         Some(
             self.unbilled(form)
                 .into_iter()
-                .filter(|c| self.picks.contains(&c.line_id))
+                .filter(|c| self.picks.contains(&c.source_line_id))
                 .map(|c| BillableSeed {
-                    source_line: c.line_id,
-                    item: c.item_id,
-                    account: if c.item_id.is_some() {
+                    source_line: c.source_line_id,
+                    account: self.income_for(c),
+                    description: c.description.clone().unwrap_or_default(),
+                    quantity: c.quantity,
+                    // A negative cost passes through at cost (Q-P20z).
+                    markup_percent: if c.cost_amount.is_negative() {
                         None
                     } else {
-                        self.accounts.get(&c.line_id).copied()
+                        markup
                     },
-                    description: c.description.clone().unwrap_or_default(),
-                    quantity: c.quantity.unwrap_or(one),
-                    unit_cost: if c.quantity.is_some() {
-                        c.unit_price.unwrap_or(c.amount)
-                    } else {
-                        c.amount
-                    },
-                    // A negative cost passes through at cost (Q-P20z).
-                    markup_percent: if c.amount.is_negative() { None } else { markup },
                 })
                 .collect(),
         )
@@ -188,7 +216,80 @@ impl Billable {
 }
 
 impl InvoiceScreen {
-    /// Add Billable Costs (Ctrl+Shift+B).
+    /// Set Up for an item typed on line `row` (Q-P20i): the Item list
+    /// opens; the item fills the line once it is saved there.
+    pub(crate) fn start_item_set_up(&mut self, row: cl_grid::RowKey, name: String) {
+        self.grid.clear_unknown_item();
+        self.setting_up_item = Some((row, name));
+        self.link.push(crate::company::CompanyEvent::OpenWindow(
+            cl_model::CommandId::new(crate::screens::lists::items::KIND),
+        ));
+    }
+
+    /// The lists were read again: a set-up item fills its line.
+    pub(crate) fn item_set_up_back(&mut self) {
+        let Some((row, name)) = self.setting_up_item.clone() else {
+            return;
+        };
+        let Some((id, desc)) = self
+            .items
+            .iter()
+            .find(|i| i.fields.name.eq_ignore_ascii_case(&name))
+            .map(|i| (i.id, i.fields.description.clone()))
+        else {
+            return;
+        };
+        self.setting_up_item = None;
+        self.grid.edit(|v, keys| {
+            if let Some(l) = v.lines.iter_mut().find(|l| l.key == row) {
+                l.taxable = None;
+                l.item_changed(Some(id));
+                if l.description.trim().is_empty() {
+                    l.description = desc.unwrap_or_default();
+                }
+            }
+            v.ensure_entry_line(keys);
+        });
+    }
+
+    /// The income accounts remembered per expense account (Q-P20p), read
+    /// once from the company's local preferences.
+    fn load_remembered_income(&mut self) {
+        if self.billable.remembered_loaded {
+            return;
+        }
+        self.billable.remembered_loaded = true;
+        let Some((id, _)) = self.tenant.as_ref() else {
+            return;
+        };
+        if let Ok(list) = self.link.store().load()
+            && let Some(r) = list.get(*id)
+        {
+            self.billable
+                .remembered
+                .extend(r.prefs.billable_income.iter().map(|(k, v)| (*k, *v)));
+        }
+    }
+
+    /// Keeps the owner's choices for next time (Q-P20p).
+    fn save_remembered_income(&mut self) {
+        if !self.billable.remembered_dirty {
+            return;
+        }
+        let Some((id, name)) = self.tenant.clone() else {
+            return;
+        };
+        let map = self.billable.remembered.clone();
+        if let Err(e) = self.link.store().update(|l| {
+            l.upsert(id, &name).prefs.billable_income = map.into_iter().collect();
+        }) {
+            tracing::warn!("could not keep the billable income accounts: {e}");
+        } else {
+            self.billable.remembered_dirty = false;
+        }
+    }
+
+    /// Add Billable Costs (Ctrl+Shift+U).
     pub(crate) fn open_billable(&mut self) {
         if self.read_only().is_some() {
             return;
@@ -203,28 +304,22 @@ impl InvoiceScreen {
         };
         let link = Arc::clone(&self.link);
         self.billable.fetch(&link, self.group.as_ref(), c);
+        self.load_remembered_income();
         let form = self.compose();
         let markup = self
             .sales
             .as_ref()
             .filter(|(id, _)| *id == c)
             .and_then(|(_, s)| s.default_markup_percent)
+            .or(self.billable.default_markup)
             .map(SignedPercent::to_wire)
             .unwrap_or_default();
         let b = &mut self.billable;
         b.open = true;
         b.problem = None;
         b.markup = markup;
-        let ids: Vec<JournalLineId> = b.unbilled(&form).iter().map(|c| c.line_id).collect();
+        let ids: Vec<JournalLineId> = b.unbilled(&form).iter().map(|c| c.source_line_id).collect();
         b.picks = ids.into_iter().collect();
-        for c in &b.costs {
-            if c.item_id.is_none()
-                && let Some(exp) = c.account_id
-                && let Some(inc) = b.remembered.get(&exp)
-            {
-                b.accounts.entry(c.line_id).or_insert(*inc);
-            }
-        }
     }
 
     /// Adds the chosen costs as lines before the entry line (one undo step).
@@ -238,9 +333,12 @@ impl InvoiceScreen {
             self.billable.problem = Some("invoice.billable.none_picked");
             return;
         }
+        // A cost without an income account yet is added all the same; the
+        // owner picks it on the line (the save gate asks for it).
         let mut added = 0;
         self.grid
             .edit(|v, keys| added = v.add_billable(&seeds, keys));
+        self.save_remembered_income();
         self.billable.added += added;
         self.billable.close();
         self.last_action = Some("billable_added");
@@ -282,30 +380,30 @@ impl InvoiceScreen {
                 }
                 for c in &rows {
                     ui.horizontal_wrapped(|ui| {
-                        let mut on = b.picks.contains(&c.line_id);
+                        let mut on = b.picks.contains(&c.source_line_id);
                         let source = t_with(
                             "invoice.billable.source",
                             &[
                                 ("vendor", c.vendor_name.as_deref().unwrap_or_default()),
-                                ("number", c.txn_number.as_deref().unwrap_or_default()),
-                                ("date", &crate::shell::us_date(c.txn_date)),
+                                ("number", c.source_number.as_deref().unwrap_or_default()),
+                                ("date", &crate::shell::us_date(c.source_date)),
                             ],
                         );
                         let label = format!(
                             "{} \u{b7} {} \u{b7} {}",
                             c.description.as_deref().unwrap_or_default(),
                             source,
-                            c.amount.format(style)
+                            c.cost_amount.format(style)
                         );
                         if ui.checkbox(&mut on, label).changed() {
                             if on {
-                                b.picks.insert(c.line_id);
+                                b.picks.insert(c.source_line_id);
                             } else {
-                                b.picks.remove(&c.line_id);
+                                b.picks.remove(&c.source_line_id);
                             }
                         }
-                        if c.item_id.is_none() {
-                            let chosen = b.accounts.get(&c.line_id).copied();
+                        {
+                            let chosen = b.income_for(c);
                             let text = chosen
                                 .and_then(|a| incomes.iter().find(|(id, _)| *id == a))
                                 .map_or_else(
@@ -313,18 +411,20 @@ impl InvoiceScreen {
                                     |(_, n)| n.clone(),
                                 );
                             let l = ui.label(t("invoice.billable.income_account"));
-                            egui::ComboBox::from_id_salt(("invoice/billable/income", c.line_id))
-                                .selected_text(text)
-                                .show_ui(ui, |ui| {
-                                    for (id, name) in &incomes {
-                                        if ui.selectable_label(chosen == Some(*id), name).clicked()
-                                        {
-                                            b.choose_income(c.line_id, *id);
-                                        }
+                            egui::ComboBox::from_id_salt((
+                                "invoice/billable/income",
+                                c.source_line_id,
+                            ))
+                            .selected_text(text)
+                            .show_ui(ui, |ui| {
+                                for (id, name) in &incomes {
+                                    if ui.selectable_label(chosen == Some(*id), name).clicked() {
+                                        b.choose_income(c.source_line_id, *id);
                                     }
-                                })
-                                .response
-                                .labelled_by(l.id);
+                                }
+                            })
+                            .response
+                            .labelled_by(l.id);
                         }
                     });
                 }
@@ -356,21 +456,19 @@ impl InvoiceScreen {
     /// hidden when there are none.
     pub(crate) fn billable_note(&mut self, ui: &mut egui::Ui, tokens: &Tokens) {
         let form = self.compose();
-        let rows = self.billable.unbilled(&form);
-        if rows.is_empty() {
+        let Some((n, sum)) = self.billable.note(&form) else {
             return;
-        }
-        let n = rows.len();
-        let style = MoneyStyle::default();
-        // One cost shows its own amount; more show the count (the UI adds
-        // nothing up, Q-P20n).
-        let text = if n == 1 {
-            t_with(
-                "invoice.billable.note.one",
-                &[("amount", &rows[0].amount.format(style))],
-            )
-        } else {
-            t_count("invoice.billable.note", n, &[])
+        };
+        let style = self.money_style;
+        // The engine's sum of every unbilled cost (`totalAmount`); once some
+        // are on the form, the count left (the UI adds nothing up, Q-P20n).
+        let text = match sum {
+            Some(sum) => t_count(
+                "invoice.billable.note.sum",
+                n,
+                &[("amount", &sum.format(style))],
+            ),
+            None => t_count("invoice.billable.note", n, &[]),
         };
         let mut open = false;
         crate::screens::card_charge::kit::panel_card(

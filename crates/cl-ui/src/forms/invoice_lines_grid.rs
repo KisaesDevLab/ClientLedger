@@ -209,6 +209,9 @@ pub struct InvState {
     updating: String,
     cant: String,
     snapshot: Option<InvoiceLine>,
+    /// A name typed in an Item cell that is not in the list (Set Up,
+    /// Q-P20i).
+    pub unknown_item: Option<(RowKey, String)>,
 }
 
 struct View<'a> {
@@ -294,9 +297,17 @@ impl RowModel for View<'_> {
             V_DESC => CellValue::Text(Cow::Borrowed(&l.description)),
             V_DATE => l.service_date.map_or(CellValue::Empty, CellValue::Date),
             V_QTY => l.quantity.map_or(CellValue::Empty, CellValue::Quantity),
+            // A billable line shows the engine's display rate (amount /
+            // quantity, Q-P20w): "Updating…" while a preview is pending,
+            // never the source's cost (N4).
+            V_RATE if l.billable.is_some() => match shown {
+                Shown::Ready { rate: Some(r), .. } => CellValue::Money(r),
+                Shown::Updating => CellValue::Text(Cow::Borrowed(&self.a.updating)),
+                Shown::Nothing => l.rate.map_or(CellValue::Empty, CellValue::Money),
+                _ => CellValue::Empty,
+            },
             V_RATE => match (l.rate, shown) {
-                (Some(r), _) if l.billable.is_none() => CellValue::Money(r),
-                (_, Shown::Ready { rate: Some(r), .. }) | (Some(r), _) => CellValue::Money(r),
+                (Some(r), _) | (_, Shown::Ready { rate: Some(r), .. }) => CellValue::Money(r),
                 _ => CellValue::Empty,
             },
             V_AMOUNT => match shown {
@@ -333,7 +344,7 @@ pub(crate) fn apply(
     value: CellInput,
     lists: &ItemLists,
 ) -> Option<TextKey> {
-    if l.amounts_locked() && matches!(col, V_QTY | V_RATE) {
+    if l.amounts_locked() && matches!(col, V_ITEM | V_QTY | V_RATE) {
         return Some(LOCKED);
     }
     match (col, value) {
@@ -342,7 +353,10 @@ pub(crate) fn apply(
                 if l.item != Some(item) {
                     l.taxable = None;
                 }
-                l.item = Some(item);
+                // Another item: the old price and discount no longer apply
+                // (S8); the engine prices the new one unless a rate is
+                // typed after this.
+                l.item_changed(Some(item));
                 if l.description.trim().is_empty() {
                     l.description = lists.description(item).unwrap_or_default().to_string();
                 }
@@ -354,7 +368,7 @@ pub(crate) fn apply(
             None => return Some(PICK_FROM_LIST),
         },
         (V_ITEM | V_ACCOUNT, CellInput::Unresolved(_)) => return Some(PICK_FROM_LIST),
-        (V_ITEM, CellInput::Clear) => l.item = None,
+        (V_ITEM, CellInput::Clear) => l.item_changed(None),
         (V_ACCOUNT, CellInput::Clear) => l.account = None,
         (V_DESC, CellInput::Text(v)) => l.description = v,
         (V_DESC, CellInput::Clear) => l.description.clear(),
@@ -378,7 +392,7 @@ impl EditableModel for View<'_> {
         };
         match col {
             V_AMOUNT => false,
-            V_QTY | V_RATE => !l.amounts_locked(),
+            V_ITEM | V_QTY | V_RATE => !l.amounts_locked(),
             _ => true,
         }
     }
@@ -391,6 +405,14 @@ impl EditableModel for View<'_> {
         value: CellInput,
         _source: Source,
     ) -> Result<(), CellProblem> {
+        if pos.col == V_ITEM {
+            self.a.unknown_item = match &value {
+                CellInput::Unresolved(text) if !text.trim().is_empty() => {
+                    Some((pos.row, text.trim().to_string()))
+                }
+                _ => None,
+            };
+        }
         let lists = Arc::clone(&self.a.lists);
         let keys = &mut self.a.keys;
         let mut problem = None;
@@ -491,6 +513,7 @@ impl InvoiceGrid {
                     updating: t("invoice.updating"),
                     cant: t("invoice.cant_calculate"),
                     snapshot: None,
+                    unknown_item: None,
                 },
                 grid,
                 t("invoice.lines.label"),
@@ -539,6 +562,17 @@ impl InvoiceGrid {
         let a = self.form.adapter_mut();
         a.lists = lists;
         a.taxable = taxable;
+    }
+
+    /// The item name typed on a line that is not in the list, if any.
+    #[must_use]
+    pub fn unknown_item(&self) -> Option<&(RowKey, String)> {
+        self.form.adapter().unknown_item.as_ref()
+    }
+
+    /// Forgets the unknown item name (set up, or the owner moved on).
+    pub fn clear_unknown_item(&mut self) {
+        self.form.adapter_mut().unknown_item = None;
     }
 
     /// The items' taxable flags.

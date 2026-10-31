@@ -44,6 +44,7 @@ pub mod pay_bills;
 
 // P19: form printing.
 pub mod company_info;
+pub(crate) mod company_layouts;
 pub mod print_forms;
 
 // P20: Create Invoice and the Outbox.

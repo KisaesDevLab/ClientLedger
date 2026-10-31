@@ -76,7 +76,7 @@ fn mockup(s: &mut InvoiceScreen) {
     });
     s.open_billable();
     s.billable.markup.clear();
-    let line = s.billable.costs[0].line_id;
+    let line = s.billable.costs[0].source_line_id;
     s.billable
         .choose_income(line, crate::company::demo::account_id(4000));
     s.add_billable();
@@ -139,7 +139,7 @@ fn a_level_price_a_subtotal_and_a_discount_come_from_the_engine() {
     assert_eq!(t.total, m("2982.91"));
     let lines = s.state_json()["lines"].clone();
     assert_eq!(lines[4]["amount"], "83.26");
-    assert_eq!(lines[4]["rate_source"], "pricelevel");
+    assert_eq!(lines[4]["rate_source"], "pricelevelpercent");
     assert_eq!(
         lines[5]["amount"], "3,163.41",
         "the subtotal shows its group"
@@ -277,4 +277,245 @@ fn every_screen_key_is_in_the_catalog() {
     for c in TERMS {
         assert!(crate::i18n::has(&format!("invoice.terms.{c}")), "{c}");
     }
+}
+
+/// B3 (review): create → GET → the form → PUT unchanged posts the same
+/// total, with a level-priced line, a subtotal, a % discount and a
+/// marked-up billable cost; the billable line goes back with only its
+/// source, account and markup, and nothing is released.
+#[test]
+fn a_saved_invoice_round_trips_without_changing_the_money() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    let find = |s: &InvoiceScreen, name: &str| {
+        s.items
+            .iter()
+            .find(|i| i.fields.name == name)
+            .map(|i| i.id)
+            .expect(name)
+    };
+    let (sub, disc) = (find(&s, "Subtotal"), find(&s, "Loyalty discount"));
+    s.grid.edit(|v, keys| {
+        let at = v.lines.len() - 1;
+        for (i, item) in [sub, disc].into_iter().enumerate() {
+            v.lines.insert(
+                at + i,
+                InvoiceLine {
+                    item: Some(item),
+                    ..InvoiceLine::blank(keys.next_key())
+                },
+            );
+        }
+        for l in &mut v.lines {
+            if let Some(b) = l.billable.as_mut() {
+                b.markup_percent = Some(q("10"));
+            }
+        }
+    });
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let saved = s.editing.clone().expect("saved").record;
+    assert_eq!(saved.billable_sources().len(), 1);
+    let mut keys = cl_grid::RowKeyGen::new();
+    let (mut form, lines) = save::form_of(&saved, &mut keys);
+    form.lines = lines;
+    let req = form.to_new_invoice(&s.context()).expect("valid as read");
+    let new = engine::new_invoice(&req).expect("maps");
+    let body = serde_json::to_value(&new).expect("json");
+    let billable: Vec<&serde_json::Value> = body["lines"]
+        .as_array()
+        .expect("lines")
+        .iter()
+        .filter(|l| l.get("billableSourceLineId").is_some())
+        .collect();
+    assert_eq!(billable.len(), 1, "the markup line is not sent");
+    let b = billable[0];
+    assert!(b.get("accountId").is_some());
+    assert_eq!(b["markupPercent"], "10");
+    for k in ["itemId", "quantity", "unitPrice", "discountPercent"] {
+        assert!(b.get(k).is_none(), "{k} is the cost's");
+    }
+    assert!(
+        body["lines"]
+            .as_array()
+            .expect("lines")
+            .iter()
+            .any(|l| l.get("discountPercent").is_some()),
+        "the % discount keeps its stored percent"
+    );
+    assert_eq!(save::released(&saved, &req), Vec::new());
+    let mut d = s.link.demo_state().expect("demo");
+    let again = crate::company::demo::invoices::update(
+        &mut d,
+        saved.txn.id,
+        saved.txn.updated_at,
+        &new,
+        None,
+    )
+    .expect("unchanged edit");
+    assert_eq!(again.record.txn.total, saved.txn.total);
+    assert_eq!(again.record.tax_amount, saved.tax_amount);
+}
+
+/// Follow-up 20: printed (or emailed) from another window, the open invoice
+/// is read again so its send history and `updatedAt` are current.
+#[test]
+fn a_send_elsewhere_reloads_the_open_invoice() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let saved = s.editing.clone().expect("saved").record;
+    let other = s.link.bus().subscribe();
+    {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::invoices::record_sent(
+            &mut d,
+            saved.txn.id,
+            &cl_api::SendRecord {
+                method: cl_api::SendMethod::Printed,
+                recipients: Vec::new(),
+                sent_at: None,
+            },
+        )
+        .expect("printed");
+    }
+    crate::forms::publish_saved(&s.link, &other, &[]);
+    s.hear_changes();
+    s.poll();
+    let now = s.editing.clone().expect("open").record;
+    assert_eq!(now.send_history.len(), 1);
+    assert_ne!(now.txn.updated_at, None);
+}
+
+/// Q-P20ad: a new invoice shows the counter's next number and doesn't send
+/// it; a typed number already in use saves with a warning (Q-94).
+#[test]
+fn the_next_number_shows_and_a_duplicate_warns() {
+    let (_d, mut s) = screen();
+    assert_eq!(s.next_number.as_deref(), Some("1042"));
+    mockup(&mut s);
+    s.start_save(SaveIntent::SaveAndNew, None);
+    settle(&mut s);
+    assert_eq!(s.next_number.as_deref(), Some("1043"));
+    assert!(!s.duplicate_number);
+    let c = story_client(&s);
+    s.pick_client(c);
+    let item = s.items[3].id;
+    s.grid.edit(|v, keys| {
+        v.lines = vec![InvoiceLine {
+            item: Some(item),
+            quantity: Some(q("1")),
+            rate: Some(m("10.00")),
+            ..InvoiceLine::blank(keys.next_key())
+        }];
+        v.ensure_entry_line(keys);
+    });
+    s.header.edit(field::NUMBER, |h| h.number = "1042".into());
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    assert!(s.duplicate_number, "1042 is taken");
+}
+
+/// Q-P20v: a saved invoice takes a file; an unsaved one asks to save first.
+#[test]
+fn a_saved_invoice_takes_an_attachment() {
+    let (_d, mut s) = screen();
+    s.upload_attachment("note.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    assert_eq!(s.attach.problem, Some("invoice.attach.save_first"));
+    mockup(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.upload_attachment("note.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    s.poll();
+    assert_eq!(s.attach.list.len(), 1);
+    assert_eq!(s.state_json()["attachments"]["files"], 1);
+    s.upload_attachment("x.txt".into(), b"hello".to_vec());
+    assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
+}
+
+/// Q-P20i: an item set up from a line fills that line when it is saved.
+#[test]
+fn an_item_set_up_from_a_line_fills_it() {
+    let (_d, mut s) = screen();
+    let key = s.grid.value().lines[0].key;
+    s.start_item_set_up(key, "Stump Grinding".into());
+    let id = {
+        let mut d = s.link.demo_state().expect("demo");
+        let items = d
+            .items
+            .get_or_insert_with(crate::company::demo::lists::items);
+        let mut new = items[0].clone();
+        new.id = cl_core::ids::ItemId::parse("d6000000-0000-4000-8000-0000000000aa").expect("id");
+        new.fields.name = "Stump Grinding".into();
+        items.push(new.clone());
+        new.id
+    };
+    s.items = s
+        .link
+        .demo_state()
+        .expect("demo")
+        .items
+        .clone()
+        .unwrap_or_default();
+    s.item_set_up_back();
+    assert_eq!(s.grid.value().lines[0].item, Some(id));
+    assert!(s.setting_up_item.is_none());
+}
+
+/// Q-P20p: the income account picked for a cost is remembered per expense
+/// account across windows (the company's local preferences).
+#[test]
+fn the_income_account_for_a_cost_is_remembered() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let tenant = cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-0000000000f1").expect("id");
+    let mut s = InvoiceScreen::new(Arc::clone(&link), Some((tenant, "Demo".into())), today());
+    mockup(&mut s);
+    let exp = s.billable.costs[0].expense_account_id;
+    let saved = link
+        .store()
+        .load()
+        .ok()
+        .and_then(|l| l.get(tenant).map(|r| r.prefs.billable_income.clone()))
+        .unwrap_or_default();
+    assert_eq!(
+        saved.get(&exp),
+        Some(&crate::company::demo::account_id(4000))
+    );
+    let mut again = InvoiceScreen::new(link, Some((tenant, "Demo".into())), today());
+    again.billable.remembered.clear();
+    let c = story_client(&again);
+    again.pick_client(c);
+    again.open_billable();
+    assert_eq!(
+        again.billable.remembered.get(&exp),
+        Some(&crate::company::demo::account_id(4000))
+    );
+}
+
+/// Q-P20ac (U-130): the Template picked prints the invoice; Simple has no
+/// quantity or rate column.
+#[test]
+fn the_template_picked_prints_the_invoice() {
+    let (_d, mut s) = screen();
+    let simple = s
+        .print_books
+        .layouts
+        .iter()
+        .find(|l| l.name == "Simple")
+        .map(|l| l.id)
+        .expect("demo layout");
+    mockup(&mut s);
+    s.header.edit_step(|h| {
+        h.layout = cl_model::forms::invoice::LayoutPick::Layout(simple.to_string());
+    });
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let r = s.editing.clone().expect("saved").record;
+    assert_eq!(r.layout_id, Some(simple));
+    let (data, _) = s.pdf_parts().expect("parts");
+    let p = data.layout.expect("layout");
+    assert!(!p.quantity && !p.rate);
 }

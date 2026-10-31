@@ -123,6 +123,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.pdf.no_address", "\u{2014} no mailing address on file \u{2014}"),
     ("print.pdf.bill_to", "Bill to"),
     ("print.pdf.sold_to", "Sold to"),
+    ("print.pdf.item", "Item"),
     ("print.pdf.description", "Description"),
     ("print.pdf.deposit_summary", "Deposit Summary"),
     ("print.pdf.customer", "Customer"),

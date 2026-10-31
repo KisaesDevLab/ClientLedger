@@ -45,6 +45,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::PayBillsV1) => "keyable-pay-bills",
             RetryClass::Keyable(KeySet::CheckPrintV1) => "keyable-check-print",
             RetryClass::Keyable(KeySet::InvoiceV1) => "keyable-invoice",
+            RetryClass::Keyable(KeySet::InvoiceEmailV1) => "keyable-invoice-email",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -89,6 +90,9 @@ pub enum KeySet {
     CheckPrintV1,
     /// `idempotency-invoice-v1` (U-124): invoice edit, void and sent.
     InvoiceV1,
+    /// `invoice-email-v1` (U-127): invoice email and email-later, keyed
+    /// with `idempotency-v1`'s contract under their own capability.
+    InvoiceEmailV1,
 }
 
 impl KeySet {
@@ -103,6 +107,7 @@ impl KeySet {
             KeySet::PayBillsV1 => crate::wire::Capabilities::IDEMPOTENCY_PAY_BILLS,
             KeySet::CheckPrintV1 => crate::wire::Capabilities::IDEMPOTENCY_CHECK_PRINT,
             KeySet::InvoiceV1 => crate::wire::Capabilities::IDEMPOTENCY_INVOICE,
+            KeySet::InvoiceEmailV1 => crate::wire::Capabilities::INVOICE_EMAIL,
         }
     }
 }
@@ -283,6 +288,19 @@ const fn keyable_check_print(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::CheckPrintV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `invoice-email-v1` keyed set (U-127): keyed
+/// only while the engine advertises that capability.
+const fn keyable_invoice_email(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::InvoiceEmailV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -952,12 +970,14 @@ pub(crate) const INVOICE_SENT: Operation =
 /// Every figure of an invoice, posting nothing (U-129; contract per P20
 /// plan §2, verify when E2 lands).
 pub(crate) const INVOICE_PREVIEW: Operation = write(Method::Post, "/api/v1/invoices/preview");
-/// Emails an invoice through the company SMTP (U-127; contract per P20
-/// plan §2, verify when E4 lands).
-pub(crate) const INVOICE_EMAIL: Operation = write(Method::Post, "/api/v1/invoices/{id}/email");
-/// Puts an email in the Outbox (U-127, Q-P20q; contract, verify with E4).
+/// Emails an invoice through the company SMTP (U-127; keyed under
+/// `invoice-email-v1`: a retry with the same key sends once).
+pub(crate) const INVOICE_EMAIL: Operation =
+    keyable_invoice_email(Method::Post, "/api/v1/invoices/{id}/email");
+/// Puts an email in the Outbox (U-127, Q-P20q; keyed under
+/// `invoice-email-v1`).
 pub(crate) const INVOICE_EMAIL_LATER: Operation =
-    write(Method::Post, "/api/v1/invoices/{id}/email-later");
+    keyable_invoice_email(Method::Post, "/api/v1/invoices/{id}/email-later");
 /// The Outbox (U-127; contract, verify with E4).
 pub(crate) const EMAIL_QUEUE: Operation = read("/api/v1/forms/email-queue");
 /// Takes one message out of the Outbox (U-127; contract, verify with E4).
@@ -965,6 +985,19 @@ pub(crate) const EMAIL_QUEUE_DELETE: Operation =
     write(Method::Delete, "/api/v1/forms/email-queue/{id}");
 /// A client's unbilled costs (U-128; contract, verify when E3 lands).
 pub(crate) const BILLABLE_COSTS: Operation = read("/api/v1/billable-costs");
+/// Invoice print layouts, default first (U-130, `invoice-layouts-v1`).
+pub(crate) const INVOICE_LAYOUTS_LIST: Operation = read("/api/v1/company/invoice-layouts");
+/// Creates an invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUTS_CREATE: Operation =
+    write(Method::Post, "/api/v1/company/invoice-layouts");
+/// One invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUT_GET: Operation = read("/api/v1/company/invoice-layouts/{id}");
+/// Edits, archives or unarchives an invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUT_PUT: Operation =
+    write(Method::Put, "/api/v1/company/invoice-layouts/{id}");
+/// Makes an invoice layout the company default (U-130).
+pub(crate) const INVOICE_LAYOUT_DEFAULT: Operation =
+    write(Method::Post, "/api/v1/company/invoice-layouts/{id}/default");
 /// Price levels (U-40; contract per P20 plan §2, verify when E2 lands).
 pub(crate) const PRICE_LEVELS_LIST: Operation = read("/api/v1/price-levels");
 /// Creates a price level (contract, verify with E2).
@@ -988,7 +1021,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 235] = [
+pub const OPERATIONS: [Operation; 240] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1237,6 +1270,11 @@ pub const OPERATIONS: [Operation; 235] = [
     PRICE_LEVEL_GET,
     PRICE_LEVEL_PUT,
     PRICE_LEVEL_DELETE,
+    INVOICE_LAYOUTS_LIST,
+    INVOICE_LAYOUTS_CREATE,
+    INVOICE_LAYOUT_GET,
+    INVOICE_LAYOUT_PUT,
+    INVOICE_LAYOUT_DEFAULT,
 ];
 
 /// Looks up a covered operation.
@@ -1327,6 +1365,8 @@ mod tests {
                 Some(KeySet::CheckPrintV1)
             } else if KEYABLE_INVOICE.contains(&route) {
                 Some(KeySet::InvoiceV1)
+            } else if KEYABLE_INVOICE_EMAIL.contains(&route) {
+                Some(KeySet::InvoiceEmailV1)
             } else {
                 None
             };
@@ -1354,7 +1394,8 @@ mod tests {
                 + KEYABLE_DOCS_ATTACH.len()
                 + KEYABLE_PAY_BILLS.len()
                 + KEYABLE_CHECK_PRINT.len()
-                + KEYABLE_INVOICE.len(),
+                + KEYABLE_INVOICE.len()
+                + KEYABLE_INVOICE_EMAIL.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1429,6 +1470,13 @@ mod tests {
         ("POST", "/api/v1/invoices/{id}/sent"),
     ];
 
+    /// The engine's `invoice-email-v1` keyed set (U-127), as
+    /// `tests/fixtures/idempotency_invoice_email_v1_routes.txt` records it.
+    const KEYABLE_INVOICE_EMAIL: [(&str, &str); 2] = [
+        ("POST", "/api/v1/invoices/{id}/email"),
+        ("POST", "/api/v1/invoices/{id}/email-later"),
+    ];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
@@ -1476,6 +1524,14 @@ mod tests {
         assert_eq!(INVOICE_PUT.key_set(), Some(KeySet::InvoiceV1));
         assert_eq!(INVOICES_CREATE.key_set(), Some(KeySet::V1));
         assert_eq!(INVOICE_PREVIEW.key_set(), None);
+        assert_eq!(KeySet::InvoiceEmailV1.capability(), "invoice-email-v1");
+        assert_eq!(
+            RetryClass::Keyable(KeySet::InvoiceEmailV1).as_str(),
+            "keyable-invoice-email"
+        );
+        assert_eq!(INVOICE_EMAIL.key_set(), Some(KeySet::InvoiceEmailV1));
+        assert_eq!(INVOICE_EMAIL_LATER.key_set(), Some(KeySet::InvoiceEmailV1));
+        assert_eq!(EMAIL_QUEUE_DELETE.key_set(), None);
     }
 
     /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
@@ -1491,6 +1547,7 @@ mod tests {
             KeySet::PayBillsV1,
             KeySet::CheckPrintV1,
             KeySet::InvoiceV1,
+            KeySet::InvoiceEmailV1,
         ] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),

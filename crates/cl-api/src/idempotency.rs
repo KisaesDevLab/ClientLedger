@@ -274,6 +274,9 @@ pub(crate) struct Executor {
     /// The engine replays keys on invoice edit, void and sent
     /// (`idempotency-invoice-v1`, U-124).
     idempotency_invoice_v1: AtomicBool,
+    /// The engine replays keys on invoice email and email-later
+    /// (`invoice-email-v1`, U-127).
+    invoice_email_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -326,6 +329,7 @@ impl Executor {
             idempotency_pay_bills_v1: AtomicBool::new(false),
             idempotency_check_print_v1: AtomicBool::new(false),
             idempotency_invoice_v1: AtomicBool::new(false),
+            invoice_email_v1: AtomicBool::new(false),
         }
     }
 
@@ -374,6 +378,12 @@ impl Executor {
         self.idempotency_invoice_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `invoice-email-v1` (U-127): it
+    /// replays keys on invoice email and email-later.
+    pub(crate) fn set_invoice_email_v1(&self, on: bool) {
+        self.invoice_email_v1.store(on, Ordering::Relaxed);
+    }
+
     /// The engine replays a key on routes of `set` (it advertises that
     /// set's capability).
     fn replays(&self, set: KeySet) -> bool {
@@ -385,6 +395,7 @@ impl Executor {
             KeySet::PayBillsV1 => self.idempotency_pay_bills_v1.load(Ordering::Relaxed),
             KeySet::CheckPrintV1 => self.idempotency_check_print_v1.load(Ordering::Relaxed),
             KeySet::InvoiceV1 => self.idempotency_invoice_v1.load(Ordering::Relaxed),
+            KeySet::InvoiceEmailV1 => self.invoice_email_v1.load(Ordering::Relaxed),
         }
     }
 

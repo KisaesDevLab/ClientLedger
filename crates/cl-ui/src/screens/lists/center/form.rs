@@ -299,6 +299,14 @@ impl CenterScreen {
                 return false;
             }
         };
+        // The client's Sales section is checked before anything is sent
+        // (S9): a bad markup keeps the form open.
+        if !self.sales.check() {
+            return false;
+        }
+        let Panel::Form(panel) = &mut self.panel else {
+            return false;
+        };
         panel.problems.clear();
         panel.error = None;
         match panel.form.begin_save(intent) {

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
-use crate::resources::invoices::SignedPercent;
+use crate::resources::invoices::{InvoiceLayoutId, SignedPercent};
 use crate::resources::operations::{BILLS_CREATE, INVOICES_CREATE};
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Session, decode, json_body};
@@ -43,18 +43,22 @@ pub struct InvoiceLine {
     pub description: Option<String>,
     /// Service date (`invoice-fields-v1`).
     pub service_date: Option<CalendarDate>,
-    /// Quantity.
-    pub quantity: Quantity,
+    /// Quantity; `None` is left out (the engine takes 1; a billable line
+    /// must not send one, U-128).
+    pub quantity: Option<Quantity>,
     /// Unit price; `None` asks the engine to price it (U-129).
     pub unit_price: Option<Money>,
+    /// A discount item's percent (resent as stored on an edit; U-129).
+    pub discount_percent: Option<SignedPercent>,
     /// Taxable; `None` takes the item's flag (false without an item).
     pub is_taxable: Option<bool>,
     /// The line's own tax rate; the desktop app sends `None`.
     pub tax_rate: Option<Rate>,
     /// Line tag.
     pub tag_id: Option<TagId>,
-    /// The billable cost this line invoices (U-128, `billable-costs-v1`;
-    /// contract per P20 plan §2, verify when E3 lands).
+    /// The billable cost this line invoices (U-128, `billable-costs-v1`):
+    /// such a line sends only the source, `account_id` (required), markup,
+    /// description, taxable, service date and tag.
     pub billable_source_line_id: Option<JournalLineId>,
     /// Markup on that cost in percent (U-128; needs the source line).
     pub markup_percent: Option<SignedPercent>,
@@ -67,7 +71,7 @@ impl InvoiceLine {
         InvoiceLine {
             account_id: Some(account),
             unit_price: Some(unit_price),
-            ..InvoiceLine::blank(quantity)
+            ..InvoiceLine::blank(Some(quantity))
         }
     }
 
@@ -77,11 +81,21 @@ impl InvoiceLine {
     pub fn item(item: ItemId, quantity: Quantity) -> InvoiceLine {
         InvoiceLine {
             item_id: Some(item),
-            ..InvoiceLine::blank(quantity)
+            ..InvoiceLine::blank(Some(quantity))
         }
     }
 
-    fn blank(quantity: Quantity) -> InvoiceLine {
+    /// A billable cost billed to `account` (U-128).
+    #[must_use]
+    pub fn billable(source: JournalLineId, account: AccountId) -> InvoiceLine {
+        InvoiceLine {
+            account_id: Some(account),
+            billable_source_line_id: Some(source),
+            ..InvoiceLine::blank(None)
+        }
+    }
+
+    fn blank(quantity: Option<Quantity>) -> InvoiceLine {
         InvoiceLine {
             account_id: None,
             item_id: None,
@@ -89,6 +103,7 @@ impl InvoiceLine {
             service_date: None,
             quantity,
             unit_price: None,
+            discount_percent: None,
             is_taxable: None,
             tax_rate: None,
             tag_id: None,
@@ -127,9 +142,14 @@ impl Serialize for InvoiceLine {
         if let Some(d) = &self.service_date {
             m.serialize_entry("serviceDate", d)?;
         }
-        m.serialize_entry("quantity", &self.quantity.to_wire())?;
+        if let Some(q) = &self.quantity {
+            m.serialize_entry("quantity", &q.to_wire())?;
+        }
         if let Some(p) = &self.unit_price {
             m.serialize_entry("unitPrice", &p.to_wire())?;
+        }
+        if let Some(p) = &self.discount_percent {
+            m.serialize_entry("discountPercent", &p.to_wire())?;
         }
         if let Some(t) = &self.is_taxable {
             m.serialize_entry("isTaxable", t)?;
@@ -200,6 +220,53 @@ pub struct NewInvoice {
     /// an edit).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_later: Option<bool>,
+    /// The print layout (`invoice-layouts-v1`, U-130).
+    #[serde(skip_serializing_if = "LayoutChoice::is_omitted")]
+    pub layout_id: LayoutChoice,
+    /// PUT only: billed costs this edit takes off the invoice (U-128; a
+    /// billed cost neither resent nor named here is 409
+    /// `BILLABLE_LINES_MISSING`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub release_billable_source_line_ids: Vec<JournalLineId>,
+}
+
+/// An invoice's `layoutId` on a save (U-130).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LayoutChoice {
+    /// Left out: on a create the client's default layout, on an edit the
+    /// invoice keeps its own.
+    #[default]
+    Omitted,
+    /// `null`: the company's default layout.
+    CompanyDefault,
+    /// This layout.
+    Layout(InvoiceLayoutId),
+}
+
+impl LayoutChoice {
+    /// Left out of the body.
+    #[must_use]
+    pub fn is_omitted(&self) -> bool {
+        *self == LayoutChoice::Omitted
+    }
+
+    /// The layout named (`None` for the company default or left out).
+    #[must_use]
+    pub const fn id(self) -> Option<InvoiceLayoutId> {
+        match self {
+            LayoutChoice::Layout(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for LayoutChoice {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            LayoutChoice::Layout(id) => s.serialize_some(id),
+            _ => s.serialize_none(),
+        }
+    }
 }
 
 impl NewInvoice {
@@ -221,6 +288,8 @@ impl NewInvoice {
             txn_number: None,
             warn_only: false,
             print_later: None,
+            layout_id: LayoutChoice::Omitted,
+            release_billable_source_line_ids: Vec::new(),
         }
     }
 }
@@ -332,7 +401,7 @@ impl Session {
         if new.lines.iter().any(|l| {
             l.account_id.is_none()
                 || l.unit_price.is_none_or(Money::is_negative)
-                || l.quantity.is_negative()
+                || l.quantity.is_none_or(Quantity::is_negative)
         }) {
             return Err(ApiError::Local(LocalValidation::NonPositiveAmount));
         }

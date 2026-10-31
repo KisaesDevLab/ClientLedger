@@ -127,6 +127,14 @@ impl InvoiceScreen {
                 {
                     clicked = Some("invoice.email");
                 }
+                if ui
+                    .add_enabled(saved, egui::Button::new(t("invoice.attach")))
+                    .on_hover_text(t("invoice.attach.tip"))
+                    .on_disabled_hover_text(t("invoice.attach.save_first"))
+                    .clicked()
+                {
+                    clicked = Some("invoice.attach");
+                }
                 ui.separator();
                 if ui
                     .add_enabled(open, egui::Button::new(t("invoice.add_billable")))
@@ -146,25 +154,15 @@ impl InvoiceScreen {
         });
         match nav.or(clicked) {
             Some("invoice.preview") => self.preview_pdf(),
+            Some("invoice.attach") => self.start_attach(ui.ctx()),
             Some(cmd) => self.after_frame = Some(CommandId::new(cmd)),
             None => {}
         }
     }
 
-    /// Preview: the saved invoice's PDF, full size.
+    /// Preview: the saved invoice's PDF, full size (made on the queue).
     fn preview_pdf(&mut self) {
-        match self.pdf() {
-            Some((name, bytes)) => self.link.push(crate::company::CompanyEvent::OpenWith(
-                CommandId::new(crate::screens::document_view::KIND),
-                Box::new(crate::windows::OpenPayload::Document(
-                    crate::widgets::pdf_viewer::DocSource {
-                        name,
-                        bytes: std::sync::Arc::from(bytes),
-                    },
-                )),
-            )),
-            None => self.notice = Some("invoice.email.pdf_failed"),
-        }
+        self.open_pdf();
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -196,7 +194,7 @@ impl InvoiceScreen {
         if let Some(text) = self
             .editing
             .as_ref()
-            .and_then(|e| super::email::sent_text(&e.record))
+            .and_then(|e| super::email::sent_text(&e.record, self.email.own.as_deref()))
         {
             banner(ui, tokens, |ui| {
                 ui.label(text);
@@ -258,6 +256,7 @@ impl InvoiceScreen {
         ui.add_space(10.0);
         header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.grid.ui(ui);
+            self.item_set_up_ui(ui);
         });
         ui.add_space(8.0);
         header::locked_scope(ui, enabled, read_only, |ui| self.footer_ui(ui, tokens));
@@ -323,12 +322,27 @@ impl InvoiceScreen {
                             self.inputs.rev = self.header.revision();
                         }
                         kit::track(&mut self.focused, &r, field::NUMBER);
+                        // Q-P20ad: the counter's next number while blank;
+                        // the engine confirms it on save.
+                        if self.editing.is_none()
+                            && self.header.current().number.trim().is_empty()
+                            && let Some(n) = &self.next_number
+                        {
+                            ui.label(
+                                RichText::new(t_with("invoice.number.next", &[("number", n)]))
+                                    .size(12.0)
+                                    .color(tokens.text_secondary),
+                            );
+                        }
                     });
                 });
                 ui.add_space(8.0);
                 header::wrap_row(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     kit::wrap_item(ui, "invoice/terms", |ui| self.terms_ui(ui, tokens));
+                    if !self.print_books.layouts.is_empty() {
+                        kit::wrap_item(ui, "invoice/template", |ui| self.template_ui(ui, tokens));
+                    }
                     kit::wrap_item(ui, "invoice/due", |ui| {
                         let today = self.today;
                         if self.inputs.due.text.is_empty()
@@ -437,6 +451,78 @@ impl InvoiceScreen {
                         "clients.center",
                     )));
             }
+        }
+    }
+
+    /// Q-P20i: an item name not in the list offers Set Up (the full item
+    /// form); the new item fills the line when it is saved.
+    fn item_set_up_ui(&mut self, ui: &mut Ui) {
+        let Some((row, name)) = self.grid.unknown_item().cloned() else {
+            return;
+        };
+        let label = t_with("invoice.item.set_up", &[("name", &name)]);
+        if ui
+            .button(label)
+            .on_hover_text(t("invoice.item.set_up.tip"))
+            .clicked()
+        {
+            self.start_item_set_up(row, name);
+        }
+    }
+
+    /// Template (Q-P20ac, U-130): the invoice's print layout. Archived
+    /// layouts are not offered; an invoice that has one keeps showing it.
+    fn template_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        use cl_model::forms::invoice::LayoutPick;
+        let l = kit::above(ui, tokens, &t("invoice.template"));
+        let current = self.header.current().layout.clone();
+        let name_of = |id: &str| {
+            self.print_books
+                .layouts
+                .iter()
+                .find(|x| x.id.to_string() == id)
+                .map(|x| x.name.clone())
+        };
+        let shown = match &current {
+            LayoutPick::Unset => t("invoice.template.client"),
+            LayoutPick::CompanyDefault => t("invoice.template.default"),
+            LayoutPick::Layout(id) => name_of(id).unwrap_or_else(|| t("invoice.template.default")),
+        };
+        let offered: Vec<(String, String)> = self
+            .print_books
+            .layouts
+            .iter()
+            .filter(|x| !x.is_archived)
+            .map(|x| (x.id.to_string(), x.name.clone()))
+            .collect();
+        let mut pick: Option<LayoutPick> = None;
+        ui.add_enabled_ui(self.read_only().is_none(), |ui| {
+            egui::ComboBox::from_id_salt("invoice/template")
+                .selected_text(shown)
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            current == LayoutPick::CompanyDefault,
+                            t("invoice.template.default"),
+                        )
+                        .clicked()
+                    {
+                        pick = Some(LayoutPick::CompanyDefault);
+                    }
+                    for (id, name) in &offered {
+                        let on = current == LayoutPick::Layout(id.clone());
+                        if ui.selectable_label(on, name).clicked() {
+                            pick = Some(LayoutPick::Layout(id.clone()));
+                        }
+                    }
+                })
+                .response
+                .labelled_by(l.id)
+                .on_hover_text(t("invoice.template.tip"));
+        });
+        if let Some(p) = pick {
+            self.header.edit_step(|h| h.layout = p);
         }
     }
 
@@ -560,7 +646,7 @@ impl InvoiceScreen {
             TotalsView::Ready(t) => t.tax_rate.map(|r| {
                 format!(
                     "{}%",
-                    (r.as_decimal() * rust_decimal::Decimal::ONE_HUNDRED).round_dp(3)
+                    (r.as_decimal() * rust_decimal::Decimal::ONE_HUNDRED).normalize()
                 )
             }),
             _ => None,
@@ -569,11 +655,15 @@ impl InvoiceScreen {
             || t("invoice.totals.tax"),
             |r| t_with("invoice.totals.tax_rate", &[("rate", &r)]),
         );
-        let editing = self.editing.as_ref().filter(|_| !self.is_dirty());
-        let paid = editing.and_then(|e| e.record.amount_paid);
-        let balance = match editing {
-            Some(e) => e.record.balance_due.map_or(Figure::Dash, Figure::Value),
-            None => fig(|t| t.total),
+        // Payments are the record's while editing (S7); the balance due is
+        // the engine's: the record's when nothing changed, a dash until
+        // the edit is saved (the UI subtracts nothing).
+        let paid = self.editing.as_ref().and_then(|e| e.record.amount_paid);
+        let has_paid = paid.is_some_and(|p| !p.is_zero());
+        let balance = match self.editing.as_ref() {
+            Some(e) if !self.is_dirty() => e.record.balance_due.map_or(Figure::Dash, Figure::Value),
+            Some(_) if has_paid => Figure::Dash,
+            _ => fig(|t| t.total),
         };
         egui::Frame::new()
             .fill(tokens.surface_subtle)
@@ -702,6 +792,7 @@ impl InvoiceScreen {
             ui.add_space(10.0);
         }
         self.billable_note(ui, tokens);
+        self.attach_card(ui, tokens);
         if let Some(notes) = f.notes.clone().filter(|n| !n.trim().is_empty()) {
             ui.add_space(10.0);
             kit::panel_card(ui, tokens, &t("invoice.side.notes"), |ui| {

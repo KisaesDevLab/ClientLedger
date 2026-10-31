@@ -333,6 +333,7 @@ pub(crate) fn form_labels() -> FormLabels {
         reference: t("print.pdf.reference"),
         statement_date: t("print.pdf.statement_date"),
         deposit_to: t("print.pdf.deposit_to"),
+        item: t("print.pdf.item"),
         description: t("print.pdf.description"),
         quantity: t("print.pdf.quantity"),
         rate: t("print.pdf.rate"),

@@ -15,7 +15,7 @@ use cl_api::{
     Session, SignedPercent,
 };
 use cl_model::forms::invoice::{
-    InvoiceRequest, PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
+    InvoiceRequest, LayoutPick, PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
 };
 
 use crate::company::demo::DemoState;
@@ -105,19 +105,31 @@ where
     }
 }
 
+/// A percent the model holds as a `Quantity` (markup, discount) as the
+/// API's exact percent.
+fn percent(q: Option<cl_core::Quantity>) -> Result<Option<SignedPercent>, ApiError> {
+    q.map(|q| {
+        let w = q.to_wire();
+        let t = if w.contains('.') {
+            w.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            w
+        };
+        SignedPercent::parse(&t)
+    })
+    .transpose()
+    .map_err(ApiError::Local)
+}
+
 /// The checked request as the engine's invoice, field by field (the tax
-/// rate is never sent).
+/// rate is never sent; a billable line sends no item, quantity or price).
 ///
 /// # Errors
 /// `Local(InvalidValue)` for a markup the API can't carry.
 pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
     let mut lines = Vec::with_capacity(r.lines.len());
     for l in &r.lines {
-        let markup = l
-            .markup_percent
-            .map(|q| SignedPercent::parse(&q.to_wire()))
-            .transpose()
-            .map_err(ApiError::Local)?;
+        let markup = percent(l.markup_percent)?;
         lines.push(cl_api::InvoiceLine {
             account_id: l.account,
             item_id: l.item,
@@ -125,6 +137,7 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
             service_date: l.service_date,
             quantity: l.quantity,
             unit_price: l.unit_price,
+            discount_percent: percent(l.discount_percent)?,
             is_taxable: l.taxable,
             tax_rate: None,
             tag_id: l.tag,
@@ -143,6 +156,13 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
     n.hide_zero_lines = r.hide_zero_lines;
     n.txn_number.clone_from(&r.number);
     n.print_later = Some(r.print_later);
+    n.layout_id = match &r.layout {
+        LayoutPick::Unset => cl_api::LayoutChoice::Omitted,
+        LayoutPick::CompanyDefault => cl_api::LayoutChoice::CompanyDefault,
+        LayoutPick::Layout(id) => cl_api::InvoiceLayoutId::parse(id)
+            .map(cl_api::LayoutChoice::Layout)
+            .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
+    };
     Ok(n)
 }
 
@@ -153,9 +173,9 @@ pub(crate) fn source_of(s: Option<PriceSource>) -> RateSource {
         Some(PriceSource::Input) => RateSource::Typed,
         Some(PriceSource::Item) => RateSource::Item,
         Some(PriceSource::PriceLevel) => RateSource::PriceLevel,
-        Some(PriceSource::PriceLevelItem) => RateSource::PriceLevelItem,
-        Some(PriceSource::Computed) => RateSource::Computed,
-        Some(PriceSource::Billable) => RateSource::Billable,
+        Some(PriceSource::PriceLevelPercent) => RateSource::PriceLevelPercent,
+        Some(PriceSource::Unpriced) => RateSource::Unpriced,
+        Some(PriceSource::BillableCost) => RateSource::Billable,
         Some(PriceSource::Other) | None => RateSource::Other,
     }
 }
@@ -173,7 +193,15 @@ pub(crate) fn figures_of(p: &InvoicePreview) -> PreviewFigures {
                 source: source_of(l.unit_price_source),
                 amount: l.amount,
                 tax_amount: l.tax_amount,
+                display_rate: l.display_rate,
+                billed_elsewhere: l.error.is_some(),
             })
+            .collect(),
+        billed_on: p
+            .lines
+            .iter()
+            .filter_map(|l| l.error.as_ref())
+            .map(|e| e.invoice_number.clone().unwrap_or_default())
             .collect(),
         totals: PreviewTotals {
             subtotal: p.subtotal,
@@ -216,14 +244,16 @@ mod tests {
             header_tags: Some(Vec::new()),
             hide_zero_lines: Some(true),
             print_later: false,
+            layout: LayoutPick::Unset,
             lines: vec![RequestLine {
                 key: RowKeyGen::new().next_key(),
                 account: None,
                 item: None,
                 description: Some("x".into()),
                 service_date: None,
-                quantity: Quantity::parse_wire("18").expect("q"),
+                quantity: Some(Quantity::parse_wire("18").expect("q")),
                 unit_price: Some(Money::parse_wire("65").expect("m")),
+                discount_percent: None,
                 taxable: Some(false),
                 tag: None,
                 billable_source_line: None,
@@ -247,6 +277,30 @@ mod tests {
     #[test]
     fn sources_map_and_unknowns_are_other() {
         assert_eq!(source_of(Some(PriceSource::Input)), RateSource::Typed);
+        assert_eq!(
+            source_of(Some(PriceSource::PriceLevelPercent)),
+            RateSource::PriceLevelPercent
+        );
+        assert_eq!(
+            source_of(Some(PriceSource::BillableCost)),
+            RateSource::Billable
+        );
         assert_eq!(source_of(None), RateSource::Other);
+    }
+
+    #[test]
+    fn stored_percents_reach_the_wire_exactly() {
+        let q = |s: &str| Some(Quantity::parse_wire(s).expect("q"));
+        assert_eq!(
+            percent(q("10.0000"))
+                .expect("ok")
+                .map(SignedPercent::to_wire),
+            Some("10".to_string())
+        );
+        assert_eq!(
+            percent(q("12.5")).expect("ok").map(SignedPercent::to_wire),
+            Some("12.5".to_string())
+        );
+        assert_eq!(percent(None).expect("ok"), None);
     }
 }

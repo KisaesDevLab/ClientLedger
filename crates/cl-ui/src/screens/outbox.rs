@@ -8,12 +8,13 @@
 //! "no email server" or sign-in refusal and reports each message. Names
 //! and addresses are shown, never logged.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use cl_api::{
     ApiError, Capabilities, Contact, ContactFilter, IdempotencyKey, InvoiceListQuery,
-    InvoiceRecord, InvoiceRefusal, InvoiceSummary, OutboxItem, PageRequest, RequestGroup,
-    Versioned, invoice_pdf_name, invoice_refusal,
+    InvoiceRecord, InvoiceRefusal, InvoiceSummary, OutboxId, OutboxItem, PageRequest, RequestGroup,
+    Versioned, invoice_refusal,
 };
 use cl_core::ids::{TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle};
@@ -42,15 +43,33 @@ pub fn make(
     (kind.as_str() == KIND).then(|| Box::new(OutboxScreen::new(Arc::clone(link), open)) as Box<_>)
 }
 
-/// Notes the demo Outbox's count on the link (the live count is read by
-/// Home and the Outbox window).
-pub(crate) fn refresh_count(link: &CompanyLink, _group: Option<&RequestGroup>) {
-    let n = link
-        .demo_state()
-        .map(|d| crate::company::demo::invoices::outbox(&d).len());
-    if let Some(n) = n {
+/// Reads the Outbox's count again after a change (Email Later, Send all,
+/// Remove) and notes it on the link for Home and the status bar: at once
+/// in the demo, on the window's queue on a live engine.
+pub(crate) fn refresh_count(link: &Arc<CompanyLink>, group: Option<&RequestGroup>) {
+    let set = |link: &CompanyLink, n: usize| {
         link.set_outbox_count(Some(u32::try_from(n).unwrap_or(u32::MAX)));
+    };
+    if let Some(n) = link
+        .demo_state()
+        .map(|d| crate::company::demo::invoices::outbox(&d).len())
+    {
+        set(link, n);
+        return;
     }
+    if !link.capabilities().has(Capabilities::INVOICE_EMAIL) {
+        return;
+    }
+    let (Some(session), Some(group)) = (link.session(), group) else {
+        return;
+    };
+    let target = Arc::clone(link);
+    // The answer lands on the link; nothing waits for it.
+    let _ = group.read(&session, move |s| async move {
+        let n = s.invoices().outbox().await?.len();
+        set(&target, n);
+        Ok(())
+    });
 }
 
 /// The tabs.
@@ -80,11 +99,17 @@ pub struct OutboxScreen {
     unsent_job: Option<Job<Vec<InvoiceSummary>>>,
     contacts: Vec<Contact>,
     contacts_job: Option<Job<Vec<Contact>>>,
+    /// Layouts and item names for the PDFs (U-130).
+    books: crate::screens::invoice::email::PrintBooks,
+    books_job: Option<Job<crate::screens::invoice::email::PrintBooks>>,
     /// Send all: the messages still to go, the one in flight, the results.
     queue: Vec<OutboxItem>,
     read_job: Option<(OutboxItem, Job<Versioned<InvoiceRecord>>)>,
     send_job: Option<(OutboxItem, Job<()>)>,
     remove_job: Option<Job<()>>,
+    /// One key per message, reused when its send is tried again (the
+    /// engine replays it under `invoice-email-v1`: never a second email).
+    keys: HashMap<OutboxId, IdempotencyKey>,
     results: Vec<(String, Outcome)>,
     error: Option<ApiError>,
     unavailable: bool,
@@ -109,10 +134,13 @@ impl OutboxScreen {
             unsent_job: None,
             contacts: Vec::new(),
             contacts_job: None,
+            books: crate::screens::invoice::email::PrintBooks::default(),
+            books_job: None,
             queue: Vec::new(),
             read_job: None,
             send_job: None,
             remove_job: None,
+            keys: HashMap::new(),
             results: Vec::new(),
             error: None,
             unavailable,
@@ -142,6 +170,10 @@ impl OutboxScreen {
                 };
                 Ok(s.invoices().list(&q, PageRequest::first_max()).await?.data)
             },
+        ));
+        self.books_job = Some(crate::screens::invoice::email::print_books_job(
+            &self.link,
+            self.group.as_ref(),
         ));
         if self.contacts.is_empty() {
             self.contacts_job = Some(engine::read(
@@ -182,6 +214,9 @@ impl OutboxScreen {
         if let Some(r) = engine::poll(&mut self.contacts_job) {
             self.contacts = r.unwrap_or_default();
         }
+        if let Some(Ok(b)) = engine::poll(&mut self.books_job) {
+            self.books = b;
+        }
         if let Some(Err(e)) = engine::poll(&mut self.remove_job) {
             self.error = Some(e);
         }
@@ -196,6 +231,7 @@ impl OutboxScreen {
             match job.take() {
                 None => self.send_job = Some((item, job)),
                 Some(Ok(())) => {
+                    self.keys.remove(&item.id);
                     self.results.push((number(&item), Outcome::Sent));
                     self.next();
                 }
@@ -239,44 +275,35 @@ impl OutboxScreen {
             .txn
             .contact_id
             .and_then(|c| self.contacts.iter().find(|x| x.id == c));
-        let terms = r
-            .payment_terms
-            .as_deref()
-            .map(|c| t(&format!("invoice.terms.{c}")))
-            .unwrap_or_default();
-        let data = crate::screens::invoice::email::print_data(r, client, &terms);
-        let style = cl_print::FormStyle {
-            company: crate::screens::print_forms::job::company(
-                self.tenant.as_ref().map_or("", |(_, n)| n.as_str()),
-                Vec::new(),
-            ),
-            logo: None,
-            footer: String::new(),
-            labels: crate::screens::print_forms::job::form_labels(),
-        };
-        let Ok(pdf) = cl_print::forms::invoice::pdf_bytes(&data, &style) else {
-            self.results
-                .push((number(&item), Outcome::Failed("invoice.email.pdf_failed")));
-            self.next();
-            return;
-        };
-        let name = invoice_pdf_name(&data.number);
+        let terms = crate::screens::invoice::email::terms_text(r.payment_terms.as_deref());
+        let data = crate::screens::invoice::email::print_data(r, client, &terms, &self.books);
+        let style = crate::screens::invoice::email::pdf_style_for(
+            self.tenant.as_ref().map_or("", |(_, n)| n.as_str()),
+            self.books.layout_of(r),
+        );
         let msg = item.message();
         let (id, outbox_id) = (item.transaction_id, item.id);
-        let key = IdempotencyKey::new();
-        let to = msg.to.clone();
+        // The same message tried again keeps its key (Q-P20 plan §5).
+        let key = self.keys.entry(outbox_id).or_default().clone();
+        let (demo_data, demo_style, m2) = (data.clone(), style.clone(), msg.clone());
+        // The PDF is made on the queue, off the window's frame (S10); the
+        // engine takes the Outbox message out in the same commit
+        // (`outboxId`).
         let job = engine::write(
             &self.link,
             self.group.as_ref(),
             label("orphan.invoice_email", Some(key.clone())),
             |d| {
-                crate::company::demo::invoices::email(d, id, &to)?;
-                crate::company::demo::invoices::remove_from_outbox(d, outbox_id);
+                crate::screens::invoice::email::render_pdf(&demo_data, &demo_style)?;
+                crate::company::demo::invoices::email(d, id, &m2, Some(outbox_id))?;
                 Ok(())
             },
             move |s| async move {
-                s.invoices().email(id, &msg, &name, &pdf, key).await?;
-                s.invoices().remove_from_outbox(outbox_id).await
+                let (name, pdf) = crate::screens::invoice::email::render_pdf(&data, &style)?;
+                s.invoices()
+                    .email(id, &msg, &name, &pdf, Some(outbox_id), key)
+                    .await?;
+                Ok(())
             },
         );
         self.send_job = Some((item, job));
@@ -285,18 +312,19 @@ impl OutboxScreen {
         }
     }
 
-    /// A message that didn't go: reported; an email-server or sign-in
-    /// refusal stops the rest.
+    /// A message that didn't go: reported; an email-server, offline or
+    /// sign-in refusal stops the rest.
     fn failed(&mut self, item: &OutboxItem, e: &ApiError) {
-        let stop = matches!(invoice_refusal(e), Some(InvoiceRefusal::SmtpNotConfigured))
+        let refusal = invoice_refusal(e);
+        if !crate::screens::register::keeps_key(e) && refusal != Some(InvoiceRefusal::Retry) {
+            self.keys.remove(&item.id);
+        }
+        let stop = refusal.is_some_and(InvoiceRefusal::stops_sending)
             || matches!(
                 e,
                 ApiError::Unauthorized { .. } | ApiError::Forbidden { .. }
             );
-        let key = match invoice_refusal(e) {
-            Some(InvoiceRefusal::SmtpNotConfigured) => "invoice.email.no_smtp",
-            _ => "invoice.email.not_sent",
-        };
+        let key = crate::screens::invoice::email::send_problem(refusal);
         self.results.push((number(item), Outcome::Failed(key)));
         if stop {
             for rest in std::mem::take(&mut self.queue) {
@@ -313,13 +341,14 @@ impl OutboxScreen {
             &self.link,
             self.group.as_ref(),
             label("orphan.outbox_remove", None),
-            |d| {
-                crate::company::demo::invoices::remove_from_outbox(d, id);
-                Ok(())
+            |d| match crate::company::demo::invoices::remove_from_outbox(d, id) {
+                Ok(()) | Err(ApiError::NotFound { .. }) => Ok(()),
+                Err(e) => Err(e),
             },
             move |s| async move { s.invoices().remove_from_outbox(id).await },
         ));
         self.items.retain(|i| i.id != id);
+        self.keys.remove(&id);
         self.link
             .set_outbox_count(Some(u32::try_from(self.items.len()).unwrap_or(u32::MAX)));
         self.poll();

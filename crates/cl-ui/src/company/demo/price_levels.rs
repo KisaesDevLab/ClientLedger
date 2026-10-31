@@ -46,7 +46,7 @@ impl DemoPriceLevels {
 }
 
 /// The price of an item with `base` price for `client` and where it came
-/// from (`item`, `price_level`, `price_level_item`).
+/// from (`item`, `price_level`, `price_level_percent`).
 #[must_use]
 pub fn price_for(
     state: &DemoState,
@@ -63,9 +63,9 @@ pub fn price_for(
         return (base, "item");
     };
     if let Some(ip) = item.and_then(|i| level.item_prices.iter().find(|ip| ip.item_id == i)) {
-        return (ip.price.as_decimal(), "price_level_item");
+        return (ip.price.as_decimal(), "price_level");
     }
-    (level_price(base, level.percent), "price_level")
+    (level_price(base, level.percent), "price_level_percent")
 }
 
 /// round2(base × (1 + percent ÷ 100)).
