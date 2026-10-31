@@ -488,6 +488,8 @@ impl CsvScreen {
                             unit_price: i.price,
                             income_account_id: i.income_account,
                             is_taxable: i.taxable,
+                            item_type: cl_api::ItemType::Service,
+                            discount_percent: None,
                         },
                     )),
                 }
@@ -1195,6 +1197,8 @@ fn demo_import(link: &CompanyLink, rows: Vec<(usize, Mapped)>, role: ContactType
                         unit_price: i.price,
                         income_account_id: i.income_account,
                         is_taxable: i.taxable,
+                        item_type: cl_api::ItemType::Service,
+                        discount_percent: None,
                     },
                 );
                 out.imported += 1;

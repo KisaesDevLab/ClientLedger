@@ -1532,6 +1532,9 @@ fn write_owned_prefs(
     to.ai.monthly_token_cap = from.ai.monthly_token_cap;
     to.smtp_security = from.smtp_security;
     to.account_numbers = from.account_numbers;
+    // P20: the email templates and BCC-self (Q-P20j).
+    to.email.clone_from(&from.email);
+    to.email.normalize();
 }
 
 #[cfg(test)]

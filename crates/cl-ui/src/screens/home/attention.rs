@@ -321,6 +321,18 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             Some(crate::screens::print_forms::KIND),
         ));
     }
+    // P20 (Q-P20d): emails waiting for Send all in the Outbox.
+    if let Some(n) = home.link.outbox_count().filter(|n| *n > 0) {
+        out.push(Line::task(
+            t_count(
+                "home.attention.outbox",
+                usize::try_from(n).unwrap_or(usize::MAX),
+                &[],
+            ),
+            "home.attention.outbox.open",
+            Some(crate::screens::outbox::KIND),
+        ));
+    }
     if later {
         out.push(Line::muted(t("home.attention.later")));
     }

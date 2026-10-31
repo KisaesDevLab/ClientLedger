@@ -12,6 +12,7 @@ pub mod closing_prompt;
 pub mod condensed;
 pub mod enter;
 pub mod header;
+pub mod invoice_lines_grid;
 pub mod item_lines_grid;
 pub mod lines_grid;
 pub mod lost_save;

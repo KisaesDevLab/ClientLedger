@@ -247,7 +247,7 @@ impl DemoState {
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
             invoices: invoices::DemoInvoices::default(),
-            price_levels: price_levels::DemoPriceLevels::default(),
+            price_levels: price_levels::DemoPriceLevels::seeded(),
         }
     }
 

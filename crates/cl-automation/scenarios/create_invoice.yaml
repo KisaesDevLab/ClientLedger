@@ -1,0 +1,120 @@
+# Create Invoice (P20 AC1-AC3) against `clientledger --demo`: the mockup's
+# lines for Long Creek Marina (18 x 65.00 non-taxable, 24 x 32.50 and
+# 6 x 48.00 taxable) plus the client's unbilled cost (842.15, no markup)
+# added with Add Billable Costs (Ctrl+Shift+B, Q-P20c) total 3,234.87; a
+# level-priced line, a subtotal and a 10 % discount then total 2,982.91 —
+# every figure from the engine's preview (Q-P20n). Once saved, the cost
+# leaves the client's unbilled list (AC2); Prev opens the invoice and Void
+# brings the cost back, so light and dark repeat in one app. Synthetic.
+name: create_invoice
+description: Mockup totals 3,234.87 from the engine; a billed cost leaves the unbilled list; void brings it back.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+I
+  - assert_exists: {role: tab, label_contains: "Create Invoice"}
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.totals, equals: none}
+  - assert_exists: {label_contains: "Invoice lines"}
+  # --- The client and its unbilled cost (side panel note, no pop-up) -------
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - assert_state: {key: screen.client, equals: true}
+  - assert_state: {key: screen.unbilled, equals: 1}
+  - assert_exists: {role: label, label_contains: "1 unbilled cost for this client"}
+  # --- The mockup's lines ---------------------------------------------------
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "18"}
+  - key: Tab
+  - type: {text: "65"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Item, line 2"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "24"}
+  - key: Tab
+  - type: {text: "32.50"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Item, line 3"}
+  - type: {text: "Mulch"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 3"}
+  - type: {text: "6"}
+  - key: Tab
+  - type: {text: "48"}
+  - key: Tab
+  # --- Add billable costs (Ctrl+Shift+B): one line, at cost ------------------
+  - key: Ctrl+Shift+B
+  - assert_state: {key: screen.billable_dialog.open, equals: true}
+  - assert_exists: {role: button, label: "Add to invoice"}
+  - screenshot: billable-dialog
+  - click: {role: button, label: "Add to invoice"}
+  - assert_state: {key: screen.billable_dialog.open, equals: false}
+  - assert_state: {key: screen.unbilled, equals: 0}
+  # A cost from an expense-only line takes the income account the owner
+  # picks on the line (Q-P20p).
+  - click: {role: grid_cell, label: "Income account, line 4"}
+  - type: {text: "4000"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.subtotal, equals: "3,080.15"}
+  - assert_state: {key: screen.tax, equals: "154.72"}
+  - assert_state: {key: screen.total, equals: "3,234.87"}
+  # Total and Balance due.
+  - assert_count: {target: {role: label, label: "3,234.87"}, count: 2}
+  - assert_no_clipping: {}
+  - screenshot: mockup-totals
+  # --- A level price, a subtotal and a 10 % discount (U-40, U-39a) ---------
+  # Long Creek Marina is on the Commercial level (7.5 % down): Weekly Mowing
+  # 45.00 prices at 41.63; the subtotal shows 3,163.41; the taxable discount
+  # right under it takes 316.34 off and lowers the taxable base (Q-P20t).
+  - click: {label_contains: "Item, line 5"}
+  - type: {text: "Weekly"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 5"}
+  - type: {text: "2"}
+  - key: Tab
+  - click: {label_contains: "Item, line 6"}
+  - type: {text: "Subtotal"}
+  - key: Tab
+  - click: {label_contains: "Item, line 7"}
+  - type: {text: "Loyalty"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.subtotal, equals: "2,847.07"}
+  - assert_state: {key: screen.tax, equals: "135.84"}
+  - assert_state: {key: screen.total, equals: "2,982.91"}
+  - screenshot: pricing
+  # --- Save & New: the cost is billed and leaves the list (AC2) -------------
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.mode, equals: new}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - assert_state: {key: screen.unbilled, equals: 0}
+  - click: {role: button, label: Clear}
+  # --- Prev opens it; Void brings the cost back ------------------------------
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.total, equals: "2,982.91"}
+  - screenshot: saved
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.void_open, equals: true}
+  - click: {role: text_input, label: "Why are you voiding it?"}
+  - type: {text: "Scenario run"}
+  - click: {role: button, label: "Void invoice"}
+  - assert_state: {key: screen.read_only, equals: invoice.read_only.void}
+  - assert_state: {key: screen.unbilled, equals: 1}
+  - command: file.close_window

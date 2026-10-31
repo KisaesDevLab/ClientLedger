@@ -993,7 +993,8 @@ impl fmt::Debug for BillableCost {
 pub struct ItemPrice {
     /// The item.
     pub item_id: ItemId,
-    /// Its price on this level.
+    /// Its price on this level (the engine's `unitPrice`, E2).
+    #[serde(rename = "unitPrice")]
     pub price: Money,
 }
 

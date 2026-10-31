@@ -142,6 +142,8 @@ pub fn items(h: &Harness) {
         unit_price: Some(m("19.9999")),
         income_account_id: income.id,
         is_taxable: true,
+        item_type: cl_api::ItemType::Service,
+        discount_percent: None,
     };
     let made = h.run(s.items().create(&fields, key())).expect("create");
     assert_eq!(made.record.fields, fields);

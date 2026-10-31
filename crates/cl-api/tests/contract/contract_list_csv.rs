@@ -87,6 +87,8 @@ pub fn exports_and_imports(h: &Harness) {
             unit_price: Some(m("45.0450")),
             income_account_id: income.id,
             is_taxable: true,
+            item_type: cl_api::ItemType::Service,
+            discount_percent: None,
         },
         key(),
     ))

@@ -79,13 +79,46 @@ pub fn items() -> Vec<Item> {
                 unit_price: p.and_then(price),
                 income_account_id: account_id(4000),
                 is_taxable: *taxable,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
             },
             is_active: *active,
             default_tag_id: None,
             created_at: Some(DemoState::now()),
             updated_at: Some(DemoState::now()),
         })
+        .chain(sales_kinds())
         .collect()
+}
+
+/// The demo's discount and subtotal items (U-39a, P20): a 10 % loyalty
+/// discount (taxable, so it lowers the taxable base, Q-P20t) and a subtotal.
+fn sales_kinds() -> Vec<Item> {
+    let item = |n: u32, name: &str, kind, pct: Option<&str>| Item {
+        id: item_id(n),
+        fields: ItemFields {
+            name: name.to_string(),
+            description: None,
+            unit_price: None,
+            income_account_id: account_id(4000),
+            is_taxable: true,
+            item_type: kind,
+            discount_percent: pct.and_then(|p| cl_api::SignedPercent::parse(p).ok()),
+        },
+        is_active: true,
+        default_tag_id: None,
+        created_at: Some(DemoState::now()),
+        updated_at: Some(DemoState::now()),
+    };
+    vec![
+        item(8, "Subtotal", cl_api::ItemType::Subtotal, None),
+        item(
+            9,
+            "Loyalty discount",
+            cl_api::ItemType::Discount,
+            Some("10"),
+        ),
+    ]
 }
 
 /// A demo tag id (stable across runs).
@@ -223,7 +256,7 @@ mod tests {
     #[test]
     fn demo_items_are_services_on_service_income() {
         let items = items();
-        assert_eq!(items.len(), 7);
+        assert_eq!(items.len(), 9);
         assert!(
             items
                 .iter()

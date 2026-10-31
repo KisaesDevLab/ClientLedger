@@ -22,6 +22,29 @@ pub struct DemoPriceLevels {
     pub clients: BTreeMap<ContactId, cl_api::PriceLevelId>,
 }
 
+impl DemoPriceLevels {
+    /// The demo's one level (P20 WP-B): Commercial, 7.5 % down, on the
+    /// story client, so an unpriced item line shows a level price.
+    #[must_use]
+    pub fn seeded() -> DemoPriceLevels {
+        let mut p = DemoPriceLevels::default();
+        let client = super::contacts::contacts()
+            .into_iter()
+            .find(|c| c.fields.display_name == super::bills::STORY_CUSTOMER)
+            .map(|c| c.id);
+        let level: Option<PriceLevel> = serde_json::from_value(serde_json::json!({
+            "id": "d6000000-0000-4000-8000-000000000101",
+            "name": "Commercial", "percent": "-7.5", "isActive": true,
+        }))
+        .ok();
+        if let (Some(c), Some(l)) = (client, level) {
+            p.clients.insert(c, l.id);
+            p.levels.push(l);
+        }
+        p
+    }
+}
+
 /// The price of an item with `base` price for `client` and where it came
 /// from (`item`, `price_level`, `price_level_item`).
 #[must_use]

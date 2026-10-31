@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::errors::{ApiError, ConflictReason};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::{self, Query, SortDir, Spec, editable_with_active, null_true, yes};
+use crate::resources::invoices::SignedPercent;
 use crate::resources::operations::{ITEM_DELETE, ITEM_GET, ITEM_PUT, ITEMS_CREATE, ITEMS_LIST};
 use crate::resources::versioning::{EditableFields, RecordVersion, Versioned};
 use crate::session::{Session, json_body};
@@ -42,6 +43,86 @@ pub struct ItemFields {
     /// Subject to sales tax.
     #[serde(default = "yes", deserialize_with = "null_true")]
     pub is_taxable: bool,
+    /// Kind (U-39a, `item-kinds-sales-v1`); a service is not sent, so an
+    /// older engine takes it as before.
+    #[serde(default, skip_serializing_if = "ItemType::is_service")]
+    pub item_type: ItemType,
+    /// A discount item's percent off (0 < p <= 100); None with a
+    /// `unit_price` takes that amount off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discount_percent: Option<SignedPercent>,
+}
+
+/// Sales item kinds (U-39a, `item-kinds-sales-v1`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemType {
+    /// A service (the default).
+    #[default]
+    Service,
+    /// A product not tracked in inventory.
+    NonInventory,
+    /// Another charge (delivery, fees).
+    OtherCharge,
+    /// A discount off the lines since the last subtotal (a percent, or an
+    /// amount in `unit_price`).
+    Discount,
+    /// A subtotal of the lines above it (posts nothing).
+    Subtotal,
+}
+
+impl ItemType {
+    /// Every kind, in menu order.
+    pub const ALL: [ItemType; 5] = [
+        ItemType::Service,
+        ItemType::NonInventory,
+        ItemType::OtherCharge,
+        ItemType::Discount,
+        ItemType::Subtotal,
+    ];
+
+    /// A service.
+    #[must_use]
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if
+    pub fn is_service(&self) -> bool {
+        *self == ItemType::Service
+    }
+
+    /// The wire name.
+    #[must_use]
+    pub const fn as_wire(self) -> &'static str {
+        match self {
+            ItemType::Service => "service",
+            ItemType::NonInventory => "non_inventory",
+            ItemType::OtherCharge => "other_charge",
+            ItemType::Discount => "discount",
+            ItemType::Subtotal => "subtotal",
+        }
+    }
+}
+
+/// Checks an item's kind against the engine before anything is sent.
+fn check_kind(s: &Session, f: &ItemFields) -> Result<(), ApiError> {
+    let kinds = s
+        .client()
+        .capabilities()
+        .has(crate::Capabilities::ITEM_KINDS_SALES);
+    if (!f.item_type.is_service() || f.discount_percent.is_some()) && !kinds {
+        return Err(ApiError::Local(crate::LocalValidation::Unsupported));
+    }
+    let pct_ok = f.discount_percent.is_none_or(|p| {
+        let d = p.as_decimal();
+        d > rust_decimal::Decimal::ZERO && d <= rust_decimal::Decimal::ONE_HUNDRED
+    });
+    let shape_ok = match f.item_type {
+        ItemType::Discount => !(f.discount_percent.is_some() && f.unit_price.is_some()),
+        ItemType::Subtotal => f.discount_percent.is_none() && f.unit_price.is_none(),
+        _ => f.discount_percent.is_none(),
+    };
+    if !pct_ok || !shape_ok {
+        return Err(ApiError::Local(crate::LocalValidation::InvalidValue));
+    }
+    Ok(())
 }
 
 /// Body of an item update: every editable field.
@@ -85,6 +166,8 @@ impl EditableFields for Item {
         "unitPrice",
         "incomeAccountId",
         "isTaxable",
+        "itemType",
+        "discountPercent",
         "isActive",
     ];
 
@@ -198,6 +281,7 @@ impl Items<'_> {
         new: &ItemFields,
         key: IdempotencyKey,
     ) -> Result<Versioned<Item>, ApiError> {
+        check_kind(self.0, new)?;
         common::create_named(
             self.0,
             &SPEC,
@@ -222,6 +306,7 @@ impl Items<'_> {
         update: &ItemUpdate,
         key: IdempotencyKey,
     ) -> Result<Versioned<Item>, ApiError> {
+        check_kind(self.0, &update.fields)?;
         common::update(
             self.0,
             &SPEC,
@@ -267,6 +352,58 @@ fn name_taken(e: ApiError) -> ApiError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn sales_kinds_round_trip_and_a_service_sends_no_kind() {
+        let v = serde_json::json!({
+            "id": "d0000000-0000-4000-8000-b00000000009",
+            "name": "Loyalty discount",
+            "incomeAccountId": "d0000000-0000-4000-8000-a00000004000",
+            "isTaxable": true,
+            "itemType": "discount",
+            "discountPercent": "10.0000",
+            "unitPrice": null,
+        });
+        let item: Item = serde_json::from_value(v).expect("an E2 item");
+        assert_eq!(item.fields.item_type, ItemType::Discount);
+        assert!(item.fields.discount_percent.is_some());
+        let body = serde_json::to_value(&item.fields).expect("json");
+        assert_eq!(body["itemType"], "discount");
+        let service = ItemFields {
+            item_type: ItemType::Service,
+            discount_percent: None,
+            ..item.fields
+        };
+        let body = serde_json::to_value(&service).expect("json");
+        assert!(
+            body.get("itemType").is_none(),
+            "older engines see no new key"
+        );
+        let old: Item = serde_json::from_value(serde_json::json!({
+            "id": "d0000000-0000-4000-8000-b00000000001",
+            "name": "Mowing",
+            "incomeAccountId": "d0000000-0000-4000-8000-a00000004000",
+        }))
+        .expect("an older item");
+        assert_eq!(old.fields.item_type, ItemType::Service);
+        for k in ItemType::ALL {
+            assert_eq!(serde_json::to_value(k).expect("json"), k.as_wire());
+        }
+    }
+
+    #[test]
+    fn a_price_level_reads_e2_unit_prices() {
+        let v = serde_json::json!({
+            "id": "d0000000-0000-4000-8000-e00000000001",
+            "name": "Contractor", "percent": "-7.5000", "isActive": true,
+            "itemPrices": [{"itemId": "d0000000-0000-4000-8000-b00000000002", "unitPrice": "30.0000"}],
+            "itemPriceCount": 1,
+        });
+        let l: crate::PriceLevel = serde_json::from_value(v).expect("an E2 level");
+        assert_eq!(l.item_prices[0].price, Money::parse_wire("30").expect("m"));
+        let back = serde_json::to_value(&l.item_prices[0]).expect("json");
+        assert!(back.get("unitPrice").is_some());
+    }
     use crate::resources::testkit::{company_session, json, query, requests};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer};

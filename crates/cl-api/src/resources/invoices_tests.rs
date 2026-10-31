@@ -741,7 +741,7 @@ async fn billable_costs_price_levels_and_client_sales() {
         .await;
     let level = format!(
         r#"{{"id":"{LEVEL}","name":"Builders","percent":"-7.5000","isActive":true,
-        "itemPrices":[{{"itemId":"{ITEM}","price":"30.0000"}}]}}"#
+        "itemPrices":[{{"itemId":"{ITEM}","unitPrice":"30.0000"}}]}}"#
     );
     Mock::given(method("POST"))
         .and(path("/api/v1/price-levels"))
@@ -814,7 +814,7 @@ async fn billable_costs_price_levels_and_client_sales() {
     assert_eq!(
         body_of(&server, "POST", 0).await,
         json!({"name": "Builders", "percent": "-7.5", "isActive": true,
-               "itemPrices": [{"itemId": ITEM, "price": "30.0000"}]})
+               "itemPrices": [{"itemId": ITEM, "unitPrice": "30.0000"}]})
     );
     let twice = PriceLevelDraft {
         item_prices: vec![draft.item_prices[0].clone(), draft.item_prices[0].clone()],

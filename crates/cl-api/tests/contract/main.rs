@@ -134,6 +134,7 @@ fn main() -> std::process::ExitCode {
         ),
         ("items::item_types_u39", contract_items::item_types_u39),
         ("items::price_levels_u40", contract_items::price_levels_u40),
+        ("items::sales_kinds_u39a", contract_items::sales_kinds_u39a),
         ("tags::groups_round_trip", contract_tags::groups_round_trip),
         (
             "tags::rename_usage_and_header_merge",

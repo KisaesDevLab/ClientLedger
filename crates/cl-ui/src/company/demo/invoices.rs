@@ -289,6 +289,13 @@ pub struct DemoInvoices {
     next: u64,
     /// Write requests that reached the demo engine (tests).
     pub writes: u32,
+    /// The Outbox (Q-P20q), oldest first (WP-B).
+    outbox: Vec<Value>,
+    /// Each client's default markup percent (U-128, WP-B).
+    pub markups: BTreeMap<cl_core::ids::ContactId, cl_api::SignedPercent>,
+    /// The demo company has no email server (WP-B): sending then fails
+    /// with `SMTP_NOT_CONFIGURED`, as an engine without one.
+    pub no_smtp: bool,
 }
 
 impl fmt::Debug for DemoInvoices {
@@ -306,6 +313,17 @@ struct Priced {
     price: Decimal,
     source: &'static str,
     account: Option<AccountId>,
+    /// A subtotal line shows the sum of its group and posts nothing.
+    display: Option<Decimal>,
+}
+
+/// round2(quantity × rate) of the priced lines of `group` that post.
+fn group_sum(group: &[Priced]) -> Decimal {
+    group
+        .iter()
+        .filter(|p| p.display.is_none())
+        .map(|p| round(p.input.quantity * p.input.unit_price, 2))
+        .sum()
 }
 
 fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, ApiError> {
@@ -313,7 +331,11 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
         return Err(invalid());
     }
     let items = state.items.get_or_insert_with(super::lists::items).clone();
-    let mut out = Vec::with_capacity(new.lines.len());
+    let mut out: Vec<Priced> = Vec::with_capacity(new.lines.len());
+    // U-39a: a discount covers the lines since the last subtotal; right
+    // under a subtotal it covers that subtotal's lines.
+    let mut group_start = 0;
+    let mut prev_group: Option<usize> = None;
     for l in &new.lines {
         let item = l
             .item_id
@@ -343,6 +365,55 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 price: fig.rate,
                 source: "billable",
                 account,
+                display: None,
+            });
+            continue;
+        }
+        let kind = item.map_or(cl_api::ItemType::Service, |i| i.fields.item_type);
+        if kind == cl_api::ItemType::Subtotal {
+            let shown = group_sum(&out[group_start..]);
+            out.push(Priced {
+                input: SalesLineIn {
+                    quantity: Decimal::ZERO,
+                    unit_price: Decimal::ZERO,
+                    taxable: false,
+                    tax_rate: None,
+                },
+                price: shown,
+                source: "computed",
+                account,
+                display: Some(shown),
+            });
+            prev_group = Some(group_start);
+            group_start = out.len();
+            continue;
+        }
+        if kind == cl_api::ItemType::Discount {
+            let from = if out.last().is_some_and(|p| p.display.is_some()) {
+                prev_group.unwrap_or(0)
+            } else {
+                group_start
+            };
+            let base = group_sum(&out[from..]);
+            let amount = match item.and_then(|i| i.fields.discount_percent) {
+                Some(p) => -round(base * p.as_decimal() / Decimal::ONE_HUNDRED, 2),
+                None => -round(
+                    item.and_then(|i| i.fields.unit_price)
+                        .map_or(Decimal::ZERO, |m| m.as_decimal().abs()),
+                    2,
+                ),
+            };
+            out.push(Priced {
+                input: SalesLineIn {
+                    quantity: Decimal::ONE,
+                    unit_price: amount,
+                    taxable,
+                    tax_rate: None,
+                },
+                price: amount,
+                source: "computed",
+                account,
+                display: None,
             });
             continue;
         }
@@ -365,6 +436,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
             price,
             source,
             account,
+            display: None,
         });
     }
     Ok(out)
@@ -400,7 +472,7 @@ pub fn preview(state: &mut DemoState, new: &NewInvoice) -> Result<InvoicePreview
             json!({
                 "unitPrice": p.price.to_string(),
                 "unitPriceSource": p.source,
-                "amount": o.amount.to_string(),
+                "amount": p.display.unwrap_or(o.amount).to_string(),
                 "taxAmount": o.tax_amount.to_string(),
             })
         })
@@ -661,6 +733,206 @@ pub fn unsent(state: &DemoState) -> Vec<TransactionId> {
 #[must_use]
 pub fn is_billed(state: &DemoState, source: JournalLineId) -> bool {
     state.invoices.claimed.contains(&source)
+}
+
+// ---- WP-B: edits, the list, email and the Outbox ------------------------------
+
+/// A fresh `updatedAt` per write (the demo clock stands still).
+fn stamp(state: &DemoState) -> String {
+    cl_core::Timestamp::from_unix_millis(1_793_000_000_000 + i64::from(state.invoices.writes))
+        .map_or_else(|_| DemoState::now().to_wire(), cl_core::Timestamp::to_wire)
+}
+
+/// `PUT /invoices/{id}` (`invoice-edit-v1`): replaced if still as
+/// `expected` was read (else 409 `STALE`); both dates need the closing
+/// password when closed; the send history, status and number stay;
+/// billable costs taken off are unbilled.
+///
+/// # Errors
+/// `NotFound`, `Conflict` (`STALE`, `BILLABLE_ALREADY_BILLED`),
+/// `ClosedPeriod`, `ClosingPasswordRejected`, `Local(InvalidValue)` (void).
+pub fn update(
+    state: &mut DemoState,
+    id: TransactionId,
+    expected: Option<cl_core::Timestamp>,
+    new: &NewInvoice,
+    password: Option<&Secret>,
+) -> Result<Versioned<InvoiceRecord>, ApiError> {
+    cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
+    let close = closing(state);
+    let old = state
+        .invoices
+        .stored
+        .get(&id)
+        .cloned()
+        .ok_or(ApiError::NotFound { code: None })?;
+    if old.record["status"] == "void" {
+        return Err(invalid());
+    }
+    let old_date = old.record["txnDate"]
+        .as_str()
+        .and_then(|d| CalendarDate::parse_wire(d).ok())
+        .ok_or(ApiError::Internal)?;
+    if let Some(e) = expected
+        && old.record["updatedAt"].as_str() != Some(e.to_wire().as_str())
+    {
+        return Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: None,
+            code: cl_api::ErrorCode::parse("STALE"),
+            message: UserText::default(),
+        });
+    }
+    check_closing(close, &[old_date, new.txn_date], password)?;
+    let taken: BTreeSet<JournalLineId> = state
+        .invoices
+        .claimed
+        .difference(&old.claims.iter().copied().collect())
+        .copied()
+        .collect();
+    if new
+        .lines
+        .iter()
+        .filter_map(|l| l.billable_source_line_id)
+        .any(|s| taken.contains(&s))
+    {
+        return Err(conflict(cl_api::BILLABLE_ALREADY_BILLED));
+    }
+    let number = new.txn_number.clone().unwrap_or_else(|| {
+        old.record["txnNumber"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    });
+    let (mut record, claims) = record_json(state, id, &number, new)?;
+    for k in ["sendHistory", "sentAt", "invoiceStatus"] {
+        record[k] = old.record[k].clone();
+    }
+    state.invoices.writes += 1;
+    record["updatedAt"] = json!(stamp(state));
+    let saved = versioned(&record)?;
+    for c in &old.claims {
+        state.invoices.claimed.remove(c);
+    }
+    state.invoices.claimed.extend(claims.iter().copied());
+    state.invoices.stored.insert(id, Stored { record, claims });
+    Ok(saved)
+}
+
+/// Every live invoice, newest first (Prev/Next).
+#[must_use]
+pub fn list(state: &DemoState) -> Vec<TransactionId> {
+    state.invoices.stored.keys().rev().copied().collect()
+}
+
+/// `POST /invoices/{id}/email`: sends (the demo has no network: it records
+/// the send) unless the demo has no email server.
+///
+/// # Errors
+/// `SMTP_NOT_CONFIGURED` as the engine's 409; `NotFound`.
+pub fn email(
+    state: &mut DemoState,
+    id: TransactionId,
+    to: &[String],
+) -> Result<Versioned<InvoiceRecord>, ApiError> {
+    if state.invoices.no_smtp {
+        return Err(conflict(cl_api::SMTP_NOT_CONFIGURED));
+    }
+    record_sent(
+        state,
+        id,
+        &SendRecord {
+            method: SendMethod::Email,
+            recipients: to.to_vec(),
+            sent_at: None,
+        },
+    )
+}
+
+/// `POST /invoices/{id}/email-later`: the message waits in the Outbox.
+///
+/// # Errors
+/// `NotFound`; `Internal` when the item can't be built.
+pub fn email_later(
+    state: &mut DemoState,
+    id: TransactionId,
+    message: &cl_api::EmailMessage,
+) -> Result<cl_api::OutboxItem, ApiError> {
+    let number = state
+        .invoices
+        .stored
+        .get(&id)
+        .ok_or(ApiError::NotFound { code: None })?
+        .record["txnNumber"]
+        .clone();
+    state.invoices.writes += 1;
+    let n = state.invoices.writes;
+    let v = json!({
+        "id": format!("d5000000-0000-4000-8000-{n:012}"),
+        "transactionId": id, "txnNumber": number,
+        "to": message.to, "cc": message.cc, "bcc": message.bcc,
+        "subject": message.subject, "body": message.body,
+        "createdAt": DemoState::now(),
+    });
+    let item = serde_json::from_value(v.clone()).map_err(|_| ApiError::Internal)?;
+    state.invoices.outbox.push(v);
+    Ok(item)
+}
+
+/// `GET /forms/email-queue`.
+#[must_use]
+pub fn outbox(state: &DemoState) -> Vec<cl_api::OutboxItem> {
+    state
+        .invoices
+        .outbox
+        .iter()
+        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+        .collect()
+}
+
+/// `DELETE /forms/email-queue/{id}`.
+pub fn remove_from_outbox(state: &mut DemoState, id: cl_api::OutboxId) {
+    let id = id.to_string();
+    state
+        .invoices
+        .outbox
+        .retain(|v| v["id"].as_str() != Some(id.as_str()));
+}
+
+/// The client's sales figures (U-38 open balance from the demo invoices,
+/// U-40 level, U-128 markup).
+#[must_use]
+pub fn client_sales(state: &DemoState, client: cl_core::ids::ContactId) -> cl_api::ClientSales {
+    let mut open = Decimal::ZERO;
+    let mut oldest: Option<CalendarDate> = None;
+    for s in state.invoices.stored.values() {
+        if s.record["contactId"].as_str() != Some(client.to_string().as_str())
+            || s.record["status"] == "void"
+        {
+            continue;
+        }
+        let due = s.record["balanceDue"]
+            .as_str()
+            .and_then(|b| Decimal::from_str(b).ok())
+            .unwrap_or_default();
+        if due.is_zero() {
+            continue;
+        }
+        open += due;
+        let d = s.record["txnDate"]
+            .as_str()
+            .and_then(|d| CalendarDate::parse_wire(d).ok());
+        oldest = match (oldest, d) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+    }
+    cl_api::ClientSales {
+        open_balance: money(open).ok(),
+        oldest_open_date: oldest,
+        price_level_id: state.price_levels.clients.get(&client).copied(),
+        default_markup_percent: state.invoices.markups.get(&client).copied(),
+    }
 }
 
 #[cfg(test)]

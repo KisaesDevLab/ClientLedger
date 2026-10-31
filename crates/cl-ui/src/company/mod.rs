@@ -107,6 +107,9 @@ pub struct CompanyLink {
     /// Saves whose outcome is unknown, for the whole app session, so the
     /// block outlives the window that made them (review fix-PR-1 B2).
     lost_saves: Mutex<crate::forms::lost_save::LostBook>,
+    /// Messages waiting in the Outbox (P20, Q-P20d), as last read; shown on
+    /// Home and in the status bar.
+    outbox: Mutex<Option<u32>>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -169,6 +172,7 @@ impl CompanyLink {
             backup_dir,
             demo: None,
             bus: crate::data_bus::DataBus::new(),
+            outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
         }
@@ -190,6 +194,7 @@ impl CompanyLink {
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
             bus: crate::data_bus::DataBus::new(),
+            outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
         }
@@ -321,6 +326,19 @@ impl CompanyLink {
     #[must_use]
     pub fn secrets(&self) -> Arc<dyn SecretStore> {
         Arc::clone(&self.secrets)
+    }
+
+    /// Messages waiting in the Outbox, as last read (P20).
+    #[must_use]
+    pub fn outbox_count(&self) -> Option<u32> {
+        self.outbox.lock().map_or(None, |g| *g)
+    }
+
+    /// Notes how many messages wait in the Outbox.
+    pub fn set_outbox_count(&self, n: Option<u32>) {
+        if let Ok(mut g) = self.outbox.lock() {
+            *g = n;
+        }
     }
 
     /// The "data changed" notices (Q-262): every successful save, void or

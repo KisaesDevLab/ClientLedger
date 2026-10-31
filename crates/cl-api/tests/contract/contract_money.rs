@@ -112,6 +112,8 @@ pub fn boundaries_round_trip(h: &Harness) {
         unit_price: Some(m("999999999999999.9999")),
         income_account_id: income.id,
         is_taxable: false,
+        item_type: cl_api::ItemType::Service,
+        discount_percent: None,
     };
     let made = h.run(s.items().create(&item, key())).expect("item");
     let got = h.run(s.items().get(made.record.id)).expect("get");
