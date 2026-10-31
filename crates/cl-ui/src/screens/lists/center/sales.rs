@@ -33,6 +33,8 @@ pub(crate) struct SalesEdit {
     read: Option<Job<(Vec<PriceLevel>, ClientSales)>>,
     write: Option<Job<()>>,
     pub(crate) problem: Option<&'static str>,
+    /// Where a failed write is reported once the form has closed (S9).
+    link: Option<Arc<CompanyLink>>,
 }
 
 impl SalesEdit {
@@ -95,9 +97,16 @@ impl SalesEdit {
             }
         }
         if let Some(r) = engine::poll(&mut self.write) {
-            match r {
-                Ok(()) => self.before = (self.level, self.markup.clone()),
-                Err(_) => self.problem = Some("center.sales.not_saved"),
+            if r.is_ok() {
+                self.before = (self.level, self.markup.clone());
+            } else {
+                self.problem = Some("center.sales.not_saved");
+                // The form may have closed (Save & Close): say so.
+                if let Some(l) = &self.link {
+                    l.push(crate::company::CompanyEvent::Toast(
+                        "center.sales.not_saved",
+                    ));
+                }
             }
         }
     }
@@ -125,6 +134,16 @@ impl SalesEdit {
         }
     }
 
+    /// The save gate (S9): false, with the problem shown, when the markup
+    /// is not a percent from 0 to 1000; nothing is saved then.
+    pub(crate) fn check(&mut self) -> bool {
+        if self.markup_on && self.markup_value().is_err() {
+            self.problem = Some("center.sales.markup_invalid");
+            return false;
+        }
+        true
+    }
+
     /// Writes the section for `client` after its contact saved.
     pub(crate) fn save(
         &mut self,
@@ -140,6 +159,7 @@ impl SalesEdit {
             return;
         };
         self.problem = None;
+        self.link = Some(Arc::clone(link));
         let level = self.level;
         self.write = Some(engine::write(
             link,
@@ -233,5 +253,25 @@ impl SalesEdit {
             "dirty": self.dirty(),
             "problem": self.problem,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bad_markup_stops_the_save_and_1000_is_allowed() {
+        let mut s = SalesEdit {
+            markup_on: true,
+            markup: "-5".into(),
+            ..SalesEdit::default()
+        };
+        assert!(!s.check());
+        assert_eq!(s.problem, Some("center.sales.markup_invalid"));
+        s.markup = "1000".into();
+        assert!(s.check());
+        s.markup = "1000.5".into();
+        assert!(!s.check());
     }
 }

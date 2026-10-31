@@ -271,11 +271,7 @@ impl OutboxScreen {
         let msg = item.message();
         let (id, outbox_id) = (item.transaction_id, item.id);
         // The same message tried again keeps its key (Q-P20 plan §5).
-        let key = self
-            .keys
-            .entry(outbox_id)
-            .or_default()
-            .clone();
+        let key = self.keys.entry(outbox_id).or_default().clone();
         let (demo_data, demo_style, m2) = (data.clone(), style.clone(), msg.clone());
         // The PDF is made on the queue, off the window's frame (S10); the
         // engine takes the Outbox message out in the same commit
