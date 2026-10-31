@@ -71,6 +71,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | Addendum | File | Phases | Status | When it runs |
 | --- | --- | --- | --- | --- |
 | ADD-01 Document intake, local reading, pop-out viewer | [addenda/ADD-01-document-intake.md](addenda/ADD-01-document-intake.md) | A01–A05 | Active, part of the beta | A01–A04 right after P17 merges, before P18; A05 right after P26; checkpoint PR-A1 after A05 |
+| ADD-03 Report Builder and Memorized Reports | [addenda/ADD-03-report-builder.md](addenda/ADD-03-report-builder.md) | A07–A10 | Active, part of the beta | Right after P28 and PR-6, before P29; mockup approved before A08 |
 
 ## Critical path and parallel lanes
 
@@ -102,6 +103,7 @@ Phases that may run in parallel with the critical path (rules in docs/AGENTS.md)
 | PR-9 | after P36 | upgrades and migrations |
 | PR-10 | in P39 | whole-app owner journeys |
 | PR-A1 | after A05 | document to books (ADD-01; opus, xhigh) |
+| PR-A2 | after A10 | report builder (ADD-03; opus, xhigh) |
 
 ## Phase template (every detailed phase follows it)
 
