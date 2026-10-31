@@ -233,5 +233,10 @@
   {"method":"POST","path":"/api/v1/price-levels","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null},
-  {"method":"DELETE","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null}
+  {"method":"DELETE","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/company/invoice-layouts","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/company/invoice-layouts","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/company/invoice-layouts/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/company/invoice-layouts/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/company/invoice-layouts/{id}/default","inSpec":false,"fragmentHash":null}
 ]

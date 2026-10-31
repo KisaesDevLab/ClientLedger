@@ -303,3 +303,8 @@ POST    /api/v1/price-levels                    pre-handler-only
 GET     /api/v1/price-levels/{id}               idempotent
 PUT     /api/v1/price-levels/{id}               pre-handler-only
 DELETE  /api/v1/price-levels/{id}               pre-handler-only
+GET     /api/v1/company/invoice-layouts         idempotent
+POST    /api/v1/company/invoice-layouts         pre-handler-only
+GET     /api/v1/company/invoice-layouts/{id}    idempotent
+PUT     /api/v1/company/invoice-layouts/{id}    pre-handler-only
+POST    /api/v1/company/invoice-layouts/{id}/default pre-handler-only

@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 /// invoice sent route (engine PR #197, U-126) and the E2/E3/E4 contracts
 /// of the P20 plan §2 (preview U-129, price levels U-40, billable costs
 /// U-128, email and Outbox U-127).
-pub const OUTSIDE_SPEC: [(&str, &str); 20] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -56,6 +56,12 @@ pub const OUTSIDE_SPEC: [(&str, &str); 20] = [
     ("GET", "/api/v1/price-levels/{id}"),
     ("PUT", "/api/v1/price-levels/{id}"),
     ("DELETE", "/api/v1/price-levels/{id}"),
+    // U-130 invoice layouts (engine PR #202).
+    ("GET", "/api/v1/company/invoice-layouts"),
+    ("POST", "/api/v1/company/invoice-layouts"),
+    ("GET", "/api/v1/company/invoice-layouts/{id}"),
+    ("PUT", "/api/v1/company/invoice-layouts/{id}"),
+    ("POST", "/api/v1/company/invoice-layouts/{id}/default"),
 ];
 
 /// Lowercase hex of a SHA-256.

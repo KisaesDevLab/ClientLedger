@@ -265,6 +265,9 @@ pub use resources::document_assist::{
     suggestion_from_json,
 };
 // P20: Create Invoice (engine U-122 to U-129, U-38).
+pub use resources::invoice_layouts::{
+    InvoiceLayout, InvoiceLayouts, LAYOUT_NAME_MAX, LayoutColumns, LayoutDraft, ResolvedFooters,
+};
 pub use resources::invoices::{
     BILLABLE_ALREADY_BILLED, BillableCost, BillableCosts, ClientSales, EMAIL_PDF_MAX_BYTES,
     EMAIL_RECIPIENTS_MAX, EmailMessage, INVOICE_HAS_PAYMENTS, INVOICE_TAGS_MAX,

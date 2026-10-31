@@ -985,6 +985,19 @@ pub(crate) const EMAIL_QUEUE_DELETE: Operation =
     write(Method::Delete, "/api/v1/forms/email-queue/{id}");
 /// A client's unbilled costs (U-128; contract, verify when E3 lands).
 pub(crate) const BILLABLE_COSTS: Operation = read("/api/v1/billable-costs");
+/// Invoice print layouts, default first (U-130, `invoice-layouts-v1`).
+pub(crate) const INVOICE_LAYOUTS_LIST: Operation = read("/api/v1/company/invoice-layouts");
+/// Creates an invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUTS_CREATE: Operation =
+    write(Method::Post, "/api/v1/company/invoice-layouts");
+/// One invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUT_GET: Operation = read("/api/v1/company/invoice-layouts/{id}");
+/// Edits, archives or unarchives an invoice layout (U-130).
+pub(crate) const INVOICE_LAYOUT_PUT: Operation =
+    write(Method::Put, "/api/v1/company/invoice-layouts/{id}");
+/// Makes an invoice layout the company default (U-130).
+pub(crate) const INVOICE_LAYOUT_DEFAULT: Operation =
+    write(Method::Post, "/api/v1/company/invoice-layouts/{id}/default");
 /// Price levels (U-40; contract per P20 plan §2, verify when E2 lands).
 pub(crate) const PRICE_LEVELS_LIST: Operation = read("/api/v1/price-levels");
 /// Creates a price level (contract, verify with E2).
@@ -1008,7 +1021,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 235] = [
+pub const OPERATIONS: [Operation; 240] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1257,6 +1270,11 @@ pub const OPERATIONS: [Operation; 235] = [
     PRICE_LEVEL_GET,
     PRICE_LEVEL_PUT,
     PRICE_LEVEL_DELETE,
+    INVOICE_LAYOUTS_LIST,
+    INVOICE_LAYOUTS_CREATE,
+    INVOICE_LAYOUT_GET,
+    INVOICE_LAYOUT_PUT,
+    INVOICE_LAYOUT_DEFAULT,
 ];
 
 /// Looks up a covered operation.
