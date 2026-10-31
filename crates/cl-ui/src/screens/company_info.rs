@@ -105,6 +105,8 @@ pub struct CompanyInfoScreen {
     baseline: Baseline,
     /// Save & Close: the window closes once the save lands.
     close_after_save: bool,
+    /// Invoice templates (U-130).
+    pub(crate) layouts: crate::screens::company_layouts::LayoutsPanel,
 }
 
 /// The editable values as read: footer, overrides, numbering rows.
@@ -161,7 +163,9 @@ impl CompanyInfoScreen {
             duplicates: BTreeMap::new(),
             baseline: Baseline::default(),
             close_after_save: false,
+            layouts: crate::screens::company_layouts::LayoutsPanel::default(),
         };
+        s.layouts = crate::screens::company_layouts::LayoutsPanel::open(&s.link, s.group.as_ref());
         s.load();
         s.poll();
         s
@@ -404,6 +408,7 @@ impl CompanyInfoScreen {
 
     fn poll(&mut self) {
         self.check_duplicates();
+        self.layouts.poll(&self.link, self.group.as_ref());
         if let Some(r) = self.load_task.as_mut().and_then(Task::try_take) {
             self.load_task = None;
             self.loaded = true;
@@ -528,6 +533,9 @@ impl CompanyInfoScreen {
             self.footer_ui(ui, &tokens);
             ui.add_space(10.0);
             self.numbers_ui(ui, &tokens);
+            ui.add_space(10.0);
+            self.layouts
+                .ui(ui, &tokens, &self.link, self.group.as_ref());
             ui.add_space(10.0);
             if ui
                 .add_enabled(
@@ -697,6 +705,7 @@ impl CompanyInfoScreen {
             "duplicates": self.duplicates.keys().map(|k| k.as_wire()).collect::<Vec<_>>(),
             "notice": self.notice,
             "error": self.error.is_some(),
+            "layouts": self.layouts.state_json(),
         })
     }
 }
@@ -742,7 +751,8 @@ impl Screen for CompanyInfoScreen {
             || self.upload_task.is_some()
             || self.save_task.is_some()
             || self.pick_rx.is_some()
-            || self.read_rx.is_some();
+            || self.read_rx.is_some()
+            || self.layouts.busy();
         if busy {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
