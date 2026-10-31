@@ -1421,6 +1421,8 @@ pub struct ClientSales {
     pub price_level_id: Option<PriceLevelId>,
     /// The client's default markup on billable costs.
     pub default_markup_percent: Option<SignedPercent>,
+    /// The layout the client's new invoices start on (U-130).
+    pub default_invoice_layout_id: Option<InvoiceLayoutId>,
 }
 
 impl fmt::Debug for ClientSales {
@@ -1444,6 +1446,8 @@ struct ClientSalesWire {
     price_level_id: Option<PriceLevelId>,
     #[serde(default)]
     default_markup_percent: Option<SignedPercent>,
+    #[serde(default)]
+    default_invoice_layout_id: Option<InvoiceLayoutId>,
 }
 
 // ---- Options -----------------------------------------------------------------------
@@ -2022,6 +2026,7 @@ impl Invoices<'_> {
             oldest_open_date: w.oldest_open_date,
             price_level_id: w.price_level_id,
             default_markup_percent: w.default_markup_percent,
+            default_invoice_layout_id: w.default_invoice_layout_id,
         })
     }
 
@@ -2061,6 +2066,30 @@ impl Invoices<'_> {
             format!("/api/v1/contacts/{client}"),
         )
         .json_body(json_body(&Value::Object(m))?);
+        self.0.send(&CONTACT_PUT, call, None).await?;
+        Ok(())
+    }
+
+    /// Sets (or with `None` clears) the layout a client's new invoices
+    /// start on (`defaultInvoiceLayoutId`, `invoice-layouts-v1`; partial
+    /// `PUT /contacts/{id}`).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without the capability (nothing sent); 400
+    /// `INVOICE_LAYOUT_NOT_FOUND` / `INVOICE_LAYOUT_ARCHIVED`; any
+    /// [`ApiError`].
+    pub async fn set_client_layout(
+        &self,
+        client: ContactId,
+        layout: Option<InvoiceLayoutId>,
+    ) -> Result<(), ApiError> {
+        require(self.0, Capabilities::INVOICE_LAYOUTS)?;
+        let call = Call::new(
+            Method::Put,
+            CONTACT_PUT.route(),
+            format!("/api/v1/contacts/{client}"),
+        )
+        .json_body(json_body(&json!({ "defaultInvoiceLayoutId": layout }))?);
         self.0.send(&CONTACT_PUT, call, None).await?;
         Ok(())
     }

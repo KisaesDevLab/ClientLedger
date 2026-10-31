@@ -1265,6 +1265,7 @@ pub fn client_sales(state: &DemoState, client: cl_core::ids::ContactId) -> cl_ap
         oldest_open_date: oldest,
         price_level_id: state.price_levels.clients.get(&client).copied(),
         default_markup_percent: state.invoices.markups.get(&client).copied(),
+        default_invoice_layout_id: state.layouts.clients.get(&client).copied(),
     }
 }
 
