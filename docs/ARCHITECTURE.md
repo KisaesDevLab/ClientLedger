@@ -466,7 +466,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | Component | License | Ships in installer |
 | --- | --- | --- |
 | ClientLedger Rust code (`crates/`, `apps/`, `xtask/`) | PolyForm Internal Use 1.0.0 (Q-303) | yes |
-| MyBooks engine (`engine/` submodule, public repo) | Kisaes LLC's engine license; licensed to ClientLedger and used inside it under ClientLedger's license (Q-31, Q-303) | yes, as `clientledger-engine` |
+| MyBooks engine (`engine/` submodule, public repo) | Commercial license from Kisaes LLC, included with ClientLedger at no charge (Q-316) | yes, as `clientledger-engine` |
 | Node.js runtime inside the engine executable | MIT (plus bundled third-party notices) | yes |
 | PostgreSQL 16 binaries | PostgreSQL License | yes |
 | PDFium binaries | BSD-3-Clause / Apache-2.0 | yes |
@@ -477,4 +477,4 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | IBM Plex fonts | SIL OFL 1.1 | yes |
 | Rust crates | MIT / Apache-2.0 direct; permissive transitive per Q-07 | yes |
 
-The installer and Help › About show all of these. `NOTICE.md` states plainly what `LICENSE` covers and how the engine is licensed to ClientLedger.
+The installer and Help › About show all of these. `NOTICE.md` states plainly what `LICENSE` covers and the engine's commercial license included with ClientLedger.

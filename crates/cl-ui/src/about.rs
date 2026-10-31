@@ -174,6 +174,7 @@ mod tests {
         assert!(body("app.tagline").contains("powered by Vibe MyBooks"));
         assert!(body("about.affiliation.body").contains("Intuit"));
         assert!(body("about.engine.body").contains("internal"));
+        assert!(body("about.engine.body").contains("commercial license included"));
         assert!(body("about.license.body").contains("PolyForm Internal Use"));
         assert!(body("privacy.body").contains("no analytics"));
         assert!(FONT_LICENSE.contains("SIL Open Font License"));
