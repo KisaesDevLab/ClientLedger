@@ -30,4 +30,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.rate_source.computed", "Figured from the lines above"),
     ("invoice.rate_source.billable", "Billable cost, with any markup"),
     ("invoice.rate_source.other", "Rate from your books"),
+    // cl-print form labels added in P20 (the print screens read them).
+    ("print.pdf.ship_to", "Ship to"),
+    ("print.pdf.service_date", "Service date"),
 ];

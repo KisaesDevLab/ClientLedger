@@ -1,6 +1,7 @@
-//! Invoices.
+//! Invoices (P19; P20 adds the ship-to block, the service-date column,
+//! multi-line descriptions and [`pdf_bytes`]).
 
-use super::{FormDoc, FormStyle, ItemLine, TotalRow, item_columns, item_rows, layout_form};
+use super::{FormDoc, FormStyle, ItemLine, TotalRow, item_table, layout_form};
 use crate::PrintError;
 use crate::layout::Document;
 use rust_decimal::Decimal;
@@ -21,6 +22,9 @@ pub struct InvoiceData {
     pub po_number: String,
     /// Bill-to address, name first.
     pub bill_to: Vec<String>,
+    /// Ship-to address, name first; printed only when it differs from the
+    /// bill-to address (Q-P20m).
+    pub ship_to: Vec<String>,
     /// Item lines.
     pub lines: Vec<ItemLine>,
     /// Leave out lines whose amount is zero (Q-201; off by default).
@@ -35,8 +39,39 @@ pub struct InvoiceData {
     pub payments: Option<Decimal>,
     /// The engine's balance due.
     pub balance_due: Decimal,
-    /// Message to the customer.
+    /// Message to the customer (printed; the memo never is, Q-P20k).
     pub message: String,
+}
+
+/// The lines of an address as compared: trimmed, blank lines dropped,
+/// spaces collapsed, letters folded to lower case.
+fn address_key(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            l.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// The ship-to block to print: empty when there is none or it is the
+/// bill-to address (Q-P20m).
+#[must_use]
+pub fn ship_to_shown(d: &InvoiceData) -> Vec<String> {
+    let ship = address_key(&d.ship_to);
+    if ship.is_empty() || ship == address_key(&d.bill_to) {
+        Vec::new()
+    } else {
+        d.ship_to
+            .iter()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    }
 }
 
 /// The invoice as a template document.
@@ -65,17 +100,25 @@ pub fn form(d: &InvoiceData, style: &FormStyle) -> FormDoc {
         totals.push(TotalRow::new(&l.payments, p, false));
         totals.push(TotalRow::new(&l.balance_due, d.balance_due, true));
     }
+    let (columns, rows) = item_table(l, &d.lines, d.hide_zero_lines);
+    let ship_to = ship_to_shown(d);
     FormDoc {
         title: l.invoice.clone(),
         number: d.number.clone(),
         address_label: l.bill_to.clone(),
         address: d.bill_to.clone(),
         fields,
-        columns: item_columns(l),
-        rows: item_rows(&d.lines, d.hide_zero_lines),
+        columns,
+        rows,
         totals,
         message: d.message.clone(),
         boxes: vec![],
+        ship_to_label: if ship_to.is_empty() {
+            String::new()
+        } else {
+            l.ship_to.clone()
+        },
+        ship_to,
     }
 }
 
@@ -86,6 +129,15 @@ pub fn form(d: &InvoiceData, style: &FormStyle) -> FormDoc {
 /// As [`layout_form`].
 pub fn layout(d: &InvoiceData, style: &FormStyle) -> Result<Document, PrintError> {
     layout_form(&form(d, style), style)
+}
+
+/// The invoice as PDF bytes (Print, Save PDF, and the email attachment
+/// `Invoice-<number>.pdf`, Q-P20q).
+///
+/// # Errors
+/// As [`layout`] and [`crate::render`].
+pub fn pdf_bytes(d: &InvoiceData, style: &FormStyle) -> Result<Vec<u8>, PrintError> {
+    crate::render(&layout(d, style)?)
 }
 
 #[cfg(test)]
@@ -115,12 +167,14 @@ pub(crate) mod tests {
                     quantity: Some(Decimal::new(25, 1)),
                     rate: Some(Decimal::new(450, 2)),
                     amount: Some(Decimal::new(1125, 2)),
+                    ..ItemLine::default()
                 },
                 ItemLine {
                     description: "Delivery (waived)".into(),
                     quantity: Some(Decimal::ONE),
                     rate: Some(Decimal::ZERO),
                     amount: Some(Decimal::ZERO),
+                    ..ItemLine::default()
                 },
             ],
             subtotal: Decimal::new(1125, 2),
@@ -196,5 +250,80 @@ pub(crate) mod tests {
         assert!((xm - ADDRESS.x).abs() <= 0.5);
         assert!((ym - (ADDRESS.y + Font::Sans.ascent_mm(10.0))).abs() <= 0.5);
         assert!(WINDOW.contains(ADDRESS));
+    }
+
+    fn y_of(p: &crate::ResolvedPage, tag: &str) -> f32 {
+        p.runs_of(tag).map(|r| r.baseline).fold(f32::MAX, f32::min)
+    }
+
+    #[test]
+    fn ship_to_prints_only_when_it_differs_and_outside_the_windows() {
+        use super::super::{SHIP_TO_X, TABLE_TOP_FIRST, TOP_WINDOW, table_top_first};
+        let mut d = sample();
+        d.ship_to = vec![
+            " pat doe ".into(),
+            "5  Oak Lane".into(),
+            String::new(),
+            "COLUMBUS, OH 43004".into(),
+        ];
+        assert!(
+            ship_to_shown(&d).is_empty(),
+            "the same address, written differently"
+        );
+        let p = &resolve(&layout(&d, &style()).unwrap()).unwrap()[0];
+        assert!(p.runs_of("ship_to").next().is_none());
+        d.ship_to = vec![
+            "Hartley job site".into(),
+            "88 River Road".into(),
+            "Columbus, OH 43004".into(),
+        ];
+        let f = form(&d, &style());
+        assert_eq!(f.ship_to_label, "Ship to");
+        assert!(table_top_first(&f) >= TABLE_TOP_FIRST);
+        let p = &resolve(&layout(&d, &style()).unwrap()).unwrap()[0];
+        assert_eq!(text(p, "ship_to_label"), "Ship to");
+        assert_eq!(
+            text(p, "ship_to"),
+            "Hartley job site\n88 River Road\nColumbus, OH 43004"
+        );
+        for r in p.runs_of("ship_to") {
+            assert!(r.x >= SHIP_TO_X - 0.01, "right of the windows");
+            assert!(r.x > WINDOW.x + WINDOW.w);
+            assert!(r.x > TOP_WINDOW.x + TOP_WINDOW.w);
+        }
+        // The lines table starts below the block.
+        let last_ship = p
+            .runs_of("ship_to")
+            .map(|r| r.baseline)
+            .fold(0.0_f32, f32::max);
+        assert!(y_of(p, "head.description") > last_ship);
+    }
+
+    #[test]
+    fn service_dates_get_a_column_and_descriptions_keep_their_lines() {
+        let mut d = sample();
+        let p = &resolve(&layout(&d, &style()).unwrap()).unwrap()[0];
+        assert!(p.runs_of("head.service_date").next().is_none());
+        d.lines[0].service_date = "10/31/2026".into();
+        d.lines[0].description = "Mulch, 2 cu ft\nspread on the north beds".into();
+        let p = &resolve(&layout(&d, &style()).unwrap()).unwrap()[0];
+        assert_eq!(text(p, "head.service_date"), "Service date");
+        assert_eq!(text(p, "row0.service_date"), "10/31/2026");
+        assert!(p.runs_of("row1.service_date").next().is_none());
+        assert_eq!(text(p, "row0.amount"), "11.25");
+        assert_eq!(
+            text(p, "row0.description"),
+            "Mulch, 2 cu ft\nspread on the north beds"
+        );
+        assert!(y_of(p, "row1.description") - y_of(p, "row0.description") > 6.0);
+    }
+
+    #[test]
+    fn pdf_bytes_are_a_pdf_with_the_customer_message() {
+        let bytes = pdf_bytes(&sample(), &style()).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        assert!(bytes.len() > 1000);
+        let p = &resolve(&layout(&sample(), &style()).unwrap()).unwrap()[0];
+        assert_eq!(text(p, "message"), "Thank you for your business.");
     }
 }

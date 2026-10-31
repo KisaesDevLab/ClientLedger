@@ -212,6 +212,12 @@ pub struct FormDoc {
     pub message: String,
     /// A row of labelled boxes under the totals (statement aging).
     pub boxes: Vec<(String, String)>,
+    /// Label above the ship-to block ("Ship to"; P20, Q-P20m).
+    pub ship_to_label: String,
+    /// The ship-to block, name first; empty for none. Printed in the right
+    /// column under the header fields, outside both envelope windows, and
+    /// the lines table moves down below it.
+    pub ship_to: Vec<String>,
 }
 
 /// Fixed words on forms (English defaults; the UI passes its
@@ -232,6 +238,8 @@ pub struct FormLabels {
     pub due_date: String,
     pub terms: String,
     pub po_number: String,
+    pub ship_to: String,
+    pub service_date: String,
     pub payment_method: String,
     pub reference: String,
     pub statement_date: String,
@@ -285,6 +293,8 @@ impl Default for FormLabels {
             due_date: s("Due date"),
             terms: s("Terms"),
             po_number: s("P.O. number"),
+            ship_to: s("Ship to"),
+            service_date: s("Service date"),
             payment_method: s("Payment method"),
             reference: s("Reference"),
             statement_date: s("Statement date"),
@@ -332,6 +342,9 @@ pub struct ItemLine {
     pub rate: Option<Decimal>,
     /// The engine's line amount; `None` for a text-only line.
     pub amount: Option<Decimal>,
+    /// Service date as the caller formatted it (empty for none; P20). A
+    /// Service date column is printed when any line has one.
+    pub service_date: String,
 }
 
 /// The standard item columns (description, qty, rate, amount).
@@ -344,13 +357,30 @@ pub(crate) fn item_columns(l: &FormLabels) -> Vec<Column> {
     ]
 }
 
-/// Item lines as rows; with `hide_zero` (Q-201) lines whose amount is
-/// exactly zero are left out (text-only lines stay).
-pub(crate) fn item_rows(lines: &[ItemLine], hide_zero: bool) -> Vec<Vec<String>> {
-    use crate::amount::{format_amount, format_quantity};
+/// The item columns with a Service date column after the description
+/// (P20), the description narrower by its width.
+pub(crate) fn item_columns_dated(l: &FormLabels) -> Vec<Column> {
+    vec![
+        Column::text("description", &l.description, 81.0),
+        Column::code("service_date", &l.service_date, 22.0),
+        Column::number("quantity", &l.quantity, 22.0),
+        Column::number("rate", &l.rate, 30.0),
+        Column::number("amount", &l.amount, 35.5),
+    ]
+}
+
+fn shown(lines: &[ItemLine], hide_zero: bool) -> impl Iterator<Item = &ItemLine> {
     lines
         .iter()
-        .filter(|l| !(hide_zero && l.amount.is_some_and(|a| a.is_zero())))
+        .filter(move |l| !(hide_zero && l.amount.is_some_and(|a| a.is_zero())))
+}
+
+/// Item lines as rows; with `hide_zero` (Q-201) lines whose amount is
+/// exactly zero are left out (text-only lines stay). A description may
+/// span several lines (`\n`).
+pub(crate) fn item_rows(lines: &[ItemLine], hide_zero: bool) -> Vec<Vec<String>> {
+    use crate::amount::{format_amount, format_quantity};
+    shown(lines, hide_zero)
         .map(|l| {
             vec![
                 l.description.clone(),
@@ -360,6 +390,60 @@ pub(crate) fn item_rows(lines: &[ItemLine], hide_zero: bool) -> Vec<Vec<String>>
             ]
         })
         .collect()
+}
+
+/// The columns and rows of item lines: with a Service date column when a
+/// shown line has a service date (P20).
+pub(crate) fn item_table(
+    l: &FormLabels,
+    lines: &[ItemLine],
+    hide_zero: bool,
+) -> (Vec<Column>, Vec<Vec<String>>) {
+    let dated = shown(lines, hide_zero).any(|x| !x.service_date.trim().is_empty());
+    let rows = item_rows(lines, hide_zero);
+    if !dated {
+        return (item_columns(l), rows);
+    }
+    let rows = shown(lines, hide_zero)
+        .zip(rows)
+        .map(|(line, mut row)| {
+            row.insert(1, line.service_date.trim().to_string());
+            row
+        })
+        .collect();
+    (item_columns_dated(l), rows)
+}
+
+/// Left edge of the ship-to block (right of both envelope windows).
+pub const SHIP_TO_X: f32 = 140.0;
+/// Most ship-to lines printed.
+pub const SHIP_TO_MAX_LINES: usize = 6;
+const SHIP_TO_PT: f32 = 9.0;
+
+/// Where the ship-to label and block go, if the form has one.
+fn ship_to_boxes(form: &FormDoc) -> Option<(Rect, Rect)> {
+    if form.ship_to.is_empty() {
+        return None;
+    }
+    let top = FIELDS_TOP + FIELD_PITCH * as_f32(form.fields.len()) + 2.0;
+    let label = Rect::new(SHIP_TO_X, top, RIGHT - SHIP_TO_X, 4.0);
+    let lines = form.ship_to.len().min(SHIP_TO_MAX_LINES);
+    let body = Rect::new(
+        SHIP_TO_X,
+        top + 4.5,
+        RIGHT - SHIP_TO_X,
+        line_height_mm(SHIP_TO_PT) * as_f32(lines),
+    );
+    Some((label, body))
+}
+
+/// Where the lines table starts on the first page: below the ship-to block
+/// when there is one.
+#[must_use]
+pub fn table_top_first(form: &FormDoc) -> f32 {
+    ship_to_boxes(form).map_or(TABLE_TOP_FIRST, |(_, body)| {
+        TABLE_TOP_FIRST.max(body.bottom() + 3.0)
+    })
 }
 
 /// Lay a form out on as many pages as its rows need.
@@ -372,7 +456,7 @@ pub fn layout_form(form: &FormDoc, style: &FormStyle) -> Result<Document, PrintE
         return Err(PrintError::TooManyFields);
     }
     let mut pages = vec![first_page(form, style)];
-    let mut y = TABLE_TOP_FIRST;
+    let mut y = table_top_first(form);
     table_head(pages.last_mut(), form, y);
     y += HEAD_H + 1.0;
     for (i, row) in form.rows.iter().enumerate() {
@@ -497,6 +581,28 @@ fn first_page(form: &FormDoc, style: &FormStyle) -> Page {
             .align(Align::Right),
         );
         y += FIELD_PITCH;
+    }
+    if let Some((label, body)) = ship_to_boxes(form) {
+        p.text(TextBox::new(
+            "ship_to_label",
+            label,
+            Font::SansSemiBold,
+            8.0,
+            form.ship_to_label.clone(),
+        ));
+        let lines: Vec<&str> = form
+            .ship_to
+            .iter()
+            .take(SHIP_TO_MAX_LINES)
+            .map(String::as_str)
+            .collect();
+        p.text(TextBox::new(
+            "ship_to",
+            body,
+            Font::Sans,
+            SHIP_TO_PT,
+            lines.join("\n"),
+        ));
     }
     p
 }
@@ -778,6 +884,7 @@ pub(crate) mod tests {
             totals: vec![TotalRow::new("Total", Decimal::new(1000, 2), true)],
             message: String::new(),
             boxes: vec![],
+            ..FormDoc::default()
         }
     }
 
@@ -948,18 +1055,21 @@ pub(crate) mod tests {
                 quantity: Some(Decimal::ONE),
                 rate: Some(Decimal::TEN),
                 amount: Some(Decimal::TEN),
+                ..ItemLine::default()
             },
             ItemLine {
                 description: "Free".into(),
                 quantity: Some(Decimal::ONE),
                 rate: Some(Decimal::ZERO),
                 amount: Some(Decimal::new(0, 2)),
+                ..ItemLine::default()
             },
             ItemLine {
                 description: "Note".into(),
                 quantity: None,
                 rate: None,
                 amount: None,
+                ..ItemLine::default()
             },
         ];
         assert_eq!(item_rows(&lines, false).len(), 3);
