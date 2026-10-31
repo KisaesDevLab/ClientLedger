@@ -12,14 +12,13 @@
 //!   `invoice_put_idempotent`, `email_not_configured`, `layouts`.
 
 use cl_api::{
-    AccountType, ApiError, Capabilities, ClosedPeriodAuthorization, ConflictReason, ContactFields,
-    ContactType, EmailMessage, IdempotencyKey, InvoiceLine, InvoiceListQuery, InvoiceRecord,
-    InvoiceRefusal, InvoiceStatus, ItemFields, LayoutDraft, Method, NewContact, NewInvoice,
-    PageRequest, PostingOptions, SendMethod, SendRecord, Session, SignedPercent, Versioned,
-    invoice_refusal,
+    AccountType, ApiError, Capabilities, ConflictReason, ContactFields, ContactType, EmailMessage,
+    IdempotencyKey, InvoiceLine, InvoiceListQuery, InvoiceRecord, InvoiceRefusal, InvoiceStatus,
+    ItemFields, LayoutDraft, Method, NewContact, NewInvoice, PageRequest, PostingOptions,
+    SendMethod, SendRecord, Session, SignedPercent, Versioned, invoice_refusal,
 };
 use cl_core::ids::{AccountId, ContactId};
-use cl_core::{CalendarDate, Money, Quantity, Secret};
+use cl_core::{CalendarDate, Money, Quantity};
 use serde_json::json;
 
 use crate::common::{account, date, key, m};
@@ -261,6 +260,9 @@ pub fn invoice_closed_period(h: &Harness) {
     if !h.require_cap(Capabilities::INVOICE_EDIT, "U-124") {
         return;
     }
+    // Tenant B, like every test that changes the closing date. Its wrong
+    // closing-password try counts toward the owner's limiter budget (10
+    // failures per user); the lifecycle test waits that out if needed.
     let s = h.s3();
     let c = customer(h, &s, "Closed");
     let a = account(h, &s, AccountType::Revenue, "Closed income").id;
@@ -278,26 +280,11 @@ pub fn invoice_closed_period(h: &Harness) {
         ))
         .expect_err("closed");
     assert!(matches!(e, ApiError::ClosedPeriod(_)), "{e:?}");
-    if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
-        let wrong = PostingOptions {
-            closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
-                "not the password",
-            ))),
-        };
-        let e = h
-            .run(
-                s.invoices()
-                    .create(&mockup(c, a, date(2026, 1, 15)), &wrong, key()),
-            )
-            .expect_err("wrong password");
-        assert!(
-            matches!(
-                e,
-                ApiError::ClosingPasswordRejected | ApiError::ClosedPeriod(_)
-            ),
-            "{e:?}"
-        );
-    }
+    // No wrong-password probe here: failed closing-password attempts are
+    // counted per user across every route (10 per 15 minutes), and the
+    // lifecycle and closed-period tests already spend that budget proving
+    // the refusal. This test proves the invoice routes are closed-period
+    // guarded (U-124).
     h.run(s.raw_mapped(
         Method::Put,
         "/api/v1/company/settings",
