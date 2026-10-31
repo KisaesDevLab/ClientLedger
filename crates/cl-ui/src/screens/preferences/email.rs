@@ -258,9 +258,71 @@ pub fn panel(
             }
         });
         form::hint(ui, tokens, &t("prefs.email.test_hint"));
-        form::hint(ui, tokens, &t("prefs.email.sends_later"));
     });
+    ui.add_space(8.0);
+    templates_card(ui, tokens, &mut edits.company.email);
     action
+}
+
+/// Preferences > Email > Templates (P20 WP-B, Q-P20j): the invoice email's
+/// subject and body with their `{fields}`, and BCC-self.
+fn templates_card(ui: &mut Ui, tokens: &Tokens, prefs: &mut cl_settings::EmailPrefs) {
+    use cl_settings::{EmailTemplate, TemplateDoc, TemplateSource};
+    form::card(ui, tokens, |ui| {
+        form::heading(ui, tokens, &t("prefs.email.templates"));
+        form::hint(ui, tokens, &t("prefs.email.templates.intro"));
+        let (mut subject, mut body, custom) = match prefs.template(TemplateDoc::Invoice) {
+            TemplateSource::Default {
+                subject_key,
+                body_key,
+            } => (t(subject_key), t(body_key), false),
+            TemplateSource::Custom(c) => (c.subject.clone(), c.body.clone(), true),
+        };
+        let mut changed =
+            form::field(ui, &t("prefs.email.template.subject"), &mut subject).changed();
+        let l = ui.label(t("prefs.email.template.body"));
+        changed |= ui
+            .add(
+                egui::TextEdit::multiline(&mut body)
+                    .desired_rows(6)
+                    .desired_width(480.0),
+            )
+            .labelled_by(l.id)
+            .changed();
+        if changed {
+            prefs.set_template(TemplateDoc::Invoice, &EmailTemplate { subject, body });
+        }
+        let names: Vec<String> = cl_settings::email_templates::FIELDS
+            .iter()
+            .map(|(_, n)| format!("{{{n}}}"))
+            .collect();
+        form::hint(
+            ui,
+            tokens,
+            &crate::i18n::t_with(
+                "prefs.email.template.fields",
+                &[("fields", &names.join(" "))],
+            ),
+        );
+        if let TemplateSource::Custom(c) = prefs.template(TemplateDoc::Invoice) {
+            let mut unknown = cl_settings::unknown_fields(&c.subject);
+            unknown.extend(cl_settings::unknown_fields(&c.body));
+            if !unknown.is_empty() {
+                ui.label(
+                    RichText::new(crate::i18n::t_with(
+                        "prefs.email.template.unknown",
+                        &[("fields", &unknown.join(", "))],
+                    ))
+                    .color(tokens.warn_text),
+                );
+            }
+        }
+        if custom && ui.button(t("prefs.email.template.reset")).clicked() {
+            prefs.invoice = None;
+        }
+        ui.checkbox(&mut prefs.bcc_self, t("prefs.email.bcc_self"))
+            .on_hover_text(t("prefs.email.bcc_self.tip"));
+    });
 }
 
 #[cfg(test)]

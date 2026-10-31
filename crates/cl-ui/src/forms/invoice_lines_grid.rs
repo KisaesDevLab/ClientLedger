@@ -240,7 +240,10 @@ fn picked<L: Lookups + ?Sized>(lists: &L, list: ListId, id: Option<u64>) -> Cell
 
 /// The taxable flag a line shows: its own, else its item's.
 #[must_use]
-pub fn taxable_of(l: &InvoiceLine, taxable: &HashMap<ItemId, bool>) -> bool {
+pub fn taxable_of<S: std::hash::BuildHasher>(
+    l: &InvoiceLine,
+    taxable: &HashMap<ItemId, bool, S>,
+) -> bool {
     l.taxable.unwrap_or_else(|| {
         l.item
             .and_then(|i| taxable.get(&i).copied())
@@ -512,6 +515,17 @@ impl InvoiceGrid {
     #[must_use]
     pub fn dirty(&self) -> bool {
         self.form.dirty()
+    }
+
+    /// A save starts (edits wait until it ends).
+    pub fn begin_save(&mut self, intent: cl_model::forms::SaveIntent) -> bool {
+        let lists = Arc::clone(&self.form.adapter().lists);
+        self.form.begin_save(intent, &*lists).is_ok()
+    }
+
+    /// The save failed (the lines stay as typed).
+    pub fn save_failed(&mut self, failure: cl_model::forms::SaveFailure) {
+        self.form.save_failed(failure);
     }
 
     /// Commits the open cell. False when it is not valid.

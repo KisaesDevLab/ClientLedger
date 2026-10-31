@@ -24,7 +24,6 @@ mod billable;
 mod draw;
 pub(crate) mod email;
 pub(crate) mod engine;
-pub(crate) mod grid;
 mod save;
 
 use std::collections::HashMap;
@@ -55,8 +54,8 @@ use crate::screens::company::form::DateInput;
 use crate::screens::register::lists::RegisterLists;
 use crate::windows::Screen;
 
+use crate::forms::invoice_lines_grid::{self as grid, InvoiceGrid};
 use engine::Job;
-use grid::InvoiceGrid;
 
 /// The command and window kind.
 pub const KIND: &str = "clients.create_invoice";

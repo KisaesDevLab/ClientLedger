@@ -178,6 +178,8 @@ pub(crate) struct HomeData {
     pub checklist: Slot<checklist::Facts>,
     /// Documents waiting for review (A04 D6): the engine's draft total.
     pub documents: Slot<u64>,
+    /// Emails waiting in the Outbox (P20, Q-P20d).
+    pub outbox: Slot<u64>,
 }
 
 impl HomeData {
@@ -195,6 +197,7 @@ impl HomeData {
             || self.chart.loading()
             || self.checklist.loading()
             || self.documents.loading()
+            || self.outbox.loading()
     }
 }
 
@@ -406,6 +409,20 @@ impl HomeScreen {
             move |s| attention::documents_demo(s, tenant),
             attention::documents_count,
         ));
+        if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::INVOICE_EMAIL)
+        {
+            self.data.outbox.start(run(
+                &self.link,
+                group,
+                None,
+                |s| Ok(crate::company::demo::invoices::outbox(s).len() as u64),
+                |s| async move { Ok(s.invoices().outbox().await?.len() as u64) },
+            ));
+        }
         self.poll();
     }
 
@@ -470,6 +487,12 @@ impl HomeScreen {
         self.data.chart.poll();
         self.data.checklist.poll();
         self.data.documents.poll();
+        if self.data.outbox.poll()
+            && let Some(n) = self.data.outbox.value
+        {
+            self.link
+                .set_outbox_count(Some(u32::try_from(n).unwrap_or(u32::MAX)));
+        }
     }
 
     /// Opens the Profit & Loss of a chart month (a placeholder until P28,

@@ -24,9 +24,9 @@ use cl_model::forms::invoice::{
 };
 
 use super::engine::{self, label};
-use super::grid::{V_DESC, V_ITEM, V_RATE};
 use super::{Editing, InvoiceScreen, KIND, Pending, field};
 use crate::company::CompanyEvent;
+use crate::forms::invoice_lines_grid::{V_DESC, V_ITEM, V_RATE};
 
 fn options(password: Option<Secret>) -> PostingOptions {
     PostingOptions {
@@ -167,6 +167,7 @@ impl InvoiceScreen {
             }
             return false;
         }
+        let _ = self.grid.begin_save(intent);
         let _ = self.header.begin_save(intent);
         self.intent = Some(intent);
         let edit = self.editing.as_ref().map(|e| (e.id, e.record.clone()));
@@ -303,10 +304,12 @@ impl InvoiceScreen {
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
         if self.lost.lost(&e) {
-            self.header.save_unknown(failure);
+            self.header.save_unknown(failure.clone());
+            self.grid.save_failed(failure);
             return;
         }
-        self.header.save_failed(failure);
+        self.header.save_failed(failure.clone());
+        self.grid.save_failed(failure);
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
