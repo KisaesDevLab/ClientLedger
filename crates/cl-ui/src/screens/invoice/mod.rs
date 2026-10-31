@@ -728,6 +728,12 @@ impl InvoiceScreen {
             if let Some(c) = self.header.current().client {
                 self.client_changed_quiet(c);
             }
+            // Printed in Print Forms, emailed from the Outbox, marked sent
+            // elsewhere: the open invoice is read again so its send history
+            // and `updatedAt` are current (the next edit isn't STALE).
+            if !self.is_dirty() && !self.busy() && self.load_job.is_none() {
+                self.reload();
+            }
         }
     }
 

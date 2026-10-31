@@ -357,3 +357,34 @@ fn a_saved_invoice_round_trips_without_changing_the_money() {
     assert_eq!(again.record.txn.total, saved.txn.total);
     assert_eq!(again.record.tax_amount, saved.tax_amount);
 }
+
+/// Follow-up 20: printed (or emailed) from another window, the open invoice
+/// is read again so its send history and `updatedAt` are current.
+#[test]
+fn a_send_elsewhere_reloads_the_open_invoice() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let saved = s.editing.clone().expect("saved").record;
+    let other = s.link.bus().subscribe();
+    {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::invoices::record_sent(
+            &mut d,
+            saved.txn.id,
+            &cl_api::SendRecord {
+                method: cl_api::SendMethod::Printed,
+                recipients: Vec::new(),
+                sent_at: None,
+            },
+        )
+        .expect("printed");
+    }
+    crate::forms::publish_saved(&s.link, &other, &[]);
+    s.hear_changes();
+    s.poll();
+    let now = s.editing.clone().expect("open").record;
+    assert_eq!(now.send_history.len(), 1);
+    assert_ne!(now.txn.updated_at, None);
+}
