@@ -16,7 +16,7 @@ use cl_api::{
     action_items_from_json, cash_position_from_json, payables_from_json, receivables_from_json,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::{CalendarDate, Money, Quantity};
 use serde_json::{Value, json};
 
 use crate::common::{account, date, key, m};
@@ -416,19 +416,22 @@ pub fn exact_strings_u76(h: &Harness) {
     let income = account(h, s, AccountType::Revenue, "Home sales").id;
     h.run(s.create_invoice(
         &NewInvoice {
-            txn_date: day(-45),
             due_date: Some(day(-15)),
-            contact_id: client,
-            lines: vec![InvoiceLine {
-                account_id: income,
-                description: None,
-                quantity: Quantity::parse_wire("1").expect("q"),
-                unit_price: m("12345.67"),
-                is_taxable: false,
-                tax_rate: Rate::parse_wire("0").expect("r"),
-            }],
             memo: None,
             txn_number: None,
+            ..NewInvoice::new(
+                client,
+                day(-45),
+                vec![InvoiceLine {
+                    description: None,
+                    is_taxable: Some(false),
+                    ..InvoiceLine::account(
+                        income,
+                        Quantity::parse_wire("1").expect("q"),
+                        m("12345.67"),
+                    )
+                }],
+            )
         },
         key(),
     ))

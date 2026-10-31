@@ -217,5 +217,21 @@
   {"method":"PUT","path":"/api/v1/document-numbers/{type}","inSpec":true,"fragmentHash":"e3d016b5ab3ca32fa8541a0cd7d1cce40bb3aa4b203ae1618411ccfa3da49a39"},
   {"method":"POST","path":"/api/v1/document-numbers/claim","inSpec":true,"fragmentHash":"9f43b66ab4b176fec59b72db02ecb04dc5d220b04ddf251a72a10ab5bcb35f95"},
   {"method":"GET","path":"/api/v1/forms/print-queue","inSpec":true,"fragmentHash":"af2ffe2f46827dba866b49b409ba04f1857d42679bdbbb8a27515308e3548340"},
-  {"method":"POST","path":"/api/v1/forms/mark-printed","inSpec":true,"fragmentHash":"aa51681b0685231afa10deb554fad34df963495ea2bbc57121788cd7496681ae"}
+  {"method":"POST","path":"/api/v1/forms/mark-printed","inSpec":true,"fragmentHash":"aa51681b0685231afa10deb554fad34df963495ea2bbc57121788cd7496681ae"},
+  {"method":"GET","path":"/api/v1/invoices","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/invoices/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"PUT","path":"/api/v1/invoices/{id}","inSpec":true,"fragmentHash":"58f1ba2964292ea3abdb216a0ab8962c250946a39e725fd6fdb93d6e943efbfd"},
+  {"method":"POST","path":"/api/v1/invoices/{id}/void","inSpec":true,"fragmentHash":"f6ef13ef14f7615ee177b979d9fed8b0bc05e9bc788fc9bbe98c9529628a7b02"},
+  {"method":"POST","path":"/api/v1/invoices/{id}/sent","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/invoices/preview","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/invoices/{id}/email","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/invoices/{id}/email-later","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/forms/email-queue","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/forms/email-queue/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/billable-costs","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/price-levels","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/price-levels","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/price-levels/{id}","inSpec":false,"fragmentHash":null}
 ]

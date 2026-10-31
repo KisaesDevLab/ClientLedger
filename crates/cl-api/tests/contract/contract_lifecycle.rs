@@ -244,19 +244,22 @@ pub fn opening_balances_and_review(h: &Harness) {
     let inv = h
         .run(s.create_invoice(
             &NewInvoice {
-                txn_date: date(2025, 12, 15),
                 due_date: Some(date(2026, 1, 14)),
-                contact_id: client.id,
-                lines: vec![InvoiceLine {
-                    account_id: opening_equity,
-                    description: Some("Opening balance".into()),
-                    quantity: Quantity::parse_wire("1").expect("q"),
-                    unit_price: m("1250.00"),
-                    is_taxable: false,
-                    tax_rate: Rate::parse_wire("0").expect("r"),
-                }],
                 memo: Some("Opening balance".into()),
                 txn_number: None,
+                ..NewInvoice::new(
+                    client.id,
+                    date(2025, 12, 15),
+                    vec![InvoiceLine {
+                        description: Some("Opening balance".into()),
+                        is_taxable: Some(false),
+                        ..InvoiceLine::account(
+                            opening_equity,
+                            Quantity::parse_wire("1").expect("q"),
+                            m("1250.00"),
+                        )
+                    }],
+                )
             },
             key(),
         ))

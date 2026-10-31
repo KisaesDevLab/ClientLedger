@@ -10,7 +10,7 @@ use cl_api::{
     InvoiceLine, NewBill, NewContact, NewInvoice, OpeningBalance, ReportBasis,
 };
 use cl_company::CompanyError;
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::{CalendarDate, Money, Quantity};
 use cl_model::{CommandId, Scope};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
@@ -298,21 +298,22 @@ impl OpeningBalancesScreen {
                 session
                     .create_invoice(
                         &NewInvoice {
-                            txn_date: inv.date,
-                            due_date: None,
-                            contact_id: contact.id,
-                            lines: vec![InvoiceLine {
-                                account_id: opening_equity,
-                                description: Some(t("opening.doc_line")),
-                                quantity: Quantity::parse_wire("1")
-                                    .map_err(|_| CompanyError::Metadata)?,
-                                unit_price: inv.amount,
-                                is_taxable: false,
-                                tax_rate: Rate::parse_wire("0")
-                                    .map_err(|_| CompanyError::Metadata)?,
-                            }],
                             memo: Some(t("opening.doc_memo")),
                             txn_number: (!inv.number.is_empty()).then(|| inv.number.clone()),
+                            ..NewInvoice::new(
+                                contact.id,
+                                inv.date,
+                                vec![InvoiceLine {
+                                    description: Some(t("opening.doc_line")),
+                                    is_taxable: Some(false),
+                                    ..InvoiceLine::account(
+                                        opening_equity,
+                                        Quantity::parse_wire("1")
+                                            .map_err(|_| CompanyError::Metadata)?,
+                                        inv.amount,
+                                    )
+                                }],
+                            )
                         },
                         IdempotencyKey::new(),
                     )
