@@ -333,10 +333,8 @@ impl InvoiceScreen {
             self.billable.problem = Some("invoice.billable.none_picked");
             return;
         }
-        if seeds.iter().any(|s| s.account.is_none()) {
-            self.billable.problem = Some("invoice.billable.pick_income_first");
-            return;
-        }
+        // A cost without an income account yet is added all the same; the
+        // owner picks it on the line (the save gate asks for it).
         let mut added = 0;
         self.grid
             .edit(|v, keys| added = v.add_billable(&seeds, keys));

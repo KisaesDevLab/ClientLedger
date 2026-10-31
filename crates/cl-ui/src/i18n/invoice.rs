@@ -86,7 +86,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.billable.note.one", "1 unbilled cost for this client."),
     ("invoice.billable.note.sum", "{n} unbilled costs for this client, {amount} in all."),
     ("invoice.billable.note.sum.one", "1 unbilled cost for this client ({amount})."),
-    ("invoice.billable.pick_income_first", "Choose the income account for each cost you tick."),
     ("invoice.billable.billed_on", "Another invoice already bills a cost on this one (invoice {numbers}). Remove that line; the list of unbilled costs is up to date."),
     ("invoice.billable.unavailable_cost", "A cost on this invoice is no longer available to bill (it was changed or voided). Remove that line and save again."),
     ("invoice.billable.lines_missing", "This change leaves out a billable cost the invoice bills. Reload the invoice and try again."),

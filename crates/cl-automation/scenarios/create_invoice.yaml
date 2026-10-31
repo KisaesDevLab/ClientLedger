@@ -69,9 +69,12 @@ steps:
   - assert_state: {key: screen.subtotal, equals: "3,080.15"}
   - assert_state: {key: screen.tax, equals: "154.72"}
   - assert_state: {key: screen.total, equals: "3,234.87"}
-  # Total and Balance due.
-  - assert_count: {target: {role: label, label: "3,234.87"}, count: 2}
+  # Total, Balance due and the side panel's After this invoice (the demo's
+  # balance-after, follow-up 7).
+  - assert_count: {target: {role: label, label: "3,234.87"}, count: 3}
   - assert_no_clipping: {}
+  # The Template picker (Q-P20ac): the print layout, Client's usual by default.
+  - assert_exists: {label_contains: "Client's usual"}
   - screenshot: mockup-totals
   # --- A level price, a subtotal and a 10 % discount (U-40, U-39a) ---------
   # Long Creek Marina is on the Commercial level (7.5 % down): Weekly Mowing
