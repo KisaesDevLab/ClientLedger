@@ -80,6 +80,8 @@
 | A08 | Report Builder editor | M | After A07 (mockup approved first) |
 | A09 | Memorized Reports, transfer, export and print | M | After A08 |
 | A10 | AI drafting of report definitions | M | After A08 |
+**ADD-04 — Distribution through winget** (`addenda/ADD-04-winget.md`; part of the beta; owner request and Q&A 2026-10-31, Q-317–Q-323). No A-phases: built inside P35/P36, switched on at P39 stage 2 (first manual submission, then `WINGET_ENABLED`). MSI per-machine only; UpgradeCode {5871208F-8AA3-4EC1-86A7-ABCF603A0765}; package `KisaesLLC.ClientLedger`.
+
 ## Post-beta (owner may reorder, Q-39)
 
 | Phase | Title | Tier | Status |
