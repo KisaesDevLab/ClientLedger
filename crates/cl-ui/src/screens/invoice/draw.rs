@@ -256,6 +256,7 @@ impl InvoiceScreen {
         ui.add_space(10.0);
         header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.grid.ui(ui);
+            self.item_set_up_ui(ui);
         });
         ui.add_space(8.0);
         header::locked_scope(ui, enabled, read_only, |ui| self.footer_ui(ui, tokens));
@@ -447,6 +448,22 @@ impl InvoiceScreen {
                         "clients.center",
                     )));
             }
+        }
+    }
+
+    /// Q-P20i: an item name not in the list offers Set Up (the full item
+    /// form); the new item fills the line when it is saved.
+    fn item_set_up_ui(&mut self, ui: &mut Ui) {
+        let Some((row, name)) = self.grid.unknown_item().cloned() else {
+            return;
+        };
+        let label = t_with("invoice.item.set_up", &[("name", &name)]);
+        if ui
+            .button(label)
+            .on_hover_text(t("invoice.item.set_up.tip"))
+            .clicked()
+        {
+            self.start_item_set_up(row, name);
         }
     }
 

@@ -434,3 +434,32 @@ fn a_saved_invoice_takes_an_attachment() {
     s.upload_attachment("x.txt".into(), b"hello".to_vec());
     assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
 }
+
+/// Q-P20i: an item set up from a line fills that line when it is saved.
+#[test]
+fn an_item_set_up_from_a_line_fills_it() {
+    let (_d, mut s) = screen();
+    let key = s.grid.value().lines[0].key;
+    s.start_item_set_up(key, "Stump Grinding".into());
+    let id = {
+        let mut d = s.link.demo_state().expect("demo");
+        let items = d
+            .items
+            .get_or_insert_with(crate::company::demo::lists::items);
+        let mut new = items[0].clone();
+        new.id = cl_core::ids::ItemId::parse("d6000000-0000-4000-8000-0000000000aa").expect("id");
+        new.fields.name = "Stump Grinding".into();
+        items.push(new.clone());
+        new.id
+    };
+    s.items = s
+        .link
+        .demo_state()
+        .expect("demo")
+        .items
+        .clone()
+        .unwrap_or_default();
+    s.item_set_up_back();
+    assert_eq!(s.grid.value().lines[0].item, Some(id));
+    assert!(s.setting_up_item.is_none());
+}

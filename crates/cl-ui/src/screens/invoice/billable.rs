@@ -214,6 +214,42 @@ impl Billable {
 }
 
 impl InvoiceScreen {
+    /// Set Up for an item typed on line `row` (Q-P20i): the Item list
+    /// opens; the item fills the line once it is saved there.
+    pub(crate) fn start_item_set_up(&mut self, row: cl_grid::RowKey, name: String) {
+        self.grid.clear_unknown_item();
+        self.setting_up_item = Some((row, name));
+        self.link.push(crate::company::CompanyEvent::OpenWindow(
+            cl_model::CommandId::new(crate::screens::lists::items::KIND),
+        ));
+    }
+
+    /// The lists were read again: a set-up item fills its line.
+    pub(crate) fn item_set_up_back(&mut self) {
+        let Some((row, name)) = self.setting_up_item.clone() else {
+            return;
+        };
+        let Some((id, desc)) = self
+            .items
+            .iter()
+            .find(|i| i.fields.name.eq_ignore_ascii_case(&name))
+            .map(|i| (i.id, i.fields.description.clone()))
+        else {
+            return;
+        };
+        self.setting_up_item = None;
+        self.grid.edit(|v, keys| {
+            if let Some(l) = v.lines.iter_mut().find(|l| l.key == row) {
+                l.taxable = None;
+                l.item_changed(Some(id));
+                if l.description.trim().is_empty() {
+                    l.description = desc.unwrap_or_default();
+                }
+            }
+            v.ensure_entry_line(keys);
+        });
+    }
+
     /// Add Billable Costs (Ctrl+Shift+U).
     pub(crate) fn open_billable(&mut self) {
         if self.read_only().is_some() {

@@ -101,6 +101,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.layout.archived", "That invoice layout is archived. Choose another one."),
     ("invoice.retry", "The books engine was busy. Try saving again."),
     ("invoice.paid.read_only", "This invoice is paid in full, so it can't be changed. To change it, remove the payment first."),
+    ("invoice.item.set_up", "Set up item \u{201c}{name}\u{201d}\u{2026}"),
+    ("invoice.item.set_up.tip", "This item isn't in your list. Set it up in the Item list; it fills this line when you save it there."),
     ("invoice.attach", "Attach"),
     ("invoice.attach.tip", "Attach a PDF or picture to this invoice (at most 10 MB)."),
     ("invoice.attach.save_first", "Save the invoice first, then attach files to it."),

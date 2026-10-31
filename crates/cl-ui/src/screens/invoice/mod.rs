@@ -204,6 +204,8 @@ pub struct InvoiceScreen {
     pub(crate) unknown_client: Option<String>,
     /// The client form was opened for this name: picked once it arrives.
     pub(crate) setting_up: Option<String>,
+    /// Set Up of an item typed on a line (Q-P20i): the line and the name.
+    pub(crate) setting_up_item: Option<(cl_grid::RowKey, String)>,
     pub(crate) saved_count: u32,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) last_saved: Option<TransactionId>,
@@ -280,6 +282,7 @@ impl InvoiceScreen {
             email_after_save: false,
             unknown_client: None,
             setting_up: None,
+            setting_up_item: None,
             saved_count: 0,
             last_action: None,
             last_saved: None,
@@ -416,6 +419,7 @@ impl InvoiceScreen {
             self.unknown_client = None;
             self.pick_client(id);
         }
+        self.item_set_up_back();
     }
 
     pub(crate) fn poll(&mut self) {
@@ -778,7 +782,7 @@ impl InvoiceScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
-        let waiting = self.setting_up.is_some();
+        let waiting = self.setting_up.is_some() || self.setting_up_item.is_some();
         if self.lists_stale && (waiting || !self.is_dirty()) && !self.books.busy() {
             self.lists_stale = false;
             self.start_lists();

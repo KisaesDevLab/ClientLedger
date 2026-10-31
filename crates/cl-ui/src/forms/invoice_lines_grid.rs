@@ -209,6 +209,9 @@ pub struct InvState {
     updating: String,
     cant: String,
     snapshot: Option<InvoiceLine>,
+    /// A name typed in an Item cell that is not in the list (Set Up,
+    /// Q-P20i).
+    pub unknown_item: Option<(RowKey, String)>,
 }
 
 struct View<'a> {
@@ -402,6 +405,14 @@ impl EditableModel for View<'_> {
         value: CellInput,
         _source: Source,
     ) -> Result<(), CellProblem> {
+        if pos.col == V_ITEM {
+            self.a.unknown_item = match &value {
+                CellInput::Unresolved(text) if !text.trim().is_empty() => {
+                    Some((pos.row, text.trim().to_string()))
+                }
+                _ => None,
+            };
+        }
         let lists = Arc::clone(&self.a.lists);
         let keys = &mut self.a.keys;
         let mut problem = None;
@@ -502,6 +513,7 @@ impl InvoiceGrid {
                     updating: t("invoice.updating"),
                     cant: t("invoice.cant_calculate"),
                     snapshot: None,
+                    unknown_item: None,
                 },
                 grid,
                 t("invoice.lines.label"),
@@ -550,6 +562,17 @@ impl InvoiceGrid {
         let a = self.form.adapter_mut();
         a.lists = lists;
         a.taxable = taxable;
+    }
+
+    /// The item name typed on a line that is not in the list, if any.
+    #[must_use]
+    pub fn unknown_item(&self) -> Option<&(RowKey, String)> {
+        self.form.adapter().unknown_item.as_ref()
+    }
+
+    /// Forgets the unknown item name (set up, or the owner moved on).
+    pub fn clear_unknown_item(&mut self) {
+        self.form.adapter_mut().unknown_item = None;
     }
 
     /// The items' taxable flags.
