@@ -409,7 +409,7 @@ fn email_and_billable_shortcuts_resolve_in_forms_only() {
             .map(crate::CommandId::as_str),
         Some("invoice.email")
     );
-    // Q-P20w: Ctrl+E stays Edit Transaction, also in the register entry row.
+    // Q-P20aa: Ctrl+E stays Edit Transaction, also in the register entry row.
     assert_eq!(
         km.resolve(Scope::Form, ctrl_e)
             .map(crate::CommandId::as_str),

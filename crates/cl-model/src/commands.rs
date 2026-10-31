@@ -302,7 +302,7 @@ pub const COMMANDS: &[Command] = &[
     // Create Invoice (P20; Page Up/Down, Alt+N, Alt+S, Ctrl+P and Attach above apply too).
     // In a form Ctrl+Shift+B shadows Pay Bills. Email is Ctrl+Shift+M, not the
     // plan's Ctrl+E: Ctrl+E is Edit Transaction in the register entry row,
-    // which is Form scope too (P12; Q-P20w).
+    // which is Form scope too (P12; Q-P20aa).
     cmd("invoice.add_billable", "Add Billable Costs\u{2026}", None, 7, ctrl_shift('B'), Scope::Form),
     cmd("invoice.email", "Email\u{2026}", None, 7, ctrl_shift('M'), Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
