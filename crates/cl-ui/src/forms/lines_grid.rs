@@ -296,7 +296,10 @@ impl LinesSpec {
         let mut columns = vec![
             Column {
                 placeholder: Some(h.account),
-                ..column(L_ACCOUNT, h.account, picker(L::ACCOUNTS), (120, 220, 2))
+                // Account names like "5200 · Project Supplies and Materials"
+                // need the room more than the memo does (the card charge's
+                // narrower form clipped them).
+                ..column(L_ACCOUNT, h.account, picker(L::ACCOUNTS), (120, 280, 3))
             },
             Column {
                 align: Align::Right,
@@ -330,7 +333,7 @@ impl LinesSpec {
             L_MEMO,
             h.memo,
             CellKind::Text { max_chars: 500 },
-            (100, 200, 2),
+            (100, 180, 1),
         )]);
         if self.customer {
             // No customer reads as a muted dash (mockup WriteCheck.html).
