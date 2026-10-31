@@ -102,6 +102,11 @@ pub(crate) fn form_of(
         header_tags: r.tag_ids.clone(),
         hide_zero_lines: r.hide_zero_lines,
         print_later: r.print_later,
+        layout: r
+            .layout_id
+            .map_or(cl_model::forms::invoice::LayoutPick::CompanyDefault, |id| {
+                cl_model::forms::invoice::LayoutPick::Layout(id.to_string())
+            }),
         lines: Vec::new(),
     };
     (form, lines)

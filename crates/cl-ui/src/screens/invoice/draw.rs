@@ -340,6 +340,9 @@ impl InvoiceScreen {
                 header::wrap_row(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     kit::wrap_item(ui, "invoice/terms", |ui| self.terms_ui(ui, tokens));
+                    if !self.print_books.layouts.is_empty() {
+                        kit::wrap_item(ui, "invoice/template", |ui| self.template_ui(ui, tokens));
+                    }
                     kit::wrap_item(ui, "invoice/due", |ui| {
                         let today = self.today;
                         if self.inputs.due.text.is_empty()
@@ -464,6 +467,62 @@ impl InvoiceScreen {
             .clicked()
         {
             self.start_item_set_up(row, name);
+        }
+    }
+
+    /// Template (Q-P20ac, U-130): the invoice's print layout. Archived
+    /// layouts are not offered; an invoice that has one keeps showing it.
+    fn template_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        use cl_model::forms::invoice::LayoutPick;
+        let l = kit::above(ui, tokens, &t("invoice.template"));
+        let current = self.header.current().layout.clone();
+        let name_of = |id: &str| {
+            self.print_books
+                .layouts
+                .iter()
+                .find(|x| x.id.to_string() == id)
+                .map(|x| x.name.clone())
+        };
+        let shown = match &current {
+            LayoutPick::Unset => t("invoice.template.client"),
+            LayoutPick::CompanyDefault => t("invoice.template.default"),
+            LayoutPick::Layout(id) => name_of(id).unwrap_or_else(|| t("invoice.template.default")),
+        };
+        let offered: Vec<(String, String)> = self
+            .print_books
+            .layouts
+            .iter()
+            .filter(|x| !x.is_archived)
+            .map(|x| (x.id.to_string(), x.name.clone()))
+            .collect();
+        let mut pick: Option<LayoutPick> = None;
+        ui.add_enabled_ui(self.read_only().is_none(), |ui| {
+            egui::ComboBox::from_id_salt("invoice/template")
+                .selected_text(shown)
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            current == LayoutPick::CompanyDefault,
+                            t("invoice.template.default"),
+                        )
+                        .clicked()
+                    {
+                        pick = Some(LayoutPick::CompanyDefault);
+                    }
+                    for (id, name) in &offered {
+                        let on = current == LayoutPick::Layout(id.clone());
+                        if ui.selectable_label(on, name).clicked() {
+                            pick = Some(LayoutPick::Layout(id.clone()));
+                        }
+                    }
+                })
+                .response
+                .labelled_by(l.id)
+                .on_hover_text(t("invoice.template.tip"));
+        });
+        if let Some(p) = pick {
+            self.header.edit_step(|h| h.layout = p);
         }
     }
 

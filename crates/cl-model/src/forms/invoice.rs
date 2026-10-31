@@ -196,6 +196,19 @@ impl fmt::Debug for BillableSeed {
     }
 }
 
+/// The invoice's print layout as the owner chose it (U-130).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LayoutPick {
+    /// Not chosen: a new invoice takes the client's default layout; an
+    /// edit keeps its own.
+    #[default]
+    Unset,
+    /// The company's default layout.
+    CompanyDefault,
+    /// This layout (its id as the engine wrote it).
+    Layout(String),
+}
+
 /// The whole editable invoice.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct InvoiceForm {
@@ -225,6 +238,8 @@ pub struct InvoiceForm {
     pub hide_zero_lines: bool,
     /// Waiting to be printed.
     pub print_later: bool,
+    /// The print layout (Template, Q-P20ac).
+    pub layout: LayoutPick,
     /// Lines, ending with a blank entry line.
     pub lines: Vec<InvoiceLine>,
 }
@@ -394,6 +409,7 @@ impl InvoiceForm {
             header_tags: None,
             hide_zero_lines: None,
             print_later: false,
+            layout: LayoutPick::Unset,
             ..self.request(client, date, lines, caps)
         })
     }
@@ -419,6 +435,7 @@ impl InvoiceForm {
             header_tags: caps.fields.then(|| self.header_tags.clone()),
             hide_zero_lines: caps.fields.then_some(self.hide_zero_lines),
             print_later: self.print_later,
+            layout: self.layout.clone(),
             lines,
         }
     }
@@ -650,6 +667,8 @@ pub struct InvoiceRequest {
     pub hide_zero_lines: Option<bool>,
     /// Print later.
     pub print_later: bool,
+    /// The print layout.
+    pub layout: LayoutPick,
     /// The used lines, in order.
     pub lines: Vec<RequestLine>,
 }

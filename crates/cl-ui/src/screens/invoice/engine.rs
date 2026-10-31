@@ -15,7 +15,7 @@ use cl_api::{
     Session, SignedPercent,
 };
 use cl_model::forms::invoice::{
-    InvoiceRequest, PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
+    InvoiceRequest, LayoutPick, PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
 };
 
 use crate::company::demo::DemoState;
@@ -156,6 +156,13 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
     n.hide_zero_lines = r.hide_zero_lines;
     n.txn_number.clone_from(&r.number);
     n.print_later = Some(r.print_later);
+    n.layout_id = match &r.layout {
+        LayoutPick::Unset => cl_api::LayoutChoice::Omitted,
+        LayoutPick::CompanyDefault => cl_api::LayoutChoice::CompanyDefault,
+        LayoutPick::Layout(id) => cl_api::InvoiceLayoutId::parse(id)
+            .map(cl_api::LayoutChoice::Layout)
+            .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
+    };
     Ok(n)
 }
 
@@ -237,6 +244,7 @@ mod tests {
             header_tags: Some(Vec::new()),
             hide_zero_lines: Some(true),
             print_later: false,
+            layout: LayoutPick::Unset,
             lines: vec![RequestLine {
                 key: RowKeyGen::new().next_key(),
                 account: None,

@@ -494,3 +494,28 @@ fn the_income_account_for_a_cost_is_remembered() {
         Some(&crate::company::demo::account_id(4000))
     );
 }
+
+/// Q-P20ac (U-130): the Template picked prints the invoice; Simple has no
+/// quantity or rate column.
+#[test]
+fn the_template_picked_prints_the_invoice() {
+    let (_d, mut s) = screen();
+    let simple = s
+        .print_books
+        .layouts
+        .iter()
+        .find(|l| l.name == "Simple")
+        .map(|l| l.id)
+        .expect("demo layout");
+    mockup(&mut s);
+    s.header.edit_step(|h| {
+        h.layout = cl_model::forms::invoice::LayoutPick::Layout(simple.to_string());
+    });
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let r = s.editing.clone().expect("saved").record;
+    assert_eq!(r.layout_id, Some(simple));
+    let (data, _) = s.pdf_parts().expect("parts");
+    let p = data.layout.expect("layout");
+    assert!(!p.quantity && !p.rate);
+}
