@@ -15,10 +15,14 @@ MIT License; copies obtained under those terms keep them.
 ClientLedger runs on the Vibe MyBooks engine, which is added to this repository
 as the `engine/` git submodule
 (<https://github.com/KisaesDevLab/Vibe-MyBooks>). The engine is copyright
-Kisaes LLC and has its own license, in the engine repository. Kisaes LLC
-licenses the engine to ClientLedger specially: when the engine reaches you
-inside ClientLedger, you use it under ClientLedger's license, PolyForm Internal
-Use 1.0.0, as part of ClientLedger.
+Kisaes LLC. Its public repository carries its own license; that license does
+not govern the engine inside ClientLedger.
+
+Inside ClientLedger, you use the engine under a **commercial license from
+Kisaes LLC that is included with ClientLedger**, at no charge and with no
+license key: every ClientLedger user receives it automatically, for use with
+ClientLedger, on the same terms as ClientLedger's own license (PolyForm
+Internal Use 1.0.0) as summarized below.
 
 ## What that means for you
 
