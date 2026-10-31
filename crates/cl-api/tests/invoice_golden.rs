@@ -26,6 +26,10 @@ fn the_golden_file_is_byte_identical_to_the_engines() {
         return;
     }
     let theirs = std::fs::read(&engine).expect("engine golden file");
+    // The engine is a submodule with its own line-ending settings: on a
+    // Windows checkout with core.autocrlf its working copy has CRLF while
+    // the committed file (and ours) is LF. Compare the committed content.
+    let theirs: Vec<u8> = theirs.into_iter().filter(|&b| b != b'\r').collect();
     assert!(
         ours == theirs,
         "fixtures/invoices/golden.json differs from the engine's"
