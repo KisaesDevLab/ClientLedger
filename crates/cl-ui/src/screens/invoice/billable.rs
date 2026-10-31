@@ -49,6 +49,8 @@ pub(crate) struct Billable {
     pub(crate) remembered: HashMap<AccountId, AccountId>,
     /// `remembered` changed since it was saved.
     pub(crate) remembered_dirty: bool,
+    /// `remembered` was read from the preferences.
+    remembered_loaded: bool,
     problem: Option<&'static str>,
     /// Costs added by the dialog so far (control channel).
     added: usize,
@@ -250,6 +252,43 @@ impl InvoiceScreen {
         });
     }
 
+    /// The income accounts remembered per expense account (Q-P20p), read
+    /// once from the company's local preferences.
+    fn load_remembered_income(&mut self) {
+        if self.billable.remembered_loaded {
+            return;
+        }
+        self.billable.remembered_loaded = true;
+        let Some((id, _)) = self.tenant.as_ref() else {
+            return;
+        };
+        if let Ok(list) = self.link.store().load()
+            && let Some(r) = list.get(*id)
+        {
+            self.billable
+                .remembered
+                .extend(r.prefs.billable_income.iter().map(|(k, v)| (*k, *v)));
+        }
+    }
+
+    /// Keeps the owner's choices for next time (Q-P20p).
+    fn save_remembered_income(&mut self) {
+        if !self.billable.remembered_dirty {
+            return;
+        }
+        let Some((id, name)) = self.tenant.clone() else {
+            return;
+        };
+        let map = self.billable.remembered.clone();
+        if let Err(e) = self.link.store().update(|l| {
+            l.upsert(id, &name).prefs.billable_income = map.into_iter().collect();
+        }) {
+            tracing::warn!("could not keep the billable income accounts: {e}");
+        } else {
+            self.billable.remembered_dirty = false;
+        }
+    }
+
     /// Add Billable Costs (Ctrl+Shift+U).
     pub(crate) fn open_billable(&mut self) {
         if self.read_only().is_some() {
@@ -265,6 +304,7 @@ impl InvoiceScreen {
         };
         let link = Arc::clone(&self.link);
         self.billable.fetch(&link, self.group.as_ref(), c);
+        self.load_remembered_income();
         let form = self.compose();
         let markup = self
             .sales
@@ -300,6 +340,7 @@ impl InvoiceScreen {
         let mut added = 0;
         self.grid
             .edit(|v, keys| added = v.add_billable(&seeds, keys));
+        self.save_remembered_income();
         self.billable.added += added;
         self.billable.close();
         self.last_action = Some("billable_added");

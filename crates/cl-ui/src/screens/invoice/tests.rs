@@ -463,3 +463,34 @@ fn an_item_set_up_from_a_line_fills_it() {
     assert_eq!(s.grid.value().lines[0].item, Some(id));
     assert!(s.setting_up_item.is_none());
 }
+
+/// Q-P20p: the income account picked for a cost is remembered per expense
+/// account across windows (the company's local preferences).
+#[test]
+fn the_income_account_for_a_cost_is_remembered() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let tenant = cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-0000000000f1").expect("id");
+    let mut s = InvoiceScreen::new(Arc::clone(&link), Some((tenant, "Demo".into())), today());
+    mockup(&mut s);
+    let exp = s.billable.costs[0].expense_account_id;
+    let saved = link
+        .store()
+        .load()
+        .ok()
+        .and_then(|l| l.get(tenant).map(|r| r.prefs.billable_income.clone()))
+        .unwrap_or_default();
+    assert_eq!(
+        saved.get(&exp),
+        Some(&crate::company::demo::account_id(4000))
+    );
+    let mut again = InvoiceScreen::new(link, Some((tenant, "Demo".into())), today());
+    again.billable.remembered.clear();
+    let c = story_client(&again);
+    again.pick_client(c);
+    again.open_billable();
+    assert_eq!(
+        again.billable.remembered.get(&exp),
+        Some(&crate::company::demo::account_id(4000))
+    );
+}

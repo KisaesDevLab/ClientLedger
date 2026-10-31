@@ -88,6 +88,9 @@ pub struct CompanyPrefs {
     pub hide_logo: bool,
     /// Email templates and BCC-self (P20, Q-P20j). Travels with backups.
     pub email: EmailPrefs,
+    /// The income account last chosen for a billable cost, by the cost's
+    /// expense account (Q-P20p): Add Billable Costs suggests it next time.
+    pub billable_income: BTreeMap<AccountId, AccountId>,
 }
 
 impl Default for CompanyPrefs {
@@ -105,6 +108,7 @@ impl Default for CompanyPrefs {
             setup_checklist_dismissed: false,
             hide_logo: false,
             email: EmailPrefs::default(),
+            billable_income: BTreeMap::new(),
         }
     }
 }
@@ -211,6 +215,7 @@ impl CompanyPrefs {
             setup_checklist_dismissed: self.setup_checklist_dismissed,
             hide_logo: self.hide_logo,
             email: self.email.clone(),
+            billable_income: self.billable_income.clone(),
         }
     }
 
@@ -248,6 +253,7 @@ impl CompanyPrefs {
             setup_checklist_dismissed: archive.setup_checklist_dismissed,
             hide_logo: archive.hide_logo,
             email: archive.email.clone(),
+            billable_income: archive.billable_income.clone(),
         };
         out.normalize();
         out
