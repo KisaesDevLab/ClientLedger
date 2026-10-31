@@ -483,6 +483,7 @@ impl InvoiceScreen {
         self.last_action = Some("load");
         self.sync_inputs();
         self.client_changed();
+        self.list_attachments();
     }
 
     // ------------------------------------------------------------- void

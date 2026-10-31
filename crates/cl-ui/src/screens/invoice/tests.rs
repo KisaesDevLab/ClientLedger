@@ -417,3 +417,20 @@ fn the_next_number_shows_and_a_duplicate_warns() {
     settle(&mut s);
     assert!(s.duplicate_number, "1042 is taken");
 }
+
+/// Q-P20v: a saved invoice takes a file; an unsaved one asks to save first.
+#[test]
+fn a_saved_invoice_takes_an_attachment() {
+    let (_d, mut s) = screen();
+    s.upload_attachment("note.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    assert_eq!(s.attach.problem, Some("invoice.attach.save_first"));
+    mockup(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.upload_attachment("note.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    s.poll();
+    assert_eq!(s.attach.list.len(), 1);
+    assert_eq!(s.state_json()["attachments"]["files"], 1);
+    s.upload_attachment("x.txt".into(), b"hello".to_vec());
+    assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
+}

@@ -127,6 +127,14 @@ impl InvoiceScreen {
                 {
                     clicked = Some("invoice.email");
                 }
+                if ui
+                    .add_enabled(saved, egui::Button::new(t("invoice.attach")))
+                    .on_hover_text(t("invoice.attach.tip"))
+                    .on_disabled_hover_text(t("invoice.attach.save_first"))
+                    .clicked()
+                {
+                    clicked = Some("invoice.attach");
+                }
                 ui.separator();
                 if ui
                     .add_enabled(open, egui::Button::new(t("invoice.add_billable")))
@@ -146,6 +154,7 @@ impl InvoiceScreen {
         });
         match nav.or(clicked) {
             Some("invoice.preview") => self.preview_pdf(),
+            Some("invoice.attach") => self.start_attach(ui.ctx()),
             Some(cmd) => self.after_frame = Some(CommandId::new(cmd)),
             None => {}
         }
@@ -707,6 +716,7 @@ impl InvoiceScreen {
             ui.add_space(10.0);
         }
         self.billable_note(ui, tokens);
+        self.attach_card(ui, tokens);
         if let Some(notes) = f.notes.clone().filter(|n| !n.trim().is_empty()) {
             ui.add_space(10.0);
             kit::panel_card(ui, tokens, &t("invoice.side.notes"), |ui| {

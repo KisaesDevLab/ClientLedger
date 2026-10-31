@@ -20,6 +20,7 @@
 //! - Add Billable Costs (Ctrl+Shift+U, Q-P20c) and Email (Ctrl+Shift+M,
 //!   Q-P20aa) live in [`billable`] and [`email`].
 
+mod attach;
 mod billable;
 mod draw;
 pub(crate) mod email;
@@ -185,6 +186,8 @@ pub struct InvoiceScreen {
     pub(crate) sales_job: Option<(ContactId, Job<ClientSales>)>,
     pub(crate) sales: Option<(ContactId, ClientSales)>,
     pub(crate) billable: billable::Billable,
+    /// Files on the saved invoice (Q-P20v).
+    pub(crate) attach: attach::InvoiceAttach,
     pub(crate) email: email::EmailFlow,
     pub(crate) problems: Vec<InvoiceProblem>,
     pub(crate) error: Option<ApiError>,
@@ -264,6 +267,7 @@ impl InvoiceScreen {
             sales_job: None,
             sales: None,
             billable: billable::Billable::default(),
+            attach: attach::InvoiceAttach::default(),
             email: email::EmailFlow::default(),
             problems: Vec::new(),
             error: None,
@@ -468,6 +472,7 @@ impl InvoiceScreen {
             }
         }
         self.billable.poll();
+        self.poll_attach();
         if let Some(r) = engine::poll(&mut self.next_job) {
             self.next_number = r.ok();
         }
@@ -617,6 +622,7 @@ impl InvoiceScreen {
         self.billable.forget();
         self.unknown_client = None;
         self.duplicate_number = false;
+        self.attach = attach::InvoiceAttach::default();
         self.sync_inputs();
         self.fetch_next_number();
     }
@@ -742,6 +748,7 @@ impl InvoiceScreen {
             "grid": { "focused": self.grid.has_focus() },
         });
         v["next_number"] = json!(self.next_number);
+        v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
