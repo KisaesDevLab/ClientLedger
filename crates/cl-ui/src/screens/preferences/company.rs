@@ -38,6 +38,8 @@ pub struct AccountingEdits {
     pub fiscal_year_start_month: u8,
     /// Default sales tax rate in percent, as typed (`8.25`).
     pub tax_percent: String,
+    /// The income account markups on billable costs post to (Q-P20b).
+    pub markup_account: Option<cl_core::ids::AccountId>,
 }
 
 impl Default for AccountingEdits {
@@ -46,6 +48,7 @@ impl Default for AccountingEdits {
             method: AccountingMethod::Accrual,
             fiscal_year_start_month: 1,
             tax_percent: String::new(),
+            markup_account: None,
         }
     }
 }
@@ -99,6 +102,7 @@ impl AccountingEdits {
                 .filter(|r| !r.is_zero())
                 .map(rate_to_percent)
                 .unwrap_or_default(),
+            markup_account: s.billable_markup_account_id,
         }
     }
 
@@ -118,7 +122,11 @@ impl AccountingEdits {
     #[must_use]
     pub fn update_for(&self, loaded: Option<&CompanySettings>) -> Option<CompanySettingsUpdate> {
         let before = AccountingEdits::from_settings(loaded);
-        if *self == before {
+        let same = AccountingEdits {
+            markup_account: before.markup_account,
+            ..self.clone()
+        };
+        if same == before {
             return None;
         }
         let rate = if self.tax_percent.trim().is_empty() {
@@ -229,6 +237,40 @@ pub fn sales_tax(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
     });
 }
 
+/// Billable costs (Q-P20b): the income account markups post to.
+pub fn billable(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    incomes: &[(cl_core::ids::AccountId, String)],
+) {
+    ui.add_space(8.0);
+    form::card(ui, tokens, |ui| {
+        let current = edits.accounting.markup_account;
+        let shown = current
+            .and_then(|a| incomes.iter().find(|(id, _)| *id == a))
+            .map_or_else(|| t("prefs.company.markup_none"), |(_, n)| n.clone());
+        ui.horizontal(|ui| {
+            let l = ui.add(egui::Label::new(t("prefs.company.markup_account")).selectable(false));
+            egui::ComboBox::from_id_salt("prefs-markup-account")
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut edits.accounting.markup_account,
+                        None,
+                        t("prefs.company.markup_none"),
+                    );
+                    for (id, name) in incomes {
+                        ui.selectable_value(&mut edits.accounting.markup_account, Some(*id), name);
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        });
+        form::hint(ui, tokens, &t("prefs.company.markup_hint"));
+    });
+}
+
 /// Inventory on/off.
 pub fn inventory(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
     form::heading(ui, tokens, &t("prefs.cat.inventory"));
@@ -286,8 +328,22 @@ mod tests {
             AccountingEdits::from_settings(None),
             AccountingEdits::default()
         );
-        let mut bad = e;
+        let mut bad = e.clone();
         bad.tax_percent = "x".into();
         assert_eq!(bad.validate(), Err(SaveBlock::BadRate));
+        // The markup account goes by its own write (Q-P20b).
+        let mut markup = e;
+        markup.markup_account = Some(
+            cl_core::ids::AccountId::parse("d2000000-0000-4000-8000-000000004000").expect("id"),
+        );
+        assert_eq!(markup.update_for(Some(&s)), None);
+        let with: CompanySettings = serde_json::from_value(serde_json::json!({
+            "billableMarkupAccountId": "d2000000-0000-4000-8000-000000004000",
+        }))
+        .expect("settings");
+        assert_eq!(
+            AccountingEdits::from_settings(Some(&with)).markup_account,
+            markup.markup_account
+        );
     }
 }

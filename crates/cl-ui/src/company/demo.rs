@@ -360,6 +360,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         consent,
         smtp: None,
         usage: Some(usage),
+        incomes: vec![(account_id(4000), "Landscaping Services".into())],
         done: true,
     }
 }
