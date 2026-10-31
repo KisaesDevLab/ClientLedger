@@ -72,6 +72,14 @@
 | --- | --- | --- | --- |
 | A06 | Read a vendor statement | M | Done 2026-10-27 |
 
+**ADD-03 — Report Builder and Memorized Reports** (`addenda/ADD-03-report-builder.md`; part of the beta; owner request and Q&A 2026-10-30, Q-305–Q-315; engine U-118–U-121). Scheduling: A07–A10 run right after P28 and its PR-6 checkpoint, before P29; the `ReportBuilder.html` mockup is drafted for the owner's approval before A08; PR-A2 after A10.
+
+| Phase | Title | Tier | Status |
+| --- | --- | --- | --- |
+| A07 | Report run engine, definitions, run in the report window | H | After P28 / PR-6 |
+| A08 | Report Builder editor | M | After A07 (mockup approved first) |
+| A09 | Memorized Reports, transfer, export and print | M | After A08 |
+| A10 | AI drafting of report definitions | M | After A08 |
 ## Post-beta (owner may reorder, Q-39)
 
 | Phase | Title | Tier | Status |
