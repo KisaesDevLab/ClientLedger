@@ -95,6 +95,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.billable.account_required", "Choose the income account each billable cost is billed to."),
     ("invoice.billable.markup_account_required", "Choose the account markups post to (Preferences \u{203a} Sales) before billing a cost with a markup."),
     ("invoice.billable.markup_account_invalid", "The account markups post to must be an income account (Preferences \u{203a} Sales)."),
+    ("invoice.lines_missing", "This change leaves out a discount or subtotal line the invoice has. Reload the invoice and try again."),
     ("invoice.total_below_paid", "The total would be less than what the client already paid. Remove the payment first or keep the total at least that amount."),
     ("invoice.recurring_has_billable", "A recurring invoice can't bill costs. Remove the billable lines first."),
     ("invoice.layout.gone", "That invoice layout no longer exists. Choose another one."),

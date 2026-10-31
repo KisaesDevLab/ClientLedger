@@ -1070,10 +1070,7 @@ fn refusals_name_every_engine_code() {
             "BILLABLE_LINES_MISSING",
             InvoiceRefusal::BillableLinesMissing,
         ),
-        (
-            "INVOICE_LINES_MISSING",
-            InvoiceRefusal::BillableLinesMissing,
-        ),
+        ("INVOICE_LINES_MISSING", InvoiceRefusal::LinesMissing),
         ("INVOICE_TOTAL_BELOW_PAID", InvoiceRefusal::TotalBelowPaid),
         ("RETRY", InvoiceRefusal::Retry),
     ] {

@@ -411,6 +411,7 @@ impl InvoiceScreen {
                 }
             }
             Some(InvoiceRefusal::BillableLinesMissing) => "invoice.billable.lines_missing",
+            Some(InvoiceRefusal::LinesMissing) => "invoice.lines_missing",
             Some(InvoiceRefusal::BillableClientMismatch) => "invoice.billable.client_mismatch",
             Some(InvoiceRefusal::BillableDuplicate) => "invoice.billable.duplicate",
             Some(

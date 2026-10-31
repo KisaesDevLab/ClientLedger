@@ -101,10 +101,7 @@ const REFUSAL_CODES: &[(&str, InvoiceRefusal)] = &[
         "BILLABLE_LINES_MISSING",
         InvoiceRefusal::BillableLinesMissing,
     ),
-    (
-        "INVOICE_LINES_MISSING",
-        InvoiceRefusal::BillableLinesMissing,
-    ),
+    ("INVOICE_LINES_MISSING", InvoiceRefusal::LinesMissing),
     (
         "BILLABLE_CONTACT_MISMATCH",
         InvoiceRefusal::BillableClientMismatch,
@@ -158,6 +155,9 @@ pub enum InvoiceRefusal {
     /// The edit leaves out a billed cost without releasing it (409
     /// `BILLABLE_LINES_MISSING`).
     BillableLinesMissing,
+    /// The edit drops discount or subtotal lines the invoice has (409
+    /// `INVOICE_LINES_MISSING`).
+    LinesMissing,
     /// The cost belongs to another client (`BILLABLE_CONTACT_MISMATCH`).
     BillableClientMismatch,
     /// The same cost twice (`BILLABLE_DUPLICATE_LINE`).
