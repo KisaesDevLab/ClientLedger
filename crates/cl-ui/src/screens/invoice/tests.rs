@@ -519,3 +519,76 @@ fn the_template_picked_prints_the_invoice() {
     let p = data.layout.expect("layout");
     assert!(!p.quantity && !p.rate);
 }
+
+/// UI-verifier MUST 1: Add Billable Costs is modal. Esc with a grid line
+/// mid-edit closes the dialog only: the grid behind gets no key, and every
+/// line stays (the typed figure is committed when the dialog opens).
+#[test]
+fn esc_closes_the_billable_dialog_and_keeps_every_line() {
+    use eframe::egui::{self, Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
+    let tap = |k: Key, modifiers: Modifiers| {
+        [true, false]
+            .into_iter()
+            .map(|pressed| Event::Key {
+                key: k,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            })
+            .collect::<Vec<_>>()
+    };
+    let ctx = egui::Context::default();
+    crate::shell::Shell::install(&ctx);
+    cl_grid::sequencer::install(&ctx);
+    let mut shell = crate::shell::Shell::new(crate::shell::ShellOptions::default());
+    let (_d, mut s) = screen();
+    let c = story_client(&s);
+    s.pick_client(c);
+    let item = s.items[3].id;
+    s.grid.edit(|v, keys| {
+        v.lines = vec![InvoiceLine {
+            item: Some(item),
+            quantity: Some(q("18")),
+            rate: Some(m("65.00")),
+            ..InvoiceLine::blank(keys.next_key())
+        }];
+        v.ensure_entry_line(keys);
+    });
+    // The entry line, mid-edit: the case where a stray Esc deleted it.
+    let entry = s.grid.value().lines[1].key;
+    s.grid.focus(entry, grid::V_QTY);
+    let w = shell.windows.open_new(CommandId::new(KIND), Box::new(s));
+    let frame = |shell: &mut crate::shell::Shell, events: Vec<Event>| {
+        for e in [events, Vec::new(), Vec::new(), Vec::new()] {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+                events: e,
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| shell.ui(ui));
+            out.textures_delta.clear();
+        }
+        shell.windows.get(w).expect("open").screen.state()
+    };
+    let before = frame(&mut shell, Vec::new());
+    assert_eq!(before["line_count"], 1);
+    // Mid-edit: a figure typed into Qty, not recorded.
+    let typed = frame(&mut shell, vec![Event::Text("2".into())]);
+    assert_eq!(typed["grid"]["focused"], true);
+    // Ctrl+Shift+U (the keymap path is the scenario's).
+    shell
+        .windows
+        .get_mut(w)
+        .expect("open")
+        .screen
+        .command(CommandId::new("invoice.add_billable"));
+    let open = frame(&mut shell, Vec::new());
+    assert_eq!(open["billable_dialog"]["open"], true, "{open}");
+    assert_eq!(open["line_count"], 2, "the typed figure is kept");
+    assert_eq!(open["grid"]["focused"], false, "the grid gave up the keys");
+    let after = frame(&mut shell, tap(Key::Escape, Modifiers::NONE));
+    assert_eq!(after["billable_dialog"]["open"], false, "Esc closes it");
+    assert_eq!(after["line_count"], 2, "every line stays");
+    assert_eq!(after["lines"][0]["item"], true);
+}

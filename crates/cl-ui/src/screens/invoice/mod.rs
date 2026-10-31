@@ -363,6 +363,12 @@ impl InvoiceScreen {
         self.save_job.is_some() || self.void_job.is_some()
     }
 
+    /// Add Billable Costs or Email is open over the form (modal: the form
+    /// behind takes no input).
+    pub(crate) fn dialog_open(&self) -> bool {
+        self.billable.is_open() || self.email.is_open()
+    }
+
     pub(crate) fn idle(&self) -> bool {
         !self.busy() && !self.closing_prompt.dialog_open()
     }
@@ -731,6 +737,7 @@ impl InvoiceScreen {
             "number": f.number,
             "terms": f.terms,
             "due_date": self.tracker.shown_due_date(&f).map(CalendarDate::to_wire),
+            "line_count": lines.len(),
             "lines": lines,
             "totals": totals,
             "subtotal": subtotal,
@@ -908,7 +915,11 @@ impl Screen for InvoiceScreen {
         if let Some(h) = self.closing_prompt.command(id) {
             return h;
         }
-        if let Some(h) = self.grid.command(id) {
+        // A dialog over the form has the keys: Esc closes it, never the
+        // grid line behind it.
+        if !self.dialog_open()
+            && let Some(h) = self.grid.command(id)
+        {
             return h;
         }
         self.form_command(id)

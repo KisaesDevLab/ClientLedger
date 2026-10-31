@@ -51,6 +51,15 @@ steps:
   - key: Tab
   - type: {text: "48"}
   - key: Tab
+  # --- The dialog is modal: Esc with a line mid-edit closes it only --------
+  - click: {role: grid_cell, label: "Description, line 1"}
+  - type: {text: "Front beds"}
+  - key: Ctrl+Shift+U
+  - assert_state: {key: screen.billable_dialog.open, equals: true}
+  - assert_state: {key: screen.grid.focused, equals: false}
+  - key: Escape
+  - assert_state: {key: screen.billable_dialog.open, equals: false}
+  - assert_state: {key: screen.line_count, equals: 3}
   # --- Add billable costs (Ctrl+Shift+U): one line, at cost ------------------
   - key: Ctrl+Shift+U
   - assert_state: {key: screen.billable_dialog.open, equals: true}

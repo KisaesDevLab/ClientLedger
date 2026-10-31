@@ -70,8 +70,9 @@ impl InvoiceScreen {
             }
         });
         let read_only = self.read_only().is_some();
+        let free = self.idle() && !self.dialog_open();
         frame.bottom(|ui| {
-            if let Some(cmd) = kit::actions_row(ui, self.idle() && !read_only, self.idle()) {
+            if let Some(cmd) = kit::actions_row(ui, free && !read_only, free) {
                 self.after_frame = Some(CommandId::new(cmd));
             }
         });
@@ -81,7 +82,7 @@ impl InvoiceScreen {
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let idle = self.idle();
+        let idle = self.idle() && !self.dialog_open();
         let saved = self.editing.is_some();
         let dirty = self.is_dirty();
         let open = self.read_only().is_none();
@@ -251,9 +252,12 @@ impl InvoiceScreen {
         ui.label(RichText::new(t("invoice.heading")).size(22.0).strong());
         ui.add_space(6.0);
         let read_only = self.read_only().is_some();
-        let enabled = self.idle() && !read_only;
+        // A dialog over the form is modal: nothing behind it takes input.
+        let dialog = self.dialog_open();
+        let enabled = self.idle() && !read_only && !dialog;
         header::locked_scope(ui, enabled, read_only, |ui| self.header_ui(ui, tokens));
         ui.add_space(10.0);
+        self.grid.set_suspended(dialog);
         header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.grid.ui(ui);
             self.item_set_up_ui(ui);

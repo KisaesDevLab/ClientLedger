@@ -637,7 +637,7 @@ impl InvoiceGrid {
 
     /// A keymap command while the grid has the keyboard.
     pub fn command(&mut self, id: CommandId) -> Option<bool> {
-        if !self.has_focus() || !GRID_COMMANDS.contains(&id.as_str()) {
+        if self.suspended() || !self.has_focus() || !GRID_COMMANDS.contains(&id.as_str()) {
             return None;
         }
         let lists = Arc::clone(&self.form.adapter().lists);
@@ -645,6 +645,18 @@ impl InvoiceGrid {
             Routed::Handled => Some(true),
             _ => None,
         }
+    }
+
+    /// A dialog is open over the grid (Add Billable Costs, Email): the grid
+    /// gives up the keyboard until it closes.
+    pub fn set_suspended(&mut self, suspended: bool) {
+        self.form.set_suspended(suspended);
+    }
+
+    /// A dialog is open over the grid.
+    #[must_use]
+    pub fn suspended(&self) -> bool {
+        self.form.suspended()
     }
 
     /// Draws the grid.
