@@ -37,7 +37,7 @@ pub(crate) struct Books {
     plants: AccountId,
     mulch: AccountId,
     vendor: ContactId,
-    project: ContactId,
+    pub(crate) project: ContactId,
 }
 
 fn contact(h: &Harness, s: &Session, t: ContactType, name: &str) -> ContactId {
