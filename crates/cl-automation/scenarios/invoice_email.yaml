@@ -35,7 +35,6 @@ steps:
   - screenshot: email-dialog
   - assert_no_clipping: {}
   - key: Escape
-  - key: Escape
   - assert_state: {key: screen.email.open, equals: false}
   # --- Put in Outbox ---------------------------------------------------------
   - key: Ctrl+Shift+M

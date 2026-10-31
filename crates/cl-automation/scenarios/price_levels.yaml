@@ -16,6 +16,7 @@ steps:
   - click: {role: text_input, label: Name}
   - type: {text: "Scenario level"}
   - click: {role: text_input, label: Percent up or down}
+  - key: Ctrl+A
   - type: {text: "-5"}
   - screenshot: editor-new
   - click: {role: button, label: Save}
