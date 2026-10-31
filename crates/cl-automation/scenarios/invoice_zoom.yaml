@@ -11,7 +11,8 @@ steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - click: {role: tab, label: Home}
-  - resize: {width: 960, height: 640}
+  # The lines are typed at full size (the grid is below the fold at
+  # 960 x 640), then the window shrinks.
   - key: Ctrl+I
   - assert_state: {key: screen.screen, equals: create_invoice}
   - assert_state: {key: screen.loaded, equals: true}
@@ -29,6 +30,8 @@ steps:
   - key: Tab
   - wait: {ms: 800}
   - assert_state: {key: screen.totals, equals: ready}
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
   - screenshot: invoice-960
   - assert_no_clipping:
       ignore:

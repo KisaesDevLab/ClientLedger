@@ -67,8 +67,8 @@ steps:
   - screenshot: email-saved
   # The invoice email template editor (P20, Q-P20f).
   - assert_exists: {label_contains: Email templates}
-  - assert_exists: {label: Invoice subject}
-  - assert_exists: {role: button, label: Use the standard text}
+  - assert_exists: {role: label, label: Invoice subject}
+  - assert_exists: {role: label, label: Invoice message}
   - screenshot: email-templates
   - assert_no_clipping: {}
   - click: {role: button, label: Remove password}
