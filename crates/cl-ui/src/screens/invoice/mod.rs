@@ -417,9 +417,16 @@ impl InvoiceScreen {
                 )
             })
             .collect();
+        let subtotals = self
+            .items
+            .iter()
+            .filter(|i| i.fields.item_type == cl_api::ItemType::Subtotal)
+            .map(|i| i.id)
+            .collect();
         self.grid.set_lists(
             Arc::new(ItemLists::new(Arc::clone(&self.books.lists), &active)),
             taxable,
+            subtotals,
         );
         self.inputs.rev = u64::MAX;
         if let Some(name) = self.setting_up.clone()

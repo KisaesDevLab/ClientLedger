@@ -2437,9 +2437,14 @@ impl Grid {
         style: &GridStyle,
         max_rows: u64,
     ) -> f32 {
-        let color = if shown.placeholder && matches!(value, CellValue::Suggested { .. }) {
-            // A suggestion is read, not a placeholder: secondary text keeps
-            // it at 4.5:1 or more (A03 UI review 7).
+        let read_hint = matches!(value, CellValue::Suggested { .. })
+            || (matches!(value, CellValue::Empty)
+                && col.empty.is_some()
+                && !state.contains(RowState::ENTRY));
+        let color = if shown.placeholder && read_hint {
+            // A suggestion, or a column's "empty" hint on a recorded line
+            // (the invoice's "Item's"), is read, not a placeholder:
+            // secondary text keeps it at 4.5:1 or more (A03 UI review 7).
             style.text_secondary
         } else if shown.placeholder {
             style.placeholder

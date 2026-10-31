@@ -10,7 +10,7 @@
 //! the source's and read-only (Q-P20p).
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cl_core::ids::ItemId;
@@ -204,6 +204,8 @@ pub struct InvState {
     pub lists: Arc<ItemLists>,
     /// Each item's taxable flag (a line follows it until set).
     pub taxable: HashMap<ItemId, bool>,
+    /// The subtotal items (their lines have no Tax box or income account).
+    pub subtotals: HashSet<ItemId>,
     /// What each line's Rate and Amount show.
     pub shown: HashMap<RowKey, Shown>,
     updating: String,
@@ -231,6 +233,11 @@ impl LinesAdapter<InvoiceForm> for InvState {
 impl View<'_> {
     fn lines(&self) -> &[InvoiceLine] {
         &self.form.current().lines
+    }
+
+    /// A subtotal line (no Tax box, no income account).
+    fn subtotal(&self, l: &InvoiceLine) -> bool {
+        l.item.is_some_and(|i| self.a.subtotals.contains(&i))
     }
 }
 
@@ -317,18 +324,22 @@ impl RowModel for View<'_> {
                 Shown::Ready { amount, .. } => CellValue::Money(amount),
             },
             V_TAX => {
-                if l.is_blank() {
+                if l.is_blank() || self.subtotal(l) {
                     CellValue::Empty
                 } else {
                     CellValue::Bool(taxable_of(l, &self.a.taxable))
                 }
             }
-            V_ACCOUNT => picked(
-                lists,
-                ACCOUNTS,
-                l.account
-                    .and_then(|a| LineLists::account_key(&*lists.base(), a)),
-            ),
+            V_ACCOUNT => match l
+                .account
+                .and_then(|a| LineLists::account_key(&*lists.base(), a))
+            {
+                Some(key) => picked(lists, ACCOUNTS, Some(key)),
+                // "Item's" only where an item supplies the account: not on
+                // a subtotal or a line without an item.
+                None if l.item.is_none() || self.subtotal(l) => CellValue::Text(Cow::Borrowed("")),
+                None => CellValue::Empty,
+            },
             _ => CellValue::Empty,
         }
     }
@@ -392,6 +403,7 @@ impl EditableModel for View<'_> {
         };
         match col {
             V_AMOUNT => false,
+            V_TAX | V_ACCOUNT if self.subtotal(l) => false,
             V_ITEM | V_QTY | V_RATE => !l.amounts_locked(),
             _ => true,
         }
@@ -509,6 +521,7 @@ impl InvoiceGrid {
                     keys,
                     lists,
                     taxable: HashMap::new(),
+                    subtotals: HashSet::new(),
                     shown: HashMap::new(),
                     updating: t("invoice.updating"),
                     cant: t("invoice.cant_calculate"),
@@ -558,10 +571,16 @@ impl InvoiceGrid {
     }
 
     /// The pickers and the items' taxable flags changed.
-    pub fn set_lists(&mut self, lists: Arc<ItemLists>, taxable: HashMap<ItemId, bool>) {
+    pub fn set_lists(
+        &mut self,
+        lists: Arc<ItemLists>,
+        taxable: HashMap<ItemId, bool>,
+        subtotals: HashSet<ItemId>,
+    ) {
         let a = self.form.adapter_mut();
         a.lists = lists;
         a.taxable = taxable;
+        a.subtotals = subtotals;
     }
 
     /// The item name typed on a line that is not in the list, if any.
@@ -703,6 +722,52 @@ mod tests {
         );
         assert_eq!(apply(&mut l, V_TAX, CellInput::Bool(false), &lists), None);
         assert_eq!(l.taxable, Some(false));
+    }
+
+    /// UI review 7: a subtotal line has no Tax box and no "Item's" hint; a
+    /// line without an item has no hint either.
+    #[test]
+    fn a_subtotal_line_has_no_tax_box_or_account_hint() {
+        let sub = ItemId::parse("d6000000-0000-4000-8000-0000000000b1").expect("id");
+        let plain = ItemId::parse("d6000000-0000-4000-8000-0000000000b2").expect("id");
+        let mut keys = Keys::new();
+        let lines = [Some(sub), Some(plain), None]
+            .into_iter()
+            .map(|item| InvoiceLine {
+                item,
+                description: "x".into(),
+                ..InvoiceLine::blank(keys.next_key())
+            })
+            .collect();
+        let mut form = FormState::new(InvoiceForm {
+            lines,
+            ..InvoiceForm::default()
+        });
+        let mut a = InvState {
+            keys,
+            lists: Arc::new(ItemLists::default()),
+            taxable: HashMap::from([(sub, false), (plain, true)]),
+            subtotals: HashSet::from([sub]),
+            shown: HashMap::new(),
+            updating: String::new(),
+            cant: String::new(),
+            snapshot: None,
+            unknown_item: None,
+        };
+        let view = View {
+            form: &mut form,
+            a: &mut a,
+        };
+        assert!(matches!(view.cell(0, V_TAX), CellValue::Empty));
+        assert!(!view.cell_editable(0, V_TAX) && !view.cell_editable(0, V_ACCOUNT));
+        assert!(matches!(view.cell(0, V_ACCOUNT), CellValue::Text(t) if t.is_empty()));
+        assert!(matches!(view.cell(1, V_TAX), CellValue::Bool(true)));
+        assert!(
+            matches!(view.cell(1, V_ACCOUNT), CellValue::Empty),
+            "Item's"
+        );
+        assert!(view.cell_editable(1, V_ACCOUNT));
+        assert!(matches!(view.cell(2, V_ACCOUNT), CellValue::Text(t) if t.is_empty()));
     }
 
     #[test]
