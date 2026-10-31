@@ -961,6 +961,7 @@ version = "0.0.0"
 dependencies = [
  "cl-core",
  "keyring",
+ "proptest",
  "serde",
  "serde_json",
  "sha2",

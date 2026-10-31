@@ -33,4 +33,21 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // cl-print form labels added in P20 (the print screens read them).
     ("print.pdf.ship_to", "Ship to"),
     ("print.pdf.service_date", "Service date"),
+    // Default invoice email (cl_settings::email_templates; Preferences > Email edits a copy).
+    ("email.template.invoice.subject", "Invoice {invoice_number} from {company_name}"),
+    ("email.template.invoice.body", "Dear {client_name},\n\nYour invoice {invoice_number} for {total} is attached. It is due {due_date}.\n\nThank you for your business.\n{company_name}"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use crate::i18n::{has, t};
+    use cl_settings::email_templates::{DEFAULT_INVOICE_BODY_KEY, DEFAULT_INVOICE_SUBJECT_KEY};
+
+    #[test]
+    fn the_default_email_texts_exist_and_use_known_fields_only() {
+        for key in [DEFAULT_INVOICE_SUBJECT_KEY, DEFAULT_INVOICE_BODY_KEY] {
+            assert!(has(key), "{key}");
+            assert_eq!(cl_settings::unknown_fields(&t(key)), Vec::<String>::new());
+        }
+    }
+}

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ai::{AiLocalPrefs, AiProvider, DEFAULT_MONTHLY_TOKEN_CAP as DEFAULT_LOCAL_CAP};
+use crate::email_templates::EmailPrefs;
 use crate::smtp::SmtpSecurity;
 
 /// Default for "bills due within N days" on Home (Q-169).
@@ -85,6 +86,8 @@ pub struct CompanyPrefs {
     /// without the uploaded logo until a new one is uploaded (the engine
     /// can't delete it yet, U-114).
     pub hide_logo: bool,
+    /// Email templates and BCC-self (P20, Q-P20j). Travels with backups.
+    pub email: EmailPrefs,
 }
 
 impl Default for CompanyPrefs {
@@ -101,6 +104,7 @@ impl Default for CompanyPrefs {
             required_tag_groups: BTreeMap::new(),
             setup_checklist_dismissed: false,
             hide_logo: false,
+            email: EmailPrefs::default(),
         }
     }
 }
@@ -206,6 +210,7 @@ impl CompanyPrefs {
             required_tag_groups: self.required_tag_groups.clone(),
             setup_checklist_dismissed: self.setup_checklist_dismissed,
             hide_logo: self.hide_logo,
+            email: self.email.clone(),
         }
     }
 
@@ -242,6 +247,7 @@ impl CompanyPrefs {
             required_tag_groups: archive.required_tag_groups.clone(),
             setup_checklist_dismissed: archive.setup_checklist_dismissed,
             hide_logo: archive.hide_logo,
+            email: archive.email.clone(),
         };
         out.normalize();
         out
@@ -261,6 +267,7 @@ impl CompanyPrefs {
         }
         self.intake_here
             .retain(|_, n| !n.path_hash.is_empty() && !n.canonical_key.is_empty());
+        self.email.normalize();
     }
 
     /// Whether this computer confirmed `folder` at its current path (the
