@@ -114,6 +114,12 @@ impl ItemLists {
         }
     }
 
+    /// The register's lists under the items (accounts, names, tags).
+    #[must_use]
+    pub fn base(&self) -> Arc<RegisterLists> {
+        Arc::clone(&self.base)
+    }
+
     /// The item behind a picker id.
     #[must_use]
     pub fn item(&self, key: u64) -> Option<ItemId> {

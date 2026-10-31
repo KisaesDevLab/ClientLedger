@@ -352,12 +352,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients
     built("clients.center", "Customers & Projects", Some(Menu::Clients), 0, None),
-    screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
+    built("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I')),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
-    screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P20"),
+    screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P22"),
     built("clients.daily_sales", "Daily Sales Summary", Some(Menu::Clients), 1, None),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
+    built("clients.outbox", "Outbox", Some(Menu::Clients), 2, None),
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     built("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B')),
@@ -573,6 +574,9 @@ mod tests {
             "file.print_forms",
             "file.printer_setup",
             "company.information",
+            // P20
+            "clients.create_invoice",
+            "clients.outbox",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -702,7 +706,7 @@ mod tests {
             assert!(c.opens && c.arrives.is_none(), "{id} is built (P14)");
         }
         // Sales Receipt comes with invoices (Q-259).
-        assert_eq!(find("clients.sales_receipt").unwrap().arrives, Some("P20"));
+        assert_eq!(find("clients.sales_receipt").unwrap().arrives, Some("P22"));
         assert!(Keymap::new(COMMANDS).is_ok(), "no new key clashes");
     }
 

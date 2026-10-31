@@ -46,6 +46,10 @@ pub mod pay_bills;
 pub mod company_info;
 pub mod print_forms;
 
+// P20: Create Invoice and the Outbox.
+pub mod invoice;
+pub mod outbox;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -82,6 +86,9 @@ pub(crate) const P18_SCREENS: [crate::shell::MakeScreen; 2] =
 /// Every P19 screen's `make` (the shell tries each after P18's).
 pub(crate) const P19_SCREENS: [crate::shell::MakeScreen; 2] =
     [print_forms::make, company_info::make];
+
+/// Every P20 screen's `make` (the shell tries each after P19's).
+pub(crate) const P20_SCREENS: [crate::shell::MakeScreen; 2] = [invoice::make, outbox::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
@@ -189,6 +196,29 @@ mod tests {
                 .id;
             assert!(make(other, &link, None, today).is_none(), "{kind}");
         }
+    }
+
+    #[test]
+    fn each_p20_screen_opens_its_own_kind_only() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        for (make, kind) in P20_SCREENS.iter().zip([invoice::KIND, outbox::KIND]) {
+            let cmd = cl_model::commands::find(kind).expect("a command");
+            assert!(cmd.opens && cmd.arrives.is_none(), "{kind} is built");
+            let s = make(cmd.id, &link, None, today).expect("its screen");
+            assert_eq!(s.title(), crate::i18n::t(&format!("cmd.{kind}")));
+            assert!(!s.state().is_null(), "{kind}");
+            let other = cl_model::commands::find("vendors.write_check")
+                .expect("write check")
+                .id;
+            assert!(make(other, &link, None, today).is_none(), "{kind}");
+        }
+        // Q-P20u: the Sales Receipt form comes with P22.
+        assert_eq!(
+            cl_model::commands::find("clients.sales_receipt").and_then(|c| c.arrives),
+            Some("P22")
+        );
     }
 
     #[test]
