@@ -355,6 +355,9 @@ impl InvoiceScreen {
                 ui.add_space(8.0);
                 header::wrap_row(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
+                    if let Some(bill) = self.bill_to() {
+                        kit::wrap_item(ui, "invoice/bill_to", |ui| bill_to_ui(ui, tokens, &bill));
+                    }
                     kit::wrap_item(ui, "invoice/terms", |ui| self.terms_ui(ui, tokens));
                     if !self.print_books.layouts.is_empty() {
                         kit::wrap_item(ui, "invoice/template", |ui| self.template_ui(ui, tokens));
@@ -421,6 +424,17 @@ impl InvoiceScreen {
                         .edit_step(|h| kit::apply_tag_edit(&tags, &mut h.header_tags, edit));
                 }
             });
+    }
+
+    /// The picked client's name and billing address (DESIGN.md: Bill to in
+    /// the header card).
+    fn bill_to(&self) -> Option<Vec<String>> {
+        let c = self.header.current().client?;
+        let contact = self.books.contacts.iter().find(|x| x.id == c)?;
+        let (street, _) = addresses(&contact.fields);
+        let mut lines = vec![contact.fields.display_name.clone()];
+        lines.extend(street);
+        Some(lines)
     }
 
     fn client_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -790,16 +804,7 @@ impl InvoiceScreen {
         // Ship to (Q-P20m): beside the header, outside the envelope windows
         // (Q-P20v); printed only when it differs from Bill to.
         let f = &contact.fields;
-        let ship: Vec<String> = [
-            f.shipping_line1.clone(),
-            f.shipping_line2.clone(),
-            f.shipping_city.clone(),
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-        if !ship.is_empty() {
+        if let (_, Some(ship)) = addresses(f) {
             kit::panel_card(ui, tokens, &t("invoice.side.ship_to"), |ui| {
                 for l in &ship {
                     ui.label(l);
@@ -816,6 +821,86 @@ impl InvoiceScreen {
             });
         }
     }
+}
+
+/// Bill to: the client's name and billing address, read only (it is the
+/// client's; changed on the client's record).
+fn bill_to_ui(ui: &mut Ui, tokens: &Tokens, lines: &[String]) {
+    ui.vertical(|ui| {
+        kit::above(ui, tokens, &t("invoice.bill_to"));
+        egui::Frame::new()
+            .fill(tokens.surface_subtle)
+            .stroke(Stroke::new(1.0, tokens.border_default))
+            .corner_radius(CornerRadius::same(4))
+            .inner_margin(Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_min_width(200.0);
+                for l in lines {
+                    ui.label(l);
+                }
+                if lines.len() < 2 {
+                    ui.label(RichText::new(t("invoice.bill_to.none")).color(tokens.text_secondary));
+                }
+            })
+            .response
+            .on_hover_text(t("invoice.bill_to.tip"));
+    });
+}
+
+/// A client's billing and shipping addresses as shown on the invoice:
+/// street lines and "City, ST ZIP". The ship-to is `None` when it has no
+/// street or only repeats the bill-to (Q-P20m).
+pub(crate) fn addresses(f: &cl_api::ContactFields) -> (Vec<String>, Option<Vec<String>>) {
+    let block = |l1: &Option<String>,
+                 l2: &Option<String>,
+                 city: &Option<String>,
+                 state: &Option<String>,
+                 zip: &Option<String>| {
+        let place = [city.as_deref(), state.as_deref()]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let last = [Some(place.as_str()), zip.as_deref()]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        [l1.clone(), l2.clone(), Some(last)]
+            .into_iter()
+            .flatten()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<String>>()
+    };
+    let bill = block(
+        &f.billing_line1,
+        &f.billing_line2,
+        &f.billing_city,
+        &f.billing_state,
+        &f.billing_zip,
+    );
+    let street = [&f.shipping_line1, &f.shipping_line2]
+        .into_iter()
+        .flatten()
+        .any(|l| !l.trim().is_empty());
+    let ship = block(
+        &f.shipping_line1,
+        &f.shipping_line2,
+        &f.shipping_city,
+        &f.shipping_state,
+        &f.shipping_zip,
+    );
+    let same = ship.len() == bill.len()
+        && ship
+            .iter()
+            .zip(&bill)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    (bill, (street && !same).then_some(ship))
 }
 
 /// "18 days".

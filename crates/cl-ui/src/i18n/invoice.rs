@@ -79,6 +79,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.side.days.one", "1 day"),
     ("invoice.side.open_client", "Open client"),
     ("invoice.side.ship_to", "Ship to"),
+    ("invoice.bill_to", "Bill to"),
+    ("invoice.bill_to.tip", "The client's billing address. Change it on the client in Customers & Projects."),
+    ("invoice.bill_to.none", "No billing address on file"),
     ("invoice.side.notes", "Notes"),
     // Billable costs
     ("invoice.billable.heading", "Billable costs"),

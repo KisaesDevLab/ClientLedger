@@ -592,3 +592,44 @@ fn esc_closes_the_billable_dialog_and_keeps_every_line() {
     assert_eq!(after["line_count"], 2, "every line stays");
     assert_eq!(after["lines"][0]["item"], true);
 }
+
+/// Q-P20m: Bill to shows in the header; Ship to only when it differs.
+#[test]
+fn ship_to_shows_only_when_it_differs_from_bill_to() {
+    let (_d, s) = screen();
+    let c = story_client(&s);
+    let mut f = s
+        .books
+        .contacts
+        .iter()
+        .find(|x| x.id == c)
+        .expect("client")
+        .fields
+        .clone();
+    let some = |v: &str| Some(v.to_string());
+    f.billing_line1 = some("27 Sycamore Ln");
+    f.billing_line2 = None;
+    f.billing_city = some("Monett");
+    f.billing_state = some("MO");
+    f.billing_zip = some("65708");
+    f.shipping_line1 = some("27 sycamore ln ");
+    f.shipping_line2 = None;
+    f.shipping_city = some("Monett");
+    f.shipping_state = some("MO");
+    f.shipping_zip = some("65708");
+    let (bill, ship) = draw::addresses(&f);
+    assert_eq!(bill, vec!["27 Sycamore Ln", "Monett, MO 65708"]);
+    assert_eq!(ship, None, "the same address");
+    f.shipping_line1 = some("Back yard beds, east side");
+    let (_, ship) = draw::addresses(&f);
+    assert_eq!(ship.map(|s| s.len()), Some(2));
+    f.shipping_line1 = None;
+    assert_eq!(draw::addresses(&f).1, None, "no street");
+    for k in [
+        "invoice.bill_to",
+        "invoice.bill_to.tip",
+        "invoice.bill_to.none",
+    ] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+}
