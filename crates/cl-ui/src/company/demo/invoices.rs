@@ -282,12 +282,15 @@ pub fn compute(lines: &[SalesLineIn], default_rate: Decimal) -> Result<SalesDocO
     let mut taxes = vec![Decimal::ZERO; lines.len()];
     let mut tax_total = Decimal::ZERO;
     let positive = amounts.iter().copied().sum::<Decimal>() > Decimal::ZERO;
+    // The negative group bases floored to 0.00 (they leave the taxable base).
+    let mut floored = Decimal::ZERO;
     for (rate, idx) in &groups {
         let base: Decimal = idx.iter().map(|i| amounts[*i]).sum();
         // Q-P20ag/Q-P20aj: on a positive document the tax base floors at
         // 0.00 (a discount can't make tax negative); a wholly negative
         // document reverses its tax.
         if positive && base.is_sign_negative() && !base.is_zero() {
+            floored += base;
             continue;
         }
         let tax = round(base * rate, 2);
@@ -303,7 +306,8 @@ pub fn compute(lines: &[SalesLineIn], default_rate: Decimal) -> Result<SalesDocO
         .zip(&amounts)
         .filter(|(l, _)| l.taxable)
         .map(|(_, a)| *a)
-        .sum();
+        .sum::<Decimal>()
+        - floored;
     Ok(SalesDocOut {
         lines: (0..lines.len())
             .map(|i| SalesLineOut {
