@@ -29,11 +29,10 @@ use sha2::{Digest, Sha256};
 /// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
 /// vendor layout routes (U-92) and the document reading assist (U-92d) are;
 /// since pin 4e0593c3 (engine PR #180) the A04 draft attach (U-95) is.
-/// The P20 rows below are client-declared until the pin moves (A7): the
-/// invoice sent route (engine PR #197, U-126) and the E2/E3/E4 contracts
-/// of the P20 plan §2 (preview U-129, price levels U-40, billable costs
-/// U-128, email and Outbox U-127).
-pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
+/// Since pin c7b7d61d (engine PRs #197-#202) the P20 invoice routes are:
+/// sent (U-126), preview (U-129), price levels (U-40), billable costs
+/// (U-128), email and the Outbox (U-127) and invoice layouts (U-130).
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -43,25 +42,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P20 (until the A7 pin bump).
-    ("POST", "/api/v1/invoices/{id}/sent"),
-    ("POST", "/api/v1/invoices/preview"),
-    ("POST", "/api/v1/invoices/{id}/email"),
-    ("POST", "/api/v1/invoices/{id}/email-later"),
-    ("GET", "/api/v1/forms/email-queue"),
-    ("DELETE", "/api/v1/forms/email-queue/{id}"),
-    ("GET", "/api/v1/billable-costs"),
-    ("GET", "/api/v1/price-levels"),
-    ("POST", "/api/v1/price-levels"),
-    ("GET", "/api/v1/price-levels/{id}"),
-    ("PUT", "/api/v1/price-levels/{id}"),
-    ("DELETE", "/api/v1/price-levels/{id}"),
-    // U-130 invoice layouts (engine PR #202).
-    ("GET", "/api/v1/company/invoice-layouts"),
-    ("POST", "/api/v1/company/invoice-layouts"),
-    ("GET", "/api/v1/company/invoice-layouts/{id}"),
-    ("PUT", "/api/v1/company/invoice-layouts/{id}"),
-    ("POST", "/api/v1/company/invoice-layouts/{id}/default"),
 ];
 
 /// Lowercase hex of a SHA-256.
