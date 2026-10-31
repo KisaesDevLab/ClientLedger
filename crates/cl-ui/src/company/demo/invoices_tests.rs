@@ -395,3 +395,81 @@ fn a_price_level_prices_an_unpriced_item_line() {
     );
     assert!(preview(&mut state, &unknown, None).is_err());
 }
+
+/// Engine PR #202 review: discounts stacked under a subtotal compound; a %
+/// of a group at or below zero is zero; a positive document never has
+/// negative tax.
+#[test]
+fn stacked_discounts_compound_and_tax_never_goes_negative() {
+    let mut state = DemoState::default();
+    let (client, items) = story(&mut state);
+    let find = |t: cl_api::ItemType| {
+        items
+            .iter()
+            .find(|i| {
+                i.fields.item_type == t
+                    && (t != cl_api::ItemType::Discount || i.fields.discount_percent.is_some())
+            })
+            .map(|i| i.id)
+    };
+    let (Some(sub), Some(disc)) = (
+        find(cl_api::ItemType::Subtotal),
+        find(cl_api::ItemType::Discount),
+    ) else {
+        return;
+    };
+    let pct = items
+        .iter()
+        .find(|i| i.id == disc)
+        .and_then(|i| i.fields.discount_percent)
+        .expect("percent")
+        .as_decimal();
+    let one = || Quantity::parse_wire("1").expect("q");
+    let new = NewInvoice::new(
+        client,
+        DemoState::today(),
+        vec![
+            line_for(&items, "100.00", true, "1"),
+            InvoiceLine::item(sub, one()),
+            InvoiceLine::item(disc, one()),
+            InvoiceLine::item(disc, one()),
+        ],
+    );
+    let p = preview(&mut state, &new, None).expect("preview");
+    let h = Decimal::ONE_HUNDRED;
+    let first = -round(h * pct / h, 2);
+    let second = -round((h + first) * pct / h, 2);
+    assert_eq!(p.lines[2].amount.as_decimal(), first);
+    assert_eq!(p.lines[3].amount.as_decimal(), second);
+    // A taxable line of -50 on a positive invoice: the base floors at 0.
+    let doc = compute(
+        &[
+            SalesLineIn {
+                quantity: Decimal::ONE,
+                unit_price: Decimal::from(100),
+                taxable: false,
+                tax_rate: None,
+            },
+            SalesLineIn {
+                quantity: Decimal::ONE,
+                unit_price: Decimal::from(-50),
+                taxable: true,
+                tax_rate: None,
+            },
+        ],
+        Decimal::from_str("0.081").expect("rate"),
+    )
+    .expect("doc");
+    assert_eq!(doc.tax_total, Decimal::ZERO);
+    let neg = compute(
+        &[SalesLineIn {
+            quantity: Decimal::ONE,
+            unit_price: Decimal::from(-50),
+            taxable: true,
+            tax_rate: None,
+        }],
+        Decimal::from_str("0.081").expect("rate"),
+    )
+    .expect("doc");
+    assert_eq!(neg.tax_total, Decimal::from_str("-4.05").expect("d"));
+}

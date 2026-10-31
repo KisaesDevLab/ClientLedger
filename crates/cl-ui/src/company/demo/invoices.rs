@@ -281,8 +281,15 @@ pub fn compute(lines: &[SalesLineIn], default_rate: Decimal) -> Result<SalesDocO
     }
     let mut taxes = vec![Decimal::ZERO; lines.len()];
     let mut tax_total = Decimal::ZERO;
+    let positive = amounts.iter().copied().sum::<Decimal>() > Decimal::ZERO;
     for (rate, idx) in &groups {
         let base: Decimal = idx.iter().map(|i| amounts[*i]).sum();
+        // Q-P20ag/Q-P20aj: on a positive document the tax base floors at
+        // 0.00 (a discount can't make tax negative); a wholly negative
+        // document reverses its tax.
+        if positive && base.is_sign_negative() && !base.is_zero() {
+            continue;
+        }
         let tax = round(base * rate, 2);
         let shares: Vec<Decimal> = idx.iter().map(|i| amounts[*i] * rate).collect();
         for (i, t) in idx.iter().zip(allocate(&shares, tax)?) {
@@ -382,6 +389,13 @@ struct Priced {
     billable: Option<(JournalLineId, super::billable::BillableFigures, Decimal)>,
 }
 
+impl Priced {
+    /// A discount line (no quantity, not a subtotal, not a billable cost).
+    fn is_discount(&self) -> bool {
+        self.quantity.is_none() && self.display.is_none() && self.billable.is_none()
+    }
+}
+
 /// round2(quantity × rate) of the priced lines of `group` that post.
 fn group_sum(group: &[Priced]) -> Decimal {
     group
@@ -478,7 +492,11 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
             continue;
         }
         if kind == cl_api::ItemType::Discount {
-            let from = if out.last().is_some_and(|p| p.display.is_some()) {
+            // Under a subtotal a discount covers that subtotal's group;
+            // discounts stacked there compound (100 → −10.00 → −4.50).
+            let since = &out[group_start..];
+            let stacked = !since.is_empty() && since.iter().all(Priced::is_discount);
+            let from = if out.last().is_some_and(|p| p.display.is_some()) || stacked {
                 prev_group.unwrap_or(0)
             } else {
                 group_start
@@ -498,6 +516,8 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 });
             let typed = l.discount_percent.is_some() || l.unit_price.is_some();
             let amount = match (percent, l.unit_price) {
+                // A % of a group at or below 0.00 is 0.00.
+                (Some(_), _) if base <= Decimal::ZERO => Decimal::ZERO,
                 (Some(p), _) => -round(base * p / Decimal::ONE_HUNDRED, 2),
                 (None, Some(off)) => -round(off.as_decimal().abs(), 2),
                 (None, None) => -round(
