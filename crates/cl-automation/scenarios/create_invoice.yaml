@@ -130,3 +130,50 @@ steps:
   - assert_state: {key: screen.read_only, equals: invoice.read_only.void}
   - assert_state: {key: screen.unbilled, equals: 1}
   - command: file.close_window
+
+# `ui-check create_invoice --compare`: the steps above close the window, so
+# the mockup's invoice is typed again into a new one and left unsaved (the
+# void brought the client's cost back): three lines and the billable cost.
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - assert_state: {key: screen.unbilled, equals: 1}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "18"}
+  - key: Tab
+  - type: {text: "65"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Item, line 2"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "24"}
+  - key: Tab
+  - type: {text: "32.50"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Item, line 3"}
+  - type: {text: "Mulch"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 3"}
+  - type: {text: "6"}
+  - key: Tab
+  - type: {text: "48"}
+  - key: Tab
+  - key: Ctrl+Shift+U
+  - click: {role: button, label: "Add to invoice"}
+  - click: {role: grid_cell, label: "Income account, line 4"}
+  - type: {text: "4000"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.total, equals: "3,234.87"}
