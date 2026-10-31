@@ -22,6 +22,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.email", "Email\u{2026}"),
     ("invoice.add_billable", "Add billable costs"),
     ("invoice.void", "Void"),
+    ("invoice.void.tip", "Void this invoice: it stays in your books at $0 with its history ({keys})."),
+    ("invoice.email.tip", "Email this invoice as a PDF ({keys})."),
+    ("invoice.add_billable.tip", "Add this client's unbilled costs as lines ({keys})."),
     // Header
     ("invoice.client", "Client"),
     ("invoice.client.set_up", "Set up \u{201c}{name}\u{201d}\u{2026}"),

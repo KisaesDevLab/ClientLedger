@@ -465,7 +465,11 @@ impl PriceLevelsScreen {
             ui.horizontal(|ui| {
                 save = crate::widgets::primary_button(ui, &t("price_levels.save")).clicked();
                 if let Some(id) = ed.id
-                    && crate::widgets::destructive_button(ui, &t("price_levels.delete")).clicked()
+                    // Plainer than Save (UI review): a quiet button with
+                    // warning-coloured text.
+                    && ui
+                        .button(RichText::new(t("price_levels.delete")).color(tokens.warn_text))
+                        .clicked()
                 {
                     delete = Some(id);
                 }

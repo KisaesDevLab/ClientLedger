@@ -99,7 +99,9 @@ impl InvoiceScreen {
         let dirty = self.is_dirty();
         let open = self.read_only().is_none();
         let mut clicked: Option<&'static str> = None;
-        let tip = |cmd: &str| kit::chip(cmd).replace(' ', "+");
+        // One tooltip format: what it does, then the keys ("Ctrl+Shift+U").
+        let tip =
+            |key: &str, cmd: &str| t_with(key, &[("keys", &kit::chip(cmd).replace(' ', "+"))]);
         let nav = kit::toolbar(ui, tokens, idle, dirty, |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
@@ -134,7 +136,7 @@ impl InvoiceScreen {
                         saved && !dirty && open,
                         egui::Button::new(t("invoice.email")),
                     )
-                    .on_hover_text(tip("invoice.email"))
+                    .on_hover_text(tip("invoice.email.tip", "invoice.email"))
                     .on_disabled_hover_text(t("invoice.email.save_first"))
                     .clicked()
                 {
@@ -151,14 +153,14 @@ impl InvoiceScreen {
                 ui.separator();
                 if ui
                     .add_enabled(open, egui::Button::new(t("invoice.add_billable")))
-                    .on_hover_text(tip("invoice.add_billable"))
+                    .on_hover_text(tip("invoice.add_billable.tip", "invoice.add_billable"))
                     .clicked()
                 {
                     clicked = Some("invoice.add_billable");
                 }
                 if ui
                     .add_enabled(saved && open, egui::Button::new(t("invoice.void")))
-                    .on_hover_text(tip("edit.void_transaction"))
+                    .on_hover_text(tip("invoice.void.tip", "edit.void_transaction"))
                     .clicked()
                 {
                     clicked = Some("edit.void_transaction");
@@ -566,7 +568,7 @@ impl InvoiceScreen {
         let mut pick: Option<Option<String>> = None;
         egui::ComboBox::from_id_salt("invoice/terms")
             .selected_text(shown)
-            .width(150.0)
+            .width(180.0)
             .show_ui(ui, |ui| {
                 if ui
                     .selectable_label(current.is_none(), t("invoice.terms.default"))
@@ -704,15 +706,24 @@ impl InvoiceScreen {
                 ui.set_width(ui.available_width());
                 let row = |ui: &mut Ui, label: &str, value: String, strong: bool| {
                     ui.horizontal(|ui| {
+                        // Total and Balance due in the semibold face (egui's
+                        // strong only brightens the colour).
                         let l = if strong {
-                            RichText::new(label).strong()
+                            RichText::new(label)
+                                .family(crate::fonts::semibold())
+                                .color(tokens.text_primary)
                         } else {
                             RichText::new(label).color(tokens.text_secondary)
                         };
                         ui.label(l);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let v = RichText::new(value).monospace();
-                            ui.label(if strong { v.strong() } else { v });
+                            ui.label(if strong {
+                                v.family(crate::fonts::mono_medium())
+                                    .color(tokens.text_primary)
+                            } else {
+                                v
+                            });
                         });
                     });
                 };
