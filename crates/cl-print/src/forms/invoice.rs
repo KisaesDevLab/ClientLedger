@@ -1,7 +1,7 @@
 //! Invoices (P19; P20 adds the ship-to block, the service-date column,
 //! multi-line descriptions and [`pdf_bytes`]).
 
-use super::{FormDoc, FormStyle, ItemLine, TotalRow, item_table, layout_form};
+use super::{Column, FormDoc, FormStyle, ItemLine, TotalRow, item_table, layout_form, shown};
 use crate::PrintError;
 use crate::layout::Document;
 use rust_decimal::Decimal;
@@ -41,6 +41,131 @@ pub struct InvoiceData {
     pub balance_due: Decimal,
     /// Message to the customer (printed; the memo never is, Q-P20k).
     pub message: String,
+    /// The invoice's print layout (U-130, Q-P20ac); `None` prints the
+    /// standard form.
+    pub layout: Option<PrintLayout>,
+    /// Each line's item name, for a layout's Item column (same order as
+    /// `lines`; may be shorter).
+    pub item_names: Vec<String>,
+}
+
+/// What a print layout changes on the form (U-130): its columns, the
+/// ship-to block, the P.O. number and terms fields. Its footer is the
+/// caller's `FormStyle::footer`.
+#[allow(clippy::struct_excessive_bools)] // one switch per option
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrintLayout {
+    /// Item column.
+    pub item: bool,
+    /// Description column.
+    pub description: bool,
+    /// Service date column (printed when a line has a date).
+    pub service_date: bool,
+    /// Quantity column.
+    pub quantity: bool,
+    /// Rate column.
+    pub rate: bool,
+    /// Ship-to block.
+    pub show_ship_to: bool,
+    /// P.O. number field.
+    pub show_po_number: bool,
+    /// Terms field.
+    pub show_terms: bool,
+}
+
+impl Default for PrintLayout {
+    fn default() -> Self {
+        PrintLayout {
+            item: false,
+            description: true,
+            service_date: true,
+            quantity: true,
+            rate: true,
+            show_ship_to: true,
+            show_po_number: true,
+            show_terms: true,
+        }
+    }
+}
+
+/// The item table as a layout chooses it: Item, Description, Service
+/// date, Quantity, Rate (each when on), then Amount (always). The
+/// description takes the width the others leave (190.5 mm in all).
+fn layout_table(
+    l: &super::FormLabels,
+    d: &InvoiceData,
+    p: PrintLayout,
+) -> (Vec<Column>, Vec<Vec<String>>) {
+    use crate::amount::{format_amount, format_quantity};
+    let dated = p.service_date
+        && shown(&d.lines, d.hide_zero_lines).any(|x| !x.service_date.trim().is_empty());
+    let mut cols: Vec<Column> = Vec::new();
+    let mut fixed = 35.5;
+    if p.item {
+        fixed += 35.0;
+    }
+    if dated {
+        fixed += 22.0;
+    }
+    if p.quantity {
+        fixed += 22.0;
+    }
+    if p.rate {
+        fixed += 30.0;
+    }
+    if p.item {
+        let w = if p.description {
+            35.0
+        } else {
+            190.5 - fixed + 35.0
+        };
+        cols.push(Column::text("item", &l.item, w));
+    }
+    if p.description || !p.item {
+        cols.push(Column::text("description", &l.description, 190.5 - fixed));
+    }
+    if dated {
+        cols.push(Column::code("service_date", &l.service_date, 22.0));
+    }
+    if p.quantity {
+        cols.push(Column::number("quantity", &l.quantity, 22.0));
+    }
+    if p.rate {
+        cols.push(Column::number("rate", &l.rate, 30.0));
+    }
+    cols.push(Column::number("amount", &l.amount, 35.5));
+    let index: Vec<usize> = d
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| !(d.hide_zero_lines && x.amount.is_some_and(|a| a.is_zero())))
+        .map(|(i, _)| i)
+        .collect();
+    let rows = index
+        .into_iter()
+        .map(|i| {
+            let x = &d.lines[i];
+            let mut row = Vec::new();
+            if p.item {
+                row.push(d.item_names.get(i).cloned().unwrap_or_default());
+            }
+            if p.description || !p.item {
+                row.push(x.description.clone());
+            }
+            if dated {
+                row.push(x.service_date.trim().to_string());
+            }
+            if p.quantity {
+                row.push(x.quantity.map(format_quantity).unwrap_or_default());
+            }
+            if p.rate {
+                row.push(x.rate.map(format_quantity).unwrap_or_default());
+            }
+            row.push(x.amount.map(format_amount).unwrap_or_default());
+            row
+        })
+        .collect();
+    (cols, rows)
 }
 
 /// The lines of an address as compared: trimmed, blank lines dropped,
@@ -78,16 +203,17 @@ pub fn ship_to_shown(d: &InvoiceData) -> Vec<String> {
 #[must_use]
 pub fn form(d: &InvoiceData, style: &FormStyle) -> FormDoc {
     let l = &style.labels;
+    let p = d.layout.unwrap_or_default();
     let mut fields = vec![
         (l.number.clone(), d.number.clone()),
         (l.date.clone(), d.date.clone()),
     ];
-    for (label, v) in [
-        (&l.due_date, &d.due_date),
-        (&l.terms, &d.terms),
-        (&l.po_number, &d.po_number),
+    for (label, v, on) in [
+        (&l.due_date, &d.due_date, true),
+        (&l.terms, &d.terms, p.show_terms),
+        (&l.po_number, &d.po_number, p.show_po_number),
     ] {
-        if !v.is_empty() {
+        if on && !v.is_empty() {
             fields.push((label.clone(), v.clone()));
         }
     }
@@ -100,8 +226,15 @@ pub fn form(d: &InvoiceData, style: &FormStyle) -> FormDoc {
         totals.push(TotalRow::new(&l.payments, p, false));
         totals.push(TotalRow::new(&l.balance_due, d.balance_due, true));
     }
-    let (columns, rows) = item_table(l, &d.lines, d.hide_zero_lines);
-    let ship_to = ship_to_shown(d);
+    let (columns, rows) = match d.layout {
+        Some(p) => layout_table(l, d, p),
+        None => item_table(l, &d.lines, d.hide_zero_lines),
+    };
+    let ship_to = if p.show_ship_to {
+        ship_to_shown(d)
+    } else {
+        Vec::new()
+    };
     FormDoc {
         title: l.invoice.clone(),
         number: d.number.clone(),
@@ -192,6 +325,36 @@ pub(crate) mod tests {
             .map(|r| r.text.clone())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn a_layout_chooses_the_columns_and_switches() {
+        let mut d = sample();
+        d.po_number = "PO-7".into();
+        d.ship_to = vec!["Pat Doe".into(), "9 Elm St".into()];
+        d.item_names = vec!["Mulch".into(), "Delivery".into()];
+        d.layout = Some(PrintLayout {
+            item: true,
+            quantity: false,
+            rate: false,
+            show_po_number: false,
+            show_ship_to: false,
+            ..PrintLayout::default()
+        });
+        let f = form(&d, &style());
+        let keys: Vec<&str> = f.columns.iter().map(|c| c.key.as_str()).collect();
+        assert_eq!(keys, ["item", "description", "amount"]);
+        let width: f32 = f.columns.iter().map(|c| c.width).sum();
+        assert!((width - 190.5).abs() < 0.01, "{width}");
+        assert_eq!(f.rows[0][0], "Mulch");
+        assert!(f.fields.iter().all(|(_, v)| v != "PO-7"));
+        assert_eq!(f.ship_to, Vec::<String>::new());
+        // Without a layout the standard form prints.
+        d.layout = None;
+        let f = form(&d, &style());
+        assert_eq!(f.columns.len(), 4);
+        assert!(f.fields.iter().any(|(_, v)| v == "PO-7"));
+        assert!(layout(&d, &style()).is_ok());
     }
 
     #[test]

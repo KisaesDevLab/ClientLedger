@@ -164,6 +164,9 @@ pub struct InvoiceScreen {
     /// The number typed is in use on another invoice (Q-94): saved with a
     /// warning.
     pub(crate) duplicate_number: bool,
+    /// Layouts and item names for the PDF (U-130).
+    pub(crate) print_books: email::PrintBooks,
+    print_books_job: Option<Job<email::PrintBooks>>,
     /// Print is waiting for its print-later save to open Print Forms.
     pub(crate) print_after_save: bool,
     /// A PDF being made on the queue (Preview, Save PDF), opened when done.
@@ -250,6 +253,8 @@ impl InvoiceScreen {
             preview_job: None,
             pdf_job: None,
             print_after_save: false,
+            print_books: email::PrintBooks::default(),
+            print_books_job: None,
             next_number: None,
             next_job: None,
             duplicate_number: false,
@@ -366,6 +371,10 @@ impl InvoiceScreen {
     pub(crate) fn start_lists(&mut self) {
         self.books.start(&self.link, self.group.as_ref());
         self.fetch_own_address();
+        self.print_books_job = Some(email::print_books_job(&self.link, self.group.as_ref()));
+        if let Some(Ok(b)) = engine::poll(&mut self.print_books_job) {
+            self.print_books = b;
+        }
         if self.editing.is_none() {
             self.fetch_next_number();
         }
@@ -477,6 +486,9 @@ impl InvoiceScreen {
         }
         self.billable.poll();
         self.poll_attach();
+        if let Some(Ok(b)) = engine::poll(&mut self.print_books_job) {
+            self.print_books = b;
+        }
         if let Some(r) = engine::poll(&mut self.next_job) {
             self.next_number = r.ok();
         }

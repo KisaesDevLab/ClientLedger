@@ -847,7 +847,11 @@ pub fn create(
         .txn_number
         .clone()
         .unwrap_or_else(|| (1041 + n).to_string());
-    let (record, claims) = record_json(state, id, &number, new)?;
+    let (mut record, claims) = record_json(state, id, &number, new)?;
+    // U-130: no layout sent starts on the client's default layout.
+    if new.layout_id.is_omitted() {
+        record["layoutId"] = json!(state.layouts.clients.get(&new.contact_id));
+    }
     let saved = versioned(&record)?;
     state.invoices.writes += 1;
     state.invoices.claimed.extend(claims.iter().copied());
@@ -893,6 +897,7 @@ pub fn all_caps() -> cl_api::Capabilities {
         cl_api::Capabilities::PRICE_LEVELS,
         cl_api::Capabilities::INVOICE_EMAIL,
         cl_api::Capabilities::DOCUMENT_NUMBERS,
+        cl_api::Capabilities::INVOICE_LAYOUTS,
     ]
     .into_iter()
     .collect()

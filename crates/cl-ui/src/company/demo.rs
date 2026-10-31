@@ -22,6 +22,7 @@ pub mod journal;
 pub mod lists;
 pub mod money;
 // P18: Pay Bills.
+pub mod layouts;
 pub mod pay_bills;
 pub mod price_levels;
 pub mod printing;
@@ -131,6 +132,8 @@ pub struct DemoState {
     pub invoices: invoices::DemoInvoices,
     /// Price levels and the clients on them (P20).
     pub price_levels: price_levels::DemoPriceLevels,
+    /// Invoice print layouts (U-130).
+    pub layouts: layouts::DemoLayouts,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -248,6 +251,7 @@ impl DemoState {
             card_digits: false,
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
+            layouts: layouts::DemoLayouts::seeded(),
         }
     }
 

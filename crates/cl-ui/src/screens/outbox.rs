@@ -99,6 +99,9 @@ pub struct OutboxScreen {
     unsent_job: Option<Job<Vec<InvoiceSummary>>>,
     contacts: Vec<Contact>,
     contacts_job: Option<Job<Vec<Contact>>>,
+    /// Layouts and item names for the PDFs (U-130).
+    books: crate::screens::invoice::email::PrintBooks,
+    books_job: Option<Job<crate::screens::invoice::email::PrintBooks>>,
     /// Send all: the messages still to go, the one in flight, the results.
     queue: Vec<OutboxItem>,
     read_job: Option<(OutboxItem, Job<Versioned<InvoiceRecord>>)>,
@@ -131,6 +134,8 @@ impl OutboxScreen {
             unsent_job: None,
             contacts: Vec::new(),
             contacts_job: None,
+            books: crate::screens::invoice::email::PrintBooks::default(),
+            books_job: None,
             queue: Vec::new(),
             read_job: None,
             send_job: None,
@@ -165,6 +170,10 @@ impl OutboxScreen {
                 };
                 Ok(s.invoices().list(&q, PageRequest::first_max()).await?.data)
             },
+        ));
+        self.books_job = Some(crate::screens::invoice::email::print_books_job(
+            &self.link,
+            self.group.as_ref(),
         ));
         if self.contacts.is_empty() {
             self.contacts_job = Some(engine::read(
@@ -204,6 +213,9 @@ impl OutboxScreen {
         }
         if let Some(r) = engine::poll(&mut self.contacts_job) {
             self.contacts = r.unwrap_or_default();
+        }
+        if let Some(Ok(b)) = engine::poll(&mut self.books_job) {
+            self.books = b;
         }
         if let Some(Err(e)) = engine::poll(&mut self.remove_job) {
             self.error = Some(e);
@@ -264,9 +276,10 @@ impl OutboxScreen {
             .contact_id
             .and_then(|c| self.contacts.iter().find(|x| x.id == c));
         let terms = crate::screens::invoice::email::terms_text(r.payment_terms.as_deref());
-        let data = crate::screens::invoice::email::print_data(r, client, &terms);
-        let style = crate::screens::invoice::email::pdf_style(
+        let data = crate::screens::invoice::email::print_data(r, client, &terms, &self.books);
+        let style = crate::screens::invoice::email::pdf_style_for(
             self.tenant.as_ref().map_or("", |(_, n)| n.as_str()),
+            self.books.layout_of(r),
         );
         let msg = item.message();
         let (id, outbox_id) = (item.transaction_id, item.id);

@@ -248,12 +248,108 @@ impl EmailFlow {
     }
 }
 
-/// The saved invoice as the printed form (every figure the engine's).
+/// What the printed form needs besides the invoice: the company's print
+/// layouts (archived ones too: an invoice keeps its layout) and the item
+/// names for a layout's Item column (U-130).
+#[derive(Clone, Default)]
+pub(crate) struct PrintBooks {
+    pub(crate) layouts: Vec<cl_api::InvoiceLayout>,
+    pub(crate) items: Vec<(cl_core::ids::ItemId, String)>,
+}
+
+impl PrintBooks {
+    /// The layout an invoice prints with: its own, else the company's
+    /// default; `None` before layouts (the standard form).
+    pub(crate) fn layout_of(&self, r: &InvoiceRecord) -> Option<&cl_api::InvoiceLayout> {
+        r.layout_id
+            .and_then(|id| self.layouts.iter().find(|l| l.id == id))
+            .or_else(|| self.layouts.iter().find(|l| l.is_default))
+    }
+}
+
+/// Reads the layouts and item names on the queue.
+pub(crate) fn print_books_job(
+    link: &crate::company::CompanyLink,
+    group: Option<&cl_api::RequestGroup>,
+) -> Job<PrintBooks> {
+    let layouts_on = link.is_demo()
+        || link
+            .capabilities()
+            .has(cl_api::Capabilities::INVOICE_LAYOUTS);
+    engine::read(
+        link,
+        group,
+        |d| {
+            Ok(PrintBooks {
+                layouts: crate::company::demo::layouts::list(d, true),
+                items: d
+                    .items_mut()
+                    .iter()
+                    .map(|i| (i.id, i.fields.name.clone()))
+                    .collect(),
+            })
+        },
+        move |s| async move {
+            let layouts = if layouts_on {
+                s.invoice_layouts().list(true).await.unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let items = s
+                .items()
+                .list_all(&cl_api::ItemFilter::default())
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|i| (i.id, i.fields.name))
+                .collect();
+            Ok(PrintBooks { layouts, items })
+        },
+    )
+}
+
+/// The form style of an invoice: the layout's footer (U-130).
+pub(crate) fn pdf_style_for(
+    company: &str,
+    layout: Option<&cl_api::InvoiceLayout>,
+) -> cl_print::FormStyle {
+    let mut s = pdf_style(company);
+    if let Some(l) = layout {
+        s.footer.clone_from(&l.resolved_footers.invoice);
+    }
+    s
+}
+
+/// The saved invoice as the printed form (every figure the engine's),
+/// with its print layout's columns and switches (U-130).
 pub(crate) fn print_data(
     r: &InvoiceRecord,
     client: Option<&cl_api::Contact>,
     terms: &str,
+    books: &PrintBooks,
 ) -> cl_print::forms::invoice::InvoiceData {
+    let layout = books
+        .layout_of(r)
+        .map(|l| cl_print::forms::invoice::PrintLayout {
+            item: l.columns.item,
+            description: l.columns.description,
+            service_date: l.columns.service_date,
+            quantity: l.columns.quantity,
+            rate: l.columns.rate,
+            show_ship_to: l.show_ship_to,
+            show_po_number: l.show_po_number,
+            show_terms: l.show_terms,
+        });
+    let item_names = r
+        .lines
+        .iter()
+        .map(|l| {
+            l.item
+                .and_then(|i| books.items.iter().find(|(id, _)| *id == i))
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default()
+        })
+        .collect();
     let dec = |m: Option<cl_core::Money>| m.map(cl_core::Money::as_decimal);
     let bill_to = client.map_or_else(Vec::new, |c| {
         let f = &c.fields;
@@ -340,6 +436,8 @@ pub(crate) fn print_data(
         payments: dec(r.amount_paid).filter(|p| !p.is_zero()),
         balance_due: dec(r.balance_due).unwrap_or(total),
         message: r.customer_message.clone().unwrap_or_default(),
+        layout,
+        item_names,
     }
 }
 
@@ -396,8 +494,9 @@ impl InvoiceScreen {
             .contact_id
             .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
         let terms = terms_text(e.record.payment_terms.as_deref());
-        let data = print_data(&e.record, client, &terms);
-        Some((data, pdf_style(&self.company_name())))
+        let data = print_data(&e.record, client, &terms, &self.print_books);
+        let layout = self.print_books.layout_of(&e.record);
+        Some((data, pdf_style_for(&self.company_name(), layout)))
     }
 
     /// Email… (Ctrl+Shift+M): the saved invoice only; `then` runs when the
