@@ -733,6 +733,7 @@ impl InvoiceScreen {
                 json!({
                     "item": l.item.is_some(),
                     "billable": l.billable.is_some(),
+                    "caption": self.grid.caption(l),
                     "taxable": grid::taxable_of(l, self.grid.taxable()),
                     "amount": amount,
                     "rate_source": source,

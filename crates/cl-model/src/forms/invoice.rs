@@ -850,6 +850,9 @@ impl RateSource {
 /// The engine's figures for one line.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PreviewLineFigures {
+    /// The quantity it used (a billable line's: the source's, 1 when it had
+    /// none).
+    pub quantity: Option<Quantity>,
     /// The rate it used.
     pub unit_price: Option<Money>,
     /// Where the rate came from.

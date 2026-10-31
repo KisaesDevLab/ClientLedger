@@ -215,6 +215,33 @@ impl Billable {
     }
 }
 
+/// A billable line's source caption (DESIGN.md: "From Ozark Feed & Seed
+/// bill 20931").
+pub(crate) fn caption(c: &BillableCost) -> String {
+    let kind = match c.source_txn_type.as_deref() {
+        Some("bill") => t("invoice.billable.kind.bill"),
+        Some("check") => t("invoice.billable.kind.check"),
+        Some("expense" | "cash_purchase") => t("invoice.billable.kind.expense"),
+        Some("credit_card_charge" | "cc_charge" | "card_charge") => t("invoice.billable.kind.card"),
+        _ => String::new(),
+    };
+    let text = t_with(
+        "invoice.billable.caption",
+        &[
+            (
+                "vendor",
+                c.vendor_name.as_deref().unwrap_or_default().trim(),
+            ),
+            ("kind", &kind),
+            (
+                "number",
+                c.source_number.as_deref().unwrap_or_default().trim(),
+            ),
+        ],
+    );
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 impl InvoiceScreen {
     /// Set Up for an item typed on line `row` (Q-P20i): the Item list
     /// opens; the item fills the line once it is saved there.
@@ -336,6 +363,14 @@ impl InvoiceScreen {
         // A cost without an income account yet is added all the same; the
         // owner picks it on the line (the save gate asks for it).
         let mut added = 0;
+        let captions: Vec<(JournalLineId, String)> = self
+            .billable
+            .costs
+            .iter()
+            .filter(|c| seeds.iter().any(|s| s.source_line == c.source_line_id))
+            .map(|c| (c.source_line_id, caption(c)))
+            .collect();
+        self.grid.add_captions(captions);
         self.grid
             .edit(|v, keys| added = v.add_billable(&seeds, keys));
         self.save_remembered_income();

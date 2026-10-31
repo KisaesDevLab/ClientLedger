@@ -189,6 +189,7 @@ pub(crate) fn figures_of(p: &InvoicePreview) -> PreviewFigures {
             .lines
             .iter()
             .map(|l| PreviewLineFigures {
+                quantity: l.quantity,
                 unit_price: l.unit_price,
                 source: source_of(l.unit_price_source),
                 amount: l.amount,

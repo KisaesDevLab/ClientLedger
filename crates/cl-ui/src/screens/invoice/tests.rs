@@ -633,3 +633,53 @@ fn ship_to_shows_only_when_it_differs_from_bill_to() {
         assert!(crate::i18n::has(k), "{k}");
     }
 }
+
+/// UI review 4: a billable line says where the cost came from, and its
+/// quantity is the engine's before and after the save.
+#[test]
+fn a_billable_line_shows_its_source_and_the_engines_quantity() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    let v = s.state_json();
+    let caption = v["lines"][3]["caption"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(caption.starts_with("From "), "{caption}");
+    assert!(caption.contains(" bill INV-55871"), "{caption}");
+    let key = s
+        .grid
+        .value()
+        .lines
+        .iter()
+        .find(|l| l.billable.is_some())
+        .map(|l| l.key)
+        .expect("billable");
+    let grid::Shown::Ready { quantity, .. } = s.grid.shown(key) else {
+        panic!("priced");
+    };
+    assert!(quantity.is_some(), "the engine's quantity");
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    let after = s
+        .grid
+        .value()
+        .lines
+        .iter()
+        .find(|l| l.billable.is_some())
+        .map(|l| (l.quantity, l.key))
+        .expect("billable");
+    assert_eq!(after.0, quantity, "the same after the save");
+    let grid::Shown::Ready {
+        quantity: shown, ..
+    } = s.grid.shown(after.1)
+    else {
+        panic!("priced");
+    };
+    assert_eq!(shown, quantity);
+    assert_eq!(
+        s.state_json()["lines"][3]["caption"],
+        caption.as_str(),
+        "kept"
+    );
+}

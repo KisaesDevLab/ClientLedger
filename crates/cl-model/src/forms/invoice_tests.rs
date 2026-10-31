@@ -306,6 +306,7 @@ fn figures(n: usize, total: &str) -> PreviewFigures {
     PreviewFigures {
         lines: (0..n)
             .map(|_| PreviewLineFigures {
+                quantity: None,
                 unit_price: Some(m("32.50")),
                 source: RateSource::Item,
                 amount: m("780.00"),

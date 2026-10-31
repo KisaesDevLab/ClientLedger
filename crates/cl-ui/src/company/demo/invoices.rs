@@ -460,7 +460,9 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                     taxable: l.is_taxable.unwrap_or(true),
                     tax_rate: None,
                 },
-                quantity: cost.quantity.map(cl_core::Quantity::as_decimal),
+                // The source's quantity, 1 when it had none (as the
+                // saved invoice's illableCosts[]).
+                quantity: Some(q),
                 price: None,
                 source: "billable_cost",
                 account,

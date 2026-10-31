@@ -13,12 +13,12 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cl_core::ids::ItemId;
-use cl_core::{Money, UserInput};
+use cl_core::ids::{ItemId, JournalLineId};
+use cl_core::{Money, Quantity, UserInput};
 use cl_grid::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,
-    Grid, GridHeight, GridOutput, GridSpec, Line, ListId, Lookups, RecordOutcome, RowKey,
-    RowKeyGen, RowModel, RowState, Source, TextKey, WidthSpec,
+    Grid, GridHeight, GridOutput, GridSpec, Line, ListId, Lookups, RecordOutcome, RowHeight,
+    RowKey, RowKeyGen, RowModel, RowNote, RowState, Source, TextKey, WidthSpec,
 };
 use cl_model::CommandId;
 use cl_model::amount_entry::{AmountKind, AmountRules, Sign};
@@ -80,6 +80,8 @@ pub enum Shown {
     Cant,
     /// The engine's figures.
     Ready {
+        /// The quantity it used.
+        quantity: Option<Quantity>,
         /// The rate it used.
         rate: Option<Money>,
         /// Where it came from.
@@ -96,6 +98,7 @@ impl Shown {
             LineView::Updating => Shown::Updating,
             LineView::CantCalculate => Shown::Cant,
             LineView::Ready(f) => Shown::Ready {
+                quantity: f.quantity,
                 rate: f.unit_price,
                 source: f.source,
                 amount: f.amount,
@@ -136,10 +139,10 @@ pub fn grid_spec() -> GridSpec {
         mono: true,
         ..c
     };
-    GridSpec::line_entry(vec![
+    let mut spec = GridSpec::line_entry(vec![
         Column {
             placeholder: Some(TextKey("invoice.col.item")),
-            ..column(V_ITEM, "invoice.col.item", picker(ITEMS), (110, 150, 1))
+            ..column(V_ITEM, "invoice.col.item", picker(ITEMS), (90, 150, 1))
         },
         column(
             V_DESC,
@@ -148,7 +151,7 @@ pub fn grid_spec() -> GridSpec {
                 multiline: true,
                 max_chars: 4000,
             },
-            (140, 260, 3),
+            (110, 260, 3),
         ),
         Column {
             mono: true,
@@ -156,7 +159,7 @@ pub fn grid_spec() -> GridSpec {
                 V_DATE,
                 "invoice.col.service_date",
                 CellKind::Date,
-                (90, 100, 0),
+                (80, 100, 0),
             )
         },
         number(column(
@@ -169,7 +172,7 @@ pub fn grid_spec() -> GridSpec {
             V_RATE,
             "invoice.col.rate",
             CellKind::Amount(RATE),
-            (80, 90, 0),
+            (70, 90, 0),
         )),
         Column {
             editable: false,
@@ -177,7 +180,7 @@ pub fn grid_spec() -> GridSpec {
                 V_AMOUNT,
                 "invoice.col.amount",
                 CellKind::Display,
-                (90, 110, 0),
+                (80, 110, 0),
             ))
         },
         Column {
@@ -190,10 +193,14 @@ pub fn grid_spec() -> GridSpec {
                 V_ACCOUNT,
                 "invoice.col.account",
                 picker(ACCOUNTS),
-                (100, 140, 1),
+                (90, 140, 1),
             )
         },
-    ])
+    ]);
+    // Rows grow with a several-line description and carry a billable
+    // cost's source caption under them.
+    spec.height = RowHeight::Measured { max_rows: 1_000 };
+    spec
 }
 
 /// Row keys, the lists, each item's taxable flag and the shown figures.
@@ -206,6 +213,9 @@ pub struct InvState {
     pub taxable: HashMap<ItemId, bool>,
     /// The subtotal items (their lines have no Tax box or income account).
     pub subtotals: HashSet<ItemId>,
+    /// A billable line's source caption ("From Ozark Feed & Seed bill
+    /// 20931"), by its cost's source line.
+    pub captions: HashMap<JournalLineId, String>,
     /// What each line's Rate and Amount show.
     pub shown: HashMap<RowKey, Shown>,
     updating: String,
@@ -303,7 +313,14 @@ impl RowModel for View<'_> {
             V_ITEM => picked(lists, ITEMS, l.item.and_then(|i| lists.item_key(i))),
             V_DESC => CellValue::Text(Cow::Borrowed(&l.description)),
             V_DATE => l.service_date.map_or(CellValue::Empty, CellValue::Date),
-            V_QTY => l.quantity.map_or(CellValue::Empty, CellValue::Quantity),
+            // A billable line shows the engine's quantity (the source's,
+            // 1 when it had none), the same before and after the save.
+            V_QTY => match shown {
+                Shown::Ready {
+                    quantity: Some(q), ..
+                } if l.billable.is_some() => CellValue::Quantity(q),
+                _ => l.quantity.map_or(CellValue::Empty, CellValue::Quantity),
+            },
             // A billable line shows the engine's display rate (amount /
             // quantity, Q-P20w): "Updating…" while a preview is pending,
             // never the source's cost (N4).
@@ -342,6 +359,11 @@ impl RowModel for View<'_> {
             },
             _ => CellValue::Empty,
         }
+    }
+    fn row_note(&self, index: usize) -> Option<RowNote<'_>> {
+        let src = self.lines().get(index)?.billable?.source_line;
+        let caption = self.a.captions.get(&src)?;
+        Some(RowNote::Caption(Cow::Borrowed(caption)))
     }
     fn row_label(&self, _index: usize) -> String {
         String::new()
@@ -522,6 +544,7 @@ impl InvoiceGrid {
                     lists,
                     taxable: HashMap::new(),
                     subtotals: HashSet::new(),
+                    captions: HashMap::new(),
                     shown: HashMap::new(),
                     updating: t("invoice.updating"),
                     cant: t("invoice.cant_calculate"),
@@ -592,6 +615,18 @@ impl InvoiceGrid {
     /// Forgets the unknown item name (set up, or the owner moved on).
     pub fn clear_unknown_item(&mut self) {
         self.form.adapter_mut().unknown_item = None;
+    }
+
+    /// A billable line's source caption, if known.
+    #[must_use]
+    pub fn caption(&self, line: &InvoiceLine) -> Option<&str> {
+        let src = line.billable?.source_line;
+        self.form.adapter().captions.get(&src).map(String::as_str)
+    }
+
+    /// Keeps the source captions of these billable costs.
+    pub fn add_captions(&mut self, captions: impl IntoIterator<Item = (JournalLineId, String)>) {
+        self.form.adapter_mut().captions.extend(captions);
     }
 
     /// The items' taxable flags.
@@ -748,6 +783,7 @@ mod tests {
             lists: Arc::new(ItemLists::default()),
             taxable: HashMap::from([(sub, false), (plain, true)]),
             subtotals: HashSet::from([sub]),
+            captions: HashMap::new(),
             shown: HashMap::new(),
             updating: String::new(),
             cant: String::new(),
