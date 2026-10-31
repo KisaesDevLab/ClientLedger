@@ -185,7 +185,7 @@ impl InvoiceScreen {
         if let Some(text) = self
             .editing
             .as_ref()
-            .and_then(|e| super::email::sent_text(&e.record))
+            .and_then(|e| super::email::sent_text(&e.record, self.email.own.as_deref()))
         {
             banner(ui, tokens, |ui| {
                 ui.label(text);

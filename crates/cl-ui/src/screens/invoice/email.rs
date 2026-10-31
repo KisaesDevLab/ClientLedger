@@ -59,6 +59,10 @@ pub(crate) struct EmailFlow {
     then: Option<SaveIntent>,
     job: Option<Job<Outcome>>,
     from_job: Option<Job<String>>,
+    /// The company's own From address (the BCC-self copy, Q-P20j): left out
+    /// of the send history shown (Q-P20ab).
+    pub(crate) own: Option<String>,
+    own_job: Option<Job<String>>,
     /// Sending failed: offer the Outbox or a PDF.
     failed: bool,
     problem: Option<&'static str>,
@@ -159,11 +163,18 @@ impl EmailFlow {
     }
 
     pub(crate) fn poll(&mut self) {
-        if let Some(Ok(from)) = engine::poll(&mut self.from_job)
-            && self.bcc.trim().is_empty()
+        if let Some(Ok(from)) = engine::poll(&mut self.own_job)
             && from.contains('@')
         {
-            self.bcc = from;
+            self.own = Some(from);
+        }
+        if let Some(Ok(from)) = engine::poll(&mut self.from_job)
+            && from.contains('@')
+        {
+            self.own = Some(from.clone());
+            if self.bcc.trim().is_empty() {
+                self.bcc = from;
+            }
         }
         if let Some(r) = engine::poll(&mut self.job) {
             match r {
@@ -484,6 +495,23 @@ impl InvoiceScreen {
         self.offer_send = false;
     }
 
+    /// Reads the company's From address once (for the send history).
+    pub(crate) fn fetch_own_address(&mut self) {
+        if self.link.is_demo()
+            || self.email.own.is_some()
+            || self.email.own_job.is_some()
+            || !self.has(cl_api::Capabilities::INVOICE_EMAIL)
+        {
+            return;
+        }
+        self.email.own_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |_| Ok(String::new()),
+            |s| async move { Ok(s.smtp_settings().await?.smtp_from) },
+        ));
+    }
+
     fn email_target(&self) -> Option<TransactionId> {
         self.email.invoice.as_ref().map(|r| r.txn.id)
     }
@@ -723,8 +751,10 @@ impl InvoiceScreen {
     }
 }
 
-/// "Sent on 11/04/2026 by email to a@b.example" (Q-P20f), the latest send.
-pub(crate) fn sent_text(r: &InvoiceRecord) -> Option<String> {
+/// "Sent on 11/04/2026 by email to a@b.example" (Q-P20f), the latest send,
+/// To and Cc only: the company's own address (its BCC-self copy) is left
+/// out (Q-P20ab).
+pub(crate) fn sent_text(r: &InvoiceRecord, own: Option<&str>) -> Option<String> {
     let last = r.send_history.last()?;
     let when = last
         .sent_at
@@ -736,7 +766,13 @@ pub(crate) fn sent_text(r: &InvoiceRecord) -> Option<String> {
         SendMethod::Email => "invoice.sent.email",
         SendMethod::Pdf | SendMethod::Other => "invoice.sent.pdf",
     });
-    let to = last.recipients.join(", ");
+    let to = last
+        .recipients
+        .iter()
+        .filter(|a| own.is_none_or(|o| !a.trim().eq_ignore_ascii_case(o.trim())))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
     Some(if to.is_empty() {
         crate::i18n::t_with("invoice.sent.banner", &[("date", &when), ("how", &how)])
     } else {
@@ -745,4 +781,25 @@ pub(crate) fn sent_text(r: &InvoiceRecord) -> Option<String> {
             &[("date", &when), ("how", &how), ("to", &to)],
         )
     })
+}
+
+#[cfg(test)]
+mod sent_tests {
+    use super::*;
+
+    #[test]
+    fn the_owners_bcc_copy_is_not_shown_in_the_history() {
+        let mut r: InvoiceRecord = serde_json::from_value(serde_json::json!({
+            "id": "d1000000-0000-4000-8000-000000000001", "txnType": "invoice",
+            "txnDate": "2026-11-04", "status": "posted", "lines": [],
+            "sendHistory": [{"method": "email", "sentAt": "2026-11-04T12:00:00.000Z",
+                "recipients": ["ap@client.example", "Owner@Company.example"]}],
+        }))
+        .expect("record");
+        let text = sent_text(&r, Some("owner@company.example")).expect("text");
+        assert!(text.contains("ap@client.example"));
+        assert!(!text.to_lowercase().contains("owner@company.example"));
+        r.send_history.clear();
+        assert_eq!(sent_text(&r, None), None);
+    }
 }

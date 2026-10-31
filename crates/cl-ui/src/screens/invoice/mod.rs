@@ -345,6 +345,7 @@ impl InvoiceScreen {
     /// Reads the accounts, names, tags, closing date and items.
     pub(crate) fn start_lists(&mut self) {
         self.books.start(&self.link, self.group.as_ref());
+        self.fetch_own_address();
         self.items_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
