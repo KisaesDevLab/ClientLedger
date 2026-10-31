@@ -2,6 +2,19 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-27 — A06 (ADD-02) complete on `phase/A06-statement-reading`; PR with auto-merge. Shipped:
+  - `cl-docread` statement reading in the sandboxed worker (protocol v5): header (statement date, period, opening and closing), line table with the sign from its column (single / charges / credits / payments, running balance), multi-page tables, balance-forward, subtotal, total and aging rows left out (Q-296); checks for sum, running balance, period and duplicates, flagged and never adjusted; 20 pages and 2,000 lines per statement (Q-300); `stmt:` statement layouts kept apart from bill layouts (Q-A06e).
+  - Match Vendor Statement "Read a statement file" (Browse, drop, Review Documents, Vendor statements intake folders): read lines become the box's rows and go through the existing Match (Q-A06b); statement beside its lines with line ↔ spot highlights; read marks; Accept / Alt+A before Match; "Ask AI to help" suggests only vendor and closing balance, each needing "Use this…"; wrong-vendor warning; "Couldn't read this statement…".
+  - Balance line from the engine's vendor-statement report read as CSV, exact difference, display only (Q-297, Q-A06c). "Save this statement with the vendor" (contact attachment, period in the file name; from a draft: copy, discard, delete; Q-A06d).
+  - Engine U-94 (PR #183: statement draft kind, `statements` intake kind, `document-drafts-statement-v1`, migration 0235) merged; pin 5a9a8700. Synthetic statements (15 layouts, 3 held out) and the statement lines gate in `docread-accuracy`.
+  Acceptance (addenda/ADD-02-statement-reading.md A06; photos per owner amendment Q-A06h):
+  - [x] AI off, offline: lines right on text PDFs 100 % (seen and held-out), scans 96.6 % / 94.5 %, photos 79.6 % / 73.5 % (targets 95 / 85 / 75 seen, 70 held-out).
+  - [x] Totals that don't reconcile are flagged and never adjusted (property test with injected errors).
+  - [x] Read lines go through the existing Match exactly as typed lines; nothing posts without the owner (`rows_from_read` round trip incl. credits under Charges; `statement_match` scenario).
+  - [x] The statement is shown beside its lines, each line linked to its spot (scenario clicks a line and a box, light and dark).
+  - [x] A malformed or hostile file can't crash or hang the desktop (worker limits, page and line caps, reply cap tested).
+  Reviews: one combined review (2 blocking: credits under Charges became charges; save could file on the wrong vendor; 7 should-fix; all fixed except S5, settled by the owner's photo amendment), ui-verifier (statement above the lines, Create credit on a payment, and 6 more; fixed). Full local CI once; GitHub CI on the PR.
+  Agents: scout/opus, impl/opus ×2 (WP-S1 reading, WP-S2 screen), engine-impl/opus (U-94 + 3 follow-ups), review/opus, impl/opus (review fixes), ui-verifier/opus, impl/opus (screen fixes), impl/sonnet (pin bump), docs-writer/sonnet. Plan by the orchestrator (Tier M, Q-301).
 - 2026-10-27 — A04 (ADD-01) complete on `phase/A04-review-queue`; PR with auto-merge. Shipped:
   - Review queue: files from intake folders become document drafts on arrival (claim on arrival, inbox state v3, `DraftLink`); rows show kind, arrival date and file name; keyboard through the whole queue.
   - Draft → form: "Enter this as" bill, card charge or check; the form opens filled from the read with the document beside it (docked or popped out); convert or attach through `DraftSession`; HMAC digest over the request body actually sent (`ConvertBody::wire_body`).
