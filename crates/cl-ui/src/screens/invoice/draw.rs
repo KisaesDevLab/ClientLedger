@@ -100,8 +100,16 @@ impl InvoiceScreen {
         let open = self.read_only().is_none();
         let mut clicked: Option<&'static str> = None;
         // One tooltip format: what it does, then the keys ("Ctrl+Shift+U").
-        let tip =
-            |key: &str, cmd: &str| t_with(key, &[("keys", &kit::chip(cmd).replace(' ', "+"))]);
+        // A command without a shortcut drops the "(…)".
+        let tip = |key: &str, cmd: &str| {
+            let keys = kit::chip(cmd).trim().replace(' ', "+");
+            let text = t_with(key, &[("keys", &keys)]);
+            if keys.is_empty() {
+                text.replace(" ()", "")
+            } else {
+                text
+            }
+        };
         let nav = kit::toolbar(ui, tokens, idle, dirty, |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
