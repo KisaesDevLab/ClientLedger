@@ -80,6 +80,8 @@
 | A08 | Report Builder editor | M | After A07 (mockup approved first) |
 | A09 | Memorized Reports, transfer, export and print | M | After A08 |
 | A10 | AI drafting of report definitions | M | After A08 |
+**ADD-04 — Distribution through winget** (`addenda/ADD-04-winget.md`; part of the beta; owner request and Q&A 2026-10-31, Q-317–Q-323). No A-phases: built inside P35/P36, switched on at P39 stage 2 (first manual submission, then `WINGET_ENABLED`). MSI per-machine only; UpgradeCode {5871208F-8AA3-4EC1-86A7-ABCF603A0765}; package `KisaesLLC.ClientLedger`.
+
 ## Post-beta (owner may reorder, Q-39)
 
 | Phase | Title | Tier | Status |
@@ -199,6 +201,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 3. Engine issues #154, #155, #157 and #158 are still open.
 4. Engine main CI (npm-audit) is failing; pre-existing, not caused by PR #159.
 5. The vendor A/P aging summary lists bills only; vendor refunds are not reflected there (the vendor statement shows them).
+
+## Follow-ups from the 2026-10-30 session (PRs #52–#64)
+
+1. Screen checks that failed on `main`: `card_charge` step 44 ("Account, line 1" too narrow for "5200 · Project Supplies and Materials") and `bill` (document reading needs local OCR on this PC). Fixed on `fix/ui-check-card-bill`: the shared lines grid gives Account more room than Memo, and local OCR is built here (`cargo xtask ocr-build`, `ocr-models`).
+2. Engine `main` (and the pin `129deff7`) is still **PolyForm Small Business**; the owner's Internal Use relicense is on the unmerged engine branch `clientledger/license-internal-use` (commit `0b558243`). ClientLedger's NOTICE.md describes the engine as licensed to ClientLedger without naming its license (Q-303). Merge the engine branch when the owner decides.
+3. macOS 14 runners retire 2026-11-02; CI, nightly and preview moved to macOS 15 and `main`'s required check is `ci (macos-15)` (#61).
+4. Auto-merge sometimes leaves a PR open after its required checks pass (#61, #64); re-applying `gh pr merge --auto --merge` merges it.
 
 ## Follow-ups from P19
 

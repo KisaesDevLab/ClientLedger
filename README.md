@@ -34,9 +34,9 @@ come later (phase P35).
 - ClientLedger code: PolyForm Internal Use License 1.0.0, see
   [LICENSE](LICENSE). Use it, and change it, for your own organization's
   internal business; it may not be distributed.
-- The bundled engine in `engine/`: Kisaes LLC's own license, licensed to
-  ClientLedger so that you use it inside ClientLedger under ClientLedger's
-  license. See [NOTICE.md](NOTICE.md). Only official releases include it.
+- The bundled engine in `engine/`: a commercial license from Kisaes LLC that is
+  included with ClientLedger at no charge and with no license key. See
+  [NOTICE.md](NOTICE.md). Only official releases include it.
 
 ## Contributing
 
