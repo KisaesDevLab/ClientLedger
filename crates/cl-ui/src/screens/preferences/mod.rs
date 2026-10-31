@@ -1382,6 +1382,14 @@ impl Screen for PreferencesScreen {
                 });
             });
         });
+        // An email field problem goes away once the field is corrected.
+        // (Host also stands for "no test request", so it stays until Save.)
+        if let Some(SaveBlock::Smtp(e)) = &self.block
+            && *e != cl_settings::SmtpFieldError::Host
+            && self.edits.email.form.validate().err().as_ref() != Some(e)
+        {
+            self.block = None;
+        }
         frame.bottom(|ui| {
             ui.separator();
             if let Some(b) = &self.block {

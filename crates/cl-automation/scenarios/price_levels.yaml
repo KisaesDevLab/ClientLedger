@@ -1,0 +1,30 @@
+# Price Levels (Lists, U-40) against `clientledger --demo`: the list, a new
+# level saved with a percent, opened again, and deleted. Synthetic.
+name: price_levels
+description: "Price level list and editor: new, save, open, delete."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.price_levels
+  - assert_state: {key: screen.screen, equals: price_levels}
+  - assert_state: {key: screen.available, equals: true}
+  - assert_exists: {role: button, label: New price level}
+  - screenshot: list
+  - assert_no_clipping: {}
+  - click: {role: button, label: New price level}
+  - assert_state: {key: screen.editing, equals: false}
+  - click: {role: text_input, label: Name}
+  - type: {text: "Scenario level"}
+  - click: {role: text_input, label: Percent up or down}
+  - type: {text: "-5"}
+  - screenshot: editor-new
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: null}
+  - click: {role: link, label: "Scenario level"}
+  - assert_state: {key: screen.editing, equals: true}
+  - assert_exists: {role: button, label: Delete}
+  - screenshot: editor
+  - assert_no_clipping: {}
+  - click: {role: button, label: Delete}
+  - assert_not_exists: {role: link, label: "Scenario level"}
+  - command: file.close_window

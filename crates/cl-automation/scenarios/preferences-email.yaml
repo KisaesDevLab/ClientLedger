@@ -43,6 +43,9 @@ steps:
   - click: {role: text_input, label: From address}
   - key: Ctrl+A
   - type: {text: books@ozarkridge.example}
+  # The problem goes away once the address is corrected.
+  - assert_state: {key: screen.blocked, equals: null}
+  - assert_not_exists: {role: label, label_contains: From address must be an email address}
   - click: {role: text_input, label: From name}
   - type: {text: Ozark Ridge Landscaping}
   - assert_no_clipping: {}
@@ -62,6 +65,12 @@ steps:
   - assert_state: {key: screen.blocked, equals: "Smtp(PlainNotLocal)"}
   - click: {role: radio_button, label: TLS (465)}
   - screenshot: email-saved
+  # The invoice email template editor (P20, Q-P20f).
+  - assert_exists: {label_contains: Email templates}
+  - assert_exists: {label: Invoice subject}
+  - assert_exists: {role: button, label: Use the standard text}
+  - screenshot: email-templates
+  - assert_no_clipping: {}
   - click: {role: button, label: Remove password}
   - assert_state: {key: screen.email.password_saved, equals: false}
   - click: {role: button, label: Cancel}
