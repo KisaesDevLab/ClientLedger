@@ -155,6 +155,14 @@ pub struct InvoiceScreen {
     pub(crate) inputs: Inputs,
     pub(crate) tracker: PreviewTracker,
     pub(crate) preview_job: Option<(PreviewTicket, Job<InvoicePreview>)>,
+    /// The number the next invoice gets from the company's counter
+    /// (`document-numbers-v1`, Q-P20ad): shown while Invoice # is blank;
+    /// never sent (a typed number skips the counter).
+    pub(crate) next_number: Option<String>,
+    next_job: Option<Job<String>>,
+    /// The number typed is in use on another invoice (Q-94): saved with a
+    /// warning.
+    pub(crate) duplicate_number: bool,
     /// Print is waiting for its print-later save to open Print Forms.
     pub(crate) print_after_save: bool,
     /// A PDF being made on the queue (Preview, Save PDF), opened when done.
@@ -162,7 +170,9 @@ pub struct InvoiceScreen {
     pub(crate) preview_problem: Option<&'static str>,
     pub(crate) clock: Instant,
     pub(crate) editing: Option<Editing>,
-    pub(crate) save_job: Option<Job<Versioned<InvoiceRecord>>>,
+    /// The save in flight: the invoice and whether its typed number is in
+    /// use elsewhere (Q-94).
+    pub(crate) save_job: Option<Job<(Versioned<InvoiceRecord>, bool)>>,
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(String, IdempotencyKey)>,
     pub(crate) void_job: Option<(Pending, Job<Versioned<InvoiceRecord>>)>,
@@ -235,6 +245,9 @@ impl InvoiceScreen {
             preview_job: None,
             pdf_job: None,
             print_after_save: false,
+            next_number: None,
+            next_job: None,
+            duplicate_number: false,
             preview_problem: None,
             clock: Instant::now(),
             editing: None,
@@ -346,6 +359,9 @@ impl InvoiceScreen {
     pub(crate) fn start_lists(&mut self) {
         self.books.start(&self.link, self.group.as_ref());
         self.fetch_own_address();
+        if self.editing.is_none() {
+            self.fetch_next_number();
+        }
         self.items_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
@@ -409,7 +425,15 @@ impl InvoiceScreen {
         }
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
-                Ok(v) => self.saved(&v),
+                Ok((v, duplicate)) => {
+                    self.saved(&v);
+                    self.duplicate_number = duplicate;
+                    if duplicate {
+                        self.link.push(crate::company::CompanyEvent::Toast(
+                            "invoice.number.duplicate",
+                        ));
+                    }
+                }
                 Err(e) => self.save_failed(e),
             }
         }
@@ -444,6 +468,9 @@ impl InvoiceScreen {
             }
         }
         self.billable.poll();
+        if let Some(r) = engine::poll(&mut self.next_job) {
+            self.next_number = r.ok();
+        }
         self.poll_pdf();
         self.email.poll();
         if let Some(done) = self.email.take_done() {
@@ -589,7 +616,30 @@ impl InvoiceScreen {
         self.sales = None;
         self.billable.forget();
         self.unknown_client = None;
+        self.duplicate_number = false;
         self.sync_inputs();
+        self.fetch_next_number();
+    }
+
+    /// Reads the next invoice number (nothing is taken).
+    pub(crate) fn fetch_next_number(&mut self) {
+        if !self.link.is_demo() && !self.has(Capabilities::DOCUMENT_NUMBERS) {
+            return;
+        }
+        self.next_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| Ok(crate::company::demo::invoices::next_number(d)),
+            |s| async move {
+                Ok(s.printing()
+                    .next_number(cl_api::DocType::Invoice)
+                    .await?
+                    .next)
+            },
+        ));
+        if let Some(Ok(n)) = engine::poll(&mut self.next_job) {
+            self.next_number = Some(n);
+        }
     }
 
     /// Clear: throw the unsaved edits away.
@@ -691,6 +741,8 @@ impl InvoiceScreen {
             "lost": self.lost.state_json(),
             "grid": { "focused": self.grid.has_focus() },
         });
+        v["next_number"] = json!(self.next_number);
+        v["duplicate_number"] = json!(self.duplicate_number);
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
             self.closing_prompt.state_json(self.closing_supported()),

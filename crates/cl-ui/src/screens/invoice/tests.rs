@@ -388,3 +388,32 @@ fn a_send_elsewhere_reloads_the_open_invoice() {
     assert_eq!(now.send_history.len(), 1);
     assert_ne!(now.txn.updated_at, None);
 }
+
+/// Q-P20ad: a new invoice shows the counter's next number and doesn't send
+/// it; a typed number already in use saves with a warning (Q-94).
+#[test]
+fn the_next_number_shows_and_a_duplicate_warns() {
+    let (_d, mut s) = screen();
+    assert_eq!(s.next_number.as_deref(), Some("1042"));
+    mockup(&mut s);
+    s.start_save(SaveIntent::SaveAndNew, None);
+    settle(&mut s);
+    assert_eq!(s.next_number.as_deref(), Some("1043"));
+    assert!(!s.duplicate_number);
+    let c = story_client(&s);
+    s.pick_client(c);
+    let item = s.items[3].id;
+    s.grid.edit(|v, keys| {
+        v.lines = vec![InvoiceLine {
+            item: Some(item),
+            quantity: Some(q("1")),
+            rate: Some(m("10.00")),
+            ..InvoiceLine::blank(keys.next_key())
+        }];
+        v.ensure_entry_line(keys);
+    });
+    s.header.edit(field::NUMBER, |h| h.number = "1042".into());
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    assert!(s.duplicate_number, "1042 is taken");
+}

@@ -171,6 +171,8 @@ impl InvoiceScreen {
                 return false;
             }
         };
+        // A typed number already in use saves with a warning (Q-94).
+        new.warn_only = new.txn_number.is_some();
         if let Some(e) = &self.editing {
             new.release_billable_source_line_ids = released(&e.record, &req);
         }
@@ -204,15 +206,23 @@ impl InvoiceScreen {
             &self.link,
             self.group.as_ref(),
             label("orphan.invoice_save", Some(key.clone())),
-            |d| match &edit {
-                None => crate::company::demo::invoices::create(d, &new, password.as_ref()),
-                Some((id, r)) => crate::company::demo::invoices::update(
+            |d| {
+                let duplicate = crate::company::demo::invoices::number_in_use(
                     d,
-                    *id,
-                    r.txn.updated_at,
-                    &new,
-                    password.as_ref(),
-                ),
+                    new.txn_number.as_deref(),
+                    edit.as_ref().map(|(id, _)| *id),
+                );
+                match &edit {
+                    None => crate::company::demo::invoices::create(d, &new, password.as_ref()),
+                    Some((id, r)) => crate::company::demo::invoices::update(
+                        d,
+                        *id,
+                        r.txn.updated_at,
+                        &new,
+                        password.as_ref(),
+                    ),
+                }
+                .map(|v| (v, duplicate))
             },
             {
                 let edit = self.editing.as_ref().map(|e| (e.id, e.record.clone()));
@@ -222,7 +232,7 @@ impl InvoiceScreen {
                         None => s.invoices().create(&new2, &opts, key).await?,
                         Some((id, r)) => s.invoices().update(id, &r, &new2, &opts, key).await?,
                     };
-                    Ok(saved.invoice)
+                    Ok((saved.invoice, !saved.warnings.is_empty()))
                 }
             },
         ));

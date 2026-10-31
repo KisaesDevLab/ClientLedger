@@ -835,6 +835,29 @@ pub fn create(
     Ok(saved)
 }
 
+/// `GET /document-numbers/next?type=invoice`: what the next invoice gets.
+#[must_use]
+pub fn next_number(state: &DemoState) -> String {
+    (1041 + state.invoices.next + 1).to_string()
+}
+
+/// A typed number another invoice already has (Q-94 warning).
+#[must_use]
+pub fn number_in_use(
+    state: &DemoState,
+    number: Option<&str>,
+    except: Option<TransactionId>,
+) -> bool {
+    let Some(n) = number.map(str::trim).filter(|n| !n.is_empty()) else {
+        return false;
+    };
+    state
+        .invoices
+        .stored
+        .iter()
+        .any(|(id, s)| Some(*id) != except && s.record["txnNumber"].as_str() == Some(n))
+}
+
 /// The capabilities the demo engine plays (E1 to E4).
 #[must_use]
 pub fn all_caps() -> cl_api::Capabilities {
@@ -849,6 +872,7 @@ pub fn all_caps() -> cl_api::Capabilities {
         cl_api::Capabilities::BILLABLE_COSTS,
         cl_api::Capabilities::PRICE_LEVELS,
         cl_api::Capabilities::INVOICE_EMAIL,
+        cl_api::Capabilities::DOCUMENT_NUMBERS,
     ]
     .into_iter()
     .collect()

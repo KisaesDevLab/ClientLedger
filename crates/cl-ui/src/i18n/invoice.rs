@@ -101,6 +101,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.layout.archived", "That invoice layout is archived. Choose another one."),
     ("invoice.retry", "The books engine was busy. Try saving again."),
     ("invoice.paid.read_only", "This invoice is paid in full, so it can't be changed. To change it, remove the payment first."),
+    ("invoice.number.next", "Next: {number}"),
+    ("invoice.number.duplicate", "Saved. Another invoice already has this number; you may want to change one of them."),
     ("invoice.terms.discount", "{percent}% {days} Net {net}"),
     ("invoice.terms.net", "Net {net}"),
     ("invoice.terms.1_10_net_30", "1% 10 Net 30"),

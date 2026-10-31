@@ -312,6 +312,18 @@ impl InvoiceScreen {
                             self.inputs.rev = self.header.revision();
                         }
                         kit::track(&mut self.focused, &r, field::NUMBER);
+                        // Q-P20ad: the counter's next number while blank;
+                        // the engine confirms it on save.
+                        if self.editing.is_none()
+                            && self.header.current().number.trim().is_empty()
+                            && let Some(n) = &self.next_number
+                        {
+                            ui.label(
+                                RichText::new(t_with("invoice.number.next", &[("number", n)]))
+                                    .size(12.0)
+                                    .color(tokens.text_secondary),
+                            );
+                        }
                     });
                 });
                 ui.add_space(8.0);
