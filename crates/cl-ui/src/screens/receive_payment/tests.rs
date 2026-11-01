@@ -560,3 +560,92 @@ fn credits_alone_are_refused_with_amount_required() {
         "payment.problem.no_amount"
     );
 }
+
+/// The grouped-deposit path through the screen: a check deposited with
+/// another payment bounces against the deposit's bank; the other payment
+/// stays deposited and the deposit can't be voided while the bounce stands.
+#[test]
+fn a_check_in_a_grouped_deposit_bounces_against_the_bank() {
+    use crate::company::demo::{deposits, receivables};
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    assert!(s.start_save(After::Stay, None));
+    s.poll();
+    let pay = s.editing.as_ref().map(|r| r.id).expect("saved");
+    let (deposit, other, bank) = {
+        let mut demo = link.demo_state().expect("demo");
+        let uf = receivables::clearing(&mut demo).expect("uf");
+        let bank = s
+            .books
+            .accounts
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some("1010"))
+            .map(|a| a.id)
+            .expect("1010");
+        let ledger = receivables::ledger_of(&demo, pay).expect("ledger");
+        let waiting = deposits::pending(&mut demo);
+        let other = waiting
+            .iter()
+            .find(|p| p.source != ledger)
+            .expect("another payment waiting");
+        let group = |source, amount, contact| cl_api::GroupedPayment {
+            source,
+            kind: cl_api::DepositSource::Payment,
+            account: uf,
+            amount,
+            contact,
+            memo: None,
+        };
+        let draft = cl_api::DepositDraft {
+            account: bank,
+            date: today(),
+            memo: None,
+            payments: vec![
+                group(
+                    ledger,
+                    Money::parse_wire("4000.00").expect("m"),
+                    s.form.client,
+                ),
+                group(other.source, other.amount, other.contact),
+            ],
+            lines: Vec::new(),
+            deductions: Vec::new(),
+            cash_back: None,
+        };
+        let dep = deposits::create(&mut demo, &draft, None).expect("deposit");
+        (dep, other.source, bank)
+    };
+    // Open it again: deposited, and the bounce explains the bank.
+    s.open_id(pay);
+    s.poll();
+    assert_eq!(s.state()["deposited"], true);
+    s.open_bounce();
+    assert!(s.bounce.as_ref().is_some_and(|f| !f.never_deposited));
+    if let Some(f) = s.bounce.as_mut() {
+        f.bounce_date = Some(today());
+        f.next_step().expect("date");
+    }
+    assert!(s.send_bounce(None), "{:?}", s.notice);
+    s.poll();
+    let v = s.state();
+    assert_eq!(v["bounce"]["done"], true, "{v}");
+    assert_eq!(v["bounce"]["reopened"][0], "4,385.00");
+    assert_eq!(
+        s.bounce
+            .as_ref()
+            .and_then(|f| f.bounce.as_ref())
+            .map(|o| o.held_in),
+        Some(bank)
+    );
+    let mut demo = link.demo_state().expect("demo");
+    assert_eq!(
+        demo.ledger.deposited_in(other),
+        Some(deposit),
+        "the other check stays"
+    );
+    let err = deposits::void(&mut demo, deposit, None).expect_err("refused");
+    assert_eq!(
+        cl_api::payment_refusal(&err),
+        Some(cl_api::PaymentRefusal::Bounced)
+    );
+}
