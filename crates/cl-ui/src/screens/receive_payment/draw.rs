@@ -18,8 +18,38 @@ use crate::theme::Tokens;
 
 /// The side panels' width.
 const SIDE: f32 = 250.0;
-/// One grid row's height.
+/// One grid row's height (the scroll area shows about 12).
 const ROW_H: f32 = 26.0;
+
+/// The open-invoice grid's focusable columns: the Apply box and the
+/// Payment cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GridCol {
+    Apply,
+    Payment,
+}
+
+/// The focus id of a row's Payment cell (Up/Down move to the same column
+/// of the next row).
+pub(crate) fn cell_id(invoice: TransactionId, col: GridCol) -> egui::Id {
+    egui::Id::unique(("payment-grid", invoice, col as u8))
+}
+
+/// Up or Down on a focused grid cell: the cell of the same column one row
+/// up or down, if any (UI standard: arrow keys move between rows).
+pub(crate) fn arrow_target(
+    rows: &[TransactionId],
+    at: (usize, GridCol),
+    down: bool,
+) -> Option<(TransactionId, GridCol)> {
+    let (i, col) = at;
+    let next = if down {
+        i.checked_add(1)?
+    } else {
+        i.checked_sub(1)?
+    };
+    rows.get(next).map(|r| (*r, col))
+}
 
 fn mono(text: String) -> RichText {
     RichText::new(text).text_style(egui::TextStyle::Monospace)
@@ -63,6 +93,21 @@ fn account_combo(
             .labelled_by(l.id);
     });
     changed
+}
+
+/// Keeps Up and Down for the grid while `id` has focus (egui would
+/// otherwise move focus by position).
+fn hold_arrows(ui: &Ui, id: egui::Id) {
+    ui.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            id,
+            egui::EventFilter {
+                vertical_arrows: true,
+                horizontal_arrows: true,
+                ..egui::EventFilter::default()
+            },
+        );
+    });
 }
 
 impl ReceivePaymentScreen {
@@ -380,73 +425,169 @@ impl ReceivePaymentScreen {
         let mut toggles: Vec<TransactionId> = Vec::new();
         let mut typed: Vec<TransactionId> = Vec::new();
         let mut discounts: Vec<TransactionId> = Vec::new();
+        let order: Vec<TransactionId> = rows.rows.iter().map(|r| r.invoice).collect();
+        // The focused cell, before this frame's widgets: Up/Down move to the
+        // same column of the row above or below (Space ticks, Tab moves
+        // across, as egui does for focused widgets).
+        let focused = ui.memory(egui::Memory::focused);
+        let box_of = |inv: TransactionId| {
+            self.grid_boxes
+                .iter()
+                .find(|(i, _)| *i == inv)
+                .map(|(_, id)| *id)
+        };
+        let at = focused.and_then(|f| {
+            order.iter().enumerate().find_map(|(i, inv)| {
+                if box_of(*inv) == Some(f) {
+                    Some((i, GridCol::Apply))
+                } else {
+                    (cell_id(*inv, GridCol::Payment) == f).then_some((i, GridCol::Payment))
+                }
+            })
+        });
+        let mut move_to: Option<(TransactionId, GridCol)> = None;
+        if let Some((i, col)) = at {
+            let (down, up) = ui.input(|inp| {
+                (
+                    inp.key_pressed(egui::Key::ArrowDown),
+                    inp.key_pressed(egui::Key::ArrowUp),
+                )
+            });
+            if down || up {
+                move_to = arrow_target(&order, (i, col), down);
+            }
+        }
+        if let Some((inv, col)) = move_to {
+            // A typed Payment cell is kept before the cursor leaves it.
+            if let Some((i, GridCol::Payment)) = at
+                && let Some(r) = rows.rows.get(i)
+                && self
+                    .cells
+                    .get(&r.invoice)
+                    .is_some_and(|t| *t != shown(r.payment))
+            {
+                typed.push(r.invoice);
+            }
+            let target = match col {
+                GridCol::Apply => box_of(inv),
+                GridCol::Payment => Some(cell_id(inv, col)),
+            };
+            if let Some(id) = target {
+                ui.memory_mut(|m| m.request_focus(id));
+            }
+        }
+        let mut boxes: Vec<(TransactionId, egui::Id)> = Vec::with_capacity(order.len());
+        // Rows differ in height (a discount line under some), so every row
+        // is laid out; the cursor's row is scrolled into view.
         egui::ScrollArea::vertical()
             .id_salt("payment-rows")
             .max_height(ROW_H * 12.0)
             .auto_shrink([false, true])
-            .show_rows(ui, ROW_H, rows.rows.len(), |ui, range| {
-                for r in &rows.rows[range] {
-                    ui.horizontal(|ui| {
-                        let mut on = r.payment.is_positive()
-                            || self.form.row_choice(r.invoice) != RowChoice::Off;
-                        let label = t_with("payment.apply_row", &[("number", &r.number)]);
-                        let c =
-                            ui.add_sized([widths[0], 22.0], egui::Checkbox::without_text(&mut on));
-                        c.widget_info(|| {
-                            egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, &label)
-                        });
-                        if c.clicked() {
-                            toggles.push(r.invoice);
-                        }
-                        ui.add_sized([widths[1], 22.0], egui::Label::new(mono(mmdd(r.date))));
-                        ui.add_sized([widths[2], 22.0], egui::Label::new(mono(r.number.clone())));
-                        ui.add_sized(
-                            [widths[3], 22.0],
-                            egui::Label::new(mono(r.due.map(mmdd).unwrap_or_default())),
-                        );
-                        ui.add_sized([widths[4], 22.0], egui::Label::new(mono(shown(r.original))));
-                        ui.add_sized([widths[5], 22.0], egui::Label::new(mono(shown(r.balance))));
-                        ui.add_sized([widths[6], 22.0], egui::Label::new(mono(shown(r.discount))));
-                        let text = self
-                            .cells
-                            .entry(r.invoice)
-                            .or_insert_with(|| shown(r.payment));
-                        let cell_label = t_with("payment.payment_row", &[("number", &r.number)]);
-                        let e = ui.add_sized(
-                            [widths[7], 22.0],
-                            egui::TextEdit::singleline(text)
-                                .font(egui::TextStyle::Monospace)
-                                .align(egui::Align2::RIGHT_CENTER),
-                        );
-                        e.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, &cell_label)
-                        });
-                        if e.lost_focus() && *text != shown(r.payment) {
-                            typed.push(r.invoice);
-                        }
-                    });
-                    if r.suggest_discount {
+            .show(ui, |ui| {
+                for r in &rows.rows {
+                    // Keyed by invoice: each row's widget ids stay the same
+                    // whatever rows come before it.
+                    ui.push_id(r.invoice, |ui| {
                         ui.horizontal(|ui| {
-                            ui.add_space(widths[0]);
-                            let chip = t_with(
-                                "payment.discount.chip",
-                                &[
-                                    ("date", &r.discount_date.map(mmdd).unwrap_or_default()),
-                                    ("percent", r.discount_percent.as_deref().unwrap_or("")),
-                                    ("amount", &shown(r.discount_available)),
-                                ],
+                            let mut on = r.payment.is_positive()
+                                || self.form.row_choice(r.invoice) != RowChoice::Off;
+                            let label = t_with("payment.apply_row", &[("number", &r.number)]);
+                            let c = ui.add_sized(
+                                [widths[0], 22.0],
+                                egui::Checkbox::without_text(&mut on),
                             );
-                            ui.label(RichText::new(chip).color(tokens.accent));
-                            if ui
-                                .button(t_with("payment.discount.apply", &[("number", &r.number)]))
-                                .clicked()
+                            let apply_id = c.id;
+                            boxes.push((r.invoice, apply_id));
+                            c.widget_info(|| {
+                                egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, &label)
+                            });
+                            if c.clicked() {
+                                toggles.push(r.invoice);
+                            }
+                            if c.has_focus() {
+                                hold_arrows(ui, apply_id);
+                                if move_to.is_some_and(|(i, _)| i == r.invoice) {
+                                    c.scroll_to_me(None);
+                                }
+                            }
+                            ui.add_sized([widths[1], 22.0], egui::Label::new(mono(mmdd(r.date))));
+                            ui.add_sized(
+                                [widths[2], 22.0],
+                                egui::Label::new(mono(r.number.clone())),
+                            );
+                            ui.add_sized(
+                                [widths[3], 22.0],
+                                egui::Label::new(mono(r.due.map(mmdd).unwrap_or_default())),
+                            );
+                            ui.add_sized(
+                                [widths[4], 22.0],
+                                egui::Label::new(mono(shown(r.original))),
+                            );
+                            ui.add_sized(
+                                [widths[5], 22.0],
+                                egui::Label::new(mono(shown(r.balance))),
+                            );
+                            ui.add_sized(
+                                [widths[6], 22.0],
+                                egui::Label::new(mono(shown(r.discount))),
+                            );
+                            let text = self
+                                .cells
+                                .entry(r.invoice)
+                                .or_insert_with(|| shown(r.payment));
+                            let cell_label =
+                                t_with("payment.payment_row", &[("number", &r.number)]);
+                            let pay_id = cell_id(r.invoice, GridCol::Payment);
+                            let e = ui.add_sized(
+                                [widths[7], 22.0],
+                                egui::TextEdit::singleline(text)
+                                    .id(pay_id)
+                                    .font(egui::TextStyle::Monospace)
+                                    .align(egui::Align2::RIGHT_CENTER),
+                            );
+                            e.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::TextInput, true, &cell_label)
+                            });
+                            if e.has_focus() {
+                                hold_arrows(ui, pay_id);
+                                if move_to.is_some_and(|(i, _)| i == r.invoice) {
+                                    e.scroll_to_me(None);
+                                }
+                            }
+                            if e.lost_focus()
+                                && *text != shown(r.payment)
+                                && !typed.contains(&r.invoice)
                             {
-                                discounts.push(r.invoice);
+                                typed.push(r.invoice);
                             }
                         });
-                    }
+                        if r.suggest_discount {
+                            ui.horizontal(|ui| {
+                                ui.add_space(widths[0]);
+                                let chip = t_with(
+                                    "payment.discount.chip",
+                                    &[
+                                        ("date", &r.discount_date.map(mmdd).unwrap_or_default()),
+                                        ("percent", r.discount_percent.as_deref().unwrap_or("")),
+                                        ("amount", &shown(r.discount_available)),
+                                    ],
+                                );
+                                ui.label(RichText::new(chip).color(tokens.accent));
+                                if ui
+                                    .button(t_with(
+                                        "payment.discount.apply",
+                                        &[("number", &r.number)],
+                                    ))
+                                    .clicked()
+                                {
+                                    discounts.push(r.invoice);
+                                }
+                            });
+                        }
+                    });
                 }
             });
+        self.grid_boxes = boxes;
         ui.horizontal(|ui| {
             ui.add_sized(
                 [widths[0] + widths[1] + widths[2] + widths[3], 22.0],

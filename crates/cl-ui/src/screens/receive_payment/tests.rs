@@ -289,3 +289,90 @@ fn a_credit_used_later_the_same_day_is_not_own_cash() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].invoice, ids["1091"]);
 }
+
+/// Runs one frame of the screen with `events`.
+fn frame(ctx: &egui::Context, s: &mut ReceivePaymentScreen, events: Vec<egui::Event>) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1440.0, 940.0),
+        )),
+        events,
+        ..egui::RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+    });
+    out.textures_delta.clear();
+}
+
+fn key(k: egui::Key) -> Vec<egui::Event> {
+    vec![
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        },
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]
+}
+
+/// UI standard: the arrows move between invoice rows in the same column;
+/// Space on a focused Apply box ticks it.
+#[test]
+fn arrows_move_between_rows_and_space_ticks() {
+    use draw::{GridCol, arrow_target, cell_id};
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let ids = invoice_ids(&s);
+    let ctx = egui::Context::default();
+    crate::fonts::install(&ctx);
+    for _ in 0..2 {
+        frame(&ctx, &mut s, Vec::new());
+    }
+    // The Payment column.
+    ctx.memory_mut(|m| m.request_focus(cell_id(ids["1091"], GridCol::Payment)));
+    frame(&ctx, &mut s, Vec::new());
+    frame(&ctx, &mut s, key(egui::Key::ArrowDown));
+    frame(&ctx, &mut s, Vec::new());
+    assert_eq!(
+        ctx.memory(egui::Memory::focused),
+        Some(cell_id(ids["1095"], GridCol::Payment))
+    );
+    frame(&ctx, &mut s, key(egui::Key::ArrowUp));
+    frame(&ctx, &mut s, Vec::new());
+    assert_eq!(
+        ctx.memory(egui::Memory::focused),
+        Some(cell_id(ids["1091"], GridCol::Payment))
+    );
+    // The Apply column.
+    let boxes = s.grid_boxes.clone();
+    assert_eq!(boxes.len(), 2);
+    ctx.memory_mut(|m| m.request_focus(boxes[0].1));
+    frame(&ctx, &mut s, Vec::new());
+    frame(&ctx, &mut s, key(egui::Key::ArrowDown));
+    frame(&ctx, &mut s, Vec::new());
+    assert_eq!(ctx.memory(egui::Memory::focused), Some(boxes[1].1));
+    // The last row stays put on Down.
+    frame(&ctx, &mut s, key(egui::Key::ArrowDown));
+    frame(&ctx, &mut s, Vec::new());
+    assert_eq!(ctx.memory(egui::Memory::focused), Some(boxes[1].1));
+    // Space ticks 1095 (Explicit mode, a fill).
+    frame(&ctx, &mut s, key(egui::Key::Space));
+    assert_eq!(s.form.row_choice(ids["1095"]), cl_model::forms::payment::RowChoice::Fill);
+    // The pure step.
+    let order = [ids["1091"], ids["1095"]];
+    assert_eq!(
+        arrow_target(&order, (0, GridCol::Apply), true),
+        Some((ids["1095"], GridCol::Apply))
+    );
+    assert_eq!(arrow_target(&order, (0, GridCol::Payment), false), None);
+}

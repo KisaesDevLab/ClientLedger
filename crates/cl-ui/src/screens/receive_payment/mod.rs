@@ -185,6 +185,8 @@ pub struct ReceivePaymentScreen {
     pub(crate) feed_job: Option<Job<Vec<FeedMatch>>>,
     pub(crate) feed_dismissed: Vec<String>,
     pub(crate) write_off_pick: Option<AccountId>,
+    /// Each grid row's Apply box id, last frame (Up/Down move between rows).
+    pub(crate) grid_boxes: Vec<(TransactionId, eframe::egui::Id)>,
     pub(crate) layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     pub(crate) dirty: bool,
@@ -265,6 +267,7 @@ impl ReceivePaymentScreen {
             feed_job: None,
             feed_dismissed: Vec::new(),
             write_off_pick: None,
+            grid_boxes: Vec::new(),
             layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             dirty: false,
