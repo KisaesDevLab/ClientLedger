@@ -1,0 +1,59 @@
+# Record bounced check (P21 AC4) against `clientledger --demo`: 4,000.00
+# from Neosho Dental Group saved to Undeposited Funds, opened again with
+# Prev, then bounced with a 35.00 bank fee (from Operating Checking) and a
+# 25.00 fee invoice: invoice 1091 is open again for exactly 4,385.00, the
+# payment is read-only, and the fee invoice exists. A bounce can't be
+# undone on this screen, so it runs once (light) and takes the dark
+# screenshot with window.theme. The deposited-check path (golden case 7:
+# other check stays deposited, the deposit's void refused) runs in the
+# demo engine's tests. Synthetic.
+name: bounced_check
+description: Bounce restores 1091 to 4,385.00, posts the bank fee, invoices the client fee.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+R
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "4000"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.rows.0.due, equals: "4,385.00"}
+  - click: {role: button, label: Record bounced check}
+  - assert_state: {key: screen.bounce.step, equals: confirm}
+  - assert_exists: {label_contains: "comes back out of Undeposited Funds"}
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.bounce.step, equals: fees}
+  - click: {role: text_input, label: Bank fee}
+  - type: {text: "35"}
+  - click: {role: combo_box, label: Fee account}
+  - click: {role: button, label_contains: "Bank and Merchant Fees"}
+  - click: {role: combo_box, label: Taken from bank}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - click: {role: text_input, label: Client fee}
+  - type: {text: "25"}
+  - click: {role: combo_box, label: Fee income account}
+  - click: {role: button, label_contains: "4000"}
+  - click: {role: button, label: Record it}
+  - assert_state: {key: screen.bounce.done, equals: true}
+  - assert_state: {key: screen.bounce.reopened.0, equals: "4,385.00"}
+  - assert_state: {key: screen.bounce.fee_invoice, equals: true}
+  - assert_state: {key: screen.bounce.step, equals: done}
+  - assert_exists: {label: "Invoice 1091 is open again: 4,385.00"}
+  - assert_state: {key: screen.bounced, equals: true}
+  - assert_state: {key: screen.read_only, equals: true}
+  - screenshot: result
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: result-dark
+  - command: window.theme
+  - command: window.theme
+  - click: {role: button, label: Close}

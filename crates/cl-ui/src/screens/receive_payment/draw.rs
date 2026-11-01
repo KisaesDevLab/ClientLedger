@@ -110,7 +110,10 @@ impl ReceivePaymentScreen {
             {
                 self.open_bounce();
             }
-            if self.editing.as_ref().is_some_and(|e| !e.is_void())
+            if self
+                .editing
+                .as_ref()
+                .is_some_and(|e| !e.is_void() && !e.is_bounced())
                 && ui.button(t("payment.void")).clicked()
             {
                 self.dialog = Some(Dialog::Void);
@@ -227,7 +230,9 @@ impl ReceivePaymentScreen {
             form::card(ui, tokens, |ui| self.header_ui(ui, tokens));
             ui.add_space(8.0);
             self.grid_ui(ui, tokens);
-            self.callouts_ui(ui, tokens);
+            if !read_only {
+                self.callouts_ui(ui, tokens);
+            }
         });
         self.summary_ui(ui, tokens);
     }
@@ -489,54 +494,64 @@ impl ReceivePaymentScreen {
         };
         if !c.underpaid.is_empty() || c.writing_off {
             let mut choose: Option<bool> = None;
-            form::card(ui, tokens, |ui| {
-                for s in &c.underpaid {
+            egui::Frame::new()
+                .fill(tokens.warn_surface)
+                .stroke(egui::Stroke::new(1.0, tokens.warn))
+                .corner_radius(6.0)
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    for s in &c.underpaid {
+                        ui.label(
+                            RichText::new(t_with(
+                                "payment.under.title",
+                                &[("amount", &shown(s.amount)), ("number", &number(s.invoice))],
+                            ))
+                            .strong(),
+                        );
+                    }
+                    if c.writing_off && c.underpaid.is_empty() {
+                        ui.label(RichText::new(t("payment.under.writing_off")).strong());
+                    }
+                    let writing = matches!(self.form.under(), Under::WriteOff { .. });
+                    if ui
+                        .radio(!writing, t("payment.under.leave"))
+                        .on_hover_text(t("payment.under.leave.tip"))
+                        .clicked()
+                    {
+                        choose = Some(false);
+                    }
+                    if let Some(s) = c.underpaid.first() {
+                        ui.label(
+                            RichText::new(t_with(
+                                "payment.under.leave.note",
+                                &[("number", &number(s.invoice)), ("amount", &shown(s.amount))],
+                            ))
+                            .color(tokens.text_secondary),
+                        );
+                    }
+                    let suggested = c.underpaid.iter().any(|s| s.within_limit);
+                    let mut wo = RichText::new(t("payment.under.write_off"));
+                    if suggested {
+                        wo = wo.strong().color(tokens.accent);
+                    }
+                    if ui.radio(writing, wo).clicked() {
+                        choose = Some(true);
+                    }
                     ui.label(
-                        RichText::new(t_with(
-                            "payment.under.title",
-                            &[("amount", &shown(s.amount)), ("number", &number(s.invoice))],
-                        ))
-                        .strong(),
+                        RichText::new(t("payment.under.write_off.note"))
+                            .color(tokens.text_secondary),
                     );
-                }
-                if c.writing_off && c.underpaid.is_empty() {
-                    ui.label(RichText::new(t("payment.under.writing_off")).strong());
-                }
-                let writing = matches!(self.form.under(), Under::WriteOff { .. });
-                if ui
-                    .radio(!writing, t("payment.under.leave"))
-                    .on_hover_text(t("payment.under.leave.tip"))
-                    .clicked()
-                {
-                    choose = Some(false);
-                }
-                if let Some(s) = c.underpaid.first() {
-                    ui.label(
-                        RichText::new(t_with(
-                            "payment.under.leave.note",
-                            &[("number", &number(s.invoice)), ("amount", &shown(s.amount))],
-                        ))
-                        .color(tokens.text_secondary),
-                    );
-                }
-                let suggested = c.underpaid.iter().any(|s| s.within_limit);
-                let mut wo = RichText::new(t("payment.under.write_off"));
-                if suggested {
-                    wo = wo.strong().color(tokens.accent);
-                }
-                if ui.radio(writing, wo).clicked() {
-                    choose = Some(true);
-                }
-                ui.label(
-                    RichText::new(t("payment.under.write_off.note")).color(tokens.text_secondary),
-                );
-                if suggested && let Some(limit) = self.defaults.write_off_limit {
-                    ui.label(
-                        RichText::new(t_with("payment.under.hint", &[("limit", &shown(limit))]))
+                    if suggested && let Some(limit) = self.defaults.write_off_limit {
+                        ui.label(
+                            RichText::new(t_with(
+                                "payment.under.hint",
+                                &[("limit", &shown(limit))],
+                            ))
                             .color(tokens.accent),
-                    );
-                }
-            });
+                        );
+                    }
+                });
             match choose {
                 Some(true) => {
                     if self.form.write_off(self.write_off_pick) {
@@ -717,11 +732,13 @@ impl ReceivePaymentScreen {
                 self.clear();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(ready && !busy, egui::Button::new(t("payment.save_close")))
-                    .on_hover_text(kit::chip("form.save_close"))
-                    .clicked()
-                {
+                let primary = ui
+                    .add_enabled_ui(ready && !busy, |ui| {
+                        crate::widgets::primary_button(ui, &t("payment.save_close"))
+                    })
+                    .inner
+                    .on_hover_text(kit::chip("form.save_close"));
+                if primary.clicked() {
                     self.start_save(After::Close, None);
                 }
                 if ui

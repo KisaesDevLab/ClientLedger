@@ -882,6 +882,7 @@ impl ReceivePaymentScreen {
         self.amount_text = shown(rec.amount);
         self.cells.clear();
         self.editing = Some(rec);
+        self.saved_next = None;
         self.dirty = false;
         self.save_key = None;
         self.problems.clear();

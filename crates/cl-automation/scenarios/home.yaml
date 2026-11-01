@@ -189,4 +189,5 @@ steps:
   - click: {role: button, label: Receive Payment}
   - assert_state: {key: screen.screen, equals: receive_payment}
   - command: file.close_window
+  - key: Alt+H
   - assert_exists: {role: button, label: Create Invoice}
