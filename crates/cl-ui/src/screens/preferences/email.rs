@@ -277,7 +277,7 @@ fn templates_card(ui: &mut Ui, tokens: &Tokens, prefs: &mut cl_settings::EmailPr
             (TemplateDoc::Statement, "prefs.email.template.statement"),
         ] {
             ui.push_id(heading, |ui| {
-                template_editor(ui, tokens, prefs, doc, heading)
+                template_editor(ui, tokens, prefs, doc, heading);
             });
             ui.add_space(6.0);
         }

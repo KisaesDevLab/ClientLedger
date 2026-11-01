@@ -119,9 +119,11 @@ mod invoice_model;
 mod receivables_model;
 // P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
 mod credit_memo;
+// P22 D6: Statements.
+mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 39] = [
+const TABLES: [&[(&str, &str)]; 40] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -161,6 +163,7 @@ const TABLES: [&[(&str, &str)]; 39] = [
     invoice::ENGLISH,
     receivables_model::ENGLISH,
     credit_memo::ENGLISH,
+    statements::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
