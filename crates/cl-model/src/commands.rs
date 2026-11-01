@@ -369,7 +369,7 @@ pub const COMMANDS: &[Command] = &[
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // P22 D3: the Refund screen and Assess Finance Charges (no shortcut);
     // built with their screens (D5, D7).
-    screen("clients.refund", "Refund a Credit", Some(Menu::Clients), 2, None, "P22"),
+    built("clients.refund", "Refund a Credit", Some(Menu::Clients), 2, None),
     screen("clients.finance_charges", "Assess Finance Charges", Some(Menu::Clients), 2, None, "P22"),
     built("clients.outbox", "Outbox", Some(Menu::Clients), 2, None),
     // Vendors
@@ -596,6 +596,7 @@ mod tests {
             // P22
             "clients.sales_receipt",
             "clients.credit_memo",
+            "clients.refund",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

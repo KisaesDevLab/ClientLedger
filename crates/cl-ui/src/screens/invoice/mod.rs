@@ -35,7 +35,7 @@ mod billable;
 pub(crate) mod credit;
 // P21 D7: the held customer deposit card (Q-P21f, Q-P21l).
 pub(crate) mod deposit_card;
-mod draw;
+pub(crate) mod draw;
 pub(crate) mod email;
 pub(crate) mod engine;
 mod save;

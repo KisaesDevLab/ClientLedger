@@ -169,6 +169,8 @@ pub fn check_queue(state: &mut DemoState, bank: AccountId) -> Vec<QueuedCheck> {
     }
     out.extend(super::checks::print_queue(state, bank, &is_printed));
     out.extend(super::pay_bills::print_queue(state, bank, &is_printed));
+    // P22 D5: refund checks queued to print (Q-P22d).
+    out.extend(super::credit_memos::refund_checks(state, bank, &is_printed));
     out
 }
 

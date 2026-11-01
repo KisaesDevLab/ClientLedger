@@ -129,6 +129,8 @@ struct Refund {
     void: bool,
     ledger: TransactionId,
     version: i64,
+    /// The bank it is paid from (the check print queue's account).
+    bank: AccountId,
 }
 
 #[derive(Clone)]
@@ -325,6 +327,41 @@ pub(super) fn payment_refunds(state: &DemoState) -> Vec<(TransactionId, Calendar
         .values()
         .filter(|r| !r.void && r.kind != CreditKind::CreditMemo)
         .map(|r| (r.source, r.date, r.amount))
+        .collect()
+}
+
+/// Refund checks on ank waiting in the check print queue (P22 D5, the
+/// engine's listChecks with customer_refund): payee the client, the
+/// client's billing address.
+#[must_use]
+pub fn refund_checks(
+    state: &mut DemoState,
+    bank: AccountId,
+    is_printed: &dyn Fn(TransactionId) -> bool,
+) -> Vec<cl_api::QueuedCheck> {
+    let rows: Vec<(TransactionId, Refund)> = state
+        .credits
+        .refunds
+        .iter()
+        .filter(|(id, r)| r.queued && !r.void && r.bank == bank && !is_printed(**id))
+        .map(|(id, r)| (*id, r.clone()))
+        .collect();
+    let contacts = state.contacts_mut().clone();
+    rows.into_iter()
+        .filter_map(|(id, r)| {
+            let c = contacts.iter().find(|c| c.id == r.customer)?;
+            let (address, _) = crate::screens::invoice::draw::addresses(&c.fields);
+            Some(cl_api::QueuedCheck {
+                id,
+                date: r.date,
+                amount: money(r.amount).ok()?,
+                payee: c.fields.display_name.clone(),
+                memo: String::new(),
+                kind: cl_api::QueuedCheckKind::Check,
+                bank_account: Some(bank),
+                address,
+            })
+        })
         .collect()
 }
 
@@ -1005,6 +1042,7 @@ pub fn create_refund(
             void: false,
             ledger,
             version: 1,
+            bank: r.from_account,
         },
     );
     if let Some(m) = state.credits.memos.get_mut(&source) {
