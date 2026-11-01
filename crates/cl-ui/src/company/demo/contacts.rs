@@ -191,8 +191,11 @@ pub fn history(state: &DemoState, id: ContactId, limit: usize) -> (Vec<Transacti
     let contacts = state.contacts.clone().unwrap_or_default();
     let names = fixture_names(state, &contacts, id);
     let sample = cl_company::Sample::load();
-    let mut rows = Vec::new();
-    let mut total = 0u64;
+    // Payments received in this session (Receive Payment) come first,
+    // newest first, as the engine's list puts them.
+    let mut rows = super::receivables::history_rows(state, id);
+    let mut total = u64::try_from(rows.len()).unwrap_or(0);
+    rows.truncate(limit);
     for t in sample.transactions.iter().rev() {
         if t.date > DemoState::today() {
             continue;

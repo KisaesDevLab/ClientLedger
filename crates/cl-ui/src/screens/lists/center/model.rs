@@ -509,6 +509,14 @@ pub fn history_form(t: cl_api::TxnType) -> Option<&'static str> {
     }
 }
 
+/// True when a history row is a payment that can be recorded as bounced
+/// (a posted customer payment; Receive Payment re-checks the record: a
+/// payment of 0, or one already bounced, says so there).
+#[must_use]
+pub fn can_bounce(r: &TransactionSummary) -> bool {
+    r.txn_type == cl_api::TxnType::CustomerPayment && r.status != cl_api::TxnStatus::Void
+}
+
 impl RowModel for HistoryModel {
     fn revision(&self) -> u64 {
         self.revision

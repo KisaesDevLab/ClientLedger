@@ -573,6 +573,41 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Result<PaymentRecord, Ap
 
 /// `GET /payments`: receipts (not draws), oldest first, optionally one
 /// client's.
+/// The client's customer payments as Client Center history rows (newest
+/// first), as the engine's contact transactions list them.
+#[must_use]
+pub fn history_rows(state: &DemoState, client: ContactId) -> Vec<cl_api::TransactionSummary> {
+    let mut v: Vec<cl_api::TransactionSummary> = state
+        .receivables
+        .pays
+        .iter()
+        .filter(|(_, p)| p.from_deposit.is_none() && p.customer == client)
+        .filter_map(|(id, p)| {
+            let amount = money(p.amount).ok()?;
+            Some(cl_api::TransactionSummary {
+                id: *id,
+                txn_type: cl_api::TxnType::CustomerPayment,
+                txn_number: p.ref_no.clone(),
+                txn_date: p.date,
+                status: if p.void {
+                    cl_api::TxnStatus::Void
+                } else {
+                    cl_api::TxnStatus::Posted
+                },
+                contact_id: Some(client),
+                contact_name: None,
+                memo: None,
+                total: Some(amount),
+                display_total: Some(amount),
+                created_at: None,
+                check_number: None,
+            })
+        })
+        .collect();
+    v.sort_by(|a, b| b.txn_date.cmp(&a.txn_date).then(b.id.cmp(&a.id)));
+    v
+}
+
 pub fn list(state: &mut DemoState, client: Option<ContactId>) -> Vec<PaymentSummary> {
     seed(state);
     let mut v: Vec<(CalendarDate, TransactionId, PaymentSummary)> = state
