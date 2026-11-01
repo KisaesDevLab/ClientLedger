@@ -378,19 +378,29 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "isStale": false,
     }))
     .ok();
+    let accounts = chart();
+    let named = |chart: &[cl_api::Account], n: u32, seeded: &str| {
+        let id = account_id(n);
+        let name = chart
+            .iter()
+            .find(|a| a.id == id)
+            .map_or_else(|| seeded.to_string(), |a| a.fields.name.clone());
+        (id, name)
+    };
     crate::screens::preferences::Loaded {
         settings,
         ai: Some(ai),
         consent,
         smtp: None,
         usage: Some(usage),
+        // The chart's own names (4000 is "Service Income" there).
         incomes: vec![
-            (account_id(4000), "Landscaping Services".into()),
-            (account_id(4950), "Sales Discounts".into()),
+            named(&accounts, 4000, "Service Income"),
+            named(&accounts, 4950, "Sales Discounts"),
         ],
         expenses: vec![
-            (account_id(6050), "Bank and Merchant Fees".into()),
-            (account_id(6960), "Bad Debts".into()),
+            named(&accounts, 6050, "Bank and Merchant Fees"),
+            named(&accounts, 6960, "Bad Debts"),
         ],
         done: true,
     }
@@ -628,6 +638,16 @@ pub fn account_report(account: &cl_api::Account) -> cl_api::AccountReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Preferences' income picker names 4000 as the chart does.
+    #[test]
+    fn preferences_pickers_use_the_charts_names() {
+        let l = preferences_loaded();
+        assert_eq!(
+            l.incomes[0],
+            (account_id(4000), "Service Income".to_string())
+        );
+    }
 
     #[test]
     fn the_demo_list_is_the_mockup() {
