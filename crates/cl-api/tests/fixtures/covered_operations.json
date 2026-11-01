@@ -274,5 +274,9 @@
   {"method":"POST","path":"/api/v1/customer-statements/{id}/email-later","inSpec":true,"fragmentHash":"cdfd879493bd0ff5faa33e1c786a94c04b2cb6211590dc61c0bd628b8acf1674"},
   {"method":"POST","path":"/api/v1/finance-charges/preview","inSpec":true,"fragmentHash":"4d7c4fb138b90260d309674498c72134453c51196c752fd137e31a5d72544f6c"},
   {"method":"POST","path":"/api/v1/finance-charges/assess","inSpec":true,"fragmentHash":"b6884bd8dd85b900e667fa90ba72309e14503ba32183676041b4ee3e3cdf021d"},
-  {"method":"GET","path":"/api/v1/finance-charges","inSpec":true,"fragmentHash":"266fa05298227547fdbcae33c9b820b0297e52c19cbb19982e83fcb261f66f89"}
+  {"method":"GET","path":"/api/v1/finance-charges","inSpec":true,"fragmentHash":"266fa05298227547fdbcae33c9b820b0297e52c19cbb19982e83fcb261f66f89"},
+  {"method":"POST","path":"/api/v1/credit-memos/{id}/email","inSpec":true,"fragmentHash":"04dc1cd0b32e0ac48e006b9dcca214286f0d03876709120da4fb393964d94911"},
+  {"method":"POST","path":"/api/v1/credit-memos/{id}/email-later","inSpec":true,"fragmentHash":"66e01e8b0b5e111e4102edbadab0992966b7902c00eb00d2968443a7bc7771d3"},
+  {"method":"POST","path":"/api/v1/sales-receipts/{id}/email","inSpec":true,"fragmentHash":"04dc1cd0b32e0ac48e006b9dcca214286f0d03876709120da4fb393964d94911"},
+  {"method":"POST","path":"/api/v1/sales-receipts/{id}/email-later","inSpec":true,"fragmentHash":"66e01e8b0b5e111e4102edbadab0992966b7902c00eb00d2968443a7bc7771d3"}
 ]
