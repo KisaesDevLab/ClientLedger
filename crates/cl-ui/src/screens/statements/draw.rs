@@ -44,6 +44,29 @@ impl StatementsScreen {
         }
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
+        if let Some(period) = self.finance_due.clone() {
+            let mut open = false;
+            ui.horizontal_wrapped(|ui| {
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_with(
+                        "statements.finance_due",
+                        &[(
+                            "month",
+                            &crate::screens::finance_charges::month_label(&period),
+                        )],
+                    ),
+                );
+                open = ui
+                    .link(t("statements.finance_due.open"))
+                    .on_hover_text(t("finance_charges.assess.tip"))
+                    .clicked();
+            });
+            if open {
+                self.open_finance_charges();
+            }
+        }
         if let Some(o) = self.email_outcome {
             form::hint(
                 ui,

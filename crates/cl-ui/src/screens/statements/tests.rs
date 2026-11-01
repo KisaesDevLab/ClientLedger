@@ -23,7 +23,7 @@ fn nov30() -> CalendarDate {
 fn settle(s: &mut StatementsScreen) {
     for _ in 0..50 {
         s.poll();
-        if !s.busy() && s.list_job.is_none() && s.preview_job.is_none() {
+        if !s.busy() && s.list_job.is_none() && s.preview_job.is_none() && s.finance_job.is_none() {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -190,4 +190,40 @@ fn every_widget_is_named_in_both_themes() {
         let unnamed = crate::screens::unnamed_widgets(&nodes);
         assert!(unnamed.is_empty(), "{unnamed:?}");
     }
+}
+
+#[test]
+fn the_finance_charge_note_shows_while_charges_are_due() {
+    let (_d, link) = link();
+    // Blank rate (Q-P22a): no note.
+    let mut s = screen(&link);
+    assert_eq!(s.state()["finance_due"], false);
+    // Set up: as of 11/30 the preview charges someone.
+    crate::company::demo::finance_charges::set_settings(
+        &mut link.demo_state().expect("demo"),
+        &cl_api::FinanceChargeSettingsUpdate {
+            annual_rate: Some(Some(cl_api::AnnualRate::parse("18").expect("rate"))),
+            minimum: Some(cl_core::Money::parse_wire("2.00").expect("money")),
+            grace_days: Some(10),
+            income_account_id: Some(Some(crate::company::demo::account_id(4000))),
+            ..cl_api::FinanceChargeSettingsUpdate::default()
+        },
+    );
+    let s2 = screen(&link);
+    assert_eq!(s2.state()["finance_due"], true);
+    assert_eq!(s2.finance_due.as_deref(), Some("2026-11"));
+    // Its link opens Assess Finance Charges on the statement date.
+    let _ = link.drain();
+    s2.open_finance_charges();
+    let events = link.drain();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        CompanyEvent::OpenWith(k, p)
+            if k.as_str() == crate::screens::finance_charges::KIND
+                && matches!(**p, crate::windows::OpenPayload::OnDate(d) if d == nov30())
+    )));
+    // Another date checks again.
+    s.set_as_of(CalendarDate::from_ymd(2026, 12, 31).ok());
+    settle(&mut s);
+    assert_eq!(s.state()["finance_due"], true);
 }

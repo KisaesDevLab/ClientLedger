@@ -162,6 +162,11 @@ pub struct StatementsScreen {
     pub(crate) layout: crate::layout::FrameReport,
     /// The last action started (control channel).
     pub(crate) action: Option<Action>,
+    /// The month (`YYYY-MM`) finance charges are due for as of the
+    /// statement date (the engine's preview found some; P22 D6/D7).
+    pub(crate) finance_due: Option<String>,
+    pub(crate) finance_job: Option<Job<Option<String>>>,
+    pub(crate) finance_for: Option<CalendarDate>,
 }
 
 impl std::fmt::Debug for StatementsScreen {
@@ -248,6 +253,9 @@ impl StatementsScreen {
             money_style: MoneyStyle::default(),
             layout: crate::layout::FrameReport::default(),
             action: None,
+            finance_due: None,
+            finance_job: None,
+            finance_for: None,
         };
         s.load_prefs();
         s.poll();
@@ -382,8 +390,53 @@ impl StatementsScreen {
             self.preview_for = pv;
             self.start_preview();
         }
+        if let Some(r) = engine::poll(&mut self.finance_job) {
+            // Only a note: a failed read shows none.
+            self.finance_due = r.ok().flatten();
+        }
+        if self.finance_job.is_none() && self.form.as_of != self.finance_for {
+            self.finance_for = self.form.as_of;
+            self.check_finance_charges();
+        }
         self.poll_issue();
         self.poll_send();
+    }
+
+    /// Asks the engine whether finance charges are due as of the statement
+    /// date: set up, and its preview would charge someone (P22 D6/D7). The
+    /// UI works nothing out.
+    fn check_finance_charges(&mut self) {
+        self.finance_due = None;
+        let Some(as_of) = self.finance_for else {
+            return;
+        };
+        if !self.link.is_demo()
+            && !self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::FINANCE_CHARGES)
+        {
+            return;
+        }
+        let due = |p: cl_api::FinanceChargePreview| {
+            (!p.not_set_up() && p.totals.count > 0).then_some(p.period)
+        };
+        self.finance_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            move |d| crate::company::demo::finance_charges::preview(d, as_of, None).map(due),
+            move |s| async move { s.finance_charges().preview(as_of, None).await.map(due) },
+        ));
+    }
+
+    /// Opens Assess Finance Charges on the statement date.
+    pub(crate) fn open_finance_charges(&self) {
+        if let Some(d) = self.form.as_of {
+            self.link.push(CompanyEvent::OpenWith(
+                CommandId::new(crate::screens::finance_charges::KIND),
+                Box::new(crate::windows::OpenPayload::OnDate(d)),
+            ));
+        }
     }
 
     fn start_list(&mut self) {
@@ -860,6 +913,7 @@ impl StatementsScreen {
             "email": self.email_outcome.map(|o| json!({"sent": o.sent, "queued": o.queued, "failed": o.failed, "problem": o.problem})),
             "last": self.last,
             "action": self.action.map(Action::wire),
+            "finance_due": self.finance_due.is_some(),
             "notice": self.notice,
             "problems": self.problems.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>(),
         });
