@@ -953,25 +953,37 @@ fn journal_entries_the_row_cant_show_go_to_make_journal_entry() {
 }
 
 #[test]
-fn rows_the_register_cant_change_show_read_only() {
+fn a_customer_payment_row_opens_receive_payment() {
     let (_d, link) = link();
     let mut s = screen(&link);
     settle(&mut s, None);
     let total = s.model.total().expect("total");
     settle(&mut s, Some(&(0..total)));
-    // A customer payment (PMT) from the demo sample.
-    let key = (0..usize::try_from(total).expect("n"))
+    // A customer payment (PMT) from the demo sample: the register can't
+    // change it in place; P21 opens it in Receive Payment (edit, void,
+    // record a bounced check).
+    let (key, id) = (0..usize::try_from(total).expect("n"))
         .filter_map(|i| {
-            s.model
-                .row_at(i)
-                .map(|r| (i, r.kind.clone(), r.editable && !s.model.locked(r)))
+            s.model.row_at(i).map(|r| {
+                (
+                    i,
+                    r.kind.clone(),
+                    r.editable && !s.model.locked(r),
+                    r.txn_id,
+                )
+            })
         })
-        .find(|(_, k, e)| k == "PMT" && *e)
-        .and_then(|(i, _, _)| s.model.row_key(i))
+        .find(|(_, k, e, _)| k == "PMT" && *e)
+        .and_then(|(i, _, _, id)| Some((s.model.row_key(i)?, id)))
         .expect("a payment row");
+    let _ = link.drain();
     s.begin_edit(key, false);
+    s.poll_edit();
     assert!(s.entry.editing.is_none());
-    assert_eq!(s.state()["entry"]["read_only"], true);
+    assert_eq!(
+        opened(&link),
+        Some((crate::screens::receive_payment::KIND.to_string(), id))
+    );
 }
 
 #[test]

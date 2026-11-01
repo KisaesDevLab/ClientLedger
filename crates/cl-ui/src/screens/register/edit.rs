@@ -121,6 +121,9 @@ pub fn form_for(
     Some(match t.txn_type {
         // P18: a bill payment opens read-only with Void (Q-P18f).
         TxnType::BillPayment => crate::screens::pay_bills::view::KIND,
+        // P21: a customer payment opens in Receive Payment (edit, void,
+        // record a bounced check).
+        TxnType::CustomerPayment => crate::screens::receive_payment::KIND,
         TxnType::DailySales => daily_sales::KIND,
         TxnType::JournalEntry => journal_entry::KIND,
         TxnType::Transfer => transfer::KIND,
@@ -668,6 +671,18 @@ mod tests {
         assert_eq!(
             (editing.kind, editing.side),
             (EntryKind::Transfer, Side::Deposit)
+        );
+    }
+
+    #[test]
+    fn a_customer_payment_opens_in_receive_payment() {
+        let payment = txn(
+            TxnType::CustomerPayment,
+            vec![line(0, 1010, "10", "0"), line(1, 1200, "0", "10")],
+        );
+        assert_eq!(
+            form_for(&payment.record, &|_| None),
+            Some(crate::screens::receive_payment::KIND)
         );
     }
 

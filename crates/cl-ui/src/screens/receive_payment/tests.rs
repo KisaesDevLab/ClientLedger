@@ -367,7 +367,10 @@ fn arrows_move_between_rows_and_space_ticks() {
     assert_eq!(ctx.memory(egui::Memory::focused), Some(boxes[1].1));
     // Space ticks 1095 (Explicit mode, a fill).
     frame(&ctx, &mut s, key(egui::Key::Space));
-    assert_eq!(s.form.row_choice(ids["1095"]), cl_model::forms::payment::RowChoice::Fill);
+    assert_eq!(
+        s.form.row_choice(ids["1095"]),
+        cl_model::forms::payment::RowChoice::Fill
+    );
     // The pure step.
     let order = [ids["1091"], ids["1095"]];
     assert_eq!(
@@ -375,4 +378,38 @@ fn arrows_move_between_rows_and_space_ticks() {
         Some((ids["1095"], GridCol::Apply))
     );
     assert_eq!(arrow_target(&order, (0, GridCol::Payment), false), None);
+}
+
+/// Review should-fix 5: any saved payment opens from the register or the
+/// Client Center's history (by its transaction id), and Prev walks them
+/// all.
+#[test]
+fn a_payment_opens_from_its_transaction_and_history() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    let pay = s.last_saved.as_ref().map(|r| r.id).expect("saved");
+    let ledger = {
+        let demo = link.demo_state().expect("demo");
+        crate::company::demo::receivables::ledger_of(&demo, pay).expect("ledger")
+    };
+    // The register's row (the ledger transaction) opens the payment.
+    let mut other = ReceivePaymentScreen::new(Arc::clone(&link), today());
+    assert!(crate::windows::Screen::open_record(&mut other, ledger));
+    other.poll();
+    assert_eq!(other.editing.as_ref().map(|e| e.id), Some(pay));
+    assert_eq!(other.state()["mode"], "edit");
+    // The bounce is offered on it.
+    other.open_bounce();
+    assert_eq!(other.state()["dialog"], "bounce");
+    // The Client Center's history row of a payment opens Receive Payment.
+    assert_eq!(
+        crate::screens::lists::center::model::history_form(cl_api::TxnType::CustomerPayment),
+        Some(KIND)
+    );
+    assert_eq!(
+        crate::screens::lists::center::model::history_form(cl_api::TxnType::Bill),
+        None
+    );
 }

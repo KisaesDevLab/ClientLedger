@@ -489,6 +489,23 @@ impl HistoryModel {
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
+
+    /// The transaction of row `key`.
+    #[must_use]
+    pub fn row_at(&self, key: RowKey) -> Option<&TransactionSummary> {
+        self.index_of(key).and_then(|i| self.rows.get(i))
+    }
+}
+
+/// The form a history row opens in on Enter or double-click (P21: a
+/// customer payment opens in Receive Payment, where it can be edited,
+/// voided or bounced).
+#[must_use]
+pub fn history_form(t: cl_api::TxnType) -> Option<&'static str> {
+    match t {
+        cl_api::TxnType::CustomerPayment => Some(crate::screens::receive_payment::KIND),
+        _ => None,
+    }
 }
 
 impl RowModel for HistoryModel {

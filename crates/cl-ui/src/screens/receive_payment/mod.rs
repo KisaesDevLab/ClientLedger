@@ -790,16 +790,7 @@ impl ReceivePaymentScreen {
                         .map(|p| p.id)
                         .collect())
                 },
-                |s| async move {
-                    let page = cl_api::PageRequest::new(200, 0)?;
-                    Ok(s.customer_payments()
-                        .list(&cl_api::PaymentListQuery::default(), page)
-                        .await?
-                        .data
-                        .into_iter()
-                        .map(|p| p.id)
-                        .collect())
-                },
+                |s| async move { all_payments(&s).await },
             ),
         ));
         self.poll_nav();
@@ -1076,6 +1067,31 @@ impl ReceivePaymentScreen {
     fn poll_bounce(&mut self) {
         crate::screens::bounced_check::poll(self);
     }
+}
+
+/// Every saved payment, oldest first (Prev/Next walk them all): the
+/// engine's list is newest first and paged.
+async fn all_payments(s: &cl_api::Session) -> Result<Vec<TransactionId>, ApiError> {
+    let limit = cl_api::PageRequest::MAX_LIMIT;
+    let mut ids = Vec::new();
+    let mut offset = 0u64;
+    loop {
+        let page = s
+            .customer_payments()
+            .list(
+                &cl_api::PaymentListQuery::default(),
+                cl_api::PageRequest::new(limit, offset)?,
+            )
+            .await?;
+        let n = page.data.len();
+        ids.extend(page.data.into_iter().map(|p| p.id));
+        offset += u64::try_from(n).unwrap_or(u64::MAX);
+        if n < usize::from(limit) || offset >= page.total {
+            break;
+        }
+    }
+    ids.reverse();
+    Ok(ids)
 }
 
 /// What the misc write was.
