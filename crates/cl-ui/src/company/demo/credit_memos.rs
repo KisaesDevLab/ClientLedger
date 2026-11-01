@@ -337,7 +337,7 @@ pub(super) fn payment_refunds(state: &DemoState) -> Vec<(TransactionId, Calendar
         .collect()
 }
 
-/// Refund checks on ank waiting in the check print queue (P22 D5, the
+/// Refund checks on `bank` waiting in the check print queue (P22 D5, the
 /// engine's listChecks with customer_refund): payee the client, the
 /// client's billing address.
 #[must_use]

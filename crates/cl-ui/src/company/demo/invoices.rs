@@ -472,7 +472,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                     tax_rate: None,
                 },
                 // The source's quantity, 1 when it had none (as the
-                // saved invoice's illableCosts[]).
+                // saved invoice's `billableCosts[]`).
                 quantity: Some(q),
                 price: None,
                 source: "billable_cost",
