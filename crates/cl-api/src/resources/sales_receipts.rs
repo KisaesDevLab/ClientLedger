@@ -225,6 +225,9 @@ pub struct SalesReceiptRecord {
     /// The deposit it is in (depositTo and amount are then locked).
     #[serde(default)]
     pub deposit_id: Option<TransactionId>,
+    /// It is in a deposit (the engine's flag; `deposit_id` when known).
+    #[serde(default)]
+    pub deposited: bool,
 }
 
 impl fmt::Debug for SalesReceiptRecord {

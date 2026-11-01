@@ -1081,6 +1081,7 @@ pub fn get_refund(state: &DemoState, id: TransactionId) -> Result<RefundRecord, 
         method: Some(r.method),
         ref_no: r.ref_no.clone(),
         check_number: r.check_number.clone(),
+        from_account: Some(r.bank),
         print_status: Some(if r.queued && !r.void {
             RefundPrintStatus::Queue
         } else {
@@ -1291,6 +1292,7 @@ pub fn save_receipt(
         updated_at: version_of(version),
         status: SalesDocStatus::Posted,
         deposit_id: None,
+        deposited: false,
     };
     state.credits.receipts.insert(
         id,
@@ -1317,6 +1319,7 @@ pub fn get_receipt(state: &DemoState, id: TransactionId) -> Result<SalesReceiptR
         .ok_or(ApiError::NotFound { code: None })?;
     let mut rec = r.record.clone();
     rec.deposit_id = r.ledger.and_then(|l| state.ledger.deposited_in(l));
+    rec.deposited = rec.deposit_id.is_some();
     Ok(rec)
 }
 

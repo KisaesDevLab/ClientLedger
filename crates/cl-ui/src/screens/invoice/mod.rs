@@ -1150,7 +1150,7 @@ impl InvoiceScreen {
                 self.editing
                     .as_ref()
                     .and_then(Editing::receipt)
-                    .is_some_and(|r| r.deposit_id.is_some())
+                    .is_some_and(|r| r.deposited || r.deposit_id.is_some())
             );
         }
         if let (Value::Object(m), Value::Object(c)) = (

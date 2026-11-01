@@ -399,9 +399,16 @@ fn a_refund_body_names_its_source_and_check_option() {
     assert!(!dbg.contains("399") && !dbg.contains("kennel"), "{dbg}");
     r.check = RefundCheck::Number("1042".into());
     let b = r.body(&caps).expect("body");
-    assert_eq!(b["checkNumber"], "1042");
+    // The engine takes the check number as a JSON integer.
+    assert_eq!(b["checkNumber"], 1042);
     assert_eq!(b["printLater"], false);
     assert!(!format!("{r:?}").contains("1042"));
+    r.check = RefundCheck::Number("10-42".into());
+    assert_eq!(
+        r.body(&caps),
+        Err(ApiError::Local(LocalValidation::InvalidValue))
+    );
+    r.check = RefundCheck::Number("1042".into());
     r.method = RefundMethod::Cash;
     assert_eq!(
         r.body(&caps),
@@ -708,4 +715,20 @@ fn outbox_rows_carry_their_kind() {
     assert_eq!(o.kind, OutboxKind::CustomerStatement);
     assert!(o.transaction_id.is_none() && o.customer_statement_id.is_some());
     assert!(!format!("{o:?}").contains("a@b"));
+}
+
+#[test]
+fn a_refund_record_reads_an_integer_check_number_and_its_bank() {
+    let body = json!({"refund": {"id": MEMO, "date": "2026-11-05", "customerId": CLIENT,
+        "amount": "399.75", "checkNumber": 1042, "refundFromAccountId": BANK,
+        "printStatus": "printed", "updatedAt": "2026-11-05T10:00:00.000Z", "status": "posted"}});
+    let r: crate::resources::customer_refunds::RefundRecord =
+        crate::resources::customer_payments::decode_key(
+            body.to_string().as_bytes(),
+            "refund",
+            "refund",
+        )
+        .expect("decodes");
+    assert_eq!(r.check_number.as_deref(), Some("1042"));
+    assert_eq!(r.from_account, Some(AccountId::parse(BANK).expect("id")));
 }

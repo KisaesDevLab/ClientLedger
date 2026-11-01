@@ -286,7 +286,8 @@ impl RefundScreen {
             match r {
                 Ok(rec) => {
                     self.closing_prompt.saved();
-                    let accounts: Vec<AccountId> = self.from.into_iter().collect();
+                    let accounts: Vec<AccountId> =
+                        rec.from_account.or(self.from).into_iter().collect();
                     crate::forms::publish_saved(&self.link, &self.bus, &accounts);
                     self.saved = Some(rec);
                     self.void_open = false;

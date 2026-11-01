@@ -228,8 +228,13 @@ impl NewRefund {
             RefundCheck::NotACheck => {}
             RefundCheck::PrintLater => body["printLater"] = json!(true),
             RefundCheck::Number(n) => {
+                // The engine takes the check number as a JSON integer.
+                let number: u64 = n
+                    .trim()
+                    .parse()
+                    .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
                 body["printLater"] = json!(false);
-                body["checkNumber"] = json!(n.trim());
+                body["checkNumber"] = json!(number);
             }
         }
         if let Some(n) = self.ref_no.as_deref().filter(|n| !n.trim().is_empty()) {
@@ -288,9 +293,13 @@ pub struct RefundRecord {
     /// Reference (owner data).
     #[serde(default)]
     pub ref_no: Option<String>,
-    /// The check number once printed or typed (owner data).
-    #[serde(default)]
+    /// The check number once printed or typed (owner data; the engine
+    /// writes an integer).
+    #[serde(default, deserialize_with = "de_number_text")]
     pub check_number: Option<String>,
+    /// The bank it was paid from.
+    #[serde(default, rename = "refundFromAccountId")]
+    pub from_account: Option<AccountId>,
     /// Print queue state.
     #[serde(default)]
     pub print_status: Option<RefundPrintStatus>,
@@ -313,6 +322,16 @@ ids_debug!(
     source,
     status
 );
+
+/// A number the engine writes as an integer (or, from older rows, a
+/// string), kept as text.
+fn de_number_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<serde_json::Value>::deserialize(d)? {
+        Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+        Some(serde_json::Value::String(s)) => Some(s),
+        _ => None,
+    })
+}
 
 /// The id of a transaction a create answered.
 #[derive(Deserialize)]
