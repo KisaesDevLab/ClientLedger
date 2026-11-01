@@ -1042,7 +1042,7 @@ impl ReceivePaymentScreen {
                 } else {
                     self.dialog = Some(Dialog::Refund(r));
                     if send {
-                        self.send_refund();
+                        self.send_refund(None);
                     }
                 }
             }

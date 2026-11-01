@@ -413,3 +413,111 @@ fn a_payment_opens_from_its_transaction_and_history() {
         None
     );
 }
+
+/// Closes the demo books through `d` (the engine's date and the screen's).
+fn close_books(link: &Arc<CompanyLink>, s: &mut ReceivePaymentScreen, d: CalendarDate) {
+    let mut demo = link.demo_state().expect("demo");
+    let open = demo.open.expect("open");
+    if let Some(c) = demo.companies.iter_mut().find(|c| c.tenant_id == open) {
+        c.closed_through = Some(d);
+    }
+    s.books.closing = Some(d);
+}
+
+fn type_closing_password(s: &mut ReceivePaymentScreen) {
+    s.closing_prompt.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+    );
+    s.submit_closing();
+    s.poll();
+}
+
+/// Review should-fix 7: a bounce in a closed period asks for the password
+/// once; the fee invoice, dated the same day, goes with it instead of
+/// failing.
+#[test]
+fn a_closed_period_bounce_sends_its_fee_invoice_with_the_same_password() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    assert!(s.start_save(After::Stay, None));
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    close_books(&link, &mut s, today());
+    s.open_bounce();
+    let income = s
+        .books
+        .accounts
+        .iter()
+        .find(|a| a.is_active && a.fields.account_type == cl_api::AccountType::Revenue)
+        .map(|a| a.id);
+    let fee_bank = s
+        .books
+        .accounts
+        .iter()
+        .find(|a| a.fields.account_number.as_deref() == Some("1010"))
+        .map(|a| a.id);
+    if let Some(f) = s.bounce.as_mut() {
+        f.bounce_date = Some(today());
+        f.next_step().expect("date");
+        f.customer_fee = "25".into();
+        f.fee_income_account = income;
+        f.fee_bank_account = fee_bank;
+    }
+    assert!(!s.send_bounce(None));
+    assert!(s.closing_prompt.dialog_open(), "the bounce asks first");
+    type_closing_password(&mut s);
+    s.poll();
+    let v = s.state();
+    assert_eq!(v["bounce"]["done"], true, "{v}");
+    assert_eq!(v["bounce"]["fee_invoice"], true, "{v}");
+    assert_eq!(v["bounce"]["fee_failed"], false);
+    assert!(!s.closing_prompt.dialog_open());
+    assert!(s.bounce_password.is_none(), "dropped once the fee is in");
+}
+
+/// A refund dated in a closed period asks for the password; a retry of the
+/// same refund keeps its key.
+#[test]
+fn a_closed_period_refund_asks_and_keeps_its_key() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let ids = invoice_ids(&s);
+    s.form.unapply_all();
+    s.toggle(ids["1091"]);
+    s.amount_text = "4400".into();
+    s.amount_typed();
+    settle(&mut s);
+    s.form.set_over(Over::Refund);
+    assert!(s.start_save(After::Stay, None));
+    s.poll();
+    assert_eq!(s.state()["dialog"], "refund");
+    close_books(&link, &mut s, today());
+    assert!(!s.send_refund(None));
+    assert!(s.closing_prompt.dialog_open());
+    assert!(s.misc.is_none(), "nothing sent");
+    type_closing_password(&mut s);
+    assert_eq!(s.notice, Some("payment.refund.done"));
+    assert!(s.refund_key.is_none());
+    let rec = s.editing.clone().expect("open");
+    let mut demo = link.demo_state().expect("demo");
+    let after = crate::company::demo::receivables::get(&mut demo, rec.id).expect("rec");
+    assert_eq!(after.unapplied_remaining, Money::ZERO);
+}
+
+/// Void of a payment dated in a closed period asks for the password, then
+/// voids (non-negotiable 8).
+#[test]
+fn a_closed_period_void_asks_for_the_password() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    assert!(s.start_save(After::Stay, None));
+    s.poll();
+    close_books(&link, &mut s, today());
+    assert!(!s.start_void(None));
+    assert!(s.closing_prompt.dialog_open());
+    assert!(s.misc.is_none(), "nothing sent");
+    type_closing_password(&mut s);
+    assert_eq!(s.notice, Some("payment.voided"));
+    s.poll();
+    assert_eq!(s.state()["read_only"], true);
+}

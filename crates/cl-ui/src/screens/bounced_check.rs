@@ -61,6 +61,7 @@ pub(crate) fn send(s: &mut ReceivePaymentScreen, password: Option<Secret>) -> bo
                 expected_updated_at: rec.updated_at,
             };
             let key = s.bounce_keys.0.clone();
+            s.bounce_password.clone_from(&password);
             let demo_key = key.to_string();
             let demo_req = req.clone();
             let pw = password.clone();
@@ -86,6 +87,17 @@ pub(crate) fn send(s: &mut ReceivePaymentScreen, password: Option<Secret>) -> bo
             ));
         }
         BounceCall::FeeInvoice(f) => {
+            // The fee invoice is dated like the bounce: it goes with the
+            // bounce's closing-date password, else asks for one.
+            let password = password.or_else(|| s.bounce_password.clone());
+            if password.is_none() && needs_password(None, f.date, s.books.closing) {
+                s.closing_prompt.set_verb(Verb::Change);
+                s.closing_prompt
+                    .ask(Pending::FeeInvoice, true, s.books.closing);
+                return false;
+            }
+            s.bounce_password.clone_from(&password);
+            let demo_pw = password.clone();
             // Q-P21p: one non-taxable line to the fee income account.
             let one = cl_core::Quantity::parse_wire("1").unwrap_or_default();
             let mut line = cl_api::InvoiceLine::account(f.income_account, one, f.amount);
@@ -99,12 +111,12 @@ pub(crate) fn send(s: &mut ReceivePaymentScreen, password: Option<Secret>) -> bo
                 s.group.as_ref(),
                 engine::label(&key),
                 move |d| {
-                    crate::company::demo::invoices::create(d, &demo_new, None)
+                    crate::company::demo::invoices::create(d, &demo_new, demo_pw.as_ref())
                         .map(|v| v.record.txn.id)
                 },
                 move |x| async move {
                     x.invoices()
-                        .create(&new, &engine::options(None), key)
+                        .create(&new, &engine::options(password), key)
                         .await
                         .map(|v| v.invoice.record.txn.id)
                 },
@@ -170,11 +182,21 @@ pub(crate) fn poll(s: &mut ReceivePaymentScreen) {
     if let Some(r) = engine::poll(&mut s.fee_job) {
         match r {
             Ok(id) => {
+                s.closing_prompt.saved();
+                s.bounce_password = None;
                 if let Some(f) = s.bounce.as_mut() {
                     f.fee_invoiced(id);
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                // A closed period (or a rejected password): the prompt asks
+                // and a resubmit sends only the fee invoice.
+                let asked = s
+                    .closing_prompt
+                    .failed(&e, Pending::FeeInvoice, true, s.books.closing);
+                if asked {
+                    s.bounce_password = None;
+                }
                 if let Some(f) = s.bounce.as_mut() {
                     f.fee_failed();
                 }
@@ -403,6 +425,7 @@ pub(crate) fn draw(s: &mut ReceivePaymentScreen, ui: &mut Ui, tokens: &Tokens) {
     }
     if close {
         s.dialog = None;
+        s.bounce_password = None;
         if s.bounce.as_ref().is_none_or(|f| f.bounce.is_none()) {
             s.bounce = None;
         }
