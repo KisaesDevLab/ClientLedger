@@ -459,6 +459,7 @@ pub fn txn_key(t: cl_api::TxnType) -> &'static str {
         T::VendorCredit => "lists.qr.type.vendor_credit",
         T::BillPayment => "lists.qr.type.bill_payment",
         T::DailySales => "lists.qr.type.daily_sales",
+        T::ReturnedPayment => "lists.qr.type.returned_payment",
     }
 }
 

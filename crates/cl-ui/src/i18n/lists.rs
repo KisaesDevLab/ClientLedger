@@ -143,5 +143,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lists.qr.type.vendor_credit", "Vendor credit"),
     ("lists.qr.type.bill_payment", "Bill payment"),
     ("lists.qr.type.daily_sales", "Daily sales"),
+    ("lists.qr.type.returned_payment", "Bounced payment"),
     ("lists.qr.type.other", "Other"),
 ];

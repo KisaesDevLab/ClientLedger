@@ -165,6 +165,7 @@ impl AttachTo {
                 TxnType::BillPayment => "bill_payment",
                 TxnType::DailySales => "daily_sales",
                 TxnType::Aje => "aje",
+                TxnType::ReturnedPayment => "returned_payment",
             },
             AttachTo::Contact(_) => "contact",
         }

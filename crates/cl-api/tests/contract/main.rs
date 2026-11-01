@@ -17,6 +17,7 @@ mod contract_bank_postings;
 mod contract_batch;
 mod contract_billable;
 mod contract_bills;
+mod contract_bounced_check;
 mod contract_capabilities;
 mod contract_census;
 mod contract_check_panel;
@@ -24,6 +25,7 @@ mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
+mod contract_customer_deposits;
 mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
@@ -43,6 +45,7 @@ mod contract_money_helpers;
 mod contract_pay_bills;
 mod contract_preferences;
 mod contract_printing;
+mod contract_receive_payment;
 mod contract_register;
 mod contract_register_property;
 mod contract_resources;
@@ -167,6 +170,54 @@ fn main() -> std::process::ExitCode {
             contract_invoices::email_not_configured,
         ),
         ("invoices::layouts", contract_invoices::layouts),
+        (
+            "receive_payment::mockup_payment_4000_leaves_385_open",
+            contract_receive_payment::mockup_payment_4000_leaves_385_open,
+        ),
+        (
+            "receive_payment::write_off_closes_invoice_to_chosen_account",
+            contract_receive_payment::write_off_closes_invoice_to_chosen_account,
+        ),
+        (
+            "receive_payment::overpayment_credit_apply_refund",
+            contract_receive_payment::overpayment_credit_apply_refund,
+        ),
+        (
+            "receive_payment::receive_and_apply_retry_same_key_posts_once",
+            contract_receive_payment::receive_and_apply_retry_same_key_posts_once,
+        ),
+        (
+            "receive_payment::payment_stale_409",
+            contract_receive_payment::payment_stale_409,
+        ),
+        (
+            "receive_payment::invoice_balance_changed_409",
+            contract_receive_payment::invoice_balance_changed_409,
+        ),
+        (
+            "receive_payment::exact_overapply_refused",
+            contract_receive_payment::exact_overapply_refused,
+        ),
+        (
+            "receive_payment::payment_closed_period_password",
+            contract_receive_payment::payment_closed_period_password,
+        ),
+        (
+            "receive_payment::payment_cross_company_404",
+            contract_receive_payment::payment_cross_company_404,
+        ),
+        (
+            "customer_deposits::customer_deposit_lifecycle",
+            contract_customer_deposits::customer_deposit_lifecycle,
+        ),
+        (
+            "bounced_check::bounced_check_restores_balances",
+            contract_bounced_check::bounced_check_restores_balances,
+        ),
+        (
+            "bounced_check::undeposited_bounce_takes_it_from_clearing",
+            contract_bounced_check::undeposited_bounce_takes_it_from_clearing,
+        ),
         (
             "billable::billable_consumed",
             contract_billable::billable_consumed,
