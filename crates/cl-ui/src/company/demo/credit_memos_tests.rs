@@ -342,6 +342,33 @@ fn date_and_in_use_rules() {
 }
 
 #[test]
+fn an_edit_refuses_applications_like_the_engine() {
+    let (mut s, c) = fresh();
+    let preview = preview_memo(&mut s, &case1(c), None).expect("preview");
+    let token = preview
+        .open_invoice(inv(1201))
+        .expect("open")
+        .balance_due_exact
+        .clone();
+    let memo = create_memo(&mut s, &case1(c), None).expect("create");
+    let v = get_memo(&s, memo.id).expect("memo").updated_at;
+    let mut with_apps = case1(c);
+    with_apps.applications = vec![CreditMemoApplication {
+        invoice_id: inv(1201),
+        amount: m("10.00"),
+        expected_balance_due: token,
+    }];
+    let e = update_memo(&mut s, memo.id, &with_apps, Some(v), None).expect_err("applications");
+    assert!(matches!(e, cl_api::ApiError::Validation(_)), "{e:?}");
+    assert_eq!(balance(&s, 1201), m("250.00"), "nothing applied");
+    assert_eq!(
+        get_memo(&s, memo.id).expect("memo").updated_at,
+        v,
+        "nothing saved"
+    );
+}
+
+#[test]
 fn the_seed_leaves_p21s_story_alone() {
     let (mut s, _) = fresh();
     super::super::receivables::seed(&mut s);

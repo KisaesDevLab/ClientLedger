@@ -337,6 +337,10 @@ impl InvoiceScreen {
             .as_ref()
             .and_then(Editing::invoice)
             .is_some_and(InvoiceRecord::was_sent);
+        // An edited memo with credit left: its credit is used with Apply
+        // credit, never by the edit (P22 review D-B1).
+        let apply_hint = self.editing.as_ref().and_then(Editing::memo).is_some()
+            && matches!(&v, SavedDoc::CreditMemo(m) if !m.is_void() && m.remaining.is_positive());
         self.saved_count += 1;
         self.last_action = Some("save");
         self.last_saved = Some(v.id());
@@ -356,6 +360,14 @@ impl InvoiceScreen {
             // save asked for.
             self.open_email(Some(intent));
             return;
+        }
+        if apply_hint {
+            if intent == SaveIntent::Save {
+                self.notice = Some("credit_memo.saved.apply_hint");
+            } else {
+                self.link
+                    .push(CompanyEvent::Toast("credit_memo.saved.apply_hint"));
+            }
         }
         if was_sent {
             if intent == SaveIntent::Save {

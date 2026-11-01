@@ -207,6 +207,48 @@ fn a_saved_memo_reads_back_navigates_and_voids() {
     assert_eq!(client_balance(&s, c), "750.00");
 }
 
+/// Review D-B1: a saved memo opened again (Prev/Next, Find, a list) and
+/// edited saves without the apply panel and sends no applications (the
+/// demo refuses them on an edit, as the engine does); Apply credit is
+/// pointed to.
+#[test]
+fn editing_a_saved_memo_never_asks_or_sends_applications() {
+    let (_d, mut s) = screen(SalesDocKind::CreditMemo);
+    let c = bluestem(&s);
+    golden_lines(&mut s, c);
+    s.start_save(SaveIntent::Save, None);
+    s.submit_apply_panel(true);
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    s.new_form(false);
+    // Opened as from Find in a fresh window: no client figures yet.
+    s.sales = None;
+    s.navigate(true);
+    assert_eq!(s.editing.as_ref().map(|e| e.id), Some(id));
+    settle(&mut s);
+    // Change a line: 1 x 75.00 becomes 1 x 80.00.
+    s.grid.edit(|v, _| {
+        if let Some(l) = v.lines.iter_mut().find(|l| l.rate == Some(m("75.00"))) {
+            l.rate = Some(m("80.00"));
+        }
+    });
+    settle(&mut s);
+    assert!(s.is_dirty());
+    s.start_save(SaveIntent::Save, None);
+    assert!(s.apply_open.is_none(), "no apply panel on an edit");
+    assert!(s.error.is_none(), "{:?}", s.error);
+    let memo = s
+        .editing
+        .as_ref()
+        .and_then(Editing::memo)
+        .cloned()
+        .expect("saved");
+    assert_eq!(memo.id, id);
+    assert_eq!(memo.live_applications().count(), 0, "nothing applied");
+    assert!(memo.remaining.is_positive());
+    assert_eq!(s.notice, Some("credit_memo.saved.apply_hint"));
+    assert!(!s.is_dirty());
+}
+
 #[test]
 fn a_sales_receipt_saves_to_payments_clearing_by_default() {
     let (_d, mut s) = screen(SalesDocKind::SalesReceipt);

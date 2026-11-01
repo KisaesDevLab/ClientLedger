@@ -939,8 +939,12 @@ impl InvoiceScreen {
         if self.sales.as_ref().map(|(c, _)| *c) != client {
             self.sales = None;
             // Another client's invoices: ask Apply or Keep again (Q-P22b).
-            self.credit.reset_answer();
-            self.apply_cells.clear();
+            // A saved memo is never asked: an edit (PUT) sends no
+            // applications; Apply credit uses its credit (P22 review D-B1).
+            if self.editing.is_none() {
+                self.credit.reset_answer();
+                self.apply_cells.clear();
+            }
         }
         if let Some(c) = client {
             self.fetch_sales(c);

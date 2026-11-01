@@ -801,7 +801,8 @@ pub fn void_memo(
 /// `PUT /credit-memos/{id}`.
 ///
 /// # Errors
-/// 409 `STALE`, `CREDIT_IN_USE`; 400 `SOURCE_DATE_AFTER_USE`,
+/// 409 `STALE`, `CREDIT_IN_USE`; 400 `VALIDATION_ERROR` (applications
+/// sent), `SOURCE_DATE_AFTER_USE`,
 /// `CREDIT_MEMO_TOTAL_NOT_POSITIVE`; closing on the old and new dates and
 /// every live refund's date.
 pub fn update_memo(
@@ -811,6 +812,11 @@ pub fn update_memo(
     expected: Option<Timestamp>,
     password: Option<&Secret>,
 ) -> Result<CreditMemoRecord, ApiError> {
+    // The engine's PUT takes no applications (400): a saved memo's credit
+    // is used through apply (P22 review D-B1).
+    if !new.applications.is_empty() {
+        return Err(refused("VALIDATION_ERROR"));
+    }
     let m = memo_of(state, id)?;
     check_version(m.version, expected)?;
     check_lines(&new.lines)?;

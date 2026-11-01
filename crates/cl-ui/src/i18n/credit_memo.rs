@@ -17,6 +17,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("credit_memo.refund.tip", "Pay the credit that is left back to the client"),
     ("credit_memo.refund.save_first", "Save the credit memo first."),
     ("credit_memo.refund.nothing_left", "Nothing is left of this credit."),
+    ("credit_memo.saved.apply_hint", "Saved. To use this credit on an open invoice, click Apply credit."),
     ("credit_memo.email.later", "Emailing credit memos and sales receipts is coming. Print it or save a PDF for now."),
     ("credit_memo.apply.title", "Apply to an invoice or keep as credit?"),
     ("credit_memo.apply.explain", "This client has open invoices. Use the credit on them now, or keep it to use or refund later."),

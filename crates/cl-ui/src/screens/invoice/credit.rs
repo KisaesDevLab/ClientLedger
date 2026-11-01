@@ -178,15 +178,20 @@ impl InvoiceScreen {
                 }
             };
             new.warn_only = new.txn_number.is_some();
-            new.applications = plan
-                .applications
-                .iter()
-                .map(|a| cl_api::CreditMemoApplication {
-                    invoice_id: a.invoice,
-                    amount: a.amount,
-                    expected_balance_due: a.token.clone(),
-                })
-                .collect();
+            // Applications go only with a new memo: the engine refuses them
+            // on an edit (400), so a saved memo uses Apply credit instead.
+            new.applications = if edit.is_some() {
+                Vec::new()
+            } else {
+                plan.applications
+                    .iter()
+                    .map(|a| cl_api::CreditMemoApplication {
+                        invoice_id: a.invoice,
+                        amount: a.amount,
+                        expected_balance_due: a.token.clone(),
+                    })
+                    .collect()
+            };
             let identity = format!(
                 "memo|{}|{:?}|{}",
                 serde_json::to_string(&new).unwrap_or_default(),
