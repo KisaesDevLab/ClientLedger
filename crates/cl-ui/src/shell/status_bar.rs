@@ -122,6 +122,24 @@ pub fn hints_for(active: Option<CommandId>, mode: EnterMode) -> Vec<Hint> {
 fn base_hints(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
+        // Receive Payment (mockup footer): Space applies, Tab moves, Esc
+        // reverts.
+        Some("clients.receive_payment") => {
+            return vec![
+                Hint {
+                    chips: vec!["Space".to_string()],
+                    label: t("status.hint.apply"),
+                },
+                Hint {
+                    chips: vec!["Tab".to_string()],
+                    label: t("status.hint.next_field"),
+                },
+                Hint {
+                    chips: vec!["Esc".to_string()],
+                    label: t("status.hint.revert"),
+                },
+            ];
+        }
         // Pay Bills (mockup PayBills.html): Space ticks the bill, the
         // arrows move, Alt+S pays.
         Some("vendors.pay_bills") => {

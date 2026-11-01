@@ -159,6 +159,8 @@ pub enum OpenPayload {
         cl_core::ids::TransactionId,
         Box<cl_model::forms::deposit::DepositSummary>,
     ),
+    /// P21: Receive Payment from this client (Client Center's action).
+    ReceiveFrom(cl_core::ids::ContactId),
 }
 
 /// Stand-in for a screen a later phase builds.
@@ -904,11 +906,11 @@ mod tests {
 
     #[test]
     fn placeholder_titles_come_from_the_command_table() {
-        let p = Placeholder::for_command(id("clients.receive_payment"));
-        assert_eq!(p.title(), "Receive Payment");
+        let p = Placeholder::for_command(id("clients.sales_receipt"));
+        assert_eq!(p.title(), "Sales Receipt");
         assert!(!p.dirty());
         assert!(
-            Placeholder::for_command(id("clients.receive_payment"))
+            Placeholder::for_command(id("clients.sales_receipt"))
                 .with_dirty(true)
                 .dirty()
         );

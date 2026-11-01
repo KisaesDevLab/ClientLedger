@@ -1081,6 +1081,16 @@ impl CenterScreen {
             if b(ui, "center.merge", "list.merge").clicked() {
                 self.open_merge();
             }
+            // P21: Receive Payment from the selected client.
+            if self.role == Role::Client
+                && let Some(c) = self.selected()
+                && b(ui, "center.receive_payment", "clients.receive_payment").clicked()
+            {
+                self.link.push(crate::company::CompanyEvent::OpenWith(
+                    cl_model::CommandId::new("clients.receive_payment"),
+                    Box::new(crate::windows::OpenPayload::ReceiveFrom(c)),
+                ));
+            }
             ui.separator();
             let find_key = match self.role {
                 Role::Client => "center.find_client",

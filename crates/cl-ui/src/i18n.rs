@@ -107,6 +107,7 @@ mod doc_form;
 mod doc_review;
 // P18.
 mod pay_bills;
+mod payment;
 // P19.
 mod print;
 // P20 WP-A (form model problems, rate sources, email templates); WP-B adds
@@ -115,7 +116,7 @@ mod invoice;
 mod invoice_model;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 36] = [
+const TABLES: [&[(&str, &str)]; 37] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -149,6 +150,7 @@ const TABLES: [&[(&str, &str)]; 36] = [
     doc_form::ENGLISH,
     compare::ENGLISH,
     pay_bills::ENGLISH,
+    payment::ENGLISH,
     print::ENGLISH,
     invoice_model::ENGLISH,
     invoice::ENGLISH,

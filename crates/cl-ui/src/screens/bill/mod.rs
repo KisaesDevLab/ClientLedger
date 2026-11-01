@@ -1313,6 +1313,7 @@ impl Screen for EnterBillScreen {
             OpenPayload::Document(_)
             | OpenPayload::StatementDraft(_)
             | OpenPayload::PrintChecks(_)
+            | OpenPayload::ReceiveFrom(_)
             | OpenPayload::ReprintCheck(..)
             | OpenPayload::PrintDeposit(..) => false,
         }
