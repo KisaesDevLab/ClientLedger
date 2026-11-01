@@ -97,6 +97,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("refund.refusal.check_number_in_use", "That check number is already used. Type another, or tick Print later."),
     ("refund.refusal.account", "Refunds are paid from a bank account. Choose one in Paid from."),
     ("refund.refusal.other", "The refund couldn't be saved. Check the fields and try again."),
+    ("payment.refusal.has_adjustments", "This payment took a discount or write-off on that invoice. Edit or void the payment instead."),
     ("orphan.refund_save", "saving a refund"),
     ("orphan.refund_void", "voiding a refund"),
     ("orphan.credit_memo_save", "saving a credit memo"),

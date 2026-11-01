@@ -475,10 +475,10 @@ fn a_closed_period_bounce_sends_its_fee_invoice_with_the_same_password() {
     assert!(s.bounce_password.is_none(), "dropped once the fee is in");
 }
 
-/// A refund dated in a closed period asks for the password; a retry of the
-/// same refund keeps its key.
+/// Q-P22m: "Refund it" saves the payment and opens Refund a Credit with
+/// its credit picked and the preview's overpayment as the amount.
 #[test]
-fn a_closed_period_refund_asks_and_keeps_its_key() {
+fn refund_it_opens_refund_a_credit_prefilled() {
     let (_d, link) = link();
     let mut s = mockup(&link);
     let ids = invoice_ids(&s);
@@ -488,22 +488,26 @@ fn a_closed_period_refund_asks_and_keeps_its_key() {
     s.amount_typed();
     settle(&mut s);
     s.form.set_over(Over::Refund);
+    let _ = link.drain();
     assert!(s.start_save(After::Stay, None));
     s.poll();
-    assert_eq!(s.state()["dialog"], "refund");
-    close_books(&link, &mut s, today());
-    assert!(!s.send_refund(None));
-    assert!(s.closing_prompt.dialog_open());
-    assert!(s.misc.is_none(), "nothing sent");
-    type_closing_password(&mut s);
-    assert_eq!(s.notice, Some("payment.refund.done"));
-    assert!(s.refund_key.is_none());
-    let rec = s.editing.clone().expect("open");
-    let mut demo = link.demo_state().expect("demo");
-    let after = crate::company::demo::receivables::get(&mut demo, rec.id).expect("rec");
-    assert_eq!(after.unapplied_remaining, Money::ZERO);
+    let rec = s.last_saved.clone().expect("saved");
+    let events = link.drain();
+    let opened = events.iter().any(|e| {
+        matches!(e, CompanyEvent::OpenWith(k, p)
+            if k.as_str() == crate::screens::refund::KIND
+                && matches!(**p, crate::windows::OpenPayload::RefundFrom(c, src)
+                    if c == rec.customer_id
+                        && src.id == rec.id
+                        && src.remaining == Money::parse_wire("15.00").expect("m")))
+    });
+    assert!(opened, "{events:?}");
+    assert_eq!(
+        s.state()["dialog"],
+        serde_json::Value::Null,
+        "no inline dialog"
+    );
 }
-
 /// Void of a payment dated in a closed period asks for the password, then
 /// voids (non-negotiable 8).
 #[test]

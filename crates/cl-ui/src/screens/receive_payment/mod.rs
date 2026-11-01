@@ -89,8 +89,6 @@ pub(crate) enum Pending {
     Bounce,
     /// The bounce's fee invoice (dated in a closed period).
     FeeInvoice,
-    /// The refund dialog's refund.
-    Refund,
 }
 
 /// An open dialog.
@@ -102,33 +100,10 @@ pub(crate) enum Dialog {
     WriteOffAccount,
     /// Pick the discount account (no company default).
     DiscountAccount,
-    /// Refund the overpayment of the saved payment (Q-P21m).
-    Refund(Refund),
     /// The bounced-check flow.
     Bounce,
     /// Void the open payment.
     Void,
-}
-
-/// The refund dialog's fields.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Refund {
-    pub payment: TransactionId,
-    pub client: ContactId,
-    pub amount: String,
-    pub from: Option<AccountId>,
-    pub method: String,
-    pub ref_no: String,
-    pub date: CalendarDate,
-    pub error: Option<&'static str>,
-}
-
-impl std::fmt::Debug for Refund {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Refund")
-            .field("payment", &self.payment)
-            .finish_non_exhaustive()
-    }
 }
 
 /// Settings Receive Payment uses (engine company settings, Q-P21q).
@@ -200,8 +175,6 @@ pub struct ReceivePaymentScreen {
     pub(crate) feed_job: Option<Job<Vec<FeedMatch>>>,
     pub(crate) feed_dismissed: Vec<String>,
     pub(crate) write_off_pick: Option<AccountId>,
-    /// The refund being sent and its key, kept until a definite answer.
-    pub(crate) refund_key: Option<(cl_api::NewCustomerRefund, IdempotencyKey)>,
     /// Each grid row's Apply box id, last frame (Up/Down move between rows).
     pub(crate) grid_boxes: Vec<(TransactionId, eframe::egui::Id)>,
     pub(crate) layout: crate::layout::FrameReport,
@@ -288,7 +261,6 @@ impl ReceivePaymentScreen {
             feed_job: None,
             feed_dismissed: Vec::new(),
             write_off_pick: None,
-            refund_key: None,
             grid_boxes: Vec::new(),
             layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
@@ -584,7 +556,6 @@ impl ReceivePaymentScreen {
         self.dialog = None;
         self.bounce = None;
         self.bounce_password = None;
-        self.refund_key = None;
     }
 
     // ------------------------------------------------------------ saves
@@ -725,18 +696,19 @@ impl ReceivePaymentScreen {
         self.link.push(CompanyEvent::Toast("payment.saved.toast"));
         self.last_saved = Some(rec.clone());
         self.saved_next = next_step;
+        // Q-P22m: "Refund it" opens Refund a Credit with this payment's
+        // credit picked (the preview's overpayment string as the amount).
+        if let Some(amount) = refund {
+            self.open_refund(rec.customer_id, rec.id, amount);
+        }
         match after {
-            After::Close if refund.is_none() => {
+            After::Close => {
                 self.dirty = false;
                 self.link
                     .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
             }
-            After::Stay => self.open_saved(rec.clone()),
-            _ => self.clear(),
-        }
-        if let Some(amount) = refund {
-            let rec = self.last_saved.clone().unwrap_or(rec);
-            self.open_refund(&rec, amount);
+            After::Stay => self.open_saved(rec),
+            After::New => self.clear(),
         }
     }
 
@@ -783,6 +755,10 @@ impl ReceivePaymentScreen {
             Some(R::AmountRequired) => Some("payment.problem.no_amount"),
             Some(R::NoMoneyReceived) => Some("payment.refusal.no_money"),
             Some(R::AppliedFromDeposit) => Some("payment.refusal.applied_from_deposit"),
+            // P22 (B1a): an unapply of a row with a discount or write-off.
+            Some(R::ApplicationHasAdjustments) => Some("payment.refusal.has_adjustments"),
+            Some(R::ApplyDateBeforeSource) => Some("credit_memo.refusal.apply_date"),
+            Some(R::SourceDateAfterUse) => Some("credit_memo.refusal.source_date"),
             Some(_) => Some("payment.refusal.other"),
             None => {
                 self.error = Some(e);
@@ -935,7 +911,6 @@ impl ReceivePaymentScreen {
             Pending::Save(after) => self.start_save(after, Some(secret)),
             Pending::Void => self.start_void(Some(secret)),
             Pending::Bounce | Pending::FeeInvoice => self.send_bounce(Some(secret)),
-            Pending::Refund => self.send_refund(Some(secret)),
         };
         if !sent && self.closing_prompt.dialog_open() {
             self.closing_prompt.nothing_sent();
@@ -1108,86 +1083,17 @@ impl ReceivePaymentScreen {
         true
     }
 
-    fn open_refund(&mut self, rec: &PaymentRecord, amount: Money) {
-        let bank = self
-            .books
-            .accounts
-            .iter()
-            .find(|a| a.fields.detail_type.as_deref() == Some("bank"))
-            .map(|a| a.id);
-        self.dialog = Some(Dialog::Refund(Refund {
-            payment: rec.id,
-            client: rec.customer_id,
-            amount: shown(amount),
-            from: bank,
-            method: "check".into(),
-            ref_no: String::new(),
-            date: rec.date,
-            error: None,
-        }));
-    }
-
-    pub(crate) fn send_refund(&mut self, password: Option<Secret>) -> bool {
-        let Some(Dialog::Refund(r)) = self.dialog.clone() else {
-            return false;
+    /// Opens Refund a Credit for the payment's credit (Q-P22m).
+    pub(crate) fn open_refund(&mut self, client: ContactId, payment: TransactionId, amount: Money) {
+        let source = cl_model::forms::refund::RefundSourceChoice {
+            id: payment,
+            kind: cl_model::forms::refund::RefundSourceKind::PaymentCredit,
+            remaining: amount,
         };
-        if self.misc.is_some() {
-            return false;
-        }
-        let (Ok(amount), Some(from)) = (Money::parse_user(&r.amount, UserInput::MONEY), r.from)
-        else {
-            if let Some(Dialog::Refund(x)) = self.dialog.as_mut() {
-                x.error = Some("payment.refund.invalid");
-            }
-            return false;
-        };
-        // A refund dated in a closed period asks for the password first.
-        if password.is_none() && needs_password(None, r.date, self.books.closing) {
-            self.closing_prompt.set_verb(Verb::Change);
-            self.closing_prompt
-                .ask(Pending::Refund, true, self.books.closing);
-            return false;
-        }
-        let new = cl_api::NewCustomerRefund {
-            customer_id: r.client,
-            date: r.date,
-            from_account: from,
-            amount,
-            source_payment: r.payment,
-            method: Some(r.method.clone()),
-            ref_no: Some(r.ref_no.clone()),
-            memo: None,
-        };
-        // One key per refund until a definite answer: a retry after a
-        // timeout replays instead of refunding twice.
-        let key = match &self.refund_key {
-            Some((n, k)) if *n == new => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.refund_key = Some((new.clone(), k.clone()));
-                k
-            }
-        };
-        let label = engine::label(&key);
-        let demo = new.clone();
-        let demo_pw = password.clone();
-        self.misc = Some(engine::write(
-            &self.link,
-            self.group.as_ref(),
-            label,
-            move |d| {
-                crate::company::demo::receivables::refund(d, &demo, demo_pw.as_ref()).map(|_| ())
-            },
-            move |s| async move {
-                s.customer_payments()
-                    .refund(&new, &engine::options(password), key)
-                    .await
-                    .map(|_| ())
-            },
+        self.link.push(CompanyEvent::OpenWith(
+            CommandId::new(crate::screens::refund::KIND),
+            Box::new(crate::windows::OpenPayload::RefundFrom(client, source)),
         ));
-        self.misc_kind = Some(Misc::Refund);
-        self.poll_misc();
-        true
     }
 
     /// Applies the held deposit `source` to the open invoice (Create
@@ -1203,12 +1109,6 @@ impl ReceivePaymentScreen {
                 self.notice = Some("payment.voided");
                 self.open_id(id);
             }
-            (Ok(()), Some(Misc::Refund)) => {
-                self.closing_prompt.saved();
-                self.refund_key = None;
-                self.dialog = None;
-                self.notice = Some("payment.refund.done");
-            }
             (Ok(()), None) => {}
             (Err(e), Some(Misc::Void(_))) => {
                 if !self
@@ -1223,28 +1123,6 @@ impl ReceivePaymentScreen {
                             "payment.refusal.deposit_applied"
                         }
                         _ => "payment.refusal.other",
-                    });
-                }
-            }
-            (Err(e), Some(Misc::Refund)) => {
-                if !crate::screens::register::keeps_key(&e) {
-                    self.refund_key = None;
-                }
-                if self
-                    .closing_prompt
-                    .failed(&e, Pending::Refund, true, self.books.closing)
-                {
-                    return;
-                }
-                // Q-P21m: the payment stays saved and the credit shows.
-                if let Some(Dialog::Refund(x)) = self.dialog.as_mut() {
-                    x.error = Some(match cl_api::payment_refusal(&e) {
-                        Some(
-                            cl_api::PaymentRefusal::CreditNotAvailable
-                            | cl_api::PaymentRefusal::DepositNotAvailable,
-                        ) => "payment.refusal.credit_not_available",
-                        Some(cl_api::PaymentRefusal::Bounced) => "payment.refusal.bounced",
-                        _ => "payment.refund.failed",
                     });
                 }
             }
@@ -1328,7 +1206,6 @@ pub(crate) struct CreditOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Misc {
     Void(TransactionId),
-    Refund,
 }
 
 impl Screen for ReceivePaymentScreen {
@@ -1460,7 +1337,6 @@ impl ReceivePaymentScreen {
                 Dialog::Credits => "credits",
                 Dialog::WriteOffAccount => "write_off_account",
                 Dialog::DiscountAccount => "discount_account",
-                Dialog::Refund(_) => "refund",
                 Dialog::Bounce => "bounce",
                 Dialog::Void => "void",
             }),

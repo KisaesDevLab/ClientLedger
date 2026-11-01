@@ -1009,43 +1009,6 @@ impl ReceivePaymentScreen {
                     self.dialog = None;
                 }
             }
-            Dialog::Refund(mut r) => {
-                let banks: Vec<(AccountId, String)> = self
-                    .deposit_accounts()
-                    .iter()
-                    .filter(|a| a.fields.detail_type.as_deref() == Some("bank"))
-                    .map(|a| (a.id, crate::screens::register::account_text(a)))
-                    .collect();
-                let mut send = false;
-                let mut close = false;
-                form::card(ui, tokens, |ui| {
-                    ui.label(RichText::new(t("payment.refund.title")).strong());
-                    form::field(ui, &t("payment.refund.amount"), &mut r.amount);
-                    account_combo(
-                        ui,
-                        &t("payment.refund.from"),
-                        "payment-refund-from",
-                        &mut r.from,
-                        &banks,
-                    );
-                    form::field(ui, &t("payment.check_no"), &mut r.ref_no);
-                    if let Some(e) = r.error {
-                        ui.label(RichText::new(t(e)).color(tokens.warn_text));
-                    }
-                    ui.horizontal(|ui| {
-                        send = ui.button(t("payment.refund.send")).clicked();
-                        close = ui.button(t("payment.refund.later")).clicked();
-                    });
-                });
-                if close {
-                    self.dialog = None;
-                } else {
-                    self.dialog = Some(Dialog::Refund(r));
-                    if send {
-                        self.send_refund(None);
-                    }
-                }
-            }
             Dialog::Void => {
                 let mut go = false;
                 let mut cancel = false;
