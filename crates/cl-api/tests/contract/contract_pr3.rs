@@ -96,9 +96,9 @@ pub fn sales_doc_email_no_smtp_and_outbox_kind(h: &Harness) {
     assert!(no_smtp(&e), "{e:?}");
     // A failed send records nothing.
     let read = h.run(s.credit_memos().get(memo.id)).expect("memo");
-    assert!(read.send_history.is_empty());
+    assert_eq!(read.send_history.len(), 0);
     let read = h.run(s.sales_receipts().get(receipt.id)).expect("receipt");
-    assert!(read.send_history.is_empty());
+    assert_eq!(read.send_history.len(), 0);
     // Email later: Outbox rows of each kind; the queue lists them.
     let q1 = h
         .run(s.credit_memos().email_later(memo.id, &message(), key()))
