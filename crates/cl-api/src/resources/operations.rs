@@ -1764,7 +1764,7 @@ mod tests {
     ];
     const KEYABLE_FINANCE_CHARGES: [(&str, &str); 1] = [("POST", "/api/v1/finance-charges/assess")];
     /// The engine's sales-doc-email-v1 keyed set (U-144), as
-    /// 	ests/fixtures/idempotency_sales_doc_email_v1_routes.txt records it.
+    /// `tests/fixtures/idempotency_sales_doc_email_v1_routes.txt` records it.
     const KEYABLE_SALES_DOC_EMAIL: [(&str, &str); 4] = [
         ("POST", "/api/v1/credit-memos/{id}/email"),
         ("POST", "/api/v1/credit-memos/{id}/email-later"),

@@ -488,6 +488,29 @@ impl InvoiceScreen {
     fn client_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let lists = std::sync::Arc::clone(&self.clients);
         let current = self.header.current().client;
+        if let Some(hint) = self.client_lock() {
+            // Shown, not editable: the engine keeps the client (U-146).
+            let mut shown = self.inputs.client.clone();
+            ui.add_enabled_ui(false, |ui| {
+                kit::name_field(
+                    ui,
+                    tokens,
+                    &t("invoice.client"),
+                    &mut shown,
+                    &lists,
+                    current,
+                    260.0,
+                )
+            })
+            .response
+            .on_disabled_hover_text(t(hint));
+            ui.label(
+                RichText::new(t(hint))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
+            return;
+        }
         let (outcome, r) = kit::name_field(
             ui,
             tokens,

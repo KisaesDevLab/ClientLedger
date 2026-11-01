@@ -1773,7 +1773,29 @@ pub fn unapply(
     if bounced(&p) {
         return Err(conflict("PAYMENT_BOUNCED"));
     }
-    check_closing(closing(state), &[p.date], password)?;
+    // As the engine (PR-3 S2): a draw's money is the deposit's (400
+    // APPLIED_FROM_DEPOSIT: void the draw); a row that took a discount or
+    // write-off keeps its GL lines (409 APPLICATION_HAS_ADJUSTMENTS: edit or
+    // void the payment); the closing date meets each row's applied date.
+    if p.from_deposit.is_some() {
+        return Err(refused("APPLIED_FROM_DEPOSIT"));
+    }
+    let rows: Vec<&App> = p
+        .apps
+        .iter()
+        .filter(|a| a.live() && a.invoice == invoice)
+        .collect();
+    if rows
+        .iter()
+        .any(|a| !a.discount.is_zero() || !a.write_off.is_zero())
+    {
+        return Err(conflict_with(
+            "APPLICATION_HAS_ADJUSTMENTS",
+            &json!({"invoiceId": invoice.to_string()}),
+        ));
+    }
+    let applied: Vec<CalendarDate> = rows.iter().map(|a| a.applied).collect();
+    check_closing(closing(state), &applied, password)?;
     let mut back = Vec::new();
     if let Some(x) = state.receivables.pays.get_mut(&payment) {
         for a in x
@@ -2207,3 +2229,17 @@ pub fn ledger_of(state: &DemoState, payment: TransactionId) -> Option<Transactio
 #[cfg(test)]
 #[path = "receivables_tests.rs"]
 mod tests;
+
+/// The live payment rows on invoice (posted payments, rows neither
+/// voided nor reversed by a bounce), as the engine counts them.
+#[must_use]
+pub fn live_rows_on(state: &DemoState, invoice: TransactionId) -> usize {
+    state
+        .receivables
+        .pays
+        .values()
+        .filter(|p| !p.void)
+        .flat_map(|p| p.apps.iter())
+        .filter(|a| a.live() && a.invoice == invoice)
+        .count()
+}

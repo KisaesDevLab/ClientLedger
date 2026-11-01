@@ -98,6 +98,13 @@ impl ConflictDetails {
         self.0.as_ref()?.get(key)?.as_str()
     }
 
+    /// A whole-number field (`INVOICE_HAS_PAYMENTS` `{payments, credits}`,
+    /// U-146): counts, never money.
+    #[must_use]
+    pub fn count(&self, key: &str) -> Option<u64> {
+        self.0.as_ref()?.get(key)?.as_u64()
+    }
+
     /// A money field (a 2-place wire string; a JSON number or anything
     /// else is `None`, never guessed).
     #[must_use]

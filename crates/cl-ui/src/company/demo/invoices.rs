@@ -1016,16 +1016,30 @@ pub fn void(
     password: Option<&Secret>,
 ) -> Result<Versioned<InvoiceRecord>, ApiError> {
     let close = closing(state);
+    let date = state
+        .invoices
+        .stored
+        .get(&id)
+        .ok_or(ApiError::NotFound { code: None })?
+        .record["txnDate"]
+        .as_str()
+        .and_then(|d| CalendarDate::parse_wire(d).ok())
+        .ok_or(ApiError::Internal)?;
+    check_closing(close, &[date], password)?;
+    // The engine refuses a void while payments or credits are applied
+    // (PR-3 S2): unapply or void those first.
+    let (payments, credits) = live_on_invoice(state, id);
+    if payments + credits > 0 {
+        return Err(super::receivables::conflict_with(
+            "INVOICE_HAS_PAYMENTS",
+            &json!({"payments": payments, "credits": credits}),
+        ));
+    }
     let s = state
         .invoices
         .stored
         .get_mut(&id)
         .ok_or(ApiError::NotFound { code: None })?;
-    let date = s.record["txnDate"]
-        .as_str()
-        .and_then(|d| CalendarDate::parse_wire(d).ok())
-        .ok_or(ApiError::Internal)?;
-    check_closing(close, &[date], password)?;
     s.record["status"] = json!("void");
     s.record["invoiceStatus"] = json!("void");
     s.record["balanceDue"] = json!(Money::ZERO.to_wire());
@@ -1094,6 +1108,11 @@ pub fn update(
     if old.record["status"] == "void" || old.record["invoiceStatus"] == "paid" {
         return Err(refused("VALIDATION_ERROR", &json!({})));
     }
+    // U-145, U-146: the invoice keeps its client while anything points at
+    // it (a finance-charge invoice always).
+    if old.record["contactId"].as_str() != Some(new.contact_id.to_string().as_str()) {
+        client_change_allowed(state, id, &old.record)?;
+    }
     // U-128: every cost the invoice bills is resent or released (409
     // BILLABLE_LINES_MISSING otherwise); not both.
     let sent: BTreeSet<JournalLineId> = new
@@ -1160,6 +1179,26 @@ pub fn update(
         if !old.record[k].is_null() {
             record[k] = old.record[k].clone();
         }
+    }
+    // What was paid stays paid: the balance is the new total less it (409
+    // INVOICE_TOTAL_BELOW_PAID below it); an edit down to exactly the
+    // amount paid makes the invoice paid (U-146 N2).
+    let paid = old.record["amountPaid"]
+        .as_str()
+        .and_then(|v| Decimal::from_str(v).ok())
+        .unwrap_or_default();
+    if !paid.is_zero() {
+        let total = record["total"]
+            .as_str()
+            .and_then(|v| Decimal::from_str(v).ok())
+            .ok_or(ApiError::Internal)?;
+        if total < paid {
+            return Err(conflict("INVOICE_TOTAL_BELOW_PAID"));
+        }
+        let balance = total - paid;
+        record["amountPaid"] = json!(money(paid)?.to_wire());
+        record["balanceDue"] = json!(money(balance)?.to_wire());
+        record["invoiceStatus"] = json!(if balance.is_zero() { "paid" } else { "partial" });
     }
     // Omitted fields keep their values on an edit (layout, print later).
     if new.layout_id.is_omitted() {
@@ -1481,3 +1520,38 @@ pub fn seed_receivable(
 #[cfg(test)]
 #[path = "invoices_tests.rs"]
 mod tests;
+
+/// The live payment and credit applications on an invoice, as the
+/// engine's `assertInvoiceUnapplied` counts them (`{payments, credits}`):
+/// payment rows and credit memo rows count as payments; the demo has no
+/// legacy refund pointers, so credits stay 0.
+#[must_use]
+pub fn live_on_invoice(state: &DemoState, id: TransactionId) -> (usize, usize) {
+    let payments = super::receivables::live_rows_on(state, id)
+        + super::credit_memos::live_memo_rows_on(state, id);
+    (payments, 0)
+}
+
+/// A saved invoice's client may change (U-145, U-146): a finance-charge
+/// invoice never (409 FINANCE_CHARGE_CLIENT_CHANGE); any other not while
+/// a payment or credit is applied (409 INVOICE_HAS_PAYMENTS).
+fn client_change_allowed(
+    state: &DemoState,
+    id: TransactionId,
+    old: &Value,
+) -> Result<(), ApiError> {
+    if old["isFinanceCharge"] == true {
+        return Err(super::receivables::conflict_with(
+            "FINANCE_CHARGE_CLIENT_CHANGE",
+            &json!({}),
+        ));
+    }
+    let (payments, credits) = live_on_invoice(state, id);
+    if payments + credits > 0 {
+        return Err(super::receivables::conflict_with(
+            "INVOICE_HAS_PAYMENTS",
+            &json!({"payments": payments, "credits": credits}),
+        ));
+    }
+    Ok(())
+}
