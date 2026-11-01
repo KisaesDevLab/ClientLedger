@@ -305,6 +305,11 @@ pub const COMMANDS: &[Command] = &[
     // which is Form scope too (P12; Q-P20aa).
     cmd("invoice.add_billable", "Add Billable Costs\u{2026}", None, 7, ctrl_shift('U'), Scope::Form),
     cmd("invoice.email", "Email\u{2026}", None, 7, ctrl_shift('M'), Scope::Form),
+    // Receive Payment (P21; Alt+N, Alt+S, Page Up/Down apply too). Record
+    // bounced check has no shortcut: the toolbar and the Edit menu.
+    cmd("payment.unapply_all", "Un-apply All", None, 7, alt('U'), Scope::Form),
+    cmd("payment.discounts_credits", "Discounts & Credits\u{2026}", None, 7, alt('D'), Scope::Form),
+    cmd("payment.bounced_check", "Record Bounced Check\u{2026}", None, 7, None, Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
     cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),
@@ -354,7 +359,7 @@ pub const COMMANDS: &[Command] = &[
     // Clients
     built("clients.center", "Customers & Projects", Some(Menu::Clients), 0, None),
     built("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I')),
-    screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
+    built("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R')),
     screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P22"),
     built("clients.daily_sales", "Daily Sales Summary", Some(Menu::Clients), 1, None),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
@@ -579,6 +584,8 @@ mod tests {
             "clients.create_invoice",
             "clients.outbox",
             "lists.price_levels",
+            // P21
+            "clients.receive_payment",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

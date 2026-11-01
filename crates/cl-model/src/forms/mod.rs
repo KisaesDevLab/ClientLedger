@@ -45,6 +45,9 @@ pub mod journal;
 pub mod lines;
 pub mod loan_payment;
 pub mod owner_money;
+// P21: Receive Payment and the bounced-check flow.
+pub mod bounced_check;
+pub mod payment;
 pub mod personal_funds;
 pub mod transfer;
 
