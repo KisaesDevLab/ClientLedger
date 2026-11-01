@@ -28,7 +28,12 @@ pub mod price_levels;
 pub mod printing;
 // P21: Receive Payment (held to fixtures/payments/golden.json).
 pub mod receivables;
+// P22: credit memos, sales receipts, refunds, statements and finance
+// charges (held to fixtures/receivables/golden.json).
+pub mod credit_memos;
+pub mod finance_charges;
 pub mod register;
+pub mod statements;
 pub mod template_store;
 pub mod templates;
 
@@ -138,6 +143,12 @@ pub struct DemoState {
     pub layouts: layouts::DemoLayouts,
     /// Customer payments, deposits on hand and bounces (P21).
     pub receivables: receivables::DemoReceivables,
+    /// Credit memos, sales receipts and refunds (P22).
+    pub credits: credit_memos::DemoCredits,
+    /// Customer statement runs and snapshots (P22).
+    pub statements: statements::DemoStatements,
+    /// Finance-charge settings and assessments (P22).
+    pub finance: finance_charges::DemoFinance,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -257,6 +268,9 @@ impl DemoState {
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),
             receivables: receivables::DemoReceivables::default(),
+            credits: credit_memos::DemoCredits::default(),
+            statements: statements::DemoStatements::default(),
+            finance: finance_charges::DemoFinance::default(),
         }
     }
 

@@ -164,11 +164,11 @@ impl fmt::Debug for DemoReceivables {
 
 // ---- Errors ------------------------------------------------------------------------
 
-fn invalid() -> ApiError {
+pub(super) fn invalid() -> ApiError {
     ApiError::Local(LocalValidation::InvalidValue)
 }
 
-fn conflict(code: &str) -> ApiError {
+pub(super) fn conflict(code: &str) -> ApiError {
     ApiError::Conflict {
         reason: ConflictReason::Unspecified,
         current_version: None,
@@ -177,14 +177,14 @@ fn conflict(code: &str) -> ApiError {
     }
 }
 
-fn refused(code: &str) -> ApiError {
+pub(super) fn refused(code: &str) -> ApiError {
     cl_api::engine_refusal(
         400,
         &json!({"error": {"message": "refused", "code": code, "details": {}}}),
     )
 }
 
-fn stale() -> ApiError {
+pub(super) fn stale() -> ApiError {
     ApiError::Conflict {
         reason: ConflictReason::Stale,
         current_version: None,
@@ -193,25 +193,25 @@ fn stale() -> ApiError {
     }
 }
 
-fn money(d: Decimal) -> Result<Money, ApiError> {
+pub(super) fn money(d: Decimal) -> Result<Money, ApiError> {
     Money::try_from(round(d, 2)).map_err(|_| invalid())
 }
 
-fn dec(m: Money) -> Decimal {
+pub(super) fn dec(m: Money) -> Decimal {
     m.as_decimal()
 }
 
 /// The stored balance as the engine echoes it (`balanceDueExact`).
-fn token(d: Decimal) -> Result<BalanceToken, ApiError> {
+pub(super) fn token(d: Decimal) -> Result<BalanceToken, ApiError> {
     Ok(BalanceToken::from_wire(&money(d)?.to_wire()))
 }
 
-fn version_of(v: i64) -> Timestamp {
+pub(super) fn version_of(v: i64) -> Timestamp {
     let base = DemoState::now().unix_millis();
     Timestamp::from_unix_millis(base + v).unwrap_or_else(|_| DemoState::now())
 }
 
-fn closing(state: &DemoState) -> Option<CalendarDate> {
+pub(super) fn closing(state: &DemoState) -> Option<CalendarDate> {
     let open = state.open?;
     state
         .companies
@@ -222,18 +222,18 @@ fn closing(state: &DemoState) -> Option<CalendarDate> {
 
 // ---- Chart and seed ----------------------------------------------------------------
 
-fn chart(state: &mut DemoState) -> Vec<Account> {
+pub(super) fn chart(state: &mut DemoState) -> Vec<Account> {
     state.chart.get_or_insert_with(super::chart).clone()
 }
 
-fn tagged(chart: &[Account], tag: &str) -> Option<AccountId> {
+pub(super) fn tagged(chart: &[Account], tag: &str) -> Option<AccountId> {
     chart
         .iter()
         .find(|a| a.system_tag.as_deref() == Some(tag))
         .map(|a| a.id)
 }
 
-fn ensure_account(
+pub(super) fn ensure_account(
     state: &mut DemoState,
     number: u32,
     name: &str,
@@ -365,7 +365,7 @@ pub fn seed_invoice_with_terms(
 
 // ---- Reads -------------------------------------------------------------------------
 
-fn name_of(state: &mut DemoState, client: ContactId) -> Option<String> {
+pub(super) fn name_of(state: &mut DemoState, client: ContactId) -> Option<String> {
     state
         .contacts_mut()
         .iter()
@@ -405,9 +405,13 @@ fn deposit_remaining(r: &DemoReceivables, id: TransactionId) -> Decimal {
 }
 
 /// The client's balance: open invoice balances less unapplied credits
-/// (held deposits are a liability, not A/R).
+/// and credit memo credit (P22; held deposits are a liability, not A/R).
 #[must_use]
 pub fn contact_balance(state: &DemoState, client: ContactId) -> Decimal {
+    payments_balance(state, client) - super::credit_memos::memo_credit(state, client)
+}
+
+fn payments_balance(state: &DemoState, client: ContactId) -> Decimal {
     let open: Decimal = receivables_of(state, client)
         .iter()
         .map(|r| r.balance)
@@ -1126,7 +1130,7 @@ fn line(account: AccountId, debit: Decimal, credit: Decimal) -> Result<DemoLine,
 }
 
 /// Posts balanced lines (zero lines dropped) to the demo ledger.
-fn post(
+pub(super) fn post(
     state: &mut DemoState,
     kind: &'static str,
     date: CalendarDate,
@@ -1160,7 +1164,7 @@ fn post(
         .ok_or_else(invalid)
 }
 
-fn is_deposit_target(state: &mut DemoState, a: AccountId) -> bool {
+pub(super) fn is_deposit_target(state: &mut DemoState, a: AccountId) -> bool {
     let chart = chart(state);
     let Some(acct) = chart.iter().find(|x| x.id == a) else {
         return false;
@@ -1172,7 +1176,7 @@ fn is_deposit_target(state: &mut DemoState, a: AccountId) -> bool {
         )
 }
 
-fn new_id(state: &mut DemoState) -> Result<TransactionId, ApiError> {
+pub(super) fn new_id(state: &mut DemoState) -> Result<TransactionId, ApiError> {
     state.receivables.next += 1;
     TransactionId::parse(&format!(
         "d4000000-0000-4000-8000-{:012}",
@@ -2037,6 +2041,87 @@ pub fn refund(
     }
     state.receivables.writes += 1;
     Ok(id)
+}
+
+// ---- P22 read-only views (company/demo/credit_memos.rs, statements.rs,
+// finance_charges.rs) -----------------------------------------------------
+
+/// One application of a payment, as the P22 open items read it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PayAppView {
+    pub invoice: TransactionId,
+    /// Cash + discount + write-off.
+    pub settled: Decimal,
+    /// Discount + write-off.
+    pub adjustments: Decimal,
+    pub applied: CalendarDate,
+    pub later: bool,
+    pub voided: bool,
+    pub reversed: bool,
+}
+
+/// One customer payment, as the P22 open items read it.
+#[derive(Clone, Debug)]
+pub(super) struct PayView {
+    pub id: TransactionId,
+    pub customer: ContactId,
+    pub date: CalendarDate,
+    pub amount: Decimal,
+    pub hold: bool,
+    pub void: bool,
+    pub bounce: Option<CalendarDate>,
+    pub refunded: Decimal,
+    pub credit_remaining: Decimal,
+    pub ref_no: Option<String>,
+    pub apps: Vec<PayAppView>,
+}
+
+/// Every customer payment the demo engine keeps.
+pub(super) fn pay_views(state: &DemoState) -> Vec<PayView> {
+    state
+        .receivables
+        .pays
+        .iter()
+        .map(|(id, p)| PayView {
+            id: *id,
+            customer: p.customer,
+            date: p.date,
+            amount: p.amount,
+            hold: p.hold,
+            void: p.void,
+            bounce: p.bounce.map(|(_, d)| d),
+            refunded: p.refunded,
+            credit_remaining: credit_remaining(p),
+            ref_no: p.ref_no.clone(),
+            apps: p
+                .apps
+                .iter()
+                .map(|a| PayAppView {
+                    invoice: a.invoice,
+                    settled: a.settled(),
+                    adjustments: a.discount + a.write_off,
+                    applied: a.applied,
+                    later: a.later,
+                    voided: a.voided,
+                    reversed: a.reversed,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// What is left of a held deposit (P22 refunds).
+pub(super) fn held_remaining(state: &DemoState, id: TransactionId) -> Option<Decimal> {
+    let p = state.receivables.pays.get(&id)?;
+    p.hold.then(|| deposit_remaining(&state.receivables, id))
+}
+
+/// Gives back `x` of a refunded credit or deposit (a P22 refund void).
+pub(super) fn unrefund(state: &mut DemoState, id: TransactionId, x: Decimal) {
+    if let Some(p) = state.receivables.pays.get_mut(&id) {
+        p.refunded -= x;
+        p.version += 1;
+    }
 }
 
 /// The receivables settings as `CompanySettings` would carry them.
