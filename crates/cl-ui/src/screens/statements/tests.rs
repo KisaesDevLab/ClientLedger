@@ -226,4 +226,39 @@ fn the_finance_charge_note_shows_while_charges_are_due() {
     s.set_as_of(CalendarDate::from_ymd(2026, 12, 31).ok());
     settle(&mut s);
     assert_eq!(s.state()["finance_due"], true);
+    // Assessing in another window clears the note here (a saved change).
+    let mut fc =
+        crate::screens::finance_charges::FinanceChargesScreen::new(Arc::clone(&link), nov30());
+    for _ in 0..50 {
+        fc.poll();
+        if fc.preview_job.is_none() && fc.settings_job.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let mut s2 = s2;
+    assert_eq!(s2.state()["finance_due"], true);
+    // Everyone chargeable, open credits too.
+    let unticked: Vec<cl_core::ids::ContactId> = fc
+        .current()
+        .expect("preview")
+        .rows
+        .iter()
+        .filter(|r| r.chargeable() && !fc.form.is_ticked(r.contact_id))
+        .map(|r| r.contact_id)
+        .collect();
+    for c in unticked {
+        fc.toggle(c);
+    }
+    assert!(fc.start_assess(None));
+    for _ in 0..50 {
+        fc.poll();
+        if !fc.busy() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!fc.results.is_empty(), "assessed");
+    settle(&mut s2);
+    assert_eq!(s2.state()["finance_due"], false, "the note went away");
 }

@@ -167,6 +167,9 @@ pub struct StatementsScreen {
     pub(crate) finance_due: Option<String>,
     pub(crate) finance_job: Option<Job<Option<String>>>,
     pub(crate) finance_for: Option<CalendarDate>,
+    /// Saves in other windows (an assessment, a payment): the note, the
+    /// list and the preview are read again.
+    pub(crate) bus: crate::data_bus::Subscription,
 }
 
 impl std::fmt::Debug for StatementsScreen {
@@ -210,7 +213,9 @@ impl StatementsScreen {
             .and_then(std::path::Path::parent)
             .map(std::path::Path::to_path_buf);
         let fake = link.is_demo();
+        let bus = link.bus().subscribe();
         let mut s = StatementsScreen {
+            bus,
             printer: print_job::Printer { root, fake },
             link,
             group,
@@ -347,6 +352,14 @@ impl StatementsScreen {
     /// Takes every answer that arrived; reads the list and the preview
     /// again when their inputs changed.
     pub(crate) fn poll(&mut self) {
+        // A save elsewhere (Assess Finance Charges, a payment, a memo):
+        // the figures and the "assess first?" note are read again when
+        // this window is shown next.
+        if !self.link.bus().take(&mut self.bus).is_empty() {
+            self.listed_for = None;
+            self.preview_for = None;
+            self.finance_for = None;
+        }
         if let Some(rx) = &self.prefs_rx
             && let Ok(p) = rx.try_recv()
         {
