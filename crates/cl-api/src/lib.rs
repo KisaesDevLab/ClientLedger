@@ -273,9 +273,9 @@ pub use resources::customer_payments::{
     NewCustomerRefund, OpenInvoiceRow, PAYMENT_MEMO_MAX, PAYMENT_REF_MAX, PaymentApplication,
     PaymentListQuery, PaymentPreview, PaymentPreviewRequest, PaymentRecord, PaymentRefusal,
     PaymentStatus, PaymentSummary, PaymentTotals, PaymentWriteOptions, PendingAfter,
-    PreviewCreditUse, PreviewInvoice, PreviewProblem, ReopenedInvoice, SaveApplication, SaveCredit,
-    Shortfall, cents_wire, check_payment, check_preview, payment_refusal, payment_refusal_codes,
-    saved_payment,
+    PreviewCreditUse, PreviewInvoice, PreviewProblem, RecordCreditUse, ReopenedInvoice,
+    SaveApplication, SaveCredit, Shortfall, cents_wire, check_payment, check_preview,
+    payment_refusal, payment_refusal_codes, saved_payment,
 };
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{

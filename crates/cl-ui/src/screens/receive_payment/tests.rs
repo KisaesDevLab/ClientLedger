@@ -179,3 +179,113 @@ fn nothing_applied_asks_and_holds_a_customer_deposit() {
     assert_eq!(held.len(), 1);
     assert_eq!(shown(held[0].remaining), "500.00");
 }
+
+/// The open invoices' ids by number, from the ready preview.
+fn invoice_ids(s: &ReceivePaymentScreen) -> BTreeMap<String, TransactionId> {
+    match s.form.figures() {
+        FiguresView::Ready(f) => f
+            .rows
+            .iter()
+            .map(|r| (r.number.clone(), r.invoice))
+            .collect(),
+        _ => BTreeMap::new(),
+    }
+}
+
+/// D-B1: a payment that used a credit opens with it, and a memo edit sends
+/// it back unchanged (the demo keeps the posting: a memo-only edit).
+#[test]
+fn a_saved_payment_keeps_its_credit_on_a_memo_edit() {
+    let (_d, link) = link();
+    // 4,400.00 on 1091 alone: 15.00 stays as a credit.
+    let mut s = mockup(&link);
+    let ids = invoice_ids(&s);
+    let client = s.form.client;
+    s.form.unapply_all();
+    s.toggle(ids["1091"]);
+    s.amount_text = "4400".into();
+    s.amount_typed();
+    settle(&mut s);
+    assert_eq!(s.state()["overpayment"], "15.00");
+    assert!(s.start_save(After::New, None), "{:?}", s.problems);
+    s.poll();
+    let credit = s.last_saved.as_ref().map(|r| r.id).expect("credit");
+    // 100.00 on 1095 plus the 15.00 credit.
+    s.clear();
+    s.form.set_client(client);
+    s.amount_text = "100".into();
+    s.amount_typed();
+    settle(&mut s);
+    s.form.unapply_all();
+    s.toggle(ids["1095"]);
+    s.form.use_credit(credit, ids["1095"], None);
+    settle(&mut s);
+    assert_eq!(s.state()["discounts_and_credits"], "15.00", "{}", s.state());
+    assert!(s.start_save(After::Stay, None), "{:?}", s.problems);
+    s.poll();
+    let rec = s.editing.clone().expect("opened");
+    assert_eq!(rec.credit_applications.len(), 1);
+    assert_eq!(s.form.credits().len(), 1);
+    let ledger = {
+        let demo = link.demo_state().expect("demo");
+        crate::company::demo::receivables::ledger_of(&demo, rec.id)
+    };
+    // A memo edit: the same credit goes back and nothing reposts.
+    settle(&mut s);
+    s.form.memo = "thanks".into();
+    assert!(s.start_save(After::Stay, None), "{:?}", s.problems);
+    s.poll();
+    let after = s.editing.clone().expect("opened");
+    assert_eq!(after.memo.as_deref(), Some("thanks"));
+    assert_eq!(after.credit_applications.len(), 1);
+    assert_eq!(shown(after.credit_applications[0].amount), "15.00");
+    let demo = link.demo_state().expect("demo");
+    assert_eq!(
+        crate::company::demo::receivables::ledger_of(&demo, rec.id),
+        ledger
+    );
+    let open = crate::company::demo::invoices::receivables_of(&demo, rec.customer_id);
+    let n1095 = open.iter().find(|i| i.number == "1095").expect("1095");
+    assert_eq!(
+        shown(Money::try_from(n1095.balance).expect("m")),
+        "1,145.00"
+    );
+}
+
+/// The credit row another receipt used later the same day is not loaded as
+/// the payment's own cash.
+#[test]
+fn a_credit_used_later_the_same_day_is_not_own_cash() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let ids = invoice_ids(&s);
+    let client = s.form.client;
+    s.form.unapply_all();
+    s.toggle(ids["1091"]);
+    s.amount_text = "4400".into();
+    s.amount_typed();
+    settle(&mut s);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    let credit = s.last_saved.as_ref().map(|r| r.id).expect("credit");
+    s.clear();
+    s.form.set_client(client);
+    s.amount_text = "100".into();
+    s.amount_typed();
+    settle(&mut s);
+    s.form.unapply_all();
+    s.toggle(ids["1095"]);
+    s.form.use_credit(credit, ids["1095"], None);
+    settle(&mut s);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    // Open the credit's payment: only 1091 is its own row.
+    s.open_id(credit);
+    s.poll();
+    let rec = s.editing.clone().expect("opened");
+    assert_eq!(rec.live_applications().count(), 2);
+    let req = s.form.to_preview_request().expect("request");
+    let rows = req.rows.expect("explicit");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].invoice, ids["1091"]);
+}

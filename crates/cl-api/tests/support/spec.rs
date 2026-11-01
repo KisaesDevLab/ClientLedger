@@ -34,8 +34,8 @@ use sha2::{Digest, Sha256};
 /// (U-128), email and the Outbox (U-127) and invoice layouts (U-130).
 /// The P21 rows below are client-declared until the D9 pin bump: the P21
 /// plan §2.2-§2.5 contract (payment preview, list, get, edit, void, apply,
-/// bounce and deposits on hand).
-pub const OUTSIDE_SPEC: [(&str, &str); 16] = [
+/// bounce, deposits on hand and customer refunds).
+pub const OUTSIDE_SPEC: [(&str, &str); 17] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -54,6 +54,7 @@ pub const OUTSIDE_SPEC: [(&str, &str); 16] = [
     ("POST", "/api/v1/payments/{id}/apply"),
     ("POST", "/api/v1/payments/{id}/bounce"),
     ("GET", "/api/v1/payments/deposits-on-hand"),
+    ("POST", "/api/v1/customer-refunds"),
 ];
 
 /// Lowercase hex of a SHA-256.

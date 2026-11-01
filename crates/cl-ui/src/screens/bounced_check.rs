@@ -217,7 +217,10 @@ pub(crate) fn draw(s: &mut ReceivePaymentScreen, ui: &mut Ui, tokens: &Tokens) {
         .collect();
     let held_name = match rec.deposited_in {
         Some(_) => t("bounce.held.deposit_bank"),
-        None => s.account_name(rec.deposit_to),
+        None => rec
+            .deposit_to
+            .map(|a| s.account_name(a))
+            .unwrap_or_default(),
     };
     let numbers: Vec<String> = rec
         .live_applications()

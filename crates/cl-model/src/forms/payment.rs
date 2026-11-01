@@ -890,10 +890,12 @@ impl PaymentForm {
         }
     }
 
-    /// Start editing a saved payment (Prev/Next): the form shows it in
-    /// Explicit mode with its live applications.
+    /// Start editing a saved payment: the form shows it in Explicit mode
+    /// with its own live applications, the credits and deposits it used
+    /// (D-B1: an unchanged save sends them back) and the accounts its
+    /// write-offs and discounts went to.
     pub fn load_saved(&mut self, editing: Editing, loaded: LoadedPayment) {
-        *self = PaymentForm::new(Some(loaded.date), Some(loaded.deposit_to));
+        *self = PaymentForm::new(Some(loaded.date), loaded.deposit_to);
         self.client = Some(loaded.client);
         self.amount = AmountInput::Typed(loaded.amount);
         self.method = loaded.method;
@@ -907,9 +909,19 @@ impl PaymentForm {
             }
             if let Some(w) = write_off {
                 self.write_offs.insert(i, w);
-                self.under = Under::WriteOff { account: None };
+                self.under = Under::WriteOff {
+                    account: loaded.write_off_account,
+                };
             }
         }
+        for (source, invoice, amount) in loaded.credits {
+            self.credits.push(CreditChoice {
+                source,
+                invoice,
+                amount: Some(amount),
+            });
+        }
+        self.discount_account = loaded.discount_account;
         if loaded.hold {
             self.nothing = Some(NothingApplied::Hold);
         }
@@ -1083,9 +1095,13 @@ impl PaymentForm {
             FiguresView::Nothing => None,
         };
         if let Some(f) = f {
-            let settles = f.rows.iter().any(|r| {
-                r.discount.is_positive() || r.write_off.is_positive() || r.credit.is_positive()
-            });
+            // Credits alone are not a receipt: the engine refuses a payment
+            // of 0 that only uses credits (400 AMOUNT_REQUIRED); they go
+            // through Apply on the credit (review D should-fix 3).
+            let settles = f
+                .rows
+                .iter()
+                .any(|r| r.discount.is_positive() || r.write_off.is_positive());
             if !f.amount.is_positive() && !settles {
                 problems.push(PaymentProblem::NoAmount);
             }
@@ -1181,16 +1197,23 @@ pub struct LoadedPayment {
     pub date: CalendarDate,
     /// Amount.
     pub amount: Money,
-    /// Where it went.
-    pub deposit_to: AccountId,
+    /// Where it went (`None` for a payment of 0 that only wrote off).
+    pub deposit_to: Option<AccountId>,
     /// Method.
     pub method: String,
     /// Reference.
     pub ref_no: String,
     /// Memo.
     pub memo: String,
-    /// Live applications: invoice, cash, discount, write-off.
+    /// Its own live applications: invoice, cash, discount, write-off.
     pub rows: Vec<(TransactionId, Money, Option<Money>, Option<Money>)>,
+    /// Credits and held deposits applied inside it: source, invoice,
+    /// amount.
+    pub credits: Vec<(TransactionId, TransactionId, Money)>,
+    /// The account its write-offs went to.
+    pub write_off_account: Option<AccountId>,
+    /// The account its discounts went to.
+    pub discount_account: Option<AccountId>,
     /// A held deposit.
     pub hold: bool,
 }
@@ -1201,6 +1224,7 @@ impl fmt::Debug for LoadedPayment {
             .field("client", &self.client)
             .field("date", &self.date)
             .field("rows", &self.rows.len())
+            .field("credits", &self.credits.len())
             .finish_non_exhaustive()
     }
 }

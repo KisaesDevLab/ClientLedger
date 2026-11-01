@@ -102,7 +102,7 @@ impl ReceivePaymentScreen {
             let can_bounce = self
                 .editing
                 .as_ref()
-                .is_some_and(|e| !e.is_bounced() && !e.is_void());
+                .is_some_and(|e| !e.is_bounced() && !e.is_void() && e.deposit_to.is_some());
             if ui
                 .add_enabled(can_bounce, egui::Button::new(t("payment.bounced_check")))
                 .on_hover_text(t("payment.bounced_check.tip"))

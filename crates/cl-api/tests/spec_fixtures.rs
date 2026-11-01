@@ -207,8 +207,8 @@ fn keyable_receive_payment_rows_are_the_recorded_set() {
     let pay = spec::route_lines(&fixture("idempotency_receive_payment_v1_routes.txt"));
     assert_eq!(
         pay.len(),
-        6,
-        "the idempotency-receive-payment-v1 set has 6 routes"
+        7,
+        "the idempotency-receive-payment-v1 set has 7 routes"
     );
     assert_eq!(
         spec::keyable_receive_payment_operations(OPERATIONS_TXT),

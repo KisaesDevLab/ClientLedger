@@ -27,9 +27,9 @@ use crate::errors::{ApiError, ConflictReason, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::feed::FeedItemId;
 use crate::resources::operations::{
-    PAYMENT_APPLY, PAYMENT_BOUNCE, PAYMENT_DEPOSITS_ON_HAND, PAYMENT_GET, PAYMENT_OPEN_INVOICES,
-    PAYMENT_PREVIEW, PAYMENT_PUT, PAYMENT_RECEIVE, PAYMENT_UNAPPLY, PAYMENT_VOID, PAYMENTS_LIST,
-    TXNS_CREATE,
+    CUSTOMER_REFUND_CREATE, PAYMENT_APPLY, PAYMENT_BOUNCE, PAYMENT_DEPOSITS_ON_HAND, PAYMENT_GET,
+    PAYMENT_OPEN_INVOICES, PAYMENT_PREVIEW, PAYMENT_PUT, PAYMENT_RECEIVE, PAYMENT_UNAPPLY,
+    PAYMENT_VOID, PAYMENTS_LIST,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::session::{Session, json_body};
@@ -189,6 +189,12 @@ pub enum PaymentRefusal {
     FeedItemNotPending,
     /// Over 1,000 invoices in one payment.
     TooManyApplications,
+    /// Nothing received: a payment of 0 that only uses credits
+    /// (400 `AMOUNT_REQUIRED`); credits alone go through Apply.
+    AmountRequired,
+    /// The credit or deposit belongs to another client
+    /// (400 `CREDIT_NOT_FOR_CUSTOMER`).
+    CreditNotForCustomer,
 }
 
 const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
@@ -246,6 +252,11 @@ const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
     ("FEED_ITEM_MISMATCH", PaymentRefusal::FeedItemMismatch),
     ("FEED_ITEM_NOT_PENDING", PaymentRefusal::FeedItemNotPending),
     ("TOO_MANY_APPLICATIONS", PaymentRefusal::TooManyApplications),
+    ("AMOUNT_REQUIRED", PaymentRefusal::AmountRequired),
+    (
+        "CREDIT_NOT_FOR_CUSTOMER",
+        PaymentRefusal::CreditNotForCustomer,
+    ),
 ];
 
 /// Every engine code [`payment_refusal`] knows (tests and the demo).
@@ -616,6 +627,16 @@ pub struct PaymentApplication {
     /// Reversed by a bounce.
     #[serde(default, deserialize_with = "null_false")]
     pub reversed: bool,
+    /// The receipt this row was applied inside, for a credit of this
+    /// payment used later by another payment (D-B1; assumed field name
+    /// until the D9 pin bump). `None` on the payment's own rows.
+    #[serde(default)]
+    pub applied_in_txn_id: Option<TransactionId>,
+    /// True for a credit row applied after the payment was received (by
+    /// another receipt or `POST /payments/:id/apply`), whatever its date
+    /// (assumed field name until the D9 pin bump).
+    #[serde(default, deserialize_with = "null_false")]
+    pub applied_later: bool,
 }
 ids_debug!(
     PaymentApplication,
@@ -623,7 +644,41 @@ ids_debug!(
     invoice_id,
     applied_date,
     voided,
-    reversed
+    reversed,
+    applied_in_txn_id,
+    applied_later
+);
+
+impl PaymentApplication {
+    /// True when the row is the payment's own (received with it), not a
+    /// credit of it applied later: an edit sends these back as its
+    /// applications. `date` is the payment's date.
+    #[must_use]
+    pub fn is_own(&self, payment: TransactionId, date: CalendarDate) -> bool {
+        !self.applied_later
+            && self.applied_in_txn_id.is_none_or(|t| t == payment)
+            && self.applied_date.is_none_or(|d| d == date)
+    }
+}
+
+/// A credit or held deposit applied inside a saved payment (D-B1, P21 plan
+/// §2.3 `creditApplications`): an edit sends it back unchanged.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordCreditUse {
+    /// The credit or deposit used.
+    pub source_payment_id: TransactionId,
+    /// The invoice it went to.
+    pub invoice_id: TransactionId,
+    /// How much.
+    #[serde(deserialize_with = "de_cents")]
+    pub amount: Money,
+}
+ids_debug!(
+    RecordCreditUse,
+    "RecordCreditUse",
+    source_payment_id,
+    invoice_id
 );
 
 /// The deposit a payment went into.
@@ -659,8 +714,10 @@ pub struct PaymentRecord {
     /// What was received.
     #[serde(deserialize_with = "de_cents")]
     pub amount: Money,
-    /// Where it went.
-    pub deposit_to: AccountId,
+    /// Where it went: `None` for a payment of 0 that only wrote off or
+    /// discounted (no asset line; engine should-fix 6).
+    #[serde(default)]
+    pub deposit_to: Option<AccountId>,
     /// Method (`check`, `cash`, ...).
     #[serde(default)]
     pub payment_method: Option<String>,
@@ -692,6 +749,16 @@ pub struct PaymentRecord {
     /// What is left of the held deposit.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub deposit_remaining: Money,
+    /// Credits and held deposits applied inside this payment (draws
+    /// included; D-B1, E-B2).
+    #[serde(default, deserialize_with = "null_vec")]
+    pub credit_applications: Vec<RecordCreditUse>,
+    /// The account its write-offs went to.
+    #[serde(default)]
+    pub write_off_account_id: Option<AccountId>,
+    /// The account its discounts went to.
+    #[serde(default)]
+    pub discount_account_id: Option<AccountId>,
 }
 
 impl fmt::Debug for PaymentRecord {
@@ -704,6 +771,7 @@ impl fmt::Debug for PaymentRecord {
             .field("deposited_in", &self.deposited_in)
             .field("bounce", &self.bounce)
             .field("applications", &self.applications.len())
+            .field("credit_applications", &self.credit_applications.len())
             .finish_non_exhaustive()
     }
 }
@@ -1103,7 +1171,7 @@ impl fmt::Debug for BounceResult {
 }
 
 /// A refund of a credit or a held deposit (Q-P21m; the small dialog after
-/// an overpayment). Posted as a `customer_refund` transaction with
+/// an overpayment). Posted through `POST /customer-refunds` with
 /// `sourcePaymentId` (P21 plan §2.3).
 #[derive(Clone, PartialEq, Eq)]
 pub struct NewCustomerRefund {
@@ -1600,10 +1668,10 @@ impl CustomerPayments<'_> {
         decode_key(&reply.body, "data", "deposits on hand")
     }
 
-    /// Refunds a credit or a held deposit: a `customer_refund` transaction
-    /// with `sourcePaymentId` (`POST /transactions`, keyed under
-    /// `idempotency-v1`; P21 plan §2.3 — the route is an assumption until
-    /// the pin bump).
+    /// Refunds a credit or a held deposit: `POST /customer-refunds` with
+    /// `sourcePaymentId` (the engine's canonical route: the Receive Payment
+    /// permission, keyed under `idempotency-receive-payment-v1`; P21 plan
+    /// §2.3). Answers the `customer_refund` transaction's id.
     ///
     /// # Errors
     /// `Local(Unsupported)` without `payment-settle-v1`;
@@ -1622,7 +1690,6 @@ impl CustomerPayments<'_> {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let mut body = json!({
-            "txnType": "customer_refund",
             "txnDate": r.date,
             "contactId": r.customer_id,
             "refundFromAccountId": r.from_account,
@@ -1639,9 +1706,9 @@ impl CustomerPayments<'_> {
             body["memo"] = json!(m);
         }
         let body = posting_body(s, body, opts)?;
-        let mut call = Call::at(Method::Post, TXNS_CREATE.route()).json_body(body);
+        let mut call = Call::at(Method::Post, CUSTOMER_REFUND_CREATE.route()).json_body(body);
         call.idempotency_key = Some(key);
-        let reply = s.send(&TXNS_CREATE, call, None).await?;
+        let reply = s.send(&CUSTOMER_REFUND_CREATE, call, None).await?;
         let created: Created = decode_key(&reply.body, "transaction", "refund")
             .map_err(crate::resources::versioning::saved_unreadable)?;
         Ok(created.id)

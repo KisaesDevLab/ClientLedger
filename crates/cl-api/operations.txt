@@ -321,3 +321,4 @@ POST    /api/v1/payments/{id}/apply             keyable-receive-payment
 POST    /api/v1/payments/{id}/bounce            keyable-receive-payment
 GET     /api/v1/payments/open-invoices/{customerId} idempotent
 GET     /api/v1/payments/deposits-on-hand       idempotent
+POST    /api/v1/customer-refunds                keyable-receive-payment

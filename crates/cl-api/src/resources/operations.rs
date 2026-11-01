@@ -1059,6 +1059,10 @@ pub(crate) const PAYMENT_OPEN_INVOICES: Operation =
     read("/api/v1/payments/open-invoices/{customerId}");
 /// A client's held deposits with what is left of each (U-135; contract).
 pub(crate) const PAYMENT_DEPOSITS_ON_HAND: Operation = read("/api/v1/payments/deposits-on-hand");
+/// Refunds a client's credit or held deposit (U-133: the canonical
+/// `customer_refund` route, Receive Payment permission; contract).
+pub(crate) const CUSTOMER_REFUND_CREATE: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/customer-refunds");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1072,7 +1076,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 251] = [
+pub const OPERATIONS: [Operation; 252] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1338,6 +1342,7 @@ pub const OPERATIONS: [Operation; 251] = [
     PAYMENT_BOUNCE,
     PAYMENT_OPEN_INVOICES,
     PAYMENT_DEPOSITS_ON_HAND,
+    CUSTOMER_REFUND_CREATE,
 ];
 
 /// Looks up a covered operation.
@@ -1545,8 +1550,9 @@ mod tests {
 
     /// The engine's `idempotency-receive-payment-v1` keyed set (U-132), as
     /// `tests/fixtures/idempotency_receive_payment_v1_routes.txt` records it.
-    const KEYABLE_RECEIVE_PAYMENT: [(&str, &str); 6] = [
+    const KEYABLE_RECEIVE_PAYMENT: [(&str, &str); 7] = [
         ("POST", "/api/v1/payments/receive"),
+        ("POST", "/api/v1/customer-refunds"),
         ("PUT", "/api/v1/payments/{id}"),
         ("POST", "/api/v1/payments/{id}/void"),
         ("POST", "/api/v1/payments/unapply"),

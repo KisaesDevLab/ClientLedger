@@ -320,7 +320,7 @@ async fn bounce_sends_the_date_fee_and_version_and_reads_the_result() {
 async fn refund_posts_a_customer_refund_linked_to_the_credit() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/transactions"))
+        .and(path("/api/v1/customer-refunds"))
         .respond_with(json(201, &format!(r#"{{"transaction":{{"id":"{RET}"}}}}"#)))
         .mount(&server)
         .await;
@@ -341,14 +341,65 @@ async fn refund_posts_a_customer_refund_linked_to_the_credit() {
         .await
         .expect("refund");
     assert_eq!(id, tid(RET));
-    let b: Value = serde_json::from_slice(&requests(&server, "POST").await[0].body).expect("json");
+    let req = &requests(&server, "POST").await[0];
+    // The canonical route is keyed (idempotency-receive-payment-v1).
+    assert!(req.headers.get("idempotency-key").is_some());
+    let b: Value = serde_json::from_slice(&req.body).expect("json");
     assert_eq!(
         b,
-        json!({"txnType": "customer_refund", "txnDate": "2026-11-04", "contactId": CLIENT,
+        json!({"txnDate": "2026-11-04", "contactId": CLIENT,
             "refundFromAccountId": BANK, "amount": "55.00", "sourcePaymentId": PAY,
             "paymentMethod": "check", "refNo": "4419"})
     );
     assert!(!format!("{r:?}").contains("4419"));
+}
+
+#[test]
+fn a_record_reads_its_credits_accounts_and_later_rows() {
+    let later = format!(
+        r#","applications":[{{"invoiceId":"{INV1}","invoiceNumber":"1091","amount":"4000.00",
+        "discount":"0.00","writeOff":"0.00","appliedDate":"2026-11-04","voided":false,"reversed":false}},
+        {{"invoiceId":"{INV2}","invoiceNumber":"1095","amount":"20.00","appliedDate":"2026-11-04",
+        "appliedInTxnId":"{RET}","appliedLater":true}}],"creditApplications":[{{"sourcePaymentId":"{RET}",
+        "invoiceId":"{INV2}","amount":"15.00"}}],"writeOffAccountId":"{BANK}","discountAccountId":null"#
+    );
+    let body = record().replacen(
+        &format!(
+            r#","applications":[{{"invoiceId":"{INV1}","invoiceNumber":"1091","amount":"4000.00",
+        "discount":"0.00","writeOff":"0.00","appliedDate":"2026-11-04","voided":false,"reversed":false}}]"#
+        ),
+        &later,
+        1,
+    );
+    let rec = saved_payment(body.as_bytes()).expect("record");
+    assert_eq!(rec.deposit_to, Some(AccountId::parse(UF).expect("id")));
+    assert_eq!(rec.credit_applications.len(), 1);
+    assert_eq!(rec.credit_applications[0].source_payment_id, tid(RET));
+    assert_eq!(rec.credit_applications[0].amount, m("15"));
+    assert_eq!(
+        rec.write_off_account_id,
+        Some(AccountId::parse(BANK).expect("id"))
+    );
+    assert_eq!(rec.discount_account_id, None);
+    // The same-day credit used later by another receipt is not the payment's
+    // own row.
+    let own: Vec<bool> = rec
+        .applications
+        .iter()
+        .map(|a| a.is_own(rec.id, rec.date))
+        .collect();
+    assert_eq!(own, [true, false]);
+    // An older engine sends neither: nothing extra, every row its own.
+    let old = saved_payment(record().as_bytes()).expect("record");
+    assert!(old.credit_applications.is_empty() && old.write_off_account_id.is_none());
+    assert!(old.applications.iter().all(|a| a.is_own(old.id, old.date)));
+    // A payment of 0 that only wrote off has no deposit account.
+    let zero = record().replace(&format!(r#""depositTo":"{UF}""#), r#""depositTo":null"#);
+    assert_eq!(
+        saved_payment(zero.as_bytes()).expect("record").deposit_to,
+        None
+    );
+    assert!(!format!("{rec:?}").contains("15.00"));
 }
 
 #[test]

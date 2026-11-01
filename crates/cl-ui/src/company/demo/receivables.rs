@@ -20,7 +20,7 @@ use cl_api::{
     DepositedIn, HeldIn, HeldKind, LocalValidation, NewCustomerPayment, NewCustomerRefund,
     PaymentApplication, PaymentPreview, PaymentPreviewRequest, PaymentRecord, PaymentStatus,
     PaymentSummary, PaymentTotals, PendingAfter, PreviewCreditUse, PreviewInvoice, PreviewProblem,
-    ReopenedInvoice, Shortfall, UserText,
+    RecordCreditUse, ReopenedInvoice, Shortfall, UserText,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret, Timestamp};
@@ -91,6 +91,9 @@ struct App {
     applied: CalendarDate,
     /// A credit used inside another receipt: that receipt.
     via: Option<TransactionId>,
+    /// A credit of this payment applied after it was received (inside
+    /// another receipt or by Apply), whatever its date.
+    later: bool,
     voided: bool,
     reversed: bool,
 }
@@ -463,6 +466,16 @@ fn record_of(state: &DemoState, id: TransactionId) -> Result<PaymentRecord, ApiE
             applied_date: Some(a.applied),
             voided: a.voided,
             reversed: a.reversed,
+            applied_in_txn_id: a.via,
+            applied_later: a.later,
+        });
+    }
+    let mut credit_applications = Vec::new();
+    for (source, x, inv) in used_inside(state, id) {
+        credit_applications.push(RecordCreditUse {
+            source_payment_id: source,
+            invoice_id: inv,
+            amount: money(x)?,
         });
     }
     Ok(PaymentRecord {
@@ -470,7 +483,8 @@ fn record_of(state: &DemoState, id: TransactionId) -> Result<PaymentRecord, ApiE
         customer_id: p.customer,
         date: p.date,
         amount: money(p.amount)?,
-        deposit_to: p.deposit_to,
+        // A payment of 0 that only wrote off has no deposit line.
+        deposit_to: (!p.amount.is_zero()).then_some(p.deposit_to),
         payment_method: p.method.clone(),
         ref_no: p.ref_no.clone(),
         memo: p.memo.clone(),
@@ -489,7 +503,50 @@ fn record_of(state: &DemoState, id: TransactionId) -> Result<PaymentRecord, ApiE
         unapplied_remaining: money(credit_remaining(p))?,
         holds_deposit: p.hold,
         deposit_remaining: money(deposit_remaining(r, id))?,
+        credit_applications,
+        write_off_account_id: p.write_off_account,
+        discount_account_id: p.discount_account,
     })
+}
+
+/// The live credits and deposit draws used inside receipt `id`: source,
+/// amount, invoice (the record's `creditApplications`).
+fn used_inside(
+    state: &DemoState,
+    id: TransactionId,
+) -> Vec<(TransactionId, Decimal, TransactionId)> {
+    let mut v = Vec::new();
+    for (pid, p) in &state.receivables.pays {
+        for a in p.apps.iter().filter(|a| a.live() && a.via == Some(id)) {
+            v.push((*pid, a.cash, a.invoice));
+        }
+        if p.inside == Some(id)
+            && !p.void
+            && let Some(source) = p.from_deposit
+        {
+            for a in p.apps.iter().filter(|a| a.live()) {
+                v.push((source, a.cash, a.invoice));
+            }
+        }
+    }
+    v
+}
+
+/// What of credit or deposit `source` the receipt being edited uses (an
+/// edit sees it as available again, as the engine's preview does).
+fn used_by_edit(
+    state: &DemoState,
+    source: TransactionId,
+    editing: Option<TransactionId>,
+) -> Decimal {
+    let Some(e) = editing else {
+        return Decimal::ZERO;
+    };
+    used_inside(state, e)
+        .into_iter()
+        .filter(|(s, _, _)| *s == source)
+        .map(|(_, x, _)| x)
+        .sum()
 }
 
 /// `GET /payments/:id`.
@@ -498,6 +555,13 @@ fn record_of(state: &DemoState, id: TransactionId) -> Result<PaymentRecord, ApiE
 /// `NotFound`.
 pub fn get(state: &mut DemoState, id: TransactionId) -> Result<PaymentRecord, ApiError> {
     seed(state);
+    // The register and Client Center hand over the ledger row's id (the
+    // engine's payment and its transaction share one id).
+    let id = if state.receivables.pays.contains_key(&id) {
+        id
+    } else {
+        payment_of_ledger(state, id).unwrap_or(id)
+    };
     record_of(state, id)
 }
 
@@ -566,7 +630,7 @@ fn credits_of(
         .iter()
         .filter(|(id, p)| p.customer == client && Some(**id) != except)
         .filter_map(|(id, p)| {
-            let left = credit_remaining(p);
+            let left = credit_remaining(p) + used_by_edit(state, *id, except);
             (left > Decimal::ZERO).then(|| {
                 Some(CreditSource {
                     source_payment_id: *id,
@@ -813,7 +877,8 @@ fn compute(
             deposit_remaining(&state.receivables, c.source)
         } else {
             credit_remaining(p)
-        } - used.get(&c.source).copied().unwrap_or_default();
+        } + used_by_edit(state, c.source, editing)
+            - used.get(&c.source).copied().unwrap_or_default();
         let Some(r) = rows.iter_mut().find(|r| r.inv.id == c.invoice) else {
             problems.push(problem("INVOICE_NOT_FOR_CUSTOMER", Some(c.invoice)));
             continue;
@@ -1134,6 +1199,7 @@ fn apply_rows(
             write_off: *write_off,
             applied: date,
             via: None,
+            later: false,
             voided: false,
             reversed: false,
         });
@@ -1266,8 +1332,10 @@ fn receive_inner(
             )
         })
         .transpose()?;
+    // As the engine: a payment of 0 is allowed only when it writes off or
+    // discounts; credits alone go through Apply (400 AMOUNT_REQUIRED).
     if c.amount.is_zero() && discounts.is_zero() && write_offs.is_zero() {
-        return Err(refused("VALIDATION_ERROR"));
+        return Err(refused("AMOUNT_REQUIRED"));
     }
     let ar = super::account_id(AR);
     let amount = c.amount;
@@ -1363,6 +1431,7 @@ fn use_credit(
         write_off: Decimal::ZERO,
         applied: date,
         via: inside,
+        later: true,
         voided: false,
         reversed: false,
     };
@@ -1393,7 +1462,11 @@ fn use_credit(
                 hold: false,
                 from_deposit: Some(source),
                 inside,
-                apps: vec![App { via: None, ..row }],
+                apps: vec![App {
+                    via: None,
+                    later: false,
+                    ..row
+                }],
                 ledger: Some(ledger),
                 discount_account: None,
                 write_off_account: None,
@@ -1537,7 +1610,7 @@ pub fn update(
                     && a.write_off == cents(n.write_off_amount).unwrap_or_default()
             })
         })
-        && p.credit_applications.is_empty()
+        && same_credits(state, id, p)
         && p.hold_as_deposit == old.hold;
     if same_money {
         check_closing(closing(state), &[old.date], password)?;
@@ -1583,6 +1656,23 @@ pub fn update(
             Err(e)
         }
     }
+}
+
+/// True when an edit sends back exactly the credits and draws the receipt
+/// used (a memo edit of a payment that used credits stays a memo edit).
+fn same_credits(state: &DemoState, id: TransactionId, p: &NewCustomerPayment) -> bool {
+    let mut old: Vec<(TransactionId, TransactionId, Decimal)> = used_inside(state, id)
+        .into_iter()
+        .map(|(s, x, i)| (s, i, x))
+        .collect();
+    let mut new: Vec<(TransactionId, TransactionId, Decimal)> = p
+        .credit_applications
+        .iter()
+        .map(|c| (c.source_payment_id, c.invoice_id, dec(c.amount)))
+        .collect();
+    old.sort();
+    new.sort();
+    old == new
 }
 
 /// `POST /payments/unapply`: one invoice off a payment.
@@ -1884,6 +1974,9 @@ pub fn refund(
         .get(&r.source_payment)
         .ok_or(ApiError::NotFound { code: None })?
         .clone();
+    if p.customer != r.customer_id {
+        return Err(refused("CREDIT_NOT_FOR_CUSTOMER"));
+    }
     if bounced(&p) {
         return Err(conflict("PAYMENT_BOUNCED"));
     }

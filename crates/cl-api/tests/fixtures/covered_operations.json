@@ -249,5 +249,6 @@
   {"method":"POST","path":"/api/v1/payments/{id}/apply","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/payments/{id}/bounce","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/payments/open-invoices/{customerId}","inSpec":true,"fragmentHash":"b8cab9d4ed5608ed172e381470aad17bb22aa18e0495fd432f98a40f92c54232"},
-  {"method":"GET","path":"/api/v1/payments/deposits-on-hand","inSpec":false,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/payments/deposits-on-hand","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/customer-refunds","inSpec":false,"fragmentHash":null}
 ]

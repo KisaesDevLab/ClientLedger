@@ -300,6 +300,150 @@ fn credits_go_in_the_request_and_save_copies_the_engines_amount() {
     assert_eq!(f.to_preview_request().unwrap().credits, Vec::new());
 }
 
+/// A saved payment of 4,000.00: 3,615.00 cash and a 385.00 write-off on
+/// 1091, a 30.00 discount, and 55.00 of an older credit on 1095.
+fn saved() -> LoadedPayment {
+    LoadedPayment {
+        client: client(1),
+        date: day(),
+        amount: m("4000.00"),
+        deposit_to: Some(acct(1)),
+        method: "check".into(),
+        ref_no: "5521".into(),
+        memo: "thanks".into(),
+        rows: vec![(id(1), m("3585.00"), Some(m("30.00")), Some(m("385.00")))],
+        credits: vec![(id(7), id(2), m("55.00"))],
+        write_off_account: Some(acct(8)),
+        discount_account: Some(acct(9)),
+        hold: false,
+    }
+}
+
+/// The engine's preview of [`saved`] as it stands.
+fn saved_figures() -> PaymentFigures {
+    let mut fig = mockup();
+    fig.rows[0].payment = m("3585.00");
+    fig.rows[0].discount = m("30.00");
+    fig.rows[0].write_off = m("385.00");
+    fig.rows[0].remaining = Money::ZERO;
+    fig.rows[1].credit = m("55.00");
+    fig.rows[1].remaining = m("1205.00");
+    fig.amount = m("4000.00");
+    fig.applied = m("3585.00");
+    fig.unapplied = m("415.00");
+    fig.shortfalls.clear();
+    fig.credit_uses.push(FigureCreditUse {
+        source: id(7),
+        invoice: id(2),
+        amount: m("55.00"),
+    });
+    fig
+}
+
+#[test]
+fn a_saved_payment_saves_back_unchanged_with_its_credits_and_accounts() {
+    let mut f = PaymentForm::default();
+    let editing = Editing {
+        id: id(40),
+        updated_at: Timestamp::from_unix_millis(1_700_000_000_000).unwrap(),
+    };
+    f.load_saved(editing, saved());
+    assert_eq!(f.editing(), Some(editing));
+    // The preview asks with the credit the payment used (D-B1).
+    let req = f.to_preview_request().unwrap();
+    assert_eq!(req.editing, Some(id(40)));
+    assert_eq!(
+        req.credits,
+        vec![CreditChoice {
+            source: id(7),
+            invoice: id(2),
+            amount: Some(m("55.00")),
+        }]
+    );
+    let rows = req.rows.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].amount, Some(m("3585.00")));
+    assert_eq!(rows[0].discount, Some(m("30.00")));
+    assert_eq!(rows[0].write_off, Some(m("385.00")));
+    answer(&mut f, saved_figures());
+    // Save unchanged: the same body, the same accounts (not the company
+    // defaults), the same credit.
+    let defaults = PaymentDefaults {
+        write_off_account: Some(acct(3)),
+        discount_account: Some(acct(4)),
+    };
+    let save = f.save_plan(defaults).unwrap();
+    assert_eq!(save.amount, m("4000.00"));
+    assert_eq!(save.deposit_to, acct(1));
+    assert_eq!(save.write_off_account, Some(acct(8)));
+    assert_eq!(save.discount_account, Some(acct(9)));
+    assert_eq!(save.rows.len(), 1);
+    assert_eq!(save.rows[0].amount, m("3585.00"));
+    assert_eq!(save.rows[0].discount, Some(m("30.00")));
+    assert_eq!(save.rows[0].write_off, Some(m("385.00")));
+    assert_eq!(save.credits.len(), 1);
+    assert_eq!(
+        (
+            save.credits[0].source,
+            save.credits[0].invoice,
+            save.credits[0].amount
+        ),
+        (id(7), id(2), m("55.00"))
+    );
+    assert_eq!(save.credits[0].token.as_wire(), "1260.0000");
+    assert_eq!(
+        (save.ref_no.as_deref(), save.memo.as_deref()),
+        (Some("5521"), Some("thanks"))
+    );
+    // A memo edit changes nothing the engine computes: the same plan.
+    f.memo = "thank you".into();
+    let again = f.save_plan(defaults).unwrap();
+    assert_eq!(again.credits, save.credits);
+    assert_eq!(again.rows, save.rows);
+    // With no account saved, the company default still applies.
+    let mut plain = saved();
+    plain.write_off_account = None;
+    let mut g = PaymentForm::default();
+    g.load_saved(editing, plain);
+    assert_eq!(g.under(), Under::WriteOff { account: None });
+}
+
+#[test]
+fn credits_alone_are_not_a_payment() {
+    // The engine refuses a payment of 0 that only uses credits
+    // (AMOUNT_REQUIRED); Save says nothing was received.
+    let mut f = form();
+    f.set_amount(AmountInput::Typed(Money::ZERO));
+    f.use_credit(id(7), id(2), None);
+    let mut fig = mockup();
+    fig.amount = Money::ZERO;
+    fig.applied = Money::ZERO;
+    fig.rows[0].payment = Money::ZERO;
+    fig.rows[1].credit = m("55.00");
+    fig.shortfalls.clear();
+    fig.credit_uses.push(FigureCreditUse {
+        source: id(7),
+        invoice: id(2),
+        amount: m("55.00"),
+    });
+    answer(&mut f, fig.clone());
+    assert_eq!(
+        f.save_plan(PaymentDefaults::default()),
+        Err(vec![PaymentProblem::NoAmount])
+    );
+    // A write-off of 0 cash is still a payment (no deposit line).
+    fig.rows[0].write_off = m("385.00");
+    f.refresh();
+    answer(&mut f, fig);
+    assert!(
+        f.save_plan(PaymentDefaults {
+            write_off_account: Some(acct(9)),
+            discount_account: None,
+        })
+        .is_ok()
+    );
+}
+
 #[derive(Debug, Clone)]
 enum Edit {
     Amount(i64),

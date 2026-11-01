@@ -120,6 +120,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payment.refusal.write_off_account", "Choose a write-off account (an expense account) in Preferences \u{203a} Sales, or when you save."),
     ("payment.refusal.discount_account", "Choose a discount account in Preferences \u{203a} Sales, or when you save."),
     ("payment.refusal.overapplied", "More is applied than an invoice owes or than was received. Check the Payment column."),
+    ("payment.bounce.nothing", "This payment took in no money (it only wrote off a balance), so there's no check to bounce. Void it instead."),
     ("payment.refusal.other", "The books couldn't record this. Check the payment and try again."),
     ("payment.credits.title", "Discounts & credits"),
     ("payment.credits.none", "No credits or deposits on hand."),

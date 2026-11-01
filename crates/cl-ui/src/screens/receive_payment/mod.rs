@@ -210,6 +210,7 @@ pub(crate) fn problem_key(p: &PaymentProblem) -> &'static str {
         PaymentProblem::AskDeposit => "payment.problem.ask_deposit",
         PaymentProblem::WriteOffAccount => "payment.account.write_off",
         PaymentProblem::DiscountAccount => "payment.account.discount",
+        PaymentProblem::Engine(c) if c == "AMOUNT_REQUIRED" => "payment.problem.no_amount",
         PaymentProblem::Engine(_) => "payment.refusal.overapplied",
     }
 }
@@ -672,7 +673,7 @@ impl ReceivePaymentScreen {
         self.closing_prompt.saved();
         self.save_key = None;
         self.saved_count += 1;
-        let accounts = [Some(rec.deposit_to), self.clearing()]
+        let accounts = [rec.deposit_to, self.clearing()]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
@@ -739,6 +740,7 @@ impl ReceivePaymentScreen {
             Some(R::Overapplied | R::ApplicationsExceedAmount) => {
                 Some("payment.refusal.overapplied")
             }
+            Some(R::AmountRequired) => Some("payment.problem.no_amount"),
             Some(_) => Some("payment.refusal.other"),
             None => {
                 self.error = Some(e);
@@ -851,13 +853,17 @@ impl ReceivePaymentScreen {
             client: rec.customer_id,
             date: rec.date,
             amount: rec.amount,
-            deposit_to: rec.deposit_to,
+            // A payment of 0 that only wrote off has no deposit account:
+            // the form keeps Undeposited Funds so an edit can send one.
+            deposit_to: rec.deposit_to.or_else(|| self.clearing()),
             method: rec.payment_method.clone().unwrap_or_default(),
             ref_no: rec.ref_no.clone().unwrap_or_default(),
             memo: rec.memo.clone().unwrap_or_default(),
+            // Its own rows only: a credit of it that another receipt used
+            // later (even the same day) is not sent back as cash.
             rows: rec
                 .live_applications()
-                .filter(|a| a.applied_date == Some(rec.date) || a.applied_date.is_none())
+                .filter(|a| a.is_own(rec.id, rec.date))
                 .map(|a| {
                     (
                         a.invoice_id,
@@ -867,6 +873,14 @@ impl ReceivePaymentScreen {
                     )
                 })
                 .collect(),
+            // D-B1: the credits and deposits it used go back unchanged.
+            credits: rec
+                .credit_applications
+                .iter()
+                .map(|c| (c.source_payment_id, c.invoice_id, c.amount))
+                .collect(),
+            write_off_account: rec.write_off_account_id,
+            discount_account: rec.discount_account_id,
             hold: rec.holds_deposit,
         };
         self.form.load_saved(
@@ -1035,7 +1049,12 @@ impl ReceivePaymentScreen {
         if rec.is_bounced() || rec.is_void() {
             return;
         }
-        let never = rec.deposited_in.is_none() && Some(rec.deposit_to) == self.clearing();
+        // A payment of 0 (only written off) took no money: nothing bounces.
+        let Some(to) = rec.deposit_to else {
+            self.notice = Some("payment.bounce.nothing");
+            return;
+        };
+        let never = rec.deposited_in.is_none() && Some(to) == self.clearing();
         self.bounce = Some(BouncedCheckFlow::new(
             rec.id,
             never,
