@@ -658,12 +658,19 @@ impl CustomerStatements<'_> {
     }
 
     /// Records that a statement was printed, emailed or saved as a PDF
-    /// (Mark as sent, Q-P22c; printing counts as sent).
+    /// (Mark as sent, Q-P22c; printing counts as sent). Keep one key per
+    /// record and reuse it on a retry (the engine keys this route under
+    /// `idempotency-customer-statements-v1`).
     ///
     /// # Errors
     /// `Local(Unsupported)`; `Local(InvalidValue)` for over 50 recipients;
     /// any [`ApiError`].
-    pub async fn mark_sent(&self, id: CustomerStatementId, r: &SendRecord) -> Result<(), ApiError> {
+    pub async fn mark_sent(
+        &self,
+        id: CustomerStatementId,
+        r: &SendRecord,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
         require(self.0, Capabilities::CUSTOMER_STATEMENT_SEND)?;
         if r.recipients.len() > crate::resources::invoices::EMAIL_RECIPIENTS_MAX {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
@@ -675,12 +682,13 @@ impl CustomerStatements<'_> {
         if let Some(t) = r.sent_at {
             body["sentAt"] = json!(t.to_wire());
         }
-        let call = Call::new(
+        let mut call = Call::new(
             Method::Post,
             STATEMENT_SENT.route(),
             format!("/api/v1/customer-statements/{id}/sent"),
         )
         .json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
         self.0.send(&STATEMENT_SENT, call, None).await?;
         Ok(())
     }

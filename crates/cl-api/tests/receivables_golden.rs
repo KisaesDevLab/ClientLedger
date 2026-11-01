@@ -1,8 +1,8 @@
 //! The receivables golden file (P22 plan §6.1): the desktop app's
 //! `fixtures/receivables/golden.json` must be byte-identical to the engine's
 //! `packages/shared/fixtures/receivables-golden.json` (the P21
-//! precedent). A pinned engine without the P22 engine PRs has no such
-//! file: PENDING, unless `CL_API_REQUIRE_CAPS` lists `credit-memo-apply-v1`.
+//! precedent). The engine has shipped it since pin bf2daf38 (P22 engine
+//! PRs #209-#213).
 
 use std::path::Path;
 
@@ -15,19 +15,11 @@ fn the_receivables_golden_file_is_byte_identical_to_the_engines() {
     let parsed: serde_json::Value = serde_json::from_slice(&ours).expect("valid JSON");
     assert!(parsed["cases"].as_array().is_some_and(|c| !c.is_empty()));
     let engine = root.join("engine/packages/shared/fixtures/receivables-golden.json");
-    if !engine.is_file() {
-        let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
-        assert!(
-            !caps.split(',').any(|c| c.trim() == "credit-memo-apply-v1"),
-            "CL_API_REQUIRE_CAPS lists credit-memo-apply-v1 but {} is missing",
-            engine.display()
-        );
-        eprintln!(
-            "PENDING(U-137): {} is not in the pinned engine",
-            engine.display()
-        );
-        return;
-    }
+    assert!(
+        engine.is_file(),
+        "{} is missing: the pinned engine (bf2daf38 or later) ships it",
+        engine.display()
+    );
     let theirs = std::fs::read(&engine).expect("engine golden file");
     // The engine is a submodule with its own line-ending settings: on a
     // Windows checkout with core.autocrlf its working copy has CRLF while

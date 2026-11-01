@@ -1153,8 +1153,11 @@ pub(crate) const STATEMENTS_LIST: Operation = read("/api/v1/customer-statements"
 /// One issued statement (its snapshot).
 pub(crate) const STATEMENT_GET: Operation = read("/api/v1/customer-statements/{id}");
 /// Records that a statement was printed, emailed or saved as a PDF.
-pub(crate) const STATEMENT_SENT: Operation =
-    write(Method::Post, "/api/v1/customer-statements/{id}/sent");
+pub(crate) const STATEMENT_SENT: Operation = keyable_in(
+    KeySet::CustomerStatementsV1,
+    Method::Post,
+    "/api/v1/customer-statements/{id}/sent",
+);
 /// Emails a statement through the company SMTP (U-140).
 pub(crate) const STATEMENT_EMAIL: Operation = keyable_in(
     KeySet::CustomerStatementsV1,
@@ -1717,10 +1720,11 @@ mod tests {
         ("POST", "/api/v1/sales-receipts"),
         ("PUT", "/api/v1/sales-receipts/{id}"),
     ];
-    const KEYABLE_CUSTOMER_STATEMENTS: [(&str, &str); 3] = [
+    const KEYABLE_CUSTOMER_STATEMENTS: [(&str, &str); 4] = [
         ("POST", "/api/v1/customer-statement-runs"),
         ("POST", "/api/v1/customer-statements/{id}/email"),
         ("POST", "/api/v1/customer-statements/{id}/email-later"),
+        ("POST", "/api/v1/customer-statements/{id}/sent"),
     ];
     const KEYABLE_FINANCE_CHARGES: [(&str, &str); 1] = [("POST", "/api/v1/finance-charges/assess")];
 

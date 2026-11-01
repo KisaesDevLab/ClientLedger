@@ -1,5 +1,5 @@
 # The engine's `idempotency-customer-statements-v1` route set (U-140, P22
-# plan §2.6): statement runs, statement email and email-later,
+# plan §2.6): statement runs, statement email, email-later and sent,
 # `x-idempotency: true` in its openapi.json. Client-declared until the pin
 # has it. Append-only for this capability name:
 # `keyable-customer-statements` in operations.txt
@@ -8,3 +8,4 @@
 POST /api/v1/customer-statement-runs
 POST /api/v1/customer-statements/{id}/email
 POST /api/v1/customer-statements/{id}/email-later
+POST /api/v1/customer-statements/{id}/sent

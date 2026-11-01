@@ -217,8 +217,8 @@ fn keyable_receive_payment_rows_are_the_recorded_set() {
     assert_eq!(typed_keyable(cl_api::KeySet::ReceivePaymentV1), pay);
 }
 
-/// The P22 key sets (U-137, U-140, U-141; client-declared until the D8
-/// pin bump): each class's rows are its recorded set and the typed table
+/// The P22 key sets (U-137, U-140, U-141; in the spec since pin
+/// bf2daf38): each class's rows are its recorded set and the typed table
 /// agrees.
 #[test]
 fn keyable_p22_rows_are_the_recorded_sets() {
@@ -245,7 +245,7 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 3] = [
         "idempotency_customer_statements_v1_routes.txt",
         "keyable-customer-statements",
         cl_api::KeySet::CustomerStatementsV1,
-        3,
+        4,
     ),
     (
         "idempotency_finance_charges_v1_routes.txt",

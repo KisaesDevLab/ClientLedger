@@ -343,7 +343,7 @@ GET     /api/v1/reports/ar-aging-summary        idempotent
 POST    /api/v1/customer-statement-runs         keyable-customer-statements
 GET     /api/v1/customer-statements             idempotent
 GET     /api/v1/customer-statements/{id}        idempotent
-POST    /api/v1/customer-statements/{id}/sent   pre-handler-only
+POST    /api/v1/customer-statements/{id}/sent   keyable-customer-statements
 POST    /api/v1/customer-statements/{id}/email  keyable-customer-statements
 POST    /api/v1/customer-statements/{id}/email-later keyable-customer-statements
 POST    /api/v1/finance-charges/preview         pre-handler-only

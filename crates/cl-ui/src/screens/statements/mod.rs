@@ -700,13 +700,18 @@ impl StatementsScreen {
 
     /// Records `method` on every issued statement.
     fn mark(&mut self, method: SendMethod, last: &'static str) {
-        let ids: Vec<_> = self.issued.iter().map(|r| r.id).collect();
+        // One key per statement: a replay of the same record posts once.
+        let ids: Vec<_> = self
+            .issued
+            .iter()
+            .map(|r| (r.id, cl_api::IdempotencyKey::new()))
+            .collect();
         let rec = SendRecord {
             method,
             recipients: Vec::new(),
             sent_at: None,
         };
-        let demo_ids = ids.clone();
+        let demo_ids: Vec<_> = ids.iter().map(|(id, _)| *id).collect();
         let demo_rec = rec.clone();
         self.mark_job = Some(engine::write(
             &self.link,
@@ -722,8 +727,10 @@ impl StatementsScreen {
                 Ok(u32::try_from(demo_ids.len()).unwrap_or(u32::MAX))
             },
             move |s| async move {
-                for id in &ids {
-                    s.customer_statements().mark_sent(*id, &rec).await?;
+                for (id, key) in &ids {
+                    s.customer_statements()
+                        .mark_sent(*id, &rec, key.clone())
+                        .await?;
                 }
                 Ok(u32::try_from(ids.len()).unwrap_or(u32::MAX))
             },
