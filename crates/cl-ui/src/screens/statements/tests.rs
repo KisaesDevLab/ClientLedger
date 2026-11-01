@@ -223,9 +223,13 @@ fn the_finance_charge_note_shows_while_charges_are_due() {
                 && matches!(**p, crate::windows::OpenPayload::OnDate(d) if d == nov30())
     )));
     // Another date checks again.
-    s.set_as_of(CalendarDate::from_ymd(2026, 12, 31).ok());
+    s.set_as_of(CalendarDate::from_ymd(2026, 10, 31).ok());
     settle(&mut s);
     assert_eq!(s.state()["finance_due"], true);
+    // A later month can't be assessed yet (the engine's 400): no note.
+    s.set_as_of(CalendarDate::from_ymd(2026, 12, 31).ok());
+    settle(&mut s);
+    assert_eq!(s.state()["finance_due"], false);
     // Assessing in another window clears the note here (a saved change).
     let mut fc =
         crate::screens::finance_charges::FinanceChargesScreen::new(Arc::clone(&link), nov30());

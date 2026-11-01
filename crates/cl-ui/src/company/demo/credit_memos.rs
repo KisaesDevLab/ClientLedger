@@ -487,6 +487,12 @@ fn memo_lines_ledger(
     out
 }
 
+/// The engine lists one save's applications oldest invoice first (by
+/// date, then number; P22 fix pass), whatever order they were sent in.
+fn oldest_first(state: &DemoState, plan: &mut [(TransactionId, Decimal)]) {
+    plan.sort_by_cached_key(|(inv, _)| receivable(state, *inv).map(|r| (r.date, r.number)));
+}
+
 /// `POST /credit-memos`: posts the memo and applies `applications` in the
 /// same step.
 ///
@@ -532,6 +538,7 @@ pub fn create_memo(
         left -= x;
         plan.push((a.invoice_id, x));
     }
+    oldest_first(state, &mut plan);
     let lines = doc_lines(state, &m.lines, &p);
     let tax = dec(p.tax_total);
     state.credits.next_memo += 1;
@@ -699,6 +706,7 @@ pub fn apply_memo(
         left -= x;
         plan.push((a.invoice_id, x));
     }
+    oldest_first(state, &mut plan);
     let mut applied = Vec::new();
     for (inv, x) in plan {
         settle(state, inv, x)?;

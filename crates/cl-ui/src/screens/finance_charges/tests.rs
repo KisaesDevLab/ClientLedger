@@ -149,10 +149,11 @@ fn golden_6_rows_assess_once_per_month() {
     )));
 }
 
-/// A finance-charge invoice keeps its amount (409 FINANCE_CHARGE_INVOICE):
-/// the invoice form says void and assess again.
+/// A finance-charge invoice can be edited like any other (P22 plan §2.7:
+/// the engine never refuses it); the month stays assessed, so assessing
+/// it again is still 409 ASSESSED.
 #[test]
-fn a_finance_charge_invoice_edit_says_void_and_reassess() {
+fn a_finance_charge_invoice_can_be_edited_and_the_month_stays_assessed() {
     let (_d, link) = link();
     let pf = client(&link, PRAIRIE_FORK);
     let mut s = screen(&link);
@@ -191,13 +192,33 @@ fn a_finance_charge_invoice_edit_says_void_and_reassess() {
         .checked_sub(std::time::Duration::from_millis(400))
         .unwrap_or(inv.clock);
     inv.poll_preview();
+    let before = crate::company::demo::invoices::get(&link.demo_state().expect("demo"), id)
+        .expect("stored")
+        .record
+        .balance_due;
     inv.start_save(cl_model::forms::SaveIntent::Save, None);
-    assert_eq!(inv.notice, Some("invoice.finance_charge_invoice"));
-    assert_eq!(
-        s.results[0].total.format(MoneyStyle::default()),
-        "15.68",
-        "the charge stays"
-    );
+    for _ in 0..50 {
+        inv.poll();
+        if inv.save_job.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_ne!(inv.notice, Some("invoice.finance_charge_invoice"));
+    assert!(inv.error.is_none(), "{:?}", inv.error);
+    let after = crate::company::demo::invoices::get(&link.demo_state().expect("demo"), id)
+        .expect("stored")
+        .record
+        .balance_due;
+    assert_ne!(after, before, "the edit saved");
+    // The month stays assessed: a second assessment is refused.
+    let again = screen(&link);
+    assert!(again.current().is_some_and(|p| {
+        p.rows
+            .iter()
+            .any(|r| r.contact_id == pf && r.already_assessed.is_some())
+    }));
+    assert!(!again.form.is_ticked(pf));
 }
 
 #[test]
@@ -277,20 +298,26 @@ fn a_closed_date_asks_for_the_closing_password() {
     assert!(s.assess_job.is_none(), "nothing sent before the password");
 }
 
-/// A date that hasn't come yet is the engine's 400 (P22 review), shown
-/// in plain words; nothing is posted.
+/// A date in a later month is the engine's 400 on the preview (P22 fix
+/// pass), shown in plain words; nothing can be assessed. Back in this
+/// month, the preview returns and the notice goes.
 #[test]
 fn a_future_assessment_date_is_refused_in_plain_words() {
     let (_d, link) = link();
     let mut s = screen(&link);
     set_up(&mut s);
-    s.set_date(Some(CalendarDate::from_ymd(2027, 1, 31).expect("date")));
-    settle(&mut s);
     assert!(s.ticked_count() > 0);
-    assert!(s.start_assess(None));
+    s.set_date(Some(CalendarDate::from_ymd(2026, 12, 1).expect("date")));
     settle(&mut s);
     assert_eq!(s.notice, Some("finance_charges.refusal.future_date"));
+    assert!(s.error.is_none(), "a plain notice, not an error");
+    assert_eq!(s.ticked_count(), 0);
+    assert!(!s.start_assess(None), "nothing to assess");
     assert_eq!(s.results.len(), 0);
+    s.set_date(Some(CalendarDate::from_ymd(2026, 11, 30).expect("date")));
+    settle(&mut s);
+    assert_eq!(s.notice, None);
+    assert!(s.ticked_count() > 0);
 }
 
 /// DESIGN.md form keys: Alt+N assesses and stays; Alt+S assesses and

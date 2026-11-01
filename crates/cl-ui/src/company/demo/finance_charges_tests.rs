@@ -169,3 +169,33 @@ fn golden_6_compounding_charges_the_october_charge() {
     );
     assert_eq!(r.sources[2].invoice_id, oct.invoices[0].invoice_id);
 }
+
+/// The engine's rule (P22 fix pass): only a later month than the story
+/// date's is refused, on preview and assess alike, naming the field and
+/// the latest month allowed; the rest of this month is fine.
+#[test]
+fn a_later_month_is_refused_the_rest_of_this_month_runs() {
+    let (mut s, _) = fresh();
+    set_up(&mut s, false);
+    let pf = client_named(&mut s, PRAIRIE_FORK).expect("pf");
+    preview(&mut s, d("2026-11-30"), Some(&[pf])).expect("11/30 is this month");
+    let e = preview(&mut s, d("2026-12-01"), Some(&[pf])).expect_err("next month");
+    assert_eq!(
+        finance_charge_refusal(&e),
+        Some(FinanceChargeRefusal::FutureDate)
+    );
+    match &e {
+        ApiError::Validation(v) => {
+            assert_eq!(
+                v.field().map(|f| f.as_str().to_string()),
+                Some("assessmentDate".into())
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let e = assess_one(&mut s, "2026-12-01", pf, "1.00", "k-future").expect_err("assess too");
+    assert_eq!(
+        finance_charge_refusal(&e),
+        Some(FinanceChargeRefusal::FutureDate)
+    );
+}

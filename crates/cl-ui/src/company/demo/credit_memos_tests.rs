@@ -153,9 +153,13 @@ fn golden_2_apply_at_save_oldest_first() {
                 .clone(),
         })
         .collect();
+    // Sent newest first, listed oldest invoice first (the engine's order).
+    memo.applications.reverse();
     let saved = create_memo(&mut s, &memo, None).expect("create");
     assert_eq!(saved.remaining, m("0.00"));
     assert!(saved.applications.iter().all(|a| a.applied_date.is_none()));
+    let order: Vec<_> = saved.applications.iter().map(|a| a.invoice_id).collect();
+    assert_eq!(order, vec![inv(1201), inv(1202)]);
     assert_eq!(balance(&s, 1201), m("0.00"));
     assert_eq!(balance(&s, 1202), m("350.25"));
     assert_eq!(client_balance(&s, c), m("350.25"));

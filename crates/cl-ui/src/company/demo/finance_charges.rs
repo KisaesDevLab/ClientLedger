@@ -277,16 +277,38 @@ fn clients(state: &mut DemoState, only: Option<&[ContactId]>) -> Vec<(ContactId,
         .collect()
 }
 
+/// 400 `FINANCE_CHARGE_DATE_IN_FUTURE` when `d` falls in a month after the
+/// current one (the engine's rule, preview and assess alike): `current` is
+/// the month of the story date + 1 day, so a month-end assessment prepared
+/// a few days early still runs (golden 6's 11/30).
+fn not_future(d: CalendarDate) -> Result<(), ApiError> {
+    let current = DemoState::today().add_days(1).unwrap_or(DemoState::today());
+    if (d.year(), d.month()) > (current.year(), current.month()) {
+        let latest = format!("{:04}-{:02}", current.year(), current.month());
+        return Err(cl_api::engine_refusal(
+            400,
+            &serde_json::json!({"error": {
+                "message": "The assessment date is in a later month.",
+                "code": "FINANCE_CHARGE_DATE_IN_FUTURE",
+                "details": {"field": "assessmentDate", "latestPeriod": latest},
+            }}),
+        ));
+    }
+    Ok(())
+}
+
 /// `POST /finance-charges/preview`.
 ///
 /// # Errors
-/// `Internal` only for an amount out of range.
+/// 400 `FINANCE_CHARGE_DATE_IN_FUTURE` (a later month); `Internal` for an
+/// amount out of range.
 pub fn preview(
     state: &mut DemoState,
     d: CalendarDate,
     only: Option<&[ContactId]>,
 ) -> Result<FinanceChargePreview, ApiError> {
     super::credit_memos::seed(state);
+    not_future(d)?;
     let mut problems = Vec::new();
     if state.finance.rate.is_none() {
         problems.push(FinanceChargeProblem {
@@ -344,18 +366,7 @@ pub fn assess(
     if r.contacts.is_empty() || r.contacts.len() > cl_api::MAX_ASSESS_CONTACTS {
         return Err(invalid());
     }
-    // A date well in the future is refused, naming the field (P22 review;
-    // the engine's 400). The demo allows the rest of a month ahead of its
-    // story date, so month-end assessments (golden 6's 11/30) still run.
-    if DemoState::today()
-        .add_days(31)
-        .is_ok_and(|limit| r.assessment_date > limit)
-    {
-        return Err(cl_api::engine_refusal(
-            400,
-            &serde_json::json!({"error": {"message": "future", "code": "FINANCE_CHARGE_DATE_IN_FUTURE", "details": {"field": "assessmentDate"}}}),
-        ));
-    }
+    not_future(r.assessment_date)?;
     check_closing(closing(state), &[r.assessment_date], password)?;
     let d = r.assessment_date;
     let ids: Vec<ContactId> = r.contacts.iter().map(|c| c.contact_id).collect();

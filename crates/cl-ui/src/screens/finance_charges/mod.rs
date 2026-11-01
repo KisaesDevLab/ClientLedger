@@ -318,6 +318,12 @@ impl FinanceChargesScreen {
         if let Some(r) = engine::poll(&mut self.preview_job) {
             match r {
                 Ok(p) => self.preview_arrived(p),
+                // A date in a later month: the engine refuses the preview
+                // as it would the assessment (400, `latestPeriod`).
+                Err(e) if finance_charge_refusal(&e) == Some(FinanceChargeRefusal::FutureDate) => {
+                    self.preview = None;
+                    self.notice = Some("finance_charges.refusal.future_date");
+                }
                 Err(e) => self.error = Some(e),
             }
         }
@@ -365,6 +371,9 @@ impl FinanceChargesScreen {
         };
         if !self.form.apply_preview(date, figures_of(&p)) {
             return;
+        }
+        if self.notice == Some("finance_charges.refusal.future_date") {
+            self.notice = None;
         }
         for r in &p.rows {
             self.names.insert(r.contact_id, r.name.clone());
