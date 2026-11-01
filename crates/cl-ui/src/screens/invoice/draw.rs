@@ -4,7 +4,7 @@
 
 use cl_core::{CalendarDate, Money};
 use cl_model::CommandId;
-use cl_model::forms::invoice::{CUSTOM_TERMS, TotalsView};
+use cl_model::forms::invoice::{CUSTOM_TERMS, SalesDocKind, TotalsView};
 use eframe::egui::{self, CornerRadius, Margin, RichText, Stroke, Ui};
 
 use super::{InvoiceScreen, TERMS, field};
@@ -54,7 +54,7 @@ impl InvoiceScreen {
                 ui.ctx().memory_mut(|m| m.request_focus(id));
             }
         }
-        let mut frame = FixedFrame::begin(ui, "create_invoice", FrameOpts::default());
+        let mut frame = FixedFrame::begin(ui, self.screen_name(), FrameOpts::default());
         frame.top(|ui| {
             self.toolbar(ui, &tokens);
             self.messages(ui, &tokens);
@@ -91,6 +91,7 @@ impl InvoiceScreen {
         self.layout = frame.end();
         self.billable_window(ui.ctx(), &tokens);
         self.email_window(ui.ctx(), &tokens);
+        self.apply_window(ui.ctx(), &tokens);
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -98,6 +99,12 @@ impl InvoiceScreen {
         let saved = self.editing.is_some();
         let dirty = self.is_dirty();
         let open = self.read_only().is_none();
+        let kind = self.kind;
+        let memo_left = self
+            .editing
+            .as_ref()
+            .and_then(super::Editing::memo)
+            .is_some_and(|m| !m.is_void() && m.remaining.is_positive());
         let mut clicked: Option<&'static str> = None;
         // One tooltip format: what it does, then the keys ("Ctrl+Shift+U").
         // A command without a shortcut drops the "(…)".
@@ -139,14 +146,17 @@ impl InvoiceScreen {
                 {
                     clicked = Some("form.print");
                 }
-                if ui
-                    .add_enabled(
-                        saved && !dirty && open,
-                        egui::Button::new(t("invoice.email")),
-                    )
-                    .on_hover_text(tip("invoice.email.tip", "invoice.email"))
-                    .on_disabled_hover_text(t("invoice.email.save_first"))
-                    .clicked()
+                // P22: credit memos and sales receipts print and save a PDF;
+                // email for them comes later.
+                if kind == SalesDocKind::Invoice
+                    && ui
+                        .add_enabled(
+                            saved && !dirty && open,
+                            egui::Button::new(t("invoice.email")),
+                        )
+                        .on_hover_text(tip("invoice.email.tip", "invoice.email"))
+                        .on_disabled_hover_text(t("invoice.email.save_first"))
+                        .clicked()
                 {
                     clicked = Some("invoice.email");
                 }
@@ -159,12 +169,34 @@ impl InvoiceScreen {
                     clicked = Some("invoice.attach");
                 }
                 ui.separator();
-                if ui
-                    .add_enabled(open, egui::Button::new(t("invoice.add_billable")))
-                    .on_hover_text(tip("invoice.add_billable.tip", "invoice.add_billable"))
-                    .clicked()
+                if kind.has_billable()
+                    && ui
+                        .add_enabled(open, egui::Button::new(t("invoice.add_billable")))
+                        .on_hover_text(tip("invoice.add_billable.tip", "invoice.add_billable"))
+                        .clicked()
                 {
                     clicked = Some("invoice.add_billable");
+                }
+                if kind == SalesDocKind::CreditMemo {
+                    // A saved memo with credit left: apply it to invoices
+                    // or refund it (Q-P22m).
+                    let left = memo_left && !dirty;
+                    if ui
+                        .add_enabled(left, egui::Button::new(t("credit_memo.apply_credit")))
+                        .on_hover_text(t("credit_memo.apply_credit.tip"))
+                        .on_disabled_hover_text(t("credit_memo.refund.nothing_left"))
+                        .clicked()
+                    {
+                        clicked = Some("credit_memo.apply");
+                    }
+                    if ui
+                        .add_enabled(left, egui::Button::new(t("credit_memo.refund")))
+                        .on_hover_text(t("credit_memo.refund.tip"))
+                        .on_disabled_hover_text(t("credit_memo.refund.nothing_left"))
+                        .clicked()
+                    {
+                        clicked = Some("credit_memo.refund");
+                    }
                 }
                 if ui
                     .add_enabled(saved && open, egui::Button::new(t("invoice.void")))
@@ -191,7 +223,7 @@ impl InvoiceScreen {
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
         match self
             .closing_prompt
-            .window(ui.ctx(), tokens, "create_invoice")
+            .window(ui.ctx(), tokens, self.screen_name())
         {
             ClosingClick::Submit => self.submit_closing(),
             ClosingClick::Cancel => {
@@ -217,7 +249,8 @@ impl InvoiceScreen {
         if let Some(text) = self
             .editing
             .as_ref()
-            .and_then(|e| super::email::sent_text(&e.record, self.email.own.as_deref()))
+            .and_then(super::Editing::invoice)
+            .and_then(|r| super::email::sent_text(r, self.email.own.as_deref()))
         {
             banner(ui, tokens, |ui| {
                 ui.label(text);
@@ -271,7 +304,7 @@ impl InvoiceScreen {
     }
 
     fn main_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        ui.label(RichText::new(t("invoice.heading")).size(22.0).strong());
+        ui.label(RichText::new(self.text("heading")).size(22.0).strong());
         ui.add_space(6.0);
         let read_only = self.read_only().is_some();
         // A dialog over the form is modal: nothing behind it takes input.
@@ -291,13 +324,11 @@ impl InvoiceScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
-        if let Some(ev) = self.lost.ui(
-            ui,
-            &mut self.header,
-            &self.link,
-            self.group.as_ref(),
-            "create_invoice",
-        ) {
+        let name = self.screen_name();
+        if let Some(ev) = self
+            .lost
+            .ui(ui, &mut self.header, &self.link, self.group.as_ref(), name)
+        {
             self.lost_event(ev);
         }
         if self.busy() {
@@ -337,7 +368,7 @@ impl InvoiceScreen {
                         let r = kit::text_field(
                             ui,
                             tokens,
-                            &t("invoice.number"),
+                            &self.text("number"),
                             &mut text,
                             100.0,
                             cl_model::forms::invoice::NUMBER_MAX,
@@ -363,10 +394,17 @@ impl InvoiceScreen {
                     });
                 });
                 ui.add_space(8.0);
+                let kind = self.kind;
                 header::wrap_row(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     if let Some(bill) = self.bill_to() {
                         kit::wrap_item(ui, "invoice/bill_to", |ui| bill_to_ui(ui, tokens, &bill));
+                    }
+                    if kind.has_payment() {
+                        self.payment_fields_ui(ui, tokens);
+                    }
+                    if !kind.has_terms() {
+                        return;
                     }
                     kit::wrap_item(ui, "invoice/terms", |ui| self.terms_ui(ui, tokens));
                     if !self.print_books.layouts.is_empty() {
@@ -698,10 +736,17 @@ impl InvoiceScreen {
         // Payments are the record's while editing (S7); the balance due is
         // the engine's: the record's when nothing changed, a dash until
         // the edit is saved (the UI subtracts nothing).
-        let paid = self.editing.as_ref().and_then(|e| e.record.amount_paid);
+        let paid = self
+            .editing
+            .as_ref()
+            .and_then(super::Editing::invoice)
+            .and_then(|r| r.amount_paid);
         let has_paid = paid.is_some_and(|p| !p.is_zero());
         let balance = match self.editing.as_ref() {
-            Some(e) if !self.is_dirty() => e.record.balance_due.map_or(Figure::Dash, Figure::Value),
+            Some(e) if !self.is_dirty() => e
+                .invoice()
+                .and_then(|r| r.balance_due)
+                .map_or(Figure::Dash, Figure::Value),
             Some(_) if has_paid => Figure::Dash,
             _ => fig(|t| t.total),
         };
@@ -751,10 +796,18 @@ impl InvoiceScreen {
                 ui.separator();
                 row(
                     ui,
-                    &t("invoice.totals.total"),
+                    &self.text("totals.total"),
                     fig(|t| t.total).text(style),
                     true,
                 );
+                if self.kind != SalesDocKind::Invoice {
+                    if let Some(p) = self.preview_problem
+                        && matches!(view, TotalsView::CantCalculate)
+                    {
+                        ui.label(RichText::new(t(p)).size(12.0).color(tokens.warn_text));
+                    }
+                    return;
+                }
                 row(
                     ui,
                     &t("invoice.totals.payments"),
@@ -820,11 +873,18 @@ impl InvoiceScreen {
             }
         });
         ui.add_space(10.0);
+        if self.kind == SalesDocKind::CreditMemo {
+            self.memo_history_card(ui, tokens);
+            ui.add_space(10.0);
+        }
         let saved = self.editing.as_ref().filter(|e| !e.void()).map(|e| e.id);
-        match self
-            .deposit_card
-            .ui(ui, tokens, &self.link, self.group.as_ref(), client, saved)
-        {
+        let card = if self.kind.has_deposit_card() {
+            self.deposit_card
+                .ui(ui, tokens, &self.link, self.group.as_ref(), client, saved)
+        } else {
+            None
+        };
+        match card {
             Some(super::deposit_card::CardEvent::Apply(source)) => {
                 self.apply_deposit(source, None);
             }

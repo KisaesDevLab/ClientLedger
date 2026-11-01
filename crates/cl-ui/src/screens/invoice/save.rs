@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, ClosedPeriodAuthorization, ConflictReason, IdempotencyKey, InvoiceListQuery,
-    InvoiceRecord, InvoiceRefusal, InvoiceWriteOptions, PageRequest, PostingOptions, Versioned,
+    InvoiceRecord, InvoiceRefusal, InvoiceWriteOptions, PageRequest, PostingOptions,
     invoice_refusal,
 };
 use cl_core::ids::TransactionId;
@@ -23,12 +23,14 @@ use cl_model::forms::invoice::{
     BillableRef, InvoiceField, InvoiceForm, InvoiceLine, InvoiceProblem,
 };
 
+use cl_model::forms::invoice::SalesDocKind;
+
 use super::engine::{self, label};
-use super::{Editing, InvoiceScreen, KIND, Pending, field};
+use super::{Editing, InvoiceScreen, Pending, SavedDoc, field};
 use crate::company::CompanyEvent;
 use crate::forms::invoice_lines_grid::{V_DESC, V_ITEM, V_RATE};
 
-fn options(password: Option<Secret>) -> PostingOptions {
+pub(crate) fn options(password: Option<Secret>) -> PostingOptions {
     PostingOptions {
         closed_period: password.map(ClosedPeriodAuthorization::with_password),
     }
@@ -170,6 +172,9 @@ impl InvoiceScreen {
         let Some(req) = check_or_refuse(self) else {
             return false;
         };
+        if self.kind != cl_model::forms::invoice::SalesDocKind::Invoice {
+            return self.start_doc_save(intent, password, req);
+        }
         let mut new = match engine::new_invoice(&req) {
             Ok(n) => n,
             Err(e) => {
@@ -179,8 +184,8 @@ impl InvoiceScreen {
         };
         // A typed number already in use saves with a warning (Q-94).
         new.warn_only = new.txn_number.is_some();
-        if let Some(e) = &self.editing {
-            new.release_billable_source_line_ids = released(&e.record, &req);
+        if let Some(r) = self.editing.as_ref().and_then(Editing::invoice) {
+            new.release_billable_source_line_ids = released(r, &req);
         }
         let closing = self.books.closing;
         let old = self.editing.as_ref().map(|e| e.old_date);
@@ -197,7 +202,10 @@ impl InvoiceScreen {
         let _ = self.grid.begin_save(intent);
         let _ = self.header.begin_save(intent);
         self.intent = Some(intent);
-        let edit = self.editing.as_ref().map(|e| (e.id, e.record.clone()));
+        let edit = self
+            .editing
+            .as_ref()
+            .and_then(|e| e.invoice().map(|r| (e.id, r.clone())));
         let identity = format!(
             "{}|{:?}|{}",
             serde_json::to_string(&new).unwrap_or_default(),
@@ -228,17 +236,23 @@ impl InvoiceScreen {
                         password.as_ref(),
                     ),
                 }
-                .map(|v| (v, duplicate))
+                .map(|v| (SavedDoc::Invoice(v.record), duplicate))
             },
             {
-                let edit = self.editing.as_ref().map(|e| (e.id, e.record.clone()));
+                let edit = self
+                    .editing
+                    .as_ref()
+                    .and_then(|e| e.invoice().map(|r| (e.id, r.clone())));
                 move |s| async move {
                     let opts = options(pw);
                     let saved = match edit {
                         None => s.invoices().create(&new2, &opts, key).await?,
                         Some((id, r)) => s.invoices().update(id, &r, &new2, &opts, key).await?,
                     };
-                    Ok((saved.invoice, !saved.warnings.is_empty()))
+                    Ok((
+                        SavedDoc::Invoice(saved.invoice.record),
+                        !saved.warnings.is_empty(),
+                    ))
                 }
             },
         ));
@@ -250,7 +264,7 @@ impl InvoiceScreen {
 
     /// The key for this save: the stored one when the same save goes again
     /// after an unknown outcome, a fresh one otherwise.
-    fn key_for(&mut self, identity: String) -> IdempotencyKey {
+    pub(crate) fn key_for(&mut self, identity: String) -> IdempotencyKey {
         match &self.key {
             Some((d, k)) if *d == identity => k.clone(),
             _ => {
@@ -294,7 +308,7 @@ impl InvoiceScreen {
         }
     }
 
-    pub(crate) fn saved(&mut self, v: &Versioned<InvoiceRecord>) {
+    pub(crate) fn saved(&mut self, v: SavedDoc) {
         if std::mem::take(&mut self.print_after_save) {
             // Print (S6): only the print-later mark changed; no "send the
             // updated copy?" banner, and Print Forms opens once it is saved.
@@ -318,10 +332,16 @@ impl InvoiceScreen {
         crate::forms::publish_saved(&self.link, &self.bus, &[]);
         self.closing_prompt.saved();
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
-        let was_sent = self.editing.as_ref().is_some_and(|e| e.record.was_sent());
+        let was_sent = self
+            .editing
+            .as_ref()
+            .and_then(Editing::invoice)
+            .is_some_and(InvoiceRecord::was_sent);
         self.saved_count += 1;
         self.last_action = Some("save");
-        self.last_saved = Some(v.record.txn.id);
+        self.last_saved = Some(v.id());
+        self.apply_open = None;
+        self.apply_cells.clear();
         self.key = None;
         self.problems.clear();
         if self.header.is_saving() {
@@ -426,6 +446,13 @@ impl InvoiceScreen {
             self.stale = true;
             return;
         }
+        if self.kind != SalesDocKind::Invoice {
+            match self.doc_refusal(&e) {
+                Some(n) => self.notice = Some(n),
+                None => self.error = Some(e),
+            }
+            return;
+        }
         let notice = match invoice_refusal(&e) {
             Some(InvoiceRefusal::Stale) => {
                 self.stale = true;
@@ -474,8 +501,9 @@ impl InvoiceScreen {
         match intent {
             SaveIntent::SaveAndNew => self.new_form(true),
             SaveIntent::SaveAndClose => {
-                self.link
-                    .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+                self.link.push(CompanyEvent::CloseWindow(CommandId::new(
+                    self.command_kind(),
+                )));
             }
             SaveIntent::Save => {}
         }
@@ -505,17 +533,22 @@ impl InvoiceScreen {
         }
     }
 
-    /// Shows a saved invoice (Prev/Next, Find, after Save).
-    pub(crate) fn show(&mut self, v: &Versioned<InvoiceRecord>) {
-        let r = &v.record;
-        let (form, lines) = form_of(r, self.grid.keys());
+    /// Shows a saved invoice, credit memo or sales receipt (Prev/Next,
+    /// Find, after Save).
+    pub(crate) fn show(&mut self, v: SavedDoc) {
+        let (form, lines) = match &v {
+            SavedDoc::Invoice(r) => form_of(r, self.grid.keys()),
+            SavedDoc::CreditMemo(r) => super::credit::memo_form_of(r, self.grid.keys()),
+            SavedDoc::SalesReceipt(r) => super::credit::receipt_form_of(r, self.grid.keys()),
+        };
         self.header.load(form);
         self.grid.load(lines);
-        self.editing = Some(Editing {
-            id: r.txn.id,
-            record: r.clone(),
-            old_date: r.txn.txn_date,
-        });
+        self.editing = Some(Editing::of(v));
+        // A saved memo's applications are its own; an edit keeps them.
+        self.credit = cl_model::forms::credit_memo::CreditMemoForm::default();
+        self.credit.choose_keep();
+        self.apply_open = None;
+        self.apply_cells.clear();
         self.focused = None;
         self.stale = false;
         self.key = None;
@@ -535,7 +568,9 @@ impl InvoiceScreen {
     pub(crate) fn start_void(&mut self) -> bool {
         match &self.editing {
             Some(e) if e.void() => self.notice = Some("invoice.void.already"),
-            Some(e) if e.record.has_payments() => self.notice = Some("invoice.has_payments"),
+            Some(e) if e.invoice().is_some_and(InvoiceRecord::has_payments) => {
+                self.notice = Some("invoice.has_payments");
+            }
             Some(_) => self.void_open = true,
             None => self.notice = Some("invoice.void.saved_only"),
         }
@@ -566,28 +601,72 @@ impl InvoiceScreen {
             return;
         }
         let key = IdempotencyKey::new();
-        let expected = e.record.txn.updated_at;
+        let expected = e.updated_at();
         let pw = password.clone();
-        let job = engine::write(
-            &self.link,
-            self.group.as_ref(),
-            label("orphan.invoice_void", Some(key.clone())),
-            |d| crate::company::demo::invoices::void(d, e.id, password.as_ref()),
-            move |s| async move {
-                let opts = InvoiceWriteOptions {
-                    posting: options(pw),
-                    expected_updated_at: expected,
-                };
-                s.invoices().void(e.id, &reason, &opts, key).await
-            },
-        );
+        let job = match self.kind {
+            SalesDocKind::Invoice => engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label("orphan.invoice_void", Some(key.clone())),
+                |d| {
+                    crate::company::demo::invoices::void(d, e.id, password.as_ref())
+                        .map(|v| SavedDoc::Invoice(v.record))
+                },
+                move |s| async move {
+                    let opts = InvoiceWriteOptions {
+                        posting: options(pw),
+                        expected_updated_at: expected,
+                    };
+                    s.invoices()
+                        .void(e.id, &reason, &opts, key)
+                        .await
+                        .map(|v| SavedDoc::Invoice(v.record))
+                },
+            ),
+            // P22: a credit memo or sales receipt is voided through
+            // `POST /transactions/:id/void` (§2.1) and read back.
+            SalesDocKind::CreditMemo => engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label("orphan.credit_memo_void", Some(key.clone())),
+                |d| {
+                    crate::company::demo::credit_memos::void_memo(d, e.id, password.as_ref())?;
+                    crate::company::demo::credit_memos::get_memo(d, e.id).map(SavedDoc::CreditMemo)
+                },
+                move |s| async move {
+                    s.transactions()
+                        .void(e.id, &reason, &options(pw), key)
+                        .await?;
+                    s.credit_memos().get(e.id).await.map(SavedDoc::CreditMemo)
+                },
+            ),
+            SalesDocKind::SalesReceipt => engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label("orphan.sales_receipt_void", Some(key.clone())),
+                |d| {
+                    crate::company::demo::credit_memos::void_receipt(d, e.id, password.as_ref())?;
+                    crate::company::demo::credit_memos::get_receipt(d, e.id)
+                        .map(SavedDoc::SalesReceipt)
+                },
+                move |s| async move {
+                    s.transactions()
+                        .void(e.id, &reason, &options(pw), key)
+                        .await?;
+                    s.sales_receipts()
+                        .get(e.id)
+                        .await
+                        .map(SavedDoc::SalesReceipt)
+                },
+            ),
+        };
         self.void_job = Some((pending, job));
         if self.link.is_demo() {
             self.poll();
         }
     }
 
-    pub(crate) fn voided(&mut self, v: &Versioned<InvoiceRecord>) {
+    pub(crate) fn voided(&mut self, v: SavedDoc) {
         crate::forms::publish_saved(&self.link, &self.bus, &[]);
         self.closing_prompt.saved();
         self.void_reason.clear();
@@ -647,14 +726,36 @@ impl InvoiceScreen {
     }
 
     fn fetch_list(&mut self) {
+        let kind = self.kind;
+        let txn_type = self.txn_type();
         self.nav_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            |d| Ok(crate::company::demo::invoices::list(d)),
-            |s| async move {
+            move |d| {
+                Ok(match kind {
+                    SalesDocKind::Invoice => crate::company::demo::invoices::list(d),
+                    SalesDocKind::CreditMemo => crate::company::demo::credit_memos::memo_ids(d),
+                    SalesDocKind::SalesReceipt => {
+                        crate::company::demo::credit_memos::receipt_ids(d)
+                    }
+                })
+            },
+            move |s| async move {
+                if kind == SalesDocKind::Invoice {
+                    let page = s
+                        .invoices()
+                        .list(&InvoiceListQuery::default(), PageRequest::new(200, 0)?)
+                        .await?;
+                    return Ok(page.data.into_iter().map(|r| r.id).collect());
+                }
+                // P22: memos and receipts through the transaction list.
+                let filter = cl_api::TransactionFilter {
+                    txn_type: Some(txn_type),
+                    ..cl_api::TransactionFilter::default()
+                };
                 let page = s
-                    .invoices()
-                    .list(&InvoiceListQuery::default(), PageRequest::new(200, 0)?)
+                    .transactions()
+                    .list(&filter, PageRequest::new(200, 0)?)
                     .await?;
                 Ok(page.data.into_iter().map(|r| r.id).collect())
             },
@@ -665,11 +766,37 @@ impl InvoiceScreen {
     }
 
     pub(crate) fn load(&mut self, id: TransactionId) {
+        let kind = self.kind;
         self.load_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            |d| crate::company::demo::invoices::get(d, id).ok_or(ApiError::NotFound { code: None }),
-            move |s| async move { s.invoices().get(id).await },
+            move |d| match kind {
+                SalesDocKind::Invoice => crate::company::demo::invoices::get(d, id)
+                    .map(|v| SavedDoc::Invoice(v.record))
+                    .ok_or(ApiError::NotFound { code: None }),
+                SalesDocKind::CreditMemo => {
+                    crate::company::demo::credit_memos::get_memo(d, id).map(SavedDoc::CreditMemo)
+                }
+                SalesDocKind::SalesReceipt => {
+                    crate::company::demo::credit_memos::get_receipt(d, id)
+                        .map(SavedDoc::SalesReceipt)
+                }
+            },
+            move |s| async move {
+                match kind {
+                    SalesDocKind::Invoice => s
+                        .invoices()
+                        .get(id)
+                        .await
+                        .map(|v| SavedDoc::Invoice(v.record)),
+                    SalesDocKind::CreditMemo => {
+                        s.credit_memos().get(id).await.map(SavedDoc::CreditMemo)
+                    }
+                    SalesDocKind::SalesReceipt => {
+                        s.sales_receipts().get(id).await.map(SavedDoc::SalesReceipt)
+                    }
+                }
+            },
         ));
         if self.link.is_demo() {
             self.poll();
@@ -688,6 +815,10 @@ impl InvoiceScreen {
     /// Esc: an open card closes, then the focused field goes back to its
     /// saved value.
     pub(crate) fn revert_field(&mut self) -> bool {
+        if self.apply_open.is_some() {
+            self.close_apply_panel();
+            return true;
+        }
         if self.email.is_open() {
             self.email.cancel();
             return true;
@@ -729,8 +860,18 @@ impl InvoiceScreen {
 
     /// Keymap commands the grid and the closing dialog did not take.
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
+        if id.as_str() == self.command_kind() {
+            return true;
+        }
         match id.as_str() {
-            KIND => true,
+            "credit_memo.apply" => {
+                self.apply_credit_later();
+                true
+            }
+            "credit_memo.refund" => {
+                self.refund_memo();
+                true
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true
@@ -796,8 +937,16 @@ impl InvoiceScreen {
             self.notice = Some(note);
             return;
         }
-        if let Some(e) = &self.editing
-            && !e.record.print_later
+        if self.kind != SalesDocKind::Invoice {
+            // P22: a credit memo or sales receipt prints from its own form
+            // (cl-print `credit_memo` / `sales_receipt`), opened full size
+            // where it prints or saves as a PDF.
+            self.open_pdf();
+            self.last_action = Some("print_preview");
+            return;
+        }
+        if let Some(r) = self.editing.as_ref().and_then(Editing::invoice)
+            && !r.print_later
         {
             self.header.edit_step(|h| h.print_later = true);
             self.print_after_save = true;

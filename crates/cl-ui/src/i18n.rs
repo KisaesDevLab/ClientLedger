@@ -117,9 +117,11 @@ mod invoice_model;
 // P22 D3: the credit memo, sales receipt, refund, statement and finance
 // charge models; the screens add their own modules (D4-D7).
 mod receivables_model;
+// P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
+mod credit_memo;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 38] = [
+const TABLES: [&[(&str, &str)]; 39] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -158,6 +160,7 @@ const TABLES: [&[(&str, &str)]; 38] = [
     invoice_model::ENGLISH,
     invoice::ENGLISH,
     receivables_model::ENGLISH,
+    credit_memo::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

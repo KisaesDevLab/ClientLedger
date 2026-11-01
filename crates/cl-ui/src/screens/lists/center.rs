@@ -1091,6 +1091,22 @@ impl CenterScreen {
                     Box::new(crate::windows::OpenPayload::ReceiveFrom(c)),
                 ));
             }
+            // P22: a credit memo or a refund for the selected client.
+            if self.role == Role::Client
+                && let Some(c) = self.selected()
+            {
+                for (key, cmd) in [
+                    ("center.new_credit_memo", "clients.credit_memo"),
+                    ("center.refund", "clients.refund"),
+                ] {
+                    if b(ui, key, cmd).clicked() {
+                        self.link.push(crate::company::CompanyEvent::OpenWith(
+                            cl_model::CommandId::new(cmd),
+                            Box::new(crate::windows::OpenPayload::ForClient(c)),
+                        ));
+                    }
+                }
+            }
             ui.separator();
             let find_key = match self.role {
                 Role::Client => "center.find_client",

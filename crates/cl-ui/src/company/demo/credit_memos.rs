@@ -1288,6 +1288,74 @@ pub fn receipt_ledger_id(state: &DemoState, id: TransactionId) -> Option<Transac
     state.credits.receipts.get(&id).and_then(|r| r.ledger)
 }
 
+/// Every credit memo, newest first (`GET /transactions?txnType=credit_memo`;
+/// Prev/Next on the Credit Memo form).
+#[must_use]
+pub fn memo_ids(state: &DemoState) -> Vec<TransactionId> {
+    let mut v: Vec<(CalendarDate, String, TransactionId)> = state
+        .credits
+        .memos
+        .iter()
+        .map(|(id, m)| (m.date, m.number.clone(), *id))
+        .collect();
+    v.sort();
+    v.into_iter().rev().map(|(_, _, id)| id).collect()
+}
+
+/// Every sales receipt, newest first (Prev/Next on the Sales Receipt form).
+#[must_use]
+pub fn receipt_ids(state: &DemoState) -> Vec<TransactionId> {
+    let mut v: Vec<(CalendarDate, String, TransactionId)> = state
+        .credits
+        .receipts
+        .iter()
+        .map(|(id, r)| {
+            (
+                r.record.date,
+                r.record.number.clone().unwrap_or_default(),
+                *id,
+            )
+        })
+        .collect();
+    v.sort();
+    v.into_iter().rev().map(|(_, _, id)| id).collect()
+}
+
+/// Voids a sales receipt (`POST /transactions/{id}/void`): its ledger entry
+/// is reversed. A deposited receipt is refused (409 `TXN_DEPOSITED`).
+///
+/// # Errors
+/// `NotFound`; 409 `TXN_DEPOSITED`; closing on its date.
+pub fn void_receipt(
+    state: &mut DemoState,
+    id: TransactionId,
+    password: Option<&Secret>,
+) -> Result<(), ApiError> {
+    let r = state
+        .credits
+        .receipts
+        .get(&id)
+        .cloned()
+        .ok_or(ApiError::NotFound { code: None })?;
+    if r.record.status == SalesDocStatus::Void {
+        return Ok(());
+    }
+    check_closing(closing(state), &[r.record.date], password)?;
+    if let Some(l) = r.ledger {
+        if state.ledger.deposited_in(l).is_some() {
+            return Err(conflict("TXN_DEPOSITED"));
+        }
+        let _ = state.ledger.void(l);
+    }
+    if let Some(x) = state.credits.receipts.get_mut(&id) {
+        x.record.status = SalesDocStatus::Void;
+        x.version += 1;
+        x.record.updated_at = version_of(x.version);
+    }
+    state.credits.writes += 1;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "credit_memos_tests.rs"]
 pub(super) mod tests;

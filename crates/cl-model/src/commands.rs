@@ -363,9 +363,9 @@ pub const COMMANDS: &[Command] = &[
     built("clients.center", "Customers & Projects", Some(Menu::Clients), 0, None),
     built("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I')),
     built("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R')),
-    screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P22"),
+    built("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R')),
     built("clients.daily_sales", "Daily Sales Summary", Some(Menu::Clients), 1, None),
-    screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
+    built("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // P22 D3: the Refund screen and Assess Finance Charges (no shortcut);
     // built with their screens (D5, D7).
@@ -593,6 +593,9 @@ mod tests {
             "lists.price_levels",
             // P21
             "clients.receive_payment",
+            // P22
+            "clients.sales_receipt",
+            "clients.credit_memo",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -721,8 +724,9 @@ mod tests {
             );
             assert!(c.opens && c.arrives.is_none(), "{id} is built (P14)");
         }
-        // Sales Receipt comes with invoices (Q-259).
-        assert_eq!(find("clients.sales_receipt").unwrap().arrives, Some("P22"));
+        // Sales Receipt came with credit memos (Q-259, Q-P22e).
+        assert!(find("clients.sales_receipt").unwrap().opens);
+        assert_eq!(find("clients.sales_receipt").unwrap().arrives, None);
         assert!(Keymap::new(COMMANDS).is_ok(), "no new key clashes");
     }
 

@@ -19,9 +19,20 @@
 //!   edit is saved, offers to send the updated copy.
 //! - Add Billable Costs (Ctrl+Shift+U, Q-P20c) and Email (Ctrl+Shift+M,
 //!   Q-P20aa) live in [`billable`] and [`email`].
+//!
+//! P22 D4: the same screen is the **Credit Memo** (`clients.credit_memo`)
+//! and the **Sales Receipt** (`clients.sales_receipt`, Ctrl+Shift+R): the
+//! form's [`SalesDocKind`] gates the fields (no terms, due date, P.O.,
+//! billable costs or deposit card; a receipt adds Deposit to, method and
+//! reference), the preview and save go to the kind's engine routes, and a
+//! credit memo saved while the client has open invoices asks "Apply to an
+//! invoice or keep as credit" first ([`credit`], Q-P22b). The saved
+//! document sits in [`Editing`] as a [`SavedDoc`]; invoice-only features
+//! read [`Editing::invoice`] and go inert for the other kinds.
 
 mod attach;
 mod billable;
+pub(crate) mod credit;
 // P21 D7: the held customer deposit card (Q-P21f, Q-P21l).
 pub(crate) mod deposit_card;
 mod draw;
@@ -29,19 +40,20 @@ pub(crate) mod email;
 pub(crate) mod engine;
 mod save;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
 use cl_api::{
-    ApiError, Capabilities, ClientSales, IdempotencyKey, InvoicePreview, InvoiceRecord, Item,
-    ItemFilter, RequestGroup, Versioned,
+    ApiError, Capabilities, ClientSales, CreditMemoRecord, IdempotencyKey, InvoicePreview,
+    InvoiceRecord, Item, ItemFilter, RequestGroup, SalesReceiptRecord,
 };
 use cl_core::ids::{ContactId, ItemId, TenantId, TransactionId};
-use cl_core::{CalendarDate, MoneyStyle};
+use cl_core::{CalendarDate, MoneyStyle, Timestamp};
+use cl_model::forms::credit_memo::{CreditMemoFigures, CreditMemoForm};
 use cl_model::forms::invoice::{
-    InvoiceCaps, InvoiceContext, InvoiceForm, InvoiceProblem, PreviewTicket, PreviewTracker,
-    TotalsView, check_invoice,
+    InvoiceCaps, InvoiceContext, InvoiceForm, InvoiceProblem, InvoiceRequest, PreviewTicket,
+    PreviewTracker, SalesDocKind, TotalsView, check_invoice,
 };
 use cl_model::forms::{FormState, SaveIntent};
 use cl_model::{CommandId, Scope};
@@ -62,6 +74,20 @@ use engine::Job;
 
 /// The command and window kind.
 pub const KIND: &str = "clients.create_invoice";
+/// The Credit Memo window (P22 D4).
+pub const CREDIT_MEMO_KIND: &str = "clients.credit_memo";
+/// The Sales Receipt window (P22 D4, Q-P22e).
+pub const SALES_RECEIPT_KIND: &str = "clients.sales_receipt";
+
+/// The window kind of a document kind.
+#[must_use]
+pub const fn kind_command(kind: SalesDocKind) -> &'static str {
+    match kind {
+        SalesDocKind::Invoice => KIND,
+        SalesDocKind::CreditMemo => CREDIT_MEMO_KIND,
+        SalesDocKind::SalesReceipt => SALES_RECEIPT_KIND,
+    }
+}
 
 /// The Create Invoice window for `kind`, if it is one.
 #[must_use]
@@ -75,6 +101,42 @@ pub fn make(
         .then(|| Box::new(InvoiceScreen::new(Arc::clone(link), open, today)) as Box<_>)
 }
 
+/// The Credit Memo window for `kind`, if it is one (P22 D4).
+#[must_use]
+pub fn make_credit_memo(
+    kind: CommandId,
+    link: &Arc<CompanyLink>,
+    open: Option<(TenantId, String)>,
+    today: CalendarDate,
+) -> Option<Box<dyn Screen>> {
+    (kind.as_str() == CREDIT_MEMO_KIND).then(|| {
+        Box::new(InvoiceScreen::new_kind(
+            Arc::clone(link),
+            open,
+            today,
+            SalesDocKind::CreditMemo,
+        )) as Box<_>
+    })
+}
+
+/// The Sales Receipt window for `kind`, if it is one (P22 D4).
+#[must_use]
+pub fn make_sales_receipt(
+    kind: CommandId,
+    link: &Arc<CompanyLink>,
+    open: Option<(TenantId, String)>,
+    today: CalendarDate,
+) -> Option<Box<dyn Screen>> {
+    (kind.as_str() == SALES_RECEIPT_KIND).then(|| {
+        Box::new(InvoiceScreen::new_kind(
+            Arc::clone(link),
+            open,
+            today,
+            SalesDocKind::SalesReceipt,
+        )) as Box<_>
+    })
+}
+
 /// Header fields (undo merges typing within one field).
 pub(crate) mod field {
     pub const CLIENT: u64 = 1;
@@ -85,6 +147,8 @@ pub(crate) mod field {
     pub const MEMO: u64 = 7;
     pub const MESSAGE: u64 = 8;
     pub const TERMS_DAYS: u64 = 9;
+    /// A sales receipt's check or reference number (P22).
+    pub const REF: u64 = 10;
 }
 
 /// The fixed payment terms (U-125), in menu order.
@@ -119,18 +183,119 @@ impl Pending {
     }
 }
 
-/// A saved invoice open in the form.
+/// A saved document as the engine answered it (P22: the three kinds).
+// One per open window, read once per save or load: boxing the invoice buys
+// nothing.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug)]
+pub(crate) enum SavedDoc {
+    Invoice(InvoiceRecord),
+    CreditMemo(CreditMemoRecord),
+    SalesReceipt(SalesReceiptRecord),
+}
+
+impl SavedDoc {
+    pub(crate) fn id(&self) -> TransactionId {
+        match self {
+            SavedDoc::Invoice(r) => r.txn.id,
+            SavedDoc::CreditMemo(r) => r.id,
+            SavedDoc::SalesReceipt(r) => r.id,
+        }
+    }
+
+    pub(crate) fn date(&self) -> CalendarDate {
+        match self {
+            SavedDoc::Invoice(r) => r.txn.txn_date,
+            SavedDoc::CreditMemo(r) => r.date,
+            SavedDoc::SalesReceipt(r) => r.date,
+        }
+    }
+}
+
+/// A saved invoice, credit memo or sales receipt open in the form.
 #[derive(Clone, Debug)]
 pub(crate) struct Editing {
     pub id: TransactionId,
-    pub record: InvoiceRecord,
+    pub doc: SavedDoc,
     pub old_date: CalendarDate,
 }
 
 impl Editing {
-    pub(crate) fn void(&self) -> bool {
-        self.record.is_void()
+    pub(crate) fn of(doc: SavedDoc) -> Editing {
+        Editing {
+            id: doc.id(),
+            old_date: doc.date(),
+            doc,
+        }
     }
+
+    /// The invoice (invoice-only features read this and go inert for a
+    /// credit memo or sales receipt).
+    pub(crate) fn invoice(&self) -> Option<&InvoiceRecord> {
+        match &self.doc {
+            SavedDoc::Invoice(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The credit memo.
+    pub(crate) fn memo(&self) -> Option<&CreditMemoRecord> {
+        match &self.doc {
+            SavedDoc::CreditMemo(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The sales receipt.
+    pub(crate) fn receipt(&self) -> Option<&SalesReceiptRecord> {
+        match &self.doc {
+            SavedDoc::SalesReceipt(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn void(&self) -> bool {
+        match &self.doc {
+            SavedDoc::Invoice(r) => r.is_void(),
+            SavedDoc::CreditMemo(r) => r.is_void(),
+            SavedDoc::SalesReceipt(r) => r.status == cl_api::SalesDocStatus::Void,
+        }
+    }
+
+    /// The document number.
+    pub(crate) fn number(&self) -> Option<String> {
+        match &self.doc {
+            SavedDoc::Invoice(r) => r.txn.txn_number.clone(),
+            SavedDoc::CreditMemo(r) => r.number.clone(),
+            SavedDoc::SalesReceipt(r) => r.number.clone(),
+        }
+    }
+
+    /// The record's stamp (an edit sends it back; 409 STALE when it moved).
+    pub(crate) fn updated_at(&self) -> Option<Timestamp> {
+        match &self.doc {
+            SavedDoc::Invoice(r) => r.txn.updated_at,
+            SavedDoc::CreditMemo(r) => Some(r.updated_at),
+            SavedDoc::SalesReceipt(r) => Some(r.updated_at),
+        }
+    }
+
+    /// The client.
+    pub(crate) fn client(&self) -> Option<ContactId> {
+        match &self.doc {
+            SavedDoc::Invoice(r) => r.txn.contact_id,
+            SavedDoc::CreditMemo(r) => Some(r.customer_id),
+            SavedDoc::SalesReceipt(r) => r.customer_id,
+        }
+    }
+}
+
+/// A preview's answer: the shared figures plus a credit memo's apply
+/// figures and a document's preview problem codes (P22).
+pub(crate) struct Answer {
+    pub figures: InvoicePreview,
+    pub credit: Option<CreditMemoFigures>,
+    pub problems: Vec<String>,
 }
 
 /// The header texts being typed.
@@ -159,7 +324,18 @@ pub struct InvoiceScreen {
     pub(crate) grid: InvoiceGrid,
     pub(crate) inputs: Inputs,
     pub(crate) tracker: PreviewTracker,
-    pub(crate) preview_job: Option<(PreviewTicket, Job<InvoicePreview>)>,
+    pub(crate) preview_job: Option<(PreviewTicket, InvoiceRequest, Job<Answer>)>,
+    /// Invoice, credit memo or sales receipt (P22; fixed per window).
+    pub(crate) kind: SalesDocKind,
+    /// A credit memo's apply-or-keep state and apply figures (Q-P22b).
+    pub(crate) credit: CreditMemoForm,
+    /// The apply panel is open over the form, for this save.
+    pub(crate) apply_open: Option<SaveIntent>,
+    /// Amounts being typed in the apply panel, by invoice.
+    pub(crate) apply_cells: BTreeMap<TransactionId, String>,
+    /// The latest preview's problem codes (a sales receipt's
+    /// `NEGATIVE_RECEIPT_NEEDS_BANK`).
+    pub(crate) doc_problems: Vec<String>,
     /// The number the next invoice gets from the company's counter
     /// (`document-numbers-v1`, Q-P20ad): shown while Invoice # is blank;
     /// never sent (a typed number skips the counter).
@@ -180,11 +356,11 @@ pub struct InvoiceScreen {
     pub(crate) editing: Option<Editing>,
     /// The save in flight: the invoice and whether its typed number is in
     /// use elsewhere (Q-94).
-    pub(crate) save_job: Option<Job<(Versioned<InvoiceRecord>, bool)>>,
+    pub(crate) save_job: Option<Job<(SavedDoc, bool)>>,
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(String, IdempotencyKey)>,
-    pub(crate) void_job: Option<(Pending, Job<Versioned<InvoiceRecord>>)>,
-    pub(crate) load_job: Option<Job<Versioned<InvoiceRecord>>>,
+    pub(crate) void_job: Option<(Pending, Job<SavedDoc>)>,
+    pub(crate) load_job: Option<Job<SavedDoc>>,
     pub(crate) nav_job: Option<Job<Vec<TransactionId>>>,
     pub(crate) nav: Vec<TransactionId>,
     pub(crate) nav_at: Option<usize>,
@@ -241,18 +417,41 @@ impl InvoiceScreen {
         tenant: Option<(TenantId, String)>,
         today: CalendarDate,
     ) -> InvoiceScreen {
+        InvoiceScreen::new_kind(link, tenant, today, SalesDocKind::Invoice)
+    }
+
+    /// A new document of `kind` (P22: credit memo, sales receipt).
+    #[must_use]
+    pub fn new_kind(
+        link: Arc<CompanyLink>,
+        tenant: Option<(TenantId, String)>,
+        today: CalendarDate,
+        kind: SalesDocKind,
+    ) -> InvoiceScreen {
         let group = link.group().and_then(Result::ok);
+        if kind != SalesDocKind::Invoice
+            && let Some(mut d) = link.demo_state()
+        {
+            // P21's story first (its ids and figures stay), then P22's.
+            crate::company::demo::receivables::seed(&mut d);
+            crate::company::demo::credit_memos::seed(&mut d);
+        }
         let mut s = InvoiceScreen {
             bus: link.bus().subscribe(),
             link,
             tenant,
             group,
             today,
+            kind,
+            credit: CreditMemoForm::default(),
+            apply_open: None,
+            apply_cells: BTreeMap::new(),
+            doc_problems: Vec::new(),
             books: Books::default(),
             items: Vec::new(),
             items_job: None,
             clients: Arc::new(RegisterLists::default()),
-            header: FormState::new(blank(today)),
+            header: FormState::new(blank(kind, today)),
             grid: InvoiceGrid::new(Arc::new(ItemLists::default())),
             inputs: Inputs {
                 date: DateInput::new(today),
@@ -326,17 +525,66 @@ impl InvoiceScreen {
 
     /// What the engine can take.
     pub(crate) fn caps(&self) -> InvoiceCaps {
-        InvoiceCaps {
-            fields: self.has(Capabilities::INVOICE_FIELDS),
-            pricing: self.has(Capabilities::INVOICE_PRICING),
-            billable: self.has(Capabilities::BILLABLE_COSTS),
-            closing: self.has(Capabilities::INVOICE_EDIT),
+        match self.kind {
+            SalesDocKind::Invoice => InvoiceCaps {
+                fields: self.has(Capabilities::INVOICE_FIELDS),
+                pricing: self.has(Capabilities::INVOICE_PRICING),
+                billable: self.has(Capabilities::BILLABLE_COSTS),
+                closing: self.has(Capabilities::INVOICE_EDIT),
+            },
+            // P22 (U-138, U-143): the documents' own capabilities.
+            SalesDocKind::CreditMemo => InvoiceCaps {
+                fields: self.has(Capabilities::CREDIT_MEMO_EDIT),
+                pricing: self.has(Capabilities::CREDIT_MEMO_EDIT),
+                billable: false,
+                closing: self.has(Capabilities::CREDIT_MEMO_EDIT),
+            },
+            SalesDocKind::SalesReceipt => InvoiceCaps {
+                fields: self.has(Capabilities::SALES_RECEIPT_LINES),
+                pricing: self.has(Capabilities::SALES_RECEIPT_LINES),
+                billable: false,
+                closing: self.has(Capabilities::SALES_RECEIPT_LINES),
+            },
         }
     }
 
-    /// The engine takes the closing-date password on invoices.
+    /// The engine takes the closing-date password on this document.
     pub(crate) fn closing_supported(&self) -> bool {
-        self.has(Capabilities::INVOICE_EDIT)
+        self.caps().closing
+    }
+
+    /// The window's command id.
+    pub(crate) fn command_kind(&self) -> &'static str {
+        kind_command(self.kind)
+    }
+
+    /// The control channel's and layout's screen name.
+    pub(crate) fn screen_name(&self) -> &'static str {
+        match self.kind {
+            SalesDocKind::Invoice => "create_invoice",
+            SalesDocKind::CreditMemo => "credit_memo",
+            SalesDocKind::SalesReceipt => "sales_receipt",
+        }
+    }
+
+    /// The engine's transaction type of the document (attachments, Prev/
+    /// Next).
+    pub(crate) fn txn_type(&self) -> cl_api::TxnType {
+        match self.kind {
+            SalesDocKind::Invoice => cl_api::TxnType::Invoice,
+            SalesDocKind::CreditMemo => cl_api::TxnType::CreditMemo,
+            SalesDocKind::SalesReceipt => cl_api::TxnType::CashSale,
+        }
+    }
+
+    /// The i18n key prefix of the kind's own texts.
+    pub(crate) fn text(&self, key: &str) -> String {
+        let prefix = match self.kind {
+            SalesDocKind::Invoice => "invoice",
+            SalesDocKind::CreditMemo => "credit_memo",
+            SalesDocKind::SalesReceipt => "sales_receipt",
+        };
+        t(&format!("{prefix}.{key}"))
     }
 
     pub(crate) fn context(&self) -> InvoiceContext {
@@ -366,7 +614,10 @@ impl InvoiceScreen {
         let e = self.editing.as_ref()?;
         if e.void() {
             Some("invoice.read_only.void")
-        } else if e.record.invoice_status == Some(cl_api::InvoiceStatus::Paid) {
+        } else if e
+            .invoice()
+            .is_some_and(|r| r.invoice_status == Some(cl_api::InvoiceStatus::Paid))
+        {
             // The engine refuses an edit of a paid invoice (400); say so up
             // front (N6).
             Some("invoice.paid.read_only")
@@ -382,7 +633,7 @@ impl InvoiceScreen {
     /// Add Billable Costs or Email is open over the form (modal: the form
     /// behind takes no input).
     pub(crate) fn dialog_open(&self) -> bool {
-        self.billable.is_open() || self.email.is_open()
+        self.billable.is_open() || self.email.is_open() || self.apply_open.is_some()
     }
 
     pub(crate) fn idle(&self) -> bool {
@@ -473,7 +724,7 @@ impl InvoiceScreen {
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
                 Ok((v, duplicate)) => {
-                    self.saved(&v);
+                    self.saved(v);
                     self.duplicate_number = duplicate;
                     if duplicate {
                         self.link.push(crate::company::CompanyEvent::Toast(
@@ -490,13 +741,13 @@ impl InvoiceScreen {
         if let Some((pending, mut job)) = self.void_job.take() {
             match job.take() {
                 None => self.void_job = Some((pending, job)),
-                Some(Ok(v)) => self.voided(&v),
+                Some(Ok(v)) => self.voided(v),
                 Some(Err(e)) => self.void_failed(&e, pending),
             }
         }
         if let Some(r) = engine::poll(&mut self.load_job) {
             match r {
-                Ok(v) => self.show(&v),
+                Ok(v) => self.show(v),
                 Err(e) => self.error = Some(e),
             }
         }
@@ -533,14 +784,24 @@ impl InvoiceScreen {
     /// Sends a preview when the form has stood still 250 ms; applies the
     /// reply (a stale one is dropped by the tracker).
     pub(crate) fn poll_preview(&mut self) {
-        if let Some((ticket, mut job)) = self.preview_job.take() {
+        if let Some((ticket, req, mut job)) = self.preview_job.take() {
             match job.take() {
-                None => self.preview_job = Some((ticket, job)),
-                Some(Ok(p)) => {
+                None => self.preview_job = Some((ticket, req, job)),
+                Some(Ok(answer)) => {
                     self.preview_problem = None;
+                    let p = answer.figures;
+                    if let Some(c) = answer.credit {
+                        let caps = self.caps();
+                        self.credit.doc = self.compose();
+                        self.credit.apply_preview(&req, c, caps);
+                    }
                     let figures = engine::figures_of(&p);
                     let held = !figures.billed_on.is_empty();
-                    if self.tracker.apply_preview(ticket, figures) && held {
+                    let applied = self.tracker.apply_preview(ticket, figures);
+                    if applied {
+                        self.doc_problems = answer.problems;
+                    }
+                    if applied && held {
                         // Another invoice bills a cost on this one (U-128):
                         // the list is read again; the lines say which.
                         if let Some(c) = self.header.current().client {
@@ -554,6 +815,11 @@ impl InvoiceScreen {
                         ApiError::Forbidden { .. } => "invoice.preview.not_allowed",
                         _ => "invoice.preview.failed",
                     });
+                    if self.kind == SalesDocKind::CreditMemo {
+                        let caps = self.caps();
+                        self.credit.doc = self.compose();
+                        self.credit.fail_preview(&req, caps);
+                    }
                     self.tracker.fail(ticket);
                 }
             }
@@ -566,20 +832,8 @@ impl InvoiceScreen {
         };
         let now = u64::try_from(self.clock.elapsed().as_millis()).unwrap_or(u64::MAX);
         if let Some((ticket, req)) = self.tracker.poll(request, now) {
-            match engine::new_invoice(&req) {
-                Ok(new) => {
-                    let editing = self.editing.as_ref().map(|e| e.id);
-                    let job = engine::read(
-                        &self.link,
-                        self.group.as_ref(),
-                        |d| crate::company::demo::invoices::preview(d, &new, editing),
-                        {
-                            let new = new.clone();
-                            move |s| async move { s.invoices().preview(&new, editing).await }
-                        },
-                    );
-                    self.preview_job = Some((ticket, job));
-                }
+            match self.preview_job_for(&req) {
+                Ok(job) => self.preview_job = Some((ticket, req, job)),
                 Err(_) => self.tracker.fail(ticket),
             }
             // The demo answers at once.
@@ -588,6 +842,70 @@ impl InvoiceScreen {
             }
         }
         self.grid.show(&self.tracker);
+    }
+
+    /// The preview call of the document's kind (the demo answers at once).
+    fn preview_job_for(&self, req: &InvoiceRequest) -> Result<Job<Answer>, ApiError> {
+        let editing = self.editing.as_ref().map(|e| e.id);
+        let plain = |figures| Answer {
+            figures,
+            credit: None,
+            problems: Vec::new(),
+        };
+        Ok(match self.kind {
+            SalesDocKind::Invoice => {
+                let new = engine::new_invoice(req)?;
+                let live = new.clone();
+                engine::read(
+                    &self.link,
+                    self.group.as_ref(),
+                    |d| crate::company::demo::invoices::preview(d, &new, editing).map(plain),
+                    move |s| async move {
+                        s.invoices()
+                            .preview(&live, editing)
+                            .await
+                            .map(|figures| Answer {
+                                figures,
+                                credit: None,
+                                problems: Vec::new(),
+                            })
+                    },
+                )
+            }
+            SalesDocKind::CreditMemo => {
+                let new = engine::new_credit_memo(req)?;
+                let live = new.clone();
+                let answer = |p: cl_api::CreditMemoPreview| Answer {
+                    credit: Some(engine::credit_figures_of(&p)),
+                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    figures: p.figures,
+                };
+                engine::read(
+                    &self.link,
+                    self.group.as_ref(),
+                    |d| {
+                        crate::company::demo::credit_memos::preview_memo(d, &new, editing)
+                            .map(answer)
+                    },
+                    move |s| async move { s.credit_memos().preview(&live, editing).await.map(answer) },
+                )
+            }
+            SalesDocKind::SalesReceipt => {
+                let new = engine::new_sales_receipt(req)?;
+                let live = new.clone();
+                let answer = |p: cl_api::SalesReceiptPreview| Answer {
+                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    credit: None,
+                    figures: p.figures,
+                };
+                engine::read(
+                    &self.link,
+                    self.group.as_ref(),
+                    |d| crate::company::demo::credit_memos::preview_receipt(d, &new).map(answer),
+                    move |s| async move { s.sales_receipts().preview(&live, editing).await.map(answer) },
+                )
+            }
+        })
     }
 
     /// The client's open balance, oldest open invoice, price level and
@@ -620,6 +938,9 @@ impl InvoiceScreen {
         let client = self.header.current().client;
         if self.sales.as_ref().map(|(c, _)| *c) != client {
             self.sales = None;
+            // Another client's invoices: ask Apply or Keep again (Q-P22b).
+            self.credit.reset_answer();
+            self.apply_cells.clear();
         }
         if let Some(c) = client {
             self.fetch_sales(c);
@@ -655,9 +976,13 @@ impl InvoiceScreen {
         } else {
             self.today
         };
-        self.header.load(blank(date));
+        self.header.load(blank(self.kind, date));
         self.grid.load(Vec::new());
         self.editing = None;
+        self.credit = CreditMemoForm::default();
+        self.apply_open = None;
+        self.apply_cells.clear();
+        self.doc_problems.clear();
         self.nav_at = None;
         self.focused = None;
         self.void_open = false;
@@ -678,16 +1003,21 @@ impl InvoiceScreen {
         if !self.link.is_demo() && !self.has(Capabilities::DOCUMENT_NUMBERS) {
             return;
         }
+        let doc = match self.kind {
+            SalesDocKind::Invoice => cl_api::DocType::Invoice,
+            SalesDocKind::CreditMemo => cl_api::DocType::CreditMemo,
+            SalesDocKind::SalesReceipt => cl_api::DocType::SalesReceipt,
+        };
+        let kind = self.kind;
         self.next_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            |d| Ok(crate::company::demo::invoices::next_number(d)),
-            |s| async move {
-                Ok(s.printing()
-                    .next_number(cl_api::DocType::Invoice)
-                    .await?
-                    .next)
+            move |d| match kind {
+                SalesDocKind::Invoice => Ok(crate::company::demo::invoices::next_number(d)),
+                // The demo numbers memos and receipts as it saves them.
+                _ => Err(ApiError::NotFound { code: None }),
             },
+            move |s| async move { Ok(s.printing().next_number(doc).await?.next) },
         ));
         if let Some(Ok(n)) = engine::poll(&mut self.next_job) {
             self.next_number = Some(n);
@@ -747,9 +1077,13 @@ impl InvoiceScreen {
                 })
             })
             .collect();
-        let sent = self.editing.as_ref().map(|e| e.record.send_history.len());
+        let sent = self
+            .editing
+            .as_ref()
+            .and_then(Editing::invoice)
+            .map(|r| r.send_history.len());
         let mut v = json!({
-            "screen": "create_invoice",
+            "screen": self.screen_name(),
             "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded && self.items_job.is_none(),
@@ -776,7 +1110,7 @@ impl InvoiceScreen {
             "email_after_save": self.email_after_save,
             "sent_events": sent,
             "offer_send": self.offer_send,
-            "invoice_status": self.editing.as_ref().and_then(|e| e.record.invoice_status).map(|s| format!("{s:?}").to_lowercase()),
+            "invoice_status": self.editing.as_ref().and_then(Editing::invoice).and_then(|r| r.invoice_status).map(|s| format!("{s:?}").to_lowercase()),
             "dirty": self.is_dirty(),
             "saving": self.save_job.is_some(),
             "saved_count": self.saved_count,
@@ -801,6 +1135,24 @@ impl InvoiceScreen {
         v["deposit_note"] = json!(self.deposit_card.note());
         v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
+        if self.kind != SalesDocKind::Invoice {
+            v["kind"] = json!(self.screen_name());
+            v["preview_problems"] = json!(self.doc_problems);
+            v["void"] = json!(self.editing.as_ref().is_some_and(Editing::void));
+        }
+        if self.kind == SalesDocKind::CreditMemo {
+            v["credit"] = self.credit_state_json();
+        }
+        if self.kind == SalesDocKind::SalesReceipt {
+            v["deposit_to"] = json!(f.deposit_to.map(|a| a.to_string()));
+            v["method"] = json!(f.payment_method);
+            v["deposited"] = json!(
+                self.editing
+                    .as_ref()
+                    .and_then(Editing::receipt)
+                    .is_some_and(|r| r.deposit_id.is_some())
+            );
+        }
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
             self.closing_prompt.state_json(self.closing_supported()),
@@ -857,10 +1209,13 @@ impl InvoiceScreen {
     }
 }
 
-/// A blank invoice dated `date` (no lines: the grid holds them).
-fn blank(date: CalendarDate) -> InvoiceForm {
+/// A blank document of `kind` dated `date` (no lines: the grid holds them).
+fn blank(kind: SalesDocKind, date: CalendarDate) -> InvoiceForm {
     InvoiceForm {
+        kind,
         date: Some(date),
+        // A sales receipt is paid by check unless the owner says otherwise.
+        payment_method: (kind == SalesDocKind::SalesReceipt).then(|| "check".to_string()),
         ..InvoiceForm::default()
     }
 }
@@ -875,13 +1230,14 @@ fn empty_date() -> DateInput {
 
 impl Screen for InvoiceScreen {
     fn title(&self) -> String {
-        match self
-            .editing
-            .as_ref()
-            .and_then(|e| e.record.txn.txn_number.clone())
-        {
-            Some(n) => crate::i18n::t_with("invoice.title.number", &[("number", &n)]),
-            None => t("cmd.clients.create_invoice"),
+        let key = match self.kind {
+            SalesDocKind::Invoice => "invoice.title.number",
+            SalesDocKind::CreditMemo => "credit_memo.title.number",
+            SalesDocKind::SalesReceipt => "sales_receipt.title.number",
+        };
+        match self.editing.as_ref().and_then(Editing::number) {
+            Some(n) => crate::i18n::t_with(key, &[("number", &n)]),
+            None => t(&format!("cmd.{}", self.command_kind())),
         }
     }
 
@@ -952,6 +1308,19 @@ impl Screen for InvoiceScreen {
         self.form_command(id)
     }
 
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            // P22: Client Center's "New credit memo" for the selected client.
+            crate::windows::OpenPayload::ForClient(c) if self.editing.is_none() => {
+                self.books.poll();
+                self.apply_lists();
+                self.pick_client(c);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn open_record(&mut self, txn: TransactionId) -> bool {
         self.load(txn);
         self.editing.as_ref().is_some_and(|e| e.id == txn) || self.load_job.is_some()
@@ -966,5 +1335,8 @@ impl Screen for InvoiceScreen {
     }
 }
 
+#[cfg(test)]
+#[path = "credit_tests.rs"]
+mod credit_tests;
 #[cfg(test)]
 mod tests;
