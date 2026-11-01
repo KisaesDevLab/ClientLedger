@@ -820,6 +820,16 @@ impl InvoiceScreen {
             }
         });
         ui.add_space(10.0);
+        let saved = self.editing.as_ref().filter(|e| !e.void()).map(|e| e.id);
+        self.deposit_card.ui(
+            ui,
+            tokens,
+            &self.link,
+            self.group.as_ref(),
+            client,
+            saved,
+            today,
+        );
         // Ship to (Q-P20m): beside the header, outside the envelope windows
         // (Q-P20v); printed only when it differs from Bill to.
         let f = &contact.fields;

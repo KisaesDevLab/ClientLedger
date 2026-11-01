@@ -22,6 +22,8 @@
 
 mod attach;
 mod billable;
+// P21 D7: the held customer deposit card (Q-P21f, Q-P21l).
+pub(crate) mod deposit_card;
 mod draw;
 pub(crate) mod email;
 pub(crate) mod engine;
@@ -225,6 +227,8 @@ pub struct InvoiceScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     pub(crate) lists_stale: bool,
     pub(crate) lost: crate::forms::lost_save::LostSave,
+    /// Deposits on hand for the client (P21).
+    pub(crate) deposit_card: deposit_card::DepositCard,
 }
 
 impl InvoiceScreen {
@@ -306,6 +310,7 @@ impl InvoiceScreen {
             money_style: MoneyStyle::default(),
             lists_stale: false,
             lost: crate::forms::lost_save::LostSave::default(),
+            deposit_card: deposit_card::DepositCard::default(),
         };
         s.start_lists();
         s.poll();
@@ -789,6 +794,8 @@ impl InvoiceScreen {
             "grid": { "focused": self.grid.has_focus() },
         });
         v["next_number"] = json!(self.next_number);
+        v["deposits_on_hand"] = json!(self.deposit_card.count());
+        v["deposits_applied"] = json!(self.deposit_card.applied);
         v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
         if let (Value::Object(m), Value::Object(c)) = (

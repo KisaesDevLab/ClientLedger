@@ -145,3 +145,37 @@ fn every_widget_is_named_in_both_themes() {
         assert!(unnamed.is_empty(), "{unnamed:?}");
     }
 }
+
+#[test]
+fn nothing_applied_asks_and_holds_a_customer_deposit() {
+    let (_d, link) = link();
+    let mut s = ReceivePaymentScreen::new(Arc::clone(&link), today());
+    s.poll();
+    // A client with no open invoices in the demo.
+    let client = s
+        .books
+        .contacts
+        .iter()
+        .find(|c| {
+            c.fields.contact_type == cl_api::ContactType::Customer
+                && c.fields.display_name != crate::company::demo::receivables::STORY_CLIENT
+        })
+        .map(|c| c.id)
+        .expect("a client");
+    s.for_client(client);
+    s.amount_text = "500".into();
+    s.amount_typed();
+    settle(&mut s);
+    assert_eq!(s.state()["ask_deposit"], true);
+    assert!(!s.start_save(After::New, None));
+    assert!(s.problems.contains(&PaymentProblem::AskDeposit));
+    s.form.answer_deposit(NothingApplied::Hold);
+    settle(&mut s);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    assert_eq!(s.saved_count, 1);
+    let mut demo = link.demo_state().expect("demo");
+    let held = crate::company::demo::receivables::deposits_on_hand(&mut demo, client);
+    assert_eq!(held.len(), 1);
+    assert_eq!(shown(held[0].remaining), "500.00");
+}
