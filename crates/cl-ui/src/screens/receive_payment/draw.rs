@@ -866,7 +866,7 @@ impl ReceivePaymentScreen {
     }
 
     fn actions_ui(&mut self, ui: &mut Ui) {
-        let busy = self.save.is_some() || self.form.in_flight();
+        let busy = self.save.is_some() || self.credit_apply.is_some() || self.form.in_flight();
         let ready = matches!(self.form.figures(), FiguresView::Ready(_)) && !self.is_read_only();
         ui.horizontal(|ui| {
             if ui.button(t("payment.clear")).clicked() {

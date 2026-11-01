@@ -177,6 +177,27 @@ pub(crate) fn new_payment(s: &PaymentSave) -> Result<NewCustomerPayment, ApiErro
     })
 }
 
+/// One credit's `POST /payments/:id/apply` of a credits-only plan: the
+/// preview's amounts, each with its invoice's balance token (Q-P21b).
+#[must_use]
+pub(crate) fn apply_request(
+    date: cl_core::CalendarDate,
+    uses: &[cl_model::forms::payment::SaveCreditUse],
+) -> cl_api::ApplyRequest {
+    cl_api::ApplyRequest {
+        date,
+        applications: uses
+            .iter()
+            .map(|u| cl_api::ApplyInvoice {
+                invoice_id: u.invoice,
+                amount: Some(u.amount),
+                expected_balance_due: Some(u.token.clone()),
+            })
+            .collect(),
+        expected_updated_at: None,
+    }
+}
+
 /// The posting options of a write with the closing-date password.
 #[must_use]
 pub(crate) fn options(password: Option<Secret>) -> PostingOptions {

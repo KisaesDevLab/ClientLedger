@@ -103,6 +103,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payment.save_new", "Save & New"),
     ("payment.save_close", "Save & Close"),
     ("payment.saved.toast", "Payment saved."),
+    ("payment.credits_applied", "Credit applied to the invoice."),
     ("payment.voided", "Payment voided. Its invoices are open again."),
     ("payment.nav.none", "No other saved payment that way."),
     ("payment.problem.no_client", "Choose who paid."),

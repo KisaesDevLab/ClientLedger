@@ -40,8 +40,8 @@ use cl_core::{CalendarDate, Money, MoneyStyle, Secret, UserInput};
 use cl_model::closing::needs_password;
 use cl_model::forms::bounced_check::{BounceDefaults, BouncedCheckFlow};
 use cl_model::forms::payment::{
-    AmountInput, Editing, FiguresView, LoadedPayment, NothingApplied, Over, PaymentDefaults,
-    PaymentForm, PaymentProblem,
+    AmountInput, CreditApplyPlan, Editing, FiguresView, LoadedPayment, NothingApplied, Over,
+    PaymentDefaults, PaymentForm, PaymentProblem,
 };
 use cl_model::{CommandId, Scope};
 use eframe::egui::Ui;
@@ -165,6 +165,14 @@ pub struct ReceivePaymentScreen {
     pub(crate) preview: Option<(u64, Job<PaymentPreview>)>,
     pub(crate) save: Option<(After, Job<PaymentRecord>)>,
     pub(crate) save_key: Option<IdempotencyKey>,
+    /// A credits-only apply in flight (Q-P21b).
+    pub(crate) credit_apply: Option<(After, Job<CreditOutcome>)>,
+    /// The credits-only plan being sent and one key per credit, with
+    /// whether it definitely applied (a retry skips those and replays the
+    /// rest under the same keys).
+    pub(crate) credit_keys: Option<(CreditApplyPlan, CreditKeys)>,
+    /// Credits-only applies done (control channel).
+    pub(crate) credits_applied: u32,
     pub(crate) misc: Option<Job<()>>,
     pub(crate) misc_kind: Option<Misc>,
     pub(crate) saved_next: Option<(u32, Money)>,
@@ -252,6 +260,9 @@ impl ReceivePaymentScreen {
             preview: None,
             save: None,
             save_key: None,
+            credit_apply: None,
+            credit_keys: None,
+            credits_applied: 0,
             misc: None,
             misc_kind: None,
             saved_next: None,
@@ -504,6 +515,7 @@ impl ReceivePaymentScreen {
             ));
         }
         self.poll_save();
+        self.poll_credit_apply();
         self.poll_nav();
         self.poll_misc();
         self.poll_bounce();
@@ -565,6 +577,7 @@ impl ReceivePaymentScreen {
         self.cells.clear();
         self.editing = None;
         self.save_key = None;
+        self.credit_keys = None;
         self.problems.clear();
         self.error = None;
         self.dirty = false;
@@ -578,11 +591,16 @@ impl ReceivePaymentScreen {
 
     /// Saves; nothing goes until the current preview is back.
     pub(crate) fn start_save(&mut self, after: After, password: Option<Secret>) -> bool {
-        if self.save.is_some() || self.is_read_only() {
+        if self.save.is_some() || self.credit_apply.is_some() || self.is_read_only() {
             return false;
         }
         self.error = None;
         self.notice = None;
+        // Credits alone are not a receipt (the engine's AMOUNT_REQUIRED):
+        // they are applied to the invoices instead (Q-P21b).
+        if let Some(plan) = self.form.credit_only_plan() {
+            return self.start_apply_credits(after, plan, password);
+        }
         let plan = self.form.save_plan(self.defaults.payment);
         let plan = match plan {
             Ok(p) => p,
@@ -723,7 +741,6 @@ impl ReceivePaymentScreen {
     }
 
     fn save_failed(&mut self, e: ApiError, after: After) {
-        use cl_api::PaymentRefusal as R;
         if !crate::screens::register::keeps_key(&e) {
             self.save_key = None;
         }
@@ -733,6 +750,13 @@ impl ReceivePaymentScreen {
         {
             return;
         }
+        self.show_refusal(e);
+    }
+
+    /// The plain-language notice of an engine refusal (else the error
+    /// dialog).
+    fn show_refusal(&mut self, e: ApiError) {
+        use cl_api::PaymentRefusal as R;
         self.notice = match cl_api::payment_refusal(&e) {
             Some(R::InvoiceBalanceChanged) => {
                 self.form.refresh();
@@ -765,6 +789,142 @@ impl ReceivePaymentScreen {
                 None
             }
         };
+    }
+
+    /// Applies the credits of a credits-only plan: one
+    /// `POST /payments/:id/apply` per credit, in order, each under its own
+    /// key (kept until that credit definitely applied). A date in a closed
+    /// period asks for the closing-date password first. Every amount is
+    /// the preview's.
+    pub(crate) fn start_apply_credits(
+        &mut self,
+        after: After,
+        plan: CreditApplyPlan,
+        password: Option<Secret>,
+    ) -> bool {
+        self.problems.clear();
+        if password.is_none() && needs_password(None, plan.date, self.books.closing) {
+            self.closing_prompt.set_verb(Verb::Change);
+            self.closing_prompt
+                .ask(Pending::Save(after), true, self.books.closing);
+            return false;
+        }
+        let keys = match &self.credit_keys {
+            Some((p, k)) if *p == plan => k.clone(),
+            _ => plan
+                .sources
+                .iter()
+                .map(|(s, _)| (*s, IdempotencyKey::new(), false))
+                .collect(),
+        };
+        let calls: Vec<(TransactionId, cl_api::ApplyRequest, IdempotencyKey)> = plan
+            .sources
+            .iter()
+            .zip(&keys)
+            .filter(|(_, (_, _, done))| !done)
+            .map(|((s, uses), (_, k, _))| (*s, engine::apply_request(plan.date, uses), k.clone()))
+            .collect();
+        self.credit_keys = Some((plan, keys));
+        let Some(label) = calls.first().map(|(_, _, k)| engine::label(k)) else {
+            return false;
+        };
+        let demo_calls = calls.clone();
+        let demo_pw = password.clone();
+        let job = engine::write(
+            &self.link,
+            self.group.as_ref(),
+            label,
+            move |d| {
+                let mut done = Vec::new();
+                for (source, r, _) in &demo_calls {
+                    if let Err(e) =
+                        crate::company::demo::receivables::apply(d, *source, r, demo_pw.as_ref())
+                    {
+                        return Ok(CreditOutcome {
+                            done,
+                            error: Some(e),
+                        });
+                    }
+                    done.push(*source);
+                }
+                Ok(CreditOutcome { done, error: None })
+            },
+            move |s| async move {
+                let opts = engine::options(password);
+                let mut done = Vec::new();
+                for (source, r, key) in calls {
+                    if let Err(e) = s.customer_payments().apply(source, &r, &opts, key).await {
+                        return Ok(CreditOutcome {
+                            done,
+                            error: Some(e),
+                        });
+                    }
+                    done.push(source);
+                }
+                Ok(CreditOutcome { done, error: None })
+            },
+        );
+        self.credit_apply = Some((after, job));
+        self.poll_credit_apply();
+        true
+    }
+
+    fn poll_credit_apply(&mut self) {
+        let Some((after, job)) = self.credit_apply.as_mut() else {
+            return;
+        };
+        let Some(r) = job.take() else {
+            return;
+        };
+        let after = *after;
+        self.credit_apply = None;
+        let (done, error) = match r {
+            Ok(o) => (o.done, o.error),
+            Err(e) => (Vec::new(), Some(e)),
+        };
+        if let Some((_, keys)) = self.credit_keys.as_mut() {
+            for k in keys.iter_mut().filter(|k| done.contains(&k.0)) {
+                k.2 = true;
+            }
+        }
+        if !done.is_empty() {
+            let accounts: Vec<AccountId> = self.clearing().into_iter().collect();
+            crate::forms::publish_saved(&self.link, &self.bus, &accounts);
+        }
+        let Some(e) = error else {
+            self.closing_prompt.saved();
+            self.credit_keys = None;
+            self.credits_applied += 1;
+            self.link
+                .push(CompanyEvent::Toast("payment.credits_applied"));
+            if after == After::Close {
+                self.dirty = false;
+                self.link
+                    .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+            } else {
+                self.clear();
+            }
+            return;
+        };
+        // A definite refusal: the next try is a new request for the credit
+        // that failed (the ones applied keep their keys and are skipped).
+        if !crate::screens::register::keeps_key(&e)
+            && let Some((_, keys)) = self.credit_keys.as_mut()
+            && let Some(k) = keys.iter_mut().find(|k| !k.2)
+        {
+            k.1 = IdempotencyKey::new();
+        }
+        if self
+            .closing_prompt
+            .failed(&e, Pending::Save(after), true, self.books.closing)
+        {
+            return;
+        }
+        if !done.is_empty() {
+            // Part of it applied: show the engine's figures as they are now.
+            self.form.refresh();
+        }
+        self.show_refusal(e);
     }
 
     pub(crate) fn submit_closing(&mut self) {
@@ -1154,6 +1314,16 @@ async fn all_payments(s: &cl_api::Session) -> Result<Vec<TransactionId>, ApiErro
     Ok(ids)
 }
 
+/// One key per credit of a credits-only plan, and whether it applied.
+pub(crate) type CreditKeys = Vec<(TransactionId, IdempotencyKey, bool)>;
+
+/// What a credits-only apply did: the credits applied, in order, and the
+/// refusal that stopped it.
+pub(crate) struct CreditOutcome {
+    pub done: Vec<TransactionId>,
+    pub error: Option<ApiError>,
+}
+
 /// What the misc write was.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Misc {
@@ -1169,7 +1339,11 @@ impl Screen for ReceivePaymentScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         self.draw(ui);
-        if self.preview.is_some() || self.form.in_flight() || self.save.is_some() {
+        if self.preview.is_some()
+            || self.form.in_flight()
+            || self.save.is_some()
+            || self.credit_apply.is_some()
+        {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(60));
         } else if !matches!(
@@ -1281,6 +1455,7 @@ impl ReceivePaymentScreen {
             "figures": figures,
             "explicit": self.form.mode() == cl_model::forms::payment::Mode::Explicit,
             "saved_count": self.saved_count,
+            "credits_applied": self.credits_applied,
             "dialog": self.dialog.as_ref().map(|d| match d {
                 Dialog::Credits => "credits",
                 Dialog::WriteOffAccount => "write_off_account",

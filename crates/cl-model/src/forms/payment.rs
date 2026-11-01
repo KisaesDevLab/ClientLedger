@@ -437,6 +437,30 @@ impl fmt::Debug for PaymentSave {
     }
 }
 
+/// Credits alone (Q-P21b): nothing received, only earlier credits or held
+/// deposits put on invoices. The engine refuses that as a receipt (400
+/// `AMOUNT_REQUIRED`); it goes through `POST /payments/:id/apply`, one call
+/// per credit, with the preview's amounts and balance tokens copied.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CreditApplyPlan {
+    /// The client.
+    pub client: ContactId,
+    /// The date the credits are applied (checked against the closing date).
+    pub date: CalendarDate,
+    /// Each credit or deposit with its uses, in the preview's order.
+    pub sources: Vec<(TransactionId, Vec<SaveCreditUse>)>,
+}
+
+impl fmt::Debug for CreditApplyPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreditApplyPlan")
+            .field("client", &self.client)
+            .field("date", &self.date)
+            .field("sources", &self.sources.len())
+            .finish()
+    }
+}
+
 /// Why Save is not possible yet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaymentProblem {
@@ -1063,6 +1087,50 @@ impl PaymentForm {
 
     fn is_hold(&self) -> bool {
         self.nothing == Some(NothingApplied::Hold)
+    }
+
+    /// The credits-only apply of the ready preview (Q-P21b), when that is
+    /// what the form holds: a new payment (not an edit, not a hold) with
+    /// nothing received, no cash, discount or write-off on any row, at
+    /// least one credit or deposit used, and no engine problem but
+    /// `AMOUNT_REQUIRED` (the preview's "this is not a receipt"). Every
+    /// amount and token is the preview's.
+    #[must_use]
+    pub fn credit_only_plan(&self) -> Option<CreditApplyPlan> {
+        let FiguresView::Ready(f) = self.figures() else {
+            return None;
+        };
+        let settles = f.rows.iter().any(|r| {
+            r.payment.is_positive() || r.discount.is_positive() || r.write_off.is_positive()
+        });
+        if self.editing.is_some()
+            || self.is_hold()
+            || f.amount.is_positive()
+            || settles
+            || f.credit_uses.is_empty()
+            || f.problems.iter().any(|(c, _)| c != "AMOUNT_REQUIRED")
+        {
+            return None;
+        }
+        let mut sources: Vec<(TransactionId, Vec<SaveCreditUse>)> = Vec::new();
+        for u in &f.credit_uses {
+            let token = f.row(u.invoice)?.token.clone();
+            let use_ = SaveCreditUse {
+                source: u.source,
+                invoice: u.invoice,
+                amount: u.amount,
+                token,
+            };
+            match sources.iter_mut().find(|(s, _)| *s == u.source) {
+                Some((_, v)) => v.push(use_),
+                None => sources.push((u.source, vec![use_])),
+            }
+        }
+        Some(CreditApplyPlan {
+            client: self.client?,
+            date: self.date?,
+            sources,
+        })
     }
 
     /// What Save sends, copied from the ready preview of this revision, or

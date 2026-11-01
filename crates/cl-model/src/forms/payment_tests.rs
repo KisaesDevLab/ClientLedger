@@ -431,16 +431,66 @@ fn credits_alone_are_not_a_payment() {
         f.save_plan(PaymentDefaults::default()),
         Err(vec![PaymentProblem::NoAmount])
     );
+    // Q-P21b: it is an apply of the credit instead, with the preview's
+    // amount and the invoice's token copied.
+    let plan = f.credit_only_plan().expect("credits alone");
+    assert_eq!(plan.client, client(1));
+    assert_eq!(plan.date, day());
+    assert_eq!(plan.sources.len(), 1);
+    assert_eq!(plan.sources[0].0, id(7));
+    let u = &plan.sources[0].1;
+    assert_eq!(u.len(), 1);
+    assert_eq!(u[0].invoice, id(2));
+    assert_eq!(u[0].amount, m("55.00"));
+    assert_eq!(u[0].token, BalanceToken::from_wire("1260.0000"));
+    // The engine's AMOUNT_REQUIRED is the only problem it tolerates.
+    fig.problems = vec![("AMOUNT_REQUIRED".into(), None)];
+    f.refresh();
+    answer(&mut f, fig.clone());
+    assert!(f.credit_only_plan().is_some());
+    fig.problems.push(("CREDIT_NOT_AVAILABLE".into(), None));
+    f.refresh();
+    answer(&mut f, fig.clone());
+    assert!(f.credit_only_plan().is_none());
+    fig.problems.clear();
     // A write-off of 0 cash is still a payment (no deposit line).
     fig.rows[0].write_off = m("385.00");
     f.refresh();
     answer(&mut f, fig);
+    assert!(f.credit_only_plan().is_none(), "a write-off is a receipt");
     assert!(
         f.save_plan(PaymentDefaults {
             write_off_account: Some(acct(9)),
             discount_account: None,
         })
         .is_ok()
+    );
+}
+
+#[test]
+fn credits_with_cash_or_on_an_edit_are_a_receipt() {
+    let mut f = form();
+    f.use_credit(id(7), id(2), None);
+    let mut fig = mockup();
+    fig.credit_uses.push(FigureCreditUse {
+        source: id(7),
+        invoice: id(2),
+        amount: m("55.00"),
+    });
+    answer(&mut f, fig);
+    assert!(f.credit_only_plan().is_none(), "cash received");
+    assert!(f.save_plan(PaymentDefaults::default()).is_ok());
+    // Nothing used at all: no plan either (Save says no amount).
+    let mut f = form();
+    f.set_amount(AmountInput::Typed(Money::ZERO));
+    let mut fig = mockup();
+    fig.amount = Money::ZERO;
+    fig.rows[0].payment = Money::ZERO;
+    answer(&mut f, fig);
+    assert!(f.credit_only_plan().is_none());
+    assert!(
+        f.save_plan(PaymentDefaults::default())
+            .is_err_and(|p| p.contains(&PaymentProblem::NoAmount))
     );
 }
 

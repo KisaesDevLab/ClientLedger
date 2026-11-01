@@ -522,14 +522,18 @@ fn a_closed_period_void_asks_for_the_password() {
     assert_eq!(s.state()["read_only"], true);
 }
 
-/// Credits alone are not a receipt: the preview reports AMOUNT_REQUIRED (as
-/// the engine does) and Save says nothing was received.
-#[test]
-fn credits_alone_are_refused_with_amount_required() {
-    let (_d, link) = link();
-    let mut s = mockup(&link);
+/// Saves 4,400.00 on invoice 1091 (4,385.00): a 15.00 credit is left on
+/// it. Returns the screen (cleared for the next payment), the credit and
+/// the open invoices' ids.
+fn with_a_credit(
+    link: &Arc<CompanyLink>,
+) -> (
+    ReceivePaymentScreen,
+    TransactionId,
+    BTreeMap<String, TransactionId>,
+) {
+    let mut s = mockup(link);
     let ids = invoice_ids(&s);
-    let client = s.form.client;
     s.form.unapply_all();
     s.toggle(ids["1091"]);
     s.amount_text = "4400".into();
@@ -538,12 +542,60 @@ fn credits_alone_are_refused_with_amount_required() {
     assert!(s.start_save(After::New, None));
     s.poll();
     let credit = s.last_saved.as_ref().map(|r| r.id).expect("credit");
-    s.form.set_client(client);
+    (s, credit, ids)
+}
+
+/// Uses `credit` on invoice 1095 with nothing received.
+fn use_credit_alone(s: &mut ReceivePaymentScreen, credit: TransactionId, invoice: TransactionId) {
+    let client = s
+        .books
+        .contact(crate::company::demo::receivables::STORY_CLIENT)
+        .expect("Neosho");
+    s.for_client(client);
     s.amount_text = "0".into();
     s.amount_typed();
-    settle(&mut s);
+    settle(s);
     s.form.unapply_all();
-    s.form.use_credit(credit, ids["1095"], None);
+    s.form.use_credit(credit, invoice, None);
+    settle(s);
+}
+
+/// Q-P21b: credits alone are not a receipt (the preview reports
+/// AMOUNT_REQUIRED, as the engine does), so Save applies the credit to the
+/// invoice through `/payments/:id/apply` with the preview's amount.
+#[test]
+fn credits_alone_apply_to_the_invoice() {
+    let (_d, link) = link();
+    let (mut s, credit, ids) = with_a_credit(&link);
+    use_credit_alone(&mut s, credit, ids["1095"]);
+    let plan = s.form.credit_only_plan().expect("credits alone");
+    assert_eq!(plan.sources.len(), 1);
+    assert_eq!(plan.sources[0].1[0].amount.to_wire(), "15.0000");
+    assert!(s.start_save(After::New, None), "{:?}", s.problems);
+    s.poll();
+    let v = s.state();
+    assert_eq!(v["credits_applied"], 1, "{v}");
+    assert_eq!(v["saved_count"], 1, "no new payment");
+    assert_eq!(v["notice"], serde_json::Value::Null);
+    assert!(s.credit_keys.is_none());
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let after = crate::company::demo::receivables::get(&mut demo, credit).expect("rec");
+        assert_eq!(after.unapplied_remaining, Money::ZERO);
+    }
+    // The form is cleared; the invoice now owes 1,245.00.
+    let client = s
+        .books
+        .contact(crate::company::demo::receivables::STORY_CLIENT)
+        .expect("Neosho");
+    s.for_client(client);
+    settle(&mut s);
+    let v = s.state();
+    assert_eq!(v["rows"][0]["number"], "1095");
+    assert_eq!(v["rows"][0]["due"], "1,245.00");
+    // Nothing used and nothing received: still "enter the amount".
+    s.amount_text = "0".into();
+    s.amount_typed();
     settle(&mut s);
     assert!(!s.start_save(After::New, None));
     assert!(
@@ -551,14 +603,57 @@ fn credits_alone_are_refused_with_amount_required() {
         "{:?}",
         s.problems
     );
-    assert!(
-        s.problems
-            .contains(&PaymentProblem::Engine("AMOUNT_REQUIRED".into()))
-    );
-    assert_eq!(
-        problem_key(&PaymentProblem::Engine("AMOUNT_REQUIRED".into())),
-        "payment.problem.no_amount"
-    );
+}
+
+/// A credits-only apply dated in a closed period asks for the closing-date
+/// password, keeps its key, and applies once the password is given.
+#[test]
+fn a_closed_period_credit_apply_asks_for_the_password() {
+    let (_d, link) = link();
+    let (mut s, credit, ids) = with_a_credit(&link);
+    use_credit_alone(&mut s, credit, ids["1095"]);
+    close_books(&link, &mut s, today());
+    assert!(!s.start_save(After::New, None));
+    assert!(s.closing_prompt.dialog_open());
+    assert!(s.credit_apply.is_none(), "nothing sent");
+    type_closing_password(&mut s);
+    assert_eq!(s.state()["credits_applied"], 1);
+    let mut demo = link.demo_state().expect("demo");
+    let after = crate::company::demo::receivables::get(&mut demo, credit).expect("rec");
+    assert_eq!(after.unapplied_remaining, Money::ZERO);
+}
+
+/// A refused apply keeps the form and says why; the credit is untouched.
+#[test]
+fn a_refused_credit_apply_shows_the_reason() {
+    let (_d, link) = link();
+    let (mut s, credit, ids) = with_a_credit(&link);
+    use_credit_alone(&mut s, credit, ids["1095"]);
+    // Another window takes the credit first.
+    {
+        let mut demo = link.demo_state().expect("demo");
+        crate::company::demo::receivables::apply(
+            &mut demo,
+            credit,
+            &cl_api::ApplyRequest {
+                date: today(),
+                applications: vec![cl_api::ApplyInvoice {
+                    invoice_id: ids["1095"],
+                    amount: None,
+                    expected_balance_due: None,
+                }],
+                expected_updated_at: None,
+            },
+            None,
+        )
+        .expect("applied elsewhere");
+    }
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    let v = s.state();
+    assert_eq!(v["credits_applied"], 0);
+    assert!(v["notice"].is_string(), "{v}");
+    assert!(s.form.client.is_some(), "the form stays");
 }
 
 /// The grouped-deposit path through the screen: a check deposited with

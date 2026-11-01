@@ -4,12 +4,12 @@
 # goes 5,645.00 -> 1,645.00 (every figure the engine preview's). Then
 # Un-apply all and Space, the save, a write-off under the 1.00 limit, an
 # overpayment kept as a credit, a customer deposit held for a client with
-# no open invoices and Create Invoice's "Deposit on hand" card; the
-# payments are voided at the end (invoices open again) so --compare sees
-# the mockup. One theme run: the dark screenshot of the same unsaved state
+# no open invoices and Create Invoice's "Deposit on hand" card, then the
+# credit applied on its own (nothing received, Q-P21b); the payments are
+# voided at the end (invoices open again) so --compare sees the mockup. One theme run: the dark screenshot of the same unsaved state
 # comes from window.theme (light -> dark -> automatic -> light). Synthetic.
 name: receive_payment
-description: Mockup 4,000.00 leaves 385.00 open; write-off; overpayment credit; customer deposit; voids restore.
+description: Mockup 4,000.00 leaves 385.00 open; write-off; overpayment credit; customer deposit; credit applied alone; voids restore.
 themes: [light]
 steps:
   - resize: {width: 1440, height: 940}
@@ -138,14 +138,42 @@ steps:
   - click: {role: button, label: Void}
   - click: {role: button, label: Void payment}
   - assert_state: {key: screen.notice, equals: payment.voided}
+  # Skip the overpayment for now; void the write-off (1091 owes 385.00).
+  - command: form.prev_record
+  - command: form.prev_record
+  - assert_state: {key: screen.write_off, equals: true}
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.notice, equals: payment.voided}
+  # --- Credits alone (Q-P21b): the 40.00 credit goes on 1091 -----------------
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "0"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.rows.0.due, equals: "385.00"}
+  - assert_state: {key: screen.credits, equals: 1}
+  - key: Alt+D
+  - assert_state: {key: screen.dialog, equals: credits}
+  - click: {role: button, label: Use}
+  - click: {role: button, label: Done}
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.discounts_and_credits, equals: "40.00"}
+  - assert_state: {key: screen.balance_after, equals: "345.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.credits_applied, equals: 1}
+  - assert_state: {key: screen.saved_count, equals: 4}
+  - assert_state: {key: screen.client, equals: false}
+  # --- Void the overpayment (its credit comes off 1091) and the mockup -------
+  - command: form.prev_record
   - command: form.prev_record
   - click: {role: button, label: Void}
   - click: {role: button, label: Void payment}
   - assert_state: {key: screen.notice, equals: payment.voided}
   - command: form.prev_record
-  - click: {role: button, label: Void}
-  - click: {role: button, label: Void payment}
-  - assert_state: {key: screen.notice, equals: payment.voided}
   - command: form.prev_record
   - click: {role: button, label: Void}
   - click: {role: button, label: Void payment}
