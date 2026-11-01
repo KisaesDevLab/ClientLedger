@@ -27,7 +27,8 @@ use crate::resources::customer_payments::{
 };
 use crate::resources::invoices::InvoicePreview;
 use crate::resources::operations::{
-    SALES_RECEIPT_CREATE, SALES_RECEIPT_GET, SALES_RECEIPT_PREVIEW, SALES_RECEIPT_PUT,
+    SALES_RECEIPT_CREATE, SALES_RECEIPT_EMAIL, SALES_RECEIPT_EMAIL_LATER, SALES_RECEIPT_GET,
+    SALES_RECEIPT_PREVIEW, SALES_RECEIPT_PUT,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::sales::{InvoiceLine, LayoutChoice};
@@ -225,9 +226,13 @@ pub struct SalesReceiptRecord {
     /// The deposit it is in (depositTo and amount are then locked).
     #[serde(default)]
     pub deposit_id: Option<TransactionId>,
-    /// It is in a deposit (the engine's flag; `deposit_id` when known).
+    /// It is in a deposit (the engine's flag; deposit_id when known).
     #[serde(default)]
     pub deposited: bool,
+    /// Every send, oldest first (U-144, sales-doc-email-v1; empty on
+    /// older engines).
+    #[serde(default, deserialize_with = "null_vec")]
+    pub send_history: Vec<crate::resources::invoices::SendEvent>,
 }
 
 impl fmt::Debug for SalesReceiptRecord {
@@ -327,6 +332,55 @@ impl SalesReceipts<'_> {
         );
         let reply = self.0.send(&SALES_RECEIPT_GET, call, None).await?;
         decode_sales_doc(&reply.body, "salesReceipt", "sales receipt")
+    }
+
+    /// Emails the receipt through the company SMTP with pdf attached
+    /// (SalesReceipt-<number>.pdf) and records an "email" send (POST
+    /// /sales-receipts/{id}/email, U-144). Keep one key per send.
+    ///
+    /// # Errors
+    /// As [crate::CreditMemos::email].
+    pub async fn email(
+        &self,
+        id: TransactionId,
+        message: &crate::EmailMessage,
+        pdf_file_name: &str,
+        pdf: &[u8],
+        outbox_id: Option<crate::OutboxId>,
+        key: IdempotencyKey,
+    ) -> Result<SalesReceiptRecord, ApiError> {
+        crate::resources::credit_memos::send_doc_email(
+            self.0,
+            &SALES_RECEIPT_EMAIL,
+            format!("/api/v1/sales-receipts/{id}/email"),
+            message,
+            (pdf_file_name, pdf),
+            outbox_id,
+            key,
+            saved_sales_receipt,
+        )
+        .await
+    }
+
+    /// Puts the receipt's email in the Outbox (POST
+    /// /sales-receipts/{id}/email-later, U-144; kind sales_receipt).
+    ///
+    /// # Errors
+    /// As [SalesReceipts::email] without the PDF checks.
+    pub async fn email_later(
+        &self,
+        id: TransactionId,
+        message: &crate::EmailMessage,
+        key: IdempotencyKey,
+    ) -> Result<crate::OutboxItem, ApiError> {
+        crate::resources::credit_memos::queue_doc_email(
+            self.0,
+            &SALES_RECEIPT_EMAIL_LATER,
+            format!("/api/v1/sales-receipts/{id}/email-later"),
+            message,
+            key,
+        )
+        .await
     }
 
     /// Edits a sales receipt if it is still at `opts.expected_updated_at`.

@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 3] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 4] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -252,6 +252,13 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 3] = [
         "keyable-finance-charges",
         cl_api::KeySet::FinanceChargesV1,
         1,
+    ),
+    // U-144 (PR-3, engine PR #214): credit memo and sales receipt email.
+    (
+        "idempotency_sales_doc_email_v1_routes.txt",
+        "keyable-sales-doc-email",
+        cl_api::KeySet::SalesDocEmailV1,
+        4,
     ),
 ];
 
@@ -388,6 +395,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         (
             "idempotency_finance_charges_v1_routes.txt",
             "idempotency-finance-charges-v1",
+        ),
+        (
+            "idempotency_sales_doc_email_v1_routes.txt",
+            "sales-doc-email-v1",
         ),
     ]
     .iter()

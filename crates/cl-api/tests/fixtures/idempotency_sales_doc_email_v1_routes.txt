@@ -1,0 +1,9 @@
+# The engine's `sales-doc-email-v1` keyed set (U-144, engine PR #214):
+# credit memo and sales receipt email and email-later, `x-idempotency: true`
+# in its openapi.json. Append-only for this capability name:
+# `keyable-sales-doc-email` in operations.txt (`KeySet::SalesDocEmailV1`),
+# keyed only while the engine advertises `sales-doc-email-v1`.
+POST /api/v1/credit-memos/{id}/email
+POST /api/v1/credit-memos/{id}/email-later
+POST /api/v1/sales-receipts/{id}/email
+POST /api/v1/sales-receipts/{id}/email-later

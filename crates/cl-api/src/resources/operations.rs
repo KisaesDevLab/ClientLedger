@@ -46,6 +46,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::CheckPrintV1) => "keyable-check-print",
             RetryClass::Keyable(KeySet::InvoiceV1) => "keyable-invoice",
             RetryClass::Keyable(KeySet::InvoiceEmailV1) => "keyable-invoice-email",
+            RetryClass::Keyable(KeySet::SalesDocEmailV1) => "keyable-sales-doc-email",
             RetryClass::Keyable(KeySet::ReceivePaymentV1) => "keyable-receive-payment",
             RetryClass::Keyable(KeySet::CreditMemoV1) => "keyable-credit-memo",
             RetryClass::Keyable(KeySet::CustomerStatementsV1) => "keyable-customer-statements",
@@ -97,6 +98,9 @@ pub enum KeySet {
     /// `invoice-email-v1` (U-127): invoice email and email-later, keyed
     /// with `idempotency-v1`'s contract under their own capability.
     InvoiceEmailV1,
+    /// `sales-doc-email-v1` (U-144): credit memo and sales receipt email
+    /// and email-later, keyed under their own capability.
+    SalesDocEmailV1,
     /// `idempotency-receive-payment-v1` (U-132, P21): payment receive,
     /// edit, void, unapply, apply and bounce.
     ReceivePaymentV1,
@@ -124,6 +128,7 @@ impl KeySet {
             KeySet::CheckPrintV1 => crate::wire::Capabilities::IDEMPOTENCY_CHECK_PRINT,
             KeySet::InvoiceV1 => crate::wire::Capabilities::IDEMPOTENCY_INVOICE,
             KeySet::InvoiceEmailV1 => crate::wire::Capabilities::INVOICE_EMAIL,
+            KeySet::SalesDocEmailV1 => crate::wire::Capabilities::SALES_DOC_EMAIL,
             KeySet::ReceivePaymentV1 => crate::wire::Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT,
             KeySet::CreditMemoV1 => crate::wire::Capabilities::IDEMPOTENCY_CREDIT_MEMO,
             KeySet::CustomerStatementsV1 => {
@@ -1181,6 +1186,30 @@ pub(crate) const FINANCE_CHARGE_ASSESS: Operation = keyable_in(
 );
 /// Finance-charge assessments of a period (U-141).
 pub(crate) const FINANCE_CHARGES_LIST: Operation = read("/api/v1/finance-charges");
+/// Emails a credit memo through the company SMTP (U-144).
+pub(crate) const CREDIT_MEMO_EMAIL: Operation = keyable_in(
+    KeySet::SalesDocEmailV1,
+    Method::Post,
+    "/api/v1/credit-memos/{id}/email",
+);
+/// Puts a credit memo email in the Outbox (U-144).
+pub(crate) const CREDIT_MEMO_EMAIL_LATER: Operation = keyable_in(
+    KeySet::SalesDocEmailV1,
+    Method::Post,
+    "/api/v1/credit-memos/{id}/email-later",
+);
+/// Emails a sales receipt through the company SMTP (U-144).
+pub(crate) const SALES_RECEIPT_EMAIL: Operation = keyable_in(
+    KeySet::SalesDocEmailV1,
+    Method::Post,
+    "/api/v1/sales-receipts/{id}/email",
+);
+/// Puts a sales receipt email in the Outbox (U-144).
+pub(crate) const SALES_RECEIPT_EMAIL_LATER: Operation = keyable_in(
+    KeySet::SalesDocEmailV1,
+    Method::Post,
+    "/api/v1/sales-receipts/{id}/email-later",
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1194,7 +1223,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 276] = [
+pub const OPERATIONS: [Operation; 280] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1485,6 +1514,10 @@ pub const OPERATIONS: [Operation; 276] = [
     FINANCE_CHARGE_PREVIEW,
     FINANCE_CHARGE_ASSESS,
     FINANCE_CHARGES_LIST,
+    CREDIT_MEMO_EMAIL,
+    CREDIT_MEMO_EMAIL_LATER,
+    SALES_RECEIPT_EMAIL,
+    SALES_RECEIPT_EMAIL_LATER,
 ];
 
 /// Looks up a covered operation.
@@ -1585,6 +1618,8 @@ mod tests {
                 Some(KeySet::CustomerStatementsV1)
             } else if KEYABLE_FINANCE_CHARGES.contains(&route) {
                 Some(KeySet::FinanceChargesV1)
+            } else if KEYABLE_SALES_DOC_EMAIL.contains(&route) {
+                Some(KeySet::SalesDocEmailV1)
             } else {
                 None
             };
@@ -1617,7 +1652,8 @@ mod tests {
                 + KEYABLE_RECEIVE_PAYMENT.len()
                 + KEYABLE_CREDIT_MEMO.len()
                 + KEYABLE_CUSTOMER_STATEMENTS.len()
-                + KEYABLE_FINANCE_CHARGES.len(),
+                + KEYABLE_FINANCE_CHARGES.len()
+                + KEYABLE_SALES_DOC_EMAIL.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1727,6 +1763,14 @@ mod tests {
         ("POST", "/api/v1/customer-statements/{id}/sent"),
     ];
     const KEYABLE_FINANCE_CHARGES: [(&str, &str); 1] = [("POST", "/api/v1/finance-charges/assess")];
+    /// The engine's sales-doc-email-v1 keyed set (U-144), as
+    /// 	ests/fixtures/idempotency_sales_doc_email_v1_routes.txt records it.
+    const KEYABLE_SALES_DOC_EMAIL: [(&str, &str); 4] = [
+        ("POST", "/api/v1/credit-memos/{id}/email"),
+        ("POST", "/api/v1/credit-memos/{id}/email-later"),
+        ("POST", "/api/v1/sales-receipts/{id}/email"),
+        ("POST", "/api/v1/sales-receipts/{id}/email-later"),
+    ];
 
     #[test]
     fn key_sets_name_their_capabilities() {

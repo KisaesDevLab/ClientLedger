@@ -611,6 +611,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.conflict_in_use", "This record is in use, so it cannot be changed that way."),
     ("error.api.conflict_exists", "A record with that name already exists."),
     ("error.api.busy", "ClientLedger is busy right now."),
+    (
+        "error.api.retry",
+        "Someone else was changing the same records at the same moment. Nothing was saved.",
+    ),
     ("fix.api.try_again_soon", "Wait a moment and try again."),
     ("error.api.conflict", "This change conflicts with something already in your books."),
     ("error.api.closed_period", "That date falls in a period you have closed."),

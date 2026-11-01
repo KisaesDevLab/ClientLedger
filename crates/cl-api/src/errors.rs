@@ -733,6 +733,11 @@ fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)>
         CHECK_PRINTED_CODE if conflict => {
             Some(("error.api.check_printed", Some("fix.api.check_printed")))
         }
+        // U-146: two saves met on the same records; nothing was saved and
+        // the one automatic resend met them again.
+        crate::idempotency::RETRY_CODE if conflict => {
+            Some(("error.api.retry", Some("fix.api.try_again_soon")))
+        }
         // U-18: the same save is still being finished.
         crate::idempotency::IDEMPOTENCY_IN_PROGRESS if conflict => Some((
             "error.api.save_in_progress",
