@@ -307,7 +307,11 @@ pub fn preview(
             }
         }
     }
-    let charged: Vec<&FinanceChargeRow> = rows.iter().filter(|r| r.chargeable()).collect();
+    // The engine totals the rows it ticks (chargeable, no open credits).
+    let charged: Vec<&FinanceChargeRow> = rows
+        .iter()
+        .filter(|r| r.ticked == Some(true))
+        .collect();
     let total: Decimal = charged.iter().map(|r| dec(r.charge)).sum();
     Ok(FinanceChargePreview {
         period: period_of(d),

@@ -93,14 +93,14 @@ impl FinanceChargesScreen {
                         self.set_date(d);
                     }
                 });
-                if let Some(p) = self.current() {
-                    let text = t_with(
-                        "finance_charges.period",
-                        &[("month", &month_label(&p.period))],
-                    );
-                    ui.label(RichText::new(text).strong());
-                }
             });
+            if let Some(p) = self.current() {
+                let text = t_with(
+                    "finance_charges.period",
+                    &[("month", &month_label(&p.period))],
+                );
+                ui.label(RichText::new(text).strong());
+            }
             if self.setup.is_none()
                 && let Some(s) = self.current().and_then(|p| p.settings.clone())
                 && let Some(rate) = s.annual_rate
