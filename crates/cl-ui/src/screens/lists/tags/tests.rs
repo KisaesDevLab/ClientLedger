@@ -353,6 +353,7 @@ fn warnings_and_other_commands() {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert_eq!(r.tag_form().problems, vec![TagProblem::NameTaken]);
     r.tag_form().save_failed(ApiError::NotFound { code: None });
@@ -443,6 +444,7 @@ fn a_number_is_saved_cleared_and_a_used_one_refused() {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert_eq!(r.tag_form().problems, vec![TagProblem::NumberTaken]);
     assert_eq!(r.tag_form().focus, Some(TagField::Number));

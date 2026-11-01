@@ -148,7 +148,7 @@ fn receive_payments_refund_it_prefills_the_payment_credit() {
 fn more_than_is_left_is_the_engines_refusal() {
     let (_d, mut s) = screen();
     let c = bluestem(&s);
-    kept_memo(&s, c);
+    let memo = kept_memo(&s, c);
     s.set_client(Some(c));
     let row = s.sources[0].clone();
     s.pick_source(&row);
@@ -156,7 +156,9 @@ fn more_than_is_left_is_the_engines_refusal() {
     s.amount_typed();
     assert!(s.start_save(After::Stay, None), "the UI compares nothing");
     assert_eq!(s.saved_count, 0);
-    assert_eq!(s.notice, Some("refund.refusal.not_available"));
+    // The engine's figure from the 409's details (review: details).
+    assert_eq!(s.notice, Some("refund.refusal.only_left"));
+    assert_eq!(s.left, Some(memo_left(&s, memo)));
     assert!(s.key.is_none(), "a definite refusal: the next try is new");
 }
 
@@ -221,4 +223,35 @@ fn the_new_refund_names_every_widget() {
     assert_ne!(nodes.len(), 0);
     let unnamed = crate::screens::unnamed_widgets(&nodes);
     assert!(unnamed.is_empty(), "{unnamed:?}");
+}
+
+/// Prev/Next walk the saved refunds newest first, like the other forms;
+/// Next past the newest is a new refund.
+#[test]
+fn prev_and_next_walk_the_saved_refunds() {
+    let (_d, mut s) = screen();
+    let c = bluestem(&s);
+    kept_memo(&s, c);
+    let mut ids = Vec::new();
+    for amount in ["10.00", "20.00"] {
+        s.clear();
+        s.set_client(Some(c));
+        let row = s.sources[0].clone();
+        s.pick_source(&row);
+        s.amount_text = amount.into();
+        s.amount_typed();
+        assert!(s.start_save(After::Stay, None));
+        ids.push(s.saved.as_ref().map(|r| r.id).expect("saved"));
+    }
+    s.clear();
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.saved.as_ref().map(|r| r.id), Some(ids[1]), "newest first");
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.saved.as_ref().map(|r| r.id), Some(ids[0]));
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.notice, Some("refund.nav.oldest"));
+    s.command(CommandId::new("form.next_record"));
+    assert_eq!(s.saved.as_ref().map(|r| r.id), Some(ids[1]));
+    s.command(CommandId::new("form.next_record"));
+    assert!(s.saved.is_none(), "a new refund");
 }

@@ -986,6 +986,7 @@ pub fn save(
             current_version: None,
             code: cl_api::ErrorCode::parse(IDEMPOTENCY_KEY_REUSED),
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     let lists = Lists::of(state);

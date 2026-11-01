@@ -64,6 +64,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("finance_charges.refusal.changed", "Some charges changed since the preview, for example because a payment came in. The new figures are shown: check them and assess again."),
     ("finance_charges.refusal.changed_clients", "Changed: {clients}."),
     ("finance_charges.refusal.assessed", "Already charged for {month}. Void that invoice to charge again."),
+    ("finance_charges.refusal.future_date", "Finance charges can't be assessed for a date that hasn't come yet. Pick today or an earlier date."),
     ("finance_charges.refusal.not_set_up", "Set the annual rate and the income account first."),
     ("finance_charges.refusal.other", "The charges could not be assessed. Preview again and retry."),
     // Statements.

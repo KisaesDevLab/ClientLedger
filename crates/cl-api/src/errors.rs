@@ -77,6 +77,62 @@ impl fmt::Debug for UserText {
     }
 }
 
+/// The engine's `details` object of a 409 (`CREDIT_NOT_AVAILABLE
+/// {remaining}`, `FINANCE_CHARGE_CHANGED {contactId, charge}`, ...). The
+/// values can hold amounts and names, so `Debug` shows only the key names
+/// and there is no `Display`; screens read them through the accessors.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ConflictDetails(Option<Box<Value>>);
+
+impl ConflictDetails {
+    /// Details as the engine sent them (the demo builds the same).
+    #[must_use]
+    pub fn new(details: Value) -> ConflictDetails {
+        // Boxed: `ApiError` stays small (clippy `result_large_err`).
+        ConflictDetails(details.is_object().then(|| Box::new(details)))
+    }
+
+    /// A string field, for the UI only.
+    #[must_use]
+    pub fn text(&self, key: &str) -> Option<&str> {
+        self.0.as_ref()?.get(key)?.as_str()
+    }
+
+    /// A money field (a 2-place wire string; a JSON number or anything
+    /// else is `None`, never guessed).
+    #[must_use]
+    pub fn money(&self, key: &str) -> Option<cl_core::Money> {
+        cl_core::Money::parse_wire(self.text(key)?).ok()
+    }
+
+    /// An id field (`contactId`, `sourceId`, ...).
+    #[must_use]
+    pub fn id<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
+        self.text(key)?.parse().ok()
+    }
+
+    /// True when the engine sent no details.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .as_deref()
+            .and_then(Value::as_object)
+            .is_none_or(serde_json::Map::is_empty)
+    }
+}
+
+impl fmt::Debug for ConflictDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let keys: Vec<&str> = self
+            .0
+            .as_deref()
+            .and_then(Value::as_object)
+            .map(|m| m.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        write!(f, "ConflictDetails{keys:?}")
+    }
+}
+
 /// A request field path such as `lines.0.debit`.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FieldPath(String);
@@ -406,6 +462,8 @@ pub enum ApiError {
         code: Option<ErrorCode>,
         /// The engine's message.
         message: UserText,
+        /// The engine's `details` (figures the screen may show).
+        details: ConflictDetails,
     },
     /// The date is in a closed period.
     #[error("closed period (TB_PERIOD_LOCKED)")]
@@ -977,6 +1035,11 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         current_version,
         code: body.code.clone(),
         message: body.text(),
+        details: body
+            .pointer("/error/details")
+            .cloned()
+            .map(ConflictDetails::new)
+            .unwrap_or_default(),
     }
 }
 
@@ -1221,6 +1284,7 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
                 current_version: None,
                 code: None,
                 message: UserText::default(),
+                details: crate::ConflictDetails::default(),
             }),
         },
         413 => fin(ApiError::PayloadTooLarge),
@@ -1273,6 +1337,43 @@ mod tests {
 
     fn code(c: &str) -> Option<ErrorCode> {
         ErrorCode::parse(c)
+    }
+
+    /// A 409's `details` reach the screen (`remaining`, `contactId`), money
+    /// only from a 2-place string, and `Debug` names the keys only.
+    #[test]
+    fn conflict_details_carry_the_engines_figures_without_logging_them() {
+        let e = err(
+            409,
+            r#"{"error":{"message":"Only 120.00 of that credit is left.","code":"CREDIT_NOT_AVAILABLE","details":{"sourcePaymentId":"0b9d6c8e-6a52-4c1e-9d55-0d5f0c1b2a3f","remaining":"120.00","n":5}}}"#,
+            RouteKind::Session,
+        );
+        let ApiError::Conflict { details, .. } = &e else {
+            panic!("{e:?}");
+        };
+        assert_eq!(
+            details.money("remaining"),
+            Some(cl_core::Money::parse_wire("120.00").expect("money"))
+        );
+        assert_eq!(details.money("n"), None, "a JSON number is never money");
+        assert_eq!(
+            details
+                .id::<cl_core::ids::TransactionId>("sourcePaymentId")
+                .map(|i| i.to_string()),
+            Some("0b9d6c8e-6a52-4c1e-9d55-0d5f0c1b2a3f".to_string())
+        );
+        let shown = format!("{e:?}");
+        assert!(!shown.contains("120.00"), "{shown}");
+        assert!(shown.contains("remaining"), "{shown}");
+        let bare = err(
+            409,
+            r#"{"error":{"message":"x","code":"STALE"}}"#,
+            RouteKind::Session,
+        );
+        let ApiError::Conflict { details, .. } = &bare else {
+            panic!("{bare:?}");
+        };
+        assert!(details.is_empty());
     }
 
     const S: RouteKind = RouteKind::Session;

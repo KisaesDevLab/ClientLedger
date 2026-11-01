@@ -467,6 +467,7 @@ fn refusals_are_classified() {
         current_version: None,
         code: ErrorCode::parse(c),
         message: UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert_eq!(
         invoice_refusal(&conflict(INVOICE_HAS_PAYMENTS)),

@@ -497,6 +497,7 @@ impl InvoiceScreen {
             }
             Some(InvoiceRefusal::MarkupAccountInvalid) => "invoice.billable.markup_account_invalid",
             Some(InvoiceRefusal::TotalBelowPaid) => "invoice.total_below_paid",
+            Some(InvoiceRefusal::FinanceChargeInvoice) => "invoice.finance_charge_invoice",
             Some(InvoiceRefusal::RecurringHasBillable) => "invoice.recurring_has_billable",
             Some(InvoiceRefusal::LayoutGone) => "invoice.layout.gone",
             Some(InvoiceRefusal::LayoutArchived) => "invoice.layout.archived",

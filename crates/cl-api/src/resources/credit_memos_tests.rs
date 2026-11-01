@@ -297,7 +297,29 @@ fn refusal(code: &str) -> ApiError {
         current_version: None,
         code: ErrorCode::parse(code),
         message: UserText::default(),
+        details: crate::ConflictDetails::default(),
     }
+}
+
+/// The 400s naming `assessmentDate` / `checkNumber` map whatever the code
+/// (P22 review: future assessment date; check number with Print later).
+#[test]
+fn field_shaped_400s_map_to_their_refusals() {
+    let bad = |field: &str| {
+        crate::engine_refusal(
+            400,
+            &json!({"error": {"message": "x", "code": "VALIDATION_ERROR", "details": {"field": field}}}),
+        )
+    };
+    assert_eq!(
+        finance_charge_refusal(&bad("assessmentDate")),
+        Some(crate::FinanceChargeRefusal::FutureDate)
+    );
+    assert_eq!(
+        refund_refusal(&bad("checkNumber")),
+        Some(crate::RefundRefusal::CheckNumberWithPrintLater)
+    );
+    assert_eq!(refund_refusal(&bad("memo")), None);
 }
 
 #[test]

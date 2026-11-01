@@ -44,6 +44,10 @@ pub enum RefundRefusal {
     AccountInvalid,
     /// The check number is taken (409 `CHECK_NUMBER_IN_USE`).
     CheckNumberInUse,
+    /// A check number with Print later (400
+    /// `CHECK_NUMBER_WITH_PRINT_LATER`, or any 400 naming `checkNumber`;
+    /// P22 review): one or the other.
+    CheckNumberWithPrintLater,
     /// The source belongs to another client.
     SourceNotForCustomer,
     /// The source payment bounced (409 `PAYMENT_BOUNCED`).
@@ -58,6 +62,10 @@ const REFUND_REFUSALS: &[(&str, RefundRefusal)] = &[
     ("REFUND_DATE_BEFORE_SOURCE", RefundRefusal::DateBeforeSource),
     ("REFUND_ACCOUNT_INVALID", RefundRefusal::AccountInvalid),
     ("CHECK_NUMBER_IN_USE", RefundRefusal::CheckNumberInUse),
+    (
+        "CHECK_NUMBER_WITH_PRINT_LATER",
+        RefundRefusal::CheckNumberWithPrintLater,
+    ),
     (
         "CREDIT_NOT_FOR_CUSTOMER",
         RefundRefusal::SourceNotForCustomer,
@@ -81,6 +89,13 @@ pub fn refund_refusal(e: &ApiError) -> Option<RefundRefusal> {
     } = e
     {
         return Some(RefundRefusal::Stale);
+    }
+    // The engine's 400 for a number with Print later names the field
+    // whatever its code.
+    if let ApiError::Validation(v) = e
+        && v.field().is_some_and(|f| f.as_str() == "checkNumber")
+    {
+        return Some(RefundRefusal::CheckNumberWithPrintLater);
     }
     let code = error_code(e)?;
     REFUND_REFUSALS

@@ -374,6 +374,7 @@ mod tests {
                 current_version: None,
                 code: None,
                 message: UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             },
             Next::Forbidden => ApiError::Forbidden { code: None },
             Next::Unsupported | Next::Ok => ApiError::Local(LocalValidation::Unsupported),

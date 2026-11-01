@@ -63,12 +63,20 @@ pub enum FinanceChargeRefusal {
     /// A client's charge changed since the preview (409
     /// `FINANCE_CHARGE_CHANGED`): preview again.
     Changed,
+    /// The assessment date is in the future (400
+    /// `FINANCE_CHARGE_DATE_IN_FUTURE`, or any 400 naming
+    /// `assessmentDate`; P22 review).
+    FutureDate,
 }
 
 const FC_REFUSALS: &[(&str, FinanceChargeRefusal)] = &[
     ("FINANCE_CHARGE_NOT_SET_UP", FinanceChargeRefusal::NotSetUp),
     ("FINANCE_CHARGE_ASSESSED", FinanceChargeRefusal::Assessed),
     ("FINANCE_CHARGE_CHANGED", FinanceChargeRefusal::Changed),
+    (
+        "FINANCE_CHARGE_DATE_IN_FUTURE",
+        FinanceChargeRefusal::FutureDate,
+    ),
 ];
 
 /// Every engine code [`finance_charge_refusal`] knows.
@@ -80,6 +88,12 @@ pub fn finance_charge_refusal_codes() -> Vec<&'static str> {
 /// Classifies `e` (`None` for anything else).
 #[must_use]
 pub fn finance_charge_refusal(e: &ApiError) -> Option<FinanceChargeRefusal> {
+    // The engine's 400 for a future date names the field whatever its code.
+    if let ApiError::Validation(v) = e
+        && v.field().is_some_and(|f| f.as_str() == "assessmentDate")
+    {
+        return Some(FinanceChargeRefusal::FutureDate);
+    }
     let code = error_code(e)?;
     FC_REFUSALS
         .iter()

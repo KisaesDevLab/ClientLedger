@@ -344,6 +344,18 @@ pub fn assess(
     if r.contacts.is_empty() || r.contacts.len() > cl_api::MAX_ASSESS_CONTACTS {
         return Err(invalid());
     }
+    // A date well in the future is refused, naming the field (P22 review;
+    // the engine's 400). The demo allows the rest of a month ahead of its
+    // story date, so month-end assessments (golden 6's 11/30) still run.
+    if DemoState::today()
+        .add_days(31)
+        .is_ok_and(|limit| r.assessment_date > limit)
+    {
+        return Err(cl_api::engine_refusal(
+            400,
+            &serde_json::json!({"error": {"message": "future", "code": "FINANCE_CHARGE_DATE_IN_FUTURE", "details": {"field": "assessmentDate"}}}),
+        ));
+    }
     check_closing(closing(state), &[r.assessment_date], password)?;
     let d = r.assessment_date;
     let ids: Vec<ContactId> = r.contacts.iter().map(|c| c.contact_id).collect();
@@ -363,7 +375,13 @@ pub fn assess(
             Some(x) if x.row.charge == want.expected_charge && x.row.charge.is_positive() => {
                 plan.push(x);
             }
-            _ => return Err(conflict("FINANCE_CHARGE_CHANGED")),
+            other => {
+                let charge = other.map_or_else(|| "0.00".to_string(), |x| x.row.charge.to_wire());
+                return Err(super::receivables::conflict_with(
+                    "FINANCE_CHARGE_CHANGED",
+                    &serde_json::json!({"contactId": c.to_string(), "charge": charge}),
+                ));
+            }
         }
     }
     state.finance.next += 1;

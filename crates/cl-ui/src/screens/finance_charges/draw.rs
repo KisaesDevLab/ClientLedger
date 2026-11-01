@@ -398,6 +398,8 @@ impl FinanceChargesScreen {
             });
         });
         if go {
+            // The Assess button stays with the results (as Alt+N).
+            self.close_after = false;
             self.start_assess(None);
         }
         if close {

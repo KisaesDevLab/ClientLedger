@@ -214,6 +214,7 @@ fn enter_now_keeps_one_key_per_date_until_a_definite_answer() {
         current_version: None,
         code: cl_api::ErrorCode::parse(cl_api::OCCURRENCE_TAKEN),
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }));
     assert_eq!(s.notice, Some("templates.entered_already"));
     assert_ne!(s.enter_key_for(occ), k3, "a definite answer: a fresh key");

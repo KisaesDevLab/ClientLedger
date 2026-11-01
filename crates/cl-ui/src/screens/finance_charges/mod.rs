@@ -153,6 +153,8 @@ pub struct FinanceChargesScreen {
     pub(crate) names: BTreeMap<ContactId, String>,
     /// The ticked charges a 409 CHANGED refused, until the new preview.
     pub(crate) changed_before: Option<Vec<(ContactId, Money)>>,
+    /// The client a 409 CHANGED named (`details.contactId`).
+    pub(crate) changed_named: Option<ContactId>,
     /// The clients whose charge moved.
     pub(crate) changed_names: Vec<String>,
     /// A refusal's month (`YYYY-MM`) for its message.
@@ -163,6 +165,8 @@ pub struct FinanceChargesScreen {
     pub(crate) error: Option<ApiError>,
     /// The last batch posted only part of the ticked clients.
     pub(crate) partial: bool,
+    /// Alt+S (Save & Close): close the window once everything posted.
+    pub(crate) close_after: bool,
     pub(crate) assessed_count: usize,
     pub(crate) money_style: MoneyStyle,
     pub(crate) layout: crate::layout::FrameReport,
@@ -207,6 +211,7 @@ impl FinanceChargesScreen {
             results: Vec::new(),
             names: BTreeMap::new(),
             changed_before: None,
+            changed_named: None,
             changed_names: Vec::new(),
             refused_period: None,
             closing_prompt: ClosingPrompt::default(),
@@ -214,6 +219,7 @@ impl FinanceChargesScreen {
             notice: None,
             error: None,
             partial: false,
+            close_after: false,
             assessed_count: 0,
             money_style: MoneyStyle::default(),
             layout: crate::layout::FrameReport::default(),
@@ -263,6 +269,7 @@ impl FinanceChargesScreen {
     pub(crate) fn set_date(&mut self, d: Option<CalendarDate>) {
         self.form.set_date(d);
         self.changed_before = None;
+        self.changed_named = None;
         self.changed_names.clear();
         self.problems.clear();
     }
@@ -364,15 +371,22 @@ impl FinanceChargesScreen {
         }
         // A 409 CHANGED: name the clients whose charge moved (the engine's
         // strings compared as sent, nothing worked out).
+        // The engine names the first client it found changed
+        // (`details.contactId`); any other ticked charge that moved is
+        // named after it.
         if let Some(before) = self.changed_before.take() {
-            self.changed_names = before
-                .iter()
-                .filter(|(c, charge)| {
-                    !p.rows
+            let named = self.changed_named.take();
+            let moved = before.iter().filter(|(c, charge)| {
+                Some(*c) != named
+                    && !p
+                        .rows
                         .iter()
                         .any(|r| r.contact_id == *c && r.chargeable() && r.charge == *charge)
-                })
-                .filter_map(|(c, _)| self.names.get(c).cloned())
+            });
+            self.changed_names = named
+                .into_iter()
+                .chain(moved.map(|(c, _)| *c))
+                .filter_map(|c| self.names.get(&c).cloned())
                 .collect();
         }
         // Rate or income account blank: the setup first (Q-P22a).
@@ -587,8 +601,15 @@ impl FinanceChargesScreen {
             self.keys.clear();
             self.notice = Some("finance_charges.done");
             self.generation += 1;
+            // Alt+S: Save & Close (DESIGN.md form keys); the toast says
+            // what posted. Alt+N stays with the results and a new preview.
+            if std::mem::take(&mut self.close_after) {
+                self.link
+                    .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+            }
             return;
         };
+        self.close_after = false;
         self.partial = !self.results.is_empty();
         if !crate::screens::register::keeps_key(&e) {
             self.keys.clear();
@@ -602,6 +623,10 @@ impl FinanceChargesScreen {
         self.refused_period = self.form.figures().map(|f| f.period.clone());
         self.notice = match finance_charge_refusal(&e) {
             Some(FinanceChargeRefusal::Changed) => {
+                self.changed_named = match &e {
+                    ApiError::Conflict { details, .. } => details.id("contactId"),
+                    _ => None,
+                };
                 self.changed_before = self.form.assess_plan().ok().map(|p| {
                     p.chunks
                         .into_iter()
@@ -611,6 +636,7 @@ impl FinanceChargesScreen {
                 Some("finance_charges.refusal.changed")
             }
             Some(FinanceChargeRefusal::Assessed) => Some("finance_charges.refusal.assessed"),
+            Some(FinanceChargeRefusal::FutureDate) => Some("finance_charges.refusal.future_date"),
             Some(FinanceChargeRefusal::NotSetUp) => {
                 self.read_settings();
                 self.open_setup();
@@ -741,11 +767,17 @@ impl Screen for FinanceChargesScreen {
         }
         match id.as_str() {
             KIND => {}
+            // Alt+N assesses and stays (Save & New: the results and a new
+            // preview); Alt+S assesses and closes once posted (Save &
+            // Close). With the setup fields shown, both save the setup.
             "form.save_close" | "form.save_new" => {
                 if self.setup.is_some() {
                     self.save_setup();
                 } else {
-                    self.start_assess(None);
+                    self.close_after = id.as_str() == "form.save_close";
+                    if !self.start_assess(None) && !self.closing_prompt.dialog_open() {
+                        self.close_after = false;
+                    }
                 }
             }
             "form.revert" => {

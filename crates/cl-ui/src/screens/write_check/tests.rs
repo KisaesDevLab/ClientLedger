@@ -1612,6 +1612,7 @@ fn conflict(code: Option<&str>) -> ApiError {
         current_version: None,
         code: code.and_then(cl_api::ErrorCode::parse),
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 

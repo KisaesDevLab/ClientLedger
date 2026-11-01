@@ -339,11 +339,13 @@ fn name_taken(e: ApiError) -> ApiError {
             current_version,
             code: None,
             message,
+            ..
         } => ApiError::Conflict {
             reason: ConflictReason::AlreadyExists,
             current_version,
             code: None,
             message,
+            details: crate::ConflictDetails::default(),
         },
         other => other,
     }

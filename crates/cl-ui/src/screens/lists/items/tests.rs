@@ -271,6 +271,7 @@ fn an_engine_name_conflict_reads_like_the_local_check() {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert_eq!(r.form().problems, vec![ItemProblem::NameTaken]);
     r.form().save_failed(ApiError::NotFound { code: None });

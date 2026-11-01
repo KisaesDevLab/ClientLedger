@@ -41,8 +41,8 @@ pub mod wire;
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
-    ApiError, AuthFailure, ClosedPeriod, ConflictReason, DEPOSIT_LINKS_DROPPED, ErrorCode,
-    FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
+    ApiError, AuthFailure, ClosedPeriod, ConflictDetails, ConflictReason, DEPOSIT_LINKS_DROPPED,
+    ErrorCode, FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
     is_deposit_links_dropped,
 };
 // A04 WP-D: the demo engine's refusals read as the engine's.

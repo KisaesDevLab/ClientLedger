@@ -878,6 +878,7 @@ fn the_engine_limits_and_the_stale_answer_match_the_client() {
         current_version: None,
         code: None,
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert!(source::is_stale(&stale));
     let unsupported = CompanyError::Api(cl_api::ApiError::Local(

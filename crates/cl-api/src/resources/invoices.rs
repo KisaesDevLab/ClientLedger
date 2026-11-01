@@ -126,6 +126,10 @@ const REFUSAL_CODES: &[(&str, InvoiceRefusal)] = &[
     ),
     ("INVOICE_TOTAL_BELOW_PAID", InvoiceRefusal::TotalBelowPaid),
     (
+        "FINANCE_CHARGE_INVOICE",
+        InvoiceRefusal::FinanceChargeInvoice,
+    ),
+    (
         "RECURRING_HAS_BILLABLE_COSTS",
         InvoiceRefusal::RecurringHasBillable,
     ),
@@ -172,6 +176,9 @@ pub enum InvoiceRefusal {
     MarkupAccountInvalid,
     /// The edit would make the total less than what was paid.
     TotalBelowPaid,
+    /// A finance-charge invoice's amount, lines or date can't be edited
+    /// (409 `FINANCE_CHARGE_INVOICE`, U-141): void it and assess again.
+    FinanceChargeInvoice,
     /// A recurring schedule can't copy billable costs.
     RecurringHasBillable,
     /// The engine asks to try again (409 `RETRY`; same key).

@@ -319,6 +319,7 @@ fn only_a_code_less_409_is_a_used_number() {
         current_version: None,
         code: code.and_then(crate::ErrorCode::parse),
         message: crate::UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert!(is_number_used(&conflict(None)));
     for code in [LINE_BILLED, CHECK_PRINTED, "SOMETHING_NEW"] {
@@ -332,6 +333,7 @@ fn only_a_code_less_409_is_a_used_number() {
         current_version: None,
         code: None,
         message: crate::UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert!(!is_number_used(&stale));
 }
@@ -711,6 +713,7 @@ async fn a_printed_check_edit_is_sent_again_with_the_owners_choice() {
         current_version: None,
         code: None,
         message: crate::errors::UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert!(!is_check_printed(&dup));
     for (choice, wire) in [

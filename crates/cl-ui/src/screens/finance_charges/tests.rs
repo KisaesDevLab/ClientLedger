@@ -149,6 +149,57 @@ fn golden_6_rows_assess_once_per_month() {
     )));
 }
 
+/// A finance-charge invoice keeps its amount (409 FINANCE_CHARGE_INVOICE):
+/// the invoice form says void and assess again.
+#[test]
+fn a_finance_charge_invoice_edit_says_void_and_reassess() {
+    let (_d, link) = link();
+    let pf = client(&link, PRAIRIE_FORK);
+    let mut s = screen(&link);
+    set_up(&mut s);
+    let others: Vec<ContactId> = s
+        .current()
+        .expect("preview")
+        .rows
+        .iter()
+        .map(|r| r.contact_id)
+        .filter(|c| *c != pf && s.form.is_ticked(*c))
+        .collect();
+    for c in others {
+        s.toggle(c);
+    }
+    assert!(s.start_assess(None));
+    settle(&mut s);
+    let id = s.results[0].invoice_id;
+    let mut inv = crate::screens::invoice::InvoiceScreen::new_kind(
+        Arc::clone(&link),
+        None,
+        oct31(),
+        cl_model::forms::invoice::SalesDocKind::Invoice,
+    );
+    inv.load(id);
+    inv.poll();
+    assert_eq!(inv.editing.as_ref().map(|e| e.id), Some(id));
+    inv.grid.edit(|v, _| {
+        if let Some(l) = v.lines.iter_mut().find(|l| l.rate.is_some()) {
+            l.rate = Some(Money::parse_wire("99.00").expect("money"));
+        }
+    });
+    inv.poll_preview();
+    inv.clock = inv
+        .clock
+        .checked_sub(std::time::Duration::from_millis(400))
+        .unwrap_or(inv.clock);
+    inv.poll_preview();
+    inv.start_save(cl_model::forms::SaveIntent::Save, None);
+    assert_eq!(inv.notice, Some("invoice.finance_charge_invoice"));
+    assert_eq!(
+        s.results[0].total.format(MoneyStyle::default()),
+        "15.68",
+        "the charge stays"
+    );
+}
+
 #[test]
 fn a_charge_that_moved_previews_again_and_names_the_client() {
     let (_d, link) = link();
@@ -177,6 +228,8 @@ fn a_charge_that_moved_previews_again_and_names_the_client() {
         },
     );
     assert!(s.start_assess(None));
+    // The engine names the client (`details.contactId`).
+    assert_eq!(s.changed_named, Some(pf));
     settle(&mut s);
     assert_eq!(s.notice, Some("finance_charges.refusal.changed"));
     assert_eq!(s.results.len(), 0);
@@ -222,6 +275,63 @@ fn a_closed_date_asks_for_the_closing_password() {
     assert!(!s.start_assess(None));
     assert!(s.closing_prompt.dialog_open());
     assert!(s.assess_job.is_none(), "nothing sent before the password");
+}
+
+/// A date that hasn't come yet is the engine's 400 (P22 review), shown
+/// in plain words; nothing is posted.
+#[test]
+fn a_future_assessment_date_is_refused_in_plain_words() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    set_up(&mut s);
+    s.set_date(Some(CalendarDate::from_ymd(2027, 1, 31).expect("date")));
+    settle(&mut s);
+    assert!(s.ticked_count() > 0);
+    assert!(s.start_assess(None));
+    settle(&mut s);
+    assert_eq!(s.notice, Some("finance_charges.refusal.future_date"));
+    assert_eq!(s.results.len(), 0);
+}
+
+/// DESIGN.md form keys: Alt+N assesses and stays; Alt+S assesses and
+/// closes once posted.
+#[test]
+fn alt_n_assesses_and_stays_alt_s_assesses_and_closes() {
+    let closes = |link: &Arc<CompanyLink>| {
+        link.drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::CloseWindow(k) if k.as_str() == KIND))
+    };
+    let (_d, link) = link();
+    let pf = client(&link, PRAIRIE_FORK);
+    let lw = client(&link, LOW_WATER);
+    let mut s = screen(&link);
+    set_up(&mut s);
+    let only = |s: &mut FinanceChargesScreen, keep: ContactId| {
+        let ids: Vec<ContactId> = s
+            .current()
+            .expect("preview")
+            .rows
+            .iter()
+            .map(|r| r.contact_id)
+            .collect();
+        for c in ids {
+            if (c == keep) != s.form.is_ticked(c) {
+                s.toggle(c);
+            }
+        }
+    };
+    only(&mut s, pf);
+    let _ = link.drain();
+    assert!(s.command(CommandId::new("form.save_new")));
+    settle(&mut s);
+    assert_eq!(s.results.len(), 1);
+    assert!(!closes(&link), "Alt+N stays");
+    only(&mut s, lw);
+    assert!(s.command(CommandId::new("form.save_close")));
+    settle(&mut s);
+    assert_eq!(s.results.len(), 2);
+    assert!(closes(&link), "Alt+S closes once posted");
 }
 
 #[test]

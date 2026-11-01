@@ -174,7 +174,27 @@ pub(super) fn conflict(code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
+}
+
+/// The engine's 409 with `code` and its `details` (`{sourceId,
+/// remaining}`, `{contactId, charge}`), mapped as cl-api maps it.
+pub(super) fn conflict_with(code: &str, details: &serde_json::Value) -> ApiError {
+    cl_api::engine_refusal(
+        409,
+        &json!({"error": {"message": "conflict", "code": code, "details": details}}),
+    )
+}
+
+/// The 409 `CREDIT_NOT_AVAILABLE` of `source` with what is left of it.
+pub(super) fn credit_not_available(source: TransactionId, left: Decimal) -> ApiError {
+    let remaining =
+        money(left.max(Decimal::ZERO)).map_or_else(|_| "0.00".to_string(), Money::to_wire);
+    conflict_with(
+        "CREDIT_NOT_AVAILABLE",
+        &json!({"sourceId": source.to_string(), "remaining": remaining}),
+    )
 }
 
 pub(super) fn refused(code: &str) -> ApiError {
@@ -190,6 +210,7 @@ pub(super) fn stale() -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse("STALE"),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 

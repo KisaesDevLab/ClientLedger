@@ -137,6 +137,7 @@ impl LocalDeposits for Fake {
                 current_version: None,
                 code: ErrorCode::parse(cl_api::ALREADY_DEPOSITED),
                 message: UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             });
         }
         log.saved.push(draft.clone());

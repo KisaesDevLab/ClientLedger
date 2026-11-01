@@ -52,6 +52,7 @@ fn conflict(code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -1072,8 +1073,8 @@ fn stamp(state: &DemoState) -> String {
 /// billable costs taken off are unbilled.
 ///
 /// # Errors
-/// `NotFound`, `Conflict` (`STALE`, `BILLABLE_ALREADY_BILLED`),
-/// `ClosedPeriod`, `ClosingPasswordRejected`, `Local(InvalidValue)` (void).
+/// `NotFound`, `Conflict` (`STALE`, `BILLABLE_ALREADY_BILLED`,
+/// `FINANCE_CHARGE_INVOICE`), `ClosedPeriod`, `ClosingPasswordRejected`, `Local(InvalidValue)` (void).
 pub fn update(
     state: &mut DemoState,
     id: TransactionId,
@@ -1127,6 +1128,7 @@ pub fn update(
             current_version: None,
             code: cl_api::ErrorCode::parse("STALE"),
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     check_closing(close, &[old_date, new.txn_date], password)?;
@@ -1151,8 +1153,19 @@ pub fn update(
             .to_string()
     });
     let (mut record, claims) = record_json(state, id, &number, new)?;
-    for k in ["sendHistory", "sentAt", "invoiceStatus"] {
-        record[k] = old.record[k].clone();
+    // A finance-charge invoice keeps its amount, date and client (409
+    // FINANCE_CHARGE_INVOICE: void it and assess again; P22 review).
+    if old.record["isFinanceCharge"] == json!(true)
+        && ["total", "txnDate", "contactId"]
+            .iter()
+            .any(|k| record[*k] != old.record[*k])
+    {
+        return Err(conflict("FINANCE_CHARGE_INVOICE"));
+    }
+    for k in ["sendHistory", "sentAt", "invoiceStatus", "isFinanceCharge"] {
+        if !old.record[k].is_null() {
+            record[k] = old.record[k].clone();
+        }
     }
     // Omitted fields keep their values on an edit (layout, print later).
     if new.layout_id.is_omitted() {

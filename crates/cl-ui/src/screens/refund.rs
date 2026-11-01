@@ -126,6 +126,9 @@ pub struct RefundScreen {
     pub(crate) sources_job: Option<Job<Vec<SourceRow>>>,
     pub(crate) save_job: Option<(After, Job<RefundRecord>)>,
     pub(crate) void_job: Option<Job<RefundRecord>>,
+    /// Prev/Next: the saved refunds newest first, then the one to open.
+    pub(crate) nav_job: Option<(bool, Job<Vec<TransactionId>>)>,
+    pub(crate) open_job: Option<Job<RefundRecord>>,
     /// The key of the save attempt in flight or undecided.
     pub(crate) key: Option<(u64, IdempotencyKey)>,
     pub(crate) saved: Option<RefundRecord>,
@@ -134,6 +137,9 @@ pub struct RefundScreen {
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) problems: Vec<RefundProblem>,
     pub(crate) notice: Option<&'static str>,
+    /// The engine's figure with "Only 120.00 of this credit is left"
+    /// (409 `CREDIT_NOT_AVAILABLE {remaining}`).
+    pub(crate) left: Option<Money>,
     pub(crate) error: Option<ApiError>,
     pub(crate) saved_count: u32,
     pub(crate) void_open: bool,
@@ -215,12 +221,15 @@ impl RefundScreen {
             sources_job: None,
             save_job: None,
             void_job: None,
+            nav_job: None,
+            open_job: None,
             key: None,
             saved: None,
             last: None,
             closing_prompt: ClosingPrompt::default(),
             problems: Vec::new(),
             notice: None,
+            left: None,
             error: None,
             saved_count: 0,
             void_open: false,
@@ -283,6 +292,26 @@ impl RefundScreen {
             match r {
                 Ok(rec) => self.saved(rec, after),
                 Err(e) => self.save_failed(&e, after),
+            }
+        }
+        if let Some((older, job)) = self.nav_job.as_mut()
+            && let Some(r) = job.take()
+        {
+            let older = *older;
+            self.nav_job = None;
+            match r {
+                Ok(ids) => self.step(&ids, older),
+                Err(e) => self.error = Some(e),
+            }
+        }
+        if let Some(r) = engine::poll(&mut self.open_job) {
+            match r {
+                Ok(rec) => {
+                    self.clear();
+                    self.last = Some(rec.clone());
+                    self.saved = Some(rec);
+                }
+                Err(e) => self.error = Some(e),
             }
         }
         if let Some(r) = engine::poll(&mut self.void_job) {
@@ -533,12 +562,23 @@ impl RefundScreen {
         }
         self.notice = match refund_refusal(e) {
             Some(RefundRefusal::CreditNotAvailable | RefundRefusal::DepositNotAvailable) => {
-                // The engine's figure: read the credits again.
+                // The engine's figure, and the credits read again.
                 self.fetch_sources();
-                Some("refund.refusal.not_available")
+                self.left = match e {
+                    ApiError::Conflict { details, .. } => details.money("remaining"),
+                    _ => None,
+                };
+                Some(if self.left.is_some() {
+                    "refund.refusal.only_left"
+                } else {
+                    "refund.refusal.not_available"
+                })
             }
             Some(RefundRefusal::DateBeforeSource) => Some("refund.refusal.date_before_source"),
             Some(RefundRefusal::CheckNumberInUse) => Some("refund.refusal.check_number_in_use"),
+            Some(RefundRefusal::CheckNumberWithPrintLater) => {
+                Some("refund.refusal.check_number_with_print_later")
+            }
             Some(RefundRefusal::AccountInvalid) => Some("refund.refusal.account"),
             Some(_) => Some("refund.refusal.other"),
             None => {
@@ -590,6 +630,72 @@ impl RefundScreen {
         true
     }
 
+    /// Prev (`older`) or Next: reads the saved refunds, then opens the
+    /// one beside this one.
+    pub(crate) fn navigate(&mut self, older: bool) {
+        if self.dirty() {
+            self.notice = Some("helper.unsaved");
+            return;
+        }
+        if self.nav_job.is_some()
+            || self.open_job.is_some()
+            || self.save_job.is_some()
+            || self.void_job.is_some()
+        {
+            return;
+        }
+        let filter = cl_api::TransactionFilter {
+            txn_type: Some(cl_api::TxnType::CustomerRefund),
+            ..cl_api::TransactionFilter::default()
+        };
+        let job = engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| Ok(crate::company::demo::credit_memos::refund_ids(d)),
+            move |s| async move {
+                let page = s
+                    .transactions()
+                    .list(&filter, cl_api::PageRequest::new(200, 0)?)
+                    .await?;
+                Ok(page.data.into_iter().map(|r| r.id).collect())
+            },
+        );
+        self.nav_job = Some((older, job));
+        self.poll();
+    }
+
+    fn step(&mut self, ids: &[TransactionId], older: bool) {
+        let at = self
+            .saved
+            .as_ref()
+            .and_then(|r| ids.iter().position(|x| *x == r.id));
+        let target = match (at, older) {
+            (None, true) => ids.first().copied(),
+            (None, false) => None,
+            (Some(i), true) => ids.get(i + 1).copied(),
+            (Some(0), false) => {
+                self.clear();
+                return;
+            }
+            (Some(i), false) => ids.get(i - 1).copied(),
+        };
+        let Some(id) = target else {
+            self.notice = Some(if older {
+                "refund.nav.oldest"
+            } else {
+                "refund.nav.newest"
+            });
+            return;
+        };
+        self.open_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            move |d| crate::company::demo::credit_memos::get_refund(d, id),
+            move |s| async move { s.customer_refunds().get(id).await },
+        ));
+        self.poll();
+    }
+
     pub(crate) fn submit_closing(&mut self) {
         let Some((pending, secret)) = self.closing_prompt.submit() else {
             return;
@@ -633,7 +739,13 @@ impl RefundScreen {
             ClosingClick::None => {}
         }
         if let Some(k) = self.notice {
-            form::hint(ui, tokens, &t(k));
+            let text = match (k, self.left) {
+                ("refund.refusal.only_left", Some(m)) => {
+                    t_with(k, &[("amount", &m.format(self.money_style))])
+                }
+                _ => t(k),
+            };
+            form::hint(ui, tokens, &text);
         }
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
@@ -925,6 +1037,7 @@ impl RefundScreen {
             "from": self.from.is_some(),
             "problems": self.problems.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>(),
             "notice": self.notice,
+            "left": self.left.map(|m| m.format(MoneyStyle::default())),
             "error": self.error.is_some(),
             "saving": self.save_job.is_some(),
             "saved_count": self.saved_count,
@@ -1025,15 +1138,10 @@ impl Screen for RefundScreen {
                 }
             }
             "form.clear" => self.clear(),
-            // Prev reopens the refund saved last in this window.
-            "form.prev_record" => {
-                if let Some(r) = self.last.clone()
-                    && !self.dirty()
-                {
-                    self.clear();
-                    self.saved = Some(r);
-                }
-            }
+            // Prev/Next walk the saved refunds, newest first (as the other
+            // forms); Next past the newest is a new refund.
+            "form.prev_record" => self.navigate(true),
+            "form.next_record" => self.navigate(false),
             "edit.void_transaction" => {
                 if self.saved.is_some() {
                     self.void_open = true;

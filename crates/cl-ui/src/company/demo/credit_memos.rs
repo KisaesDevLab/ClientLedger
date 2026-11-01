@@ -26,8 +26,8 @@ use rust_decimal::Decimal;
 use super::DemoState;
 use super::invoices::{receivable, receivables_of, settle};
 use super::receivables::{
-    chart, closing, conflict, dec, invalid, money, new_id, pay_views, post, refused, stale, tagged,
-    token, version_of,
+    chart, closing, conflict, conflict_with, credit_not_available, dec, invalid, money, new_id,
+    pay_views, post, refused, stale, tagged, token, version_of,
 };
 use super::register::check_closing;
 
@@ -523,7 +523,11 @@ pub fn create_memo(
             return Err(refused("OVERAPPLIED"));
         }
         if x > left {
-            return Err(conflict("CREDIT_NOT_AVAILABLE"));
+            // A new memo has no id yet: only what is left.
+            return Err(conflict_with(
+                "CREDIT_NOT_AVAILABLE",
+                &serde_json::json!({"remaining": money(left)?.to_wire()}),
+            ));
         }
         left -= x;
         plan.push((a.invoice_id, x));
@@ -666,7 +670,7 @@ pub fn apply_memo(
     let m = memo_of(state, id)?;
     check_version(m.version, r.expected_updated_at)?;
     if m.void {
-        return Err(conflict("CREDIT_NOT_AVAILABLE"));
+        return Err(credit_not_available(id, Decimal::ZERO));
     }
     if r.date < m.date {
         return Err(refused("APPLY_DATE_BEFORE_SOURCE"));
@@ -687,7 +691,7 @@ pub fn apply_memo(
         }
         let x = a.amount.map_or_else(|| left.min(inv.balance), dec);
         if x > left || x <= Decimal::ZERO {
-            return Err(conflict("CREDIT_NOT_AVAILABLE"));
+            return Err(credit_not_available(id, left));
         }
         if x > inv.balance {
             return Err(refused("OVERAPPLIED"));
@@ -984,8 +988,13 @@ pub fn create_refund(
         if r.date < m.date {
             return Err(refused("REFUND_DATE_BEFORE_SOURCE"));
         }
-        if x > memo_remaining(state, source, &m) || m.void {
-            return Err(conflict("CREDIT_NOT_AVAILABLE"));
+        let left = if m.void {
+            Decimal::ZERO
+        } else {
+            memo_remaining(state, source, &m)
+        };
+        if x > left {
+            return Err(credit_not_available(source, left));
         }
         check_closing(closing(state), &[r.date], password)?;
         let number = check_number.clone().unwrap_or_default();
@@ -1020,11 +1029,11 @@ pub fn create_refund(
             pay.credit_remaining
         };
         if x > left {
-            return Err(conflict(if pay.hold {
-                "DEPOSIT_NOT_AVAILABLE"
+            return Err(if pay.hold {
+                conflict("DEPOSIT_NOT_AVAILABLE")
             } else {
-                "CREDIT_NOT_AVAILABLE"
-            }));
+                credit_not_available(source, left)
+            });
         }
         let legacy = NewCustomerRefund {
             customer_id: r.customer_id,
@@ -1338,6 +1347,20 @@ pub fn get_receipt(state: &DemoState, id: TransactionId) -> Result<SalesReceiptR
 #[must_use]
 pub fn receipt_ledger_id(state: &DemoState, id: TransactionId) -> Option<TransactionId> {
     state.credits.receipts.get(&id).and_then(|r| r.ledger)
+}
+
+/// Every refund, newest first (`GET /transactions?txnType=customer_refund`;
+/// Prev/Next on Refund a Credit).
+#[must_use]
+pub fn refund_ids(state: &DemoState) -> Vec<TransactionId> {
+    let mut v: Vec<(CalendarDate, TransactionId)> = state
+        .credits
+        .refunds
+        .iter()
+        .map(|(id, r)| (r.date, *id))
+        .collect();
+    v.sort();
+    v.into_iter().rev().map(|(_, id)| id).collect()
 }
 
 /// Every credit memo, newest first (`GET /transactions?txnType=credit_memo`;

@@ -137,6 +137,7 @@ fn demo_save(
             current_version: None,
             code: cl_api::ErrorCode::parse("PRICE_LEVEL_NAME_IN_USE"),
             message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     let level = PriceLevel {
@@ -335,6 +336,7 @@ impl PriceLevelsScreen {
                         current_version: None,
                         code: cl_api::ErrorCode::parse("PRICE_LEVEL_IN_USE"),
                         message: cl_api::UserText::default(),
+                        details: cl_api::ConflictDetails::default(),
                     });
                 }
                 d.price_levels.levels.retain(|l| l.id != id);

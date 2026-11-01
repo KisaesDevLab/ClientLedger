@@ -267,6 +267,7 @@ where
                     current_version: Some(RecordVersion::Fingerprint(now)),
                     code: None,
                     message: UserText::default(),
+                    details: crate::ConflictDetails::default(),
                 });
             }
             Some(now)

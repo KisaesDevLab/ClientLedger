@@ -148,6 +148,7 @@ fn conflict(code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -548,6 +549,7 @@ fn stale(
             current_version: Some(now.version),
             code: None,
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     if state.ledger.is_void(id) {

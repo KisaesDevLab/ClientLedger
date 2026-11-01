@@ -1261,6 +1261,7 @@ mod tests {
             current_version: None,
             code: ErrorCode::parse(c),
             message: UserText::default(),
+            details: crate::ConflictDetails::default(),
         };
         assert_eq!(
             ap_refusal(&conflict(CREDIT_APPLIED)),
@@ -1292,6 +1293,7 @@ mod tests {
             current_version: None,
             code: None,
             message: UserText::default(),
+            details: crate::ConflictDetails::default(),
         };
         assert_eq!(ap_refusal(&stale), Some(ApRefusal::Stale));
         let v = ApiError::Validation(ValidationError::for_field(
