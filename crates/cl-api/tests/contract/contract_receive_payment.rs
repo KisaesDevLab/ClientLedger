@@ -14,6 +14,11 @@
 //!   nothing is left to apply (409 `CREDIT_NOT_AVAILABLE`).
 //! - `receive_and_apply_retry_same_key_posts_once`: a replayed receive,
 //!   void and apply post once.
+//! - `early_discount_suggested_and_posted` (Q-P21c): 2% 10 net 30 on
+//!   1,000.00 paid on day 8 with 980.00 suggests 20.00; applied, the
+//!   invoice is paid with Dr discount 20.00; on day 11 nothing is offered.
+//! - `void_via_transactions_route_reopens`: the general void route reopens
+//!   the invoice; a deposited payment is 409 `TXN_DEPOSITED` there too.
 //! - `payment_stale_409`, `invoice_balance_changed_409`,
 //!   `exact_overapply_refused`, `payment_closed_period_password`,
 //!   `payment_cross_company_404`.
@@ -831,5 +836,140 @@ pub fn payment_cross_company_404(h: &Harness) {
         )
         .expect_err("void across companies");
     assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
+    assert_eq!(invoice_balance(h, s, x.i1091), m("4285.00"));
+}
+
+/// Q-P21c: an early-payment discount is suggested (never applied by
+/// itself) and posts exactly the engine's figure.
+pub fn early_discount_suggested_and_posted(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::PAYMENT_DISCOUNTS, "U-134") {
+        return;
+    }
+    let s = &h.s1;
+    let c = customer(h, s, "Early payer");
+    let income = account(h, s, AccountType::Revenue, "Design").id;
+    let discounts = account(h, s, AccountType::Expense, "Discounts given").id;
+    let line = InvoiceLine {
+        is_taxable: Some(false),
+        ..InvoiceLine::account(
+            income,
+            Quantity::parse_wire("1").expect("qty"),
+            m("1000.00"),
+        )
+    };
+    let mut new = NewInvoice::new(c, date(2026, 11, 1), vec![line]);
+    new.payment_terms = Some("2_10_net_30".into());
+    let inv = h
+        .run(s.invoices().create(&new, &PostingOptions::default(), key()))
+        .expect("invoice")
+        .invoice
+        .record
+        .txn
+        .id;
+    let uf = clearing(h, s);
+    // Day 11: past the window, nothing offered.
+    let late = preview(
+        h,
+        s,
+        &request(c, date(2026, 11, 12), Some("980.00"), Some(uf)),
+    );
+    let row = late.invoice(inv).expect("row");
+    assert_eq!(row.discount_available, Money::ZERO);
+    assert!(!row.suggest_discount);
+    // Day 8 with 980.00: 20.00 suggested, nothing applied yet.
+    let on = date(2026, 11, 9);
+    let p = preview(h, s, &request(c, on, Some("980.00"), Some(uf)));
+    let row = p.invoice(inv).expect("row");
+    assert_eq!(row.discount_available, m("20.00"));
+    assert!(row.suggest_discount);
+    assert_eq!(row.discount, Money::ZERO, "suggested, not applied");
+    assert_eq!(p.shortfalls.len(), 1);
+    // Apply copies the engine's figure.
+    let mut r = request(c, on, Some("980.00"), Some(uf));
+    r.applications = Some(vec![cl_api::ApplicationRequest {
+        invoice_id: inv,
+        amount: None,
+        discount_amount: Some(row.discount_available),
+        write_off_amount: None,
+    }]);
+    let p = preview(h, s, &r);
+    assert!(p.shortfalls.is_empty());
+    assert_eq!(p.totals.discounts_and_credits, m("20.00"));
+    assert_eq!(p.contact_balance_after, Money::ZERO);
+    let mut save = save_of(&p, c, on, uf);
+    save.discount_account_id = Some(discounts);
+    let rec = h
+        .run(
+            s.customer_payments()
+                .receive(&save, &PostingOptions::default(), key()),
+        )
+        .expect("receive");
+    assert_eq!(rec.discount_account_id, Some(discounts));
+    assert_eq!(invoice_balance(h, s, inv), Money::ZERO);
+    assert_eq!(balance(h, s, discounts), m("20.00"));
+    assert_eq!(client_balance(h, s, c, on), Money::ZERO);
+}
+
+/// The general void route (`/transactions/:id/void`) reopens the invoice;
+/// a deposited payment is refused there too.
+pub fn void_via_transactions_route_reopens(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::DEPOSIT_GROUPING, "U-52") {
+        return;
+    }
+    let s = &h.s1;
+    let on = date(2026, 11, 14);
+    let x = mockup_client(h, s, "Void route");
+    let rec = receive_auto(h, s, x.client, on, "4000.00");
+    assert_eq!(invoice_balance(h, s, x.i1091), m("385.00"));
+    h.run(s.transactions().void(
+        rec.id,
+        "contract: entered twice",
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("void");
+    assert_eq!(invoice_balance(h, s, x.i1091), m("4385.00"));
+    assert_eq!(client_balance(h, s, x.client, on), m("5645.00"));
+    let read = h.run(s.customer_payments().get(rec.id)).expect("get");
+    assert!(read.is_void());
+    // A deposited payment: refused, nothing changes.
+    let dep = receive_auto(h, s, x.client, on, "100.00");
+    let uf = clearing(h, s);
+    let bank = crate::contract_bank_postings::detail_account(h, s, AccountType::Asset, "bank");
+    let pending = h.run(s.payments().pending_deposits()).expect("pending");
+    let mut d = cl_api::DepositDraft::plain(bank, on, None, Vec::new());
+    d.payments = pending
+        .items
+        .iter()
+        .filter(|p| p.source == dep.id)
+        .map(|p| p.grouped(uf).expect("exact"))
+        .collect();
+    let posting = cl_api::BankPosting::deposit_with(
+        d,
+        cl_api::DepositCaps {
+            grouping: true,
+            cashback: h.caps.has(Capabilities::DEPOSIT_CASHBACK),
+            vendor_refund: h.caps.has(Capabilities::VENDOR_REFUND),
+        },
+    )
+    .expect("deposit");
+    h.run(
+        s.transactions()
+            .create_bank_posting(&posting, &PostingOptions::default(), key()),
+    )
+    .expect("deposit");
+    let e = h
+        .run(s.transactions().void(
+            dep.id,
+            "contract: deposited",
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("deposited");
+    assert_eq!(
+        payment_refusal(&e),
+        Some(PaymentRefusal::Deposited),
+        "{e:?}"
+    );
     assert_eq!(invoice_balance(h, s, x.i1091), m("4285.00"));
 }

@@ -187,6 +187,14 @@ fn main() -> std::process::ExitCode {
             contract_receive_payment::receive_and_apply_retry_same_key_posts_once,
         ),
         (
+            "receive_payment::early_discount_suggested_and_posted",
+            contract_receive_payment::early_discount_suggested_and_posted,
+        ),
+        (
+            "receive_payment::void_via_transactions_route_reopens",
+            contract_receive_payment::void_via_transactions_route_reopens,
+        ),
+        (
             "receive_payment::payment_stale_409",
             contract_receive_payment::payment_stale_409,
         ),
