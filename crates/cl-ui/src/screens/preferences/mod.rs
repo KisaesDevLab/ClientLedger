@@ -204,6 +204,8 @@ pub struct Loaded {
     pub usage: Option<AiUsage>,
     /// Active income accounts (the markup account picker, Q-P20b).
     pub incomes: Vec<(cl_core::ids::AccountId, String)>,
+    /// Active expense accounts (write-off and bank-fee pickers, P21).
+    pub expenses: Vec<(cl_core::ids::AccountId, String)>,
     /// The reads finished (with or without answers).
     pub done: bool,
 }
@@ -217,6 +219,7 @@ impl std::fmt::Debug for Loaded {
             .field("smtp", &self.smtp.is_some())
             .field("usage", &self.usage.is_some())
             .field("incomes", &self.incomes.len())
+            .field("expenses", &self.expenses.len())
             .field("done", &self.done)
             .finish()
     }
@@ -514,6 +517,7 @@ impl PreferencesScreen {
                 smtp: s.smtp_settings().await.ok(),
                 usage: s.ai_usage(1).await.ok(),
                 incomes: income_accounts(&s).await,
+                expenses: expense_accounts(&s).await,
                 done: true,
             };
             l.done = true;
@@ -720,6 +724,34 @@ impl PreferencesScreen {
         if let (Some(m), Some(mut demo)) = (markup, self.link.demo_state()) {
             demo.invoices.markup_account = m;
         }
+        // P21: Receive Payment's settings go by their own write.
+        let receivables = edits
+            .accounting
+            .receivables
+            .update_for(self.loaded.settings.as_ref())
+            .ok()
+            .flatten();
+        if let (Some(u), Some(mut demo)) = (receivables.as_ref(), self.link.demo_state()) {
+            let s = &mut demo.receivables.settings;
+            if let Some(v) = u.sales_discount_account_id {
+                s.discount_account = v;
+            }
+            if let Some(v) = u.write_off_account_id {
+                s.write_off_account = v;
+            }
+            if let Some(v) = u.write_off_threshold {
+                s.write_off_threshold = v;
+            }
+            if let Some(v) = u.nsf_bank_fee_account_id {
+                s.nsf_bank_fee_account = v;
+            }
+            if let Some(v) = u.nsf_fee_income_account_id {
+                s.nsf_fee_income_account = v;
+            }
+            if let Some(v) = u.nsf_customer_fee {
+                s.nsf_customer_fee = v;
+            }
+        }
         let smtp = edits.email.update_for(self.loaded.smtp.as_ref());
         // Intake folders: the engine takes the whole list against the stamp
         // it was read with. It goes last, so an earlier failure never leaves
@@ -824,6 +856,11 @@ impl PreferencesScreen {
             if let Some(m) = markup {
                 session
                     .set_billable_markup_account(m, cl_api::IdempotencyKey::new())
+                    .await?;
+            }
+            if let Some(u) = receivables {
+                session
+                    .set_receivables_settings(&u, cl_api::IdempotencyKey::new())
                     .await?;
             }
             if let Some(u) = smtp {
@@ -1107,6 +1144,20 @@ impl PreferencesScreen {
                         .has(cl_api::Capabilities::BILLABLE_COSTS)
                 {
                     company::billable(ui, tokens, &mut self.edits, &self.loaded.incomes);
+                }
+                if self.link.is_demo()
+                    || self
+                        .link
+                        .capabilities()
+                        .has(cl_api::Capabilities::PAYMENT_SETTLE)
+                {
+                    company::receivables(
+                        ui,
+                        tokens,
+                        &mut self.edits,
+                        &self.loaded.incomes,
+                        &self.loaded.expenses,
+                    );
                 }
             }
             Category::Inventory => company::inventory(ui, tokens, &mut self.edits),
@@ -1572,6 +1623,27 @@ fn write_owned_prefs(
     // P20: the email templates and BCC-self (Q-P20j).
     to.email.clone_from(&from.email);
     to.email.normalize();
+}
+
+/// The active expense accounts, for the write-off and bank-fee pickers
+/// (empty when the read fails).
+async fn expense_accounts(s: &cl_api::Session) -> Vec<(cl_core::ids::AccountId, String)> {
+    let filter = cl_api::AccountFilter {
+        types: vec![
+            cl_api::AccountType::Expense,
+            cl_api::AccountType::OtherExpense,
+        ],
+        is_active: Some(true),
+        ..cl_api::AccountFilter::default()
+    };
+    match s
+        .accounts()
+        .list(&filter, cl_api::PageRequest::first_max())
+        .await
+    {
+        Ok(p) => p.data.into_iter().map(|a| (a.id, a.fields.name)).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// The active income accounts, for the markup account picker (empty when

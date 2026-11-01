@@ -40,6 +40,89 @@ pub struct AccountingEdits {
     pub tax_percent: String,
     /// The income account markups on billable costs post to (Q-P20b).
     pub markup_account: Option<cl_core::ids::AccountId>,
+    /// Receive Payment's settings (P21, Q-P21q): written by their own call.
+    pub receivables: ReceivablesEdits,
+}
+
+/// Preferences › Sales for Receive Payment (P21, Q-P21q): engine company
+/// settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReceivablesEdits {
+    /// Early-payment discounts post here.
+    pub discount_account: Option<cl_core::ids::AccountId>,
+    /// Underpayments written off post here.
+    pub write_off_account: Option<cl_core::ids::AccountId>,
+    /// Shortfalls up to this suggest the write-off (Q-P21h), as typed.
+    pub write_off_limit: String,
+    /// A bounced check's bank fee posts here.
+    pub nsf_bank_fee_account: Option<cl_core::ids::AccountId>,
+    /// The bounced-check fee invoice's income account (Q-P21p).
+    pub nsf_fee_income_account: Option<cl_core::ids::AccountId>,
+    /// The client's bounced-check fee, blank until set (Q-P21d).
+    pub nsf_customer_fee: String,
+}
+
+fn money_text(m: Option<cl_core::Money>) -> String {
+    m.map(|m| m.format(cl_core::MoneyStyle::default()))
+        .unwrap_or_default()
+}
+
+fn money_of(text: &str) -> Result<Option<cl_core::Money>, SaveBlock> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    match cl_core::Money::parse_user(t, UserInput::MONEY) {
+        Ok(m) if !m.is_negative() => Ok(Some(m)),
+        _ => Err(SaveBlock::BadRate),
+    }
+}
+
+impl ReceivablesEdits {
+    /// From the engine's settings.
+    #[must_use]
+    pub fn from_settings(s: Option<&CompanySettings>) -> ReceivablesEdits {
+        let Some(s) = s else {
+            return ReceivablesEdits::default();
+        };
+        ReceivablesEdits {
+            discount_account: s.sales_discount_account_id,
+            write_off_account: s.write_off_account_id,
+            write_off_limit: money_text(s.write_off_threshold),
+            nsf_bank_fee_account: s.nsf_bank_fee_account_id,
+            nsf_fee_income_account: s.nsf_fee_income_account_id,
+            nsf_customer_fee: money_text(s.nsf_customer_fee),
+        }
+    }
+
+    /// The write for what changed (`None` when nothing did).
+    ///
+    /// # Errors
+    /// `BadRate` for a limit or fee that isn't an amount.
+    pub fn update_for(
+        &self,
+        loaded: Option<&CompanySettings>,
+    ) -> Result<Option<cl_api::ReceivablesSettingsUpdate>, SaveBlock> {
+        let before = ReceivablesEdits::from_settings(loaded);
+        let limit = money_of(&self.write_off_limit)?;
+        let fee = money_of(&self.nsf_customer_fee)?;
+        let u = cl_api::ReceivablesSettingsUpdate {
+            sales_discount_account_id: (self.discount_account != before.discount_account)
+                .then_some(self.discount_account),
+            write_off_account_id: (self.write_off_account != before.write_off_account)
+                .then_some(self.write_off_account),
+            write_off_threshold: (money_of(&before.write_off_limit).ok().flatten() != limit)
+                .then_some(limit),
+            nsf_bank_fee_account_id: (self.nsf_bank_fee_account != before.nsf_bank_fee_account)
+                .then_some(self.nsf_bank_fee_account),
+            nsf_fee_income_account_id: (self.nsf_fee_income_account
+                != before.nsf_fee_income_account)
+                .then_some(self.nsf_fee_income_account),
+            nsf_customer_fee: (money_of(&before.nsf_customer_fee).ok().flatten() != fee)
+                .then_some(fee),
+        };
+        Ok((!u.is_empty()).then_some(u))
+    }
 }
 
 impl Default for AccountingEdits {
@@ -49,6 +132,7 @@ impl Default for AccountingEdits {
             fiscal_year_start_month: 1,
             tax_percent: String::new(),
             markup_account: None,
+            receivables: ReceivablesEdits::default(),
         }
     }
 }
@@ -103,6 +187,7 @@ impl AccountingEdits {
                 .map(rate_to_percent)
                 .unwrap_or_default(),
             markup_account: s.billable_markup_account_id,
+            receivables: ReceivablesEdits::from_settings(Some(s)),
         }
     }
 
@@ -114,6 +199,8 @@ impl AccountingEdits {
         if !self.tax_percent.trim().is_empty() {
             percent_to_rate(&self.tax_percent)?;
         }
+        money_of(&self.receivables.write_off_limit)?;
+        money_of(&self.receivables.nsf_customer_fee)?;
         Ok(())
     }
 
@@ -124,6 +211,7 @@ impl AccountingEdits {
         let before = AccountingEdits::from_settings(loaded);
         let same = AccountingEdits {
             markup_account: before.markup_account,
+            receivables: before.receivables.clone(),
             ..self.clone()
         };
         if same == before {
@@ -271,6 +359,85 @@ pub fn billable(
     });
 }
 
+/// Receive Payment's settings (P21, Q-P21q): discount and write-off
+/// accounts, the write-off limit and the bounced-check fees.
+pub fn receivables(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    incomes: &[(cl_core::ids::AccountId, String)],
+    expenses: &[(cl_core::ids::AccountId, String)],
+) {
+    let pick = |ui: &mut Ui,
+                key: &str,
+                salt: &str,
+                v: &mut Option<cl_core::ids::AccountId>,
+                list: &[(cl_core::ids::AccountId, String)]| {
+        let shown = v
+            .and_then(|a| list.iter().find(|(id, _)| *id == a))
+            .map_or_else(|| t("prefs.sales.none"), |(_, n)| n.clone());
+        ui.horizontal(|ui| {
+            let l = ui.add(egui::Label::new(t(key)).selectable(false));
+            egui::ComboBox::from_id_salt(salt)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(v, None, t("prefs.sales.none"));
+                    for (id, name) in list {
+                        ui.selectable_value(v, Some(*id), name);
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        });
+    };
+    ui.add_space(8.0);
+    form::card(ui, tokens, |ui| {
+        let r = &mut edits.accounting.receivables;
+        ui.label(egui::RichText::new(t("prefs.sales.payments")).strong());
+        pick(
+            ui,
+            "prefs.sales.discount_account",
+            "prefs-sales-discount",
+            &mut r.discount_account,
+            incomes,
+        );
+        pick(
+            ui,
+            "prefs.sales.write_off_account",
+            "prefs-sales-write-off",
+            &mut r.write_off_account,
+            expenses,
+        );
+        form::field(
+            ui,
+            &t("prefs.sales.write_off_limit"),
+            &mut r.write_off_limit,
+        );
+        form::hint(ui, tokens, &t("prefs.sales.write_off_hint"));
+        ui.label(egui::RichText::new(t("prefs.sales.bounced")).strong());
+        pick(
+            ui,
+            "prefs.sales.nsf_bank_fee_account",
+            "prefs-sales-nsf-fee",
+            &mut r.nsf_bank_fee_account,
+            expenses,
+        );
+        pick(
+            ui,
+            "prefs.sales.nsf_fee_income_account",
+            "prefs-sales-nsf-income",
+            &mut r.nsf_fee_income_account,
+            incomes,
+        );
+        form::field(
+            ui,
+            &t("prefs.sales.nsf_customer_fee"),
+            &mut r.nsf_customer_fee,
+        );
+        form::hint(ui, tokens, &t("prefs.sales.nsf_hint"));
+    });
+}
+
 /// Inventory on/off.
 pub fn inventory(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
     form::heading(ui, tokens, &t("prefs.cat.inventory"));
@@ -345,5 +512,27 @@ mod tests {
             AccountingEdits::from_settings(Some(&with)).markup_account,
             markup.markup_account
         );
+    }
+
+    #[test]
+    fn receivables_settings_send_only_what_changed() {
+        let s: CompanySettings =
+            serde_json::from_value(serde_json::json!({"writeOffThreshold": "1.00"})).unwrap();
+        let mut e = ReceivablesEdits::from_settings(Some(&s));
+        assert_eq!(e.write_off_limit, "1.00");
+        assert_eq!(e.update_for(Some(&s)), Ok(None));
+        e.nsf_customer_fee = "25".into();
+        let u = e.update_for(Some(&s)).unwrap().unwrap();
+        assert_eq!(
+            u.nsf_customer_fee,
+            Some(cl_core::Money::parse_wire("25").ok())
+        );
+        assert_eq!(u.write_off_threshold, None);
+        e.write_off_limit = "abc".into();
+        assert_eq!(e.update_for(Some(&s)), Err(SaveBlock::BadRate));
+        // The other accounting settings don't count it as their change.
+        let mut a = AccountingEdits::from_settings(Some(&s));
+        a.receivables.nsf_customer_fee = "25".into();
+        assert_eq!(a.update_for(Some(&s)), None);
     }
 }

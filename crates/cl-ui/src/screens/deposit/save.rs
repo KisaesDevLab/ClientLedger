@@ -410,7 +410,9 @@ impl DepositScreen {
                 Ok(()) => self.voided(),
                 Err(e) => {
                     let reason = self.void.reason.clone();
-                    if !self.closing_failed(&e, Pending::Void(reason)) {
+                    if cl_api::payment_refusal(&e) == Some(cl_api::PaymentRefusal::Bounced) {
+                        self.save.notice = Some("deposit.refusal.bounced");
+                    } else if !self.closing_failed(&e, Pending::Void(reason)) {
                         self.save.error = Some(e);
                     }
                 }
@@ -581,6 +583,11 @@ impl DepositScreen {
         self.header.save_failed(failure.clone());
         self.lines.form_mut().save_failed(failure);
         if self.closing_failed(&e, Pending::Save(intent)) {
+            return;
+        }
+        if cl_api::payment_refusal(&e) == Some(cl_api::PaymentRefusal::Bounced) {
+            self.save.notice = Some("deposit.refusal.bounced");
+            self.save.key = None;
             return;
         }
         if is_already_deposited(&e) {
@@ -892,7 +899,10 @@ impl DepositScreen {
             match local.void(&link, e.id, password.as_ref()) {
                 Ok(()) => self.void.task = Some(Task::ready(())),
                 Err(err) => {
-                    if !self.closing_failed(&err, Pending::Void(reason)) {
+                    if cl_api::payment_refusal(&err) == Some(cl_api::PaymentRefusal::Bounced) {
+                        // P21: a check in this deposit bounced.
+                        self.save.notice = Some("deposit.refusal.bounced");
+                    } else if !self.closing_failed(&err, Pending::Void(reason)) {
                         self.save.error = Some(err);
                     }
                     return;

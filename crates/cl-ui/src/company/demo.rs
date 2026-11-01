@@ -329,6 +329,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "accountingMethod": "accrual",
         "defaultSalesTaxRate": "0.0825",
         "lockDate": "2026-09-30",
+        "writeOffThreshold": "1.00",
     }))
     .ok();
     let ai: cl_api::AiConfig = serde_json::from_value(serde_json::json!({
@@ -369,7 +370,14 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         consent,
         smtp: None,
         usage: Some(usage),
-        incomes: vec![(account_id(4000), "Landscaping Services".into())],
+        incomes: vec![
+            (account_id(4000), "Landscaping Services".into()),
+            (account_id(4950), "Sales Discounts".into()),
+        ],
+        expenses: vec![
+            (account_id(6050), "Bank and Merchant Fees".into()),
+            (account_id(6960), "Bad Debts".into()),
+        ],
         done: true,
     }
 }
