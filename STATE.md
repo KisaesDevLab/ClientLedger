@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P22 — Credit memos, refunds, statements, finance charges (next). P21 done 2026-11-01. A05 runs right after P26; ADD-03 (A07–A10) right after P28/PR-6; ADD-04 inside P35/P36.
-**Status:** P21 PR open with auto-merge (engine stack #205–#208 merged).
+**Current phase:** Checkpoint PR-3 — Sales lifecycle (next), then P23 — Sales tax. P22 done 2026-11-01. A05 runs right after P26; ADD-03 (A07–A10) right after P28/PR-6; ADD-04 inside P35/P36.
+**Status:** P22 PR open with auto-merge (engine #209–#213 merged).
 **Engine commit:** `bf2daf38` (`main`, pinned 2026-11-01 after engine PRs #209–#213 (P22 credit memo, sales receipt, refund, customer statement and finance-charge stack: U-137–U-143, U-112, U-121 A/R half); before that `eaa12bad` (pinned 2026-10-31 after engine PRs #205, #206, #208 and #207 (P21 Receive Payment stack: U-132–U-136); before that `c7b7d61d` (pinned 2026-10-31 after engine PRs #197, #199, #200, #201, #202 (P20 invoice stack: U-122–U-130, U-38, U-39a, U-40 and review fixes; migrations 0242–0246) and #203 (U-131, stored SMTP password; no smtpPass in company responses), and #198 (follow-redirects audit fix); before that `129deff7` (pinned 2026-10-29 after engine PR #196 (U-115–U-117, PR-2 purchasing fixes, migration 0241); before that `12187716` (pinned 2026-10-29 after engine PRs #194 (U-106–U-110, check printing, migration 0239) and #195 (U-111, U-113, document numbering and forms print queue, migration 0240); before that `e45658fb` (pinned 2026-10-28 after engine PR #193 (U-101–U-104, Pay Bills discounts, idempotent pay, check numbers, company scope; migrations 0236–0238); before that `5a9a8700` (pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-11-01
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -35,7 +35,7 @@
 | PR-2 | Checkpoint: purchasing lifecycle process review | — | Done 2026-10-29 (fixes on `fix/PR-2`; engine PR #196 merged) |
 | P20 | Create Invoice | M | Done 2026-10-31 |
 | P21 | Receive Payment | H | Done 2026-11-01 |
-| P22 | Credit memos, refunds, statements, finance charges | M | |
+| P22 | Credit memos, refunds, statements, finance charges | M | Done 2026-11-01 |
 | P23 | Sales tax | H | |
 | P24 | Inventory (average cost) | H | |
 | P25 | Bank file import (QIF, QFX, OFX, CSV) | H | |
@@ -202,19 +202,32 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 4. Engine main CI (npm-audit) is failing; pre-existing, not caused by PR #159.
 5. The vendor A/P aging summary lists bills only; vendor refunds are not reflected there (the vendor statement shows them).
 
+## Follow-ups from P22
+
+1. Emailing credit memos and sales receipts is not built (the engine's invoice email routes don't cover them; Q-163). Owner decision pending.
+2. Editing a finance-charge invoice's client leaves the assessment on the old client (plan gap). Owner decision pending.
+3. Two cross-company contract assertions accept 404 or a refusal (refund another company's memo; assess another company's client). Tighten them.
+4. A statement email is sent before the database commit (as U-127): a failed commit and retry could send twice (known limit).
+5. Sales by Item has no cash-basis test.
+6. The demo tax rate is 8.1% against the golden file's 8.25% per-line rate.
+7. Statements has no Alt+N / Alt+S (batch screen).
+8. Scenarios don't yet check the Client Center balance after a memo or the Print Checks listing after a refund; no unnamed_widgets checks in the YAML scenarios.
+9. Receive Payment --compare remaining deviations: extra Void button, "Unsaved changes" note, no teal tint on the header card, "Write off the rest", Next-step count from demo data, grid without a bordered card.
+10. A dev database that ran the old 0250_finance_charges migration must be reset.
+
 ## Follow-ups from P21
 
 1. Contract tests not written: `receive_matches_feed_item_atomically` (needs a seeded bank-file item) and `balance_token_round_trips` (partly covered).
 2. The open-invoice grid on Receive Payment is hand-rolled, not `cl-grid`.
-3. The bounced-check and other dialogs are inline on Receive Payment, not modal; a bounce is reachable only from Receive Payment (open the payment from the register or client history first).
-4. No dedicated Find dialog for payments.
+3. ~~The bounced-check and other dialogs are inline on Receive Payment, not modal; a bounce is reachable only from Receive Payment (open the payment from the register or client history first).~~ Done in P22.
+4. ~~No dedicated Find dialog for payments.~~ Done in P22.
 5. Demo: the sample ledger's PMT rows aren't receivables, so opening one from the register shows "not found" in the demo.
 6. The engine reports the Customer Deposits liability balance debit-positive (-500.00); check the display on Chart of Accounts and the balance sheet in P28.
 7. `returned_payment` was added to the attachable types; engine attachment support for it is unverified.
 8. Engine: the GET /payments route description isn't updated for the new list fields.
 9. The count of legacy sub-cent invoices (Q-P21g) was not run against MyBooks Online data; engine PR #205 has the query.
-10. Mockup deviations accepted (Q-P21w): labels beside header fields; toolbar lacks Find/Attach/History; Prev/Next without arrows; summary below the callout; "Write off the rest"; Next-step panel count from demo data.
-11. A/R aging nit (from the design review) deferred to P22.
+10. ~~Mockup deviations accepted (Q-P21w): labels beside header fields; toolbar lacks Find/Attach/History; Prev/Next without arrows; summary below the callout; "Write off the rest"; Next-step panel count from demo data.~~ Done in P22.
+11. ~~A/R aging nit (from the design review) deferred to P22.~~ Done in P22.
 
 ## Follow-ups from P20
 
@@ -375,6 +388,13 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-11-01 — P22 Credit memos, refunds, statements, finance charges complete on `phase/P22-credit-memos`; PR with auto-merge. Shipped:
+  - Engine PRs (KisaesDevLab/Vibe-MyBooks, all merged; pin bf2daf38): #209 U-137 credit memos as A/R credit sources + U-142 exact A/R open items and aging + U-121 A/R half + P21 unapply fix (409 APPLICATION_HAS_ADJUSTMENTS); #210 U-138 credit memo items, tax and edit + U-143 sales receipt lines; #211 U-139 refunds of credit-memo credit + refund checks in the print queue; #212 U-112/U-140 customer statements and sending (migration 0250); #213 U-141 finance charges (migration 0251). Also fixed: Sales by Item failed on every call (items.sku) and now counts credit memos as negative sales (also Sales by Customer); a flaky credit-memo application order.
+  - Desktop: Credit Memo and Sales Receipt (Ctrl+Shift+R) on the invoice screen; apply-or-keep on save (Q-P22b); Refund a Credit (credits, credit memos, held deposits; check via the print queue, Print later by default); Statements (open item / balance forward / transaction; batch by days overdue; aging row; Print / PDF / Email via Outbox / Mark as sent; numbered snapshots); Assess Finance Charges with Preferences settings (rate blank = off); Receive Payment mockup fixes (Find, Attach, History, arrows, layout; Q-P21w); Client Center: New Credit Memo, Refund a Credit, Statement, Finance charges, Record bounced check; statement email template; 409 details reach the screens.
+  - Acceptance: [x] credit memo and refund flows balance exactly; [x] finance-charge assessment is idempotent per period. Spec tests: [x] credit memo reduces A/R exactly; [x] refund clears credit; [x] finance-charge idempotency; [x] statement aging totals equal A/R aging.
+  - Checks: 245 live contract tests at bf2daf38 (23 new); receivables golden byte-identical; cl-ui 1396, cl-api lib 484; ui-check credit_memo, sales_receipt, refund, statements, finance_charges, receive_payment (+ --compare), client-center, home, preferences-email; full local `cargo xtask ci` full local `cargo xtask ci` green at 9848623 (fmt, clippy, deny, licenses, layering, nofloat, keymap-doc, api-spec; tests re-run green after one stale demo test was fixed).
+  - Decisions: Q-P22a–t (owner answered a–g, n; defaults h–m, o–t); Q-P21j, l confirmed; Q-P21w done. UPSTREAM rows U-112 (amended), U-121 (A/R half), U-137–U-143.
+  - Agents: engine-scout (opus), architect (opus) x2 rounds, process-reviewer (opus, xhigh) design review, engine-implementer (opus) x3 (build, fix pass, merge-conflict resolution), rust-implementer (opus) x6 (D1–D3, D4–D5, RP fixes + D6, D7, fix pass, D8), reviewer (opus) combined review, bookkeeper (sonnet). The 2-implementer rule was exceeded (fresh agent per 2–3 steps per the plan; turn limits).
 - 2026-11-01 — P21 Receive Payment complete on `phase/P21-receive-payment`; PR with auto-merge. Shipped:
   - Engine PRs (KisaesDevLab/Vibe-MyBooks, all merged; pin eaa12bad): #205 U-132 payment lifecycle, preview, void, unapply, bounce, edit (migration 0247); #206 U-133 and U-134 write-off, overpayment credits, apply, refunds, early discounts (0248); #208 U-135 customer deposits (0249); #207 U-136 bank-feed matching of customer payments. The 0.01 overapply tolerance is removed (Q-P21g), which changes MyBooks Online behaviour; a read-only count of legacy sub-cent invoices is in #205's description and has not been run against MyBooks Online data.
   - Desktop: Receive Payment (Ctrl/Home/Client Center), auto-apply oldest first, un-apply all (Alt+U), Discounts & credits (Alt+D), under/over payment (write-off under the limit suggested; credit kept; small Refund dialog), early discount suggestion, customer deposits (hold; "Deposit on hand - Apply" card on Create Invoice), credit-only apply, bounced check (dated "Bounced payment" entry, NSF bank fee, optional client fee invoice), imported-deposit banner, preferences (six accounts and limits), demo parity; any payment opens from the register and Client Center history.
@@ -395,14 +415,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - Owner decisions: Q-PR2a (a voided check keeps its number), Q-PR2b (hand-written Pay Bills numbers per company), Q-PR2c (check styles merged per account), Q-PR2d, Q-PR2e (only transactions created as checks are checks).
   - Checks: full local `cargo xtask ci` green; live PR-2 contract tests for U-115–U-117; ui-check pay_bills, print_checks, write_check light and dark.
   - Agents: checkpoint review by process-reviewer (opus, xhigh) per docs/AGENTS.md; the fix-pass agents were not recorded in the fix commits.
-- 2026-10-29 — P19 Form printing complete on `phase/P19-form-printing`; PR with auto-merge. Shipped:
-  - Engine PRs #194 (U-106–U-110: reprint/requeue audit with closed-period password and the old number logged and reusable, company scope and counter lock on print, payee address in the queue, bill details on bill-payment applications, check style and company block per bank account, logo download; migration 0239) and #195 (U-111, U-113: numbering per company and type with prefix and duplicate warnings, company footers with per-type overrides, Print later for forms; migration 0240); pin 12187716.
-  - `cl-print`: PDF engine on pdf-writer with embedded Plex; checks standard / voucher / z-fold (stubs list bills paid or expense lines, totals must match the check), amount in words in capitals, company block optional; invoice, sales receipt, credit memo, statement (own data, U-112 for P22), deposit summary; #10 window positions, #10 envelopes, hide-$0 lines, footer, logo with size limits; numbers shrink, never clip.
-  - `cl-host` OS print: Windows direct printing through GDI (`win_print.rs`, documented unsafe), print verb / `lp`, then open the PDF; printer list, copies, temp PDFs swept at startup. `cl-settings` per-printer offsets, last printer per kind, unanswered print batches.
-  - `cl-ui`: File > Print Forms (checks and forms queues, preview, Print / Save PDF / Envelopes; numbers recorded at Print; "Did all checks print correctly?" with reprint of the bad ones and a Home reminder), Printer Setup (offsets per printer, ruler test, style and company block per account), Print and Reprint check on Write Check, Print checks on Pay Bills (Ctrl+P), Print deposit summary on Make Deposit, Company > Company Information (logo, footers, numbering with duplicate warning). Open Company: scrolls, practice company reachable before sign-in, File > Open Practice Company (Q-P19ao); Intuit notice removed from Open Company, kept in About (Q-P19ap).
-  - Help `docs/user/printing-checks.md`, `printing-forms.md`; scenarios `print_checks`, `print_forms`, `printer_setup`, `company_info`, updated `write_check`, `pay_bills`, `deposit`, `open_company`.
-  - Acceptance: [x] field positions within ±0.5 mm at 100% (layout and PDF content-stream tests for every check style, window addresses and envelopes); [x] reprint logs the original number (engine audit row per check; per owner Q-P19b the number is logged and may be reused, not voided).
-  - Checks: full local `cargo xtask ci` green (4 build jobs / 4 test threads after one run was stopped for low memory); 5 live printing contract tests; ui-check light and dark for all eight scenarios.
-  - Also merged in: PR #50 (secret names changed after the first start on Windows; owner's company would not open), with review fixes.
-  - Decisions: Q-P19a–aq (owner answered b, f–q, s–ad, ae, af, ao, ap); P20 and P21 decisions taken early (Q-P20a–m, Q-P21a–f). Proposed: U-112 (P22), U-114 (logo delete).
-  - Agents: engine-scout, engine-implementer ×2 (build, review fixes), rust-implementer ×5 (cl-print, fixes + Windows print, API + screens, gaps, screen fixes; three were turn- or context-limited and continued fresh), reviewer ×2 (phase, PR #50) and ui-verifier on opus; docs-writer on sonnet. Exceeds the 2-implementer rule (Q-301) because of context limits; noted for the owner.
