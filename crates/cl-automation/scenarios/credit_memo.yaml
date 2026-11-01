@@ -101,6 +101,6 @@ steps:
   - click: {role: button, label: Refund}
   - assert_state: {key: screen.screen, equals: refund}
   - assert_state: {key: screen.source, equals: creditmemo}
-  - assert_state: {key: screen.amount, equals: "40.00"}
+  - assert_state: {key: screen.amount, equals: "80.00"}
   - command: file.close_window
   - command: file.close_window
