@@ -129,6 +129,8 @@ pub struct RefundScreen {
     /// The key of the save attempt in flight or undecided.
     pub(crate) key: Option<(u64, IdempotencyKey)>,
     pub(crate) saved: Option<RefundRecord>,
+    /// The refund saved last in this window (Prev reopens it).
+    pub(crate) last: Option<RefundRecord>,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) problems: Vec<RefundProblem>,
     pub(crate) notice: Option<&'static str>,
@@ -215,6 +217,7 @@ impl RefundScreen {
             void_job: None,
             key: None,
             saved: None,
+            last: None,
             closing_prompt: ClosingPrompt::default(),
             problems: Vec::new(),
             notice: None,
@@ -289,6 +292,7 @@ impl RefundScreen {
                     let accounts: Vec<AccountId> =
                         rec.from_account.or(self.from).into_iter().collect();
                     crate::forms::publish_saved(&self.link, &self.bus, &accounts);
+                    self.last = Some(rec.clone());
                     self.saved = Some(rec);
                     self.void_open = false;
                     self.notice = Some("refund.voided");
@@ -492,6 +496,7 @@ impl RefundScreen {
         let accounts: Vec<AccountId> = self.from.into_iter().collect();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
         let queued = rec.print_status == Some(cl_api::RefundPrintStatus::Queue);
+        self.last = Some(rec.clone());
         self.link.push(CompanyEvent::Toast(if queued {
             "refund.saved.queued"
         } else {
@@ -1020,6 +1025,15 @@ impl Screen for RefundScreen {
                 }
             }
             "form.clear" => self.clear(),
+            // Prev reopens the refund saved last in this window.
+            "form.prev_record" => {
+                if let Some(r) = self.last.clone()
+                    && !self.dirty()
+                {
+                    self.clear();
+                    self.saved = Some(r);
+                }
+            }
             "edit.void_transaction" => {
                 if self.saved.is_some() {
                     self.void_open = true;

@@ -1,0 +1,87 @@
+# Refund a Credit (P22 "refund clears credit", Q-P22d) against
+# `clientledger --demo`: a 399.30 credit memo for Bluestem Veterinary
+# Clinic kept as credit (the demo's 8.1 % tax), refunded by check with
+# Print later on: Print Forms lists the check; void brings the credit
+# back. Synthetic.
+name: refund
+description: Memo kept as credit; refund by check queued to print; void restores the credit.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.credit_memo
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "150"}
+  - key: Tab
+  - click: {label_contains: "Item, line 2"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "75"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.total, equals: "399.30"}
+  - key: Alt+S
+  - click: {role: radio_button, label: Keep as credit}
+  - click: {role: button, label: Save}
+  # --- Refund a Credit ------------------------------------------------------
+  - command: clients.refund
+  - assert_state: {key: screen.screen, equals: refund}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - assert_state: {key: screen.client, equals: true}
+  - assert_state: {key: screen.sources.0.kind, equals: creditmemo}
+  - assert_state: {key: screen.sources.0.remaining, equals: "399.30"}
+  - click: {role: radio_button, label_contains: "Credit memo"}
+  - assert_state: {key: screen.amount, equals: "399.30"}
+  - assert_state: {key: screen.method, equals: check}
+  - assert_state: {key: screen.print_later, equals: true}
+  - screenshot: refund
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: refund-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.client, equals: false}
+  # Prev reopens the refund just saved.
+  - command: form.prev_record
+  - assert_state: {key: screen.saved.queued, equals: true}
+  - screenshot: saved
+  # --- Print Forms lists the check -------------------------------------------
+  - click: {role: button, label: Open Print Forms}
+  - assert_state: {key: screen.screen, equals: print_forms}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.checks, equals: 3}
+  - assert_exists: {label: "Bluestem Veterinary Clinic"}
+  - assert_exists: {label: "399.30"}
+  - screenshot: print-queue
+  # --- Void: the credit is back ------------------------------------------------
+  - command: clients.refund
+  - assert_state: {key: screen.screen, equals: refund}
+  - assert_state: {key: screen.saved.queued, equals: true}
+  - click: {role: button, label: Void refund}
+  - click: {role: button, label: Void refund}
+  - assert_state: {key: screen.saved.void, equals: true}
+  - assert_state: {key: screen.notice, equals: refund.voided}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - assert_state: {key: screen.sources.0.remaining, equals: "399.30"}
+  - command: file.close_window

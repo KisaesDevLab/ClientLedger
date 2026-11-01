@@ -1,0 +1,90 @@
+# Credit Memo (P22 AC1, Q-P22b) against `clientledger --demo`: golden
+# case 1's lines for Bluestem Veterinary Clinic (2 x 150.00 taxable,
+# 1 x 75.00 not) total 375.00 + tax; the demo company's own 8.1 % rate
+# gives 24.30 / 399.30 (the form never sends a rate, Q-P20a; the engine
+# golden's 8.25 % is a per-line rate). Saving asks Apply or Keep: Apply
+# puts the engine's oldest-first suggestion (A 250.00, B 149.30) on the
+# invoices in the same save. A second memo is kept as credit; its History
+# shows the credit left and Refund opens Refund a Credit. Synthetic.
+name: credit_memo
+description: Golden 1 lines; apply at save oldest first; keep as credit; history and refund.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.credit_memo
+  - assert_state: {key: screen.screen, equals: credit_memo}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - assert_state: {key: screen.client, equals: true}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "150"}
+  - key: Tab
+  - click: {label_contains: "Item, line 2"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "75"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.subtotal, equals: "375.00"}
+  - assert_state: {key: screen.tax, equals: "24.30"}
+  - assert_state: {key: screen.total, equals: "399.30"}
+  - assert_state: {key: screen.credit.open_invoices, equals: 2}
+  - screenshot: totals
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: totals-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  # --- Save: Apply or Keep (Q-P22b) --------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.credit.panel_open, equals: true}
+  - assert_state: {key: screen.credit.apply_rows.0.amount, equals: "250.00"}
+  - assert_state: {key: screen.credit.apply_rows.1.amount, equals: "149.30"}
+  - assert_state: {key: screen.credit.remaining_credit, equals: "0.00"}
+  - screenshot: apply-panel
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.mode, equals: new}
+  # --- A second memo kept as credit --------------------------------------
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "40"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.total, equals: "40.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.credit.panel_open, equals: true}
+  - click: {role: radio_button, label: Keep as credit}
+  - assert_state: {key: screen.credit.answer, equals: keep}
+  - click: {role: button, label: Save}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.credit.saved_remaining, equals: "40.00"}
+  - assert_exists: {role: label, label: History}
+  - screenshot: kept-credit
+  - click: {role: button, label: Refund}
+  - assert_state: {key: screen.screen, equals: refund}
+  - assert_state: {key: screen.source, equals: creditmemo}
+  - assert_state: {key: screen.amount, equals: "40.00"}
+  - command: file.close_window
+  - command: file.close_window

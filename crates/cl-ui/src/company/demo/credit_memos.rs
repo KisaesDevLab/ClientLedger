@@ -235,7 +235,12 @@ fn doc_lines(
             quantity: f.quantity.or(l.quantity),
             unit_price: f.unit_price.or(l.unit_price),
             discount_percent: f.discount_percent,
-            is_taxable: l.is_taxable.unwrap_or(true),
+            // An unset box takes the item's own setting (as the preview).
+            is_taxable: l.is_taxable.unwrap_or_else(|| {
+                l.item_id
+                    .and_then(|i| items.iter().find(|x| x.id == i))
+                    .is_none_or(|i| i.fields.is_taxable)
+            }),
             amount: f.amount,
             tax_amount: f.tax_amount,
             tag_id: l.tag_id,

@@ -1,0 +1,55 @@
+# Sales Receipt (P22, Q-P20u, Q-P22e) against `clientledger --demo`:
+# Ctrl+Shift+R opens it; two lines for Bluestem Veterinary Clinic total
+# 375.00 + 24.30 tax (the demo's 8.1 %) = 399.30, paid by check into
+# Undeposited Funds (Q-P20h); Save & Close; Home's Money-in lane opens it
+# again. Synthetic.
+name: sales_receipt
+description: Ctrl+Shift+R; lines and tax from the engine; Payments Clearing; the Home lane opens it.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+Shift+R
+  - assert_state: {key: screen.screen, equals: sales_receipt}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.method, equals: check}
+  - assert_exists: {role: label, label: Deposit to}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Bluestem"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "150"}
+  - key: Tab
+  - click: {label_contains: "Item, line 2"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "75"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.subtotal, equals: "375.00"}
+  - assert_state: {key: screen.tax, equals: "24.30"}
+  - assert_state: {key: screen.total, equals: "399.30"}
+  - screenshot: receipt
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: receipt-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  - key: Alt+S
+  - key: Alt+H
+  - click: {role: button, label: Sales Receipt}
+  - assert_state: {key: screen.screen, equals: sales_receipt}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.total, equals: "399.30"}
+  - command: file.close_window

@@ -685,7 +685,10 @@ impl InvoiceScreen {
                 s.header.edit(field::MEMO, |h| h.memo = memo);
             }
             kit::track(&mut s.focused, &r, field::MEMO);
-            ui.checkbox(&mut s.email_after_save, t("invoice.email_after_save"));
+            // Email is for invoices only in P22.
+            if s.kind == SalesDocKind::Invoice {
+                ui.checkbox(&mut s.email_after_save, t("invoice.email_after_save"));
+            }
             let mut hide = s.header.current().hide_zero_lines;
             if ui.checkbox(&mut hide, t("invoice.hide_zero")).changed() {
                 s.header.edit_step(|h| h.hide_zero_lines = hide);
