@@ -445,7 +445,10 @@ pub struct ArAgingSummary {
     pub as_of_date: Option<CalendarDate>,
     /// Company-wide buckets.
     pub buckets_exact: crate::resources::customer_statements::AgingBuckets,
-    /// Company-wide total (= the A/R account balance).
+    /// Company-wide total: the exact A/R account balance as of the date
+    /// (`totalExact`, U-142). On legacy sub-cent data it can differ from
+    /// the sum of the cent-rounded buckets and rows by the rounding
+    /// difference; show this figure as the A/R total, never a sum of rows.
     #[serde(deserialize_with = "crate::resources::customer_payments::de_stored")]
     pub total_exact: Money,
     /// One row per client, plus "(no client)".
