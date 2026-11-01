@@ -79,6 +79,8 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Alt+A` | Accept These Values | `form.accept_read` |
 | `Alt+T` | Attach to Selected Transaction | `form.attach_selected` |
 | `Alt+E` | Enter as New | `form.enter_as_new` |
+| `Ctrl+Shift+U` | Add Billable Costs… | `invoice.add_billable` |
+| `Ctrl+Shift+M` | Email… | `invoice.email` |
 
 ## In a grid
 
@@ -169,8 +171,8 @@ Find these from the menus or with `Ctrl+K`.
 
 - **File:** New Company, Close Company, Open Practice Company, Back Up Company, Restore a Backup, Export All Data, Full Database Backup (Utilities), Delete Company, Print Forms, Printer Setup
 - **Edit:** Void Transaction
-- **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
-- **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements
+- **Lists:** Item List, Price Levels, Tags, Terms, Payment Methods, Templates, Import or Export a List
+- **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements, Outbox
 - **Vendors:** Vendors, Paid with Personal Funds, Receipt Inbox, Match Vendor Statement…, Review Documents
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll

@@ -64,6 +64,9 @@ pub struct GridForm<V, A> {
     widths_key: Option<String>,
     widths_loaded: bool,
     snapshot: GridSnapshot,
+    /// A dialog of the screen's is open over the grid: it takes no input
+    /// (a valid open cell is committed; focus comes back on close).
+    suspended: bool,
 }
 
 impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
@@ -85,7 +88,19 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
             widths_key: None,
             widths_loaded: false,
             snapshot: GridSnapshot::default(),
+            suspended: false,
         }
+    }
+
+    /// A screen dialog opened over the grid (`true`) or closed.
+    pub fn set_suspended(&mut self, suspended: bool) {
+        self.suspended = suspended;
+    }
+
+    /// A screen dialog is open over the grid.
+    #[must_use]
+    pub fn suspended(&self) -> bool {
+        self.suspended
     }
 
     /// Remember column widths under this key (`<screen kind>/<grid>`).
@@ -371,7 +386,7 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         let mut env = self.parts.env(lookups, &self.label, self.height);
         // While a save is in flight the grid takes no input (its edits
         // would be refused); it gets focus back when the save finishes.
-        env.input_enabled &= !self.form.is_saving();
+        env.input_enabled &= !self.form.is_saving() && !self.suspended;
         env.context = context;
         let mut model = self.adapter.model(&mut self.form);
         let out = self.grid.show(ui, ModelRef::Edit(&mut *model), &env);

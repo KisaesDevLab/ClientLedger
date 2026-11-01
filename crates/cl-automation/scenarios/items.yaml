@@ -1,8 +1,8 @@
 # Item List (P11 step 4) against `clientledger --demo`: the list with exact
 # prices, type-to-find, Include inactive, a keyboard-only create (a used
 # name refused), edit with Esc revert, and make inactive / active again.
-# The engine keeps service items only (U-39) and has no price levels
-# (U-40); the panel and the list say so. Item names stay taken by inactive
+# The demo engine keeps the sales kinds (U-39a, all five) and price levels
+# (U-40, the list links to them); the purchase side waits for U-39b. Item names stay taken by inactive
 # items, so the item made here is named after the theme (`{theme}`) and
 # left inactive. The demo data is synthetic.
 name: items
@@ -14,11 +14,11 @@ steps:
   - assert_exists: {role: tab, label: Item List}
   - assert_state: {key: screen.screen, equals: items}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_state: {key: screen.kinds_available, equals: 1}
-  - assert_state: {key: screen.price_levels_available, equals: false}
+  - assert_state: {key: screen.kinds_available, equals: 5}
+  - assert_state: {key: screen.price_levels_available, equals: true}
   - assert_state: {key: screen.focused, equals: true}
   - assert_exists: {role: row, label_contains: "Weekly Mowing, 45.00"}
-  - assert_exists: {label_contains: "Price levels (a different price for some customers) aren't available yet"}
+  - assert_exists: {role: link, label: "Price Levels\u2026"}
   - assert_not_exists: {role: row, label_contains: "Snow Plowing"}
   - assert_no_clipping: {}
   - screenshot: list
@@ -39,7 +39,6 @@ steps:
   - key: Ctrl+N
   - assert_state: {key: screen.panel, equals: new}
   - assert_exists: {role: label, label: New item}
-  - assert_exists: {label_contains: "discounts and subtotals aren't available yet"}
   - assert_exists: {label_contains: "A purchase price and expense account"}
   - type: {text: weekly mowing}
   - key: Alt+S

@@ -7,6 +7,7 @@ pub mod center;
 pub mod csv_import;
 pub mod detail_pane;
 pub mod items;
+pub mod price_levels;
 pub mod rows;
 pub mod tags;
 pub mod terms;
@@ -47,6 +48,9 @@ pub fn make(
             today,
         ))),
         items::KIND => Some(Box::new(items::ItemsScreen::new(Arc::clone(link), open))),
+        price_levels::KIND => Some(Box::new(price_levels::PriceLevelsScreen::new(Arc::clone(
+            link,
+        )))),
         tags::KIND => Some(Box::new(tags::TagsScreen::new(Arc::clone(link), open))),
         terms::TERMS_KIND => Some(Box::new(terms::FixedListScreen::new(
             terms::FixedList::Terms,

@@ -77,7 +77,7 @@ steps:
   - assert_state: {key: screen.account_numbers, equals: true}
   - screenshot: accounting
   - click: {role: button, label: Checks and forms}
-  - assert_exists: {role: label, label_contains: come with Write Check}
+  - assert_exists: {role: label, label_contains: are in File > Printer Setup}
   - click: {role: button, label: Sales tax}
   - assert_exists: {role: check_box, label: This company charges sales tax}
   - assert_exists: {role: text_input, label: Default rate (%)}

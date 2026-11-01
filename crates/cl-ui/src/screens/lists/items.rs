@@ -58,6 +58,7 @@ const F_PRICE: u64 = 3;
 const F_ACCOUNT: u64 = 4;
 const F_TAXABLE: u64 = 5;
 const F_KIND: u64 = 6;
+const F_DISCOUNT: u64 = 7;
 
 /// Width of the add/edit panel.
 const PANEL_WIDTH: f32 = 420.0;
@@ -203,8 +204,11 @@ impl ItemsScreen {
         let has = |c: &str| caps.as_ref().is_some_and(|k| k.has(c));
         let (grid, model) = new_grid(false);
         let mut s = ItemsScreen {
-            item_types: has(Capabilities::ITEM_TYPES),
-            price_levels: has(Capabilities::PRICE_LEVELS),
+            // The sales kinds (U-39a); the purchase side waits for U-39b.
+            item_types: link.is_demo()
+                || has(Capabilities::ITEM_KINDS_SALES)
+                || has(Capabilities::ITEM_TYPES),
+            price_levels: link.is_demo() || has(Capabilities::PRICE_LEVELS),
             link,
             group,
             items: Vec::new(),
@@ -340,6 +344,11 @@ impl ItemsScreen {
                 income_account: i.fields.income_account_id,
                 taxable: i.fields.is_taxable,
                 active: i.is_active,
+                kind: kind_of(i.fields.item_type),
+                discount_percent: i
+                    .fields
+                    .discount_percent
+                    .and_then(|p| cl_core::Quantity::parse_wire(&p.to_wire()).ok()),
             })
             .collect();
         self.list = ItemList::new(entries);
@@ -355,8 +364,7 @@ impl ItemsScreen {
     }
 
     fn refilter(&mut self) {
-        let (service, yes, no, inactive) = (
-            t(ItemKind::Service.label().as_str()),
+        let (yes, no, inactive) = (
             t("items.taxable.yes"),
             t("items.taxable.no"),
             t("items.status.inactive"),
@@ -386,7 +394,7 @@ impl ItemsScreen {
                     vec![
                         e.name.clone(),
                         e.description.clone().unwrap_or_default(),
-                        service.clone(),
+                        t(e.kind.label().as_str()),
                         price,
                         self.account_name(e.income_account),
                         if e.taxable { yes.clone() } else { no.clone() },
@@ -616,6 +624,10 @@ impl ItemsScreen {
             unit_price: checked.price,
             income_account_id: checked.income_account,
             is_taxable: checked.taxable,
+            item_type: type_of(checked.kind),
+            discount_percent: checked
+                .discount_percent
+                .and_then(|q| cl_api::SignedPercent::parse(&q.to_wire()).ok()),
         };
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());
@@ -865,7 +877,13 @@ impl ItemsScreen {
             ))
             .color(tokens.text_secondary),
         );
-        if !self.price_levels {
+        if self.price_levels {
+            if ui.link(t("items.price_levels.open")).clicked() {
+                self.link.push(crate::company::CompanyEvent::OpenWindow(
+                    cl_model::CommandId::new(super::price_levels::KIND),
+                ));
+            }
+        } else {
             pane::pending(ui, tokens, &t("items.price_levels_later"));
         }
     }
@@ -915,6 +933,20 @@ impl ItemsScreen {
             if !item_types {
                 pane::pending(ui, tokens, &t("items.form.kinds_later"));
             }
+            if d.kind == ItemKind::Discount {
+                let mut pct = d.discount.clone();
+                let r = pane::text_row(
+                    ui,
+                    field_id(ItemField::Discount),
+                    &t("items.form.discount"),
+                    &mut pct,
+                    want(ItemField::Discount),
+                )
+                .on_hover_text(t("items.form.discount.tip"));
+                if r.changed() {
+                    panel.form.edit(F_DISCOUNT, |x| x.discount = pct);
+                }
+            }
             let mut name = d.name.clone();
             let r = pane::text_row(
                 ui,
@@ -946,7 +978,10 @@ impl ItemsScreen {
             let r = pane::text_row(
                 ui,
                 field_id(ItemField::Price),
-                &t("items.form.price"),
+                &t(match d.kind {
+                    ItemKind::Discount => "items.form.amount_off",
+                    _ => "items.form.price",
+                }),
                 &mut price,
                 want(ItemField::Price),
             );
@@ -980,9 +1015,8 @@ impl ItemsScreen {
                 panel.form.edit(F_TAXABLE, |x| x.taxable = taxable);
             }
             ui.add_space(4.0);
-            if !item_types {
-                pane::pending(ui, tokens, &t("items.form.purchase_later"));
-            }
+            // The purchase side and units wait for U-39b (item-types-v1).
+            pane::pending(ui, tokens, &t("items.form.purchase_later"));
         });
         ui.add_space(6.0);
         for p in &panel.problems {
@@ -1060,6 +1094,28 @@ pub(crate) fn demo_save(
     Versioned {
         version: RecordVersion::Fingerprint(item.fingerprint()),
         record: item,
+    }
+}
+
+/// The model's kind of an engine item type.
+fn kind_of(t: cl_api::ItemType) -> ItemKind {
+    match t {
+        cl_api::ItemType::Service => ItemKind::Service,
+        cl_api::ItemType::NonInventory => ItemKind::NonInventory,
+        cl_api::ItemType::OtherCharge => ItemKind::OtherCharge,
+        cl_api::ItemType::Discount => ItemKind::Discount,
+        cl_api::ItemType::Subtotal => ItemKind::Subtotal,
+    }
+}
+
+/// The engine's item type of a kind.
+fn type_of(k: ItemKind) -> cl_api::ItemType {
+    match k {
+        ItemKind::Service => cl_api::ItemType::Service,
+        ItemKind::NonInventory => cl_api::ItemType::NonInventory,
+        ItemKind::OtherCharge => cl_api::ItemType::OtherCharge,
+        ItemKind::Discount => cl_api::ItemType::Discount,
+        ItemKind::Subtotal => cl_api::ItemType::Subtotal,
     }
 }
 

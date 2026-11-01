@@ -85,7 +85,7 @@ pub use resources::contacts::{
 };
 pub use resources::export::{ExportFile, ExportManifest};
 pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
-pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
+pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemType, ItemUpdate, Items};
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
@@ -264,4 +264,21 @@ pub use resources::document_assist::{
     CLOUD_VISION_DISABLED, CONSENT_REQUIRED, is_png, png_dimensions, png_fits,
     suggestion_from_json,
 };
+// P20: Create Invoice (engine U-122 to U-129, U-38).
+pub use resources::invoice_layouts::{
+    InvoiceLayout, InvoiceLayouts, LAYOUT_NAME_MAX, LayoutColumns, LayoutDraft, ResolvedFooters,
+};
+pub use resources::invoices::{
+    BILLABLE_ALREADY_BILLED, BillableCost, BillableCosts, ClientSales, EMAIL_PDF_MAX_BYTES,
+    EMAIL_RECIPIENTS_MAX, EmailMessage, INVOICE_HAS_PAYMENTS, INVOICE_TAGS_MAX,
+    INVOICE_TERMS_DAYS_MAX, INVOICE_TEXT_MAX, INVOICE_VOID_CODE, InvoiceBillableCost,
+    InvoiceLayoutId, InvoiceListQuery, InvoicePreview, InvoiceRecord, InvoiceRecordLine,
+    InvoiceRefusal, InvoiceStatus, InvoiceSummary, InvoiceWriteOptions, Invoices, ItemPrice,
+    OutboxId, OutboxItem, PO_NUMBER_MAX, PRICE_LEVEL_NAME_MAX, PreviewLine, PreviewLineError,
+    PriceLevel, PriceLevelDraft, PriceLevelId, PriceLevels, PriceSource, SMTP_NOT_CONFIGURED,
+    SMTP_SEND_FAILED, SavedInvoice, SendEvent, SendMethod, SendRecord, SignedPercent,
+    check_invoice, invoice_pdf_name, invoice_refusal,
+};
+pub use resources::sales::LayoutChoice;
+pub use resources::sales::MAX_LINES as INVOICE_MAX_LINES;
 pub use wire::money_str_strict;

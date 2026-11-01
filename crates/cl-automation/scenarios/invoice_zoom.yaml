@@ -1,0 +1,56 @@
+# Create Invoice at the minimum window (960 x 640), at 100% and at 200%
+# zoom (480 x 320 points), against `clientledger --demo`: below 860 points
+# the side panel moves under the form (DESIGN.md: panels stack on narrow
+# windows), the header wraps, and nothing is drawn over anything or cut
+# inside its field. Ignored as in forms-zoom: the tab strip (it scrolls)
+# and the bottom band, where the scrolled form runs under the status bar.
+# Nothing is saved. Synthetic.
+name: invoice_zoom
+description: Create Invoice at the minimum window and 200% zoom, nothing clipped.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - click: {role: tab, label: Home}
+  # The lines are typed at full size (the grid is below the fold at
+  # 960 x 640), then the window shrinks.
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "18"}
+  - key: Tab
+  - type: {text: "65"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  - screenshot: invoice-960
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8960, height: 40}
+        - {x: 0, y: 560, width: 960, height: 80}
+  - key: Ctrl+Shift+U
+  - assert_state: {key: screen.billable_dialog.open, equals: true}
+  - screenshot: billable-960
+  - key: Escape
+  - assert_state: {key: screen.billable_dialog.open, equals: false}
+  - assert_state: {key: screen.line_count, equals: 1}
+  - set_zoom: {percent: 200}
+  - screenshot: invoice-z200
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        - {x: 0, y: 260, width: 480, height: 80}
+  - set_zoom: {percent: 100}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - resize: {width: 1440, height: 940}
+  - assert_not_exists: {role: tab, label_contains: "Create Invoice"}

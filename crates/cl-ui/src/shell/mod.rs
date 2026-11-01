@@ -1133,6 +1133,18 @@ impl Shell {
         );
     }
 
+    /// Messages waiting in the Outbox (the status-bar chip, P20).
+    #[must_use]
+    pub fn outbox_waiting(&self) -> u32 {
+        if self.open_tenant.is_none() && !self.demo {
+            return 0;
+        }
+        self.company_link
+            .as_ref()
+            .and_then(|l| l.outbox_count())
+            .unwrap_or(0)
+    }
+
     /// How many templates wait for the owner (the status-bar chip).
     #[must_use]
     pub fn templates_need_you(&self) -> usize {
@@ -1178,8 +1190,8 @@ impl Shell {
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
-        if status_bar::show(ui, self, narrow, &tokens) {
-            self.open_screen(CommandId::new(crate::screens::templates_due::KIND));
+        if let Some(kind) = status_bar::show(ui, self, narrow, &tokens) {
+            self.open_screen(CommandId::new(kind));
         }
         // With no company open the Open Company window fills the body, as
         // in its mockup: no rail and no tab strip until a company opens.
@@ -1603,6 +1615,7 @@ fn make_any(
             .chain(&crate::screens::A04_SCREENS)
             .chain(&crate::screens::P18_SCREENS)
             .chain(&crate::screens::P19_SCREENS)
+            .chain(&crate::screens::P20_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

@@ -68,7 +68,8 @@ fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
         | "vendors.personal_funds"
         | "banking.deposit"
         | "banking.loan_payment"
-        | "company.journal_entry" => Some(&CHECK_HINTS),
+        | "company.journal_entry"
+        | "clients.create_invoice" => Some(&CHECK_HINTS),
         "banking.owner_money" | "clients.daily_sales" => Some(&LIST_HINTS),
         "banking.transfer" => Some(&REVERT_HINTS),
         _ => None,
@@ -201,12 +202,19 @@ pub fn templates_chip(n: usize) -> Option<String> {
     }
 }
 
-/// Draw the bar. True when the owner clicked the "templates need you"
-/// chip (the shell opens Templates Due).
-pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> bool {
+/// The Outbox chip (P20, Q-P20d) when messages wait.
+#[must_use]
+pub fn outbox_chip(n: u32) -> Option<String> {
+    (n > 0).then(|| crate::i18n::t_with("status.outbox", &[("n", &n.to_string())]))
+}
+
+/// Draw the bar. Returns the window to open when the owner clicked the
+/// "templates need you" chip (Templates Due) or the Outbox chip.
+pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> Option<&'static str> {
     let engine = engine_text(&shell.host_view());
     let chip = templates_chip(shell.templates_need_you());
-    let mut chip_clicked = false;
+    let outbox = outbox_chip(shell.outbox_waiting());
+    let mut chip_clicked = None;
     egui::Panel::bottom("status_bar")
         .exact_size(HEIGHT)
         .frame(
@@ -241,7 +249,15 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> bool {
                         .on_hover_text(t("status.templates_need_you.tip"))
                         .clicked()
                 {
-                    chip_clicked = true;
+                    chip_clicked = Some(crate::screens::templates_due::KIND);
+                }
+                if let Some(outbox) = &outbox
+                    && ui
+                        .link(RichText::new(outbox).size(12.0).color(tokens.accent))
+                        .on_hover_text(t("status.outbox.tip"))
+                        .clicked()
+                {
+                    chip_clicked = Some(crate::screens::outbox::KIND);
                 }
                 if let Some(toast) = shell.toast_text() {
                     // Leave room for the shortcut chips on the right so the

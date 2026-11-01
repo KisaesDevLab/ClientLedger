@@ -68,6 +68,7 @@ pub fn form(d: &SalesReceiptData, style: &FormStyle) -> FormDoc {
         totals,
         message: d.message.clone(),
         boxes: vec![],
+        ..FormDoc::default()
     }
 }
 
@@ -97,6 +98,7 @@ mod tests {
                 quantity: Some(Decimal::TWO),
                 rate: Some(Decimal::new(399, 2)),
                 amount: Some(Decimal::new(798, 2)),
+                ..ItemLine::default()
             }],
             subtotal: Decimal::new(798, 2),
             total: Decimal::new(798, 2),

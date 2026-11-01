@@ -1,0 +1,64 @@
+# Email an invoice and the Outbox (P20 Q-P20f/aa) against `clientledger
+# --demo`: a saved invoice opens the Email dialog with the keyboard in To;
+# Esc closes it; Put in Outbox queues it; the Outbox lists it and Send all
+# sends it on the demo; Not sent yet lists invoices never sent. Synthetic.
+name: invoice_email
+description: The Email dialog takes the keyboard, queues to the Outbox, and Send all sends it.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Irrigation"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "65"}
+  - key: Tab
+  - wait: {ms: 800}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - wait: {ms: 600}
+  # --- The dialog takes the keyboard; Esc closes it ------------------------
+  - click: {role: button, label: "Email…"}
+  - assert_state: {key: screen.email.open, equals: true}
+  - assert_focused: {role: text_input, label: To}
+  - screenshot: email-dialog
+  - assert_no_clipping: {}
+  - key: Escape
+  - assert_state: {key: screen.email.open, equals: false}
+  # --- Put in Outbox ---------------------------------------------------------
+  - key: Ctrl+Shift+M
+  - assert_state: {key: screen.email.open, equals: true}
+  - click: {role: text_input, label: To}
+  - key: Ctrl+A
+  - type: {text: "billing@longcreek.example"}
+  - click: {role: button, label: "Put in Outbox"}
+  - assert_state: {key: screen.email.open, equals: false}
+  - assert_state: {key: screen.last_action, equals: queued}
+  - command: file.close_window
+  # --- The Outbox: Send all ------------------------------------------------
+  - command: clients.outbox
+  - assert_state: {key: screen.screen, equals: outbox}
+  - assert_state: {key: screen.items, equals: 1}
+  - assert_exists: {role: button, label: Send all}
+  - screenshot: outbox
+  - assert_no_clipping: {}
+  - click: {role: button, label: Send all}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.items, equals: 0}
+  - screenshot: outbox-sent
+  - click: {label_contains: "Not sent yet"}
+  - assert_state: {key: screen.tab, equals: not_sent}
+  - screenshot: outbox-not-sent
+  - assert_no_clipping: {}
+  - command: file.close_window

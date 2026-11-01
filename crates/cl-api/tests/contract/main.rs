@@ -15,6 +15,7 @@ mod contract_ap_void;
 mod contract_audit;
 mod contract_bank_postings;
 mod contract_batch;
+mod contract_billable;
 mod contract_bills;
 mod contract_capabilities;
 mod contract_census;
@@ -29,6 +30,7 @@ mod contract_errors;
 mod contract_harness;
 mod contract_home;
 mod contract_idempotency;
+mod contract_invoices;
 mod contract_items;
 mod contract_journal;
 mod contract_journal_entries;
@@ -134,6 +136,41 @@ fn main() -> std::process::ExitCode {
         ),
         ("items::item_types_u39", contract_items::item_types_u39),
         ("items::price_levels_u40", contract_items::price_levels_u40),
+        ("items::sales_kinds_u39a", contract_items::sales_kinds_u39a),
+        (
+            "invoices::mockup_invoice_totals_3234_87",
+            contract_invoices::mockup_invoice_totals_3234_87,
+        ),
+        (
+            "invoices::rounding_golden_cases",
+            contract_invoices::rounding_golden_cases,
+        ),
+        (
+            "invoices::price_level_and_discount",
+            contract_invoices::price_level_and_discount,
+        ),
+        ("invoices::unsent_filter", contract_invoices::unsent_filter),
+        (
+            "invoices::invoice_closed_period",
+            contract_invoices::invoice_closed_period,
+        ),
+        (
+            "invoices::invoice_stale_409",
+            contract_invoices::invoice_stale_409,
+        ),
+        (
+            "invoices::invoice_put_idempotent",
+            contract_invoices::invoice_put_idempotent,
+        ),
+        (
+            "invoices::email_not_configured",
+            contract_invoices::email_not_configured,
+        ),
+        ("invoices::layouts", contract_invoices::layouts),
+        (
+            "billable::billable_consumed",
+            contract_billable::billable_consumed,
+        ),
         ("tags::groups_round_trip", contract_tags::groups_round_trip),
         (
             "tags::rename_usage_and_header_merge",

@@ -153,6 +153,8 @@ fn every_request_type_omits_both_keys() {
         unit_price: Some(Money::ZERO),
         income_account_id: AccountId::parse("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
         is_taxable: true,
+        item_type: cl_api::ItemType::Service,
+        discount_percent: None,
     };
     assert_clean("ItemFields", &item);
     assert_clean(

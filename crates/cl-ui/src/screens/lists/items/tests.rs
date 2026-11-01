@@ -84,10 +84,11 @@ fn loads_the_demo_items_without_the_inactive_one() {
     let r = Rig::new();
     assert_eq!(r.state("screen"), "items");
     assert_eq!(r.state("loaded"), true);
-    assert_eq!(r.state("rows"), 6);
-    assert_eq!(r.state("total"), 7);
-    assert_eq!(r.state("kinds_available"), 1);
-    assert_eq!(r.state("price_levels_available"), false);
+    assert_eq!(r.state("rows"), 8);
+    assert_eq!(r.state("total"), 9);
+    // The demo engine keeps the sales kinds (U-39a) and price levels (U-40).
+    assert_eq!(r.state("kinds_available"), 5);
+    assert_eq!(r.state("price_levels_available"), true);
     assert_eq!(r.state("panel"), "none");
     assert_eq!(r.s.title(), "Item List");
     assert!(!r.s.dirty());
@@ -116,7 +117,7 @@ fn create_with_save_and_close_then_edit() {
     r.frames(2);
     assert_eq!(r.state("panel"), "none");
     assert_eq!(r.state("note"), "saved");
-    assert_eq!(r.state("rows"), 7);
+    assert_eq!(r.state("rows"), 9); // with the demo subtotal and discount (U-39a)
     assert_eq!(r.state("selected_price"), "120.5000");
     assert_eq!(r.state("selected_active"), true);
     let made = r.s.selected().expect("selected");
@@ -179,15 +180,28 @@ fn save_and_new_keeps_the_income_account_and_problems_focus_their_field() {
         Some("13.3333"),
         "a calculated price keeps four decimals, not cents"
     );
-    // A kind the engine can't keep is refused.
+    // A discount item (U-39a): a percent and an amount off together are
+    // refused; the percent alone saves.
     r.form()
         .form
         .edit(super::F_KIND, |d| d.kind = ItemKind::Discount);
     r.form()
         .form
         .edit(super::F_NAME, |d| d.name = "Promo".into());
+    r.form().form.edit(super::F_PRICE, |d| d.price = "5".into());
+    r.form()
+        .form
+        .edit(super::F_DISCOUNT, |d| d.discount = "10".into());
     assert!(!r.s.save_form(SaveIntent::SaveAndClose));
-    assert_eq!(r.form().problems, vec![ItemProblem::KindNotAvailable]);
+    assert_eq!(r.form().problems, vec![ItemProblem::DiscountBoth]);
+    r.form().form.edit(super::F_PRICE, |d| d.price.clear());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    let saved = r.link.demo_state().expect("demo").items_mut().clone();
+    let promo = saved
+        .iter()
+        .find(|i| i.fields.name == "Promo")
+        .expect("saved");
+    assert_eq!(promo.fields.item_type, cl_api::ItemType::Discount);
 }
 
 #[test]
@@ -207,7 +221,7 @@ fn esc_reverts_then_closes_then_clears_the_search() {
     r.frames(1);
     assert_eq!(r.state("rows"), 1);
     assert!(r.cmd("form.revert"));
-    assert_eq!(r.state("rows"), 6);
+    assert_eq!(r.state("rows"), 8);
     assert!(
         !r.cmd("form.revert"),
         "nothing left: the shell closes the window"
@@ -220,7 +234,7 @@ fn make_inactive_and_active_again() {
     r.select(2);
     r.cmd("list.toggle_active");
     assert_eq!(r.state("note"), "made_inactive");
-    assert_eq!(r.state("rows"), 5);
+    assert_eq!(r.state("rows"), 7);
     r.cmd("list.show_inactive");
     assert_eq!(r.state("show_inactive"), true);
     assert_eq!(r.s.selected(), Some(item_id(2)), "the cursor comes back");
@@ -229,7 +243,7 @@ fn make_inactive_and_active_again() {
     assert_eq!(r.state("note"), "made_active");
     assert_eq!(r.state("selected_active"), true);
     r.cmd("list.show_inactive");
-    assert_eq!(r.state("rows"), 6);
+    assert_eq!(r.state("rows"), 8);
 }
 
 #[test]

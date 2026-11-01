@@ -56,6 +56,7 @@ pub fn form(d: &CreditMemoData, style: &FormStyle) -> FormDoc {
         totals,
         message: d.message.clone(),
         boxes: vec![],
+        ..FormDoc::default()
     }
 }
 
@@ -84,6 +85,7 @@ mod tests {
                 quantity: Some(Decimal::ONE),
                 rate: Some(Decimal::new(2500, 2)),
                 amount: Some(Decimal::new(2500, 2)),
+                ..ItemLine::default()
             }],
             subtotal: Decimal::new(2500, 2),
             total: Decimal::new(2500, 2),

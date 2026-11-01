@@ -435,7 +435,7 @@ mod tests {
             find("vendors.write_check")
                 .is_some_and(|c| c.shortcut.is_some() && c.arrives.is_none())
         );
-        assert!(find("clients.create_invoice").is_some_and(|c| c.arrives == Some("P20")));
+        assert!(find("clients.create_invoice").is_some_and(|c| c.opens && c.arrives.is_none()));
         assert!(COMMANDS.len() > 16);
     }
 

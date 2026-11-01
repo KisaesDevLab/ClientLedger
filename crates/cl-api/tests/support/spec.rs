@@ -29,6 +29,9 @@ use sha2::{Digest, Sha256};
 /// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
 /// vendor layout routes (U-92) and the document reading assist (U-92d) are;
 /// since pin 4e0593c3 (engine PR #180) the A04 draft attach (U-95) is.
+/// Since pin c7b7d61d (engine PRs #197-#202) the P20 invoice routes are:
+/// sent (U-126), preview (U-129), price levels (U-40), billable costs
+/// (U-128), email and the Outbox (U-127) and invoice layouts (U-130).
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
@@ -251,6 +254,18 @@ pub fn keyable_pay_bills_operations(txt: &str) -> Vec<(String, String)> {
 /// `operations.txt`: `(METHOD, route)`, sorted.
 pub fn keyable_check_print_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-check-print")
+}
+
+/// The `keyable-invoice` (`idempotency-invoice-v1`) rows of
+/// `operations.txt`: `(METHOD, route)`, sorted.
+pub fn keyable_invoice_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-invoice")
+}
+
+/// The `keyable-invoice-email` (`invoice-email-v1`) rows of
+/// `operations.txt`, sorted.
+pub fn keyable_invoice_email_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-invoice-email")
 }
 
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {

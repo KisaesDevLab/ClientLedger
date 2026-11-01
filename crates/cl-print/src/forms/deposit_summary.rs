@@ -81,6 +81,7 @@ pub fn form(d: &DepositSummaryData, style: &FormStyle) -> FormDoc {
         totals,
         message: d.memo.clone(),
         boxes: vec![],
+        ..FormDoc::default()
     }
 }
 

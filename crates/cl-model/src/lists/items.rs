@@ -13,8 +13,8 @@
 
 use std::cmp::Ordering;
 
-use cl_core::Money;
 use cl_core::ids::{AccountId, ItemId};
+use cl_core::{Money, Quantity};
 
 use crate::amount_entry::{self, Amount, AmountKind, AmountRules, Sign};
 use crate::lists::engine_len;
@@ -99,6 +99,10 @@ pub struct ItemEntry {
     pub taxable: bool,
     /// Active.
     pub active: bool,
+    /// Kind (U-39a).
+    pub kind: ItemKind,
+    /// A discount item's percent off.
+    pub discount_percent: Option<Quantity>,
 }
 
 /// What the Item List shows.
@@ -215,6 +219,9 @@ pub struct ItemDraft {
     pub income_account: Option<AccountId>,
     /// Subject to sales tax.
     pub taxable: bool,
+    /// A discount item's percent off as typed (blank: the price is the
+    /// amount off).
+    pub discount: String,
 }
 
 impl ItemDraft {
@@ -228,6 +235,7 @@ impl ItemDraft {
             price: String::new(),
             income_account,
             taxable: true,
+            discount: String::new(),
         }
     }
 
@@ -237,12 +245,21 @@ impl ItemDraft {
     #[must_use]
     pub fn from_entry(e: &ItemEntry) -> ItemDraft {
         ItemDraft {
-            kind: ItemKind::Service,
+            kind: e.kind,
             name: e.name.clone(),
             description: e.description.clone().unwrap_or_default(),
             price: e.price.map(price_text).unwrap_or_default(),
             income_account: Some(e.income_account),
             taxable: e.taxable,
+            discount: e
+                .discount_percent
+                .map(|q| {
+                    q.to_wire()
+                        .trim_end_matches('0')
+                        .trim_end_matches('.')
+                        .to_string()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -277,6 +294,10 @@ pub struct CheckedItem {
     pub income_account: AccountId,
     /// Subject to sales tax.
     pub taxable: bool,
+    /// Kind.
+    pub kind: ItemKind,
+    /// A discount's percent off.
+    pub discount_percent: Option<Quantity>,
 }
 
 /// The form field a problem belongs to.
@@ -294,6 +315,8 @@ pub enum ItemField {
     IncomeAccount,
     /// Taxable.
     Taxable,
+    /// A discount's percent.
+    Discount,
 }
 
 /// Why an item draft cannot be saved.
@@ -315,6 +338,12 @@ pub enum ItemProblem {
     PriceNegative,
     /// No income account, or one that is gone or not an income account.
     IncomeAccountMissing,
+    /// A discount percent that is not above 0 and at most 100.
+    DiscountInvalid,
+    /// A discount with both a percent and an amount.
+    DiscountBoth,
+    /// A subtotal takes no price.
+    SubtotalPriced,
 }
 
 impl ItemProblem {
@@ -330,6 +359,9 @@ impl ItemProblem {
             ItemProblem::PriceInvalid => "items.problem.price_invalid",
             ItemProblem::PriceNegative => "items.problem.price_negative",
             ItemProblem::IncomeAccountMissing => "items.problem.income_account_missing",
+            ItemProblem::DiscountInvalid => "items.problem.discount_invalid",
+            ItemProblem::DiscountBoth => "items.problem.discount_both",
+            ItemProblem::SubtotalPriced => "items.problem.subtotal_priced",
         })
     }
 
@@ -342,8 +374,11 @@ impl ItemProblem {
                 ItemField::Name
             }
             ItemProblem::DescriptionTooLong => ItemField::Description,
-            ItemProblem::PriceInvalid | ItemProblem::PriceNegative => ItemField::Price,
+            ItemProblem::PriceInvalid
+            | ItemProblem::PriceNegative
+            | ItemProblem::SubtotalPriced => ItemField::Price,
             ItemProblem::IncomeAccountMissing => ItemField::IncomeAccount,
+            ItemProblem::DiscountInvalid | ItemProblem::DiscountBoth => ItemField::Discount,
         }
     }
 }
@@ -403,9 +438,28 @@ pub fn check(
             None
         }
     };
+    // Discount and subtotal items need an income account too (E2).
     let income = draft.income_account.filter(|a| income_ok(*a));
     if income.is_none() {
         problems.push(ItemProblem::IncomeAccountMissing);
+    }
+    let discount_percent = match (draft.kind, draft.discount.trim()) {
+        (ItemKind::Discount, t) if !t.is_empty() => match Quantity::parse_wire(t) {
+            Ok(q) if q.is_positive() && q <= Quantity::parse_wire("100").unwrap_or(q) => {
+                if price.is_some() {
+                    problems.push(ItemProblem::DiscountBoth);
+                }
+                Some(q)
+            }
+            _ => {
+                problems.push(ItemProblem::DiscountInvalid);
+                None
+            }
+        },
+        _ => None,
+    };
+    if draft.kind == ItemKind::Subtotal && price.is_some() {
+        problems.push(ItemProblem::SubtotalPriced);
     }
     match (income, problems.is_empty()) {
         (Some(income_account), true) => Ok(CheckedItem {
@@ -414,6 +468,8 @@ pub fn check(
             price,
             income_account,
             taxable: draft.taxable,
+            kind: draft.kind,
+            discount_percent,
         }),
         _ => Err(problems),
     }

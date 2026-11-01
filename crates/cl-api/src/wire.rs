@@ -64,8 +64,9 @@ impl Capabilities {
     pub const CONTACT_ADDRESSES: &'static str = "contact-addresses-v1";
     /// U-37 dated notes and to-dos on contacts and projects.
     pub const CONTACT_NOTES: &'static str = "contact-notes-v1";
-    /// U-38 the engine's open balance on each contact read.
-    pub const CONTACT_OPEN_BALANCE: &'static str = "contact-open-balance-v1";
+    /// U-38 the engine's open balance and oldest open date on each contact
+    /// read (the name engine PR #197 advertises).
+    pub const CONTACT_OPEN_BALANCE: &'static str = "contact-balance-v1";
     /// U-44 "W-9 on file" recorded by the owner (a paper W-9).
     pub const VENDOR_W9_ON_FILE: &'static str = "vendor-w9-on-file-v1";
     /// U-39 item types (non-inventory, other charge, discount, subtotal),
@@ -305,6 +306,41 @@ impl Capabilities {
     pub const DOCUMENT_NUMBERS: &'static str = "document-numbers-v1";
     /// U-113: Print later for invoices, sales receipts and credit memos.
     pub const FORMS_PRINT_QUEUE: &'static str = "forms-print-queue-v1";
+    /// U-122: sales forms to the cent; tax once per document, allocated to
+    /// the taxable lines by largest remainder.
+    pub const SALES_CENTS: &'static str = "sales-cents-v1";
+    /// U-124: closing-date password and `expectedUpdatedAt` on invoice
+    /// create, edit and void; 409 `INVOICE_HAS_PAYMENTS`.
+    pub const INVOICE_EDIT: &'static str = "invoice-edit-v1";
+    /// U-124: `Idempotency-Key` on invoice edit, void and sent.
+    pub const IDEMPOTENCY_INVOICE: &'static str = "idempotency-invoice-v1";
+    /// U-125: invoice terms (invoice, else client, else company).
+    pub const INVOICE_TERMS: &'static str = "invoice-terms-v1";
+    /// U-123: line item and service date; header P.O. number, customer
+    /// message, tags and hide-zero-lines.
+    pub const INVOICE_FIELDS: &'static str = "invoice-fields-v1";
+    /// U-126: send history and the unsent filter.
+    pub const INVOICE_SENT_HISTORY: &'static str = "invoice-sent-history-v1";
+    /// U-39a: sales item kinds (service, non-inventory, other charge,
+    /// discount, subtotal). Contract per P20 plan §2; verify when E2 lands.
+    pub const ITEM_KINDS_SALES: &'static str = "item-kinds-sales-v1";
+    /// U-129: `POST /invoices/preview` and engine pricing (price levels,
+    /// discounts, subtotals). Contract per P20 plan §2; verify when E2
+    /// lands.
+    pub const INVOICE_PRICING: &'static str = "invoice-pricing-v1";
+    /// An invoice PUT may say its line list is complete
+    /// (`pricingLinesComplete: true`): discount and subtotal lines it
+    /// leaves out were removed on purpose (no 409 `INVOICE_LINES_MISSING`).
+    pub const INVOICE_PRICING_LINES: &'static str = "invoice-pricing-lines-v1";
+    /// U-130: invoice print layouts (`/company/invoice-layouts`, invoice
+    /// `layoutId`, contact `defaultInvoiceLayoutId`).
+    pub const INVOICE_LAYOUTS: &'static str = "invoice-layouts-v1";
+    /// U-128: billable costs and markup. Contract per P20 plan §2; verify
+    /// when E3 lands.
+    pub const BILLABLE_COSTS: &'static str = "billable-costs-v1";
+    /// U-127: email an invoice through the company SMTP and the Outbox.
+    /// Contract per P20 plan §2; verify when E4 lands.
+    pub const INVOICE_EMAIL: &'static str = "invoice-email-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

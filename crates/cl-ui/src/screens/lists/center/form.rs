@@ -299,11 +299,23 @@ impl CenterScreen {
                 return false;
             }
         };
+        // The client's Sales section is checked before anything is sent
+        // (S9): a bad markup keeps the form open.
+        if !self.sales.check() {
+            return false;
+        }
+        let Panel::Form(panel) = &mut self.panel else {
+            return false;
+        };
         panel.problems.clear();
         panel.error = None;
         match panel.form.begin_save(intent) {
             SaveStart::Send(_) => {}
             SaveStart::Skip(after) => {
+                // Only the Sales section changed (P20).
+                if let Some(id) = panel.editing {
+                    self.sales.save(&self.link, self.group.as_ref(), id);
+                }
                 self.after_save(after, None);
                 return true;
             }
@@ -382,6 +394,8 @@ impl CenterScreen {
                 let after = panel.form.save_ok(panel.form.current().clone());
                 let contact = saved.contact.record;
                 let id = contact.id;
+                // The client's price level and markup go after the contact.
+                self.sales.save(&self.link, self.group.as_ref(), id);
                 let here = roles_of(contact.fields.contact_type).has(self.role);
                 match self.contacts.iter_mut().find(|c| c.id == id) {
                     Some(c) => *c = contact,
@@ -451,6 +465,7 @@ impl CenterScreen {
     pub(super) fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let accounts = self.accounts.clone();
         let role = self.role;
+        let sales = &mut self.sales;
         let Panel::Form(panel) = &mut self.panel else {
             return;
         };
@@ -626,6 +641,9 @@ impl CenterScreen {
             .changed()
             {
                 panel.form.edit(F_NOTES, |x| x.notes = notes);
+            }
+            if role == Role::Client {
+                sales.ui(ui, tokens);
             }
 
             if d.roles.has(Role::Vendor) {

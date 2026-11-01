@@ -322,6 +322,10 @@ pub struct CompanySettings {
     /// (`billDiscountAccountId`, `bill-discounts-v1`, Q-P18a).
     #[serde(default)]
     pub bill_discount_account_id: Option<AccountId>,
+    /// Where markups on billable costs post (`billableMarkupAccountId`,
+    /// `billable-costs-v1`, Q-P20b; an income account).
+    #[serde(default)]
+    pub billable_markup_account_id: Option<AccountId>,
 }
 
 /// Accounting basis of the company (`accountingMethod`, Q-44).
@@ -524,6 +528,36 @@ impl Session {
         }
         let body = json_body(&serde_json::json!({
             "billDiscountAccountId": account.map(|a| a.to_string()),
+        }))?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply)
+    }
+
+    /// Sets (or with `None` clears) the income account markups on billable
+    /// costs post to (`billableMarkupAccountId`, U-128). Refused locally
+    /// without `billable-costs-v1`.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without the capability (nothing sent);
+    /// `NoCompanyOpen`; `Validation` (`MARKUP_ACCOUNT_INVALID`: not an
+    /// income account of this company); any [`ApiError`].
+    pub async fn set_billable_markup_account(
+        &self,
+        account: Option<AccountId>,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        self.require_company()?;
+        if !self
+            .client()
+            .capabilities()
+            .has(Capabilities::BILLABLE_COSTS)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        let body = json_body(&serde_json::json!({
+            "billableMarkupAccountId": account.map(|a| a.to_string()),
         }))?;
         let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
         call.idempotency_key = Some(key);

@@ -24,6 +24,8 @@ fn service(h: &Harness, prefix: &str) -> cl_api::Item {
             unit_price: Some(m("45.0450")),
             income_account_id: income.id,
             is_taxable: true,
+            item_type: cl_api::ItemType::Service,
+            discount_percent: None,
         },
         key(),
     ))
@@ -85,8 +87,8 @@ pub fn reactivate_and_unique_names(h: &Harness) {
     h.run(s.items().deactivate(item.id, key())).expect("off");
 }
 
-/// U-39: the engine keeps no item type, purchase side or unit label today
-/// (the fields are dropped on create).
+/// U-39b: the purchase side and the unit label are not kept yet (the sales
+/// kinds are U-39a, `sales_kinds_u39a`); PENDING until `item-types-v1`.
 pub fn item_types_u39(h: &Harness) {
     let s = &h.s1;
     let income = account(h, s, AccountType::Revenue, "Discounts");
@@ -110,7 +112,7 @@ pub fn item_types_u39(h: &Harness) {
     if h.require_cap(Capabilities::ITEM_TYPES, "U-39") {
         assert_eq!(item["itemType"], "discount", "{item}");
     } else {
-        for f in ["itemType", "discountPercent", "unitCost", "uomLabel"] {
+        for f in ["unitCost", "uomLabel"] {
             assert!(item[f].is_null(), "{f} is not kept today: {item}");
         }
     }
@@ -121,7 +123,42 @@ pub fn item_types_u39(h: &Harness) {
     assert_eq!(off.status, 200, "{}", off.body);
 }
 
-/// U-40: there are no price levels today.
+/// U-39a (`item-kinds-sales-v1`): a discount item keeps its kind and its
+/// percent; a subtotal item takes no price.
+pub fn sales_kinds_u39a(h: &Harness) {
+    let s = &h.s1;
+    if !h.require_cap(Capabilities::ITEM_KINDS_SALES, "U-39a") {
+        return;
+    }
+    let income = account(h, s, AccountType::Revenue, "Discounts given");
+    let pct = cl_api::SignedPercent::parse("10").expect("pct");
+    let fields = ItemFields {
+        name: unique("Loyalty discount"),
+        description: None,
+        unit_price: None,
+        income_account_id: income.id,
+        is_taxable: true,
+        item_type: cl_api::ItemType::Discount,
+        discount_percent: Some(pct),
+    };
+    let d = h.run(s.items().create(&fields, key())).expect("discount");
+    assert_eq!(d.record.fields.item_type, cl_api::ItemType::Discount);
+    assert_eq!(d.record.fields.discount_percent, Some(pct));
+    let sub = ItemFields {
+        name: unique("Subtotal"),
+        item_type: cl_api::ItemType::Subtotal,
+        discount_percent: None,
+        ..fields
+    };
+    let t = h.run(s.items().create(&sub, key())).expect("subtotal");
+    assert_eq!(t.record.fields.item_type, cl_api::ItemType::Subtotal);
+    for id in [d.record.id, t.record.id] {
+        h.run(s.items().deactivate(id, key())).expect("off");
+    }
+}
+
+/// U-40 (`price-levels-v1`): a level with a % and an item price round-trips
+/// through create, get, update and delete.
 pub fn price_levels_u40(h: &Harness) {
     let s = &h.s1;
     let raw = h
@@ -129,6 +166,45 @@ pub fn price_levels_u40(h: &Harness) {
         .expect("raw");
     if h.require_cap(Capabilities::PRICE_LEVELS, "U-40") {
         assert_eq!(raw.status, 200, "{}", raw.body);
+        let income = account(h, s, AccountType::Revenue, "Level sales");
+        let item = h
+            .run(s.items().create(
+                &ItemFields {
+                    name: unique("Shrubs"),
+                    description: None,
+                    unit_price: Some(cl_core::Money::parse_wire("32.50").expect("m")),
+                    income_account_id: income.id,
+                    is_taxable: true,
+                    item_type: cl_api::ItemType::Service,
+                    discount_percent: None,
+                },
+                key(),
+            ))
+            .expect("item");
+        let levels = s.invoices();
+        let levels = levels.price_levels();
+        let draft = cl_api::PriceLevelDraft {
+            name: unique("Contractor"),
+            percent: cl_api::SignedPercent::parse("-7.5").expect("pct"),
+            is_active: true,
+            item_prices: vec![cl_api::ItemPrice {
+                item_id: item.record.id,
+                price: cl_core::Money::parse_wire("30").expect("m"),
+            }],
+        };
+        let made = h.run(levels.create(&draft)).expect("create");
+        assert_eq!(made.percent.to_wire(), "-7.5");
+        let got = h.run(levels.get(made.id)).expect("get");
+        assert_eq!(got.item_prices.len(), 1);
+        let off = cl_api::PriceLevelDraft {
+            is_active: false,
+            ..draft
+        };
+        let upd = h.run(levels.update(made.id, &off)).expect("update");
+        assert!(!upd.is_active);
+        h.run(levels.delete(made.id)).expect("delete");
+        h.run(s.items().deactivate(item.record.id, key()))
+            .expect("off");
     } else {
         assert_eq!(raw.status, 404, "no such route today: {}", raw.body);
     }

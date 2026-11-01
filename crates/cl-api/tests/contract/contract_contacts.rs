@@ -11,7 +11,7 @@ use cl_api::{
     ContactType, InvoiceLine, Method, NewBill, NewContact, NewInvoice, PageRequest, Session,
     TinType, TxnType, Vendor1099Update,
 };
-use cl_core::{Money, Quantity, Rate};
+use cl_core::{Money, Quantity};
 use serde_json::json;
 
 use crate::common::{account, date, key, m};
@@ -147,19 +147,22 @@ pub fn client_open_balance(h: &Harness) {
     let idle = contact(h, s, ContactType::Customer, "Idle client");
     h.run(s.create_invoice(
         &NewInvoice {
-            txn_date: date(2026, 7, 2),
             due_date: Some(date(2026, 8, 1)),
-            contact_id: client.id,
-            lines: vec![InvoiceLine {
-                account_id: income.id,
-                description: None,
-                quantity: Quantity::parse_wire("3").expect("q"),
-                unit_price: m("41.1100"),
-                is_taxable: false,
-                tax_rate: Rate::parse_wire("0").expect("r"),
-            }],
             memo: None,
             txn_number: None,
+            ..NewInvoice::new(
+                client.id,
+                date(2026, 7, 2),
+                vec![InvoiceLine {
+                    description: None,
+                    is_taxable: Some(false),
+                    ..InvoiceLine::account(
+                        income.id,
+                        Quantity::parse_wire("3").expect("q"),
+                        m("41.1100"),
+                    )
+                }],
+            )
         },
         key(),
     ))

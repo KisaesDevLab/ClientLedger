@@ -107,6 +107,7 @@ pub fn form(d: &StatementData, style: &FormStyle) -> FormDoc {
         totals: vec![TotalRow::new(&l.amount_due, d.amount_due, true)],
         message: d.message.clone(),
         boxes,
+        ..FormDoc::default()
     }
 }
 

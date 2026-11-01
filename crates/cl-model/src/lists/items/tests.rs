@@ -21,6 +21,8 @@ fn entry(n: u32, name: &str, active: bool) -> ItemEntry {
         income_account: aid(1),
         taxable: true,
         active,
+        kind: ItemKind::Service,
+        discount_percent: None,
     }
 }
 
@@ -173,7 +175,48 @@ fn checked_item_is_trimmed() {
             price: Some(m("30.0000")),
             income_account: aid(1),
             taxable: false,
+            kind: ItemKind::Service,
+            discount_percent: None,
         }
+    );
+}
+
+/// U-39a: discount and subtotal items need an income account; a discount
+/// takes a percent or an amount, not both; a subtotal takes no price.
+#[test]
+fn sales_kinds_are_checked() {
+    let mut d = ItemDraft::new(None);
+    d.name = "Loyalty".into();
+    d.kind = ItemKind::Discount;
+    d.discount = "10".into();
+    let e = check(&d, &sample(), None, true, income_ok).expect_err("no account");
+    assert_eq!(e, vec![ItemProblem::IncomeAccountMissing]);
+    d.income_account = Some(aid(1));
+    let c = check(&d, &sample(), None, true, income_ok).expect("ok");
+    assert_eq!(c.kind, ItemKind::Discount);
+    assert_eq!(
+        c.discount_percent
+            .map(cl_core::Quantity::to_wire)
+            .as_deref(),
+        Some("10.0000")
+    );
+    d.price = "5".into();
+    let e = check(&d, &sample(), None, true, income_ok).expect_err("both");
+    assert_eq!(e, vec![ItemProblem::DiscountBoth]);
+    d.price.clear();
+    d.discount = "150".into();
+    let e = check(&d, &sample(), None, true, income_ok).expect_err("over 100");
+    assert_eq!(e, vec![ItemProblem::DiscountInvalid]);
+    let mut s = ItemDraft::new(Some(aid(1)));
+    s.name = "Subtotal".into();
+    s.kind = ItemKind::Subtotal;
+    s.price = "1".into();
+    let e = check(&s, &sample(), None, true, income_ok).expect_err("priced");
+    assert_eq!(e, vec![ItemProblem::SubtotalPriced]);
+    s.price.clear();
+    assert!(
+        check(&s, &sample(), None, false, income_ok).is_err(),
+        "needs the engine"
     );
 }
 

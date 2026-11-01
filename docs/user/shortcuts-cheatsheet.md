@@ -88,6 +88,8 @@
 - `Alt+A` Accept These Values
 - `Alt+T` Attach to Selected Transaction
 - `Alt+E` Enter as New
+- `Ctrl+Shift+U` Add Billable Costs…
+- `Ctrl+Shift+M` Email…
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries
