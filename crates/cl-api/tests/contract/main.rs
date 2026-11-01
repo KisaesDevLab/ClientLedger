@@ -309,6 +309,10 @@ fn main() -> std::process::ExitCode {
             contract_pr3::invoice_client_guard_409,
         ),
         (
+            "pr3::ar_aging_ties_to_balance_sheet",
+            contract_pr3::ar_aging_ties_to_balance_sheet,
+        ),
+        (
             "customer_deposits::customer_deposit_lifecycle",
             contract_customer_deposits::customer_deposit_lifecycle,
         ),
