@@ -112,6 +112,17 @@ pub fn set_settings(state: &mut DemoState, u: &FinanceChargeSettingsUpdate) {
     }
 }
 
+/// `GET /company/settings`' finance-charge fields as the demo engine holds
+/// them (Preferences reads them).
+pub fn fill_settings(f: &DemoFinance, s: &mut cl_api::CompanySettings) {
+    s.finance_charge_annual_rate = f.rate;
+    s.finance_charge_minimum = Some(f.minimum.unwrap_or(Money::ZERO));
+    s.finance_charge_grace_days = Some(f.grace_days);
+    s.finance_charge_on_finance_charges = Some(f.compounding);
+    s.finance_charge_income_account_id = f.income_account;
+    s.finance_charge_print_later = Some(f.print_later.unwrap_or(true));
+}
+
 fn settings_echo(state: &DemoState) -> FinanceChargeSettings {
     let f = &state.finance;
     FinanceChargeSettings {

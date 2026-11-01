@@ -120,10 +120,11 @@ mod receivables_model;
 // P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
 mod credit_memo;
 // P22 D6: Statements.
+mod finance_charges;
 mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 40] = [
+const TABLES: [&[(&str, &str)]; 41] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -164,6 +165,7 @@ const TABLES: [&[(&str, &str)]; 40] = [
     receivables_model::ENGLISH,
     credit_memo::ENGLISH,
     statements::ENGLISH,
+    finance_charges::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -759,7 +761,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.company.account_numbers_hint", "Shows each account's number before its name in the Chart of Accounts and in account lists, and sorts accounts by number."),
     ("prefs.company.checks_intro", "Check numbering, printing and form defaults."),
     ("prefs.company.checks_later", "Check options and default accounts are not available yet; they come with Write Check and printing."),
-    ("prefs.company.finance_later", "Finance charge settings are not available yet; they come with Statements."),
+    ("prefs.company.finance_later", "Finance charges are set under Sales tax › Finance charges."),
     ("prefs.company.ten99_later", "1099 box mapping is not available yet; it comes with the Vendors list and the 1099 Summary report."),
     ("prefs.company.tax_intro", "Turn sales tax on when you charge it on invoices."),
     ("prefs.company.tax_on", "This company charges sales tax"),
