@@ -157,6 +157,22 @@ steps:
   - assert_state: {key: screen.figures, equals: ready}
   - assert_state: {key: screen.balance_before, equals: "5,645.00"}
   - click: {role: button, label: Clear}
+  # --- Client Center: Receive Payment from the selected client ---------------
+  - command: clients.center
+  - assert_state: {key: screen.screen, equals: client_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: Neosho}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - click: {role: button, label: Receive Payment}
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - assert_state: {key: screen.client, equals: true}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.balance_before, equals: "5,645.00"}
+  - assert_state: {key: screen.rows.0.number, equals: "1091"}
+  - screenshot: from-client-center
+  - command: file.close_window
+  - command: file.close_window
 
 # `ui-check receive_payment --compare`: the mockup's unsaved state again.
 compare:
