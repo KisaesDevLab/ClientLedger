@@ -16,7 +16,10 @@
 # same for the idempotency-invoice-v1 route set (U-124); keyable-receive-payment
 # = the same for the idempotency-receive-payment-v1 route set (U-132). Only keyable,
 # keyable-ap, keyable-docs, keyable-docs-attach, keyable-pay-bills,
-# keyable-check-print, keyable-invoice and keyable-receive-payment routes are
+# keyable-check-print, keyable-invoice, keyable-receive-payment,
+# keyable-credit-memo (idempotency-credit-memo-v1, U-137),
+# keyable-customer-statements (idempotency-customer-statements-v1, U-140) and
+# keyable-finance-charges (idempotency-finance-charges-v1, U-141) routes are
 # upgraded;
 # never = auth and company-creation routes.
 #
@@ -322,3 +325,27 @@ POST    /api/v1/payments/{id}/bounce            keyable-receive-payment
 GET     /api/v1/payments/open-invoices/{customerId} idempotent
 GET     /api/v1/payments/deposits-on-hand       idempotent
 POST    /api/v1/customer-refunds                keyable-receive-payment
+GET     /api/v1/payments/credits                idempotent
+POST    /api/v1/credit-memos/preview            pre-handler-only
+POST    /api/v1/credit-memos                    keyable-credit-memo
+GET     /api/v1/credit-memos/{id}               idempotent
+PUT     /api/v1/credit-memos/{id}               keyable-credit-memo
+POST    /api/v1/credit-memos/{id}/apply         keyable-credit-memo
+POST    /api/v1/credit-memos/{id}/unapply       keyable-credit-memo
+POST    /api/v1/sales-receipts/preview          pre-handler-only
+POST    /api/v1/sales-receipts                  keyable-credit-memo
+GET     /api/v1/sales-receipts/{id}             idempotent
+PUT     /api/v1/sales-receipts/{id}             keyable-credit-memo
+GET     /api/v1/customer-refunds/{id}           idempotent
+GET     /api/v1/reports/customer-statement      idempotent
+GET     /api/v1/reports/customer-statements     idempotent
+GET     /api/v1/reports/ar-aging-summary        idempotent
+POST    /api/v1/customer-statement-runs         keyable-customer-statements
+GET     /api/v1/customer-statements             idempotent
+GET     /api/v1/customer-statements/{id}        idempotent
+POST    /api/v1/customer-statements/{id}/sent   pre-handler-only
+POST    /api/v1/customer-statements/{id}/email  keyable-customer-statements
+POST    /api/v1/customer-statements/{id}/email-later keyable-customer-statements
+POST    /api/v1/finance-charges/preview         pre-handler-only
+POST    /api/v1/finance-charges/assess          keyable-finance-charges
+GET     /api/v1/finance-charges                 idempotent

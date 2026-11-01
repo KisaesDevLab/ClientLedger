@@ -35,7 +35,10 @@ use sha2::{Digest, Sha256};
 /// Since pin eaa12bad (engine PRs #205-#208) the P21 payment routes are:
 /// preview, list, get, edit, void, apply, bounce, deposits on hand and
 /// customer refunds (U-132 to U-136).
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// The P22 rows are client-declared until the D8 pin bump: the P22 plan
+/// §2.2-§2.7 contract (credit memos, sales receipts, refund get, customer
+/// statements and runs, finance charges and open credits).
+pub const OUTSIDE_SPEC: [(&str, &str); 31] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -45,6 +48,30 @@ pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    // P22 (engine U-137 to U-143, U-112; until the D8 pin bump).
+    ("GET", "/api/v1/payments/credits"),
+    ("POST", "/api/v1/credit-memos/preview"),
+    ("POST", "/api/v1/credit-memos"),
+    ("GET", "/api/v1/credit-memos/{id}"),
+    ("PUT", "/api/v1/credit-memos/{id}"),
+    ("POST", "/api/v1/credit-memos/{id}/apply"),
+    ("POST", "/api/v1/credit-memos/{id}/unapply"),
+    ("POST", "/api/v1/sales-receipts/preview"),
+    ("POST", "/api/v1/sales-receipts"),
+    ("GET", "/api/v1/sales-receipts/{id}"),
+    ("PUT", "/api/v1/sales-receipts/{id}"),
+    ("GET", "/api/v1/customer-refunds/{id}"),
+    ("GET", "/api/v1/reports/customer-statement"),
+    ("GET", "/api/v1/reports/customer-statements"),
+    ("POST", "/api/v1/customer-statement-runs"),
+    ("GET", "/api/v1/customer-statements"),
+    ("GET", "/api/v1/customer-statements/{id}"),
+    ("POST", "/api/v1/customer-statements/{id}/sent"),
+    ("POST", "/api/v1/customer-statements/{id}/email"),
+    ("POST", "/api/v1/customer-statements/{id}/email-later"),
+    ("POST", "/api/v1/finance-charges/preview"),
+    ("POST", "/api/v1/finance-charges/assess"),
+    ("GET", "/api/v1/finance-charges"),
 ];
 
 /// Lowercase hex of a SHA-256.
@@ -263,6 +290,13 @@ pub fn keyable_check_print_operations(txt: &str) -> Vec<(String, String)> {
 /// `operations.txt`: `(METHOD, route)`, sorted.
 pub fn keyable_invoice_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-invoice")
+}
+
+/// The rows of `operations.txt` in retry class `class`, sorted (the P22
+/// key sets: `keyable-credit-memo`, `keyable-customer-statements`,
+/// `keyable-finance-charges`).
+pub fn keyable_class_operations(txt: &str, class: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, class)
 }
 
 /// The `keyable-receive-payment` (`idempotency-receive-payment-v1`) rows of

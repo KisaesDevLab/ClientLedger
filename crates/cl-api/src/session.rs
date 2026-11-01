@@ -142,6 +142,13 @@ impl Client {
             info.capabilities
                 .has(Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT),
         );
+        self.exec().set_p22_key_sets(
+            info.capabilities.has(Capabilities::IDEMPOTENCY_CREDIT_MEMO),
+            info.capabilities
+                .has(Capabilities::IDEMPOTENCY_CUSTOMER_STATEMENTS),
+            info.capabilities
+                .has(Capabilities::IDEMPOTENCY_FINANCE_CHARGES),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

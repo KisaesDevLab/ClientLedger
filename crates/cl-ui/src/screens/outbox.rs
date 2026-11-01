@@ -257,7 +257,12 @@ impl OutboxScreen {
             self.refresh();
             return;
         };
-        let id = item.transaction_id;
+        // Statement rows (P22, U-140) are sent by the Statements screen's
+        // own path (D6); Send all leaves them queued until then.
+        let Some(id) = item.transaction_id else {
+            self.next();
+            return;
+        };
         let job = engine::read(
             &self.link,
             self.group.as_ref(),
@@ -282,7 +287,10 @@ impl OutboxScreen {
             self.books.layout_of(r),
         );
         let msg = item.message();
-        let (id, outbox_id) = (item.transaction_id, item.id);
+        let Some(id) = item.transaction_id else {
+            return;
+        };
+        let outbox_id = item.id;
         // The same message tried again keeps its key (Q-P20 plan §5).
         let key = self.keys.entry(outbox_id).or_default().clone();
         let (demo_data, demo_style, m2) = (data.clone(), style.clone(), msg.clone());

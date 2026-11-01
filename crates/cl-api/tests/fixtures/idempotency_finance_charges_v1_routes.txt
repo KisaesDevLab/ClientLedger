@@ -1,0 +1,7 @@
+# The engine's `idempotency-finance-charges-v1` route set (U-141, P22 plan
+# §2.7): finance-charge assess, `x-idempotency: true` in its openapi.json.
+# Client-declared until the pin has it. Append-only for this capability
+# name: `keyable-finance-charges` in operations.txt
+# (`KeySet::FinanceChargesV1`), keyed only while the engine advertises
+# `idempotency-finance-charges-v1`.
+POST /api/v1/finance-charges/assess

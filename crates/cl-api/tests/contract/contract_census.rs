@@ -441,6 +441,14 @@ pub fn field_census(h: &Harness) {
                 "nsfBankFeeAccountId",
                 "nsfFeeIncomeAccountId",
                 "nsfCustomerFee",
+                // P22 (U-141, Q-P22a): the finance-charge settings arrive
+                // with E5; required once the D8 pin carries them.
+                "financeChargeAnnualRate",
+                "financeChargeMinimum",
+                "financeChargeGraceDays",
+                "financeChargeOnFinanceCharges",
+                "financeChargeIncomeAccountId",
+                "financeChargePrintLater",
             ],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],

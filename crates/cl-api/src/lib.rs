@@ -98,9 +98,9 @@ pub use resources::register::{
     RegisterSummary,
 };
 pub use resources::reports::{
-    AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, BalanceSheet,
-    BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary, ProfitLoss, ReportDate, Reports,
-    TrialBalance, TrialBalanceRow, VendorStatementBalances,
+    AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, ArAgingCustomer,
+    ArAgingSummary, BalanceSheet, BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary,
+    ProfitLoss, ReportDate, Reports, TrialBalance, TrialBalanceRow, VendorStatementBalances,
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
 pub use resources::session_secrets::{
@@ -277,6 +277,38 @@ pub use resources::customer_payments::{
     SaveApplication, SaveCredit, Shortfall, cents_wire, check_payment, check_preview,
     payment_refusal, payment_refusal_codes, saved_payment,
 };
+// P22: credit memos, sales receipts, refunds, statements, finance charges
+// (engine U-112, U-137 to U-143).
+pub use resources::credit_memos::{
+    CreditKind, CreditMemoApplication, CreditMemoAppliedRow, CreditMemoPreview, CreditMemoRecord,
+    CreditMemoRefundRow, CreditMemos, CreditOpenInvoice, CreditRefusal, CreditWriteOptions,
+    NewCreditMemo, OpenCredit, SALES_DOC_MEMO_MAX, SALES_DOC_NUMBER_MAX, SalesDocLine,
+    SalesDocStatus, SuggestedApplication, check_credit_memo, credit_refusal, credit_refusal_codes,
+    saved_credit_memo,
+};
+pub use resources::customer_refunds::{
+    CustomerRefunds, NewRefund, RefundCheck, RefundMethod, RefundPrintStatus, RefundRecord,
+    RefundRefusal, RefundSource, RefundSourceRef, refund_refusal, refund_refusal_codes,
+};
+pub use resources::customer_statements::{
+    AgingBuckets, CustomerStatement, CustomerStatementId, CustomerStatements, IssuedStatement,
+    IssuedStatementRecord, LastStatement, MAX_RUN_CONTACTS, NewStatementRun, RUN_CHUNK,
+    StatementAging, StatementContact, StatementFormat, StatementHistoryRow, StatementLine,
+    StatementListQuery, StatementListRow, StatementQuery, StatementRefusal, StatementRun,
+    StatementRunId, check_run, statement_pdf_name, statement_refusal, statement_refusal_codes,
+};
+pub use resources::finance_charges::{
+    AlreadyAssessed, AnnualRate, AssessContact, AssessRequest, AssessResult, AssessedInvoice,
+    Assessment, FinanceChargeAssessmentId, FinanceChargePreview, FinanceChargeProblem,
+    FinanceChargeRefusal, FinanceChargeRow, FinanceChargeRunId, FinanceChargeSettings,
+    FinanceChargeSettingsUpdate, FinanceChargeSkip, FinanceChargeSource, FinanceChargeTotals,
+    FinanceCharges, GRACE_DAYS_MAX, MAX_ASSESS_CONTACTS, check_assess, finance_charge_refusal,
+    finance_charge_refusal_codes,
+};
+pub use resources::sales_receipts::{
+    NewSalesReceipt, PaymentMethod, SalesReceiptPreview, SalesReceiptRecord, SalesReceipts,
+    check_sales_receipt, saved_sales_receipt,
+};
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{
     InvoiceLayout, InvoiceLayouts, LAYOUT_NAME_MAX, LayoutColumns, LayoutDraft, ResolvedFooters,
@@ -287,10 +319,10 @@ pub use resources::invoices::{
     INVOICE_TERMS_DAYS_MAX, INVOICE_TEXT_MAX, INVOICE_VOID_CODE, InvoiceBillableCost,
     InvoiceLayoutId, InvoiceListQuery, InvoicePreview, InvoiceRecord, InvoiceRecordLine,
     InvoiceRefusal, InvoiceStatus, InvoiceSummary, InvoiceWriteOptions, Invoices, ItemPrice,
-    OutboxId, OutboxItem, PO_NUMBER_MAX, PRICE_LEVEL_NAME_MAX, PreviewLine, PreviewLineError,
-    PriceLevel, PriceLevelDraft, PriceLevelId, PriceLevels, PriceSource, SMTP_NOT_CONFIGURED,
-    SMTP_SEND_FAILED, SavedInvoice, SendEvent, SendMethod, SendRecord, SignedPercent,
-    check_invoice, invoice_pdf_name, invoice_refusal,
+    OutboxId, OutboxItem, OutboxKind, PO_NUMBER_MAX, PRICE_LEVEL_NAME_MAX, PreviewLine,
+    PreviewLineError, PriceLevel, PriceLevelDraft, PriceLevelId, PriceLevels, PriceSource,
+    SMTP_NOT_CONFIGURED, SMTP_SEND_FAILED, SavedInvoice, SendEvent, SendMethod, SendRecord,
+    SignedPercent, check_invoice, invoice_pdf_name, invoice_refusal,
 };
 pub use resources::sales::LayoutChoice;
 pub use resources::sales::MAX_LINES as INVOICE_MAX_LINES;

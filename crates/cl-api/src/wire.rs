@@ -359,6 +359,37 @@ impl Capabilities {
     /// U-136: a customer payment matched to a bank-file deposit as it is
     /// received (`bankFeedItemId`).
     pub const FEED_CUSTOMER_PAYMENTS: &'static str = "feed-customer-payments-v1";
+    /// U-137: a credit memo is an A/R credit source (apply, unapply,
+    /// `GET /payments/credits`; P22 plan §2.2). Contract per the P22 plan;
+    /// verify at the pin bump (D8).
+    pub const CREDIT_MEMO_APPLY: &'static str = "credit-memo-apply-v1";
+    /// U-137: `Idempotency-Key` on credit memo create, edit, apply and
+    /// unapply, and (a desktop-side assumption, P22 D1) sales receipt
+    /// create and edit.
+    pub const IDEMPOTENCY_CREDIT_MEMO: &'static str = "idempotency-credit-memo-v1";
+    /// U-142: exact A/R open items as of a date.
+    pub const AR_OPEN_ITEMS_ASOF: &'static str = "ar-open-items-asof-v1";
+    /// U-142: the A/R aging summary's exact string fields and per-client
+    /// rows (Q-P22o).
+    pub const AR_AGING_EXACT: &'static str = "ar-aging-exact-v1";
+    /// U-138: credit memo lines with items and tax, preview and edit.
+    pub const CREDIT_MEMO_EDIT: &'static str = "credit-memo-edit-v1";
+    /// U-143: sales receipt lines with items and tax, preview and edit.
+    pub const SALES_RECEIPT_LINES: &'static str = "sales-receipt-lines-v1";
+    /// U-139: refunds of a credit memo's credit.
+    pub const REFUND_CREDIT_MEMO: &'static str = "refund-credit-memo-v1";
+    /// U-139: refunds paid by check (`printLater`, `checkNumber`).
+    pub const REFUND_CHECKS: &'static str = "refund-checks-v1";
+    /// U-112: customer statements (three formats).
+    pub const CUSTOMER_STATEMENT: &'static str = "customer-statement-v1";
+    /// U-140: statement runs, snapshots, send history and email.
+    pub const CUSTOMER_STATEMENT_SEND: &'static str = "customer-statement-send-v1";
+    /// U-140: `Idempotency-Key` on statement runs and statement email.
+    pub const IDEMPOTENCY_CUSTOMER_STATEMENTS: &'static str = "idempotency-customer-statements-v1";
+    /// U-141: finance-charge settings, preview, assess and list.
+    pub const FINANCE_CHARGES: &'static str = "finance-charges-v1";
+    /// U-141: `Idempotency-Key` on finance-charge assess.
+    pub const IDEMPOTENCY_FINANCE_CHARGES: &'static str = "idempotency-finance-charges-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
