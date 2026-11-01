@@ -174,6 +174,7 @@ pub fn type_key(t: TxnType, class: AccountClass, debit: bool) -> &'static str {
         TxnType::VendorCredit => "register.type.vendor_credit",
         TxnType::BillPayment => "register.type.bill_payment",
         TxnType::DailySales => "register.type.daily_sales",
+        TxnType::ReturnedPayment => "register.type.returned_payment",
     }
 }
 

@@ -46,6 +46,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::CheckPrintV1) => "keyable-check-print",
             RetryClass::Keyable(KeySet::InvoiceV1) => "keyable-invoice",
             RetryClass::Keyable(KeySet::InvoiceEmailV1) => "keyable-invoice-email",
+            RetryClass::Keyable(KeySet::ReceivePaymentV1) => "keyable-receive-payment",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -93,6 +94,9 @@ pub enum KeySet {
     /// `invoice-email-v1` (U-127): invoice email and email-later, keyed
     /// with `idempotency-v1`'s contract under their own capability.
     InvoiceEmailV1,
+    /// `idempotency-receive-payment-v1` (U-132, P21): payment receive,
+    /// edit, void, unapply, apply and bounce.
+    ReceivePaymentV1,
 }
 
 impl KeySet {
@@ -108,6 +112,7 @@ impl KeySet {
             KeySet::CheckPrintV1 => crate::wire::Capabilities::IDEMPOTENCY_CHECK_PRINT,
             KeySet::InvoiceV1 => crate::wire::Capabilities::IDEMPOTENCY_INVOICE,
             KeySet::InvoiceEmailV1 => crate::wire::Capabilities::INVOICE_EMAIL,
+            KeySet::ReceivePaymentV1 => crate::wire::Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT,
         }
     }
 }
@@ -314,6 +319,19 @@ const fn keyable_invoice(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::InvoiceV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-receive-payment-v1` route set
+/// (U-132): keyed only while the engine advertises that capability.
+const fn keyable_receive_payment(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::ReceivePaymentV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -1009,6 +1027,43 @@ pub(crate) const PRICE_LEVEL_PUT: Operation = write(Method::Put, "/api/v1/price-
 /// Deletes a price level (contract, verify with E2).
 pub(crate) const PRICE_LEVEL_DELETE: Operation = write(Method::Delete, "/api/v1/price-levels/{id}");
 
+// ---- P21 Receive Payment (engine U-132 to U-136) ----------------------------
+
+/// Every figure of a customer payment, posting nothing (U-132; contract per
+/// the P21 plan §2.2, verify at the pin bump).
+pub(crate) const PAYMENT_PREVIEW: Operation = write(Method::Post, "/api/v1/payments/preview");
+/// Receives a customer payment (U-132: one transaction, exact amounts).
+pub(crate) const PAYMENT_RECEIVE: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/payments/receive");
+/// Customer payments by client and date (contract, verify at the pin bump).
+pub(crate) const PAYMENTS_LIST: Operation = read("/api/v1/payments");
+/// One customer payment with its applications (contract).
+pub(crate) const PAYMENT_GET: Operation = read("/api/v1/payments/{id}");
+/// Edits a customer payment (Q-P21o; contract).
+pub(crate) const PAYMENT_PUT: Operation =
+    keyable_receive_payment(Method::Put, "/api/v1/payments/{id}");
+/// Voids a customer payment and reopens its invoices (contract).
+pub(crate) const PAYMENT_VOID: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/payments/{id}/void");
+/// Takes one invoice off a payment.
+pub(crate) const PAYMENT_UNAPPLY: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/payments/unapply");
+/// Applies a credit or a held deposit to invoices (U-133, U-135; contract).
+pub(crate) const PAYMENT_APPLY: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/payments/{id}/apply");
+/// Records a bounced check (U-132; contract).
+pub(crate) const PAYMENT_BOUNCE: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/payments/{id}/bounce");
+/// A client's open invoices.
+pub(crate) const PAYMENT_OPEN_INVOICES: Operation =
+    read("/api/v1/payments/open-invoices/{customerId}");
+/// A client's held deposits with what is left of each (U-135; contract).
+pub(crate) const PAYMENT_DEPOSITS_ON_HAND: Operation = read("/api/v1/payments/deposits-on-hand");
+/// Refunds a client's credit or held deposit (U-133: the canonical
+/// `customer_refund` route, Receive Payment permission; contract).
+pub(crate) const CUSTOMER_REFUND_CREATE: Operation =
+    keyable_receive_payment(Method::Post, "/api/v1/customer-refunds");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -1021,7 +1076,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 240] = [
+pub const OPERATIONS: [Operation; 252] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1275,6 +1330,19 @@ pub const OPERATIONS: [Operation; 240] = [
     INVOICE_LAYOUT_GET,
     INVOICE_LAYOUT_PUT,
     INVOICE_LAYOUT_DEFAULT,
+    // P21
+    PAYMENT_PREVIEW,
+    PAYMENT_RECEIVE,
+    PAYMENTS_LIST,
+    PAYMENT_GET,
+    PAYMENT_PUT,
+    PAYMENT_VOID,
+    PAYMENT_UNAPPLY,
+    PAYMENT_APPLY,
+    PAYMENT_BOUNCE,
+    PAYMENT_OPEN_INVOICES,
+    PAYMENT_DEPOSITS_ON_HAND,
+    CUSTOMER_REFUND_CREATE,
 ];
 
 /// Looks up a covered operation.
@@ -1367,6 +1435,8 @@ mod tests {
                 Some(KeySet::InvoiceV1)
             } else if KEYABLE_INVOICE_EMAIL.contains(&route) {
                 Some(KeySet::InvoiceEmailV1)
+            } else if KEYABLE_RECEIVE_PAYMENT.contains(&route) {
+                Some(KeySet::ReceivePaymentV1)
             } else {
                 None
             };
@@ -1395,7 +1465,8 @@ mod tests {
                 + KEYABLE_PAY_BILLS.len()
                 + KEYABLE_CHECK_PRINT.len()
                 + KEYABLE_INVOICE.len()
-                + KEYABLE_INVOICE_EMAIL.len(),
+                + KEYABLE_INVOICE_EMAIL.len()
+                + KEYABLE_RECEIVE_PAYMENT.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1477,6 +1548,18 @@ mod tests {
         ("POST", "/api/v1/invoices/{id}/email-later"),
     ];
 
+    /// The engine's `idempotency-receive-payment-v1` keyed set (U-132), as
+    /// `tests/fixtures/idempotency_receive_payment_v1_routes.txt` records it.
+    const KEYABLE_RECEIVE_PAYMENT: [(&str, &str); 7] = [
+        ("POST", "/api/v1/payments/receive"),
+        ("POST", "/api/v1/customer-refunds"),
+        ("PUT", "/api/v1/payments/{id}"),
+        ("POST", "/api/v1/payments/{id}/void"),
+        ("POST", "/api/v1/payments/unapply"),
+        ("POST", "/api/v1/payments/{id}/apply"),
+        ("POST", "/api/v1/payments/{id}/bounce"),
+    ];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
@@ -1532,6 +1615,16 @@ mod tests {
         assert_eq!(INVOICE_EMAIL.key_set(), Some(KeySet::InvoiceEmailV1));
         assert_eq!(INVOICE_EMAIL_LATER.key_set(), Some(KeySet::InvoiceEmailV1));
         assert_eq!(EMAIL_QUEUE_DELETE.key_set(), None);
+        assert_eq!(
+            KeySet::ReceivePaymentV1.capability(),
+            "idempotency-receive-payment-v1"
+        );
+        assert_eq!(
+            RetryClass::Keyable(KeySet::ReceivePaymentV1).as_str(),
+            "keyable-receive-payment"
+        );
+        assert_eq!(PAYMENT_BOUNCE.key_set(), Some(KeySet::ReceivePaymentV1));
+        assert_eq!(PAYMENT_PREVIEW.key_set(), None);
     }
 
     /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
@@ -1548,6 +1641,7 @@ mod tests {
             KeySet::CheckPrintV1,
             KeySet::InvoiceV1,
             KeySet::InvoiceEmailV1,
+            KeySet::ReceivePaymentV1,
         ] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),

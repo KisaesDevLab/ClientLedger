@@ -1081,6 +1081,16 @@ impl CenterScreen {
             if b(ui, "center.merge", "list.merge").clicked() {
                 self.open_merge();
             }
+            // P21: Receive Payment from the selected client.
+            if self.role == Role::Client
+                && let Some(c) = self.selected()
+                && b(ui, "center.receive_payment", "clients.receive_payment").clicked()
+            {
+                self.link.push(crate::company::CompanyEvent::OpenWith(
+                    cl_model::CommandId::new("clients.receive_payment"),
+                    Box::new(crate::windows::OpenPayload::ReceiveFrom(c)),
+                ));
+            }
             ui.separator();
             let find_key = match self.role {
                 Role::Client => "center.find_client",
@@ -1394,7 +1404,18 @@ impl CenterScreen {
         let env = self
             .parts
             .env(&NoLookups, &label, GridHeight::Rows { min: 3, max: 14 });
-        d.grid.show(ui, ModelRef::Browse(&mut d.model), &env);
+        let out = d.grid.show(ui, ModelRef::Browse(&mut d.model), &env);
+        for e in out.events {
+            if let GridEvent::Activate { key } = e
+                && let Some(r) = d.model.row_at(key)
+                && let Some(kind) = self::model::history_form(r.txn_type)
+            {
+                self.link.push(crate::company::CompanyEvent::OpenRecord(
+                    cl_model::CommandId::new(kind),
+                    r.id,
+                ));
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(t_with(

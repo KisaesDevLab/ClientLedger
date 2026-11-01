@@ -372,7 +372,37 @@ impl InvoiceScreen {
         self.engine_refusal(e);
     }
 
-    fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
+    /// Applies held deposit `source` to the open invoice, dated today; on
+    /// or before the closing date the password is asked first.
+    pub(crate) fn apply_deposit(&mut self, source: TransactionId, password: Option<Secret>) {
+        let Some(invoice) = self.editing.as_ref().filter(|e| !e.void()).map(|e| e.id) else {
+            return;
+        };
+        let closing = self.books.closing;
+        if password.is_none() && needs_password(None, self.today, closing) {
+            let supported = self.closing_supported();
+            let pending = Pending::ApplyDeposit(source);
+            let verb = pending.verb();
+            if supported {
+                self.closing_prompt.ask(pending, supported, closing);
+                self.closing_prompt.set_verb(verb);
+            } else {
+                self.closing_prompt.unavailable(supported, closing);
+            }
+            return;
+        }
+        let today = self.today;
+        self.deposit_card.send(
+            &self.link,
+            self.group.as_ref(),
+            source,
+            invoice,
+            today,
+            password,
+        );
+    }
+
+    pub(crate) fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let supported = self.closing_supported();
         let closing = self.books.closing;
         let verb = pending.verb();
@@ -464,6 +494,12 @@ impl InvoiceScreen {
             Pending::Void(reason) => {
                 self.void_reason = reason;
                 self.send_void(Some(secret));
+            }
+            Pending::ApplyDeposit(source) => {
+                self.apply_deposit(source, Some(secret));
+                if !self.deposit_card.busy() && self.closing_prompt.dialog_open() {
+                    self.closing_prompt.nothing_sent();
+                }
             }
         }
     }

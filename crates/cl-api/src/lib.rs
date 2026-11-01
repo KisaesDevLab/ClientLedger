@@ -77,7 +77,7 @@ pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
     ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
-    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles,
+    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles, ReceivablesSettingsUpdate,
 };
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
@@ -263,6 +263,19 @@ pub use resources::document_assist::{
     ASSIST_MAX_TEXT_CHARS, AssistLine, AssistReader, AssistRequest, AssistSuggestion,
     CLOUD_VISION_DISABLED, CONSENT_REQUIRED, is_png, png_dimensions, png_fits,
     suggestion_from_json,
+};
+// P21: Receive Payment (engine U-132 to U-136).
+pub use cl_core::BalanceToken;
+pub use resources::customer_payments::{
+    AmountSource, ApplicationRequest, AppliedAmount, ApplyInvoice, ApplyRequest, ApplyResult,
+    BounceRef, BounceRequest, BounceResult, CreditRequest, CreditSource, CustomerPayments,
+    DepositOnHand, DepositedIn, HeldIn, HeldKind, MAX_APPLICATIONS, NewCustomerPayment,
+    NewCustomerRefund, OpenInvoiceRow, PAYMENT_MEMO_MAX, PAYMENT_REF_MAX, PaymentApplication,
+    PaymentListQuery, PaymentPreview, PaymentPreviewRequest, PaymentRecord, PaymentRefusal,
+    PaymentStatus, PaymentSummary, PaymentTotals, PaymentWriteOptions, PendingAfter,
+    PreviewCreditUse, PreviewInvoice, PreviewProblem, RecordCreditUse, ReopenedInvoice,
+    SaveApplication, SaveCredit, Shortfall, cents_wire, check_payment, check_preview,
+    payment_refusal, payment_refusal_codes, saved_payment,
 };
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{

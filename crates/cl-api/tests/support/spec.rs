@@ -32,6 +32,9 @@ use sha2::{Digest, Sha256};
 /// Since pin c7b7d61d (engine PRs #197-#202) the P20 invoice routes are:
 /// sent (U-126), preview (U-129), price levels (U-40), billable costs
 /// (U-128), email and the Outbox (U-127) and invoice layouts (U-130).
+/// Since pin eaa12bad (engine PRs #205-#208) the P21 payment routes are:
+/// preview, list, get, edit, void, apply, bounce, deposits on hand and
+/// customer refunds (U-132 to U-136).
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
@@ -260,6 +263,12 @@ pub fn keyable_check_print_operations(txt: &str) -> Vec<(String, String)> {
 /// `operations.txt`: `(METHOD, route)`, sorted.
 pub fn keyable_invoice_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-invoice")
+}
+
+/// The `keyable-receive-payment` (`idempotency-receive-payment-v1`) rows of
+/// `operations.txt`, sorted.
+pub fn keyable_receive_payment_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-receive-payment")
 }
 
 /// The `keyable-invoice-email` (`invoice-email-v1`) rows of

@@ -13,9 +13,11 @@
 # document-drafts-attach-v1 route set (U-95); keyable-pay-bills = the same for
 # the idempotency-pay-bills-v1 route set (U-102); keyable-check-print = the same
 # for the idempotency-check-print-v1 route set (U-116); keyable-invoice = the
-# same for the idempotency-invoice-v1 route set (U-124). Only keyable,
+# same for the idempotency-invoice-v1 route set (U-124); keyable-receive-payment
+# = the same for the idempotency-receive-payment-v1 route set (U-132). Only keyable,
 # keyable-ap, keyable-docs, keyable-docs-attach, keyable-pay-bills,
-# keyable-check-print and keyable-invoice routes are upgraded;
+# keyable-check-print, keyable-invoice and keyable-receive-payment routes are
+# upgraded;
 # never = auth and company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
@@ -308,3 +310,15 @@ POST    /api/v1/company/invoice-layouts         pre-handler-only
 GET     /api/v1/company/invoice-layouts/{id}    idempotent
 PUT     /api/v1/company/invoice-layouts/{id}    pre-handler-only
 POST    /api/v1/company/invoice-layouts/{id}/default pre-handler-only
+POST    /api/v1/payments/preview                pre-handler-only
+POST    /api/v1/payments/receive                keyable-receive-payment
+GET     /api/v1/payments                        idempotent
+GET     /api/v1/payments/{id}                   idempotent
+PUT     /api/v1/payments/{id}                   keyable-receive-payment
+POST    /api/v1/payments/{id}/void              keyable-receive-payment
+POST    /api/v1/payments/unapply                keyable-receive-payment
+POST    /api/v1/payments/{id}/apply             keyable-receive-payment
+POST    /api/v1/payments/{id}/bounce            keyable-receive-payment
+GET     /api/v1/payments/open-invoices/{customerId} idempotent
+GET     /api/v1/payments/deposits-on-hand       idempotent
+POST    /api/v1/customer-refunds                keyable-receive-payment

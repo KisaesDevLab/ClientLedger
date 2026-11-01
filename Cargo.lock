@@ -992,6 +992,7 @@ dependencies = [
  "hmac",
  "image",
  "pdfium-render",
+ "proptest",
  "rfd",
  "rust_decimal",
  "serde",

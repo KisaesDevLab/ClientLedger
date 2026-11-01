@@ -1,0 +1,329 @@
+{
+  "description": "Customer payment money rules (P21, U-132 to U-135) shared by the engine (packages/api/src/services/payment-compute.ts, packages/shared/fixtures/payment-golden.json) and the ClientLedger client (fixtures/payments/golden.json, byte-identical; the --demo engine runs every case). Synthetic. Every amount is a 2-place decimal string (whole cents, Q-P21t); invoices are keyed by number; accounts by role. Each case starts from an empty company with one client and the invoices listed; steps run in order. Keys marked engineOnly are not checked by the demo engine (its Payments Clearing also holds the sample company's payments).",
+  "rules": {
+    "amounts": "Every amount sent in is a decimal string with at most 2 places; more is 400 VALIDATION_ERROR. Overapply checks are exact: cash + discount + write-off on an invoice is at most its cent balance, no tolerance (Q-P21g).",
+    "auto": "No applications sent: the amount fills open invoices oldest first (txnDate, then number, then id), each up to its balance; what is left is unapplied (a client credit).",
+    "explicit": "Applications sent: rows not sent get 0.00; a row with amount null takes what is left of the amount, up to its balance, in date order; with no amount typed, null rows take their full balance and the amount is their sum (amountSource from_applications).",
+    "discount": "discountAvailable = round2(total x percent / 100), half away from zero, capped at the cent balance, on or before discountDate (invoice date + discountDays); 0.00 after it or once a discount was taken. suggestDiscount: within the window and the row's payment is exactly the balance less discountAvailable (Q-P21c).",
+    "shortfall": "A row paid more than 0.00 but less than its balance (cash + discount + write-off) is a shortfall of the rest; withinWriteOffLimit when the shortfall is at most the company's writeOffThreshold (false when none is set).",
+    "balances": "contactBalanceAfter = before - amount - discounts - write-offs - deposit draws. Credits applied don't change it (already in A/R); a held deposit leaves it as before.",
+    "bounce": "One dated returned_payment (Bounced payment): Cr the account holding the money (the deposit's bank, else depositTo, else Payments Clearing), Dr A/R amount + discounts + write-offs, Cr the discount and write-off accounts; every live application restored and marked reversed; remaining credit 0. A held deposit with draws: Dr A/R drawn + Dr Customer Deposits the rest. The bank fee is an expense in the same step."
+  },
+  "cases": [
+    {
+      "id": 1,
+      "name": "mockup: 4,000.00 from Neosho Dental Group leaves 385.00 open on 1091",
+      "company": {"writeOffThreshold": "1.00"},
+      "invoices": [
+        {"number": "1091", "date": "2026-10-05", "dueDate": "2026-11-04", "total": "4385.00"},
+        {"number": "1095", "date": "2026-10-28", "dueDate": "2026-11-27", "total": "1260.00"}
+      ],
+      "otherPending": "6210.00",
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "4000.00"},
+          "expect": {
+            "amount": "4000.00", "amountSource": "typed",
+            "payments": {"1091": "4000.00", "1095": "0.00"},
+            "remaining": {"1091": "385.00", "1095": "1260.00"},
+            "totals": {"amountDue": "5645.00", "applied": "4000.00", "discountsAndCredits": "0.00", "unapplied": "0.00"},
+            "shortfalls": [{"invoice": "1091", "amount": "385.00", "withinWriteOffLimit": false}],
+            "contactBalanceBefore": "5645.00", "contactBalanceAfter": "1645.00",
+            "engineOnly": {"pendingDeposits": {"count": 2, "total": "10210.00"}}
+          }
+        },
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "4000.00", "depositTo": "undeposited_funds", "applications": [{"invoice": "1091", "amount": "4000.00"}]},
+          "expect": {
+            "lines": [{"account": "undeposited_funds", "debit": "4000.00"}, {"account": "accounts_receivable", "credit": "4000.00"}],
+            "invoices": {"1091": {"balanceDue": "385.00", "status": "partial"}, "1095": {"balanceDue": "1260.00", "status": "sent"}},
+            "contactBalance": "1645.00"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "write-off: 4,384.25 on 1091 leaves 0.75, under the 1.00 limit, written off",
+      "company": {"writeOffThreshold": "1.00"},
+      "invoices": [
+        {"number": "1091", "date": "2026-10-05", "dueDate": "2026-11-04", "total": "4385.00"},
+        {"number": "1095", "date": "2026-10-28", "dueDate": "2026-11-27", "total": "1260.00"}
+      ],
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "4384.25"},
+          "expect": {
+            "amount": "4384.25", "amountSource": "typed",
+            "payments": {"1091": "4384.25", "1095": "0.00"},
+            "totals": {"amountDue": "5645.00", "applied": "4384.25", "discountsAndCredits": "0.00", "unapplied": "0.00"},
+            "shortfalls": [{"invoice": "1091", "amount": "0.75", "withinWriteOffLimit": true}],
+            "contactBalanceBefore": "5645.00", "contactBalanceAfter": "1260.75"
+          }
+        },
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "4384.25", "depositTo": "undeposited_funds", "applications": [{"invoice": "1091", "amount": "4384.25", "writeOffAmount": "0.75"}]},
+          "expect": {
+            "lines": [{"account": "undeposited_funds", "debit": "4384.25"}, {"account": "write_off", "debit": "0.75"}, {"account": "accounts_receivable", "credit": "4385.00"}],
+            "invoices": {"1091": {"balanceDue": "0.00", "status": "paid"}},
+            "contactBalance": "1260.00"
+          }
+        },
+        {
+          "op": "void",
+          "expect": {"invoices": {"1091": {"balanceDue": "4385.00", "status": "sent"}}, "contactBalance": "5645.00"}
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "early discount: 2% 10 net 30, paid on day 8 with 980.00; the HALF_UP traps; no discount on day 11",
+      "company": {},
+      "invoices": [
+        {"number": "2001", "date": "2026-11-01", "dueDate": "2026-12-01", "total": "1000.00", "discountPercent": "2", "discountDays": 10},
+        {"number": "2002", "date": "2026-11-02", "dueDate": "2026-12-02", "total": "1234.57", "discountPercent": "2", "discountDays": 10},
+        {"number": "2003", "date": "2026-11-03", "dueDate": "2026-12-03", "total": "1234.75", "discountPercent": "2", "discountDays": 10}
+      ],
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-09", "amount": "980.00"},
+          "expect": {
+            "payments": {"2001": "980.00", "2002": "0.00", "2003": "0.00"},
+            "discountAvailable": {"2001": "20.00", "2002": "24.69", "2003": "24.70"},
+            "suggestDiscount": {"2001": true, "2002": false, "2003": false},
+            "shortfalls": [{"invoice": "2001", "amount": "20.00", "withinWriteOffLimit": false}]
+          }
+        },
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-12", "amount": "980.00"},
+          "expect": {
+            "discountAvailable": {"2001": "0.00", "2002": "24.69", "2003": "24.70"},
+            "suggestDiscount": {"2001": false, "2002": false, "2003": false}
+          }
+        },
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-09", "amount": "980.00", "depositTo": "undeposited_funds", "applications": [{"invoice": "2001", "amount": "980.00", "discountAmount": "20.00"}]},
+          "expect": {
+            "lines": [{"account": "undeposited_funds", "debit": "980.00"}, {"account": "sales_discount", "debit": "20.00"}, {"account": "accounts_receivable", "credit": "1000.00"}],
+            "invoices": {"2001": {"balanceDue": "0.00", "status": "paid"}},
+            "contactBalance": "2469.32"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "overpayment: 5,700.00 pays both, 55.00 stays a credit, later applied to a new 300.00 invoice",
+      "company": {},
+      "invoices": [
+        {"number": "1091", "date": "2026-10-05", "dueDate": "2026-11-04", "total": "4385.00"},
+        {"number": "1095", "date": "2026-10-28", "dueDate": "2026-11-27", "total": "1260.00"}
+      ],
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "5700.00"},
+          "expect": {
+            "payments": {"1091": "4385.00", "1095": "1260.00"},
+            "totals": {"amountDue": "5645.00", "applied": "5645.00", "discountsAndCredits": "0.00", "unapplied": "55.00"},
+            "overpayment": "55.00", "shortfalls": [],
+            "contactBalanceBefore": "5645.00", "contactBalanceAfter": "-55.00"
+          }
+        },
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "5700.00", "depositTo": "undeposited_funds", "applications": [{"invoice": "1091", "amount": "4385.00"}, {"invoice": "1095", "amount": "1260.00"}]},
+          "expect": {
+            "lines": [{"account": "undeposited_funds", "debit": "5700.00"}, {"account": "accounts_receivable", "credit": "5700.00"}],
+            "invoices": {"1091": {"balanceDue": "0.00", "status": "paid"}, "1095": {"balanceDue": "0.00", "status": "paid"}},
+            "contactBalance": "-55.00", "unappliedRemaining": "55.00"
+          }
+        },
+        {"op": "invoice", "invoice": {"number": "1102", "date": "2026-11-06", "dueDate": "2026-12-06", "total": "300.00"}},
+        {
+          "op": "apply",
+          "request": {"date": "2026-11-06", "applications": [{"invoice": "1102"}]},
+          "expect": {"applied": {"1102": "55.00"}, "remaining": "0.00", "lines": [], "invoices": {"1102": {"balanceDue": "245.00", "status": "partial"}}, "contactBalance": "245.00"}
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "explicit fill with no amount: tick 1095 only",
+      "company": {},
+      "invoices": [
+        {"number": "1091", "date": "2026-10-05", "dueDate": "2026-11-04", "total": "4385.00"},
+        {"number": "1095", "date": "2026-10-28", "dueDate": "2026-11-27", "total": "1260.00"}
+      ],
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "applications": [{"invoice": "1095", "amount": null}]},
+          "expect": {
+            "amount": "1260.00", "amountSource": "from_applications",
+            "payments": {"1091": "0.00", "1095": "1260.00"},
+            "totals": {"amountDue": "5645.00", "applied": "1260.00", "discountsAndCredits": "0.00", "unapplied": "0.00"},
+            "shortfalls": [], "contactBalanceAfter": "4385.00"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "customer deposit: 500.00 held, then applied to a 1,200.00 invoice",
+      "company": {},
+      "invoices": [],
+      "steps": [
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "500.00"},
+          "expect": {"holdAsDepositOffered": true, "totals": {"amountDue": "0.00", "applied": "0.00", "discountsAndCredits": "0.00", "unapplied": "500.00"}, "contactBalanceBefore": "0.00", "contactBalanceAfter": "-500.00"}
+        },
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "500.00", "holdAsDeposit": true},
+          "expect": {"holdAsDepositOffered": true, "contactBalanceAfter": "0.00"}
+        },
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "500.00", "depositTo": "undeposited_funds", "holdAsDeposit": true, "applications": []},
+          "expect": {"lines": [{"account": "undeposited_funds", "debit": "500.00"}, {"account": "customer_deposits", "credit": "500.00"}], "contactBalance": "0.00", "depositRemaining": "500.00", "customerDeposits": "500.00"}
+        },
+        {"op": "invoice", "invoice": {"number": "1110", "date": "2026-11-05", "dueDate": "2026-12-05", "total": "1200.00"}},
+        {
+          "op": "apply",
+          "request": {"date": "2026-11-05", "applications": [{"invoice": "1110"}]},
+          "expect": {"applied": {"1110": "500.00"}, "remaining": "0.00", "lines": [{"account": "customer_deposits", "debit": "500.00"}, {"account": "accounts_receivable", "credit": "500.00"}], "invoices": {"1110": {"balanceDue": "700.00", "status": "partial"}}, "contactBalance": "700.00", "customerDeposits": "0.00"}
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "bounce: case 1 deposited with the 6,210.00 payment to Operating, bounced on 11/12 with a 35.00 bank fee",
+      "company": {},
+      "invoices": [
+        {"number": "1091", "date": "2026-10-05", "dueDate": "2026-11-04", "total": "4385.00"},
+        {"number": "1095", "date": "2026-10-28", "dueDate": "2026-11-27", "total": "1260.00"}
+      ],
+      "otherPending": "6210.00",
+      "steps": [
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "4000.00", "depositTo": "undeposited_funds", "applications": [{"invoice": "1091", "amount": "4000.00"}]},
+          "expect": {"invoices": {"1091": {"balanceDue": "385.00", "status": "partial"}}, "contactBalance": "1645.00"}
+        },
+        {"op": "deposit", "date": "2026-11-05", "account": "operating", "payments": ["this", "other"], "expect": {"total": "10210.00"}},
+        {
+          "op": "bounce",
+          "request": {"date": "2026-11-12", "bankFeeAmount": "35.00"},
+          "expect": {
+            "heldIn": "operating",
+            "lines": [{"account": "operating", "credit": "4000.00"}, {"account": "accounts_receivable", "debit": "4000.00"}],
+            "feeLines": [{"account": "bank_fee", "debit": "35.00"}, {"account": "operating", "credit": "35.00"}],
+            "invoices": {"1091": {"balanceDue": "4385.00", "status": "sent"}},
+            "contactBalance": "5645.00", "operatingChange": "6175.00", "otherStillDeposited": true,
+            "unappliedRemaining": "0.00", "credits": 0
+          }
+        },
+        {"op": "bounceAgain", "request": {"date": "2026-11-13"}, "expect": {"error": "PAYMENT_BOUNCED"}},
+        {"op": "voidDeposit", "expect": {"error": "PAYMENT_BOUNCED"}}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "bounce with a discount and a write-off: both reversed exactly",
+      "company": {"writeOffThreshold": "1.00"},
+      "invoices": [
+        {"number": "2001", "date": "2026-11-01", "dueDate": "2026-12-01", "total": "1000.00", "discountPercent": "2", "discountDays": 10},
+        {"number": "2004", "date": "2026-11-02", "dueDate": "2026-12-02", "total": "250.00"}
+      ],
+      "steps": [
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-09", "amount": "1229.50", "depositTo": "undeposited_funds", "applications": [{"invoice": "2001", "amount": "980.00", "discountAmount": "20.00"}, {"invoice": "2004", "amount": "249.50", "writeOffAmount": "0.50"}]},
+          "expect": {
+            "lines": [{"account": "undeposited_funds", "debit": "1229.50"}, {"account": "sales_discount", "debit": "20.00"}, {"account": "write_off", "debit": "0.50"}, {"account": "accounts_receivable", "credit": "1250.00"}],
+            "invoices": {"2001": {"balanceDue": "0.00", "status": "paid"}, "2004": {"balanceDue": "0.00", "status": "paid"}},
+            "contactBalance": "0.00"
+          }
+        },
+        {
+          "op": "bounce",
+          "request": {"date": "2026-11-12"},
+          "expect": {
+            "heldIn": "undeposited_funds",
+            "lines": [{"account": "undeposited_funds", "credit": "1229.50"}, {"account": "accounts_receivable", "debit": "1250.00"}, {"account": "sales_discount", "credit": "20.00"}, {"account": "write_off", "credit": "0.50"}],
+            "invoices": {"2001": {"balanceDue": "1000.00", "status": "sent"}, "2004": {"balanceDue": "250.00", "status": "sent"}},
+            "contactBalance": "1250.00", "pendingIncludesPayment": false
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "exactness traps: 3 places refused, 0.01 over the balance refused, oldest first over 0.01 / 999,999.99 / 1.00",
+      "company": {},
+      "invoices": [
+        {"number": "3001", "date": "2026-10-01", "dueDate": "2026-10-31", "total": "0.01"},
+        {"number": "3002", "date": "2026-10-02", "dueDate": "2026-11-01", "total": "999999.99"},
+        {"number": "3003", "date": "2026-10-03", "dueDate": "2026-11-02", "total": "1.00"}
+      ],
+      "steps": [
+        {"op": "preview", "request": {"date": "2026-11-04", "amount": "10.005"}, "expect": {"error": "VALIDATION_ERROR"}},
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "1.01", "depositTo": "undeposited_funds", "applications": [{"invoice": "3003", "amount": "1.01"}]},
+          "expect": {"error": "OVERAPPLIED"}
+        },
+        {
+          "op": "preview",
+          "request": {"date": "2026-11-04", "amount": "1000000.50"},
+          "expect": {
+            "payments": {"3001": "0.01", "3002": "999999.99", "3003": "0.50"},
+            "totals": {"amountDue": "1000001.00", "applied": "1000000.50", "discountsAndCredits": "0.00", "unapplied": "0.00"},
+            "shortfalls": [{"invoice": "3003", "amount": "0.50", "withinWriteOffLimit": false}],
+            "contactBalanceAfter": "0.50"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "bounce of a held deposit with a draw: 500.00 held and deposited, 300.00 drawn to a 1,200.00 invoice",
+      "company": {},
+      "invoices": [
+        {"number": "1120", "date": "2026-11-02", "dueDate": "2026-12-02", "total": "1200.00"}
+      ],
+      "steps": [
+        {
+          "op": "receive",
+          "request": {"date": "2026-11-04", "amount": "500.00", "depositTo": "undeposited_funds", "holdAsDeposit": true, "applications": []},
+          "expect": {"customerDeposits": "500.00", "contactBalance": "1200.00"}
+        },
+        {"op": "deposit", "date": "2026-11-05", "account": "operating", "payments": ["this"], "expect": {"total": "500.00"}},
+        {
+          "op": "apply",
+          "request": {"date": "2026-11-06", "applications": [{"invoice": "1120", "amount": "300.00"}]},
+          "expect": {"applied": {"1120": "300.00"}, "remaining": "200.00", "invoices": {"1120": {"balanceDue": "900.00", "status": "partial"}}, "customerDeposits": "200.00"}
+        },
+        {
+          "op": "bounce",
+          "request": {"date": "2026-11-12"},
+          "expect": {
+            "heldIn": "operating",
+            "lines": [{"account": "operating", "credit": "500.00"}, {"account": "accounts_receivable", "debit": "300.00"}, {"account": "customer_deposits", "debit": "200.00"}],
+            "invoices": {"1120": {"balanceDue": "1200.00", "status": "sent"}},
+            "contactBalance": "1200.00", "customerDeposits": "0.00", "operatingChange": "0.00", "depositRemaining": "0.00"
+          }
+        }
+      ]
+    }
+  ]
+}

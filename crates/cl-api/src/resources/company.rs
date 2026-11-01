@@ -326,6 +326,125 @@ pub struct CompanySettings {
     /// `billable-costs-v1`, Q-P20b; an income account).
     #[serde(default)]
     pub billable_markup_account_id: Option<AccountId>,
+    /// Where early-payment discounts on customer payments post
+    /// (`salesDiscountAccountId`, U-134, Q-P21q).
+    #[serde(default)]
+    pub sales_discount_account_id: Option<AccountId>,
+    /// Where underpayments written off post (`writeOffAccountId`, U-133).
+    #[serde(default)]
+    pub write_off_account_id: Option<AccountId>,
+    /// Shortfalls up to this suggest the write-off (`writeOffThreshold`,
+    /// U-133, Q-P21h; `None`: never suggested).
+    #[serde(default, deserialize_with = "money_text_opt")]
+    pub write_off_threshold: Option<cl_core::Money>,
+    /// The expense account of a bounced check's bank fee
+    /// (`nsfBankFeeAccountId`, U-132).
+    #[serde(default)]
+    pub nsf_bank_fee_account_id: Option<AccountId>,
+    /// The income account of the bounced-check fee invoice
+    /// (`nsfFeeIncomeAccountId`, Q-P21p).
+    #[serde(default)]
+    pub nsf_fee_income_account_id: Option<AccountId>,
+    /// The client's bounced-check fee, blank until set
+    /// (`nsfCustomerFee`, Q-P21d).
+    #[serde(default, deserialize_with = "money_text_opt")]
+    pub nsf_customer_fee: Option<cl_core::Money>,
+}
+
+/// An optional money string (a JSON number is refused).
+fn money_text_opt<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<cl_core::Money>, D::Error> {
+    match Option::<String>::deserialize(d)? {
+        Some(s) => cl_core::Money::parse_wire(&s)
+            .map(Some)
+            .map_err(|_| serde::de::Error::custom("money")),
+        None => Ok(None),
+    }
+}
+
+/// The receivables settings Preferences › Sales writes (P21, Q-P21q): each
+/// `Some` field is sent, `Some(None)` clears it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReceivablesSettingsUpdate {
+    /// `salesDiscountAccountId` (needs `payment-discounts-v1`).
+    pub sales_discount_account_id: Option<Option<AccountId>>,
+    /// `writeOffAccountId` (needs `payment-settle-v1`).
+    pub write_off_account_id: Option<Option<AccountId>>,
+    /// `writeOffThreshold` (needs `payment-settle-v1`).
+    pub write_off_threshold: Option<Option<cl_core::Money>>,
+    /// `nsfBankFeeAccountId` (needs `payment-bounce-v1`).
+    pub nsf_bank_fee_account_id: Option<Option<AccountId>>,
+    /// `nsfFeeIncomeAccountId` (needs `payment-bounce-v1`).
+    pub nsf_fee_income_account_id: Option<Option<AccountId>>,
+    /// `nsfCustomerFee` (needs `payment-bounce-v1`).
+    pub nsf_customer_fee: Option<Option<cl_core::Money>>,
+}
+
+impl ReceivablesSettingsUpdate {
+    /// True when nothing would be sent.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == ReceivablesSettingsUpdate::default()
+    }
+
+    /// The body, or `Local(Unsupported)` for a field the engine does not
+    /// advertise (an older engine would drop it and answer success), or
+    /// `Local(InvalidValue)` for a negative amount or a fraction of a cent.
+    ///
+    /// # Errors
+    /// As above.
+    pub fn body(&self, caps: &Capabilities) -> Result<Value, ApiError> {
+        let mut m = serde_json::Map::new();
+        let need = |on: bool, cap: &str| -> Result<(), ApiError> {
+            if on && !caps.has(cap) {
+                return Err(ApiError::Local(LocalValidation::Unsupported));
+            }
+            Ok(())
+        };
+        need(
+            self.sales_discount_account_id.is_some(),
+            Capabilities::PAYMENT_DISCOUNTS,
+        )?;
+        need(
+            self.write_off_account_id.is_some() || self.write_off_threshold.is_some(),
+            Capabilities::PAYMENT_SETTLE,
+        )?;
+        need(
+            self.nsf_bank_fee_account_id.is_some()
+                || self.nsf_fee_income_account_id.is_some()
+                || self.nsf_customer_fee.is_some(),
+            Capabilities::PAYMENT_BOUNCE,
+        )?;
+        let account =
+            |a: Option<AccountId>| a.map_or(Value::Null, |a| Value::String(a.to_string()));
+        let money = |v: Option<cl_core::Money>| -> Result<Value, ApiError> {
+            match v {
+                None => Ok(Value::Null),
+                Some(v) if v.is_negative() => Err(ApiError::Local(LocalValidation::InvalidValue)),
+                Some(v) => crate::resources::customer_payments::cents_wire(v).map(Value::String),
+            }
+        };
+        if let Some(a) = self.sales_discount_account_id {
+            m.insert("salesDiscountAccountId".into(), account(a));
+        }
+        if let Some(a) = self.write_off_account_id {
+            m.insert("writeOffAccountId".into(), account(a));
+        }
+        if let Some(v) = self.write_off_threshold {
+            m.insert("writeOffThreshold".into(), money(v)?);
+        }
+        if let Some(a) = self.nsf_bank_fee_account_id {
+            m.insert("nsfBankFeeAccountId".into(), account(a));
+        }
+        if let Some(a) = self.nsf_fee_income_account_id {
+            m.insert("nsfFeeIncomeAccountId".into(), account(a));
+        }
+        if let Some(v) = self.nsf_customer_fee {
+            m.insert("nsfCustomerFee".into(), money(v)?);
+        }
+        Ok(Value::Object(m))
+    }
 }
 
 /// Accounting basis of the company (`accountingMethod`, Q-44).
@@ -563,6 +682,29 @@ impl Session {
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
+    }
+
+    /// Saves the receivables settings of Preferences › Sales (P21,
+    /// Q-P21q). Nothing is sent for an empty update.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` for a field the engine does not advertise
+    /// (nothing sent); `NoCompanyOpen`; `Validation` (an account the engine
+    /// refuses); any [`ApiError`].
+    pub async fn set_receivables_settings(
+        &self,
+        u: &ReceivablesSettingsUpdate,
+        key: IdempotencyKey,
+    ) -> Result<Option<CompanySettings>, ApiError> {
+        self.require_company()?;
+        if u.is_empty() {
+            return Ok(None);
+        }
+        let body = json_body(&u.body(&self.client().capabilities())?)?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply).map(Some)
     }
 
     /// The company's entity type and its equity role accounts (U-56).

@@ -431,7 +431,17 @@ pub fn field_census(h: &Harness) {
             // Read when the settings carry it; the engine's settings reply
             // does not (pin f78583e): the legal form comes from
             // `GET /company` and `GET /company/equity-roles`.
-            optional: &["entityType"],
+            // P21 (U-132 to U-134, Q-P21q): the receivables settings arrive
+            // with their engine rows; required once the D9 pin carries them.
+            optional: &[
+                "entityType",
+                "salesDiscountAccountId",
+                "writeOffAccountId",
+                "writeOffThreshold",
+                "nsfBankFeeAccountId",
+                "nsfFeeIncomeAccountId",
+                "nsfCustomerFee",
+            ],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],
     );

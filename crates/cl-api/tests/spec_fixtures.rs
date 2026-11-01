@@ -199,6 +199,24 @@ fn keyable_invoice_email_rows_are_the_recorded_set() {
     assert_eq!(typed_keyable(cl_api::KeySet::InvoiceEmailV1), email);
 }
 
+/// The `keyable-receive-payment` rows are the recorded
+/// `idempotency-receive-payment-v1` set (U-132, P21; client-declared until
+/// the pin has it) and the typed table agrees.
+#[test]
+fn keyable_receive_payment_rows_are_the_recorded_set() {
+    let pay = spec::route_lines(&fixture("idempotency_receive_payment_v1_routes.txt"));
+    assert_eq!(
+        pay.len(),
+        7,
+        "the idempotency-receive-payment-v1 set has 7 routes"
+    );
+    assert_eq!(
+        spec::keyable_receive_payment_operations(OPERATIONS_TXT),
+        pay
+    );
+    assert_eq!(typed_keyable(cl_api::KeySet::ReceivePaymentV1), pay);
+}
+
 #[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
     let (v1, ap, docs, attach, pay, print, invoice) = expected_keyable();
@@ -226,6 +244,7 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
             + print.len()
             + invoice.len()
             + spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt")).len()
+            + spec::route_lines(&fixture("idempotency_receive_payment_v1_routes.txt")).len()
     );
 }
 
@@ -303,8 +322,17 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
     let has_invoice = later_set(&marked, &invoice, "idempotency-invoice-v1", "U-124", &path);
     let email = spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt"));
     let has_email = later_set(&marked, &email, "invoice-email-v1", "U-127", &path);
+    let receive = spec::route_lines(&fixture("idempotency_receive_payment_v1_routes.txt"));
+    let has_receive = later_set(
+        &marked,
+        &receive,
+        "idempotency-receive-payment-v1",
+        "U-132",
+        &path,
+    );
     for (has, set) in [
         (has_email, &email),
+        (has_receive, &receive),
         (has_docs, &docs),
         (has_attach, &attach),
         (has_pay, &pay),

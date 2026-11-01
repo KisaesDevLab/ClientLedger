@@ -82,6 +82,10 @@ pub enum TxnType {
     DailySales,
     /// Adjusting entry (Trial Balance module; not editable here).
     Aje,
+    /// A bounced customer payment, "Bounced payment" (U-132,
+    /// `payment-bounce-v1`): dated the bounce date, Cr the account that
+    /// held the money, Dr A/R. Posted only by `POST /payments/:id/bounce`.
+    ReturnedPayment,
 }
 
 impl TxnType {

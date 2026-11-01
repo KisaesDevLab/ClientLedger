@@ -51,6 +51,10 @@ pub mod print_forms;
 pub mod invoice;
 pub mod outbox;
 
+// P21: Receive Payment and the bounced-check flow.
+pub mod bounced_check;
+pub mod receive_payment;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -90,6 +94,9 @@ pub(crate) const P19_SCREENS: [crate::shell::MakeScreen; 2] =
 
 /// Every P20 screen's `make` (the shell tries each after P19's).
 pub(crate) const P20_SCREENS: [crate::shell::MakeScreen; 2] = [invoice::make, outbox::make];
+
+/// Every P21 screen's `make` (the shell tries each after P20's).
+pub(crate) const P21_SCREENS: [crate::shell::MakeScreen; 1] = [receive_payment::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
@@ -220,6 +227,24 @@ mod tests {
             cl_model::commands::find("clients.sales_receipt").and_then(|c| c.arrives),
             Some("P22")
         );
+    }
+
+    #[test]
+    fn each_p21_screen_opens_its_own_kind_only() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        for (make, kind) in P21_SCREENS.iter().zip([receive_payment::KIND]) {
+            let cmd = cl_model::commands::find(kind).expect("a command");
+            assert!(cmd.opens && cmd.arrives.is_none(), "{kind} is built");
+            let s = make(cmd.id, &link, None, today).expect("its screen");
+            assert_eq!(s.title(), crate::i18n::t(&format!("cmd.{kind}")));
+            assert!(!s.state().is_null(), "{kind}");
+            let other = cl_model::commands::find("vendors.write_check")
+                .expect("write check")
+                .id;
+            assert!(make(other, &link, None, today).is_none(), "{kind}");
+        }
     }
 
     #[test]

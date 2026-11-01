@@ -1,0 +1,218 @@
+# Receive Payment (P21 AC1-AC3, AC5) against `clientledger --demo`: the
+# mockup's 4,000.00 from Neosho Dental Group on invoices 1091 (4,385.00)
+# and 1095 (1,260.00) leaves 385.00 open on 1091 and the client's balance
+# goes 5,645.00 -> 1,645.00 (every figure the engine preview's). Then
+# Un-apply all and Space, the save, a write-off under the 1.00 limit, an
+# overpayment kept as a credit, a customer deposit held for a client with
+# no open invoices and Create Invoice's "Deposit on hand" card, then the
+# credit applied on its own (nothing received, Q-P21b); the payments are
+# voided at the end (invoices open again) so --compare sees the mockup. One theme run: the dark screenshot of the same unsaved state
+# comes from window.theme (light -> dark -> automatic -> light). Synthetic.
+name: receive_payment
+description: Mockup 4,000.00 leaves 385.00 open; write-off; overpayment credit; customer deposit; credit applied alone; voids restore.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+R
+  - assert_exists: {role: tab, label_contains: "Receive Payment"}
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.figures, equals: none}
+  - assert_exists: {label: "Choose who paid."}
+  # --- The mockup: 4,000.00 from Neosho Dental Group ------------------------
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - assert_state: {key: screen.client, equals: true}
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "4000"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.rows.0.number, equals: "1091"}
+  - assert_state: {key: screen.rows.0.payment, equals: "4,000.00"}
+  - assert_state: {key: screen.rows.1.payment, equals: "0.00"}
+  - assert_state: {key: screen.amount_due, equals: "5,645.00"}
+  - assert_state: {key: screen.applied, equals: "4,000.00"}
+  - assert_state: {key: screen.unapplied, equals: "0.00"}
+  - assert_state: {key: screen.balance_before, equals: "5,645.00"}
+  - assert_state: {key: screen.balance_after, equals: "1,645.00"}
+  - assert_exists: {label: "Underpayment of 385.00 on invoice 1091"}
+  - assert_exists: {label: "Usually pays in 24 days"}
+  - assert_exists: {role: check_box, label: "Apply, invoice 1091"}
+  - screenshot: mockup
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: mockup-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  # --- Un-apply all (Alt+U) and Space on a row (no save) ---------------------
+  - key: Alt+U
+  - assert_state: {key: screen.explicit, equals: true}
+  - assert_state: {key: screen.applied, equals: "0.00"}
+  - focus: {role: check_box, label: "Apply, invoice 1095"}
+  - key: Space
+  - assert_state: {key: screen.rows.1.payment, equals: "1,260.00"}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.client, equals: false}
+  # --- Save & New: 1091 keeps 385.00 open -----------------------------------
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "4000"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  # The demo has two other payments waiting (2,092.50): a listed deviation
+  # from the mockup's 2 / 10,210.00.
+  - assert_state: {key: screen.next_step.count, equals: 3}
+  - assert_state: {key: screen.next_step.total, equals: "6,092.50"}
+  # --- Write-off: 384.25 leaves 0.75, under the 1.00 limit ------------------
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - assert_state: {key: screen.rows.0.due, equals: "385.00"}
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "384.25"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.within_limit, equals: true}
+  - assert_exists: {label_contains: "write-off limit"}
+  - click: {role: radio_button, label: Write off the rest}
+  - assert_state: {key: screen.write_off, equals: true}
+  - assert_state: {key: screen.figures, equals: ready}
+  - key: Alt+N
+  - assert_state: {key: screen.dialog, equals: write_off_account}
+  - click: {role: button, label_contains: "Bad Debts"}
+  - assert_enabled: {role: button, label: Save with this account}
+  - click: {role: button, label: Save with this account}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  # --- Overpayment: 1,300.00 on 1095 keeps 40.00 as a credit -----------------
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - assert_state: {key: screen.rows.0.number, equals: "1095"}
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "1300"}
+  - key: Tab
+  - assert_state: {key: screen.overpayment, equals: "40.00"}
+  - assert_exists: {role: radio_button, label_contains: "Keep 40.00 as a credit"}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 3}
+  # --- A customer deposit for a client with no open invoices ----------------
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Maple Street"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "500"}
+  - key: Tab
+  - assert_state: {key: screen.ask_deposit, equals: true}
+  - assert_exists: {label: "Hold as a customer deposit?"}
+  - key: Alt+N
+  - assert_state: {key: screen.problems.0, equals: AskDeposit}
+  - click: {role: radio_button, label: "Yes, hold it as a customer deposit"}
+  - assert_state: {key: screen.figures, equals: ready}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 4}
+  # Create Invoice offers the deposit (applied once the invoice is saved).
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Maple Street"}
+  - key: Tab
+  - assert_state: {key: screen.deposits_on_hand, equals: 1}
+  - assert_exists: {label: "Deposit on hand: 500.00"}
+  - assert_exists: {label: "Save the invoice to apply it."}
+  - screenshot: invoice-deposit
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  # --- Prev opens the saved payments; Void reopens their invoices ------------
+  - key: Ctrl+R
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.hold, equals: true}
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.notice, equals: payment.voided}
+  # Skip the overpayment for now; void the write-off (1091 owes 385.00).
+  - command: form.prev_record
+  - command: form.prev_record
+  - assert_state: {key: screen.write_off, equals: true}
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.notice, equals: payment.voided}
+  # --- Credits alone (Q-P21b): the 40.00 credit goes on 1091 -----------------
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "0"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.rows.0.due, equals: "385.00"}
+  - assert_state: {key: screen.credits, equals: 1}
+  - key: Alt+D
+  - assert_state: {key: screen.dialog, equals: credits}
+  - click: {role: button, label: Use}
+  - click: {role: button, label: Done}
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.discounts_and_credits, equals: "40.00"}
+  - assert_state: {key: screen.balance_after, equals: "345.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.credits_applied, equals: 1}
+  - assert_state: {key: screen.saved_count, equals: 4}
+  - assert_state: {key: screen.client, equals: false}
+  # --- Void the overpayment (its credit comes off 1091) and the mockup -------
+  - command: form.prev_record
+  - command: form.prev_record
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.notice, equals: payment.voided}
+  - command: form.prev_record
+  - command: form.prev_record
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void payment}
+  - assert_state: {key: screen.notice, equals: payment.voided}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.balance_before, equals: "5,645.00"}
+  - click: {role: button, label: Clear}
+  # --- Client Center: Receive Payment from the selected client ---------------
+  - command: clients.center
+  - assert_state: {key: screen.screen, equals: client_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: Neosho}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - click: {role: button, label: Receive Payment}
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - assert_state: {key: screen.client, equals: true}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.balance_before, equals: "5,645.00"}
+  - assert_state: {key: screen.rows.0.number, equals: "1091"}
+  - screenshot: from-client-center
+  - command: file.close_window
+  - command: file.close_window
+
+# `ui-check receive_payment --compare`: the mockup's unsaved state again.
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+R
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Received from}
+  - type: {text: "Neosho"}
+  - key: Tab
+  - click: {role: text_input, label: Payment amount ($)}
+  - type: {text: "4000"}
+  - key: Tab
+  - assert_state: {key: screen.figures, equals: ready}
+  - assert_state: {key: screen.balance_after, equals: "1,645.00"}

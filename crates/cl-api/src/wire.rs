@@ -341,6 +341,24 @@ impl Capabilities {
     /// U-127: email an invoice through the company SMTP and the Outbox.
     /// Contract per P20 plan §2; verify when E4 lands.
     pub const INVOICE_EMAIL: &'static str = "invoice-email-v1";
+    /// U-132: payment preview, receive, edit, void, list (P21 plan §2.2).
+    /// Contract per the P21 plan; verify at the pin bump (D9).
+    pub const RECEIVE_PAYMENT: &'static str = "receive-payment-v1";
+    /// U-132: `Idempotency-Key` on payment receive, edit, void, unapply,
+    /// apply and bounce.
+    pub const IDEMPOTENCY_RECEIVE_PAYMENT: &'static str = "idempotency-receive-payment-v1";
+    /// U-132: a bounced check as one dated "Bounced payment" entry.
+    pub const PAYMENT_BOUNCE: &'static str = "payment-bounce-v1";
+    /// U-133: write-offs, unapplied credits, applying a credit later and
+    /// refunds linked to a credit.
+    pub const PAYMENT_SETTLE: &'static str = "payment-settle-v1";
+    /// U-134: early-payment discounts on customer payments.
+    pub const PAYMENT_DISCOUNTS: &'static str = "payment-discounts-v1";
+    /// U-135: customer deposits held in a liability until applied.
+    pub const CUSTOMER_DEPOSITS: &'static str = "customer-deposits-v1";
+    /// U-136: a customer payment matched to a bank-file deposit as it is
+    /// received (`bankFeedItemId`).
+    pub const FEED_CUSTOMER_PAYMENTS: &'static str = "feed-customer-payments-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

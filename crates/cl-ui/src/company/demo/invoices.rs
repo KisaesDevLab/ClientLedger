@@ -909,6 +909,31 @@ pub fn all_caps() -> cl_api::Capabilities {
     .collect()
 }
 
+/// [`all_caps`] and the Receive Payment capabilities the demo engine plays
+/// (P21, U-132 to U-136).
+#[must_use]
+pub fn all_caps_with_payments() -> cl_api::Capabilities {
+    let mut v: Vec<&str> = vec![
+        cl_api::Capabilities::RECEIVE_PAYMENT,
+        cl_api::Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT,
+        cl_api::Capabilities::PAYMENT_BOUNCE,
+        cl_api::Capabilities::PAYMENT_SETTLE,
+        cl_api::Capabilities::PAYMENT_DISCOUNTS,
+        cl_api::Capabilities::CUSTOMER_DEPOSITS,
+        cl_api::Capabilities::FEED_CUSTOMER_PAYMENTS,
+    ];
+    let base = all_caps();
+    v.extend(
+        [
+            cl_api::Capabilities::SALES_CENTS,
+            cl_api::Capabilities::INVOICE_EDIT,
+        ]
+        .into_iter()
+        .filter(|c| base.has(c)),
+    );
+    v.into_iter().collect()
+}
+
 /// `GET /invoices/{id}`.
 #[must_use]
 pub fn get(state: &DemoState, id: TransactionId) -> Option<Versioned<InvoiceRecord>> {
@@ -1273,6 +1298,152 @@ pub fn client_sales(state: &DemoState, client: cl_core::ids::ContactId) -> cl_ap
         default_markup_percent: state.invoices.markups.get(&client).copied(),
         default_invoice_layout_id: state.layouts.clients.get(&client).copied(),
     }
+}
+
+// ---- P21: the receivables side (company/demo/receivables.rs) ----------------
+
+/// One invoice as Receive Payment sees it (P21).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Receivable {
+    /// The invoice.
+    pub id: TransactionId,
+    /// Its number.
+    pub number: String,
+    /// Its date.
+    pub date: CalendarDate,
+    /// When it is due.
+    pub due: Option<CalendarDate>,
+    /// Its total.
+    pub total: Decimal,
+    /// What is still owed (stored).
+    pub balance: Decimal,
+    /// Its client.
+    pub client: cl_core::ids::ContactId,
+    /// It was sent (a restore reopens it as sent, not draft).
+    pub sent: bool,
+}
+
+impl fmt::Debug for Receivable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Receivable")
+            .field("id", &self.id)
+            .field("date", &self.date)
+            .finish_non_exhaustive()
+    }
+}
+
+fn receivable_of(id: TransactionId, s: &Stored) -> Option<Receivable> {
+    let r = &s.record;
+    if r["status"] == "void" {
+        return None;
+    }
+    let dec = |k: &str| r[k].as_str().and_then(|v| Decimal::from_str(v).ok());
+    let date = |k: &str| r[k].as_str().and_then(|v| CalendarDate::parse_wire(v).ok());
+    Some(Receivable {
+        id,
+        number: r["txnNumber"].as_str().unwrap_or_default().to_string(),
+        date: date("txnDate")?,
+        due: date("dueDate"),
+        total: dec("total")?,
+        balance: dec("balanceDue")?,
+        client: r["contactId"]
+            .as_str()
+            .and_then(|c| cl_core::ids::ContactId::parse(c).ok())?,
+        sent: r["sentAt"].is_string() || r["sendHistory"].as_array().is_some_and(|h| !h.is_empty()),
+    })
+}
+
+/// A client's live invoices (any balance), by date, number, id.
+#[must_use]
+pub fn receivables_of(state: &DemoState, client: cl_core::ids::ContactId) -> Vec<Receivable> {
+    let mut v: Vec<Receivable> = state
+        .invoices
+        .stored
+        .iter()
+        .filter_map(|(id, s)| receivable_of(*id, s))
+        .filter(|r| r.client == client)
+        .collect();
+    v.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then_with(|| a.number.cmp(&b.number))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    v
+}
+
+/// One live invoice.
+#[must_use]
+pub fn receivable(state: &DemoState, id: TransactionId) -> Option<Receivable> {
+    state
+        .invoices
+        .stored
+        .get(&id)
+        .and_then(|s| receivable_of(id, s))
+}
+
+/// Settles `paid` (cash + discount + write-off; negative restores) on an
+/// invoice: `balanceDue` and `amountPaid` move by it and the status is
+/// recomputed (P21 plan §2.1: paid at 0.00, partial while anything is
+/// applied, else sent or draft).
+///
+/// # Errors
+/// `NotFound`; `Local(InvalidValue)` when it would go below 0.00 or above
+/// the total.
+pub fn settle(state: &mut DemoState, id: TransactionId, paid: Decimal) -> Result<(), ApiError> {
+    let s = state
+        .invoices
+        .stored
+        .get_mut(&id)
+        .ok_or(ApiError::NotFound { code: None })?;
+    let now = receivable_of(id, s).ok_or(ApiError::NotFound { code: None })?;
+    let balance = now.balance - paid;
+    let amount_paid = now.total - balance;
+    if balance.is_sign_negative() && !balance.is_zero() || balance > now.total {
+        return Err(invalid());
+    }
+    let status = if balance.is_zero() {
+        "paid"
+    } else if !amount_paid.is_zero() {
+        "partial"
+    } else if now.sent {
+        "sent"
+    } else {
+        "draft"
+    };
+    s.record["balanceDue"] = json!(money(balance)?.to_wire());
+    s.record["amountPaid"] = json!(money(amount_paid)?.to_wire());
+    s.record["invoiceStatus"] = json!(status);
+    s.record["updatedAt"] = json!(DemoState::now());
+    Ok(())
+}
+
+/// Puts a sent, single-line invoice in the store under `id` without moving
+/// the Create Invoice numbering (the Receive Payment story's invoices and
+/// the golden cases).
+///
+/// # Errors
+/// `Local(InvalidValue)` for a total the demo can't price.
+pub fn seed_receivable(
+    state: &mut DemoState,
+    id: TransactionId,
+    client: cl_core::ids::ContactId,
+    number: &str,
+    date: CalendarDate,
+    due: CalendarDate,
+    total: Money,
+) -> Result<(), ApiError> {
+    let one = cl_core::Quantity::parse_wire("1").map_err(|_| invalid())?;
+    let mut line = cl_api::InvoiceLine::account(super::account_id(4000), one, total);
+    line.is_taxable = Some(false);
+    let mut new = NewInvoice::new(client, date, vec![line]);
+    new.due_date = Some(due);
+    new.txn_number = Some(number.to_string());
+    let (mut record, claims) = record_json(state, id, number, &new)?;
+    record["invoiceStatus"] = json!("sent");
+    record["sentAt"] = json!(DemoState::now());
+    state.invoices.stored.insert(id, Stored { record, claims });
+    Ok(())
 }
 
 #[cfg(test)]

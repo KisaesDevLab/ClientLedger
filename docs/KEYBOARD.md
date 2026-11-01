@@ -81,6 +81,8 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Alt+E` | Enter as New | `form.enter_as_new` |
 | `Ctrl+Shift+U` | Add Billable Costs… | `invoice.add_billable` |
 | `Ctrl+Shift+M` | Email… | `invoice.email` |
+| `Alt+U` | Un-apply All | `payment.unapply_all` |
+| `Alt+D` | Discounts & Credits… | `payment.discounts_credits` |
 
 ## In a grid
 

@@ -204,6 +204,16 @@ pub fn add_story_contacts(contacts: &mut Vec<cl_api::Contact>) {
     v.default_payment_terms = Some("net_15".into());
     v.is1099_eligible = true;
     push(v);
+    // P21: the Receive Payment mockup's client (invoices 1091 and 1095,
+    // `company/demo/receivables.rs`).
+    let mut c = ContactFields::named(ContactType::Customer, super::receivables::STORY_CLIENT);
+    c.billing_line1 = Some("410 S Main St".into());
+    c.billing_city = Some("Neosho".into());
+    c.billing_state = Some("MO".into());
+    c.billing_zip = Some("64850".into());
+    c.billing_country = Some("US".into());
+    c.default_payment_terms = Some("net_30".into());
+    push(c);
 }
 
 /// One document as the demo engine checks and posts it.

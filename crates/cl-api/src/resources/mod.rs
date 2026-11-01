@@ -15,6 +15,7 @@ pub mod checks;
 pub(crate) mod common;
 pub mod company;
 pub mod contacts;
+pub mod customer_payments;
 pub mod daily_sales;
 pub mod dashboard;
 pub mod document_assist;

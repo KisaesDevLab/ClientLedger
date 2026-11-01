@@ -683,3 +683,106 @@ fn a_billable_line_shows_its_source_and_the_engines_quantity() {
         "kept"
     );
 }
+
+/// P21 D7 (review should-fix 6): a held deposit applied in a closed period
+/// asks for the closing-date password first; a refused apply keeps its key
+/// for the retry and says why on the card.
+#[test]
+fn applying_a_deposit_in_a_closed_period_asks_and_keeps_its_key() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    let invoice = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let client = story_client(&s);
+    // A 100.00 deposit held for the client.
+    let source = {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::receivables::seed(&mut d);
+        let uf = crate::company::demo::receivables::clearing(&mut d).expect("uf");
+        let hold = cl_api::NewCustomerPayment {
+            customer_id: client,
+            date: today(),
+            amount: m("100"),
+            deposit_to: uf,
+            payment_method: None,
+            ref_no: None,
+            memo: None,
+            applications: Vec::new(),
+            credit_applications: Vec::new(),
+            write_off_account_id: None,
+            discount_account_id: None,
+            hold_as_deposit: true,
+            bank_feed_item_id: None,
+        };
+        crate::company::demo::receivables::receive(&mut d, &hold, None, None)
+            .expect("held")
+            .id
+    };
+    // The books are closed through the end of the month.
+    let closed = CalendarDate::from_ymd(2026, 11, 30).expect("date");
+    s.books.closing = Some(closed);
+    s.apply_deposit(source, None);
+    assert!(s.closing_prompt.dialog_open(), "asks first");
+    assert!(!s.deposit_card.busy(), "nothing sent");
+    s.closing_prompt.cancel();
+    // The engine refuses without the password (its own closing date): a
+    // definite refusal, so the retry gets a fresh key; the card says why.
+    {
+        let mut d = s.link.demo_state().expect("demo");
+        let open = d.open.expect("open");
+        if let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open) {
+            c.closed_through = Some(closed);
+        }
+    }
+    s.books.closing = None;
+    s.apply_deposit(source, None);
+    let ev = s.deposit_card.poll_apply(&s.link, s.group.as_ref());
+    assert!(matches!(
+        ev,
+        Some(super::deposit_card::CardEvent::Failed(
+            _,
+            cl_api::ApiError::ClosedPeriod(_)
+        ))
+    ));
+    assert!(s.deposit_card.key.is_none());
+    assert_eq!(s.deposit_card.note(), Some("invoice.deposit.failed"));
+    // An unknown outcome (a timeout) keeps the key: the retry replays.
+    let pw = || {
+        Some(cl_core::Secret::new(
+            crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+        ))
+    };
+    s.apply_deposit(source, pw());
+    let key = s
+        .deposit_card
+        .key
+        .as_ref()
+        .map(|(_, _, k)| k.clone())
+        .expect("a key");
+    if let Some((_, job)) = s.deposit_card.apply.as_mut() {
+        *job = super::engine::Job::Done(Some(Err(cl_api::ApiError::Timeout)));
+    }
+    assert!(
+        s.deposit_card
+            .poll_apply(&s.link, s.group.as_ref())
+            .is_some()
+    );
+    assert_eq!(
+        s.deposit_card.key.as_ref().map(|(_, _, k)| k.clone()),
+        Some(key.clone())
+    );
+    s.apply_deposit(source, pw());
+    assert_eq!(
+        s.deposit_card.key.as_ref().map(|(_, _, k)| k.clone()),
+        Some(key)
+    );
+    assert!(
+        s.deposit_card
+            .poll_apply(&s.link, s.group.as_ref())
+            .is_none()
+    );
+    assert_eq!(s.deposit_card.applied, 1);
+    assert!(s.deposit_card.key.is_none());
+    assert_eq!(s.deposit_card.note(), Some("invoice.deposit.applied"));
+    let _ = invoice;
+}
