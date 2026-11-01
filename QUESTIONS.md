@@ -688,6 +688,20 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P22b | Saving a credit memo with open invoices | P22 | **Ask: "Apply to an invoice" (oldest first, editable) or "Keep as credit"** for later or a refund (owner 2026-11-01). | Answered by owner 2026-11-01 |
 | Q-P22c | Sending statements | P22 | **Print / PDF, email through the Outbox (P20 SMTP and templates), and "Mark as sent"**, all recorded in send history (owner 2026-11-01). | Answered by owner 2026-11-01 |
 | Q-P22d | Refund by check | P22 | **Goes to the check print queue with "Print later" on by default**, like Write Check (owner 2026-11-01). | Answered by owner 2026-11-01 |
+| Q-P22e | Sales Receipt in P22 | P22 | **Built in P22** (owner 2026-11-01, as Q-P20u promised): invoice-style lines and preview (U-143), reusing the invoice form; Ctrl+Shift+R. | Answered by owner 2026-11-01 |
+| Q-P22f | Older credit memos linked to an invoice | P22 | **Shown as open credits; no backfill** (owner 2026-11-01). The apply panel preselects the linked invoice; readers of the legacy `appliedToInvoiceId` stop counting it as applied. | Answered by owner 2026-11-01 |
+| Q-P22g | Finance charge math | P22 | **Simple daily interest (annual rate ÷ 365) on each overdue invoice balance from the due date after the grace days, rounded to the cent per invoice; minimum on the client total; one assessment per calendar month; clients in credit or inactive skipped; charge invoice not taxable, due on receipt** (owner 2026-11-01). | Answered by owner 2026-11-01 |
+| Q-P22h | Statement formats | P22 | Open item (open invoices and credits as of the date), balance forward (opening balance, activity in range, closing), transaction (every A/R transaction in range). | Default in force |
+| Q-P22i | As-of figures and unapplies | P22 | As-of figures use applications live today, because unapplies are not dated. | Default in force |
+| Q-P22j | Voiding a credit memo | P22 | Unapplies it and reopens its invoices; refused while a refund of its credit is live. | Default in force |
+| Q-P22k | Refunds with no source | P22 | The API still accepts them (other integrations); the desktop always sends a source. | Default in force |
+| Q-P22l | Refund accounts | P22 | Refunds come from bank-type accounts only. | Default in force |
+| Q-P22m | "Refund it" on Receive Payment | P22 | Opens the full Refund screen; the P21 inline dialog retires. | Default in force |
+| Q-P22n | Statement copies | P22 | **Each printed, emailed or marked-sent statement is numbered and saved as a snapshot** (owner 2026-11-01). | Answered by owner 2026-11-01 |
+| Q-P22o | A/R aging response | P22 | Gains exact string fields alongside the existing numbers (web keeps working). | Default in force |
+| Q-P22p | Second assessment in a month | P22 | Refused (409) until the first is voided. | Default in force |
+| Q-P22q | Find on Receive Payment | P22 | Reuses an existing Find window if one exists, else a small dialog. | Default in force |
+| Q-P22r | Zero or negative credit memo | P22 | Refused. | Default in force |
 | Q-PR2a | Number of a printed check that is later voided | PR-2 | **Stays with the voided check and is never used again** (owner 2026-10-29), so each paper check number matches one record; numbers cleared by a reprint in a print run (Q-P19b) stay reusable. Engine: void checks that carry a number count as used (U-117). | Answered by owner 2026-10-29 |
 | Q-PR2b | Handwritten check numbers in Pay Bills | PR-2 | **Fixed in PR-2** (owner 2026-10-29): numbered per company and claimed inside the payment's save (U-117). | Answered by owner 2026-10-29 |
 | Q-PR2d | A print whose outcome can't be read back | PR-2 | **"Forget this print"** (owner 2026-10-29): shown only when the read-back can't decide a saved print run, with a plain warning to look in the bank register for those check numbers before printing the checks again. Forgetting is logged and clears the Home reminder when nothing else waits. | Answered by owner 2026-10-29 |
