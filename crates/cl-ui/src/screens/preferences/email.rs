@@ -309,6 +309,24 @@ fn template_fields(doc: cl_settings::TemplateDoc) -> Vec<&'static str> {
     wanted.iter().map(|f| f.name()).collect()
 }
 
+/// The subject, message and reset labels of a document's editor: each
+/// names its document, so the invoice and statement editors never share an
+/// accessible name.
+fn template_labels(doc: cl_settings::TemplateDoc) -> (&'static str, &'static str, &'static str) {
+    match doc {
+        cl_settings::TemplateDoc::Statement => (
+            "prefs.email.template.statement_subject",
+            "prefs.email.template.statement_body",
+            "prefs.email.template.statement_reset",
+        ),
+        _ => (
+            "prefs.email.template.subject",
+            "prefs.email.template.body",
+            "prefs.email.template.reset",
+        ),
+    }
+}
+
 /// One document's subject and body.
 fn template_editor(
     ui: &mut Ui,
@@ -326,8 +344,9 @@ fn template_editor(
         } => (t(subject_key), t(body_key), false),
         TemplateSource::Custom(c) => (c.subject.clone(), c.body.clone(), true),
     };
-    let mut changed = form::field(ui, &t("prefs.email.template.subject"), &mut subject).changed();
-    let l = ui.label(t("prefs.email.template.body"));
+    let (subject_key, body_key, reset_key) = template_labels(doc);
+    let mut changed = form::field(ui, &t(subject_key), &mut subject).changed();
+    let l = ui.label(t(body_key));
     changed |= ui
         .add(
             egui::TextEdit::multiline(&mut body)
@@ -364,7 +383,7 @@ fn template_editor(
             );
         }
     }
-    if custom && ui.button(t("prefs.email.template.reset")).clicked() {
+    if custom && ui.button(t(reset_key)).clicked() {
         prefs.set_template(doc, &EmailTemplate::default());
     }
 }
