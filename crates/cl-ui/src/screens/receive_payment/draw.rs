@@ -18,6 +18,10 @@ use crate::theme::Tokens;
 
 /// The side panels' width.
 const SIDE: f32 = 250.0;
+/// The amounts summary's width (beside the callout).
+const SUMMARY: f32 = 280.0;
+/// What a card's margins and stroke add around its content.
+const CARD_EDGE: f32 = 30.0;
 /// One grid row's height (the scroll area shows about 12).
 const ROW_H: f32 = 26.0;
 
@@ -68,33 +72,6 @@ fn mmdd(d: cl_core::CalendarDate) -> String {
     crate::shell::us_date(d)
 }
 
-fn account_combo(
-    ui: &mut Ui,
-    label: &str,
-    salt: &str,
-    value: &mut Option<AccountId>,
-    list: &[(AccountId, String)],
-) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        let l = ui.add(egui::Label::new(label).selectable(false));
-        let current = value
-            .and_then(|id| list.iter().find(|(a, _)| *a == id))
-            .map_or_else(|| t("payment.account.choose"), |(_, n)| n.clone());
-        egui::ComboBox::from_id_salt(salt)
-            .selected_text(current)
-            .width(260.0)
-            .show_ui(ui, |ui| {
-                for (id, name) in list {
-                    changed |= ui.selectable_value(value, Some(*id), name).changed();
-                }
-            })
-            .response
-            .labelled_by(l.id);
-    });
-    changed
-}
-
 /// Keeps Up and Down for the grid while `id` has focus (egui would
 /// otherwise move focus by position).
 fn hold_arrows(ui: &Ui, id: egui::Id) {
@@ -120,50 +97,82 @@ impl ReceivePaymentScreen {
         self.layout = frame.end();
     }
 
-    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .button(t("payment.prev"))
-                .on_hover_text(t("payment.prev.tip"))
-                .clicked()
-            {
-                self.nav(-1);
-            }
-            if ui
-                .button(t("payment.next"))
-                .on_hover_text(t("payment.next.tip"))
-                .clicked()
-            {
-                self.nav(1);
-            }
+    /// The toolbar (mockup: ◀ Prev, Next ▶ | Find, Attach, History,
+    /// Discounts & credits | Record bounced check; Void is ours).
+    fn toolbar_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let idle = self.save.is_none() && self.credit_apply.is_none();
+        let saved = self.editing.is_some();
+        let mut clicked: Option<&'static str> = None;
+        let can_bounce = self
+            .editing
+            .as_ref()
+            .is_some_and(|e| !e.is_bounced() && !e.is_void() && e.deposit_to.is_some());
+        let can_void = self
+            .editing
+            .as_ref()
+            .is_some_and(|e| !e.is_void() && !e.is_bounced());
+        let nav = kit::toolbar(ui, tokens, idle, self.dirty, |ui| {
             ui.separator();
+            if ui
+                .button(t("payment.find"))
+                .on_hover_text(t_with(
+                    "payment.find.tip",
+                    &[("keys", &kit::chip("edit.find").replace(' ', "+"))],
+                ))
+                .clicked()
+            {
+                clicked = Some("edit.find");
+            }
+            if ui
+                .add_enabled(saved, egui::Button::new(t("payment.attach")))
+                .on_hover_text(t("payment.attach.tip"))
+                .on_disabled_hover_text(t("payment.attach.save_first"))
+                .clicked()
+            {
+                clicked = Some("form.attach");
+            }
+            if ui
+                .add_enabled(saved, egui::Button::new(t("payment.history")))
+                .on_hover_text(t("payment.history.tip"))
+                .on_disabled_hover_text(t("payment.history.saved_only"))
+                .clicked()
+            {
+                clicked = Some("form.history");
+            }
             if ui
                 .button(t("payment.discounts_credits"))
                 .on_hover_text(kit::chip("payment.discounts_credits"))
                 .clicked()
             {
-                self.dialog = Some(Dialog::Credits);
+                clicked = Some("payment.discounts_credits");
             }
-            let can_bounce = self
-                .editing
-                .as_ref()
-                .is_some_and(|e| !e.is_bounced() && !e.is_void() && e.deposit_to.is_some());
+            ui.separator();
             if ui
                 .add_enabled(can_bounce, egui::Button::new(t("payment.bounced_check")))
                 .on_hover_text(t("payment.bounced_check.tip"))
                 .clicked()
             {
-                self.open_bounce();
+                clicked = Some("payment.bounced_check");
             }
-            if self
-                .editing
-                .as_ref()
-                .is_some_and(|e| !e.is_void() && !e.is_bounced())
-                && ui.button(t("payment.void")).clicked()
-            {
-                self.dialog = Some(Dialog::Void);
+            if can_void && ui.button(t("payment.void")).clicked() {
+                clicked = Some("edit.void_transaction");
             }
         });
+        match nav.or(clicked) {
+            Some("form.prev_record") => self.nav(-1),
+            Some("form.next_record") => self.nav(1),
+            Some("edit.find") => self.open_find(),
+            Some("form.attach") => self.start_attach(ui.ctx()),
+            Some("form.history") => self.toggle_history(),
+            Some("payment.discounts_credits") => self.dialog = Some(Dialog::Credits),
+            Some("payment.bounced_check") => self.open_bounce(),
+            Some("edit.void_transaction") => self.dialog = Some(Dialog::Void),
+            _ => {}
+        }
+    }
+
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        self.toolbar_ui(ui, tokens);
         ui.label(
             RichText::new(crate::i18n::t(&format!("cmd.{}", super::KIND)))
                 .size(22.0)
@@ -253,7 +262,7 @@ impl ReceivePaymentScreen {
         let wide = ui.available_width() > 760.0;
         if wide {
             ui.horizontal_top(|ui| {
-                let w = ui.available_width() - SIDE - 16.0;
+                let w = ui.available_width() - SIDE - 16.0 - CARD_EDGE;
                 ui.vertical(|ui| {
                     ui.set_width(w);
                     self.main_ui(ui, tokens);
@@ -275,58 +284,104 @@ impl ReceivePaymentScreen {
             form::card(ui, tokens, |ui| self.header_ui(ui, tokens));
             ui.add_space(8.0);
             self.grid_ui(ui, tokens);
+        });
+        ui.add_space(8.0);
+        // The callout and the amounts summary side by side (the mockup),
+        // stacked when narrow.
+        if ui.available_width() > 560.0 {
+            ui.horizontal_top(|ui| {
+                // Each card adds its margins and stroke (~28 px) around
+                // the width set here.
+                let w = (ui.available_width() - SUMMARY - 12.0 - 2.0 * CARD_EDGE).max(200.0);
+                ui.vertical(|ui| {
+                    ui.set_width(w);
+                    if !read_only {
+                        self.callouts_ui(ui, tokens);
+                    }
+                });
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.set_width(SUMMARY - CARD_EDGE);
+                    self.summary_ui(ui, tokens);
+                });
+            });
+        } else {
             if !read_only {
                 self.callouts_ui(ui, tokens);
             }
-        });
-        self.summary_ui(ui, tokens);
+            self.summary_ui(ui, tokens);
+        }
+        for p in &self.problems {
+            ui.label(RichText::new(t(super::problem_key(p))).color(tokens.warn_text));
+        }
     }
 
     fn header_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let lists = std::sync::Arc::clone(&self.books.lists);
-        ui.horizontal_wrapped(|ui| {
-            let (out, _) = kit::name_field(
-                ui,
-                tokens,
-                &t("payment.received_from"),
-                &mut self.client_input,
-                &lists,
-                self.form.client,
-                260.0,
-            );
-            match out {
-                NameOutcome::Picked(c) => self.set_client(Some(c)),
-                NameOutcome::Cleared => self.set_client(None),
-                NameOutcome::None => {}
-            }
-            let r = form::date_field(ui, &t("payment.date"), &mut self.date, self.today);
-            if r.changed() || r.lost_focus() {
-                self.form.set_date(self.date.value);
-                self.dirty = true;
-            }
-            let r = ui
-                .horizontal(|ui| {
-                    let l = ui.add(egui::Label::new(t("payment.amount")).selectable(false));
-                    ui.add_sized(
-                        [140.0, 24.0],
+        // The mockup's 6-column header card, labels above the inputs.
+        let gap = 16.0;
+        // Inputs draw a little wider than their desired width (padding, the
+        // combo arrow): each column keeps 12 px of slack.
+        let col = ((ui.available_width() - 5.0 * gap) / 6.0 - 12.0).clamp(80.0, 200.0);
+        let span = |n: f32| col * n + gap * (n - 1.0);
+        let today = self.today;
+        crate::forms::header::wrap_row(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(gap, 12.0);
+            kit::wrap_item(ui, "payment/client", |ui| {
+                let (out, _) = kit::name_field(
+                    ui,
+                    tokens,
+                    &t("payment.received_from"),
+                    &mut self.client_input,
+                    &lists,
+                    self.form.client,
+                    span(3.0),
+                );
+                match out {
+                    NameOutcome::Picked(c) => self.set_client(Some(c)),
+                    NameOutcome::Cleared => self.set_client(None),
+                    NameOutcome::None => {}
+                }
+            });
+            kit::wrap_item(ui, "payment/date", |ui| {
+                let (r, _) = kit::date_field(
+                    ui,
+                    tokens,
+                    &t("payment.date"),
+                    &mut self.date,
+                    today,
+                    span(1.0),
+                );
+                if r.changed() || r.lost_focus() {
+                    self.form.set_date(self.date.value);
+                    self.dirty = true;
+                }
+            });
+            kit::wrap_item(ui, "payment/amount", |ui| {
+                let l = kit::above(ui, tokens, &t("payment.amount"));
+                let r = ui
+                    .add(
                         egui::TextEdit::singleline(&mut self.amount_text)
-                            .font(egui::TextStyle::Monospace)
+                            .desired_width(span(2.0) - 8.0)
+                            .font(egui::FontId::monospace(15.0))
                             .align(egui::Align2::RIGHT_CENTER),
                     )
-                    .labelled_by(l.id)
-                })
-                .inner;
-            if r.lost_focus() || (r.changed() && self.amount_text.trim().is_empty()) {
-                self.amount_typed();
-                if let Some(s) = form::settled_money_text(&self.amount_text, self.money_style) {
-                    self.amount_text = s;
+                    .labelled_by(l.id);
+                if r.lost_focus() || (r.changed() && self.amount_text.trim().is_empty()) {
+                    self.amount_typed();
+                    if let Some(s) = form::settled_money_text(&self.amount_text, self.money_style) {
+                        self.amount_text = s;
+                    }
                 }
-            }
+            });
         });
-        ui.horizontal_wrapped(|ui| {
-            ui.horizontal(|ui| {
-                let l = ui.add(egui::Label::new(t("payment.method")).selectable(false));
+        ui.add_space(8.0);
+        crate::forms::header::wrap_row(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(gap, 12.0);
+            kit::wrap_item(ui, "payment/method", |ui| {
+                let l = kit::above(ui, tokens, &t("payment.method"));
                 egui::ComboBox::from_id_salt("payment-method")
+                    .width(span(1.0) - 8.0)
                     .selected_text(t(&format!("payment.method.{}", self.form.method)))
                     .show_ui(ui, |ui| {
                         for m in METHODS {
@@ -345,12 +400,49 @@ impl ReceivePaymentScreen {
             } else {
                 t("payment.ref_no")
             };
-            if form::field(ui, &ref_label, &mut self.form.ref_no).changed() {
-                self.dirty = true;
-            }
+            kit::wrap_item(ui, "payment/ref", |ui| {
+                if kit::text_field(ui, tokens, &ref_label, &mut self.form.ref_no, span(1.0), 40)
+                    .changed()
+                {
+                    self.dirty = true;
+                }
+            });
+            let deposit = self.deposit_choices();
+            kit::wrap_item(ui, "payment/deposit_to", |ui| {
+                let (picked, _) = kit::account_combo(
+                    ui,
+                    tokens,
+                    "payment-deposit-to",
+                    &t("payment.deposit_to"),
+                    &deposit,
+                    self.form.deposit_to(),
+                    span(2.0),
+                );
+                if let Some(p) = picked {
+                    self.form.set_deposit_to(Some(p));
+                    self.dirty = true;
+                }
+            });
+            kit::wrap_item(ui, "payment/memo", |ui| {
+                if kit::text_field(
+                    ui,
+                    tokens,
+                    &t("payment.memo"),
+                    &mut self.form.memo,
+                    span(2.0),
+                    4000,
+                )
+                .changed()
+                {
+                    self.dirty = true;
+                }
+            });
         });
-        let deposit: Vec<(AccountId, String)> = self
-            .deposit_accounts()
+    }
+
+    /// Deposit to's choices: Undeposited Funds first, then the banks.
+    fn deposit_choices(&self) -> Vec<(AccountId, String)> {
+        self.deposit_accounts()
             .iter()
             .map(|a| {
                 let name = if a.system_tag.as_deref() == Some("payments_clearing") {
@@ -360,23 +452,8 @@ impl ReceivePaymentScreen {
                 };
                 (a.id, name)
             })
-            .collect();
-        let mut to = self.form.deposit_to();
-        if account_combo(
-            ui,
-            &t("payment.deposit_to"),
-            "payment-deposit-to",
-            &mut to,
-            &deposit,
-        ) {
-            self.form.set_deposit_to(to);
-            self.dirty = true;
-        }
-        if form::field(ui, &t("payment.memo"), &mut self.form.memo).changed() {
-            self.dirty = true;
-        }
+            .collect()
     }
-
     fn grid_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         ui.label(RichText::new(t("payment.grid")).strong());
         let rows = match self.form.figures() {
@@ -403,7 +480,7 @@ impl ReceivePaymentScreen {
             );
             return;
         }
-        let widths = [44.0, 84.0, 70.0, 84.0, 96.0, 96.0, 80.0, 110.0];
+        let widths = [44.0, 84.0, 70.0, 84.0, 96.0, 96.0, 80.0, 128.0];
         let heads = [
             "payment.col.apply",
             "payment.col.date",
@@ -542,6 +619,7 @@ impl ReceivePaymentScreen {
                                 [widths[7], 22.0],
                                 egui::TextEdit::singleline(text)
                                     .id(pay_id)
+                                    .desired_width(widths[7] - 8.0)
                                     .font(egui::TextStyle::Monospace)
                                     .align(egui::Align2::RIGHT_CENTER),
                             );
@@ -770,7 +848,7 @@ impl ReceivePaymentScreen {
             _ => None,
         };
         form::card(ui, tokens, |ui| {
-            ui.set_max_width(340.0);
+            ui.set_max_width(ui.available_width().min(340.0));
             fact(
                 ui,
                 tokens,
@@ -796,9 +874,6 @@ impl ReceivePaymentScreen {
                 figure(f.as_ref().map(|f| f.unapplied)),
             );
         });
-        for p in &self.problems {
-            ui.label(RichText::new(t(super::problem_key(p))).color(tokens.warn_text));
-        }
     }
 
     fn side_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -863,6 +938,122 @@ impl ReceivePaymentScreen {
                     .size(12.0),
             );
         });
+        if self.history_open {
+            self.history_card(ui, tokens);
+        }
+        self.attach_card(ui, tokens);
+    }
+
+    /// History (Q-P21w): what the saved payment did, from its record:
+    /// received, each application (with the date a later one was made),
+    /// credits it used, its deposit, its bounce or void, and the credit
+    /// left. Refunds are not on the payment record; Refund a Credit lists
+    /// them.
+    fn history_card(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(rec) = self.editing.clone() else {
+            return;
+        };
+        let mut close = false;
+        kit::panel_card(ui, tokens, &t("payment.history.title"), |ui| {
+            let line = |ui: &mut Ui, text: String| {
+                ui.label(RichText::new(text).size(12.5));
+            };
+            line(
+                ui,
+                t_with(
+                    "payment.history.received",
+                    &[("date", &mmdd(rec.date)), ("amount", &shown(rec.amount))],
+                ),
+            );
+            for a in &rec.applications {
+                let key = if a.reversed {
+                    "payment.history.applied_reversed"
+                } else if a.voided {
+                    "payment.history.applied_undone"
+                } else {
+                    "payment.history.applied"
+                };
+                let date = a.applied_date.unwrap_or(rec.date);
+                line(
+                    ui,
+                    t_with(
+                        key,
+                        &[
+                            ("number", &a.invoice_number),
+                            ("amount", &shown(a.amount)),
+                            ("date", &mmdd(date)),
+                        ],
+                    ),
+                );
+                if a.discount.is_positive() {
+                    line(
+                        ui,
+                        t_with(
+                            "payment.history.discount",
+                            &[("amount", &shown(a.discount))],
+                        ),
+                    );
+                }
+                if a.write_off.is_positive() {
+                    line(
+                        ui,
+                        t_with(
+                            "payment.history.write_off",
+                            &[("amount", &shown(a.write_off))],
+                        ),
+                    );
+                }
+            }
+            for c in &rec.credit_applications {
+                line(
+                    ui,
+                    t_with(
+                        if c.from_deposit {
+                            "payment.history.used_deposit"
+                        } else {
+                            "payment.history.used_credit"
+                        },
+                        &[("number", &c.invoice_number), ("amount", &shown(c.amount))],
+                    ),
+                );
+            }
+            if let Some(d) = rec.deposited_in {
+                line(
+                    ui,
+                    t_with("payment.history.deposited", &[("date", &mmdd(d.date))]),
+                );
+            }
+            if let Some(b) = rec.bounce {
+                line(
+                    ui,
+                    t_with("payment.history.bounced", &[("date", &mmdd(b.date))]),
+                );
+            }
+            if rec.is_void() {
+                line(ui, t("payment.history.void"));
+            }
+            if rec.holds_deposit {
+                line(
+                    ui,
+                    t_with(
+                        "payment.history.deposit_left",
+                        &[("amount", &shown(rec.deposit_remaining))],
+                    ),
+                );
+            } else {
+                line(
+                    ui,
+                    t_with(
+                        "payment.history.credit_left",
+                        &[("amount", &shown(rec.unapplied_remaining))],
+                    ),
+                );
+            }
+            close = ui.small_button(t("payment.history.close")).clicked();
+        });
+        if close {
+            self.history_open = false;
+        }
     }
 
     fn actions_ui(&mut self, ui: &mut Ui) {
@@ -900,6 +1091,7 @@ impl ReceivePaymentScreen {
         };
         match d {
             Dialog::Bounce => crate::screens::bounced_check::draw(self, ui, tokens),
+            Dialog::Find => self.find_ui(ui, tokens),
             Dialog::Credits => {
                 let (credits, first_open) = match self.form.figures() {
                     FiguresView::Ready(f) => (

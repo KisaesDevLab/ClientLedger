@@ -25,8 +25,10 @@
 //! `state` carries counts, flags and the demo's figures as the screen shows
 //! them (the scenario's assertions); no names or memos.
 
+mod attach;
 mod draw;
 pub(crate) mod engine;
+pub(crate) mod find;
 #[cfg(test)]
 mod tests;
 
@@ -104,6 +106,8 @@ pub(crate) enum Dialog {
     Bounce,
     /// Void the open payment.
     Void,
+    /// Find a payment (Q-P22q).
+    Find,
 }
 
 /// Settings Receive Payment uses (engine company settings, Q-P21q).
@@ -180,6 +184,15 @@ pub struct ReceivePaymentScreen {
     pub(crate) layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     pub(crate) dirty: bool,
+    /// The saved payment's files (Q-P21w).
+    pub(crate) attach: attach::PaymentAttach,
+    /// The History card is open (Q-P21w).
+    pub(crate) history_open: bool,
+    /// The Find dialog (Q-P22q).
+    pub(crate) find: find::FindPayment,
+    /// Client Center's "Record bounced check": the bounce flow opens once
+    /// this payment has loaded.
+    pub(crate) bounce_on_open: Option<TransactionId>,
 }
 
 impl std::fmt::Debug for ReceivePaymentScreen {
@@ -265,6 +278,10 @@ impl ReceivePaymentScreen {
             layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             dirty: false,
+            attach: attach::PaymentAttach::default(),
+            history_open: false,
+            find: find::FindPayment::default(),
+            bounce_on_open: None,
         };
         if let Some(mut d) = s.link.demo_state() {
             crate::company::demo::receivables::seed(&mut d);
@@ -491,6 +508,8 @@ impl ReceivePaymentScreen {
         self.poll_nav();
         self.poll_misc();
         self.poll_bounce();
+        self.poll_attach();
+        self.poll_find();
     }
 
     // ------------------------------------------------------------ edits
@@ -556,6 +575,8 @@ impl ReceivePaymentScreen {
         self.dialog = None;
         self.bounce = None;
         self.bounce_password = None;
+        self.history_open = false;
+        self.attach = attach::PaymentAttach::default();
     }
 
     // ------------------------------------------------------------ saves
@@ -927,6 +948,17 @@ impl ReceivePaymentScreen {
             .is_some_and(|e| e.is_bounced() || e.is_void() || e.deposit_to.is_none())
     }
 
+    /// History: the saved payment's card (its applications, deposit,
+    /// bounce and what is left), read from the record already open.
+    pub(crate) fn toggle_history(&mut self) {
+        if self.editing.is_none() {
+            self.notice = Some("payment.history.saved_only");
+            self.history_open = false;
+            return;
+        }
+        self.history_open = !self.history_open;
+    }
+
     /// Prev (-1) or Next (+1): reads the saved list, then opens one.
     pub(crate) fn nav(&mut self, step: i8) {
         if self.list_job.is_some() {
@@ -1042,11 +1074,18 @@ impl ReceivePaymentScreen {
         self.date = DateInput::new(rec.date);
         self.amount_text = shown(rec.amount);
         self.cells.clear();
+        let id = rec.id;
         self.editing = Some(rec);
         self.saved_next = None;
         self.dirty = false;
         self.save_key = None;
         self.problems.clear();
+        self.list_attachments();
+        // Client Center's "Record bounced check" (P21 follow-up 3).
+        if self.bounce_on_open == Some(id) {
+            self.bounce_on_open = None;
+            self.open_bounce();
+        }
     }
 
     // ------------------------------------------------------------ void, refund
@@ -1261,6 +1300,8 @@ impl Screen for ReceivePaymentScreen {
             }
             "payment.discounts_credits" => self.dialog = Some(Dialog::Credits),
             "payment.bounced_check" => self.open_bounce(),
+            "edit.find" => self.open_find(),
+            "form.history" => self.toggle_history(),
             "form.prev_record" => self.nav(-1),
             "form.next_record" => self.nav(1),
             "edit.void_transaction" => {
@@ -1293,6 +1334,12 @@ impl Screen for ReceivePaymentScreen {
         match payload {
             crate::windows::OpenPayload::ReceiveFrom(c) => {
                 self.for_client(c);
+                true
+            }
+            crate::windows::OpenPayload::BounceCheck(id) => {
+                self.clear();
+                self.bounce_on_open = Some(id);
+                self.open_id(id);
                 true
             }
             _ => false,
@@ -1339,7 +1386,11 @@ impl ReceivePaymentScreen {
                 Dialog::DiscountAccount => "discount_account",
                 Dialog::Bounce => "bounce",
                 Dialog::Void => "void",
+                Dialog::Find => "find",
             }),
+            "history_open": self.history_open,
+            "attachments": self.attach.state_json(),
+            "find_results": self.find.results.as_ref().map(Vec::len),
             "notice": self.notice,
             "problems": self.problems.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>(),
             "read_only": self.is_read_only(),

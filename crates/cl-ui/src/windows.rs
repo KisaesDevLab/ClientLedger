@@ -170,6 +170,9 @@ pub enum OpenPayload {
     /// P22: a new document of the window's kind for this client (Client
     /// Center's "New credit memo", "Refund").
     ForClient(cl_core::ids::ContactId),
+    /// P22 (P21 follow-up 3): Receive Payment opens this saved payment and
+    /// its bounced-check flow (Client Center's "Record bounced check").
+    BounceCheck(cl_core::ids::TransactionId),
 }
 
 /// Stand-in for a screen a later phase builds.

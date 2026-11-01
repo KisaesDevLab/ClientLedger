@@ -40,6 +40,14 @@ steps:
   - assert_exists: {label: "Underpayment of 385.00 on invoice 1091"}
   - assert_exists: {label: "Usually pays in 24 days"}
   - assert_exists: {role: check_box, label: "Apply, invoice 1091"}
+  # Q-P21w: the mockup's toolbar (arrows on Prev/Next) and labels above.
+  - assert_exists: {role: button, label_contains: "Prev"}
+  - assert_exists: {role: button, label_contains: "Next"}
+  - assert_exists: {role: button, label: Find}
+  - assert_exists: {role: button, label: Attach}
+  - assert_exists: {role: button, label: History}
+  - assert_exists: {role: button, label: Discounts & credits}
+  - assert_exists: {role: button, label: Record bounced check}
   - screenshot: mockup
   - command: window.theme
   - wait: {ms: 300}
@@ -185,6 +193,22 @@ steps:
   - assert_state: {key: screen.figures, equals: ready}
   - assert_state: {key: screen.balance_before, equals: "5,645.00"}
   - click: {role: button, label: Clear}
+  # --- Find (Q-P22q) opens the 1,300.00 payment; History and Attach ----------
+  - click: {role: button, label: Find}
+  - assert_state: {key: screen.dialog, equals: find}
+  - click: {role: text_input, label: Amount}
+  - type: {text: "1300"}
+  - click: {role: button, label: Search}
+  - assert_state: {key: screen.find_results, equals: 1}
+  - screenshot: find
+  - click: {role: button, label: Open}
+  - assert_state: {key: screen.mode, equals: edit}
+  - click: {role: button, label: History}
+  - assert_state: {key: screen.history_open, equals: true}
+  - assert_exists: {label_contains: "Received 1,300.00"}
+  - screenshot: history
+  - click: {role: button, label: Clear}
+  - command: file.close_window
   # --- Client Center: Receive Payment from the selected client ---------------
   - command: clients.center
   - assert_state: {key: screen.screen, equals: client_center}
