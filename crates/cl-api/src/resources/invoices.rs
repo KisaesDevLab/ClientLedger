@@ -657,10 +657,7 @@ fn null_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "the engine's flags as sent"
-)]
+#[allow(clippy::struct_excessive_bools, reason = "the engine's flags as sent")]
 struct RecordWire {
     #[serde(default)]
     subtotal: Option<Money>,
