@@ -186,7 +186,7 @@ pub enum InvoiceRefusal {
     /// (409 `FINANCE_CHARGE_INVOICE`, U-141): void it and assess again.
     FinanceChargeInvoice,
     /// A finance-charge invoice keeps its client (409
-    /// FINANCE_CHARGE_CLIENT_CHANGE, U-145, Q-P22v): void it and assess
+    /// `FINANCE_CHARGE_CLIENT_CHANGE`, U-145, Q-P22v): void it and assess
     /// again for the right client.
     FinanceChargeClientChange,
     /// A recurring schedule can't copy billable costs.
@@ -550,6 +550,10 @@ impl fmt::Debug for InvoiceRecordLine {
 
 /// A saved invoice (`GET /invoices/{id}` and the save answers).
 #[derive(Clone, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent flags the engine reports on the invoice"
+)]
 pub struct InvoiceRecord {
     /// The ledger record (its lines include A/R and sales tax).
     pub txn: Transaction,
@@ -653,6 +657,10 @@ fn null_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the engine's flags as sent"
+)]
 struct RecordWire {
     #[serde(default)]
     subtotal: Option<Money>,
@@ -1192,13 +1200,13 @@ impl EmailMessage {
     }
 }
 
-/// The body of an email send (POST …/{id}/email, U-127 and U-144): the
+/// The body of an email send (`POST …/{id}/email`, U-127 and U-144): the
 /// message, the PDF in base64 with its file name and the Outbox message it
 /// sends, if any.
 ///
 /// # Errors
-/// Local(InvalidValue) for no recipient or a bad address;
-/// Local(AttachmentTooLarge) for an empty PDF or one over 10 MB.
+/// `Local(InvalidValue)` for no recipient or a bad address;
+/// `Local(AttachmentTooLarge)` for an empty PDF or one over 10 MB.
 pub(crate) fn email_body(
     message: &EmailMessage,
     pdf_file_name: &str,
@@ -1275,10 +1283,10 @@ pub enum OutboxKind {
     Transaction,
     /// A customer statement.
     CustomerStatement,
-    /// A credit memo (U-144, sales-doc-email-v1): sent with
-    /// POST /credit-memos/{id}/email and its outboxId.
+    /// A credit memo (U-144, `sales-doc-email-v1`): sent with
+    /// `POST /credit-memos/{id}/email` and its `outboxId`.
     CreditMemo,
-    /// A sales receipt (U-144): sent with POST /sales-receipts/{id}/email.
+    /// A sales receipt (U-144): sent with `POST /sales-receipts/{id}/email`.
     SalesReceipt,
     /// Anything a newer engine adds.
     #[serde(other)]

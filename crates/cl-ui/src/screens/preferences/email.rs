@@ -264,8 +264,8 @@ pub fn panel(
     action
 }
 
-/// Preferences > Email > Templates (P20 WP-B, Q-P20j; Q-163): the invoice
-/// and statement emails' subjects and bodies with their `{fields}`, and
+/// Preferences > Email > Templates (P20 WP-B, Q-P20j; Q-163): the invoice,
+/// statement, credit memo and sales receipt (PR-3, Q-P22u) emails' subjects and bodies with their `{fields}`, and
 /// BCC-self.
 fn templates_card(ui: &mut Ui, tokens: &Tokens, prefs: &mut cl_settings::EmailPrefs) {
     use cl_settings::TemplateDoc;
@@ -275,6 +275,11 @@ fn templates_card(ui: &mut Ui, tokens: &Tokens, prefs: &mut cl_settings::EmailPr
         for (doc, heading) in [
             (TemplateDoc::Invoice, "prefs.email.template.invoice"),
             (TemplateDoc::Statement, "prefs.email.template.statement"),
+            (TemplateDoc::CreditMemo, "prefs.email.template.credit_memo"),
+            (
+                TemplateDoc::SalesReceipt,
+                "prefs.email.template.sales_receipt",
+            ),
         ] {
             ui.push_id(heading, |ui| {
                 template_editor(ui, tokens, prefs, doc, heading);
@@ -296,6 +301,9 @@ fn template_fields(doc: cl_settings::TemplateDoc) -> Vec<&'static str> {
             F::AmountDue,
             F::CompanyName,
         ],
+        cl_settings::TemplateDoc::CreditMemo | cl_settings::TemplateDoc::SalesReceipt => {
+            &[F::ClientName, F::Number, F::Date, F::Total, F::CompanyName]
+        }
         _ => &[
             F::ClientName,
             F::InvoiceNumber,
@@ -318,6 +326,16 @@ fn template_labels(doc: cl_settings::TemplateDoc) -> (&'static str, &'static str
             "prefs.email.template.statement_subject",
             "prefs.email.template.statement_body",
             "prefs.email.template.statement_reset",
+        ),
+        cl_settings::TemplateDoc::CreditMemo => (
+            "prefs.email.template.credit_memo_subject",
+            "prefs.email.template.credit_memo_body",
+            "prefs.email.template.credit_memo_reset",
+        ),
+        cl_settings::TemplateDoc::SalesReceipt => (
+            "prefs.email.template.sales_receipt_subject",
+            "prefs.email.template.sales_receipt_body",
+            "prefs.email.template.sales_receipt_reset",
         ),
         _ => (
             "prefs.email.template.subject",

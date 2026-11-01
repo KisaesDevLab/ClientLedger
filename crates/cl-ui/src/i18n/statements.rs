@@ -85,4 +85,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("statements.txn.returned_payment", "Bounced payment"),
     ("statements.txn.journal_entry", "Adjustment"),
     ("outbox.statement", "Statement {number}"),
+    ("outbox.credit_memo", "Credit memo {number}"),
+    ("outbox.sales_receipt", "Sales receipt {number}"),
 ];

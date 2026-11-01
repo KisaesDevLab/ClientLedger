@@ -8,8 +8,9 @@
 //!   [`DEFAULT_INVOICE_BODY_KEY`]) and resolved by the UI, so they can be
 //!   translated.
 //! - Fields are written `{client_name}`, `{invoice_number}`,
-//!   `{invoice_date}`, `{due_date}`, `{total}`, `{balance_due}` and
-//!   `{company_name}` ([`FIELDS`]). `{{` and `}}` write a single brace. A
+//!   `{invoice_date}`, `{due_date}`, `{total}`, `{balance_due}`,
+//!   `{company_name}`, `{number}` and `{date}` ([`FIELDS`]; credit memos and
+//!   sales receipts use `{number}` and `{date}`, PR-3). `{{` and `}}` write a single brace. A
 //!   field this version does not know is kept as typed and reported
 //!   ([`Filled::unknown`]), so the editor can say so.
 //! - [`fill`] substitutes in one pass: a value that itself contains
@@ -30,6 +31,14 @@ pub const DEFAULT_INVOICE_BODY_KEY: &str = "email.template.invoice.body";
 pub const DEFAULT_STATEMENT_SUBJECT_KEY: &str = "email.template.statement.subject";
 /// The i18n key of the default statement email body (P22, Q-163).
 pub const DEFAULT_STATEMENT_BODY_KEY: &str = "email.template.statement.body";
+/// The i18n key of the default credit memo email subject (U-144, Q-163).
+pub const DEFAULT_CREDIT_MEMO_SUBJECT_KEY: &str = "email.template.credit_memo.subject";
+/// The i18n key of the default credit memo email body (U-144, Q-163).
+pub const DEFAULT_CREDIT_MEMO_BODY_KEY: &str = "email.template.credit_memo.body";
+/// The i18n key of the default sales receipt email subject (U-144, Q-163).
+pub const DEFAULT_SALES_RECEIPT_SUBJECT_KEY: &str = "email.template.sales_receipt.subject";
+/// The i18n key of the default sales receipt email body (U-144, Q-163).
+pub const DEFAULT_SALES_RECEIPT_BODY_KEY: &str = "email.template.sales_receipt.body";
 /// The longest subject kept (characters).
 pub const SUBJECT_MAX: usize = 255;
 /// The longest body kept (characters).
@@ -43,6 +52,10 @@ pub enum TemplateDoc {
     Invoice,
     /// Customer statements (P22).
     Statement,
+    /// Credit memos (PR-3, U-144, Q-P22u).
+    CreditMemo,
+    /// Sales receipts (PR-3, U-144, Q-P22u).
+    SalesReceipt,
 }
 
 /// One field a template can use.
@@ -66,11 +79,16 @@ pub enum Field {
     StatementDate,
     /// `{amount_due}` (statements, P22).
     AmountDue,
+    /// `{number}`: the document's number (credit memos and sales receipts,
+    /// PR-3; on an invoice, the invoice number).
+    Number,
+    /// `{date}`: the document's date (PR-3; on an invoice, its date).
+    Date,
 }
 
 /// Every field with the name written between braces, in the editor's
 /// order.
-pub const FIELDS: [(Field, &str); 9] = [
+pub const FIELDS: [(Field, &str); 11] = [
     (Field::ClientName, "client_name"),
     (Field::InvoiceNumber, "invoice_number"),
     (Field::InvoiceDate, "invoice_date"),
@@ -80,6 +98,8 @@ pub const FIELDS: [(Field, &str); 9] = [
     (Field::CompanyName, "company_name"),
     (Field::StatementDate, "statement_date"),
     (Field::AmountDue, "amount_due"),
+    (Field::Number, "number"),
+    (Field::Date, "date"),
 ];
 
 impl Field {
@@ -144,6 +164,12 @@ pub struct EmailPrefs {
     pub invoice: Option<EmailTemplate>,
     /// The owner's statement template (P22); `None` uses the default texts.
     pub statement: Option<EmailTemplate>,
+    /// The owner's credit memo template (PR-3); `None` uses the default
+    /// texts.
+    pub credit_memo: Option<EmailTemplate>,
+    /// The owner's sales receipt template (PR-3); `None` uses the default
+    /// texts.
+    pub sales_receipt: Option<EmailTemplate>,
 }
 
 impl Default for EmailPrefs {
@@ -152,6 +178,8 @@ impl Default for EmailPrefs {
             bcc_self: true,
             invoice: None,
             statement: None,
+            credit_memo: None,
+            sales_receipt: None,
         }
     }
 }
@@ -160,22 +188,35 @@ impl EmailPrefs {
     /// The template of `doc`.
     #[must_use]
     pub fn template(&self, doc: TemplateDoc) -> TemplateSource<'_> {
-        match doc {
-            TemplateDoc::Invoice => self.invoice.as_ref().map_or(
-                TemplateSource::Default {
-                    subject_key: DEFAULT_INVOICE_SUBJECT_KEY,
-                    body_key: DEFAULT_INVOICE_BODY_KEY,
-                },
-                TemplateSource::Custom,
+        let (own, subject_key, body_key) = match doc {
+            TemplateDoc::Invoice => (
+                &self.invoice,
+                DEFAULT_INVOICE_SUBJECT_KEY,
+                DEFAULT_INVOICE_BODY_KEY,
             ),
-            TemplateDoc::Statement => self.statement.as_ref().map_or(
-                TemplateSource::Default {
-                    subject_key: DEFAULT_STATEMENT_SUBJECT_KEY,
-                    body_key: DEFAULT_STATEMENT_BODY_KEY,
-                },
-                TemplateSource::Custom,
+            TemplateDoc::Statement => (
+                &self.statement,
+                DEFAULT_STATEMENT_SUBJECT_KEY,
+                DEFAULT_STATEMENT_BODY_KEY,
             ),
-        }
+            TemplateDoc::CreditMemo => (
+                &self.credit_memo,
+                DEFAULT_CREDIT_MEMO_SUBJECT_KEY,
+                DEFAULT_CREDIT_MEMO_BODY_KEY,
+            ),
+            TemplateDoc::SalesReceipt => (
+                &self.sales_receipt,
+                DEFAULT_SALES_RECEIPT_SUBJECT_KEY,
+                DEFAULT_SALES_RECEIPT_BODY_KEY,
+            ),
+        };
+        own.as_ref().map_or(
+            TemplateSource::Default {
+                subject_key,
+                body_key,
+            },
+            TemplateSource::Custom,
+        )
     }
 
     /// Saves the owner's template for `doc`, cut to [`SUBJECT_MAX`] and
@@ -194,6 +235,8 @@ impl EmailPrefs {
         match doc {
             TemplateDoc::Invoice => self.invoice = kept,
             TemplateDoc::Statement => self.statement = kept,
+            TemplateDoc::CreditMemo => self.credit_memo = kept,
+            TemplateDoc::SalesReceipt => self.sales_receipt = kept,
         }
     }
 
@@ -204,6 +247,12 @@ impl EmailPrefs {
         }
         if let Some(t) = self.statement.take() {
             self.set_template(TemplateDoc::Statement, &t);
+        }
+        if let Some(t) = self.credit_memo.take() {
+            self.set_template(TemplateDoc::CreditMemo, &t);
+        }
+        if let Some(t) = self.sales_receipt.take() {
+            self.set_template(TemplateDoc::SalesReceipt, &t);
         }
     }
 }
@@ -230,6 +279,10 @@ pub struct FieldValues {
     pub statement_date: String,
     /// The engine's amount due, as formatted (statements).
     pub amount_due: String,
+    /// The document's number (`{number}`).
+    pub number: String,
+    /// The document's date (`{date}`).
+    pub date: String,
 }
 
 impl fmt::Debug for FieldValues {
@@ -252,6 +305,8 @@ impl FieldValues {
             Field::CompanyName => &self.company_name,
             Field::StatementDate => &self.statement_date,
             Field::AmountDue => &self.amount_due,
+            Field::Number => &self.number,
+            Field::Date => &self.date,
         }
     }
 }
@@ -346,16 +401,18 @@ mod tests {
             company_name: "Kisaes Garden Supply".into(),
             statement_date: "11/30/2026".into(),
             amount_due: "$300.25".into(),
+            number: "CM-1001".into(),
+            date: "11/05/2026".into(),
         }
     }
 
     #[test]
     fn every_field_is_replaced() {
-        let t = "{client_name}|{invoice_number}|{invoice_date}|{due_date}|{total}|{balance_due}|{company_name}|{statement_date}|{amount_due}";
+        let t = "{client_name}|{invoice_number}|{invoice_date}|{due_date}|{total}|{balance_due}|{company_name}|{statement_date}|{amount_due}|{number}|{date}";
         let f = fill(t, &values());
         assert_eq!(
             f.text,
-            "Hartley Builders|1042|11/03/2026|12/03/2026|$3,234.87|$3,234.87|Kisaes Garden Supply|11/30/2026|$300.25"
+            "Hartley Builders|1042|11/03/2026|12/03/2026|$3,234.87|$3,234.87|Kisaes Garden Supply|11/30/2026|$300.25|CM-1001|11/05/2026"
         );
         assert_eq!(f.unknown, Vec::<String>::new());
         for (field, name) in FIELDS {
@@ -408,6 +465,47 @@ mod tests {
         );
         let old: EmailPrefs = serde_json::from_str("{}").expect("json");
         assert!(old.bcc_self, "a file from before P20 keeps the default");
+        for (doc, s, b) in [
+            (
+                TemplateDoc::CreditMemo,
+                "email.template.credit_memo.subject",
+                "email.template.credit_memo.body",
+            ),
+            (
+                TemplateDoc::SalesReceipt,
+                "email.template.sales_receipt.subject",
+                "email.template.sales_receipt.body",
+            ),
+        ] {
+            assert_eq!(
+                p.template(doc),
+                TemplateSource::Default {
+                    subject_key: s,
+                    body_key: b,
+                }
+            );
+        }
+        // A file from before PR-3 reads; each document keeps its own text.
+        let mut p: EmailPrefs =
+            serde_json::from_str(r#"{"invoice":{"subject":"I","body":"i"}}"#).expect("json");
+        assert!(p.credit_memo.is_none() && p.sales_receipt.is_none());
+        p.set_template(
+            TemplateDoc::CreditMemo,
+            &EmailTemplate {
+                subject: "Credit {number}".into(),
+                body: "b".into(),
+            },
+        );
+        assert!(
+            matches!(p.template(TemplateDoc::CreditMemo), TemplateSource::Custom(t) if t.subject == "Credit {number}")
+        );
+        assert!(matches!(
+            p.template(TemplateDoc::SalesReceipt),
+            TemplateSource::Default { .. }
+        ));
+        assert!(
+            matches!(p.template(TemplateDoc::Invoice), TemplateSource::Custom(t) if t.subject == "I")
+        );
     }
 
     #[test]

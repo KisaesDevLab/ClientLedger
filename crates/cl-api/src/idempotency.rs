@@ -750,7 +750,7 @@ impl Executor {
                     Step::Done(Err(keyed_give_up(ctx, r, e)))
                 }
             }
-            // 409 RETRY (U-146, eceivables-retry-v1; billable costs and
+            // 409 RETRY (U-146, `receivables-retry-v1`; billable costs and
             // batch groups since U-128): the engine rolled back and stored
             // nothing, so the same request goes once more with the same
             // key after a short pause; a second RETRY is the caller's

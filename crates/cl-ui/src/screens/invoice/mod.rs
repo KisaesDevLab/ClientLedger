@@ -280,6 +280,15 @@ impl Editing {
         }
     }
 
+    /// Every send, oldest first (U-144: memos and receipts too).
+    pub(crate) fn send_history(&self) -> &[cl_api::SendEvent] {
+        match &self.doc {
+            SavedDoc::Invoice(r) => &r.send_history,
+            SavedDoc::CreditMemo(r) => &r.send_history,
+            SavedDoc::SalesReceipt(r) => &r.send_history,
+        }
+    }
+
     /// The client.
     pub(crate) fn client(&self) -> Option<ContactId> {
         match &self.doc {
@@ -1097,11 +1106,7 @@ impl InvoiceScreen {
                 })
             })
             .collect();
-        let sent = self
-            .editing
-            .as_ref()
-            .and_then(Editing::invoice)
-            .map(|r| r.send_history.len());
+        let sent = self.editing.as_ref().map(|e| e.send_history().len());
         let mut v = json!({
             "screen": self.screen_name(),
             "layout": self.layout.json(),

@@ -832,6 +832,7 @@ fn void_of_an_invoice_with_payments_is_refused_until_unapplied() {
 /// date, not the payment's: a credit applied after the closing date comes
 /// off without the password; a row applied on or before it needs it.
 #[test]
+#[allow(clippy::many_single_char_names, reason = "the golden tests' r, a, b, p")]
 fn unapply_checks_the_closing_date_on_the_applied_date() {
     let (mut r, a, b) = parity_run();
     let client = r.client;
@@ -877,6 +878,7 @@ fn unapply_checks_the_closing_date_on_the_applied_date() {
 /// (409 FINANCE_CHARGE_CLIENT_CHANGE); same-client edits still save; an
 /// edit down to exactly the amount paid makes it paid (N2).
 #[test]
+#[allow(clippy::many_single_char_names, reason = "the golden tests' r, a, b, p")]
 fn an_invoice_keeps_its_client_while_anything_is_applied() {
     let (mut r, a, b) = parity_run();
     let client = r.client;

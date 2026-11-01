@@ -226,10 +226,10 @@ pub struct SalesReceiptRecord {
     /// The deposit it is in (depositTo and amount are then locked).
     #[serde(default)]
     pub deposit_id: Option<TransactionId>,
-    /// It is in a deposit (the engine's flag; deposit_id when known).
+    /// It is in a deposit (the engine's flag; `deposit_id` when known).
     #[serde(default)]
     pub deposited: bool,
-    /// Every send, oldest first (U-144, sales-doc-email-v1; empty on
+    /// Every send, oldest first (U-144, `sales-doc-email-v1`; empty on
     /// older engines).
     #[serde(default, deserialize_with = "null_vec")]
     pub send_history: Vec<crate::resources::invoices::SendEvent>,
@@ -334,12 +334,12 @@ impl SalesReceipts<'_> {
         decode_sales_doc(&reply.body, "salesReceipt", "sales receipt")
     }
 
-    /// Emails the receipt through the company SMTP with pdf attached
-    /// (SalesReceipt-<number>.pdf) and records an "email" send (POST
-    /// /sales-receipts/{id}/email, U-144). Keep one key per send.
+    /// Emails the receipt through the company SMTP with `pdf` attached
+    /// (`SalesReceipt-<number>.pdf`) and records an "email" send (`POST
+    /// /sales-receipts/{id}/email`, U-144). Keep one key per send.
     ///
     /// # Errors
-    /// As [crate::CreditMemos::email].
+    /// As [`crate::CreditMemos::email`].
     pub async fn email(
         &self,
         id: TransactionId,
@@ -351,8 +351,10 @@ impl SalesReceipts<'_> {
     ) -> Result<SalesReceiptRecord, ApiError> {
         crate::resources::credit_memos::send_doc_email(
             self.0,
-            &SALES_RECEIPT_EMAIL,
-            format!("/api/v1/sales-receipts/{id}/email"),
+            (
+                &SALES_RECEIPT_EMAIL,
+                format!("/api/v1/sales-receipts/{id}/email"),
+            ),
             message,
             (pdf_file_name, pdf),
             outbox_id,
@@ -362,11 +364,11 @@ impl SalesReceipts<'_> {
         .await
     }
 
-    /// Puts the receipt's email in the Outbox (POST
-    /// /sales-receipts/{id}/email-later, U-144; kind sales_receipt).
+    /// Puts the receipt's email in the Outbox (`POST
+    /// /sales-receipts/{id}/email-later`, U-144; kind `sales_receipt`).
     ///
     /// # Errors
-    /// As [SalesReceipts::email] without the PDF checks.
+    /// As [`SalesReceipts::email`] without the PDF checks.
     pub async fn email_later(
         &self,
         id: TransactionId,

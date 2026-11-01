@@ -100,6 +100,9 @@ impl InvoiceScreen {
         let dirty = self.is_dirty();
         let open = self.read_only().is_none();
         let kind = self.kind;
+        // PR-3 (U-144): memos and receipts email on sales-doc-email-v1.
+        let emails =
+            kind == SalesDocKind::Invoice || self.has(cl_api::Capabilities::SALES_DOC_EMAIL);
         let memo_left = self
             .editing
             .as_ref()
@@ -146,9 +149,7 @@ impl InvoiceScreen {
                 {
                     clicked = Some("form.print");
                 }
-                // P22: credit memos and sales receipts print and save a PDF;
-                // email for them comes later.
-                if kind == SalesDocKind::Invoice
+                if emails
                     && ui
                         .add_enabled(
                             saved && !dirty && open,
@@ -249,8 +250,7 @@ impl InvoiceScreen {
         if let Some(text) = self
             .editing
             .as_ref()
-            .and_then(super::Editing::invoice)
-            .and_then(|r| super::email::sent_text(r, self.email.own.as_deref()))
+            .and_then(|e| super::email::sent_text(e.send_history(), self.email.own.as_deref()))
         {
             banner(ui, tokens, |ui| {
                 ui.label(text);
@@ -708,8 +708,8 @@ impl InvoiceScreen {
                 s.header.edit(field::MEMO, |h| h.memo = memo);
             }
             kit::track(&mut s.focused, &r, field::MEMO);
-            // Email is for invoices only in P22.
-            if s.kind == SalesDocKind::Invoice {
+            // Memos and receipts email too on sales-doc-email-v1 (U-144).
+            if s.kind == SalesDocKind::Invoice || s.has(cl_api::Capabilities::SALES_DOC_EMAIL) {
                 ui.checkbox(&mut s.email_after_save, t("invoice.email_after_save"));
             }
             let mut hide = s.header.current().hide_zero_lines;
