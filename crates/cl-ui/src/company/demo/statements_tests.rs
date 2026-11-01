@@ -142,8 +142,10 @@ fn runs_issue_numbered_snapshots_without_ids_and_record_sends() {
     s.invoices.no_smtp = false;
     email(&mut s, id, &msg, Some(queued.id), "e1").expect("sent");
     email(&mut s, id, &msg, Some(queued.id), "e1").expect("replay sends once");
+    // History rows carry only lastSentAt (as the engine); the statement keeps every send.
     let h = history(&s, c);
-    assert_eq!(h[0].send_history.len(), 2);
+    assert!(h[0].last_sent_at.is_some());
+    assert_eq!(get(&s, id).expect("statement").send_history.len(), 2);
     let list = statement_list(
         &mut s,
         &StatementListQuery {
