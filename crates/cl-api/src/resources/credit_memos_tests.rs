@@ -754,3 +754,30 @@ fn a_refund_record_reads_an_integer_check_number_and_its_bank() {
     assert_eq!(r.check_number.as_deref(), Some("1042"));
     assert_eq!(r.from_account, Some(AccountId::parse(BANK).expect("id")));
 }
+
+/// The engine nests the figures in `totals` (P22 pin bf2daf38): they are
+/// read as the record's own, for credit memos and sales receipts alike.
+#[test]
+fn the_engines_nested_totals_are_read() {
+    let nested = memo_record().replace(
+        r#""subtotal":"375.00","taxAmount":"24.75","total":"399.75","#,
+        r#""totals":{"subtotal":"375.00","taxTotal":"24.75","total":"399.75"},"#,
+    );
+    assert!(nested.contains("\"totals\""));
+    let r = saved_credit_memo(nested.as_bytes()).expect("nested totals");
+    assert_eq!(r.subtotal, m("375.00"));
+    assert_eq!(r.tax_amount, m("24.75"));
+    assert_eq!(r.total, m("399.75"));
+    let number = nested.replace(r#""total":"399.75"}"#, r#""total":399.75}"#);
+    assert!(saved_credit_memo(number.as_bytes()).is_err());
+    let receipt = format!(
+        r#"{{"salesReceipt":{{"id":"{MEMO}","number":"1001","date":"2026-11-02","customerId":"{CLIENT}",
+        "depositToAccountId":"{INCOME}","paymentMethod":"cash","lines":[],"updatedAt":"2026-11-02T09:00:00.000Z",
+        "status":"posted","deposited":false,"totals":{{"subtotal":"99.98","taxTotal":"8.25","total":"108.23"}}}}}}"#
+    );
+    let r =
+        crate::resources::sales_receipts::saved_sales_receipt(receipt.as_bytes()).expect("receipt");
+    assert_eq!(r.total, m("108.23"));
+    assert_eq!(r.tax_amount, m("8.25"));
+    assert_eq!(r.subtotal, m("99.98"));
+}

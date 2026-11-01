@@ -19,11 +19,11 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::credit_memos::{
-    CreditWriteOptions, SalesDocLine, SalesDocStatus, check_doc_lines, doc_body,
+    CreditWriteOptions, SalesDocLine, SalesDocStatus, check_doc_lines, decode_sales_doc, doc_body,
 };
 use crate::resources::customer_payments::{
-    PAYMENT_REF_MAX, PreviewProblem, de_cents, de_cents_zero, decode_key, null_vec, require,
-    too_long, with_version,
+    PAYMENT_REF_MAX, PreviewProblem, de_cents, de_cents_zero, null_vec, require, too_long,
+    with_version,
 };
 use crate::resources::invoices::InvoicePreview;
 use crate::resources::operations::{
@@ -248,7 +248,7 @@ impl fmt::Debug for SalesReceiptRecord {
 /// # Errors
 /// `SavedUnreadable` when the answer can't be read.
 pub fn saved_sales_receipt(body: &[u8]) -> Result<SalesReceiptRecord, ApiError> {
-    decode_key(body, "salesReceipt", "sales receipt")
+    decode_sales_doc(body, "salesReceipt", "sales receipt")
         .map_err(crate::resources::versioning::saved_unreadable)
 }
 
@@ -326,7 +326,7 @@ impl SalesReceipts<'_> {
             format!("/api/v1/sales-receipts/{id}"),
         );
         let reply = self.0.send(&SALES_RECEIPT_GET, call, None).await?;
-        decode_key(&reply.body, "salesReceipt", "sales receipt")
+        decode_sales_doc(&reply.body, "salesReceipt", "sales receipt")
     }
 
     /// Edits a sales receipt if it is still at `opts.expected_updated_at`.

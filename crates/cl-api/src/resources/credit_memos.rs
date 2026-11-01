@@ -629,12 +629,44 @@ impl CreditMemoRecord {
     }
 }
 
-/// Reads a credit memo from an answer (`{creditMemo: …}`).
+/// Reads a saved credit memo or sales receipt under `key`. The engine
+/// nests the figures in `totals: {subtotal, taxTotal, total}`; they are
+/// lifted to the record's own fields (a top-level figure, as older
+/// fixtures had it, is kept).
 ///
+/// # Errors
+/// `Decode` when the answer can't be read.
+pub(crate) fn decode_sales_doc<T: for<'de> Deserialize<'de>>(
+    body: &[u8],
+    key: &str,
+    what: &'static str,
+) -> Result<T, ApiError> {
+    let mut v: serde_json::Map<String, Value> =
+        serde_json::from_slice(body).map_err(|_| ApiError::Decode { what })?;
+    let mut inner = v.remove(key).ok_or(ApiError::Decode { what })?;
+    if let Value::Object(doc) = &mut inner
+        && let Some(Value::Object(totals)) = doc.remove("totals")
+    {
+        for (from, to) in [
+            ("subtotal", "subtotal"),
+            ("taxTotal", "taxAmount"),
+            ("total", "total"),
+        ] {
+            if let Some(x) = totals.get(from)
+                && !doc.contains_key(to)
+            {
+                doc.insert(to.into(), x.clone());
+            }
+        }
+    }
+    serde_json::from_value(inner).map_err(|_| ApiError::Decode { what })
+}
+
+/// Reads a credit memo from an answer (`{creditMemo: …}`).///
 /// # Errors
 /// `SavedUnreadable` when the answer can't be read.
 pub fn saved_credit_memo(body: &[u8]) -> Result<CreditMemoRecord, ApiError> {
-    decode_key(body, "creditMemo", "credit memo")
+    decode_sales_doc(body, "creditMemo", "credit memo")
         .map_err(crate::resources::versioning::saved_unreadable)
 }
 
@@ -736,7 +768,7 @@ impl CreditMemos<'_> {
             format!("/api/v1/credit-memos/{id}"),
         );
         let reply = self.0.send(&CREDIT_MEMO_GET, call, None).await?;
-        decode_key(&reply.body, "creditMemo", "credit memo")
+        decode_sales_doc(&reply.body, "creditMemo", "credit memo")
     }
 
     /// Edits a credit memo if it is still at `opts.expected_updated_at`.
