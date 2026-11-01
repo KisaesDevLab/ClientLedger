@@ -1,0 +1,46 @@
+//! English text for the P22 form models (`cl_model::forms::{invoice,
+//! credit_memo, refund, statements, finance_charge}`): window titles of the
+//! three sales documents, problems, refund methods and statement layouts.
+//! Keys: `sales_doc.*`, `credit_memo.problem.*`, `sales_receipt.problem.*`,
+//! `refund.*`, `statements.format.*`, `statements.problem.*`,
+//! `finance_charges.problem.*`. The screens' text arrives with them (D4-D7).
+
+/// The P22 models' part of the English catalog.
+#[rustfmt::skip]
+pub const ENGLISH: &[(&str, &str)] = &[
+    ("sales_doc.title.invoice", "Create Invoice"),
+    ("sales_doc.title.credit_memo", "Credit Memo"),
+    ("sales_doc.title.sales_receipt", "Sales Receipt"),
+    ("credit_memo.problem.billable_not_allowed", "Billable costs go on invoices only. Remove this line, or add the cost to an invoice."),
+    ("credit_memo.problem.updating", "The totals are updating. Try again in a moment."),
+    ("credit_memo.problem.cant_calculate", "The totals can't be calculated right now. Check the lines, then try again."),
+    ("credit_memo.problem.total_not_positive", "A credit memo must total more than 0.00. To give money back for a return, use a sales receipt with a negative amount."),
+    ("credit_memo.problem.apply_or_keep", "This customer has open invoices. Choose Apply to an invoice or Keep as credit."),
+    ("credit_memo.problem.nothing_to_apply", "Choose at least one invoice to apply the credit to, or keep it as credit."),
+    ("credit_memo.problem.invoice_gone", "One of the invoices is no longer open. Reload the open invoices and try again."),
+    ("sales_receipt.problem.ref_too_long", "The reference can be at most 50 characters."),
+    ("sales_receipt.problem.needs_bank", "Money going back to a customer has to come from a bank account. Choose one in Deposit to."),
+    ("refund.method.check", "Check"),
+    ("refund.method.cash", "Cash"),
+    ("refund.method.card", "Card"),
+    ("refund.method.bank_transfer", "Bank transfer"),
+    ("refund.method.other", "Other"),
+    ("refund.problem.no_client", "Choose the customer to refund."),
+    ("refund.problem.no_source", "Choose the credit to refund."),
+    ("refund.problem.no_amount", "Enter an amount above 0.00."),
+    ("refund.problem.no_account", "Choose the bank account the refund is paid from."),
+    ("refund.problem.no_date", "Enter the refund date."),
+    ("refund.problem.check_no_or_print_later", "Enter the check number, or tick Print later to print the check."),
+    ("refund.problem.text_too_long", "The check number can be at most 50 characters and the memo at most 4,000."),
+    ("refund.problem.closing", "This date is in a closed period. Enter the closing-date password to save."),
+    ("statements.format.open_item", "Open item"),
+    ("statements.format.balance_forward", "Balance forward"),
+    ("statements.format.transaction", "Transaction"),
+    ("statements.problem.no_date", "Enter the statement date."),
+    ("statements.problem.no_clients", "Choose at least one customer."),
+    ("statements.problem.start_after_as_of", "The start date can't be after the statement date."),
+    ("finance_charges.problem.no_date", "Enter the assessment date."),
+    ("finance_charges.problem.not_set_up", "Set the annual rate and the income account first."),
+    ("finance_charges.problem.updating", "The charges are updating. Try again in a moment."),
+    ("finance_charges.problem.nothing_ticked", "Tick at least one customer to charge."),
+];

@@ -310,6 +310,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("payment.unapply_all", "Un-apply All", None, 7, alt('U'), Scope::Form),
     cmd("payment.discounts_credits", "Discounts & Credits\u{2026}", None, 7, alt('D'), Scope::Form),
     cmd("payment.bounced_check", "Record Bounced Check\u{2026}", None, 7, None, Scope::Form),
+    // Credit memo toolbar (P22, no shortcut).
+    cmd("credit_memo.apply", "Apply Credit\u{2026}", None, 7, None, Scope::Form),
+    cmd("credit_memo.refund", "Refund\u{2026}", None, 7, None, Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
     cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),
@@ -364,6 +367,10 @@ pub const COMMANDS: &[Command] = &[
     built("clients.daily_sales", "Daily Sales Summary", Some(Menu::Clients), 1, None),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
+    // P22 D3: the Refund screen and Assess Finance Charges (no shortcut);
+    // built with their screens (D5, D7).
+    screen("clients.refund", "Refund a Credit", Some(Menu::Clients), 2, None, "P22"),
+    screen("clients.finance_charges", "Assess Finance Charges", Some(Menu::Clients), 2, None, "P22"),
     built("clients.outbox", "Outbox", Some(Menu::Clients), 2, None),
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),

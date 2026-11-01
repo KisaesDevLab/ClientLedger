@@ -108,6 +108,7 @@ pub(crate) fn form_of(
                 cl_model::forms::invoice::LayoutPick::Layout(id.to_string())
             }),
         lines: Vec::new(),
+        ..InvoiceForm::default()
     };
     (form, lines)
 }

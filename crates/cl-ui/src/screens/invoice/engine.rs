@@ -233,6 +233,10 @@ mod tests {
         let client = ContactId::parse("d0000000-0000-4000-8000-c00000000001").expect("id");
         let date = CalendarDate::from_ymd(2026, 11, 4).expect("date");
         let r = InvoiceRequest {
+            kind: cl_model::forms::invoice::SalesDocKind::Invoice,
+            deposit_to: None,
+            payment_method: None,
+            ref_no: None,
             client,
             date,
             due_date: None,

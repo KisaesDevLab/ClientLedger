@@ -50,6 +50,12 @@ pub mod bounced_check;
 pub mod payment;
 pub mod personal_funds;
 pub mod transfer;
+// P22: credit memos, sales receipts (the invoice form's kind), refunds,
+// statements and finance charges.
+pub mod credit_memo;
+pub mod finance_charge;
+pub mod refund;
+pub mod statements;
 
 /// How many unsaved steps a form remembers.
 pub const UNDO_LIMIT: usize = 200;

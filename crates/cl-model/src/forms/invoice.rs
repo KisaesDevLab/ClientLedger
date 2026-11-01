@@ -209,9 +209,79 @@ pub enum LayoutPick {
     Layout(String),
 }
 
+/// Which sales document the form is (P22 D3): the three share the lines
+/// grid, the preview and the save path; the kind gates the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SalesDocKind {
+    /// Create Invoice (P20).
+    #[default]
+    Invoice,
+    /// Credit Memo: no terms, due date, P.O. number, billable costs or
+    /// deposit card (Q-P22b asks Apply or Keep on save).
+    CreditMemo,
+    /// Sales Receipt: no terms, due date, P.O. number or billable costs;
+    /// adds Deposit to, payment method and reference (Q-P20u, Q-P22e).
+    SalesReceipt,
+}
+
+impl SalesDocKind {
+    /// Terms, days and the due date show.
+    #[must_use]
+    pub const fn has_terms(self) -> bool {
+        matches!(self, SalesDocKind::Invoice)
+    }
+
+    /// The P.O. number shows.
+    #[must_use]
+    pub const fn has_po_number(self) -> bool {
+        matches!(self, SalesDocKind::Invoice)
+    }
+
+    /// Billable costs can be added.
+    #[must_use]
+    pub const fn has_billable(self) -> bool {
+        matches!(self, SalesDocKind::Invoice)
+    }
+
+    /// The side panel's deposit card shows.
+    #[must_use]
+    pub const fn has_deposit_card(self) -> bool {
+        matches!(self, SalesDocKind::Invoice)
+    }
+
+    /// Deposit to, payment method and reference show.
+    #[must_use]
+    pub const fn has_payment(self) -> bool {
+        matches!(self, SalesDocKind::SalesReceipt)
+    }
+
+    /// The window title's text key.
+    #[must_use]
+    pub const fn title(self) -> TextKey {
+        match self {
+            SalesDocKind::Invoice => TextKey("sales_doc.title.invoice"),
+            SalesDocKind::CreditMemo => TextKey("sales_doc.title.credit_memo"),
+            SalesDocKind::SalesReceipt => TextKey("sales_doc.title.sales_receipt"),
+        }
+    }
+}
+
+/// The longest payment reference of a sales receipt.
+pub const REF_MAX: usize = 50;
+
 /// The whole editable invoice.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct InvoiceForm {
+    /// Invoice, credit memo or sales receipt (P22).
+    pub kind: SalesDocKind,
+    /// Sales receipt: where the money goes (`None`: Payments Clearing,
+    /// Q-P20h; the screen prefills the last choice).
+    pub deposit_to: Option<AccountId>,
+    /// Sales receipt: the engine's payment method (`check`, `cash`,
+    /// `credit_card`, `ach`, `other`).
+    pub payment_method: Option<String>,
+    /// Sales receipt: check or reference number.
+    pub ref_no: String,
     /// The client.
     pub client: Option<ContactId>,
     /// Invoice date.
@@ -247,6 +317,7 @@ pub struct InvoiceForm {
 impl fmt::Debug for InvoiceForm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InvoiceForm")
+            .field("kind", &self.kind)
             .field("client", &self.client.is_some())
             .field("date", &self.date.is_some())
             .field("number", &!self.number.is_empty())
@@ -271,6 +342,19 @@ impl InvoiceForm {
             date,
             lines: vec![InvoiceLine::blank(keys.next_key())],
             ..InvoiceForm::default()
+        }
+    }
+
+    /// A blank document of `kind` dated `date` with one entry line.
+    #[must_use]
+    pub fn new_kind(
+        kind: SalesDocKind,
+        date: Option<CalendarDate>,
+        keys: &mut RowKeyGen,
+    ) -> InvoiceForm {
+        InvoiceForm {
+            kind,
+            ..InvoiceForm::new(date, keys)
         }
     }
 
@@ -391,7 +475,7 @@ impl InvoiceForm {
         let lines: Vec<RequestLine> = self
             .lines
             .iter()
-            .filter(|l| l.priceable())
+            .filter(|l| l.priceable() && (self.kind.has_billable() || l.billable.is_none()))
             .map(|l| RequestLine {
                 description: None,
                 tag: None,
@@ -422,15 +506,26 @@ impl InvoiceForm {
         caps: InvoiceCaps,
     ) -> InvoiceRequest {
         let custom = self.terms.as_deref() == Some(CUSTOM_TERMS);
+        let terms = self.kind.has_terms();
+        let pay = self.kind.has_payment();
         InvoiceRequest {
+            kind: self.kind,
             client,
             date,
-            due_date: self.due_date,
-            terms: self.terms.clone(),
-            terms_days: if custom { self.terms_days } else { None },
+            due_date: self.due_date.filter(|_| terms),
+            terms: self.terms.clone().filter(|_| terms),
+            terms_days: if custom && terms {
+                self.terms_days
+            } else {
+                None
+            },
             number: Some(self.number.trim().to_string()).filter(|n| !n.is_empty()),
             memo: self.memo.clone(),
-            po_number: caps.fields.then(|| self.po_number.trim().to_string()),
+            po_number: (caps.fields && self.kind.has_po_number())
+                .then(|| self.po_number.trim().to_string()),
+            deposit_to: self.deposit_to.filter(|_| pay),
+            payment_method: self.payment_method.clone().filter(|_| pay),
+            ref_no: Some(self.ref_no.trim().to_string()).filter(|r| pay && !r.is_empty()),
             customer_message: caps.fields.then(|| self.customer_message.clone()),
             header_tags: caps.fields.then(|| self.header_tags.clone()),
             hide_zero_lines: caps.fields.then_some(self.hide_zero_lines),
@@ -493,6 +588,10 @@ pub enum InvoiceField {
     LineRate(RowKey),
     /// One line's billable markup.
     LineMarkup(RowKey),
+    /// A sales receipt's Deposit to (P22).
+    DepositTo,
+    /// A sales receipt's reference (P22).
+    Reference,
 }
 
 /// Why an invoice can't be saved.
@@ -534,6 +633,13 @@ pub enum InvoiceProblem {
     MarkupNegative(RowKey),
     /// A billable line without the income account it is billed to.
     BillableAccountMissing(RowKey),
+    /// A billable cost on a credit memo or sales receipt (invoices only).
+    BillableNotAllowed(RowKey),
+    /// A sales receipt's reference is longer than [`REF_MAX`].
+    RefTooLong,
+    /// A negative sales receipt (a return) to Payments Clearing: pick a
+    /// bank account (the preview's `NEGATIVE_RECEIPT_NEEDS_BANK`).
+    NegativeReceiptNeedsBank,
 }
 
 impl InvoiceProblem {
@@ -566,6 +672,21 @@ impl InvoiceProblem {
             InvoiceProblem::BillableAccountMissing(_) => {
                 TextKey("invoice.problem.billable_account_missing")
             }
+            InvoiceProblem::BillableNotAllowed(_) => {
+                TextKey("credit_memo.problem.billable_not_allowed")
+            }
+            InvoiceProblem::RefTooLong => TextKey("sales_receipt.problem.ref_too_long"),
+            InvoiceProblem::NegativeReceiptNeedsBank => TextKey("sales_receipt.problem.needs_bank"),
+        }
+    }
+
+    /// The form problem a preview problem code stands for (the preview
+    /// never answers 4xx for these; Save stays off while one shows).
+    #[must_use]
+    pub fn from_preview_code(code: &str) -> Option<InvoiceProblem> {
+        match code {
+            "NEGATIVE_RECEIPT_NEEDS_BANK" => Some(InvoiceProblem::NegativeReceiptNeedsBank),
+            _ => None,
         }
     }
 
@@ -587,7 +708,10 @@ impl InvoiceProblem {
             | InvoiceProblem::TooManyLines => InvoiceField::Lines,
             InvoiceProblem::LineItemMissing(k)
             | InvoiceProblem::BillableNeedsUpdate(k)
+            | InvoiceProblem::BillableNotAllowed(k)
             | InvoiceProblem::BillableAccountMissing(k) => InvoiceField::LineItem(k),
+            InvoiceProblem::RefTooLong => InvoiceField::Reference,
+            InvoiceProblem::NegativeReceiptNeedsBank => InvoiceField::DepositTo,
             InvoiceProblem::LineDescriptionTooLong(k) => InvoiceField::LineDescription(k),
             InvoiceProblem::LineRateMissing(k) => InvoiceField::LineRate(k),
             InvoiceProblem::MarkupNegative(k) => InvoiceField::LineMarkup(k),
@@ -642,6 +766,10 @@ impl fmt::Debug for RequestLine {
 /// `cl_api::NewInvoice`; the tax rate is never sent).
 #[derive(Clone, PartialEq, Eq)]
 pub struct InvoiceRequest {
+    /// Which document (P22): the UI maps an invoice onto
+    /// `cl_api::NewInvoice`, a credit memo onto `NewCreditMemo`, a sales
+    /// receipt onto `NewSalesReceipt`.
+    pub kind: SalesDocKind,
     /// The client.
     pub client: ContactId,
     /// Invoice date.
@@ -671,11 +799,18 @@ pub struct InvoiceRequest {
     pub layout: LayoutPick,
     /// The used lines, in order.
     pub lines: Vec<RequestLine>,
+    /// Sales receipt: Deposit to (`None`: Payments Clearing).
+    pub deposit_to: Option<AccountId>,
+    /// Sales receipt: payment method.
+    pub payment_method: Option<String>,
+    /// Sales receipt: reference.
+    pub ref_no: Option<String>,
 }
 
 impl fmt::Debug for InvoiceRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InvoiceRequest")
+            .field("kind", &self.kind)
             .field("client", &self.client)
             .field("date", &self.date)
             .field("due_date", &self.due_date)
@@ -742,7 +877,7 @@ pub fn check_invoice(
             if closed && !caps.closing {
                 problems.push(InvoiceProblem::ClosedPeriodNeedsUpdate);
             }
-            if form.due_date.is_some_and(|due| due < d) {
+            if form.kind.has_terms() && form.due_date.is_some_and(|due| due < d) {
                 problems.push(InvoiceProblem::DueBeforeDate);
             }
         }
@@ -756,10 +891,14 @@ pub fn check_invoice(
     if form.customer_message.chars().count() > TEXT_MAX {
         problems.push(InvoiceProblem::MessageTooLong);
     }
-    if form.terms.as_deref() == Some(CUSTOM_TERMS)
+    if form.kind.has_terms()
+        && form.terms.as_deref() == Some(CUSTOM_TERMS)
         && form.terms_days.is_none_or(|d| d > TERMS_DAYS_MAX)
     {
         problems.push(InvoiceProblem::TermsDaysInvalid);
+    }
+    if form.kind.has_payment() && form.ref_no.trim().chars().count() > REF_MAX {
+        problems.push(InvoiceProblem::RefTooLong);
     }
     let used: Vec<&InvoiceLine> = form.lines.iter().filter(|l| !l.is_blank()).collect();
     let header_fields = !form.po_number.trim().is_empty()
@@ -787,7 +926,9 @@ pub fn check_invoice(
         if l.rate.is_none() && l.billable.is_none() && !caps.pricing {
             problems.push(InvoiceProblem::LineRateMissing(l.key));
         }
-        if let Some(b) = l.billable {
+        if l.billable.is_some() && !form.kind.has_billable() {
+            problems.push(InvoiceProblem::BillableNotAllowed(l.key));
+        } else if let Some(b) = l.billable {
             if !caps.billable {
                 problems.push(InvoiceProblem::BillableNeedsUpdate(l.key));
             }
