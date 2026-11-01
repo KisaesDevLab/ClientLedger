@@ -111,11 +111,10 @@ pub fn customer_deposit_lifecycle(h: &Harness) {
         before.checked_add(m("700.00")).expect("add"),
         "the new invoice less the deposit"
     );
-    assert!(
-        h.run(s.customer_payments().deposits_on_hand(x.client))
-            .expect("on hand")
-            .is_empty()
-    );
+    let on_hand = h
+        .run(s.customer_payments().deposits_on_hand(x.client))
+        .expect("on hand");
+    assert_eq!(on_hand.len(), 0, "nothing left on hand");
 
     // The deposit can't be voided while its draw stands.
     let held_now = h.run(s.customer_payments().get(held.id)).expect("get");
