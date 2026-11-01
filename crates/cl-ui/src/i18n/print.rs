@@ -156,6 +156,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.pdf.days_31_60", "31-60 days"),
     ("print.pdf.days_61_90", "61-90 days"),
     ("print.pdf.over_90", "Over 90 days"),
+    ("print.pdf.open", "Open"),
+    ("print.pdf.previous_balance", "Previous balance"),
     ("print.pdf.continued", "(continued)"),
     ("print.pdf.page_of", "Page {page} of {pages}"),
     ("print.pdf.other_deposits", "Other deposits"),

@@ -557,6 +557,7 @@ impl InvoiceScreen {
             total: rec.txn.total.map(|m| m.format(style)).unwrap_or_default(),
             balance_due: rec.balance_due.map(|m| m.format(style)).unwrap_or_default(),
             company_name: self.company_name(),
+            ..FieldValues::default()
         };
         let (subject, body) = match prefs.template(TemplateDoc::Invoice) {
             TemplateSource::Default {

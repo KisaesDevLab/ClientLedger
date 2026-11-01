@@ -264,65 +264,109 @@ pub fn panel(
     action
 }
 
-/// Preferences > Email > Templates (P20 WP-B, Q-P20j): the invoice email's
-/// subject and body with their `{fields}`, and BCC-self.
+/// Preferences > Email > Templates (P20 WP-B, Q-P20j; Q-163): the invoice
+/// and statement emails' subjects and bodies with their `{fields}`, and
+/// BCC-self.
 fn templates_card(ui: &mut Ui, tokens: &Tokens, prefs: &mut cl_settings::EmailPrefs) {
-    use cl_settings::{EmailTemplate, TemplateDoc, TemplateSource};
+    use cl_settings::TemplateDoc;
     form::card(ui, tokens, |ui| {
         form::heading(ui, tokens, &t("prefs.email.templates"));
         form::hint(ui, tokens, &t("prefs.email.templates.intro"));
-        let (mut subject, mut body, custom) = match prefs.template(TemplateDoc::Invoice) {
-            TemplateSource::Default {
-                subject_key,
-                body_key,
-            } => (t(subject_key), t(body_key), false),
-            TemplateSource::Custom(c) => (c.subject.clone(), c.body.clone(), true),
-        };
-        let mut changed =
-            form::field(ui, &t("prefs.email.template.subject"), &mut subject).changed();
-        let l = ui.label(t("prefs.email.template.body"));
-        changed |= ui
-            .add(
-                egui::TextEdit::multiline(&mut body)
-                    .desired_rows(6)
-                    .desired_width(480.0),
-            )
-            .labelled_by(l.id)
-            .changed();
-        if changed {
-            prefs.set_template(TemplateDoc::Invoice, &EmailTemplate { subject, body });
-        }
-        let names: Vec<String> = cl_settings::email_templates::FIELDS
-            .iter()
-            .map(|(_, n)| format!("{{{n}}}"))
-            .collect();
-        form::hint(
-            ui,
-            tokens,
-            &crate::i18n::t_with(
-                "prefs.email.template.fields",
-                &[("fields", &names.join(" "))],
-            ),
-        );
-        if let TemplateSource::Custom(c) = prefs.template(TemplateDoc::Invoice) {
-            let mut unknown = cl_settings::unknown_fields(&c.subject);
-            unknown.extend(cl_settings::unknown_fields(&c.body));
-            if !unknown.is_empty() {
-                ui.label(
-                    RichText::new(crate::i18n::t_with(
-                        "prefs.email.template.unknown",
-                        &[("fields", &unknown.join(", "))],
-                    ))
-                    .color(tokens.warn_text),
-                );
-            }
-        }
-        if custom && ui.button(t("prefs.email.template.reset")).clicked() {
-            prefs.invoice = None;
+        for (doc, heading) in [
+            (TemplateDoc::Invoice, "prefs.email.template.invoice"),
+            (TemplateDoc::Statement, "prefs.email.template.statement"),
+        ] {
+            ui.push_id(heading, |ui| {
+                template_editor(ui, tokens, prefs, doc, heading)
+            });
+            ui.add_space(6.0);
         }
         ui.checkbox(&mut prefs.bcc_self, t("prefs.email.bcc_self"))
             .on_hover_text(t("prefs.email.bcc_self.tip"));
     });
+}
+
+/// The `{fields}` a document's template can use.
+fn template_fields(doc: cl_settings::TemplateDoc) -> Vec<&'static str> {
+    use cl_settings::EmailField as F;
+    let wanted: &[F] = match doc {
+        cl_settings::TemplateDoc::Statement => &[
+            F::ClientName,
+            F::StatementDate,
+            F::AmountDue,
+            F::CompanyName,
+        ],
+        _ => &[
+            F::ClientName,
+            F::InvoiceNumber,
+            F::InvoiceDate,
+            F::DueDate,
+            F::Total,
+            F::BalanceDue,
+            F::CompanyName,
+        ],
+    };
+    wanted.iter().map(|f| f.name()).collect()
+}
+
+/// One document's subject and body.
+fn template_editor(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    prefs: &mut cl_settings::EmailPrefs,
+    doc: cl_settings::TemplateDoc,
+    heading: &str,
+) {
+    use cl_settings::{EmailTemplate, TemplateSource};
+    ui.label(RichText::new(t(heading)).strong());
+    let (mut subject, mut body, custom) = match prefs.template(doc) {
+        TemplateSource::Default {
+            subject_key,
+            body_key,
+        } => (t(subject_key), t(body_key), false),
+        TemplateSource::Custom(c) => (c.subject.clone(), c.body.clone(), true),
+    };
+    let mut changed = form::field(ui, &t("prefs.email.template.subject"), &mut subject).changed();
+    let l = ui.label(t("prefs.email.template.body"));
+    changed |= ui
+        .add(
+            egui::TextEdit::multiline(&mut body)
+                .desired_rows(6)
+                .desired_width(480.0),
+        )
+        .labelled_by(l.id)
+        .changed();
+    if changed {
+        prefs.set_template(doc, &EmailTemplate { subject, body });
+    }
+    let names: Vec<String> = template_fields(doc)
+        .iter()
+        .map(|n| format!("{{{n}}}"))
+        .collect();
+    form::hint(
+        ui,
+        tokens,
+        &crate::i18n::t_with(
+            "prefs.email.template.fields",
+            &[("fields", &names.join(" "))],
+        ),
+    );
+    if let TemplateSource::Custom(c) = prefs.template(doc) {
+        let mut unknown = cl_settings::unknown_fields(&c.subject);
+        unknown.extend(cl_settings::unknown_fields(&c.body));
+        if !unknown.is_empty() {
+            ui.label(
+                RichText::new(crate::i18n::t_with(
+                    "prefs.email.template.unknown",
+                    &[("fields", &unknown.join(", "))],
+                ))
+                .color(tokens.warn_text),
+            );
+        }
+    }
+    if custom && ui.button(t("prefs.email.template.reset")).clicked() {
+        prefs.set_template(doc, &EmailTemplate::default());
+    }
 }
 
 #[cfg(test)]

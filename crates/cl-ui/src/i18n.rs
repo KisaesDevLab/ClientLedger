@@ -911,6 +911,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.email.template.fields", "Fields you can use: {fields}. Type {{ for a brace."),
     ("prefs.email.template.unknown", "Not known, sent as typed: {fields}"),
     ("prefs.email.template.reset", "Use the standard text"),
+    ("prefs.email.template.invoice", "Invoice email"),
+    ("prefs.email.template.statement", "Statement email"),
     ("prefs.email.bcc_self", "Send me a copy (Bcc the From address)"),
     ("prefs.email.bcc_self.tip", "ClientLedger keeps the sent history either way."),
     ("prefs.email.err_host", "Enter the mail server's address."),
