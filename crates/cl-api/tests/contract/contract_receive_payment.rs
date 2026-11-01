@@ -893,7 +893,7 @@ pub fn early_discount_suggested_and_posted(h: &Harness) {
         write_off_amount: None,
     }]);
     let p = preview(h, s, &r);
-    assert!(p.shortfalls.is_empty());
+    assert!(p.shortfalls.is_empty(), "the discount closes it");
     assert_eq!(p.totals.discounts_and_credits, m("20.00"));
     assert_eq!(p.contact_balance_after, Money::ZERO);
     let mut save = save_of(&p, c, on, uf);
