@@ -338,6 +338,8 @@ fn money(d: Decimal) -> Result<Money, ApiError> {
 struct Stored {
     record: Value,
     claims: Vec<JournalLineId>,
+    /// When it was made (the engine's `createdAt` tiebreaker in the list).
+    made: u64,
 }
 
 /// Invoices the demo engine keeps.
@@ -346,6 +348,8 @@ pub struct DemoInvoices {
     stored: BTreeMap<TransactionId, Stored>,
     claimed: BTreeSet<JournalLineId>,
     next: u64,
+    /// Invoices made so far, seeded or created (each one's `made`).
+    made: u64,
     /// Write requests that reached the demo engine (tests).
     pub writes: u32,
     /// The Outbox (Q-P20q), oldest first (WP-B).
@@ -361,6 +365,12 @@ pub struct DemoInvoices {
 }
 
 impl DemoInvoices {
+    /// The next invoice's `made`.
+    fn made_one(&mut self) -> u64 {
+        self.made += 1;
+        self.made
+    }
+
     fn markup_account(&self) -> AccountId {
         self.markup_account
             .unwrap_or_else(|| super::account_id(4000))
@@ -864,7 +874,15 @@ pub fn create(
     let saved = versioned(&record)?;
     state.invoices.writes += 1;
     state.invoices.claimed.extend(claims.iter().copied());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    let made = state.invoices.made_one();
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made,
+        },
+    );
     Ok(saved)
 }
 
@@ -1214,14 +1232,34 @@ pub fn update(
         state.invoices.claimed.remove(c);
     }
     state.invoices.claimed.extend(claims.iter().copied());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made: old.made,
+        },
+    );
     Ok(saved)
 }
 
-/// Every live invoice, newest first (Prev/Next).
+/// Every live invoice, newest first (Prev/Next): as the engine's list,
+/// by date and then by when it was made, both descending. Not by id: the
+/// seeded invoices' ids carry their numbers (1091, 1201, ...) and would
+/// come before every invoice the owner creates.
 #[must_use]
 pub fn list(state: &DemoState) -> Vec<TransactionId> {
-    state.invoices.stored.keys().rev().copied().collect()
+    let mut v: Vec<(String, u64, TransactionId)> = state
+        .invoices
+        .stored
+        .iter()
+        .map(|(id, s)| {
+            let date = s.record["txnDate"].as_str().unwrap_or_default().to_string();
+            (date, s.made, *id)
+        })
+        .collect();
+    v.sort();
+    v.into_iter().rev().map(|(_, _, id)| id).collect()
 }
 
 /// `POST /invoices/{id}/email`: sends (the demo has no network: it records
@@ -1513,7 +1551,15 @@ pub fn seed_receivable(
     let (mut record, claims) = record_json(state, id, number, &new)?;
     record["invoiceStatus"] = json!("sent");
     record["sentAt"] = json!(DemoState::now());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    let made = state.invoices.made_one();
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made,
+        },
+    );
     Ok(())
 }
 
