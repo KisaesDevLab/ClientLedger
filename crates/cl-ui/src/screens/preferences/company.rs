@@ -694,6 +694,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn finance_charge_settings_send_only_what_changed() {
         let s: CompanySettings = serde_json::from_value(serde_json::json!({
             "financeChargeAnnualRate": null,

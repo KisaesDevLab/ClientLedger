@@ -261,6 +261,7 @@ fn charge_for(
             has_open_credits: (credits > Decimal::ZERO)
                 .then(|| money(credits))
                 .transpose()?,
+            ticked: None,
         },
         sources: through,
     }))
@@ -292,10 +293,16 @@ pub fn preview(
             code: "RATE_NOT_SET".into(),
         });
     }
+    if state.finance.income_account.is_none() {
+        problems.push(FinanceChargeProblem {
+            code: "INCOME_ACCOUNT_NOT_SET".into(),
+        });
+    }
     let mut rows = Vec::new();
     if problems.is_empty() {
         for (c, name, active) in clients(state, only) {
-            if let Some(x) = charge_for(state, c, name, active, d)? {
+            if let Some(mut x) = charge_for(state, c, name, active, d)? {
+                x.row.ticked = Some(x.row.chargeable() && x.row.has_open_credits.is_none());
                 rows.push(x.row);
             }
         }
@@ -330,7 +337,7 @@ pub fn assess(
     if let Some(done) = state.finance.keys.get(key) {
         return Ok(done.clone());
     }
-    if state.finance.rate.is_none() {
+    if state.finance.rate.is_none() || state.finance.income_account.is_none() {
         return Err(refused("FINANCE_CHARGE_NOT_SET_UP"));
     }
     if r.contacts.is_empty() || r.contacts.len() > cl_api::MAX_ASSESS_CONTACTS {

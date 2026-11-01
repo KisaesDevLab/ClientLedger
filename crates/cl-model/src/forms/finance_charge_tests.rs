@@ -23,6 +23,7 @@ fn row(n: usize, charge: &str, chargeable: bool, credits: bool) -> ChargeRowFigu
         charge: m(charge),
         chargeable,
         has_open_credits: credits,
+        ticked: None,
     }
 }
 
@@ -93,4 +94,20 @@ proptest! {
             prop_assert_eq!(x.to_wire(), r.charge.to_wire());
         }
     }
+}
+
+#[test]
+fn the_engines_tick_wins_when_it_sends_one() {
+    let mut figures = golden6();
+    figures.rows[0].ticked = Some(false);
+    figures.rows[2].ticked = Some(true);
+    // A row the engine can't charge stays unticked whatever it says.
+    figures.rows[3].ticked = Some(true);
+    let date = cl_core::CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    let mut f = FinanceChargeForm::new(Some(date));
+    assert!(f.apply_preview(date, figures));
+    assert!(!f.is_ticked(client(1)));
+    assert!(f.is_ticked(client(2)));
+    assert!(f.is_ticked(client(3)));
+    assert!(!f.is_ticked(client(4)));
 }

@@ -32,7 +32,7 @@ fn set_up(s: &mut DemoState, compounding: bool) {
             minimum: Some(m("2.00")),
             grace_days: Some(10),
             on_finance_charges: Some(compounding),
-            income_account_id: None,
+            income_account_id: Some(Some(crate::company::demo::account_id(4000))),
             print_later: None,
         },
     );

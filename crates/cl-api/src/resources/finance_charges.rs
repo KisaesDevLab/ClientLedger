@@ -320,6 +320,10 @@ pub struct FinanceChargeRow {
     /// The client's open credits (shown unticked with a hint, Q-P22s).
     #[serde(default, deserialize_with = "de_cents_opt")]
     pub has_open_credits: Option<Money>,
+    /// The engine's starting tick (chargeable without open credits);
+    /// `None` from engines that don't send it.
+    #[serde(default)]
+    pub ticked: Option<bool>,
 }
 
 impl fmt::Debug for FinanceChargeRow {

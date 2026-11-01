@@ -1099,6 +1099,7 @@ impl CenterScreen {
                     ("center.new_credit_memo", "clients.credit_memo"),
                     ("center.refund", "clients.refund"),
                     ("center.statement", "clients.statements"),
+                    ("center.finance_charges", "clients.finance_charges"),
                 ] {
                     if b(ui, key, cmd).clicked() {
                         self.link.push(crate::company::CompanyEvent::OpenWith(

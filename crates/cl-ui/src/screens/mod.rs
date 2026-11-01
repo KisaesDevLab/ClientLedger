@@ -59,6 +59,7 @@ pub mod receive_payment;
 // screen of their kind).
 pub mod refund;
 // P22 D6: Statements.
+pub mod finance_charges;
 pub mod statements;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
@@ -105,11 +106,12 @@ pub(crate) const P20_SCREENS: [crate::shell::MakeScreen; 2] = [invoice::make, ou
 pub(crate) const P21_SCREENS: [crate::shell::MakeScreen; 1] = [receive_payment::make];
 
 /// Every P22 screen's `make` (the shell tries each after P21's).
-pub(crate) const P22_SCREENS: [crate::shell::MakeScreen; 4] = [
+pub(crate) const P22_SCREENS: [crate::shell::MakeScreen; 5] = [
     invoice::make_credit_memo,
     invoice::make_sales_receipt,
     refund::make,
     statements::make,
+    finance_charges::make,
 ];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
@@ -253,6 +255,7 @@ mod tests {
             invoice::SALES_RECEIPT_KIND,
             refund::KIND,
             statements::KIND,
+            finance_charges::KIND,
         ];
         for (make, kind) in P22_SCREENS.iter().zip(kinds) {
             let cmd = cl_model::commands::find(kind).expect("a command");

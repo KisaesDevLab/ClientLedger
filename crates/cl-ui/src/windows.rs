@@ -173,6 +173,9 @@ pub enum OpenPayload {
     /// P22 (P21 follow-up 3): Receive Payment opens this saved payment and
     /// its bounced-check flow (Client Center's "Record bounced check").
     BounceCheck(cl_core::ids::TransactionId),
+    /// P22: Assess Finance Charges on this date (Statements' "Assess
+    /// finance charges first?").
+    OnDate(cl_core::CalendarDate),
 }
 
 /// Stand-in for a screen a later phase builds.

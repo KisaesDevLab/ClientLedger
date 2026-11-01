@@ -32,6 +32,9 @@ pub struct ChargeRowFigure {
     pub chargeable: bool,
     /// The client has open credits (the hint; starts unticked).
     pub has_open_credits: bool,
+    /// The engine's starting tick (`None`: chargeable rows without open
+    /// credits start ticked).
+    pub ticked: Option<bool>,
 }
 
 impl fmt::Debug for ChargeRowFigure {
@@ -168,7 +171,7 @@ impl FinanceChargeForm {
         self.ticked = figures
             .rows
             .iter()
-            .filter(|r| r.chargeable && !r.has_open_credits)
+            .filter(|r| r.chargeable && r.ticked.unwrap_or(!r.has_open_credits))
             .map(|r| r.client)
             .collect();
         self.figures = Some((date, figures));

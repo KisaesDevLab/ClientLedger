@@ -1317,6 +1317,7 @@ impl Screen for EnterBillScreen {
             | OpenPayload::RefundFrom(..)
             | OpenPayload::ForClient(_)
             | OpenPayload::BounceCheck(_)
+            | OpenPayload::OnDate(_)
             | OpenPayload::ReprintCheck(..)
             | OpenPayload::PrintDeposit(..) => false,
         }

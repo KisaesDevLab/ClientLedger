@@ -55,6 +55,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("finance_charges.assess.tip", "Creates one finance-charge invoice per ticked client, due on receipt."),
     ("finance_charges.assessing", "Creating the finance-charge invoices\u{2026}"),
     ("finance_charges.close", "Close"),
+    ("finance_charges.toast", "Finance charges assessed"),
     ("finance_charges.done", "Created {n} finance-charge invoices."),
     ("finance_charges.done.queued", "They are in the print queue."),
     ("finance_charges.done.partial", "Some clients were charged before the problem below. Their invoices are listed here."),

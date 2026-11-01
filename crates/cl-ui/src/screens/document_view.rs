@@ -192,6 +192,7 @@ impl Screen for DocumentViewScreen {
             | OpenPayload::RefundFrom(..)
             | OpenPayload::ForClient(_)
             | OpenPayload::BounceCheck(_)
+            | OpenPayload::OnDate(_)
             | OpenPayload::ReprintCheck(..)
             | OpenPayload::PrintDeposit(..) => false,
         }
