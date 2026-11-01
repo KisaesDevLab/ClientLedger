@@ -1,0 +1,13 @@
+# The engine's `idempotency-receive-payment-v1` route set (U-132, P21 plan
+# §2.2, branch clientledger/receive-payment): payment receive, edit, void,
+# unapply, apply and bounce, `x-idempotency: true` in its openapi.json.
+# Client-declared until the pin has it. Append-only for this capability
+# name: `keyable-receive-payment` in operations.txt
+# (`KeySet::ReceivePaymentV1`), keyed only while the engine advertises
+# `idempotency-receive-payment-v1`.
+POST /api/v1/payments/receive
+POST /api/v1/payments/unapply
+POST /api/v1/payments/{id}/apply
+POST /api/v1/payments/{id}/bounce
+POST /api/v1/payments/{id}/void
+PUT /api/v1/payments/{id}

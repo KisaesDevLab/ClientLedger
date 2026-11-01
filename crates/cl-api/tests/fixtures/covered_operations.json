@@ -238,5 +238,16 @@
   {"method":"POST","path":"/api/v1/company/invoice-layouts","inSpec":true,"fragmentHash":"29fa679b2446be9637891c8fe06d4d4748aff0b9bd6b0a164a79068643565eeb"},
   {"method":"GET","path":"/api/v1/company/invoice-layouts/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
   {"method":"PUT","path":"/api/v1/company/invoice-layouts/{id}","inSpec":true,"fragmentHash":"1752f1a251cdb2f2fbb19a9c3e54d1f822bab776cfd7ae9c13ddbf30fac577cb"},
-  {"method":"POST","path":"/api/v1/company/invoice-layouts/{id}/default","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"}
+  {"method":"POST","path":"/api/v1/company/invoice-layouts/{id}/default","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
+  {"method":"POST","path":"/api/v1/payments/preview","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/payments/receive","inSpec":true,"fragmentHash":"4c895c9d5b5c271e25ee2f95733d0eaf85d0f38b7eab5e7280902e6705f49d6c"},
+  {"method":"GET","path":"/api/v1/payments","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/payments/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/payments/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/payments/{id}/void","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/payments/unapply","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/payments/{id}/apply","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/payments/{id}/bounce","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/payments/open-invoices/{customerId}","inSpec":true,"fragmentHash":"b8cab9d4ed5608ed172e381470aad17bb22aa18e0495fd432f98a40f92c54232"},
+  {"method":"GET","path":"/api/v1/payments/deposits-on-hand","inSpec":false,"fragmentHash":null}
 ]
