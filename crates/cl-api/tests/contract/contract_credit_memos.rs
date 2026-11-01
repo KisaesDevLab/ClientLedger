@@ -299,7 +299,7 @@ pub fn credit_memo_keep_then_apply_later(h: &Harness) {
     let memo = case1(h, s, &x);
     let rec = create(h, s, &memo);
     assert_eq!(rec.remaining, m("399.75"), "kept as credit");
-    assert!(rec.applications.is_empty());
+    assert_eq!(rec.applications.len(), 0);
     assert_eq!(invoice_balance(h, s, x.a), m("250.00"));
     // The credit is listed for the client.
     let credits = h.run(s.credit_memos().credits(x.client)).expect("credits");

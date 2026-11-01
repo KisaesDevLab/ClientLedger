@@ -796,7 +796,7 @@ fn a_history_row_reads_its_last_send() {
     ))
     .expect("row");
     assert!(row.last_sent_at.is_some());
-    assert!(row.send_history.is_empty());
+    assert_eq!(row.send_history.len(), 0);
     let never: crate::resources::customer_statements::StatementHistoryRow = serde_json::from_str(&format!(
         r#"{{"id":"{STMT}","number":"1005","asOf":"2026-11-30","amountDue":"0.00","lastSentAt":null}}"#
     ))

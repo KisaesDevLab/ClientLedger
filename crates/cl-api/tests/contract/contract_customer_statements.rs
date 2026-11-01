@@ -195,7 +195,7 @@ pub fn customer_statement_run_send_history(h: &Harness) {
     assert_eq!(rec.number, issued.number);
     assert_eq!(rec.amount_due, m("300.25"));
     assert_eq!(rec.snapshot.amount_due, m("300.25"));
-    assert!(rec.send_history.is_empty());
+    assert_eq!(rec.send_history.len(), 0);
     receive_auto(h, s, x.client, date(2026, 12, 1), "100.00");
     let rec = h
         .run(s.customer_statements().get(issued.statement_id))
