@@ -105,13 +105,15 @@ pub(crate) enum Pending {
     Save(SaveIntent),
     /// Void the open invoice with this reason.
     Void(String),
+    /// Apply this held customer deposit to the open invoice (P21 D7).
+    ApplyDeposit(TransactionId),
 }
 
 impl Pending {
     pub(crate) fn verb(&self) -> crate::forms::closing_prompt::Verb {
         use crate::forms::closing_prompt::Verb;
         match self {
-            Pending::Save(_) => Verb::Change,
+            Pending::Save(_) | Pending::ApplyDeposit(_) => Verb::Change,
             Pending::Void(_) => Verb::Void,
         }
     }
@@ -796,6 +798,7 @@ impl InvoiceScreen {
         v["next_number"] = json!(self.next_number);
         v["deposits_on_hand"] = json!(self.deposit_card.count());
         v["deposits_applied"] = json!(self.deposit_card.applied);
+        v["deposit_note"] = json!(self.deposit_card.note());
         v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
         if let (Value::Object(m), Value::Object(c)) = (

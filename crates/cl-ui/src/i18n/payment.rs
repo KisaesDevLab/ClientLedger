@@ -23,6 +23,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.deposit.save_first", "Save the invoice to apply it."),
     ("invoice.deposit.applied", "Deposit applied to this invoice."),
     ("invoice.deposit.failed", "The invoice is saved, but the deposit wasn't applied. Try again."),
+    ("invoice.deposit.not_available", "The invoice is saved, but less of the deposit is left than this needs. The card shows what's left now."),
+    ("invoice.deposit.balance_changed", "The invoice is saved, but its balance changed. Try Apply again."),
     ("payment.prev", "Prev"),
     ("payment.prev.tip", "The saved payment before this one (Page Up)"),
     ("payment.next", "Next"),
