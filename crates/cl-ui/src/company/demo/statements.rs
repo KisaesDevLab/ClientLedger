@@ -670,7 +670,9 @@ pub fn history(state: &DemoState, contact: ContactId) -> Vec<StatementHistoryRow
             as_of: s.as_of,
             amount_due: s.amount_due,
             created_at: s.created_at,
-            send_history: s.send_history.clone(),
+            // The engine's list carries the last send only.
+            last_sent_at: s.send_history.iter().filter_map(|e| e.sent_at).max(),
+            send_history: Vec::new(),
         })
         .collect();
     v.sort_by(|a, b| b.as_of.cmp(&a.as_of).then_with(|| b.number.cmp(&a.number)));

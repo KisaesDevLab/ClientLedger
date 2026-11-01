@@ -480,7 +480,11 @@ async fn a_statement_reads_its_aging_and_debug_redacts_the_address() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/reports/customer-statement"))
-        .respond_with(json(200, &statement_json(true)))
+        // The engine's `{statement: …}` (pin bf2daf38).
+        .respond_with(json(
+            200,
+            &format!(r#"{{"statement":{}}}"#, statement_json(true)),
+        ))
         .mount(&server)
         .await;
     let s = session_with_caps(&server, &ALL).await;
@@ -780,4 +784,22 @@ fn the_engines_nested_totals_are_read() {
     assert_eq!(r.total, m("108.23"));
     assert_eq!(r.tax_amount, m("8.25"));
     assert_eq!(r.subtotal, m("99.98"));
+}
+
+/// The engine's statement history rows carry `lastSentAt` only (pin
+/// bf2daf38); the events come with GET /customer-statements/{id}.
+#[test]
+fn a_history_row_reads_its_last_send() {
+    let row: crate::resources::customer_statements::StatementHistoryRow = serde_json::from_str(&format!(
+        r#"{{"id":"{STMT}","runId":"{RUN}","contactId":"{CLIENT}","number":"1004","asOf":"2026-11-30",
+        "amountDue":"300.25","createdAt":"2026-11-30T10:00:00.000Z","lastSentAt":"2026-11-30T11:00:00.000Z"}}"#
+    ))
+    .expect("row");
+    assert!(row.last_sent_at.is_some());
+    assert!(row.send_history.is_empty());
+    let never: crate::resources::customer_statements::StatementHistoryRow = serde_json::from_str(&format!(
+        r#"{{"id":"{STMT}","number":"1005","asOf":"2026-11-30","amountDue":"0.00","lastSentAt":null}}"#
+    ))
+    .expect("row");
+    assert_eq!(never.last_sent_at, None);
 }

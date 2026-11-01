@@ -26,7 +26,7 @@ use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::attachments::uuid_id;
 use crate::resources::customer_payments::{
-    de_cents, de_cents_opt, de_stored, error_code, null_false, null_vec, require,
+    de_cents, de_cents_opt, de_stored, decode_key, error_code, null_false, null_vec, require,
 };
 use crate::resources::invoices::{
     EMAIL_PDF_MAX_BYTES, EmailMessage, OutboxId, OutboxItem, SendEvent, SendRecord,
@@ -499,7 +499,12 @@ pub struct StatementHistoryRow {
     /// Issued.
     #[serde(default)]
     pub created_at: Option<Timestamp>,
-    /// How it went out.
+    /// When it last went out (`lastSentAt`; `None`: never sent).
+    #[serde(default)]
+    pub last_sent_at: Option<Timestamp>,
+    /// How it went out. The engine's list carries only `last_sent_at`;
+    /// the events come with [`CustomerStatements::get`]. Empty here unless
+    /// an answer includes them.
     #[serde(default, deserialize_with = "null_vec")]
     pub send_history: Vec<SendEvent>,
 }
@@ -509,6 +514,7 @@ impl fmt::Debug for StatementHistoryRow {
         f.debug_struct("StatementHistoryRow")
             .field("id", &self.id)
             .field("as_of", &self.as_of)
+            .field("last_sent_at", &self.last_sent_at)
             .field("send_history", &self.send_history)
             .finish_non_exhaustive()
     }
@@ -577,7 +583,8 @@ impl CustomerStatements<'_> {
             call.query.push(("start".into(), d.to_wire()));
         }
         let reply = self.0.send(&REPORT_CUSTOMER_STATEMENT, call, None).await?;
-        decode(&reply, "customer statement")
+        // `{statement: CustomerStatement}`.
+        decode_key(&reply.body, "statement", "customer statement")
     }
 
     /// The batch picker: clients with their amount due, filtered.
