@@ -173,6 +173,8 @@ pub(crate) fn poll(s: &mut ReceivePaymentScreen) {
                             | cl_api::PaymentRefusal::FeeAccountInvalid,
                         ) => "bounce.problem.fee_account",
                         Some(cl_api::PaymentRefusal::FeeBankRequired) => "bounce.problem.fee_bank",
+                        Some(cl_api::PaymentRefusal::Stale) => "payment.refusal.changed_meanwhile",
+                        Some(cl_api::PaymentRefusal::NoMoneyReceived) => "payment.refusal.no_money",
                         _ => "payment.refusal.other",
                     });
                 }

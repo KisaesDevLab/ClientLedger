@@ -475,7 +475,9 @@ fn record_of(state: &DemoState, id: TransactionId) -> Result<PaymentRecord, ApiE
         credit_applications.push(RecordCreditUse {
             source_payment_id: source,
             invoice_id: inv,
+            invoice_number: receivable(state, inv).map(|i| i.number).unwrap_or_default(),
             amount: money(x)?,
+            from_deposit: r.pays.get(&source).is_some_and(|s| s.hold),
         });
     }
     Ok(PaymentRecord {
@@ -589,6 +591,9 @@ pub fn list(state: &mut DemoState, client: Option<ContactId>) -> Vec<PaymentSumm
                     } else {
                         PaymentStatus::Posted
                     },
+                    holds_deposit: p.hold,
+                    deposit_remaining: money(deposit_remaining(&state.receivables, *id)).ok()?,
+                    unapplied_remaining: money(credit_remaining(p)).ok()?,
                 },
             ))
         })
@@ -1049,6 +1054,15 @@ pub fn preview(
     } else {
         before - c.amount - discounts - write_offs - draws
     };
+    let mut problems = c.problems;
+    if c.amount.is_zero()
+        && discounts.is_zero()
+        && write_offs.is_zero()
+        && !c.credit_uses.is_empty()
+    {
+        // As the engine: credits alone are not a receipt (Apply them).
+        problems.push(problem("AMOUNT_REQUIRED", None));
+    }
     let offered = applied.is_zero()
         && c.credit_uses.is_empty()
         && discounts.is_zero()
@@ -1096,7 +1110,7 @@ pub fn preview(
         hold_as_deposit_offered: offered,
         pending_deposits: Some(PendingAfter { count, total }),
         average_days_to_pay: average_days(state, r.customer_id),
-        problems: c.problems,
+        problems,
     })
 }
 
@@ -1596,6 +1610,9 @@ pub fn update(
     if old.void {
         return Err(refused("ALREADY_VOID"));
     }
+    if old.amount.is_zero() {
+        return Err(refused("NO_MONEY_RECEIVED"));
+    }
     let same_money = dec(p.amount) == old.amount
         && p.deposit_to == old.deposit_to
         && p.customer_id == old.customer
@@ -1836,6 +1853,9 @@ pub fn bounce(
     if p.void || p.from_deposit.is_some() {
         return Err(refused("VALIDATION_ERROR"));
     }
+    if p.amount.is_zero() {
+        return Err(refused("NO_MONEY_RECEIVED"));
+    }
     if !p.refunded.is_zero() {
         return Err(conflict("PAYMENT_REFUNDED"));
     }
@@ -1868,6 +1888,10 @@ pub fn bounce(
         (Some(_), _) => Some(held),
         (None, _) => None,
     };
+    // The fee can't go to the bank it comes out of.
+    if fee_account.is_some() && fee_account == fee_bank {
+        return Err(refused("FEE_ACCOUNT_INVALID"));
+    }
     let ar = super::account_id(AR);
     // What it reverses: its own live rows (including credits used later),
     // or, for a held deposit, its draws' rows.

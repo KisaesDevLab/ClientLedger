@@ -361,7 +361,7 @@ fn a_record_reads_its_credits_accounts_and_later_rows() {
         "discount":"0.00","writeOff":"0.00","appliedDate":"2026-11-04","voided":false,"reversed":false}},
         {{"invoiceId":"{INV2}","invoiceNumber":"1095","amount":"20.00","appliedDate":"2026-11-04",
         "appliedInTxnId":"{RET}","appliedLater":true}}],"creditApplications":[{{"sourcePaymentId":"{RET}",
-        "invoiceId":"{INV2}","amount":"15.00"}}],"writeOffAccountId":"{BANK}","discountAccountId":null"#
+        "invoiceId":"{INV2}","invoiceNumber":"1095","amount":"15.00","fromDeposit":false}}],"writeOffAccountId":"{BANK}","discountAccountId":null"#
     );
     let body = record().replacen(
         &format!(
@@ -376,6 +376,8 @@ fn a_record_reads_its_credits_accounts_and_later_rows() {
     assert_eq!(rec.credit_applications.len(), 1);
     assert_eq!(rec.credit_applications[0].source_payment_id, tid(RET));
     assert_eq!(rec.credit_applications[0].amount, m("15"));
+    assert_eq!(rec.credit_applications[0].invoice_number, "1095");
+    assert!(!rec.credit_applications[0].from_deposit);
     assert_eq!(
         rec.write_off_account_id,
         Some(AccountId::parse(BANK).expect("id"))

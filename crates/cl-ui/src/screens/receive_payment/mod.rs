@@ -757,6 +757,8 @@ impl ReceivePaymentScreen {
                 Some("payment.refusal.overapplied")
             }
             Some(R::AmountRequired) => Some("payment.problem.no_amount"),
+            Some(R::NoMoneyReceived) => Some("payment.refusal.no_money"),
+            Some(R::AppliedFromDeposit) => Some("payment.refusal.applied_from_deposit"),
             Some(_) => Some("payment.refusal.other"),
             None => {
                 self.error = Some(e);
@@ -782,10 +784,12 @@ impl ReceivePaymentScreen {
 
     // ------------------------------------------------------------ saved payments
 
+    /// Bounced, void, or a payment of 0.00 that only wrote off (the engine
+    /// refuses to edit it: 400 `NO_MONEY_RECEIVED`; Void stays).
     pub(crate) fn is_read_only(&self) -> bool {
         self.editing
             .as_ref()
-            .is_some_and(|e| e.is_bounced() || e.is_void())
+            .is_some_and(|e| e.is_bounced() || e.is_void() || e.deposit_to.is_none())
     }
 
     /// Prev (-1) or Next (+1): reads the saved list, then opens one.

@@ -521,3 +521,42 @@ fn a_closed_period_void_asks_for_the_password() {
     s.poll();
     assert_eq!(s.state()["read_only"], true);
 }
+
+/// Credits alone are not a receipt: the preview reports AMOUNT_REQUIRED (as
+/// the engine does) and Save says nothing was received.
+#[test]
+fn credits_alone_are_refused_with_amount_required() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let ids = invoice_ids(&s);
+    let client = s.form.client;
+    s.form.unapply_all();
+    s.toggle(ids["1091"]);
+    s.amount_text = "4400".into();
+    s.amount_typed();
+    settle(&mut s);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    let credit = s.last_saved.as_ref().map(|r| r.id).expect("credit");
+    s.form.set_client(client);
+    s.amount_text = "0".into();
+    s.amount_typed();
+    settle(&mut s);
+    s.form.unapply_all();
+    s.form.use_credit(credit, ids["1095"], None);
+    settle(&mut s);
+    assert!(!s.start_save(After::New, None));
+    assert!(
+        s.problems.contains(&PaymentProblem::NoAmount),
+        "{:?}",
+        s.problems
+    );
+    assert!(
+        s.problems
+            .contains(&PaymentProblem::Engine("AMOUNT_REQUIRED".into()))
+    );
+    assert_eq!(
+        problem_key(&PaymentProblem::Engine("AMOUNT_REQUIRED".into())),
+        "payment.problem.no_amount"
+    );
+}

@@ -195,6 +195,12 @@ pub enum PaymentRefusal {
     /// The credit or deposit belongs to another client
     /// (400 `CREDIT_NOT_FOR_CUSTOMER`).
     CreditNotForCustomer,
+    /// A payment of 0.00 (only written off) can't be bounced or edited
+    /// (400 `NO_MONEY_RECEIVED`).
+    NoMoneyReceived,
+    /// The row is a held deposit's draw: void the draw instead
+    /// (400 `APPLIED_FROM_DEPOSIT`).
+    AppliedFromDeposit,
 }
 
 const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
@@ -257,6 +263,8 @@ const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
         "CREDIT_NOT_FOR_CUSTOMER",
         PaymentRefusal::CreditNotForCustomer,
     ),
+    ("NO_MONEY_RECEIVED", PaymentRefusal::NoMoneyReceived),
+    ("APPLIED_FROM_DEPOSIT", PaymentRefusal::AppliedFromDeposit),
 ];
 
 /// Every engine code [`payment_refusal`] knows (tests and the demo).
@@ -628,13 +636,13 @@ pub struct PaymentApplication {
     #[serde(default, deserialize_with = "null_false")]
     pub reversed: bool,
     /// The receipt this row was applied inside, for a credit of this
-    /// payment used later by another payment (D-B1; assumed field name
-    /// until the D9 pin bump). `None` on the payment's own rows.
+    /// payment used later by another payment. `None` on the payment's own
+    /// rows.
     #[serde(default)]
     pub applied_in_txn_id: Option<TransactionId>,
     /// True for a credit row applied after the payment was received (by
-    /// another receipt or `POST /payments/:id/apply`), whatever its date
-    /// (assumed field name until the D9 pin bump).
+    /// another receipt or `POST /payments/:id/apply`), whatever its date:
+    /// the engine's flag for "not the payment's own row".
     #[serde(default, deserialize_with = "null_false")]
     pub applied_later: bool,
 }
@@ -670,15 +678,22 @@ pub struct RecordCreditUse {
     pub source_payment_id: TransactionId,
     /// The invoice it went to.
     pub invoice_id: TransactionId,
+    /// Its number (owner data).
+    #[serde(default)]
+    pub invoice_number: String,
     /// How much.
     #[serde(deserialize_with = "de_cents")]
     pub amount: Money,
+    /// A draw on a held customer deposit (else a client credit).
+    #[serde(default, deserialize_with = "null_false")]
+    pub from_deposit: bool,
 }
 ids_debug!(
     RecordCreditUse,
     "RecordCreditUse",
     source_payment_id,
-    invoice_id
+    invoice_id,
+    from_deposit
 );
 
 /// The deposit a payment went into.
@@ -815,6 +830,15 @@ pub struct PaymentSummary {
     pub ref_no: Option<String>,
     /// Posted or void.
     pub status: PaymentStatus,
+    /// A held customer deposit.
+    #[serde(default, deserialize_with = "null_false")]
+    pub holds_deposit: bool,
+    /// What is left of a held deposit.
+    #[serde(default, deserialize_with = "de_cents_zero")]
+    pub deposit_remaining: Money,
+    /// Credit left on it (0.00 for a held deposit or a bounced check).
+    #[serde(default, deserialize_with = "de_cents_zero")]
+    pub unapplied_remaining: Money,
 }
 ids_debug!(
     PaymentSummary,
