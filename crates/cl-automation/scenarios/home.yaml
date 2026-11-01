@@ -184,3 +184,9 @@ steps:
   # --- Back to normal ----------------------------------------------------------
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
+
+  # --- P21: Receive Payment opens its screen (no placeholder) ----------------
+  - click: {role: button, label: Receive Payment}
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - command: file.close_window
+  - assert_exists: {role: button, label: Create Invoice}

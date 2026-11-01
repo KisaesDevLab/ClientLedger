@@ -160,7 +160,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bounce.fees.client", "Charge the client a fee (optional)"),
     ("bounce.customer_fee", "Client fee"),
     ("bounce.fee_income", "Fee income account"),
-    ("bounce.record", "Record bounced check"),
+    ("bounce.record", "Record it"),
     ("bounce.done", "Bounced check recorded."),
     ("bounce.reopened", "Invoice {number} is open again: {balance}"),
     ("bounce.charged", "Taken back out of {account}."),

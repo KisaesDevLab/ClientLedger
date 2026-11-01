@@ -816,13 +816,15 @@ impl ReceivePaymentScreen {
                         }))
                         .strong(),
                     );
-                    account_combo(
-                        ui,
-                        &t("payment.account.label"),
-                        "payment-pick-account",
-                        &mut pick,
-                        &list,
-                    );
+                    // A plain list (one click picks), not a drop-down.
+                    ui.label(t("payment.account.label"));
+                    ui.horizontal_wrapped(|ui| {
+                        for (id, name) in &list {
+                            if ui.selectable_label(pick == Some(*id), name).clicked() {
+                                pick = Some(*id);
+                            }
+                        }
+                    });
                     ui.horizontal(|ui| {
                         go = ui
                             .add_enabled(
