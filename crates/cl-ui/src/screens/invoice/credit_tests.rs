@@ -364,3 +364,38 @@ fn the_new_kinds_name_every_widget() {
         assert!(unnamed.is_empty(), "{kind:?}: {unnamed:?}");
     }
 }
+
+/// Q-P20h: a new sales receipt starts on the last Deposit to picked in
+/// this run, without making the blank form dirty.
+#[test]
+fn a_new_receipt_remembers_the_last_deposit_to() {
+    let (_d, mut s) = screen(SalesDocKind::SalesReceipt);
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |s: &mut InvoiceScreen| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 940.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+    };
+    frame(&mut s);
+    let bank = s
+        .books
+        .accounts
+        .iter()
+        .find(|a| a.is_active && a.fields.detail_type.as_deref() == Some("bank"))
+        .map(|a| a.id)
+        .expect("a bank");
+    ctx.data_mut(|d| d.insert_temp(super::credit::last_deposit_id(), Some(bank)));
+    frame(&mut s);
+    assert_eq!(s.header.current().deposit_to, Some(bank));
+    assert!(!s.is_dirty(), "a remembered default is not an edit");
+}

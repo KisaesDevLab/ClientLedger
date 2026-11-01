@@ -558,7 +558,25 @@ impl InvoiceScreen {
                         .map(|a| (Some(a.id), crate::screens::register::account_text(a))),
                 )
                 .collect();
-        let current = self.header.current().deposit_to;
+        let mut current = self.header.current().deposit_to;
+        // Q-P20h: a new receipt starts on the last Deposit to picked in
+        // this run (as Write Check's bank); loaded as the form's own value,
+        // so the form is not dirty.
+        let remembered = ui
+            .ctx()
+            .data(|d| d.get_temp::<Option<cl_core::ids::AccountId>>(last_deposit_id()));
+        if let Some(r) = remembered
+            && r != current
+            && self.editing.is_none()
+            && !self.is_dirty()
+            && accounts.iter().any(|(id, _)| *id == r)
+        {
+            let mut f = self.header.current().clone();
+            f.deposit_to = r;
+            self.header.load(f);
+            self.inputs.rev = self.header.revision();
+            current = r;
+        }
         let problem = self
             .problems
             .contains(&cl_model::forms::invoice::InvoiceProblem::NegativeReceiptNeedsBank);
@@ -592,6 +610,7 @@ impl InvoiceScreen {
                     );
                 }
                 if let Some(p) = pick {
+                    ui.ctx().data_mut(|d| d.insert_temp(last_deposit_id(), p));
                     self.header.edit_step(|h| h.deposit_to = p);
                 }
             });
@@ -925,4 +944,9 @@ impl InvoiceScreen {
         ));
         self.poll_pdf();
     }
+}
+
+/// Where a sales receipt was last deposited in this run (Q-P20h).
+pub(crate) fn last_deposit_id() -> egui::Id {
+    egui::Id::unique("sales_receipt/last_deposit_to")
 }
