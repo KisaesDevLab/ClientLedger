@@ -462,6 +462,10 @@ impl InvoiceScreen {
     /// Makes the open saved invoice's PDF on the queue and opens it full
     /// size when done (S10: never in a frame).
     pub(crate) fn open_pdf(&mut self) {
+        if self.kind != cl_model::forms::invoice::SalesDocKind::Invoice {
+            self.open_doc_pdf();
+            return;
+        }
         let Some((data, style)) = self.pdf_parts() else {
             self.notice = Some("invoice.email.pdf_failed");
             return;
@@ -497,15 +501,14 @@ impl InvoiceScreen {
     pub(crate) fn pdf_parts(
         &self,
     ) -> Option<(cl_print::forms::invoice::InvoiceData, cl_print::FormStyle)> {
-        let e = self.editing.as_ref()?;
-        let client = e
-            .record
+        let r = self.editing.as_ref()?.invoice()?;
+        let client = r
             .txn
             .contact_id
             .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
-        let terms = terms_text(e.record.payment_terms.as_deref());
-        let data = print_data(&e.record, client, &terms, &self.print_books);
-        let layout = self.print_books.layout_of(&e.record);
+        let terms = terms_text(r.payment_terms.as_deref());
+        let data = print_data(r, client, &terms, &self.print_books);
+        let layout = self.print_books.layout_of(r);
         Some((data, pdf_style_for(&self.company_name(), layout)))
     }
 
@@ -523,6 +526,14 @@ impl InvoiceScreen {
             self.notice = Some("invoice.email.save_first");
             return;
         }
+        // P22: credit memos and sales receipts email later (not yet built).
+        let Some(rec) = e.invoice().cloned() else {
+            self.notice = Some("credit_memo.email.later");
+            if let Some(i) = then {
+                self.follow_up(i);
+            }
+            return;
+        };
         if e.void() {
             self.notice = Some("invoice.read_only.void");
             return;
@@ -531,8 +542,7 @@ impl InvoiceScreen {
         // next email after a change in Preferences).
         let prefs = self.email.prefs.clone().unwrap_or_default();
         self.load_email_prefs();
-        let client = e
-            .record
+        let client = rec
             .txn
             .contact_id
             .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
@@ -541,25 +551,13 @@ impl InvoiceScreen {
             client_name: client
                 .map(|c| c.fields.display_name.clone())
                 .unwrap_or_default(),
-            invoice_number: e.record.txn.txn_number.clone().unwrap_or_default(),
-            invoice_date: crate::shell::us_date(e.record.txn.txn_date),
-            due_date: e
-                .record
-                .due_date
-                .map(crate::shell::us_date)
-                .unwrap_or_default(),
-            total: e
-                .record
-                .txn
-                .total
-                .map(|m| m.format(style))
-                .unwrap_or_default(),
-            balance_due: e
-                .record
-                .balance_due
-                .map(|m| m.format(style))
-                .unwrap_or_default(),
+            invoice_number: rec.txn.txn_number.clone().unwrap_or_default(),
+            invoice_date: crate::shell::us_date(rec.txn.txn_date),
+            due_date: rec.due_date.map(crate::shell::us_date).unwrap_or_default(),
+            total: rec.txn.total.map(|m| m.format(style)).unwrap_or_default(),
+            balance_due: rec.balance_due.map(|m| m.format(style)).unwrap_or_default(),
             company_name: self.company_name(),
+            ..FieldValues::default()
         };
         let (subject, body) = match prefs.template(TemplateDoc::Invoice) {
             TemplateSource::Default {
@@ -583,7 +581,7 @@ impl InvoiceScreen {
         f.failed = false;
         f.problem = None;
         f.key = None;
-        f.invoice = Some(e.record.clone());
+        f.invoice = Some(rec);
         f.then = then;
         f.open = true;
         if prefs.bcc_self && !self.link.is_demo() {

@@ -755,6 +755,7 @@ impl Tenants<'_> {
                 current_version: None,
                 code: crate::errors::ErrorCode::parse("SWITCH_TENANT_FIRST"),
                 message: crate::errors::UserText::default(),
+                details: crate::ConflictDetails::default(),
             });
         }
         let call = Call::new(

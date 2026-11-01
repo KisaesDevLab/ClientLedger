@@ -26,6 +26,10 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_INVOICE_SUBJECT_KEY: &str = "email.template.invoice.subject";
 /// The i18n key of the default invoice email body.
 pub const DEFAULT_INVOICE_BODY_KEY: &str = "email.template.invoice.body";
+/// The i18n key of the default statement email subject (P22, Q-163).
+pub const DEFAULT_STATEMENT_SUBJECT_KEY: &str = "email.template.statement.subject";
+/// The i18n key of the default statement email body (P22, Q-163).
+pub const DEFAULT_STATEMENT_BODY_KEY: &str = "email.template.statement.body";
 /// The longest subject kept (characters).
 pub const SUBJECT_MAX: usize = 255;
 /// The longest body kept (characters).
@@ -37,6 +41,8 @@ pub const BODY_MAX: usize = 10_000;
 pub enum TemplateDoc {
     /// Invoices.
     Invoice,
+    /// Customer statements (P22).
+    Statement,
 }
 
 /// One field a template can use.
@@ -56,11 +62,15 @@ pub enum Field {
     BalanceDue,
     /// `{company_name}`.
     CompanyName,
+    /// `{statement_date}` (statements, P22).
+    StatementDate,
+    /// `{amount_due}` (statements, P22).
+    AmountDue,
 }
 
 /// Every field with the name written between braces, in the editor's
 /// order.
-pub const FIELDS: [(Field, &str); 7] = [
+pub const FIELDS: [(Field, &str); 9] = [
     (Field::ClientName, "client_name"),
     (Field::InvoiceNumber, "invoice_number"),
     (Field::InvoiceDate, "invoice_date"),
@@ -68,6 +78,8 @@ pub const FIELDS: [(Field, &str); 7] = [
     (Field::Total, "total"),
     (Field::BalanceDue, "balance_due"),
     (Field::CompanyName, "company_name"),
+    (Field::StatementDate, "statement_date"),
+    (Field::AmountDue, "amount_due"),
 ];
 
 impl Field {
@@ -130,6 +142,8 @@ pub struct EmailPrefs {
     pub bcc_self: bool,
     /// The owner's invoice template; `None` uses the default texts.
     pub invoice: Option<EmailTemplate>,
+    /// The owner's statement template (P22); `None` uses the default texts.
+    pub statement: Option<EmailTemplate>,
 }
 
 impl Default for EmailPrefs {
@@ -137,6 +151,7 @@ impl Default for EmailPrefs {
         EmailPrefs {
             bcc_self: true,
             invoice: None,
+            statement: None,
         }
     }
 }
@@ -150,6 +165,13 @@ impl EmailPrefs {
                 TemplateSource::Default {
                     subject_key: DEFAULT_INVOICE_SUBJECT_KEY,
                     body_key: DEFAULT_INVOICE_BODY_KEY,
+                },
+                TemplateSource::Custom,
+            ),
+            TemplateDoc::Statement => self.statement.as_ref().map_or(
+                TemplateSource::Default {
+                    subject_key: DEFAULT_STATEMENT_SUBJECT_KEY,
+                    body_key: DEFAULT_STATEMENT_BODY_KEY,
                 },
                 TemplateSource::Custom,
             ),
@@ -171,6 +193,7 @@ impl EmailPrefs {
             .then_some(EmailTemplate { subject, body });
         match doc {
             TemplateDoc::Invoice => self.invoice = kept,
+            TemplateDoc::Statement => self.statement = kept,
         }
     }
 
@@ -178,6 +201,9 @@ impl EmailPrefs {
     pub fn normalize(&mut self) {
         if let Some(t) = self.invoice.take() {
             self.set_template(TemplateDoc::Invoice, &t);
+        }
+        if let Some(t) = self.statement.take() {
+            self.set_template(TemplateDoc::Statement, &t);
         }
     }
 }
@@ -200,6 +226,10 @@ pub struct FieldValues {
     pub balance_due: String,
     /// The company's name.
     pub company_name: String,
+    /// The statement date (statements).
+    pub statement_date: String,
+    /// The engine's amount due, as formatted (statements).
+    pub amount_due: String,
 }
 
 impl fmt::Debug for FieldValues {
@@ -220,6 +250,8 @@ impl FieldValues {
             Field::Total => &self.total,
             Field::BalanceDue => &self.balance_due,
             Field::CompanyName => &self.company_name,
+            Field::StatementDate => &self.statement_date,
+            Field::AmountDue => &self.amount_due,
         }
     }
 }
@@ -312,16 +344,18 @@ mod tests {
             total: "$3,234.87".into(),
             balance_due: "$3,234.87".into(),
             company_name: "Kisaes Garden Supply".into(),
+            statement_date: "11/30/2026".into(),
+            amount_due: "$300.25".into(),
         }
     }
 
     #[test]
     fn every_field_is_replaced() {
-        let t = "{client_name}|{invoice_number}|{invoice_date}|{due_date}|{total}|{balance_due}|{company_name}";
+        let t = "{client_name}|{invoice_number}|{invoice_date}|{due_date}|{total}|{balance_due}|{company_name}|{statement_date}|{amount_due}";
         let f = fill(t, &values());
         assert_eq!(
             f.text,
-            "Hartley Builders|1042|11/03/2026|12/03/2026|$3,234.87|$3,234.87|Kisaes Garden Supply"
+            "Hartley Builders|1042|11/03/2026|12/03/2026|$3,234.87|$3,234.87|Kisaes Garden Supply|11/30/2026|$300.25"
         );
         assert_eq!(f.unknown, Vec::<String>::new());
         for (field, name) in FIELDS {
@@ -363,6 +397,13 @@ mod tests {
             TemplateSource::Default {
                 subject_key: "email.template.invoice.subject",
                 body_key: "email.template.invoice.body",
+            }
+        );
+        assert_eq!(
+            p.template(TemplateDoc::Statement),
+            TemplateSource::Default {
+                subject_key: "email.template.statement.subject",
+                body_key: "email.template.statement.body",
             }
         );
         let old: EmailPrefs = serde_json::from_str("{}").expect("json");

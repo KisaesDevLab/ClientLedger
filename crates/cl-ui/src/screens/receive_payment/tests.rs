@@ -475,10 +475,10 @@ fn a_closed_period_bounce_sends_its_fee_invoice_with_the_same_password() {
     assert!(s.bounce_password.is_none(), "dropped once the fee is in");
 }
 
-/// A refund dated in a closed period asks for the password; a retry of the
-/// same refund keeps its key.
+/// Q-P22m: "Refund it" saves the payment and opens Refund a Credit with
+/// its credit picked and the preview's overpayment as the amount.
 #[test]
-fn a_closed_period_refund_asks_and_keeps_its_key() {
+fn refund_it_opens_refund_a_credit_prefilled() {
     let (_d, link) = link();
     let mut s = mockup(&link);
     let ids = invoice_ids(&s);
@@ -488,22 +488,26 @@ fn a_closed_period_refund_asks_and_keeps_its_key() {
     s.amount_typed();
     settle(&mut s);
     s.form.set_over(Over::Refund);
+    let _ = link.drain();
     assert!(s.start_save(After::Stay, None));
     s.poll();
-    assert_eq!(s.state()["dialog"], "refund");
-    close_books(&link, &mut s, today());
-    assert!(!s.send_refund(None));
-    assert!(s.closing_prompt.dialog_open());
-    assert!(s.misc.is_none(), "nothing sent");
-    type_closing_password(&mut s);
-    assert_eq!(s.notice, Some("payment.refund.done"));
-    assert!(s.refund_key.is_none());
-    let rec = s.editing.clone().expect("open");
-    let mut demo = link.demo_state().expect("demo");
-    let after = crate::company::demo::receivables::get(&mut demo, rec.id).expect("rec");
-    assert_eq!(after.unapplied_remaining, Money::ZERO);
+    let rec = s.last_saved.clone().expect("saved");
+    let events = link.drain();
+    let opened = events.iter().any(|e| {
+        matches!(e, CompanyEvent::OpenWith(k, p)
+            if k.as_str() == crate::screens::refund::KIND
+                && matches!(**p, crate::windows::OpenPayload::RefundFrom(c, src)
+                    if c == rec.customer_id
+                        && src.id == rec.id
+                        && src.remaining == Money::parse_wire("15.00").expect("m")))
+    });
+    assert!(opened, "{events:?}");
+    assert_eq!(
+        s.state()["dialog"],
+        serde_json::Value::Null,
+        "no inline dialog"
+    );
 }
-
 /// Void of a payment dated in a closed period asks for the password, then
 /// voids (non-negotiable 8).
 #[test]
@@ -743,4 +747,115 @@ fn a_check_in_a_grouped_deposit_bounces_against_the_bank() {
         cl_api::payment_refusal(&err),
         Some(cl_api::PaymentRefusal::Bounced)
     );
+}
+
+/// The AccessKit labels of one 1440 x 940 frame run three times.
+fn labels(s: &mut ReceivePaymentScreen) -> (Vec<String>, Vec<String>) {
+    let ctx = egui::Context::default();
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 940.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        nodes.extend(
+            out.platform_output
+                .accesskit_update
+                .map(|u| u.nodes)
+                .unwrap_or_default(),
+        );
+    }
+    let unnamed = crate::screens::unnamed_widgets(&nodes);
+    let named = nodes
+        .iter()
+        .filter_map(|(_, n)| n.label().map(str::to_string))
+        .collect();
+    (
+        named,
+        unnamed.into_iter().map(|u| format!("{u:?}")).collect(),
+    )
+}
+
+#[test]
+fn the_toolbar_has_the_mockup_buttons_and_find_lists_payments() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let (named, unnamed) = labels(&mut s);
+    for want in [
+        "Find",
+        "Attach",
+        "History",
+        "Discounts & credits",
+        "Record bounced check",
+    ] {
+        assert!(named.iter().any(|n| n == want), "{want}");
+    }
+    assert!(named.iter().any(|n| n.contains("Prev")), "prev");
+    assert!(named.iter().any(|n| n.contains("Next")), "next");
+    assert!(unnamed.is_empty(), "{unnamed:?}");
+    // Save it, then Find by amount opens it.
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    assert!(s.command(CommandId::new("edit.find")));
+    assert_eq!(s.state()["dialog"], "find");
+    s.find.amount = "4,000.00".into();
+    s.run_find();
+    s.poll();
+    let rows = s.find.results.clone().expect("results");
+    assert_eq!(rows.len(), 1);
+    let (_, unnamed) = labels(&mut s);
+    assert!(unnamed.is_empty(), "{unnamed:?}");
+    s.open_id(rows[0].id);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    // History reads the saved record.
+    s.toggle_history();
+    assert_eq!(s.state()["history_open"], true);
+    let (named, unnamed) = labels(&mut s);
+    assert!(named.iter().any(|n| n == "Close"), "history card");
+    assert!(unnamed.is_empty(), "{unnamed:?}");
+    // A file attaches to the saved payment.
+    s.upload_attachment("check.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    for _ in 0..50 {
+        s.poll();
+        if s.attach.attached == 1 && !s.attach.list.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(s.state()["attachments"]["files"], 1);
+}
+
+#[test]
+fn history_and_attach_need_a_saved_payment() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    s.toggle_history();
+    assert_eq!(s.state()["history_open"], false);
+    assert_eq!(s.notice, Some("payment.history.saved_only"));
+    s.upload_attachment("check.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    assert_eq!(s.attach.problem, Some("payment.attach.save_first"));
+}
+
+#[test]
+fn client_center_bounce_opens_the_payment_and_its_bounce_flow() {
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    assert!(s.start_save(After::New, None));
+    s.poll();
+    let id = s.last_saved.as_ref().expect("saved").id;
+    let mut w = ReceivePaymentScreen::new(Arc::clone(&link), today());
+    assert!(w.open_with(crate::windows::OpenPayload::BounceCheck(id)));
+    w.poll();
+    assert_eq!(w.state()["mode"], "edit");
+    assert_eq!(w.state()["dialog"], "bounce");
 }

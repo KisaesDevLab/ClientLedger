@@ -1091,6 +1091,24 @@ impl CenterScreen {
                     Box::new(crate::windows::OpenPayload::ReceiveFrom(c)),
                 ));
             }
+            // P22: a credit memo or a refund for the selected client.
+            if self.role == Role::Client
+                && let Some(c) = self.selected()
+            {
+                for (key, cmd) in [
+                    ("center.new_credit_memo", "clients.credit_memo"),
+                    ("center.refund", "clients.refund"),
+                    ("center.statement", "clients.statements"),
+                    ("center.finance_charges", "clients.finance_charges"),
+                ] {
+                    if b(ui, key, cmd).clicked() {
+                        self.link.push(crate::company::CompanyEvent::OpenWith(
+                            cl_model::CommandId::new(cmd),
+                            Box::new(crate::windows::OpenPayload::ForClient(c)),
+                        ));
+                    }
+                }
+            }
             ui.separator();
             let find_key = match self.role {
                 Role::Client => "center.find_client",
@@ -1405,6 +1423,25 @@ impl CenterScreen {
             .parts
             .env(&NoLookups, &label, GridHeight::Rows { min: 3, max: 14 });
         let out = d.grid.show(ui, ModelRef::Browse(&mut d.model), &env);
+        // P21 follow-up 3: a payment row offers "Record bounced check".
+        let payment = d
+            .grid
+            .core()
+            .cursor()
+            .and_then(|c| d.model.row_at(c.row))
+            .filter(|r| self::model::can_bounce(r))
+            .map(|r| r.id);
+        if let Some(id) = payment
+            && ui
+                .button(t("center.bounced_check"))
+                .on_hover_text(t("center.bounced_check.tip"))
+                .clicked()
+        {
+            self.link.push(crate::company::CompanyEvent::OpenWith(
+                cl_model::CommandId::new(crate::screens::receive_payment::KIND),
+                Box::new(crate::windows::OpenPayload::BounceCheck(id)),
+            ));
+        }
         for e in out.events {
             if let GridEvent::Activate { key } = e
                 && let Some(r) = d.model.row_at(key)

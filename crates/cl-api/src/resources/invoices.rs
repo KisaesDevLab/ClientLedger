@@ -126,6 +126,10 @@ const REFUSAL_CODES: &[(&str, InvoiceRefusal)] = &[
     ),
     ("INVOICE_TOTAL_BELOW_PAID", InvoiceRefusal::TotalBelowPaid),
     (
+        "FINANCE_CHARGE_INVOICE",
+        InvoiceRefusal::FinanceChargeInvoice,
+    ),
+    (
         "RECURRING_HAS_BILLABLE_COSTS",
         InvoiceRefusal::RecurringHasBillable,
     ),
@@ -172,6 +176,9 @@ pub enum InvoiceRefusal {
     MarkupAccountInvalid,
     /// The edit would make the total less than what was paid.
     TotalBelowPaid,
+    /// A finance-charge invoice's amount, lines or date can't be edited
+    /// (409 `FINANCE_CHARGE_INVOICE`, U-141): void it and assess again.
+    FinanceChargeInvoice,
     /// A recurring schedule can't copy billable costs.
     RecurringHasBillable,
     /// The engine asks to try again (409 `RETRY`; same key).
@@ -1142,7 +1149,7 @@ impl fmt::Debug for EmailMessage {
 }
 
 impl EmailMessage {
-    fn check(&self) -> Result<(), ApiError> {
+    pub(crate) fn check(&self) -> Result<(), ApiError> {
         let bad = |list: &[String]| {
             list.len() > EMAIL_RECIPIENTS_MAX
                 || list
@@ -1155,7 +1162,7 @@ impl EmailMessage {
         Ok(())
     }
 
-    fn json(&self) -> Map<String, Value> {
+    pub(crate) fn json(&self) -> Map<String, Value> {
         let mut m = Map::new();
         m.insert("to".into(), json!(self.to));
         if !self.cc.is_empty() {
@@ -1178,8 +1185,17 @@ impl EmailMessage {
 pub struct OutboxItem {
     /// The queued message.
     pub id: OutboxId,
-    /// The invoice it sends.
-    pub transaction_id: TransactionId,
+    /// What it sends (P22, U-140: a transaction or a customer statement;
+    /// absent on older engines: a transaction).
+    #[serde(default)]
+    pub kind: OutboxKind,
+    /// The invoice (or, from P22, credit memo or sales receipt) it sends;
+    /// `None` for a customer statement.
+    #[serde(default)]
+    pub transaction_id: Option<TransactionId>,
+    /// The customer statement it sends (U-140).
+    #[serde(default)]
+    pub customer_statement_id: Option<crate::resources::customer_statements::CustomerStatementId>,
     /// Its number (display).
     #[serde(default)]
     pub txn_number: Option<String>,
@@ -1203,6 +1219,20 @@ pub struct OutboxItem {
     pub created_at: Option<Timestamp>,
 }
 
+/// What an Outbox message sends (U-140).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutboxKind {
+    /// An invoice, credit memo or sales receipt.
+    #[default]
+    Transaction,
+    /// A customer statement.
+    CustomerStatement,
+    /// Anything a newer engine adds.
+    #[serde(other)]
+    Other,
+}
+
 impl OutboxItem {
     /// The message to send.
     #[must_use]
@@ -1221,7 +1251,9 @@ impl fmt::Debug for OutboxItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OutboxItem")
             .field("id", &self.id)
+            .field("kind", &self.kind)
             .field("transaction_id", &self.transaction_id)
+            .field("customer_statement_id", &self.customer_statement_id)
             .field("created_at", &self.created_at)
             .finish_non_exhaustive()
     }

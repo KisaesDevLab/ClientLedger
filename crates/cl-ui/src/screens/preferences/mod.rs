@@ -162,7 +162,7 @@ impl Category {
             Category::Reminders => "bills due backup remind",
             Category::Accounting => "basis cash accrual fiscal year closing date account numbers",
             Category::ChecksForms => "check number print form",
-            Category::SalesTax => "tax rate",
+            Category::SalesTax => "tax rate finance charge interest late overdue",
             Category::Inventory => "stock items cost",
             Category::Ai => "ai anthropic openai ollama key suggestions cap usage",
             Category::AiCloudReading => {
@@ -500,9 +500,13 @@ impl PreferencesScreen {
             self.loaded.done = true;
             return;
         }
-        let demo_ai = self.link.demo_state().map(|d| d.ai);
-        if let Some(switches) = demo_ai {
-            self.apply_loaded(crate::company::demo::preferences_loaded_with(switches));
+        let demo = self.link.demo_state().map(|d| (d.ai, d.finance.clone()));
+        if let Some((switches, finance)) = demo {
+            let mut loaded = crate::company::demo::preferences_loaded_with(switches);
+            if let Some(s) = loaded.settings.as_mut() {
+                crate::company::demo::finance_charges::fill_settings(&finance, s);
+            }
+            self.apply_loaded(loaded);
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -752,6 +756,21 @@ impl PreferencesScreen {
                 s.nsf_customer_fee = v;
             }
         }
+        // P22: finance charges go by their own write (Q-P22a).
+        let finance = edits
+            .accounting
+            .finance
+            .update_for(self.loaded.settings.as_ref())
+            .ok()
+            .flatten();
+        if let Some(u) = finance.as_ref()
+            && let Some(mut demo) = self.link.demo_state()
+        {
+            crate::company::demo::finance_charges::set_settings(&mut demo, u);
+            if let Some(s) = self.loaded.settings.as_mut() {
+                crate::company::demo::finance_charges::fill_settings(&demo.finance, s);
+            }
+        }
         let smtp = edits.email.update_for(self.loaded.smtp.as_ref());
         // Intake folders: the engine takes the whole list against the stamp
         // it was read with. It goes last, so an earlier failure never leaves
@@ -861,6 +880,11 @@ impl PreferencesScreen {
             if let Some(u) = receivables {
                 session
                     .set_receivables_settings(&u, cl_api::IdempotencyKey::new())
+                    .await?;
+            }
+            if let Some(u) = finance {
+                session
+                    .set_finance_charge_settings(&u, cl_api::IdempotencyKey::new())
                     .await?;
             }
             if let Some(u) = smtp {
@@ -1158,6 +1182,14 @@ impl PreferencesScreen {
                         &self.loaded.incomes,
                         &self.loaded.expenses,
                     );
+                }
+                if self.link.is_demo()
+                    || self
+                        .link
+                        .capabilities()
+                        .has(cl_api::Capabilities::FINANCE_CHARGES)
+                {
+                    company::finance_charges(ui, tokens, &mut self.edits, &self.loaded.incomes);
                 }
             }
             Category::Inventory => company::inventory(ui, tokens, &mut self.edits),

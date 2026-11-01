@@ -265,6 +265,7 @@ fn only_a_used_name_skips_an_item() {
         current_version: None,
         code: None,
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     };
     assert!(super::name_taken(&conflict(ConflictReason::AlreadyExists)));
     for other in [

@@ -271,6 +271,10 @@ pub struct FormLabels {
     pub days_31_60: String,
     pub days_61_90: String,
     pub over_90: String,
+    /// A statement line's open amount (open-item statements, P22).
+    pub open: String,
+    /// The balance before a transaction statement's period (P22).
+    pub previous_balance: String,
     /// Appended to the title on continuation pages.
     pub continued: String,
     /// `{page}` and `{pages}` are replaced.
@@ -327,6 +331,8 @@ impl Default for FormLabels {
             days_31_60: s("31-60 days"),
             days_61_90: s("61-90 days"),
             over_90: s("Over 90 days"),
+            open: s("Open"),
+            previous_balance: s("Previous balance"),
             continued: s("(continued)"),
             page_of: s("Page {page} of {pages}"),
         }

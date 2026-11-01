@@ -376,6 +376,7 @@ impl BatchEngine for Scripted {
                 current_version: None,
                 code: cl_api::ErrorCode::parse("BATCH_BUSY"),
                 message: cl_api::UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             }),
             SaveStep::Answer => DemoBatchEngine.save(link, groups, key, add_new_names),
             SaveStep::Forbidden(g) => Err(forbidden(g)),

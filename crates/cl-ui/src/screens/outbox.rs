@@ -257,7 +257,15 @@ impl OutboxScreen {
             self.refresh();
             return;
         };
-        let id = item.transaction_id;
+        // Statement rows (P22, U-140): the issued snapshot's PDF goes out.
+        if let Some(sid) = item.customer_statement_id {
+            self.send_statement(item, sid);
+            return;
+        }
+        let Some(id) = item.transaction_id else {
+            self.next();
+            return;
+        };
         let job = engine::read(
             &self.link,
             self.group.as_ref(),
@@ -282,7 +290,10 @@ impl OutboxScreen {
             self.books.layout_of(r),
         );
         let msg = item.message();
-        let (id, outbox_id) = (item.transaction_id, item.id);
+        let Some(id) = item.transaction_id else {
+            return;
+        };
+        let outbox_id = item.id;
         // The same message tried again keeps its key (Q-P20 plan §5).
         let key = self.keys.entry(outbox_id).or_default().clone();
         let (demo_data, demo_style, m2) = (data.clone(), style.clone(), msg.clone());
@@ -304,6 +315,42 @@ impl OutboxScreen {
                     .email(id, &msg, &name, &pdf, Some(outbox_id), key)
                     .await?;
                 Ok(())
+            },
+        );
+        self.send_job = Some((item, job));
+        if self.link.is_demo() {
+            self.poll();
+        }
+    }
+
+    /// Sends a statement row: reads the issued statement, makes its PDF
+    /// from the snapshot (on the queue) and emails it; the engine takes
+    /// the Outbox message out in the same commit (`outboxId`).
+    fn send_statement(&mut self, item: OutboxItem, id: cl_api::CustomerStatementId) {
+        let msg = item.message();
+        let outbox_id = item.id;
+        let key = self.keys.entry(outbox_id).or_default().clone();
+        let company = self
+            .tenant
+            .as_ref()
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default();
+        let (c2, m2, k2) = (company.clone(), msg.clone(), key.to_string());
+        let job = engine::write(
+            &self.link,
+            self.group.as_ref(),
+            label("orphan.statement_email", Some(key.clone())),
+            move |d| {
+                let r = crate::company::demo::statements::get(d, id)?;
+                crate::screens::statements::print::pdf_of(&r, &c2, "")?;
+                crate::company::demo::statements::email(d, id, &m2, Some(outbox_id), &k2)
+            },
+            move |s| async move {
+                let r = s.customer_statements().get(id).await?;
+                let (name, pdf) = crate::screens::statements::print::pdf_of(&r, &company, "")?;
+                s.customer_statements()
+                    .email(id, &msg, &name, &pdf, Some(outbox_id), key)
+                    .await
             },
         );
         self.send_job = Some((item, job));
@@ -508,7 +555,12 @@ impl OutboxScreen {
 }
 
 fn number(i: &OutboxItem) -> String {
-    i.txn_number.clone().unwrap_or_default()
+    let n = i.txn_number.clone().unwrap_or_default();
+    if i.kind == cl_api::OutboxKind::CustomerStatement {
+        t_with("outbox.statement", &[("number", &n)])
+    } else {
+        n
+    }
 }
 
 /// The demo's never-sent invoices as list rows.
@@ -591,5 +643,54 @@ mod tests {
         }
         s.send_all();
         assert!(!s.sending(), "nothing to send");
+    }
+
+    #[test]
+    fn send_all_sends_a_statement_row_and_records_the_email() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let id = {
+            let mut d = link.demo_state().expect("demo");
+            crate::company::demo::credit_memos::seed(&mut d);
+            d.invoices.no_smtp = false;
+            let c = d
+                .contacts_mut()
+                .iter()
+                .find(|c| c.fields.display_name == crate::company::demo::credit_memos::BLUESTEM)
+                .map(|c| c.id)
+                .expect("Bluestem");
+            let run = crate::company::demo::statements::create_run(
+                &mut d,
+                &cl_api::NewStatementRun {
+                    as_of: cl_core::CalendarDate::from_ymd(2026, 11, 30).expect("date"),
+                    format: cl_api::StatementFormat::OpenItem,
+                    start: None,
+                    contact_ids: vec![c],
+                },
+                "k1",
+            )
+            .expect("run");
+            let id = run.statements[0].statement_id;
+            let msg = cl_api::EmailMessage {
+                to: vec!["billing@example.com".into()],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Statement".into(),
+                body: "Attached.".into(),
+            };
+            crate::company::demo::statements::email_later(&mut d, id, &msg).expect("queued");
+            id
+        };
+        let mut s = OutboxScreen::new(Arc::clone(&link), None);
+        assert_eq!(s.state_json()["items"], 1);
+        s.send_all();
+        for _ in 0..20 {
+            s.poll();
+        }
+        assert_eq!(s.state_json()["results"][0], "sent");
+        assert_eq!(s.state_json()["items"], 0);
+        let rec = crate::company::demo::statements::get(&link.demo_state().expect("demo"), id)
+            .expect("statement");
+        assert_eq!(rec.send_history.len(), 1);
     }
 }

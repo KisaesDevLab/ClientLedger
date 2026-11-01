@@ -137,6 +137,7 @@ fn number_used() -> ApiError {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -369,6 +370,7 @@ pub fn update(
                 current_version: None,
                 code: cl_api::ErrorCode::parse(cl_api::CHECK_PRINTED),
                 message: UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             });
         }
         let saved = match printed.filter(|_| face_changed) {
@@ -412,6 +414,7 @@ pub fn update_expense(
             current_version: Some(now),
             code: None,
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     let old = current.record.txn.txn_date;

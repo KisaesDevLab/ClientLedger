@@ -210,6 +210,7 @@ fn a_used_number_is_refused_before_and_by_the_engine() {
         current_version: None,
         code: cl_api::ErrorCode::parse("ACCOUNT_NUMBER_EXISTS"),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert_eq!(p.problems, vec![DraftProblem::NumberTaken]);
     assert!(p.error.is_none());
@@ -223,6 +224,7 @@ fn a_used_number_is_refused_before_and_by_the_engine() {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     });
     assert_eq!(p.problems, Vec::new());
     assert!(p.error.is_some());

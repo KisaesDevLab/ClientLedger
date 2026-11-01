@@ -217,6 +217,51 @@ fn keyable_receive_payment_rows_are_the_recorded_set() {
     assert_eq!(typed_keyable(cl_api::KeySet::ReceivePaymentV1), pay);
 }
 
+/// The P22 key sets (U-137, U-140, U-141; in the spec since pin
+/// bf2daf38): each class's rows are its recorded set and the typed table
+/// agrees.
+#[test]
+fn keyable_p22_rows_are_the_recorded_sets() {
+    for (file, class, set, n) in P22_SETS {
+        let routes = spec::route_lines(&fixture(file));
+        assert_eq!(routes.len(), n, "{file} has {n} routes");
+        assert_eq!(
+            spec::keyable_class_operations(OPERATIONS_TXT, class),
+            routes,
+            "{class}"
+        );
+        assert_eq!(typed_keyable(set), routes, "{class}");
+    }
+}
+
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 3] = [
+    (
+        "idempotency_credit_memo_v1_routes.txt",
+        "keyable-credit-memo",
+        cl_api::KeySet::CreditMemoV1,
+        6,
+    ),
+    (
+        "idempotency_customer_statements_v1_routes.txt",
+        "keyable-customer-statements",
+        cl_api::KeySet::CustomerStatementsV1,
+        4,
+    ),
+    (
+        "idempotency_finance_charges_v1_routes.txt",
+        "keyable-finance-charges",
+        cl_api::KeySet::FinanceChargesV1,
+        1,
+    ),
+];
+
+fn p22_set_len() -> usize {
+    P22_SETS
+        .iter()
+        .map(|(f, ..)| spec::route_lines(&fixture(f)).len())
+        .sum()
+}
+
 #[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
     let (v1, ap, docs, attach, pay, print, invoice) = expected_keyable();
@@ -245,6 +290,7 @@ fn keyable_rows_are_the_engines_idempotency_routes() {
             + invoice.len()
             + spec::route_lines(&fixture("idempotency_invoice_email_v1_routes.txt")).len()
             + spec::route_lines(&fixture("idempotency_receive_payment_v1_routes.txt")).len()
+            + p22_set_len()
     );
 }
 
@@ -330,6 +376,31 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         "U-132",
         &path,
     );
+    let p22: Vec<(bool, Routes)> = [
+        (
+            "idempotency_credit_memo_v1_routes.txt",
+            "idempotency-credit-memo-v1",
+        ),
+        (
+            "idempotency_customer_statements_v1_routes.txt",
+            "idempotency-customer-statements-v1",
+        ),
+        (
+            "idempotency_finance_charges_v1_routes.txt",
+            "idempotency-finance-charges-v1",
+        ),
+    ]
+    .iter()
+    .map(|(f, cap)| {
+        let set = spec::route_lines(&fixture(f));
+        (later_set(&marked, &set, cap, "P22", &path), set)
+    })
+    .collect();
+    for (has, set) in &p22 {
+        if *has {
+            sets.extend(set.iter().cloned());
+        }
+    }
     for (has, set) in [
         (has_email, &email),
         (has_receive, &receive),

@@ -1,0 +1,14 @@
+# The engine's `idempotency-credit-memo-v1` route set (U-137, U-138, U-143;
+# P22 plan §2.2, §2.4): credit memo create, edit, apply and unapply, and
+# sales receipt create and edit (the sales receipt rows are a ClientLedger
+# assumption until the D8 pin bump), `x-idempotency: true` in its
+# openapi.json. Client-declared until the pin has it. Append-only for this
+# capability name: `keyable-credit-memo` in operations.txt
+# (`KeySet::CreditMemoV1`), keyed only while the engine advertises
+# `idempotency-credit-memo-v1`.
+POST /api/v1/credit-memos
+POST /api/v1/credit-memos/{id}/apply
+POST /api/v1/credit-memos/{id}/unapply
+POST /api/v1/sales-receipts
+PUT /api/v1/credit-memos/{id}
+PUT /api/v1/sales-receipts/{id}

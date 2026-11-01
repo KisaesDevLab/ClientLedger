@@ -1,0 +1,81 @@
+# Statements (P22 D6; Q-175-Q-177, Q-P22c, Q-P22n) against
+# `clientledger --demo`: as of 11/30/2026 the batch lists clients with a
+# balance; Bluestem Veterinary Clinic's open-item statement shows invoice
+# A (250.00, 46 days, 31-60) and B (500.00, 11 days, 1-30): amount due
+# 750.00, its aging row the A/R aging row. Email puts its numbered
+# statement in the Outbox (the demo has no mail server); Prairie Fork
+# Kennels has no email address and is marked as sent; Client Center's
+# Statement opens the screen for a client. Synthetic.
+name: statements
+description: Batch of clients with a balance; Bluestem's aging row; Email to the Outbox; Mark as sent; Client Center Statement.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.statements
+  - assert_exists: {role: tab, label_contains: "Statements"}
+  - assert_state: {key: screen.screen, equals: statements}
+  - assert_state: {key: screen.format, equals: open_item}
+  - assert_state: {key: screen.shows_start, equals: false}
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "11/30/2026"}
+  - key: Tab
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: check_box, label: "Send a statement to Bluestem Veterinary Clinic"}
+  - click: {role: button, label: "Bluestem Veterinary Clinic"}
+  - assert_state: {key: screen.preview.amount_due, equals: "750.00"}
+  - assert_state: {key: screen.preview.aging.current, equals: "0.00"}
+  - assert_state: {key: screen.preview.aging.days_1_30, equals: "500.00"}
+  - assert_state: {key: screen.preview.aging.days_31_60, equals: "250.00"}
+  - assert_state: {key: screen.preview.aging.total, equals: "750.00"}
+  - screenshot: preview
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: preview-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  # --- Balance forward shows the period start --------------------------------
+  - click: {role: combo_box, label: Layout}
+  - click: {role: button, label: Balance forward}
+  - assert_state: {key: screen.shows_start, equals: true}
+  - assert_exists: {role: text_input, label: Period starts}
+  - assert_state: {key: screen.preview.amount_due, equals: "750.00"}
+  - click: {role: combo_box, label: Layout}
+  - click: {role: button, label: Open item}
+  # --- Email Bluestem's statement to the Outbox -------------------------------
+  - click: {role: check_box, label: "Send a statement to Bluestem Veterinary Clinic"}
+  - assert_state: {key: screen.selected, equals: 1}
+  - click: {role: button, label: Email}
+  - assert_state: {key: screen.issued, equals: 1}
+  - assert_state: {key: screen.email_open, equals: true}
+  - screenshot: email
+  - click: {role: button, label: Put in Outbox}
+  - assert_state: {key: screen.email.queued, equals: 1}
+  - assert_state: {key: screen.last, equals: queued}
+  # --- Mark as sent: Prairie Fork Kennels (no email address) -------------------
+  - click: {role: button, label: Select none}
+  - click: {role: check_box, label: "Send a statement to Prairie Fork Kennels"}
+  - click: {role: button, label: Mark as sent}
+  - assert_state: {key: screen.issued, equals: 2}
+  - assert_state: {key: screen.marked, equals: 1}
+  - screenshot: sent
+  # --- The Outbox lists the statement ------------------------------------------
+  - command: clients.outbox
+  - assert_state: {key: screen.screen, equals: outbox}
+  - assert_state: {key: screen.items, equals: 1}
+  - assert_exists: {label_contains: "Statement 10"}
+  - screenshot: outbox
+  - command: file.close_window
+  - command: file.close_window
+  # --- Client Center's Statement ----------------------------------------------
+  - command: clients.center
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: Bluestem}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - click: {role: button, label: Statement}
+  - assert_state: {key: screen.screen, equals: statements}
+  - assert_state: {key: screen.selected, equals: 1}
+  - command: file.close_window
+  - command: file.close_window

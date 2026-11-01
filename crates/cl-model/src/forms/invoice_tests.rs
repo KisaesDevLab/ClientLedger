@@ -483,3 +483,52 @@ fn email_and_billable_shortcuts_resolve_in_forms_only() {
         Some("vendors.pay_bills")
     );
 }
+
+// ---- P22: the document kind -------------------------------------------------
+
+#[test]
+fn a_sales_receipt_sends_its_payment_fields_and_no_terms() {
+    let mut keys = RowKeyGen::new();
+    let mut f = form(&mut keys);
+    f.kind = SalesDocKind::SalesReceipt;
+    f.terms = Some(CUSTOM_TERMS.into());
+    f.terms_days = None;
+    f.due_date = Some(day(1));
+    f.po_number = "PO-7".into();
+    f.deposit_to = Some(income());
+    f.payment_method = Some("credit_card".into());
+    f.ref_no = " 5521 ".into();
+    let r = check_invoice(&f, &ctx()).expect("terms are not checked on a receipt");
+    assert_eq!(r.kind, SalesDocKind::SalesReceipt);
+    assert!(r.terms.is_none() && r.terms_days.is_none() && r.due_date.is_none());
+    assert!(r.po_number.is_none());
+    assert_eq!(r.deposit_to, Some(income()));
+    assert_eq!(r.payment_method.as_deref(), Some("credit_card"));
+    assert_eq!(r.ref_no.as_deref(), Some("5521"));
+    f.ref_no = "x".repeat(REF_MAX + 1);
+    assert_eq!(
+        check_invoice(&f, &ctx()).map(|_| ()),
+        Err(vec![InvoiceProblem::RefTooLong])
+    );
+    assert_eq!(InvoiceProblem::RefTooLong.field(), InvoiceField::Reference);
+    assert_eq!(
+        InvoiceProblem::from_preview_code("NEGATIVE_RECEIPT_NEEDS_BANK").map(InvoiceProblem::field),
+        Some(InvoiceField::DepositTo)
+    );
+    assert_eq!(InvoiceProblem::from_preview_code("OTHER"), None);
+}
+
+#[test]
+fn an_invoice_keeps_its_p20_request_and_sends_no_payment_fields() {
+    let mut keys = RowKeyGen::new();
+    let mut f = form(&mut keys);
+    f.deposit_to = Some(income());
+    f.ref_no = "5521".into();
+    let r = check_invoice(&f, &ctx()).expect("request");
+    assert_eq!(r.kind, SalesDocKind::Invoice);
+    assert!(r.deposit_to.is_none() && r.ref_no.is_none() && r.payment_method.is_none());
+    assert_eq!(
+        InvoiceForm::new_kind(SalesDocKind::CreditMemo, Some(day(2)), &mut keys).kind,
+        SalesDocKind::CreditMemo
+    );
+}

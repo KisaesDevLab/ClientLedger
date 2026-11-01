@@ -360,6 +360,8 @@ pub(crate) fn form_labels() -> FormLabels {
         days_31_60: t("print.pdf.days_31_60"),
         days_61_90: t("print.pdf.days_61_90"),
         over_90: t("print.pdf.over_90"),
+        open: t("print.pdf.open"),
+        previous_balance: t("print.pdf.previous_balance"),
         continued: t("print.pdf.continued"),
         page_of: t("print.pdf.page_of"),
     }

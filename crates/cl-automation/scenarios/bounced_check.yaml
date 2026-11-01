@@ -1,6 +1,6 @@
 # Record bounced check (P21 AC4) against `clientledger --demo`: 4,000.00
 # from Neosho Dental Group saved to Undeposited Funds, opened again with
-# Prev, then bounced with a 35.00 bank fee (from Operating Checking) and a
+# Client Center's Record bounced check, then bounced with a 35.00 bank fee (from Operating Checking) and a
 # 25.00 fee invoice: invoice 1091 is open again for exactly 4,385.00, the
 # payment is read-only, and the fee invoice exists. A bounce can't be
 # undone on this screen, so it runs once (light) and takes the dark
@@ -24,10 +24,20 @@ steps:
   - assert_state: {key: screen.figures, equals: ready}
   - key: Alt+N
   - assert_state: {key: screen.saved_count, equals: 1}
-  - command: form.prev_record
-  - assert_state: {key: screen.mode, equals: edit}
-  - assert_state: {key: screen.rows.0.due, equals: "4,385.00"}
+  # Client Center's transaction list offers the bounce on a payment row
+  # (P21 follow-up 3, P22): it opens the payment and its bounce flow.
+  - command: file.close_window
+  - command: clients.center
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: Neosho}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.tab, equals: transactions}
+  - click: {role: row, label_contains: "Payment"}
   - click: {role: button, label: Record bounced check}
+  - assert_state: {key: screen.screen, equals: receive_payment}
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.dialog, equals: bounce}
   - assert_state: {key: screen.bounce.step, equals: confirm}
   - assert_exists: {label_contains: "comes back out of Undeposited Funds"}
   - click: {role: button, label: Continue}

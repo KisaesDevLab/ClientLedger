@@ -55,6 +55,13 @@ pub mod outbox;
 pub mod bounced_check;
 pub mod receive_payment;
 
+// P22: Refund a Credit (Credit Memo and Sales Receipt are the invoice
+// screen of their kind).
+pub mod refund;
+// P22 D6: Statements.
+pub mod finance_charges;
+pub mod statements;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -97,6 +104,15 @@ pub(crate) const P20_SCREENS: [crate::shell::MakeScreen; 2] = [invoice::make, ou
 
 /// Every P21 screen's `make` (the shell tries each after P20's).
 pub(crate) const P21_SCREENS: [crate::shell::MakeScreen; 1] = [receive_payment::make];
+
+/// Every P22 screen's `make` (the shell tries each after P21's).
+pub(crate) const P22_SCREENS: [crate::shell::MakeScreen; 5] = [
+    invoice::make_credit_memo,
+    invoice::make_sales_receipt,
+    refund::make,
+    statements::make,
+    finance_charges::make,
+];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
@@ -222,11 +238,38 @@ mod tests {
                 .id;
             assert!(make(other, &link, None, today).is_none(), "{kind}");
         }
-        // Q-P20u: the Sales Receipt form comes with P22.
+        // Q-P20u: the Sales Receipt form came with P22 (built there).
         assert_eq!(
             cl_model::commands::find("clients.sales_receipt").and_then(|c| c.arrives),
-            Some("P22")
+            None
         );
+    }
+
+    #[test]
+    fn each_p22_screen_opens_its_own_kind_only() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let kinds = [
+            invoice::CREDIT_MEMO_KIND,
+            invoice::SALES_RECEIPT_KIND,
+            refund::KIND,
+            statements::KIND,
+            finance_charges::KIND,
+        ];
+        for (make, kind) in P22_SCREENS.iter().zip(kinds) {
+            let cmd = cl_model::commands::find(kind).expect("a command");
+            assert!(cmd.opens && cmd.arrives.is_none(), "{kind} is built");
+            let s = make(cmd.id, &link, None, today).expect("its screen");
+            assert_eq!(s.title(), crate::i18n::t(&format!("cmd.{kind}")));
+            assert!(!s.state().is_null(), "{kind}");
+            let other = cl_model::commands::find("vendors.write_check")
+                .expect("write check")
+                .id;
+            assert!(make(other, &link, None, today).is_none(), "{kind}");
+            let invoice = cl_model::commands::find(invoice::KIND).expect("invoice").id;
+            assert!(make(invoice, &link, None, today).is_none(), "{kind}");
+        }
     }
 
     #[test]

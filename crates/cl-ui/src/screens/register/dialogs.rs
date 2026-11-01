@@ -178,6 +178,7 @@ pub(super) async fn row_write(s: Session, w: RowWrite) -> Result<(), ApiError> {
                 current_version: Some(now.version),
                 code: None,
                 message: cl_api::UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             });
         }
     }

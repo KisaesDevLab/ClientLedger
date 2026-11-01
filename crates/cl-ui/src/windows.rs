@@ -161,6 +161,21 @@ pub enum OpenPayload {
     ),
     /// P21: Receive Payment from this client (Client Center's action).
     ReceiveFrom(cl_core::ids::ContactId),
+    /// P22: Refund a Credit for this client with this credit picked
+    /// (Receive Payment's "Refund it", a credit memo's Refund).
+    RefundFrom(
+        cl_core::ids::ContactId,
+        cl_model::forms::refund::RefundSourceChoice,
+    ),
+    /// P22: a new document of the window's kind for this client (Client
+    /// Center's "New credit memo", "Refund").
+    ForClient(cl_core::ids::ContactId),
+    /// P22 (P21 follow-up 3): Receive Payment opens this saved payment and
+    /// its bounced-check flow (Client Center's "Record bounced check").
+    BounceCheck(cl_core::ids::TransactionId),
+    /// P22: Assess Finance Charges on this date (Statements' "Assess
+    /// finance charges first?").
+    OnDate(cl_core::CalendarDate),
 }
 
 /// Stand-in for a screen a later phase builds.
@@ -906,11 +921,11 @@ mod tests {
 
     #[test]
     fn placeholder_titles_come_from_the_command_table() {
-        let p = Placeholder::for_command(id("clients.sales_receipt"));
-        assert_eq!(p.title(), "Sales Receipt");
+        let p = Placeholder::for_command(id("clients.statements"));
+        assert_eq!(p.title(), "Statements");
         assert!(!p.dirty());
         assert!(
-            Placeholder::for_command(id("clients.sales_receipt"))
+            Placeholder::for_command(id("clients.statements"))
                 .with_dirty(true)
                 .dirty()
         );

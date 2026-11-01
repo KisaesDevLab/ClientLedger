@@ -17,8 +17,8 @@ use serde::{Deserialize, Deserializer};
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::resources::operations::{
-    REPORT_ACCOUNT, REPORT_AP_AGING, REPORT_BALANCE_SHEET, REPORT_CUSTOMER_BALANCE,
-    REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE, REPORT_VENDOR_STATEMENT,
+    REPORT_ACCOUNT, REPORT_AP_AGING, REPORT_AR_AGING, REPORT_BALANCE_SHEET,
+    REPORT_CUSTOMER_BALANCE, REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE, REPORT_VENDOR_STATEMENT,
 };
 use crate::resources::transactions::ReportBasis;
 use crate::session::{Session, decode};
@@ -340,9 +340,30 @@ impl Reports<'_> {
         }
     }
 
+    /// What each client owes as of `as_of`, by age, exact (U-142,
+    /// `ar-aging-exact-v1`): the same open items as the client's statement
+    /// (Q-177), with a "(no client)" row.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `ar-aging-exact-v1`; `Decode`; any
+    /// [`ApiError`].
+    pub async fn ar_aging_summary(&self, as_of: CalendarDate) -> Result<ArAgingSummary, ApiError> {
+        if !self
+            .0
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::AR_AGING_EXACT)
+        {
+            return Err(ApiError::Local(crate::errors::LocalValidation::Unsupported));
+        }
+        let mut call = Call::at(Method::Get, REPORT_AR_AGING.route());
+        call.query = vec![("as_of_date".into(), as_of.to_wire())];
+        let reply = self.0.send(&REPORT_AR_AGING, call, None).await?;
+        decode(&reply, "client aging summary")
+    }
+
     /// What is owed to each vendor on open bills as of `as_of`, by age
-    /// (`/reports/ap-aging-summary`). Vendors with nothing open are left
-    /// out.
+    /// (`/reports/ap-aging-summary`).
     ///
     /// # Errors
     /// `NoCompanyOpen`; any [`ApiError`].
@@ -382,6 +403,64 @@ impl CustomerBalanceSummary {
             .iter()
             .find(|r| r.id == client)
             .map(|r| &r.balance)
+    }
+}
+
+/// One client's row of the exact A/R aging summary (U-142). Bills of no
+/// client (A/R lines without a contact) come as one row with no
+/// `contact_id`: the "(no client)" row, kept so the rows add to the A/R
+/// account.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArAgingCustomer {
+    /// The client (`None`: the "(no client)" row).
+    #[serde(default, deserialize_with = "blank_contact")]
+    pub contact_id: Option<ContactId>,
+    /// Name (owner data).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The buckets (exact strings).
+    pub buckets: crate::resources::customer_statements::AgingBuckets,
+    /// The total (exact string).
+    #[serde(deserialize_with = "crate::resources::customer_payments::de_stored")]
+    pub total: Money,
+}
+
+impl std::fmt::Debug for ArAgingCustomer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArAgingCustomer")
+            .field("contact_id", &self.contact_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `GET /api/v1/reports/ar-aging-summary`, exact part only (U-142,
+/// Q-P22o): the string fields. The numeric fields the web app reads are
+/// ignored, never used.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArAgingSummary {
+    /// As-of date.
+    #[serde(default)]
+    pub as_of_date: Option<CalendarDate>,
+    /// Company-wide buckets.
+    pub buckets_exact: crate::resources::customer_statements::AgingBuckets,
+    /// Company-wide total: the exact A/R account balance as of the date
+    /// (`totalExact`, U-142). On legacy sub-cent data it can differ from
+    /// the sum of the cent-rounded buckets and rows by the rounding
+    /// difference; show this figure as the A/R total, never a sum of rows.
+    #[serde(deserialize_with = "crate::resources::customer_payments::de_stored")]
+    pub total_exact: Money,
+    /// One row per client, plus "(no client)".
+    #[serde(default)]
+    pub customers: Vec<ArAgingCustomer>,
+}
+
+impl ArAgingSummary {
+    /// The row of `client` (`None` asks for the "(no client)" row).
+    #[must_use]
+    pub fn row(&self, client: Option<ContactId>) -> Option<&ArAgingCustomer> {
+        self.customers.iter().find(|r| r.contact_id == client)
     }
 }
 

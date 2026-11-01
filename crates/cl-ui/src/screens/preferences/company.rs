@@ -42,6 +42,8 @@ pub struct AccountingEdits {
     pub markup_account: Option<cl_core::ids::AccountId>,
     /// Receive Payment's settings (P21, Q-P21q): written by their own call.
     pub receivables: ReceivablesEdits,
+    /// Finance charges (P22, Q-P22a): written by their own call.
+    pub finance: FinanceChargeEdits,
 }
 
 /// Preferences › Sales for Receive Payment (P21, Q-P21q): engine company
@@ -125,6 +127,179 @@ impl ReceivablesEdits {
     }
 }
 
+/// Preferences › Sales › Finance charges (P22, U-141, Q-P22a): engine
+/// company settings, written by their own call. Assess Finance Charges
+/// shows the same fields when the rate is blank. A blank rate is "off".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinanceChargeEdits {
+    /// Annual percent as typed (`18`; blank: off).
+    pub rate: String,
+    /// The smallest charge per client, as typed (blank: none).
+    pub minimum: String,
+    /// Days after the due date before charging, as typed.
+    pub grace_days: String,
+    /// Charge on earlier finance charges.
+    pub compounding: bool,
+    /// The income account the charges post to.
+    pub income_account: Option<cl_core::ids::AccountId>,
+    /// Finance-charge invoices wait in the print queue.
+    pub print_later: bool,
+}
+
+impl Default for FinanceChargeEdits {
+    fn default() -> Self {
+        FinanceChargeEdits {
+            rate: String::new(),
+            minimum: String::new(),
+            grace_days: "0".into(),
+            compounding: false,
+            income_account: None,
+            print_later: true,
+        }
+    }
+}
+
+/// The checked finance-charge fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FinanceChargeValues {
+    rate: Option<cl_api::AnnualRate>,
+    minimum: cl_core::Money,
+    grace_days: u16,
+}
+
+impl FinanceChargeEdits {
+    /// From the engine's settings.
+    #[must_use]
+    pub fn from_settings(s: Option<&CompanySettings>) -> FinanceChargeEdits {
+        let Some(s) = s else {
+            return FinanceChargeEdits::default();
+        };
+        FinanceChargeEdits {
+            rate: s
+                .finance_charge_annual_rate
+                .map(cl_api::AnnualRate::to_wire)
+                .unwrap_or_default(),
+            minimum: money_text(s.finance_charge_minimum.filter(|m| !m.is_zero())),
+            grace_days: s.finance_charge_grace_days.unwrap_or(0).to_string(),
+            compounding: s.finance_charge_on_finance_charges.unwrap_or(false),
+            income_account: s.finance_charge_income_account_id,
+            print_later: s.finance_charge_print_later.unwrap_or(true),
+        }
+    }
+
+    fn values(&self) -> Result<FinanceChargeValues, SaveBlock> {
+        let rate = match self.rate.trim() {
+            "" => None,
+            t => Some(cl_api::AnnualRate::parse(t).map_err(|_| SaveBlock::BadRate)?),
+        };
+        let minimum = money_of(&self.minimum)?.unwrap_or(cl_core::Money::ZERO);
+        let grace_days = self
+            .grace_days
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|d| *d <= cl_api::GRACE_DAYS_MAX)
+            .ok_or(SaveBlock::BadNumber("finance_grace_days"))?;
+        Ok(FinanceChargeValues {
+            rate,
+            minimum,
+            grace_days,
+        })
+    }
+
+    /// Checks the typed rate, minimum and grace days.
+    ///
+    /// # Errors
+    /// `BadRate` for a rate or minimum that isn't one; `BadNumber` for
+    /// grace days outside 0-365.
+    pub fn validate(&self) -> Result<(), SaveBlock> {
+        self.values().map(|_| ())
+    }
+
+    /// True when the rate is blank (finance charges are off, Q-P22a).
+    #[must_use]
+    pub fn is_off(&self) -> bool {
+        self.rate.trim().is_empty()
+    }
+
+    /// The write for what changed against the engine's values (`None` when
+    /// nothing did).
+    ///
+    /// # Errors
+    /// See [`FinanceChargeEdits::validate`].
+    pub fn update_for(
+        &self,
+        loaded: Option<&CompanySettings>,
+    ) -> Result<Option<cl_api::FinanceChargeSettingsUpdate>, SaveBlock> {
+        let before = FinanceChargeEdits::from_settings(loaded);
+        let now = self.values()?;
+        let was = before.values().ok();
+        let u = cl_api::FinanceChargeSettingsUpdate {
+            annual_rate: (was.map(|w| w.rate) != Some(now.rate)).then_some(now.rate),
+            minimum: (was.map(|w| w.minimum) != Some(now.minimum)).then_some(now.minimum),
+            grace_days: (was.map(|w| w.grace_days) != Some(now.grace_days))
+                .then_some(now.grace_days),
+            on_finance_charges: (self.compounding != before.compounding)
+                .then_some(self.compounding),
+            income_account_id: (self.income_account != before.income_account)
+                .then_some(self.income_account),
+            print_later: (self.print_later != before.print_later).then_some(self.print_later),
+        };
+        Ok((!u.is_empty()).then_some(u))
+    }
+}
+
+/// The finance-charge fields (Preferences › Sales and Assess Finance
+/// Charges' setup).
+pub fn finance_charge_fields(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    f: &mut FinanceChargeEdits,
+    incomes: &[(cl_core::ids::AccountId, String)],
+) {
+    form::field(ui, &t("prefs.finance.rate"), &mut f.rate)
+        .on_hover_text(t("prefs.finance.rate.tip"));
+    form::field(ui, &t("prefs.finance.minimum"), &mut f.minimum)
+        .on_hover_text(t("prefs.finance.minimum.tip"));
+    form::field(ui, &t("prefs.finance.grace_days"), &mut f.grace_days)
+        .on_hover_text(t("prefs.finance.grace_days.tip"));
+    let shown = f
+        .income_account
+        .and_then(|a| incomes.iter().find(|(id, _)| *id == a))
+        .map_or_else(|| t("prefs.sales.none"), |(_, n)| n.clone());
+    ui.horizontal(|ui| {
+        let l = ui.add(egui::Label::new(t("prefs.finance.income_account")).selectable(false));
+        egui::ComboBox::from_id_salt("prefs-finance-income")
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut f.income_account, None, t("prefs.sales.none"));
+                for (id, name) in incomes {
+                    ui.selectable_value(&mut f.income_account, Some(*id), name);
+                }
+            })
+            .response
+            .labelled_by(l.id);
+    });
+    ui.checkbox(&mut f.compounding, t("prefs.finance.compounding"))
+        .on_hover_text(t("prefs.finance.compounding.tip"));
+    ui.checkbox(&mut f.print_later, t("prefs.finance.print_later"));
+    form::hint(ui, tokens, &t("prefs.finance.hint"));
+}
+
+/// Preferences › Sales › Finance charges.
+pub fn finance_charges(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    incomes: &[(cl_core::ids::AccountId, String)],
+) {
+    ui.add_space(8.0);
+    form::card(ui, tokens, |ui| {
+        ui.label(egui::RichText::new(t("prefs.finance.title")).strong());
+        finance_charge_fields(ui, tokens, &mut edits.accounting.finance, incomes);
+    });
+}
+
 impl Default for AccountingEdits {
     fn default() -> Self {
         AccountingEdits {
@@ -133,6 +308,7 @@ impl Default for AccountingEdits {
             tax_percent: String::new(),
             markup_account: None,
             receivables: ReceivablesEdits::default(),
+            finance: FinanceChargeEdits::default(),
         }
     }
 }
@@ -188,6 +364,7 @@ impl AccountingEdits {
                 .unwrap_or_default(),
             markup_account: s.billable_markup_account_id,
             receivables: ReceivablesEdits::from_settings(Some(s)),
+            finance: FinanceChargeEdits::from_settings(Some(s)),
         }
     }
 
@@ -201,6 +378,7 @@ impl AccountingEdits {
         }
         money_of(&self.receivables.write_off_limit)?;
         money_of(&self.receivables.nsf_customer_fee)?;
+        self.finance.validate()?;
         Ok(())
     }
 
@@ -212,6 +390,7 @@ impl AccountingEdits {
         let same = AccountingEdits {
             markup_account: before.markup_account,
             receivables: before.receivables.clone(),
+            finance: before.finance.clone(),
             ..self.clone()
         };
         if same == before {
@@ -512,6 +691,72 @@ mod tests {
             AccountingEdits::from_settings(Some(&with)).markup_account,
             markup.markup_account
         );
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names)]
+    fn finance_charge_settings_send_only_what_changed() {
+        let s: CompanySettings = serde_json::from_value(serde_json::json!({
+            "financeChargeAnnualRate": null,
+            "financeChargeMinimum": "0.00",
+            "financeChargeGraceDays": 0,
+            "financeChargeOnFinanceCharges": false,
+            "financeChargeIncomeAccountId": null,
+            "financeChargePrintLater": true,
+        }))
+        .unwrap();
+        let mut f = FinanceChargeEdits::from_settings(Some(&s));
+        assert!(f.is_off(), "a blank rate is off (Q-P22a)");
+        assert_eq!(f.minimum, "", "a zero minimum shows blank");
+        assert_eq!(f.update_for(Some(&s)), Ok(None));
+        f.rate = "18".into();
+        f.minimum = "2.00".into();
+        f.grace_days = "10".into();
+        let u = f.update_for(Some(&s)).unwrap().unwrap();
+        assert_eq!(
+            u.annual_rate,
+            Some(Some(cl_api::AnnualRate::parse("18").unwrap()))
+        );
+        assert_eq!(u.minimum, Some(cl_core::Money::parse_wire("2.00").unwrap()));
+        assert_eq!(u.grace_days, Some(10));
+        assert_eq!(u.on_finance_charges, None);
+        assert_eq!(u.income_account_id, None);
+        assert_eq!(u.print_later, None);
+        // Blanking the rate again turns finance charges off.
+        let on: CompanySettings = serde_json::from_value(serde_json::json!({
+            "financeChargeAnnualRate": "18",
+            "financeChargeMinimum": "2.00",
+            "financeChargeGraceDays": 10,
+        }))
+        .unwrap();
+        let mut g = FinanceChargeEdits::from_settings(Some(&on));
+        assert_eq!(g.rate, "18");
+        g.rate = String::new();
+        assert_eq!(
+            g.update_for(Some(&on)).unwrap().unwrap().annual_rate,
+            Some(None)
+        );
+        for (rate, grace, block) in [
+            ("0", "0", SaveBlock::BadRate),
+            ("101", "0", SaveBlock::BadRate),
+            ("1.23456", "0", SaveBlock::BadRate),
+            ("18", "366", SaveBlock::BadNumber("finance_grace_days")),
+            ("18", "x", SaveBlock::BadNumber("finance_grace_days")),
+        ] {
+            let bad = FinanceChargeEdits {
+                rate: rate.into(),
+                grace_days: grace.into(),
+                ..FinanceChargeEdits::default()
+            };
+            assert_eq!(bad.validate(), Err(block.clone()), "{rate} {grace}");
+            assert_eq!(bad.update_for(Some(&s)), Err(block));
+        }
+        // The other accounting settings don't count it as their change.
+        let mut a = AccountingEdits::from_settings(Some(&s));
+        a.finance.rate = "18".into();
+        assert_eq!(a.update_for(Some(&s)), None);
+        a.finance.rate = "abc".into();
+        assert_eq!(a.validate(), Err(SaveBlock::BadRate));
     }
 
     #[test]

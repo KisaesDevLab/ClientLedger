@@ -220,6 +220,7 @@ pub fn save_layout(
                 current_version: None,
                 code: None,
                 message: cl_api::UserText::default(),
+                details: cl_api::ConflictDetails::default(),
             })
         },
     );

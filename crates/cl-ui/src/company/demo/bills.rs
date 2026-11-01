@@ -148,6 +148,7 @@ fn conflict(code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -214,6 +215,20 @@ pub fn add_story_contacts(contacts: &mut Vec<cl_api::Contact>) {
     c.billing_country = Some("US".into());
     c.default_payment_terms = Some("net_30".into());
     push(c);
+    // P22: the credit memo, refund and statement client and the
+    // finance-charge clients (golden cases 1-7,
+    // `company/demo/credit_memos.rs`), after Neosho so P21's ids stay.
+    for (name, street, city, email) in super::credit_memos::P22_CLIENTS {
+        let mut c = ContactFields::named(ContactType::Customer, name);
+        c.billing_line1 = Some(street.into());
+        c.billing_city = Some(city.into());
+        c.billing_state = Some("MO".into());
+        c.billing_zip = Some("64850".into());
+        c.billing_country = Some("US".into());
+        c.email = email.map(str::to_string);
+        c.default_payment_terms = Some("net_30".into());
+        push(c);
+    }
 }
 
 /// One document as the demo engine checks and posts it.
@@ -534,6 +549,7 @@ fn stale(
             current_version: Some(now.version),
             code: None,
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     if state.ledger.is_void(id) {

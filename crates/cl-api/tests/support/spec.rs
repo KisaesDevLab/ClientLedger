@@ -35,6 +35,9 @@ use sha2::{Digest, Sha256};
 /// Since pin eaa12bad (engine PRs #205-#208) the P21 payment routes are:
 /// preview, list, get, edit, void, apply, bounce, deposits on hand and
 /// customer refunds (U-132 to U-136).
+/// Since pin bf2daf38 (engine PRs #209-#213) the P22 routes are: credit
+/// memos, sales receipts, refund get, open credits, customer statements
+/// and runs, and finance charges (U-137 to U-143, U-112).
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
@@ -263,6 +266,13 @@ pub fn keyable_check_print_operations(txt: &str) -> Vec<(String, String)> {
 /// `operations.txt`: `(METHOD, route)`, sorted.
 pub fn keyable_invoice_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-invoice")
+}
+
+/// The rows of `operations.txt` in retry class `class`, sorted (the P22
+/// key sets: `keyable-credit-memo`, `keyable-customer-statements`,
+/// `keyable-finance-charges`).
+pub fn keyable_class_operations(txt: &str, class: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, class)
 }
 
 /// The `keyable-receive-payment` (`idempotency-receive-payment-v1`) rows of

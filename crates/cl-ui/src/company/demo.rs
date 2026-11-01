@@ -28,7 +28,12 @@ pub mod price_levels;
 pub mod printing;
 // P21: Receive Payment (held to fixtures/payments/golden.json).
 pub mod receivables;
+// P22: credit memos, sales receipts, refunds, statements and finance
+// charges (held to fixtures/receivables/golden.json).
+pub mod credit_memos;
+pub mod finance_charges;
 pub mod register;
+pub mod statements;
 pub mod template_store;
 pub mod templates;
 
@@ -138,6 +143,12 @@ pub struct DemoState {
     pub layouts: layouts::DemoLayouts,
     /// Customer payments, deposits on hand and bounces (P21).
     pub receivables: receivables::DemoReceivables,
+    /// Credit memos, sales receipts and refunds (P22).
+    pub credits: credit_memos::DemoCredits,
+    /// Customer statement runs and snapshots (P22).
+    pub statements: statements::DemoStatements,
+    /// Finance-charge settings and assessments (P22).
+    pub finance: finance_charges::DemoFinance,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -257,6 +268,9 @@ impl DemoState {
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),
             receivables: receivables::DemoReceivables::default(),
+            credits: credit_memos::DemoCredits::default(),
+            statements: statements::DemoStatements::default(),
+            finance: finance_charges::DemoFinance::default(),
         }
     }
 
@@ -364,19 +378,29 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "isStale": false,
     }))
     .ok();
+    let accounts = chart();
+    let named = |chart: &[cl_api::Account], n: u32, seeded: &str| {
+        let id = account_id(n);
+        let name = chart
+            .iter()
+            .find(|a| a.id == id)
+            .map_or_else(|| seeded.to_string(), |a| a.fields.name.clone());
+        (id, name)
+    };
     crate::screens::preferences::Loaded {
         settings,
         ai: Some(ai),
         consent,
         smtp: None,
         usage: Some(usage),
+        // The chart's own names (4000 is "Service Income" there).
         incomes: vec![
-            (account_id(4000), "Landscaping Services".into()),
-            (account_id(4950), "Sales Discounts".into()),
+            named(&accounts, 4000, "Service Income"),
+            named(&accounts, 4950, "Sales Discounts"),
         ],
         expenses: vec![
-            (account_id(6050), "Bank and Merchant Fees".into()),
-            (account_id(6960), "Bad Debts".into()),
+            named(&accounts, 6050, "Bank and Merchant Fees"),
+            named(&accounts, 6960, "Bad Debts"),
         ],
         done: true,
     }
@@ -614,6 +638,16 @@ pub fn account_report(account: &cl_api::Account) -> cl_api::AccountReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Preferences' income picker names 4000 as the chart does.
+    #[test]
+    fn preferences_pickers_use_the_charts_names() {
+        let l = preferences_loaded();
+        assert_eq!(
+            l.incomes[0],
+            (account_id(4000), "Service Income".to_string())
+        );
+    }
 
     #[test]
     fn the_demo_list_is_the_mockup() {

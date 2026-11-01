@@ -47,6 +47,9 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::InvoiceV1) => "keyable-invoice",
             RetryClass::Keyable(KeySet::InvoiceEmailV1) => "keyable-invoice-email",
             RetryClass::Keyable(KeySet::ReceivePaymentV1) => "keyable-receive-payment",
+            RetryClass::Keyable(KeySet::CreditMemoV1) => "keyable-credit-memo",
+            RetryClass::Keyable(KeySet::CustomerStatementsV1) => "keyable-customer-statements",
+            RetryClass::Keyable(KeySet::FinanceChargesV1) => "keyable-finance-charges",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -97,6 +100,15 @@ pub enum KeySet {
     /// `idempotency-receive-payment-v1` (U-132, P21): payment receive,
     /// edit, void, unapply, apply and bounce.
     ReceivePaymentV1,
+    /// `idempotency-credit-memo-v1` (U-137, P22): credit memo create,
+    /// edit, apply and unapply; sales receipt create and edit.
+    CreditMemoV1,
+    /// `idempotency-customer-statements-v1` (U-140, P22): statement runs,
+    /// statement email and email-later.
+    CustomerStatementsV1,
+    /// `idempotency-finance-charges-v1` (U-141, P22): finance-charge
+    /// assess.
+    FinanceChargesV1,
 }
 
 impl KeySet {
@@ -113,6 +125,11 @@ impl KeySet {
             KeySet::InvoiceV1 => crate::wire::Capabilities::IDEMPOTENCY_INVOICE,
             KeySet::InvoiceEmailV1 => crate::wire::Capabilities::INVOICE_EMAIL,
             KeySet::ReceivePaymentV1 => crate::wire::Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT,
+            KeySet::CreditMemoV1 => crate::wire::Capabilities::IDEMPOTENCY_CREDIT_MEMO,
+            KeySet::CustomerStatementsV1 => {
+                crate::wire::Capabilities::IDEMPOTENCY_CUSTOMER_STATEMENTS
+            }
+            KeySet::FinanceChargesV1 => crate::wire::Capabilities::IDEMPOTENCY_FINANCE_CHARGES,
         }
     }
 }
@@ -332,6 +349,19 @@ const fn keyable_receive_payment(method: Method, route: &'static str) -> Operati
         method,
         route,
         RetryClass::Keyable(KeySet::ReceivePaymentV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in one of the P22 keyed route sets (U-137, U-140, U-141):
+/// keyed only while the engine advertises that set's capability.
+const fn keyable_in(set: KeySet, method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(set),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -1064,6 +1094,94 @@ pub(crate) const PAYMENT_DEPOSITS_ON_HAND: Operation = read("/api/v1/payments/de
 pub(crate) const CUSTOMER_REFUND_CREATE: Operation =
     keyable_receive_payment(Method::Post, "/api/v1/customer-refunds");
 
+// ---- P22 credit memos, sales receipts, refunds, statements, finance charges --
+// Contract per the P22 plan §2.2-§2.7 (U-137 to U-143, U-112); verify at
+// the D8 pin bump.
+
+const fn keyable_credit_memo(method: Method, route: &'static str) -> Operation {
+    keyable_in(KeySet::CreditMemoV1, method, route)
+}
+
+/// A client's open credits: payment credits and credit memos (U-137).
+pub(crate) const PAYMENT_CREDITS: Operation = read("/api/v1/payments/credits");
+/// Every figure of a credit memo, posting nothing (U-138).
+pub(crate) const CREDIT_MEMO_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/credit-memos/preview");
+/// Creates a credit memo, applying it in the same step (U-137, U-138).
+pub(crate) const CREDIT_MEMO_CREATE: Operation =
+    keyable_credit_memo(Method::Post, "/api/v1/credit-memos");
+/// One credit memo with its applications and refunds.
+pub(crate) const CREDIT_MEMO_GET: Operation = read("/api/v1/credit-memos/{id}");
+/// Edits a credit memo (`expectedUpdatedAt`).
+pub(crate) const CREDIT_MEMO_PUT: Operation =
+    keyable_credit_memo(Method::Put, "/api/v1/credit-memos/{id}");
+/// Applies a credit memo to invoices.
+pub(crate) const CREDIT_MEMO_APPLY: Operation =
+    keyable_credit_memo(Method::Post, "/api/v1/credit-memos/{id}/apply");
+/// Takes one invoice off a credit memo.
+pub(crate) const CREDIT_MEMO_UNAPPLY: Operation =
+    keyable_credit_memo(Method::Post, "/api/v1/credit-memos/{id}/unapply");
+/// Every figure of a sales receipt, posting nothing (U-143).
+pub(crate) const SALES_RECEIPT_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/sales-receipts/preview");
+/// Creates a sales receipt (U-143; keyed under `idempotency-credit-memo-v1`,
+/// a desktop-side assumption until the pin bump).
+pub(crate) const SALES_RECEIPT_CREATE: Operation =
+    keyable_credit_memo(Method::Post, "/api/v1/sales-receipts");
+/// One sales receipt.
+pub(crate) const SALES_RECEIPT_GET: Operation = read("/api/v1/sales-receipts/{id}");
+/// Edits a sales receipt.
+pub(crate) const SALES_RECEIPT_PUT: Operation =
+    keyable_credit_memo(Method::Put, "/api/v1/sales-receipts/{id}");
+/// One customer refund with its source (U-139).
+pub(crate) const CUSTOMER_REFUND_GET: Operation = read("/api/v1/customer-refunds/{id}");
+/// One client's statement as of a date (U-112).
+pub(crate) const REPORT_CUSTOMER_STATEMENT: Operation = read("/api/v1/reports/customer-statement");
+/// The statement batch picker (U-112).
+pub(crate) const REPORT_CUSTOMER_STATEMENTS: Operation =
+    read("/api/v1/reports/customer-statements");
+/// The A/R aging summary (U-142: exact string fields and client rows).
+pub(crate) const REPORT_AR_AGING: Operation = read("/api/v1/reports/ar-aging-summary");
+/// Issues numbered statement snapshots (U-140).
+pub(crate) const STATEMENT_RUN_CREATE: Operation = keyable_in(
+    KeySet::CustomerStatementsV1,
+    Method::Post,
+    "/api/v1/customer-statement-runs",
+);
+/// A client's statement history, newest first (U-140).
+pub(crate) const STATEMENTS_LIST: Operation = read("/api/v1/customer-statements");
+/// One issued statement (its snapshot).
+pub(crate) const STATEMENT_GET: Operation = read("/api/v1/customer-statements/{id}");
+/// Records that a statement was printed, emailed or saved as a PDF.
+pub(crate) const STATEMENT_SENT: Operation = keyable_in(
+    KeySet::CustomerStatementsV1,
+    Method::Post,
+    "/api/v1/customer-statements/{id}/sent",
+);
+/// Emails a statement through the company SMTP (U-140).
+pub(crate) const STATEMENT_EMAIL: Operation = keyable_in(
+    KeySet::CustomerStatementsV1,
+    Method::Post,
+    "/api/v1/customer-statements/{id}/email",
+);
+/// Puts a statement email in the Outbox (U-140).
+pub(crate) const STATEMENT_EMAIL_LATER: Operation = keyable_in(
+    KeySet::CustomerStatementsV1,
+    Method::Post,
+    "/api/v1/customer-statements/{id}/email-later",
+);
+/// Every finance charge the date would assess, posting nothing (U-141).
+pub(crate) const FINANCE_CHARGE_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/finance-charges/preview");
+/// Assesses finance charges, all or nothing (U-141).
+pub(crate) const FINANCE_CHARGE_ASSESS: Operation = keyable_in(
+    KeySet::FinanceChargesV1,
+    Method::Post,
+    "/api/v1/finance-charges/assess",
+);
+/// Finance-charge assessments of a period (U-141).
+pub(crate) const FINANCE_CHARGES_LIST: Operation = read("/api/v1/finance-charges");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -1076,7 +1194,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 252] = [
+pub const OPERATIONS: [Operation; 276] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1343,6 +1461,30 @@ pub const OPERATIONS: [Operation; 252] = [
     PAYMENT_OPEN_INVOICES,
     PAYMENT_DEPOSITS_ON_HAND,
     CUSTOMER_REFUND_CREATE,
+    PAYMENT_CREDITS,
+    CREDIT_MEMO_PREVIEW,
+    CREDIT_MEMO_CREATE,
+    CREDIT_MEMO_GET,
+    CREDIT_MEMO_PUT,
+    CREDIT_MEMO_APPLY,
+    CREDIT_MEMO_UNAPPLY,
+    SALES_RECEIPT_PREVIEW,
+    SALES_RECEIPT_CREATE,
+    SALES_RECEIPT_GET,
+    SALES_RECEIPT_PUT,
+    CUSTOMER_REFUND_GET,
+    REPORT_CUSTOMER_STATEMENT,
+    REPORT_CUSTOMER_STATEMENTS,
+    REPORT_AR_AGING,
+    STATEMENT_RUN_CREATE,
+    STATEMENTS_LIST,
+    STATEMENT_GET,
+    STATEMENT_SENT,
+    STATEMENT_EMAIL,
+    STATEMENT_EMAIL_LATER,
+    FINANCE_CHARGE_PREVIEW,
+    FINANCE_CHARGE_ASSESS,
+    FINANCE_CHARGES_LIST,
 ];
 
 /// Looks up a covered operation.
@@ -1437,6 +1579,12 @@ mod tests {
                 Some(KeySet::InvoiceEmailV1)
             } else if KEYABLE_RECEIVE_PAYMENT.contains(&route) {
                 Some(KeySet::ReceivePaymentV1)
+            } else if KEYABLE_CREDIT_MEMO.contains(&route) {
+                Some(KeySet::CreditMemoV1)
+            } else if KEYABLE_CUSTOMER_STATEMENTS.contains(&route) {
+                Some(KeySet::CustomerStatementsV1)
+            } else if KEYABLE_FINANCE_CHARGES.contains(&route) {
+                Some(KeySet::FinanceChargesV1)
             } else {
                 None
             };
@@ -1466,7 +1614,10 @@ mod tests {
                 + KEYABLE_CHECK_PRINT.len()
                 + KEYABLE_INVOICE.len()
                 + KEYABLE_INVOICE_EMAIL.len()
-                + KEYABLE_RECEIVE_PAYMENT.len(),
+                + KEYABLE_RECEIVE_PAYMENT.len()
+                + KEYABLE_CREDIT_MEMO.len()
+                + KEYABLE_CUSTOMER_STATEMENTS.len()
+                + KEYABLE_FINANCE_CHARGES.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1560,8 +1711,47 @@ mod tests {
         ("POST", "/api/v1/payments/{id}/bounce"),
     ];
 
+    /// The P22 key sets (U-137, U-140, U-141).
+    const KEYABLE_CREDIT_MEMO: [(&str, &str); 6] = [
+        ("POST", "/api/v1/credit-memos"),
+        ("PUT", "/api/v1/credit-memos/{id}"),
+        ("POST", "/api/v1/credit-memos/{id}/apply"),
+        ("POST", "/api/v1/credit-memos/{id}/unapply"),
+        ("POST", "/api/v1/sales-receipts"),
+        ("PUT", "/api/v1/sales-receipts/{id}"),
+    ];
+    const KEYABLE_CUSTOMER_STATEMENTS: [(&str, &str); 4] = [
+        ("POST", "/api/v1/customer-statement-runs"),
+        ("POST", "/api/v1/customer-statements/{id}/email"),
+        ("POST", "/api/v1/customer-statements/{id}/email-later"),
+        ("POST", "/api/v1/customer-statements/{id}/sent"),
+    ];
+    const KEYABLE_FINANCE_CHARGES: [(&str, &str); 1] = [("POST", "/api/v1/finance-charges/assess")];
+
     #[test]
     fn key_sets_name_their_capabilities() {
+        assert_eq!(
+            KeySet::CreditMemoV1.capability(),
+            "idempotency-credit-memo-v1"
+        );
+        assert_eq!(
+            KeySet::CustomerStatementsV1.capability(),
+            "idempotency-customer-statements-v1"
+        );
+        assert_eq!(
+            KeySet::FinanceChargesV1.capability(),
+            "idempotency-finance-charges-v1"
+        );
+        assert_eq!(CREDIT_MEMO_CREATE.key_set(), Some(KeySet::CreditMemoV1));
+        assert_eq!(CREDIT_MEMO_GET.key_set(), None);
+        assert_eq!(
+            STATEMENT_RUN_CREATE.key_set(),
+            Some(KeySet::CustomerStatementsV1)
+        );
+        assert_eq!(
+            FINANCE_CHARGE_ASSESS.key_set(),
+            Some(KeySet::FinanceChargesV1)
+        );
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
         assert_eq!(KeySet::ApV1.capability(), "idempotency-ap-v1");
         assert_eq!(RetryClass::Keyable(KeySet::V1).as_str(), "keyable");

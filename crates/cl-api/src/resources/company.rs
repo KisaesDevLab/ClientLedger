@@ -349,6 +349,26 @@ pub struct CompanySettings {
     /// (`nsfCustomerFee`, Q-P21d).
     #[serde(default, deserialize_with = "money_text_opt")]
     pub nsf_customer_fee: Option<cl_core::Money>,
+    /// Annual finance-charge percent (`financeChargeAnnualRate`, U-141;
+    /// `None`: finance charges are off, Q-P22a).
+    #[serde(default)]
+    pub finance_charge_annual_rate: Option<crate::resources::finance_charges::AnnualRate>,
+    /// The smallest charge per client (`financeChargeMinimum`).
+    #[serde(default, deserialize_with = "money_text_opt")]
+    pub finance_charge_minimum: Option<cl_core::Money>,
+    /// Days after the due date before charging (`financeChargeGraceDays`).
+    #[serde(default)]
+    pub finance_charge_grace_days: Option<u16>,
+    /// Charge on earlier finance charges (`financeChargeOnFinanceCharges`).
+    #[serde(default)]
+    pub finance_charge_on_finance_charges: Option<bool>,
+    /// The finance-charge income account (`financeChargeIncomeAccountId`).
+    #[serde(default)]
+    pub finance_charge_income_account_id: Option<AccountId>,
+    /// Finance-charge invoices wait to be printed
+    /// (`financeChargePrintLater`, default on).
+    #[serde(default)]
+    pub finance_charge_print_later: Option<bool>,
 }
 
 /// An optional money string (a JSON number is refused).
@@ -694,6 +714,29 @@ impl Session {
     pub async fn set_receivables_settings(
         &self,
         u: &ReceivablesSettingsUpdate,
+        key: IdempotencyKey,
+    ) -> Result<Option<CompanySettings>, ApiError> {
+        self.require_company()?;
+        if u.is_empty() {
+            return Ok(None);
+        }
+        let body = json_body(&u.body(&self.client().capabilities())?)?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply).map(Some)
+    }
+
+    /// Saves the finance-charge settings (P22, U-141, Q-P22a). Nothing is
+    /// sent for an empty update.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `finance-charges-v1` (nothing sent);
+    /// `Local(InvalidValue)`; `NoCompanyOpen`; `Validation`; any
+    /// [`ApiError`].
+    pub async fn set_finance_charge_settings(
+        &self,
+        u: &crate::resources::finance_charges::FinanceChargeSettingsUpdate,
         key: IdempotencyKey,
     ) -> Result<Option<CompanySettings>, ApiError> {
         self.require_company()?;

@@ -412,6 +412,7 @@ fn every_refusal_code_maps() {
             current_version: None,
             code: ErrorCode::parse(code),
             message: UserText::default(),
+            details: crate::ConflictDetails::default(),
         };
         assert!(payment_refusal(&e).is_some(), "{code}");
     }
@@ -420,6 +421,7 @@ fn every_refusal_code_maps() {
         current_version: None,
         code: None,
         message: UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert_eq!(payment_refusal(&stale), Some(PaymentRefusal::Stale));
     let e = crate::errors::engine_refusal(

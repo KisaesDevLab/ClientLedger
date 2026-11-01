@@ -166,6 +166,93 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
     Ok(n)
 }
 
+/// The checked request of a credit memo as the engine's memo (P22): the
+/// same lines as an invoice; no terms, due date or P.O. number. The
+/// applications at save are added by the caller from the model's plan.
+///
+/// # Errors
+/// As [`new_invoice`].
+pub(crate) fn new_credit_memo(r: &InvoiceRequest) -> Result<cl_api::NewCreditMemo, ApiError> {
+    let inv = new_invoice(r)?;
+    let mut m = cl_api::NewCreditMemo::new(r.client, r.date, inv.lines);
+    m.memo = inv.memo;
+    m.customer_message = inv.customer_message;
+    m.tag_ids = inv.tag_ids;
+    m.hide_zero_lines = inv.hide_zero_lines;
+    m.layout_id = inv.layout_id;
+    m.txn_number = inv.txn_number;
+    m.print_later = inv.print_later;
+    Ok(m)
+}
+
+/// The engine's payment method of a sales receipt (the form keeps the
+/// wire string).
+fn payment_method(m: Option<&str>) -> Option<cl_api::PaymentMethod> {
+    m.map(|m| match m {
+        "check" => cl_api::PaymentMethod::Check,
+        "cash" => cl_api::PaymentMethod::Cash,
+        "credit_card" => cl_api::PaymentMethod::CreditCard,
+        "ach" => cl_api::PaymentMethod::Ach,
+        _ => cl_api::PaymentMethod::Other,
+    })
+}
+
+/// The checked request of a sales receipt as the engine's receipt (P22,
+/// Q-P20u): the invoice's lines plus Deposit to, method and reference.
+///
+/// # Errors
+/// As [`new_invoice`].
+pub(crate) fn new_sales_receipt(r: &InvoiceRequest) -> Result<cl_api::NewSalesReceipt, ApiError> {
+    let inv = new_invoice(r)?;
+    let mut s = cl_api::NewSalesReceipt::new(r.date, inv.lines);
+    s.contact_id = Some(r.client);
+    s.deposit_to_account_id = r.deposit_to;
+    s.payment_method = payment_method(r.payment_method.as_deref());
+    s.ref_no.clone_from(&r.ref_no);
+    s.memo = inv.memo;
+    s.customer_message = inv.customer_message;
+    s.tag_ids = inv.tag_ids;
+    s.hide_zero_lines = inv.hide_zero_lines;
+    s.layout_id = inv.layout_id;
+    s.txn_number = inv.txn_number;
+    s.print_later = inv.print_later;
+    Ok(s)
+}
+
+/// A credit memo preview's apply figures as the model's (copied strings
+/// and tokens, never recomputed).
+#[must_use]
+pub(crate) fn credit_figures_of(
+    p: &cl_api::CreditMemoPreview,
+) -> cl_model::forms::credit_memo::CreditMemoFigures {
+    use cl_model::forms::credit_memo::{CreditMemoFigures, OpenInvoiceFigure, SuggestedFigure};
+    CreditMemoFigures {
+        total: p.figures.total,
+        open_invoices: p
+            .open_invoices
+            .iter()
+            .map(|o| OpenInvoiceFigure {
+                invoice: o.invoice_id,
+                number: o.number.clone().unwrap_or_default(),
+                date: o.date,
+                due: o.due_date,
+                balance_due: o.balance_due,
+                token: o.balance_due_exact.clone(),
+            })
+            .collect(),
+        suggested: p
+            .suggested_applications
+            .iter()
+            .map(|s| SuggestedFigure {
+                invoice: s.invoice_id,
+                amount: s.amount,
+            })
+            .collect(),
+        remaining_credit: p.remaining_credit,
+        problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+    }
+}
+
 /// Where the engine says a rate came from.
 #[must_use]
 pub(crate) fn source_of(s: Option<PriceSource>) -> RateSource {
@@ -233,6 +320,10 @@ mod tests {
         let client = ContactId::parse("d0000000-0000-4000-8000-c00000000001").expect("id");
         let date = CalendarDate::from_ymd(2026, 11, 4).expect("date");
         let r = InvoiceRequest {
+            kind: cl_model::forms::invoice::SalesDocKind::Invoice,
+            deposit_to: None,
+            payment_method: None,
+            ref_no: None,
             client,
             date,
             due_date: None,

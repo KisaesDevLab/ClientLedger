@@ -52,6 +52,7 @@ fn conflict(code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -563,7 +564,9 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 quantity,
                 unit_price: price,
                 taxable,
-                tax_rate: None,
+                // A line's own rate (the P22 golden cases' 8.25 %; the
+                // desktop never sends one, so the demo's default).
+                tax_rate: l.tax_rate.map(cl_core::Rate::as_decimal),
             },
             quantity: Some(quantity),
             price: Some(price),
@@ -871,6 +874,29 @@ pub fn next_number(state: &DemoState) -> String {
     (1041 + state.invoices.next + 1).to_string()
 }
 
+/// Takes the next invoice number (P22 finance-charge invoices).
+pub fn take_number(state: &mut DemoState) -> String {
+    let n = next_number(state);
+    state.invoices.next += 1;
+    n
+}
+
+/// Puts a message in the Outbox (P22 statements; `item` is the engine's
+/// row JSON).
+pub fn push_outbox(state: &mut DemoState, item: Value) {
+    state.invoices.outbox.push(item);
+}
+
+/// Marks an invoice as a finance-charge invoice: due on receipt and
+/// waiting to be printed when `print_later` (P22, U-141).
+pub fn mark_finance_charge(state: &mut DemoState, id: TransactionId, print_later: bool) {
+    if let Some(s) = state.invoices.stored.get_mut(&id) {
+        s.record["isFinanceCharge"] = json!(true);
+        s.record["paymentTerms"] = json!("due_on_receipt");
+        s.record["printLater"] = json!(print_later);
+    }
+}
+
 /// A typed number another invoice already has (Q-94 warning).
 #[must_use]
 pub fn number_in_use(
@@ -1102,6 +1128,7 @@ pub fn update(
             current_version: None,
             code: cl_api::ErrorCode::parse("STALE"),
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     check_closing(close, &[old_date, new.txn_date], password)?;
@@ -1126,8 +1153,13 @@ pub fn update(
             .to_string()
     });
     let (mut record, claims) = record_json(state, id, &number, new)?;
-    for k in ["sendHistory", "sentAt", "invoiceStatus"] {
-        record[k] = old.record[k].clone();
+    // A finance-charge invoice can be edited like any other (P22 plan
+    // §2.7: the engine allows it and its assessment's sources stay
+    // charged); only a void frees the period.
+    for k in ["sendHistory", "sentAt", "invoiceStatus", "isFinanceCharge"] {
+        if !old.record[k].is_null() {
+            record[k] = old.record[k].clone();
+        }
     }
     // Omitted fields keep their values on an edit (layout, print later).
     if new.layout_id.is_omitted() {

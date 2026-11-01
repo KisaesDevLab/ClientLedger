@@ -48,6 +48,7 @@ pub(crate) fn conflict(reason: ConflictReason, code: &str) -> ApiError {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -317,6 +318,7 @@ pub fn update(
             current_version: None,
             code: cl_api::ErrorCode::parse("STALE"),
             message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         });
     }
     let draft = c.draft.clone().unwrap_or_else(|| now.draft.clone());

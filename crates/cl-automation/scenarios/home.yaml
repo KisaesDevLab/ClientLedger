@@ -124,8 +124,7 @@ steps:
   - assert_state: {key: screen.screen, equals: home}
   - assert_state: {key: screen.last_opened, equals: vendors.write_check}
 
-  # --- Create Invoice opens its form (P20); a later phase's action opens --
-  # --- its placeholder ------------------------------------------------------
+  # --- Create Invoice opens its form (P20); Sales Receipt its own (P22) ----
   - click: {role: button, label: Create Invoice}
   - assert_state: {key: active_tab, equals: Create Invoice}
   - assert_state: {key: screen.screen, equals: create_invoice}
@@ -133,8 +132,8 @@ steps:
   - key: Alt+H
   - click: {role: button, label: Sales Receipt}
   - assert_state: {key: active_tab, equals: Sales Receipt}
-  - assert_exists: {role: label, label_contains: not available yet}
-  - screenshot: sales-receipt-placeholder
+  - assert_state: {key: screen.screen, equals: sales_receipt}
+  - screenshot: sales-receipt
   - command: file.close_window
   - key: Alt+H
 

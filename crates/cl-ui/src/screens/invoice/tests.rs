@@ -315,7 +315,13 @@ fn a_saved_invoice_round_trips_without_changing_the_money() {
     settle(&mut s);
     s.start_save(SaveIntent::Save, None);
     settle(&mut s);
-    let saved = s.editing.clone().expect("saved").record;
+    let saved = s
+        .editing
+        .clone()
+        .expect("saved")
+        .invoice()
+        .cloned()
+        .expect("an invoice");
     assert_eq!(saved.billable_sources().len(), 1);
     let mut keys = cl_grid::RowKeyGen::new();
     let (mut form, lines) = save::form_of(&saved, &mut keys);
@@ -366,7 +372,13 @@ fn a_send_elsewhere_reloads_the_open_invoice() {
     mockup(&mut s);
     s.start_save(SaveIntent::Save, None);
     settle(&mut s);
-    let saved = s.editing.clone().expect("saved").record;
+    let saved = s
+        .editing
+        .clone()
+        .expect("saved")
+        .invoice()
+        .cloned()
+        .expect("an invoice");
     let other = s.link.bus().subscribe();
     {
         let mut d = s.link.demo_state().expect("demo");
@@ -384,7 +396,13 @@ fn a_send_elsewhere_reloads_the_open_invoice() {
     crate::forms::publish_saved(&s.link, &other, &[]);
     s.hear_changes();
     s.poll();
-    let now = s.editing.clone().expect("open").record;
+    let now = s
+        .editing
+        .clone()
+        .expect("open")
+        .invoice()
+        .cloned()
+        .expect("an invoice");
     assert_eq!(now.send_history.len(), 1);
     assert_ne!(now.txn.updated_at, None);
 }
@@ -513,7 +531,13 @@ fn the_template_picked_prints_the_invoice() {
     });
     s.start_save(SaveIntent::Save, None);
     settle(&mut s);
-    let r = s.editing.clone().expect("saved").record;
+    let r = s
+        .editing
+        .clone()
+        .expect("saved")
+        .invoice()
+        .cloned()
+        .expect("an invoice");
     assert_eq!(r.layout_id, Some(simple));
     let (data, _) = s.pdf_parts().expect("parts");
     let p = data.layout.expect("layout");

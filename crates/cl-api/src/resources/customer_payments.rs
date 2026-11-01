@@ -58,7 +58,7 @@ pub fn cents_wire(m: Money) -> Result<String, ApiError> {
     }
 }
 
-fn cents_from_str<E: de::Error>(s: &str) -> Result<Money, E> {
+pub(crate) fn cents_from_str<E: de::Error>(s: &str) -> Result<Money, E> {
     let m = Money::parse_wire(s).map_err(|_| E::custom("money"))?;
     if m.to_ten_thousandths() % 100 != 0 {
         return Err(E::custom("money to the cent"));
@@ -67,13 +67,13 @@ fn cents_from_str<E: de::Error>(s: &str) -> Result<Money, E> {
 }
 
 /// A money string (never a JSON number).
-fn de_cents<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
+pub(crate) fn de_cents<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
     let s = String::deserialize(d)?;
     cents_from_str(&s)
 }
 
 /// An optional money string; `null` or absent is `None`.
-fn de_cents_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Money>, D::Error> {
+pub(crate) fn de_cents_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Money>, D::Error> {
     match Option::<String>::deserialize(d)? {
         Some(s) => cents_from_str(&s).map(Some),
         None => Ok(None),
@@ -82,35 +82,37 @@ fn de_cents_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Money>, D::Err
 
 /// A money string, `null` or absent read as 0.00 (the fields later engine
 /// rows add).
-fn de_cents_zero<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
+pub(crate) fn de_cents_zero<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
     Ok(de_cents_opt(d)?.unwrap_or(Money::ZERO))
 }
 
 /// A stored (4-place) money string, read exactly (legacy invoice balances
 /// and totals may carry more than cents; display only).
-fn de_stored<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
+pub(crate) fn de_stored<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Error> {
     let s = String::deserialize(d)?;
     Money::parse_wire(&s).map_err(|_| de::Error::custom("money"))
 }
 
-fn ser_cents<S: Serializer>(m: &Money, s: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn ser_cents<S: Serializer>(m: &Money, s: S) -> Result<S::Ok, S::Error> {
     let w = cents_wire(*m).map_err(|_| serde::ser::Error::custom("money to the cent"))?;
     s.serialize_str(&w)
 }
 
 #[allow(clippy::ref_option)]
-fn ser_cents_opt<S: Serializer>(m: &Option<Money>, s: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn ser_cents_opt<S: Serializer>(m: &Option<Money>, s: S) -> Result<S::Ok, S::Error> {
     match m {
         Some(m) => ser_cents(m, s),
         None => s.serialize_none(),
     }
 }
 
-fn null_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+pub(crate) fn null_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     Ok(Option::<bool>::deserialize(d)?.unwrap_or(false))
 }
 
-fn null_vec<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
+pub(crate) fn null_vec<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Vec<T>, D::Error> {
     Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
@@ -125,6 +127,7 @@ macro_rules! ids_debug {
         }
     };
 }
+pub(crate) use ids_debug;
 
 // ---- Refusals ----------------------------------------------------------------------
 
@@ -201,6 +204,15 @@ pub enum PaymentRefusal {
     /// The row is a held deposit's draw: void the draw instead
     /// (400 `APPLIED_FROM_DEPOSIT`).
     AppliedFromDeposit,
+    /// The row took a discount or write-off: edit or void the payment
+    /// instead (409 `APPLICATION_HAS_ADJUSTMENTS`, P22 B1a).
+    ApplicationHasAdjustments,
+    /// A credit used before its own date (400 `APPLY_DATE_BEFORE_SOURCE`,
+    /// P22 §2.0).
+    ApplyDateBeforeSource,
+    /// A credit's date moved after it was used (400
+    /// `SOURCE_DATE_AFTER_USE`, P22 §2.0).
+    SourceDateAfterUse,
 }
 
 const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
@@ -265,6 +277,15 @@ const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
     ),
     ("NO_MONEY_RECEIVED", PaymentRefusal::NoMoneyReceived),
     ("APPLIED_FROM_DEPOSIT", PaymentRefusal::AppliedFromDeposit),
+    (
+        "APPLICATION_HAS_ADJUSTMENTS",
+        PaymentRefusal::ApplicationHasAdjustments,
+    ),
+    (
+        "APPLY_DATE_BEFORE_SOURCE",
+        PaymentRefusal::ApplyDateBeforeSource,
+    ),
+    ("SOURCE_DATE_AFTER_USE", PaymentRefusal::SourceDateAfterUse),
 ];
 
 /// Every engine code [`payment_refusal`] knows (tests and the demo).
@@ -273,7 +294,7 @@ pub fn payment_refusal_codes() -> Vec<&'static str> {
     REFUSAL_CODES.iter().map(|(c, _)| *c).collect()
 }
 
-fn error_code(e: &ApiError) -> Option<&str> {
+pub(crate) fn error_code(e: &ApiError) -> Option<&str> {
     match e {
         ApiError::Conflict { code: Some(c), .. }
         | ApiError::NotFound { code: Some(c) }
@@ -1236,7 +1257,7 @@ pub struct PaymentWriteOptions {
 
 // ---- Checks ------------------------------------------------------------------------
 
-fn require(s: &Session, cap: &str) -> Result<(), ApiError> {
+pub(crate) fn require(s: &Session, cap: &str) -> Result<(), ApiError> {
     if s.client().capabilities().has(cap) {
         Ok(())
     } else {
@@ -1244,7 +1265,7 @@ fn require(s: &Session, cap: &str) -> Result<(), ApiError> {
     }
 }
 
-fn too_long(s: Option<&str>, max: usize) -> bool {
+pub(crate) fn too_long(s: Option<&str>, max: usize) -> bool {
     s.is_some_and(|t| t.chars().count() > max)
 }
 
@@ -1352,14 +1373,14 @@ pub fn check_payment(p: &NewCustomerPayment, caps: &Capabilities) -> Result<(), 
     Ok(())
 }
 
-fn with_version(mut body: Value, t: Option<Timestamp>) -> Value {
+pub(crate) fn with_version(mut body: Value, t: Option<Timestamp>) -> Value {
     if let (Some(t), Value::Object(map)) = (t, &mut body) {
         map.insert("expectedUpdatedAt".into(), Value::String(t.to_wire()));
     }
     body
 }
 
-fn decode_key<T: for<'de> Deserialize<'de>>(
+pub(crate) fn decode_key<T: for<'de> Deserialize<'de>>(
     body: &[u8],
     key: &str,
     what: &'static str,

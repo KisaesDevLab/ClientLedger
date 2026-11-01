@@ -372,6 +372,7 @@ fn pay_refusals_are_classified() {
         current_version: None,
         code: ErrorCode::parse(code),
         message: UserText::default(),
+        details: crate::ConflictDetails::default(),
     };
     assert_eq!(
         pay_problem(&validation(Some(DISCOUNT_ACCOUNT_REQUIRED))),

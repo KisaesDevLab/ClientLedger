@@ -114,9 +114,17 @@ mod print;
 // its screens' module beside it.
 mod invoice;
 mod invoice_model;
+// P22 D3: the credit memo, sales receipt, refund, statement and finance
+// charge models; the screens add their own modules (D4-D7).
+mod receivables_model;
+// P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
+mod credit_memo;
+// P22 D6: Statements.
+mod finance_charges;
+mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 37] = [
+const TABLES: [&[(&str, &str)]; 41] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -154,6 +162,10 @@ const TABLES: [&[(&str, &str)]; 37] = [
     print::ENGLISH,
     invoice_model::ENGLISH,
     invoice::ENGLISH,
+    receivables_model::ENGLISH,
+    credit_memo::ENGLISH,
+    statements::ENGLISH,
+    finance_charges::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -749,7 +761,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.company.account_numbers_hint", "Shows each account's number before its name in the Chart of Accounts and in account lists, and sorts accounts by number."),
     ("prefs.company.checks_intro", "Check numbering, printing and form defaults."),
     ("prefs.company.checks_later", "Check options and default accounts are not available yet; they come with Write Check and printing."),
-    ("prefs.company.finance_later", "Finance charge settings are not available yet; they come with Statements."),
+    ("prefs.company.finance_later", "Finance charges are set under Sales tax › Finance charges."),
     ("prefs.company.ten99_later", "1099 box mapping is not available yet; it comes with the Vendors list and the 1099 Summary report."),
     ("prefs.company.tax_intro", "Turn sales tax on when you charge it on invoices."),
     ("prefs.company.tax_on", "This company charges sales tax"),
@@ -904,6 +916,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.email.template.fields", "Fields you can use: {fields}. Type {{ for a brace."),
     ("prefs.email.template.unknown", "Not known, sent as typed: {fields}"),
     ("prefs.email.template.reset", "Use the standard text"),
+    ("prefs.email.template.invoice", "Invoice email"),
+    ("prefs.email.template.statement", "Statement email"),
+    ("prefs.email.template.statement_subject", "Statement subject"),
+    ("prefs.email.template.statement_body", "Statement message"),
+    ("prefs.email.template.statement_reset", "Use the standard statement text"),
     ("prefs.email.bcc_self", "Send me a copy (Bcc the From address)"),
     ("prefs.email.bcc_self.tip", "ClientLedger keeps the sent history either way."),
     ("prefs.email.err_host", "Enter the mail server's address."),

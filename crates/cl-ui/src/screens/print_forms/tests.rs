@@ -1079,6 +1079,7 @@ fn a_busy_first_send_reads_back_like_every_keyed_save() {
         current_version: None,
         code: cl_api::ErrorCode::parse("IDEMPOTENCY_IN_PROGRESS"),
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     };
     assert!(keeps_key(&busy));
     assert!(!keeps_key(&ApiError::AccountPasswordRejected));

@@ -695,6 +695,7 @@ mod tests {
             current_version: None,
             code: crate::errors::ErrorCode::parse(code),
             message: crate::errors::UserText::default(),
+            details: crate::ConflictDetails::default(),
         };
         assert!(is_already_deposited(&conflict(ALREADY_DEPOSITED)));
         assert!(!is_already_deposited(&conflict("TXN_DEPOSITED")));

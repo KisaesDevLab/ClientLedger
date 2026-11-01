@@ -280,6 +280,15 @@ pub(crate) struct Executor {
     /// The engine replays keys on customer payments
     /// (`idempotency-receive-payment-v1`, U-132).
     idempotency_receive_payment_v1: AtomicBool,
+    /// The engine replays keys on credit memos and sales receipts
+    /// (`idempotency-credit-memo-v1`, U-137).
+    idempotency_credit_memo_v1: AtomicBool,
+    /// The engine replays keys on statement runs and email
+    /// (`idempotency-customer-statements-v1`, U-140).
+    idempotency_customer_statements_v1: AtomicBool,
+    /// The engine replays keys on finance-charge assess
+    /// (`idempotency-finance-charges-v1`, U-141).
+    idempotency_finance_charges_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -334,6 +343,9 @@ impl Executor {
             idempotency_invoice_v1: AtomicBool::new(false),
             invoice_email_v1: AtomicBool::new(false),
             idempotency_receive_payment_v1: AtomicBool::new(false),
+            idempotency_credit_memo_v1: AtomicBool::new(false),
+            idempotency_customer_statements_v1: AtomicBool::new(false),
+            idempotency_finance_charges_v1: AtomicBool::new(false),
         }
     }
 
@@ -388,6 +400,18 @@ impl Executor {
         self.invoice_email_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises the P22 key sets
+    /// (`idempotency-credit-memo-v1`, `idempotency-customer-statements-v1`,
+    /// `idempotency-finance-charges-v1`).
+    pub(crate) fn set_p22_key_sets(&self, credit_memo: bool, statements: bool, finance: bool) {
+        self.idempotency_credit_memo_v1
+            .store(credit_memo, Ordering::Relaxed);
+        self.idempotency_customer_statements_v1
+            .store(statements, Ordering::Relaxed);
+        self.idempotency_finance_charges_v1
+            .store(finance, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -408,6 +432,11 @@ impl Executor {
             KeySet::InvoiceV1 => self.idempotency_invoice_v1.load(Ordering::Relaxed),
             KeySet::InvoiceEmailV1 => self.invoice_email_v1.load(Ordering::Relaxed),
             KeySet::ReceivePaymentV1 => self.idempotency_receive_payment_v1.load(Ordering::Relaxed),
+            KeySet::CreditMemoV1 => self.idempotency_credit_memo_v1.load(Ordering::Relaxed),
+            KeySet::CustomerStatementsV1 => self
+                .idempotency_customer_statements_v1
+                .load(Ordering::Relaxed),
+            KeySet::FinanceChargesV1 => self.idempotency_finance_charges_v1.load(Ordering::Relaxed),
         }
     }
 

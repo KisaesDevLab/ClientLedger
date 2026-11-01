@@ -1510,6 +1510,7 @@ fn rate_limits_and_conflicts_are_plain_messages() {
             current_version: None,
             code: None,
             message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
         },
     );
     assert_eq!(s.state()["row_action"]["stale"], true);
@@ -1763,6 +1764,7 @@ fn busy_keeps_the_key_and_other_conflicts_drop_it() {
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     };
     for code in ["BATCH_BUSY", "TENANT_BUSY", "IDEMPOTENCY_IN_PROGRESS"] {
         assert!(

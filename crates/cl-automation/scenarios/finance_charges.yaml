@@ -1,0 +1,117 @@
+# Assess Finance Charges (P22 D7; Q-174, Q-P22a, Q-P22g, Q-P22p, Q-P22s)
+# against `clientledger --demo`: the rate is blank, so the setup comes
+# first; 18% a year, 10 grace days, a 2.00 minimum and an income account
+# are saved to the company settings. On 10/31/2026 the engine's preview
+# (golden case 6) charges Prairie Fork Kennels 15.68 and Low Water Bait &
+# Tackle 2.00 (the minimum), and Bluestem Veterinary Clinic 2.00 (its
+# invoice A, 16 days overdue); Cedar Gap Outfitters has 400.00 in open
+# credits and starts unticked with the hint. Assess posts three
+# finance-charge invoices; previewing the same date again shows both as
+# already charged for October. Preferences shows the saved settings.
+# Statements as of 11/30 suggests assessing November first. Light, then
+# dark screenshots in one run (a second themed pass would find October
+# already charged). Synthetic.
+name: finance_charges
+description: Setup with a blank rate; golden 6 preview (open credits unticked); assess; already charged; Preferences; Statements note.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.finance_charges
+  - assert_exists: {role: tab, label_contains: "Assess Finance Charges"}
+  - assert_state: {key: screen.screen, equals: finance_charges}
+  # --- Blank rate: the setup first (Q-P22a) ------------------------------------
+  - assert_state: {key: screen.setup, equals: true}
+  - assert_state: {key: screen.not_set_up, equals: true}
+  - assert_exists: {role: label, label: Set up finance charges}
+  - assert_disabled: {role: button, label: Assess charges}
+  - screenshot: setup
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: setup-dark
+  - command: window.theme
+  - wait: {ms: 300}
+  - click: {role: text_input, label: "Annual interest rate (%)"}
+  - type: {text: "18"}
+  - click: {role: text_input, label: Minimum charge}
+  - type: {text: "2.00"}
+  - click: {role: text_input, label: Grace days}
+  - key: Ctrl+A
+  - type: {text: "10"}
+  - click: {role: combo_box, label: Income account}
+  - click: {role: button, label_contains: "4000"}
+  - click: {role: button, label: Save and preview}
+  - assert_state: {key: screen.setup, equals: false}
+  - assert_state: {key: screen.not_set_up, equals: false}
+  # --- Golden 6 on 10/31/2026 --------------------------------------------------
+  - click: {role: text_input, label: Assessment date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - assert_state: {key: screen.loading, equals: false}
+  - assert_state: {key: screen.period, equals: "2026-10"}
+  - assert_exists: {role: label, label: Charges for October 2026}
+  - assert_exists: {role: check_box, label: Charge Prairie Fork Kennels}
+  - assert_exists: {role: check_box, label: "Charge Low Water Bait & Tackle"}
+  - assert_exists: {role: check_box, label: Charge Cedar Gap Outfitters}
+  - assert_exists: {role: label, label: "15.68"}
+  - assert_exists: {role: label, label: "9.17"}
+  - assert_exists: {role: label, label: "Has 400.00 in open credits. Apply them first, or tick to charge anyway."}
+  - assert_state: {key: screen.credit_rows_unticked, equals: 1}
+  - assert_state: {key: screen.count, equals: 3}
+  - assert_state: {key: screen.total, equals: "19.68"}
+  - click: {role: button, label: Show the invoices for Prairie Fork Kennels}
+  - assert_exists: {role: label, label_contains: "31 days from 09/30/2026"}
+  - screenshot: preview
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: preview-dark
+  - command: window.theme
+  - wait: {ms: 300}
+  # --- Assess (one invoice per ticked client) ----------------------------------
+  - assert_enabled: {role: button, label: Assess charges}
+  - click: {role: button, label: Assess charges}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.assessed, equals: 3}
+  - assert_state: {key: screen.notice, equals: finance_charges.done}
+  - assert_count: {target: {role: button, label_contains: Open invoice}, count: 3}
+  - assert_count: {target: {role: label, label_contains: "Already charged for October 2026"}, count: 3}
+  - screenshot: assessed
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: assessed-dark
+  - command: window.theme
+  - wait: {ms: 300}
+  - command: file.close_window
+  # --- Reopened on the same date: already charged (Q-P22p) ---------------------
+  - command: clients.finance_charges
+  - click: {role: text_input, label: Assessment date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - assert_state: {key: screen.loading, equals: false}
+  - assert_state: {key: screen.setup, equals: false}
+  - assert_count: {target: {role: label, label_contains: "Already charged for October 2026"}, count: 3}
+  - command: file.close_window
+  # --- Preferences shows the saved settings ------------------------------------
+  - command: edit.preferences
+  - click: {role: button, label: Sales tax}
+  - assert_exists: {role: label, label: Finance charges}
+  - assert_value: {target: {role: text_input, label: "Annual interest rate (%)"}, equals: "18"}
+  - assert_value: {target: {role: text_input, label: Grace days}, equals: "10"}
+  - screenshot: preferences
+  - click: {role: button, label: Cancel}
+  # --- Statements as of 11/30: assess November first? --------------------------
+  - command: clients.statements
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "11/30/2026"}
+  - key: Tab
+  - assert_state: {key: screen.finance_due, equals: true}
+  - assert_exists: {role: label, label_contains: "Assess finance charges first?"}
+  - screenshot: statements-note
+  - click: {role: link, label: Assess Finance Charges}
+  - assert_state: {key: screen.screen, equals: finance_charges}
+  - assert_state: {key: screen.date, equals: "2026-11-30"}
+  - command: file.close_window
+  - command: file.close_window

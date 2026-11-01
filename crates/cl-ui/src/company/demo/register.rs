@@ -424,6 +424,7 @@ fn refused(reason: cl_api::ConflictReason) -> cl_api::ApiError {
         current_version: None,
         code: None,
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 
@@ -435,6 +436,7 @@ pub(super) fn conflict_code(reason: cl_api::ConflictReason, code: &str) -> cl_ap
         current_version: None,
         code: cl_api::ErrorCode::parse(code),
         message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::default(),
     }
 }
 

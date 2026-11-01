@@ -653,3 +653,26 @@ fn toggle_details_hides_the_details_and_a_new_window_remembers() {
     r.frames(2);
     assert_eq!(r.s.state()["details_collapsed"], false);
 }
+
+#[test]
+fn only_a_live_payment_row_offers_record_bounced_check() {
+    use super::model::can_bounce;
+    use cl_api::{TxnStatus as S, TxnType as T};
+    let row = |t: cl_api::TxnType, s: cl_api::TxnStatus| cl_api::TransactionSummary {
+        id: cl_core::ids::TransactionId::from_uuid(uuid::Uuid::from_u128(1)),
+        txn_type: t,
+        txn_number: None,
+        txn_date: CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+        status: s,
+        contact_id: None,
+        contact_name: None,
+        memo: None,
+        total: None,
+        display_total: None,
+        created_at: None,
+        check_number: None,
+    };
+    assert!(can_bounce(&row(T::CustomerPayment, S::Posted)));
+    assert!(!can_bounce(&row(T::CustomerPayment, S::Void)));
+    assert!(!can_bounce(&row(T::Invoice, S::Posted)));
+}

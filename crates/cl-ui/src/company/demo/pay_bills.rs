@@ -497,6 +497,7 @@ pub fn pay(
                     current_version: None,
                     code: cl_api::ErrorCode::parse(cl_api::CHECK_NUMBER_IN_USE),
                     message: cl_api::UserText::default(),
+                    details: cl_api::ConflictDetails::default(),
                 });
             }
         }
