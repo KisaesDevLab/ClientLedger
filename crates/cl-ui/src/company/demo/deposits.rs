@@ -181,7 +181,10 @@ pub fn pending(state: &mut DemoState) -> Vec<DemoPending> {
         .iter()
         .filter_map(|t| {
             let id = DemoLedger::id_of(t);
-            if ledger.is_void(id) || ledger.deposited_in(id).is_some() {
+            if ledger.is_void(id)
+                || ledger.deposited_in(id).is_some()
+                || super::receivables::is_bounced_source(state, id)
+            {
                 return None;
             }
             let amount = held(t, &clearing)?;
@@ -327,6 +330,13 @@ pub fn create(
                         "ALREADY_DEPOSITED",
                     ));
                 }
+                // P21: a bounced check can't be deposited again.
+                if super::receivables::is_bounced_source(state, p.source) {
+                    return Err(conflict_code(
+                        ConflictReason::Unspecified,
+                        "PAYMENT_BOUNCED",
+                    ));
+                }
                 let holds = held(t, &clearing_number).ok_or_else(invalid)?;
                 if !holds.is_positive() || holds != p.amount {
                     return Err(invalid());
@@ -433,6 +443,19 @@ pub fn void(
         .date_of(id)
         .ok_or(ApiError::NotFound { code: None })?;
     check_closing(closing(state), &[date], password)?;
+    // P21: a deposit holding a bounced check stays as it is until the
+    // bounce is voided (the bank can't drop twice).
+    if state
+        .ledger
+        .deposit_links(id)
+        .iter()
+        .any(|(src, _)| super::receivables::is_bounced_source(state, *src))
+    {
+        return Err(conflict_code(
+            ConflictReason::Unspecified,
+            "PAYMENT_BOUNCED",
+        ));
+    }
     state.ledger.void(id)
 }
 

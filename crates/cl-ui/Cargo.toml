@@ -71,6 +71,9 @@ cl-api = { path = "../cl-api", features = ["test-support"] }
 # A02: the synthetic CCITT G4 fixture's encoder (the same crate `tiff`
 # decodes with). MIT.
 fax = "0.2.7"
+# P21: properties of the demo receivables engine (already in the tree via
+# cl-core). MIT OR Apache-2.0.
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6.5"

@@ -26,6 +26,8 @@ pub mod layouts;
 pub mod pay_bills;
 pub mod price_levels;
 pub mod printing;
+// P21: Receive Payment (held to fixtures/payments/golden.json).
+pub mod receivables;
 pub mod register;
 pub mod template_store;
 pub mod templates;
@@ -134,6 +136,8 @@ pub struct DemoState {
     pub price_levels: price_levels::DemoPriceLevels,
     /// Invoice print layouts (U-130).
     pub layouts: layouts::DemoLayouts,
+    /// Customer payments, deposits on hand and bounces (P21).
+    pub receivables: receivables::DemoReceivables,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -252,6 +256,7 @@ impl DemoState {
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),
+            receivables: receivables::DemoReceivables::default(),
         }
     }
 
