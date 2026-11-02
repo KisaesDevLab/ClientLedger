@@ -149,6 +149,9 @@ pub(crate) mod field {
     pub const TERMS_DAYS: u64 = 9;
     /// A sales receipt's check or reference number (P22).
     pub const REF: u64 = 10;
+    /// P23: the document's sales tax and "use current rates".
+    pub const SALES_TAX: u64 = 11;
+    pub const USE_CURRENT_RATES: u64 = 12;
 }
 
 /// The fixed payment terms (U-125), in menu order.
@@ -326,6 +329,11 @@ pub struct InvoiceScreen {
     pub(crate) books: Books,
     pub(crate) items: Vec<Item>,
     pub(crate) items_job: Option<Job<Vec<Item>>>,
+    /// P23: the company's sales taxes and groups (the totals picker) and
+    /// tax codes (the Tax code column).
+    pub(crate) tax_items: Vec<cl_api::SalesTaxItem>,
+    pub(crate) tax_codes: Vec<cl_api::TaxCode>,
+    pub(crate) tax_job: Option<Job<(Vec<cl_api::SalesTaxItem>, Vec<cl_api::TaxCode>)>>,
     /// Customers only (the Client field).
     pub(crate) clients: Arc<RegisterLists>,
     /// The header (its `lines` stay empty: the grid holds them).
@@ -438,6 +446,8 @@ impl InvoiceScreen {
         kind: SalesDocKind,
     ) -> InvoiceScreen {
         let group = link.group().and_then(Result::ok);
+        // P23: the Tax column picks a tax code where the engine has them.
+        let coded = link.is_demo() || link.capabilities().has(Capabilities::SALES_TAX_SETUP);
         if kind != SalesDocKind::Invoice
             && let Some(mut d) = link.demo_state()
         {
@@ -459,9 +469,12 @@ impl InvoiceScreen {
             books: Books::default(),
             items: Vec::new(),
             items_job: None,
+            tax_items: Vec::new(),
+            tax_codes: Vec::new(),
+            tax_job: None,
             clients: Arc::new(RegisterLists::default()),
             header: FormState::new(blank(kind, today)),
-            grid: InvoiceGrid::new(Arc::new(ItemLists::default())),
+            grid: InvoiceGrid::new_for(Arc::new(ItemLists::default()), coded),
             inputs: Inputs {
                 date: DateInput::new(today),
                 due: empty_date(),
@@ -540,6 +553,7 @@ impl InvoiceScreen {
                 pricing: self.has(Capabilities::INVOICE_PRICING),
                 billable: self.has(Capabilities::BILLABLE_COSTS),
                 closing: self.has(Capabilities::INVOICE_EDIT),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
             // P22 (U-138, U-143): the documents' own capabilities.
             SalesDocKind::CreditMemo => InvoiceCaps {
@@ -547,12 +561,14 @@ impl InvoiceScreen {
                 pricing: self.has(Capabilities::CREDIT_MEMO_EDIT),
                 billable: false,
                 closing: self.has(Capabilities::CREDIT_MEMO_EDIT),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
             SalesDocKind::SalesReceipt => InvoiceCaps {
                 fields: self.has(Capabilities::SALES_RECEIPT_LINES),
                 pricing: self.has(Capabilities::SALES_RECEIPT_LINES),
                 billable: false,
                 closing: self.has(Capabilities::SALES_RECEIPT_LINES),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
         }
     }
@@ -680,6 +696,22 @@ impl InvoiceScreen {
             |d| Ok(d.items_mut().clone()),
             |s| async move { s.items().list_all(&ItemFilter::default()).await },
         ));
+        if self.has(Capabilities::SALES_TAX_SETUP) {
+            self.tax_job = Some(engine::read(
+                &self.link,
+                self.group.as_ref(),
+                |d| {
+                    Ok((
+                        crate::company::demo::sales_tax::items(d, false),
+                        crate::company::demo::sales_tax::codes(d, false),
+                    ))
+                },
+                |s| async move {
+                    let st = s.sales_tax();
+                    Ok((st.items(false).await?, st.codes(false).await?))
+                },
+            ));
+        }
     }
 
     /// The pickers from the lists read.
@@ -713,7 +745,9 @@ impl InvoiceScreen {
             .map(|i| i.id)
             .collect();
         self.grid.set_lists(
-            Arc::new(ItemLists::new(Arc::clone(&self.books.lists), &active)),
+            Arc::new(
+                ItemLists::new(Arc::clone(&self.books.lists), &active).with_codes(&self.tax_codes),
+            ),
             taxable,
             subtotals,
         );
@@ -738,6 +772,14 @@ impl InvoiceScreen {
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
+            lists = true;
+        }
+        if let Some(r) = engine::poll(&mut self.tax_job) {
+            // Without the lists the document still takes the defaults.
+            if let Ok((items, codes)) = r {
+                self.tax_items = items;
+                self.tax_codes = codes;
+            }
             lists = true;
         }
         if lists {
@@ -869,10 +911,11 @@ impl InvoiceScreen {
     /// The preview call of the document's kind (the demo answers at once).
     fn preview_job_for(&self, req: &InvoiceRequest) -> Result<Job<Answer>, ApiError> {
         let editing = self.editing.as_ref().map(|e| e.id);
-        let plain = |figures| Answer {
+        // An invoice's preview carries its own sales tax notices.
+        let plain = |figures: InvoicePreview| Answer {
+            problems: figures.notice_codes(),
             figures,
             credit: None,
-            problems: Vec::new(),
         };
         Ok(match self.kind {
             SalesDocKind::Invoice => {
@@ -882,16 +925,7 @@ impl InvoiceScreen {
                     &self.link,
                     self.group.as_ref(),
                     |d| crate::company::demo::invoices::preview(d, &new, editing).map(plain),
-                    move |s| async move {
-                        s.invoices()
-                            .preview(&live, editing)
-                            .await
-                            .map(|figures| Answer {
-                                figures,
-                                credit: None,
-                                problems: Vec::new(),
-                            })
-                    },
+                    move |s| async move { s.invoices().preview(&live, editing).await.map(plain) },
                 )
             }
             SalesDocKind::CreditMemo => {
@@ -899,7 +933,7 @@ impl InvoiceScreen {
                 let live = new.clone();
                 let answer = |p: cl_api::CreditMemoPreview| Answer {
                     credit: Some(engine::credit_figures_of(&p)),
-                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    problems: merged(&p.problems, &p.figures),
                     figures: p.figures,
                 };
                 engine::read(
@@ -916,7 +950,7 @@ impl InvoiceScreen {
                 let new = engine::new_sales_receipt(req)?;
                 let live = new.clone();
                 let answer = |p: cl_api::SalesReceiptPreview| Answer {
-                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    problems: merged(&p.problems, &p.figures),
                     credit: None,
                     figures: p.figures,
                 };
@@ -1161,6 +1195,31 @@ impl InvoiceScreen {
         v["deposit_note"] = json!(self.deposit_card.note());
         v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
+        // P23: the picked sales tax (null: the default), the one the
+        // engine used and its notices.
+        let used = match self.tracker.totals() {
+            TotalsView::Ready(t) => t.sales_tax.as_ref().map(|s| {
+                json!({
+                    "name": s.name, "rate": s.rate.format_percent(),
+                    "members": s.members.iter().map(|m| json!({
+                        "name": m.name, "tax": m.tax.map(cl_core::Money::to_wire),
+                    })).collect::<Vec<_>>(),
+                })
+            }),
+            _ => None,
+        };
+        v["sales_tax"] = json!({
+            "picked": self.header.current().sales_tax.and_then(|id| {
+                self.tax_items.iter().find(|i| i.id == id).map(|i| i.name.clone())
+            }),
+            "used": used,
+            "use_current_rates": self.header.current().use_current_rates,
+            "notices": self.doc_problems.iter()
+                .filter_map(|c| cl_model::forms::invoice::TaxNotice::from_code(c))
+                .map(|n| n.key().0).collect::<Vec<_>>(),
+            "items": self.tax_items.len(),
+            "codes": self.tax_codes.len(),
+        });
         if self.kind != SalesDocKind::Invoice {
             v["kind"] = json!(self.screen_name());
             v["preview_problems"] = json!(self.doc_problems);
@@ -1247,6 +1306,18 @@ fn blank(kind: SalesDocKind, date: CalendarDate) -> InvoiceForm {
 }
 
 /// An empty date field (Due).
+/// A receipt's or memo's own `problems` and the sales tax notices of its
+/// figures (`RATE_CHANGED`; the `EXEMPTION_*` warnings), a code once.
+fn merged(problems: &[cl_api::PreviewProblem], figures: &InvoicePreview) -> Vec<String> {
+    let mut out: Vec<String> = problems.iter().map(|x| x.code.clone()).collect();
+    for c in figures.notice_codes() {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn empty_date() -> DateInput {
     DateInput {
         text: String::new(),

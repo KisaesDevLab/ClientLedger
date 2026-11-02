@@ -161,6 +161,14 @@ typed_id!(
     /// UUID stored in the engine's `companies.intake_settings`, not an
     /// engine entity id.
     IntakeFolderId,
+    /// A sales tax agency: the vendor sales tax is paid to (P23, U-147).
+    SalesTaxAgencyId,
+    /// A sales tax item or group (P23, U-147).
+    SalesTaxItemId,
+    /// A tax code (`Tax`, `Non`, `Res`; P23, U-25).
+    TaxCodeId,
+    /// A client's exemption certificate (P23, U-151).
+    TaxExemptionId,
 );
 
 #[cfg(test)]

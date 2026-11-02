@@ -212,12 +212,24 @@ pub(crate) fn footer_view(home: &HomeScreen, footer: LaneFooter, style: MoneySty
                 tip,
             }
         }
-        LaneFooter::SalesTaxOwed => FooterView {
-            label: t("home.footer.sales_tax_owed"),
-            value: None,
-            money: true,
-            tip: Some(t("home.footer.sales_tax.tip")),
-        },
+        LaneFooter::SalesTaxOwed => {
+            // The engine's owed total (P23, Q-P23l), every agency, today.
+            let slot = &home.data.sales_tax;
+            let value = slot.value.map(|m| m.format(style));
+            let tip = if value.is_some() {
+                None
+            } else if slot.error.is_some() {
+                Some(t("home.footer.failed.tip"))
+            } else {
+                Some(t("home.footer.sales_tax.tip"))
+            };
+            FooterView {
+                label: t("home.footer.sales_tax_owed"),
+                value,
+                money: true,
+                tip,
+            }
+        }
     }
 }
 

@@ -151,6 +151,7 @@ pub fn price_level_and_discount(h: &Harness) {
                 is_taxable: true,
                 item_type: kind,
                 discount_percent: pct.map(|p| SignedPercent::parse(p).expect("pct")),
+                tax_code_id: None,
             },
             key(),
         ))

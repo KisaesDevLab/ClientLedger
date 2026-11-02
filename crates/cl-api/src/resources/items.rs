@@ -51,6 +51,10 @@ pub struct ItemFields {
     /// `unit_price` takes that amount off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discount_percent: Option<SignedPercent>,
+    /// The item's tax code (`taxCodeId`, `sales-tax-setup-v1`, U-25);
+    /// sent only when set (P23 WP-1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tax_code_id: Option<crate::resources::sales_tax::TaxCodeId>,
 }
 
 /// Sales item kinds (U-39a, `item-kinds-sales-v1`).

@@ -151,6 +151,12 @@ impl Client {
             info.capabilities
                 .has(Capabilities::IDEMPOTENCY_FINANCE_CHARGES),
         );
+        self.exec().set_p23_key_sets(
+            info.capabilities.has(Capabilities::IDEMPOTENCY_SALES_TAX),
+            info.capabilities
+                .has(Capabilities::IDEMPOTENCY_SALES_TAX_PAY),
+            info.capabilities.has(Capabilities::IDEMPOTENCY_RECOVERY),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

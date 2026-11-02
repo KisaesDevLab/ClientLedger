@@ -66,7 +66,8 @@ steps:
   - assert_exists: {role: label, label: "$7,471.90"}
   - assert_exists: {role: label, label: "Operating Checking · 09/30/2026"}
   - assert_exists: {role: label, label: Sales tax owed}
-  - assert_state: {key: screen.footers.sales_tax_owed, equals: false}
+  # P23: the engine's owed figure (GET /sales-tax/owed) fills the footer.
+  - assert_state: {key: screen.footers.sales_tax_owed, equals: true}
 
   # --- Account balances -------------------------------------------------------
   - assert_exists: {role: label, label: Account balances}

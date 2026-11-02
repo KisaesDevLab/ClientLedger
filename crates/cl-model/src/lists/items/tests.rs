@@ -23,6 +23,7 @@ fn entry(n: u32, name: &str, active: bool) -> ItemEntry {
         active,
         kind: ItemKind::Service,
         discount_percent: None,
+        tax_code: None,
     }
 }
 
@@ -177,6 +178,7 @@ fn checked_item_is_trimmed() {
             taxable: false,
             kind: ItemKind::Service,
             discount_percent: None,
+            tax_code: None,
         }
     );
 }
@@ -240,4 +242,19 @@ fn twenty_thousand_items_filter_quickly() {
     });
     assert!(!rows.is_empty() && !all.is_empty());
     assert!(took.as_millis() < 100, "filtering took {took:?}");
+}
+
+/// P23: the item's tax code goes through the check unchanged and back
+/// into the form from the list.
+#[test]
+fn the_tax_code_rides_through_the_check() {
+    let code = cl_core::ids::TaxCodeId::parse("d7200000-0000-4000-8000-000000000003").expect("id");
+    let mut d = ItemDraft::new(Some(aid(1)));
+    d.name = "Mulch".into();
+    d.tax_code = Some(code);
+    let c = check(&d, &sample(), None, false, income_ok).expect("ok");
+    assert_eq!(c.tax_code, Some(code));
+    let mut e = entry(9, "Mulch", true);
+    e.tax_code = Some(code);
+    assert_eq!(ItemDraft::from_entry(&e).tax_code, Some(code));
 }

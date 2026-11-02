@@ -1,0 +1,42 @@
+# Tax Exemption Certificates (P23 WP-3, Clients > Tax Exemption
+# Certificates) against `clientledger --demo`: a certificate needs its
+# number and a two-letter state, saves, shows in the expiring report, and
+# is made inactive (never deleted). Synthetic.
+name: tax_exemptions
+description: "Exemption certificates: add, expiring report, make inactive."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.tax_exemptions
+  - assert_state: {key: screen.screen, equals: tax_exemptions}
+  - assert_state: {key: screen.available, equals: true}
+  - assert_state: {key: screen.certificates, equals: 0}
+  - screenshot: empty
+  - click: {role: button, label: New certificate}
+  - assert_state: {key: screen.editing.new, equals: true}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: "tax_exemptions.problem.no_client"}
+  - click: {role: combo_box, label: Customer}
+  - click: {role: button, label: "Riverbend HOA"}
+  - click: {role: text_input, label: Certificate number}
+  - type: {text: "RS-1001"}
+  - click: {role: text_input, label: State}
+  - type: {text: "Missouri"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: "tax_exemptions.problem.bad_state"}
+  - click: {role: text_input, label: State}
+  - key: Ctrl+A
+  - type: {text: "MO"}
+  - click: {role: text_input, label: Expires}
+  - type: {text: "12/15/2026"}
+  - key: Tab
+  - screenshot: editor
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.certificates, equals: 1}
+  - assert_state: {key: screen.expiring, equals: 1}
+  - screenshot: listed
+  - assert_no_clipping: {}
+  - click: {role: link, label: "RS-1001"}
+  - click: {role: button, label: Make inactive}
+  - assert_state: {key: screen.certificates, equals: 0}
+  - command: file.close_window

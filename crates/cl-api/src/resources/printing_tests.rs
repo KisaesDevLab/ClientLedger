@@ -728,3 +728,15 @@ fn bill_payment_applications_read_the_stub_numbers() {
     assert_eq!(c.txn_number, None);
     assert_eq!(c.total, Some(m("20.00")));
 }
+
+#[test]
+fn a_sales_tax_payment_waits_as_its_own_kind() {
+    let body = format!(
+        r#"{{"data":[{{"id":"{C1}","txnDate":"2026-12-10","amount":"210.42","memo":null,
+          "payeeNameOnCheck":null,"printedMemo":null,"contactName":"Sample State Revenue Dept.",
+          "createdAt":"x","source":null,"txnType":"sales_tax_payment","bankAccountId":"{BANK}"}}]}}"#
+    );
+    let q = print_queue_from_json(body.as_bytes()).expect("queue");
+    assert_eq!(q[0].kind, QueuedCheckKind::SalesTaxPayment);
+    assert_eq!(q[0].amount, m("210.42"));
+}

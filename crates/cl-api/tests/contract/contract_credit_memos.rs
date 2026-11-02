@@ -137,6 +137,7 @@ fn item(h: &Harness, s: &Session, income: AccountId, name: &str, price: &str, ta
             is_taxable: tax,
             item_type: cl_api::ItemType::Service,
             discount_percent: None,
+            tax_code_id: None,
         },
         key(),
     ))

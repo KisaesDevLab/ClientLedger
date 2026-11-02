@@ -333,6 +333,9 @@ pub fn update(
         state.checks.writes += 1;
         return Err(invalid());
     }
+    // A check matched to a sales tax payment can't change until it is
+    // unmatched (409 SALES_TAX_LINKED, P23 review).
+    super::sales_tax_owed::refuse_if_linked(state, id)?;
     // A printed check whose printed face changes needs the owner's choice
     // (409 CHECK_PRINTED otherwise; nothing changes).
     let was_printed = state

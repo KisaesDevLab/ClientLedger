@@ -78,6 +78,7 @@ pub use resources::company::{
     AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
     ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
     CompanySettingsUpdate, EntityType, EquityRole, EquityRoles, ReceivablesSettingsUpdate,
+    SalesTaxSettingsUpdate,
 };
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
@@ -308,6 +309,32 @@ pub use resources::finance_charges::{
 pub use resources::sales_receipts::{
     NewSalesReceipt, PaymentMethod, SalesReceiptPreview, SalesReceiptRecord, SalesReceipts,
     check_sales_receipt, saved_sales_receipt,
+};
+// P23: sales tax (engine U-147 to U-154, U-25).
+pub use resources::recoveries::{
+    NewRecovery, Recoveries, RecoveryRefusal, RecoveryResult, WriteOff, recovery_available,
+    recovery_refusal, recovery_refusal_codes,
+};
+pub use resources::sales_tax::{
+    DocSalesTax, DocSalesTaxMember, DocTaxProblem, EXEMPTION_NOTE_MAX, EXEMPTION_NUMBER_MAX,
+    ExemptionStatus, ExpiringExemption, GROUP_MEMBERS_MAX, LineTaxCode, OwedAgency, OwedItem,
+    SALES_TAX_DESCRIPTION_MAX, SALES_TAX_NAME_MAX, SalesTax, SalesTaxAgency, SalesTaxAgencyId,
+    SalesTaxBasis, SalesTaxItem, SalesTaxItemDraft, SalesTaxItemId, SalesTaxKind, SalesTaxMember,
+    SalesTaxOwed, SalesTaxRefusal, TAX_CODE_MAX, TAX_CODE_NAME_MAX, TaxCode, TaxCodeDraft,
+    TaxCodeId, TaxCodeSource, TaxExemption, TaxExemptionDraft, TaxExemptionId, sales_tax_refusal,
+    sales_tax_refusal_codes,
+};
+pub use resources::sales_tax_payments::{
+    ADJUSTMENT_REASON_MAX, LinkLine, LinkPaymentRequest, MarkPaidLine, MarkPaidResult,
+    PAY_LINES_MAX, PAY_MEMO_MAX, PayAdjustment, PayLine, PayPreview, PayPreviewLine,
+    PaySalesTaxRefusal, PaySalesTaxRequest, PaySalesTaxResult, PaymentLineKind, SalesTaxPayMethod,
+    SalesTaxPayProblem, SalesTaxPayProblemKind, SalesTaxPaymentLine, SalesTaxPaymentQuery,
+    SalesTaxPaymentRecord, SalesTaxPayments, StubLine, UndoMarkPaidResult, UnlinkResult,
+    pay_sales_tax_refusal, pay_sales_tax_refusal_codes,
+};
+pub use resources::sales_tax_reports::{
+    LiabilityAgency, LiabilityBalanceCheck, LiabilityColumns, LiabilityItem, LiabilityQuery,
+    NonTaxableSales, SalesTaxLiability, SixPlaceAmount,
 };
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{

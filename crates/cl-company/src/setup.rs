@@ -174,6 +174,27 @@ pub struct Created {
     pub closing_password_set: bool,
 }
 
+/// A new `ClientLedger` company follows the Streamlined Sales Tax rules for
+/// discounts and bad debts (Q-SPF6; existing and `MyBooks` Online companies
+/// keep the engine's off, Q-P23aa). The "Sales tax" item for the typed
+/// rate is the engine's, made from `defaultSalesTaxRate` (Q-P23f).
+async fn streamlined_sales_tax(session: &Session, on: bool) -> Result<(), CompanyError> {
+    let caps = session.client().capabilities();
+    if caps.has(Capabilities::SALES_TAX_SSUTA) && caps.has(Capabilities::COMPANY_SALES_TAX_FLAGS) {
+        session
+            .set_sales_tax_settings(
+                &cl_api::SalesTaxSettingsUpdate {
+                    enabled: Some(on),
+                    ssuta: Some(true),
+                    ..cl_api::SalesTaxSettingsUpdate::default()
+                },
+                IdempotencyKey::new(),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
 /// Runs the interview's answers against the engine and records the
 /// company locally. The session is left open on the new company.
 ///
@@ -229,7 +250,7 @@ pub async fn create_company(
                 fiscal_year_start_month: Some(setup.fiscal_year_start_month),
                 accounting_method: Some(setup.basis),
                 default_sales_tax_rate: if setup.sales_tax {
-                    setup.sales_tax_rate
+                    setup.sales_tax_rate.map(cl_core::TaxRate::from)
                 } else {
                     None
                 },
@@ -239,6 +260,8 @@ pub async fn create_company(
             IdempotencyKey::new(),
         )
         .await?;
+
+    streamlined_sales_tax(session, setup.sales_tax).await?;
 
     let rows = setup
         .chart

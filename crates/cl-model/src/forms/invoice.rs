@@ -26,8 +26,8 @@
 
 use std::fmt;
 
-use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId};
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, SalesTaxItemId, TagId, TaxCodeId};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 
 use crate::rowkey::{RowKey, RowKeyGen};
 use crate::text::TextKey;
@@ -95,6 +95,10 @@ pub struct InvoiceLine {
     /// The billable cost this line invoices (quantity and rate are the
     /// source's and read-only, Q-P20p).
     pub billable: Option<BillableRef>,
+    /// The line's tax code as the owner set it (P23, U-25); None lets the
+    /// engine choose: the client's non-taxable code, else the item's, else
+    /// the taxable flag (Q-P23k).
+    pub tax_code: Option<TaxCodeId>,
 }
 
 impl InvoiceLine {
@@ -113,6 +117,7 @@ impl InvoiceLine {
             taxable: None,
             tag: None,
             billable: None,
+            tax_code: None,
         }
     }
 
@@ -129,6 +134,7 @@ impl InvoiceLine {
             && self.taxable.is_none()
             && self.tag.is_none()
             && self.billable.is_none()
+            && self.tax_code.is_none()
     }
 
     /// Item, quantity and rate come from a billable cost and can't be
@@ -165,6 +171,7 @@ impl fmt::Debug for InvoiceLine {
             .field("rate", &self.rate.is_some())
             .field("taxable", &self.taxable)
             .field("billable", &self.billable)
+            .field("tax_code", &self.tax_code)
             .finish_non_exhaustive()
     }
 }
@@ -312,6 +319,12 @@ pub struct InvoiceForm {
     pub layout: LayoutPick,
     /// Lines, ending with a blank entry line.
     pub lines: Vec<InvoiceLine>,
+    /// The document's sales tax item or group (P23, Q-P23d); None uses
+    /// the client's default, else the company's.
+    pub sales_tax: Option<SalesTaxItemId>,
+    /// An edit takes today's rates instead of the saved ones (Q-P23i; the
+    /// owner chose "Use current rates" after `RATE_CHANGED`).
+    pub use_current_rates: bool,
 }
 
 impl fmt::Debug for InvoiceForm {
@@ -330,6 +343,8 @@ impl fmt::Debug for InvoiceForm {
             .field("hide_zero_lines", &self.hide_zero_lines)
             .field("print_later", &self.print_later)
             .field("lines", &self.lines.len())
+            .field("sales_tax", &self.sales_tax)
+            .field("use_current_rates", &self.use_current_rates)
             .finish_non_exhaustive()
     }
 }
@@ -532,6 +547,8 @@ impl InvoiceForm {
             print_later: self.print_later,
             layout: self.layout.clone(),
             lines,
+            sales_tax: self.sales_tax.filter(|_| caps.sales_tax),
+            use_current_rates: self.use_current_rates && caps.sales_tax,
         }
     }
 }
@@ -548,6 +565,9 @@ pub struct InvoiceCaps {
     pub billable: bool,
     /// `invoice-edit-v1`: the closing-date password on invoices.
     pub closing: bool,
+    /// `sales-tax-setup-v1`: the document's sales tax and line tax codes
+    /// are sent (P23). Without it neither is.
+    pub sales_tax: bool,
 }
 
 /// What an invoice is checked against.
@@ -748,6 +768,9 @@ pub struct RequestLine {
     pub billable_source_line: Option<JournalLineId>,
     /// Its markup in percent.
     pub markup_percent: Option<Quantity>,
+    /// The line's tax code (only with `sales-tax-setup-v1`; `None`: the
+    /// engine's choice, Q-P23k).
+    pub tax_code: Option<TaxCodeId>,
 }
 
 impl fmt::Debug for RequestLine {
@@ -805,6 +828,11 @@ pub struct InvoiceRequest {
     pub payment_method: Option<String>,
     /// Sales receipt: reference.
     pub ref_no: Option<String>,
+    /// The document's sales tax (only with `sales-tax-setup-v1`; `None`:
+    /// the client's default, else the company's).
+    pub sales_tax: Option<SalesTaxItemId>,
+    /// An edit takes today's rates (Q-P23i).
+    pub use_current_rates: bool,
 }
 
 impl fmt::Debug for InvoiceRequest {
@@ -815,6 +843,8 @@ impl fmt::Debug for InvoiceRequest {
             .field("date", &self.date)
             .field("due_date", &self.due_date)
             .field("terms", &self.terms)
+            .field("sales_tax", &self.sales_tax)
+            .field("use_current_rates", &self.use_current_rates)
             .field("lines", &self.lines)
             .finish_non_exhaustive()
     }
@@ -849,6 +879,7 @@ fn request_line(l: &InvoiceLine, caps: InvoiceCaps) -> RequestLine {
         tag: l.tag,
         billable_source_line: l.billable.map(|b| b.source_line),
         markup_percent: l.billable.and_then(|b| b.markup_percent),
+        tax_code: l.tax_code.filter(|_| caps.sales_tax),
     }
 }
 
@@ -988,8 +1019,103 @@ impl RateSource {
     }
 }
 
+/// A line's tax code as the engine resolved it (P23; copied, the Tax code
+/// column shows `code`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineCodeFigure {
+    /// The code's id (`None` on legacy lines).
+    pub id: Option<TaxCodeId>,
+    /// `Tax`, `Non`, `Res`, …
+    pub code: String,
+    /// The line is taxed.
+    pub taxable: bool,
+}
+
+/// One item of the document's sales tax with its share (copied).
+#[derive(Clone, PartialEq, Eq)]
+pub struct DocTaxMemberFigure {
+    /// Its name (owner data).
+    pub name: String,
+    /// Its rate as saved.
+    pub rate: TaxRate,
+    /// Its share of the document tax.
+    pub tax: Option<Money>,
+}
+
+impl fmt::Debug for DocTaxMemberFigure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DocTaxMemberFigure")
+            .field("rate", &self.rate)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The document's sales tax as the engine used it (one per document,
+/// Q-P23d; copied, never computed).
+#[derive(Clone, PartialEq, Eq)]
+pub struct DocTaxFigure {
+    /// The item or group.
+    pub id: SalesTaxItemId,
+    /// Its name ("Monett").
+    pub name: String,
+    /// The combined rate as saved.
+    pub rate: TaxRate,
+    /// The members (one for an item).
+    pub members: Vec<DocTaxMemberFigure>,
+}
+
+impl fmt::Debug for DocTaxFigure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DocTaxFigure")
+            .field("id", &self.id)
+            .field("rate", &self.rate)
+            .field("members", &self.members.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A sales tax notice a document preview reports (P23): shown beside the
+/// totals, never blocking Save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TaxNotice {
+    /// The saved rates differ from today's: offer "Use current rates"
+    /// (`RATE_CHANGED`, Q-P23i).
+    RateChanged,
+    /// A non-taxable client has no certificate on file (Q-P23n).
+    ExemptionMissing,
+    /// The client's certificate has expired.
+    ExemptionExpired,
+    /// The client's certificate expires within 30 days.
+    ExemptionExpiring,
+}
+
+impl TaxNotice {
+    /// The notice a preview problem `code` names, if it is one.
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<TaxNotice> {
+        match code {
+            "RATE_CHANGED" => Some(TaxNotice::RateChanged),
+            "EXEMPTION_MISSING" => Some(TaxNotice::ExemptionMissing),
+            "EXEMPTION_EXPIRED" => Some(TaxNotice::ExemptionExpired),
+            "EXEMPTION_EXPIRING" => Some(TaxNotice::ExemptionExpiring),
+            _ => None,
+        }
+    }
+
+    /// Plain-language message (strings live in `cl-ui::i18n`).
+    #[must_use]
+    pub const fn key(self) -> TextKey {
+        match self {
+            TaxNotice::RateChanged => TextKey("invoice.tax.rate_changed"),
+            TaxNotice::ExemptionMissing => TextKey("invoice.tax.exemption_missing"),
+            TaxNotice::ExemptionExpired => TextKey("invoice.tax.exemption_expired"),
+            TaxNotice::ExemptionExpiring => TextKey("invoice.tax.exemption_expiring"),
+        }
+    }
+}
+
 /// The engine's figures for one line.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PreviewLineFigures {
     /// The quantity it used (a billable line's: the source's, 1 when it had
     /// none).
@@ -1006,6 +1132,8 @@ pub struct PreviewLineFigures {
     pub display_rate: Option<Money>,
     /// Another invoice already bills this line's cost (U-128).
     pub billed_elsewhere: bool,
+    /// The line's tax code as resolved (P23; `None` from older engines).
+    pub tax_code: Option<LineCodeFigure>,
 }
 
 impl fmt::Debug for PreviewLineFigures {
@@ -1017,14 +1145,17 @@ impl fmt::Debug for PreviewLineFigures {
 }
 
 /// The engine's figures for the whole invoice.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PreviewTotals {
     /// Sum of the line amounts.
     pub subtotal: Money,
     /// The document tax.
     pub tax_total: Money,
-    /// The tax rate (the label; no city until P23).
-    pub tax_rate: Option<Rate>,
+    /// The tax rate (the label when the engine names no sales tax).
+    pub tax_rate: Option<TaxRate>,
+    /// The sales tax used (P23): the label reads "Sales tax · Monett
+    /// (8.100%)" from it.
+    pub sales_tax: Option<DocTaxFigure>,
     /// Total.
     pub total: Money,
     /// Due date from the terms.

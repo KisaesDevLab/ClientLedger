@@ -820,6 +820,12 @@ impl PrintFormsScreen {
                         .get(c.id)
                         .await
                         .map(|r| job::stub_of_payment(&r))
+                } else if c.kind == cl_api::QueuedCheckKind::SalesTaxPayment {
+                    let items = s.sales_tax().items(true).await.unwrap_or_default();
+                    s.sales_tax_payments()
+                        .get(c.id)
+                        .await
+                        .map(|r| job::stub_of_sales_tax_payment(&r, &items))
                 } else {
                     s.transactions()
                         .get(c.id)

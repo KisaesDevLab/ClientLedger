@@ -110,6 +110,8 @@ pub(crate) fn form_of(
                 cl_model::forms::invoice::LayoutPick::Layout(id.to_string())
             }),
         lines: Vec::new(),
+        // P23: the saved sales tax stays (an edit keeps its rates, Q-P23i).
+        sales_tax: r.sales_tax.as_ref().map(|s| s.id),
         ..InvoiceForm::default()
     };
     (form, lines)

@@ -45,7 +45,7 @@ fn the_demo_engine_computes_every_golden_case() {
         for (i, (o, x)) in out.lines.iter().zip(want).enumerate() {
             assert_eq!(s2(o.amount), x["amount"], "{name} line {i} amount");
             assert_eq!(
-                format!("{:.4}", o.tax_rate),
+                format!("{:.6}", o.tax_rate),
                 x["taxRate"],
                 "{name} line {i} rate"
             );

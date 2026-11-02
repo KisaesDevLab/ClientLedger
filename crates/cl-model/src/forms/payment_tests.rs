@@ -43,6 +43,8 @@ fn row(n: u8, number: &str, balance: &str, payment: &str, remaining: &str) -> Fi
         discount_date: None,
         discount_percent: None,
         suggest_discount: false,
+        discount_tax: None,
+        write_off_tax: None,
     }
 }
 

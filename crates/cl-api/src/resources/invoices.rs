@@ -25,7 +25,9 @@ use base64::Engine as _;
 use cl_core::ids::{
     AccountId, ContactId, IdError, ItemId, JournalLineId, TagId, TransactionId, parse_uuid,
 };
-use cl_core::{CalendarDate, Money, Quantity, Rate, Timestamp};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate, Timestamp};
+
+use crate::resources::sales_tax::{DocSalesTax, LineTaxCode};
 use rust_decimal::Decimal;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
@@ -472,7 +474,7 @@ pub struct InvoiceRecordLine {
     /// Taxable.
     pub is_taxable: bool,
     /// The rate the engine applied.
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// The line's share of the document tax.
     pub tax_amount: Option<Money>,
     /// Line tag.
@@ -483,6 +485,8 @@ pub struct InvoiceRecordLine {
     pub markup_percent: Option<SignedPercent>,
     /// A billable line's rate as shown (amount / quantity, 4 places).
     pub display_rate: Option<Money>,
+    /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
+    pub tax_code: Option<LineTaxCode>,
 }
 
 impl InvoiceRecordLine {
@@ -597,6 +601,8 @@ pub struct InvoiceRecord {
     pub layout_id: Option<InvoiceLayoutId>,
     /// A finance-charge invoice (U-141): it keeps its client (U-145).
     pub is_finance_charge: bool,
+    /// The invoice's sales tax with its rate as saved (`sales-tax-setup-v1`).
+    pub sales_tax: Option<DocSalesTax>,
 }
 
 impl InvoiceRecord {
@@ -699,6 +705,8 @@ struct RecordWire {
     layout_id: Option<InvoiceLayoutId>,
     #[serde(default, deserialize_with = "null_false")]
     is_finance_charge: bool,
+    #[serde(default)]
+    sales_tax: Option<DocSalesTax>,
 }
 
 #[derive(Deserialize)]
@@ -719,7 +727,7 @@ struct LineWire {
     #[serde(default, deserialize_with = "null_false")]
     is_taxable: bool,
     #[serde(default)]
-    tax_rate: Option<Rate>,
+    tax_rate: Option<TaxRate>,
     #[serde(default)]
     tax_amount: Option<Money>,
     #[serde(default)]
@@ -728,6 +736,8 @@ struct LineWire {
     billable_source_line_id: Option<JournalLineId>,
     #[serde(default)]
     markup_percent: Option<SignedPercent>,
+    #[serde(default)]
+    tax_code: Option<LineTaxCode>,
 }
 
 /// Reads the object as the [`Transaction`] and again for the invoice
@@ -793,6 +803,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
                 billable_source_line_id: x.billable_source_line_id,
                 markup_percent,
                 display_rate,
+                tax_code: x.tax_code,
             });
         }
         Ok(InvoiceRecord {
@@ -817,6 +828,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
             billable_costs: costs,
             layout_id: w.layout_id,
             is_finance_charge: w.is_finance_charge,
+            sales_tax: w.sales_tax,
         })
     }
 }
@@ -1073,6 +1085,9 @@ pub struct PreviewLine {
     /// Another invoice holds this line's cost.
     #[serde(default)]
     pub error: Option<PreviewLineError>,
+    /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub tax_code: Option<LineTaxCode>,
 }
 
 impl fmt::Debug for PreviewLine {
@@ -1098,7 +1113,7 @@ pub struct InvoicePreview {
     pub taxable_base: Option<Money>,
     /// The document's tax rate.
     #[serde(default)]
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// The document tax.
     pub tax_total: Money,
     /// Total.
@@ -1109,6 +1124,41 @@ pub struct InvoicePreview {
     /// The client's open balance once this invoice posts.
     #[serde(default)]
     pub contact_balance_after: Option<Money>,
+    /// The sales tax used, with its members' shares (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub sales_tax: Option<DocSalesTax>,
+    /// Sales tax notices (`RATE_CHANGED`, `EXEMPTION_*`; P23, never a 4xx).
+    /// A credit memo's or sales receipt's preview reads its own top-level
+    /// `problems`, so this stays empty there.
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub problems: Vec<crate::resources::customer_payments::PreviewProblem>,
+    /// Warnings `[{code, message, details?}]` (engine PR #220): the
+    /// exemption certificate notices `EXEMPTION_MISSING`, `_EXPIRED`,
+    /// `_EXPIRING` on invoice and sales receipt previews (also read on a
+    /// credit memo's, flattened here). `RATE_CHANGED` stays in `problems`
+    /// (engine PR #217); [`InvoicePreview::notice_codes`] reads both.
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub warnings: Vec<crate::resources::customer_payments::PreviewProblem>,
+}
+
+impl InvoicePreview {
+    /// The codes of `problems` then `warnings` (a code once).
+    #[must_use]
+    pub fn notice_codes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in self.problems.iter().chain(&self.warnings) {
+            if !out.contains(&p.code) {
+                out.push(p.code.clone());
+            }
+        }
+        out
+    }
 }
 
 impl fmt::Debug for InvoicePreview {

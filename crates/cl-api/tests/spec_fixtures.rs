@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 4] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 7] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -259,6 +259,25 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 4] = [
         "keyable-sales-doc-email",
         cl_api::KeySet::SalesDocEmailV1,
         4,
+    ),
+    // P23 (U-147, U-150, U-151, U-154): in the spec since pin 9be6da51.
+    (
+        "idempotency_sales_tax_v1_routes.txt",
+        "keyable-sales-tax",
+        cl_api::KeySet::SalesTaxSetupV1,
+        16,
+    ),
+    (
+        "idempotency_sales_tax_pay_v1_routes.txt",
+        "keyable-sales-tax-pay",
+        cl_api::KeySet::SalesTaxPayV1,
+        5,
+    ),
+    (
+        "idempotency_recovery_v1_routes.txt",
+        "keyable-recovery",
+        cl_api::KeySet::RecoveryV1,
+        1,
     ),
 ];
 
@@ -399,6 +418,18 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         (
             "idempotency_sales_doc_email_v1_routes.txt",
             "sales-doc-email-v1",
+        ),
+        (
+            "idempotency_sales_tax_v1_routes.txt",
+            "idempotency-sales-tax-v1",
+        ),
+        (
+            "idempotency_sales_tax_pay_v1_routes.txt",
+            "idempotency-sales-tax-pay-v1",
+        ),
+        (
+            "idempotency_recovery_v1_routes.txt",
+            "idempotency-recovery-v1",
         ),
     ]
     .iter()

@@ -1600,6 +1600,9 @@ fn make_any(
         if let Some(s) = crate::screens::lists::make(kind, link, open.clone(), today) {
             return s;
         }
+        if let Some(s) = crate::screens::sales_tax::make(kind, link, open.clone(), today) {
+            return s;
+        }
         if let Some(s) = crate::screens::register::make(kind, link, open.clone(), today) {
             return s;
         }

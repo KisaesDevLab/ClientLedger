@@ -22,6 +22,7 @@ fn caps() -> InvoiceCaps {
         pricing: true,
         billable: true,
         closing: true,
+        sales_tax: false,
     }
 }
 

@@ -37,8 +37,9 @@ pub(crate) struct Plan {
 
 /// How a save ended.
 pub(crate) enum Outcome {
-    /// Posted.
-    Posted(DailyEntry),
+    /// Posted, with the engine's expected tax when the typed tax differs
+    /// from it (`TAX_DIFFERS`, a warning: the typed tax posts).
+    Posted(DailyEntry, Option<Money>),
     /// The engine's preview disagreed with the form (the layout changed
     /// elsewhere) or a line is unmapped: nothing posted; the draft is kept.
     Mismatch { draft: DailyEntryId },
@@ -66,7 +67,7 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
             Err(ApiError::Validation(v)) => {
                 let e = api.entry(id).await?;
                 if e.status == EntryStatus::Posted {
-                    return Ok(Outcome::Posted(e));
+                    return Ok(Outcome::Posted(e, None));
                 }
                 return Err(ApiError::Validation(v));
             }
@@ -112,7 +113,13 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
         return Ok(Outcome::Mismatch { draft: entry.id });
     }
     match api.post(entry.id, plan.password).await {
-        Ok(posted) => Ok(Outcome::Posted(posted)),
+        Ok(posted) => Ok(Outcome::Posted(
+            posted,
+            preview
+                .tax_differs()
+                .then_some(preview.expected_tax)
+                .flatten(),
+        )),
         Err(error) => Ok(Outcome::NotPosted {
             draft: entry.id,
             error,
@@ -248,7 +255,10 @@ impl DailySalesScreen {
         if let Some(r) = self.save.task.as_mut().and_then(Task::poll_result) {
             self.save.task = None;
             match r {
-                Ok(Reply::Outcome(Outcome::Posted(e))) => self.posted(&e),
+                Ok(Reply::Outcome(Outcome::Posted(e, differs))) => {
+                    self.posted(&e);
+                    self.save.tax_differs = differs;
+                }
                 Ok(Reply::Outcome(Outcome::Mismatch { draft })) => self.mismatch(draft),
                 Ok(Reply::Outcome(Outcome::NotPosted { draft, error })) => {
                     self.keep_draft(draft);
@@ -374,6 +384,7 @@ impl DailySalesScreen {
         self.save.problems.clear();
         self.save.error = None;
         self.save.notice = None;
+        self.save.tax_differs = None;
         self.save.last_action = Some("post");
         self.header.save_ok(form);
         self.saved = Some(Saved {

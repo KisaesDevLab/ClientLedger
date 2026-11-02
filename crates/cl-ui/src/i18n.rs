@@ -117,6 +117,9 @@ mod invoice_model;
 // P22 D3: the credit memo, sales receipt, refund, statement and finance
 // charge models; the screens add their own modules (D4-D7).
 mod receivables_model;
+mod sales_tax;
+mod sales_tax_model;
+mod sales_tax_owed;
 // P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
 mod credit_memo;
 // P22 D6: Statements.
@@ -124,7 +127,7 @@ mod finance_charges;
 mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 41] = [
+const TABLES: [&[(&str, &str)]; 45] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -163,6 +166,10 @@ const TABLES: [&[(&str, &str)]; 41] = [
     invoice_model::ENGLISH,
     invoice::ENGLISH,
     receivables_model::ENGLISH,
+    sales_tax::ENGLISH,
+    sales_tax_model::ENGLISH,
+    sales_tax_owed::ENGLISH,
+    sales_tax_owed::ENGLISH_2,
     credit_memo::ENGLISH,
     statements::ENGLISH,
     finance_charges::ENGLISH,
@@ -631,6 +638,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.delete_unsupported", "This kind of transaction can't be deleted."),
     ("error.api.delete_linked", "Other transactions depend on this one, so it can't be deleted."),
     ("fix.api.void_instead", "Void it instead. It stays in your records and in the audit trail."),
+    ("error.api.sales_tax_linked", "This check or entry is matched to a sales tax payment, so its amount and date can't change."),
+    ("fix.api.unlink_sales_tax", "Unlink it from the sales tax payment first: in Vendors \u{203a} Pay Sales Tax, click Unmatch on it. Then edit it."),
     ("error.api.inexact_money", "The books engine sent amounts ClientLedger can't show exactly, so they aren't shown."),
     ("error.api.offline", "That needs the internet, and ClientLedger is working offline."),
     ("fix.api.offline", "Turn off Work offline in Preferences if you want to use it."),
@@ -1106,7 +1115,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.footer.later.tip", "Shown after a future update."),
     ("home.footer.failed.tip", "Couldn't load this. Choose Refresh to try again."),
     ("home.footer.window.tip", "Shown when the bills window is 90 days or less. You can change it in Preferences."),
-    ("home.footer.sales_tax.tip", "Shown when the sales tax reports arrive."),
+    ("home.footer.sales_tax.tip", "Shown once the engine can report sales tax owed."),
     ("home.balances.title", "Account balances"),
     ("home.balances.account", "Account"),
     ("home.balances.books", "In your books"),

@@ -206,6 +206,16 @@ impl DailySalesScreen {
                 self.start_save(SaveIntent::Save, None);
             }
         }
+        if let Some(expected) = self.save.tax_differs {
+            form::inline_warning(
+                ui,
+                tokens,
+                &crate::i18n::t_with(
+                    "daily.tax_differs",
+                    &[("amount", &expected.format(self.money_style))],
+                ),
+            );
+        }
         if self.void.open {
             let mut send = false;
             let mut cancel = false;

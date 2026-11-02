@@ -206,6 +206,9 @@ pub struct Loaded {
     pub incomes: Vec<(cl_core::ids::AccountId, String)>,
     /// Active expense accounts (write-off and bank-fee pickers, P21).
     pub expenses: Vec<(cl_core::ids::AccountId, String)>,
+    /// P23: the active sales taxes and groups (the default picker), with
+    /// their rates as owners read them.
+    pub sales_taxes: Vec<(cl_core::ids::SalesTaxItemId, String)>,
     /// The reads finished (with or without answers).
     pub done: bool,
 }
@@ -220,6 +223,7 @@ impl std::fmt::Debug for Loaded {
             .field("usage", &self.usage.is_some())
             .field("incomes", &self.incomes.len())
             .field("expenses", &self.expenses.len())
+            .field("sales_taxes", &self.sales_taxes.len())
             .field("done", &self.done)
             .finish()
     }
@@ -500,12 +504,20 @@ impl PreferencesScreen {
             self.loaded.done = true;
             return;
         }
-        let demo = self.link.demo_state().map(|d| (d.ai, d.finance.clone()));
-        if let Some((switches, finance)) = demo {
+        let demo = self.link.demo_state().map(|mut d| {
+            let taxes = crate::company::demo::sales_tax::items(&mut d, false);
+            (d.ai, d.finance.clone(), d.sales_tax.clone(), taxes)
+        });
+        if let Some((switches, finance, st, taxes)) = demo {
             let mut loaded = crate::company::demo::preferences_loaded_with(switches);
             if let Some(s) = loaded.settings.as_mut() {
                 crate::company::demo::finance_charges::fill_settings(&finance, s);
+                s.sales_tax_enabled = Some(st.enabled);
+                s.sales_tax_basis = Some(st.basis);
+                s.default_sales_tax_id = st.default_id;
+                s.sales_tax_ssuta = Some(st.ssuta);
             }
+            loaded.sales_taxes = company::sales_tax_choices(&taxes);
             self.apply_loaded(loaded);
             return;
         }
@@ -522,6 +534,12 @@ impl PreferencesScreen {
                 usage: s.ai_usage(1).await.ok(),
                 incomes: income_accounts(&s).await,
                 expenses: expense_accounts(&s).await,
+                sales_taxes: s
+                    .sales_tax()
+                    .items(false)
+                    .await
+                    .map(|v| company::sales_tax_choices(&v))
+                    .unwrap_or_default(),
                 done: true,
             };
             l.done = true;
@@ -544,6 +562,11 @@ impl PreferencesScreen {
             self.edits.clone()
         };
         base.accounting = company::AccountingEdits::from_settings(loaded.settings.as_ref());
+        // P23: an engine that keeps "Charge sales tax" is the source of
+        // truth (S6: the engine wins once it has the flag).
+        if let Some(on) = base.accounting.sales_tax.engine_enabled {
+            base.flags.sales_tax_enabled = on;
+        }
         base.ai.apply_engine(
             loaded.ai.as_ref(),
             loaded.consent.as_ref(),
@@ -756,6 +779,23 @@ impl PreferencesScreen {
                 s.nsf_customer_fee = v;
             }
         }
+        // P23: the sales tax settings go by their own write.
+        let sales_tax = if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::COMPANY_SALES_TAX_FLAGS)
+        {
+            edits
+                .accounting
+                .sales_tax
+                .update_for(self.loaded.settings.as_ref(), edits.flags.sales_tax_enabled)
+        } else {
+            None
+        };
+        if let (Some(u), Some(mut demo)) = (sales_tax.as_ref(), self.link.demo_state()) {
+            let _ = crate::company::demo::sales_tax::save_settings(&mut demo, u);
+        }
         // P22: finance charges go by their own write (Q-P22a).
         let finance = edits
             .accounting
@@ -885,6 +925,11 @@ impl PreferencesScreen {
             if let Some(u) = finance {
                 session
                     .set_finance_charge_settings(&u, cl_api::IdempotencyKey::new())
+                    .await?;
+            }
+            if let Some(u) = sales_tax {
+                session
+                    .set_sales_tax_settings(&u, cl_api::IdempotencyKey::new())
                     .await?;
             }
             if let Some(u) = smtp {
@@ -1160,7 +1205,21 @@ impl PreferencesScreen {
             Category::Accounting => company::accounting(ui, tokens, &mut self.edits, &self.loaded),
             Category::ChecksForms => company::checks_forms(ui, tokens),
             Category::SalesTax => {
-                company::sales_tax(ui, tokens, &mut self.edits);
+                if self.link.is_demo()
+                    || self
+                        .link
+                        .capabilities()
+                        .has(cl_api::Capabilities::COMPANY_SALES_TAX_FLAGS)
+                {
+                    let choices = self.loaded.sales_taxes.clone();
+                    if company::sales_tax_engine(ui, tokens, &mut self.edits, &choices) {
+                        self.link.push(crate::company::CompanyEvent::OpenWindow(
+                            cl_model::CommandId::new(crate::screens::sales_tax::setup::KIND),
+                        ));
+                    }
+                } else {
+                    company::sales_tax(ui, tokens, &mut self.edits);
+                }
                 if self.link.is_demo()
                     || self
                         .link
@@ -1724,6 +1783,47 @@ mod tests {
         (dir, s)
     }
 
+    /// P23: Preferences › Sales tax shows the demo's settings (SSUTA on,
+    /// Monett the default) and saves the basis, the default and the switch
+    /// to the engine; nothing changed sends nothing.
+    #[test]
+    fn sales_tax_settings_load_and_save() {
+        let (_d, mut s) = demo_screen(true);
+        let st = s.edits().accounting.sales_tax.clone();
+        assert!(st.ssuta);
+        assert_eq!(st.basis, cl_api::SalesTaxBasis::Accrual);
+        assert!(st.default_id.is_some());
+        assert!(s.loaded.sales_taxes.len() >= 4);
+        assert_eq!(
+            st.update_for(
+                s.loaded.settings.as_ref(),
+                s.edits().flags.sales_tax_enabled
+            ),
+            None
+        );
+        let springfield = s
+            .loaded
+            .sales_taxes
+            .iter()
+            .find(|(_, n)| n.starts_with("Springfield"))
+            .map(|(id, _)| *id);
+        s.edits_mut().accounting.sales_tax.basis = cl_api::SalesTaxBasis::Cash;
+        s.edits_mut().accounting.sales_tax.ssuta = false;
+        s.edits_mut().accounting.sales_tax.default_id = springfield;
+        assert!(s.save());
+        let d = s.link.demo_state().expect("demo");
+        assert_eq!(d.sales_tax.basis, cl_api::SalesTaxBasis::Cash);
+        assert!(!d.sales_tax.ssuta);
+        assert_eq!(d.sales_tax.default_id, springfield);
+        for k in [
+            "prefs.sales_tax.basis_help",
+            "prefs.sales_tax.ssuta",
+            "prefs.sales_tax.ssuta_tip",
+            "prefs.sales_tax.ssuta_hint",
+        ] {
+            assert!(crate::i18n::has(k), "{k}");
+        }
+    }
     /// A03 step 21: the switches start off, the owner's change is stored,
     /// and AI turned off (as a re-consent) turns them off again, shown on
     /// their own screen.

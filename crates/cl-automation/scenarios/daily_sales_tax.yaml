@@ -1,0 +1,48 @@
+# Daily sales tax (P23 plan §6.4, Q-P23g) against `clientledger --demo`:
+# Set up lines links the "Sales Tax Collected" line to Springfield (8.875%);
+# a day of 200.00 taxable sales with 17.00 typed tax posts the typed tax and
+# warns that the rate gives 17.75 (TAX_DIFFERS). The day is voided and the
+# link removed so light and dark repeat. Synthetic.
+name: daily_sales_tax
+description: "Daily sales: a tax line linked to a sales tax, the expected-tax warning."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.daily_sales
+  - assert_state: {key: screen.screen, equals: daily_sales}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Set up lines}
+  - assert_state: {key: screen.setup_open, equals: true}
+  # Index 0 is the sales line's tax code; index 1 the tax line's sales tax.
+  - assert_exists: {role: combo_box, label: Sales tax, index: 1}
+  - click: {role: combo_box, label: Sales tax, index: 1}
+  - click: {role: button, label: Springfield}
+  - assert_no_clipping: {}
+  - screenshot: setup-linked
+  - click: {role: button, label: Update this layout}
+  - assert_state: {key: screen.setup_open, equals: false}
+  - type: {text: "200", target: {role: text_input, label: Plant sales}}
+  - type: {text: "17", target: {role: text_input, label: Sales Tax Collected}}
+  - type: {text: "100", target: {role: text_input, label: Cash}}
+  - type: {text: "117", target: {role: text_input, label: Cards}}
+  - key: Tab
+  - assert_state: {key: screen.over_short, equals: even}
+  - key: Alt+N
+  - assert_state: {key: screen.last_action, equals: post}
+  - assert_state: {key: screen.tax_differs, equals: true}
+  - assert_exists: {role: label, label_contains: "17.75"}
+  - screenshot: tax-differs
+  # Put things back: void the day, unlink the tax line.
+  - key: PageUp
+  - click_if_present: {role: button, label: Discard changes}
+  - click: {role: button, label: Void}
+  - click: {role: button, label: Void day}
+  - assert_state: {key: screen.last_action, equals: void}
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Set up lines}
+  - click: {role: combo_box, label: Sales tax, index: 1}
+  - click: {role: button, label: Not linked}
+  - click: {role: button, label: Update this layout}
+  - assert_state: {key: screen.setup_open, equals: false}
+  - command: file.close_window

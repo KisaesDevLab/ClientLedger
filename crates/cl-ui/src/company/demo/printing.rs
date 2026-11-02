@@ -171,6 +171,8 @@ pub fn check_queue(state: &mut DemoState, bank: AccountId) -> Vec<QueuedCheck> {
     out.extend(super::pay_bills::print_queue(state, bank, &is_printed));
     // P22 D5: refund checks queued to print (Q-P22d).
     out.extend(super::credit_memos::refund_checks(state, bank, &is_printed));
+    // P23: Pay Sales Tax checks printed later.
+    out.extend(super::sales_tax_owed::print_queue(state, bank, &is_printed));
     out
 }
 
@@ -191,6 +193,11 @@ pub fn stub(state: &mut DemoState, check: &QueuedCheck) -> cl_print::StubData {
                 .collect(),
             ..cl_print::StubData::default()
         };
+    }
+    if check.kind == QueuedCheckKind::SalesTaxPayment
+        && let Some(stub) = super::sales_tax_owed::stub(state, check.id)
+    {
+        return stub;
     }
     if check.kind == QueuedCheckKind::BillPayment {
         return super::pay_bills::get(state, check.id)

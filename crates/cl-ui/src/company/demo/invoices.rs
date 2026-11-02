@@ -148,7 +148,7 @@ pub fn parse_price(s: &str) -> Result<Decimal, ApiError> {
     parse_decimal(s, 15, true)
 }
 
-/// A tax rate as a fraction, rounded to the 4 places the ledger stores;
+/// A tax rate as a fraction, rounded to the 6 places the ledger stores;
 /// 0 up to (not including) 1.
 ///
 /// # Errors
@@ -164,7 +164,7 @@ pub fn parse_rate(s: &str) -> Result<Decimal, ApiError> {
     {
         return Err(invalid());
     }
-    let r = round(Decimal::from_str(t).map_err(|_| invalid())?, 4);
+    let r = round(Decimal::from_str(t).map_err(|_| invalid())?, 6);
     if r >= Decimal::ONE {
         return Err(invalid());
     }
@@ -221,7 +221,7 @@ pub struct SalesDocOut {
 /// Largest-remainder allocation of `total` over `shares` (any signs): each
 /// share floored to the cent, the leftover cents one each to the largest
 /// remainders, the earlier first on a tie.
-fn allocate(shares: &[Decimal], total: Decimal) -> Result<Vec<Decimal>, ApiError> {
+pub(crate) fn allocate(shares: &[Decimal], total: Decimal) -> Result<Vec<Decimal>, ApiError> {
     let hundred = Decimal::ONE_HUNDRED;
     let floors: Vec<Decimal> = shares.iter().map(|s| (s * hundred).floor()).collect();
     let rems: Vec<Decimal> = shares
@@ -324,6 +324,23 @@ pub fn compute(lines: &[SalesLineIn], default_rate: Decimal) -> Result<SalesDocO
     })
 }
 
+/// The document's sales tax (P23, Q-P23d) and its figures: one tax per
+/// document, rounded once on the combined rate. A line naming its own rate
+/// keeps the old per-rate path (no sales tax).
+fn taxed(
+    state: &mut DemoState,
+    new: &NewInvoice,
+    priced: &[Priced],
+) -> Result<(SalesDocOut, Option<super::sales_tax::Resolved>), ApiError> {
+    let ins: Vec<SalesLineIn> = priced.iter().map(|p| p.input).collect();
+    if new.lines.iter().any(|l| l.tax_rate.is_some()) {
+        return Ok((compute(&ins, default_rate())?, None));
+    }
+    let tax = super::sales_tax::resolve(state, new.sales_tax_id, new.contact_id)?;
+    let rate = tax.as_ref().map_or(Decimal::ZERO, |t| t.rate);
+    Ok((compute(&ins, rate)?, tax))
+}
+
 /// The demo's default rate.
 fn default_rate() -> Decimal {
     Decimal::from_str(DEMO_TAX_RATE).unwrap_or(Decimal::ZERO)
@@ -335,8 +352,8 @@ fn money(d: Decimal) -> Result<Money, ApiError> {
 
 /// One stored demo invoice.
 #[derive(Clone)]
-struct Stored {
-    record: Value,
+pub(super) struct Stored {
+    pub(super) record: Value,
     claims: Vec<JournalLineId>,
     /// When it was made (the engine's `createdAt` tiebreaker in the list).
     made: u64,
@@ -345,7 +362,7 @@ struct Stored {
 /// Invoices the demo engine keeps.
 #[derive(Clone, Default)]
 pub struct DemoInvoices {
-    stored: BTreeMap<TransactionId, Stored>,
+    pub(super) stored: BTreeMap<TransactionId, Stored>,
     claimed: BTreeSet<JournalLineId>,
     next: u64,
     /// Invoices made so far, seeded or created (each one's `made`).
@@ -402,6 +419,9 @@ struct Priced {
     discount_percent: Option<Decimal>,
     /// A billable line: its source, figures and source quantity.
     billable: Option<(JournalLineId, super::billable::BillableFigures, Decimal)>,
+    /// The line's tax code (P23; None on the old line-rate path, on a
+    /// subtotal, or while sales tax is off).
+    code: Option<super::sales_tax::LineCode>,
 }
 
 impl Priced {
@@ -426,6 +446,9 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
     }
     let items = state.items.get_or_insert_with(super::lists::items).clone();
     let mut out: Vec<Priced> = Vec::with_capacity(new.lines.len());
+    // P23: lines carry tax codes while sales tax is on and no line names
+    // its own rate (the old line-rate path keeps the taxable flags).
+    let coded = state.sales_tax.enabled && new.lines.iter().all(|l| l.tax_rate.is_none());
     // U-39a: a discount covers the lines since the last subtotal; right
     // under a subtotal it covers that subtotal's lines.
     let mut group_start = 0;
@@ -464,11 +487,22 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 .map_or(Decimal::ONE, cl_core::Quantity::as_decimal);
             let markup = l.markup_percent.map(cl_api::SignedPercent::as_decimal);
             let fig = super::billable::figures(cost.cost_amount.as_decimal(), q, markup);
+            let code = coded.then(|| {
+                super::sales_tax::line_code(
+                    state,
+                    l.tax_code_id,
+                    new.contact_id,
+                    None,
+                    Some(l.is_taxable.unwrap_or(true)),
+                )
+            });
             out.push(Priced {
                 input: SalesLineIn {
                     quantity: Decimal::ONE,
                     unit_price: fig.amount,
-                    taxable: l.is_taxable.unwrap_or(true),
+                    taxable: code
+                        .as_ref()
+                        .map_or(l.is_taxable.unwrap_or(true), |c| c.taxable),
                     tax_rate: None,
                 },
                 // The source's quantity, 1 when it had none (as the
@@ -480,13 +514,30 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 display: None,
                 discount_percent: None,
                 billable: Some((src, fig, q)),
+                code,
             });
             continue;
         }
-        let taxable = l
-            .is_taxable
-            .unwrap_or(item.is_some_and(|i| i.fields.is_taxable));
         let kind = item.map_or(cl_api::ItemType::Service, |i| i.fields.item_type);
+        // P23: the line's tax code decides (Q-P23k); the old line-rate path
+        // and a subtotal keep the taxable flag.
+        let code =
+            (coded && l.tax_rate.is_none() && kind != cl_api::ItemType::Subtotal).then(|| {
+                super::sales_tax::line_code(
+                    state,
+                    l.tax_code_id,
+                    new.contact_id,
+                    item.map(|i| (i.fields.tax_code_id, i.fields.is_taxable)),
+                    l.is_taxable,
+                )
+            });
+        let taxable = code.as_ref().map_or_else(
+            || {
+                l.is_taxable
+                    .unwrap_or(item.is_some_and(|i| i.fields.is_taxable))
+            },
+            |c| c.taxable,
+        );
         if kind == cl_api::ItemType::Subtotal {
             let shown = group_sum(&out[group_start..]);
             out.push(Priced {
@@ -503,6 +554,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 display: Some(shown),
                 discount_percent: None,
                 billable: None,
+                code: None,
             });
             prev_group = Some(group_start);
             group_start = out.len();
@@ -557,6 +609,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 display: None,
                 discount_percent: percent,
                 billable: None,
+                code,
             });
             continue;
         }
@@ -576,7 +629,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 taxable,
                 // A line's own rate (the P22 golden cases' 8.25 %; the
                 // desktop never sends one, so the demo's default).
-                tax_rate: l.tax_rate.map(cl_core::Rate::as_decimal),
+                tax_rate: l.tax_rate.map(cl_core::TaxRate::as_decimal),
             },
             quantity: Some(quantity),
             price: Some(price),
@@ -585,6 +638,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
             display: None,
             discount_percent: None,
             billable: None,
+            code,
         });
     }
     Ok(out)
@@ -637,8 +691,7 @@ pub fn preview(
 ) -> Result<InvoicePreview, ApiError> {
     billable_rules(new)?;
     let priced = price_lines(state, new)?;
-    let ins: Vec<SalesLineIn> = priced.iter().map(|p| p.input).collect();
-    let doc = compute(&ins, default_rate())?;
+    let (doc, tax) = taxed(state, new, &priced)?;
     let terms = new.payment_terms.as_deref().unwrap_or(DEMO_TERMS);
     let due = new
         .due_date
@@ -656,6 +709,9 @@ pub fn preview(
                 "amount": p.display.unwrap_or(o.amount).to_string(),
                 "taxAmount": o.tax_amount.to_string(),
             });
+            if let Some(code) = &p.code {
+                v["taxCode"] = code.preview_json();
+            }
             if let Some((src, f, _)) = p.billable {
                 let error = held_by(state, src, editing).map(|(id, n)| {
                     json!({"code": cl_api::BILLABLE_ALREADY_BILLED, "invoiceId": id, "invoiceNumber": n})
@@ -683,11 +739,20 @@ pub fn preview(
         .and_then(|s| s.record["balanceDue"].as_str())
         .and_then(|b| Decimal::from_str(b).ok())
         .unwrap_or_default();
+    // P23 (Q-P23n): the certificate warning of a non-taxable client, in
+    // `warnings` as engine PR #220 sends it.
+    let warnings: Vec<Value> =
+        super::sales_tax_owed::exemption_problem(state, new.contact_id, new.txn_date)
+            .map(|c| json!({"code": c, "message": ""}))
+            .into_iter()
+            .collect();
     let v = json!({
+        "warnings": warnings,
         "lines": lines,
         "subtotal": doc.subtotal.to_string(),
         "taxableBase": doc.taxable_base.to_string(),
-        "taxRate": default_rate().to_string(),
+        "taxRate": tax.as_ref().map_or_else(default_rate, |t| t.rate).to_string(),
+        "salesTax": tax.as_ref().map(|t| t.json(doc.taxable_base, doc.tax_total, Decimal::ONE)).transpose()?,
         "taxTotal": doc.tax_total.to_string(),
         "total": doc.total.to_string(),
         "dueDate": due,
@@ -720,8 +785,7 @@ fn record_json(
     new: &NewInvoice,
 ) -> Result<(Value, Vec<JournalLineId>), ApiError> {
     let priced = price_lines(state, new)?;
-    let ins: Vec<SalesLineIn> = priced.iter().map(|p| p.input).collect();
-    let doc = compute(&ins, default_rate())?;
+    let (doc, tax) = taxed(state, new, &priced)?;
     let m4 = |d: Decimal| money(d).map(Money::to_wire);
     let side = |d: Decimal| -> Result<(String, String), ApiError> {
         if d.is_sign_negative() && !d.is_zero() {
@@ -760,8 +824,10 @@ fn record_json(
             "quantity": opt(p.quantity)?, "unitPrice": opt(p.price)?,
             "discountPercent": p.discount_percent.map(|d| round(d, 4).to_string()),
             "unitPriceSource": p.source,
-            "isTaxable": p.input.taxable, "taxRate": round(o.tax_rate, 4).to_string(),
+            "isTaxable": p.input.taxable,
+            "taxRate": round(o.tax_rate, 6).to_string(),
             "taxAmount": m4(o.tax_amount)?, "serviceDate": l.service_date,
+            "taxCode": p.code.as_ref().map(super::sales_tax::LineCode::record_json),
         });
         if let Some((src, f, q)) = p.billable {
             claims.push(src);
@@ -820,6 +886,7 @@ fn record_json(
         "sentAt": null, "sendHistory": [], "printLater": new.print_later.unwrap_or(false),
         "updatedAt": DemoState::now(), "lines": lines, "billableCosts": costs,
         "layoutId": new.layout_id.id(),
+        "salesTax": tax.as_ref().map(|t| t.json(doc.taxable_base, doc.tax_total, Decimal::ONE)).transpose()?,
     });
     Ok((v, claims))
 }
@@ -883,6 +950,9 @@ pub fn create(
             made,
         },
     );
+    // P23: the document's stored tax rows.
+    let figures = preview(state, new, Some(id))?;
+    super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
     Ok(saved)
 }
 
@@ -1065,7 +1135,9 @@ pub fn void(
         state.invoices.claimed.remove(&c);
     }
     state.invoices.writes += 1;
-    versioned(&s.record)
+    let saved = versioned(&s.record);
+    super::sales_tax::void_rows(state, id);
+    saved
 }
 
 /// Invoices never sent (the Outbox's Not sent yet tab, Q-P20s), newest
@@ -1240,6 +1312,8 @@ pub fn update(
             made: old.made,
         },
     );
+    let figures = preview(state, new, Some(id))?;
+    super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
     Ok(saved)
 }
 

@@ -21,7 +21,7 @@ use crate::contract_bills::payables_account;
 use crate::contract_printing::{in_queue, print_keyed};
 use crate::support::{Harness, unique};
 
-fn vendor(h: &Harness, s: &Session, name: &str) -> ContactId {
+pub(crate) fn vendor(h: &Harness, s: &Session, name: &str) -> ContactId {
     h.run(s.contacts().create(
         &NewContact {
             fields: ContactFields::named(ContactType::Vendor, unique(name)),
@@ -35,7 +35,7 @@ fn vendor(h: &Harness, s: &Session, name: &str) -> ContactId {
     .id
 }
 
-fn bill(
+pub(crate) fn bill(
     h: &Harness,
     s: &Session,
     v: ContactId,
@@ -105,7 +105,11 @@ fn bill_balance(h: &Harness, s: &Session, id: TransactionId) -> Money {
         .unwrap_or(Money::ZERO)
 }
 
-fn request(bank: AccountId, bills: Vec<BillToPay>, credits: Vec<CreditToApply>) -> PayBillsRequest {
+pub(crate) fn request(
+    bank: AccountId,
+    bills: Vec<BillToPay>,
+    credits: Vec<CreditToApply>,
+) -> PayBillsRequest {
     PayBillsRequest {
         bank_account: bank,
         date: date(2026, 11, 4),

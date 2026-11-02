@@ -271,6 +271,7 @@ pub fn field_census(h: &Harness) {
                 is_taxable: false,
                 item_type: cl_api::ItemType::Service,
                 discount_percent: None,
+                tax_code_id: None,
             },
             key(),
         ))
@@ -343,13 +344,16 @@ pub fn field_census(h: &Harness) {
         name,
         keys: contact_keys.clone(),
         strings: &["openingBalance"],
-        optional: &[],
+        // P23 (U-147, U-25): arrive with E1; required once the WP-4 pin
+        // carries them.
+        optional: &["defaultSalesTaxId", "taxCodeId"],
     };
     let item_shape = |name| Shape {
         name,
         keys: item_keys.clone(),
         strings: &["unitPrice"],
-        optional: &[],
+        // P23 (U-25): arrives with E1.
+        optional: &["taxCodeId"],
     };
     // U-75: `tagNumber` arrives with `tag-number-v1`; until then the engine
     // leaves it out.
@@ -449,6 +453,12 @@ pub fn field_census(h: &Harness) {
                 "financeChargeOnFinanceCharges",
                 "financeChargeIncomeAccountId",
                 "financeChargePrintLater",
+                // P23 (U-147, Q-P23a, Q-SPF6): the sales tax flags arrive
+                // with E1; required once the WP-4 pin carries them.
+                "salesTaxEnabled",
+                "salesTaxBasis",
+                "defaultSalesTaxId",
+                "salesTaxSsuta",
             ],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],

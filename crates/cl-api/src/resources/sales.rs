@@ -2,14 +2,14 @@
 //! (open invoices and unpaid bills as of the start date, Q-45) and the
 //! invoice line and body P20 Create Invoice sends (`resources::invoices`).
 //!
-//! Money fields are exact (`Money`, `Quantity`, `Rate`) and travel as
+//! Money fields are exact (`Money`, `Quantity`, `TaxRate`) and travel as
 //! strings; the engine computes every line amount, the tax and the totals
 //! (U-122, Q-P20n). Nothing here adds up an invoice.
 
 use std::fmt;
 
 use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId};
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -18,6 +18,7 @@ use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::invoices::{InvoiceLayoutId, SignedPercent};
 use crate::resources::operations::{BILLS_CREATE, INVOICES_CREATE};
+use crate::resources::sales_tax::{SalesTaxItemId, TaxCodeId};
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Session, decode, json_body};
 
@@ -53,7 +54,7 @@ pub struct InvoiceLine {
     /// Taxable; `None` takes the item's flag (false without an item).
     pub is_taxable: Option<bool>,
     /// The line's own tax rate; the desktop app sends `None`.
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// Line tag.
     pub tag_id: Option<TagId>,
     /// The billable cost this line invoices (U-128, `billable-costs-v1`):
@@ -62,6 +63,10 @@ pub struct InvoiceLine {
     pub billable_source_line_id: Option<JournalLineId>,
     /// Markup on that cost in percent (U-128; needs the source line).
     pub markup_percent: Option<SignedPercent>,
+    /// The line's tax code (`sales-tax-setup-v1`, U-25); `None` lets the
+    /// engine choose (the client's non-taxable code, else the item's, else
+    /// the taxable flag; Q-P23k).
+    pub tax_code_id: Option<TaxCodeId>,
 }
 
 impl InvoiceLine {
@@ -109,6 +114,7 @@ impl InvoiceLine {
             tag_id: None,
             billable_source_line_id: None,
             markup_percent: None,
+            tax_code_id: None,
         }
     }
 }
@@ -123,6 +129,7 @@ impl fmt::Debug for InvoiceLine {
             .field("is_taxable", &self.is_taxable)
             .field("tag_id", &self.tag_id)
             .field("billable_source_line_id", &self.billable_source_line_id)
+            .field("tax_code_id", &self.tax_code_id)
             .finish_non_exhaustive()
     }
 }
@@ -165,6 +172,9 @@ impl Serialize for InvoiceLine {
         }
         if let Some(p) = &self.markup_percent {
             m.serialize_entry("markupPercent", &p.to_wire())?;
+        }
+        if let Some(t) = &self.tax_code_id {
+            m.serialize_entry("taxCodeId", t)?;
         }
         m.end()
     }
@@ -228,6 +238,13 @@ pub struct NewInvoice {
     /// `BILLABLE_LINES_MISSING`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub release_billable_source_line_ids: Vec<JournalLineId>,
+    /// The document's sales tax item or group (`sales-tax-setup-v1`);
+    /// `None`: the client's default, else the company's (Q-P23d).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sales_tax_id: Option<SalesTaxItemId>,
+    /// An edit takes today's rates instead of the saved ones (Q-P23i).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub use_current_rates: bool,
 }
 
 /// An invoice's `layoutId` on a save (U-130).
@@ -290,6 +307,8 @@ impl NewInvoice {
             print_later: None,
             layout_id: LayoutChoice::Omitted,
             release_billable_source_line_ids: Vec::new(),
+            sales_tax_id: None,
+            use_current_rates: false,
         }
     }
 }
@@ -305,6 +324,8 @@ impl fmt::Debug for NewInvoice {
             .field("terms_days", &self.terms_days)
             .field("lines", &self.lines.len())
             .field("warn_only", &self.warn_only)
+            .field("sales_tax_id", &self.sales_tax_id)
+            .field("use_current_rates", &self.use_current_rates)
             .finish_non_exhaustive()
     }
 }

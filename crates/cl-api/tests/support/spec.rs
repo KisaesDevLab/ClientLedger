@@ -40,6 +40,9 @@ use sha2::{Digest, Sha256};
 /// and runs, and finance charges (U-137 to U-143, U-112).
 /// Since pin 9fe75899 (engine PRs #214, #215) credit memo and sales receipt
 /// email and email-later are (U-144).
+/// Since pin 9be6da51 (engine PRs #216-#221) the P23 sales tax routes are:
+/// setup, owed, exemptions, Pay Sales Tax, link and unlink, mark paid
+/// through and its undo, and bad-debt recoveries (U-147 to U-154).
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

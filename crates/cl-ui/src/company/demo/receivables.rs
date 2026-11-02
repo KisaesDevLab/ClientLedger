@@ -130,6 +130,10 @@ struct Pay {
     write_off_account: Option<AccountId>,
     bounce: Option<(TransactionId, CalendarDate)>,
     refunded: Decimal,
+    /// The Streamlined Sales Tax switch when it was posted (Q-P23w: the
+    /// switch applies to postings made while it is on; an edit posts
+    /// again).
+    ssuta: bool,
 }
 
 /// Customer payments, settings and history of the demo engine.
@@ -1051,6 +1055,14 @@ pub fn preview(
     let threshold = state.receivables.settings.write_off_threshold;
     for row in &c.rows {
         let remaining = row.balance - row.settled();
+        // SSUTA (U-153): the tax parts of this row's discount and write-off.
+        let tax_parts = super::sales_tax_owed::preview_tax_parts(
+            state,
+            row.inv.id,
+            row.cash,
+            row.discount,
+            row.write_off,
+        );
         invoices.push(PreviewInvoice {
             invoice_id: row.inv.id,
             invoice_number: row.inv.number.clone(),
@@ -1068,6 +1080,8 @@ pub fn preview(
             discount_date: row.pct.map(|(_, d)| d),
             discount_available: money(row.available)?,
             suggest_discount: row.suggest,
+            discount_tax: tax_parts.map(|(d, _)| money(d)).transpose()?,
+            write_off_tax: tax_parts.map(|(_, w)| money(w)).transpose()?,
         });
         if row.settled() > Decimal::ZERO && remaining > Decimal::ZERO {
             let amount = money(remaining)?;
@@ -1147,6 +1161,15 @@ pub fn preview(
             amount: money(*x)?,
         });
     }
+    // The engine twin's totals of the rows' SSUTA tax parts (U-153).
+    let ssuta = state.sales_tax.ssuta;
+    let sum = |f: fn(&PreviewInvoice) -> Option<Money>| -> Result<Option<Money>, ApiError> {
+        if !ssuta {
+            return Ok(None);
+        }
+        money(invoices.iter().filter_map(f).map(Money::as_decimal).sum()).map(Some)
+    };
+    let (discount_tax, write_off_tax) = (sum(|i| i.discount_tax)?, sum(|i| i.write_off_tax)?);
     Ok(PaymentPreview {
         contact_balance_before: money(before)?,
         contact_balance_after: money(after)?,
@@ -1159,6 +1182,8 @@ pub fn preview(
             discounts_and_credits: money(discounts + credit_total)?,
             unapplied: money(unapplied)?,
             write_offs: money(write_offs)?,
+            discount_tax,
+            write_off_tax,
         },
         shortfalls,
         overpayment: (unapplied > Decimal::ZERO && !r.hold_as_deposit)
@@ -1171,6 +1196,7 @@ pub fn preview(
         pending_deposits: Some(PendingAfter { count, total }),
         average_days_to_pay: average_days(state, r.customer_id),
         problems,
+        sales_tax_ssuta: Some(ssuta),
     })
 }
 
@@ -1468,6 +1494,7 @@ fn receive_inner(
             write_off_account,
             bounce: None,
             refunded: Decimal::ZERO,
+            ssuta: state.sales_tax.ssuta,
         },
     );
     // Credits and deposits used inside this receipt.
@@ -1546,6 +1573,7 @@ fn use_credit(
                 write_off_account: None,
                 bounce: None,
                 refunded: Decimal::ZERO,
+                ssuta: state.sales_tax.ssuta,
             },
         );
     } else if let Some(p) = state.receivables.pays.get_mut(&source) {
@@ -1941,6 +1969,14 @@ pub fn bounce(
     if !p.refunded.is_zero() {
         return Err(conflict("PAYMENT_REFUNDED"));
     }
+    // P23 (U-154): a write-off part of which was recovered stays.
+    if p.apps.iter().any(|a| {
+        a.live()
+            && a.write_off > Decimal::ZERO
+            && super::sales_tax_owed::recovered_on(state, a.invoice)
+    }) {
+        return Err(conflict("WRITE_OFF_RECOVERED"));
+    }
     let deposit = deposit_of(state, &p);
     if r.date < p.date || deposit.is_some_and(|(_, d)| r.date < d) {
         return Err(refused("BOUNCE_DATE_INVALID"));
@@ -2132,6 +2168,10 @@ pub(super) struct PayAppView {
     pub settled: Decimal,
     /// Discount + write-off.
     pub adjustments: Decimal,
+    /// The early-payment discount (P23 SSUTA shares).
+    pub discount: Decimal,
+    /// The write-off (P23 SSUTA shares).
+    pub write_off: Decimal,
     pub applied: CalendarDate,
     pub later: bool,
     pub voided: bool,
@@ -2152,6 +2192,8 @@ pub(super) struct PayView {
     pub credit_remaining: Decimal,
     pub ref_no: Option<String>,
     pub apps: Vec<PayAppView>,
+    /// The Streamlined Sales Tax switch when it was posted.
+    pub ssuta: bool,
 }
 
 /// Every customer payment the demo engine keeps.
@@ -2171,6 +2213,7 @@ pub(super) fn pay_views(state: &DemoState) -> Vec<PayView> {
             refunded: p.refunded,
             credit_remaining: credit_remaining(p),
             ref_no: p.ref_no.clone(),
+            ssuta: p.ssuta,
             apps: p
                 .apps
                 .iter()
@@ -2178,6 +2221,8 @@ pub(super) fn pay_views(state: &DemoState) -> Vec<PayView> {
                     invoice: a.invoice,
                     settled: a.settled(),
                     adjustments: a.discount + a.write_off,
+                    discount: a.discount,
+                    write_off: a.write_off,
                     applied: a.applied,
                     later: a.later,
                     voided: a.voided,

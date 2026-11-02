@@ -15,7 +15,8 @@ use cl_api::{
     Session, SignedPercent,
 };
 use cl_model::forms::invoice::{
-    InvoiceRequest, LayoutPick, PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
+    DocTaxFigure, DocTaxMemberFigure, InvoiceRequest, LayoutPick, LineCodeFigure, PreviewFigures,
+    PreviewLineFigures, PreviewTotals, RateSource,
 };
 
 use crate::company::demo::DemoState;
@@ -143,9 +144,12 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
             tag_id: l.tag,
             billable_source_line_id: l.billable_source_line,
             markup_percent: markup,
+            tax_code_id: l.tax_code,
         });
     }
     let mut n = NewInvoice::new(r.client, r.date, lines);
+    n.sales_tax_id = r.sales_tax;
+    n.use_current_rates = r.use_current_rates;
     n.due_date = r.due_date;
     n.payment_terms.clone_from(&r.terms);
     n.terms_days = r.terms_days.map(u32::from);
@@ -182,6 +186,8 @@ pub(crate) fn new_credit_memo(r: &InvoiceRequest) -> Result<cl_api::NewCreditMem
     m.layout_id = inv.layout_id;
     m.txn_number = inv.txn_number;
     m.print_later = inv.print_later;
+    m.sales_tax_id = inv.sales_tax_id;
+    m.use_current_rates = inv.use_current_rates;
     Ok(m)
 }
 
@@ -216,6 +222,8 @@ pub(crate) fn new_sales_receipt(r: &InvoiceRequest) -> Result<cl_api::NewSalesRe
     s.layout_id = inv.layout_id;
     s.txn_number = inv.txn_number;
     s.print_later = inv.print_later;
+    s.sales_tax_id = inv.sales_tax_id;
+    s.use_current_rates = inv.use_current_rates;
     Ok(s)
 }
 
@@ -283,6 +291,11 @@ pub(crate) fn figures_of(p: &InvoicePreview) -> PreviewFigures {
                 tax_amount: l.tax_amount,
                 display_rate: l.display_rate,
                 billed_elsewhere: l.error.is_some(),
+                tax_code: l.tax_code.as_ref().map(|c| LineCodeFigure {
+                    id: c.id,
+                    code: c.code.clone(),
+                    taxable: c.taxable,
+                }),
             })
             .collect(),
         billed_on: p
@@ -295,6 +308,20 @@ pub(crate) fn figures_of(p: &InvoicePreview) -> PreviewFigures {
             subtotal: p.subtotal,
             tax_total: p.tax_total,
             tax_rate: p.tax_rate,
+            sales_tax: p.sales_tax.as_ref().map(|s| DocTaxFigure {
+                id: s.id,
+                name: s.name.clone(),
+                rate: s.rate,
+                members: s
+                    .members
+                    .iter()
+                    .map(|m| DocTaxMemberFigure {
+                        name: m.name.clone(),
+                        rate: m.rate,
+                        tax: m.tax,
+                    })
+                    .collect(),
+            }),
             total: p.total,
             due_date: p.due_date,
             balance_after: p.contact_balance_after,
@@ -350,7 +377,10 @@ mod tests {
                 tag: None,
                 billable_source_line: None,
                 markup_percent: Some(Quantity::parse_wire("10").expect("q")),
+                tax_code: None,
             }],
+            sales_tax: None,
+            use_current_rates: false,
         };
         let n = new_invoice(&r).expect("maps");
         assert_eq!(n.terms_days, Some(12));

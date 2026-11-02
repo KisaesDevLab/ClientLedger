@@ -96,6 +96,13 @@ pub struct NewSalesReceipt {
     /// Waiting to be printed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_later: Option<bool>,
+    /// The document's sales tax item or group (`sales-tax-setup-v1`;
+    /// `None`: the client's default, else the company's; Q-P23d).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sales_tax_id: Option<crate::resources::sales_tax::SalesTaxItemId>,
+    /// An edit takes today's rates instead of the saved ones (Q-P23i).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub use_current_rates: bool,
 }
 
 impl NewSalesReceipt {
@@ -117,6 +124,8 @@ impl NewSalesReceipt {
             txn_number: None,
             warn_only: false,
             print_later: None,
+            sales_tax_id: None,
+            use_current_rates: false,
         }
     }
 }
@@ -219,6 +228,9 @@ pub struct SalesReceiptRecord {
     /// The printed message (owner data).
     #[serde(default)]
     pub customer_message: Option<String>,
+    /// The document's sales tax with its rate as saved (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub sales_tax: Option<crate::resources::sales_tax::DocSalesTax>,
     /// The version to send back as `expectedUpdatedAt`.
     pub updated_at: Timestamp,
     /// Posted or void.

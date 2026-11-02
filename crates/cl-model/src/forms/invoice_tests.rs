@@ -37,6 +37,7 @@ const ALL: InvoiceCaps = InvoiceCaps {
     pricing: true,
     billable: true,
     closing: true,
+    sales_tax: true,
 };
 
 fn ctx() -> InvoiceContext {
@@ -313,12 +314,14 @@ fn figures(n: usize, total: &str) -> PreviewFigures {
                 tax_amount: Some(m("63.18")),
                 display_rate: None,
                 billed_elsewhere: false,
+                tax_code: None,
             })
             .collect(),
         totals: PreviewTotals {
             subtotal: m("1950.00"),
             tax_total: m("63.18"),
-            tax_rate: Some(Rate::parse_wire("0.081").expect("rate")),
+            tax_rate: Some(cl_core::TaxRate::parse_wire("0.081").expect("rate")),
+            sales_tax: None,
             total: m(total),
             due_date: Some(day(18)),
             balance_after: Some(m("3013.18")),
@@ -531,4 +534,86 @@ fn an_invoice_keeps_its_p20_request_and_sends_no_payment_fields() {
         InvoiceForm::new_kind(SalesDocKind::CreditMemo, Some(day(2)), &mut keys).kind,
         SalesDocKind::CreditMemo
     );
+}
+
+// ---- P23: the document's sales tax and line tax codes ----------------------------
+
+fn sales_tax() -> SalesTaxItemId {
+    SalesTaxItemId::parse("7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("sales tax")
+}
+
+fn resale() -> TaxCodeId {
+    TaxCodeId::parse("8c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("code")
+}
+
+#[test]
+fn sales_tax_and_codes_are_sent_only_with_the_capability() {
+    let mut keys = RowKeyGen::new();
+    let mut f = form(&mut keys);
+    f.sales_tax = Some(sales_tax());
+    f.use_current_rates = true;
+    let k = f.lines[0].key;
+    f.line_mut(k).expect("line").tax_code = Some(resale());
+    let r = f.to_new_invoice(&ctx()).expect("ok");
+    assert_eq!(r.sales_tax, Some(sales_tax()));
+    assert!(r.use_current_rates);
+    assert_eq!(r.lines[0].tax_code, Some(resale()));
+    assert_eq!(r.lines[1].tax_code, None);
+    // The preview carries both (the engine prices them).
+    let p = f.preview_request(ALL).expect("preview");
+    assert_eq!(p.sales_tax, Some(sales_tax()));
+    assert_eq!(p.lines[0].tax_code, Some(resale()));
+    // An engine without sales-tax-setup-v1 gets neither.
+    let old = InvoiceContext {
+        caps: InvoiceCaps {
+            sales_tax: false,
+            ..ALL
+        },
+        ..InvoiceContext::default()
+    };
+    let r = f.to_new_invoice(&old).expect("ok");
+    assert_eq!(r.sales_tax, None);
+    assert!(!r.use_current_rates);
+    assert_eq!(r.lines[0].tax_code, None);
+}
+
+#[test]
+fn a_line_with_only_a_tax_code_is_not_blank() {
+    let mut keys = RowKeyGen::new();
+    let mut l = InvoiceLine::blank(keys.next_key());
+    assert!(l.is_blank());
+    l.tax_code = Some(resale());
+    assert!(!l.is_blank());
+    assert!(format!("{l:?}").contains("tax_code"));
+}
+
+#[test]
+fn tax_notices_map_their_codes_and_never_block_save() {
+    for (code, n) in [
+        ("RATE_CHANGED", TaxNotice::RateChanged),
+        ("EXEMPTION_MISSING", TaxNotice::ExemptionMissing),
+        ("EXEMPTION_EXPIRED", TaxNotice::ExemptionExpired),
+        ("EXEMPTION_EXPIRING", TaxNotice::ExemptionExpiring),
+    ] {
+        assert_eq!(TaxNotice::from_code(code), Some(n));
+        assert!(n.key().0.starts_with("invoice.tax."));
+        assert_eq!(InvoiceProblem::from_preview_code(code), None);
+    }
+    assert_eq!(TaxNotice::from_code("NEGATIVE_RECEIPT_NEEDS_BANK"), None);
+}
+
+#[test]
+fn the_document_tax_figure_hides_names_in_debug() {
+    let d = DocTaxFigure {
+        id: sales_tax(),
+        name: "Monett".into(),
+        rate: TaxRate::parse_wire("0.081000").expect("rate"),
+        members: vec![DocTaxMemberFigure {
+            name: "State".into(),
+            rate: TaxRate::parse_wire("0.042250").expect("rate"),
+            tax: Some(m("0.26")),
+        }],
+    };
+    let s = format!("{d:?} {:?}", d.members[0]);
+    assert!(!s.contains("Monett") && !s.contains("State") && !s.contains("0.26"));
 }

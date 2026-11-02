@@ -1,0 +1,21 @@
+# The engine's `idempotency-sales-tax-v1` route set (U-147, U-151, P23 plan §2.0): the sales tax setup writes and exemption certificates,
+# `x-idempotency: true` in its openapi.json; in the spec since pin 9be6da51
+# (engine PRs #216-#221). Append-only for this capability name: `keyable-sales-tax` in operations.txt
+# (`KeySet::SalesTaxSetupV1`), keyed only while the engine advertises
+# `idempotency-sales-tax-v1`.
+POST /api/v1/sales-tax/agencies
+PUT /api/v1/sales-tax/agencies/{id}
+POST /api/v1/sales-tax/agencies/{id}/deactivate
+POST /api/v1/sales-tax/agencies/{id}/reactivate
+POST /api/v1/sales-tax/codes
+PUT /api/v1/sales-tax/codes/{id}
+POST /api/v1/sales-tax/codes/{id}/deactivate
+POST /api/v1/sales-tax/codes/{id}/reactivate
+POST /api/v1/sales-tax/exemptions
+PUT /api/v1/sales-tax/exemptions/{id}
+POST /api/v1/sales-tax/exemptions/{id}/deactivate
+POST /api/v1/sales-tax/exemptions/{id}/reactivate
+POST /api/v1/sales-tax/items
+PUT /api/v1/sales-tax/items/{id}
+POST /api/v1/sales-tax/items/{id}/deactivate
+POST /api/v1/sales-tax/items/{id}/reactivate

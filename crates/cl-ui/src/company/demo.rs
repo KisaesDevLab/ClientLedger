@@ -33,6 +33,10 @@ pub mod receivables;
 pub mod credit_memos;
 pub mod finance_charges;
 pub mod register;
+// P23: sales tax setup, document tax and the stored tax rows.
+pub mod sales_tax;
+// P23 WP-3: owed, Pay Sales Tax, exemption certificates, recoveries.
+pub mod sales_tax_owed;
 pub mod statements;
 pub mod template_store;
 pub mod templates;
@@ -149,6 +153,8 @@ pub struct DemoState {
     pub statements: statements::DemoStatements,
     /// Finance-charge settings and assessments (P22).
     pub finance: finance_charges::DemoFinance,
+    /// Sales tax setup, switches and stored tax rows (P23).
+    pub sales_tax: sales_tax::DemoSalesTax,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -271,6 +277,7 @@ impl DemoState {
             credits: credit_memos::DemoCredits::default(),
             statements: statements::DemoStatements::default(),
             finance: finance_charges::DemoFinance::default(),
+            sales_tax: sales_tax::DemoSalesTax::default(),
         }
     }
 
@@ -402,6 +409,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
             named(&accounts, 6050, "Bank and Merchant Fees"),
             named(&accounts, 6960, "Bad Debts"),
         ],
+        sales_taxes: Vec::new(),
         done: true,
     }
 }

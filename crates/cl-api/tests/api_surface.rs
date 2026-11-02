@@ -155,6 +155,7 @@ fn every_request_type_omits_both_keys() {
         is_taxable: true,
         item_type: cl_api::ItemType::Service,
         discount_percent: None,
+        tax_code_id: None,
     };
     assert_clean("ItemFields", &item);
     assert_clean(

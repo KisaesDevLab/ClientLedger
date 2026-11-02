@@ -1,0 +1,90 @@
+# Sales Tax Setup (P23 WP-2, Lists › Sales Tax Setup) against
+# `clientledger --demo`: the seeded taxes and the Monett group, a new tax
+# saved with its agency, a group, the duplicate-name refusal, the agencies
+# and tax codes tabs (Tax and Non built in), and deactivate (never
+# delete). Synthetic.
+name: sales_tax_setup
+description: "Sales tax setup: taxes, groups, agencies, codes; deactivate, never delete."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.sales_tax
+  - assert_state: {key: screen.screen, equals: sales_tax_setup}
+  - assert_state: {key: screen.available, equals: true}
+  # Light and dark run in one app: start from the seed each time.
+  - command: dev.demo_sales_tax_reset
+  - assert_state: {key: screen.items, equals: 4}
+  - assert_state: {key: screen.groups, equals: 1}
+  - assert_exists: {role: link, label: Monett}
+  - assert_exists: {role: label, label: "8.100%"}
+  - assert_exists: {role: label, label: "8.875%"}
+  - screenshot: taxes
+  - assert_no_clipping: {}
+  # A new tax: the agency is required, then it saves.
+  - click: {role: button, label: New tax}
+  - assert_state: {key: screen.editing.kind, equals: item}
+  - click: {role: text_input, label: Name}
+  - type: {text: "Branson"}
+  - click: {role: text_input, label: "Rate (%)"}
+  - type: {text: "7.25"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: "sales_tax.problem.agency_required"}
+  - click: {role: combo_box, label: Paid to agency}
+  - click: {role: button, label: "Sample State Revenue Dept."}
+  - screenshot: tax-editor
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: null}
+  - assert_state: {key: screen.items, equals: 5}
+  - assert_exists: {role: label, label: "7.250%"}
+  # The same name again is refused.
+  - command: list.new
+  - click: {role: text_input, label: Name}
+  - type: {text: "branson"}
+  - click: {role: text_input, label: "Rate (%)"}
+  - type: {text: "1"}
+  - click: {role: combo_box, label: Paid to agency}
+  - click: {role: button, label: "Sample State Revenue Dept."}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problem, equals: "sales_tax.refusal.name_in_use"}
+  - click: {role: button, label: Cancel}
+  # A group of one tax.
+  - click: {role: button, label: New group}
+  - click: {role: text_input, label: Name}
+  - type: {text: "Taney County"}
+  - click: {role: check_box, label: Branson}
+  - assert_state: {key: screen.editing.members, equals: 1}
+  - screenshot: group-editor
+  - assert_no_clipping: {}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.groups, equals: 2}
+  # Branson is in a group now: it stays active.
+  - click: {role: link, label: Branson}
+  - click: {role: button, label: Make inactive}
+  - assert_state: {key: screen.problem, equals: "sales_tax.refusal.item_in_group"}
+  - click: {role: button, label: Cancel}
+  # Agencies.
+  - click: {role: button, label: Agencies}
+  - assert_state: {key: screen.tab, equals: agencies}
+  - assert_state: {key: screen.agencies, equals: 2}
+  - screenshot: agencies
+  # Tax codes: a new one, then deactivated and listed with the inactive.
+  - click: {role: button, label: Tax codes}
+  - assert_state: {key: screen.codes, equals: 3}
+  - click: {role: link, label: Tax}
+  - assert_state: {key: screen.editing.system, equals: true}
+  - click: {role: button, label: Cancel}
+  - click: {role: button, label: New code}
+  - click: {role: text_input, label: Code}
+  - type: {text: "Out"}
+  - click: {role: text_input, label: Description}
+  - type: {text: "Out of state"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.codes, equals: 4}
+  - screenshot: codes
+  - click: {role: link, label: Out}
+  - click: {role: button, label: Make inactive}
+  - assert_state: {key: screen.codes, equals: 3}
+  - click: {role: check_box, label: Include inactive}
+  - assert_state: {key: screen.codes, equals: 4}
+  - command: dev.demo_sales_tax_reset
+  - command: file.close_window

@@ -5,7 +5,7 @@
 //! (P13/P19), finance charges (P22), 1099 box mapping (P11/P28).
 
 use cl_api::{AccountingMethod, CompanySettings, CompanySettingsUpdate};
-use cl_core::{Rate, UserInput};
+use cl_core::{TaxRate, UserInput};
 use eframe::egui::{self, Ui};
 
 use super::{Edits, Loaded, SaveBlock};
@@ -44,6 +44,138 @@ pub struct AccountingEdits {
     pub receivables: ReceivablesEdits,
     /// Finance charges (P22, Q-P22a): written by their own call.
     pub finance: FinanceChargeEdits,
+    /// Sales tax (P23): written by their own call.
+    pub sales_tax: SalesTaxEdits,
+}
+
+/// Preferences › Sales tax (P23, `company-sales-tax-flags-v1`): the basis
+/// (Q-P23a), the company default and the Streamlined Sales Tax switch
+/// (Q-P23m, Q-SPF6; forward only, Q-P23w). "Charge sales tax" stays the
+/// local flag and is pushed to the engine when it differs (S6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SalesTaxEdits {
+    /// Accrual or cash.
+    pub basis: cl_api::SalesTaxBasis,
+    /// The company default.
+    pub default_id: Option<cl_core::ids::SalesTaxItemId>,
+    /// Streamlined Sales Tax rules.
+    pub ssuta: bool,
+    /// The engine's salesTaxEnabled (None before P23).
+    pub engine_enabled: Option<bool>,
+}
+
+impl SalesTaxEdits {
+    /// From the engine's settings.
+    #[must_use]
+    pub fn from_settings(s: Option<&CompanySettings>) -> SalesTaxEdits {
+        let Some(s) = s else {
+            return SalesTaxEdits::default();
+        };
+        SalesTaxEdits {
+            basis: s.sales_tax_basis.unwrap_or_default(),
+            default_id: s.default_sales_tax_id,
+            ssuta: s.sales_tax_ssuta.unwrap_or(false),
+            engine_enabled: s.sales_tax_enabled,
+        }
+    }
+
+    /// The write for what changed (`None` when nothing did). `enabled` is
+    /// the local "Charge sales tax" flag: sent when the engine's differs.
+    #[must_use]
+    pub fn update_for(
+        &self,
+        loaded: Option<&CompanySettings>,
+        enabled: bool,
+    ) -> Option<cl_api::SalesTaxSettingsUpdate> {
+        let before = SalesTaxEdits::from_settings(loaded);
+        let u = cl_api::SalesTaxSettingsUpdate {
+            enabled: (before.engine_enabled.is_some_and(|e| e != enabled)).then_some(enabled),
+            basis: (self.basis != before.basis).then_some(self.basis),
+            default_sales_tax_id: (self.default_id != before.default_id).then_some(self.default_id),
+            ssuta: (self.ssuta != before.ssuta).then_some(self.ssuta),
+        };
+        (!u.is_empty()).then_some(u)
+    }
+}
+
+/// The default picker's choices: active taxes and groups with their rates.
+#[must_use]
+pub fn sales_tax_choices(
+    items: &[cl_api::SalesTaxItem],
+) -> Vec<(cl_core::ids::SalesTaxItemId, String)> {
+    items
+        .iter()
+        .filter(|i| i.is_active)
+        .map(|i| (i.id, format!("{} ({})", i.name, i.rate.format_percent())))
+        .collect()
+}
+
+/// Preferences › Sales tax with the engine's sales tax settings (P23):
+/// on/off, basis with its help text, the default tax, the Streamlined
+/// Sales Tax switch with its tooltip and hint (Q-P23aa), the 6-place rate
+/// note and a link to Sales Tax Setup. Returns true when the link was
+/// clicked.
+pub fn sales_tax_engine(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    choices: &[(cl_core::ids::SalesTaxItemId, String)],
+) -> bool {
+    form::heading(ui, tokens, &t("prefs.sales_tax.title"));
+    ui.add_space(8.0);
+    let mut open = false;
+    form::card(ui, tokens, |ui| {
+        ui.checkbox(
+            &mut edits.flags.sales_tax_enabled,
+            t("prefs.sales_tax.enabled"),
+        );
+        ui.add_enabled_ui(edits.flags.sales_tax_enabled, |ui| {
+            let st = &mut edits.accounting.sales_tax;
+            ui.label(t("prefs.sales_tax.basis"));
+            ui.radio_value(
+                &mut st.basis,
+                cl_api::SalesTaxBasis::Accrual,
+                t("prefs.sales_tax.basis.accrual"),
+            );
+            ui.radio_value(
+                &mut st.basis,
+                cl_api::SalesTaxBasis::Cash,
+                t("prefs.sales_tax.basis.cash"),
+            );
+            form::hint(ui, tokens, &t("prefs.sales_tax.basis_help"));
+            ui.add_space(6.0);
+            let shown = st
+                .default_id
+                .and_then(|id| choices.iter().find(|(x, _)| *x == id))
+                .map_or_else(|| t("prefs.sales_tax.default_none"), |(_, n)| n.clone());
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("prefs.sales_tax.default")).selectable(false));
+                egui::ComboBox::from_id_salt("prefs-default-sales-tax")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut st.default_id,
+                            None,
+                            t("prefs.sales_tax.default_none"),
+                        );
+                        for (id, n) in choices {
+                            ui.selectable_value(&mut st.default_id, Some(*id), n);
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+            });
+            ui.add_space(6.0);
+            ui.checkbox(&mut st.ssuta, t("prefs.sales_tax.ssuta"))
+                .on_hover_text(t("prefs.sales_tax.ssuta_tip"));
+            form::hint(ui, tokens, &t("prefs.sales_tax.ssuta_hint"));
+            form::hint(ui, tokens, &t("prefs.sales_tax.rates_note"));
+        });
+        if ui.link(t("prefs.sales_tax.setup")).clicked() {
+            open = true;
+        }
+    });
+    open
 }
 
 /// Preferences › Sales for Receive Payment (P21, Q-P21q): engine company
@@ -309,38 +441,28 @@ impl Default for AccountingEdits {
             markup_account: None,
             receivables: ReceivablesEdits::default(),
             finance: FinanceChargeEdits::default(),
+            sales_tax: SalesTaxEdits::default(),
         }
     }
 }
 
 /// `0.0825` → `8.25` (exact; trailing zeros trimmed).
 #[must_use]
-pub fn rate_to_percent(rate: Rate) -> String {
-    let units = rate.to_ten_thousandths() * 100; // percent in ten-thousandths
-    let whole = units / 10_000;
-    let frac = (units % 10_000).unsigned_abs();
-    let mut s = format!("{whole}.{frac:04}");
-    while s.ends_with('0') {
-        s.pop();
-    }
-    if s.ends_with('.') {
-        s.pop();
-    }
-    s
+pub fn rate_to_percent(rate: TaxRate) -> String {
+    rate.percent_input()
 }
 
-/// `8.25` (percent, up to two decimals) → `0.0825`.
+/// `8.25` (percent, up to two decimals: the legacy default rate is still
+/// `decimal(5,4)` until U-148) → `0.0825`.
 ///
 /// # Errors
 /// `BadRate` for anything else.
-pub fn percent_to_rate(text: &str) -> Result<Rate, SaveBlock> {
-    let t = text.trim().trim_end_matches('%').trim();
-    let percent = Rate::parse_user(t, UserInput::CENTS).map_err(|_| SaveBlock::BadRate)?;
-    let units = percent.to_ten_thousandths();
-    if units < 0 || units % 100 != 0 {
+pub fn percent_to_rate(text: &str) -> Result<TaxRate, SaveBlock> {
+    let r = TaxRate::parse_percent(text).map_err(|_| SaveBlock::BadRate)?;
+    if r.to_millionths() % 100 != 0 {
         return Err(SaveBlock::BadRate);
     }
-    Rate::from_ten_thousandths(units / 100).map_err(|_| SaveBlock::BadRate)
+    Ok(r)
 }
 
 impl AccountingEdits {
@@ -365,6 +487,7 @@ impl AccountingEdits {
             markup_account: s.billable_markup_account_id,
             receivables: ReceivablesEdits::from_settings(Some(s)),
             finance: FinanceChargeEdits::from_settings(Some(s)),
+            sales_tax: SalesTaxEdits::from_settings(Some(s)),
         }
     }
 
@@ -391,13 +514,14 @@ impl AccountingEdits {
             markup_account: before.markup_account,
             receivables: before.receivables.clone(),
             finance: before.finance.clone(),
+            sales_tax: before.sales_tax.clone(),
             ..self.clone()
         };
         if same == before {
             return None;
         }
         let rate = if self.tax_percent.trim().is_empty() {
-            Some(Rate::ZERO)
+            Some(TaxRate::ZERO)
         } else {
             percent_to_rate(&self.tax_percent).ok()
         };
@@ -641,12 +765,15 @@ mod tests {
         assert_eq!(r.to_wire(), "0.0825");
         assert_eq!(rate_to_percent(r), "8.25");
         assert_eq!(percent_to_rate(" 7 % ").expect("rate").to_wire(), "0.0700");
-        assert_eq!(rate_to_percent(Rate::parse_wire("0.0700").expect("r")), "7");
         assert_eq!(
-            rate_to_percent(Rate::parse_wire("0.1000").expect("r")),
+            rate_to_percent(TaxRate::parse_wire("0.0700").expect("r")),
+            "7"
+        );
+        assert_eq!(
+            rate_to_percent(TaxRate::parse_wire("0.1000").expect("r")),
             "10"
         );
-        assert_eq!(rate_to_percent(Rate::ZERO), "0");
+        assert_eq!(rate_to_percent(TaxRate::ZERO), "0");
         for bad in ["8.255", "-1", "abc", "8,25"] {
             assert_eq!(percent_to_rate(bad), Err(SaveBlock::BadRate), "{bad}");
         }
@@ -657,7 +784,7 @@ mod tests {
         let s = CompanySettings {
             fiscal_year_start_month: Some(7),
             accounting_method: Some("cash".into()),
-            default_sales_tax_rate: Some(Rate::parse_wire("0.0825").expect("r")),
+            default_sales_tax_rate: Some(TaxRate::parse_wire("0.0825").expect("r")),
             ..serde_json::from_str("{}").expect("empty settings")
         };
         let e = AccountingEdits::from_settings(Some(&s));
@@ -668,7 +795,7 @@ mod tests {
         let mut changed = e.clone();
         changed.tax_percent = String::new();
         let u = changed.update_for(Some(&s)).expect("update");
-        assert_eq!(u.default_sales_tax_rate, Some(Rate::ZERO));
+        assert_eq!(u.default_sales_tax_rate, Some(TaxRate::ZERO));
         assert_eq!(u.accounting_method, Some(AccountingMethod::Cash));
         assert_eq!(
             AccountingEdits::from_settings(None),

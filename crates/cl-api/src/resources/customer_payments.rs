@@ -213,6 +213,9 @@ pub enum PaymentRefusal {
     /// A credit's date moved after it was used (400
     /// `SOURCE_DATE_AFTER_USE`, P22 §2.0).
     SourceDateAfterUse,
+    /// A bounce of a payment whose write-off was partly recovered (409
+    /// `WRITE_OFF_RECOVERED`, P23 U-154, Q-P23x): void the recovery first.
+    WriteOffRecovered,
 }
 
 const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
@@ -286,6 +289,7 @@ const REFUSAL_CODES: &[(&str, PaymentRefusal)] = &[
         PaymentRefusal::ApplyDateBeforeSource,
     ),
     ("SOURCE_DATE_AFTER_USE", PaymentRefusal::SourceDateAfterUse),
+    ("WRITE_OFF_RECOVERED", PaymentRefusal::WriteOffRecovered),
 ];
 
 /// Every engine code [`payment_refusal`] knows (tests and the demo).
@@ -413,6 +417,14 @@ pub struct PreviewInvoice {
     /// the balance less the discount, within the window.
     #[serde(default, deserialize_with = "null_false")]
     pub suggest_discount: bool,
+    /// The sales tax part of the discount (SSUTA, U-153; `None` from engines
+    /// without `sales-tax-ssuta-v1` or with the switch off). Shown as
+    /// "includes 0.71 sales tax"; never computed here.
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub discount_tax: Option<Money>,
+    /// The sales tax part of the write-off (SSUTA bad debt, U-153).
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub write_off_tax: Option<Money>,
 }
 ids_debug!(
     PreviewInvoice,
@@ -442,6 +454,12 @@ pub struct PaymentTotals {
     /// Amounts written off (U-133).
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub write_offs: Money,
+    /// The sales tax part of the discounts (SSUTA, engine PR #221).
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub discount_tax: Option<Money>,
+    /// The sales tax part of the write-offs.
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub write_off_tax: Option<Money>,
 }
 impl fmt::Debug for PaymentTotals {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -591,6 +609,10 @@ pub struct PaymentPreview {
     /// paid invoices).
     #[serde(default)]
     pub average_days_to_pay: Option<u32>,
+    /// The company follows Streamlined Sales Tax rules (engine PR #221;
+    /// `None` from older engines): the tax hints show only when true.
+    #[serde(default)]
+    pub sales_tax_ssuta: Option<bool>,
     /// Problems.
     #[serde(default, deserialize_with = "null_vec")]
     pub problems: Vec<PreviewProblem>,

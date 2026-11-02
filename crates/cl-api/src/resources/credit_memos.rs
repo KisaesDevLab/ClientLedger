@@ -241,6 +241,9 @@ pub struct SalesDocLine {
     /// The line tag.
     #[serde(default)]
     pub tag_id: Option<TagId>,
+    /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub tax_code: Option<crate::resources::sales_tax::LineTaxCode>,
 }
 ids_debug!(SalesDocLine, "SalesDocLine", account_id, item_id);
 
@@ -310,6 +313,13 @@ pub struct NewCreditMemo {
     /// Waiting to be printed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_later: Option<bool>,
+    /// The document's sales tax item or group (`sales-tax-setup-v1`;
+    /// `None`: the client's default, else the company's; Q-P23d).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sales_tax_id: Option<crate::resources::sales_tax::SalesTaxItemId>,
+    /// An edit takes today's rates instead of the saved ones (Q-P23i).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub use_current_rates: bool,
     /// Apply at save (Q-P22b): copied from the preview; empty keeps the
     /// whole memo as a credit.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -332,6 +342,8 @@ impl NewCreditMemo {
             txn_number: None,
             warn_only: false,
             print_later: None,
+            sales_tax_id: None,
+            use_current_rates: false,
             applications: Vec::new(),
         }
     }
@@ -584,6 +596,9 @@ pub struct CreditMemoRecord {
     /// The printed message (owner data).
     #[serde(default)]
     pub customer_message: Option<String>,
+    /// The document's sales tax with its rate as saved (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub sales_tax: Option<crate::resources::sales_tax::DocSalesTax>,
     /// The version to send back as `expectedUpdatedAt`.
     pub updated_at: Timestamp,
     /// Posted or void.

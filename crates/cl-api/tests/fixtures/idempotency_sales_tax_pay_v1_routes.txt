@@ -1,0 +1,10 @@
+# The engine's `idempotency-sales-tax-pay-v1` route set (U-150, P23 plan §2.0): Pay Sales Tax, linking an outside payment, unlink and mark paid through,
+# `x-idempotency: true` in its openapi.json; in the spec since pin 9be6da51
+# (engine PRs #216-#221). Append-only for this capability name: `keyable-sales-tax-pay` in operations.txt
+# (`KeySet::SalesTaxPayV1`), keyed only while the engine advertises
+# `idempotency-sales-tax-pay-v1`.
+POST /api/v1/sales-tax/payments
+POST /api/v1/sales-tax/payments/link
+POST /api/v1/sales-tax/payments/{id}/unlink
+POST /api/v1/sales-tax/payments/mark-paid-through
+POST /api/v1/sales-tax/payments/mark-paid-through/{runId}/undo

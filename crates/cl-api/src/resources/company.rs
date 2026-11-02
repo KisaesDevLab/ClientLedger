@@ -11,7 +11,7 @@
 //!   change the session's scope.
 
 use cl_core::ids::{AccountId, CompanyId, UserId};
-use cl_core::{CalendarDate, Rate, Secret, Timestamp};
+use cl_core::{CalendarDate, Secret, TaxRate, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -302,9 +302,10 @@ pub struct CompanySettings {
     /// Next invoice number.
     #[serde(default)]
     pub invoice_next_number: Option<u64>,
-    /// Default sales tax rate (exact, `decimal(5,4)`).
+    /// Default sales tax rate (exact; four places before U-148, six after;
+    /// the legacy field, `defaultSalesTaxId` names the sales tax).
     #[serde(default)]
-    pub default_sales_tax_rate: Option<Rate>,
+    pub default_sales_tax_rate: Option<TaxRate>,
     /// Currency code.
     #[serde(default)]
     pub currency: Option<String>,
@@ -369,6 +370,20 @@ pub struct CompanySettings {
     /// (`financeChargePrintLater`, default on).
     #[serde(default)]
     pub finance_charge_print_later: Option<bool>,
+    /// Sales tax on (`salesTaxEnabled`, U-147; `None` from engines before
+    /// it and NULL rows read as on).
+    #[serde(default)]
+    pub sales_tax_enabled: Option<bool>,
+    /// The basis sales tax is filed on (`salesTaxBasis`, Q-P23a).
+    #[serde(default)]
+    pub sales_tax_basis: Option<crate::resources::sales_tax::SalesTaxBasis>,
+    /// The company's default sales tax item or group (`defaultSalesTaxId`).
+    #[serde(default)]
+    pub default_sales_tax_id: Option<crate::resources::sales_tax::SalesTaxItemId>,
+    /// Streamlined Sales Tax rules for discounts and bad debts
+    /// (`salesTaxSsuta`, Q-P23m, Q-SPF6: off for existing companies).
+    #[serde(default)]
+    pub sales_tax_ssuta: Option<bool>,
 }
 
 /// An optional money string (a JSON number is refused).
@@ -467,6 +482,57 @@ impl ReceivablesSettingsUpdate {
     }
 }
 
+/// The sales tax settings Preferences › Sales tax and the New Company
+/// interview write (P23, `company-sales-tax-flags-v1`): each `Some` is
+/// sent, `Some(None)` clears the default.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SalesTaxSettingsUpdate {
+    /// `salesTaxEnabled`.
+    pub enabled: Option<bool>,
+    /// `salesTaxBasis`.
+    pub basis: Option<crate::resources::sales_tax::SalesTaxBasis>,
+    /// `defaultSalesTaxId` (`Some(None)`: no default).
+    pub default_sales_tax_id: Option<Option<crate::resources::sales_tax::SalesTaxItemId>>,
+    /// `salesTaxSsuta` (forward only, Q-P23w).
+    pub ssuta: Option<bool>,
+}
+
+impl SalesTaxSettingsUpdate {
+    /// True when nothing would be sent.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == SalesTaxSettingsUpdate::default()
+    }
+
+    /// The body.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `company-sales-tax-flags-v1` (an older
+    /// engine would drop the fields and answer success).
+    pub fn body(&self, caps: &Capabilities) -> Result<Value, ApiError> {
+        if !caps.has(Capabilities::COMPANY_SALES_TAX_FLAGS) {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        let mut m = serde_json::Map::new();
+        if let Some(b) = self.enabled {
+            m.insert("salesTaxEnabled".into(), Value::Bool(b));
+        }
+        if let Some(b) = self.basis {
+            m.insert("salesTaxBasis".into(), Value::String(b.as_wire().into()));
+        }
+        if let Some(d) = self.default_sales_tax_id {
+            m.insert(
+                "defaultSalesTaxId".into(),
+                d.map_or(Value::Null, |d| Value::String(d.to_string())),
+            );
+        }
+        if let Some(b) = self.ssuta {
+            m.insert("salesTaxSsuta".into(), Value::Bool(b));
+        }
+        Ok(Value::Object(m))
+    }
+}
+
 /// Accounting basis of the company (`accountingMethod`, Q-44).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -501,7 +567,7 @@ pub struct CompanySettingsUpdate {
     pub invoice_next_number: Option<u64>,
     /// Default sales tax rate (exact).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_sales_tax_rate: Option<Rate>,
+    pub default_sales_tax_rate: Option<TaxRate>,
     /// Currency code (USD, Q-41).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
@@ -737,6 +803,28 @@ impl Session {
     pub async fn set_finance_charge_settings(
         &self,
         u: &crate::resources::finance_charges::FinanceChargeSettingsUpdate,
+        key: IdempotencyKey,
+    ) -> Result<Option<CompanySettings>, ApiError> {
+        self.require_company()?;
+        if u.is_empty() {
+            return Ok(None);
+        }
+        let body = json_body(&u.body(&self.client().capabilities())?)?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply).map(Some)
+    }
+
+    /// Saves the sales tax settings (P23, U-147). Nothing is sent for an
+    /// empty update.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `company-sales-tax-flags-v1` (nothing
+    /// sent); `NoCompanyOpen`; `Validation`; any [`ApiError`].
+    pub async fn set_sales_tax_settings(
+        &self,
+        u: &SalesTaxSettingsUpdate,
         key: IdempotencyKey,
     ) -> Result<Option<CompanySettings>, ApiError> {
         self.require_company()?;
@@ -1163,7 +1251,7 @@ mod tests {
         let st = s.company_settings().await.expect("settings");
         assert_eq!(st.fiscal_year_start_month, Some(7));
         assert_eq!(
-            st.default_sales_tax_rate.map(Rate::to_wire).as_deref(),
+            st.default_sales_tax_rate.map(TaxRate::to_wire).as_deref(),
             Some("0.0550")
         );
         assert_eq!(

@@ -79,6 +79,8 @@ impl Setup {
                     },
                     required: false,
                     active: true,
+                    sales_tax_id: l.sales_tax,
+                    tax_code_id: l.tax_code,
                 })
             })
             .collect()
@@ -102,8 +104,10 @@ impl DailySalesScreen {
         let unknown = layout.lines.iter().any(|l| l.section.is_none());
         let mut active = original.clone();
         active.lines.retain(|l| l.active);
+        let tpl_id = tpl.id;
+        self.load_tax_lists();
         self.setup = Some(Setup {
-            template: Some(tpl.id),
+            template: Some(tpl_id),
             original: active,
             layout,
             row: None,
@@ -112,6 +116,32 @@ impl DailySalesScreen {
             confirm_delete: false,
             error: None,
         });
+    }
+
+    /// Reads the sales taxes and tax codes the line pickers offer (P23;
+    /// only with `daily-sales-tax-v1` or the demo).
+    pub(crate) fn load_tax_lists(&mut self) {
+        let caps = self.link.capabilities();
+        if !(self.link.is_demo()
+            || (caps.has(cl_api::Capabilities::DAILY_SALES_TAX)
+                && caps.has(cl_api::Capabilities::SALES_TAX_SETUP)))
+        {
+            return;
+        }
+        self.tax_lists_job = Some(crate::screens::invoice::engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| {
+                Ok((
+                    crate::company::demo::sales_tax::items(d, false),
+                    crate::company::demo::sales_tax::codes(d, false),
+                ))
+            },
+            |s| async move {
+                let st = s.sales_tax();
+                Ok((st.items(false).await?, st.codes(false).await?))
+            },
+        ));
     }
 
     /// The empty state's choice: a preset layout from the engine, or a
@@ -286,6 +316,22 @@ impl DailySalesScreen {
             .filter(|a| a.is_active)
             .map(|a| (a.id, account_text(a)))
             .collect();
+        if let Some(r) = crate::screens::invoice::engine::poll(&mut self.tax_lists_job) {
+            self.tax_lists = r.unwrap_or_default();
+        }
+        let taxes: Vec<(cl_core::ids::SalesTaxItemId, String)> = self
+            .tax_lists
+            .0
+            .iter()
+            .map(|i| (i.id, i.name.clone()))
+            .collect();
+        let codes: Vec<(cl_core::ids::TaxCodeId, String, bool)> = self
+            .tax_lists
+            .1
+            .iter()
+            .map(|c| (c.id, c.code.clone(), c.taxable))
+            .collect();
+        let tax_column = !taxes.is_empty();
         let busy = self.setup_task.is_some();
         let Some(s) = self.setup.as_mut() else { return };
         let mut action: Option<&'static str> = None;
@@ -298,7 +344,7 @@ impl DailySalesScreen {
             let mut remove = None;
             let count = s.layout.lines.len();
             egui::Grid::new("daily_sales/setup_grid")
-                .num_columns(5)
+                .num_columns(if tax_column { 6 } else { 5 })
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     ui.label(RichText::new(t("daily.setup.col.section")).size(12.0));
@@ -307,6 +353,10 @@ impl DailySalesScreen {
                         .label(RichText::new(t("daily.setup.col.line")).size(12.0))
                         .id;
                     ui.label(RichText::new(t("daily.setup.col.account")).size(12.0));
+                    if tax_column {
+                        ui.label(RichText::new(t("daily.setup.col.sales_tax")).size(12.0))
+                            .on_hover_text(t("daily.setup.sales_tax.tip"));
+                    }
                     ui.label("");
                     ui.label("");
                     ui.end_row();
@@ -388,6 +438,9 @@ impl DailySalesScreen {
                             .on_hover_text(t("daily.setup.col.account"));
                         if let Some(a) = picked_account {
                             line.account = a;
+                        }
+                        if tax_column {
+                            tax_cell(ui, i, line, &taxes, &codes);
                         }
                         ui.horizontal(|ui| {
                             if ui
@@ -489,6 +542,88 @@ impl DailySalesScreen {
             Some("delete") => self.delete_setup(),
             Some("cancel") => self.setup = None,
             _ => {}
+        }
+    }
+}
+
+/// The Sales tax cell of a setup row: a tax line (credit side) picks the
+/// sales tax it is (P23, Q-P23g); a sales line picks its tax code; other
+/// lines have none.
+fn tax_cell(
+    ui: &mut Ui,
+    i: usize,
+    line: &mut LayoutLine,
+    taxes: &[(cl_core::ids::SalesTaxItemId, String)],
+    codes: &[(cl_core::ids::TaxCodeId, String, bool)],
+) {
+    match line.section {
+        Some(DailySection::Tax) if line.side == DailySide::Credit => {
+            let shown = line
+                .sales_tax
+                .and_then(|s| taxes.iter().find(|(id, _)| *id == s))
+                .map_or_else(|| t("daily.setup.sales_tax.none"), |(_, n)| n.clone());
+            let mut picked = None;
+            egui::ComboBox::from_id_salt(("daily_sales/setup_sales_tax", i))
+                .width(160.0)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(line.sales_tax.is_none(), t("daily.setup.sales_tax.none"))
+                        .clicked()
+                    {
+                        picked = Some(None);
+                    }
+                    for (id, name) in taxes {
+                        if ui
+                            .selectable_label(line.sales_tax == Some(*id), name)
+                            .clicked()
+                        {
+                            picked = Some(Some(*id));
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(t("daily.setup.col.sales_tax"));
+            if let Some(p) = picked {
+                line.sales_tax = p;
+            }
+        }
+        Some(DailySection::Sales) => {
+            let shown = line
+                .tax_code
+                .and_then(|c| codes.iter().find(|(id, _, _)| *id == c))
+                .map_or_else(|| t("daily.setup.tax_code.taxable"), |(_, n, _)| n.clone());
+            let mut picked = None;
+            egui::ComboBox::from_id_salt(("daily_sales/setup_tax_code", i))
+                .width(160.0)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            line.tax_code.is_none(),
+                            t("daily.setup.tax_code.taxable"),
+                        )
+                        .clicked()
+                    {
+                        picked = Some(None);
+                    }
+                    for (id, code, _) in codes {
+                        if ui
+                            .selectable_label(line.tax_code == Some(*id), code)
+                            .clicked()
+                        {
+                            picked = Some(Some(*id));
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(t("daily.setup.col.sales_tax"));
+            if let Some(p) = picked {
+                line.tax_code = p;
+            }
+        }
+        _ => {
+            ui.label("");
         }
     }
 }

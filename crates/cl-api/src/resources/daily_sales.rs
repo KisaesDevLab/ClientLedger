@@ -18,7 +18,10 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use cl_core::ids::{AccountId, DailyEntryId, DailyLineId, DailyTemplateId, TagId, TransactionId};
+use cl_core::ids::{
+    AccountId, DailyEntryId, DailyLineId, DailyTemplateId, SalesTaxItemId, TagId, TaxCodeId,
+    TransactionId,
+};
 use cl_core::{CalendarDate, Money};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -202,6 +205,13 @@ pub struct DailyLine {
     /// Order on the form.
     #[serde(rename = "sortOrder", default, deserialize_with = "sort_de")]
     pub sort: u32,
+    /// A tax line's sales tax (`daily-sales-tax-v1`, Q-P23g): its typed tax
+    /// posts to Sales Tax Payable as that sales tax's rows. One per layout.
+    #[serde(rename = "salesTaxId", default)]
+    pub sales_tax_id: Option<SalesTaxItemId>,
+    /// A sales line's tax code (`None`: taxable).
+    #[serde(rename = "taxCodeId", default)]
+    pub tax_code_id: Option<TaxCodeId>,
 }
 
 const fn yes() -> bool {
@@ -284,6 +294,10 @@ pub struct DailyLineInput {
     pub required: bool,
     /// Active (false removes it but keeps it for old days).
     pub active: bool,
+    /// A tax line's sales tax (`daily-sales-tax-v1`; sent only when set).
+    pub sales_tax_id: Option<SalesTaxItemId>,
+    /// A sales line's tax code (sent only when set).
+    pub tax_code_id: Option<TaxCodeId>,
 }
 
 /// Hides the label.
@@ -309,6 +323,8 @@ impl From<&DailyLine> for DailyLineInput {
             side: l.side,
             required: l.required,
             active: l.active,
+            sales_tax_id: l.sales_tax_id,
+            tax_code_id: l.tax_code_id,
         }
     }
 }
@@ -577,6 +593,22 @@ pub struct DailyPreview {
     pub payments: Money,
     /// Labels of lines with an amount but no account.
     pub unmapped: Vec<String>,
+    /// The sales tax of the layout's linked tax line (`daily-sales-tax-v1`).
+    pub sales_tax_id: Option<SalesTaxItemId>,
+    /// round2(taxable sales x its rate): what the typed tax is checked
+    /// against (`None` without a linked tax line). The engine's figure.
+    pub expected_tax: Option<Money>,
+    /// Warnings: `TAX_DIFFERS` when the typed tax is not `expected_tax`
+    /// (the typed tax still posts).
+    pub problems: Vec<String>,
+}
+
+impl DailyPreview {
+    /// The typed tax differs from the expected tax (a warning).
+    #[must_use]
+    pub fn tax_differs(&self) -> bool {
+        self.problems.iter().any(|p| p == "TAX_DIFFERS")
+    }
 }
 
 /// Hides the amounts and labels.
@@ -605,6 +637,18 @@ struct PreviewWire {
     total_payments: Money,
     #[serde(default)]
     unmapped_labels: Vec<String>,
+    #[serde(default)]
+    sales_tax_id: Option<SalesTaxItemId>,
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    expected_tax: Option<Money>,
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    problems: Vec<String>,
 }
 
 /// Options of a post or a void.
@@ -666,6 +710,9 @@ pub fn preview_from_json(body: &[u8]) -> Result<DailyPreview, ApiError> {
         tax: w.total_tax,
         payments: w.total_payments,
         unmapped: w.unmapped_labels,
+        sales_tax_id: w.sales_tax_id,
+        expected_tax: w.expected_tax,
+        problems: w.problems,
     })
 }
 
@@ -747,6 +794,14 @@ pub(crate) fn lines_body(lines: &[DailyLineInput]) -> Result<Value, ApiError> {
         });
         if let (Some(id), Value::Object(map)) = (l.id, &mut line) {
             map.insert("id".into(), json!(id.to_string()));
+        }
+        if let Value::Object(map) = &mut line {
+            if let Some(s) = l.sales_tax_id {
+                map.insert("salesTaxId".into(), json!(s.to_string()));
+            }
+            if let Some(c) = l.tax_code_id {
+                map.insert("taxCodeId".into(), json!(c.to_string()));
+            }
         }
         out.push(line);
     }

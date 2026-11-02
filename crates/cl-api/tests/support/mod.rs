@@ -49,7 +49,10 @@ pub const OWNER_EMAIL: &str = "owner@example.com";
 /// The company created by `/desktop/initialize`.
 pub const CONTRACT_CO: &str = "Contract Co";
 /// Calls to rate-limited auth routes allowed per binary (limit 10/min/IP).
-const AUTH_LIMIT: u64 = 8;
+/// 9 since P23 WP-4: the P23 tests create one company of their own ("Sales
+/// Tax Co"); still under the engine's 10 even if every call fell in one
+/// minute.
+const AUTH_LIMIT: u64 = 9;
 
 fn env_is(key: &str, value: &str) -> bool {
     std::env::var(key).as_deref() == Ok(value)

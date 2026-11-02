@@ -56,6 +56,8 @@ fn line(
         allow_tag: false,
         active: true,
         sort,
+        sales_tax_id: None,
+        tax_code_id: None,
     }
 }
 
@@ -153,6 +155,9 @@ impl Fake {
                 .iter()
                 .map(|i| layout.lines[*i].label.clone())
                 .collect(),
+            sales_tax_id: None,
+            expected_tax: None,
+            problems: Vec::new(),
         }
     }
 
@@ -256,6 +261,8 @@ impl DailyBooks for Fake {
                 allow_tag: false,
                 active: l.active,
                 sort,
+                sales_tax_id: l.sales_tax_id,
+                tax_code_id: l.tax_code_id,
             };
             match out.iter_mut().find(|o| o.id == new.id) {
                 Some(o) => *o = new,

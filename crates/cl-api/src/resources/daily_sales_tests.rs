@@ -140,6 +140,8 @@ fn draft_and_line_bodies_carry_strings_only() {
         side: NormalSide::Credit,
         required: false,
         active: true,
+        sales_tax_id: None,
+        tax_code_id: None,
     }])
     .expect("lines");
     assert_eq!(
@@ -188,6 +190,8 @@ fn local_refusals() {
         side: NormalSide::Debit,
         required: false,
         active: true,
+        sales_tax_id: None,
+        tax_code_id: None,
     };
     assert!(lines_body(&[line(Section::Unknown("x".into()), "A")]).is_err());
     assert!(lines_body(&[line(Section::Payment, "   ")]).is_err());
@@ -360,4 +364,52 @@ async fn calls_reach_the_documented_routes() {
     let sent: Value = serde_json::from_slice(&posts[1].body).expect("json");
     assert_eq!(sent["values"][2]["amount"], "1077.6500");
     assert_eq!(sent["templateId"], TPL);
+}
+
+#[test]
+fn a_linked_tax_line_and_its_preview_check() {
+    let item = "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    let code = "7e0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    let line = |section: Section, side: NormalSide| DailyLineInput {
+        id: None,
+        section,
+        label: "L".into(),
+        account: None,
+        tag: None,
+        side,
+        required: false,
+        active: true,
+        sales_tax_id: None,
+        tax_code_id: None,
+    };
+    let mut tax = line(Section::Tax, NormalSide::Credit);
+    tax.sales_tax_id = SalesTaxItemId::parse(item).ok();
+    let mut sales = line(Section::Sales, NormalSide::Credit);
+    sales.tax_code_id = TaxCodeId::parse(code).ok();
+    let body = lines_body(&[tax, sales, line(Section::Payment, NormalSide::Debit)]).expect("b");
+    assert_eq!(body["lines"][0]["salesTaxId"], item);
+    assert_eq!(body["lines"][1]["taxCodeId"], code);
+    assert!(
+        body["lines"][2].get("salesTaxId").is_none(),
+        "unset fields are not sent (older engines)"
+    );
+    let p = preview_from_json(
+        format!(
+            r#"{{"totalDebits":"217.75","totalCredits":"217.75","overShort":"0.0000","balanced":true,
+                "totalSales":"200.0000","totalTax":"17.7500","totalPayments":"217.7500","unmappedLabels":[],
+                "salesTaxId":"{item}","expectedTax":"17.75","problems":["TAX_DIFFERS"]}}"#
+        )
+        .as_bytes(),
+    )
+    .expect("preview");
+    assert_eq!(
+        p.expected_tax.map(Money::to_wire).as_deref(),
+        Some("17.7500")
+    );
+    assert!(p.tax_differs());
+    let old = preview_from_json(
+        br#"{"totalDebits":"1","totalCredits":"1","overShort":"0","balanced":true}"#,
+    )
+    .expect("old engine");
+    assert!(old.expected_tax.is_none() && !old.tax_differs());
 }

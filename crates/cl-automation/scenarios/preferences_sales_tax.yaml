@@ -1,0 +1,22 @@
+# Preferences > Sales tax (P23 plan §3 WP-2, §6.4) against `clientledger
+# --demo`: the switch, the basis with its help text, the default sales
+# tax and the Streamlined Sales Tax switch with its tooltip. Nothing is
+# saved. Synthetic.
+name: preferences_sales_tax
+description: "Preferences, Sales tax: basis help, default, SSUTA switch."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: Sales tax}
+  - assert_state: {key: screen.category, equals: sales_tax}
+  - assert_exists: {role: check_box, label: Charge sales tax}
+  - assert_exists: {role: radio_button, label: Accrual (when you invoice)}
+  - assert_exists: {role: radio_button, label: Cash (when you're paid)}
+  - assert_exists: {role: label, label_contains: "Your state decides which basis to file on"}
+  - assert_exists: {role: check_box, label_contains: "Streamlined Sales Tax rules"}
+  - assert_exists: {role: link, label: Open Sales Tax Setup}
+  - assert_no_clipping: {}
+  - screenshot: sales-tax
+  - command: file.close_window

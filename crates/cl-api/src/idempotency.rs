@@ -298,6 +298,15 @@ pub(crate) struct Executor {
     /// The engine replays keys on finance-charge assess
     /// (`idempotency-finance-charges-v1`, U-141).
     idempotency_finance_charges_v1: AtomicBool,
+    /// The engine replays keys on the sales tax setup writes
+    /// (`idempotency-sales-tax-v1`, U-147).
+    idempotency_sales_tax_v1: AtomicBool,
+    /// The engine replays keys on Pay Sales Tax and link
+    /// (`idempotency-sales-tax-pay-v1`, U-150).
+    idempotency_sales_tax_pay_v1: AtomicBool,
+    /// The engine replays keys on bad-debt recoveries
+    /// (`idempotency-recovery-v1`, U-154).
+    idempotency_recovery_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -359,6 +368,9 @@ impl Executor {
             idempotency_credit_memo_v1: AtomicBool::new(false),
             idempotency_customer_statements_v1: AtomicBool::new(false),
             idempotency_finance_charges_v1: AtomicBool::new(false),
+            idempotency_sales_tax_v1: AtomicBool::new(false),
+            idempotency_sales_tax_pay_v1: AtomicBool::new(false),
+            idempotency_recovery_v1: AtomicBool::new(false),
         }
     }
 
@@ -431,6 +443,18 @@ impl Executor {
             .store(finance, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises the P23 key sets
+    /// (`idempotency-sales-tax-v1`, `idempotency-sales-tax-pay-v1`,
+    /// `idempotency-recovery-v1`).
+    pub(crate) fn set_p23_key_sets(&self, setup: bool, pay: bool, recovery: bool) {
+        self.idempotency_sales_tax_v1
+            .store(setup, Ordering::Relaxed);
+        self.idempotency_sales_tax_pay_v1
+            .store(pay, Ordering::Relaxed);
+        self.idempotency_recovery_v1
+            .store(recovery, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -457,6 +481,9 @@ impl Executor {
                 .idempotency_customer_statements_v1
                 .load(Ordering::Relaxed),
             KeySet::FinanceChargesV1 => self.idempotency_finance_charges_v1.load(Ordering::Relaxed),
+            KeySet::SalesTaxSetupV1 => self.idempotency_sales_tax_v1.load(Ordering::Relaxed),
+            KeySet::SalesTaxPayV1 => self.idempotency_sales_tax_pay_v1.load(Ordering::Relaxed),
+            KeySet::RecoveryV1 => self.idempotency_recovery_v1.load(Ordering::Relaxed),
         }
     }
 

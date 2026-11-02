@@ -26,6 +26,7 @@ fn service(h: &Harness, prefix: &str) -> cl_api::Item {
             is_taxable: true,
             item_type: cl_api::ItemType::Service,
             discount_percent: None,
+            tax_code_id: None,
         },
         key(),
     ))
@@ -140,6 +141,7 @@ pub fn sales_kinds_u39a(h: &Harness) {
         is_taxable: true,
         item_type: cl_api::ItemType::Discount,
         discount_percent: Some(pct),
+        tax_code_id: None,
     };
     let d = h.run(s.items().create(&fields, key())).expect("discount");
     assert_eq!(d.record.fields.item_type, cl_api::ItemType::Discount);
@@ -177,6 +179,7 @@ pub fn price_levels_u40(h: &Harness) {
                     is_taxable: true,
                     item_type: cl_api::ItemType::Service,
                     discount_percent: None,
+                    tax_code_id: None,
                 },
                 key(),
             ))

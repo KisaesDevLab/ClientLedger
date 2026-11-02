@@ -922,6 +922,7 @@ pub fn item_lines_u85(h: &Harness) {
                 is_taxable: false,
                 item_type: cl_api::ItemType::Service,
                 discount_percent: None,
+                tax_code_id: None,
             },
             key(),
         ))
