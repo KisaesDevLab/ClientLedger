@@ -1192,4 +1192,4 @@ impl SalesTax<'_> {
 
 #[cfg(test)]
 #[path = "sales_tax_tests.rs"]
-mod tests;
+pub(crate) mod tests;

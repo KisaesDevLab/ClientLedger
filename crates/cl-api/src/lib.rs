@@ -310,6 +310,10 @@ pub use resources::sales_receipts::{
     check_sales_receipt, saved_sales_receipt,
 };
 // P23: sales tax (engine U-147 to U-154, U-25).
+pub use resources::recoveries::{
+    NewRecovery, Recoveries, RecoveryRefusal, RecoveryResult, recovery_available, recovery_refusal,
+    recovery_refusal_codes,
+};
 pub use resources::sales_tax::{
     EXEMPTION_NOTE_MAX, EXEMPTION_NUMBER_MAX, ExemptionStatus, ExpiringExemption,
     GROUP_MEMBERS_MAX, OwedAgency, OwedItem, SALES_TAX_DESCRIPTION_MAX, SALES_TAX_NAME_MAX,
@@ -317,6 +321,17 @@ pub use resources::sales_tax::{
     SalesTaxItemId, SalesTaxKind, SalesTaxMember, SalesTaxOwed, SalesTaxRefusal, TAX_CODE_MAX,
     TAX_CODE_NAME_MAX, TaxCode, TaxCodeDraft, TaxCodeId, TaxExemption, TaxExemptionDraft,
     TaxExemptionId, sales_tax_refusal, sales_tax_refusal_codes,
+};
+pub use resources::sales_tax_payments::{
+    ADJUSTMENT_REASON_MAX, CHECK_NUMBER_MAX, LinkLine, LinkPaymentRequest, PAY_LINES_MAX,
+    PAY_MEMO_MAX, PayAdjustment, PayLine, PayPreview, PayPreviewLine, PayProblem, PayProblemKind,
+    PaySalesTaxRefusal, PaySalesTaxRequest, PaySalesTaxResult, PaymentLineKind, SalesTaxPayMethod,
+    SalesTaxPaymentLine, SalesTaxPaymentQuery, SalesTaxPaymentRecord, SalesTaxPayments,
+    pay_sales_tax_refusal, pay_sales_tax_refusal_codes,
+};
+pub use resources::sales_tax_reports::{
+    LiabilityAgency, LiabilityBalanceCheck, LiabilityColumns, LiabilityItem, LiabilityQuery,
+    NonTaxableSales, SalesTaxLiability, SixPlaceAmount,
 };
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{
