@@ -87,17 +87,17 @@ fn an_untyped_item_is_paid_at_owed_plus_its_adjustment_not_a_frozen_figure() {
     s.form.set_amount(a, "1.00");
     s.preview();
     assert!(s.form.figures().is_some());
-    let i = s.form.add_adjustment();
-    let account = s.accounts.first().map(|x| x.id);
-    s.form.edit_adjustment(i, |x| {
-        x.item = Some(b);
-        x.account = account;
-        x.amount = "-2.00".into();
-        x.reason = "Timely filing discount".into();
+    let row = s.form.add_adjustment();
+    let account = s.accounts.first().map(|acct| acct.id);
+    s.form.edit_adjustment(row, |adj| {
+        adj.item = Some(b);
+        adj.account = account;
+        adj.amount = "-2.00".into();
+        adj.reason = "Timely filing discount".into();
     });
     s.preview();
-    let f = s.form.figures().cloned().expect("figures");
-    let line_b = f.lines.iter().find(|l| l.item == Some(b)).expect("b");
+    let figs = s.form.figures().cloned().expect("figures");
+    let line_b = figs.lines.iter().find(|l| l.item == Some(b)).expect("b");
     assert_eq!(
         line_b.amount,
         owed_b
@@ -105,12 +105,12 @@ fn an_untyped_item_is_paid_at_owed_plus_its_adjustment_not_a_frozen_figure() {
             .expect("m"),
         "the engine's owed plus adjustment"
     );
-    assert!(!f.more_than_owed);
+    assert!(!figs.more_than_owed);
     let plan = s.form.post_plan().expect("plan");
     assert!(
         plan.lines
             .iter()
-            .any(|(i, amt, _)| *i == b && amt.is_none()),
+            .any(|(item, amt, _)| *item == b && amt.is_none()),
         "the untyped item is posted without an amount: {plan:?}"
     );
     s.pay();
@@ -267,16 +267,35 @@ fn each_write_target_has_its_own_idempotency_key() {
         id("8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02"),
     );
     let k1 = s.key_for(KeyFor::Void(a));
-    assert!(s.key_for(KeyFor::Void(a)) == k1, "a retry reuses it");
+    assert_eq!(
+        s.key_for(KeyFor::Void(a)).as_header(),
+        k1.as_header(),
+        "a retry reuses it"
+    );
     let k2 = s.key_for(KeyFor::Void(b));
-    assert!(k1 != k2, "another payment gets another key");
+    assert_ne!(
+        k1.as_header(),
+        k2.as_header(),
+        "another payment gets another key"
+    );
     let k3 = s.key_for(KeyFor::Unlink(b));
-    assert!(k2 != k3, "another write on the same payment too");
+    assert_ne!(
+        k2.as_header(),
+        k3.as_header(),
+        "another write on the same payment too"
+    );
     let agency = s.form.agency.expect("agency");
     let d = CalendarDate::from_ymd(2026, 11, 30).expect("d");
     let k4 = s.key_for(KeyFor::MarkPaid(agency, d));
-    assert!(s.key_for(KeyFor::MarkPaid(agency, d)) == k4);
-    assert!(s.key_for(KeyFor::MarkPaid(agency, d.add_days(-1).expect("d"))) != k4);
+    assert_eq!(
+        s.key_for(KeyFor::MarkPaid(agency, d)).as_header(),
+        k4.as_header()
+    );
+    assert_ne!(
+        s.key_for(KeyFor::MarkPaid(agency, d.add_days(-1).expect("d")))
+            .as_header(),
+        k4.as_header()
+    );
 }
 
 #[test]

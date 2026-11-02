@@ -632,26 +632,6 @@ async fn unlink_and_mark_paid_through_are_keyed() {
     assert_eq!(body, json!({"agencyId":AGENCY,"throughDate":"2026-11-30"}));
     // Undo mark paid through (P23 review fix; provisional route).
     assert_eq!(m.run_id.as_deref(), Some("run-1"));
-    Mock::given(method("POST"))
-        .and(path(
-            "/api/v1/sales-tax/payments/mark-paid-through/run-1/undo",
-        ))
-        .respond_with(json(200, r#"{"result":{"runId":"run-1","removed":1}}"#))
-        .mount(&server)
-        .await;
-    let u = s
-        .sales_tax_payments()
-        .undo_mark_paid_through("run-1", &PostingOptions::default())
-        .await
-        .expect("undo");
-    assert_eq!(u.removed, 1);
-    assert_eq!(
-        s.sales_tax_payments()
-            .undo_mark_paid_through("../x", &PostingOptions::default())
-            .await
-            .expect_err("bad run id"),
-        ApiError::Local(LocalValidation::InvalidValue)
-    );
     let list = s
         .sales_tax_payments()
         .list(SalesTaxPaymentQuery {
@@ -724,5 +704,32 @@ async fn write_offs_list_and_expected_owed_from_e5() {
         p.expected_owed_total().map(Money::to_wire).as_deref(),
         Some("2.0000"),
         "the engine's expectedOwed is sent back unchanged"
+    );
+}
+
+#[tokio::test]
+async fn undo_mark_paid_through_posts_to_the_run() {
+    // P23 review fix; the route is provisional until the engine lands it.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v1/sales-tax/payments/mark-paid-through/run-1/undo",
+        ))
+        .respond_with(json(200, r#"{"result":{"runId":"run-1","removed":1}}"#))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let u = s
+        .sales_tax_payments()
+        .undo_mark_paid_through("run-1", &PostingOptions::default())
+        .await
+        .expect("undo");
+    assert_eq!(u.removed, 1);
+    assert_eq!(
+        s.sales_tax_payments()
+            .undo_mark_paid_through("../x", &PostingOptions::default())
+            .await
+            .expect_err("bad run id"),
+        ApiError::Local(LocalValidation::InvalidValue)
     );
 }
