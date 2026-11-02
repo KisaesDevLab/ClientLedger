@@ -126,3 +126,43 @@ fn ctrl_n_and_the_list_commands_work_in_the_window() {
     assert!(!s.command(CommandId::new("form.save_close")));
     assert_eq!(s.scope(), Scope::Window);
 }
+
+#[test]
+fn every_widget_is_named_in_both_themes() {
+    for theme in super::super::THEMES {
+        for tab in [Tab::Items, Tab::Agencies, Tab::Codes] {
+            let (_d, mut s) = screen();
+            s.tab = tab;
+            let unnamed = super::super::unnamed_in(&mut s, theme);
+            assert!(unnamed.is_empty(), "{theme:?} {tab:?}: {unnamed:?}");
+            s.new_entry();
+            let unnamed = super::super::unnamed_in(&mut s, theme);
+            assert!(unnamed.is_empty(), "{theme:?} {tab:?} editor: {unnamed:?}");
+        }
+        let (_d, mut s) = screen();
+        s.new_group();
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?} group: {unnamed:?}");
+    }
+}
+
+#[test]
+fn esc_reverts_the_editor_then_closes_it_and_edits_are_unsaved() {
+    let (_d, mut s) = screen();
+    s.new_entry();
+    // Drawing an untouched editor leaves it clean.
+    let _ = super::super::unnamed_in(&mut s, crate::theme::ThemeChoice::Light);
+    assert!(!Screen::dirty(&s), "{:?}", s.editor);
+    if let Some(Editor::Item { ed, .. }) = s.editor.as_mut() {
+        ed.name = "Springfield 2".into();
+    }
+    assert!(Screen::dirty(&s), "a typed name is unsaved");
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(
+        s.editor.is_some() && !Screen::dirty(&s),
+        "reverted, still open"
+    );
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.editor.is_none(), "then closed");
+    assert!(!s.command(CommandId::new("form.revert")), "then the window");
+}

@@ -174,6 +174,9 @@ impl RecoveryScreen {
                     self.pending = None;
                     self.done = Some(done);
                     self.problem = None;
+                    // Recorded: nothing typed is left unsaved.
+                    self.set_amount("");
+                    self.form.memo.clear();
                     crate::forms::publish_saved(&self.link, &self.link.bus().subscribe(), &[]);
                     self.read_invoices();
                 }
@@ -440,6 +443,19 @@ impl Screen for RecoveryScreen {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// An amount or memo typed and not yet recorded.
+    fn dirty(&self) -> bool {
+        !self.amount.trim().is_empty() || !self.form.memo.trim().is_empty()
+    }
+
+    /// The close prompt's Save: records the recovery (the window stays
+    /// open when it can't yet, or while the engine answers).
+    fn save(&mut self) -> bool {
+        RecoveryScreen::save(self);
+        self.poll();
+        !Screen::dirty(self)
     }
 
     fn scope(&self) -> Scope {

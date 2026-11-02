@@ -294,3 +294,48 @@ fn mark_paid_through_can_be_undone() {
     assert_eq!(v["marked"], Value::Null);
     assert_eq!(v["total"], total, "owed again");
 }
+
+#[test]
+fn every_widget_is_named_in_both_themes() {
+    for theme in super::super::THEMES {
+        let (_d, mut s) = screen();
+        let (a, b) = two_items(&mut s);
+        s.form.set_amount(a, "1.00");
+        s.amounts.insert(a, "1.00".into());
+        let i = s.form.add_adjustment();
+        s.form.edit_adjustment(i, |x| x.item = Some(b));
+        s.preview();
+        s.pay();
+        s.form.remove_adjustment(i);
+        s.preview();
+        s.pay();
+        s.open_link();
+        s.confirm_mark = true;
+        s.confirm_over = true;
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?}: {unnamed:?}");
+    }
+}
+
+#[test]
+fn typed_amounts_are_unsaved_and_esc_closes_dialogs_first() {
+    let (_d, mut s) = screen();
+    assert!(!Screen::dirty(&s), "nothing typed");
+    let (a, _) = two_items(&mut s);
+    s.form.set_amount(a, "1.00");
+    assert!(Screen::dirty(&s), "a typed amount is unsaved");
+    s.confirm_mark = true;
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(!s.confirm_mark, "Esc closes the confirmation");
+    s.open_link();
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.linking.is_none(), "then the match card");
+    assert!(
+        !s.command(CommandId::new("form.revert")),
+        "then the shell closes the window (asking, as it is dirty)"
+    );
+    // The close prompt's Save pays; the window may close.
+    s.preview();
+    assert!(Screen::save(&mut s), "{}", s.state());
+    assert!(!Screen::dirty(&s));
+}

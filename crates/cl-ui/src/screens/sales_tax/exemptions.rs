@@ -53,6 +53,9 @@ pub struct ExemptionsScreen {
     key: Option<IdempotencyKey>,
     /// The open editor and the saved version it edits.
     pub(crate) editor: Option<(ExemptionForm, Option<Timestamp>)>,
+    /// The editor and its expiry text as opened (Esc reverts to them;
+    /// differs: dirty).
+    opened: Option<(ExemptionForm, Option<Timestamp>, DateInput)>,
     pub(crate) expires: DateInput,
     pub(crate) show_inactive: bool,
     problem: Option<&'static str>,
@@ -89,6 +92,7 @@ impl ExemptionsScreen {
             save_job: None,
             key: None,
             editor: None,
+            opened: None,
             expires: DateInput {
                 text: String::new(),
                 value: None,
@@ -331,6 +335,40 @@ impl ExemptionsScreen {
         self.refresh();
     }
 
+    fn set_editor(&mut self, e: (ExemptionForm, Option<Timestamp>)) {
+        self.opened = Some((e.0.clone(), e.1, self.expires.clone()));
+        self.editor = Some(e);
+    }
+
+    /// The open editor has changes not saved.
+    pub(crate) fn editor_dirty(&self) -> bool {
+        match (&self.editor, &self.opened) {
+            (Some((f, _)), Some((o, _, d))) => f != o || self.expires.text != d.text,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    }
+
+    /// Esc: an editor with changes goes back to how it was opened; an
+    /// unchanged one closes. False when no editor is open (the window
+    /// closes).
+    pub(crate) fn revert(&mut self) -> bool {
+        if self.editor_dirty() {
+            if let Some((f, v, d)) = self.opened.clone() {
+                self.editor = Some((f, v));
+                self.expires = d;
+            }
+            self.problem = None;
+            true
+        } else if self.editor.take().is_some() {
+            self.opened = None;
+            self.problem = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Ctrl+N: a new certificate for the client shown.
     pub(crate) fn new_entry(&mut self) {
         self.problem = None;
@@ -339,7 +377,7 @@ impl ExemptionsScreen {
             text: String::new(),
             value: None,
         };
-        self.editor = Some((
+        self.set_editor((
             ExemptionForm {
                 client: self.client,
                 ..ExemptionForm::default()
@@ -361,7 +399,7 @@ impl ExemptionsScreen {
             },
             DateInput::new,
         );
-        self.editor = Some((
+        self.set_editor((
             ExemptionForm {
                 id: Some(e.id),
                 client: Some(e.contact_id),
@@ -690,6 +728,21 @@ impl Screen for ExemptionsScreen {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+        // Esc (DESIGN.md form rules; the window scope binds no Esc): the
+        // editor reverts, then closes, then the window closes (asking
+        // first when something is unsaved).
+        if ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && !self.command(CommandId::new("form.revert"))
+        {
+            self.link
+                .push(crate::company::CompanyEvent::CloseWindow(CommandId::new(
+                    KIND,
+                )));
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        self.editor_dirty()
     }
 
     fn scope(&self) -> Scope {
@@ -699,6 +752,7 @@ impl Screen for ExemptionsScreen {
     fn command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
+            "form.revert" => self.revert(),
             "list.new" => {
                 self.new_entry();
                 true

@@ -107,6 +107,8 @@ pub struct SetupScreen {
     /// The key of the save attempt in flight (reused if it is retried).
     key: Option<IdempotencyKey>,
     pub(crate) editor: Option<Editor>,
+    /// The editor as it was opened (Esc reverts to it; differs: dirty).
+    opened: Option<Editor>,
     pub(crate) selected: Option<String>,
     problem: Option<&'static str>,
     error: Option<ApiError>,
@@ -150,6 +152,7 @@ impl SetupScreen {
             save_job: None,
             key: None,
             editor: None,
+            opened: None,
             selected: None,
             problem: None,
             error: None,
@@ -269,10 +272,37 @@ impl SetupScreen {
 
     // ---- Editors ---------------------------------------------------------------
 
+    fn set_editor(&mut self, e: Editor) {
+        self.opened = Some(e.clone());
+        self.editor = Some(e);
+    }
+
+    /// The open editor has changes not saved.
+    pub(crate) fn editor_dirty(&self) -> bool {
+        self.editor.is_some() && self.editor != self.opened
+    }
+
+    /// Esc: an editor with changes goes back to how it was opened; an
+    /// unchanged one closes. False when no editor is open (the window
+    /// closes).
+    pub(crate) fn revert(&mut self) -> bool {
+        if self.editor_dirty() {
+            self.editor.clone_from(&self.opened);
+            self.problem = None;
+            true
+        } else if self.editor.take().is_some() {
+            self.opened = None;
+            self.problem = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Ctrl+N: a new entry on the tab in front.
     pub(crate) fn new_entry(&mut self) {
         self.problem = None;
-        self.editor = Some(match self.tab {
+        self.set_editor(match self.tab {
             Tab::Items => Editor::Item {
                 id: None,
                 ed: ItemEditor::default(),
@@ -290,7 +320,7 @@ impl SetupScreen {
 
     pub(crate) fn new_group(&mut self) {
         self.problem = None;
-        self.editor = Some(Editor::Group {
+        self.set_editor(Editor::Group {
             id: None,
             ed: GroupEditor::default(),
             version: None,
@@ -303,7 +333,7 @@ impl SetupScreen {
         };
         self.problem = None;
         self.selected = Some(i.name.clone());
-        self.editor = Some(if i.kind == SalesTaxKind::Group {
+        self.set_editor(if i.kind == SalesTaxKind::Group {
             let members: Vec<SalesTaxItemId> = i.members.iter().map(|m| m.id).collect();
             let mut ed = GroupEditor::new(&i.name, &members);
             ed.description = i.description.clone().unwrap_or_default();
@@ -335,7 +365,7 @@ impl SetupScreen {
         };
         self.problem = None;
         self.selected = Some(c.code.clone());
-        self.editor = Some(Editor::Code {
+        self.set_editor(Editor::Code {
             id: Some(id),
             ed: CodeEditor {
                 code: c.code.clone(),
@@ -1031,6 +1061,21 @@ impl Screen for SetupScreen {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+        // Esc (DESIGN.md form rules; the window scope binds no Esc): the
+        // editor reverts, then closes, then the window closes (asking
+        // first when something is unsaved).
+        if ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && !self.command(CommandId::new("form.revert"))
+        {
+            self.link
+                .push(crate::company::CompanyEvent::CloseWindow(CommandId::new(
+                    KIND,
+                )));
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        self.editor_dirty()
     }
 
     fn scope(&self) -> Scope {
@@ -1040,6 +1085,7 @@ impl Screen for SetupScreen {
     fn command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
+            "form.revert" => self.revert(),
             "list.new" => {
                 self.new_entry();
                 true

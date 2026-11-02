@@ -1453,6 +1453,20 @@ impl Screen for PayScreen {
         }
     }
 
+    /// Typed amounts, adjustment rows or a half-typed match are unsaved.
+    fn dirty(&self) -> bool {
+        self.form.has_edits()
+            || (self.linking.is_some() && self.link_texts.values().any(|t| !t.trim().is_empty()))
+    }
+
+    /// The close prompt's Save: pays (the window stays open when it can't
+    /// yet, or while the engine answers).
+    fn save(&mut self) -> bool {
+        self.pay();
+        self.poll();
+        !self.dirty()
+    }
+
     fn scope(&self) -> Scope {
         Scope::Form
     }
@@ -1463,6 +1477,21 @@ impl Screen for PayScreen {
         }
         match id.as_str() {
             KIND => true,
+            // Esc closes a confirmation or the match card first; then the
+            // shell closes the window (asking first when it is dirty).
+            "form.revert" => {
+                if self.confirm_over || self.confirm_mark {
+                    self.confirm_over = false;
+                    self.confirm_mark = false;
+                    true
+                } else if self.linking.take().is_some() {
+                    self.link_texts.clear();
+                    self.problem = None;
+                    true
+                } else {
+                    false
+                }
+            }
             "form.save_close" | "form.save_new" => {
                 self.pay();
                 true

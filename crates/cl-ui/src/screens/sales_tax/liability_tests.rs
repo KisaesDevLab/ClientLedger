@@ -49,3 +49,19 @@ fn a_bad_range_is_a_plain_problem() {
         CalendarDate::from_ymd(2026, 12, 31).expect("d")
     );
 }
+
+#[test]
+fn every_widget_is_named_in_both_themes() {
+    for theme in super::super::THEMES {
+        let (_d, mut s) = screen();
+        assert!(s.command(CommandId::new("dev.demo_sales_tax_story")));
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?}: {unnamed:?}");
+        // An item's detail open.
+        s.open = crate::company::demo::sales_tax::items(&mut s.link.demo_state().expect("d"), true)
+            .first()
+            .map(|i| i.id);
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?} detail: {unnamed:?}");
+    }
+}

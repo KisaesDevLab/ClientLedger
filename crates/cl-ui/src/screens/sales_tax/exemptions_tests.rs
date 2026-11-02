@@ -79,3 +79,38 @@ fn a_certificate_keeps_its_file() {
     s.open(id);
     assert_eq!(s.state()["file"], true, "reopened with its file");
 }
+
+#[test]
+fn every_widget_is_named_in_both_themes() {
+    for theme in super::super::THEMES {
+        let (_d, mut s) = screen();
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?}: {unnamed:?}");
+        let client = s.clients.first().map(|c| c.id).expect("a client");
+        s.set_client(Some(client));
+        s.new_entry();
+        let unnamed = super::super::unnamed_in(&mut s, theme);
+        assert!(unnamed.is_empty(), "{theme:?} editor: {unnamed:?}");
+    }
+}
+
+#[test]
+fn esc_reverts_the_certificate_then_closes_it_and_edits_are_unsaved() {
+    let (_d, mut s) = screen();
+    let client = s.clients.first().map(|c| c.id).expect("a client");
+    s.set_client(Some(client));
+    s.new_entry();
+    let _ = super::super::unnamed_in(&mut s, crate::theme::ThemeChoice::Light);
+    assert!(!Screen::dirty(&s), "an untouched editor is clean");
+    if let Some((f, _)) = s.editor.as_mut() {
+        f.number = "RS-1001".into();
+    }
+    s.expires.text = "12/31/2027".into();
+    assert!(Screen::dirty(&s));
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.editor.is_some() && !Screen::dirty(&s));
+    assert_eq!(s.expires.text, "");
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.editor.is_none());
+    assert!(!s.command(CommandId::new("form.revert")));
+}
