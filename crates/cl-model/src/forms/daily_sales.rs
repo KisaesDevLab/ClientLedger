@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use cl_core::ids::{AccountId, DailyLineId, DailyTemplateId, TagId};
+use cl_core::ids::{AccountId, DailyLineId, DailyTemplateId, SalesTaxItemId, TagId, TaxCodeId};
 use cl_core::{CalendarDate, Money};
 
 /// Most values one day takes (the engine's schema).
@@ -100,6 +100,11 @@ pub struct LayoutLine {
     pub side: DailySide,
     /// False for a removed line.
     pub active: bool,
+    /// A tax line's sales tax (P23, Q-P23g): its typed tax posts as that
+    /// sales tax's, to Sales Tax Payable. At most one line per layout.
+    pub sales_tax: Option<SalesTaxItemId>,
+    /// A sales line's tax code (`None`: taxable).
+    pub tax_code: Option<TaxCodeId>,
 }
 
 impl LayoutLine {
@@ -113,6 +118,8 @@ impl LayoutLine {
             account,
             side: side_for(section),
             active: true,
+            sales_tax: None,
+            tax_code: None,
         }
     }
 }

@@ -915,6 +915,8 @@ pub fn layout_seed_lines(
             },
             required: false,
             active: true,
+            sales_tax_id: None,
+            tax_code_id: None,
         })
         .collect()
 }

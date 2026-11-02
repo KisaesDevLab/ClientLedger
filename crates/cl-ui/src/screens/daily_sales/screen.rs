@@ -347,6 +347,7 @@ impl DailySalesScreen {
             },
             "last_action": self.save.last_action,
             "notice": self.save.notice,
+            "tax_differs": self.save.tax_differs.is_some(),
             "lock_supported": self.lock_supported(),
             "void_open": self.void.open,
             "setup_open": self.setup.is_some(),

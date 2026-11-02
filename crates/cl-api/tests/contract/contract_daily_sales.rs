@@ -65,6 +65,8 @@ pub(crate) fn layout(h: &Harness, s: &Session) -> Layout {
             side,
             required: false,
             active: true,
+            sales_tax_id: None,
+            tax_code_id: None,
         };
     let t = h
         .run(ds.replace_lines(

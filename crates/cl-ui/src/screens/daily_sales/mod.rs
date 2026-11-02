@@ -37,7 +37,7 @@ use cl_api::{
 use cl_core::ids::{
     AccountId, DailyEntryId, DailyLineId, DailyTemplateId, TenantId, TransactionId,
 };
-use cl_core::{CalendarDate, Secret};
+use cl_core::{CalendarDate, Money, Secret};
 use cl_model::CommandId;
 use cl_model::forms::FormState;
 use cl_model::forms::daily_sales::{
@@ -546,6 +546,9 @@ pub(crate) struct SaveState {
     pub lost: crate::forms::lost_save::LostSave,
     /// Check again on a lost post: the day's entry, read by id.
     pub lost_check: Option<Job>,
+    /// The last post's expected tax when the typed tax differed from it
+    /// (`TAX_DIFFERS`, P23; the engine's figure).
+    pub tax_differs: Option<Money>,
 }
 
 /// Void: the confirmation and its request.
@@ -631,6 +634,11 @@ pub struct DailySalesScreen {
     pub(crate) after_save_nav: Option<bool>,
     /// Save as Template and the template this day came from (P15).
     pub(crate) save_template: crate::screens::templates::SaveFlow,
+    /// Sales taxes and tax codes for Set up lines (P23, `daily-sales-tax-v1`).
+    pub(crate) tax_lists: (Vec<cl_api::SalesTaxItem>, Vec<cl_api::TaxCode>),
+    pub(crate) tax_lists_job: Option<
+        crate::screens::invoice::engine::Job<(Vec<cl_api::SalesTaxItem>, Vec<cl_api::TaxCode>)>,
+    >,
 }
 
 /// The cl-model section of an engine section (`None`: unknown).
@@ -678,6 +686,8 @@ pub(crate) fn layout_of(t: &DailyTemplate) -> DailyLayout {
                     NormalSide::Credit => DailySide::Credit,
                 },
                 active: l.active,
+                sales_tax: l.sales_tax_id,
+                tax_code: l.tax_code_id,
             })
             .collect(),
     }
@@ -764,6 +774,8 @@ impl DailySalesScreen {
             nav_prompt: None,
             after_save_nav: None,
             save_template: crate::screens::templates::SaveFlow::default(),
+            tax_lists: (Vec::new(), Vec::new()),
+            tax_lists_job: None,
         };
 
         s.bus = s.link.bus().subscribe();

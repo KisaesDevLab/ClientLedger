@@ -102,6 +102,10 @@ pub struct DemoLayoutLine {
     pub debit: bool,
     /// Active (inactive lines are skipped).
     pub active: bool,
+    /// A tax line's sales tax (P23 `daily-sales-tax-v1`).
+    pub sales_tax: Option<cl_core::ids::SalesTaxItemId>,
+    /// A sales line's tax code (`None`: taxable).
+    pub tax_code: Option<cl_core::ids::TaxCodeId>,
 }
 
 /// A layout (the engine's daily-sales template).
@@ -275,6 +279,44 @@ fn not_found() -> ApiError {
     ApiError::NotFound { code: None }
 }
 
+/// The layout's linked sales tax (`daily-sales-tax-v1`, Q-P23g): (sales
+/// tax, taxable sales, typed tax). Taxable sales are the sales lines with
+/// no code or a taxable code (a debit-side sales line counts negative).
+#[must_use]
+pub fn linked_tax(
+    state: &DemoState,
+    layout: &DemoLayout,
+    values: &[(u32, Money)],
+) -> Option<(
+    cl_core::ids::SalesTaxItemId,
+    rust_decimal::Decimal,
+    rust_decimal::Decimal,
+)> {
+    let linked = layout
+        .lines
+        .iter()
+        .find(|l| l.active && l.sales_tax.is_some())?;
+    let signed = |l: &DemoLayoutLine| {
+        let a = values
+            .iter()
+            .find(|(id, _)| *id == l.id)
+            .map_or(rust_decimal::Decimal::ZERO, |(_, m)| m.as_decimal());
+        if l.debit { -a } else { a }
+    };
+    let base = layout
+        .lines
+        .iter()
+        .filter(|l| l.active && l.section == Section::Sales)
+        .filter(|l| {
+            l.tax_code
+                .and_then(|c| state.sales_tax.code(c))
+                .is_none_or(|c| c.taxable)
+        })
+        .map(signed)
+        .sum();
+    Some((linked.sales_tax?, base, signed(linked)))
+}
+
 /// The exact twin of the engine's `computeEntry`.
 ///
 /// # Errors
@@ -355,6 +397,8 @@ fn layouts_mut(state: &mut DemoState) -> &mut Vec<DemoLayout> {
                     account: account.and_then(|n| by_number(&chart, &n)),
                     debit: sl.side == cl_company::sample::LayoutSide::Debit,
                     active: true,
+                    sales_tax: None,
+                    tax_code: None,
                 });
             }
             out.push(DemoLayout {
@@ -463,6 +507,8 @@ pub fn create_layout(
             account,
             debit: section.is_debit(),
             active: true,
+            sales_tax: None,
+            tax_code: None,
         });
     }
     layouts_mut(state).push(DemoLayout {
@@ -531,12 +577,22 @@ pub fn replace_lines(
             && (l.id == 0 || current.lines.iter().any(|c| c.id == l.id))
             && l.account.is_none_or(|a| chart.iter().any(|x| x.id == a))
     });
-    if !ok {
+    // P23 (Q-P23g): one active tax line (credit side) may carry a sales
+    // tax; it always posts to Sales Tax Payable.
+    let linked: Vec<&DemoLayoutLine> = lines
+        .iter()
+        .filter(|l| l.active && l.sales_tax.is_some())
+        .collect();
+    if !ok || linked.len() > 1 || linked.iter().any(|l| l.section != Section::Tax || l.debit) {
         return Err(invalid());
     }
+    let stp = by_tag(&chart, "sales_tax_payable");
     let mut next = Vec::new();
     for l in lines {
         let mut l = l.clone();
+        if l.sales_tax.is_some() && stp.is_some() {
+            l.account = stp;
+        }
         if l.id == 0 {
             l.id = state.daily_sales.fresh();
         }
@@ -747,6 +803,10 @@ pub fn post(
         .ledger
         .save_lines(&chart, &journal, None)
         .ok_or_else(invalid)?;
+    // The linked tax line's typed tax becomes the sales tax's row (P23).
+    if let Some((item, base, typed)) = linked_tax(state, &l, &d.values) {
+        super::sales_tax::post_daily(state, txn, d.date, Some(item), base, typed);
+    }
     if let Some(x) = state.daily_sales.days.iter_mut().find(|x| x.id == id) {
         x.status = DayStatus::Posted;
         x.transaction = Some(txn);
@@ -822,6 +882,8 @@ fn template_of(l: &DemoLayout) -> Result<cl_api::DailyTemplate, ApiError> {
             allow_tag: false,
             active: x.active,
             sort: u32::try_from(i).map_err(|_| invalid())?,
+            sales_tax_id: x.sales_tax,
+            tax_code_id: x.tax_code,
         });
     }
     Ok(cl_api::DailyTemplate {
@@ -983,6 +1045,8 @@ impl crate::screens::daily_sales::DailyBooks for DemoDailyBooks {
                 account: l.account,
                 debit: l.side == cl_api::NormalSide::Debit,
                 active: l.active,
+                sales_tax: l.sales_tax_id,
+                tax_code: l.tax_code_id,
             });
         }
         self.with(|s| {
@@ -1072,7 +1136,21 @@ impl crate::screens::daily_sales::DailyBooks for DemoDailyBooks {
         let values = values_in(values).map_err(|_| invalid())?;
         self.with(|s| {
             let p = preview(s, layout, &values)?;
+            let l = super::daily_sales::layout(s, layout).ok_or_else(not_found)?;
+            let tax = linked_tax(s, &l, &values).map(|(item, base, typed)| {
+                let expected = super::sales_tax::expected_daily_tax(s, item, base);
+                (item, expected, typed)
+            });
+            let expected_tax = tax
+                .map(|(_, e, _)| super::receivables::money(e))
+                .transpose()?;
             Ok(cl_api::DailyPreview {
+                sales_tax_id: tax.map(|(i, _, _)| i),
+                expected_tax,
+                problems: tax
+                    .filter(|(_, e, t)| e != t)
+                    .map(|_| vec!["TAX_DIFFERS".to_string()])
+                    .unwrap_or_default(),
                 debits: p.debits,
                 credits: p.credits,
                 over_short: p.over_short,
@@ -1195,6 +1273,42 @@ mod tests {
         );
     }
 
+    /// P23 (Q-P23g): a tax line linked to Springfield (8.875%): the preview
+    /// gives the expected tax and TAX_DIFFERS; the typed tax posts as the
+    /// sales tax's row. A second linked line is refused.
+    #[test]
+    fn a_linked_tax_line_checks_and_posts_the_typed_tax() {
+        let d = |s: &str| s.parse::<rust_decimal::Decimal>().expect("d");
+        let mut state = DemoState::new();
+        let l = counter(&mut state);
+        let springfield = super::super::sales_tax::item_id(super::super::sales_tax::SPRINGFIELD);
+        let _ = super::super::sales_tax::items(&mut state, false);
+        let mut lines = l.lines.clone();
+        let tax_at = lines
+            .iter()
+            .position(|x| x.section == Section::Tax)
+            .expect("tax line");
+        lines[tax_at].sales_tax = Some(springfield);
+        let mut twice = lines.clone();
+        let mut other = twice[tax_at].clone();
+        other.id = 0;
+        twice.push(other);
+        assert_eq!(replace_lines(&mut state, l.id, &twice), Err(invalid()));
+        replace_lines(&mut state, l.id, &lines).expect("linked");
+        let l = layout(&mut state, l.id).expect("l");
+        let v = values(&l, &["200.00", "17.00", "100.00", "117.00"]);
+        let (item, base, typed) = linked_tax(&state, &l, &v).expect("linked");
+        assert_eq!((item, base, typed), (springfield, d("200.00"), d("17.00")));
+        assert_eq!(
+            super::super::sales_tax::expected_daily_tax(&state, item, base),
+            d("17.75")
+        );
+        let id = create_day(&mut state, l.id, story(), None, &v).expect("draft");
+        let txn = post(&mut state, id, None).expect("post");
+        let rows = &state.sales_tax.rows[&txn];
+        assert_eq!(rows[0].tax, d("17.00"), "the typed tax posts");
+    }
+
     /// The over case: cash 503.00 → Cr Cash Over/Short 0.65. An exact day
     /// posts no over/short line.
     #[test]
@@ -1269,6 +1383,8 @@ mod tests {
             account: super::super::deposits::clearing_account(&mut state),
             debit: true,
             active: true,
+            sales_tax: None,
+            tax_code: None,
         });
         replace_lines(&mut state, id, &lines).expect("replace");
         let after = layout(&mut state, id).expect("l");
