@@ -39,8 +39,9 @@ use crate::resources::customer_payments::{
 use crate::resources::operations::{
     Operation, REPORT_EXEMPTIONS_EXPIRING, SALES_TAX_AGENCIES, SALES_TAX_AGENCY_CREATE,
     SALES_TAX_AGENCY_DEACTIVATE, SALES_TAX_AGENCY_PUT, SALES_TAX_AGENCY_REACTIVATE,
-    SALES_TAX_CODE_CREATE, SALES_TAX_CODE_DEACTIVATE, SALES_TAX_CODE_PUT, SALES_TAX_CODES,
-    SALES_TAX_EXEMPTION_CREATE, SALES_TAX_EXEMPTION_DEACTIVATE, SALES_TAX_EXEMPTION_PUT,
+    SALES_TAX_CODE_CREATE, SALES_TAX_CODE_DEACTIVATE, SALES_TAX_CODE_PUT,
+    SALES_TAX_CODE_REACTIVATE, SALES_TAX_CODES, SALES_TAX_EXEMPTION_CREATE,
+    SALES_TAX_EXEMPTION_DEACTIVATE, SALES_TAX_EXEMPTION_PUT, SALES_TAX_EXEMPTION_REACTIVATE,
     SALES_TAX_EXEMPTIONS, SALES_TAX_ITEM_CREATE, SALES_TAX_ITEM_DEACTIVATE, SALES_TAX_ITEM_PUT,
     SALES_TAX_ITEM_REACTIVATE, SALES_TAX_ITEMS, SALES_TAX_OWED,
 };
@@ -1173,6 +1174,27 @@ impl SalesTax<'_> {
         decode_one(&reply.body, "code", "tax code")
     }
 
+    /// Reactivates a tax code.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)`; `NotFound`; any [`ApiError`].
+    pub async fn reactivate_code(
+        &self,
+        id: TaxCodeId,
+        key: IdempotencyKey,
+    ) -> Result<TaxCode, ApiError> {
+        require(self.0, Capabilities::SALES_TAX_SETUP)?;
+        let reply = self
+            .write(
+                &SALES_TAX_CODE_REACTIVATE,
+                with_id(&SALES_TAX_CODE_REACTIVATE, &id),
+                &json!({}),
+                key,
+            )
+            .await?;
+        decode_one(&reply.body, "code", "tax code")
+    }
+
     /// What is owed as of `as_of` (`basis`: `None` for the company's;
     /// `agency`: `None` for every agency).
     ///
@@ -1275,6 +1297,27 @@ impl SalesTax<'_> {
             .write(
                 &SALES_TAX_EXEMPTION_DEACTIVATE,
                 with_id(&SALES_TAX_EXEMPTION_DEACTIVATE, &id),
+                &json!({}),
+                key,
+            )
+            .await?;
+        decode_one(&reply.body, "exemption", "exemption certificate")
+    }
+
+    /// Reactivates an exemption certificate.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)`; `NotFound`; any [`ApiError`].
+    pub async fn reactivate_exemption(
+        &self,
+        id: TaxExemptionId,
+        key: IdempotencyKey,
+    ) -> Result<TaxExemption, ApiError> {
+        require(self.0, Capabilities::TAX_EXEMPTIONS)?;
+        let reply = self
+            .write(
+                &SALES_TAX_EXEMPTION_REACTIVATE,
+                with_id(&SALES_TAX_EXEMPTION_REACTIVATE, &id),
                 &json!({}),
                 key,
             )

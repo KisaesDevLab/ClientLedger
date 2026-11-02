@@ -32,8 +32,10 @@ use crate::support::{Harness, unique};
 
 /// The engine's own system account numbers (never imported, never
 /// overwritten): seeded by every template with `systemAccountsOnly`.
-const SYSTEM_NUMBERS: [&str; 7] = [
-    "10100", "10150", "10200", "20100", "20900", "30000", "30120",
+/// 49900 is Unapplied receipts (`cash-basis-spf-v1`, U-152, since pin
+/// 9be6da51).
+const SYSTEM_NUMBERS: [&str; 8] = [
+    "10100", "10150", "10200", "20100", "20900", "30000", "30120", "49900",
 ];
 
 /// The owner's equity accounts the engine seeds for a single-member LLC

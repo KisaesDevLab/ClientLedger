@@ -260,12 +260,12 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 7] = [
         cl_api::KeySet::SalesDocEmailV1,
         4,
     ),
-    // P23 (U-147, U-150, U-154): client-declared until the WP-4 pin bump.
+    // P23 (U-147, U-150, U-151, U-154): in the spec since pin 9be6da51.
     (
         "idempotency_sales_tax_v1_routes.txt",
         "keyable-sales-tax",
         cl_api::KeySet::SalesTaxSetupV1,
-        14,
+        16,
     ),
     (
         "idempotency_sales_tax_pay_v1_routes.txt",

@@ -1300,6 +1300,12 @@ pub(crate) const SALES_TAX_CODE_DEACTIVATE: Operation = keyable_in(
     Method::Post,
     "/api/v1/sales-tax/codes/{id}/deactivate",
 );
+/// Reactivates a tax code.
+pub(crate) const SALES_TAX_CODE_REACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/codes/{id}/reactivate",
+);
 /// Sales tax owed as of a date by agency and item (U-149).
 pub(crate) const SALES_TAX_OWED: Operation = read("/api/v1/sales-tax/owed");
 /// Exemption certificates (U-151).
@@ -1321,6 +1327,12 @@ pub(crate) const SALES_TAX_EXEMPTION_DEACTIVATE: Operation = keyable_in(
     KeySet::SalesTaxSetupV1,
     Method::Post,
     "/api/v1/sales-tax/exemptions/{id}/deactivate",
+);
+/// Reactivates an exemption certificate.
+pub(crate) const SALES_TAX_EXEMPTION_REACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/exemptions/{id}/reactivate",
 );
 /// Certificates expired or expiring within a window (U-151).
 pub(crate) const REPORT_EXEMPTIONS_EXPIRING: Operation =
@@ -1357,7 +1369,7 @@ pub(crate) const SALES_TAX_PAY_MARK_PAID: Operation = keyable_in(
 pub(crate) const SALES_TAX_PAY_MARK_PAID_UNDO: Operation = keyable_in(
     KeySet::SalesTaxPayV1,
     Method::Post,
-    "/api/v1/sales-tax/payments/mark-paid-through/{id}/undo",
+    "/api/v1/sales-tax/payments/mark-paid-through/{runId}/undo",
 );
 /// One sales tax payment with its lines.
 pub(crate) const SALES_TAX_PAYMENT_GET: Operation = read("/api/v1/sales-tax/payments/{id}");
@@ -1389,7 +1401,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 312] = [
+pub const OPERATIONS: [Operation; 314] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1699,11 +1711,13 @@ pub const OPERATIONS: [Operation; 312] = [
     SALES_TAX_CODE_CREATE,
     SALES_TAX_CODE_PUT,
     SALES_TAX_CODE_DEACTIVATE,
+    SALES_TAX_CODE_REACTIVATE,
     SALES_TAX_OWED,
     SALES_TAX_EXEMPTIONS,
     SALES_TAX_EXEMPTION_CREATE,
     SALES_TAX_EXEMPTION_PUT,
     SALES_TAX_EXEMPTION_DEACTIVATE,
+    SALES_TAX_EXEMPTION_REACTIVATE,
     REPORT_EXEMPTIONS_EXPIRING,
     SALES_TAX_PAY_PREVIEW,
     SALES_TAX_PAY_CREATE,
@@ -1982,7 +1996,7 @@ mod tests {
     /// The P23 key sets (U-147, U-150, U-154), as
     /// `tests/fixtures/idempotency_sales_tax*_routes.txt` and
     /// `idempotency_recovery_v1_routes.txt` record them.
-    const KEYABLE_SALES_TAX: [(&str, &str); 14] = [
+    const KEYABLE_SALES_TAX: [(&str, &str); 16] = [
         ("POST", "/api/v1/sales-tax/agencies"),
         ("PUT", "/api/v1/sales-tax/agencies/{id}"),
         ("POST", "/api/v1/sales-tax/agencies/{id}/deactivate"),
@@ -1994,9 +2008,11 @@ mod tests {
         ("POST", "/api/v1/sales-tax/codes"),
         ("PUT", "/api/v1/sales-tax/codes/{id}"),
         ("POST", "/api/v1/sales-tax/codes/{id}/deactivate"),
+        ("POST", "/api/v1/sales-tax/codes/{id}/reactivate"),
         ("POST", "/api/v1/sales-tax/exemptions"),
         ("PUT", "/api/v1/sales-tax/exemptions/{id}"),
         ("POST", "/api/v1/sales-tax/exemptions/{id}/deactivate"),
+        ("POST", "/api/v1/sales-tax/exemptions/{id}/reactivate"),
     ];
     const KEYABLE_SALES_TAX_PAY: [(&str, &str); 5] = [
         ("POST", "/api/v1/sales-tax/payments"),
@@ -2005,7 +2021,7 @@ mod tests {
         ("POST", "/api/v1/sales-tax/payments/mark-paid-through"),
         (
             "POST",
-            "/api/v1/sales-tax/payments/mark-paid-through/{id}/undo",
+            "/api/v1/sales-tax/payments/mark-paid-through/{runId}/undo",
         ),
     ];
     const KEYABLE_RECOVERY: [(&str, &str); 1] = [("POST", "/api/v1/payments/write-off-recoveries")];

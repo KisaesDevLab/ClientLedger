@@ -1,6 +1,6 @@
 # The engine's `idempotency-recovery-v1` route set (U-154, P23 plan §2.0): bad-debt recoveries,
-# `x-idempotency: true` in its openapi.json. Client-declared until the WP-4
-# pin bump. Append-only for this capability name: `keyable-recovery` in operations.txt
+# `x-idempotency: true` in its openapi.json; in the spec since pin 9be6da51
+# (engine PRs #216-#221). Append-only for this capability name: `keyable-recovery` in operations.txt
 # (`KeySet::RecoveryV1`), keyed only while the engine advertises
 # `idempotency-recovery-v1`.
 POST /api/v1/payments/write-off-recoveries
