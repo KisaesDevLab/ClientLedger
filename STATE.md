@@ -205,7 +205,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 ## Follow-ups from P23
 
-1. Run `ANALYZE` on the bundled PostgreSQL after company create, import and restore (or shorten `autovacuum_naptime`): without statistics every report can pick a bad plan (U-155 fixed the cash reports only).
+1. ~~`ANALYZE` after company create, import and restore~~ Done 2026-11-02 on `fix/db-statistics` (Q-335): runs as the app role after create, restore, new-from-existing and the practice company; a company import flow will need the same call when it exists.
 2. Contract tests not written: sales receipt tax (golden 5), daily sales tax, cash golden 8b and 8d (covered by engine tests and the demo only).
 3. Q-P23z: the cash-basis SPF corrections change cash reports of closed periods (no posted rows change); owner confirmation recommended. P28's basis note records the version.
 4. A dev database that applied the pre-review 0254 or 0256 migrations must be recreated.
