@@ -22,10 +22,10 @@
 //!   rows dated through the date and every live payment line whatever its
 //!   date (S1).
 //!
-//! The demo derives the SSUTA shares when the report is read (the engine
-//! stores them at posting): the switch therefore applies to every posting,
-//! not only those made while it is on (Q-P23w; a listed demo limit). No
-//! floats.
+//! Each customer payment keeps the Streamlined Sales Tax switch as it was
+//! when it was posted (an edit posts again), and only those settlements
+//! take discount and bad-debt shares (Q-P23w, as the engine stores them at
+//! posting). No floats.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -142,6 +142,9 @@ struct Settlement {
     cash: Decimal,
     discount: Decimal,
     write_off: Decimal,
+    /// Streamlined Sales Tax was on when it was posted (its discount and
+    /// write-off shares count only then, Q-P23w).
+    ssuta: bool,
 }
 
 /// Each invoice's settlements in order (effective date, then the order
@@ -161,6 +164,7 @@ fn settlements(state: &DemoState) -> BTreeMap<TransactionId, Vec<Settlement>> {
                 cash: a.settled - a.adjustments,
                 discount: a.discount,
                 write_off: a.write_off,
+                ssuta: p.ssuta,
             };
             seq += 1;
             out.entry(a.invoice).or_default().push((s.date, seq, s));
@@ -176,6 +180,7 @@ fn settlements(state: &DemoState) -> BTreeMap<TransactionId, Vec<Settlement>> {
                         cash: -s.cash,
                         discount: -s.discount,
                         write_off: -s.write_off,
+                        ssuta: s.ssuta,
                     },
                 ));
             }
@@ -254,6 +259,7 @@ pub fn preview_tax_parts(
         cash,
         discount,
         write_off,
+        ssuta: true,
     };
     let mut out = (Decimal::ZERO, Decimal::ZERO);
     for r in rows
@@ -311,7 +317,6 @@ fn row_event(r: &TaxRow, date: CalendarDate, tax: Decimal, base: Decimal) -> Eve
 /// Every figure on `basis` (payments included).
 fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
     let st = &state.sales_tax;
-    let ssuta = st.ssuta;
     let settled = settlements(state);
     let mut out = Vec::new();
     for (txn, rows) in &st.rows {
@@ -348,15 +353,19 @@ fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
                     p += add;
                 }
             }
-            // SSUTA discount (both bases) and bad-debt (accrual) parts.
-            if ssuta
-                && r.doc == DocKind::Invoice
+            // SSUTA discount (both bases) and bad-debt (accrual) parts, of
+            // the settlements posted while the switch was on (Q-P23w).
+            if r.doc == DocKind::Invoice
                 && r.code.is_none()
                 && let Some(total) = total
             {
                 let mut p = Decimal::ZERO;
                 for s in sets {
-                    let (d, w) = ssuta_split(r.tax, *s, p, total);
+                    let (d, w) = if s.ssuta {
+                        ssuta_split(r.tax, *s, p, total)
+                    } else {
+                        (Decimal::ZERO, Decimal::ZERO)
+                    };
                     p += s.cash + s.discount + s.write_off;
                     for (col, x) in [(Col::Discounts, d), (Col::BadDebts, w)] {
                         if x.is_zero() || col == Col::BadDebts && cash {
@@ -1479,7 +1488,9 @@ fn written_off(
             let mut p = Decimal::ZERO;
             let mut wt = Decimal::ZERO;
             for s in &sets {
-                wt += ssuta_split(r.tax, *s, p, total).1;
+                if s.ssuta {
+                    wt += ssuta_split(r.tax, *s, p, total).1;
+                }
                 p += s.cash + s.discount + s.write_off;
             }
             items.push((item, r.agency, wt));

@@ -704,6 +704,26 @@ fn ssuta_discount_case_12_on_and_off() {
 }
 
 #[test]
+fn the_ssuta_switch_applies_to_postings_made_while_it_is_on() {
+    // Q-P23w: a discount posted with the switch off keeps no tax share
+    // when the switch is turned on later (the Preferences hint says "from
+    // now on"); one posted while on keeps its share when it is turned off.
+    let all = |s: &mut Seed| {
+        owed(&mut s.state, day("2026-12-31"), None, None)
+            .expect("owed")
+            .total
+    };
+    let mut off = run_ssuta(12, false);
+    let before = all(&mut off);
+    off.state.sales_tax.ssuta = true;
+    assert_eq!(all(&mut off), before, "switching on restates nothing");
+    let mut on = run_ssuta(12, true);
+    let before = all(&mut on);
+    on.state.sales_tax.ssuta = false;
+    assert_eq!(all(&mut on), before, "switching off restates nothing");
+}
+
+#[test]
 fn ssuta_bad_debt_and_recovery_case_13() {
     let mut s = run_ssuta(13, true);
     // A second recovery past the write-off is refused with what is left.
@@ -758,6 +778,7 @@ fn ssuta_split_matches_the_golden_shares() {
         cash: d(c),
         discount: d(disc),
         write_off: d(w),
+        ssuta: true,
     };
     assert_eq!(
         ssuta_split(

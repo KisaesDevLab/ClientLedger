@@ -130,6 +130,10 @@ struct Pay {
     write_off_account: Option<AccountId>,
     bounce: Option<(TransactionId, CalendarDate)>,
     refunded: Decimal,
+    /// The Streamlined Sales Tax switch when it was posted (Q-P23w: the
+    /// switch applies to postings made while it is on; an edit posts
+    /// again).
+    ssuta: bool,
 }
 
 /// Customer payments, settings and history of the demo engine.
@@ -1490,6 +1494,7 @@ fn receive_inner(
             write_off_account,
             bounce: None,
             refunded: Decimal::ZERO,
+            ssuta: state.sales_tax.ssuta,
         },
     );
     // Credits and deposits used inside this receipt.
@@ -1568,6 +1573,7 @@ fn use_credit(
                 write_off_account: None,
                 bounce: None,
                 refunded: Decimal::ZERO,
+                ssuta: state.sales_tax.ssuta,
             },
         );
     } else if let Some(p) = state.receivables.pays.get_mut(&source) {
@@ -2186,6 +2192,8 @@ pub(super) struct PayView {
     pub credit_remaining: Decimal,
     pub ref_no: Option<String>,
     pub apps: Vec<PayAppView>,
+    /// The Streamlined Sales Tax switch when it was posted.
+    pub ssuta: bool,
 }
 
 /// Every customer payment the demo engine keeps.
@@ -2205,6 +2213,7 @@ pub(super) fn pay_views(state: &DemoState) -> Vec<PayView> {
             refunded: p.refunded,
             credit_remaining: credit_remaining(p),
             ref_no: p.ref_no.clone(),
+            ssuta: p.ssuta,
             apps: p
                 .apps
                 .iter()
