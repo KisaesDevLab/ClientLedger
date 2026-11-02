@@ -51,6 +51,9 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::CreditMemoV1) => "keyable-credit-memo",
             RetryClass::Keyable(KeySet::CustomerStatementsV1) => "keyable-customer-statements",
             RetryClass::Keyable(KeySet::FinanceChargesV1) => "keyable-finance-charges",
+            RetryClass::Keyable(KeySet::SalesTaxSetupV1) => "keyable-sales-tax",
+            RetryClass::Keyable(KeySet::SalesTaxPayV1) => "keyable-sales-tax-pay",
+            RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -113,6 +116,14 @@ pub enum KeySet {
     /// `idempotency-finance-charges-v1` (U-141, P22): finance-charge
     /// assess.
     FinanceChargesV1,
+    /// `idempotency-sales-tax-v1` (U-147, P23): the sales tax setup writes
+    /// (agencies, items and groups, codes, exemption certificates).
+    SalesTaxSetupV1,
+    /// `idempotency-sales-tax-pay-v1` (U-150, P23): Pay Sales Tax and
+    /// linking an outside payment.
+    SalesTaxPayV1,
+    /// `idempotency-recovery-v1` (U-154, P23): bad-debt recoveries.
+    RecoveryV1,
 }
 
 impl KeySet {
@@ -135,6 +146,9 @@ impl KeySet {
                 crate::wire::Capabilities::IDEMPOTENCY_CUSTOMER_STATEMENTS
             }
             KeySet::FinanceChargesV1 => crate::wire::Capabilities::IDEMPOTENCY_FINANCE_CHARGES,
+            KeySet::SalesTaxSetupV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX,
+            KeySet::SalesTaxPayV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX_PAY,
+            KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
         }
     }
 }
@@ -1211,6 +1225,137 @@ pub(crate) const SALES_RECEIPT_EMAIL_LATER: Operation = keyable_in(
     "/api/v1/sales-receipts/{id}/email-later",
 );
 
+// ---- P23 sales tax ----------------------------------------------------------------
+// Contract per the P23 plan §2.4-§2.8 (U-147 to U-154, U-25); verify at the
+// WP-4 pin bump.
+/// The sales tax agencies (U-147).
+pub(crate) const SALES_TAX_AGENCIES: Operation = read("/api/v1/sales-tax/agencies");
+/// Makes a vendor a sales tax agency (U-147).
+pub(crate) const SALES_TAX_AGENCY_CREATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/agencies",
+);
+/// Edits an agency (`expectedUpdatedAt`).
+pub(crate) const SALES_TAX_AGENCY_PUT: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Put,
+    "/api/v1/sales-tax/agencies/{id}",
+);
+/// Deactivates an agency (409 `AGENCY_IN_USE`).
+pub(crate) const SALES_TAX_AGENCY_DEACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/agencies/{id}/deactivate",
+);
+/// Reactivates an agency.
+pub(crate) const SALES_TAX_AGENCY_REACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/agencies/{id}/reactivate",
+);
+/// Sales tax items and groups (U-147).
+pub(crate) const SALES_TAX_ITEMS: Operation = read("/api/v1/sales-tax/items");
+/// Creates a sales tax item or group.
+pub(crate) const SALES_TAX_ITEM_CREATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/items",
+);
+/// Edits a sales tax item or group (`expectedUpdatedAt`).
+pub(crate) const SALES_TAX_ITEM_PUT: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Put,
+    "/api/v1/sales-tax/items/{id}",
+);
+/// Deactivates a sales tax item or group (409 `ITEM_IN_GROUP`).
+pub(crate) const SALES_TAX_ITEM_DEACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/items/{id}/deactivate",
+);
+/// Reactivates a sales tax item or group.
+pub(crate) const SALES_TAX_ITEM_REACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/items/{id}/reactivate",
+);
+/// Tax codes (U-25).
+pub(crate) const SALES_TAX_CODES: Operation = read("/api/v1/sales-tax/codes");
+/// Creates a tax code.
+pub(crate) const SALES_TAX_CODE_CREATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/codes",
+);
+/// Edits a tax code (409 `SYSTEM_CODE` for Tax and Non).
+pub(crate) const SALES_TAX_CODE_PUT: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Put,
+    "/api/v1/sales-tax/codes/{id}",
+);
+/// Deactivates a tax code (409 `CODE_IN_USE`).
+pub(crate) const SALES_TAX_CODE_DEACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/codes/{id}/deactivate",
+);
+/// Sales tax owed as of a date by agency and item (U-149).
+pub(crate) const SALES_TAX_OWED: Operation = read("/api/v1/sales-tax/owed");
+/// Exemption certificates (U-151).
+pub(crate) const SALES_TAX_EXEMPTIONS: Operation = read("/api/v1/sales-tax/exemptions");
+/// Records an exemption certificate.
+pub(crate) const SALES_TAX_EXEMPTION_CREATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/exemptions",
+);
+/// Edits an exemption certificate (`expectedUpdatedAt`).
+pub(crate) const SALES_TAX_EXEMPTION_PUT: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Put,
+    "/api/v1/sales-tax/exemptions/{id}",
+);
+/// Deactivates an exemption certificate.
+pub(crate) const SALES_TAX_EXEMPTION_DEACTIVATE: Operation = keyable_in(
+    KeySet::SalesTaxSetupV1,
+    Method::Post,
+    "/api/v1/sales-tax/exemptions/{id}/deactivate",
+);
+/// Certificates expired or expiring within a window (U-151).
+pub(crate) const REPORT_EXEMPTIONS_EXPIRING: Operation =
+    read("/api/v1/reports/exemptions-expiring");
+/// Every figure of a sales tax payment, posting nothing (U-150).
+pub(crate) const SALES_TAX_PAY_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/sales-tax/payments/preview");
+/// Pays sales tax: a `sales_tax_payment` check (U-150).
+pub(crate) const SALES_TAX_PAY_CREATE: Operation = keyable_in(
+    KeySet::SalesTaxPayV1,
+    Method::Post,
+    "/api/v1/sales-tax/payments",
+);
+/// Links an outside payment that debited Sales Tax Payable (U-150).
+pub(crate) const SALES_TAX_PAY_LINK: Operation = keyable_in(
+    KeySet::SalesTaxPayV1,
+    Method::Post,
+    "/api/v1/sales-tax/payments/link",
+);
+/// One sales tax payment with its lines.
+pub(crate) const SALES_TAX_PAYMENT_GET: Operation = read("/api/v1/sales-tax/payments/{id}");
+/// Sales tax payments.
+pub(crate) const SALES_TAX_PAYMENTS_LIST: Operation = read("/api/v1/sales-tax/payments");
+/// Recovers part of a written-off invoice (U-154).
+pub(crate) const WRITE_OFF_RECOVERY_CREATE: Operation = keyable_in(
+    KeySet::RecoveryV1,
+    Method::Post,
+    "/api/v1/payments/write-off-recoveries",
+);
+/// The sales tax liability report (v2 string columns, U-149).
+pub(crate) const REPORT_SALES_TAX_LIABILITY: Operation =
+    read("/api/v1/reports/sales-tax-liability");
+/// The sales tax payments report.
+pub(crate) const REPORT_SALES_TAX_PAYMENTS: Operation = read("/api/v1/reports/sales-tax-payments");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -1223,7 +1368,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 280] = [
+pub const OPERATIONS: [Operation; 308] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1518,6 +1663,35 @@ pub const OPERATIONS: [Operation; 280] = [
     CREDIT_MEMO_EMAIL_LATER,
     SALES_RECEIPT_EMAIL,
     SALES_RECEIPT_EMAIL_LATER,
+    // P23
+    SALES_TAX_AGENCIES,
+    SALES_TAX_AGENCY_CREATE,
+    SALES_TAX_AGENCY_PUT,
+    SALES_TAX_AGENCY_DEACTIVATE,
+    SALES_TAX_AGENCY_REACTIVATE,
+    SALES_TAX_ITEMS,
+    SALES_TAX_ITEM_CREATE,
+    SALES_TAX_ITEM_PUT,
+    SALES_TAX_ITEM_DEACTIVATE,
+    SALES_TAX_ITEM_REACTIVATE,
+    SALES_TAX_CODES,
+    SALES_TAX_CODE_CREATE,
+    SALES_TAX_CODE_PUT,
+    SALES_TAX_CODE_DEACTIVATE,
+    SALES_TAX_OWED,
+    SALES_TAX_EXEMPTIONS,
+    SALES_TAX_EXEMPTION_CREATE,
+    SALES_TAX_EXEMPTION_PUT,
+    SALES_TAX_EXEMPTION_DEACTIVATE,
+    REPORT_EXEMPTIONS_EXPIRING,
+    SALES_TAX_PAY_PREVIEW,
+    SALES_TAX_PAY_CREATE,
+    SALES_TAX_PAY_LINK,
+    SALES_TAX_PAYMENT_GET,
+    SALES_TAX_PAYMENTS_LIST,
+    WRITE_OFF_RECOVERY_CREATE,
+    REPORT_SALES_TAX_LIABILITY,
+    REPORT_SALES_TAX_PAYMENTS,
 ];
 
 /// Looks up a covered operation.
@@ -1620,6 +1794,12 @@ mod tests {
                 Some(KeySet::FinanceChargesV1)
             } else if KEYABLE_SALES_DOC_EMAIL.contains(&route) {
                 Some(KeySet::SalesDocEmailV1)
+            } else if KEYABLE_SALES_TAX.contains(&route) {
+                Some(KeySet::SalesTaxSetupV1)
+            } else if KEYABLE_SALES_TAX_PAY.contains(&route) {
+                Some(KeySet::SalesTaxPayV1)
+            } else if KEYABLE_RECOVERY.contains(&route) {
+                Some(KeySet::RecoveryV1)
             } else {
                 None
             };
@@ -1653,7 +1833,10 @@ mod tests {
                 + KEYABLE_CREDIT_MEMO.len()
                 + KEYABLE_CUSTOMER_STATEMENTS.len()
                 + KEYABLE_FINANCE_CHARGES.len()
-                + KEYABLE_SALES_DOC_EMAIL.len(),
+                + KEYABLE_SALES_DOC_EMAIL.len()
+                + KEYABLE_SALES_TAX.len()
+                + KEYABLE_SALES_TAX_PAY.len()
+                + KEYABLE_RECOVERY.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -1771,6 +1954,58 @@ mod tests {
         ("POST", "/api/v1/sales-receipts/{id}/email"),
         ("POST", "/api/v1/sales-receipts/{id}/email-later"),
     ];
+    /// The P23 key sets (U-147, U-150, U-154), as
+    /// `tests/fixtures/idempotency_sales_tax*_routes.txt` and
+    /// `idempotency_recovery_v1_routes.txt` record them.
+    const KEYABLE_SALES_TAX: [(&str, &str); 14] = [
+        ("POST", "/api/v1/sales-tax/agencies"),
+        ("PUT", "/api/v1/sales-tax/agencies/{id}"),
+        ("POST", "/api/v1/sales-tax/agencies/{id}/deactivate"),
+        ("POST", "/api/v1/sales-tax/agencies/{id}/reactivate"),
+        ("POST", "/api/v1/sales-tax/items"),
+        ("PUT", "/api/v1/sales-tax/items/{id}"),
+        ("POST", "/api/v1/sales-tax/items/{id}/deactivate"),
+        ("POST", "/api/v1/sales-tax/items/{id}/reactivate"),
+        ("POST", "/api/v1/sales-tax/codes"),
+        ("PUT", "/api/v1/sales-tax/codes/{id}"),
+        ("POST", "/api/v1/sales-tax/codes/{id}/deactivate"),
+        ("POST", "/api/v1/sales-tax/exemptions"),
+        ("PUT", "/api/v1/sales-tax/exemptions/{id}"),
+        ("POST", "/api/v1/sales-tax/exemptions/{id}/deactivate"),
+    ];
+    const KEYABLE_SALES_TAX_PAY: [(&str, &str); 2] = [
+        ("POST", "/api/v1/sales-tax/payments"),
+        ("POST", "/api/v1/sales-tax/payments/link"),
+    ];
+    const KEYABLE_RECOVERY: [(&str, &str); 1] = [("POST", "/api/v1/payments/write-off-recoveries")];
+
+    #[test]
+    fn p23_key_sets_name_their_capabilities() {
+        assert_eq!(
+            KeySet::SalesTaxSetupV1.capability(),
+            "idempotency-sales-tax-v1"
+        );
+        assert_eq!(
+            KeySet::SalesTaxPayV1.capability(),
+            "idempotency-sales-tax-pay-v1"
+        );
+        assert_eq!(KeySet::RecoveryV1.capability(), "idempotency-recovery-v1");
+        assert_eq!(
+            SALES_TAX_ITEM_CREATE.key_set(),
+            Some(KeySet::SalesTaxSetupV1)
+        );
+        assert_eq!(SALES_TAX_PAY_CREATE.key_set(), Some(KeySet::SalesTaxPayV1));
+        assert_eq!(SALES_TAX_PAY_PREVIEW.key_set(), None);
+        assert_eq!(
+            WRITE_OFF_RECOVERY_CREATE.key_set(),
+            Some(KeySet::RecoveryV1)
+        );
+        assert_eq!(REPORT_SALES_TAX_LIABILITY.key_set(), None);
+        assert_eq!(
+            RetryClass::Keyable(KeySet::SalesTaxPayV1).as_str(),
+            "keyable-sales-tax-pay"
+        );
+    }
 
     #[test]
     fn key_sets_name_their_capabilities() {

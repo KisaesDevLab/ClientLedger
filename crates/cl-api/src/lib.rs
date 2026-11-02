@@ -309,6 +309,15 @@ pub use resources::sales_receipts::{
     NewSalesReceipt, PaymentMethod, SalesReceiptPreview, SalesReceiptRecord, SalesReceipts,
     check_sales_receipt, saved_sales_receipt,
 };
+// P23: sales tax (engine U-147 to U-154, U-25).
+pub use resources::sales_tax::{
+    EXEMPTION_NOTE_MAX, EXEMPTION_NUMBER_MAX, ExemptionStatus, ExpiringExemption,
+    GROUP_MEMBERS_MAX, OwedAgency, OwedItem, SALES_TAX_DESCRIPTION_MAX, SALES_TAX_NAME_MAX,
+    SalesTax, SalesTaxAgency, SalesTaxAgencyId, SalesTaxBasis, SalesTaxItem, SalesTaxItemDraft,
+    SalesTaxItemId, SalesTaxKind, SalesTaxMember, SalesTaxOwed, SalesTaxRefusal, TAX_CODE_MAX,
+    TAX_CODE_NAME_MAX, TaxCode, TaxCodeDraft, TaxCodeId, TaxExemption, TaxExemptionDraft,
+    TaxExemptionId, sales_tax_refusal, sales_tax_refusal_codes,
+};
 // P20: Create Invoice (engine U-122 to U-129, U-38).
 pub use resources::invoice_layouts::{
     InvoiceLayout, InvoiceLayouts, LAYOUT_NAME_MAX, LayoutColumns, LayoutDraft, ResolvedFooters,

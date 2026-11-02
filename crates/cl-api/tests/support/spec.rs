@@ -40,7 +40,11 @@ use sha2::{Digest, Sha256};
 /// and runs, and finance charges (U-137 to U-143, U-112).
 /// Since pin 9fe75899 (engine PRs #214, #215) credit memo and sales receipt
 /// email and email-later are (U-144).
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// The P23 sales tax rows are client-declared until the WP-4 pin bump: the
+/// P23 plan §2.4-§2.8 contract (setup, owed, exemptions, Pay Sales Tax and
+/// link, bad-debt recoveries; U-147 to U-154). The liability and payments
+/// reports were already in the spec.
+pub const OUTSIDE_SPEC: [(&str, &str); 34] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -50,6 +54,33 @@ pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    // P23 (engine U-147 to U-154; until the WP-4 pin bump).
+    ("GET", "/api/v1/sales-tax/agencies"),
+    ("POST", "/api/v1/sales-tax/agencies"),
+    ("PUT", "/api/v1/sales-tax/agencies/{id}"),
+    ("POST", "/api/v1/sales-tax/agencies/{id}/deactivate"),
+    ("POST", "/api/v1/sales-tax/agencies/{id}/reactivate"),
+    ("GET", "/api/v1/sales-tax/items"),
+    ("POST", "/api/v1/sales-tax/items"),
+    ("PUT", "/api/v1/sales-tax/items/{id}"),
+    ("POST", "/api/v1/sales-tax/items/{id}/deactivate"),
+    ("POST", "/api/v1/sales-tax/items/{id}/reactivate"),
+    ("GET", "/api/v1/sales-tax/codes"),
+    ("POST", "/api/v1/sales-tax/codes"),
+    ("PUT", "/api/v1/sales-tax/codes/{id}"),
+    ("POST", "/api/v1/sales-tax/codes/{id}/deactivate"),
+    ("GET", "/api/v1/sales-tax/owed"),
+    ("GET", "/api/v1/sales-tax/exemptions"),
+    ("POST", "/api/v1/sales-tax/exemptions"),
+    ("PUT", "/api/v1/sales-tax/exemptions/{id}"),
+    ("POST", "/api/v1/sales-tax/exemptions/{id}/deactivate"),
+    ("GET", "/api/v1/reports/exemptions-expiring"),
+    ("POST", "/api/v1/sales-tax/payments/preview"),
+    ("POST", "/api/v1/sales-tax/payments"),
+    ("POST", "/api/v1/sales-tax/payments/link"),
+    ("GET", "/api/v1/sales-tax/payments/{id}"),
+    ("GET", "/api/v1/sales-tax/payments"),
+    ("POST", "/api/v1/payments/write-off-recoveries"),
 ];
 
 /// Lowercase hex of a SHA-256.

@@ -1068,6 +1068,8 @@ pub fn preview(
             discount_date: row.pct.map(|(_, d)| d),
             discount_available: money(row.available)?,
             suggest_discount: row.suggest,
+            discount_tax: None,
+            write_off_tax: None,
         });
         if row.settled() > Decimal::ZERO && remaining > Decimal::ZERO {
             let amount = money(remaining)?;

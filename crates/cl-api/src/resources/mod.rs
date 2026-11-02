@@ -46,6 +46,7 @@ pub mod reports;
 pub mod rules;
 pub mod sales;
 pub mod sales_receipts;
+pub mod sales_tax;
 pub mod session_secrets;
 pub mod setup;
 pub mod smtp;

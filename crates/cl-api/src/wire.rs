@@ -401,6 +401,40 @@ impl Capabilities {
     /// U-146: a deadlock on the receivables routes is 409 `RETRY` (nothing
     /// saved; resend with the same key).
     pub const RECEIVABLES_RETRY: &'static str = "receivables-retry-v1";
+    // P23 sales tax (plan §2.4-§2.8; contract per the plan, verified at the
+    // WP-4 pin bump).
+    /// U-147, U-25: agencies, sales tax items and groups, tax codes, the
+    /// client and item defaults, document `salesTaxId` and line codes.
+    pub const SALES_TAX_SETUP: &'static str = "sales-tax-setup-v1";
+    /// U-148: six-place rates on every route (`numeric(7,6)`).
+    pub const SALES_TAX_RATE6: &'static str = "sales-tax-rate6-v1";
+    /// U-147: `salesTaxEnabled`, `salesTaxBasis`, `defaultSalesTaxId` and
+    /// `salesTaxSsuta` on `/company/settings`.
+    pub const COMPANY_SALES_TAX_FLAGS: &'static str = "company-sales-tax-flags-v1";
+    /// U-147: `Idempotency-Key` on the sales tax setup writes.
+    pub const IDEMPOTENCY_SALES_TAX: &'static str = "idempotency-sales-tax-v1";
+    /// U-149: the liability report's string columns by agency and item,
+    /// `GET /sales-tax/owed` and the payments report.
+    pub const SALES_TAX_LIABILITY: &'static str = "sales-tax-liability-v2";
+    /// U-152: cash basis per the SPF rules (Unapplied receipts, write-offs
+    /// off cash, bill discounts).
+    pub const CASH_BASIS_SPF: &'static str = "cash-basis-spf-v1";
+    /// Daily sales tax lines linked to a sales tax (`expectedTax`,
+    /// `TAX_DIFFERS`).
+    pub const DAILY_SALES_TAX: &'static str = "daily-sales-tax-v1";
+    /// U-150: Pay Sales Tax (preview, post, link, get, list).
+    pub const SALES_TAX_PAY: &'static str = "sales-tax-pay-v1";
+    /// U-150: `Idempotency-Key` on Pay Sales Tax and link.
+    pub const IDEMPOTENCY_SALES_TAX_PAY: &'static str = "idempotency-sales-tax-pay-v1";
+    /// U-151: exemption certificates and the expiring report.
+    pub const TAX_EXEMPTIONS: &'static str = "tax-exemptions-v1";
+    /// U-153: SSUTA discount and bad-debt shares (`discountTax`,
+    /// `writeOffTax` on the payment preview).
+    pub const SALES_TAX_SSUTA: &'static str = "sales-tax-ssuta-v1";
+    /// U-154: bad-debt recoveries.
+    pub const BAD_DEBT_RECOVERY: &'static str = "bad-debt-recovery-v1";
+    /// U-154: `Idempotency-Key` on a recovery.
+    pub const IDEMPOTENCY_RECOVERY: &'static str = "idempotency-recovery-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
