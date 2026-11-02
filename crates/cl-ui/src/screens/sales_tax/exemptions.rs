@@ -327,7 +327,7 @@ impl ExemptionsScreen {
         }
         form::hint(ui, &tokens, &t("tax_exemptions.intro"));
         ui.horizontal(|ui| {
-            let l = ui.label(t("tax_exemptions.client"));
+            let l = ui.label(t("tax_exemptions.filter"));
             let shown = self
                 .client
                 .map_or_else(|| t("tax_exemptions.all_clients"), |c| self.name_of(c));

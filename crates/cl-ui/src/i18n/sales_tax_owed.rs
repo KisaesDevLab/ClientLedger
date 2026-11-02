@@ -122,6 +122,7 @@ pub const ENGLISH_2: &[(&str, &str)] = &[
     ("tax_exemptions.needs_update", "Exemption certificates need an engine update."),
     ("tax_exemptions.intro", "Keep the certificates of customers who don't pay sales tax. Invoices warn when one is missing or expired; they still save."),
     ("tax_exemptions.client", "Customer"),
+    ("tax_exemptions.filter", "Show"),
     ("tax_exemptions.all_clients", "All customers"),
     ("tax_exemptions.new", "New certificate"),
     ("tax_exemptions.new_title", "New certificate"),
