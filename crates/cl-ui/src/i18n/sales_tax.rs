@@ -20,7 +20,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.tax.exemption_missing", "This client is marked non-taxable but has no exemption certificate on file."),
     ("invoice.tax.exemption_expired", "This client's exemption certificate has expired."),
     ("invoice.tax.exemption_expiring", "This client's exemption certificate expires within 30 days."),
-    ("invoice.col.tax_code", "TAX"),
+    ("invoice.col.tax_code", "Tax"),
     ("invoice.tax_code.hint", "Tax code: whether this line is taxed. Blank follows the client and the item."),
     ("invoice.tax_code.auto", "Auto"),
     // Sales Tax Setup

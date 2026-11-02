@@ -1,0 +1,62 @@
+# A taxed invoice (P23 WP-2) against `clientledger --demo`: two taxable
+# lines for Long Creek Marina (24 x 32.50 and 6 x 48.00, base 1,068.00)
+# take the company's Monett group, rounded once at 8.100% (86.51); the
+# Sales tax picker moves the invoice to Springfield 8.875% (94.79); the Tax
+# code column makes the mulch line Non (69.23). Every figure is the
+# engine's preview (Q-P23d). Nothing is saved, so light and dark repeat.
+# Synthetic.
+name: sales_tax_invoice
+description: "Taxed invoice: Monett by default, Springfield from the picker, a Non line from the Tax code column."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Spring"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "24"}
+  - key: Tab
+  - type: {text: "32.50"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Item, line 2"}
+  - type: {text: "Mulch"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 2"}
+  - type: {text: "6"}
+  - key: Tab
+  - type: {text: "48"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.totals, equals: ready}
+  - assert_state: {key: screen.sales_tax.used.name, equals: Monett}
+  - assert_state: {key: screen.sales_tax.picked, equals: null}
+  - assert_state: {key: screen.tax, equals: "86.51"}
+  - assert_exists: {role: label, label: "Sales tax \u00b7 Monett (8.100%)"}
+  - assert_exists: {role: combo_box, label: Sales tax}
+  - screenshot: monett
+  - assert_no_clipping: {}
+  # The picker: Springfield for this invoice.
+  - click: {role: combo_box, label: Sales tax}
+  - click: {role: button, label: "Springfield (8.875%)"}
+  - wait: {ms: 800}
+  - assert_state: {key: screen.sales_tax.picked, equals: Springfield}
+  - assert_state: {key: screen.sales_tax.used.name, equals: Springfield}
+  - assert_state: {key: screen.tax, equals: "94.79"}
+  # The Tax code column: the mulch line is not taxed.
+  - click: {label_contains: "Tax, line 2"}
+  - key: Ctrl+A
+  - type: {text: "Non"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.tax, equals: "69.23"}
+  - screenshot: springfield-non
+  - assert_no_clipping: {}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
