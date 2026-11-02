@@ -1107,6 +1107,24 @@ pub fn link(
     Ok(())
 }
 
+/// An edit of a check or entry matched to a sales tax payment is refused
+/// until it is unmatched (409 `SALES_TAX_LINKED`, as the engine).
+///
+/// # Errors
+/// That refusal.
+pub fn refuse_if_linked(state: &DemoState, id: TransactionId) -> Result<(), ApiError> {
+    let linked = state
+        .sales_tax
+        .book
+        .payments
+        .get(&id)
+        .is_some_and(|p| p.linked && !p.voided);
+    if linked {
+        return Err(refused(409, "SALES_TAX_LINKED", &json!({})));
+    }
+    Ok(())
+}
+
 fn record_json(state: &DemoState, id: TransactionId, p: &TaxPayment) -> Value {
     let name = |i: &SalesTaxItemId| {
         state

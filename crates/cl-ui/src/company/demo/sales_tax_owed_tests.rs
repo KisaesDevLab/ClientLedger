@@ -490,6 +490,19 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
                 link(&mut s.state, &r, None, req["key"].as_str()).expect("linked");
                 let rec = get(&s.state, names["CHK-CITY"]).expect("record");
                 assert!(rec.linked && rec.stub_lines.len() == 1, "{what}");
+                // A matched check can't be edited until it is unmatched
+                // (409 SALES_TAX_LINKED, as the engine).
+                let e = refuse_if_linked(&s.state, names["CHK-CITY"]).expect_err("linked");
+                assert!(
+                    matches!(
+                        e,
+                        ApiError::Conflict {
+                            reason: cl_api::ConflictReason::SalesTaxLinked,
+                            ..
+                        }
+                    ),
+                    "{e:?}"
+                );
             }
             "liability" => {
                 let r = liability(

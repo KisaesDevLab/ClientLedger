@@ -426,6 +426,10 @@ pub enum ConflictReason {
     /// Other records depend on this transaction (a deposit that groups
     /// payments, or a payment inside one; 409 `TXN_DELETE_LINKED`).
     DeleteLinked,
+    /// The check or journal entry is matched to a sales tax payment, so its
+    /// amount or date can't change until it is unmatched (409
+    /// `SALES_TAX_LINKED`, P23 review).
+    SalesTaxLinked,
     /// Any other conflict.
     Unspecified,
 }
@@ -816,6 +820,10 @@ impl OwnerFacing for ApiError {
                 ConflictReason::DeleteLinked => {
                     ("error.api.delete_linked", Some("fix.api.void_instead"))
                 }
+                ConflictReason::SalesTaxLinked => (
+                    "error.api.sales_tax_linked",
+                    Some("fix.api.unlink_sales_tax"),
+                ),
                 ConflictReason::Unspecified => ("error.api.conflict", None),
             },
             ApiError::ClosedPeriod(_) => ("error.api.closed_period", Some("fix.api.closed_period")),
@@ -1033,6 +1041,7 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         Some("TXN_ALREADY_DELETED") => ConflictReason::AlreadyDeleted,
         Some("TXN_DELETE_UNSUPPORTED") => ConflictReason::DeleteUnsupported,
         Some("TXN_DELETE_LINKED") => ConflictReason::DeleteLinked,
+        Some("SALES_TAX_LINKED") => ConflictReason::SalesTaxLinked,
         _ => ConflictReason::Unspecified,
     };
     let current_version = if reason == ConflictReason::Stale {
@@ -2053,6 +2062,11 @@ mod tests {
                 "TXN_DELETE_LINKED",
                 ConflictReason::DeleteLinked,
                 "error.api.delete_linked",
+            ),
+            (
+                "SALES_TAX_LINKED",
+                ConflictReason::SalesTaxLinked,
+                "error.api.sales_tax_linked",
             ),
         ] {
             let e = err(409, &body(code), S);
