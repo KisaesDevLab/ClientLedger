@@ -148,7 +148,7 @@ pub fn parse_price(s: &str) -> Result<Decimal, ApiError> {
     parse_decimal(s, 15, true)
 }
 
-/// A tax rate as a fraction, rounded to the 4 places the ledger stores;
+/// A tax rate as a fraction, rounded to the 6 places the ledger stores;
 /// 0 up to (not including) 1.
 ///
 /// # Errors
@@ -164,7 +164,7 @@ pub fn parse_rate(s: &str) -> Result<Decimal, ApiError> {
     {
         return Err(invalid());
     }
-    let r = round(Decimal::from_str(t).map_err(|_| invalid())?, 4);
+    let r = round(Decimal::from_str(t).map_err(|_| invalid())?, 6);
     if r >= Decimal::ONE {
         return Err(invalid());
     }
@@ -825,7 +825,7 @@ fn record_json(
             "discountPercent": p.discount_percent.map(|d| round(d, 4).to_string()),
             "unitPriceSource": p.source,
             "isTaxable": p.input.taxable,
-            "taxRate": round(o.tax_rate, if tax.is_some() { 6 } else { 4 }).to_string(),
+            "taxRate": round(o.tax_rate, 6).to_string(),
             "taxAmount": m4(o.tax_amount)?, "serviceDate": l.service_date,
             "taxCode": p.code.as_ref().map(super::sales_tax::LineCode::record_json),
         });

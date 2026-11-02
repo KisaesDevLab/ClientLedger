@@ -1,8 +1,8 @@
 //! The sales tax golden file (P23 plan §2.0, §6.1): the desktop app's
 //! `fixtures/sales_tax/golden.json` must be byte-identical to the engine's
-//! `packages/shared/fixtures/sales-tax-golden.json` (published on the E1
-//! branch `clientledger/sales-tax-setup`). PENDING until the WP-4 pin bump
-//! checks the engine's copy out.
+//! `packages/shared/fixtures/sales-tax-golden.json` (in the pinned engine
+//! since 9be6da51, engine PRs #216-#221). A pin from before P23 has no such
+//! file: PENDING, unless `CL_API_REQUIRE_CAPS` lists `sales-tax-setup-v1`.
 
 use std::path::Path;
 
