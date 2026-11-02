@@ -888,3 +888,58 @@ fn client_is_locked_on_a_paid_or_finance_charge_invoice() {
         assert!(crate::i18n::has(k), "{k}");
     }
 }
+
+/// P23: the mockup invoice charges the company's Monett group, rounded
+/// once and split State 80.70 / City 74.02 (golden case 3); picking
+/// Springfield re-prices it at 8.875 %; the Tax column shows each line's
+/// resolved code.
+#[test]
+fn the_document_sales_tax_comes_from_the_picker_and_the_engine() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    let v = s.state_json();
+    assert_eq!(v["sales_tax"]["used"]["name"], "Monett");
+    assert_eq!(v["sales_tax"]["used"]["rate"], "8.100%");
+    assert_eq!(v["sales_tax"]["picked"], serde_json::Value::Null);
+    assert!(v["sales_tax"]["items"].as_u64().is_some_and(|n| n >= 4));
+    let TotalsView::Ready(t) = s.tracker.totals() else {
+        panic!("no figures");
+    };
+    let members: Vec<String> = t
+        .sales_tax
+        .as_ref()
+        .expect("tax")
+        .members
+        .iter()
+        .map(|m| m.tax.map(Money::to_wire).unwrap_or_default())
+        .collect();
+    assert_eq!(
+        members.iter().map(|x| m(x)).collect::<Vec<_>>(),
+        [m("80.70"), m("74.02")]
+    );
+    assert!(s.grid.coded());
+    let springfield = s
+        .tax_items
+        .iter()
+        .find(|i| i.name == "Springfield")
+        .map(|i| i.id)
+        .expect("Springfield");
+    s.header
+        .edit(field::SALES_TAX, |h| h.sales_tax = Some(springfield));
+    settle(&mut s);
+    let v = s.state_json();
+    assert_eq!(v["sales_tax"]["picked"], "Springfield");
+    assert_eq!(v["sales_tax"]["used"]["name"], "Springfield");
+    let TotalsView::Ready(t) = s.tracker.totals() else {
+        panic!("no figures");
+    };
+    // 1,910.15 taxable × 8.875 % = 169.53.
+    assert_eq!(t.tax_total, m("169.53"));
+    for k in [
+        "invoice.totals.sales_tax",
+        "invoice.tax.use_current",
+        "invoice.col.tax_code",
+    ] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+}

@@ -149,6 +149,9 @@ pub(crate) mod field {
     pub const TERMS_DAYS: u64 = 9;
     /// A sales receipt's check or reference number (P22).
     pub const REF: u64 = 10;
+    /// P23: the document's sales tax and "use current rates".
+    pub const SALES_TAX: u64 = 11;
+    pub const USE_CURRENT_RATES: u64 = 12;
 }
 
 /// The fixed payment terms (U-125), in menu order.
@@ -326,6 +329,11 @@ pub struct InvoiceScreen {
     pub(crate) books: Books,
     pub(crate) items: Vec<Item>,
     pub(crate) items_job: Option<Job<Vec<Item>>>,
+    /// P23: the company's sales taxes and groups (the totals picker) and
+    /// tax codes (the Tax code column).
+    pub(crate) tax_items: Vec<cl_api::SalesTaxItem>,
+    pub(crate) tax_codes: Vec<cl_api::TaxCode>,
+    pub(crate) tax_job: Option<Job<(Vec<cl_api::SalesTaxItem>, Vec<cl_api::TaxCode>)>>,
     /// Customers only (the Client field).
     pub(crate) clients: Arc<RegisterLists>,
     /// The header (its `lines` stay empty: the grid holds them).
@@ -438,6 +446,8 @@ impl InvoiceScreen {
         kind: SalesDocKind,
     ) -> InvoiceScreen {
         let group = link.group().and_then(Result::ok);
+        // P23: the Tax column picks a tax code where the engine has them.
+        let coded = link.is_demo() || link.capabilities().has(Capabilities::SALES_TAX_SETUP);
         if kind != SalesDocKind::Invoice
             && let Some(mut d) = link.demo_state()
         {
@@ -459,9 +469,12 @@ impl InvoiceScreen {
             books: Books::default(),
             items: Vec::new(),
             items_job: None,
+            tax_items: Vec::new(),
+            tax_codes: Vec::new(),
+            tax_job: None,
             clients: Arc::new(RegisterLists::default()),
             header: FormState::new(blank(kind, today)),
-            grid: InvoiceGrid::new(Arc::new(ItemLists::default())),
+            grid: InvoiceGrid::new_for(Arc::new(ItemLists::default()), coded),
             inputs: Inputs {
                 date: DateInput::new(today),
                 due: empty_date(),
@@ -683,6 +696,22 @@ impl InvoiceScreen {
             |d| Ok(d.items_mut().clone()),
             |s| async move { s.items().list_all(&ItemFilter::default()).await },
         ));
+        if self.has(Capabilities::SALES_TAX_SETUP) {
+            self.tax_job = Some(engine::read(
+                &self.link,
+                self.group.as_ref(),
+                |d| {
+                    Ok((
+                        crate::company::demo::sales_tax::items(d, false),
+                        crate::company::demo::sales_tax::codes(d, false),
+                    ))
+                },
+                |s| async move {
+                    let st = s.sales_tax();
+                    Ok((st.items(false).await?, st.codes(false).await?))
+                },
+            ));
+        }
     }
 
     /// The pickers from the lists read.
@@ -716,7 +745,9 @@ impl InvoiceScreen {
             .map(|i| i.id)
             .collect();
         self.grid.set_lists(
-            Arc::new(ItemLists::new(Arc::clone(&self.books.lists), &active)),
+            Arc::new(
+                ItemLists::new(Arc::clone(&self.books.lists), &active).with_codes(&self.tax_codes),
+            ),
             taxable,
             subtotals,
         );
@@ -741,6 +772,14 @@ impl InvoiceScreen {
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
+            lists = true;
+        }
+        if let Some(r) = engine::poll(&mut self.tax_job) {
+            // Without the lists the document still takes the defaults.
+            if let Ok((items, codes)) = r {
+                self.tax_items = items;
+                self.tax_codes = codes;
+            }
             lists = true;
         }
         if lists {
@@ -1164,6 +1203,31 @@ impl InvoiceScreen {
         v["deposit_note"] = json!(self.deposit_card.note());
         v["attachments"] = self.attach.state_json();
         v["duplicate_number"] = json!(self.duplicate_number);
+        // P23: the picked sales tax (null: the default), the one the
+        // engine used and its notices.
+        let used = match self.tracker.totals() {
+            TotalsView::Ready(t) => t.sales_tax.as_ref().map(|s| {
+                json!({
+                    "name": s.name, "rate": s.rate.format_percent(),
+                    "members": s.members.iter().map(|m| json!({
+                        "name": m.name, "tax": m.tax.map(cl_core::Money::to_wire),
+                    })).collect::<Vec<_>>(),
+                })
+            }),
+            _ => None,
+        };
+        v["sales_tax"] = json!({
+            "picked": self.header.current().sales_tax.and_then(|id| {
+                self.tax_items.iter().find(|i| i.id == id).map(|i| i.name.clone())
+            }),
+            "used": used,
+            "use_current_rates": self.header.current().use_current_rates,
+            "notices": self.doc_problems.iter()
+                .filter_map(|c| cl_model::forms::invoice::TaxNotice::from_code(c))
+                .map(|n| n.key().0).collect::<Vec<_>>(),
+            "items": self.tax_items.len(),
+            "codes": self.tax_codes.len(),
+        });
         if self.kind != SalesDocKind::Invoice {
             v["kind"] = json!(self.screen_name());
             v["preview_problems"] = json!(self.doc_problems);

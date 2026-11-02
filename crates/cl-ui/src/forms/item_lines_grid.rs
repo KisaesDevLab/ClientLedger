@@ -56,6 +56,8 @@ pub const I_TAG: ColumnId = ColumnId(19);
 
 /// The items list.
 pub const ITEMS: ListId = ListId(4);
+/// The tax codes list (P23: the invoice's Tax code column).
+pub const TAX_CODES: ListId = ListId(5);
 
 const PICK_FROM_LIST: TextKey = TextKey("register.entry.pick_from_list");
 const BAD_VALUE: TextKey = TextKey("register.entry.bad_value");
@@ -84,6 +86,9 @@ pub struct ItemLists {
     labels: Vec<String>,
     descriptions: Vec<Option<String>>,
     index: Option<LookupIndex>,
+    /// Tax codes (P23): id and code text.
+    codes: Vec<(cl_core::ids::TaxCodeId, String)>,
+    code_index: Option<LookupIndex>,
 }
 
 impl ItemLists {
@@ -111,7 +116,50 @@ impl ItemLists {
             labels,
             descriptions,
             index: Some(LookupIndex::new(entries)),
+            codes: Vec::new(),
+            code_index: None,
         }
+    }
+
+    /// The same lists with the company's active tax codes (P23).
+    #[must_use]
+    pub fn with_codes(mut self, codes: &[cl_api::TaxCode]) -> ItemLists {
+        let active: Vec<&cl_api::TaxCode> = codes.iter().filter(|c| c.is_active).collect();
+        self.codes = active.iter().map(|c| (c.id, c.code.clone())).collect();
+        self.code_index = Some(LookupIndex::new(
+            active
+                .iter()
+                .enumerate()
+                .map(|(i, c)| LookupEntry {
+                    id: i as u64 + 1,
+                    number: None,
+                    full_name: c.code.clone(),
+                    active: true,
+                })
+                .collect(),
+        ));
+        self
+    }
+
+    /// The tax code behind a picker id.
+    #[must_use]
+    pub fn code(&self, key: u64) -> Option<cl_core::ids::TaxCodeId> {
+        let i = usize::try_from(key.checked_sub(1)?).ok()?;
+        self.codes.get(i).map(|c| c.0)
+    }
+
+    /// The picker id of a tax code.
+    #[must_use]
+    pub fn code_key(&self, id: cl_core::ids::TaxCodeId) -> Option<u64> {
+        self.codes
+            .iter()
+            .position(|c| c.0 == id)
+            .map(|i| i as u64 + 1)
+    }
+
+    fn code_label(&self, key: u64) -> Option<&str> {
+        let i = usize::try_from(key.checked_sub(1)?).ok()?;
+        self.codes.get(i).map(|c| c.1.as_str())
     }
 
     /// The register's lists under the items (accounts, names, tags).
@@ -148,10 +196,12 @@ impl ItemLists {
 
 impl Lookups for ItemLists {
     fn suggest(&self, list: ListId, query: &str, limit: usize) -> LookupResult {
-        if list != ITEMS {
+        if list != ITEMS && list != TAX_CODES {
             return self.base.suggest(list, query, limit);
         }
-        let Some(index) = &self.index else {
+        let codes = list == TAX_CODES;
+        let index = if codes { &self.code_index } else { &self.index };
+        let Some(index) = index else {
             return LookupResult::Ready(Vec::new());
         };
         LookupResult::Ready(
@@ -159,7 +209,12 @@ impl Lookups for ItemLists {
                 .rank(query, limit)
                 .into_iter()
                 .filter_map(|r| {
-                    self.label(r.id).map(|label| Suggestion {
+                    let label = if codes {
+                        self.code_label(r.id)
+                    } else {
+                        self.label(r.id)
+                    };
+                    label.map(|label| Suggestion {
                         id: r.id,
                         label: label.to_string(),
                         group: None,
@@ -170,6 +225,14 @@ impl Lookups for ItemLists {
     }
 
     fn exact(&self, list: ListId, query: &str) -> Option<Suggestion> {
+        if list == TAX_CODES {
+            let e = self.code_index.as_ref()?.exact(query)?;
+            return self.code_label(e.id).map(|label| Suggestion {
+                id: e.id,
+                label: label.to_string(),
+                group: None,
+            });
+        }
         if list != ITEMS {
             return self.base.exact(list, query);
         }
@@ -182,6 +245,9 @@ impl Lookups for ItemLists {
     }
 
     fn display(&self, list: ListId, id: u64) -> Option<Cow<'_, str>> {
+        if list == TAX_CODES {
+            return self.code_label(id).map(Cow::Borrowed);
+        }
         if list != ITEMS {
             return self.base.display(list, id);
         }

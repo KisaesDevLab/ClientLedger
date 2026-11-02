@@ -26,7 +26,7 @@ use cl_model::forms::FormState;
 use cl_model::forms::invoice::{InvoiceForm, InvoiceLine, LineView, PreviewTracker, RateSource};
 use eframe::egui::Ui;
 
-use crate::forms::item_lines_grid::{ITEMS, ItemLists};
+use crate::forms::item_lines_grid::{ITEMS, ItemLists, TAX_CODES};
 use crate::forms::lines_grid::LineLists;
 use crate::grid_form::{GridForm, LinesAdapter, Routed};
 use crate::i18n::t;
@@ -130,6 +130,13 @@ fn column(id: ColumnId, header: &'static str, kind: CellKind, width: (u16, u16, 
 /// The invoice grid's columns.
 #[must_use]
 pub fn grid_spec() -> GridSpec {
+    grid_spec_for(false)
+}
+
+/// The columns; coded (P23, sales-tax-setup-v1): the Tax column is a
+/// tax code picker instead of the taxable box.
+#[must_use]
+pub fn grid_spec_for(coded: bool) -> GridSpec {
     let picker = |list| CellKind::Picker {
         list,
         add_new: false,
@@ -183,9 +190,22 @@ pub fn grid_spec() -> GridSpec {
                 (80, 110, 0),
             ))
         },
-        Column {
-            align: Align::Center,
-            ..column(V_TAX, "invoice.col.tax", CellKind::Checkbox, (44, 50, 0))
+        if coded {
+            Column {
+                empty: Some(TextKey("invoice.tax_code.auto")),
+                help: Some(TextKey("invoice.tax_code.hint")),
+                ..column(
+                    V_TAX,
+                    "invoice.col.tax_code",
+                    picker(TAX_CODES),
+                    (50, 64, 0),
+                )
+            }
+        } else {
+            Column {
+                align: Align::Center,
+                ..column(V_TAX, "invoice.col.tax", CellKind::Checkbox, (44, 50, 0))
+            }
         },
         Column {
             empty: Some(TextKey("invoice.col.account.empty")),
@@ -224,6 +244,11 @@ pub struct InvState {
     /// A name typed in an Item cell that is not in the list (Set Up,
     /// Q-P20i).
     pub unknown_item: Option<(RowKey, String)>,
+    /// P23: the Tax column picks a tax code.
+    pub coded: bool,
+    /// The code the engine resolved for each line (shown when the line
+    /// sets none).
+    pub codes_shown: HashMap<RowKey, String>,
 }
 
 struct View<'a> {
@@ -340,6 +365,18 @@ impl RowModel for View<'_> {
                 Shown::Cant => CellValue::Text(Cow::Borrowed(&self.a.cant)),
                 Shown::Ready { amount, .. } => CellValue::Money(amount),
             },
+            V_TAX if self.a.coded => {
+                if l.is_blank() || self.subtotal(l) {
+                    CellValue::Empty
+                } else if let Some(key) = l.tax_code.and_then(|c| lists.code_key(c)) {
+                    picked(lists, TAX_CODES, Some(key))
+                } else {
+                    self.a
+                        .codes_shown
+                        .get(&l.key)
+                        .map_or(CellValue::Empty, |c| CellValue::Text(Cow::Borrowed(c)))
+                }
+            }
             V_TAX => {
                 if l.is_blank() || self.subtotal(l) {
                     CellValue::Empty
@@ -411,6 +448,11 @@ pub(crate) fn apply(
         (V_QTY, CellInput::Clear) => l.quantity = None,
         (V_RATE, CellInput::Money(m)) => l.rate = Some(m),
         (V_RATE, CellInput::Clear) => l.rate = None,
+        (V_TAX, CellInput::Ref(id)) => match lists.code(id) {
+            Some(c) => l.tax_code = Some(c),
+            None => return Some(PICK_FROM_LIST),
+        },
+        (V_TAX, CellInput::Unresolved(_)) => return Some(PICK_FROM_LIST),
         (V_TAX, CellInput::Bool(b)) => l.taxable = Some(b),
         (V_TAX, CellInput::Clear) => l.taxable = Some(false),
         _ => return Some(BAD_VALUE),
@@ -449,10 +491,17 @@ impl EditableModel for View<'_> {
         }
         let lists = Arc::clone(&self.a.lists);
         let keys = &mut self.a.keys;
+        let coded = self.a.coded;
         let mut problem = None;
         let applied = self.form.edit_step(|v| {
             if let Some(l) = v.lines.iter_mut().find(|l| l.key == pos.row) {
-                problem = apply(l, pos.col, value, &lists);
+                // A cleared code goes back to the engine's choice.
+                problem = if coded && pos.col == V_TAX && matches!(value, CellInput::Clear) {
+                    l.tax_code = None;
+                    None
+                } else {
+                    apply(l, pos.col, value, &lists)
+                };
             }
             v.ensure_entry_line(keys);
         });
@@ -532,10 +581,20 @@ impl InvoiceGrid {
     /// Never: the spec is fixed and covered by tests.
     #[must_use]
     pub fn new(lists: Arc<ItemLists>) -> InvoiceGrid {
+        InvoiceGrid::new_for(lists, false)
+    }
+
+    /// An empty grid; `coded`: the Tax column picks a tax code (P23).
+    ///
+    /// # Panics
+    /// Never: both specs are fixed and covered by tests.
+    #[must_use]
+    pub fn new_for(lists: Arc<ItemLists>, coded: bool) -> InvoiceGrid {
         let mut keys = RowKeyGen::new();
         let value = InvoiceForm::new(None, &mut keys);
-        // The spec is fixed; `the_invoice_spec_is_valid` covers it.
-        let grid = Grid::new("invoice/lines", grid_spec()).expect("the invoice spec is valid");
+        // The specs are fixed; `the_invoice_spec_is_valid` covers them.
+        let grid =
+            Grid::new("invoice/lines", grid_spec_for(coded)).expect("the invoice spec is valid");
         InvoiceGrid {
             form: GridForm::new(
                 FormState::new(value),
@@ -550,6 +609,8 @@ impl InvoiceGrid {
                     cant: t("invoice.cant_calculate"),
                     snapshot: None,
                     unknown_item: None,
+                    coded,
+                    codes_shown: HashMap::new(),
                 },
                 grid,
                 t("invoice.lines.label"),
@@ -643,7 +704,24 @@ impl InvoiceGrid {
             .iter()
             .map(|l| (l.key, Shown::of(tracker.line(l.key))))
             .collect();
-        self.form.adapter_mut().shown = shown;
+        let codes: HashMap<RowKey, String> = self
+            .value()
+            .lines
+            .iter()
+            .filter_map(|l| match tracker.line(l.key) {
+                LineView::Ready(f) => f.tax_code.as_ref().map(|c| (l.key, c.code.clone())),
+                _ => None,
+            })
+            .collect();
+        let a = self.form.adapter_mut();
+        a.shown = shown;
+        a.codes_shown = codes;
+    }
+
+    /// The Tax column picks a tax code (P23).
+    #[must_use]
+    pub fn coded(&self) -> bool {
+        self.form.adapter().coded
     }
 
     /// What line `key` shows.
@@ -738,6 +816,42 @@ mod tests {
         }
         assert!(crate::i18n::has("invoice.lines.label"));
         assert!(crate::i18n::has("invoice.col.account.empty"));
+        let coded = grid_spec_for(true);
+        assert_eq!(coded.validate(), Ok(()));
+        for c in &coded.columns {
+            assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+            for k in [c.empty, c.help].into_iter().flatten() {
+                assert!(crate::i18n::has(k.0), "{}", k.0);
+            }
+        }
+    }
+
+    /// P23: the Tax column picks a code; clearing it goes back to the
+    /// engine's choice; an unknown code is refused.
+    #[test]
+    fn a_coded_tax_column_sets_and_clears_the_line_code() {
+        let codes: Vec<cl_api::TaxCode> = serde_json::from_value(serde_json::json!([
+            {"id": "d7200000-0000-4000-8000-000000000001", "code": "Tax", "taxable": true},
+            {"id": "d7200000-0000-4000-8000-000000000003", "code": "Res", "taxable": false},
+        ]))
+        .expect("codes");
+        let lists = ItemLists::new(
+            Arc::new(crate::screens::register::lists::RegisterLists::default()),
+            &[],
+        )
+        .with_codes(&codes);
+        let key = lists.code_key(codes[1].id).expect("key");
+        assert_eq!(lists.display(TAX_CODES, key).as_deref(), Some("Res"));
+        let mut keys = Keys::new();
+        let mut l = InvoiceLine::blank(keys.next_key());
+        assert_eq!(apply(&mut l, V_TAX, CellInput::Ref(key), &lists), None);
+        assert_eq!(l.tax_code, Some(codes[1].id));
+        assert_eq!(
+            apply(&mut l, V_TAX, CellInput::Ref(99), &lists),
+            Some(PICK_FROM_LIST)
+        );
+        let g = InvoiceGrid::new_for(Arc::new(lists), true);
+        assert!(g.coded());
     }
 
     #[test]
@@ -789,6 +903,8 @@ mod tests {
             cant: String::new(),
             snapshot: None,
             unknown_item: None,
+            coded: false,
+            codes_shown: HashMap::new(),
         };
         let view = View {
             form: &mut form,

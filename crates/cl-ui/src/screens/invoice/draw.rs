@@ -4,7 +4,7 @@
 
 use cl_core::{CalendarDate, Money};
 use cl_model::CommandId;
-use cl_model::forms::invoice::{CUSTOM_TERMS, SalesDocKind, TotalsView};
+use cl_model::forms::invoice::{CUSTOM_TERMS, SalesDocKind, TaxNotice, TotalsView};
 use eframe::egui::{self, CornerRadius, Margin, RichText, Stroke, Ui};
 
 use super::{InvoiceScreen, TERMS, field};
@@ -737,6 +737,9 @@ impl InvoiceScreen {
     }
 
     fn totals_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.caps().pricing && self.caps().sales_tax {
+            self.tax_picker_ui(ui, tokens);
+        }
         let style = self.money_style;
         let view = self.tracker.totals();
         let pricing = self.caps().pricing;
@@ -755,10 +758,23 @@ impl InvoiceScreen {
             }),
             _ => None,
         };
-        let tax_label = rate.map_or_else(
-            || t("invoice.totals.tax"),
-            |r| t_with("invoice.totals.tax_rate", &[("rate", &r)]),
-        );
+        // P23: the engine's sales tax names the row ("Sales tax · Monett
+        // (8.100%)"); without one, the rate as before.
+        let named = match view {
+            TotalsView::Ready(t) => t.sales_tax.as_ref().map(|s| {
+                t_with(
+                    "invoice.totals.sales_tax",
+                    &[("name", &s.name), ("rate", &s.rate.format_percent())],
+                )
+            }),
+            _ => None,
+        };
+        let tax_label = named.unwrap_or_else(|| {
+            rate.map_or_else(
+                || t("invoice.totals.tax"),
+                |r| t_with("invoice.totals.tax_rate", &[("rate", &r)]),
+            )
+        });
         // Payments are the record's while editing (S7); the balance due is
         // the engine's: the record's when nothing changed, a dash until
         // the edit is saved (the UI subtracts nothing).
@@ -1037,4 +1053,75 @@ fn banner(ui: &mut Ui, tokens: &Tokens, add: impl FnOnce(&mut Ui)) {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(add);
         });
+}
+
+impl InvoiceScreen {
+    /// P23: the document's sales tax (blank: the client's default, else
+    /// the company's) and the engine's sales tax notices: saved rates that
+    /// changed ("Use current rates", Q-P23i) and exemption certificates
+    /// (Q-P23n). A listed deviation from the mockup, which shows the tax
+    /// only as the totals label.
+    pub(crate) fn tax_picker_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let current = self.header.current().sales_tax;
+        let shown = current
+            .and_then(|id| self.tax_items.iter().find(|i| i.id == id))
+            .map_or_else(|| t("invoice.tax.default"), |i| i.name.clone());
+        let mut picked = None;
+        ui.horizontal(|ui| {
+            let l = ui.label(t("invoice.tax.pick"));
+            egui::ComboBox::from_id_salt(("invoice/sales_tax", self.kind as u8))
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(current.is_none(), t("invoice.tax.default"))
+                        .clicked()
+                    {
+                        picked = Some(None);
+                    }
+                    for i in self.tax_items.iter().filter(|i| i.is_active) {
+                        let label = format!("{} ({})", i.name, i.rate.format_percent());
+                        if ui.selectable_label(current == Some(i.id), label).clicked() {
+                            picked = Some(Some(i.id));
+                        }
+                    }
+                })
+                .response
+                .labelled_by(l.id)
+                .on_hover_text(t("invoice.tax.pick_hint"));
+        });
+        if let Some(p) = picked
+            && self.read_only().is_none()
+        {
+            self.header
+                .edit(super::field::SALES_TAX, |h| h.sales_tax = p);
+        }
+        let notices: Vec<TaxNotice> = self
+            .doc_problems
+            .iter()
+            .filter_map(|c| TaxNotice::from_code(c))
+            .collect();
+        let using = self.header.current().use_current_rates;
+        for n in notices {
+            ui.label(
+                RichText::new(t(n.key().0))
+                    .size(12.0)
+                    .color(tokens.warn_text),
+            );
+            if n == TaxNotice::RateChanged
+                && !using
+                && ui.button(t("invoice.tax.use_current")).clicked()
+            {
+                self.header.edit(super::field::USE_CURRENT_RATES, |h| {
+                    h.use_current_rates = true
+                });
+            }
+        }
+        if using {
+            ui.label(
+                RichText::new(t("invoice.tax.using_current"))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
+        }
+    }
 }
