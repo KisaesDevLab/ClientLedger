@@ -41,6 +41,129 @@ fn pay_posts_the_previews_lines_then_owed_is_zero_and_void_restores() {
     assert_eq!(v["total"], total, "owed again");
 }
 
+/// Picks an agency whose preview has two items or more.
+fn two_items(s: &mut PayScreen) -> (SalesTaxItemId, SalesTaxItemId) {
+    let agencies: Vec<SalesTaxAgencyId> = s.agencies.iter().map(|a| a.id).collect();
+    for a in agencies {
+        s.set_agency(Some(a));
+        let items: Vec<SalesTaxItemId> = s
+            .form
+            .figures()
+            .map(|f| f.lines.iter().filter_map(|l| l.item).collect())
+            .unwrap_or_default();
+        if items.len() >= 2 {
+            return (items[0], items[1]);
+        }
+    }
+    panic!("no agency with two items in the story");
+}
+
+fn owed_now(s: &PayScreen, item: SalesTaxItemId) -> Money {
+    let mut d = s.link.demo_state().expect("demo");
+    let o = crate::company::demo::sales_tax_owed::owed(
+        &mut d,
+        CalendarDate::from_ymd(2026, 11, 30).expect("d"),
+        None,
+        s.form.agency,
+    )
+    .expect("owed");
+    o.agencies
+        .iter()
+        .flat_map(|a| a.items.iter())
+        .find(|i| i.tax_item_id == Some(item))
+        .map_or(Money::ZERO, |i| i.owed)
+}
+
+#[test]
+fn an_untyped_item_is_paid_at_owed_plus_its_adjustment_not_a_frozen_figure() {
+    // Review finding 5: the owner types an amount on one item, then adds a
+    // -2.00 discount on another. The untyped item goes without an amount,
+    // so the check is lowered by the discount and nothing ends at -2.00.
+    let (_d, mut s) = screen();
+    let (a, b) = two_items(&mut s);
+    let owed_a = owed_now(&s, a);
+    let owed_b = owed_now(&s, b);
+    assert!(owed_b.is_positive());
+    s.form.set_amount(a, "1.00");
+    s.preview();
+    assert!(s.form.figures().is_some());
+    let i = s.form.add_adjustment();
+    let account = s.accounts.first().map(|x| x.id);
+    s.form.edit_adjustment(i, |x| {
+        x.item = Some(b);
+        x.account = account;
+        x.amount = "-2.00".into();
+        x.reason = "Timely filing discount".into();
+    });
+    s.preview();
+    let f = s.form.figures().cloned().expect("figures");
+    let line_b = f.lines.iter().find(|l| l.item == Some(b)).expect("b");
+    assert_eq!(
+        line_b.amount,
+        owed_b
+            .checked_sub(Money::parse_wire("2.00").expect("m"))
+            .expect("m"),
+        "the engine's owed plus adjustment"
+    );
+    assert!(!f.more_than_owed);
+    let plan = s.form.post_plan().expect("plan");
+    assert!(
+        plan.lines
+            .iter()
+            .any(|(i, amt, _)| *i == b && amt.is_none()),
+        "the untyped item is posted without an amount: {plan:?}"
+    );
+    s.pay();
+    assert_eq!(s.state()["problem"], Value::Null, "{}", s.state());
+    assert!(s.paid.is_some());
+    assert_eq!(owed_now(&s, b), Money::ZERO, "no -2.00 left owed");
+    assert_eq!(
+        owed_now(&s, a),
+        owed_a
+            .checked_sub(Money::parse_wire("1.00").expect("m"))
+            .expect("m")
+    );
+}
+
+#[test]
+fn an_amount_typed_before_the_first_preview_keeps_the_other_items() {
+    let (_d, mut s) = screen();
+    let (a, b) = two_items(&mut s);
+    // A fresh form for the agency, typed before any preview came back.
+    let agency = s.form.agency;
+    s.set_agency(None);
+    s.form.set_agency(agency);
+    s.items_job = None;
+    let items: Vec<SalesTaxItemId> = s
+        .items
+        .iter()
+        .filter(|i| i.agency_id == agency)
+        .map(|i| i.id)
+        .collect();
+    s.form.set_items(items);
+    s.form.set_amount(a, "1.00");
+    let r = s.form.request_plan().expect("plan");
+    let sent = r.amounts.expect("lines");
+    assert!(sent.contains(&(b, None)), "{sent:?}");
+}
+
+#[test]
+fn paying_more_than_owed_asks_first() {
+    let (_d, mut s) = screen();
+    let (a, _) = two_items(&mut s);
+    s.form.set_amount(a, "99999.00");
+    s.preview();
+    assert!(s.form.figures().is_some_and(|f| f.more_than_owed));
+    s.pay();
+    let v = s.state();
+    assert_eq!(v["confirm_over"], true, "{v}");
+    assert_eq!(v["paid"], Value::Null, "nothing posted yet");
+    s.confirm_over_owed();
+    let v = s.state();
+    assert_eq!(v["confirm_over"], false);
+    assert_eq!(v["paid"]["queued"], true, "{v}");
+}
+
 #[test]
 fn an_adjustment_lowers_the_check_and_needs_a_reason() {
     let (_d, mut s) = screen();

@@ -23,6 +23,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("pay_sales_tax.problem.bad_check_number", "Enter the check number as a whole number, or leave it blank to print the check later."),
     ("pay_sales_tax.problem.updating", "The amounts are updating. Try again in a moment."),
     ("pay_sales_tax.problem.nothing_to_pay", "There is nothing to pay. The total must be more than zero."),
+    ("pay_sales_tax.problem.more_than_owed", "You're paying more than is owed on a tax. Confirm that's what you mean before paying."),
     ("pay_sales_tax.link.no_payment", "Choose the payment you already made."),
     ("pay_sales_tax.link.no_lines", "Enter how much of the payment was for each tax item."),
     ("tax_exemptions.problem.no_client", "Choose the customer."),

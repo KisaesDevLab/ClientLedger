@@ -248,7 +248,7 @@ fn pay_request(s: &mut Seed, req: &Value) -> PaySalesTaxRequest {
             ls.iter()
                 .map(|l| PayLine {
                     tax_item_id: item(s, l["item"].as_str().expect("item")),
-                    amount: m(l["amount"].as_str().expect("amount")),
+                    amount: l["amount"].as_str().map(m),
                     expected_owed: None,
                 })
                 .collect()
@@ -367,7 +367,8 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
             "pay" => {
                 let mut r = pay_request(&mut s, req);
                 let p = preview(&mut s.state, &r).expect("preview");
-                // The screen posts the owner's amounts (or the preview's)
+                // The screen posts the owner's amounts (untyped lines go
+                // without one: owed plus adjustments, review finding 5)
                 // with each line's expectedOwed and the owed total copied.
                 r.expected_owed = p.expected_owed_total();
                 r.lines = Some(
@@ -379,7 +380,7 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
                             });
                             Some(PayLine {
                                 tax_item_id: l.tax_item_id?,
-                                amount: typed.map_or(l.amount, |t| t.amount),
+                                amount: typed.and_then(|t| t.amount),
                                 expected_owed: Some(l.expected_owed),
                             })
                         })

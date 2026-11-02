@@ -779,11 +779,14 @@ fn figure(
         return Err(refused(400, "TAX_ITEM_NOT_FOR_AGENCY", &json!({})));
     }
     for (item, o) in &owed {
+        // `Some(Some(x))`: sent with an amount; `Some(None)`: sent without
+        // one (owed plus adjustments, the engine's figure); `None`: not
+        // sent.
         let sent = r
             .lines
             .as_ref()
             .and_then(|ls| ls.iter().find(|l| l.tax_item_id == *item))
-            .map(|l| money_of(l.amount));
+            .map(|l| l.amount.map(money_of));
         let adjusted = r.adjustments.iter().any(|a| a.tax_item_id == *item);
         // Lines sent: only those items (and any with an adjustment).
         if r.lines.is_some() && sent.is_none() && !adjusted {
@@ -796,13 +799,15 @@ fn figure(
             .map(|a| money_of(a.amount))
             .sum();
         // The amount paid for the item, adjustments included: the sent
-        // amount, else (no lines) everything owed plus its adjustments.
+        // amount, else (no lines, or the line sent without an amount)
+        // everything owed plus its adjustments.
+        let typed = sent.flatten();
         let amount = match (&r.lines, sent) {
-            (_, Some(t)) => t,
-            (None, None) => *o + adj,
+            (_, Some(Some(t))) => t,
+            (None, _) | (_, Some(None)) => *o + adj,
             (Some(_), None) => Decimal::ZERO,
         };
-        if o.is_zero() && adj.is_zero() && amount.is_zero() && sent.is_none() {
+        if o.is_zero() && adj.is_zero() && amount.is_zero() && typed.is_none() {
             continue;
         }
         if amount > *o + adj {

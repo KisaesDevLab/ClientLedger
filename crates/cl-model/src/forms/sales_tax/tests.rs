@@ -171,31 +171,32 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
     let plan = f.post_plan().expect("post");
     assert_eq!(
         plan.lines,
-        vec![
-            (item(1), m("80.70"), m("80.70")),
-            (item(2), m("129.72"), m("131.68")),
-        ],
-        "the preview's amounts (adjustments included), copied; unassigned tax is not paid here"
+        vec![(item(1), None, m("80.70")), (item(2), None, m("131.68")),],
+        "nothing typed: no amounts (the engine pays owed plus adjustments); unassigned tax is not paid here"
     );
     assert_eq!(
         plan.expected_owed,
         m("212.38"),
         "the preview's owed, copied"
     );
-    // A typed amount is sent with every other item at the last preview's
-    // amount (the engine pays only the items sent).
+    // A typed amount is sent with every other item without an amount
+    // (the engine pays only the items sent, the rest at owed plus
+    // adjustments, never frozen at an older preview's figure).
     f.set_amount(item(2), "100.00");
     assert_eq!(
         f.request_plan().expect("r").amounts,
-        Some(vec![(item(1), m("80.70")), (item(2), m("100.00"))])
+        Some(vec![(item(1), None), (item(2), Some(m("100.00")))])
     );
     let rev = f.revision();
     let mut typed = golden9_figures();
     typed.lines[1].amount = m("100.00");
     assert!(f.apply_preview(rev, typed));
     assert_eq!(
-        f.post_plan().expect("post").lines[1],
-        (item(2), m("100.00"), m("131.68"))
+        f.post_plan().expect("post").lines,
+        vec![
+            (item(1), None, m("80.70")),
+            (item(2), Some(m("100.00")), m("131.68")),
+        ]
     );
     f.set_amount(item(2), "");
     // Any change makes the figures stale; an old answer is dropped.
@@ -204,7 +205,7 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
     assert!(!f.apply_preview(rev, golden9_figures()));
     assert_eq!(
         f.request_plan().expect("r").amounts,
-        Some(vec![(item(2), m("100.00")), (item(1), m("50.00"))])
+        Some(vec![(item(1), Some(m("50.00"))), (item(2), None)])
     );
     f.set_amount(item(1), "50.005");
     assert_eq!(f.request_plan(), Err(PayProblem::BadAmount), "no rounding");
@@ -216,6 +217,46 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
     zero.total = Money::ZERO;
     assert!(f.apply_preview(rev, zero));
     assert_eq!(f.post_plan(), Err(PayProblem::NothingToPay));
+}
+
+#[test]
+fn an_amount_typed_before_any_preview_still_sends_every_item() {
+    // Review finding 5: with no preview yet the agency's items come from
+    // the item list, so the untyped ones are not dropped.
+    let mut f = golden9_form();
+    f.set_items(vec![item(1), item(2)]);
+    assert!(f.has_edits(), "the adjustment row is an edit");
+    f.set_amount(item(1), "10.00");
+    assert_eq!(
+        f.request_plan().expect("r").amounts,
+        Some(vec![(item(1), Some(m("10.00"))), (item(2), None)]),
+        "the adjusted, untyped item goes without an amount"
+    );
+    // Another agency's lines go with it.
+    f.set_agency(Some(
+        SalesTaxAgencyId::parse("7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02").expect("id"),
+    ));
+    assert!(f.figures().is_none());
+    assert!(!f.has_edits());
+}
+
+#[test]
+fn paying_more_than_owed_needs_a_confirm_for_exactly_what_is_shown() {
+    let mut f = golden9_form();
+    f.set_amount(item(1), "90.00");
+    let rev = f.revision();
+    let mut over = golden9_figures();
+    over.lines[0].amount = m("90.00");
+    over.more_than_owed = true;
+    assert!(f.apply_preview(rev, over.clone()));
+    assert_eq!(f.post_plan(), Err(PayProblem::MoreThanOwed));
+    f.confirm_more_than_owed();
+    assert!(f.post_plan().is_ok());
+    // Any change asks again.
+    f.set_amount(item(1), "95.00");
+    let rev = f.revision();
+    assert!(f.apply_preview(rev, over));
+    assert_eq!(f.post_plan(), Err(PayProblem::MoreThanOwed));
 }
 
 #[test]

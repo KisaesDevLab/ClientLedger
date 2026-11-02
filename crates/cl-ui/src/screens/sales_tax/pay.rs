@@ -24,7 +24,8 @@ use cl_api::{
 use cl_core::ids::{AccountId, SalesTaxAgencyId, SalesTaxItemId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_model::forms::sales_tax::pay::{
-    LinkForm, PayFigures, PayForm, PayLineFigure, PayMethod, PayPostPlan, PayRequestPlan,
+    LinkForm, PayFigures, PayForm, PayLineFigure, PayMethod, PayPostPlan, PayProblem,
+    PayRequestPlan,
 };
 use cl_model::{CommandId, Scope};
 use eframe::egui::{self, RichText, Ui};
@@ -101,6 +102,8 @@ pub struct PayScreen {
     pub(crate) marked: Option<cl_api::MarkPaidResult>,
     /// The "Mark paid through" confirmation is open.
     pub(crate) confirm_mark: bool,
+    /// The "Pay more than is owed?" confirmation is open.
+    pub(crate) confirm_over: bool,
     notice: Option<&'static str>,
     problem: Option<&'static str>,
     error: Option<ApiError>,
@@ -131,6 +134,8 @@ fn request(p: &PayRequestPlan, lines: Option<Vec<PayLine>>) -> PaySalesTaxReques
                 a.iter()
                     .map(|(i, m)| PayLine {
                         tax_item_id: *i,
+                        // `None`: what the item owes plus its adjustments,
+                        // the engine's figure (review finding 5).
                         amount: *m,
                         expected_owed: None,
                     })
@@ -219,6 +224,7 @@ impl PayScreen {
             paid: None,
             marked: None,
             confirm_mark: false,
+            confirm_over: false,
             notice: None,
             problem: None,
             error: None,
@@ -288,11 +294,29 @@ impl PayScreen {
     /// Picks the agency (Pay Sales Tax from Sales Tax Owed opens on it).
     pub(crate) fn set_agency(&mut self, agency: Option<SalesTaxAgencyId>) {
         self.form.set_agency(agency);
+        self.sync_items();
         self.amounts.clear();
         self.paid = None;
         self.notice = None;
         self.read_history();
         self.preview();
+    }
+
+    /// Tells the form the agency's items, so an amount typed before the
+    /// first preview still sends every item (review finding 5).
+    fn sync_items(&mut self) {
+        let items = self
+            .form
+            .agency
+            .map(|a| {
+                self.items
+                    .iter()
+                    .filter(|i| i.agency_id == Some(a))
+                    .map(|i| i.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.form.set_items(items);
     }
 
     /// Asks the engine for the figures of what is on screen.
@@ -336,6 +360,8 @@ impl PayScreen {
         }
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
+            self.sync_items();
+            self.preview();
         }
         if let Some(r) = engine::poll(&mut self.accounts_job) {
             self.accounts = r.unwrap_or_default();
@@ -400,7 +426,40 @@ impl PayScreen {
         self.notice = None;
         match self.form.post_plan() {
             Ok(plan) => self.send(Pending::Pay(plan), None),
+            // More than owed: the owner confirms first (review finding 5).
+            Err(PayProblem::MoreThanOwed) => self.confirm_over = true,
             Err(p) => self.problem = Some(p.key().0),
+        }
+    }
+
+    /// The "Pay more than is owed?" confirmation's "Pay anyway".
+    pub(crate) fn confirm_over_owed(&mut self) {
+        self.confirm_over = false;
+        self.form.confirm_more_than_owed();
+        self.pay();
+    }
+
+    fn over_dialog(&mut self, ctx: &egui::Context) {
+        if !self.confirm_over {
+            return;
+        }
+        let (mut confirm, mut cancel) = (false, false);
+        egui::Window::new(t("sales_tax.pay.over.title"))
+            .id(egui::Id::unique("pay_sales_tax_over_owed"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(t("sales_tax.pay.over.body"));
+                ui.horizontal(|ui| {
+                    confirm = ui.button(t("sales_tax.pay.over.confirm")).clicked();
+                    cancel = ui.button(t("sales_tax.pay.over.cancel")).clicked();
+                });
+            });
+        if confirm {
+            self.confirm_over_owed();
+        } else if cancel {
+            self.confirm_over = false;
         }
     }
 
@@ -868,6 +927,7 @@ impl PayScreen {
             }
         });
         self.mark_dialog(ui.ctx(), &tokens);
+        self.over_dialog(ui.ctx());
         if let Some(m) = &self.marked
             && let Some(total) = m.total
         {
@@ -1291,6 +1351,7 @@ impl PayScreen {
             "voided": self.history.iter().filter(|p| p.is_void()).count(),
             "linked": self.history.iter().filter(|p| p.linked).count(),
             "confirm_mark": self.confirm_mark,
+            "confirm_over": self.confirm_over,
             "marked": self.marked.as_ref().map(|m| json!({"lines": m.lines.len()})),
             "linking": self.linking.is_some(),
             "candidates": self.candidates.len(),

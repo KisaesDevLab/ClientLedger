@@ -141,14 +141,19 @@ pub struct PayRequestPlan {
     pub print_later: bool,
     /// A typed check number (the engine takes a positive whole number).
     pub check_number: Option<u32>,
-    /// The owner's amounts (`None`: everything owed).
-    pub amounts: Option<Vec<(SalesTaxItemId, Money)>>,
+    /// The lines sent (`None`: no amount typed, everything owed). Once the
+    /// owner types any amount every item of the agency goes: the typed
+    /// ones with their amount, the rest with none (`None`), which the
+    /// engine pays at what is owed plus adjustments when it works the
+    /// figures out (never a copy of an older preview).
+    pub amounts: Option<Vec<(SalesTaxItemId, Option<Money>)>>,
     /// Adjustments.
     pub adjustments: Vec<AdjustmentPlan>,
 }
 
-/// One posted line: (item, amount, expected owed), all the preview's.
-pub type PostLine = (SalesTaxItemId, Money, Money);
+/// One posted line: (item, the typed amount or `None` for "what is owed
+/// plus adjustments", the preview's expected owed).
+pub type PostLine = (SalesTaxItemId, Option<Money>, Money);
 
 /// What Pay posts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +189,9 @@ pub enum PayProblem {
     PreviewPending,
     /// The check total is zero or less.
     NothingToPay,
+    /// An item is paid more than it owes: the owner confirms first
+    /// ([`PayForm::confirm_more_than_owed`]).
+    MoreThanOwed,
 }
 
 impl PayProblem {
@@ -200,6 +208,7 @@ impl PayProblem {
             PayProblem::BadCheckNumber => TextKey("pay_sales_tax.problem.bad_check_number"),
             PayProblem::PreviewPending => TextKey("pay_sales_tax.problem.updating"),
             PayProblem::NothingToPay => TextKey("pay_sales_tax.problem.nothing_to_pay"),
+            PayProblem::MoreThanOwed => TextKey("pay_sales_tax.problem.more_than_owed"),
         }
     }
 }
@@ -223,7 +232,12 @@ pub struct PayForm {
     pub check_number: String,
     amounts: BTreeMap<SalesTaxItemId, String>,
     adjustments: Vec<AdjustmentEntry>,
+    /// The agency's items (so typing before the first preview still sends
+    /// every item).
+    items: Vec<SalesTaxItemId>,
     figures: Option<(u64, PayFigures)>,
+    /// The revision at which the owner confirmed paying more than owed.
+    over_confirmed: Option<u64>,
     revision: u64,
 }
 
@@ -280,8 +294,34 @@ impl PayForm {
             self.agency = agency;
             self.amounts.clear();
             self.adjustments.clear();
+            self.items.clear();
+            // Another agency's preview must not feed this one's lines.
+            self.figures = None;
             self.changed();
         }
+    }
+
+    /// The agency's items (the screen's item list for the agency picked).
+    pub fn set_items(&mut self, items: Vec<SalesTaxItemId>) {
+        if self.items != items {
+            self.items = items;
+            if !self.amounts.is_empty() {
+                self.changed();
+            }
+        }
+    }
+
+    /// Something was typed or changed that is not yet saved (an amount,
+    /// an adjustment row).
+    #[must_use]
+    pub fn has_edits(&self) -> bool {
+        !self.amounts.is_empty() || !self.adjustments.is_empty()
+    }
+
+    /// The owner confirmed paying more than an item owes, for exactly what
+    /// is on screen now (any change asks again).
+    pub fn confirm_more_than_owed(&mut self) {
+        self.over_confirmed = Some(self.revision);
     }
 
     /// Types an item's amount (blank: what the engine says).
@@ -373,30 +413,29 @@ impl PayForm {
         };
         // A typed amount is what the payment pays for the item, after its
         // adjustments (the engine's `lines[].amount`). The engine pays only
-        // the items sent once any is, so every other item of the last
-        // preview goes along at that preview's amount (a copy).
+        // the items sent once any is, so every other item of the agency
+        // goes along without an amount: the engine pays what it owes plus
+        // its adjustments (review finding 5; never a copy of an older
+        // preview, which would freeze it).
         let amounts = if self.amounts.is_empty() {
             None
         } else {
-            let mut typed = BTreeMap::new();
+            let mut all: BTreeMap<SalesTaxItemId, Option<Money>> = BTreeMap::new();
+            for item in &self.items {
+                all.insert(*item, None);
+            }
+            if let Some((_, last)) = &self.figures {
+                for item in last.lines.iter().filter_map(|l| l.item) {
+                    all.insert(item, None);
+                }
+            }
             for (item, text) in &self.amounts {
                 let m = parse_amount(text)
                     .filter(|m| !m.is_negative())
                     .ok_or(PayProblem::BadAmount)?;
-                typed.insert(*item, m);
+                all.insert(*item, Some(m));
             }
-            let mut v: Vec<(SalesTaxItemId, Money)> = Vec::new();
-            if let Some((_, last)) = &self.figures {
-                for l in &last.lines {
-                    if let Some(item) = l.item
-                        && !typed.contains_key(&item)
-                    {
-                        v.push((item, l.amount));
-                    }
-                }
-            }
-            v.extend(typed);
-            Some(v)
+            Some(all.into_iter().collect())
         };
         let mut adjustments = Vec::with_capacity(self.adjustments.len());
         for a in &self.adjustments {
@@ -430,25 +469,39 @@ impl PayForm {
     }
 
     /// What Pay posts: the preview's lines (unassigned ones left out), each
-    /// with the preview's `amount` (what is paid for the item, adjustments
-    /// included; the engine's `lines[].amount`) and `expectedOwed` copied,
-    /// plus the preview's owed total. The adjustments go with the request;
-    /// the engine splits Sales Tax Payable and the adjustment accounts (no
-    /// arithmetic here).
+    /// with the amount the owner typed for it or none (the engine pays
+    /// what it owes plus its adjustments, review finding 5) and the
+    /// preview's `expectedOwed` copied, plus the preview's owed total. The
+    /// adjustments go with the request; the engine splits Sales Tax
+    /// Payable and the adjustment accounts (no arithmetic here).
     ///
     /// # Errors
     /// A [`PayProblem`] of the inputs, `PreviewPending` without current
-    /// figures, `NothingToPay` when the preview's total is not above zero.
+    /// figures, `NothingToPay` when the preview's total is not above zero,
+    /// `MoreThanOwed` while the preview warns of paying more than owed and
+    /// the owner has not confirmed it.
     pub fn post_plan(&self) -> Result<PayPostPlan, PayProblem> {
         let mut request = self.request_plan()?;
         let f = self.figures().ok_or(PayProblem::PreviewPending)?;
         if !f.total.is_positive() {
             return Err(PayProblem::NothingToPay);
         }
+        if f.more_than_owed && self.over_confirmed != Some(self.revision) {
+            return Err(PayProblem::MoreThanOwed);
+        }
+        let typed: BTreeMap<SalesTaxItemId, Money> = request
+            .amounts
+            .iter()
+            .flatten()
+            .filter_map(|(i, a)| Some((*i, (*a)?)))
+            .collect();
         let lines: Vec<PostLine> = f
             .lines
             .iter()
-            .filter_map(|l| Some((l.item?, l.amount, l.expected_owed)))
+            .filter_map(|l| {
+                let item = l.item?;
+                Some((item, typed.get(&item).copied(), l.expected_owed))
+            })
             .collect();
         request.amounts = Some(lines.iter().map(|(i, a, _)| (*i, *a)).collect());
         Ok(PayPostPlan {

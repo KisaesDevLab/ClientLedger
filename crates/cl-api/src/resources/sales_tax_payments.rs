@@ -160,9 +160,15 @@ pub enum SalesTaxPayMethod {
 pub struct PayLine {
     /// The item.
     pub tax_item_id: SalesTaxItemId,
-    /// The amount to pay (before adjustments; may be 0.00 to leave it).
-    #[serde(serialize_with = "ser_cents")]
-    pub amount: Money,
+    /// What this payment pays for the item, adjustments included (may be
+    /// 0.00 to leave it). `None` (sent without `amount`): the engine pays
+    /// what the item owes plus its adjustments, worked out when it posts,
+    /// so an untyped item never freezes at an older preview's figure.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::resources::customer_payments::ser_cents_opt"
+    )]
+    pub amount: Option<Money>,
     /// The preview's `expectedOwed`, copied (post only).
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -271,10 +277,12 @@ impl PaySalesTaxRequest {
             return Err(bad());
         }
         for l in lines {
-            if l.amount.is_negative() {
-                return Err(bad());
+            if let Some(a) = l.amount {
+                if a.is_negative() {
+                    return Err(bad());
+                }
+                cents_wire(a)?;
             }
-            cents_wire(l.amount)?;
             if let Some(e) = l.expected_owed {
                 cents_wire(e)?;
             }
@@ -505,7 +513,7 @@ impl PayPreview {
             .filter_map(|l| {
                 Some(PayLine {
                     tax_item_id: l.tax_item_id?,
-                    amount: l.amount,
+                    amount: Some(l.amount),
                     expected_owed: Some(l.expected_owed),
                 })
             })

@@ -157,7 +157,7 @@ fn the_request_body_is_exact_and_checked() {
     );
     let line = |a: &str| PayLine {
         tax_item_id: item(STATE),
-        amount: m(a),
+        amount: Some(m(a)),
         expected_owed: None,
     };
     let mut r = golden9();
@@ -166,6 +166,22 @@ fn the_request_body_is_exact_and_checked() {
         local(r.body()),
         Some(LocalValidation::InvalidValue),
         "negative line"
+    );
+    // An untyped item goes without `amount`: the engine pays what it owes
+    // plus its adjustments (review finding 5).
+    r.lines = Some(vec![
+        line("10.00"),
+        PayLine {
+            tax_item_id: item(SPRINGFIELD),
+            amount: None,
+            expected_owed: Some(m("131.68")),
+        },
+    ]);
+    let body = r.body().expect("body");
+    assert_eq!(
+        body["lines"],
+        json!([{"taxItemId":STATE,"amount":"10.00"},
+               {"taxItemId":SPRINGFIELD,"expectedOwed":"131.68"}])
     );
     r.lines = Some(vec![line("1.00"), line("2.00")]);
     assert_eq!(
