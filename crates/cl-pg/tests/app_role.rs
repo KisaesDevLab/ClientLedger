@@ -185,3 +185,50 @@ fn hostile_names_and_passwords_are_refused_before_any_sql_runs() {
     }
     cluster.stop().unwrap();
 }
+
+#[test]
+fn analyze_fills_in_table_statistics_for_the_app_database() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("approle-analyze");
+    let cluster = Cluster::ensure(&scratch.data_dir(), bins, &MemoryStore::new()).unwrap();
+    let running = cluster.start().unwrap();
+    let port = running.port;
+    let pw = Secret::generate().unwrap();
+    cluster.ensure_app_database(port, ROLE, DB, &pw).unwrap();
+
+    // Tables the engine would create, never analyzed yet.
+    let mut app = connect_app(port, DB, &pw).unwrap();
+    app.batch_execute(
+        "CREATE SCHEMA books; \
+         CREATE TABLE books.lines (id int primary key, v numeric(12,2)); \
+         INSERT INTO books.lines SELECT g, g * 1.25 FROM generate_series(1, 500) g;",
+    )
+    .unwrap();
+    let reltuples = |app: &mut postgres::Client| -> f32 {
+        app.query_one(
+            "SELECT c.reltuples FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'books' AND c.relname = 'lines'",
+            &[],
+        )
+        .unwrap()
+        .get(0)
+    };
+    assert!(reltuples(&mut app) < 0.0, "a new table has no statistics");
+
+    Cluster::analyze_database(port, ROLE, DB, &pw).unwrap();
+    assert!((reltuples(&mut app) - 500.0).abs() < 1.0);
+    let stats: i64 = app
+        .query_one(
+            "SELECT count(*) FROM pg_stats WHERE schemaname = 'books' AND tablename = 'lines'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(stats > 0, "column statistics were gathered");
+
+    // A bad name or password is an error, never a panic.
+    assert!(Cluster::analyze_database(port, ROLE, "x y", &pw).is_err());
+    assert!(Cluster::analyze_database(port, ROLE, DB, &Secret::new("wrong")).is_err());
+    drop(app);
+    cluster.stop().unwrap();
+}
