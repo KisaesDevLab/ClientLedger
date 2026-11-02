@@ -1352,10 +1352,10 @@ pub(crate) const SALES_TAX_PAY_MARK_PAID: Operation = keyable_in(
     Method::Post,
     "/api/v1/sales-tax/payments/mark-paid-through",
 );
-/// Undoes one "Mark paid through" run (P23 review fix; the engine route is
-/// provisional until the engine fix pass lands, so it is not keyed yet: a
-/// repeated undo is refused by the engine, never applied twice).
-pub(crate) const SALES_TAX_PAY_MARK_PAID_UNDO: Operation = write(
+/// Undoes one "Mark paid through" run (U-150 review fix; a second undo of
+/// the same run is 409 `ALREADY_UNDONE`).
+pub(crate) const SALES_TAX_PAY_MARK_PAID_UNDO: Operation = keyable_in(
+    KeySet::SalesTaxPayV1,
     Method::Post,
     "/api/v1/sales-tax/payments/mark-paid-through/{id}/undo",
 );
@@ -1998,11 +1998,15 @@ mod tests {
         ("PUT", "/api/v1/sales-tax/exemptions/{id}"),
         ("POST", "/api/v1/sales-tax/exemptions/{id}/deactivate"),
     ];
-    const KEYABLE_SALES_TAX_PAY: [(&str, &str); 4] = [
+    const KEYABLE_SALES_TAX_PAY: [(&str, &str); 5] = [
         ("POST", "/api/v1/sales-tax/payments"),
         ("POST", "/api/v1/sales-tax/payments/link"),
         ("POST", "/api/v1/sales-tax/payments/{id}/unlink"),
         ("POST", "/api/v1/sales-tax/payments/mark-paid-through"),
+        (
+            "POST",
+            "/api/v1/sales-tax/payments/mark-paid-through/{id}/undo",
+        ),
     ];
     const KEYABLE_RECOVERY: [(&str, &str); 1] = [("POST", "/api/v1/payments/write-off-recoveries")];
 

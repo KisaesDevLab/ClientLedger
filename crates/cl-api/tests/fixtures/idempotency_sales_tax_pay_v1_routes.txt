@@ -7,3 +7,4 @@ POST /api/v1/sales-tax/payments
 POST /api/v1/sales-tax/payments/link
 POST /api/v1/sales-tax/payments/{id}/unlink
 POST /api/v1/sales-tax/payments/mark-paid-through
+POST /api/v1/sales-tax/payments/mark-paid-through/{id}/undo

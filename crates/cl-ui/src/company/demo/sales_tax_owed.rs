@@ -1325,8 +1325,8 @@ pub fn mark_paid_through(
     decode(v)
 }
 
-/// `POST /sales-tax/payments/mark-paid-through/:runId/undo` (provisional
-/// route): the run's opening lines go and what they covered is owed again.
+/// `POST /sales-tax/payments/mark-paid-through/:runId/undo`: the run's
+/// opening lines go and what they covered is owed again.
 ///
 /// # Errors
 /// 404 for an unknown or already undone run; closing on its date.
@@ -1354,7 +1354,8 @@ pub fn undo_mark_paid_through(
     let book = &mut state.sales_tax.book;
     book.openings.retain(|o| o.4 != run);
     book.writes += 1;
-    decode(json!({"runId": run_id, "removed": dates.len()}))
+    let through = dates.iter().max().copied();
+    decode(json!({"runId": run_id, "throughDate": through, "undoneAt": "demo"}))
 }
 
 /// Checks and entries that paid Sales Tax Payable and are not yet a sales

@@ -779,16 +779,20 @@ pub struct MarkPaidResult {
     pub run_id: Option<String>,
 }
 
-/// `POST /sales-tax/payments/mark-paid-through/:runId/undo` answered.
+/// `POST /sales-tax/payments/mark-paid-through/:runId/undo` answered: the
+/// run record (as the mark answered it) with `undoneAt` set.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoMarkPaidResult {
     /// The run undone.
     #[serde(default)]
     pub run_id: Option<String>,
-    /// How many opening lines were removed.
+    /// Owed through this date is owed again.
     #[serde(default)]
-    pub removed: u32,
+    pub through_date: Option<CalendarDate>,
+    /// When it was undone.
+    #[serde(default)]
+    pub undone_at: Option<String>,
 }
 
 impl fmt::Debug for MarkPaidResult {
@@ -1032,17 +1036,17 @@ impl SalesTaxPayments<'_> {
     }
 
     /// "Undo mark paid through": the run's opening lines go and what they
-    /// covered is owed again (audited; closing on its date). The route is
-    /// provisional until the engine's P23 fix pass lands.
+    /// covered is owed again (audited; closing on its date).
     ///
     /// # Errors
     /// `Local(Unsupported)`; `Local(InvalidValue)` for a blank run id;
-    /// `NotFound` for an unknown or already undone run; closing; any
+    /// `NotFound` for an unknown run; 409 `ALREADY_UNDONE`; closing; any
     /// [`ApiError`].
     pub async fn undo_mark_paid_through(
         &self,
         run_id: &str,
         opts: &PostingOptions,
+        key: IdempotencyKey,
     ) -> Result<UndoMarkPaidResult, ApiError> {
         let s = &self.0.pinned();
         require(s, Capabilities::SALES_TAX_PAY)?;
@@ -1051,12 +1055,13 @@ impl SalesTaxPayments<'_> {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let body = posting_body(s, json!({}), opts)?;
-        let call = Call::new(
+        let mut call = Call::new(
             Method::Post,
             SALES_TAX_PAY_MARK_PAID_UNDO.route(),
             format!("/api/v1/sales-tax/payments/mark-paid-through/{run}/undo"),
         )
         .json_body(body);
+        call.idempotency_key = Some(key);
         let reply = s.send(&SALES_TAX_PAY_MARK_PAID_UNDO, call, None).await?;
         decode_one(&reply.body, "result", "undo mark paid through")
             .map_err(crate::resources::versioning::saved_unreadable)

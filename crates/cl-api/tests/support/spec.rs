@@ -44,7 +44,7 @@ use sha2::{Digest, Sha256};
 /// P23 plan §2.4-§2.8 contract (setup, owed, exemptions, Pay Sales Tax and
 /// link, bad-debt recoveries; U-147 to U-154). The liability and payments
 /// reports were already in the spec.
-pub const OUTSIDE_SPEC: [(&str, &str); 35] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 38] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -78,11 +78,13 @@ pub const OUTSIDE_SPEC: [(&str, &str); 35] = [
     ("POST", "/api/v1/sales-tax/payments/preview"),
     ("POST", "/api/v1/sales-tax/payments"),
     ("POST", "/api/v1/sales-tax/payments/link"),
+    ("POST", "/api/v1/sales-tax/payments/{id}/unlink"),
+    ("POST", "/api/v1/sales-tax/payments/mark-paid-through"),
     ("GET", "/api/v1/sales-tax/payments/{id}"),
     ("GET", "/api/v1/sales-tax/payments"),
     ("POST", "/api/v1/payments/write-off-recoveries"),
-    // The P23 review fix pass: undo a "Mark paid through" run (provisional
-    // route until the engine fix pass lands).
+    ("GET", "/api/v1/payments/write-offs"),
+    // The P23 review fix pass: undo a "Mark paid through" run.
     (
         "POST",
         "/api/v1/sales-tax/payments/mark-paid-through/{id}/undo",

@@ -651,7 +651,7 @@ impl PayScreen {
                     },
                     move |s| async move {
                         s.sales_tax_payments()
-                            .undo_mark_paid_through(&live, &opts)
+                            .undo_mark_paid_through(&live, &opts, key)
                             .await
                             .map(|_| Wrote::UndoneMark)
                     },

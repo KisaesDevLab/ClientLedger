@@ -309,6 +309,6 @@
   {"method":"GET","path":"/api/v1/sales-tax/payments","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/payments/write-off-recoveries","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/sales-tax-liability","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/payments/write-offs","inSpec":false,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/reports/sales-tax-payments","inSpec":true,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/reports/sales-tax-payments","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/payments/write-offs","inSpec":false,"fragmentHash":null}
 ]

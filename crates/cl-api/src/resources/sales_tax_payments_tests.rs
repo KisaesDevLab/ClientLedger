@@ -709,25 +709,25 @@ async fn write_offs_list_and_expected_owed_from_e5() {
 
 #[tokio::test]
 async fn undo_mark_paid_through_posts_to_the_run() {
-    // P23 review fix; the route is provisional until the engine lands it.
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path(
             "/api/v1/sales-tax/payments/mark-paid-through/run-1/undo",
         ))
-        .respond_with(json(200, r#"{"result":{"runId":"run-1","removed":1}}"#))
+        .respond_with(json(200, r#"{"runId":"run-1","agencyId":"x","throughDate":"2026-09-30","lines":[],"total":"0.00","createdAt":"2026-10-01T00:00:00Z","undoneAt":"2026-10-02T00:00:00Z"}"#))
         .mount(&server)
         .await;
     let s = session_with_caps(&server, &ALL).await;
     let u = s
         .sales_tax_payments()
-        .undo_mark_paid_through("run-1", &PostingOptions::default())
+        .undo_mark_paid_through("run-1", &PostingOptions::default(), IdempotencyKey::new())
         .await
         .expect("undo");
-    assert_eq!(u.removed, 1);
+    assert_eq!(u.run_id.as_deref(), Some("run-1"));
+    assert!(u.undone_at.is_some());
     assert_eq!(
         s.sales_tax_payments()
-            .undo_mark_paid_through("../x", &PostingOptions::default())
+            .undo_mark_paid_through("../x", &PostingOptions::default(), IdempotencyKey::new())
             .await
             .expect_err("bad run id"),
         ApiError::Local(LocalValidation::InvalidValue)
