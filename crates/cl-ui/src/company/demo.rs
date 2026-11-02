@@ -407,6 +407,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
             named(&accounts, 6050, "Bank and Merchant Fees"),
             named(&accounts, 6960, "Bad Debts"),
         ],
+        sales_taxes: Vec::new(),
         done: true,
     }
 }

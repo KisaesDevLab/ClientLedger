@@ -44,6 +44,138 @@ pub struct AccountingEdits {
     pub receivables: ReceivablesEdits,
     /// Finance charges (P22, Q-P22a): written by their own call.
     pub finance: FinanceChargeEdits,
+    /// Sales tax (P23): written by their own call.
+    pub sales_tax: SalesTaxEdits,
+}
+
+/// Preferences › Sales tax (P23, company-sales-tax-flags-v1): the basis
+/// (Q-P23a), the company default and the Streamlined Sales Tax switch
+/// (Q-P23m, Q-SPF6; forward only, Q-P23w). "Charge sales tax" stays the
+/// local flag and is pushed to the engine when it differs (S6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SalesTaxEdits {
+    /// Accrual or cash.
+    pub basis: cl_api::SalesTaxBasis,
+    /// The company default.
+    pub default_id: Option<cl_core::ids::SalesTaxItemId>,
+    /// Streamlined Sales Tax rules.
+    pub ssuta: bool,
+    /// The engine's salesTaxEnabled (None before P23).
+    pub engine_enabled: Option<bool>,
+}
+
+impl SalesTaxEdits {
+    /// From the engine's settings.
+    #[must_use]
+    pub fn from_settings(s: Option<&CompanySettings>) -> SalesTaxEdits {
+        let Some(s) = s else {
+            return SalesTaxEdits::default();
+        };
+        SalesTaxEdits {
+            basis: s.sales_tax_basis.unwrap_or_default(),
+            default_id: s.default_sales_tax_id,
+            ssuta: s.sales_tax_ssuta.unwrap_or(false),
+            engine_enabled: s.sales_tax_enabled,
+        }
+    }
+
+    /// The write for what changed (None when nothing did). nabled is
+    /// the local "Charge sales tax" flag: sent when the engine's differs.
+    #[must_use]
+    pub fn update_for(
+        &self,
+        loaded: Option<&CompanySettings>,
+        enabled: bool,
+    ) -> Option<cl_api::SalesTaxSettingsUpdate> {
+        let before = SalesTaxEdits::from_settings(loaded);
+        let u = cl_api::SalesTaxSettingsUpdate {
+            enabled: (before.engine_enabled.is_some_and(|e| e != enabled)).then_some(enabled),
+            basis: (self.basis != before.basis).then_some(self.basis),
+            default_sales_tax_id: (self.default_id != before.default_id).then_some(self.default_id),
+            ssuta: (self.ssuta != before.ssuta).then_some(self.ssuta),
+        };
+        (!u.is_empty()).then_some(u)
+    }
+}
+
+/// The default picker's choices: active taxes and groups with their rates.
+#[must_use]
+pub fn sales_tax_choices(
+    items: &[cl_api::SalesTaxItem],
+) -> Vec<(cl_core::ids::SalesTaxItemId, String)> {
+    items
+        .iter()
+        .filter(|i| i.is_active)
+        .map(|i| (i.id, format!("{} ({})", i.name, i.rate.format_percent())))
+        .collect()
+}
+
+/// Preferences › Sales tax with the engine's sales tax settings (P23):
+/// on/off, basis with its help text, the default tax, the Streamlined
+/// Sales Tax switch with its tooltip and hint (Q-P23aa), the 6-place rate
+/// note and a link to Sales Tax Setup. Returns true when the link was
+/// clicked.
+pub fn sales_tax_engine(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    choices: &[(cl_core::ids::SalesTaxItemId, String)],
+) -> bool {
+    form::heading(ui, tokens, &t("prefs.sales_tax.title"));
+    ui.add_space(8.0);
+    let mut open = false;
+    form::card(ui, tokens, |ui| {
+        ui.checkbox(
+            &mut edits.flags.sales_tax_enabled,
+            t("prefs.sales_tax.enabled"),
+        );
+        ui.add_enabled_ui(edits.flags.sales_tax_enabled, |ui| {
+            let st = &mut edits.accounting.sales_tax;
+            ui.label(t("prefs.sales_tax.basis"));
+            ui.radio_value(
+                &mut st.basis,
+                cl_api::SalesTaxBasis::Accrual,
+                t("prefs.sales_tax.basis.accrual"),
+            );
+            ui.radio_value(
+                &mut st.basis,
+                cl_api::SalesTaxBasis::Cash,
+                t("prefs.sales_tax.basis.cash"),
+            );
+            form::hint(ui, tokens, &t("prefs.sales_tax.basis_help"));
+            ui.add_space(6.0);
+            let shown = st
+                .default_id
+                .and_then(|id| choices.iter().find(|(x, _)| *x == id))
+                .map_or_else(|| t("prefs.sales_tax.default_none"), |(_, n)| n.clone());
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("prefs.sales_tax.default")).selectable(false));
+                egui::ComboBox::from_id_salt("prefs-default-sales-tax")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut st.default_id,
+                            None,
+                            t("prefs.sales_tax.default_none"),
+                        );
+                        for (id, n) in choices {
+                            ui.selectable_value(&mut st.default_id, Some(*id), n);
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+            });
+            ui.add_space(6.0);
+            ui.checkbox(&mut st.ssuta, t("prefs.sales_tax.ssuta"))
+                .on_hover_text(t("prefs.sales_tax.ssuta_tip"));
+            form::hint(ui, tokens, &t("prefs.sales_tax.ssuta_hint"));
+            form::hint(ui, tokens, &t("prefs.sales_tax.rates_note"));
+        });
+        if ui.link(t("prefs.sales_tax.setup")).clicked() {
+            open = true;
+        }
+    });
+    open
 }
 
 /// Preferences › Sales for Receive Payment (P21, Q-P21q): engine company
@@ -309,6 +441,7 @@ impl Default for AccountingEdits {
             markup_account: None,
             receivables: ReceivablesEdits::default(),
             finance: FinanceChargeEdits::default(),
+            sales_tax: SalesTaxEdits::default(),
         }
     }
 }
@@ -354,6 +487,7 @@ impl AccountingEdits {
             markup_account: s.billable_markup_account_id,
             receivables: ReceivablesEdits::from_settings(Some(s)),
             finance: FinanceChargeEdits::from_settings(Some(s)),
+            sales_tax: SalesTaxEdits::from_settings(Some(s)),
         }
     }
 
@@ -380,6 +514,7 @@ impl AccountingEdits {
             markup_account: before.markup_account,
             receivables: before.receivables.clone(),
             finance: before.finance.clone(),
+            sales_tax: before.sales_tax.clone(),
             ..self.clone()
         };
         if same == before {
