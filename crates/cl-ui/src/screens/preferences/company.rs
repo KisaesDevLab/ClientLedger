@@ -48,7 +48,7 @@ pub struct AccountingEdits {
     pub sales_tax: SalesTaxEdits,
 }
 
-/// Preferences › Sales tax (P23, company-sales-tax-flags-v1): the basis
+/// Preferences › Sales tax (P23, `company-sales-tax-flags-v1`): the basis
 /// (Q-P23a), the company default and the Streamlined Sales Tax switch
 /// (Q-P23m, Q-SPF6; forward only, Q-P23w). "Charge sales tax" stays the
 /// local flag and is pushed to the engine when it differs (S6).
@@ -79,7 +79,7 @@ impl SalesTaxEdits {
         }
     }
 
-    /// The write for what changed (None when nothing did). nabled is
+    /// The write for what changed (`None` when nothing did). `enabled` is
     /// the local "Charge sales tax" flag: sent when the engine's differs.
     #[must_use]
     pub fn update_for(

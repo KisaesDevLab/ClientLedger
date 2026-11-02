@@ -223,6 +223,7 @@ impl std::fmt::Debug for Loaded {
             .field("usage", &self.usage.is_some())
             .field("incomes", &self.incomes.len())
             .field("expenses", &self.expenses.len())
+            .field("sales_taxes", &self.sales_taxes.len())
             .field("done", &self.done)
             .finish()
     }

@@ -1112,7 +1112,7 @@ impl InvoiceScreen {
                 && ui.button(t("invoice.tax.use_current")).clicked()
             {
                 self.header.edit(super::field::USE_CURRENT_RATES, |h| {
-                    h.use_current_rates = true
+                    h.use_current_rates = true;
                 });
             }
         }

@@ -323,7 +323,7 @@ pub struct InvoiceForm {
     /// the client's default, else the company's.
     pub sales_tax: Option<SalesTaxItemId>,
     /// An edit takes today's rates instead of the saved ones (Q-P23i; the
-    /// owner chose "Use current rates" after RATE_CHANGED).
+    /// owner chose "Use current rates" after `RATE_CHANGED`).
     pub use_current_rates: bool,
 }
 
