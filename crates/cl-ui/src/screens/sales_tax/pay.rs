@@ -1150,6 +1150,17 @@ impl Screen for PayScreen {
                 self.pay();
                 true
             }
+            // Demo only: a few taxed documents to pay (the scenario).
+            "dev.demo_sales_tax_story" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                crate::company::demo::sales_tax_owed::story(&mut d);
+                drop(d);
+                self.form.changed();
+                self.preview();
+                true
+            }
             _ => false,
         }
     }

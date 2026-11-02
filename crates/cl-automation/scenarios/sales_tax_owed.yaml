@@ -1,0 +1,35 @@
+# Sales Tax Owed (P23 WP-3, Vendors > Sales Tax Owed) against
+# `clientledger --demo`: the story's taxed invoices and receipt on the
+# Preferences basis (accrual: Bad debts and Recovered shown), then cash
+# (those columns hidden, Q-SPF3), an item's drill-down. Synthetic.
+name: sales_tax_owed
+description: "Sales tax owed by agency and item, accrual and cash."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.sales_tax_owed
+  - assert_state: {key: screen.screen, equals: sales_tax_owed}
+  - assert_state: {key: screen.available, equals: true}
+  - command: dev.demo_sales_tax_story
+  - assert_state: {key: screen.basis, equals: accrual}
+  - assert_state: {key: screen.bad_debt_columns, equals: true}
+  - assert_state: {key: screen.agencies, equals: 2}
+  - assert_state: {key: screen.items, equals: 3}
+  - assert_exists: {role: label, label: "Sample State Revenue Dept."}
+  - assert_exists: {role: label, label: "Bad debts"}
+  - assert_exists: {role: label, label: "Recovered"}
+  - screenshot: accrual
+  - assert_no_clipping: {}
+  - click: {role: button, label: Springfield}
+  - assert_state: {key: screen.open, equals: true}
+  - assert_exists: {role: label, label: "Non-taxable sales by tax code"}
+  - screenshot: drill-down
+  - click: {role: combo_box, label: Basis}
+  - click: {role: button, label: "Cash (when you're paid)"}
+  - assert_state: {key: screen.basis, equals: cash}
+  - assert_state: {key: screen.bad_debt_columns, equals: false}
+  - assert_not_exists: {role: label, label: "Bad debts"}
+  - assert_exists: {role: label, label: "Rounding"}
+  - screenshot: cash
+  - assert_no_clipping: {}
+  - command: file.close_window
