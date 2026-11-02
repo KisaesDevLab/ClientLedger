@@ -255,3 +255,26 @@ fn a_pay_sales_tax_payment_is_voided_not_unlinked() {
     s.void(paid);
     assert_eq!(s.state()["total"], total, "owed again");
 }
+
+#[test]
+fn each_write_target_has_its_own_idempotency_key() {
+    // Review nit: a transport failure on one void must not hand its key to
+    // the next, different void (or link).
+    let (_d, mut s) = screen();
+    let id = |s: &str| TransactionId::parse(s).expect("id");
+    let (a, b) = (
+        id("8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01"),
+        id("8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02"),
+    );
+    let k1 = s.key_for(KeyFor::Void(a));
+    assert!(s.key_for(KeyFor::Void(a)) == k1, "a retry reuses it");
+    let k2 = s.key_for(KeyFor::Void(b));
+    assert!(k1 != k2, "another payment gets another key");
+    let k3 = s.key_for(KeyFor::Unlink(b));
+    assert!(k2 != k3, "another write on the same payment too");
+    let agency = s.form.agency.expect("agency");
+    let d = CalendarDate::from_ymd(2026, 11, 30).expect("d");
+    let k4 = s.key_for(KeyFor::MarkPaid(agency, d));
+    assert!(s.key_for(KeyFor::MarkPaid(agency, d)) == k4);
+    assert!(s.key_for(KeyFor::MarkPaid(agency, d.add_days(-1).expect("d"))) != k4);
+}

@@ -54,6 +54,17 @@ pub(crate) enum Pending {
     MarkPaid(SalesTaxAgencyId, CalendarDate),
 }
 
+/// What a write's idempotency key belongs to: the save attempt for Pay,
+/// the target (and split) for the others.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum KeyFor {
+    Pay(u64),
+    Link(LinkPaymentRequest),
+    Void(TransactionId),
+    Unlink(TransactionId),
+    MarkPaid(SalesTaxAgencyId, CalendarDate),
+}
+
 /// What a write answered.
 enum Wrote {
     Paid(PaySalesTaxResult),
@@ -86,8 +97,9 @@ pub struct PayScreen {
     history_job: Option<Job<Vec<SalesTaxPaymentRecord>>>,
     preview_job: Option<(u64, Job<PayPreview>)>,
     write_job: Option<Job<Wrote>>,
-    /// The save attempt's key (its revision), reused through the prompt.
-    key: Option<(u64, IdempotencyKey)>,
+    /// The write's key, reused through the prompt and on a retry of the
+    /// same write.
+    pub(crate) key: Option<(KeyFor, IdempotencyKey)>,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     /// The change in flight (for the closing-date password).
     pending_kept: Option<Pending>,
@@ -463,12 +475,15 @@ impl PayScreen {
         }
     }
 
-    fn key_for(&mut self, attempt: u64) -> IdempotencyKey {
+    /// The key of a write: reused only for the same write (a retry after a
+    /// transport failure or through the closing-date password), never for
+    /// another payment's void or another link (review nit).
+    fn key_for(&mut self, what: KeyFor) -> IdempotencyKey {
         match &self.key {
-            Some((a, k)) if *a == attempt => k.clone(),
+            Some((a, k)) if *a == what => k.clone(),
             _ => {
                 let k = IdempotencyKey::new();
-                self.key = Some((attempt, k.clone()));
+                self.key = Some((what, k.clone()));
                 k
             }
         }
@@ -479,14 +494,14 @@ impl PayScreen {
             return;
         }
         self.problem = None;
-        let attempt = match &pending {
-            Pending::Pay(p) => p.attempt,
-            Pending::Link(_) => u64::MAX - 1,
-            Pending::Void(_) => u64::MAX,
-            Pending::Unlink(_) => u64::MAX - 2,
-            Pending::MarkPaid(..) => u64::MAX - 3,
+        let what = match &pending {
+            Pending::Pay(p) => KeyFor::Pay(p.attempt),
+            Pending::Link(r) => KeyFor::Link(r.clone()),
+            Pending::Void(id) => KeyFor::Void(*id),
+            Pending::Unlink(id) => KeyFor::Unlink(*id),
+            Pending::MarkPaid(a, d) => KeyFor::MarkPaid(*a, *d),
         };
-        let key = self.key_for(attempt);
+        let key = self.key_for(what);
         let demo_key = key.as_header();
         let label = OrphanLabel {
             what: "orphan.sales_tax_pay",
