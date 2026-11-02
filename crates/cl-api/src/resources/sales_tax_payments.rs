@@ -366,7 +366,7 @@ impl fmt::Debug for PayPreviewLine {
 /// A warning of the preview (nothing is refused by a problem).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PayProblem {
+pub struct SalesTaxPayProblem {
     /// `AMOUNT_MORE_THAN_OWED`, `LEGACY_UNASSIGNED`, `NO_VENDOR_ADDRESS`, …
     pub code: String,
     /// The item it is about.
@@ -374,22 +374,22 @@ pub struct PayProblem {
     pub tax_item_id: Option<SalesTaxItemId>,
 }
 
-impl PayProblem {
+impl SalesTaxPayProblem {
     /// The known kinds.
     #[must_use]
-    pub fn kind(&self) -> PayProblemKind {
+    pub fn kind(&self) -> SalesTaxPayProblemKind {
         match self.code.as_str() {
-            "AMOUNT_MORE_THAN_OWED" => PayProblemKind::AmountMoreThanOwed,
-            "LEGACY_UNASSIGNED" => PayProblemKind::LegacyUnassigned,
-            "NO_VENDOR_ADDRESS" => PayProblemKind::NoVendorAddress,
-            _ => PayProblemKind::Other,
+            "AMOUNT_MORE_THAN_OWED" => SalesTaxPayProblemKind::AmountMoreThanOwed,
+            "LEGACY_UNASSIGNED" => SalesTaxPayProblemKind::LegacyUnassigned,
+            "NO_VENDOR_ADDRESS" => SalesTaxPayProblemKind::NoVendorAddress,
+            _ => SalesTaxPayProblemKind::Other,
         }
     }
 }
 
-/// What a [`PayProblem`] is about.
+/// What a [`SalesTaxPayProblem`] is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PayProblemKind {
+pub enum SalesTaxPayProblemKind {
     /// More than owed is paid on an item.
     AmountMoreThanOwed,
     /// Legacy tax not assigned to an item can't be paid here.
@@ -412,7 +412,7 @@ pub struct PayPreview {
     pub total: Money,
     /// Warnings.
     #[serde(default, deserialize_with = "null_vec")]
-    pub problems: Vec<PayProblem>,
+    pub problems: Vec<SalesTaxPayProblem>,
 }
 
 impl fmt::Debug for PayPreview {

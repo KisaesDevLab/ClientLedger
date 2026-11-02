@@ -179,8 +179,11 @@ fn post_lines_copy_the_preview_strings() {
         json!([{"taxItemId":STATE,"amount":"80.70","expectedOwed":"80.70"},
                {"taxItemId":SPRINGFIELD,"amount":"129.72","expectedOwed":"131.68"}])
     );
-    assert_eq!(p.problems[0].kind(), PayProblemKind::LegacyUnassigned);
-    assert_eq!(p.problems[1].kind(), PayProblemKind::Other);
+    assert_eq!(
+        p.problems[0].kind(),
+        SalesTaxPayProblemKind::LegacyUnassigned
+    );
+    assert_eq!(p.problems[1].kind(), SalesTaxPayProblemKind::Other);
     assert!(!format!("{p:?}").contains("131"));
 }
 
