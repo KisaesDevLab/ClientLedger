@@ -113,6 +113,19 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("sales_tax.pay.refusal.not_stp", "That payment didn't go to Sales Tax Payable."),
     ("sales_tax.pay.refusal.already_linked", "That payment is already matched."),
     ("sales_tax.pay.refusal.stale", "Someone changed this since you opened it. Try again."),
+    ("sales_tax.pay.refusal.not_linked", "Only a matched payment can be unmatched. Void a payment made here instead."),
+    ("sales_tax.pay.unlink_on", "Unmatch {date}"),
+    ("sales_tax.pay.unlink_tip", "Stop counting this check or entry as a sales tax payment. The check stays; the tax is owed again."),
+    ("sales_tax.pay.unlinked", "Payment unmatched. The tax it paid is owed again."),
+    ("sales_tax.pay.mark", "Mark paid through\u{2026}"),
+    ("sales_tax.pay.mark_tip", "For tax you paid before using ClientLedger or outside it: record everything owed through the date as already paid, with no check."),
+    ("sales_tax.pay.mark.title", "Mark tax paid through a date"),
+    ("sales_tax.pay.mark.body", "Record everything {agency} is owed through {date} as already paid outside ClientLedger? No check or bank entry is made."),
+    ("sales_tax.pay.mark.no_undo", "This can't be undone. Only do this for tax you have really paid."),
+    ("sales_tax.pay.mark.confirm", "Mark as paid"),
+    ("sales_tax.pay.mark.cancel", "Cancel"),
+    ("sales_tax.pay.marked_paid", "Tax marked as paid. Nothing is owed through that date now."),
+    ("sales_tax.pay.marked_total", "{amount} marked as paid through {date}."),
 ];
 
 /// Tax Exemption Certificates and Recover a Bad Debt.

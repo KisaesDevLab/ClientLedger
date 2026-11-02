@@ -739,14 +739,15 @@ pub fn preview(
         .and_then(|s| s.record["balanceDue"].as_str())
         .and_then(|b| Decimal::from_str(b).ok())
         .unwrap_or_default();
-    // P23 (Q-P23n): the certificate warning of a non-taxable client.
-    let problems: Vec<Value> =
+    // P23 (Q-P23n): the certificate warning of a non-taxable client, in
+    // `warnings` as engine PR #220 sends it.
+    let warnings: Vec<Value> =
         super::sales_tax_owed::exemption_problem(state, new.contact_id, new.txn_date)
-            .map(|c| json!({"code": c}))
+            .map(|c| json!({"code": c, "message": ""}))
             .into_iter()
             .collect();
     let v = json!({
-        "problems": problems,
+        "warnings": warnings,
         "lines": lines,
         "subtotal": doc.subtotal.to_string(),
         "taxableBase": doc.taxable_base.to_string(),

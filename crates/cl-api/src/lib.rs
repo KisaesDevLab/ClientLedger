@@ -325,11 +325,12 @@ pub use resources::sales_tax::{
     sales_tax_refusal_codes,
 };
 pub use resources::sales_tax_payments::{
-    ADJUSTMENT_REASON_MAX, CHECK_NUMBER_MAX, LinkLine, LinkPaymentRequest, PAY_LINES_MAX,
-    PAY_MEMO_MAX, PayAdjustment, PayLine, PayPreview, PayPreviewLine, PaySalesTaxRefusal,
-    PaySalesTaxRequest, PaySalesTaxResult, PaymentLineKind, SalesTaxPayMethod, SalesTaxPayProblem,
-    SalesTaxPayProblemKind, SalesTaxPaymentLine, SalesTaxPaymentQuery, SalesTaxPaymentRecord,
-    SalesTaxPayments, pay_sales_tax_refusal, pay_sales_tax_refusal_codes,
+    ADJUSTMENT_REASON_MAX, LinkLine, LinkPaymentRequest, MarkPaidLine, MarkPaidResult,
+    PAY_LINES_MAX, PAY_MEMO_MAX, PayAdjustment, PayLine, PayPreview, PayPreviewLine,
+    PaySalesTaxRefusal, PaySalesTaxRequest, PaySalesTaxResult, PaymentLineKind, SalesTaxPayMethod,
+    SalesTaxPayProblem, SalesTaxPayProblemKind, SalesTaxPaymentLine, SalesTaxPaymentQuery,
+    SalesTaxPaymentRecord, SalesTaxPayments, StubLine, UnlinkResult, pay_sales_tax_refusal,
+    pay_sales_tax_refusal_codes,
 };
 pub use resources::sales_tax_reports::{
     LiabilityAgency, LiabilityBalanceCheck, LiabilityColumns, LiabilityItem, LiabilityQuery,

@@ -271,7 +271,7 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 7] = [
         "idempotency_sales_tax_pay_v1_routes.txt",
         "keyable-sales-tax-pay",
         cl_api::KeySet::SalesTaxPayV1,
-        2,
+        4,
     ),
     (
         "idempotency_recovery_v1_routes.txt",

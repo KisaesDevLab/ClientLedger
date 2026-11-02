@@ -59,7 +59,7 @@ struct TaxPayment {
     method: SalesTaxPayMethod,
     bank: Option<AccountId>,
     total: Decimal,
-    check_number: Option<String>,
+    check_number: Option<u32>,
     queued: bool,
     linked: bool,
     voided: bool,
@@ -78,8 +78,8 @@ type PaymentLine = (
     Option<String>,
 );
 
-/// A preview's line to post: (item, paid before adjustments, adjustment,
-/// owed).
+/// A preview's line to post: (item, amount paid for it with its
+/// adjustments, adjustment, owed), as the engine plans it.
 type FigureLine = (SalesTaxItemId, Decimal, Decimal, Decimal);
 
 /// One recovery of a written-off invoice.
@@ -99,6 +99,9 @@ pub struct DemoTaxBook {
     keys: BTreeMap<String, Value>,
     recoveries: BTreeMap<TransactionId, Recovery>,
     exemptions: Vec<TaxExemption>,
+    /// "Mark paid through" opening lines (no GL): (agency, item, date,
+    /// amount).
+    openings: Vec<(SalesTaxAgencyId, SalesTaxItemId, CalendarDate, Decimal)>,
     next: u32,
     story: bool,
     /// Writes that reached the demo engine (tests).
@@ -234,6 +237,8 @@ enum Col {
     Recoveries,
     Adjustments,
     Paid,
+    /// Paid before or outside these books ("Mark paid through").
+    Opening,
 }
 
 /// One figure on one item on one date.
@@ -366,6 +371,18 @@ fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
             });
         }
     }
+    for (agency, item, date, amount) in &st.book.openings {
+        out.push(Event {
+            date: *date,
+            item: Some(*item),
+            agency: Some(*agency),
+            col: Col::Opening,
+            tax: *amount,
+            base: Decimal::ZERO,
+            code: None,
+            exact: None,
+        });
+    }
     out
 }
 
@@ -381,13 +398,23 @@ struct Cols {
     recoveries: Decimal,
     adjustments: Decimal,
     paid: Decimal,
+    /// Opening lines to the end date (cumulative; not a column).
+    opening: Decimal,
     owed: Decimal,
 }
 
 impl Cols {
     fn add(&mut self, e: &Event, in_range: bool) {
-        let signed = if e.col == Col::Paid { -e.tax } else { e.tax };
+        let signed = if matches!(e.col, Col::Paid | Col::Opening) {
+            -e.tax
+        } else {
+            e.tax
+        };
         self.owed += signed;
+        if e.col == Col::Opening {
+            self.opening += e.tax;
+            return;
+        }
         if !in_range {
             return;
         }
@@ -404,6 +431,7 @@ impl Cols {
             Col::Recoveries => self.recoveries += e.tax,
             Col::Adjustments => self.adjustments += e.tax,
             Col::Paid => self.paid += e.tax,
+            Col::Opening => {}
         }
     }
 
@@ -426,6 +454,7 @@ impl Cols {
         self.recoveries += o.recoveries;
         self.adjustments += o.adjustments;
         self.paid += o.paid;
+        self.opening += o.opening;
         self.owed += o.owed;
     }
 }
@@ -454,7 +483,7 @@ fn columns(
     // engine shows round5(exact) - rounded, golden 7: -0.002790).
     let (mut exact, mut rounded) = (Decimal::ZERO, Decimal::ZERO);
     for e in events(state, basis) {
-        let payment = matches!(e.col, Col::Paid | Col::Adjustments);
+        let payment = matches!(e.col, Col::Paid | Col::Adjustments | Col::Opening);
         if e.date > end && !(all_payments && payment) {
             continue;
         }
@@ -477,23 +506,29 @@ fn columns(
 }
 
 /// `GET /reports/sales-tax-liability` (v2) for `start..=end` on `basis`
-/// (`None`: the company's).
+/// (`None`: the company's), every agency or `agency` only (engine PR #218:
+/// filtered, the GL fields are `null`).
 ///
 /// # Errors
-/// `Local(BadRange)` for an end before the start; `Internal` if the demo's
-/// own answer does not decode.
+/// `Local(BadRange)` for an end before the start; 404 for an unknown
+/// agency; `Internal` if the demo's own answer does not decode.
 pub fn liability(
     state: &mut DemoState,
-    start: CalendarDate,
-    end: CalendarDate,
-    basis: Option<SalesTaxBasis>,
+    q: cl_api::LiabilityQuery,
 ) -> Result<SalesTaxLiability, ApiError> {
+    let (start, end) = (q.start_date, q.end_date);
     if end < start {
         return Err(ApiError::Local(cl_api::LocalValidation::BadRange));
     }
     let _ = super::sales_tax::agencies(state, true);
-    let basis = basis_or(state, basis);
+    if let Some(a) = q.agency_id
+        && state.sales_tax.agency_vendor(a).is_none()
+    {
+        return Err(ApiError::NotFound { code: None });
+    }
+    let basis = basis_or(state, q.basis);
     let (by, unassigned, rounding) = columns(state, basis, start, end, false);
+    let (_, unassigned_cum, rounding_cum) = columns(state, basis, CalendarDate::min(), end, false);
     let contacts = state.contacts_mut().clone();
     let st = &state.sales_tax;
     let name_of_agency = |a: Option<SalesTaxAgencyId>| {
@@ -505,6 +540,9 @@ pub fn liability(
     // Agencies in setup order, then items without one.
     let mut order: Vec<Option<SalesTaxAgencyId>> = st.agency_ids().into_iter().map(Some).collect();
     order.push(None);
+    if let Some(a) = q.agency_id {
+        order.retain(|x| *x == Some(a));
+    }
     let mut agencies = Vec::new();
     let mut total = Cols::default();
     for a in order {
@@ -556,22 +594,31 @@ pub fn liability(
         total.collected + total.discounts + total.bad_debts + total.recoveries + total.adjustments
             - total.paid;
     let cash = basis == SalesTaxBasis::Cash;
+    // The GL ties only company-wide: filtered by agency, the GL fields are
+    // null (engine PR #218).
+    let whole = q.agency_id.is_none();
+    let unassigned = if whole { unassigned } else { Decimal::ZERO };
     let v = json!({
         "basis": basis.as_wire(),
         "startDate": start,
         "endDate": end,
+        "agencyId": q.agency_id,
         "agencies": agencies,
+        "totals": total.json(),
+        "total": s2(total.collected + total.discounts + total.bad_debts + total.recoveries),
         "unassigned": s2(unassigned),
-        "openingPaid": "0.00",
-        "otherEntries": "0.00",
-        "glMovement": s2(movement),
+        "openingPaid": s2(total.opening),
+        "otherEntries": whole.then_some("0.00"),
+        "glMovement": whole.then(|| s2(movement)),
         "roundingDifference": cash.then(|| format!("{rounding:.6}")),
-        "balanceCheck": {
-            "stpBalance": s2(total.owed + unassigned),
+        "balanceCheck": whole.then(|| json!({
+            "stpBalance": s2(total.owed + total.opening + unassigned),
             "owedAtEnd": s2(total.owed),
+            "unassigned": s2(unassigned_cum),
             "otherEntriesCumulative": "0.00",
-            "openingPaid": "0.00",
-        },
+            "openingPaid": s2(total.opening),
+            "roundingDifferenceCumulative": cash.then(|| format!("{rounding_cum:.6}")),
+        })),
     });
     decode(v)
 }
@@ -650,7 +697,7 @@ fn owed_for_pay(
             continue;
         }
         let x = match e.col {
-            Col::Paid => -e.tax,
+            Col::Paid | Col::Opening => -e.tax,
             Col::Adjustments => e.tax,
             _ if e.date <= through => e.tax,
             _ => continue,
@@ -685,16 +732,22 @@ fn figure(
     let mut lines = Vec::new();
     let mut out = Vec::new();
     let mut total = Decimal::ZERO;
+    let mut owed_total = Decimal::ZERO;
+    if let Some(ls) = &r.lines
+        && ls.iter().any(|l| !owed.contains_key(&l.tax_item_id))
+    {
+        return Err(refused(400, "TAX_ITEM_NOT_FOR_AGENCY", &json!({})));
+    }
     for (item, o) in &owed {
-        let typed = r
+        let sent = r
             .lines
             .as_ref()
             .and_then(|ls| ls.iter().find(|l| l.tax_item_id == *item))
             .map(|l| money_of(l.amount));
-        if let Some(ls) = &r.lines
-            && ls.iter().any(|l| !owed.contains_key(&l.tax_item_id))
-        {
-            return Err(refused(400, "TAX_ITEM_NOT_FOR_AGENCY", &json!({})));
+        let adjusted = r.adjustments.iter().any(|a| a.tax_item_id == *item);
+        // Lines sent: only those items (and any with an adjustment).
+        if r.lines.is_some() && sent.is_none() && !adjusted {
+            continue;
         }
         let adj: Decimal = r
             .adjustments
@@ -702,19 +755,21 @@ fn figure(
             .filter(|a| a.tax_item_id == *item)
             .map(|a| money_of(a.amount))
             .sum();
-        // Without typed lines everything owed is paid.
-        let pay = match (&r.lines, typed) {
+        // The amount paid for the item, adjustments included: the sent
+        // amount, else (no lines) everything owed plus its adjustments.
+        let amount = match (&r.lines, sent) {
             (_, Some(t)) => t,
-            (None, None) => *o,
+            (None, None) => *o + adj,
             (Some(_), None) => Decimal::ZERO,
         };
-        if o.is_zero() && pay.is_zero() && adj.is_zero() {
+        if o.is_zero() && adj.is_zero() && amount.is_zero() && sent.is_none() {
             continue;
         }
-        if pay > *o && !pay.is_zero() {
-            problems.push(json!({"code": "AMOUNT_MORE_THAN_OWED", "taxItemId": item}));
+        if amount > *o + adj {
+            problems.push(json!({"code": "AMOUNT_MORE_THAN_OWED", "message": "", "details": {"taxItemId": item}}));
         }
-        let amount = pay + adj;
+        let pay = amount;
+        owed_total += *o;
         total += amount;
         out.push(json!({
             "taxItemId": item,
@@ -734,7 +789,7 @@ fn figure(
             .find(|c| Some(c.id) == vendor)
             .is_some_and(|c| c.fields.billing_line1.is_some());
         if !has_address {
-            problems.push(json!({"code": "NO_VENDOR_ADDRESS"}));
+            problems.push(json!({"code": "NO_VENDOR_ADDRESS", "message": ""}));
         }
     }
     let (_, unassigned, _) = columns(
@@ -745,10 +800,18 @@ fn figure(
         true,
     );
     if !unassigned.is_zero() {
-        problems.push(json!({"code": "LEGACY_UNASSIGNED"}));
+        problems.push(json!({"code": "LEGACY_UNASSIGNED", "message": ""}));
     }
     Ok((
-        json!({"lines": out, "total": s2(total), "problems": problems}),
+        json!({
+            "agencyId": r.agency_id,
+            "throughDate": r.through_date,
+            "basis": state.sales_tax.basis.as_wire(),
+            "lines": out,
+            "owed": s2(owed_total),
+            "total": s2(total),
+            "problems": problems,
+        }),
         lines,
     ))
 }
@@ -781,17 +844,39 @@ pub fn create(
     if let Some(done) = key.and_then(|k| state.sales_tax.book.keys.get(k)) {
         return decode(done.clone());
     }
-    let (_, lines) = figure(state, r)?;
-    for l in r.lines.as_deref().unwrap_or_default() {
-        let now = lines
-            .iter()
-            .find(|x| x.0 == l.tax_item_id)
-            .map_or(Decimal::ZERO, |x| x.3);
-        if l.expected_owed.map(money_of) != Some(now) {
-            return Err(refused(409, "SALES_TAX_OWED_CHANGED", &json!({})));
-        }
+    // The engine's order: expectedOwed is required; a check with no number
+    // is printed later; a number with Print later is refused.
+    let Some(expected) = r.expected_owed.map(money_of) else {
+        return Err(refused(
+            400,
+            "VALIDATION_ERROR",
+            &json!({"field": "expectedOwed"}),
+        ));
+    };
+    let check = r.method == SalesTaxPayMethod::Check;
+    let queued = check && (r.print_later || r.check_number.is_none());
+    if check && queued && r.check_number.is_some() {
+        return Err(refused(400, "CHECK_NO_OR_PRINT_LATER", &json!({})));
     }
-    let total: Decimal = lines.iter().map(|l| l.1 + l.2).sum();
+    let (_, lines) = figure(state, r)?;
+    let owed_now: Decimal = lines.iter().map(|l| l.3).sum();
+    let line_changed = r.lines.as_deref().unwrap_or_default().iter().any(|l| {
+        l.expected_owed.is_some_and(|e| {
+            let now = lines
+                .iter()
+                .find(|x| x.0 == l.tax_item_id)
+                .map_or(Decimal::ZERO, |x| x.3);
+            money_of(e) != now
+        })
+    });
+    if owed_now != expected || line_changed {
+        return Err(refused(
+            409,
+            "SALES_TAX_OWED_CHANGED",
+            &json!({"owed": s2(owed_now)}),
+        ));
+    }
+    let total: Decimal = lines.iter().map(|l| l.1).sum();
     if total <= Decimal::ZERO {
         return Err(refused(400, "PAYMENT_TOTAL_NOT_POSITIVE", &json!({})));
     }
@@ -800,19 +885,20 @@ pub fn create(
     let money = super::receivables::money;
     let mut jl = Vec::new();
     let mut stored = Vec::new();
-    for (item, pay, adj, _) in &lines {
-        let paid = *pay + *adj;
-        if !pay.is_zero() {
-            // Sales Tax Payable is relieved by what was owed and paid.
+    for (item, amount, adj, _) in &lines {
+        // Sales Tax Payable is relieved by the amount less its adjustments
+        // (a credit when that is negative).
+        let net = *amount - *adj;
+        if !net.is_zero() {
             jl.push(DemoLine {
                 account: stp,
-                debit: money(*pay)?,
-                credit: Money::ZERO,
+                debit: money(net.max(Decimal::ZERO))?,
+                credit: money((-net).max(Decimal::ZERO))?,
                 memo: None,
             });
         }
-        if !paid.is_zero() {
-            stored.push((*item, "paid", paid, None, None));
+        if !amount.is_zero() {
+            stored.push((*item, "paid", *amount, None, None));
         }
     }
     for a in &r.adjustments {
@@ -854,7 +940,7 @@ pub fn create(
             &DemoJournal {
                 kind: "check",
                 date: r.date,
-                number: r.check_number.clone().unwrap_or_default(),
+                number: r.check_number.map(|n| n.to_string()).unwrap_or_default(),
                 contact: payee,
                 memo: r.memo.clone().unwrap_or_default(),
                 lines: jl,
@@ -862,7 +948,6 @@ pub fn create(
             None,
         )
         .ok_or(ApiError::Internal)?;
-    let queued = r.method == SalesTaxPayMethod::Check && r.print_later;
     let book = &mut state.sales_tax.book;
     book.next += 1;
     book.writes += 1;
@@ -876,7 +961,7 @@ pub fn create(
             method: r.method,
             bank: Some(r.bank_account_id),
             total,
-            check_number: r.check_number.clone(),
+            check_number: r.check_number,
             queued,
             linked: false,
             voided: false,
@@ -888,7 +973,8 @@ pub fn create(
         "id": id,
         "number": number,
         "checkNumber": r.check_number,
-        "printStatus": queued.then_some("queue"),
+        "printStatus": check.then_some(if queued { "queue" } else { "hand_written" }),
+        "total": s2(total),
     });
     if let Some(k) = key {
         book.keys.insert(k.to_string(), v.clone());
@@ -975,23 +1061,43 @@ pub fn link(
     Ok(())
 }
 
-fn record_json(id: TransactionId, p: &TaxPayment) -> Value {
+fn record_json(state: &DemoState, id: TransactionId, p: &TaxPayment) -> Value {
+    let name = |i: &SalesTaxItemId| {
+        state
+            .sales_tax
+            .item_name(*i)
+            .unwrap_or_default()
+            .to_string()
+    };
+    // What a check stub lists: each item paid, then each adjustment.
+    let stub: Vec<Value> = p
+        .lines
+        .iter()
+        .filter(|l| l.1 == "paid")
+        .map(|(i, _, a, _, _)| json!({"label": name(i), "amount": s2(*a)}))
+        .chain(p.lines.iter().filter(|l| l.1 == "adjustment").map(|(_, _, a, _, r)| {
+            json!({"label": r.clone().unwrap_or_else(|| "Adjustment".into()), "amount": s2(*a)})
+        }))
+        .collect();
+    let check = p.method == SalesTaxPayMethod::Check && !p.linked;
     json!({
         "id": id,
         "agencyId": p.agency,
         "date": p.date,
+        "status": if p.voided { "void" } else { "posted" },
         "throughDate": p.through,
-        "method": p.method,
+        "method": (!p.linked).then_some(p.method),
         "bankAccountId": p.bank,
         "total": s2(p.total),
         "checkNumber": p.check_number,
-        "printStatus": p.queued.then_some("queue"),
+        "printStatus": check.then_some(if p.queued { "queue" } else { "hand_written" }),
         "linked": p.linked,
         "voided": p.voided,
         "lines": p.lines.iter().map(|(i, k, a, acct, reason)| json!({
-            "taxItemId": i, "kind": k, "amount": s2(*a),
+            "taxItemId": i, "name": name(i), "kind": k, "amount": s2(*a),
             "accountId": acct, "reason": reason,
         })).collect::<Vec<_>>(),
+        "stubLines": stub,
         "memo": p.memo,
     })
 }
@@ -1007,7 +1113,7 @@ pub fn get(state: &DemoState, id: TransactionId) -> Result<SalesTaxPaymentRecord
         .payments
         .get(&id)
         .ok_or(ApiError::NotFound { code: None })?;
-    decode(record_json(id, p))
+    decode(record_json(state, id, p))
 }
 
 /// `GET /sales-tax/payments` (newest first).
@@ -1019,7 +1125,7 @@ pub fn list(state: &DemoState, agency: Option<SalesTaxAgencyId>) -> Vec<SalesTax
         .payments
         .iter()
         .filter(|(_, p)| agency.is_none_or(|a| p.agency == a))
-        .filter_map(|(id, p)| decode(record_json(*id, p)).ok())
+        .filter_map(|(id, p)| decode(record_json(state, *id, p)).ok())
         .collect();
     out.sort_by_key(|r| std::cmp::Reverse((r.date, r.id)));
     out
@@ -1058,6 +1164,82 @@ pub fn void(
     }
     state.sales_tax.book.writes += 1;
     Ok(())
+}
+
+/// `POST /sales-tax/payments/:id/unlink`: a linked outside payment stops
+/// counting (what it paid is owed again; its check stays).
+///
+/// # Errors
+/// 404; 400 `NOT_LINKED` for a Pay Sales Tax payment; closing on its date.
+pub fn unlink(
+    state: &mut DemoState,
+    id: TransactionId,
+    password: Option<&Secret>,
+    key: Option<&str>,
+) -> Result<cl_api::UnlinkResult, ApiError> {
+    if key.is_some_and(|k| state.sales_tax.book.keys.contains_key(k)) {
+        return decode(json!({"transactionId": id, "unlinked": 0}));
+    }
+    let Some(p) = state.sales_tax.book.payments.get(&id).cloned() else {
+        return Err(refused(400, "NOT_LINKED", &json!({})));
+    };
+    if !p.linked {
+        return Err(refused(400, "NOT_LINKED", &json!({})));
+    }
+    check_closing(super::receivables::closing(state), &[p.date], password)?;
+    let book = &mut state.sales_tax.book;
+    book.payments.remove(&id);
+    book.writes += 1;
+    if let Some(k) = key {
+        book.keys.insert(k.to_string(), Value::Null);
+    }
+    decode(json!({"transactionId": id, "unlinked": p.lines.len()}))
+}
+
+/// `POST /sales-tax/payments/mark-paid-through`: what each of the agency's
+/// items owes through `through` is recorded as paid outside these books
+/// (opening lines dated `through`, no GL). No undo.
+///
+/// # Errors
+/// 404 for an unknown agency.
+pub fn mark_paid_through(
+    state: &mut DemoState,
+    agency: SalesTaxAgencyId,
+    through: CalendarDate,
+    key: Option<&str>,
+) -> Result<cl_api::MarkPaidResult, ApiError> {
+    if key.is_some_and(|k| state.sales_tax.book.keys.contains_key(k)) {
+        return decode(json!({"agencyId": agency, "throughDate": through, "replayed": true}));
+    }
+    let _ = super::sales_tax::agencies(state, true);
+    if state.sales_tax.agency_vendor(agency).is_none() {
+        return Err(ApiError::NotFound { code: None });
+    }
+    let owed = owed_for_pay(state, agency, through);
+    let lines: Vec<(SalesTaxItemId, Decimal)> = owed
+        .into_iter()
+        .filter(|(_, o)| *o > Decimal::ZERO)
+        .collect();
+    let total: Decimal = lines.iter().map(|(_, o)| *o).sum();
+    let out: Vec<Value> = lines
+        .iter()
+        .map(|(i, o)| {
+            json!({
+                "taxItemId": i,
+                "name": state.sales_tax.item_name(*i).unwrap_or_default(),
+                "amount": s2(*o),
+            })
+        })
+        .collect();
+    let book = &mut state.sales_tax.book;
+    for (i, o) in &lines {
+        book.openings.push((agency, *i, through, *o));
+    }
+    book.writes += 1;
+    if let Some(k) = key {
+        book.keys.insert(k.to_string(), Value::Null);
+    }
+    decode(json!({"agencyId": agency, "throughDate": through, "lines": out, "total": s2(total)}))
 }
 
 /// Checks and entries that paid Sales Tax Payable and are not yet a sales

@@ -62,6 +62,7 @@ fn golden9() -> PaySalesTaxRequest {
         print_later: true,
         check_number: None,
         memo: None,
+        expected_owed: None,
     }
 }
 
@@ -71,7 +72,8 @@ fn preview_json() -> String {
           {{"taxItemId":"{STATE}","name":"State","owed":"80.70","adjustment":"0.00","amount":"80.70","expectedOwed":"80.70"}},
           {{"taxItemId":"{SPRINGFIELD}","name":"Springfield","owed":"131.68","adjustment":"-1.96","amount":"129.72","expectedOwed":"131.68"}},
           {{"taxItemId":null,"name":"Unassigned","owed":"3.00","adjustment":"0.00","amount":"0.00","expectedOwed":"3.00"}}],
-          "total":"210.42","problems":[{{"code":"LEGACY_UNASSIGNED"}},{{"code":"SOMETHING_NEW"}}]}}}}"#
+          "owed":"215.38","total":"210.42","problems":[{{"code":"LEGACY_UNASSIGNED","message":"m","details":{{"amount":"3.00"}}}},{{"code":"SOMETHING_NEW"}},
+          {{"code":"AMOUNT_MORE_THAN_OWED","message":"m","details":{{"taxItemId":"{STATE}"}}}}]}}}}"#
     )
 }
 
@@ -112,14 +114,21 @@ fn the_request_body_is_exact_and_checked() {
                                "amount":"-1.96","reason":"Timely filing discount"}]})
     );
     let mut r = golden9();
-    r.check_number = Some("1042".into());
+    r.check_number = Some(1042);
     assert_eq!(
         local(r.body()),
         Some(LocalValidation::InvalidValue),
         "number and print later"
     );
     r.print_later = false;
-    assert_eq!(r.body().expect("typed number")["checkNumber"], "1042");
+    assert_eq!(
+        r.body().expect("typed number")["checkNumber"],
+        json!(1042),
+        "a JSON whole number"
+    );
+    r.check_number = Some(0);
+    assert_eq!(local(r.body()), Some(LocalValidation::InvalidValue), "zero");
+    r.check_number = Some(1042);
     r.method = SalesTaxPayMethod::Electronic;
     assert_eq!(
         local(r.body()),
@@ -184,6 +193,16 @@ fn post_lines_copy_the_preview_strings() {
         SalesTaxPayProblemKind::LegacyUnassigned
     );
     assert_eq!(p.problems[1].kind(), SalesTaxPayProblemKind::Other);
+    assert_eq!(
+        p.problems[2].tax_item_id,
+        Some(item(STATE)),
+        "the item comes from details"
+    );
+    assert_eq!(p.owed.to_wire(), "215.3800");
+    assert!(
+        !format!("{:?}", p.problems).contains("3.00"),
+        "details amounts are not kept"
+    );
     assert!(!format!("{p:?}").contains("131"));
 }
 
@@ -227,6 +246,14 @@ async fn pay_previews_then_posts_with_a_key() {
         ApiError::Local(LocalValidation::InvalidValue)
     );
     r.lines = Some(p.post_lines());
+    assert_eq!(
+        s.sales_tax_payments()
+            .create(&r, &PostingOptions::default(), IdempotencyKey::new())
+            .await
+            .expect_err("no top-level expectedOwed"),
+        ApiError::Local(LocalValidation::InvalidValue)
+    );
+    r.expected_owed = Some(p.owed);
     let done = s
         .sales_tax_payments()
         .create(&r, &PostingOptions::default(), IdempotencyKey::new())
@@ -238,6 +265,7 @@ async fn pay_previews_then_posts_with_a_key() {
     assert!(posts[1].headers.get("idempotency-key").is_some());
     let body: Value = serde_json::from_slice(&posts[1].body).expect("json");
     assert_eq!(body["lines"][1]["expectedOwed"], "131.68");
+    assert_eq!(body["expectedOwed"], "215.38", "the preview's owed, copied");
 }
 
 #[test]
@@ -362,9 +390,10 @@ fn liability_json(basis: &str) -> String {
               "nonTaxable":[],"collected":"131.68","discounts":"-0.71","badDebts":"-9.60",
               "recoveries":"0.00","adjustments":"0.00","paid":"0.00","owedAtEnd":"121.37"}}],
             "totals":{{"collected":"212.38","discounts":"-0.71","badDebts":"-9.60","owedAtEnd":"202.07"}}}}],
+          "totals":{{"collected":"212.38","discounts":"-0.71","badDebts":"-9.60","owedAtEnd":"202.07"}},"total":"202.07",
           "unassigned":"0.00","openingPaid":"0.00","otherEntries":"0.00","glMovement":"202.07",
           "roundingDifference":"-0.00278",
-          "balanceCheck":{{"stpBalance":"202.07","owedAtEnd":"202.07","otherEntriesCumulative":"0.00","openingPaid":"0.00"}}}}"#
+          "balanceCheck":{{"stpBalance":"202.07","owedAtEnd":"202.07","unassigned":"0.00","otherEntriesCumulative":"0.00","openingPaid":"0.00","roundingDifferenceCumulative":"-0.002790"}}}}"#
     )
 }
 
@@ -382,6 +411,7 @@ async fn the_liability_report_reads_string_columns_only() {
         start_date: d(11, 1),
         end_date: d(11, 30),
         basis: Some(SalesTaxBasis::Accrual),
+        agency_id: None,
     };
     assert_eq!(
         s.reports()
@@ -395,6 +425,7 @@ async fn the_liability_report_reads_string_columns_only() {
         start_date: d(11, 30),
         end_date: d(11, 1),
         basis: None,
+        agency_id: None,
     };
     assert_eq!(
         s.reports()
@@ -416,7 +447,22 @@ async fn the_liability_report_reads_string_columns_only() {
         Some("8.875%")
     );
     assert_eq!(a.totals.paid, Money::ZERO, "absent columns read 0.00");
-    assert_eq!(r.balance_check.stp_balance.to_wire(), "202.0700");
+    let check = r.balance_check.as_ref().expect("company-wide");
+    assert_eq!(check.stp_balance.to_wire(), "202.0700");
+    assert_eq!(check.unassigned, Money::ZERO);
+    assert_eq!(
+        check
+            .rounding_difference_cumulative
+            .map(SixPlaceAmount::to_text)
+            .as_deref(),
+        Some("-0.00279")
+    );
+    assert_eq!(r.totals.collected.to_wire(), "212.3800");
+    assert_eq!(r.total.to_wire(), "202.0700");
+    assert_eq!(
+        r.gl_movement.map(Money::to_wire).as_deref(),
+        Some("202.0700")
+    );
     assert_eq!(
         r.rounding_difference
             .map(SixPlaceAmount::to_text)
@@ -454,4 +500,137 @@ fn six_place_amounts_are_strict() {
         serde_json::from_str::<SixPlaceAmount>("-0.00278").is_err(),
         "a JSON number"
     );
+}
+
+#[test]
+fn payment_records_read_stub_lines_and_numeric_check_numbers() {
+    let rec: SalesTaxPaymentRecord = decode_one(
+        format!(
+            r#"{{"id":"{PAY}","date":"2026-12-10","number":null,"status":"void","agencyId":"{AGENCY}",
+                "throughDate":"2026-11-30","method":"check","linked":false,"bankAccountId":"{BANK}","total":"210.42",
+                "checkNumber":5001,"printStatus":"hand_written","lines":[
+                {{"taxItemId":"{STATE}","name":"State","kind":"paid","amount":"80.70","accountId":null,"reason":null}}],
+                "stubLines":[{{"label":"State","amount":"80.70"}},{{"label":"Timely filing discount","amount":"-1.96"}}]}}"#
+        )
+        .as_bytes(),
+        "payment",
+        "p",
+    )
+    .expect("record");
+    assert_eq!(rec.check_number, Some(5001));
+    assert!(rec.is_void());
+    assert_eq!(rec.lines[0].name, "State");
+    assert_eq!(rec.stub_lines.len(), 2);
+    assert_eq!(rec.stub_lines[1].amount.to_wire(), "-1.9600");
+    assert!(!format!("{rec:?}").contains("Timely"));
+    let done: PaySalesTaxResult = serde_json::from_str(&format!(
+        r#"{{"id":"{PAY}","number":null,"checkNumber":null,"printStatus":"queue","total":"210.42"}}"#
+    ))
+    .expect("result");
+    assert_eq!(
+        (done.check_number, done.total.map(Money::to_wire)),
+        (None, Some("210.4200".into()))
+    );
+}
+
+#[tokio::test]
+async fn unlink_and_mark_paid_through_are_keyed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/sales-tax/payments/{PAY}/unlink")))
+        .respond_with(json(
+            200,
+            &format!(r#"{{"transactionId":"{PAY}","unlinked":1}}"#),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/sales-tax/payments/mark-paid-through"))
+        .respond_with(json(
+            201,
+            &format!(
+                r#"{{"agencyId":"{AGENCY}","throughDate":"2026-11-30",
+                    "lines":[{{"taxItemId":"{STATE}","name":"State","amount":"80.70"}}],"total":"80.70"}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/sales-tax/payments"))
+        .respond_with(json(
+            200,
+            &format!(
+                r#"{{"data":[{{"transactionId":"{PAY}","date":"2026-12-10","txnType":"check","number":"77",
+                    "agencyId":"{AGENCY}","agencyName":"State","total":"24.02","paid":"24.02","adjustments":"0.00","linked":true}}]}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let id = TransactionId::parse(PAY).expect("id");
+    let u = s
+        .sales_tax_payments()
+        .unlink(id, &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect("unlink");
+    assert_eq!(u.unlinked, 1);
+    let agency = SalesTaxAgencyId::parse(AGENCY).expect("id");
+    let long = "x".repeat(MARK_PAID_REASON_MAX + 1);
+    assert_eq!(
+        s.sales_tax_payments()
+            .mark_paid_through(agency, d(11, 30), Some(&long), IdempotencyKey::new())
+            .await
+            .expect_err("long reason"),
+        ApiError::Local(LocalValidation::InvalidValue)
+    );
+    let m = s
+        .sales_tax_payments()
+        .mark_paid_through(agency, d(11, 30), None, IdempotencyKey::new())
+        .await
+        .expect("mark");
+    assert_eq!(m.total.map(Money::to_wire).as_deref(), Some("80.7000"));
+    assert_eq!(m.lines[0].tax_item_id, item(STATE));
+    let posts = requests(&server, "POST").await;
+    assert!(
+        posts
+            .iter()
+            .all(|p| p.headers.get("idempotency-key").is_some())
+    );
+    let body: Value = serde_json::from_slice(&posts[1].body).expect("json");
+    assert_eq!(body, json!({"agencyId":AGENCY,"throughDate":"2026-11-30"}));
+    let list = s
+        .sales_tax_payments()
+        .list(SalesTaxPaymentQuery {
+            agency_id: Some(agency),
+            start_date: Some(d(1, 1)),
+            end_date: None,
+        })
+        .await
+        .expect("list");
+    assert!(list[0].linked && !list[0].is_void());
+    let qs = query(&requests(&server, "GET").await[1]);
+    assert!(
+        qs.contains("agency_id=") && qs.contains("start_date=2026-01-01"),
+        "snake_case query: {qs}"
+    );
+    assert_eq!(
+        pay_sales_tax_refusal(&refusal("NOT_LINKED")),
+        Some(PaySalesTaxRefusal::NotLinked)
+    );
+}
+
+#[test]
+fn a_report_filtered_by_agency_has_no_gl_fields() {
+    let filtered = liability_json("accrual")
+        .replace(
+            r#""otherEntries":"0.00","glMovement":"202.07""#,
+            r#""otherEntries":null,"glMovement":null"#,
+        )
+        .replace(
+            r#""balanceCheck":{"stpBalance""#,
+            r#""ignored":{"stpBalance""#,
+        );
+    let r: SalesTaxLiability = serde_json::from_str(&filtered).expect("filtered");
+    assert_eq!((r.gl_movement, r.other_entries), (None, None));
+    assert!(r.balance_check.is_none());
 }

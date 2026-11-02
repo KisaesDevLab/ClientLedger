@@ -20,6 +20,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("pay_sales_tax.problem.bad_amount", "Enter an amount of zero or more, to the cent."),
     ("pay_sales_tax.problem.bad_adjustment", "Each adjustment needs a tax item, an account, an amount other than zero and a reason."),
     ("pay_sales_tax.problem.check_number", "Enter a check number or tick Print later, not both."),
+    ("pay_sales_tax.problem.bad_check_number", "Enter the check number as a whole number, or leave it blank to print the check later."),
     ("pay_sales_tax.problem.updating", "The amounts are updating. Try again in a moment."),
     ("pay_sales_tax.problem.nothing_to_pay", "There is nothing to pay. The total must be more than zero."),
     ("pay_sales_tax.link.no_payment", "Choose the payment you already made."),

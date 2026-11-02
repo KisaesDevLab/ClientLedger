@@ -47,6 +47,10 @@ pub(crate) enum Pending {
     Pay(PayPostPlan),
     Link(LinkPaymentRequest),
     Void(TransactionId),
+    /// Undo a link (closing on its date).
+    Unlink(TransactionId),
+    /// "Mark paid through" (no GL, no closing, no undo).
+    MarkPaid(SalesTaxAgencyId, CalendarDate),
 }
 
 /// What a write answered.
@@ -54,6 +58,8 @@ enum Wrote {
     Paid(PaySalesTaxResult),
     Linked,
     Voided,
+    Unlinked,
+    MarkedPaid(cl_api::MarkPaidResult),
 }
 
 /// One outside payment that can be matched: (id, date, number, STP debit).
@@ -91,6 +97,10 @@ pub struct PayScreen {
     candidates_job: Option<Job<Vec<Candidate>>>,
     /// The last payment made here.
     pub(crate) paid: Option<PaySalesTaxResult>,
+    /// The last "Mark paid through" answer.
+    pub(crate) marked: Option<cl_api::MarkPaidResult>,
+    /// The "Mark paid through" confirmation is open.
+    pub(crate) confirm_mark: bool,
     notice: Option<&'static str>,
     problem: Option<&'static str>,
     error: Option<ApiError>,
@@ -138,8 +148,9 @@ fn request(p: &PayRequestPlan, lines: Option<Vec<PayLine>>) -> PaySalesTaxReques
             })
             .collect(),
         print_later: p.print_later,
-        check_number: p.check_number.clone(),
+        check_number: p.check_number,
         memo: None,
+        expected_owed: None,
     }
 }
 
@@ -158,6 +169,7 @@ fn figures_of(p: &PayPreview) -> PayFigures {
             })
             .collect(),
         total: p.total,
+        owed: p.owed,
         legacy_unassigned: p
             .problems
             .iter()
@@ -205,6 +217,8 @@ impl PayScreen {
             candidates: Vec::new(),
             candidates_job: None,
             paid: None,
+            marked: None,
+            confirm_mark: false,
             notice: None,
             problem: None,
             error: None,
@@ -410,6 +424,8 @@ impl PayScreen {
             Pending::Pay(p) => p.attempt,
             Pending::Link(_) => u64::MAX - 1,
             Pending::Void(_) => u64::MAX,
+            Pending::Unlink(_) => u64::MAX - 2,
+            Pending::MarkPaid(..) => u64::MAX - 3,
         };
         let key = self.key_for(attempt);
         let demo_key = key.as_header();
@@ -433,7 +449,9 @@ impl PayScreen {
                         expected_owed: Some(*e),
                     })
                     .collect();
-                let r = request(&plan.request, Some(lines));
+                let mut r = request(&plan.request, Some(lines));
+                // The preview's owed total, copied (engine PR #219).
+                r.expected_owed = Some(plan.expected_owed);
                 let live = r.clone();
                 engine::write(
                     &self.link,
@@ -497,6 +515,46 @@ impl PayScreen {
                     },
                 )
             }
+            Pending::Unlink(id) => engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label,
+                move |d| {
+                    crate::company::demo::sales_tax_owed::unlink(
+                        d,
+                        id,
+                        password.as_ref(),
+                        Some(&demo_key),
+                    )
+                    .map(|_| Wrote::Unlinked)
+                },
+                move |s| async move {
+                    s.sales_tax_payments()
+                        .unlink(id, &opts, key)
+                        .await
+                        .map(|_| Wrote::Unlinked)
+                },
+            ),
+            Pending::MarkPaid(agency, through) => engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label,
+                move |d| {
+                    crate::company::demo::sales_tax_owed::mark_paid_through(
+                        d,
+                        agency,
+                        through,
+                        Some(&demo_key),
+                    )
+                    .map(Wrote::MarkedPaid)
+                },
+                move |s| async move {
+                    s.sales_tax_payments()
+                        .mark_paid_through(agency, through, None, key)
+                        .await
+                        .map(Wrote::MarkedPaid)
+                },
+            ),
         };
         self.write_job = Some(job);
         self.pending_kept = Some(pending);
@@ -529,6 +587,16 @@ impl PayScreen {
             Wrote::Voided => {
                 self.notice = Some("sales_tax.pay.voided");
                 self.paid = None;
+                self.form.changed();
+            }
+            Wrote::Unlinked => {
+                self.notice = Some("sales_tax.pay.unlinked");
+                self.form.changed();
+            }
+            Wrote::MarkedPaid(r) => {
+                self.notice = Some("sales_tax.pay.marked_paid");
+                self.marked = Some(r);
+                self.amounts.clear();
                 self.form.changed();
             }
         }
@@ -570,6 +638,7 @@ impl PayScreen {
                     PaySalesTaxRefusal::LinkTotalMismatch => "sales_tax.pay.refusal.link_total",
                     PaySalesTaxRefusal::NotStpPayment => "sales_tax.pay.refusal.not_stp",
                     PaySalesTaxRefusal::AlreadyLinked => "sales_tax.pay.refusal.already_linked",
+                    PaySalesTaxRefusal::NotLinked => "sales_tax.pay.refusal.not_linked",
                     PaySalesTaxRefusal::Stale | PaySalesTaxRefusal::OwedChanged => {
                         "sales_tax.pay.refusal.stale"
                     }
@@ -592,6 +661,74 @@ impl PayScreen {
     pub(crate) fn void(&mut self, id: TransactionId) {
         self.closing_prompt.set_verb(Verb::Void);
         self.send(Pending::Void(id), None);
+    }
+
+    /// Undoes a linked outside payment (closing-date password when it is
+    /// in a closed period). Its check stays; what it paid is owed again.
+    pub(crate) fn unlink(&mut self, id: TransactionId) {
+        self.closing_prompt.set_verb(Verb::Change);
+        self.send(Pending::Unlink(id), None);
+    }
+
+    /// "Mark paid through…": opens the confirmation (the write can't be
+    /// undone).
+    pub(crate) fn ask_mark_paid(&mut self) {
+        self.problem = None;
+        if self.form.agency.is_none() {
+            self.problem = Some("pay_sales_tax.problem.no_agency");
+        } else if self.form.through.is_none() {
+            self.problem = Some("pay_sales_tax.problem.no_date");
+        } else {
+            self.confirm_mark = true;
+        }
+    }
+
+    /// The confirmation's "Mark as paid": records what the agency's items
+    /// owe through the date as paid outside these books.
+    pub(crate) fn confirm_mark_paid(&mut self) {
+        self.confirm_mark = false;
+        if let (Some(a), Some(d)) = (self.form.agency, self.form.through) {
+            self.send(Pending::MarkPaid(a, d), None);
+        }
+    }
+
+    fn mark_dialog(&mut self, ctx: &egui::Context, tokens: &Tokens) {
+        if !self.confirm_mark {
+            return;
+        }
+        let agency = self
+            .form
+            .agency
+            .and_then(|a| self.agencies.iter().find(|x| x.id == a))
+            .map(|a| a.vendor_name.clone())
+            .unwrap_or_default();
+        let date = self
+            .form
+            .through
+            .map(crate::shell::us_date)
+            .unwrap_or_default();
+        let (mut confirm, mut cancel) = (false, false);
+        egui::Window::new(t("sales_tax.pay.mark.title"))
+            .id(egui::Id::unique("pay_sales_tax_mark_paid"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(t_with(
+                    "sales_tax.pay.mark.body",
+                    &[("agency", &agency), ("date", &date)],
+                ));
+                form::inline_warning(ui, tokens, &t("sales_tax.pay.mark.no_undo"));
+                ui.horizontal(|ui| {
+                    confirm = ui.button(t("sales_tax.pay.mark.confirm")).clicked();
+                    cancel = ui.button(t("sales_tax.pay.mark.cancel")).clicked();
+                });
+            });
+        if confirm {
+            self.confirm_mark_paid();
+        } else if cancel {
+            self.confirm_mark = false;
+        }
     }
 
     /// "Match a payment you already made".
@@ -722,7 +859,30 @@ impl PayScreen {
             if ui.button(t("sales_tax.pay.link")).clicked() {
                 self.open_link();
             }
+            if ui
+                .add_enabled(enabled, egui::Button::new(t("sales_tax.pay.mark")))
+                .on_hover_text(t("sales_tax.pay.mark_tip"))
+                .clicked()
+            {
+                self.ask_mark_paid();
+            }
         });
+        self.mark_dialog(ui.ctx(), &tokens);
+        if let Some(m) = &self.marked
+            && let Some(total) = m.total
+        {
+            form::hint(
+                ui,
+                &tokens,
+                &t_with(
+                    "sales_tax.pay.marked_total",
+                    &[
+                        ("amount", &fmt(total)),
+                        ("date", &crate::shell::us_date(m.through_date)),
+                    ],
+                ),
+            );
+        }
         if self.linking.is_some() {
             ui.add_space(8.0);
             self.link_ui(ui, &tokens);
@@ -868,7 +1028,7 @@ impl PayScreen {
                             let r = ui.add_sized(
                                 [110.0, 22.0],
                                 egui::TextEdit::singleline(&mut text)
-                                    .hint_text(fmt(l.owed))
+                                    .hint_text(fmt(l.amount))
                                     .font(egui::TextStyle::Monospace),
                             );
                             r.widget_info(|| {
@@ -1063,6 +1223,7 @@ impl PayScreen {
             return;
         }
         let mut void = None;
+        let mut unlink = None;
         egui::Grid::new("pay_sales_tax_history")
             .striped(true)
             .spacing([14.0, 4.0])
@@ -1075,10 +1236,23 @@ impl PayScreen {
                     } else if p.print_status.as_deref() == Some("queue") {
                         t("sales_tax.pay.history.queued")
                     } else {
-                        p.check_number.clone().unwrap_or_default()
+                        p.check_number.map(|n| n.to_string()).unwrap_or_default()
                     });
-                    if p.voided {
+                    if p.is_void() {
                         ui.label(t("sales_tax.pay.history.void"));
+                    } else if p.linked {
+                        // A matched outside payment is unlinked, never voided
+                        // here (its check is the owner's own).
+                        if ui
+                            .button(t_with(
+                                "sales_tax.pay.unlink_on",
+                                &[("date", &crate::shell::us_date(p.date))],
+                            ))
+                            .on_hover_text(t("sales_tax.pay.unlink_tip"))
+                            .clicked()
+                        {
+                            unlink = Some(p.id);
+                        }
                     } else if ui
                         .button(t_with(
                             "sales_tax.pay.void_on",
@@ -1093,6 +1267,9 @@ impl PayScreen {
             });
         if let Some(id) = void {
             self.void(id);
+        }
+        if let Some(id) = unlink {
+            self.unlink(id);
         }
     }
 
@@ -1111,7 +1288,10 @@ impl PayScreen {
             "previews": self.previews,
             "paid": self.paid.as_ref().map(|p| json!({"queued": p.print_status.as_deref() == Some("queue")})),
             "history": self.history.len(),
-            "voided": self.history.iter().filter(|p| p.voided).count(),
+            "voided": self.history.iter().filter(|p| p.is_void()).count(),
+            "linked": self.history.iter().filter(|p| p.linked).count(),
+            "confirm_mark": self.confirm_mark,
+            "marked": self.marked.as_ref().map(|m| json!({"lines": m.lines.len()})),
             "linking": self.linking.is_some(),
             "candidates": self.candidates.len(),
             "closing_dialog": self.closing_prompt.dialog_open(),

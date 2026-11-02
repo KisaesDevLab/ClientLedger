@@ -1135,6 +1135,30 @@ pub struct InvoicePreview {
         deserialize_with = "crate::resources::customer_payments::null_vec"
     )]
     pub problems: Vec<crate::resources::customer_payments::PreviewProblem>,
+    /// Warnings `[{code, message, details?}]` (engine PR #220): the
+    /// exemption certificate notices `EXEMPTION_MISSING`, `_EXPIRED`,
+    /// `_EXPIRING` on invoice and sales receipt previews (also read on a
+    /// credit memo's, flattened here). `RATE_CHANGED` stays in `problems`
+    /// (engine PR #217); [`InvoicePreview::notice_codes`] reads both.
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub warnings: Vec<crate::resources::customer_payments::PreviewProblem>,
+}
+
+impl InvoicePreview {
+    /// The codes of `problems` then `warnings` (a code once).
+    #[must_use]
+    pub fn notice_codes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for p in self.problems.iter().chain(&self.warnings) {
+            if !out.contains(&p.code) {
+                out.push(p.code.clone());
+            }
+        }
+        out
+    }
 }
 
 impl fmt::Debug for InvoicePreview {

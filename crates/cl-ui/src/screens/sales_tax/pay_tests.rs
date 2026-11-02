@@ -87,3 +87,48 @@ fn a_stale_expected_owed_previews_again_with_a_message() {
     );
     assert_eq!(s.state()["notice"], "sales_tax.pay.owed_changed");
 }
+
+#[test]
+fn a_check_with_no_number_is_queued_and_a_typed_one_is_not() {
+    let (_d, mut s) = screen();
+    s.form.print_later = false;
+    s.form.check_number = "5001".into();
+    s.form.changed();
+    s.preview();
+    s.pay();
+    let v = s.state();
+    assert_eq!(v["paid"]["queued"], false, "{v}");
+    assert_eq!(s.history[0].check_number, Some(5001));
+}
+
+#[test]
+fn mark_paid_through_asks_first_then_nothing_is_owed() {
+    let (_d, mut s) = screen();
+    let total = s.state()["total"].as_str().expect("total").to_string();
+    assert_ne!(total, "0.0000");
+    s.ask_mark_paid();
+    let v = s.state();
+    assert_eq!(
+        v["confirm_mark"], true,
+        "a confirmation, nothing written yet"
+    );
+    assert_eq!(v["total"], total);
+    s.confirm_mark_paid();
+    let v = s.state();
+    assert_eq!(v["confirm_mark"], false);
+    assert_eq!(v["notice"], "sales_tax.pay.marked_paid", "{v}");
+    assert_eq!(v["total"], "0.0000", "owed through the date is now zero");
+    assert_eq!(v["history"], 0, "no check or payment is made");
+}
+
+#[test]
+fn a_pay_sales_tax_payment_is_voided_not_unlinked() {
+    let (_d, mut s) = screen();
+    let total = s.state()["total"].as_str().expect("total").to_string();
+    s.pay();
+    let paid = s.history[0].id;
+    s.unlink(paid);
+    assert_eq!(s.state()["problem"], "sales_tax.pay.refusal.not_linked");
+    s.void(paid);
+    assert_eq!(s.state()["total"], total, "owed again");
+}

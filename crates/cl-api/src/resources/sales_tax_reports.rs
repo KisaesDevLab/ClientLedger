@@ -12,7 +12,9 @@
 //! - The cash rounding difference may carry up to six places, so it is a
 //!   [`SixPlaceAmount`], display only.
 //! - The query keeps the v1 route's names (`start_date`, `end_date`), plus
-//!   `basis` and `agency_id` (a desktop-side assumption until the pin).
+//!   `basis` and `agency_id` (engine PR #218). Filtered by agency, the GL
+//!   fields (`glMovement`, `otherEntries`, `roundingDifference`,
+//!   `balanceCheck`) are `null`: the screen hides those footer rows.
 
 use std::fmt;
 use std::str::FromStr;
@@ -216,8 +218,9 @@ impl fmt::Debug for LiabilityAgency {
     }
 }
 
-/// The balance check: Sales Tax Payable = owed + unassigned + other
-/// entries + opening paid (the engine's figures).
+/// The balance check: Sales Tax Payable is owed plus opening paid plus
+/// unassigned plus other entries plus the cash rounding, all to the end
+/// date (the engine's figures).
 #[derive(Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiabilityBalanceCheck {
@@ -227,12 +230,19 @@ pub struct LiabilityBalanceCheck {
     /// Owed at the end date.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub owed_at_end: Money,
+    /// Tax on Sales Tax Payable with no tax item, to the end date.
+    #[serde(default, deserialize_with = "de_cents_zero")]
+    pub unassigned: Money,
     /// Other entries to Sales Tax Payable to the end date.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub other_entries_cumulative: Money,
     /// Tax paid before the items existed (backfill).
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub opening_paid: Money,
+    /// Cash basis: the running-total rounding to the end date (up to six
+    /// places).
+    #[serde(default)]
+    pub rounding_difference_cumulative: Option<SixPlaceAmount>,
 }
 
 impl fmt::Debug for LiabilityBalanceCheck {
@@ -254,9 +264,19 @@ pub struct SalesTaxLiability {
     /// The period's end.
     #[serde(default)]
     pub end_date: Option<CalendarDate>,
+    /// The agency it was filtered to (`None`: every agency).
+    #[serde(default)]
+    pub agency_id: Option<SalesTaxAgencyId>,
     /// Per agency.
     #[serde(default, deserialize_with = "null_vec")]
     pub agencies: Vec<LiabilityAgency>,
+    /// The report's tax totals over every agency shown.
+    #[serde(default)]
+    pub totals: LiabilityColumns,
+    /// Collected + discounts + bad debts + recoveries in the period (the
+    /// engine's figure).
+    #[serde(default, deserialize_with = "de_cents_zero")]
+    pub total: Money,
     /// Sales Tax Payable rows without an item (legacy).
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub unassigned: Money,
@@ -264,18 +284,26 @@ pub struct SalesTaxLiability {
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub opening_paid: Money,
     /// Entries to Sales Tax Payable in the period that are not sales tax
-    /// rows or payments (journal entries, …).
-    #[serde(default, deserialize_with = "de_cents_zero")]
-    pub other_entries: Money,
-    /// The Sales Tax Payable movement in the period on the chosen basis.
-    #[serde(default, deserialize_with = "de_cents_zero")]
-    pub gl_movement: Money,
+    /// rows or payments (journal entries, …). `None` when filtered by
+    /// agency (the GL is not split by agency).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub other_entries: Option<Money>,
+    /// The Sales Tax Payable movement in the period on the chosen basis
+    /// (`None` when filtered by agency).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub gl_movement: Option<Money>,
     /// Cash basis only: the running-total rounding left in the period.
     #[serde(default)]
     pub rounding_difference: Option<SixPlaceAmount>,
-    /// The balance check.
+    /// The balance check (`None` when filtered by agency).
     #[serde(default)]
-    pub balance_check: LiabilityBalanceCheck,
+    pub balance_check: Option<LiabilityBalanceCheck>,
 }
 
 impl fmt::Debug for SalesTaxLiability {
@@ -307,6 +335,9 @@ pub struct LiabilityQuery {
     pub end_date: CalendarDate,
     /// `None`: the company's sales tax basis.
     pub basis: Option<SalesTaxBasis>,
+    /// One agency (`None`: every agency; the GL fields come back `None`
+    /// when filtered).
+    pub agency_id: Option<SalesTaxAgencyId>,
 }
 
 impl Reports<'_> {
@@ -331,6 +362,9 @@ impl Reports<'_> {
         ];
         if let Some(b) = q.basis {
             call.query.push(("basis".into(), b.as_wire().into()));
+        }
+        if let Some(a) = q.agency_id {
+            call.query.push(("agency_id".into(), a.to_string()));
         }
         let reply = self.0.send(&REPORT_SALES_TAX_LIABILITY, call, None).await?;
         decode(&reply, "sales tax liability")

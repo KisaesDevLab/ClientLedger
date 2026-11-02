@@ -171,9 +171,12 @@ fn basis(req: &Value) -> SalesTaxBasis {
 fn check_liability(s: &mut Seed, req: &Value, want: &Value, what: &str) {
     let r = liability(
         &mut s.state,
-        day(req["startDate"].as_str().expect("start")),
-        day(req["endDate"].as_str().expect("end")),
-        Some(basis(req)),
+        cl_api::LiabilityQuery {
+            start_date: day(req["startDate"].as_str().expect("start")),
+            end_date: day(req["endDate"].as_str().expect("end")),
+            basis: Some(basis(req)),
+            agency_id: None,
+        },
     )
     .expect("liability");
     for w in want["items"].as_array().into_iter().flatten() {
@@ -264,6 +267,7 @@ fn pay_request(s: &mut Seed, req: &Value) -> PaySalesTaxRequest {
         print_later: req["printLater"].as_bool().unwrap_or(false),
         check_number: None,
         memo: None,
+        expected_owed: None,
     }
 }
 
@@ -363,8 +367,9 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
             "pay" => {
                 let mut r = pay_request(&mut s, req);
                 let p = preview(&mut s.state, &r).expect("preview");
-                // The screen posts the owner's amounts (or what is owed)
-                // with each line's expectedOwed copied.
+                // The screen posts the owner's amounts (or the preview's)
+                // with each line's expectedOwed and the owed total copied.
+                r.expected_owed = Some(p.owed);
                 r.lines = Some(
                     p.lines
                         .iter()
@@ -374,7 +379,7 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
                             });
                             Some(PayLine {
                                 tax_item_id: l.tax_item_id?,
-                                amount: typed.map_or(l.owed, |t| t.amount),
+                                amount: typed.map_or(l.amount, |t| t.amount),
                                 expected_owed: Some(l.expected_owed),
                             })
                         })
@@ -458,30 +463,49 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
             "link" => {
                 let a = agency(&mut s, city_agency);
                 let city = item(&s, "City");
-                link(
-                    &mut s.state,
-                    &LinkPaymentRequest {
-                        transaction_id: names["CHK-CITY"],
-                        agency_id: a,
-                        lines: vec![cl_api::LinkLine {
-                            tax_item_id: city,
-                            amount: m("24.02"),
-                        }],
-                    },
-                    None,
-                    req["key"].as_str(),
-                )
-                .expect("linked");
+                let r = LinkPaymentRequest {
+                    transaction_id: names["CHK-CITY"],
+                    agency_id: a,
+                    lines: vec![cl_api::LinkLine {
+                        tax_item_id: city,
+                        amount: m("24.02"),
+                    }],
+                };
+                // Not in the golden file: link, unlink (owed again), link.
+                link(&mut s.state, &r, None, Some("link-0")).expect("linked");
+                same(
+                    owed_of(&mut s, city_agency).total.as_decimal(),
+                    &json!("0.00"),
+                    &what,
+                );
+                let u = unlink(&mut s.state, names["CHK-CITY"], None, Some("unlink-0"))
+                    .expect("unlinked");
+                assert_eq!(u.unlinked, 1);
+                same(
+                    owed_of(&mut s, city_agency).total.as_decimal(),
+                    &json!("24.02"),
+                    &what,
+                );
+                link(&mut s.state, &r, None, req["key"].as_str()).expect("linked");
+                let rec = get(&s.state, names["CHK-CITY"]).expect("record");
+                assert!(rec.linked && rec.stub_lines.len() == 1, "{what}");
             }
             "liability" => {
                 let r = liability(
                     &mut s.state,
-                    day(req["startDate"].as_str().expect("s")),
-                    day(req["endDate"].as_str().expect("e")),
-                    Some(basis(req)),
+                    cl_api::LiabilityQuery {
+                        start_date: day(req["startDate"].as_str().expect("s")),
+                        end_date: day(req["endDate"].as_str().expect("e")),
+                        basis: Some(basis(req)),
+                        agency_id: None,
+                    },
                 )
                 .expect("liability");
-                same(r.other_entries.as_decimal(), &want["otherEntries"], &what);
+                same(
+                    r.other_entries.expect("company-wide").as_decimal(),
+                    &want["otherEntries"],
+                    &what,
+                );
             }
             "void" => {
                 let id = paid_id.expect("paid");
@@ -528,7 +552,11 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
                 // The invoice preview carries it.
                 let new = NewInvoice::new(client, day("2026-11-20"), lines(&s, req));
                 let p = super::super::invoices::preview(&mut s.state, &new, None).expect("p");
-                assert_eq!(p.problems.first().map(|x| x.code.as_str()), wanted);
+                assert_eq!(
+                    p.warnings.first().map(|x| x.code.as_str()),
+                    wanted,
+                    "in warnings"
+                );
                 warned += 1;
             }
             "exemptionsExpiring" => {

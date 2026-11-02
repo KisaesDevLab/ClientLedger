@@ -62,6 +62,9 @@ pub struct PayFigures {
     pub lines: Vec<PayLineFigure>,
     /// The check amount.
     pub total: Money,
+    /// The preview's owed total of the payment's items (`owed`), sent back
+    /// as the top-level `expectedOwed` (a byte copy, never a sum made here).
+    pub owed: Money,
     /// Legacy tax without an item is owed (the banner).
     pub legacy_unassigned: bool,
     /// More than owed is paid on an item (a warning only).
@@ -134,10 +137,10 @@ pub struct PayRequestPlan {
     pub bank: AccountId,
     /// How.
     pub method: PayMethod,
-    /// Queue the check.
+    /// Queue the check (also a check with no number: the engine queues it).
     pub print_later: bool,
-    /// A typed check number.
-    pub check_number: Option<String>,
+    /// A typed check number (the engine takes a positive whole number).
+    pub check_number: Option<u32>,
     /// The owner's amounts (`None`: everything owed).
     pub amounts: Option<Vec<(SalesTaxItemId, Money)>>,
     /// Adjustments.
@@ -154,6 +157,8 @@ pub struct PayPostPlan {
     pub request: PayRequestPlan,
     /// The lines with their `expectedOwed`.
     pub lines: Vec<PostLine>,
+    /// The preview's owed total, sent as the top-level `expectedOwed`.
+    pub expected_owed: Money,
     /// The save attempt (the UI keys each attempt).
     pub attempt: u64,
 }
@@ -171,8 +176,10 @@ pub enum PayProblem {
     BadAmount,
     /// An adjustment lacks its item, account, amount or reason.
     BadAdjustment,
-    /// A check needs a number or Print later.
+    /// A check has a number and Print later both.
     CheckNumberOrPrintLater,
+    /// The check number is not a whole number above zero.
+    BadCheckNumber,
     /// The preview is being recalculated.
     PreviewPending,
     /// The check total is zero or less.
@@ -190,6 +197,7 @@ impl PayProblem {
             PayProblem::BadAmount => TextKey("pay_sales_tax.problem.bad_amount"),
             PayProblem::BadAdjustment => TextKey("pay_sales_tax.problem.bad_adjustment"),
             PayProblem::CheckNumberOrPrintLater => TextKey("pay_sales_tax.problem.check_number"),
+            PayProblem::BadCheckNumber => TextKey("pay_sales_tax.problem.bad_check_number"),
             PayProblem::PreviewPending => TextKey("pay_sales_tax.problem.updating"),
             PayProblem::NothingToPay => TextKey("pay_sales_tax.problem.nothing_to_pay"),
         }
@@ -348,26 +356,46 @@ impl PayForm {
         let (through, date) = self.through.zip(self.date).ok_or(PayProblem::NoDate)?;
         let bank = self.bank.ok_or(PayProblem::NoBank)?;
         let number = self.check_number.trim();
+        // A check with no number waits in the print queue (the engine's
+        // rule); a number together with Print later is refused.
         let check_number = match self.method {
             PayMethod::Check if self.print_later && !number.is_empty() => {
                 return Err(PayProblem::CheckNumberOrPrintLater);
             }
-            PayMethod::Check if !self.print_later && number.is_empty() => {
-                return Err(PayProblem::CheckNumberOrPrintLater);
-            }
-            PayMethod::Check if !number.is_empty() => Some(number.to_string()),
+            PayMethod::Check if !number.is_empty() => Some(
+                number
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n > 0 && i32::try_from(*n).is_ok())
+                    .ok_or(PayProblem::BadCheckNumber)?,
+            ),
             _ => None,
         };
+        // A typed amount is what the payment pays for the item, after its
+        // adjustments (the engine's `lines[].amount`). The engine pays only
+        // the items sent once any is, so every other item of the last
+        // preview goes along at that preview's amount (a copy).
         let amounts = if self.amounts.is_empty() {
             None
         } else {
-            let mut v = Vec::with_capacity(self.amounts.len());
+            let mut typed = BTreeMap::new();
             for (item, text) in &self.amounts {
                 let m = parse_amount(text)
                     .filter(|m| !m.is_negative())
                     .ok_or(PayProblem::BadAmount)?;
-                v.push((*item, m));
+                typed.insert(*item, m);
             }
+            let mut v: Vec<(SalesTaxItemId, Money)> = Vec::new();
+            if let Some((_, last)) = &self.figures {
+                for l in &last.lines {
+                    if let Some(item) = l.item
+                        && !typed.contains_key(&item)
+                    {
+                        v.push((item, l.amount));
+                    }
+                }
+            }
+            v.extend(typed);
             Some(v)
         };
         let mut adjustments = Vec::with_capacity(self.adjustments.len());
@@ -394,7 +422,7 @@ impl PayForm {
             date,
             bank,
             method: self.method,
-            print_later: self.method == PayMethod::Check && self.print_later,
+            print_later: self.method == PayMethod::Check && check_number.is_none(),
             check_number,
             amounts,
             adjustments,
@@ -402,9 +430,11 @@ impl PayForm {
     }
 
     /// What Pay posts: the preview's lines (unassigned ones left out), each
-    /// with the amount before adjustments (the owner's typed amount, else
-    /// the preview's `owed`) and `expectedOwed` copied. The adjustments
-    /// go with the request; the engine adds them (no arithmetic here).
+    /// with the preview's `amount` (what is paid for the item, adjustments
+    /// included; the engine's `lines[].amount`) and `expectedOwed` copied,
+    /// plus the preview's owed total. The adjustments go with the request;
+    /// the engine splits Sales Tax Payable and the adjustment accounts (no
+    /// arithmetic here).
     ///
     /// # Errors
     /// A [`PayProblem`] of the inputs, `PreviewPending` without current
@@ -415,23 +445,16 @@ impl PayForm {
         if !f.total.is_positive() {
             return Err(PayProblem::NothingToPay);
         }
-        let typed = request.amounts.clone().unwrap_or_default();
         let lines: Vec<PostLine> = f
             .lines
             .iter()
-            .filter_map(|l| {
-                let item = l.item?;
-                let amount = typed
-                    .iter()
-                    .find(|(i, _)| *i == item)
-                    .map_or(l.owed, |(_, m)| *m);
-                Some((item, amount, l.expected_owed))
-            })
+            .filter_map(|l| Some((l.item?, l.amount, l.expected_owed)))
             .collect();
         request.amounts = Some(lines.iter().map(|(i, a, _)| (*i, *a)).collect());
         Ok(PayPostPlan {
             request,
             lines,
+            expected_owed: f.owed,
             attempt: self.revision,
         })
     }

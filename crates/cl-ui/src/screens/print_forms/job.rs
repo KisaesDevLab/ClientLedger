@@ -172,6 +172,24 @@ pub(crate) fn stub_of_sales_tax_payment(
             .map(|i| i.name.clone())
             .unwrap_or_default()
     };
+    // The engine's `stubLines` (engine PR #219) when it sends them.
+    if !r.stub_lines.is_empty() {
+        return cl_print::StubData {
+            lines: r
+                .stub_lines
+                .iter()
+                .map(|l| StubLine {
+                    name: if l.label.trim().is_empty() {
+                        t("print.stub.sales_tax_adjustment")
+                    } else {
+                        l.label.clone()
+                    },
+                    amount: dec(l.amount),
+                })
+                .collect(),
+            ..cl_print::StubData::default()
+        };
+    }
     cl_print::StubData {
         lines: r
             .lines

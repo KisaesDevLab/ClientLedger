@@ -119,11 +119,12 @@ impl OwedScreen {
             start_date: start,
             end_date: end,
             basis,
+            agency_id: None,
         };
         self.job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            move |d| crate::company::demo::sales_tax_owed::liability(d, start, end, basis),
+            move |d| crate::company::demo::sales_tax_owed::liability(d, q),
             move |s| async move { s.reports().sales_tax_liability(q).await },
         ));
         self.payments_job = Some(engine::read(
@@ -408,9 +409,16 @@ impl OwedScreen {
                 if !r.unassigned.is_zero() {
                     row("sales_tax.owed.unassigned", r.unassigned);
                 }
-                row("sales_tax.owed.other_entries", r.other_entries);
-                row("sales_tax.owed.gl_movement", r.gl_movement);
-                row("sales_tax.owed.stp_balance", r.balance_check.stp_balance);
+                // The GL rows: absent when the report is filtered by agency.
+                if let Some(m) = r.other_entries {
+                    row("sales_tax.owed.other_entries", m);
+                }
+                if let Some(m) = r.gl_movement {
+                    row("sales_tax.owed.gl_movement", m);
+                }
+                if let Some(b) = &r.balance_check {
+                    row("sales_tax.owed.stp_balance", b.stp_balance);
+                }
                 if let Some(x) = r.rounding_difference {
                     ui.label(t("sales_tax.owed.rounding"))
                         .on_hover_text(t("sales_tax.owed.rounding_tip"));

@@ -139,6 +139,7 @@ fn golden9_figures() -> PayFigures {
             },
         ],
         total: m("210.42"),
+        owed: m("212.38"),
         legacy_unassigned: true,
         more_than_owed: false,
     }
@@ -172,14 +173,26 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
         plan.lines,
         vec![
             (item(1), m("80.70"), m("80.70")),
-            (item(2), m("131.68"), m("131.68")),
+            (item(2), m("129.72"), m("131.68")),
         ],
-        "amounts before adjustments (owed, copied); unassigned tax is not paid here"
+        "the preview's amounts (adjustments included), copied; unassigned tax is not paid here"
     );
-    // A typed amount goes as typed.
+    assert_eq!(
+        plan.expected_owed,
+        m("212.38"),
+        "the preview's owed, copied"
+    );
+    // A typed amount is sent with every other item at the last preview's
+    // amount (the engine pays only the items sent).
     f.set_amount(item(2), "100.00");
+    assert_eq!(
+        f.request_plan().expect("r").amounts,
+        Some(vec![(item(1), m("80.70")), (item(2), m("100.00"))])
+    );
     let rev = f.revision();
-    assert!(f.apply_preview(rev, golden9_figures()));
+    let mut typed = golden9_figures();
+    typed.lines[1].amount = m("100.00");
+    assert!(f.apply_preview(rev, typed));
     assert_eq!(
         f.post_plan().expect("post").lines[1],
         (item(2), m("100.00"), m("131.68"))
@@ -191,7 +204,7 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
     assert!(!f.apply_preview(rev, golden9_figures()));
     assert_eq!(
         f.request_plan().expect("r").amounts,
-        Some(vec![(item(1), m("50.00"))])
+        Some(vec![(item(2), m("100.00")), (item(1), m("50.00"))])
     );
     f.set_amount(item(1), "50.005");
     assert_eq!(f.request_plan(), Err(PayProblem::BadAmount), "no rounding");
@@ -211,12 +224,15 @@ fn pay_checks_the_check_and_adjustments() {
     f.check_number = "1042".into();
     assert_eq!(f.request_plan(), Err(PayProblem::CheckNumberOrPrintLater));
     f.print_later = false;
-    assert_eq!(
-        f.request_plan().expect("r").check_number.as_deref(),
-        Some("1042")
-    );
+    let r = f.request_plan().expect("r");
+    assert_eq!((r.check_number, r.print_later), (Some(1042), false));
+    f.check_number = "10a".into();
+    assert_eq!(f.request_plan(), Err(PayProblem::BadCheckNumber));
+    f.check_number = "0".into();
+    assert_eq!(f.request_plan(), Err(PayProblem::BadCheckNumber));
     f.check_number.clear();
-    assert_eq!(f.request_plan(), Err(PayProblem::CheckNumberOrPrintLater));
+    let r = f.request_plan().expect("no number: the print queue");
+    assert!(r.print_later && r.check_number.is_none());
     f.method = PayMethod::Electronic;
     let r = f.request_plan().expect("electronic");
     assert!(!r.print_later && r.check_number.is_none());

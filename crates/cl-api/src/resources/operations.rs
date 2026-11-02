@@ -1340,6 +1340,18 @@ pub(crate) const SALES_TAX_PAY_LINK: Operation = keyable_in(
     Method::Post,
     "/api/v1/sales-tax/payments/link",
 );
+/// Undoes a link (U-150).
+pub(crate) const SALES_TAX_PAY_UNLINK: Operation = keyable_in(
+    KeySet::SalesTaxPayV1,
+    Method::Post,
+    "/api/v1/sales-tax/payments/{id}/unlink",
+);
+/// Records tax paid outside these books through a date (U-150; no undo).
+pub(crate) const SALES_TAX_PAY_MARK_PAID: Operation = keyable_in(
+    KeySet::SalesTaxPayV1,
+    Method::Post,
+    "/api/v1/sales-tax/payments/mark-paid-through",
+);
 /// One sales tax payment with its lines.
 pub(crate) const SALES_TAX_PAYMENT_GET: Operation = read("/api/v1/sales-tax/payments/{id}");
 /// Sales tax payments.
@@ -1368,7 +1380,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 308] = [
+pub const OPERATIONS: [Operation; 310] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1687,6 +1699,8 @@ pub const OPERATIONS: [Operation; 308] = [
     SALES_TAX_PAY_PREVIEW,
     SALES_TAX_PAY_CREATE,
     SALES_TAX_PAY_LINK,
+    SALES_TAX_PAY_UNLINK,
+    SALES_TAX_PAY_MARK_PAID,
     SALES_TAX_PAYMENT_GET,
     SALES_TAX_PAYMENTS_LIST,
     WRITE_OFF_RECOVERY_CREATE,
@@ -1973,9 +1987,11 @@ mod tests {
         ("PUT", "/api/v1/sales-tax/exemptions/{id}"),
         ("POST", "/api/v1/sales-tax/exemptions/{id}/deactivate"),
     ];
-    const KEYABLE_SALES_TAX_PAY: [(&str, &str); 2] = [
+    const KEYABLE_SALES_TAX_PAY: [(&str, &str); 4] = [
         ("POST", "/api/v1/sales-tax/payments"),
         ("POST", "/api/v1/sales-tax/payments/link"),
+        ("POST", "/api/v1/sales-tax/payments/{id}/unlink"),
+        ("POST", "/api/v1/sales-tax/payments/mark-paid-through"),
     ];
     const KEYABLE_RECOVERY: [(&str, &str); 1] = [("POST", "/api/v1/payments/write-off-recoveries")];
 

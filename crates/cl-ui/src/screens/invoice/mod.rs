@@ -913,7 +913,7 @@ impl InvoiceScreen {
         let editing = self.editing.as_ref().map(|e| e.id);
         // An invoice's preview carries its own sales tax notices.
         let plain = |figures: InvoicePreview| Answer {
-            problems: figures.problems.iter().map(|x| x.code.clone()).collect(),
+            problems: figures.notice_codes(),
             figures,
             credit: None,
         };
@@ -933,7 +933,7 @@ impl InvoiceScreen {
                 let live = new.clone();
                 let answer = |p: cl_api::CreditMemoPreview| Answer {
                     credit: Some(engine::credit_figures_of(&p)),
-                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    problems: merged(&p.problems, &p.figures),
                     figures: p.figures,
                 };
                 engine::read(
@@ -950,7 +950,7 @@ impl InvoiceScreen {
                 let new = engine::new_sales_receipt(req)?;
                 let live = new.clone();
                 let answer = |p: cl_api::SalesReceiptPreview| Answer {
-                    problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+                    problems: merged(&p.problems, &p.figures),
                     credit: None,
                     figures: p.figures,
                 };
@@ -1306,6 +1306,18 @@ fn blank(kind: SalesDocKind, date: CalendarDate) -> InvoiceForm {
 }
 
 /// An empty date field (Due).
+/// A receipt's or memo's own `problems` and the sales tax notices of its
+/// figures (`RATE_CHANGED`; the `EXEMPTION_*` warnings), a code once.
+fn merged(problems: &[cl_api::PreviewProblem], figures: &InvoicePreview) -> Vec<String> {
+    let mut out: Vec<String> = problems.iter().map(|x| x.code.clone()).collect();
+    for c in figures.notice_codes() {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn empty_date() -> DateInput {
     DateInput {
         text: String::new(),

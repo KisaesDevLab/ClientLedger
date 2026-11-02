@@ -15,6 +15,14 @@
 //! - Link marks an existing check or journal entry that debited Sales Tax
 //!   Payable as this agency's payment, split over its items.
 //! - There is no edit (Q-P23h): void through `/transactions/:id/void`.
+//! - Contract per engine PR #219 (U-150): the post carries the preview's
+//!   owed total as a top-level `expectedOwed`; `checkNumber` is a JSON
+//!   whole number both ways; a check with no number is printed later
+//!   (`CHECK_NO_OR_PRINT_LATER` only when both are sent); `GET
+//!   /sales-tax/payments/:id` adds `stubLines`; a link is undone with
+//!   `POST /sales-tax/payments/:id/unlink`; `POST
+//!   /sales-tax/payments/mark-paid-through` records tax paid outside these
+//!   books (opening lines, no GL, no undo).
 
 use std::fmt;
 
@@ -31,8 +39,8 @@ use crate::resources::customer_payments::{
     too_long,
 };
 use crate::resources::operations::{
-    SALES_TAX_PAY_CREATE, SALES_TAX_PAY_LINK, SALES_TAX_PAY_PREVIEW, SALES_TAX_PAYMENT_GET,
-    SALES_TAX_PAYMENTS_LIST,
+    SALES_TAX_PAY_CREATE, SALES_TAX_PAY_LINK, SALES_TAX_PAY_MARK_PAID, SALES_TAX_PAY_PREVIEW,
+    SALES_TAX_PAY_UNLINK, SALES_TAX_PAYMENT_GET, SALES_TAX_PAYMENTS_LIST,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::sales_tax::{SalesTaxAgencyId, SalesTaxItemId, decode_list, decode_one};
@@ -45,8 +53,6 @@ pub const PAY_LINES_MAX: usize = 200;
 pub const ADJUSTMENT_REASON_MAX: usize = 200;
 /// Longest payment memo.
 pub const PAY_MEMO_MAX: usize = 4000;
-/// Longest typed check number.
-pub const CHECK_NUMBER_MAX: usize = 20;
 
 // ---- Refusals ------------------------------------------------------------------
 
@@ -77,6 +83,9 @@ pub enum PaySalesTaxRefusal {
     NotStpPayment,
     /// The transaction is already linked (409 `ALREADY_LINKED`).
     AlreadyLinked,
+    /// Unlink on a Pay Sales Tax payment or a transaction with no link
+    /// (400 `NOT_LINKED`; void a Pay Sales Tax payment instead).
+    NotLinked,
     /// Someone changed it since it was read (409 `STALE`).
     Stale,
 }
@@ -103,6 +112,7 @@ const REFUSALS: &[(&str, PaySalesTaxRefusal)] = &[
     ("LINK_TOTAL_MISMATCH", PaySalesTaxRefusal::LinkTotalMismatch),
     ("NOT_STP_PAYMENT", PaySalesTaxRefusal::NotStpPayment),
     ("ALREADY_LINKED", PaySalesTaxRefusal::AlreadyLinked),
+    ("NOT_LINKED", PaySalesTaxRefusal::NotLinked),
     (crate::resources::ap_doc::STALE, PaySalesTaxRefusal::Stale),
 ];
 
@@ -211,12 +221,17 @@ pub struct PaySalesTaxRequest {
     pub lines: Option<Vec<PayLine>>,
     /// Adjustments.
     pub adjustments: Vec<PayAdjustment>,
-    /// Queue the check for printing.
+    /// Queue the check for printing (a check with no number is queued
+    /// either way).
     pub print_later: bool,
-    /// A hand-written check's number.
-    pub check_number: Option<String>,
+    /// A hand-written check's number (a whole number above zero).
+    pub check_number: Option<u32>,
     /// Memo (owner data).
     pub memo: Option<String>,
+    /// The preview's owed total (`owed`), copied for the post as the
+    /// top-level `expectedOwed` (required by the engine to pay; never a
+    /// sum made here). Not sent on a preview.
+    pub expected_owed: Option<Money>,
 }
 
 impl fmt::Debug for PaySalesTaxRequest {
@@ -273,13 +288,16 @@ impl PaySalesTaxRequest {
             }
             cents_wire(a.amount)?;
         }
-        if let Some(n) = self.check_number.as_deref().map(str::trim)
-            && (n.is_empty()
-                || n.chars().count() > CHECK_NUMBER_MAX
+        if let Some(n) = self.check_number
+            && (n == 0
+                || i32::try_from(n).is_err()
                 || self.print_later
                 || self.method != SalesTaxPayMethod::Check)
         {
             return Err(bad());
+        }
+        if let Some(e) = self.expected_owed {
+            cents_wire(e)?;
         }
         if self.print_later && self.method != SalesTaxPayMethod::Check {
             return Err(bad());
@@ -319,11 +337,14 @@ impl PaySalesTaxRequest {
         if self.print_later {
             m.insert("printLater".into(), json!(true));
         }
-        if let Some(n) = self.check_number.as_deref().map(str::trim) {
+        if let Some(n) = self.check_number {
             m.insert("checkNumber".into(), json!(n));
         }
         if let Some(memo) = self.memo.as_deref().filter(|s| !s.trim().is_empty()) {
             m.insert("memo".into(), json!(memo));
+        }
+        if let Some(e) = self.expected_owed {
+            m.insert("expectedOwed".into(), json!(cents_wire(e)?));
         }
         Ok(Value::Object(m))
     }
@@ -363,15 +384,44 @@ impl fmt::Debug for PayPreviewLine {
     }
 }
 
-/// A warning of the preview (nothing is refused by a problem).
+/// A warning of the preview (nothing is refused by a problem). The engine
+/// sends `{code, message, details?}` with the item in `details.taxItemId`;
+/// the message and any other details (amounts) are not kept.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(from = "ProblemWire")]
 pub struct SalesTaxPayProblem {
     /// `AMOUNT_MORE_THAN_OWED`, `LEGACY_UNASSIGNED`, `NO_VENDOR_ADDRESS`, …
     pub code: String,
     /// The item it is about.
-    #[serde(default)]
     pub tax_item_id: Option<SalesTaxItemId>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProblemDetailsWire {
+    #[serde(default)]
+    tax_item_id: Option<SalesTaxItemId>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProblemWire {
+    code: String,
+    #[serde(default)]
+    tax_item_id: Option<SalesTaxItemId>,
+    #[serde(default)]
+    details: Option<ProblemDetailsWire>,
+}
+
+impl From<ProblemWire> for SalesTaxPayProblem {
+    fn from(w: ProblemWire) -> Self {
+        SalesTaxPayProblem {
+            code: w.code,
+            tax_item_id: w
+                .tax_item_id
+                .or_else(|| w.details.and_then(|d| d.tax_item_id)),
+        }
+    }
 }
 
 impl SalesTaxPayProblem {
@@ -410,6 +460,10 @@ pub struct PayPreview {
     /// The check amount.
     #[serde(deserialize_with = "de_cents")]
     pub total: Money,
+    /// What the payment's items owe in total (the engine's figure): sent
+    /// back as the post's top-level `expectedOwed`.
+    #[serde(deserialize_with = "de_cents")]
+    pub owed: Money,
     /// Warnings.
     #[serde(default, deserialize_with = "null_vec")]
     pub problems: Vec<SalesTaxPayProblem>,
@@ -453,12 +507,19 @@ pub struct PaySalesTaxResult {
     /// Its number.
     #[serde(default)]
     pub number: Option<String>,
-    /// A hand-written check's number.
-    #[serde(default)]
-    pub check_number: Option<String>,
-    /// `queue` when it waits to be printed.
+    /// A hand-written check's number (a JSON whole number).
+    #[serde(default, deserialize_with = "de_check_number")]
+    pub check_number: Option<u32>,
+    /// `queue` when it waits to be printed (`hand_written` for a typed
+    /// number).
     #[serde(default)]
     pub print_status: Option<String>,
+    /// The check amount (the engine's).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub total: Option<Money>,
 }
 
 impl fmt::Debug for PaySalesTaxResult {
@@ -492,6 +553,9 @@ pub struct SalesTaxPaymentLine {
     /// The item.
     #[serde(default)]
     pub tax_item_id: Option<SalesTaxItemId>,
+    /// The item's name (owner data).
+    #[serde(default)]
+    pub name: String,
     /// Paid, adjustment or opening.
     pub kind: PaymentLineKind,
     /// The amount (signed for adjustments).
@@ -540,9 +604,15 @@ pub struct SalesTaxPaymentRecord {
     /// The amount paid.
     #[serde(deserialize_with = "de_cents")]
     pub total: Money,
-    /// The check number.
+    /// The check number (a JSON whole number).
+    #[serde(default, deserialize_with = "de_check_number")]
+    pub check_number: Option<u32>,
+    /// The transaction number.
     #[serde(default)]
-    pub check_number: Option<String>,
+    pub number: Option<String>,
+    /// `posted` or `void` (GET; the list leaves it out).
+    #[serde(default)]
+    pub status: Option<String>,
     /// `queue` while it waits to be printed.
     #[serde(default)]
     pub print_status: Option<String>,
@@ -555,6 +625,10 @@ pub struct SalesTaxPaymentRecord {
     /// The lines.
     #[serde(default, deserialize_with = "null_vec")]
     pub lines: Vec<SalesTaxPaymentLine>,
+    /// What a check stub lists: each item paid, then each adjustment
+    /// (GET only; the engine's labels and amounts).
+    #[serde(default, deserialize_with = "null_vec")]
+    pub stub_lines: Vec<StubLine>,
     /// Memo (owner data).
     #[serde(default)]
     pub memo: Option<String>,
@@ -573,6 +647,118 @@ impl fmt::Debug for SalesTaxPaymentRecord {
             .finish_non_exhaustive()
     }
 }
+
+impl SalesTaxPaymentRecord {
+    /// Voided (`voided`, or `status: void` on GET).
+    #[must_use]
+    pub fn is_void(&self) -> bool {
+        self.voided || self.status.as_deref() == Some("void")
+    }
+}
+
+/// One line of a sales tax check's stub.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StubLine {
+    /// The item's name or the adjustment's reason (owner data).
+    #[serde(default)]
+    pub label: String,
+    /// Its amount (signed for adjustments).
+    #[serde(deserialize_with = "de_cents")]
+    pub amount: Money,
+}
+
+impl fmt::Debug for StubLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StubLine(..)")
+    }
+}
+
+/// A check number as the engine sends it: a JSON whole number (a numeric
+/// string is read too); `null` or absent is `None`.
+fn de_check_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum N {
+        Num(u32),
+        Text(String),
+    }
+    match Option::<N>::deserialize(d)? {
+        None => Ok(None),
+        Some(N::Num(n)) => Ok(Some(n)),
+        Some(N::Text(s)) => s
+            .trim()
+            .parse()
+            .map(Some)
+            .map_err(|_| serde::de::Error::custom("check number")),
+    }
+}
+
+/// `POST /sales-tax/payments/:id/unlink` answered.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnlinkResult {
+    /// The transaction that is no longer a sales tax payment.
+    pub transaction_id: TransactionId,
+    /// How many paid lines were dropped (0 on a replay).
+    #[serde(default)]
+    pub unlinked: u32,
+}
+
+/// One item marked paid.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkPaidLine {
+    /// The item.
+    pub tax_item_id: SalesTaxItemId,
+    /// Its name (owner data).
+    #[serde(default)]
+    pub name: String,
+    /// What was owed and is now recorded as paid outside these books.
+    #[serde(deserialize_with = "de_cents")]
+    pub amount: Money,
+}
+
+impl fmt::Debug for MarkPaidLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MarkPaidLine")
+            .field("tax_item_id", &self.tax_item_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `POST /sales-tax/payments/mark-paid-through` answered (201). A replay
+/// answers `{agencyId, throughDate, replayed: true}` without lines.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkPaidResult {
+    /// The agency.
+    pub agency_id: SalesTaxAgencyId,
+    /// Owed through this date is now 0.00.
+    pub through_date: CalendarDate,
+    /// The opening lines written.
+    #[serde(default, deserialize_with = "null_vec")]
+    pub lines: Vec<MarkPaidLine>,
+    /// Their total (absent on a replay).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub total: Option<Money>,
+}
+
+impl fmt::Debug for MarkPaidResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MarkPaidResult")
+            .field("agency_id", &self.agency_id)
+            .field("through_date", &self.through_date)
+            .field("lines", &self.lines)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Longest "mark paid through" reason.
+pub const MARK_PAID_REASON_MAX: usize = 255;
 
 /// `POST /sales-tax/payments/link`.
 #[derive(Clone, PartialEq, Eq, Serialize)]
@@ -691,8 +877,8 @@ impl SalesTaxPayments<'_> {
     /// (every line carries `expectedOwed`).
     ///
     /// # Errors
-    /// Nothing is sent for `Local(…)` (also `InvalidValue` for a line
-    /// without `expectedOwed`); from the engine see
+    /// Nothing is sent for `Local(…)` (also `InvalidValue` without the
+    /// top-level `expectedOwed` or for a line without one); from the engine see
     /// [`pay_sales_tax_refusal`]; closing on the date; any [`ApiError`].
     pub async fn create(
         &self,
@@ -703,7 +889,10 @@ impl SalesTaxPayments<'_> {
         let s = &self.0.pinned();
         require(s, Capabilities::SALES_TAX_PAY)?;
         let lines = r.lines.as_deref().unwrap_or_default();
-        if lines.is_empty() || lines.iter().any(|l| l.expected_owed.is_none()) {
+        if r.expected_owed.is_none()
+            || lines.is_empty()
+            || lines.iter().any(|l| l.expected_owed.is_none())
+        {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let body = posting_body(s, r.body()?, opts)?;
@@ -738,6 +927,63 @@ impl SalesTaxPayments<'_> {
         Ok(())
     }
 
+    /// Undoes a link: the transaction stops counting as a payment to the
+    /// agency and what it paid is owed again (no GL change).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)`; 400 `NOT_LINKED` (a Pay Sales Tax payment is
+    /// voided instead); closing on its date; any [`ApiError`].
+    pub async fn unlink(
+        &self,
+        id: TransactionId,
+        opts: &PostingOptions,
+        key: IdempotencyKey,
+    ) -> Result<UnlinkResult, ApiError> {
+        let s = &self.0.pinned();
+        require(s, Capabilities::SALES_TAX_PAY)?;
+        let body = posting_body(s, json!({}), opts)?;
+        let mut call = Call::new(
+            Method::Post,
+            SALES_TAX_PAY_UNLINK.route(),
+            format!("/api/v1/sales-tax/payments/{id}/unlink"),
+        )
+        .json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = s.send(&SALES_TAX_PAY_UNLINK, call, None).await?;
+        decode_one(&reply.body, "unlink", "sales tax unlink")
+            .map_err(crate::resources::versioning::saved_unreadable)
+    }
+
+    /// "Mark paid through": everything the agency's items owe through
+    /// `through` is recorded as paid before or outside these books
+    /// (opening lines, no GL, audited). There is no undo.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)`; `Local(InvalidValue)` for a reason over 255
+    /// characters; any [`ApiError`].
+    pub async fn mark_paid_through(
+        &self,
+        agency: SalesTaxAgencyId,
+        through: CalendarDate,
+        reason: Option<&str>,
+        key: IdempotencyKey,
+    ) -> Result<MarkPaidResult, ApiError> {
+        require(self.0, Capabilities::SALES_TAX_PAY)?;
+        let mut body = json!({"agencyId": agency, "throughDate": through});
+        if let Some(r) = reason.map(str::trim).filter(|r| !r.is_empty()) {
+            if r.chars().count() > MARK_PAID_REASON_MAX {
+                return Err(ApiError::Local(LocalValidation::InvalidValue));
+            }
+            body["reason"] = json!(r);
+        }
+        let mut call =
+            Call::at(Method::Post, SALES_TAX_PAY_MARK_PAID.route()).json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&SALES_TAX_PAY_MARK_PAID, call, None).await?;
+        decode_one(&reply.body, "result", "mark paid through")
+            .map_err(crate::resources::versioning::saved_unreadable)
+    }
+
     /// One payment with its lines.
     ///
     /// # Errors
@@ -764,13 +1010,13 @@ impl SalesTaxPayments<'_> {
         require(self.0, Capabilities::SALES_TAX_PAY)?;
         let mut call = Call::at(Method::Get, SALES_TAX_PAYMENTS_LIST.route());
         if let Some(a) = q.agency_id {
-            call.query.push(("agencyId".into(), a.to_string()));
+            call.query.push(("agency_id".into(), a.to_string()));
         }
         if let Some(d) = q.start_date {
-            call.query.push(("startDate".into(), d.to_string()));
+            call.query.push(("start_date".into(), d.to_string()));
         }
         if let Some(d) = q.end_date {
-            call.query.push(("endDate".into(), d.to_string()));
+            call.query.push(("end_date".into(), d.to_string()));
         }
         let reply = self.0.send(&SALES_TAX_PAYMENTS_LIST, call, None).await?;
         decode_list(&reply.body, "payments", "sales tax payments")
