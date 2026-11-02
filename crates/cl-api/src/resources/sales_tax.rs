@@ -20,19 +20,18 @@
 //!   `POST …/{id}/deactivate|reactivate`.
 
 use std::fmt;
-use std::str::FromStr;
 
-use cl_core::ids::{ContactId, IdError, parse_uuid};
+use cl_core::ids::ContactId;
+pub use cl_core::ids::{SalesTaxAgencyId, SalesTaxItemId, TaxCodeId, TaxExemptionId};
 use cl_core::{CalendarDate, Money, TaxRate, Timestamp};
 use serde::de::{DeserializeOwned, Deserializer};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 use crate::client::{Call, EngineReply, Method};
 use crate::errors::{ApiError, ConflictReason, LocalValidation};
 use crate::idempotency::IdempotencyKey;
-use crate::resources::attachments::{AttachmentId, uuid_id};
+use crate::resources::attachments::AttachmentId;
 use crate::resources::customer_payments::{
     de_cents, de_cents_opt, de_cents_zero, error_code, null_false, null_vec, require, too_long,
     with_version,
@@ -63,26 +62,6 @@ pub const GROUP_MEMBERS_MAX: usize = 10;
 pub const EXEMPTION_NUMBER_MAX: usize = 50;
 /// Longest exemption note.
 pub const EXEMPTION_NOTE_MAX: usize = 1000;
-
-uuid_id!(
-    /// A sales tax agency (U-147).
-    SalesTaxAgencyId
-);
-
-uuid_id!(
-    /// A sales tax item or group (U-147).
-    SalesTaxItemId
-);
-
-uuid_id!(
-    /// A tax code (U-25).
-    TaxCodeId
-);
-
-uuid_id!(
-    /// An exemption certificate (U-151).
-    TaxExemptionId
-);
 
 // ---- Refusals ------------------------------------------------------------------
 
