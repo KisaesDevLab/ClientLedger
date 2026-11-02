@@ -209,10 +209,8 @@ fn check_liability(s: &mut Seed, req: &Value, want: &Value, what: &str) {
         .sum();
     same(collected + r.unassigned.as_decimal(), &want["total"], what);
     if let Some(rd) = want["roundingDifference"].as_str() {
-        // The golden's -0.002780 is 85.79722 - 85.80 with the exact sum
-        // cut to 5 places; the exact figure is -0.002791 (reported).
         let got = r.rounding_difference.expect("rounding").as_decimal();
-        assert!((got - d(rd)).abs() < d("0.00002"), "{what} rounding {got}");
+        assert_eq!(got, d(rd), "{what} rounding");
     }
     if r.basis == SalesTaxBasis::Cash {
         assert!(r.hides_bad_debts());

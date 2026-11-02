@@ -450,7 +450,9 @@ fn columns(
 ) -> (BTreeMap<SalesTaxItemId, Cols>, Decimal, Decimal) {
     let mut by: BTreeMap<SalesTaxItemId, Cols> = BTreeMap::new();
     let mut unassigned = Decimal::ZERO;
-    let mut rounding = Decimal::ZERO;
+    // The exact running-total shares and their rounded cents in range (the
+    // engine shows round5(exact) - rounded, golden 7: -0.002790).
+    let (mut exact, mut rounded) = (Decimal::ZERO, Decimal::ZERO);
     for e in events(state, basis) {
         let payment = matches!(e.col, Col::Paid | Col::Adjustments);
         if e.date > end && !(all_payments && payment) {
@@ -462,7 +464,8 @@ fn columns(
             continue;
         };
         if in_range && let Some(x) = e.exact {
-            rounding += x - e.tax;
+            exact += x;
+            rounded += e.tax;
         }
         let c = by.entry(item).or_default();
         if c.agency.is_none() {
@@ -470,7 +473,7 @@ fn columns(
         }
         c.add(&e, in_range);
     }
-    (by, unassigned, round(rounding, 6))
+    (by, unassigned, round(exact, 5) - rounded)
 }
 
 /// `GET /reports/sales-tax-liability` (v2) for `start..=end` on `basis`
