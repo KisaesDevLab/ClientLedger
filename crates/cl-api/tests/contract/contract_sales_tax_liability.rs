@@ -73,7 +73,10 @@ pub fn liability_reconciles_to_gl(h: &Harness) {
     assert_eq!(state.taxable_sales, m("1910.15"), "INV-B and CM-C cancel");
     assert_eq!(state.tax.collected, m("80.70"));
     assert_eq!(state.tax.owed_at_end, m("80.70"));
-    assert_eq!(state.rate.map(|r| r.to_wire6()), Some("0.042250".into()));
+    assert_eq!(
+        state.rate.map(cl_core::TaxRate::to_wire6),
+        Some("0.042250".into())
+    );
     let non: Vec<_> = state
         .non_taxable
         .iter()

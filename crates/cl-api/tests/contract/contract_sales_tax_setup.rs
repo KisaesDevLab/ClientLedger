@@ -76,7 +76,7 @@ pub(crate) struct Monett {
     pub state: SalesTaxItemId,
     pub springfield: SalesTaxItemId,
     pub city: SalesTaxItemId,
-    pub monett: SalesTaxItemId,
+    pub local_item: SalesTaxItemId,
     pub code_tax: TaxCodeId,
     pub plants: ItemId,
     pub install_labor: ItemId,
@@ -279,7 +279,7 @@ pub(crate) fn monett(h: &Harness, label: &str, ssuta: bool) -> Monett {
         state,
         springfield,
         city,
-        monett,
+        local_item: monett,
         code_tax,
         plants,
         install_labor,
@@ -458,7 +458,7 @@ pub fn setup_crud_stale_and_deactivate(h: &Harness) {
         .expect("Springfield");
     assert_eq!(springfield.rate, rate("0.088750"));
     assert_eq!(springfield.agency_id, Some(x.state_agency));
-    let group = items.iter().find(|i| i.id == x.monett).expect("Monett");
+    let group = items.iter().find(|i| i.id == x.local_item).expect("Monett");
     assert_eq!(group.kind, SalesTaxKind::Group);
     assert_eq!(group.rate, rate("0.081000"), "Σ member rates");
     let mut members: Vec<_> = group.members.iter().map(|mb| mb.id).collect();
@@ -566,7 +566,7 @@ pub fn setup_crud_stale_and_deactivate(h: &Harness) {
                 description: None,
                 rate: None,
                 agency_id: None,
-                member_ids: vec![x.monett],
+                member_ids: vec![x.local_item],
             },
             key(),
         ))
@@ -680,7 +680,7 @@ pub fn setup_crud_stale_and_deactivate(h: &Harness) {
 
     // The company settings read back (flags of U-147).
     let settings = h.run(s.company_settings()).expect("settings");
-    assert_eq!(settings.default_sales_tax_id, Some(x.monett));
+    assert_eq!(settings.default_sales_tax_id, Some(x.local_item));
     assert_eq!(settings.sales_tax_ssuta, Some(true));
     assert_eq!(settings.sales_tax_basis, Some(SalesTaxBasis::Accrual));
     assert_ne!(settings.sales_tax_enabled, Some(false));

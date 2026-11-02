@@ -89,7 +89,7 @@ pub fn rounded_once_per_document_goldens_1_to_4(h: &Harness) {
     let b = x.plants(h, x.hollister, date(2026, 11, 3), "6.00");
     assert_eq!(b.tax_amount, Some(m("0.49")));
     let tax = b.sales_tax.as_ref().expect("salesTax");
-    assert_eq!(tax.id, x.monett, "the company default");
+    assert_eq!(tax.id, x.local_item, "the company default");
     assert_eq!(tax.rate.to_wire6(), "0.081000");
     let by_member: Vec<_> = tax.members.iter().map(|mb| (mb.id, mb.tax)).collect();
     assert!(by_member.contains(&(x.state, Some(m("0.26")))));
