@@ -6,6 +6,8 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     ("print.stub.sales_tax_adjustment", "Adjustment"),
+    ("orphan.sales_tax_setup", "saving the sales tax setup"),
+    ("orphan.sales_tax_settings", "saving the sales tax settings"),
     // Create Invoice, Sales Receipt, Credit Memo
     ("invoice.totals.sales_tax", "Sales tax \u{b7} {name} ({rate})"),
     ("invoice.tax.pick", "Sales tax"),

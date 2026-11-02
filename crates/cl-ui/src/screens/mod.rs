@@ -61,6 +61,8 @@ pub mod refund;
 // P22 D6: Statements.
 pub mod finance_charges;
 pub mod statements;
+// P23: Sales Tax Setup (WP-2).
+pub mod sales_tax;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [

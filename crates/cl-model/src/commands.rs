@@ -479,6 +479,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_pay_bills_reset",
         "Reset Demo Bill Payments (developer)",
     ),
+    // P23: the Sales Tax Setup scenario runs light and dark in one app;
+    // this puts the demo's sales tax setup back to its seed.
+    dev_action(
+        "dev.demo_sales_tax_reset",
+        "Reset Demo Sales Tax Setup (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
