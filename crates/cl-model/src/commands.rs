@@ -497,6 +497,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_write_off_story",
         "Demo Write-off Story (developer)",
     ),
+    // P23: drops the demo's "Mark paid through" lines so the Pay Sales Tax
+    // scenario repeats in dark (the engine has no undo).
+    dev_action(
+        "dev.demo_mark_paid_reset",
+        "Reset Demo Mark Paid Through (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

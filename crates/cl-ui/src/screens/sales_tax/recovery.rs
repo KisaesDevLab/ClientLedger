@@ -461,7 +461,10 @@ impl Screen for RecoveryScreen {
                 let Some(mut d) = self.link.demo_state() else {
                     return false;
                 };
-                let _ = crate::company::demo::sales_tax_owed::write_off_story(&mut d);
+                // Once per demo session: the dark run reuses the light run's.
+                if crate::company::demo::sales_tax_owed::recoverable(&d, None).is_empty() {
+                    let _ = crate::company::demo::sales_tax_owed::write_off_story(&mut d);
+                }
                 drop(d);
                 self.set_client(None);
                 true

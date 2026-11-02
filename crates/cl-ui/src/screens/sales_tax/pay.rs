@@ -1330,6 +1330,19 @@ impl Screen for PayScreen {
                 self.pay();
                 true
             }
+            // Demo only: the scenario's Mark paid through, dropped so the dark
+            // run repeats it (the engine has no undo).
+            "dev.demo_mark_paid_reset" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                crate::company::demo::sales_tax_owed::reset_marked_paid(&mut d);
+                drop(d);
+                self.marked = None;
+                self.form.changed();
+                self.preview();
+                true
+            }
             // Demo only: a few taxed documents to pay (the scenario).
             "dev.demo_sales_tax_story" => {
                 let Some(mut d) = self.link.demo_state() else {

@@ -1791,6 +1791,13 @@ pub fn write_off_story(state: &mut DemoState) -> Option<TransactionId> {
 
 // ---- The scenario's story -----------------------------------------------------------
 
+/// The developer command `dev.demo_mark_paid_reset`: drops the demo's "Mark
+/// paid through" opening lines so the Pay Sales Tax scenario repeats in
+/// dark (the engine has no undo; demo only).
+pub fn reset_marked_paid(state: &mut DemoState) {
+    state.sales_tax.book.openings.clear();
+}
+
 /// The developer command `dev.demo_sales_tax_story` (once per demo run):
 /// two taxed invoices (Monett by default; Springfield picked), a sales
 /// receipt, and the Springfield invoice paid in full, so the owed screens
