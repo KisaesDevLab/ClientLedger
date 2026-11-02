@@ -56,6 +56,8 @@ pub mod credit_memo;
 pub mod finance_charge;
 pub mod refund;
 pub mod statements;
+// P23: sales tax setup, Pay Sales Tax and link, exemptions, recoveries.
+pub mod sales_tax;
 
 /// How many unsaved steps a form remembers.
 pub const UNDO_LIMIT: usize = 200;
