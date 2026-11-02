@@ -180,6 +180,8 @@ pub(crate) struct HomeData {
     pub documents: Slot<u64>,
     /// Emails waiting in the Outbox (P20, Q-P20d).
     pub outbox: Slot<u64>,
+    /// Sales tax owed today, every agency (P23, Q-P23l): the engine's total.
+    pub sales_tax: Slot<cl_core::Money>,
 }
 
 impl HomeData {
@@ -198,6 +200,7 @@ impl HomeData {
             || self.checklist.loading()
             || self.documents.loading()
             || self.outbox.loading()
+            || self.sales_tax.loading()
     }
 }
 
@@ -423,6 +426,24 @@ impl HomeScreen {
                 |s| async move { Ok(s.invoices().outbox().await?.len() as u64) },
             ));
         }
+        if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::SALES_TAX_LIABILITY)
+        {
+            let today = self.today;
+            self.data.sales_tax.start(run(
+                &self.link,
+                group,
+                None,
+                move |s| {
+                    crate::company::demo::sales_tax_owed::owed(s, today, None, None)
+                        .map(|o| o.total)
+                },
+                move |s| async move { Ok(s.sales_tax().owed(today, None, None).await?.total) },
+            ));
+        }
         self.poll();
     }
 
@@ -487,6 +508,7 @@ impl HomeScreen {
         self.data.chart.poll();
         self.data.checklist.poll();
         self.data.documents.poll();
+        self.data.sales_tax.poll();
         if self.data.outbox.poll()
             && let Some(n) = self.data.outbox.value
         {

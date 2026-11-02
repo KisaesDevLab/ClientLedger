@@ -1,7 +1,11 @@
-//! Sales tax screens (P23): Sales Tax Setup (WP-2). The liability report,
-//! Pay Sales Tax, exemption certificates and the recovery dialog arrive
-//! with WP-3.
+//! Sales tax screens (P23): Sales Tax Setup (WP-2); Sales Tax Owed, Pay
+//! Sales Tax, exemption certificates and the bad-debt recovery dialog
+//! (WP-3).
 
+pub mod exemptions;
+pub mod liability;
+pub mod pay;
+pub mod recovery;
 pub mod setup;
 
 use std::sync::Arc;
@@ -19,10 +23,23 @@ pub fn make(
     kind: CommandId,
     link: &Arc<CompanyLink>,
     _open: Option<(TenantId, String)>,
-    _today: CalendarDate,
+    today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
     match kind.as_str() {
         setup::KIND => Some(Box::new(setup::SetupScreen::new(Arc::clone(link)))),
+        liability::KIND => Some(Box::new(liability::OwedScreen::new(
+            Arc::clone(link),
+            today,
+        ))),
+        pay::KIND => Some(Box::new(pay::PayScreen::new(Arc::clone(link), today))),
+        exemptions::KIND => Some(Box::new(exemptions::ExemptionsScreen::new(
+            Arc::clone(link),
+            today,
+        ))),
+        recovery::KIND => Some(Box::new(recovery::RecoveryScreen::new(
+            Arc::clone(link),
+            today,
+        ))),
         _ => None,
     }
 }

@@ -100,6 +100,7 @@ pub struct DemoTaxBook {
     recoveries: BTreeMap<TransactionId, Recovery>,
     exemptions: Vec<TaxExemption>,
     next: u32,
+    story: bool,
     /// Writes that reached the demo engine (tests).
     pub writes: u32,
 }
@@ -1056,6 +1057,56 @@ pub fn void(
     Ok(())
 }
 
+/// Checks and entries that paid Sales Tax Payable and are not yet a sales
+/// tax payment ("Match a payment you already made"): (id, date, number,
+/// Sales Tax Payable debit).
+#[must_use]
+pub fn link_candidates(state: &mut DemoState) -> Vec<(TransactionId, CalendarDate, String, Money)> {
+    let Some(stp) = stp(state) else {
+        return Vec::new();
+    };
+    let chart = super::receivables::chart(state);
+    let number = chart
+        .iter()
+        .find(|a| a.id == stp)
+        .and_then(|a| a.fields.account_number.clone())
+        .unwrap_or_default();
+    let ids: Vec<TransactionId> = state
+        .ledger
+        .transactions()
+        .iter()
+        .filter(|t| {
+            t.lines
+                .iter()
+                .any(|l| l.account == number && l.debit.is_positive())
+        })
+        .map(super::register::DemoLedger::id_of)
+        .filter(|id| !state.ledger.is_void(*id) && !state.sales_tax.book.payments.contains_key(id))
+        .collect();
+    ids.into_iter()
+        .filter_map(|id| {
+            let t = super::checks::transaction(state, id)?;
+            let debit: Decimal = t
+                .lines
+                .iter()
+                .filter(|l| l.account_id == stp)
+                .map(|l| l.debit.as_decimal() - l.credit.as_decimal())
+                .sum();
+            let debit = super::receivables::money(debit)
+                .ok()
+                .filter(|m| m.is_positive())?;
+            Some((
+                id,
+                t.txn_date,
+                t.txn_number
+                    .or(t.check_number.map(|n| n.to_string()))
+                    .unwrap_or_default(),
+                debit,
+            ))
+        })
+        .collect()
+}
+
 /// The sales tax checks waiting to print on `bank`.
 pub fn print_queue(
     state: &mut DemoState,
@@ -1438,6 +1489,164 @@ pub fn exemption_problem(
         }
         Some(_) => None,
     }
+}
+
+/// A Springfield invoice of 200.00 (17.75 tax) for the first client, paid
+/// 100.00 with 117.75 written off on 11/20 (golden 13), for the recovery
+/// dialog's scenario and tests. Returns the invoice.
+pub fn write_off_story(state: &mut DemoState) -> Option<TransactionId> {
+    let _ = super::sales_tax::agencies(state, true);
+    super::receivables::seed(state);
+    state.receivables.settings.write_off_threshold = Money::parse_wire("200.00").ok();
+    state.receivables.settings.write_off_account =
+        Some(super::account_id(super::receivables::BAD_DEBTS));
+    let client = super::contacts::contact_id(1);
+    let d1 = CalendarDate::from_ymd(2026, 11, 4).ok()?;
+    let d2 = CalendarDate::from_ymd(2026, 11, 20).ok()?;
+    let mut line = cl_api::InvoiceLine::item(
+        super::lists::item_id(1),
+        cl_core::Quantity::parse_wire("1").ok()?,
+    );
+    line.unit_price = Money::parse_wire("200.00").ok();
+    let mut inv = cl_api::NewInvoice::new(client, d1, vec![line]);
+    inv.sales_tax_id = Some(super::sales_tax::item_id(super::sales_tax::SPRINGFIELD));
+    let id = super::invoices::create(state, &inv, None)
+        .ok()?
+        .record
+        .txn
+        .id;
+    let clearing = super::receivables::clearing(state)?;
+    let cash = Money::parse_wire("100.00").ok()?;
+    let w = Money::parse_wire("117.75").ok()?;
+    let p = super::receivables::preview(
+        state,
+        &cl_api::PaymentPreviewRequest {
+            customer_id: client,
+            date: d2,
+            amount: Some(cash),
+            deposit_to: Some(clearing),
+            applications: Some(vec![cl_api::ApplicationRequest {
+                invoice_id: id,
+                amount: Some(cash),
+                discount_amount: None,
+                write_off_amount: Some(w),
+            }]),
+            credit_applications: Vec::new(),
+            hold_as_deposit: false,
+            editing_payment_id: None,
+        },
+    )
+    .ok()?;
+    let token = p.invoice(id)?.balance_due_exact.clone();
+    let new = cl_api::NewCustomerPayment {
+        customer_id: client,
+        date: d2,
+        amount: p.amount,
+        deposit_to: clearing,
+        payment_method: Some("check".into()),
+        ref_no: None,
+        memo: None,
+        applications: vec![cl_api::SaveApplication {
+            invoice_id: id,
+            amount: cash,
+            expected_balance_due: token,
+            discount_amount: None,
+            write_off_amount: Some(w),
+        }],
+        credit_applications: Vec::new(),
+        write_off_account_id: None,
+        discount_account_id: None,
+        hold_as_deposit: false,
+        bank_feed_item_id: None,
+    };
+    super::receivables::receive(state, &new, None, None).ok()?;
+    Some(id)
+}
+
+// ---- The scenario's story -----------------------------------------------------------
+
+/// The developer command `dev.demo_sales_tax_story` (once per demo run):
+/// two taxed invoices (Monett by default; Springfield picked), a sales
+/// receipt, and the Springfield invoice paid in full, so the owed screens
+/// have accrual and cash figures. Synthetic.
+pub fn story(state: &mut DemoState) {
+    if state.sales_tax.book.story {
+        return;
+    }
+    state.sales_tax.book.story = true;
+    let _ = super::sales_tax::agencies(state, true);
+    let day = |m, d| CalendarDate::from_ymd(2026, m, d).ok();
+    let qty = |q: &str| cl_core::Quantity::parse_wire(q).ok();
+    let (Some(d1), Some(d2), Some(d3), Some(four), Some(ten)) =
+        (day(11, 2), day(11, 3), day(11, 4), qty("4"), qty("10"))
+    else {
+        return;
+    };
+    let item = super::lists::item_id;
+    let client = super::contacts::contact_id;
+    let first = cl_api::NewInvoice::new(
+        client(1),
+        d1,
+        vec![cl_api::InvoiceLine::item(item(2), four)],
+    );
+    let _ = super::invoices::create(state, &first, None);
+    let mut second =
+        cl_api::NewInvoice::new(client(2), d2, vec![cl_api::InvoiceLine::item(item(3), ten)]);
+    second.sales_tax_id = Some(super::sales_tax::item_id(super::sales_tax::SPRINGFIELD));
+    let Ok(saved) = super::invoices::create(state, &second, None) else {
+        return;
+    };
+    let mut r = cl_api::NewSalesReceipt::new(d3, vec![cl_api::InvoiceLine::item(item(1), four)]);
+    r.contact_id = Some(client(3));
+    let _ = super::credit_memos::save_receipt(state, &r, None, None);
+    // The Springfield invoice paid in full on 11/04.
+    let id = saved.record.txn.id;
+    let Some(clearing) = super::receivables::clearing(state) else {
+        return;
+    };
+    let Ok(p) = super::receivables::preview(
+        state,
+        &cl_api::PaymentPreviewRequest {
+            customer_id: client(2),
+            date: d3,
+            amount: None,
+            deposit_to: Some(clearing),
+            applications: Some(vec![cl_api::ApplicationRequest {
+                invoice_id: id,
+                amount: None,
+                discount_amount: None,
+                write_off_amount: None,
+            }]),
+            credit_applications: Vec::new(),
+            hold_as_deposit: false,
+            editing_payment_id: None,
+        },
+    ) else {
+        return;
+    };
+    let Some(row) = p.invoice(id) else { return };
+    let new = cl_api::NewCustomerPayment {
+        customer_id: client(2),
+        date: d3,
+        amount: row.balance_due,
+        deposit_to: clearing,
+        payment_method: Some("check".into()),
+        ref_no: None,
+        memo: None,
+        applications: vec![cl_api::SaveApplication {
+            invoice_id: id,
+            amount: row.balance_due,
+            expected_balance_due: row.balance_due_exact.clone(),
+            discount_amount: None,
+            write_off_amount: None,
+        }],
+        credit_applications: Vec::new(),
+        write_off_account_id: None,
+        discount_account_id: None,
+        hold_as_deposit: false,
+        bank_feed_item_id: None,
+    };
+    let _ = super::receivables::receive(state, &new, None, None);
 }
 
 #[cfg(test)]

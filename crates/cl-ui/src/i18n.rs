@@ -119,6 +119,7 @@ mod invoice_model;
 mod receivables_model;
 mod sales_tax;
 mod sales_tax_model;
+mod sales_tax_owed;
 // P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
 mod credit_memo;
 // P22 D6: Statements.
@@ -126,7 +127,7 @@ mod finance_charges;
 mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 43] = [
+const TABLES: [&[(&str, &str)]; 45] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -167,6 +168,8 @@ const TABLES: [&[(&str, &str)]; 43] = [
     receivables_model::ENGLISH,
     sales_tax::ENGLISH,
     sales_tax_model::ENGLISH,
+    sales_tax_owed::ENGLISH,
+    sales_tax_owed::ENGLISH_2,
     credit_memo::ENGLISH,
     statements::ENGLISH,
     finance_charges::ENGLISH,
@@ -1110,7 +1113,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.footer.later.tip", "Shown after a future update."),
     ("home.footer.failed.tip", "Couldn't load this. Choose Refresh to try again."),
     ("home.footer.window.tip", "Shown when the bills window is 90 days or less. You can change it in Preferences."),
-    ("home.footer.sales_tax.tip", "Shown when the sales tax reports arrive."),
+    ("home.footer.sales_tax.tip", "Shown once the engine can report sales tax owed."),
     ("home.balances.title", "Account balances"),
     ("home.balances.account", "Account"),
     ("home.balances.books", "In your books"),

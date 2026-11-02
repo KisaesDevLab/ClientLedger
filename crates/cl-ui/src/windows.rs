@@ -159,7 +159,9 @@ pub enum OpenPayload {
         cl_core::ids::TransactionId,
         Box<cl_model::forms::deposit::DepositSummary>,
     ),
-    /// P21: Receive Payment from this client (Client Center's action).
+    /// P23: Pay Sales Tax on this agency (Sales Tax Owed's "Pay").
+    PaySalesTax(cl_core::ids::SalesTaxAgencyId),
+    /// P23: Receive Payment from this client (Client Center's action).
     ReceiveFrom(cl_core::ids::ContactId),
     /// P22: Refund a Credit for this client with this credit picked
     /// (Receive Payment's "Refund it", a credit memo's Refund).

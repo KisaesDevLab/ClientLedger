@@ -640,7 +640,7 @@ fn the_demo_lanes_show_the_mockup() {
     assert_eq!(st["lane_columns"], 1, "the last draw was 480 wide");
     assert_eq!(
         st["footers"],
-        json!({"clients_owe": true, "bills_due": true, "last_reconciled": true, "sales_tax_owed": false})
+        json!({"clients_owe": true, "bills_due": true, "last_reconciled": true, "sales_tax_owed": true})
     );
     let text = st.to_string();
     for figure in ["48912", "48,912", "7471", "Operating"] {

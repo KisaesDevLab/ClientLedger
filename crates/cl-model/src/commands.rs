@@ -375,8 +375,8 @@ pub const COMMANDS: &[Command] = &[
     built("clients.finance_charges", "Assess Finance Charges", Some(Menu::Clients), 2, None),
     built("clients.outbox", "Outbox", Some(Menu::Clients), 2, None),
     // P23 WP-3: exemption certificates and the bad-debt recovery dialog.
-    screen("clients.tax_exemptions", "Tax Exemption Certificates", Some(Menu::Clients), 2, None, "P23"),
-    screen("clients.recover_bad_debt", "Recover a Bad Debt", Some(Menu::Clients), 2, None, "P23"),
+    built("clients.tax_exemptions", "Tax Exemption Certificates", Some(Menu::Clients), 2, None),
+    built("clients.recover_bad_debt", "Recover a Bad Debt", Some(Menu::Clients), 2, None),
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     built("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B')),
@@ -385,8 +385,8 @@ pub const COMMANDS: &[Command] = &[
     built("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C')),
     built("vendors.personal_funds", "Paid with Personal Funds", Some(Menu::Vendors), 1, None),
     // P23 WP-3: the liability report and Pay Sales Tax (no shortcut).
-    screen("vendors.sales_tax_owed", "Sales Tax Owed", Some(Menu::Vendors), 3, None, "P23"),
-    screen("vendors.pay_sales_tax", "Pay Sales Tax", Some(Menu::Vendors), 3, None, "P23"),
+    built("vendors.sales_tax_owed", "Sales Tax Owed", Some(Menu::Vendors), 3, None),
+    built("vendors.pay_sales_tax", "Pay Sales Tax", Some(Menu::Vendors), 3, None),
     // P17: the receipt inbox (the menu shows its count, Q-P17t) and the
     // vendor statement match; no shortcut
     built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),
@@ -484,6 +484,12 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.demo_sales_tax_reset",
         "Reset Demo Sales Tax Setup (developer)",
+    ),
+    // P23 WP-3: a few taxed documents for the Sales Tax Owed and Pay Sales
+    // Tax scenarios (once per demo run).
+    dev_action(
+        "dev.demo_sales_tax_story",
+        "Demo Sales Tax Story (developer)",
     ),
 ];
 
@@ -615,6 +621,10 @@ mod tests {
             "clients.finance_charges",
             // P23
             "lists.sales_tax",
+            "clients.tax_exemptions",
+            "vendors.sales_tax_owed",
+            "vendors.pay_sales_tax",
+            "clients.recover_bad_debt",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
