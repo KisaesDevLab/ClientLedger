@@ -300,8 +300,8 @@ fn void(h: &Harness, s: &Session, id: TransactionId) {
 
 /// PR-3 review missing test 4: A/R aging = Balance Sheet A/R on three
 /// dates through apply later, unapply, bounce, bounce void and refund.
-/// Tied at four checkpoints, not after every step: 24 report requests
-/// stay under the engine's 30 a minute.
+/// Tied at three checkpoints, not after every step: 18 report requests
+/// leave room under the engine's 30 a minute for the suite's others.
 pub fn ar_aging_ties_to_balance_sheet(h: &Harness) {
     if !crate::contract_credit_memos::caps(h)
         || !h.require_cap(Capabilities::RECEIVE_PAYMENT, "U-132")
@@ -367,9 +367,8 @@ pub fn ar_aging_ties_to_balance_sheet(h: &Harness) {
     assert_eq!(invoice_balance(h, s, i2), Money::ZERO);
     bounce(h, s, p2.id, date(2026, 11, 8));
     assert_eq!(invoice_balance(h, s, i2), m("200.00"));
-    tie(h, s, "an unapply and a bounce");
     void(h, s, i2);
-    tie(h, s, "invoice voided after its bounce");
+    tie(h, s, "an unapply, a bounce and the invoice voided after it");
 
     // The first check bounces on 11/09; voiding the bounce re-applies it.
     let returned = bounce(h, s, p1.id, date(2026, 11, 9));
