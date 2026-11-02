@@ -177,6 +177,8 @@ fn cold_and_warm_starts_meet_the_budget_and_nothing_is_left_behind() {
         "{made:?}"
     );
     assert!(sup.engine_info().unwrap().initialized);
+    // Table statistics refresh on the engine's database (Q-335).
+    sup.refresh_statistics().unwrap();
 
     sup.stop();
     // No orphans: neither child is alive and nothing mentions our folders.
@@ -248,5 +250,7 @@ fn killing_the_engine_or_the_database_restarts_them() {
     let ep = sup.endpoint().unwrap();
     let health = check_health(ep.port, &ep.token, Duration::from_secs(5)).unwrap();
     assert_eq!(health.superuser, Some(false));
+    // The refresher follows the restarted database (Q-335).
+    sup.refresh_statistics().unwrap();
     sup.stop();
 }

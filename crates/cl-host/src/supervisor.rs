@@ -7,7 +7,9 @@
 //! [`Supervisor::endpoint`] to learn where (and with which token) to talk to
 //! the engine; the endpoint changes after every engine restart.
 
-use crate::database::{DatabaseFactory, DatabaseService, DbEndpoint, PgService};
+use crate::database::{
+    DatabaseFactory, DatabaseService, DbEndpoint, PgService, StatisticsRefresher,
+};
 use crate::desktop::{self, AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 use crate::engine::{self, EngineProcess, LaunchError, LaunchPlan, OfflineSetting, Scrubber};
 use crate::health::{self, HealthError, HealthReport};
@@ -298,6 +300,8 @@ impl HostConfig {
 struct Inner {
     status: HostStatus,
     endpoint: Option<Endpoint>,
+    /// Set while the database runs (Q-335).
+    statistics: Option<StatisticsRefresher>,
 }
 
 /// Status and endpoint read together. See [`Supervisor::snapshot`].
@@ -402,6 +406,7 @@ impl Supervisor {
                     schema_version: None,
                 },
                 endpoint: None,
+                statistics: None,
             }),
             changed: Condvar::new(),
         });
@@ -592,6 +597,24 @@ impl Supervisor {
             DesktopError::Unreachable(_) => HostError::NotRunning,
             other => HostError::Desktop(other),
         })
+    }
+
+    /// Refresh the database's table statistics (`ANALYZE`, Q-335), so
+    /// reports get good query plans right after a company is created,
+    /// imported or restored. Blocking: call it off the UI thread.
+    ///
+    /// # Errors
+    /// [`HostError::NotRunning`] while the database is down; the database's
+    /// error when the refresh fails.
+    pub fn refresh_statistics(&self) -> Result<()> {
+        let refresher = self
+            .shared
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .statistics
+            .clone();
+        refresher.ok_or(HostError::NotRunning)?.run()
     }
 
     /// Stop the engine, then the database, and wait for both.
@@ -807,7 +830,11 @@ impl Worker {
                     Ok(ep) => {
                         self.log.info("database ready");
                         scrub_values.push(ep.url.clone());
-                        self.shared.update(|i| i.status.database_pid = Some(ep.pid));
+                        let statistics = db.statistics(&ep);
+                        self.shared.update(|i| {
+                            i.status.database_pid = Some(ep.pid);
+                            i.statistics = statistics;
+                        });
                         db_ep = Some(ep);
                     }
                     Err(e) => {
@@ -1078,6 +1105,7 @@ impl Worker {
             i.endpoint = None;
             i.status.engine_pid = None;
             i.status.database_pid = None;
+            i.statistics = None;
             if !matches!(i.status.state, HostState::Fault(_)) {
                 i.status.state = HostState::Stopped;
             }
@@ -1115,6 +1143,7 @@ impl Worker {
         self.shared.update(|i| {
             i.endpoint = None;
             i.status.engine_pid = None;
+            i.statistics = None;
         });
         let _ = db.stop();
         *db_ep = None;

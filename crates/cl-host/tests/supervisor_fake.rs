@@ -6,7 +6,7 @@ mod common;
 use cl_host::{
     AdminAccount, CompanySeed, Component, DatabaseFactory, DatabaseParts, DatabaseService,
     DbEndpoint, DesktopError, EngineSecrets, HostConfig, HostError, HostState, Result, Secret,
-    Supervisor, check_health,
+    StatisticsRefresher, Supervisor, check_health,
 };
 use cl_pg::PasswordStore as _;
 use common::{Scratch, fake_config, process_alive, wait_until};
@@ -23,6 +23,7 @@ struct FakeDbState {
     fail_next_starts: AtomicU32,
     engine_pid_at_stop: Mutex<Vec<Option<u32>>>,
     engine_pid: AtomicU32,
+    analyzed: Arc<AtomicU32>,
 }
 
 struct FakeDb(Arc<FakeDbState>);
@@ -67,6 +68,14 @@ impl DatabaseService for FakeDb {
         self.0.alive.store(false, Ordering::SeqCst);
         self.0.stops.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    fn statistics(&self, _: &DbEndpoint) -> Option<StatisticsRefresher> {
+        let analyzed = Arc::clone(&self.0.analyzed);
+        Some(StatisticsRefresher::new(move || {
+            analyzed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }))
     }
 }
 
@@ -116,6 +125,18 @@ fn starts_in_order_serves_health_and_stops_in_reverse() {
     assert_eq!(*db.engine_pid_at_stop.lock().unwrap(), vec![None]);
     assert!(!process_alive(engine_pid), "engine left running");
     assert_eq!(db.stops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn statistics_refresh_runs_on_the_running_database() {
+    let scratch = Scratch::new("analyze");
+    let (db, factory) = fake_db();
+    let sup = start(fake_config(&scratch), factory).unwrap();
+    sup.refresh_statistics().unwrap();
+    sup.refresh_statistics().unwrap();
+    assert_eq!(db.analyzed.load(Ordering::SeqCst), 2);
+    assert!(!format!("{sup:?}").contains("FAKE-DB-PASSWORD"));
+    sup.stop();
 }
 
 #[test]
