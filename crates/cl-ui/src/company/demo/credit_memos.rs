@@ -243,6 +243,7 @@ fn doc_lines(
                     .and_then(|i| items.iter().find(|x| x.id == i))
                     .is_none_or(|i| i.fields.is_taxable)
             }),
+            tax_code: None,
             amount: f.amount,
             tax_amount: f.tax_amount,
             tag_id: l.tag_id,
@@ -613,6 +614,7 @@ pub fn get_memo(state: &DemoState, id: TransactionId) -> Result<CreditMemoRecord
         total: money(m.total)?,
         memo: m.memo.clone(),
         customer_message: m.message.clone(),
+        sales_tax: None,
         updated_at: version_of(m.version),
         status: if m.void {
             SalesDocStatus::Void
@@ -1321,6 +1323,7 @@ pub fn save_receipt(
         total: preview.figures.total,
         memo: r.memo.clone(),
         customer_message: r.customer_message.clone(),
+        sales_tax: None,
         updated_at: version_of(version),
         status: SalesDocStatus::Posted,
         deposit_id: None,

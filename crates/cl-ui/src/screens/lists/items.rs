@@ -628,6 +628,7 @@ impl ItemsScreen {
             discount_percent: checked
                 .discount_percent
                 .and_then(|q| cl_api::SignedPercent::parse(&q.to_wire()).ok()),
+            tax_code_id: None,
         };
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());

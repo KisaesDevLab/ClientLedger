@@ -121,6 +121,15 @@ pub struct ContactFields {
     pub notes: Option<String>,
     #[serde(default)]
     pub default_tag_id: Option<TagId>,
+    /// A client's default sales tax item or group (`defaultSalesTaxId`,
+    /// `sales-tax-setup-v1`); sent only when set (P23 WP-1; clearing it is
+    /// WP-2's update path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_sales_tax_id: Option<crate::resources::sales_tax::SalesTaxItemId>,
+    /// A client's tax code (`taxCodeId`; a non-taxable code makes the
+    /// client's lines non-taxable, Q-P23k); sent only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tax_code_id: Option<crate::resources::sales_tax::TaxCodeId>,
 }
 
 impl ContactFields {
@@ -154,6 +163,8 @@ impl ContactFields {
             is1099_eligible: false,
             notes: None,
             default_tag_id: None,
+            default_sales_tax_id: None,
+            tax_code_id: None,
         }
     }
 }
@@ -192,6 +203,8 @@ impl std::fmt::Debug for ContactFields {
             .field("is1099_eligible", &self.is1099_eligible)
             .field("notes", &self.notes)
             .field("default_tag_id", &self.default_tag_id)
+            .field("default_sales_tax_id", &self.default_sales_tax_id)
+            .field("tax_code_id", &self.tax_code_id)
             .finish()
     }
 }

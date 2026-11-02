@@ -26,6 +26,8 @@ use cl_core::ids::{
     AccountId, ContactId, IdError, ItemId, JournalLineId, TagId, TransactionId, parse_uuid,
 };
 use cl_core::{CalendarDate, Money, Quantity, TaxRate, Timestamp};
+
+use crate::resources::sales_tax::{DocSalesTax, LineTaxCode};
 use rust_decimal::Decimal;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
@@ -483,6 +485,8 @@ pub struct InvoiceRecordLine {
     pub markup_percent: Option<SignedPercent>,
     /// A billable line's rate as shown (amount / quantity, 4 places).
     pub display_rate: Option<Money>,
+    /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
+    pub tax_code: Option<LineTaxCode>,
 }
 
 impl InvoiceRecordLine {
@@ -597,6 +601,8 @@ pub struct InvoiceRecord {
     pub layout_id: Option<InvoiceLayoutId>,
     /// A finance-charge invoice (U-141): it keeps its client (U-145).
     pub is_finance_charge: bool,
+    /// The invoice's sales tax with its rate as saved (`sales-tax-setup-v1`).
+    pub sales_tax: Option<DocSalesTax>,
 }
 
 impl InvoiceRecord {
@@ -699,6 +705,8 @@ struct RecordWire {
     layout_id: Option<InvoiceLayoutId>,
     #[serde(default, deserialize_with = "null_false")]
     is_finance_charge: bool,
+    #[serde(default)]
+    sales_tax: Option<DocSalesTax>,
 }
 
 #[derive(Deserialize)]
@@ -728,6 +736,8 @@ struct LineWire {
     billable_source_line_id: Option<JournalLineId>,
     #[serde(default)]
     markup_percent: Option<SignedPercent>,
+    #[serde(default)]
+    tax_code: Option<LineTaxCode>,
 }
 
 /// Reads the object as the [`Transaction`] and again for the invoice
@@ -793,6 +803,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
                 billable_source_line_id: x.billable_source_line_id,
                 markup_percent,
                 display_rate,
+                tax_code: x.tax_code,
             });
         }
         Ok(InvoiceRecord {
@@ -817,6 +828,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
             billable_costs: costs,
             layout_id: w.layout_id,
             is_finance_charge: w.is_finance_charge,
+            sales_tax: w.sales_tax,
         })
     }
 }
@@ -1073,6 +1085,9 @@ pub struct PreviewLine {
     /// Another invoice holds this line's cost.
     #[serde(default)]
     pub error: Option<PreviewLineError>,
+    /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub tax_code: Option<LineTaxCode>,
 }
 
 impl fmt::Debug for PreviewLine {
@@ -1109,6 +1124,9 @@ pub struct InvoicePreview {
     /// The client's open balance once this invoice posts.
     #[serde(default)]
     pub contact_balance_after: Option<Money>,
+    /// The sales tax used, with its members' shares (`sales-tax-setup-v1`).
+    #[serde(default)]
+    pub sales_tax: Option<DocSalesTax>,
 }
 
 impl fmt::Debug for InvoicePreview {

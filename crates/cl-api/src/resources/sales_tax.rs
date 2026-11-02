@@ -34,7 +34,8 @@ use crate::errors::{ApiError, ConflictReason, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::attachments::{AttachmentId, uuid_id};
 use crate::resources::customer_payments::{
-    de_cents, de_cents_zero, error_code, null_false, null_vec, require, too_long, with_version,
+    de_cents, de_cents_opt, de_cents_zero, error_code, null_false, null_vec, require, too_long,
+    with_version,
 };
 use crate::resources::operations::{
     Operation, REPORT_EXEMPTIONS_EXPIRING, SALES_TAX_AGENCIES, SALES_TAX_AGENCY_CREATE,
@@ -728,6 +729,138 @@ impl fmt::Debug for ExpiringExemption {
             .field("status", &self.status)
             .finish_non_exhaustive()
     }
+}
+
+// ---- A document's sales tax ------------------------------------------------------
+
+/// One item of a document's sales tax with its share of the tax (the
+/// engine's largest-remainder split, Q-P23d).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocSalesTaxMember {
+    /// The item.
+    #[serde(alias = "itemId", alias = "taxItemId")]
+    pub id: SalesTaxItemId,
+    /// Its name (owner data).
+    #[serde(default)]
+    pub name: String,
+    /// Its rate as saved on the document.
+    pub rate: TaxRate,
+    /// Its share of the document tax.
+    #[serde(default, alias = "amount", deserialize_with = "de_cents_opt")]
+    pub tax: Option<Money>,
+}
+
+impl fmt::Debug for DocSalesTaxMember {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DocSalesTaxMember")
+            .field("id", &self.id)
+            .field("rate", &self.rate)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The sales tax of an invoice, sales receipt or credit memo (`salesTax`;
+/// one per document, Q-P23d): the item or group, its combined rate as
+/// saved, and the members' shares. Shown, never computed here.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocSalesTax {
+    /// The item or group.
+    pub id: SalesTaxItemId,
+    /// Its name (owner data; "Monett").
+    #[serde(default)]
+    pub name: String,
+    /// The combined rate as saved on the document.
+    pub rate: TaxRate,
+    /// Item or group.
+    #[serde(default)]
+    pub kind: Option<SalesTaxKind>,
+    /// The members (one for an item).
+    #[serde(default, deserialize_with = "null_vec")]
+    pub members: Vec<DocSalesTaxMember>,
+}
+
+impl fmt::Debug for DocSalesTax {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DocSalesTax")
+            .field("id", &self.id)
+            .field("rate", &self.rate)
+            .field("members", &self.members)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Where a line's tax code came from (Q-P23k).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaxCodeSource {
+    /// Set on the line.
+    Request,
+    /// The client's non-taxable code.
+    Client,
+    /// The item's code.
+    Item,
+    /// The line's taxable flag.
+    IsTaxable,
+    /// `Non` by default.
+    Default,
+    /// A source this version does not know.
+    #[serde(other)]
+    Other,
+}
+
+/// A document line's tax code as the engine resolved it (`taxCode`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineTaxCode {
+    /// The code's id (`None` on legacy lines).
+    #[serde(default)]
+    pub id: Option<TaxCodeId>,
+    /// The code (`Tax`, `Non`, `Res`).
+    #[serde(default)]
+    pub code: String,
+    /// The line is taxed.
+    pub taxable: bool,
+    /// Where it came from.
+    #[serde(default)]
+    pub source: Option<TaxCodeSource>,
+}
+
+/// A sales tax problem a document preview reports (never a 4xx).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DocTaxProblem {
+    /// The saved rates differ from the current ones: offer "Use current
+    /// rates" (Q-P23i).
+    RateChanged,
+    /// A non-taxable client has no certificate on file (Q-P23n).
+    ExemptionMissing,
+    /// The client's certificate has expired.
+    ExemptionExpired,
+    /// The client's certificate expires within 30 days.
+    ExemptionExpiring,
+}
+
+const DOC_PROBLEMS: &[(&str, DocTaxProblem)] = &[
+    ("RATE_CHANGED", DocTaxProblem::RateChanged),
+    ("EXEMPTION_MISSING", DocTaxProblem::ExemptionMissing),
+    ("EXEMPTION_EXPIRED", DocTaxProblem::ExemptionExpired),
+    ("EXEMPTION_EXPIRING", DocTaxProblem::ExemptionExpiring),
+];
+
+/// The sales tax problem a preview problem `code` names, if it is one.
+#[must_use]
+pub fn doc_tax_problem(code: &str) -> Option<DocTaxProblem> {
+    DOC_PROBLEMS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, p)| *p)
+}
+
+/// Every code [`doc_tax_problem`] knows.
+#[must_use]
+pub fn doc_tax_problem_codes() -> Vec<&'static str> {
+    DOC_PROBLEMS.iter().map(|(c, _)| *c).collect()
 }
 
 // ---- Decoding helpers ------------------------------------------------------------

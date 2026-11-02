@@ -89,6 +89,7 @@ pub fn exports_and_imports(h: &Harness) {
             is_taxable: true,
             item_type: cl_api::ItemType::Service,
             discount_percent: None,
+            tax_code_id: None,
         },
         key(),
     ))

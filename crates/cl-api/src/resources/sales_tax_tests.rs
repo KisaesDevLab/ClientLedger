@@ -364,3 +364,111 @@ async fn exemptions_list_and_expiring_report() {
     assert!(query(&gets[1]).contains(&format!("contactId={CLIENT}")));
     assert!(query(&gets[2]).contains("within=60"));
 }
+
+#[test]
+fn documents_carry_the_sales_tax_and_line_codes() {
+    use crate::resources::invoices::InvoicePreview;
+    use crate::resources::sales::{InvoiceLine, NewInvoice};
+    let p: InvoicePreview = serde_json::from_str(&format!(
+        r#"{{"lines":[{{"amount":"1000.00","taxAmount":"88.75",
+              "taxCode":{{"id":null,"code":"Tax","taxable":true,"source":"item"}}}},
+             {{"amount":"500.00","taxAmount":"0.00",
+              "taxCode":{{"code":"Res","taxable":false,"source":"client"}}}}],
+            "subtotal":"1500.00","taxableBase":"1000.00","taxRate":"0.088750","taxTotal":"88.75",
+            "total":"1588.75",
+            "salesTax":{{"id":"{GROUP}","name":"Monett","rate":"0.081000","kind":"group",
+              "members":[{{"id":"{STATE}","name":"State","rate":"0.042250","tax":"0.26"}},
+                         {{"itemId":"{CITY}","name":"City","rate":"0.038750","amount":"0.23"}}]}}}}"#
+    ))
+    .expect("preview");
+    assert_eq!(p.tax_rate, Some(rate("0.08875")), "six places decode");
+    let st = p.sales_tax.as_ref().expect("sales tax");
+    assert_eq!(st.rate.format_percent(), "8.100%");
+    assert_eq!(
+        st.members[1].tax.map(Money::to_wire).as_deref(),
+        Some("0.2300")
+    );
+    let code = p.lines[1].tax_code.as_ref().expect("code");
+    assert_eq!((code.code.as_str(), code.taxable), ("Res", false));
+    assert_eq!(code.source, Some(TaxCodeSource::Client));
+    assert!(!format!("{st:?}").contains("Monett"));
+    let mut line = InvoiceLine::item(
+        cl_core::ids::ItemId::parse(STATE).expect("id"),
+        cl_core::Quantity::parse_wire("1").expect("q"),
+    );
+    line.tax_code_id = Some(TaxCodeId::parse(CERT).expect("id"));
+    let mut n = NewInvoice::new(
+        ContactId::parse(CLIENT).expect("id"),
+        CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+        vec![line],
+    );
+    let v = serde_json::to_value(&n).expect("json");
+    assert!(v.get("salesTaxId").is_none() && v.get("useCurrentRates").is_none());
+    assert_eq!(v["lines"][0]["taxCodeId"], CERT);
+    n.sales_tax_id = Some(item_id(GROUP));
+    n.use_current_rates = true;
+    let v = serde_json::to_value(&n).expect("json");
+    assert_eq!(v["salesTaxId"], GROUP);
+    assert_eq!(v["useCurrentRates"], true);
+    assert_eq!(
+        doc_tax_problem("RATE_CHANGED"),
+        Some(DocTaxProblem::RateChanged)
+    );
+    assert_eq!(
+        doc_tax_problem("EXEMPTION_EXPIRED"),
+        Some(DocTaxProblem::ExemptionExpired)
+    );
+    assert_eq!(doc_tax_problem("OVERAPPLIED"), None);
+    assert_eq!(doc_tax_problem_codes().len(), 4);
+}
+
+#[test]
+fn company_settings_read_and_write_the_sales_tax_flags() {
+    use crate::resources::company::{CompanySettings, SalesTaxSettingsUpdate};
+    let s: CompanySettings = serde_json::from_str(&format!(
+        r#"{{"defaultSalesTaxRate":"0.081000","salesTaxEnabled":true,"salesTaxBasis":"cash",
+            "defaultSalesTaxId":"{GROUP}","salesTaxSsuta":false}}"#
+    ))
+    .expect("settings");
+    assert_eq!(s.default_sales_tax_rate, Some(rate("0.081")));
+    assert_eq!(s.sales_tax_basis, Some(SalesTaxBasis::Cash));
+    assert_eq!(s.default_sales_tax_id, Some(item_id(GROUP)));
+    assert_eq!(s.sales_tax_ssuta, Some(false));
+    let old: CompanySettings = serde_json::from_str("{}").expect("old engine");
+    assert_eq!(old.sales_tax_enabled, None);
+    let u = SalesTaxSettingsUpdate {
+        enabled: Some(true),
+        basis: Some(SalesTaxBasis::Accrual),
+        default_sales_tax_id: Some(None),
+        ssuta: Some(true),
+    };
+    let none = Capabilities::default();
+    assert_eq!(
+        u.body(&none).expect_err("cap"),
+        ApiError::Local(LocalValidation::Unsupported)
+    );
+    let caps: Capabilities = [Capabilities::COMPANY_SALES_TAX_FLAGS]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        u.body(&caps).expect("body"),
+        json!({"salesTaxEnabled":true,"salesTaxBasis":"accrual","defaultSalesTaxId":null,
+               "salesTaxSsuta":true})
+    );
+    assert!(SalesTaxSettingsUpdate::default().is_empty());
+}
+
+#[test]
+fn contacts_and_items_send_their_tax_defaults_only_when_set() {
+    use crate::resources::contacts::{ContactFields, ContactType};
+    let mut c = ContactFields::named(ContactType::Customer, "Ozark Outfitters");
+    let v = serde_json::to_value(&c).expect("json");
+    assert!(v.get("defaultSalesTaxId").is_none() && v.get("taxCodeId").is_none());
+    c.default_sales_tax_id = Some(item_id(GROUP));
+    c.tax_code_id = Some(TaxCodeId::parse(CERT).expect("id"));
+    let v = serde_json::to_value(&c).expect("json");
+    assert_eq!(v["defaultSalesTaxId"], GROUP);
+    assert_eq!(v["taxCodeId"], CERT);
+    let back: ContactFields = serde_json::from_value(v).expect("decode");
+    assert_eq!(back.default_sales_tax_id, Some(item_id(GROUP)));
+}

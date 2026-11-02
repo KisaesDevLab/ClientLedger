@@ -144,6 +144,7 @@ pub fn items(h: &Harness) {
         is_taxable: true,
         item_type: cl_api::ItemType::Service,
         discount_percent: None,
+        tax_code_id: None,
     };
     let made = h.run(s.items().create(&fields, key())).expect("create");
     assert_eq!(made.record.fields, fields);

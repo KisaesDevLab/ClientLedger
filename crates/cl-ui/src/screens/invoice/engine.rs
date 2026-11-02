@@ -143,6 +143,8 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
             tag_id: l.tag,
             billable_source_line_id: l.billable_source_line,
             markup_percent: markup,
+            // The Tax code column arrives with P23 WP-2.
+            tax_code_id: None,
         });
     }
     let mut n = NewInvoice::new(r.client, r.date, lines);

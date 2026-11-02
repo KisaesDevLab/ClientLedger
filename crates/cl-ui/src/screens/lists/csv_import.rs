@@ -490,6 +490,7 @@ impl CsvScreen {
                             is_taxable: i.taxable,
                             item_type: cl_api::ItemType::Service,
                             discount_percent: None,
+                            tax_code_id: None,
                         },
                     )),
                 }
@@ -1199,6 +1200,7 @@ fn demo_import(link: &CompanyLink, rows: Vec<(usize, Mapped)>, role: ContactType
                         is_taxable: i.taxable,
                         item_type: cl_api::ItemType::Service,
                         discount_percent: None,
+                        tax_code_id: None,
                     },
                 );
                 out.imported += 1;
