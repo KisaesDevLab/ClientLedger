@@ -22,6 +22,7 @@ pub mod ids;
 pub mod intake;
 pub mod money;
 pub mod secret;
+pub mod tax_rate;
 
 pub use balance_token::BalanceToken;
 pub use dates::{CalendarDate, DateError, Timestamp, Weekday};
@@ -33,3 +34,4 @@ pub use money::{
     UserInput,
 };
 pub use secret::Secret;
+pub use tax_rate::{TaxRate, TaxRateInputError};
