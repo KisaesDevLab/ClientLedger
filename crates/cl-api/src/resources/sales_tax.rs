@@ -80,7 +80,8 @@ pub enum SalesTaxRefusal {
     NameInUse,
     /// The item is in an active group (409 `ITEM_IN_GROUP`).
     ItemInGroup,
-    /// The code is on clients or items (409 `CODE_IN_USE`).
+    /// Another tax code already uses the code (409 `CODE_IN_USE`; codes
+    /// are unique, case-insensitive). Deactivating a code in use is allowed.
     CodeInUse,
     /// `Tax` and `Non` can't be changed (409 `SYSTEM_CODE`).
     SystemCode,

@@ -342,6 +342,27 @@ fn payment_records_decode_with_linked() {
     assert!(!format!("{rec:?}").contains("Timely"));
 }
 
+/// The list rows as the engine sends them (`buildSalesTaxPaymentsV2`):
+/// `transactionId` with both `txn_date` and `date` (found by the WP-4
+/// contract test; a `txn_date` alias made `date` a duplicate field).
+#[test]
+fn payment_list_rows_decode_with_txn_date_and_date() {
+    let rows: Vec<SalesTaxPaymentRecord> = decode_list(
+        format!(
+            r#"{{"title":"Sales Tax Payments","data":[{{"transactionId":"{PAY}","txn_date":"2026-12-10",
+                "date":"2026-12-10","txnType":"sales_tax_payment","number":"12","agencyId":"{AGENCY}",
+                "agencyName":"State","total":"167.49","paid":"169.45","adjustments":"-1.96","linked":false}}]}}"#
+        )
+        .as_bytes(),
+        "payments",
+        "p",
+    )
+    .expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].date, d(12, 10));
+    assert_eq!(rows[0].total, m("167.49"));
+}
+
 #[tokio::test]
 async fn recoveries_are_keyed_and_read_the_available_figure() {
     let server = MockServer::start().await;

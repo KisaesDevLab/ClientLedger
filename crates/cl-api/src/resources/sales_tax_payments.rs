@@ -618,7 +618,7 @@ pub struct SalesTaxPaymentRecord {
     /// The agency.
     pub agency_id: SalesTaxAgencyId,
     /// The payment date.
-    #[serde(alias = "txnDate", alias = "txn_date")]
+    #[serde(alias = "txnDate")]
     pub date: CalendarDate,
     /// Owed through.
     #[serde(default)]
