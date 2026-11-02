@@ -10,29 +10,29 @@ use cl_api::{
 use cl_core::{Money, Quantity};
 use serde_json::Value;
 
-fn golden() -> Value {
+pub(crate) fn golden() -> Value {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/sales_tax/golden.json");
     serde_json::from_slice(&std::fs::read(path).expect("golden file")).expect("json")
 }
 
-fn d(s: &str) -> Decimal {
+pub(crate) fn d(s: &str) -> Decimal {
     Decimal::from_str(s).expect("decimal")
 }
 
-fn day(s: &str) -> CalendarDate {
+pub(crate) fn day(s: &str) -> CalendarDate {
     CalendarDate::parse_wire(s).expect("date")
 }
 
 /// The golden seed in a fresh demo company: its items (by tax code), its
 /// clients (defaults and codes); the demo's own setup is the seed's.
-struct Seed {
-    state: DemoState,
-    items: BTreeMap<String, cl_core::ids::ItemId>,
-    clients: BTreeMap<String, ContactId>,
+pub(crate) struct Seed {
+    pub(crate) state: DemoState,
+    pub(crate) items: BTreeMap<String, cl_core::ids::ItemId>,
+    pub(crate) clients: BTreeMap<String, ContactId>,
 }
 
-fn seed(g: &Value) -> Seed {
+pub(crate) fn seed(g: &Value) -> Seed {
     let mut state = DemoState::new();
     let _ = agencies(&mut state, true);
     let by_code = |st: &DemoState, c: &str| {
@@ -101,7 +101,7 @@ fn seed(g: &Value) -> Seed {
     }
 }
 
-fn lines(s: &Seed, req: &Value) -> Vec<InvoiceLine> {
+pub(crate) fn lines(s: &Seed, req: &Value) -> Vec<InvoiceLine> {
     req["lines"]
         .as_array()
         .expect("lines")
@@ -117,7 +117,7 @@ fn lines(s: &Seed, req: &Value) -> Vec<InvoiceLine> {
         .collect()
 }
 
-fn same(got: Decimal, want: &Value, what: &str) {
+pub(crate) fn same(got: Decimal, want: &Value, what: &str) {
     if let Some(w) = want.as_str() {
         assert_eq!(got, d(w), "{what}");
     }
@@ -208,6 +208,75 @@ fn liability(s: &Seed, req: &Value, want: &Value) {
     same(unassigned, &want["unassigned"], "unassigned");
 }
 
+/// Runs one WP-2 step of the golden chain (cases 1-6).
+pub(crate) fn run_step(s: &mut Seed, id: i64, step: &Value) {
+    let req = &step["request"];
+    let want = &step["expect"];
+    let what = format!("case {id} {}", step["op"]);
+    let client = req["client"].as_str().map(|c| s.clients[c]);
+    let date = req["date"].as_str().map(day);
+    match step["op"].as_str().expect("op") {
+        "invoice" => {
+            let new = NewInvoice::new(client.expect("c"), date.expect("d"), lines(s, req));
+            let p = super::super::invoices::preview(&mut s.state, &new, None).expect("preview");
+            check_preview(&p, want, &what);
+            let saved = super::super::invoices::create(&mut s.state, &new, None).expect("posted");
+            check_tax(saved.record.sales_tax.as_ref(), &want["salesTax"], &what);
+        }
+        "creditMemo" => {
+            let m = NewCreditMemo::new(client.expect("c"), date.expect("d"), lines(s, req));
+            let r = super::super::credit_memos::create_memo(&mut s.state, &m, None).expect("memo");
+            check_tax(r.sales_tax.as_ref(), &want["salesTax"], &what);
+            same(r.tax_amount.as_decimal(), &want["taxTotal"], &what);
+            same(r.total.as_decimal(), &want["total"], &what);
+        }
+        "salesReceipt" => {
+            let mut r = NewSalesReceipt::new(date.expect("d"), lines(s, req));
+            r.contact_id = client;
+            let rec = super::super::credit_memos::save_receipt(&mut s.state, &r, None, None)
+                .expect("receipt");
+            check_tax(rec.sales_tax.as_ref(), &want["salesTax"], &what);
+            same(rec.tax_amount.as_decimal(), &want["taxTotal"], &what);
+            same(rec.total.as_decimal(), &want["total"], &what);
+        }
+        "dailySalesPreview" | "dailySales" => {
+            let item = s
+                .state
+                .sales_tax
+                .items
+                .iter()
+                .find(|i| Some(i.name.as_str()) == req["salesTax"].as_str())
+                .map(|i| i.id)
+                .expect("item");
+            let sales = d(req["sales"].as_str().expect("sales"));
+            let typed = d(req["tax"].as_str().expect("tax"));
+            let expected = expected_daily_tax(&s.state, item, sales);
+            same(expected, &want["expectedTax"], &what);
+            let differs = expected != typed;
+            assert_eq!(
+                differs,
+                want["problems"]
+                    .as_array()
+                    .is_some_and(|p| p.iter().any(|x| x == "TAX_DIFFERS")),
+                "{what}"
+            );
+            if step["op"] == "dailySales" {
+                let txn = TransactionId::parse("d1900000-0000-4000-8000-000000000001").expect("id");
+                post_daily(
+                    &mut s.state,
+                    txn,
+                    date.expect("d"),
+                    Some(item),
+                    sales,
+                    typed,
+                );
+            }
+        }
+        "liability" => liability(s, req, want),
+        other => panic!("unexpected op {other} in case {id}"),
+    }
+}
+
 #[test]
 fn the_demo_engine_runs_golden_cases_1_to_6() {
     let g = golden();
@@ -221,77 +290,7 @@ fn the_demo_engine_runs_golden_cases_1_to_6() {
             .find(|c| c["id"] == id)
             .expect("case");
         for step in case["steps"].as_array().expect("steps") {
-            let req = &step["request"];
-            let want = &step["expect"];
-            let what = format!("case {id} {}", step["op"]);
-            let client = req["client"].as_str().map(|c| s.clients[c]);
-            let date = req["date"].as_str().map(day);
-            match step["op"].as_str().expect("op") {
-                "invoice" => {
-                    let new = NewInvoice::new(client.expect("c"), date.expect("d"), lines(&s, req));
-                    let p =
-                        super::super::invoices::preview(&mut s.state, &new, None).expect("preview");
-                    check_preview(&p, want, &what);
-                    let saved =
-                        super::super::invoices::create(&mut s.state, &new, None).expect("posted");
-                    check_tax(saved.record.sales_tax.as_ref(), &want["salesTax"], &what);
-                }
-                "creditMemo" => {
-                    let m =
-                        NewCreditMemo::new(client.expect("c"), date.expect("d"), lines(&s, req));
-                    let r = super::super::credit_memos::create_memo(&mut s.state, &m, None)
-                        .expect("memo");
-                    check_tax(r.sales_tax.as_ref(), &want["salesTax"], &what);
-                    same(r.tax_amount.as_decimal(), &want["taxTotal"], &what);
-                    same(r.total.as_decimal(), &want["total"], &what);
-                }
-                "salesReceipt" => {
-                    let mut r = NewSalesReceipt::new(date.expect("d"), lines(&s, req));
-                    r.contact_id = client;
-                    let rec =
-                        super::super::credit_memos::save_receipt(&mut s.state, &r, None, None)
-                            .expect("receipt");
-                    check_tax(rec.sales_tax.as_ref(), &want["salesTax"], &what);
-                    same(rec.tax_amount.as_decimal(), &want["taxTotal"], &what);
-                    same(rec.total.as_decimal(), &want["total"], &what);
-                }
-                "dailySalesPreview" | "dailySales" => {
-                    let item = s
-                        .state
-                        .sales_tax
-                        .items
-                        .iter()
-                        .find(|i| Some(i.name.as_str()) == req["salesTax"].as_str())
-                        .map(|i| i.id)
-                        .expect("item");
-                    let sales = d(req["sales"].as_str().expect("sales"));
-                    let typed = d(req["tax"].as_str().expect("tax"));
-                    let expected = expected_daily_tax(&s.state, item, sales);
-                    same(expected, &want["expectedTax"], &what);
-                    let differs = expected != typed;
-                    assert_eq!(
-                        differs,
-                        want["problems"]
-                            .as_array()
-                            .is_some_and(|p| p.iter().any(|x| x == "TAX_DIFFERS")),
-                        "{what}"
-                    );
-                    if step["op"] == "dailySales" {
-                        let txn = TransactionId::parse("d1900000-0000-4000-8000-000000000001")
-                            .expect("id");
-                        post_daily(
-                            &mut s.state,
-                            txn,
-                            date.expect("d"),
-                            Some(item),
-                            sales,
-                            typed,
-                        );
-                    }
-                }
-                "liability" => liability(&s, req, want),
-                other => panic!("unexpected op {other} in case {id}"),
-            }
+            run_step(&mut s, id, step);
             ran += 1;
         }
     }
@@ -311,10 +310,10 @@ fn a_voided_document_drops_its_rows_and_owed_follows() {
         ),
     );
     let saved = super::super::invoices::create(&mut s.state, &new, None).expect("posted");
-    let o = owed(&s.state, day("2026-11-30"));
+    let o = owed(&mut s.state, day("2026-11-30"));
     assert_eq!(o["total"], "88.75");
     super::super::invoices::void(&mut s.state, saved.record.txn.id, None).expect("void");
-    assert_eq!(owed(&s.state, day("2026-11-30"))["total"], "0.00");
+    assert_eq!(owed(&mut s.state, day("2026-11-30"))["total"], "0.00");
 }
 
 #[test]

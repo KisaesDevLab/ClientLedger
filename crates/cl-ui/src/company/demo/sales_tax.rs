@@ -92,12 +92,27 @@ pub enum RowKind {
     Sale,
 }
 
+/// The kind of document a row belongs to (the cash rules differ).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DocKind {
+    /// An invoice: collected on cash as it is paid (running total).
+    Invoice,
+    /// A credit memo (not on cash: it settles invoices, never cash).
+    Memo,
+    /// A sales receipt: cash on its date.
+    Receipt,
+    /// A daily sales summary: cash on its date.
+    Daily,
+}
+
 /// One stored tax row (`transaction_tax_lines`): written once per post,
 /// rewritten on an edit, dropped on a void.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TaxRow {
     /// What it is for.
     pub kind: RowKind,
+    /// The document's kind.
+    pub doc: DocKind,
     /// The document date.
     pub event_date: CalendarDate,
     /// The document's sales tax (item or group).
@@ -146,6 +161,8 @@ pub struct DemoSalesTax {
     pub doc_tax: BTreeMap<TransactionId, cl_api::DocSalesTax>,
     /// Setup and settings writes (tests).
     pub writes: u32,
+    /// Payments, recoveries and certificates (WP-3).
+    pub book: super::sales_tax_owed::DemoTaxBook,
     seeded: bool,
 }
 
@@ -223,6 +240,7 @@ impl Default for DemoSalesTax {
             rows: BTreeMap::new(),
             doc_tax: BTreeMap::new(),
             writes: 0,
+            book: super::sales_tax_owed::DemoTaxBook::default(),
             seeded: false,
         }
     }
@@ -332,6 +350,40 @@ impl DemoSalesTax {
     pub fn code(&self, id: TaxCodeId) -> Option<&TaxCode> {
         self.codes.iter().find(|c| c.id == id)
     }
+
+    /// A tax item's or group's name.
+    #[must_use]
+    pub fn item_name(&self, id: SalesTaxItemId) -> Option<&str> {
+        self.find(id).map(|i| i.name.as_str())
+    }
+
+    /// An item's own rate (a group's: its members').
+    #[must_use]
+    pub fn item_rate(&self, id: SalesTaxItemId) -> Option<Decimal> {
+        self.find(id).map(|i| self.rate_of(i))
+    }
+
+    /// The tax items (never groups) paid to `agency`, active or not.
+    #[must_use]
+    pub fn agency_items(&self, agency: SalesTaxAgencyId) -> Vec<SalesTaxItemId> {
+        self.items
+            .iter()
+            .filter(|i| !i.group && i.agency == Some(agency))
+            .map(|i| i.id)
+            .collect()
+    }
+
+    /// The agency's vendor.
+    #[must_use]
+    pub fn agency_vendor(&self, agency: SalesTaxAgencyId) -> Option<ContactId> {
+        self.agencies.iter().find(|a| a.0 == agency).map(|a| a.1)
+    }
+
+    /// Every agency, in setup order.
+    #[must_use]
+    pub fn agency_ids(&self) -> Vec<SalesTaxAgencyId> {
+        self.agencies.iter().map(|a| a.0).collect()
+    }
 }
 
 /// The developer command dev.demo_sales_tax_reset (the scenario runs
@@ -340,9 +392,11 @@ impl DemoSalesTax {
 pub fn reset(state: &mut DemoState) {
     let rows = std::mem::take(&mut state.sales_tax.rows);
     let doc_tax = std::mem::take(&mut state.sales_tax.doc_tax);
+    let book = std::mem::take(&mut state.sales_tax.book);
     state.sales_tax = DemoSalesTax {
         rows,
         doc_tax,
+        book,
         ..DemoSalesTax::default()
     };
     ensure(state);
@@ -904,11 +958,19 @@ pub fn post_rows(
         .taxable_base
         .map_or(Decimal::ZERO, cl_core::Money::as_decimal);
     let mut rows = Vec::new();
+    let doc = if sign.is_sign_negative() {
+        DocKind::Memo
+    } else if state.invoices.stored.contains_key(&txn) {
+        DocKind::Invoice
+    } else {
+        DocKind::Receipt
+    };
     let st = &state.sales_tax;
     for m in &tax.members {
         let agency = st.find(m.id).and_then(|i| i.agency);
         rows.push(TaxRow {
             kind: RowKind::Sale,
+            doc,
             event_date: date,
             sales_tax: Some(tax.id),
             tax_item: Some(m.id),
@@ -925,6 +987,7 @@ pub fn post_rows(
             {
                 rows.push(TaxRow {
                     kind: RowKind::Sale,
+                    doc,
                     event_date: date,
                     sales_tax: Some(tax.id),
                     tax_item: Some(m.id),
@@ -973,6 +1036,7 @@ pub fn post_daily(
         txn,
         vec![TaxRow {
             kind: RowKind::Sale,
+            doc: DocKind::Daily,
             event_date: date,
             sales_tax: item,
             tax_item: item,
@@ -1077,33 +1141,13 @@ pub fn liability_accrual(
     (out, unassigned)
 }
 
-/// What is owed as of `as_of` on the company's basis (accrual in WP-2):
-/// by agency and item, the unassigned tax and the total.
+/// What is owed as of `as_of` on the company's basis: by agency and
+/// item, the unassigned tax and the total (the engine's JSON).
 #[must_use]
-pub fn owed(state: &DemoState, as_of: CalendarDate) -> Value {
-    let (cols, unassigned) = liability_accrual(state, CalendarDate::min(), as_of);
-    let mut agencies: Vec<(Option<SalesTaxAgencyId>, Vec<Value>, Decimal)> = Vec::new();
-    let mut total = unassigned;
-    for c in cols {
-        total += c.owed_at_end;
-        let v = json!({"taxItemId": c.item, "owed": s2(c.owed_at_end)});
-        match agencies.iter_mut().find(|a| a.0 == c.agency) {
-            Some(a) => {
-                a.1.push(v);
-                a.2 += c.owed_at_end;
-            }
-            None => agencies.push((c.agency, vec![v], c.owed_at_end)),
-        }
-    }
-    json!({
-        "agencies": agencies.into_iter().map(|(a, items, t)| json!({
-            "agencyId": a, "items": items, "total": s2(t),
-        })).collect::<Vec<_>>(),
-        "unassigned": s2(unassigned),
-        "total": s2(total),
-    })
+pub fn owed(state: &mut DemoState, as_of: CalendarDate) -> Value {
+    super::sales_tax_owed::owed_json(state, as_of, None, None)
 }
 
 #[cfg(test)]
 #[path = "sales_tax_tests.rs"]
-mod tests;
+pub(crate) mod tests;

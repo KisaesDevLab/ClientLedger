@@ -911,10 +911,11 @@ impl InvoiceScreen {
     /// The preview call of the document's kind (the demo answers at once).
     fn preview_job_for(&self, req: &InvoiceRequest) -> Result<Job<Answer>, ApiError> {
         let editing = self.editing.as_ref().map(|e| e.id);
-        let plain = |figures| Answer {
+        // An invoice's preview carries its own sales tax notices.
+        let plain = |figures: InvoicePreview| Answer {
+            problems: figures.problems.iter().map(|x| x.code.clone()).collect(),
             figures,
             credit: None,
-            problems: Vec::new(),
         };
         Ok(match self.kind {
             SalesDocKind::Invoice => {
@@ -924,16 +925,7 @@ impl InvoiceScreen {
                     &self.link,
                     self.group.as_ref(),
                     |d| crate::company::demo::invoices::preview(d, &new, editing).map(plain),
-                    move |s| async move {
-                        s.invoices()
-                            .preview(&live, editing)
-                            .await
-                            .map(|figures| Answer {
-                                figures,
-                                credit: None,
-                                problems: Vec::new(),
-                            })
-                    },
+                    move |s| async move { s.invoices().preview(&live, editing).await.map(plain) },
                 )
             }
             SalesDocKind::CreditMemo => {

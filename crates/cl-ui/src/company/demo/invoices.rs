@@ -352,8 +352,8 @@ fn money(d: Decimal) -> Result<Money, ApiError> {
 
 /// One stored demo invoice.
 #[derive(Clone)]
-struct Stored {
-    record: Value,
+pub(super) struct Stored {
+    pub(super) record: Value,
     claims: Vec<JournalLineId>,
     /// When it was made (the engine's `createdAt` tiebreaker in the list).
     made: u64,
@@ -362,7 +362,7 @@ struct Stored {
 /// Invoices the demo engine keeps.
 #[derive(Clone, Default)]
 pub struct DemoInvoices {
-    stored: BTreeMap<TransactionId, Stored>,
+    pub(super) stored: BTreeMap<TransactionId, Stored>,
     claimed: BTreeSet<JournalLineId>,
     next: u64,
     /// Invoices made so far, seeded or created (each one's `made`).
@@ -739,7 +739,14 @@ pub fn preview(
         .and_then(|s| s.record["balanceDue"].as_str())
         .and_then(|b| Decimal::from_str(b).ok())
         .unwrap_or_default();
+    // P23 (Q-P23n): the certificate warning of a non-taxable client.
+    let problems: Vec<Value> =
+        super::sales_tax_owed::exemption_problem(state, new.contact_id, new.txn_date)
+            .map(|c| json!({"code": c}))
+            .into_iter()
+            .collect();
     let v = json!({
+        "problems": problems,
         "lines": lines,
         "subtotal": doc.subtotal.to_string(),
         "taxableBase": doc.taxable_base.to_string(),

@@ -35,6 +35,8 @@ pub mod finance_charges;
 pub mod register;
 // P23: sales tax setup, document tax and the stored tax rows.
 pub mod sales_tax;
+// P23 WP-3: owed, Pay Sales Tax, exemption certificates, recoveries.
+pub mod sales_tax_owed;
 pub mod statements;
 pub mod template_store;
 pub mod templates;

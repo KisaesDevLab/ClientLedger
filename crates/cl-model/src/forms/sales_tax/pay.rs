@@ -401,8 +401,10 @@ impl PayForm {
         })
     }
 
-    /// What Pay posts: the preview's lines (unassigned ones left out),
-    /// each with its amount and `expectedOwed` copied.
+    /// What Pay posts: the preview's lines (unassigned ones left out), each
+    /// with the amount before adjustments (the owner's typed amount, else
+    /// the preview's `owed`) and `expectedOwed` copied. The adjustments
+    /// go with the request; the engine adds them (no arithmetic here).
     ///
     /// # Errors
     /// A [`PayProblem`] of the inputs, `PreviewPending` without current
@@ -413,10 +415,18 @@ impl PayForm {
         if !f.total.is_positive() {
             return Err(PayProblem::NothingToPay);
         }
+        let typed = request.amounts.clone().unwrap_or_default();
         let lines: Vec<PostLine> = f
             .lines
             .iter()
-            .filter_map(|l| Some((l.item?, l.amount, l.expected_owed)))
+            .filter_map(|l| {
+                let item = l.item?;
+                let amount = typed
+                    .iter()
+                    .find(|(i, _)| *i == item)
+                    .map_or(l.owed, |(_, m)| *m);
+                Some((item, amount, l.expected_owed))
+            })
             .collect();
         request.amounts = Some(lines.iter().map(|(i, a, _)| (*i, *a)).collect());
         Ok(PayPostPlan {

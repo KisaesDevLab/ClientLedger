@@ -172,10 +172,19 @@ fn pay_posts_the_previews_lines_and_expected_owed() {
         plan.lines,
         vec![
             (item(1), m("80.70"), m("80.70")),
-            (item(2), m("129.72"), m("131.68")),
+            (item(2), m("131.68"), m("131.68")),
         ],
-        "unassigned tax is not paid here; strings copied"
+        "amounts before adjustments (owed, copied); unassigned tax is not paid here"
     );
+    // A typed amount goes as typed.
+    f.set_amount(item(2), "100.00");
+    let rev = f.revision();
+    assert!(f.apply_preview(rev, golden9_figures()));
+    assert_eq!(
+        f.post_plan().expect("post").lines[1],
+        (item(2), m("100.00"), m("131.68"))
+    );
+    f.set_amount(item(2), "");
     // Any change makes the figures stale; an old answer is dropped.
     f.set_amount(item(1), "50.00");
     assert_eq!(f.post_plan(), Err(PayProblem::PreviewPending));

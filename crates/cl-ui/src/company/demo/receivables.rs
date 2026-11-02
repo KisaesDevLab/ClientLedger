@@ -1943,6 +1943,14 @@ pub fn bounce(
     if !p.refunded.is_zero() {
         return Err(conflict("PAYMENT_REFUNDED"));
     }
+    // P23 (U-154): a write-off part of which was recovered stays.
+    if p.apps.iter().any(|a| {
+        a.live()
+            && a.write_off > Decimal::ZERO
+            && super::sales_tax_owed::recovered_on(state, a.invoice)
+    }) {
+        return Err(conflict("WRITE_OFF_RECOVERED"));
+    }
     let deposit = deposit_of(state, &p);
     if r.date < p.date || deposit.is_some_and(|(_, d)| r.date < d) {
         return Err(refused("BOUNCE_DATE_INVALID"));
@@ -2134,6 +2142,10 @@ pub(super) struct PayAppView {
     pub settled: Decimal,
     /// Discount + write-off.
     pub adjustments: Decimal,
+    /// The early-payment discount (P23 SSUTA shares).
+    pub discount: Decimal,
+    /// The write-off (P23 SSUTA shares).
+    pub write_off: Decimal,
     pub applied: CalendarDate,
     pub later: bool,
     pub voided: bool,
@@ -2180,6 +2192,8 @@ pub(super) fn pay_views(state: &DemoState) -> Vec<PayView> {
                     invoice: a.invoice,
                     settled: a.settled(),
                     adjustments: a.discount + a.write_off,
+                    discount: a.discount,
+                    write_off: a.write_off,
                     applied: a.applied,
                     later: a.later,
                     voided: a.voided,
