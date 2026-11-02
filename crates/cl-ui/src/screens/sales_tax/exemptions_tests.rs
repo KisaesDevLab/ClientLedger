@@ -51,3 +51,31 @@ fn a_certificate_saves_lists_expiring_and_deactivates() {
         "no certificate numbers in the state"
     );
 }
+
+#[test]
+fn a_certificate_keeps_its_file() {
+    let (_d, mut s) = screen();
+    let client = s.clients.first().map(|c| c.id).expect("a client");
+    s.new_entry();
+    s.upload_file("cert.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    assert_eq!(
+        s.state()["problem"],
+        "tax_exemptions.attach.client_first",
+        "attached to the client"
+    );
+    s.set_client(Some(client));
+    s.new_entry();
+    s.upload_file("cert.txt".into(), b"plain text".to_vec());
+    assert_eq!(s.state()["file"], false, "checked before sending");
+    s.upload_file("cert.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    assert_eq!(s.state()["file"], true, "{}", s.state());
+    if let Some((f, _)) = s.editor.as_mut() {
+        f.number = "RS-2001".into();
+        f.state = "MO".into();
+    }
+    s.save();
+    assert!(s.list[0].attachment_id.is_some(), "saved with the file");
+    let id = s.list[0].id;
+    s.open(id);
+    assert_eq!(s.state()["file"], true, "reopened with its file");
+}

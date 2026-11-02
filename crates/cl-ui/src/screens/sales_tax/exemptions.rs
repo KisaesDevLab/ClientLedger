@@ -58,6 +58,14 @@ pub struct ExemptionsScreen {
     problem: Option<&'static str>,
     error: Option<ApiError>,
     saved: u32,
+    /// The certificate file of the open editor (P23: attached to the client,
+    /// `attachable_type: contact`, the same company and contact as the
+    /// engine requires).
+    pub(crate) file: Option<cl_api::AttachmentId>,
+    picking: Option<std::sync::mpsc::Receiver<Vec<std::path::PathBuf>>>,
+    reading: Option<std::sync::mpsc::Receiver<crate::screens::write_check::attach::FileRead>>,
+    upload_job: Option<(IdempotencyKey, Job<cl_api::Attachment>)>,
+    open_job: Option<Job<(String, Vec<u8>)>>,
 }
 
 impl ExemptionsScreen {
@@ -89,6 +97,11 @@ impl ExemptionsScreen {
             problem: None,
             error: None,
             saved: 0,
+            file: None,
+            picking: None,
+            reading: None,
+            upload_job: None,
+            open_job: None,
         };
         if s.available {
             s.clients_job = Some(engine::read(
@@ -158,9 +171,13 @@ impl ExemptionsScreen {
             || self.list_job.is_some()
             || self.expiring_job.is_some()
             || self.save_job.is_some()
+            || self.picking.is_some()
+            || self.reading.is_some()
+            || self.upload_job.is_some()
     }
 
     pub(crate) fn poll(&mut self) {
+        self.poll_file();
         if let Some(r) = engine::poll(&mut self.clients_job) {
             self.clients = r.unwrap_or_default();
         }
@@ -192,6 +209,113 @@ impl ExemptionsScreen {
         }
     }
 
+    /// "Attach certificate…": the file picker (the editor needs a client).
+    pub(crate) fn start_attach(&mut self, ctx: &egui::Context) {
+        if self.upload_job.is_some() || self.picking.is_some() || self.reading.is_some() {
+            return;
+        }
+        self.problem = None;
+        self.picking = Some(crate::screens::write_check::attach::browse_for_file(ctx));
+    }
+
+    /// Uploads the certificate file to the editor's client (the picker and
+    /// the control channel end here); the certificate keeps its id when
+    /// saved.
+    pub(crate) fn upload_file(&mut self, name: String, bytes: Vec<u8>) {
+        let Some(client) = self.editor.as_ref().and_then(|(f, _)| f.client) else {
+            self.problem = Some("tax_exemptions.attach.client_first");
+            return;
+        };
+        if let Err(k) = crate::screens::write_check::attach::check_bytes(&bytes) {
+            self.problem = Some(k);
+            return;
+        }
+        let to = cl_api::AttachTo::Contact(client);
+        let key = IdempotencyKey::new();
+        let (n2, b2) = (name.clone(), bytes.clone());
+        let job = engine::write(
+            &self.link,
+            self.group.as_ref(),
+            OrphanLabel {
+                what: "orphan.sales_tax_exemption",
+                key: Some(key.clone()),
+            },
+            move |d| crate::company::demo::checks::upload(d, to, &n2, &b2),
+            {
+                let key = key.clone();
+                move |s| async move { s.attachments().upload(to, &name, &bytes, key).await }
+            },
+        );
+        self.upload_job = Some((key, job));
+        self.poll();
+    }
+
+    /// Opens the certificate file in the document viewer.
+    pub(crate) fn open_file(&mut self) {
+        let Some(id) = self.file else { return };
+        self.open_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            move |d| {
+                crate::company::demo::checks::download(d, id)
+                    .map(|b| (t("tax_exemptions.attach.file_name"), b))
+            },
+            move |s| async move {
+                let a = s.attachments().get(id).await?;
+                Ok((a.file_name, s.attachments().download(id).await?))
+            },
+        ));
+        self.poll();
+    }
+
+    fn poll_file(&mut self) {
+        use crate::screens::write_check::attach::{poll_file_read, read_file, read_in_background};
+        if let Some(rx) = &self.picking
+            && let Ok(paths) = rx.try_recv()
+        {
+            self.picking = None;
+            if let Some(p) = paths.into_iter().next() {
+                match read_in_background(&p, read_file) {
+                    Ok(rx) => self.reading = Some(rx),
+                    Err(k) => self.problem = Some(k),
+                }
+            }
+        }
+        match poll_file_read(&mut self.reading) {
+            Some(Ok((name, bytes))) => self.upload_file(name, bytes),
+            Some(Err(k)) => self.problem = Some(k),
+            None => {}
+        }
+        if let Some((k, mut job)) = self.upload_job.take() {
+            match job.take() {
+                None => self.upload_job = Some((k, job)),
+                Some(Ok(a)) => self.file = Some(a.id),
+                Some(Err(e)) => {
+                    self.problem = Some(match e {
+                        ApiError::Local(cl_api::LocalValidation::AttachmentTooLarge) => {
+                            "check.attach.too_large"
+                        }
+                        ApiError::Local(_) => "check.attach.wrong_type",
+                        _ => "invoice.attach.failed",
+                    });
+                }
+            }
+        }
+        match engine::poll(&mut self.open_job) {
+            Some(Ok((name, bytes))) => self.link.push(crate::company::CompanyEvent::OpenWith(
+                cl_model::CommandId::new(crate::screens::document_view::KIND),
+                Box::new(crate::windows::OpenPayload::Document(
+                    crate::widgets::pdf_viewer::DocSource {
+                        name,
+                        bytes: Arc::from(bytes),
+                    },
+                )),
+            )),
+            Some(Err(_)) => self.problem = Some("invoice.attach.open_failed"),
+            None => {}
+        }
+    }
+
     fn name_of(&self, id: ContactId) -> String {
         self.clients
             .iter()
@@ -210,6 +334,7 @@ impl ExemptionsScreen {
     /// Ctrl+N: a new certificate for the client shown.
     pub(crate) fn new_entry(&mut self) {
         self.problem = None;
+        self.file = None;
         self.expires = DateInput {
             text: String::new(),
             value: None,
@@ -227,6 +352,7 @@ impl ExemptionsScreen {
         let Some(e) = self.list.iter().find(|e| e.id == id) else {
             return;
         };
+        self.file = e.attachment_id;
         self.problem = None;
         self.expires = e.expires_on.map_or(
             DateInput {
@@ -259,9 +385,7 @@ impl ExemptionsScreen {
                 return;
             }
         };
-        let attachment =
-            f.id.and_then(|id| self.list.iter().find(|e| e.id == id))
-                .and_then(|e| e.attachment_id);
+        let attachment = self.file;
         let draft = TaxExemptionDraft {
             contact_id: plan.client,
             number: plan.number,
@@ -418,6 +542,10 @@ impl ExemptionsScreen {
         let problem = self.problem;
         let mut save = false;
         let mut cancel = false;
+        let mut attach = false;
+        let mut open = false;
+        let has_file = self.file.is_some();
+        let sending = self.upload_job.is_some() || self.reading.is_some();
         let mut deactivate = false;
         let expires = &mut self.expires;
         let Some((f, _)) = self.editor.as_mut() else {
@@ -457,6 +585,28 @@ impl ExemptionsScreen {
             }
             form::hint(ui, tokens, &t("tax_exemptions.expires_tip"));
             form::field(ui, &t("tax_exemptions.note"), &mut f.note);
+            ui.horizontal(|ui| {
+                ui.label(t(if has_file {
+                    "tax_exemptions.attach.on_file"
+                } else {
+                    "tax_exemptions.attach.none"
+                }));
+                if has_file && ui.button(t("tax_exemptions.attach.open")).clicked() {
+                    open = true;
+                }
+                let label = t(if has_file {
+                    "tax_exemptions.attach.replace"
+                } else {
+                    "tax_exemptions.attach"
+                });
+                attach = ui
+                    .add_enabled(!sending, egui::Button::new(label))
+                    .on_hover_text(t("tax_exemptions.attach.tip"))
+                    .clicked();
+                if sending {
+                    ui.label(t("invoice.attach.sending"));
+                }
+            });
             if let Some(p) = problem {
                 form::inline_warning(ui, tokens, &t(p));
             }
@@ -473,6 +623,12 @@ impl ExemptionsScreen {
         }
         if deactivate {
             self.deactivate();
+        }
+        if attach {
+            self.start_attach(ui.ctx());
+        }
+        if open {
+            self.open_file();
         }
         if cancel {
             self.editor = None;
@@ -515,6 +671,8 @@ impl ExemptionsScreen {
             "editing": self.editor.as_ref().map(|(f, _)| json!({"new": f.id.is_none()})),
             "problem": self.problem,
             "saved": self.saved,
+            "file": self.file.is_some(),
+            "attaching": self.upload_job.is_some(),
             "error": self.error.is_some(),
         })
     }
