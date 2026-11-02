@@ -77,7 +77,7 @@ pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
     ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
-    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles, ReceivablesSettingsUpdate,
+    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles, ReceivablesSettingsUpdate, SalesTaxSettingsUpdate,
 };
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
@@ -316,7 +316,7 @@ pub use resources::recoveries::{
 };
 pub use resources::sales_tax::{
     EXEMPTION_NOTE_MAX, EXEMPTION_NUMBER_MAX, ExemptionStatus, ExpiringExemption,
-    GROUP_MEMBERS_MAX, OwedAgency, OwedItem, SALES_TAX_DESCRIPTION_MAX, SALES_TAX_NAME_MAX,
+    DocSalesTax, DocSalesTaxMember, DocTaxProblem, LineTaxCode, TaxCodeSource, GROUP_MEMBERS_MAX, OwedAgency, OwedItem, SALES_TAX_DESCRIPTION_MAX, SALES_TAX_NAME_MAX,
     SalesTax, SalesTaxAgency, SalesTaxAgencyId, SalesTaxBasis, SalesTaxItem, SalesTaxItemDraft,
     SalesTaxItemId, SalesTaxKind, SalesTaxMember, SalesTaxOwed, SalesTaxRefusal, TAX_CODE_MAX,
     TAX_CODE_NAME_MAX, TaxCode, TaxCodeDraft, TaxCodeId, TaxExemption, TaxExemptionDraft,

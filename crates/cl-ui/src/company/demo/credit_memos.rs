@@ -212,8 +212,27 @@ pub fn seed(state: &mut DemoState) {
 
 // ---- Shared figures ----------------------------------------------------------------
 
-fn as_invoice(contact: ContactId, date: CalendarDate, lines: &[cl_api::InvoiceLine]) -> NewInvoice {
-    NewInvoice::new(contact, date, lines.to_vec())
+fn as_invoice(
+    contact: ContactId,
+    date: CalendarDate,
+    lines: &[cl_api::InvoiceLine],
+    sales_tax: Option<cl_core::ids::SalesTaxItemId>,
+) -> NewInvoice {
+    let mut n = NewInvoice::new(contact, date, lines.to_vec());
+    n.sales_tax_id = sales_tax;
+    n
+}
+
+/// A credit memo's members carry their tax negated (the engine's memo
+/// preview and record, P23).
+fn negate_members(p: &mut InvoicePreview) {
+    if let Some(t) = p.sales_tax.as_mut() {
+        for m in &mut t.members {
+            m.tax = m
+                .tax
+                .and_then(|x| cl_core::Money::try_from(-x.as_decimal()).ok());
+        }
+    }
 }
 
 fn doc_lines(
@@ -243,7 +262,7 @@ fn doc_lines(
                     .and_then(|i| items.iter().find(|x| x.id == i))
                     .is_none_or(|i| i.fields.is_taxable)
             }),
-            tax_code: None,
+            tax_code: f.tax_code.clone(),
             amount: f.amount,
             tax_amount: f.tax_amount,
             tag_id: l.tag_id,
@@ -417,8 +436,12 @@ pub fn preview_memo(
 ) -> Result<CreditMemoPreview, ApiError> {
     seed(state);
     check_lines(&m.lines)?;
-    let mut figures =
-        super::invoices::preview(state, &as_invoice(m.contact_id, m.txn_date, &m.lines), None)?;
+    let mut figures = super::invoices::preview(
+        state,
+        &as_invoice(m.contact_id, m.txn_date, &m.lines, m.sales_tax_id),
+        None,
+    )?;
+    negate_members(&mut figures);
     let total = dec(figures.total);
     let own = editing
         .and_then(|id| state.credits.memos.get(&id).map(|x| (id, x.clone())))
@@ -511,7 +534,12 @@ pub fn create_memo(
     seed(state);
     check_lines(&m.lines)?;
     check_closing(closing(state), &[m.txn_date], password)?;
-    let p = super::invoices::preview(state, &as_invoice(m.contact_id, m.txn_date, &m.lines), None)?;
+    let mut p = super::invoices::preview(
+        state,
+        &as_invoice(m.contact_id, m.txn_date, &m.lines, m.sales_tax_id),
+        None,
+    )?;
+    negate_members(&mut p);
     let total = dec(p.total);
     if total <= Decimal::ZERO {
         return Err(refused("CREDIT_MEMO_TOTAL_NOT_POSITIVE"));
@@ -589,6 +617,7 @@ pub fn create_memo(
         },
     );
     state.credits.writes += 1;
+    super::sales_tax::post_rows(state, id, m.txn_date, &p, -Decimal::ONE);
     get_memo(state, id)
 }
 
@@ -614,7 +643,7 @@ pub fn get_memo(state: &DemoState, id: TransactionId) -> Result<CreditMemoRecord
         total: money(m.total)?,
         memo: m.memo.clone(),
         customer_message: m.message.clone(),
-        sales_tax: None,
+        sales_tax: state.sales_tax.doc_tax.get(&id).cloned(),
         updated_at: version_of(m.version),
         status: if m.void {
             SalesDocStatus::Void
@@ -812,6 +841,7 @@ pub fn void_memo(
             a.voided = true;
         }
     }
+    super::sales_tax::void_rows(state, id);
     bump(state, id);
     Ok(())
 }
@@ -845,11 +875,12 @@ pub fn update_memo(
     let mut dates = vec![m.date, new.txn_date];
     dates.extend(refunds.iter().map(|r| r.0));
     check_closing(closing(state), &dates, password)?;
-    let p = super::invoices::preview(
+    let mut p = super::invoices::preview(
         state,
-        &as_invoice(new.contact_id, new.txn_date, &new.lines),
+        &as_invoice(new.contact_id, new.txn_date, &new.lines, new.sales_tax_id),
         None,
     )?;
+    negate_members(&mut p);
     let total = dec(p.total);
     if total <= Decimal::ZERO {
         return Err(refused("CREDIT_MEMO_TOTAL_NOT_POSITIVE"));
@@ -896,6 +927,7 @@ pub fn update_memo(
         mm.ledger = Some(ledger);
     }
     bump(state, id);
+    super::sales_tax::post_rows(state, id, new.txn_date, &p, -Decimal::ONE);
     get_memo(state, id)
 }
 
@@ -1200,8 +1232,11 @@ pub fn preview_receipt(
 ) -> Result<SalesReceiptPreview, ApiError> {
     check_lines(&r.lines)?;
     let contact = r.contact_id.unwrap_or_else(walk_in);
-    let mut figures =
-        super::invoices::preview(state, &as_invoice(contact, r.txn_date, &r.lines), None)?;
+    let mut figures = super::invoices::preview(
+        state,
+        &as_invoice(contact, r.txn_date, &r.lines, r.sales_tax_id),
+        None,
+    )?;
     figures.due_date = None;
     figures.contact_balance_after = None;
     let mut problems = Vec::new();
@@ -1323,7 +1358,7 @@ pub fn save_receipt(
         total: preview.figures.total,
         memo: r.memo.clone(),
         customer_message: r.customer_message.clone(),
-        sales_tax: None,
+        sales_tax: preview.figures.sales_tax.clone(),
         updated_at: version_of(version),
         status: SalesDocStatus::Posted,
         deposit_id: None,
@@ -1344,6 +1379,7 @@ pub fn save_receipt(
         },
     );
     state.credits.writes += 1;
+    super::sales_tax::post_rows(state, id, r.txn_date, &preview.figures, Decimal::ONE);
     Ok(record)
 }
 
@@ -1447,6 +1483,7 @@ pub fn void_receipt(
         x.version += 1;
         x.record.updated_at = version_of(x.version);
     }
+    super::sales_tax::void_rows(state, id);
     state.credits.writes += 1;
     Ok(())
 }
