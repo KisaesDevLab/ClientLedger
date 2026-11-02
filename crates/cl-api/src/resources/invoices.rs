@@ -1127,6 +1127,14 @@ pub struct InvoicePreview {
     /// The sales tax used, with its members' shares (`sales-tax-setup-v1`).
     #[serde(default)]
     pub sales_tax: Option<DocSalesTax>,
+    /// Sales tax notices (`RATE_CHANGED`, `EXEMPTION_*`; P23, never a 4xx).
+    /// A credit memo's or sales receipt's preview reads its own top-level
+    /// `problems`, so this stays empty there.
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub problems: Vec<crate::resources::customer_payments::PreviewProblem>,
 }
 
 impl fmt::Debug for InvoicePreview {

@@ -132,6 +132,9 @@ pub enum QueuedCheckKind {
     Check,
     /// A bill payment (its stub lists the bills paid).
     BillPayment,
+    /// A sales tax payment (P23, U-150; its stub lists the tax items
+    /// paid, stubLines).
+    SalesTaxPayment,
 }
 
 /// One check waiting to print (`GET /checks/print-queue`).
@@ -223,10 +226,10 @@ pub fn print_queue_from_json(body: &[u8]) -> Result<Vec<QueuedCheck>, ApiError> 
                 memo: non_blank(r.printed_memo)
                     .or(non_blank(r.memo))
                     .unwrap_or_default(),
-                kind: if r.txn_type.as_deref() == Some("bill_payment") {
-                    QueuedCheckKind::BillPayment
-                } else {
-                    QueuedCheckKind::Check
+                kind: match r.txn_type.as_deref() {
+                    Some("bill_payment") => QueuedCheckKind::BillPayment,
+                    Some("sales_tax_payment") => QueuedCheckKind::SalesTaxPayment,
+                    _ => QueuedCheckKind::Check,
                 },
                 bank_account: r.bank_account_id,
                 address: r

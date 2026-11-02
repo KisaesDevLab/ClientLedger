@@ -159,6 +159,45 @@ fn opt_dec(m: Option<Money>) -> rust_decimal::Decimal {
     m.map_or(rust_decimal::Decimal::ZERO, dec)
 }
 
+/// A sales tax payment's voucher stub (P23, U-150): one row per tax item
+/// paid and per adjustment, the engine's amounts as they are (opening
+/// lines are not on the check).
+#[must_use]
+pub(crate) fn stub_of_sales_tax_payment(
+    r: &cl_api::SalesTaxPaymentRecord,
+    items: &[cl_api::SalesTaxItem],
+) -> cl_print::StubData {
+    let name_of = |id: Option<cl_core::ids::SalesTaxItemId>| {
+        id.and_then(|id| items.iter().find(|i| i.id == id))
+            .map(|i| i.name.clone())
+            .unwrap_or_default()
+    };
+    cl_print::StubData {
+        lines: r
+            .lines
+            .iter()
+            .filter_map(|l| {
+                let name = match l.kind {
+                    cl_api::PaymentLineKind::Paid => name_of(l.tax_item_id),
+                    cl_api::PaymentLineKind::Adjustment => l
+                        .reason
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| t("print.stub.sales_tax_adjustment")),
+                    cl_api::PaymentLineKind::Opening | cl_api::PaymentLineKind::Other => {
+                        return None;
+                    }
+                };
+                Some(StubLine {
+                    name,
+                    amount: dec(l.amount),
+                })
+            })
+            .collect(),
+        ..cl_print::StubData::default()
+    }
+}
+
 /// A bill payment's voucher stub: the bills paid and the credits used
 /// (Q-213, U-108).
 #[must_use]

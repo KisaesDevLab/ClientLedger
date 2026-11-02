@@ -344,6 +344,8 @@ pub const COMMANDS: &[Command] = &[
     built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
     built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
     built("lists.templates", "Templates", Some(Menu::Lists), 1, None),
+    // P23: agencies, sales tax items and groups, tax codes (no shortcut).
+    built("lists.sales_tax", "Sales Tax Setup", Some(Menu::Lists), 1, None),
     // Templates Due (P15): the catch-up runner opens it; no menu entry (the
     // palette still finds it, like every command)
     built("lists.templates_due", "Templates Due", None, 1, None),
@@ -372,6 +374,9 @@ pub const COMMANDS: &[Command] = &[
     built("clients.refund", "Refund a Credit", Some(Menu::Clients), 2, None),
     built("clients.finance_charges", "Assess Finance Charges", Some(Menu::Clients), 2, None),
     built("clients.outbox", "Outbox", Some(Menu::Clients), 2, None),
+    // P23 WP-3: exemption certificates and the bad-debt recovery dialog.
+    screen("clients.tax_exemptions", "Tax Exemption Certificates", Some(Menu::Clients), 2, None, "P23"),
+    screen("clients.recover_bad_debt", "Recover a Bad Debt", Some(Menu::Clients), 2, None, "P23"),
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     built("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B')),
@@ -379,6 +384,9 @@ pub const COMMANDS: &[Command] = &[
     built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
     built("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C')),
     built("vendors.personal_funds", "Paid with Personal Funds", Some(Menu::Vendors), 1, None),
+    // P23 WP-3: the liability report and Pay Sales Tax (no shortcut).
+    screen("vendors.sales_tax_owed", "Sales Tax Owed", Some(Menu::Vendors), 3, None, "P23"),
+    screen("vendors.pay_sales_tax", "Pay Sales Tax", Some(Menu::Vendors), 3, None, "P23"),
     // P17: the receipt inbox (the menu shows its count, Q-P17t) and the
     // vendor statement match; no shortcut
     built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),
@@ -599,6 +607,8 @@ mod tests {
             "clients.refund",
             "clients.statements",
             "clients.finance_charges",
+            // P23
+            "lists.sales_tax",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

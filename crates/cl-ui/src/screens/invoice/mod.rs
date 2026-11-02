@@ -540,6 +540,7 @@ impl InvoiceScreen {
                 pricing: self.has(Capabilities::INVOICE_PRICING),
                 billable: self.has(Capabilities::BILLABLE_COSTS),
                 closing: self.has(Capabilities::INVOICE_EDIT),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
             // P22 (U-138, U-143): the documents' own capabilities.
             SalesDocKind::CreditMemo => InvoiceCaps {
@@ -547,12 +548,14 @@ impl InvoiceScreen {
                 pricing: self.has(Capabilities::CREDIT_MEMO_EDIT),
                 billable: false,
                 closing: self.has(Capabilities::CREDIT_MEMO_EDIT),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
             SalesDocKind::SalesReceipt => InvoiceCaps {
                 fields: self.has(Capabilities::SALES_RECEIPT_LINES),
                 pricing: self.has(Capabilities::SALES_RECEIPT_LINES),
                 billable: false,
                 closing: self.has(Capabilities::SALES_RECEIPT_LINES),
+                sales_tax: self.has(Capabilities::SALES_TAX_SETUP),
             },
         }
     }

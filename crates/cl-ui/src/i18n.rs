@@ -117,6 +117,7 @@ mod invoice_model;
 // P22 D3: the credit memo, sales receipt, refund, statement and finance
 // charge models; the screens add their own modules (D4-D7).
 mod receivables_model;
+mod sales_tax;
 mod sales_tax_model;
 // P22 D4-D5: Credit Memo, Sales Receipt and Refund a Credit.
 mod credit_memo;
@@ -125,7 +126,7 @@ mod finance_charges;
 mod statements;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 42] = [
+const TABLES: [&[(&str, &str)]; 43] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -164,6 +165,7 @@ const TABLES: [&[(&str, &str)]; 42] = [
     invoice_model::ENGLISH,
     invoice::ENGLISH,
     receivables_model::ENGLISH,
+    sales_tax::ENGLISH,
     sales_tax_model::ENGLISH,
     credit_memo::ENGLISH,
     statements::ENGLISH,
