@@ -17,7 +17,7 @@ use cl_api::{
     NewCreditMemo, NewCustomerRefund, NewInvoice, NewRefund, NewSalesReceipt, OpenCredit,
     PreviewProblem, RefundCheck, RefundMethod, RefundPrintStatus, RefundRecord, RefundSource,
     RefundSourceRef, SalesDocLine, SalesDocStatus, SalesReceiptPreview, SalesReceiptRecord,
-    SuggestedApplication,
+    SendEvent, SendMethod, SuggestedApplication,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret, Timestamp};
@@ -113,6 +113,8 @@ struct Memo {
     void: bool,
     apps: Vec<MemoApp>,
     ledger: Option<TransactionId>,
+    /// Every send, oldest first (U-144).
+    sent: Vec<SendEvent>,
 }
 
 #[derive(Clone)]
@@ -335,7 +337,7 @@ pub(super) fn payment_refunds(state: &DemoState) -> Vec<(TransactionId, Calendar
         .collect()
 }
 
-/// Refund checks on ank waiting in the check print queue (P22 D5, the
+/// Refund checks on `bank` waiting in the check print queue (P22 D5, the
 /// engine's listChecks with customer_refund): payee the client, the
 /// client's billing address.
 #[must_use]
@@ -582,6 +584,7 @@ pub fn create_memo(
             void: false,
             apps,
             ledger: Some(ledger),
+            sent: Vec::new(),
         },
     );
     state.credits.writes += 1;
@@ -643,6 +646,7 @@ pub fn get_memo(state: &DemoState, id: TransactionId) -> Result<CreditMemoRecord
             })
             .collect::<Result<_, ApiError>>()?,
         remaining: money(memo_remaining(state, id, m))?,
+        send_history: m.sent.clone(),
     })
 }
 
@@ -1321,6 +1325,11 @@ pub fn save_receipt(
         status: SalesDocStatus::Posted,
         deposit_id: None,
         deposited: false,
+        // An edit keeps the send history (U-144).
+        send_history: old
+            .as_ref()
+            .map(|(_, o)| o.record.send_history.clone())
+            .unwrap_or_default(),
     };
     state.credits.receipts.insert(
         id,
@@ -1442,3 +1451,156 @@ pub fn void_receipt(
 #[cfg(test)]
 #[path = "credit_memos_tests.rs"]
 pub(super) mod tests;
+
+// ---- U-144: emailing credit memos and sales receipts --------------------------------
+
+/// A credit memo or a sales receipt (the documents U-144 emails).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SalesDoc {
+    /// POST /credit-memos/{id}/email.
+    CreditMemo,
+    /// POST /sales-receipts/{id}/email.
+    SalesReceipt,
+}
+
+impl SalesDoc {
+    /// The Outbox row's kind.
+    fn outbox_kind(self) -> &'static str {
+        match self {
+            SalesDoc::CreditMemo => "credit_memo",
+            SalesDoc::SalesReceipt => "sales_receipt",
+        }
+    }
+}
+
+/// Its number, refusing a void document (400 DOCUMENT_VOID) and an
+/// unknown one (404).
+fn sendable(
+    state: &DemoState,
+    doc: SalesDoc,
+    id: TransactionId,
+) -> Result<Option<String>, ApiError> {
+    let (void, number) = match doc {
+        SalesDoc::CreditMemo => {
+            let m = state
+                .credits
+                .memos
+                .get(&id)
+                .ok_or(ApiError::NotFound { code: None })?;
+            (m.void, Some(m.number.clone()))
+        }
+        SalesDoc::SalesReceipt => {
+            let r = state
+                .credits
+                .receipts
+                .get(&id)
+                .ok_or(ApiError::NotFound { code: None })?;
+            (
+                r.record.status == SalesDocStatus::Void,
+                r.record.number.clone(),
+            )
+        }
+    };
+    if void {
+        return Err(refused("DOCUMENT_VOID"));
+    }
+    Ok(number)
+}
+
+/// POST /credit-memos/{id}/email and /sales-receipts/{id}/email: as the
+/// invoice email (the demo has no network: it records the "email" send,
+/// to + cc + bcc), unless the demo has no email server. With outbox_id
+/// the Outbox message goes in the same commit (404 OUTBOX_ITEM_NOT_FOUND
+/// when it is already gone).
+///
+/// # Errors
+/// NotFound, DOCUMENT_VOID, SMTP_NOT_CONFIGURED,
+/// OUTBOX_ITEM_NOT_FOUND.
+pub fn email_doc(
+    state: &mut DemoState,
+    doc: SalesDoc,
+    id: TransactionId,
+    message: &cl_api::EmailMessage,
+    outbox_id: Option<cl_api::OutboxId>,
+) -> Result<(), ApiError> {
+    if let Some(o) = outbox_id
+        && !super::invoices::outbox(state).iter().any(|i| i.id == o)
+    {
+        return Err(ApiError::NotFound {
+            code: cl_api::ErrorCode::parse("OUTBOX_ITEM_NOT_FOUND"),
+        });
+    }
+    sendable(state, doc, id)?;
+    if state.invoices.no_smtp {
+        return Err(refused(cl_api::SMTP_NOT_CONFIGURED));
+    }
+    let event = SendEvent {
+        method: SendMethod::Email,
+        recipients: message
+            .to
+            .iter()
+            .chain(&message.cc)
+            .chain(&message.bcc)
+            .cloned()
+            .collect(),
+        sent_at: Some(DemoState::now()),
+    };
+    match doc {
+        SalesDoc::CreditMemo => {
+            if let Some(m) = state.credits.memos.get_mut(&id) {
+                m.sent.push(event);
+            }
+        }
+        SalesDoc::SalesReceipt => {
+            if let Some(r) = state.credits.receipts.get_mut(&id) {
+                r.record.send_history.push(event);
+            }
+        }
+    }
+    if let Some(o) = outbox_id {
+        let _ = super::invoices::remove_from_outbox(state, o);
+    }
+    state.credits.writes += 1;
+    Ok(())
+}
+
+/// POST /credit-memos/{id}/email-later and /sales-receipts/{id}/email-
+/// later: the message waits in the Outbox (kind credit_memo or
+/// sales_receipt).
+///
+/// # Errors
+/// NotFound, DOCUMENT_VOID; Internal when the item can't be built.
+pub fn email_doc_later(
+    state: &mut DemoState,
+    doc: SalesDoc,
+    id: TransactionId,
+    message: &cl_api::EmailMessage,
+) -> Result<cl_api::OutboxItem, ApiError> {
+    let number = sendable(state, doc, id)?;
+    state.credits.writes += 1;
+    let n = state.credits.writes;
+    let v = serde_json::json!({
+        "id": format!("d5100000-0000-4000-8000-{n:012}"),
+        "kind": doc.outbox_kind(),
+        "transactionId": id, "txnNumber": number,
+        "to": message.to, "cc": message.cc, "bcc": message.bcc,
+        "subject": message.subject, "body": message.body,
+        "createdAt": DemoState::now(),
+    });
+    let item = serde_json::from_value(v.clone()).map_err(|_| ApiError::Internal)?;
+    super::invoices::push_outbox(state, v);
+    Ok(item)
+}
+/// The live credit memo rows on invoice (the engine counts them with the
+/// payments).
+#[must_use]
+pub fn live_memo_rows_on(state: &DemoState, invoice: TransactionId) -> usize {
+    state
+        .credits
+        .memos
+        .values()
+        .filter(|m| !m.void)
+        .flat_map(|m| m.apps.iter())
+        .filter(|a| !a.voided && a.invoice == invoice)
+        .count()
+}

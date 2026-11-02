@@ -318,9 +318,9 @@ pub fn refund_cross_company_404(h: &Harness) {
             key(),
         ))
         .expect_err("refund another company's credit");
-    assert!(
-        matches!(e, ApiError::NotFound { .. }) || refund_refusal(&e).is_some(),
-        "{e:?}"
-    );
+    // PR-3 item 9: exactly the engine's answer. Company B's own bank passes
+    // the account check; the source memo is another company's, so it is
+    // 404 (customer-refund.service.ts: "Credit memo not found").
+    assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
     assert_eq!(remaining(h, s, memo), m("389.75"));
 }

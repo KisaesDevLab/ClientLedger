@@ -247,6 +247,12 @@ pub(crate) const IDEMPOTENCY_IN_PROGRESS: &str = "IDEMPOTENCY_IN_PROGRESS";
 /// request's deadline).
 const MAX_IN_PROGRESS_RETRIES: u32 = 5;
 
+/// 409 `RETRY`: a deadlock rolled the request back (U-146).
+pub(crate) const RETRY_CODE: &str = "RETRY";
+
+/// The pause before the one resend after 409 `RETRY`.
+const DEADLOCK_PAUSE_MS: u64 = 150;
+
 /// The wait when the engine names none.
 const IN_PROGRESS_WAIT: Duration = Duration::from_secs(1);
 
@@ -277,6 +283,9 @@ pub(crate) struct Executor {
     /// The engine replays keys on invoice email and email-later
     /// (`invoice-email-v1`, U-127).
     invoice_email_v1: AtomicBool,
+    /// The engine replays keys on credit memo and sales receipt email and
+    /// email-later (`sales-doc-email-v1`, U-144).
+    sales_doc_email_v1: AtomicBool,
     /// The engine replays keys on customer payments
     /// (`idempotency-receive-payment-v1`, U-132).
     idempotency_receive_payment_v1: AtomicBool,
@@ -303,6 +312,9 @@ struct Retries {
     in_progress: u32,
     gate_replayed: bool,
     auth_replayed: bool,
+    /// The one same-key resend after 409 `RETRY` (a deadlock: nothing was
+    /// saved, U-146) is spent.
+    deadlock_resent: bool,
     same_key_retried: bool,
     /// An earlier attempt may have reached a handler (timeout, broken
     /// connection, 5xx).
@@ -342,6 +354,7 @@ impl Executor {
             idempotency_check_print_v1: AtomicBool::new(false),
             idempotency_invoice_v1: AtomicBool::new(false),
             invoice_email_v1: AtomicBool::new(false),
+            sales_doc_email_v1: AtomicBool::new(false),
             idempotency_receive_payment_v1: AtomicBool::new(false),
             idempotency_credit_memo_v1: AtomicBool::new(false),
             idempotency_customer_statements_v1: AtomicBool::new(false),
@@ -400,6 +413,12 @@ impl Executor {
         self.invoice_email_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `sales-doc-email-v1` (U-144):
+    /// it replays keys on credit memo and sales receipt email.
+    pub(crate) fn set_sales_doc_email_v1(&self, on: bool) {
+        self.sales_doc_email_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises the P22 key sets
     /// (`idempotency-credit-memo-v1`, `idempotency-customer-statements-v1`,
     /// `idempotency-finance-charges-v1`).
@@ -431,6 +450,7 @@ impl Executor {
             KeySet::CheckPrintV1 => self.idempotency_check_print_v1.load(Ordering::Relaxed),
             KeySet::InvoiceV1 => self.idempotency_invoice_v1.load(Ordering::Relaxed),
             KeySet::InvoiceEmailV1 => self.invoice_email_v1.load(Ordering::Relaxed),
+            KeySet::SalesDocEmailV1 => self.sales_doc_email_v1.load(Ordering::Relaxed),
             KeySet::ReceivePaymentV1 => self.idempotency_receive_payment_v1.load(Ordering::Relaxed),
             KeySet::CreditMemoV1 => self.idempotency_credit_memo_v1.load(Ordering::Relaxed),
             KeySet::CustomerStatementsV1 => self
@@ -728,6 +748,26 @@ impl Executor {
                     Step::Again
                 } else {
                     Step::Done(Err(keyed_give_up(ctx, r, e)))
+                }
+            }
+            // 409 RETRY (U-146, `receivables-retry-v1`; billable costs and
+            // batch groups since U-128): the engine rolled back and stored
+            // nothing, so the same request goes once more with the same
+            // key after a short pause; a second RETRY is the caller's
+            // ("try again").
+            (_, ApiError::Conflict { code: Some(c), .. })
+                if c.as_str() == RETRY_CODE && !ctx.call.method.is_read() && !r.deadlock_resent =>
+            {
+                r.deadlock_resent = true;
+                let wait = Duration::from_millis(DEADLOCK_PAUSE_MS);
+                if Instant::now()
+                    .checked_add(wait)
+                    .is_some_and(|t| t < ctx.deadline)
+                {
+                    tokio::time::sleep(wait).await;
+                    Step::Again
+                } else {
+                    Step::Done(Err(e))
                 }
             }
             // A 5xx after a mutation's handler may have run is ambiguous.
@@ -2255,6 +2295,59 @@ pub(crate) mod tests {
             reqs[0].headers.get("idempotency-key"),
             reqs[1].headers.get("idempotency-key")
         );
+    }
+
+    /// U-146: 409 `RETRY` (a deadlock, nothing saved) is sent once more
+    /// with the same key; the second answer is the result.
+    #[tokio::test]
+    async fn a_deadlock_retry_is_resent_once_with_the_same_key() {
+        let retry = r#"{"error":{"message":"x","code":"RETRY"}}"#;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(409, retry))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(json(201, r#"{"ok":true}"#))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let r = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect("resent");
+        assert_eq!(&r.body[..], br#"{"ok":true}"#);
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), 2);
+        assert!(reqs[0].headers.get("idempotency-key").is_some());
+        assert_eq!(
+            reqs[0].headers.get("idempotency-key"),
+            reqs[1].headers.get("idempotency-key")
+        );
+    }
+
+    /// A second 409 `RETRY` is the caller's: a plain "try again" message,
+    /// after exactly two sends (also on an unkeyed route).
+    #[tokio::test]
+    async fn a_second_deadlock_retry_is_a_plain_try_again() {
+        use cl_core::OwnerFacing as _;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(409, r#"{"error":{"message":"x","code":"RETRY"}}"#))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("retry");
+        assert_eq!(count(&server).await, 2);
+        let m = e.owner_message();
+        assert_eq!(m.key, "error.api.retry");
+        assert_eq!(m.suggestion_key, Some("fix.api.try_again_soon"));
     }
 
     /// The waits are bounded by the deadline: then the outcome is unknown

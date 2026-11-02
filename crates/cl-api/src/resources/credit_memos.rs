@@ -32,11 +32,13 @@ use crate::resources::customer_payments::{
     null_vec, require, ser_cents, too_long, with_version,
 };
 use crate::resources::invoices::{
-    INVOICE_TAGS_MAX, INVOICE_TEXT_MAX, InvoicePreview, SignedPercent,
+    EmailMessage, INVOICE_TAGS_MAX, INVOICE_TEXT_MAX, InvoicePreview, OutboxItem, SendEvent,
+    SignedPercent, email_body,
 };
 use crate::resources::operations::{
-    CREDIT_MEMO_APPLY, CREDIT_MEMO_CREATE, CREDIT_MEMO_GET, CREDIT_MEMO_PREVIEW, CREDIT_MEMO_PUT,
-    CREDIT_MEMO_UNAPPLY, PAYMENT_CREDITS,
+    CREDIT_MEMO_APPLY, CREDIT_MEMO_CREATE, CREDIT_MEMO_EMAIL, CREDIT_MEMO_EMAIL_LATER,
+    CREDIT_MEMO_GET, CREDIT_MEMO_PREVIEW, CREDIT_MEMO_PUT, CREDIT_MEMO_UNAPPLY, Operation,
+    PAYMENT_CREDITS,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::sales::{InvoiceLine, LayoutChoice, MAX_LINES};
@@ -595,6 +597,10 @@ pub struct CreditMemoRecord {
     /// What is left of the credit.
     #[serde(deserialize_with = "de_cents")]
     pub remaining: Money,
+    /// Every send, oldest first (U-144, `sales-doc-email-v1`; empty on
+    /// older engines).
+    #[serde(default, deserialize_with = "null_vec")]
+    pub send_history: Vec<SendEvent>,
 }
 
 impl fmt::Debug for CreditMemoRecord {
@@ -690,6 +696,44 @@ pub(crate) fn doc_body<T: Serialize>(
         map.insert("editingId".into(), Value::String(id.to_string()));
     }
     Ok(body)
+}
+
+/// Emails a credit memo or sales receipt (U-144, `sales-doc-email-v1`):
+/// the invoice email's body and errors on the document's own route
+/// (`to`: the operation and its path).
+pub(crate) async fn send_doc_email<T>(
+    s: &Session,
+    (op, path): (&'static Operation, String),
+    message: &EmailMessage,
+    pdf: (&str, &[u8]),
+    outbox_id: Option<crate::resources::invoices::OutboxId>,
+    key: IdempotencyKey,
+    read: fn(&[u8]) -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    require(s, Capabilities::SALES_DOC_EMAIL)?;
+    let body = email_body(message, pdf.0, pdf.1, outbox_id)?;
+    let mut call = Call::new(Method::Post, op.route(), path).json_body(json_body(&body)?);
+    call.idempotency_key = Some(key);
+    read(&s.send(op, call, None).await?.body)
+}
+
+/// Puts a credit memo or sales receipt email in the Outbox (U-144):
+/// 201 `{item}`.
+pub(crate) async fn queue_doc_email(
+    s: &Session,
+    op: &'static Operation,
+    path: String,
+    message: &EmailMessage,
+    key: IdempotencyKey,
+) -> Result<OutboxItem, ApiError> {
+    require(s, Capabilities::SALES_DOC_EMAIL)?;
+    message.check()?;
+    let mut call = Call::new(Method::Post, op.route(), path)
+        .json_body(json_body(&Value::Object(message.json()))?);
+    call.idempotency_key = Some(key);
+    let reply = s.send(op, call, None).await?;
+    decode_key(&reply.body, "item", "outbox item")
+        .map_err(crate::resources::versioning::saved_unreadable)
 }
 
 /// Credit memo operations of a session (`session.credit_memos()`).
@@ -875,6 +919,62 @@ impl CreditMemos<'_> {
         serde_json::from_slice::<W>(&reply.body)
             .map(|w| w.remaining)
             .map_err(|_| ApiError::Decode { what: "unapply" })
+    }
+
+    /// Emails the memo through the company SMTP with `pdf` attached
+    /// (`CreditMemo-<number>.pdf`) and records an "email" send (`POST
+    /// /credit-memos/{id}/email`, U-144). Keep one key per send and reuse
+    /// it on a retry; `outbox_id` (Send all) takes the Outbox message out
+    /// in the same commit.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `sales-doc-email-v1`; the local checks
+    /// of the invoice email; from the engine `SMTP_NOT_CONFIGURED`,
+    /// `SMTP_SEND_FAILED`, `DOCUMENT_VOID`, `OUTBOX_ITEM_NOT_FOUND` (see
+    /// [`crate::invoice_refusal`]), any [`ApiError`].
+    pub async fn email(
+        &self,
+        id: TransactionId,
+        message: &EmailMessage,
+        pdf_file_name: &str,
+        pdf: &[u8],
+        outbox_id: Option<crate::resources::invoices::OutboxId>,
+        key: IdempotencyKey,
+    ) -> Result<CreditMemoRecord, ApiError> {
+        send_doc_email(
+            self.0,
+            (
+                &CREDIT_MEMO_EMAIL,
+                format!("/api/v1/credit-memos/{id}/email"),
+            ),
+            message,
+            (pdf_file_name, pdf),
+            outbox_id,
+            key,
+            saved_credit_memo,
+        )
+        .await
+    }
+
+    /// Puts the memo's email in the Outbox (`POST
+    /// /credit-memos/{id}/email-later`, U-144; kind `credit_memo`).
+    ///
+    /// # Errors
+    /// As [`CreditMemos::email`] without the PDF checks.
+    pub async fn email_later(
+        &self,
+        id: TransactionId,
+        message: &EmailMessage,
+        key: IdempotencyKey,
+    ) -> Result<OutboxItem, ApiError> {
+        queue_doc_email(
+            self.0,
+            &CREDIT_MEMO_EMAIL_LATER,
+            format!("/api/v1/credit-memos/{id}/email-later"),
+            message,
+            key,
+        )
+        .await
     }
 
     /// A client's open credits (payment credits and credit memos), oldest

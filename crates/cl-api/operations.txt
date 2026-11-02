@@ -19,7 +19,8 @@
 # keyable-check-print, keyable-invoice, keyable-receive-payment,
 # keyable-credit-memo (idempotency-credit-memo-v1, U-137),
 # keyable-customer-statements (idempotency-customer-statements-v1, U-140) and
-# keyable-finance-charges (idempotency-finance-charges-v1, U-141) routes are
+# keyable-finance-charges (idempotency-finance-charges-v1, U-141) and
+# keyable-sales-doc-email (sales-doc-email-v1, U-144) routes are
 # upgraded;
 # never = auth and company-creation routes.
 #
@@ -349,3 +350,7 @@ POST    /api/v1/customer-statements/{id}/email-later keyable-customer-statements
 POST    /api/v1/finance-charges/preview         pre-handler-only
 POST    /api/v1/finance-charges/assess          keyable-finance-charges
 GET     /api/v1/finance-charges                 idempotent
+POST    /api/v1/credit-memos/{id}/email         keyable-sales-doc-email
+POST    /api/v1/credit-memos/{id}/email-later   keyable-sales-doc-email
+POST    /api/v1/sales-receipts/{id}/email       keyable-sales-doc-email
+POST    /api/v1/sales-receipts/{id}/email-later keyable-sales-doc-email

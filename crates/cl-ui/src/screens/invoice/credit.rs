@@ -852,76 +852,13 @@ impl InvoiceScreen {
     /// engine's, parsed for display only).
     pub(crate) fn doc_print(&self) -> Option<(String, cl_print::layout::Document)> {
         let e = self.editing.as_ref()?;
-        let client = e
-            .client()
-            .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
-        let address = client
-            .map(|c| {
-                let (bill, _) = super::draw::addresses(&c.fields);
-                std::iter::once(c.fields.display_name.clone())
-                    .chain(bill)
-                    .collect::<Vec<_>>()
-            })
+        let company = self
+            .tenant
+            .as_ref()
+            .map(|(_, n)| n.clone())
             .unwrap_or_default();
-        let item = |l: &cl_api::SalesDocLine| cl_print::forms::ItemLine {
-            description: l.description.clone().unwrap_or_default(),
-            quantity: l.quantity.map(Quantity::as_decimal),
-            rate: l.unit_price.map(Money::as_decimal),
-            amount: Some(l.amount.as_decimal()),
-            service_date: l
-                .service_date
-                .map(crate::shell::us_date)
-                .unwrap_or_default(),
-        };
-        let style = super::email::pdf_style(
-            &self
-                .tenant
-                .as_ref()
-                .map(|(_, n)| n.clone())
-                .unwrap_or_default(),
-        );
-        let tax = |m: Money| (!m.is_zero()).then(|| m.as_decimal());
-        match &e.doc {
-            SavedDoc::CreditMemo(m) => {
-                let d = cl_print::forms::credit_memo::CreditMemoData {
-                    number: m.number.clone().unwrap_or_default(),
-                    date: crate::shell::us_date(m.date),
-                    customer: address,
-                    lines: m.lines.iter().map(item).collect(),
-                    hide_zero_lines: false,
-                    subtotal: m.subtotal.as_decimal(),
-                    tax: tax(m.tax_amount),
-                    total: m.total.as_decimal(),
-                    remaining: Some(m.remaining.as_decimal()),
-                    message: m.customer_message.clone().unwrap_or_default(),
-                };
-                let doc = cl_print::forms::credit_memo::layout(&d, &style).ok()?;
-                Some((format!("CreditMemo-{}.pdf", d.number), doc))
-            }
-            SavedDoc::SalesReceipt(r) => {
-                let d = cl_print::forms::sales_receipt::SalesReceiptData {
-                    number: r.number.clone().unwrap_or_default(),
-                    date: crate::shell::us_date(r.date),
-                    payment_method: r
-                        .payment_method
-                        .map(|m| t(&format!("sales_receipt.method.{}", method_wire(m))))
-                        .unwrap_or_default(),
-                    reference: r.ref_no.clone().unwrap_or_default(),
-                    sold_to: address,
-                    lines: r.lines.iter().map(item).collect(),
-                    hide_zero_lines: false,
-                    subtotal: r.subtotal.as_decimal(),
-                    tax: tax(r.tax_amount),
-                    total: r.total.as_decimal(),
-                    message: r.customer_message.clone().unwrap_or_default(),
-                };
-                let doc = cl_print::forms::sales_receipt::layout(&d, &style).ok()?;
-                Some((format!("SalesReceipt-{}.pdf", d.number), doc))
-            }
-            SavedDoc::Invoice(_) => None,
-        }
+        doc_print_of(&e.doc, &self.books.contacts, &company)
     }
-
     /// Makes the saved memo's or receipt's PDF on the queue; it opens full
     /// size when done (S10: never in a frame).
     pub(crate) fn open_doc_pdf(&mut self) {
@@ -943,6 +880,81 @@ impl InvoiceScreen {
             move |_| async move { render() },
         ));
         self.poll_pdf();
+    }
+}
+
+/// A saved memo or receipt as its printed form (every figure the engine's,
+/// parsed for display only); the Outbox makes its PDF from this too
+/// (U-144). `None` for an invoice.
+pub(crate) fn doc_print_of(
+    doc: &SavedDoc,
+    contacts: &[cl_api::Contact],
+    company: &str,
+) -> Option<(String, cl_print::layout::Document)> {
+    let client = match doc {
+        SavedDoc::CreditMemo(m) => Some(m.customer_id),
+        SavedDoc::SalesReceipt(r) => r.customer_id,
+        SavedDoc::Invoice(_) => None,
+    }
+    .and_then(|c| contacts.iter().find(|x| x.id == c));
+    let address = client
+        .map(|c| {
+            let (bill, _) = super::draw::addresses(&c.fields);
+            std::iter::once(c.fields.display_name.clone())
+                .chain(bill)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let item = |l: &cl_api::SalesDocLine| cl_print::forms::ItemLine {
+        description: l.description.clone().unwrap_or_default(),
+        quantity: l.quantity.map(Quantity::as_decimal),
+        rate: l.unit_price.map(Money::as_decimal),
+        amount: Some(l.amount.as_decimal()),
+        service_date: l
+            .service_date
+            .map(crate::shell::us_date)
+            .unwrap_or_default(),
+    };
+    let style = super::email::pdf_style(company);
+    let tax = |m: Money| (!m.is_zero()).then(|| m.as_decimal());
+    match doc {
+        SavedDoc::CreditMemo(m) => {
+            let d = cl_print::forms::credit_memo::CreditMemoData {
+                number: m.number.clone().unwrap_or_default(),
+                date: crate::shell::us_date(m.date),
+                customer: address,
+                lines: m.lines.iter().map(item).collect(),
+                hide_zero_lines: false,
+                subtotal: m.subtotal.as_decimal(),
+                tax: tax(m.tax_amount),
+                total: m.total.as_decimal(),
+                remaining: Some(m.remaining.as_decimal()),
+                message: m.customer_message.clone().unwrap_or_default(),
+            };
+            let doc = cl_print::forms::credit_memo::layout(&d, &style).ok()?;
+            Some((format!("CreditMemo-{}.pdf", d.number), doc))
+        }
+        SavedDoc::SalesReceipt(r) => {
+            let d = cl_print::forms::sales_receipt::SalesReceiptData {
+                number: r.number.clone().unwrap_or_default(),
+                date: crate::shell::us_date(r.date),
+                payment_method: r
+                    .payment_method
+                    .map(|m| t(&format!("sales_receipt.method.{}", method_wire(m))))
+                    .unwrap_or_default(),
+                reference: r.ref_no.clone().unwrap_or_default(),
+                sold_to: address,
+                lines: r.lines.iter().map(item).collect(),
+                hide_zero_lines: false,
+                subtotal: r.subtotal.as_decimal(),
+                tax: tax(r.tax_amount),
+                total: r.total.as_decimal(),
+                message: r.customer_message.clone().unwrap_or_default(),
+            };
+            let doc = cl_print::forms::sales_receipt::layout(&d, &style).ok()?;
+            Some((format!("SalesReceipt-{}.pdf", d.number), doc))
+        }
+        SavedDoc::Invoice(_) => None,
     }
 }
 

@@ -390,6 +390,17 @@ impl Capabilities {
     pub const FINANCE_CHARGES: &'static str = "finance-charges-v1";
     /// U-141: `Idempotency-Key` on finance-charge assess.
     pub const IDEMPOTENCY_FINANCE_CHARGES: &'static str = "idempotency-finance-charges-v1";
+    /// U-144: email and email-later for credit memos and sales receipts
+    /// (keyed on those four routes), their send history and the Outbox
+    /// kinds `credit_memo` and `sales_receipt`.
+    pub const SALES_DOC_EMAIL: &'static str = "sales-doc-email-v1";
+    /// U-145, U-146: an invoice keeps its client while a payment, credit or
+    /// finance charge is on it (409 `INVOICE_HAS_PAYMENTS`,
+    /// `FINANCE_CHARGE_CLIENT_CHANGE`).
+    pub const INVOICE_CLIENT_GUARD: &'static str = "invoice-client-guard-v1";
+    /// U-146: a deadlock on the receivables routes is 409 `RETRY` (nothing
+    /// saved; resend with the same key).
+    pub const RECEIVABLES_RETRY: &'static str = "receivables-retry-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

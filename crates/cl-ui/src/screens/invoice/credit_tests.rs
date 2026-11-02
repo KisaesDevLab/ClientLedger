@@ -399,3 +399,110 @@ fn a_new_receipt_remembers_the_last_deposit_to() {
     assert_eq!(s.header.current().deposit_to, Some(bank));
     assert!(!s.is_dirty(), "a remembered default is not an edit");
 }
+
+/// PR-3 (U-144, Q-P22u): a saved credit memo and a saved sales receipt
+/// email as invoices do: the dialog fills from the document's own
+/// template, Send records the email in its sent history, Email later puts
+/// it in the Outbox with its kind, and Send all sends that row.
+#[test]
+fn memos_and_receipts_email_now_or_from_the_outbox() {
+    for kind in [SalesDocKind::CreditMemo, SalesDocKind::SalesReceipt] {
+        let (_d, mut s) = screen(kind);
+        s.link.demo_state().expect("demo").invoices.no_smtp = false;
+        let c = bluestem(&s);
+        golden_lines(&mut s, c);
+        s.start_save(SaveIntent::Save, None);
+        if kind == SalesDocKind::CreditMemo {
+            s.submit_apply_panel(true);
+        }
+        assert!(s.editing.is_some(), "{kind:?} saved");
+        s.open_email(None);
+        assert_eq!(s.state_json()["email"]["open"], true, "{kind:?}");
+        assert_eq!(s.state_json()["email"]["subject_filled"], true);
+        let number = s
+            .editing
+            .as_ref()
+            .and_then(Editing::number)
+            .expect("number");
+        assert!(
+            s.email.subject.contains(&number),
+            "{kind:?}: {}",
+            s.email.subject.len()
+        );
+        s.email.to = "ap@client.example".into();
+        s.send_email();
+        for _ in 0..5 {
+            s.poll();
+        }
+        assert_eq!(s.state_json()["email"]["last"], "sent", "{kind:?}");
+        assert_eq!(s.state_json()["sent_events"], 1, "{kind:?}");
+        // Email later: an Outbox row of the document's kind.
+        s.open_email(None);
+        s.email.to = "ap@client.example".into();
+        s.queue_email();
+        for _ in 0..5 {
+            s.poll();
+        }
+        assert_eq!(s.state_json()["email"]["last"], "queued");
+        let items = crate::company::demo::invoices::outbox(&s.link.demo_state().expect("demo"));
+        let want = if kind == SalesDocKind::CreditMemo {
+            cl_api::OutboxKind::CreditMemo
+        } else {
+            cl_api::OutboxKind::SalesReceipt
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, want);
+        let mut o = crate::screens::outbox::OutboxScreen::new(Arc::clone(&s.link), None);
+        o.send_all_for_tests();
+        let st = o.state_for_tests();
+        assert_eq!(st["results"][0], "sent", "{kind:?}");
+        assert_eq!(st["items"], 0);
+        s.load(s.editing.as_ref().map(|e| e.id).expect("id"));
+        for _ in 0..5 {
+            s.poll();
+        }
+        assert_eq!(s.state_json()["sent_events"], 2, "{kind:?}");
+    }
+}
+
+/// A memo or receipt can't be emailed without an email server: the dialog
+/// says so and offers the Outbox; a void one is refused before sending.
+#[test]
+fn a_memo_email_without_a_mail_server_offers_the_outbox() {
+    let (_d, mut s) = screen(SalesDocKind::CreditMemo);
+    s.link.demo_state().expect("demo").invoices.no_smtp = true;
+    let c = bluestem(&s);
+    golden_lines(&mut s, c);
+    s.start_save(SaveIntent::Save, None);
+    s.submit_apply_panel(true);
+    s.open_email(None);
+    s.email.to = "ap@client.example".into();
+    s.send_email();
+    for _ in 0..5 {
+        s.poll();
+    }
+    let st = s.state_json();
+    assert_eq!(st["email"]["failed"], true);
+    assert_eq!(st["email"]["problem"], "invoice.email.no_smtp");
+    assert_eq!(st["sent_events"], 0);
+    for k in [
+        "credit_memo.email.attachment",
+        "sales_receipt.email.attachment",
+        "outbox.credit_memo",
+        "outbox.sales_receipt",
+        "email.template.credit_memo.subject",
+        "email.template.sales_receipt.body",
+        "prefs.email.template.credit_memo",
+        "prefs.email.template.sales_receipt_reset",
+    ] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+    let e = crate::company::demo::credit_memos::email_doc_later(
+        &mut s.link.demo_state().expect("demo"),
+        crate::company::demo::credit_memos::SalesDoc::CreditMemo,
+        cl_core::ids::TransactionId::parse("d9000000-0000-4000-8000-000000000001").expect("id"),
+        &cl_api::EmailMessage::default(),
+    )
+    .expect_err("unknown");
+    assert!(matches!(e, cl_api::ApiError::NotFound { .. }));
+}

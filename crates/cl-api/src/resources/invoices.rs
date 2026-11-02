@@ -134,6 +134,12 @@ const REFUSAL_CODES: &[(&str, InvoiceRefusal)] = &[
         InvoiceRefusal::RecurringHasBillable,
     ),
     ("RETRY", InvoiceRefusal::Retry),
+    (
+        "FINANCE_CHARGE_CLIENT_CHANGE",
+        InvoiceRefusal::FinanceChargeClientChange,
+    ),
+    // U-144: a void credit memo or sales receipt can't be emailed.
+    ("DOCUMENT_VOID", InvoiceRefusal::Void),
     ("ATTACHMENT_TOO_LARGE", InvoiceRefusal::AttachmentTooLarge),
     ("OUTBOX_ITEM_NOT_FOUND", InvoiceRefusal::OutboxItemGone),
     ("OFFLINE_UNAVAILABLE", InvoiceRefusal::Offline),
@@ -179,6 +185,10 @@ pub enum InvoiceRefusal {
     /// A finance-charge invoice's amount, lines or date can't be edited
     /// (409 `FINANCE_CHARGE_INVOICE`, U-141): void it and assess again.
     FinanceChargeInvoice,
+    /// A finance-charge invoice keeps its client (409
+    /// `FINANCE_CHARGE_CLIENT_CHANGE`, U-145, Q-P22v): void it and assess
+    /// again for the right client.
+    FinanceChargeClientChange,
     /// A recurring schedule can't copy billable costs.
     RecurringHasBillable,
     /// The engine asks to try again (409 `RETRY`; same key).
@@ -540,6 +550,10 @@ impl fmt::Debug for InvoiceRecordLine {
 
 /// A saved invoice (`GET /invoices/{id}` and the save answers).
 #[derive(Clone, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent flags the engine reports on the invoice"
+)]
 pub struct InvoiceRecord {
     /// The ledger record (its lines include A/R and sales tax).
     pub txn: Transaction,
@@ -581,6 +595,8 @@ pub struct InvoiceRecord {
     pub billable_costs: Vec<InvoiceBillableCost>,
     /// The print layout (`None`: the company default; U-130).
     pub layout_id: Option<InvoiceLayoutId>,
+    /// A finance-charge invoice (U-141): it keeps its client (U-145).
+    pub is_finance_charge: bool,
 }
 
 impl InvoiceRecord {
@@ -641,6 +657,7 @@ fn null_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools, reason = "the engine's flags as sent")]
 struct RecordWire {
     #[serde(default)]
     subtotal: Option<Money>,
@@ -680,6 +697,8 @@ struct RecordWire {
     billable_costs: Option<Vec<InvoiceBillableCost>>,
     #[serde(default)]
     layout_id: Option<InvoiceLayoutId>,
+    #[serde(default, deserialize_with = "null_false")]
+    is_finance_charge: bool,
 }
 
 #[derive(Deserialize)]
@@ -797,6 +816,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
             print_later: w.print_later,
             billable_costs: costs,
             layout_id: w.layout_id,
+            is_finance_charge: w.is_finance_charge,
         })
     }
 }
@@ -1177,6 +1197,38 @@ impl EmailMessage {
     }
 }
 
+/// The body of an email send (`POST …/{id}/email`, U-127 and U-144): the
+/// message, the PDF in base64 with its file name and the Outbox message it
+/// sends, if any.
+///
+/// # Errors
+/// `Local(InvalidValue)` for no recipient or a bad address;
+/// `Local(AttachmentTooLarge)` for an empty PDF or one over 10 MB.
+pub(crate) fn email_body(
+    message: &EmailMessage,
+    pdf_file_name: &str,
+    pdf: &[u8],
+    outbox_id: Option<OutboxId>,
+) -> Result<Value, ApiError> {
+    message.check()?;
+    if pdf.is_empty() || pdf.len() > EMAIL_PDF_MAX_BYTES {
+        return Err(ApiError::Local(LocalValidation::AttachmentTooLarge));
+    }
+    let mut m = message.json();
+    m.insert(
+        "pdfBase64".into(),
+        Value::String(base64::engine::general_purpose::STANDARD.encode(pdf)),
+    );
+    m.insert(
+        "pdfFileName".into(),
+        Value::String(pdf_file_name.to_string()),
+    );
+    if let Some(o) = outbox_id {
+        m.insert("outboxId".into(), Value::String(o.to_string()));
+    }
+    Ok(Value::Object(m))
+}
+
 /// A message waiting in the Outbox (`GET /forms/email-queue`, U-127;
 /// contract per P20 plan §2, verify when E4 lands). The PDF is made when it
 /// is sent (Q-P20q).
@@ -1228,6 +1280,11 @@ pub enum OutboxKind {
     Transaction,
     /// A customer statement.
     CustomerStatement,
+    /// A credit memo (U-144, `sales-doc-email-v1`): sent with
+    /// `POST /credit-memos/{id}/email` and its `outboxId`.
+    CreditMemo,
+    /// A sales receipt (U-144): sent with `POST /sales-receipts/{id}/email`.
+    SalesReceipt,
     /// Anything a newer engine adds.
     #[serde(other)]
     Other,
@@ -1874,28 +1931,13 @@ impl Invoices<'_> {
         key: IdempotencyKey,
     ) -> Result<Versioned<InvoiceRecord>, ApiError> {
         require(self.0, Capabilities::INVOICE_EMAIL)?;
-        message.check()?;
-        if pdf.is_empty() || pdf.len() > EMAIL_PDF_MAX_BYTES {
-            return Err(ApiError::Local(LocalValidation::AttachmentTooLarge));
-        }
-        let mut m = message.json();
-        m.insert(
-            "pdfBase64".into(),
-            Value::String(base64::engine::general_purpose::STANDARD.encode(pdf)),
-        );
-        m.insert(
-            "pdfFileName".into(),
-            Value::String(pdf_file_name.to_string()),
-        );
-        if let Some(o) = outbox_id {
-            m.insert("outboxId".into(), Value::String(o.to_string()));
-        }
+        let body = email_body(message, pdf_file_name, pdf, outbox_id)?;
         let mut call = Call::new(
             Method::Post,
             INVOICE_EMAIL.route(),
             format!("{BASE}/{id}/email"),
         )
-        .json_body(json_body(&Value::Object(m))?);
+        .json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&INVOICE_EMAIL, call, None).await?;
         saved_from(&reply.body, "invoice")

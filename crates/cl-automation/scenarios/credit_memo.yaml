@@ -98,9 +98,27 @@ steps:
   - assert_state: {key: toast, equals: "Saved. To use this credit on an open invoice, click Apply credit."}
   - command: form.prev_record
   - assert_state: {key: screen.credit.saved_remaining, equals: "80.00"}
+  # --- PR-3 (U-144): email it; Put in Outbox queues a credit memo row ---------
+  - key: Ctrl+Shift+M
+  - assert_state: {key: screen.email.open, equals: true}
+  - assert_state: {key: screen.email.subject_filled, equals: true}
+  - assert_focused: {role: text_input, label: To}
+  - key: Ctrl+A
+  - type: {text: "billing@bluestem.example"}
+  - screenshot: email-dialog
+  - assert_no_clipping: {}
+  - click: {role: button, label: "Put in Outbox"}
+  - assert_state: {key: screen.email.open, equals: false}
+  - assert_state: {key: screen.last_action, equals: queued}
   - click: {role: button, label: Refund}
   - assert_state: {key: screen.screen, equals: refund}
   - assert_state: {key: screen.source, equals: creditmemo}
   - assert_state: {key: screen.amount, equals: "80.00"}
   - command: file.close_window
+  - command: file.close_window
+  # --- The Outbox lists the credit memo row (U-144) ----------------------
+  - command: clients.outbox
+  - assert_state: {key: screen.screen, equals: outbox}
+  - assert_state: {key: screen.items, equals: 1}
+  - screenshot: outbox-credit-memo
   - command: file.close_window

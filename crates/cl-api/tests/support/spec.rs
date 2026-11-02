@@ -38,6 +38,8 @@ use sha2::{Digest, Sha256};
 /// Since pin bf2daf38 (engine PRs #209-#213) the P22 routes are: credit
 /// memos, sales receipts, refund get, open credits, customer statements
 /// and runs, and finance charges (U-137 to U-143, U-112).
+/// Since pin 9fe75899 (engine PRs #214, #215) credit memo and sales receipt
+/// email and email-later are (U-144).
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

@@ -71,6 +71,11 @@ steps:
   - assert_exists: {role: label, label: Invoice message}
   - assert_exists: {role: label, label: Statement subject}
   - assert_exists: {role: label, label: Statement message}
+  # PR-3 (Q-P22u): credit memo and sales receipt templates.
+  - assert_exists: {role: label, label: Credit memo subject}
+  - assert_exists: {role: label, label: Credit memo message}
+  - assert_exists: {role: label, label: Sales receipt subject}
+  - assert_exists: {role: label, label: Sales receipt message}
   - screenshot: email-templates
   - assert_no_clipping: {}
   - click: {role: button, label: Remove password}

@@ -52,4 +52,20 @@ steps:
   - command: form.prev_record
   - assert_state: {key: screen.mode, equals: edit}
   - assert_state: {key: screen.total, equals: "399.30"}
+  # --- PR-3 (U-144): email it; Put in Outbox queues a sales receipt row ---------
+  - key: Ctrl+Shift+M
+  - assert_state: {key: screen.email.open, equals: true}
+  - assert_state: {key: screen.email.subject_filled, equals: true}
+  - assert_focused: {role: text_input, label: To}
+  - key: Ctrl+A
+  - type: {text: "billing@bluestem.example"}
+  - screenshot: email-dialog
+  - assert_no_clipping: {}
+  - click: {role: button, label: "Put in Outbox"}
+  - assert_state: {key: screen.email.open, equals: false}
+  - assert_state: {key: screen.last_action, equals: queued}
+  - command: file.close_window
+  - command: clients.outbox
+  - assert_state: {key: screen.items, equals: 1}
+  - screenshot: outbox-sales-receipt
   - command: file.close_window

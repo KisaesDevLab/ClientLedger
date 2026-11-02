@@ -25,11 +25,12 @@ use eframe::egui::{self, RichText};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
-use super::InvoiceScreen;
 use super::engine::{self, Job, label};
+use super::{InvoiceScreen, SavedDoc};
 use crate::company::CompanyEvent;
 use crate::i18n::{t, t_with};
 use crate::theme::Tokens;
+use cl_model::forms::invoice::SalesDocKind;
 
 /// What a finished email flow did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +49,9 @@ pub(crate) enum Outcome {
 #[derive(Default)]
 pub(crate) struct EmailFlow {
     open: bool,
-    invoice: Option<InvoiceRecord>,
+    /// The saved document being emailed (an invoice, or from PR-3 a credit
+    /// memo or sales receipt, U-144).
+    target: Option<TransactionId>,
     pub to: String,
     pub cc: String,
     pub bcc: String,
@@ -140,6 +143,26 @@ pub(crate) fn render_pdf(
         ));
     }
     Ok((invoice_pdf_name(&data.number), bytes))
+}
+
+/// Makes a credit memo's or sales receipt's PDF from its printed form (on
+/// the request queue, never in a frame; at most 10 MB).
+///
+/// # Errors
+/// `Local(InvalidValue)` when the PDF can't be made;
+/// `Local(AttachmentTooLarge)` over 10 MB.
+pub(crate) fn render_doc_pdf(
+    name: &str,
+    doc: &cl_print::layout::Document,
+) -> Result<(String, Vec<u8>), cl_api::ApiError> {
+    let bytes = cl_print::render(doc)
+        .map_err(|_| cl_api::ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
+    if bytes.len() > cl_api::EMAIL_PDF_MAX_BYTES {
+        return Err(cl_api::ApiError::Local(
+            cl_api::LocalValidation::AttachmentTooLarge,
+        ));
+    }
+    Ok((name.to_string(), bytes))
 }
 
 fn list(s: &str) -> Vec<String> {
@@ -526,14 +549,15 @@ impl InvoiceScreen {
             self.notice = Some("invoice.email.save_first");
             return;
         }
-        // P22: credit memos and sales receipts email later (not yet built).
-        let Some(rec) = e.invoice().cloned() else {
+        // PR-3 (U-144, Q-P22u): credit memos and sales receipts email as
+        // invoices do, on an engine with sales-doc-email-v1.
+        if e.invoice().is_none() && !self.has(cl_api::Capabilities::SALES_DOC_EMAIL) {
             self.notice = Some("credit_memo.email.later");
             if let Some(i) = then {
                 self.follow_up(i);
             }
             return;
-        };
+        }
         if e.void() {
             self.notice = Some("invoice.read_only.void");
             return;
@@ -542,24 +566,37 @@ impl InvoiceScreen {
         // next email after a change in Preferences).
         let prefs = self.email.prefs.clone().unwrap_or_default();
         self.load_email_prefs();
-        let client = rec
-            .txn
-            .contact_id
+        let client = e
+            .client()
             .and_then(|c| self.books.contacts.iter().find(|x| x.id == c));
         let style = MoneyStyle::default();
+        let number = e.number().unwrap_or_default();
+        let date = crate::shell::us_date(e.doc.date());
+        let (total, due, balance) = match &e.doc {
+            SavedDoc::Invoice(r) => (r.txn.total, r.due_date, r.balance_due),
+            SavedDoc::CreditMemo(m) => (Some(m.total), None, None),
+            SavedDoc::SalesReceipt(r) => (Some(r.total), None, None),
+        };
         let values = FieldValues {
             client_name: client
                 .map(|c| c.fields.display_name.clone())
                 .unwrap_or_default(),
-            invoice_number: rec.txn.txn_number.clone().unwrap_or_default(),
-            invoice_date: crate::shell::us_date(rec.txn.txn_date),
-            due_date: rec.due_date.map(crate::shell::us_date).unwrap_or_default(),
-            total: rec.txn.total.map(|m| m.format(style)).unwrap_or_default(),
-            balance_due: rec.balance_due.map(|m| m.format(style)).unwrap_or_default(),
+            invoice_number: number.clone(),
+            invoice_date: date.clone(),
+            due_date: due.map(crate::shell::us_date).unwrap_or_default(),
+            total: total.map(|m| m.format(style)).unwrap_or_default(),
+            balance_due: balance.map(|m| m.format(style)).unwrap_or_default(),
             company_name: self.company_name(),
+            number,
+            date,
             ..FieldValues::default()
         };
-        let (subject, body) = match prefs.template(TemplateDoc::Invoice) {
+        let doc = match self.kind {
+            SalesDocKind::Invoice => TemplateDoc::Invoice,
+            SalesDocKind::CreditMemo => TemplateDoc::CreditMemo,
+            SalesDocKind::SalesReceipt => TemplateDoc::SalesReceipt,
+        };
+        let (subject, body) = match prefs.template(doc) {
             TemplateSource::Default {
                 subject_key,
                 body_key,
@@ -581,7 +618,7 @@ impl InvoiceScreen {
         f.failed = false;
         f.problem = None;
         f.key = None;
-        f.invoice = Some(rec);
+        f.target = Some(e.id);
         f.then = then;
         f.open = true;
         if prefs.bcc_self && !self.link.is_demo() {
@@ -640,7 +677,13 @@ impl InvoiceScreen {
     }
 
     fn email_target(&self) -> Option<TransactionId> {
-        self.email.invoice.as_ref().map(|r| r.txn.id)
+        self.email.target
+    }
+
+    /// The open memo's or receipt's PDF parts (U-144): its file name and
+    /// printed form.
+    fn doc_pdf_parts(&self) -> Option<(String, Arc<cl_print::layout::Document>)> {
+        self.doc_print().map(|(n, d)| (n, Arc::new(d)))
     }
 
     /// Send now.
@@ -651,6 +694,10 @@ impl InvoiceScreen {
         let msg = self.email.message();
         if msg.to.is_empty() {
             self.email.problem = Some("invoice.email.to_needed");
+            return;
+        }
+        if self.kind != SalesDocKind::Invoice {
+            self.send_doc_email(id, msg);
             return;
         }
         let Some((data, style)) = self.pdf_parts() else {
@@ -678,6 +725,43 @@ impl InvoiceScreen {
         self.poll();
     }
 
+    /// Sends the open credit memo or sales receipt now (U-144): its PDF is
+    /// made on the queue from the printed form.
+    fn send_doc_email(&mut self, id: TransactionId, msg: EmailMessage) {
+        let Some((name, doc)) = self.doc_pdf_parts() else {
+            self.email.problem = Some("invoice.email.pdf_failed");
+            return;
+        };
+        self.email.problem = None;
+        let key = self.email.key_for(&format!("send|{id}"), &msg);
+        let kind = self.kind;
+        let (n2, d2, m2) = (name.clone(), Arc::clone(&doc), msg.clone());
+        self.email.job = Some(engine::write(
+            &self.link,
+            self.group.as_ref(),
+            label("orphan.invoice_email", Some(key.clone())),
+            move |d| {
+                render_doc_pdf(&n2, &d2)?;
+                crate::company::demo::credit_memos::email_doc(d, demo_doc(kind), id, &m2, None)
+                    .map(|()| Outcome::Sent)
+            },
+            move |s| async move {
+                let (name, pdf) = render_doc_pdf(&name, &doc)?;
+                if kind == SalesDocKind::CreditMemo {
+                    s.credit_memos()
+                        .email(id, &msg, &name, &pdf, None, key)
+                        .await?;
+                } else {
+                    s.sales_receipts()
+                        .email(id, &msg, &name, &pdf, None, key)
+                        .await?;
+                }
+                Ok(Outcome::Sent)
+            },
+        ));
+        self.poll();
+    }
+
     /// Put it in the Outbox (sent when the owner clicks Send all, Q-P20d).
     pub(crate) fn queue_email(&mut self) {
         let Some(id) = self.email_target() else {
@@ -689,6 +773,29 @@ impl InvoiceScreen {
             return;
         }
         let key = self.email.key_for(&format!("later|{id}"), &msg);
+        if self.kind != SalesDocKind::Invoice {
+            let kind = self.kind;
+            let m2 = msg.clone();
+            self.email.job = Some(engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label("orphan.invoice_email_later", Some(key.clone())),
+                move |d| {
+                    crate::company::demo::credit_memos::email_doc_later(d, demo_doc(kind), id, &m2)
+                        .map(|_: OutboxItem| Outcome::Queued)
+                },
+                move |s| async move {
+                    if kind == SalesDocKind::CreditMemo {
+                        s.credit_memos().email_later(id, &msg, key).await?;
+                    } else {
+                        s.sales_receipts().email_later(id, &msg, key).await?;
+                    }
+                    Ok(Outcome::Queued)
+                },
+            ));
+            self.poll();
+            return;
+        }
         let m2 = msg.clone();
         self.email.job = Some(engine::write(
             &self.link,
@@ -716,7 +823,9 @@ impl InvoiceScreen {
             return;
         }
         self.open_pdf();
-        if self.email.mark_sent {
+        // A memo or receipt has no "sent" record of its own (U-144 records
+        // email sends only): Mark as sent is an invoice's.
+        if self.email.mark_sent && self.kind == SalesDocKind::Invoice {
             let key = IdempotencyKey::new();
             let sent = SendRecord {
                 method: SendMethod::Pdf,
@@ -779,6 +888,12 @@ impl InvoiceScreen {
         }
         let mut click = None;
         let mut focus_first = std::mem::take(&mut self.dialog_focus);
+        let invoice = self.kind == SalesDocKind::Invoice;
+        let attachment = match self.kind {
+            SalesDocKind::Invoice => "invoice.email.attachment",
+            SalesDocKind::CreditMemo => "credit_memo.email.attachment",
+            SalesDocKind::SalesReceipt => "sales_receipt.email.attachment",
+        };
         let width = (ctx.content_rect().width() - 48.0).clamp(300.0, 560.0);
         egui::Window::new(t("invoice.email.title"))
             .id(egui::Id::unique("invoice/email"))
@@ -811,7 +926,7 @@ impl InvoiceScreen {
                 )
                 .labelled_by(l.id);
                 ui.label(
-                    RichText::new(t("invoice.email.attachment"))
+                    RichText::new(t(attachment))
                         .size(12.0)
                         .color(tokens.text_secondary),
                 );
@@ -857,7 +972,9 @@ impl InvoiceScreen {
                     {
                         click = Some("pdf");
                     }
-                    ui.checkbox(&mut f.mark_sent, t("invoice.email.mark_sent"));
+                    if invoice {
+                        ui.checkbox(&mut f.mark_sent, t("invoice.email.mark_sent"));
+                    }
                     if ui.button(t("invoice.email.cancel")).clicked() {
                         click = Some("cancel");
                     }
@@ -884,11 +1001,20 @@ impl InvoiceScreen {
     }
 }
 
+/// The demo's document kind of a memo or receipt window.
+fn demo_doc(kind: SalesDocKind) -> crate::company::demo::credit_memos::SalesDoc {
+    if kind == SalesDocKind::CreditMemo {
+        crate::company::demo::credit_memos::SalesDoc::CreditMemo
+    } else {
+        crate::company::demo::credit_memos::SalesDoc::SalesReceipt
+    }
+}
+
 /// "Sent on 11/04/2026 by email to a@b.example" (Q-P20f), the latest send,
 /// To and Cc only: the company's own address (its BCC-self copy) is left
-/// out (Q-P20ab).
-pub(crate) fn sent_text(r: &InvoiceRecord, own: Option<&str>) -> Option<String> {
-    let last = r.send_history.last()?;
+/// out (Q-P20ab). Invoices, credit memos and sales receipts (U-144).
+pub(crate) fn sent_text(history: &[cl_api::SendEvent], own: Option<&str>) -> Option<String> {
+    let last = history.last()?;
     let when = last
         .sent_at
         .and_then(|ts| cl_core::CalendarDate::from_naive(ts.as_utc().date_naive()).ok())
@@ -929,10 +1055,10 @@ mod sent_tests {
                 "recipients": ["ap@client.example", "Owner@Company.example"]}],
         }))
         .expect("record");
-        let text = sent_text(&r, Some("owner@company.example")).expect("text");
+        let text = sent_text(&r.send_history, Some("owner@company.example")).expect("text");
         assert!(text.contains("ap@client.example"));
         assert!(!text.to_lowercase().contains("owner@company.example"));
         r.send_history.clear();
-        assert_eq!(sent_text(&r, None), None);
+        assert_eq!(sent_text(&r.send_history, None), None);
     }
 }

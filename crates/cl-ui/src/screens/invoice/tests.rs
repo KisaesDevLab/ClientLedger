@@ -810,3 +810,81 @@ fn applying_a_deposit_in_a_closed_period_asks_and_keeps_its_key() {
     assert_eq!(s.deposit_card.note(), Some("invoice.deposit.applied"));
     let _ = invoice;
 }
+
+/// PR-3 B1 (U-145, U-146): on a saved invoice with a payment applied, or
+/// on a finance-charge invoice, Client is locked with a plain hint and a
+/// pick is ignored; the engine's 409s read as plain messages.
+#[test]
+fn client_is_locked_on_a_paid_or_finance_charge_invoice() {
+    let (_d, mut s) = screen();
+    let c = story_client(&s);
+    let record = |extra: serde_json::Value| {
+        let mut v = serde_json::json!({
+            "id": "d1000000-0000-4000-8000-000000000077", "txnType": "invoice",
+            "txnDate": "2026-11-04", "status": "posted", "lines": [],
+            "contactId": c.to_string(), "total": "100.0000",
+        });
+        if let (Some(m), serde_json::Value::Object(x)) = (v.as_object_mut(), extra) {
+            m.extend(x);
+        }
+        let r: cl_api::InvoiceRecord = serde_json::from_value(v).expect("record");
+        r
+    };
+    s.editing = Some(Editing::of(SavedDoc::Invoice(record(serde_json::json!({
+        "amountPaid": "40.0000", "balanceDue": "60.0000", "invoiceStatus": "partial"
+    })))));
+    s.header.load(InvoiceForm {
+        client: Some(c),
+        ..InvoiceForm::default()
+    });
+    assert_eq!(s.client_lock(), Some("invoice.client.locked.paid"));
+    assert_eq!(
+        s.state_json()["client_locked"],
+        "invoice.client.locked.paid"
+    );
+    assert!(
+        s.read_only().is_none(),
+        "the rest of the form stays editable"
+    );
+    let other = s
+        .books
+        .contacts
+        .iter()
+        .find(|x| x.id != c && x.fields.contact_type != cl_api::ContactType::Vendor)
+        .map(|x| x.id)
+        .expect("another client");
+    s.pick_client(other);
+    assert_eq!(s.header.current().client, Some(c), "the pick is ignored");
+    s.editing = Some(Editing::of(SavedDoc::Invoice(record(serde_json::json!({
+        "isFinanceCharge": true
+    })))));
+    assert_eq!(
+        s.client_lock(),
+        Some("invoice.client.locked.finance_charge")
+    );
+    s.editing = Some(Editing::of(SavedDoc::Invoice(record(
+        serde_json::json!({}),
+    ))));
+    assert_eq!(s.client_lock(), None);
+    for (code, key) in [
+        ("INVOICE_HAS_PAYMENTS", "invoice.client.has_payments"),
+        (
+            "FINANCE_CHARGE_CLIENT_CHANGE",
+            "invoice.client.finance_charge",
+        ),
+    ] {
+        s.notice = None;
+        s.save_failed(cl_api::engine_refusal(
+            409,
+            &serde_json::json!({"error": {"message": "x", "code": code, "details": {}}}),
+        ));
+        assert_eq!(s.notice, Some(key), "{code}");
+        assert!(crate::i18n::has(key));
+    }
+    for k in [
+        "invoice.client.locked.paid",
+        "invoice.client.locked.finance_charge",
+    ] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+}

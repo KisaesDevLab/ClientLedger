@@ -266,6 +266,15 @@ impl OutboxScreen {
             self.next();
             return;
         };
+        // Credit memo and sales receipt rows (PR-3, U-144): each goes with
+        // its own route and outboxId.
+        if matches!(
+            item.kind,
+            cl_api::OutboxKind::CreditMemo | cl_api::OutboxKind::SalesReceipt
+        ) {
+            self.send_doc(item, id);
+            return;
+        }
         let job = engine::read(
             &self.link,
             self.group.as_ref(),
@@ -351,6 +360,73 @@ impl OutboxScreen {
                 s.customer_statements()
                     .email(id, &msg, &name, &pdf, Some(outbox_id), key)
                     .await
+            },
+        );
+        self.send_job = Some((item, job));
+        if self.link.is_demo() {
+            self.poll();
+        }
+    }
+
+    /// Sends a credit memo or sales receipt row (U-144): reads the
+    /// document, makes its PDF from the printed form (on the queue) and
+    /// emails it; the engine takes the Outbox message out in the same
+    /// commit (`outboxId`).
+    fn send_doc(&mut self, item: OutboxItem, id: TransactionId) {
+        use crate::company::demo::credit_memos as demo;
+        use crate::screens::invoice::SavedDoc;
+        use crate::screens::invoice::credit::doc_print_of;
+        use crate::screens::invoice::email::render_doc_pdf;
+        let memo = item.kind == cl_api::OutboxKind::CreditMemo;
+        let msg = item.message();
+        let outbox_id = item.id;
+        let key = self.keys.entry(outbox_id).or_default().clone();
+        let company = self
+            .tenant
+            .as_ref()
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default();
+        let contacts = self.contacts.clone();
+        let (c2, k2, m2) = (company.clone(), contacts.clone(), msg.clone());
+        let pdf = |doc: &SavedDoc, contacts: &[Contact], company: &str| {
+            let (name, form) = doc_print_of(doc, contacts, company)
+                .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
+            render_doc_pdf(&name, &form)
+        };
+        let job = engine::write(
+            &self.link,
+            self.group.as_ref(),
+            label("orphan.invoice_email", Some(key.clone())),
+            move |d| {
+                let (doc, kind) = if memo {
+                    (
+                        SavedDoc::CreditMemo(demo::get_memo(d, id)?),
+                        demo::SalesDoc::CreditMemo,
+                    )
+                } else {
+                    (
+                        SavedDoc::SalesReceipt(demo::get_receipt(d, id)?),
+                        demo::SalesDoc::SalesReceipt,
+                    )
+                };
+                pdf(&doc, &k2, &c2)?;
+                demo::email_doc(d, kind, id, &m2, Some(outbox_id))
+            },
+            move |s| async move {
+                if memo {
+                    let doc = SavedDoc::CreditMemo(s.credit_memos().get(id).await?);
+                    let (name, bytes) = pdf(&doc, &contacts, &company)?;
+                    s.credit_memos()
+                        .email(id, &msg, &name, &bytes, Some(outbox_id), key)
+                        .await?;
+                } else {
+                    let doc = SavedDoc::SalesReceipt(s.sales_receipts().get(id).await?);
+                    let (name, bytes) = pdf(&doc, &contacts, &company)?;
+                    s.sales_receipts()
+                        .email(id, &msg, &name, &bytes, Some(outbox_id), key)
+                        .await?;
+                }
+                Ok(())
             },
         );
         self.send_job = Some((item, job));
@@ -556,10 +632,11 @@ impl OutboxScreen {
 
 fn number(i: &OutboxItem) -> String {
     let n = i.txn_number.clone().unwrap_or_default();
-    if i.kind == cl_api::OutboxKind::CustomerStatement {
-        t_with("outbox.statement", &[("number", &n)])
-    } else {
-        n
+    match i.kind {
+        cl_api::OutboxKind::CustomerStatement => t_with("outbox.statement", &[("number", &n)]),
+        cl_api::OutboxKind::CreditMemo => t_with("outbox.credit_memo", &[("number", &n)]),
+        cl_api::OutboxKind::SalesReceipt => t_with("outbox.sales_receipt", &[("number", &n)]),
+        _ => n,
     }
 }
 
@@ -589,6 +666,23 @@ fn demo_unsent(d: &mut crate::company::demo::DemoState) -> Vec<InvoiceSummary> {
             }
         })
         .collect()
+}
+
+impl OutboxScreen {
+    /// Send all, polled to the end (tests of other screens).
+    #[cfg(test)]
+    pub(crate) fn send_all_for_tests(&mut self) {
+        self.send_all();
+        for _ in 0..20 {
+            self.poll();
+        }
+    }
+
+    /// The control-channel state (tests of other screens).
+    #[cfg(test)]
+    pub(crate) fn state_for_tests(&self) -> Value {
+        self.state_json()
+    }
 }
 
 impl Screen for OutboxScreen {

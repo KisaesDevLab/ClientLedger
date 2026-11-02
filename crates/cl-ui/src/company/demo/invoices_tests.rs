@@ -473,3 +473,42 @@ fn stacked_discounts_compound_and_tax_never_goes_negative() {
     .expect("doc");
     assert_eq!(neg.tax_total, Decimal::from_str("-4.05").expect("d"));
 }
+
+/// Prev/Next lists newest first as the engine does (date, then when made,
+/// descending), not by id: the seeded 1091/1095 and P22's 1201 to 1321
+/// carry their numbers in their ids, so an id order put them ahead of an
+/// invoice made today (`ui-check create_invoice`, Prev after Save & New).
+#[test]
+fn the_list_puts_an_invoice_made_today_before_the_seeded_ones() {
+    let mut state = DemoState::new();
+    // The seeds first: they build the contacts with the story clients.
+    super::super::receivables::seed(&mut state);
+    super::super::credit_memos::seed(&mut state);
+    let (client, items) = story(&mut state);
+    let seeded = list(&state);
+    assert!(seeded.len() >= 2, "the seeded invoices are listed");
+    let new = NewInvoice::new(
+        client,
+        DemoState::today(),
+        vec![line_for(&items, "10.00", false, "1")],
+    );
+    let first = create(&mut state, &new, None)
+        .expect("create")
+        .record
+        .txn
+        .id;
+    let second = create(&mut state, &new, None)
+        .expect("create")
+        .record
+        .txn
+        .id;
+    let v = list(&state);
+    assert_eq!(v[..2], [second, first]);
+    assert_eq!(v[2..], seeded[..]);
+    // Older dates follow newer ones whatever the order they were made in.
+    let dates: Vec<String> = v
+        .iter()
+        .map(|id| state.invoices.stored[id].record["txnDate"].to_string())
+        .collect();
+    assert!(dates.windows(2).all(|w| w[0] >= w[1]), "{dates:?}");
+}

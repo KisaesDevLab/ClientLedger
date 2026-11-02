@@ -37,6 +37,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Default invoice email (cl_settings::email_templates; Preferences > Email edits a copy).
     ("email.template.invoice.subject", "Invoice {invoice_number} from {company_name}"),
     ("email.template.invoice.body", "Dear {client_name},\n\nYour invoice {invoice_number} for {total} is attached. It is due {due_date}.\n\nThank you for your business.\n{company_name}"),
+    ("email.template.credit_memo.subject", "Credit memo {number} from {company_name}"),
+    ("email.template.credit_memo.body", "Dear {client_name},\n\nYour credit memo {number} dated {date} for {total} is attached.\n\nThank you for your business.\n{company_name}"),
+    ("email.template.sales_receipt.subject", "Sales receipt {number} from {company_name}"),
+    ("email.template.sales_receipt.body", "Dear {client_name},\n\nYour sales receipt {number} dated {date} for {total} is attached.\n\nThank you for your business.\n{company_name}"),
     ("email.template.statement.subject", "Statement {statement_date} from {company_name}"),
     ("email.template.statement.body", "Dear {client_name},\n\nYour statement as of {statement_date} is attached. The amount due is {amount_due}.\n\nThank you for your business.\n{company_name}"),
 ];

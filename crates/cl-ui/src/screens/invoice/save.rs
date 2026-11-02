@@ -402,7 +402,16 @@ impl InvoiceScreen {
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
-        self.engine_refusal(e);
+        // U-145, U-146: a save can only meet these on a client change.
+        match invoice_refusal(&e) {
+            Some(InvoiceRefusal::HasPayments) => {
+                self.notice = Some("invoice.client.has_payments");
+            }
+            Some(InvoiceRefusal::FinanceChargeClientChange) => {
+                self.notice = Some("invoice.client.finance_charge");
+            }
+            _ => self.engine_refusal(e),
+        }
     }
 
     /// Applies held deposit `source` to the open invoice, dated today; on

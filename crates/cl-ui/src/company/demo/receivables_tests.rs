@@ -751,3 +751,183 @@ proptest! {
         prop_assert_eq!(record_of(&r.state, rec.id).expect("r").unapplied_remaining, Money::ZERO);
     }
 }
+
+// ---- PR-3 S2 and B1: the demo refuses what the engine refuses ----------------------
+
+fn parity_run() -> (Run, TransactionId, TransactionId) {
+    let mut r = new_run(&serde_json::json!({"company": {}}));
+    let client = r.client;
+    let a = add_invoice(
+        &mut r,
+        &serde_json::json!({"number": "7001", "date": "2026-10-01", "dueDate": "2026-10-31", "total": "100.00"}),
+        client,
+    );
+    let b = add_invoice(
+        &mut r,
+        &serde_json::json!({"number": "7002", "date": "2026-10-02", "dueDate": "2026-11-01", "total": "50.00"}),
+        client,
+    );
+    (r, a, b)
+}
+
+fn close_through(r: &mut Run, date: &str) {
+    r.state.open = r.state.companies.first().map(|c| c.tenant_id);
+    r.state.companies[0].closed_through = Some(d(date));
+}
+
+/// Review item 7: a row that took a discount can't be unapplied (409
+/// APPLICATION_HAS_ADJUSTMENTS) and the invoice keeps what was applied.
+#[test]
+fn unapply_of_a_row_with_a_discount_is_refused() {
+    let (mut r, a, _) = parity_run();
+    let client = r.client;
+    let p = save(
+        &mut r,
+        client,
+        "2026-11-03",
+        "98.00",
+        &[(a, "98.00".into(), Some("2.00".into()), None)],
+        false,
+    );
+    let pay = receive(&mut r.state, &p, None, None).expect("received").id;
+    let e = unapply(&mut r.state, pay, a, None, None).expect_err("refused");
+    assert_eq!(code_of(&e), "APPLICATION_HAS_ADJUSTMENTS");
+    assert_eq!(super::super::invoices::live_on_invoice(&r.state, a), (1, 0));
+    assert_eq!(
+        super::super::invoices::receivable(&r.state, a)
+            .expect("a")
+            .balance,
+        Decimal::ZERO
+    );
+}
+
+/// Review item 7: an invoice with a live payment can't be voided (409
+/// INVOICE_HAS_PAYMENTS with the engine's counts); once the row is
+/// unapplied it can.
+#[test]
+fn void_of_an_invoice_with_payments_is_refused_until_unapplied() {
+    let (mut r, a, _) = parity_run();
+    let client = r.client;
+    let p = save(
+        &mut r,
+        client,
+        "2026-11-03",
+        "40.00",
+        &[(a, "40.00".into(), None, None)],
+        false,
+    );
+    let pay = receive(&mut r.state, &p, None, None).expect("received").id;
+    let e = super::super::invoices::void(&mut r.state, a, None).expect_err("refused");
+    assert_eq!(code_of(&e), "INVOICE_HAS_PAYMENTS");
+    let ApiError::Conflict { details, .. } = &e else {
+        panic!("conflict: {e:?}");
+    };
+    assert_eq!(details.count("payments"), Some(1));
+    assert_eq!(details.count("credits"), Some(0));
+    unapply(&mut r.state, pay, a, None, None).expect("unapplied");
+    super::super::invoices::void(&mut r.state, a, None).expect("void");
+}
+
+/// Review item 7: unapply meets the closing date on the row's applied
+/// date, not the payment's: a credit applied after the closing date comes
+/// off without the password; a row applied on or before it needs it.
+#[test]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the golden tests' r, a, b, p"
+)]
+fn unapply_checks_the_closing_date_on_the_applied_date() {
+    let (mut r, a, b) = parity_run();
+    let client = r.client;
+    // 150 on Nov 3: 100 to A, 50 left as credit.
+    let p = save(
+        &mut r,
+        client,
+        "2026-11-03",
+        "150.00",
+        &[(a, "100.00".into(), None, None)],
+        false,
+    );
+    let pay = receive(&mut r.state, &p, None, None).expect("received").id;
+    apply(
+        &mut r.state,
+        pay,
+        &ApplyRequest {
+            date: d("2026-11-20"),
+            applications: vec![ApplyInvoice {
+                invoice_id: b,
+                amount: Some(m("50.00")),
+                expected_balance_due: None,
+            }],
+            expected_updated_at: None,
+        },
+        None,
+    )
+    .expect("applied later");
+    close_through(&mut r, "2026-11-10");
+    let e = unapply(&mut r.state, pay, a, None, None).expect_err("closed");
+    assert!(
+        matches!(
+            e,
+            ApiError::ClosedPeriod(_) | ApiError::ClosingPasswordRequired
+        ),
+        "{e:?}"
+    );
+    unapply(&mut r.state, pay, b, None, None).expect("applied after the closing date");
+}
+
+/// PR-3 B1 (U-146): a saved invoice keeps its client while a payment is
+/// applied (409 INVOICE_HAS_PAYMENTS); a finance-charge invoice always
+/// (409 FINANCE_CHARGE_CLIENT_CHANGE); same-client edits still save; an
+/// edit down to exactly the amount paid makes it paid (N2).
+#[test]
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the golden tests' r, a, b, p"
+)]
+fn an_invoice_keeps_its_client_while_anything_is_applied() {
+    let (mut r, a, b) = parity_run();
+    let client = r.client;
+    let other = r
+        .state
+        .contacts_mut()
+        .iter()
+        .find(|c| c.fields.display_name == "Golden Other")
+        .map(|c| c.id)
+        .expect("other");
+    let p = save(
+        &mut r,
+        client,
+        "2026-11-03",
+        "40.00",
+        &[(a, "40.00".into(), None, None)],
+        false,
+    );
+    receive(&mut r.state, &p, None, None).expect("received");
+    let edit = |to: ContactId, total: &str| {
+        let one = cl_core::Quantity::parse_wire("1").expect("q");
+        let mut line = cl_api::InvoiceLine::account(super::super::account_id(4000), one, m(total));
+        line.is_taxable = Some(false);
+        cl_api::NewInvoice::new(to, d("2026-10-01"), vec![line])
+    };
+    let e = super::super::invoices::update(&mut r.state, a, None, &edit(other, "100.00"), None)
+        .expect_err("refused");
+    assert_eq!(code_of(&e), "INVOICE_HAS_PAYMENTS");
+    // Same client, total down to exactly what was paid: paid.
+    let saved = super::super::invoices::update(&mut r.state, a, None, &edit(client, "40.00"), None)
+        .expect("same client");
+    assert_eq!(
+        saved.record.invoice_status,
+        Some(cl_api::InvoiceStatus::Paid)
+    );
+    assert_eq!(saved.record.balance_due, Some(Money::ZERO));
+    // Nothing applied: the client may change.
+    super::super::invoices::update(&mut r.state, b, None, &edit(other, "50.00"), None)
+        .expect("free invoice moves");
+    super::super::invoices::mark_finance_charge(&mut r.state, b, false);
+    let e = super::super::invoices::update(&mut r.state, b, None, &edit(client, "50.00"), None)
+        .expect_err("finance charge");
+    assert_eq!(code_of(&e), "FINANCE_CHARGE_CLIENT_CHANGE");
+    super::super::invoices::update(&mut r.state, b, None, &edit(other, "45.00"), None)
+        .expect("amount edits stay allowed");
+}

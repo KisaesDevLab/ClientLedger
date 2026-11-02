@@ -280,6 +280,15 @@ impl Editing {
         }
     }
 
+    /// Every send, oldest first (U-144: memos and receipts too).
+    pub(crate) fn send_history(&self) -> &[cl_api::SendEvent] {
+        match &self.doc {
+            SavedDoc::Invoice(r) => &r.send_history,
+            SavedDoc::CreditMemo(r) => &r.send_history,
+            SavedDoc::SalesReceipt(r) => &r.send_history,
+        }
+    }
+
     /// The client.
     pub(crate) fn client(&self) -> Option<ContactId> {
         match &self.doc {
@@ -626,6 +635,19 @@ impl InvoiceScreen {
         }
     }
 
+    /// The Client field can't change on this saved invoice (U-145, U-146):
+    /// a finance-charge invoice keeps its client; any other keeps it while
+    /// a payment or credit is applied. The plain hint's key.
+    pub(crate) fn client_lock(&self) -> Option<&'static str> {
+        let r = self.editing.as_ref()?.invoice()?;
+        if r.is_finance_charge {
+            Some("invoice.client.locked.finance_charge")
+        } else if r.has_payments() {
+            Some("invoice.client.locked.paid")
+        } else {
+            None
+        }
+    }
     pub(crate) fn busy(&self) -> bool {
         self.save_job.is_some() || self.void_job.is_some()
     }
@@ -926,6 +948,9 @@ impl InvoiceScreen {
     /// The client was picked: header defaults, the side panel, the
     /// unbilled costs.
     pub(crate) fn pick_client(&mut self, id: ContactId) {
+        if self.client_lock().is_some() {
+            return;
+        }
         self.header.edit(field::CLIENT, |h| h.client = Some(id));
         self.inputs.client.text = self.clients.name_text(id).unwrap_or_default().to_string();
         self.inputs.client.problem = false;
@@ -1081,11 +1106,7 @@ impl InvoiceScreen {
                 })
             })
             .collect();
-        let sent = self
-            .editing
-            .as_ref()
-            .and_then(Editing::invoice)
-            .map(|r| r.send_history.len());
+        let sent = self.editing.as_ref().map(|e| e.send_history().len());
         let mut v = json!({
             "screen": self.screen_name(),
             "layout": self.layout.json(),
@@ -1134,6 +1155,7 @@ impl InvoiceScreen {
             "grid": { "focused": self.grid.has_focus() },
         });
         v["next_number"] = json!(self.next_number);
+        v["client_locked"] = json!(self.client_lock());
         v["deposits_on_hand"] = json!(self.deposit_card.count());
         v["deposits_applied"] = json!(self.deposit_card.applied);
         v["deposit_note"] = json!(self.deposit_card.note());

@@ -329,15 +329,65 @@ pub fn finance_charge_cross_company_404(h: &Harness) {
     let s = &h.s1;
     let c = customer(h, s, "Charge scope");
     let b = h.s3();
+    // PR-3 item 9: company B is set up, so its settings can't answer first;
+    // the client is another company's: exactly 404 ("Customer not found",
+    // finance-charge.service.ts assess), nothing posts.
+    set_up(h, &b, false);
     let e = assess(h, &b, oct31(), c, m("2.00"), key()).expect_err("another company's client");
-    assert!(
-        matches!(e, ApiError::NotFound { .. } | ApiError::Validation(_))
-            || finance_charge_refusal(&e) == Some(FinanceChargeRefusal::NotSetUp)
-            || finance_charge_refusal(&e) == Some(FinanceChargeRefusal::Changed),
-        "{e:?}"
-    );
+    assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
     let listed = h
         .run(b.finance_charges().list("2026-10"))
         .expect("assessments");
     assert!(listed.iter().all(|a| a.contact_id != c));
+}
+
+/// U-145 (Q-P22v, `invoice-client-guard-v1`): a finance-charge invoice
+/// keeps its client: an edit that changes it is 409
+/// `FINANCE_CHARGE_CLIENT_CHANGE` whatever is applied; nothing changes.
+pub fn finance_charge_client_change_409(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::INVOICE_CLIENT_GUARD, "U-145") {
+        return;
+    }
+    let s = &h.s1;
+    let fc_income = set_up(h, s, false);
+    let income = account(h, s, AccountType::Revenue, "Kennel services").id;
+    let late = customer(h, s, "Late Payer");
+    let other = customer(h, s, "Someone Else");
+    dated_invoice(
+        h,
+        s,
+        late,
+        income,
+        date(2026, 8, 31),
+        date(2026, 9, 30),
+        "1000.00",
+    );
+    let charge = charge_of(&preview(h, s, oct31(), &[late]), late);
+    let run = assess(h, s, oct31(), late, charge, key()).expect("assess");
+    let fc = run.invoices[0].invoice_id;
+    let read = h.run(s.invoices().get(fc)).expect("the charge").record;
+    assert!(read.is_finance_charge, "the engine marks it");
+    let one = Quantity::parse_wire("1").expect("qty");
+    let moved = NewInvoice::new(
+        other,
+        read.txn.txn_date,
+        vec![InvoiceLine {
+            is_taxable: Some(false),
+            ..InvoiceLine::account(fc_income, one, charge)
+        }],
+    );
+    let e = h
+        .run(
+            s.invoices()
+                .update(fc, &read, &moved, &PostingOptions::default(), key()),
+        )
+        .expect_err("a finance charge keeps its client");
+    assert_eq!(
+        cl_api::invoice_refusal(&e),
+        Some(cl_api::InvoiceRefusal::FinanceChargeClientChange),
+        "{e:?}"
+    );
+    let after = h.run(s.invoices().get(fc)).expect("unchanged").record;
+    assert_eq!(after.txn.contact_id, Some(late));
+    assert_eq!(after.txn.updated_at, read.txn.updated_at);
 }

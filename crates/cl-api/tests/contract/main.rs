@@ -46,6 +46,7 @@ mod contract_merges;
 mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
+mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
 mod contract_receive_payment;
@@ -294,6 +295,22 @@ fn main() -> std::process::ExitCode {
         (
             "finance_charges::finance_charge_cross_company_404",
             contract_finance_charges::finance_charge_cross_company_404,
+        ),
+        (
+            "finance_charges::finance_charge_client_change_409",
+            contract_finance_charges::finance_charge_client_change_409,
+        ),
+        (
+            "pr3::sales_doc_email_no_smtp_and_outbox_kind",
+            contract_pr3::sales_doc_email_no_smtp_and_outbox_kind,
+        ),
+        (
+            "pr3::invoice_client_guard_409",
+            contract_pr3::invoice_client_guard_409,
+        ),
+        (
+            "pr3::ar_aging_ties_to_balance_sheet",
+            contract_pr3::ar_aging_ties_to_balance_sheet,
         ),
         (
             "customer_deposits::customer_deposit_lifecycle",

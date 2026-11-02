@@ -338,6 +338,8 @@ fn money(d: Decimal) -> Result<Money, ApiError> {
 struct Stored {
     record: Value,
     claims: Vec<JournalLineId>,
+    /// When it was made (the engine's `createdAt` tiebreaker in the list).
+    made: u64,
 }
 
 /// Invoices the demo engine keeps.
@@ -346,6 +348,8 @@ pub struct DemoInvoices {
     stored: BTreeMap<TransactionId, Stored>,
     claimed: BTreeSet<JournalLineId>,
     next: u64,
+    /// Invoices made so far, seeded or created (each one's `made`).
+    made: u64,
     /// Write requests that reached the demo engine (tests).
     pub writes: u32,
     /// The Outbox (Q-P20q), oldest first (WP-B).
@@ -361,6 +365,12 @@ pub struct DemoInvoices {
 }
 
 impl DemoInvoices {
+    /// The next invoice's `made`.
+    fn made_one(&mut self) -> u64 {
+        self.made += 1;
+        self.made
+    }
+
     fn markup_account(&self) -> AccountId {
         self.markup_account
             .unwrap_or_else(|| super::account_id(4000))
@@ -462,7 +472,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                     tax_rate: None,
                 },
                 // The source's quantity, 1 when it had none (as the
-                // saved invoice's illableCosts[]).
+                // saved invoice's `billableCosts[]`).
                 quantity: Some(q),
                 price: None,
                 source: "billable_cost",
@@ -864,7 +874,15 @@ pub fn create(
     let saved = versioned(&record)?;
     state.invoices.writes += 1;
     state.invoices.claimed.extend(claims.iter().copied());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    let made = state.invoices.made_one();
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made,
+        },
+    );
     Ok(saved)
 }
 
@@ -1016,16 +1034,30 @@ pub fn void(
     password: Option<&Secret>,
 ) -> Result<Versioned<InvoiceRecord>, ApiError> {
     let close = closing(state);
+    let date = state
+        .invoices
+        .stored
+        .get(&id)
+        .ok_or(ApiError::NotFound { code: None })?
+        .record["txnDate"]
+        .as_str()
+        .and_then(|d| CalendarDate::parse_wire(d).ok())
+        .ok_or(ApiError::Internal)?;
+    check_closing(close, &[date], password)?;
+    // The engine refuses a void while payments or credits are applied
+    // (PR-3 S2): unapply or void those first.
+    let (payments, credits) = live_on_invoice(state, id);
+    if payments + credits > 0 {
+        return Err(super::receivables::conflict_with(
+            "INVOICE_HAS_PAYMENTS",
+            &json!({"payments": payments, "credits": credits}),
+        ));
+    }
     let s = state
         .invoices
         .stored
         .get_mut(&id)
         .ok_or(ApiError::NotFound { code: None })?;
-    let date = s.record["txnDate"]
-        .as_str()
-        .and_then(|d| CalendarDate::parse_wire(d).ok())
-        .ok_or(ApiError::Internal)?;
-    check_closing(close, &[date], password)?;
     s.record["status"] = json!("void");
     s.record["invoiceStatus"] = json!("void");
     s.record["balanceDue"] = json!(Money::ZERO.to_wire());
@@ -1094,6 +1126,11 @@ pub fn update(
     if old.record["status"] == "void" || old.record["invoiceStatus"] == "paid" {
         return Err(refused("VALIDATION_ERROR", &json!({})));
     }
+    // U-145, U-146: the invoice keeps its client while anything points at
+    // it (a finance-charge invoice always).
+    if old.record["contactId"].as_str() != Some(new.contact_id.to_string().as_str()) {
+        client_change_allowed(state, id, &old.record)?;
+    }
     // U-128: every cost the invoice bills is resent or released (409
     // BILLABLE_LINES_MISSING otherwise); not both.
     let sent: BTreeSet<JournalLineId> = new
@@ -1161,6 +1198,26 @@ pub fn update(
             record[k] = old.record[k].clone();
         }
     }
+    // What was paid stays paid: the balance is the new total less it (409
+    // INVOICE_TOTAL_BELOW_PAID below it); an edit down to exactly the
+    // amount paid makes the invoice paid (U-146 N2).
+    let paid = old.record["amountPaid"]
+        .as_str()
+        .and_then(|v| Decimal::from_str(v).ok())
+        .unwrap_or_default();
+    if !paid.is_zero() {
+        let total = record["total"]
+            .as_str()
+            .and_then(|v| Decimal::from_str(v).ok())
+            .ok_or(ApiError::Internal)?;
+        if total < paid {
+            return Err(conflict("INVOICE_TOTAL_BELOW_PAID"));
+        }
+        let balance = total - paid;
+        record["amountPaid"] = json!(money(paid)?.to_wire());
+        record["balanceDue"] = json!(money(balance)?.to_wire());
+        record["invoiceStatus"] = json!(if balance.is_zero() { "paid" } else { "partial" });
+    }
     // Omitted fields keep their values on an edit (layout, print later).
     if new.layout_id.is_omitted() {
         record["layoutId"] = old.record["layoutId"].clone();
@@ -1175,14 +1232,34 @@ pub fn update(
         state.invoices.claimed.remove(c);
     }
     state.invoices.claimed.extend(claims.iter().copied());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made: old.made,
+        },
+    );
     Ok(saved)
 }
 
-/// Every live invoice, newest first (Prev/Next).
+/// Every live invoice, newest first (Prev/Next): as the engine's list,
+/// by date and then by when it was made, both descending. Not by id: the
+/// seeded invoices' ids carry their numbers (1091, 1201, ...) and would
+/// come before every invoice the owner creates.
 #[must_use]
 pub fn list(state: &DemoState) -> Vec<TransactionId> {
-    state.invoices.stored.keys().rev().copied().collect()
+    let mut v: Vec<(String, u64, TransactionId)> = state
+        .invoices
+        .stored
+        .iter()
+        .map(|(id, s)| {
+            let date = s.record["txnDate"].as_str().unwrap_or_default().to_string();
+            (date, s.made, *id)
+        })
+        .collect();
+    v.sort();
+    v.into_iter().rev().map(|(_, _, id)| id).collect()
 }
 
 /// `POST /invoices/{id}/email`: sends (the demo has no network: it records
@@ -1474,10 +1551,53 @@ pub fn seed_receivable(
     let (mut record, claims) = record_json(state, id, number, &new)?;
     record["invoiceStatus"] = json!("sent");
     record["sentAt"] = json!(DemoState::now());
-    state.invoices.stored.insert(id, Stored { record, claims });
+    let made = state.invoices.made_one();
+    state.invoices.stored.insert(
+        id,
+        Stored {
+            record,
+            claims,
+            made,
+        },
+    );
     Ok(())
 }
 
 #[cfg(test)]
 #[path = "invoices_tests.rs"]
 mod tests;
+
+/// The live payment and credit applications on an invoice, as the
+/// engine's `assertInvoiceUnapplied` counts them (`{payments, credits}`):
+/// payment rows and credit memo rows count as payments; the demo has no
+/// legacy refund pointers, so credits stay 0.
+#[must_use]
+pub fn live_on_invoice(state: &DemoState, id: TransactionId) -> (usize, usize) {
+    let payments = super::receivables::live_rows_on(state, id)
+        + super::credit_memos::live_memo_rows_on(state, id);
+    (payments, 0)
+}
+
+/// A saved invoice's client may change (U-145, U-146): a finance-charge
+/// invoice never (409 FINANCE_CHARGE_CLIENT_CHANGE); any other not while
+/// a payment or credit is applied (409 INVOICE_HAS_PAYMENTS).
+fn client_change_allowed(
+    state: &DemoState,
+    id: TransactionId,
+    old: &Value,
+) -> Result<(), ApiError> {
+    if old["isFinanceCharge"] == true {
+        return Err(super::receivables::conflict_with(
+            "FINANCE_CHARGE_CLIENT_CHANGE",
+            &json!({}),
+        ));
+    }
+    let (payments, credits) = live_on_invoice(state, id);
+    if payments + credits > 0 {
+        return Err(super::receivables::conflict_with(
+            "INVOICE_HAS_PAYMENTS",
+            &json!({"payments": payments, "credits": credits}),
+        ));
+    }
+    Ok(())
+}
