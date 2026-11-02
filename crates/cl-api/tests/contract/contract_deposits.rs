@@ -55,7 +55,7 @@ fn balance(h: &Harness, s: &Session, a: AccountId) -> Money {
         .unwrap_or(Money::ZERO)
 }
 
-fn caps(h: &Harness) -> DepositCaps {
+pub(crate) fn caps(h: &Harness) -> DepositCaps {
     DepositCaps {
         grouping: h.caps.has(Capabilities::DEPOSIT_GROUPING),
         cashback: h.caps.has(Capabilities::DEPOSIT_CASHBACK),
