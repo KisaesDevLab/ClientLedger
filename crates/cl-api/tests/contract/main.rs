@@ -19,6 +19,7 @@ mod contract_billable;
 mod contract_bills;
 mod contract_bounced_check;
 mod contract_capabilities;
+mod contract_cash_basis_spf;
 mod contract_census;
 mod contract_check_panel;
 mod contract_closed_period;
@@ -56,6 +57,12 @@ mod contract_register_property;
 mod contract_resources;
 mod contract_run_due;
 mod contract_sales_receipts;
+mod contract_sales_tax_documents;
+mod contract_sales_tax_exemptions;
+mod contract_sales_tax_liability;
+mod contract_sales_tax_pay;
+mod contract_sales_tax_setup;
+mod contract_sales_tax_ssuta;
 mod contract_session;
 mod contract_tags;
 mod contract_templates;
@@ -963,6 +970,61 @@ fn main() -> std::process::ExitCode {
         (
             "bills::backup_restore_keeps_the_bill_file_live",
             contract_bills::backup_restore_keeps_the_bill_file_live,
+        ),
+        // P23 WP-4: sales tax, in one company of its own. The cash-basis
+        // tests run first: the engine's cash reports slow down sharply as
+        // the company fills (reported to the orchestrator, WP-4).
+        (
+            "cash_basis_spf::unapplied_receipts_no_ar_on_cash",
+            contract_cash_basis_spf::unapplied_receipts_no_ar_on_cash,
+        ),
+        (
+            "cash_basis_spf::cash_write_off_and_bill_discount",
+            contract_cash_basis_spf::cash_write_off_and_bill_discount,
+        ),
+        (
+            "sales_tax_setup::setup_crud_stale_and_deactivate",
+            contract_sales_tax_setup::setup_crud_stale_and_deactivate,
+        ),
+        (
+            "sales_tax_documents::rounded_once_per_document_goldens_1_to_4",
+            contract_sales_tax_documents::rounded_once_per_document_goldens_1_to_4,
+        ),
+        (
+            "sales_tax_documents::rate_changed_and_use_current_rates",
+            contract_sales_tax_documents::rate_changed_and_use_current_rates,
+        ),
+        (
+            "sales_tax_liability::liability_reconciles_to_gl",
+            contract_sales_tax_liability::liability_reconciles_to_gl,
+        ),
+        (
+            "sales_tax_liability::cash_running_total_golden_7",
+            contract_sales_tax_liability::cash_running_total_golden_7,
+        ),
+        (
+            "sales_tax_pay::pay_reduces_owed_exactly",
+            contract_sales_tax_pay::pay_reduces_owed_exactly,
+        ),
+        (
+            "sales_tax_pay::mark_paid_through_and_undo",
+            contract_sales_tax_pay::mark_paid_through_and_undo,
+        ),
+        (
+            "sales_tax_exemptions::expired_certificate_warns",
+            contract_sales_tax_exemptions::expired_certificate_warns,
+        ),
+        (
+            "sales_tax_ssuta::ssuta_discount_and_bounce",
+            contract_sales_tax_ssuta::ssuta_discount_and_bounce,
+        ),
+        (
+            "sales_tax_ssuta::bad_debt_recovery",
+            contract_sales_tax_ssuta::bad_debt_recovery,
+        ),
+        (
+            "sales_tax_ssuta::ssuta_off_and_forward_only",
+            contract_sales_tax_ssuta::ssuta_off_and_forward_only,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",
