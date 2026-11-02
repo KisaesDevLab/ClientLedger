@@ -570,7 +570,7 @@ async fn unlink_and_mark_paid_through_are_keyed() {
             201,
             &format!(
                 r#"{{"agencyId":"{AGENCY}","throughDate":"2026-11-30",
-                    "lines":[{{"taxItemId":"{STATE}","name":"State","amount":"80.70"}}],"total":"80.70"}}"#
+                    "lines":[{{"taxItemId":"{STATE}","name":"State","amount":"80.70"}}],"total":"80.70","runId":"run-1"}}"#
             ),
         ))
         .mount(&server)
@@ -598,14 +598,26 @@ async fn unlink_and_mark_paid_through_are_keyed() {
     let long = "x".repeat(MARK_PAID_REASON_MAX + 1);
     assert_eq!(
         s.sales_tax_payments()
-            .mark_paid_through(agency, d(11, 30), Some(&long), IdempotencyKey::new())
+            .mark_paid_through(
+                agency,
+                d(11, 30),
+                Some(&long),
+                &PostingOptions::default(),
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("long reason"),
         ApiError::Local(LocalValidation::InvalidValue)
     );
     let m = s
         .sales_tax_payments()
-        .mark_paid_through(agency, d(11, 30), None, IdempotencyKey::new())
+        .mark_paid_through(
+            agency,
+            d(11, 30),
+            None,
+            &PostingOptions::default(),
+            IdempotencyKey::new(),
+        )
         .await
         .expect("mark");
     assert_eq!(m.total.map(Money::to_wire).as_deref(), Some("80.7000"));
@@ -618,6 +630,28 @@ async fn unlink_and_mark_paid_through_are_keyed() {
     );
     let body: Value = serde_json::from_slice(&posts[1].body).expect("json");
     assert_eq!(body, json!({"agencyId":AGENCY,"throughDate":"2026-11-30"}));
+    // Undo mark paid through (P23 review fix; provisional route).
+    assert_eq!(m.run_id.as_deref(), Some("run-1"));
+    Mock::given(method("POST"))
+        .and(path(
+            "/api/v1/sales-tax/payments/mark-paid-through/run-1/undo",
+        ))
+        .respond_with(json(200, r#"{"result":{"runId":"run-1","removed":1}}"#))
+        .mount(&server)
+        .await;
+    let u = s
+        .sales_tax_payments()
+        .undo_mark_paid_through("run-1", &PostingOptions::default())
+        .await
+        .expect("undo");
+    assert_eq!(u.removed, 1);
+    assert_eq!(
+        s.sales_tax_payments()
+            .undo_mark_paid_through("../x", &PostingOptions::default())
+            .await
+            .expect_err("bad run id"),
+        ApiError::Local(LocalValidation::InvalidValue)
+    );
     let list = s
         .sales_tax_payments()
         .list(SalesTaxPaymentQuery {

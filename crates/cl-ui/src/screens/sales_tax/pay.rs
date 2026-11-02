@@ -50,8 +50,10 @@ pub(crate) enum Pending {
     Void(TransactionId),
     /// Undo a link (closing on its date).
     Unlink(TransactionId),
-    /// "Mark paid through" (no GL, no closing, no undo).
+    /// "Mark paid through" (no GL; closing on the date).
     MarkPaid(SalesTaxAgencyId, CalendarDate),
+    /// "Undo mark paid through" of a run (closing on its date).
+    UndoMark(String),
 }
 
 /// What a write's idempotency key belongs to: the save attempt for Pay,
@@ -63,6 +65,7 @@ pub(crate) enum KeyFor {
     Void(TransactionId),
     Unlink(TransactionId),
     MarkPaid(SalesTaxAgencyId, CalendarDate),
+    UndoMark(String),
 }
 
 /// What a write answered.
@@ -72,6 +75,7 @@ enum Wrote {
     Voided,
     Unlinked,
     MarkedPaid(cl_api::MarkPaidResult),
+    UndoneMark,
 }
 
 /// One outside payment that can be matched: (id, date, number, STP debit).
@@ -500,6 +504,7 @@ impl PayScreen {
             Pending::Void(id) => KeyFor::Void(*id),
             Pending::Unlink(id) => KeyFor::Unlink(*id),
             Pending::MarkPaid(a, d) => KeyFor::MarkPaid(*a, *d),
+            Pending::UndoMark(run) => KeyFor::UndoMark(run.clone()),
         };
         let key = self.key_for(what);
         let demo_key = key.as_header();
@@ -618,21 +623,57 @@ impl PayScreen {
                         d,
                         agency,
                         through,
+                        password.as_ref(),
                         Some(&demo_key),
                     )
                     .map(Wrote::MarkedPaid)
                 },
                 move |s| async move {
                     s.sales_tax_payments()
-                        .mark_paid_through(agency, through, None, key)
+                        .mark_paid_through(agency, through, None, &opts, key)
                         .await
                         .map(Wrote::MarkedPaid)
                 },
             ),
+            Pending::UndoMark(run) => {
+                let live = run.clone();
+                engine::write(
+                    &self.link,
+                    self.group.as_ref(),
+                    label,
+                    move |d| {
+                        crate::company::demo::sales_tax_owed::undo_mark_paid_through(
+                            d,
+                            &run,
+                            password.as_ref(),
+                        )
+                        .map(|_| Wrote::UndoneMark)
+                    },
+                    move |s| async move {
+                        s.sales_tax_payments()
+                            .undo_mark_paid_through(&live, &opts)
+                            .await
+                            .map(|_| Wrote::UndoneMark)
+                    },
+                )
+            }
         };
         self.write_job = Some(job);
         self.pending_kept = Some(pending);
         self.poll();
+    }
+
+    /// A fresh form for the same agency, dates and account (after a
+    /// payment or "Mark paid through"): typed amounts and adjustments go.
+    fn reset_form(&mut self) {
+        self.amounts.clear();
+        let agency = self.form.agency;
+        let (bank, method) = (self.form.bank, self.form.method);
+        let (through, date) = (self.form.through, self.form.date);
+        self.form = PayForm::new(agency, through, date);
+        self.form.bank = bank;
+        self.form.method = method;
+        self.sync_items();
     }
 
     fn wrote(&mut self, w: Wrote) {
@@ -647,11 +688,7 @@ impl PayScreen {
                     "sales_tax.pay.saved"
                 });
                 self.paid = Some(r);
-                self.amounts.clear();
-                let agency = self.form.agency;
-                let (bank, through, date) = (self.form.bank, self.form.through, self.form.date);
-                self.form = PayForm::new(agency, through, date);
-                self.form.bank = bank;
+                self.reset_form();
             }
             Wrote::Linked => {
                 self.linking = None;
@@ -670,7 +707,11 @@ impl PayScreen {
             Wrote::MarkedPaid(r) => {
                 self.notice = Some("sales_tax.pay.marked_paid");
                 self.marked = Some(r);
-                self.amounts.clear();
+                self.reset_form();
+            }
+            Wrote::UndoneMark => {
+                self.notice = Some("sales_tax.pay.mark_undone");
+                self.marked = None;
                 self.form.changed();
             }
         }
@@ -744,8 +785,16 @@ impl PayScreen {
         self.send(Pending::Unlink(id), None);
     }
 
-    /// "Mark paid through…": opens the confirmation (the write can't be
-    /// undone).
+    /// "Undo mark paid through": takes the last run back (what it covered
+    /// is owed again; closing-date password when its date is closed).
+    pub(crate) fn undo_mark_paid(&mut self) {
+        if let Some(run) = self.marked.as_ref().and_then(|m| m.run_id.clone()) {
+            self.closing_prompt.set_verb(Verb::Change);
+            self.send(Pending::UndoMark(run), None);
+        }
+    }
+
+    /// "Mark paid through…": opens the confirmation.
     pub(crate) fn ask_mark_paid(&mut self) {
         self.problem = None;
         if self.form.agency.is_none() {
@@ -943,20 +992,32 @@ impl PayScreen {
         });
         self.mark_dialog(ui.ctx(), &tokens);
         self.over_dialog(ui.ctx());
-        if let Some(m) = &self.marked
-            && let Some(total) = m.total
-        {
-            form::hint(
-                ui,
-                &tokens,
-                &t_with(
-                    "sales_tax.pay.marked_total",
-                    &[
-                        ("amount", &fmt(total)),
-                        ("date", &crate::shell::us_date(m.through_date)),
-                    ],
-                ),
-            );
+        let mut undo = false;
+        if let Some(m) = &self.marked {
+            if let Some(total) = m.total {
+                form::hint(
+                    ui,
+                    &tokens,
+                    &t_with(
+                        "sales_tax.pay.marked_total",
+                        &[
+                            ("amount", &fmt(total)),
+                            ("date", &crate::shell::us_date(m.through_date)),
+                        ],
+                    ),
+                );
+            }
+            // Engines before the P23 review fix send no run: no undo then.
+            if m.run_id.is_some() {
+                let enabled = self.write_job.is_none() && !self.closing_prompt.dialog_open();
+                undo = ui
+                    .add_enabled(enabled, egui::Button::new(t("sales_tax.pay.mark_undo")))
+                    .on_hover_text(t("sales_tax.pay.mark_undo_tip"))
+                    .clicked();
+            }
+        }
+        if undo {
+            self.undo_mark_paid();
         }
         if self.linking.is_some() {
             ui.add_space(8.0);
@@ -1367,7 +1428,7 @@ impl PayScreen {
             "linked": self.history.iter().filter(|p| p.linked).count(),
             "confirm_mark": self.confirm_mark,
             "confirm_over": self.confirm_over,
-            "marked": self.marked.as_ref().map(|m| json!({"lines": m.lines.len()})),
+            "marked": self.marked.as_ref().map(|m| json!({"lines": m.lines.len(), "undo": m.run_id.is_some()})),
             "linking": self.linking.is_some(),
             "candidates": self.candidates.len(),
             "closing_dialog": self.closing_prompt.dialog_open(),
@@ -1406,8 +1467,8 @@ impl Screen for PayScreen {
                 self.pay();
                 true
             }
-            // Demo only: the scenario's Mark paid through, dropped so the dark
-            // run repeats it (the engine has no undo).
+            // Demo only: drops every Mark paid through so the dark run of the
+            // scenario starts clean.
             "dev.demo_mark_paid_reset" => {
                 let Some(mut d) = self.link.demo_state() else {
                     return false;

@@ -100,8 +100,8 @@ pub struct DemoTaxBook {
     recoveries: BTreeMap<TransactionId, Recovery>,
     exemptions: Vec<TaxExemption>,
     /// "Mark paid through" opening lines (no GL): (agency, item, date,
-    /// amount).
-    openings: Vec<(SalesTaxAgencyId, SalesTaxItemId, CalendarDate, Decimal)>,
+    /// amount, run).
+    openings: Vec<(SalesTaxAgencyId, SalesTaxItemId, CalendarDate, Decimal, u32)>,
     next: u32,
     story: bool,
     /// Writes that reached the demo engine (tests).
@@ -411,7 +411,7 @@ fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
             });
         }
     }
-    for (agency, item, date, amount) in &st.book.openings {
+    for (agency, item, date, amount, _) in &st.book.openings {
         out.push(Event {
             date: *date,
             item: Some(*item),
@@ -1244,23 +1244,27 @@ pub fn unlink(
 
 /// `POST /sales-tax/payments/mark-paid-through`: what each of the agency's
 /// items owes through `through` is recorded as paid outside these books
-/// (opening lines dated `through`, no GL). No undo.
+/// (opening lines dated `through`, no GL; closing on `through`). A replay
+/// answers what the first call did. [`undo_mark_paid_through`] takes the
+/// run back.
 ///
 /// # Errors
-/// 404 for an unknown agency.
+/// 404 for an unknown agency; closing.
 pub fn mark_paid_through(
     state: &mut DemoState,
     agency: SalesTaxAgencyId,
     through: CalendarDate,
+    password: Option<&Secret>,
     key: Option<&str>,
 ) -> Result<cl_api::MarkPaidResult, ApiError> {
-    if key.is_some_and(|k| state.sales_tax.book.keys.contains_key(k)) {
-        return decode(json!({"agencyId": agency, "throughDate": through, "replayed": true}));
+    if let Some(done) = key.and_then(|k| state.sales_tax.book.keys.get(k)) {
+        return decode(done.clone());
     }
     let _ = super::sales_tax::agencies(state, true);
     if state.sales_tax.agency_vendor(agency).is_none() {
         return Err(ApiError::NotFound { code: None });
     }
+    check_closing(super::receivables::closing(state), &[through], password)?;
     let owed = owed_for_pay(state, agency, through);
     let lines: Vec<(SalesTaxItemId, Decimal)> = owed
         .into_iter()
@@ -1278,14 +1282,52 @@ pub fn mark_paid_through(
         })
         .collect();
     let book = &mut state.sales_tax.book;
+    book.next += 1;
+    let run = book.next;
     for (i, o) in &lines {
-        book.openings.push((agency, *i, through, *o));
+        book.openings.push((agency, *i, through, *o, run));
     }
     book.writes += 1;
+    let v = json!({
+        "agencyId": agency, "throughDate": through, "lines": out, "total": s2(total),
+        "runId": format!("run-{run}"),
+    });
     if let Some(k) = key {
-        book.keys.insert(k.to_string(), Value::Null);
+        book.keys.insert(k.to_string(), v.clone());
     }
-    decode(json!({"agencyId": agency, "throughDate": through, "lines": out, "total": s2(total)}))
+    decode(v)
+}
+
+/// `POST /sales-tax/payments/mark-paid-through/:runId/undo` (provisional
+/// route): the run's opening lines go and what they covered is owed again.
+///
+/// # Errors
+/// 404 for an unknown or already undone run; closing on its date.
+pub fn undo_mark_paid_through(
+    state: &mut DemoState,
+    run_id: &str,
+    password: Option<&Secret>,
+) -> Result<cl_api::UndoMarkPaidResult, ApiError> {
+    let run = run_id
+        .strip_prefix("run-")
+        .and_then(|n| n.parse::<u32>().ok())
+        .ok_or(ApiError::NotFound { code: None })?;
+    let dates: Vec<CalendarDate> = state
+        .sales_tax
+        .book
+        .openings
+        .iter()
+        .filter(|o| o.4 == run)
+        .map(|o| o.2)
+        .collect();
+    if dates.is_empty() {
+        return Err(ApiError::NotFound { code: None });
+    }
+    check_closing(super::receivables::closing(state), &dates, password)?;
+    let book = &mut state.sales_tax.book;
+    book.openings.retain(|o| o.4 != run);
+    book.writes += 1;
+    decode(json!({"runId": run_id, "removed": dates.len()}))
 }
 
 /// Checks and entries that paid Sales Tax Payable and are not yet a sales
@@ -1798,7 +1840,7 @@ pub fn write_off_story(state: &mut DemoState) -> Option<TransactionId> {
 
 /// The developer command `dev.demo_mark_paid_reset`: drops the demo's "Mark
 /// paid through" opening lines so the Pay Sales Tax scenario repeats in
-/// dark (the engine has no undo; demo only).
+/// dark (demo only).
 pub fn reset_marked_paid(state: &mut DemoState) {
     state.sales_tax.book.openings.clear();
 }

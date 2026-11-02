@@ -125,11 +125,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("sales_tax.pay.mark_tip", "For tax you paid before using ClientLedger or outside it: record everything owed through the date as already paid, with no check."),
     ("sales_tax.pay.mark.title", "Mark tax paid through a date"),
     ("sales_tax.pay.mark.body", "Record everything {agency} is owed through {date} as already paid outside ClientLedger? No check or bank entry is made."),
-    ("sales_tax.pay.mark.no_undo", "This can't be undone. Only do this for tax you have really paid."),
+    ("sales_tax.pay.mark.no_undo", "Only do this for tax you have really paid. You can undo it from this window right after."),
     ("sales_tax.pay.mark.confirm", "Mark as paid"),
     ("sales_tax.pay.mark.cancel", "Cancel"),
     ("sales_tax.pay.marked_paid", "Tax marked as paid. Nothing is owed through that date now."),
     ("sales_tax.pay.marked_total", "{amount} marked as paid through {date}."),
+    ("sales_tax.pay.mark_undo", "Undo mark paid through"),
+    ("sales_tax.pay.mark_undo_tip", "Take back what was just marked as paid. That tax is owed again."),
+    ("sales_tax.pay.mark_undone", "Mark paid through undone. That tax is owed again."),
 ];
 
 /// Tax Exemption Certificates and Recover a Bad Debt.

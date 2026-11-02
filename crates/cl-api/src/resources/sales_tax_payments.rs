@@ -22,7 +22,9 @@
 //!   /sales-tax/payments/:id` adds `stubLines`; a link is undone with
 //!   `POST /sales-tax/payments/:id/unlink`; `POST
 //!   /sales-tax/payments/mark-paid-through` records tax paid outside these
-//!   books (opening lines, no GL, no undo).
+//!   books (opening lines, no GL); `POST
+//!   /sales-tax/payments/mark-paid-through/:runId/undo` takes a run back
+//!   (P23 review fix; provisional route).
 
 use std::fmt;
 
@@ -39,8 +41,9 @@ use crate::resources::customer_payments::{
     too_long,
 };
 use crate::resources::operations::{
-    SALES_TAX_PAY_CREATE, SALES_TAX_PAY_LINK, SALES_TAX_PAY_MARK_PAID, SALES_TAX_PAY_PREVIEW,
-    SALES_TAX_PAY_UNLINK, SALES_TAX_PAYMENT_GET, SALES_TAX_PAYMENTS_LIST,
+    SALES_TAX_PAY_CREATE, SALES_TAX_PAY_LINK, SALES_TAX_PAY_MARK_PAID,
+    SALES_TAX_PAY_MARK_PAID_UNDO, SALES_TAX_PAY_PREVIEW, SALES_TAX_PAY_UNLINK,
+    SALES_TAX_PAYMENT_GET, SALES_TAX_PAYMENTS_LIST,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::sales_tax::{SalesTaxAgencyId, SalesTaxItemId, decode_list, decode_one};
@@ -770,6 +773,22 @@ pub struct MarkPaidResult {
         deserialize_with = "crate::resources::customer_payments::de_cents_opt"
     )]
     pub total: Option<Money>,
+    /// The run, for "Undo mark paid through" (engines before the P23
+    /// review fix send none, and then there is no undo).
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
+/// `POST /sales-tax/payments/mark-paid-through/:runId/undo` answered.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoMarkPaidResult {
+    /// The run undone.
+    #[serde(default)]
+    pub run_id: Option<String>,
+    /// How many opening lines were removed.
+    #[serde(default)]
+    pub removed: u32,
 }
 
 impl fmt::Debug for MarkPaidResult {
@@ -981,19 +1000,22 @@ impl SalesTaxPayments<'_> {
 
     /// "Mark paid through": everything the agency's items owe through
     /// `through` is recorded as paid before or outside these books
-    /// (opening lines, no GL, audited). There is no undo.
+    /// (opening lines dated `through`, no GL, audited; closing on
+    /// `through`). [`Self::undo_mark_paid_through`] takes a run back.
     ///
     /// # Errors
     /// `Local(Unsupported)`; `Local(InvalidValue)` for a reason over 255
-    /// characters; any [`ApiError`].
+    /// characters; closing on the date; any [`ApiError`].
     pub async fn mark_paid_through(
         &self,
         agency: SalesTaxAgencyId,
         through: CalendarDate,
         reason: Option<&str>,
+        opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<MarkPaidResult, ApiError> {
-        require(self.0, Capabilities::SALES_TAX_PAY)?;
+        let s = &self.0.pinned();
+        require(s, Capabilities::SALES_TAX_PAY)?;
         let mut body = json!({"agencyId": agency, "throughDate": through});
         if let Some(r) = reason.map(str::trim).filter(|r| !r.is_empty()) {
             if r.chars().count() > MARK_PAID_REASON_MAX {
@@ -1001,11 +1023,42 @@ impl SalesTaxPayments<'_> {
             }
             body["reason"] = json!(r);
         }
-        let mut call =
-            Call::at(Method::Post, SALES_TAX_PAY_MARK_PAID.route()).json_body(json_body(&body)?);
+        let body = posting_body(s, body, opts)?;
+        let mut call = Call::at(Method::Post, SALES_TAX_PAY_MARK_PAID.route()).json_body(body);
         call.idempotency_key = Some(key);
-        let reply = self.0.send(&SALES_TAX_PAY_MARK_PAID, call, None).await?;
+        let reply = s.send(&SALES_TAX_PAY_MARK_PAID, call, None).await?;
         decode_one(&reply.body, "result", "mark paid through")
+            .map_err(crate::resources::versioning::saved_unreadable)
+    }
+
+    /// "Undo mark paid through": the run's opening lines go and what they
+    /// covered is owed again (audited; closing on its date). The route is
+    /// provisional until the engine's P23 fix pass lands.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)`; `Local(InvalidValue)` for a blank run id;
+    /// `NotFound` for an unknown or already undone run; closing; any
+    /// [`ApiError`].
+    pub async fn undo_mark_paid_through(
+        &self,
+        run_id: &str,
+        opts: &PostingOptions,
+    ) -> Result<UndoMarkPaidResult, ApiError> {
+        let s = &self.0.pinned();
+        require(s, Capabilities::SALES_TAX_PAY)?;
+        let run = run_id.trim();
+        if run.is_empty() || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let body = posting_body(s, json!({}), opts)?;
+        let call = Call::new(
+            Method::Post,
+            SALES_TAX_PAY_MARK_PAID_UNDO.route(),
+            format!("/api/v1/sales-tax/payments/mark-paid-through/{run}/undo"),
+        )
+        .json_body(body);
+        let reply = s.send(&SALES_TAX_PAY_MARK_PAID_UNDO, call, None).await?;
+        decode_one(&reply.body, "result", "undo mark paid through")
             .map_err(crate::resources::versioning::saved_unreadable)
     }
 

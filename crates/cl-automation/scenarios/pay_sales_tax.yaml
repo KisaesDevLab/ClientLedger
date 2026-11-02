@@ -37,17 +37,22 @@ steps:
   - click: {role: button, label: "Void 11/04/2026"}
   - assert_state: {key: screen.notice, equals: "sales_tax.pay.voided"}
   - screenshot: voided
-  # Mark paid through: a confirmation that says it can't be undone, then
-  # nothing is owed through the date and no check is made. The demo-only
-  # reset puts it back so the dark run repeats it.
+  # Mark paid through: a confirmation that says to do it only for tax
+  # really paid, then nothing is owed through the date and no check is
+  # made. "Undo mark paid through" takes it back (the demo-only reset is
+  # kept so the dark run always starts clean).
   - click: {role: button, label: "Mark paid through…"}
   - assert_state: {key: screen.confirm_mark, equals: true}
-  - assert_exists: {role: label, label_contains: "can't be undone"}
+  - assert_exists: {role: label, label_contains: "really paid"}
   - screenshot: mark-paid-confirm
   - click: {role: button, label: Mark as paid}
   - assert_state: {key: screen.notice, equals: "sales_tax.pay.marked_paid"}
   - assert_state: {key: screen.total, equals: "0.0000"}
+  - assert_state: {key: screen.marked.undo, equals: true}
   - screenshot: marked-paid
+  - click: {role: button, label: Undo mark paid through}
+  - assert_state: {key: screen.notice, equals: "sales_tax.pay.mark_undone"}
+  - assert_state: {key: screen.marked, equals: null}
   - command: dev.demo_mark_paid_reset
   - assert_state: {key: screen.marked, equals: null}
   - command: file.close_window

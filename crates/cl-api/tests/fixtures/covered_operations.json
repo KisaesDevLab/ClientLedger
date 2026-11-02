@@ -304,6 +304,7 @@
   {"method":"POST","path":"/api/v1/sales-tax/payments/link","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/sales-tax/payments/{id}/unlink","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/sales-tax/payments/mark-paid-through","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/sales-tax/payments/mark-paid-through/{id}/undo","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/sales-tax/payments/{id}","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/sales-tax/payments","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/payments/write-off-recoveries","inSpec":false,"fragmentHash":null},

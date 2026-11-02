@@ -278,3 +278,19 @@ fn each_write_target_has_its_own_idempotency_key() {
     assert!(s.key_for(KeyFor::MarkPaid(agency, d)) == k4);
     assert!(s.key_for(KeyFor::MarkPaid(agency, d.add_days(-1).expect("d"))) != k4);
 }
+
+#[test]
+fn mark_paid_through_can_be_undone() {
+    let (_d, mut s) = screen();
+    let total = s.state()["total"].as_str().expect("total").to_string();
+    s.ask_mark_paid();
+    s.confirm_mark_paid();
+    let v = s.state();
+    assert_eq!(v["total"], "0.0000");
+    assert_eq!(v["marked"]["undo"], true, "{v}");
+    s.undo_mark_paid();
+    let v = s.state();
+    assert_eq!(v["notice"], "sales_tax.pay.mark_undone", "{v}");
+    assert_eq!(v["marked"], Value::Null);
+    assert_eq!(v["total"], total, "owed again");
+}
