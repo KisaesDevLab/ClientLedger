@@ -160,6 +160,11 @@ pub struct FigureRow {
     pub discount_percent: Option<String>,
     /// The engine suggests the discount (Q-P21c).
     pub suggest_discount: bool,
+    /// The sales tax part of the discount (SSUTA, the engine's figure;
+    /// `None` with the switch off or an older engine).
+    pub discount_tax: Option<Money>,
+    /// The sales tax part of the write-off (SSUTA bad debt).
+    pub write_off_tax: Option<Money>,
 }
 
 impl fmt::Debug for FigureRow {

@@ -662,6 +662,32 @@ impl ReceivePaymentScreen {
                                 }
                             });
                         }
+                        // SSUTA (P23): the engine's sales tax part of a
+                        // discount or write-off; hidden when it sends none.
+                        let taxes = [
+                            (
+                                r.discount.is_positive(),
+                                r.discount_tax,
+                                "payment.discount.tax",
+                            ),
+                            (
+                                r.write_off.is_positive(),
+                                r.write_off_tax,
+                                "payment.write_off.tax",
+                            ),
+                        ];
+                        for (shown_on, tax, key) in taxes {
+                            if let Some(x) = tax.filter(|x| shown_on && !x.is_zero()) {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(widths[0]);
+                                    ui.label(
+                                        RichText::new(t_with(key, &[("amount", &shown(x))]))
+                                            .color(tokens.text_secondary),
+                                    )
+                                    .on_hover_text(t("payment.tax_part.tip"));
+                                });
+                            }
+                        }
                     });
                 }
             });

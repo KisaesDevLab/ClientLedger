@@ -603,6 +603,23 @@ fn run_ssuta(id: i64, ssuta: bool) -> Seed {
                 invoice(&mut s, &mut names, req);
             }
             "receivePayment" => {
+                // The preview's discountTax / writeOffTax (U-153).
+                for a in req["applications"].as_array().into_iter().flatten() {
+                    let inv = a["invoice"].as_str().expect("inv");
+                    let z = |k: &str| a[k].as_str().map_or(Decimal::ZERO, d);
+                    let parts = preview_tax_parts(
+                        &s.state,
+                        names[inv],
+                        z("amount"),
+                        z("discount"),
+                        z("writeOff"),
+                    );
+                    if !ssuta {
+                        assert_eq!(parts, None, "{what}: switch off");
+                    } else if let Some(want) = want["discountTax"][inv].as_str() {
+                        assert_eq!(parts.map(|p| p.0), Some(d(want)), "{what}");
+                    }
+                }
                 receive(&mut s, &mut names, req, false);
             }
             "liability" => check_liability(&mut s, req, want, &what),

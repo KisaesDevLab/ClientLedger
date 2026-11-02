@@ -1051,6 +1051,14 @@ pub fn preview(
     let threshold = state.receivables.settings.write_off_threshold;
     for row in &c.rows {
         let remaining = row.balance - row.settled();
+        // SSUTA (U-153): the tax parts of this row's discount and write-off.
+        let tax_parts = super::sales_tax_owed::preview_tax_parts(
+            state,
+            row.inv.id,
+            row.cash,
+            row.discount,
+            row.write_off,
+        );
         invoices.push(PreviewInvoice {
             invoice_id: row.inv.id,
             invoice_number: row.inv.number.clone(),
@@ -1068,8 +1076,8 @@ pub fn preview(
             discount_date: row.pct.map(|(_, d)| d),
             discount_available: money(row.available)?,
             suggest_discount: row.suggest,
-            discount_tax: None,
-            write_off_tax: None,
+            discount_tax: tax_parts.map(|(d, _)| money(d)).transpose()?,
+            write_off_tax: tax_parts.map(|(_, w)| money(w)).transpose()?,
         });
         if row.settled() > Decimal::ZERO && remaining > Decimal::ZERO {
             let amount = money(remaining)?;

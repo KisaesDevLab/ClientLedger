@@ -94,6 +94,8 @@ pub(crate) fn figures_of(p: &PaymentPreview) -> PaymentFigures {
                 discount_date: i.discount_date,
                 discount_percent: i.discount_percent.clone(),
                 suggest_discount: i.suggest_discount,
+                discount_tax: i.discount_tax,
+                write_off_tax: i.write_off_tax,
             })
             .collect(),
         amount_due: p.totals.amount_due,

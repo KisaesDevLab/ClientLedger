@@ -227,6 +227,46 @@ fn ssuta_split(tax: Decimal, s: Settlement, before: Decimal, total: Decimal) -> 
     }
 }
 
+/// The sales tax parts (discount, write-off) a new settlement of `invoice`
+/// would take with Streamlined Sales Tax on (`POST /payments/preview`
+/// `discountTax` / `writeOffTax`, U-153): each tax row's running-total
+/// share after the invoice's earlier settlements, summed. `None` with the
+/// switch off or an invoice without tax rows.
+#[must_use]
+pub fn preview_tax_parts(
+    state: &DemoState,
+    invoice: TransactionId,
+    cash: Decimal,
+    discount: Decimal,
+    write_off: Decimal,
+) -> Option<(Decimal, Decimal)> {
+    if !state.sales_tax.ssuta {
+        return None;
+    }
+    let rows = state.sales_tax.rows.get(&invoice)?;
+    let total = invoice_total(state, invoice)?;
+    let before: Decimal = settlements(state)
+        .get(&invoice)
+        .map(|v| v.iter().map(|s| s.cash + s.discount + s.write_off).sum())
+        .unwrap_or_default();
+    let s = Settlement {
+        date: CalendarDate::min(),
+        cash,
+        discount,
+        write_off,
+    };
+    let mut out = (Decimal::ZERO, Decimal::ZERO);
+    for r in rows
+        .iter()
+        .filter(|r| r.doc == DocKind::Invoice && r.code.is_none())
+    {
+        let (d, w) = ssuta_split(r.tax, s, before, total);
+        out.0 += d;
+        out.1 += w;
+    }
+    Some(out)
+}
+
 // ---- Events --------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
