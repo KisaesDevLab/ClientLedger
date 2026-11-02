@@ -19,6 +19,7 @@ use cl_core::{Rate, Secret};
 use cl_settings::{Accent, CompanyFlags, FiscalCalendar, RecentStore};
 
 use crate::error::CompanyError;
+use crate::statistics::Statistics;
 use crate::templates::StarterChart;
 
 /// Shortest closing-date password (Q-211 family).
@@ -196,11 +197,26 @@ async fn streamlined_sales_tax(session: &Session, on: bool) -> Result<(), Compan
 }
 
 /// Runs the interview's answers against the engine and records the
-/// company locally. The session is left open on the new company.
+/// company locally. The session is left open on the new company. Table
+/// statistics are refreshed at the end through `stats` (Q-335; a failed
+/// refresh is logged, never returned).
 ///
 /// # Errors
 /// `Setup` with the issues (nothing sent); `Api`; `Settings`.
 pub async fn create_company(
+    session: &Session,
+    store: &RecentStore,
+    setup: &CompanySetup,
+    stats: &Statistics,
+) -> Result<Created, CompanyError> {
+    let created = create_company_steps(session, store, setup).await?;
+    stats.refresh().await;
+    Ok(created)
+}
+
+/// [`create_company`] without the statistics refresh, for flows that load
+/// more data afterwards and refresh at their own end.
+pub(crate) async fn create_company_steps(
     session: &Session,
     store: &RecentStore,
     setup: &CompanySetup,

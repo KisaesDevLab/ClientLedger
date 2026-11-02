@@ -38,7 +38,8 @@ use serde::Deserialize;
 
 use crate::backup::{Progress, ProgressSink};
 use crate::error::CompanyError;
-use crate::setup::{CompanySetup, Created, create_company};
+use crate::setup::{CompanySetup, Created, create_company_steps};
+use crate::statistics::Statistics;
 use crate::templates::StarterChart;
 
 /// Display name of the practice company.
@@ -688,12 +689,13 @@ impl Sample {
 /// sample. Reports progress per hundred transactions.
 ///
 /// # Errors
-/// Everything [`create_company`] and the posting routes can fail with.
+/// Everything [`crate::create_company`] and the posting routes can fail with.
 #[allow(clippy::too_many_lines, reason = "one linear sequence of posts")]
 pub async fn load_into(
     session: &Session,
     store: &RecentStore,
     progress: &ProgressSink,
+    stats: &Statistics,
 ) -> Result<Created, CompanyError> {
     let sample = Sample::load();
     progress(Progress::Starting);
@@ -703,7 +705,7 @@ pub async fn load_into(
     setup.chart =
         StarterChart::from_id(&sample.company.chart).unwrap_or(StarterChart::GeneralService);
     setup.accent = cl_settings::Accent([0xC9, 0xC4, 0xBA]);
-    let created = create_company(session, store, &setup).await?;
+    let created = create_company_steps(session, store, &setup).await?;
     // Pinned: a switch while the sample loads stops the posts (StaleScope)
     // instead of sending them into the other company.
     let session = &session.pinned();
@@ -886,6 +888,8 @@ pub async fn load_into(
             r.source = Some("sample".into());
         }
     })?;
+    // Statistics for everything just posted (Q-335).
+    stats.refresh().await;
     progress(Progress::Done);
     Ok(created)
 }

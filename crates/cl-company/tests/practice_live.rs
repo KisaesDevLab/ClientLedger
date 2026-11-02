@@ -138,9 +138,14 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
         "the pinned engine has templates-v1 and recurring-run-due-v1"
     );
     let store = RecentStore::in_dir(&scratch.join("settings"));
-    let created = cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
-        .await
-        .expect("the practice company loads");
+    let created = cl_company::sample::load_into(
+        &s,
+        &store,
+        &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
+    )
+    .await
+    .expect("the practice company loads");
     // load_into leaves the new company open in the session.
     let _ = created;
 

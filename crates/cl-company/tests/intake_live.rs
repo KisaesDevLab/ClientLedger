@@ -137,9 +137,14 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         other => panic!("login: {other:?}"),
     };
     let store = RecentStore::in_dir(&scratch.join("settings"));
-    let created = cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
-        .await
-        .expect("a company to copy into");
+    let created = cl_company::sample::load_into(
+        &s,
+        &store,
+        &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
+    )
+    .await
+    .expect("a company to copy into");
 
     // AC1: a file saved into a watched folder becomes an attachment.
     let folder = scratch.join("Bills");
@@ -342,6 +347,7 @@ async fn backup_restore_keeps_folders(
             passphrase: None,
         },
         &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
     )
     .await
     .expect("restore");

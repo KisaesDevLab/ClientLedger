@@ -225,6 +225,21 @@ impl CompanyLink {
         self.live.as_ref().map(|l| &l.supervisor)
     }
 
+    /// Refreshes table statistics after a company is created, imported or
+    /// restored (Q-335); nothing in demo. Holds the supervisor weakly, so a
+    /// running task never keeps it alive at shutdown.
+    #[must_use]
+    pub fn statistics(&self) -> cl_company::Statistics {
+        let Some(sup) = self.supervisor() else {
+            return cl_company::Statistics::none();
+        };
+        let sup = Arc::downgrade(sup);
+        cl_company::Statistics::new(move || {
+            let sup = sup.upgrade().ok_or("the app is shutting down")?;
+            sup.refresh_statistics().map_err(|e| e.to_string())
+        })
+    }
+
     /// A request group for one window.
     ///
     /// # Errors

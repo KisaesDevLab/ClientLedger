@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::backup::{Progress, ProgressSink, sha256_file};
 use crate::error::CompanyError;
+use crate::statistics::Statistics;
 use crate::zipfile;
 
 /// The archive format the engine writes.
@@ -137,7 +138,9 @@ pub struct RestoreOutcome {
 /// archive's `host`, else from the company it came from), and only then
 /// are names swapped, which needs the previous company's `updatedAt` from
 /// `GET /api/v1/tenants`. A failed swap is not fatal: the restored
-/// company keeps the archive's name and `names_swapped` is false.
+/// company keeps the archive's name and `names_swapped` is false. Table
+/// statistics are refreshed last through `stats` (Q-335; a failure is
+/// logged, never returned).
 ///
 /// # Errors
 /// `NotABackup`, `Tampered`, `Io` (nothing sent); `NoPassphrase`;
@@ -151,6 +154,7 @@ pub async fn restore(
     secrets: &dyn SecretStore,
     req: &RestoreRequest,
     progress: &ProgressSink,
+    stats: &Statistics,
 ) -> Result<RestoreOutcome, CompanyError> {
     let list = store.load()?;
     let path = std::path::absolute(&req.path).map_err(CompanyError::io("resolve archive"))?;
@@ -285,6 +289,8 @@ pub async fn restore(
             })?;
         }
     }
+    // The imported rows have no statistics yet (Q-335).
+    stats.refresh().await;
     progress(Progress::Done);
     Ok(RestoreOutcome {
         new_tenant: imported.tenant_id,

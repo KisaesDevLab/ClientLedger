@@ -360,6 +360,7 @@ impl OpenCompanyScreen {
         };
         let store = self.link.store().clone();
         let secrets = self.link.secrets();
+        let stats = self.link.statistics();
         self.busy = Some("open.restore.working");
         self.restore_task = spawn_lifecycle(&self.link, group, move || async move {
             cl_company::restore(
@@ -368,6 +369,7 @@ impl OpenCompanyScreen {
                 secrets.as_ref(),
                 &RestoreRequest { path, passphrase },
                 &cl_company::backup::silent(),
+                &stats,
             )
             .await
         })
@@ -410,9 +412,11 @@ impl OpenCompanyScreen {
             return;
         };
         let store = self.link.store().clone();
+        let stats = self.link.statistics();
         self.busy = Some("open.practice_loading");
         self.sample_task = spawn_lifecycle(&self.link, group, move || async move {
-            cl_company::sample::load_into(&session, &store, &cl_company::backup::silent()).await
+            cl_company::sample::load_into(&session, &store, &cl_company::backup::silent(), &stats)
+                .await
         })
         .ok();
     }

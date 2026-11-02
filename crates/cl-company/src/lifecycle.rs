@@ -10,6 +10,7 @@ use cl_settings::{Accent, RecentStore};
 
 use crate::error::CompanyError;
 use crate::setup::Created;
+use crate::statistics::Statistics;
 use crate::templates::ENGINE_SYSTEM_NUMBERS;
 
 /// One row of the Open Company list: the engine's tenant plus what the
@@ -109,6 +110,7 @@ pub async fn close_company(session: &Session) -> Result<(), CompanyError> {
 /// "New from existing" (Q-127): a new company with the source company's
 /// chart of accounts, settings and legal form, without transactions,
 /// contacts or items. The session is left open on the new company.
+/// Table statistics are refreshed at the end through `stats` (Q-335).
 ///
 /// # Errors
 /// `Api`; `Settings`.
@@ -118,6 +120,7 @@ pub async fn new_from_existing(
     source: TenantId,
     new_name: &str,
     accent: Accent,
+    stats: &Statistics,
 ) -> Result<Created, CompanyError> {
     let new_name = new_name.trim().to_string();
     if new_name.is_empty() || new_name.chars().count() > 255 {
@@ -211,6 +214,7 @@ pub async fn new_from_existing(
         rec.transaction_count = Some(0);
         list.touch_opened(made.tenant_id, now);
     })?;
+    stats.refresh().await;
     Ok(Created {
         tenant_id: open.tenant_id,
         company_id: open.company_id,
