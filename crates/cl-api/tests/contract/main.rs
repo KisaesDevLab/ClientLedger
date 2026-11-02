@@ -972,16 +972,8 @@ fn main() -> std::process::ExitCode {
             contract_bills::backup_restore_keeps_the_bill_file_live,
         ),
         // P23 WP-4: sales tax, in one company of its own. The cash-basis
-        // tests run first: the engine's cash reports slow down sharply as
-        // the company fills (reported to the orchestrator, WP-4).
-        (
-            "cash_basis_spf::unapplied_receipts_no_ar_on_cash",
-            contract_cash_basis_spf::unapplied_receipts_no_ar_on_cash,
-        ),
-        (
-            "cash_basis_spf::cash_write_off_and_bill_discount",
-            contract_cash_basis_spf::cash_write_off_and_bill_discount,
-        ),
+        // tests run last, on the fullest company (U-155: cash reports stay
+        // fast as the company fills).
         (
             "sales_tax_setup::setup_crud_stale_and_deactivate",
             contract_sales_tax_setup::setup_crud_stale_and_deactivate,
@@ -1025,6 +1017,14 @@ fn main() -> std::process::ExitCode {
         (
             "sales_tax_ssuta::ssuta_off_and_forward_only",
             contract_sales_tax_ssuta::ssuta_off_and_forward_only,
+        ),
+        (
+            "cash_basis_spf::unapplied_receipts_no_ar_on_cash",
+            contract_cash_basis_spf::unapplied_receipts_no_ar_on_cash,
+        ),
+        (
+            "cash_basis_spf::cash_write_off_and_bill_discount",
+            contract_cash_basis_spf::cash_write_off_and_bill_discount,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",
