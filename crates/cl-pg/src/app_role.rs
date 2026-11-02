@@ -94,6 +94,50 @@ impl Cluster {
         apply(&mut client, role, database, pw)
     }
 
+    /// Refresh the planner's table statistics (`ANALYZE`) for every table in
+    /// `database` (Q-335). Run after a company is created, imported or
+    /// restored: with no statistics yet, report queries can pick plans that
+    /// take minutes instead of milliseconds (U-155). At `ClientLedger` sizes
+    /// the whole database takes well under a second.
+    ///
+    /// Runs as the application role `role`, which owns `database`: the
+    /// superuser may only connect to `postgres` (`pg_hba`), and a database
+    /// owner may analyze every table in its database.
+    ///
+    /// Blocking; call it from `spawn_blocking` in async code. Needs the
+    /// server running on `port`.
+    ///
+    /// # Errors
+    /// Fails when a name is not a plain lowercase SQL name, the server
+    /// cannot be reached, or it refuses the statement.
+    pub fn analyze_database(
+        port: u16,
+        role: &str,
+        database: &str,
+        password: &Secret,
+    ) -> Result<()> {
+        if !valid_name(role) || !valid_name(database) {
+            return Err(PgError::Sql {
+                context: "refresh table statistics".into(),
+                detail: "role and database names must be lowercase letters, digits, underscores"
+                    .into(),
+            });
+        }
+        let mut client = Config::new()
+            .host("127.0.0.1")
+            .port(port)
+            .user(role)
+            .password(password.expose())
+            .dbname(database)
+            .connect_timeout(Duration::from_secs(10))
+            .application_name("clientledger-host")
+            .connect(NoTls)
+            .map_err(|e| sql_error("connect to the application database", &e))?;
+        client
+            .batch_execute("ANALYZE")
+            .map_err(|e| sql_error("refresh table statistics", &e))
+    }
+
     /// `postgres://<role>:<password>@127.0.0.1:<port>/<database>`.
     #[must_use]
     pub fn app_url(port: u16, role: &str, database: &str, password: &Secret) -> Secret {

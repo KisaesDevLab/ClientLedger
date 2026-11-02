@@ -20,6 +20,21 @@ use serde_json::{Value, json};
 use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// A statistics refresh that counts its runs (Q-335).
+fn counting_stats() -> (Arc<std::sync::atomic::AtomicU32>, cl_company::Statistics) {
+    let n = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let c = Arc::clone(&n);
+    let stats = cl_company::Statistics::new(move || {
+        c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    });
+    (n, stats)
+}
+
+fn runs(n: &std::sync::atomic::AtomicU32) -> u32 {
+    n.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 const WS: &str = "0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a00";
 const T1: &str = "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const T2: &str = "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
@@ -413,6 +428,7 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
         ))
         .mount(&server)
         .await;
+    let (restored_runs, restore_stats) = counting_stats();
     let out = restore(
         &s,
         &store,
@@ -422,9 +438,11 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
             passphrase: None,
         },
         &cl_company::backup::silent(),
+        &restore_stats,
     )
     .await
     .expect("restore");
+    assert_eq!(runs(&restored_runs), 1, "statistics refreshed once");
     assert_eq!(out.new_tenant, t(T2));
     assert_eq!(out.kept_previous, Some(t(T1)));
     assert!(out.names_swapped);
@@ -531,6 +549,7 @@ async fn an_old_portable_copy_still_restores_q268() {
             passphrase: None,
         },
         &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
     )
     .await
     .expect("an old portable copy restores");
@@ -583,6 +602,7 @@ async fn restore_refuses_a_changed_file_before_anything_is_sent() {
             passphrase: None,
         },
         &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
     )
     .await
     .expect_err("tampered");
@@ -791,7 +811,11 @@ async fn create_company_runs_the_interview_steps_in_order() {
     setup.chart = StarterChart::Contractor;
     setup.inventory = true;
     setup.accent = cl_settings::ACCENT_PALETTE[3];
-    let made = create_company(&s, &store, &setup).await.expect("created");
+    let (made_runs, stats) = counting_stats();
+    let made = create_company(&s, &store, &setup, &stats)
+        .await
+        .expect("created");
+    assert_eq!(runs(&made_runs), 1, "statistics refreshed once");
     assert_eq!(made.tenant_id, t(T2));
     assert_eq!(made.accounts_imported, 40);
     assert!(!made.closing_password_set);
@@ -832,8 +856,12 @@ async fn create_company_runs_the_interview_steps_in_order() {
     // anything is sent.
     let before = server.received_requests().await.expect("r").len();
     setup.closing_password = Some(Secret::new("a-closing-password-12"));
-    let e = create_company(&s, &store, &setup).await.expect_err("gated");
+    let (gated_runs, stats) = counting_stats();
+    let e = create_company(&s, &store, &setup, &stats)
+        .await
+        .expect_err("gated");
     assert!(matches!(e, CompanyError::Setup(_)), "{e:?}");
+    assert_eq!(runs(&gated_runs), 0, "nothing to refresh after a refusal");
     assert_eq!(server.received_requests().await.expect("r").len(), before);
 }
 
@@ -940,7 +968,13 @@ async fn switching_mid_load_sends_nothing_into_the_other_company() {
         let s = s.clone();
         let store = store.clone();
         tokio::spawn(async move {
-            cl_company::sample::load_into(&s, &store, &cl_company::backup::silent()).await
+            cl_company::sample::load_into(
+                &s,
+                &store,
+                &cl_company::backup::silent(),
+                &cl_company::Statistics::none(),
+            )
+            .await
         })
     };
     // Let a few posts go out, then switch companies underneath the loader.
@@ -1065,9 +1099,14 @@ async fn the_sample_posts_waiting_payments_into_payments_clearing() {
         .mount(&server)
         .await;
 
-    cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
-        .await
-        .expect("loaded");
+    cl_company::sample::load_into(
+        &s,
+        &store,
+        &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
+    )
+    .await
+    .expect("loaded");
 
     let entries = posts(&server, "/api/v1/transactions").await;
     assert_eq!(entries.len(), 1512);
@@ -1153,6 +1192,7 @@ async fn restore_with_a_stale_previous_company_keeps_both_names() {
             passphrase: None,
         },
         &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
     )
     .await
     .expect("the restore itself succeeded");

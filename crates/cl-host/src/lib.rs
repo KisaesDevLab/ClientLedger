@@ -44,6 +44,7 @@ mod win_print;
 pub use cl_pg::Secret;
 pub use database::{
     APP_DATABASE, APP_ROLE, DatabaseFactory, DatabaseParts, DatabaseService, DbEndpoint, PgService,
+    StatisticsRefresher,
 };
 pub use desktop::{AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 pub use docread_worker::{

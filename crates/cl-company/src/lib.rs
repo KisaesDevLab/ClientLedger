@@ -27,6 +27,7 @@ pub mod restore;
 pub mod retention;
 pub mod sample;
 pub mod setup;
+pub mod statistics;
 pub mod templates;
 pub mod year_end;
 mod zipfile;
@@ -47,6 +48,7 @@ pub use lifecycle::{CompanyEntry, close_company, list_companies, new_from_existi
 pub use restore::{ArchiveInfo, RestoreOutcome, RestoreRequest, inspect_archive, restore};
 pub use sample::{SAMPLE_NAME, Sample};
 pub use setup::{CompanySetup, Created, SetupIssue, create_company};
+pub use statistics::Statistics;
 pub use templates::{StarterChart, Template};
 pub use year_end::{YearEndPrompt, year_end_prompt};
 

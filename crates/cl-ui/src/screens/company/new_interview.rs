@@ -261,8 +261,9 @@ impl NewCompanyScreen {
         };
         let store = self.link.store().clone();
         let setup = self.setup.clone();
+        let stats = self.link.statistics();
         self.task = spawn_lifecycle(&self.link, group, move || async move {
-            cl_company::create_company(&session, &store, &setup).await
+            cl_company::create_company(&session, &store, &setup, &stats).await
         })
         .ok();
     }

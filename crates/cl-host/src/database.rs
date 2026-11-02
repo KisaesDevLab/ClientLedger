@@ -46,6 +46,38 @@ pub trait DatabaseService: Send {
     fn log_paths(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+
+    /// How to refresh table statistics on the server started at `endpoint`
+    /// (Q-335), or `None` when this database has no statistics to refresh.
+    fn statistics(&self, _endpoint: &DbEndpoint) -> Option<StatisticsRefresher> {
+        None
+    }
+}
+
+/// Refreshes the planner's table statistics (`ANALYZE`) of the engine's
+/// database. Blocking. Holds the role password, so `Debug` shows nothing.
+#[derive(Clone)]
+pub struct StatisticsRefresher(Arc<dyn Fn() -> Result<()> + Send + Sync>);
+
+impl StatisticsRefresher {
+    /// Wrap `f`.
+    pub fn new(f: impl Fn() -> Result<()> + Send + Sync + 'static) -> StatisticsRefresher {
+        StatisticsRefresher(Arc::new(f))
+    }
+
+    /// Run it (blocking).
+    ///
+    /// # Errors
+    /// Whatever the refresh returned.
+    pub fn run(&self) -> Result<()> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for StatisticsRefresher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StatisticsRefresher")
+    }
 }
 
 /// What a [`DatabaseFactory`] returns: the service and any notices for the owner.
@@ -141,5 +173,13 @@ impl DatabaseService for PgService {
 
     fn log_paths(&self) -> Vec<PathBuf> {
         vec![self.startup_log.clone(), self.data_log_dir.clone()]
+    }
+
+    fn statistics(&self, endpoint: &DbEndpoint) -> Option<StatisticsRefresher> {
+        let (port, password) = (endpoint.port, self.app_password.clone());
+        Some(StatisticsRefresher::new(move || {
+            Cluster::analyze_database(port, APP_ROLE, APP_DATABASE, &password)
+                .map_err(HostError::from)
+        }))
     }
 }
