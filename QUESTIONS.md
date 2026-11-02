@@ -733,10 +733,10 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P23i | Editing a taxed document | P23 | **Edits keep the saved rates unless the sales tax item changes or the owner asks to use current rates (`RATE_CHANGED`); backfilled documents re-save with their stored rates.** Plan default (revision 2). | Default in force |
 | Q-P23j | Tax rate type | P23 | **A new `TaxRate` type (fraction up to 6 places, shown as "8.100%", percent entry up to 4 decimals); the existing `Rate` is unchanged.** Plan default (revision 2). | Default in force |
 | Q-P23k | Line tax code | P23 | **Request code, else the client's non-taxable code, else the item's code, else `is_taxable`, else Non.** Plan default (revision 2). | Default in force |
-| Q-P23l | Remaining P23 plan details (g–l group) | P23 | **Defaults as in revision 2 of target/plans/P23.md; the latest plan does not restate this item separately.** Revisit if the reviewer flags it. | Default in force |
+| Q-P23l | Remaining P23 plan details (g–l group) | P23 | The Home footer "Sales tax owed" is wired in P23 (not left for P28). | Default in force |
 | Q-P23n | Exemption certificate warnings | P23 | **Previews for a client whose code is not taxable warn `EXEMPTION_MISSING`, `EXEMPTION_EXPIRED` and `EXEMPTION_EXPIRING` (within 30 days).** Plan default. | Default in force |
-| Q-P23o | Remaining P23 plan details (n–p group) | P23 | **Defaults as in revision 2 of target/plans/P23.md; the latest plan does not restate this item separately.** | Default in force |
-| Q-P23p | Remaining P23 plan details (n–p group) | P23 | **Defaults as in revision 2 of target/plans/P23.md; the latest plan does not restate this item separately.** | Default in force |
+| Q-P23o | Remaining P23 plan details (n–p group) | P23 | Switching the liability basis (accrual / cash) mid-period is allowed; reports always use the current setting. | Default in force |
+| Q-P23p | Remaining P23 plan details (n–p group) | P23 | Every new tax item needs an agency (legacy backfilled items are the only exception, Q-P23f). | Default in force |
 | Q-P23q | Bad debt recovered later | P23 | **A recovery reopens the invoice and the owner receives the payment normally; the recovered tax is owed again.** Plan default (revision 2). | Default in force |
 | Q-P23r | Opening paid tax at upgrade | P23 | **Opening paid lines are written oldest first until the total owed equals the Sales Tax Payable balance at upgrade (FIFO).** Plan default (revision 2). | Default in force |
 | Q-P23s | Write-offs under SSUTA | P23 | **Every write-off is a bad debt while the SSUTA switch is on (accrual basis only, per Q-SPF3).** Plan default (revision 2). | Default in force |
