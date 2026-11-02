@@ -576,7 +576,7 @@ fn price_lines(state: &mut DemoState, new: &NewInvoice) -> Result<Vec<Priced>, A
                 taxable,
                 // A line's own rate (the P22 golden cases' 8.25 %; the
                 // desktop never sends one, so the demo's default).
-                tax_rate: l.tax_rate.map(cl_core::Rate::as_decimal),
+                tax_rate: l.tax_rate.map(cl_core::TaxRate::as_decimal),
             },
             quantity: Some(quantity),
             price: Some(price),

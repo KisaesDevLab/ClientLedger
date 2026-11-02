@@ -86,6 +86,15 @@ pub enum TxnType {
     /// `payment-bounce-v1`): dated the bounce date, Cr the account that
     /// held the money, Dr A/R. Posted only by `POST /payments/:id/bounce`.
     ReturnedPayment,
+    /// A sales tax payment, "Sales tax payment" (P23, U-150,
+    /// `sales-tax-pay-v1`): Dr Sales Tax Payable per item, the adjustment
+    /// account, Cr bank. A check: it can wait in the print queue. Posted
+    /// only by `POST /sales-tax/payments`; voided, never deleted.
+    SalesTaxPayment,
+    /// A bad-debt recovery (P23, U-154, `bad-debt-recovery-v1`): Dr A/R,
+    /// Cr the write-off account and Sales Tax Payable; the invoice reopens.
+    /// Posted only by `POST /payments/write-off-recoveries`.
+    BadDebtRecovery,
 }
 
 impl TxnType {

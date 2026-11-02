@@ -25,7 +25,7 @@ use base64::Engine as _;
 use cl_core::ids::{
     AccountId, ContactId, IdError, ItemId, JournalLineId, TagId, TransactionId, parse_uuid,
 };
-use cl_core::{CalendarDate, Money, Quantity, Rate, Timestamp};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate, Timestamp};
 use rust_decimal::Decimal;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize, Serializer};
@@ -472,7 +472,7 @@ pub struct InvoiceRecordLine {
     /// Taxable.
     pub is_taxable: bool,
     /// The rate the engine applied.
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// The line's share of the document tax.
     pub tax_amount: Option<Money>,
     /// Line tag.
@@ -719,7 +719,7 @@ struct LineWire {
     #[serde(default, deserialize_with = "null_false")]
     is_taxable: bool,
     #[serde(default)]
-    tax_rate: Option<Rate>,
+    tax_rate: Option<TaxRate>,
     #[serde(default)]
     tax_amount: Option<Money>,
     #[serde(default)]
@@ -1098,7 +1098,7 @@ pub struct InvoicePreview {
     pub taxable_base: Option<Money>,
     /// The document's tax rate.
     #[serde(default)]
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// The document tax.
     pub tax_total: Money,
     /// Total.

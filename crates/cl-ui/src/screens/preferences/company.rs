@@ -5,7 +5,7 @@
 //! (P13/P19), finance charges (P22), 1099 box mapping (P11/P28).
 
 use cl_api::{AccountingMethod, CompanySettings, CompanySettingsUpdate};
-use cl_core::{Rate, UserInput};
+use cl_core::{TaxRate, UserInput};
 use eframe::egui::{self, Ui};
 
 use super::{Edits, Loaded, SaveBlock};
@@ -315,32 +315,21 @@ impl Default for AccountingEdits {
 
 /// `0.0825` → `8.25` (exact; trailing zeros trimmed).
 #[must_use]
-pub fn rate_to_percent(rate: Rate) -> String {
-    let units = rate.to_ten_thousandths() * 100; // percent in ten-thousandths
-    let whole = units / 10_000;
-    let frac = (units % 10_000).unsigned_abs();
-    let mut s = format!("{whole}.{frac:04}");
-    while s.ends_with('0') {
-        s.pop();
-    }
-    if s.ends_with('.') {
-        s.pop();
-    }
-    s
+pub fn rate_to_percent(rate: TaxRate) -> String {
+    rate.percent_input()
 }
 
-/// `8.25` (percent, up to two decimals) → `0.0825`.
+/// `8.25` (percent, up to two decimals: the legacy default rate is still
+/// `decimal(5,4)` until U-148) → `0.0825`.
 ///
 /// # Errors
 /// `BadRate` for anything else.
-pub fn percent_to_rate(text: &str) -> Result<Rate, SaveBlock> {
-    let t = text.trim().trim_end_matches('%').trim();
-    let percent = Rate::parse_user(t, UserInput::CENTS).map_err(|_| SaveBlock::BadRate)?;
-    let units = percent.to_ten_thousandths();
-    if units < 0 || units % 100 != 0 {
+pub fn percent_to_rate(text: &str) -> Result<TaxRate, SaveBlock> {
+    let r = TaxRate::parse_percent(text).map_err(|_| SaveBlock::BadRate)?;
+    if r.to_millionths() % 100 != 0 {
         return Err(SaveBlock::BadRate);
     }
-    Rate::from_ten_thousandths(units / 100).map_err(|_| SaveBlock::BadRate)
+    Ok(r)
 }
 
 impl AccountingEdits {
@@ -397,7 +386,7 @@ impl AccountingEdits {
             return None;
         }
         let rate = if self.tax_percent.trim().is_empty() {
-            Some(Rate::ZERO)
+            Some(TaxRate::ZERO)
         } else {
             percent_to_rate(&self.tax_percent).ok()
         };
@@ -641,12 +630,15 @@ mod tests {
         assert_eq!(r.to_wire(), "0.0825");
         assert_eq!(rate_to_percent(r), "8.25");
         assert_eq!(percent_to_rate(" 7 % ").expect("rate").to_wire(), "0.0700");
-        assert_eq!(rate_to_percent(Rate::parse_wire("0.0700").expect("r")), "7");
         assert_eq!(
-            rate_to_percent(Rate::parse_wire("0.1000").expect("r")),
+            rate_to_percent(TaxRate::parse_wire("0.0700").expect("r")),
+            "7"
+        );
+        assert_eq!(
+            rate_to_percent(TaxRate::parse_wire("0.1000").expect("r")),
             "10"
         );
-        assert_eq!(rate_to_percent(Rate::ZERO), "0");
+        assert_eq!(rate_to_percent(TaxRate::ZERO), "0");
         for bad in ["8.255", "-1", "abc", "8,25"] {
             assert_eq!(percent_to_rate(bad), Err(SaveBlock::BadRate), "{bad}");
         }
@@ -657,7 +649,7 @@ mod tests {
         let s = CompanySettings {
             fiscal_year_start_month: Some(7),
             accounting_method: Some("cash".into()),
-            default_sales_tax_rate: Some(Rate::parse_wire("0.0825").expect("r")),
+            default_sales_tax_rate: Some(TaxRate::parse_wire("0.0825").expect("r")),
             ..serde_json::from_str("{}").expect("empty settings")
         };
         let e = AccountingEdits::from_settings(Some(&s));
@@ -668,7 +660,7 @@ mod tests {
         let mut changed = e.clone();
         changed.tax_percent = String::new();
         let u = changed.update_for(Some(&s)).expect("update");
-        assert_eq!(u.default_sales_tax_rate, Some(Rate::ZERO));
+        assert_eq!(u.default_sales_tax_rate, Some(TaxRate::ZERO));
         assert_eq!(u.accounting_method, Some(AccountingMethod::Cash));
         assert_eq!(
             AccountingEdits::from_settings(None),

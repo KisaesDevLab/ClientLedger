@@ -24,7 +24,7 @@ use cl_api::{
     LocalValidation, Method, NewBill, NewCompany, NewContact, NewInvoice, NewTenant, ReportBasis,
 };
 use cl_core::ids::TenantId;
-use cl_core::{Money, Quantity, Rate, Secret};
+use cl_core::{Money, Quantity, Secret, TaxRate};
 use serde_json::json;
 
 use crate::common::{date, je2, key, m, post};
@@ -150,7 +150,7 @@ pub fn coa_import_settings_and_setup(h: &Harness) {
             &CompanySettingsUpdate {
                 fiscal_year_start_month: Some(1),
                 accounting_method: Some(AccountingMethod::Accrual),
-                default_sales_tax_rate: Some(Rate::parse_wire("0.0825").expect("rate")),
+                default_sales_tax_rate: Some(TaxRate::parse_wire("0.0825").expect("rate")),
                 ..CompanySettingsUpdate::default()
             },
             key(),
@@ -160,7 +160,7 @@ pub fn coa_import_settings_and_setup(h: &Harness) {
     assert_eq!(
         settings
             .default_sales_tax_rate
-            .map(Rate::to_wire)
+            .map(TaxRate::to_wire)
             .as_deref(),
         Some("0.0825")
     );

@@ -2,14 +2,14 @@
 //! (open invoices and unpaid bills as of the start date, Q-45) and the
 //! invoice line and body P20 Create Invoice sends (`resources::invoices`).
 //!
-//! Money fields are exact (`Money`, `Quantity`, `Rate`) and travel as
+//! Money fields are exact (`Money`, `Quantity`, `TaxRate`) and travel as
 //! strings; the engine computes every line amount, the tax and the totals
 //! (U-122, Q-P20n). Nothing here adds up an invoice.
 
 use std::fmt;
 
 use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId};
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -53,7 +53,7 @@ pub struct InvoiceLine {
     /// Taxable; `None` takes the item's flag (false without an item).
     pub is_taxable: Option<bool>,
     /// The line's own tax rate; the desktop app sends `None`.
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// Line tag.
     pub tag_id: Option<TagId>,
     /// The billable cost this line invoices (U-128, `billable-costs-v1`):

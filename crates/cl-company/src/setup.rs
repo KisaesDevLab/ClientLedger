@@ -229,7 +229,7 @@ pub async fn create_company(
                 fiscal_year_start_month: Some(setup.fiscal_year_start_month),
                 accounting_method: Some(setup.basis),
                 default_sales_tax_rate: if setup.sales_tax {
-                    setup.sales_tax_rate
+                    setup.sales_tax_rate.map(cl_core::TaxRate::from)
                 } else {
                     None
                 },

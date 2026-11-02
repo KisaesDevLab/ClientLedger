@@ -166,6 +166,8 @@ impl AttachTo {
                 TxnType::DailySales => "daily_sales",
                 TxnType::Aje => "aje",
                 TxnType::ReturnedPayment => "returned_payment",
+                TxnType::SalesTaxPayment => "sales_tax_payment",
+                TxnType::BadDebtRecovery => "bad_debt_recovery",
             },
             AttachTo::Contact(_) => "contact",
         }
@@ -820,6 +822,9 @@ mod tests {
             TxnType::BillPayment,
             TxnType::DailySales,
             TxnType::Aje,
+            TxnType::ReturnedPayment,
+            TxnType::SalesTaxPayment,
+            TxnType::BadDebtRecovery,
         ] {
             assert_eq!(AttachTo::Txn(t, txn).attachable_type(), t.as_str());
         }

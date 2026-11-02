@@ -27,7 +27,7 @@
 use std::fmt;
 
 use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId};
-use cl_core::{CalendarDate, Money, Quantity, Rate};
+use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 
 use crate::rowkey::{RowKey, RowKeyGen};
 use crate::text::TextKey;
@@ -1024,7 +1024,7 @@ pub struct PreviewTotals {
     /// The document tax.
     pub tax_total: Money,
     /// The tax rate (the label; no city until P23).
-    pub tax_rate: Option<Rate>,
+    pub tax_rate: Option<TaxRate>,
     /// Total.
     pub total: Money,
     /// Due date from the terms.

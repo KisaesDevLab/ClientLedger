@@ -11,7 +11,7 @@
 //!   change the session's scope.
 
 use cl_core::ids::{AccountId, CompanyId, UserId};
-use cl_core::{CalendarDate, Rate, Secret, Timestamp};
+use cl_core::{CalendarDate, Secret, TaxRate, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -302,9 +302,10 @@ pub struct CompanySettings {
     /// Next invoice number.
     #[serde(default)]
     pub invoice_next_number: Option<u64>,
-    /// Default sales tax rate (exact, `decimal(5,4)`).
+    /// Default sales tax rate (exact; four places before U-148, six after;
+    /// the legacy field, `defaultSalesTaxId` names the sales tax).
     #[serde(default)]
-    pub default_sales_tax_rate: Option<Rate>,
+    pub default_sales_tax_rate: Option<TaxRate>,
     /// Currency code.
     #[serde(default)]
     pub currency: Option<String>,
@@ -501,7 +502,7 @@ pub struct CompanySettingsUpdate {
     pub invoice_next_number: Option<u64>,
     /// Default sales tax rate (exact).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_sales_tax_rate: Option<Rate>,
+    pub default_sales_tax_rate: Option<TaxRate>,
     /// Currency code (USD, Q-41).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
@@ -1163,7 +1164,7 @@ mod tests {
         let st = s.company_settings().await.expect("settings");
         assert_eq!(st.fiscal_year_start_month, Some(7));
         assert_eq!(
-            st.default_sales_tax_rate.map(Rate::to_wire).as_deref(),
+            st.default_sales_tax_rate.map(TaxRate::to_wire).as_deref(),
             Some("0.0550")
         );
         assert_eq!(

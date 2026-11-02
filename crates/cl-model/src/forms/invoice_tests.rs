@@ -318,7 +318,7 @@ fn figures(n: usize, total: &str) -> PreviewFigures {
         totals: PreviewTotals {
             subtotal: m("1950.00"),
             tax_total: m("63.18"),
-            tax_rate: Some(Rate::parse_wire("0.081").expect("rate")),
+            tax_rate: Some(cl_core::TaxRate::parse_wire("0.081").expect("rate")),
             total: m(total),
             due_date: Some(day(18)),
             balance_after: Some(m("3013.18")),

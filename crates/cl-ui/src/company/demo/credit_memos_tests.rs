@@ -6,7 +6,7 @@ use cl_api::{
     ApplyInvoice, CreditMemoApplication, CreditRefusal, InvoiceLine, RefundRefusal, credit_refusal,
     refund_refusal,
 };
-use cl_core::{Quantity, Rate};
+use cl_core::{Quantity, TaxRate};
 use proptest::prelude::*;
 use serde_json::Value;
 
@@ -45,7 +45,7 @@ pub(crate) fn line(qty: &str, price: &str, taxable: bool) -> InvoiceLine {
     );
     l.is_taxable = Some(taxable);
     // The golden cases' 8.25 % (the demo company's own rate is 8.1 %).
-    l.tax_rate = Some(Rate::parse_wire("0.0825").expect("rate"));
+    l.tax_rate = Some(TaxRate::parse_wire("0.0825").expect("rate"));
     l
 }
 
