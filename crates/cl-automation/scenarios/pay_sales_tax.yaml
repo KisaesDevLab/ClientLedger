@@ -37,4 +37,15 @@ steps:
   - click: {role: button, label: "Void 11/04/2026"}
   - assert_state: {key: screen.notice, equals: "sales_tax.pay.voided"}
   - screenshot: voided
+  # Mark paid through: a confirmation that says it can't be undone, then
+  # nothing is owed through the date and no check is made. Last: it can't
+  # be undone, so this scenario runs once per demo session.
+  - click: {role: button, label: "Mark paid through…"}
+  - assert_state: {key: screen.confirm_mark, equals: true}
+  - assert_exists: {role: label, label_contains: "can't be undone"}
+  - screenshot: mark-paid-confirm
+  - click: {role: button, label: Mark as paid}
+  - assert_state: {key: screen.notice, equals: "sales_tax.pay.marked_paid"}
+  - assert_state: {key: screen.total, equals: "0.0000"}
+  - screenshot: marked-paid
   - command: file.close_window

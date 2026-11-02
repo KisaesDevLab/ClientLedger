@@ -169,7 +169,7 @@ fn figures_of(p: &PayPreview) -> PayFigures {
             })
             .collect(),
         total: p.total,
-        owed: p.owed,
+        owed: p.expected_owed_total(),
         legacy_unassigned: p
             .problems
             .iter()

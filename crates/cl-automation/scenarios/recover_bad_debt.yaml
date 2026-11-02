@@ -1,0 +1,36 @@
+# Recover a Bad Debt (P23 plan §6.4, golden 13) against `clientledger
+# --demo`: an invoice of 200.00 + 17.75 tax paid 100.00 with 117.75 written
+# off (Streamlined Sales Tax on); 500.00 is more than is left (the engine's
+# 117.75 is offered), then 50.00 reopens the invoice with 4.08 sales tax
+# owed again. Run once per demo session (light, then dark in a fresh app).
+# Synthetic.
+name: recover_bad_debt
+description: "Recover a bad debt: too much offers what's left; the recovered tax."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.recover_bad_debt
+  - assert_state: {key: screen.screen, equals: recover_bad_debt}
+  - assert_state: {key: screen.available, equals: true}
+  - command: dev.demo_write_off_story
+  - assert_state: {key: screen.invoices, equals: 1}
+  - assert_state: {key: screen.invoice, equals: true}
+  - screenshot: written-off
+  - click: {role: text_input, label: Amount recovered}
+  - key: Ctrl+A
+  - type: {text: "500.00"}
+  - key: Tab
+  - click: {role: button, label: Record recovery}
+  - assert_state: {key: screen.problem, equals: true}
+  - assert_value: {target: {role: text_input, label: Amount recovered}, equals: "117.75"}
+  - click: {role: text_input, label: Amount recovered}
+  - key: Ctrl+A
+  - type: {text: "50.00"}
+  - key: Tab
+  - click: {role: button, label: Record recovery}
+  - assert_state: {key: screen.done.balance, equals: "50.0000"}
+  - assert_state: {key: screen.done.tax, equals: "4.0800"}
+  - assert_exists: {role: button, label: Receive the payment now}
+  - assert_no_clipping: {}
+  - screenshot: recovered
+  - command: file.close_window

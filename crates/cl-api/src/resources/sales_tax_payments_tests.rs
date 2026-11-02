@@ -198,7 +198,11 @@ fn post_lines_copy_the_preview_strings() {
         Some(item(STATE)),
         "the item comes from details"
     );
-    assert_eq!(p.owed.to_wire(), "215.3800");
+    assert_eq!(
+        p.expected_owed_total().map(Money::to_wire).as_deref(),
+        Some("215.3800"),
+        "owed when the engine sends no expectedOwed"
+    );
     assert!(
         !format!("{:?}", p.problems).contains("3.00"),
         "details amounts are not kept"
@@ -253,7 +257,7 @@ async fn pay_previews_then_posts_with_a_key() {
             .expect_err("no top-level expectedOwed"),
         ApiError::Local(LocalValidation::InvalidValue)
     );
-    r.expected_owed = Some(p.owed);
+    r.expected_owed = p.expected_owed_total();
     let done = s
         .sales_tax_payments()
         .create(&r, &PostingOptions::default(), IdempotencyKey::new())
@@ -633,4 +637,42 @@ fn a_report_filtered_by_agency_has_no_gl_fields() {
     let r: SalesTaxLiability = serde_json::from_str(&filtered).expect("filtered");
     assert_eq!((r.gl_movement, r.other_entries), (None, None));
     assert!(r.balance_check.is_none());
+}
+
+#[tokio::test]
+async fn write_offs_list_and_expected_owed_from_e5() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/payments/write-offs"))
+        .respond_with(json(
+            200,
+            &format!(
+                r#"{{"data":[{{"invoiceId":"{INV}","invoiceNumber":"INV-W","invoiceDate":"2026-11-01",
+                    "customerId":null,"customerName":"x","writeOffDate":"2026-11-20","firstWriteOffDate":"2026-11-20",
+                    "writtenOff":"117.75","writeOffTax":"10.45","recovered":"50.00","recoveredTax":"4.08",
+                    "recoverable":"67.75","balanceDue":"50.00"}}]}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let w = s.recoveries().write_offs(None, false).await.expect("list");
+    assert_eq!(
+        (w[0].written_off.to_wire(), w[0].recoverable.to_wire()),
+        ("117.7500".into(), "67.7500".into())
+    );
+    assert!(!format!("{:?}", w[0]).contains("117"));
+    assert_eq!(
+        recovery_refusal(&refusal("RECOVERY_DATE_INVALID")),
+        Some(RecoveryRefusal::DateInvalid)
+    );
+    let p: PayPreview = serde_json::from_str(
+        r#"{"lines":[],"owed":"1.00","expectedOwed":"2.00","total":"0.00","problems":[]}"#,
+    )
+    .expect("preview");
+    assert_eq!(
+        p.expected_owed_total().map(Money::to_wire).as_deref(),
+        Some("2.0000"),
+        "the engine's expectedOwed is sent back unchanged"
+    );
 }

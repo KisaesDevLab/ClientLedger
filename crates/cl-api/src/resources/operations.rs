@@ -1362,6 +1362,8 @@ pub(crate) const WRITE_OFF_RECOVERY_CREATE: Operation = keyable_in(
     Method::Post,
     "/api/v1/payments/write-off-recoveries",
 );
+/// Written-off invoices and what is left to recover (U-154).
+pub(crate) const WRITE_OFFS_LIST: Operation = read("/api/v1/payments/write-offs");
 /// The sales tax liability report (v2 string columns, U-149).
 pub(crate) const REPORT_SALES_TAX_LIABILITY: Operation =
     read("/api/v1/reports/sales-tax-liability");
@@ -1380,7 +1382,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 310] = [
+pub const OPERATIONS: [Operation; 311] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1706,6 +1708,7 @@ pub const OPERATIONS: [Operation; 310] = [
     WRITE_OFF_RECOVERY_CREATE,
     REPORT_SALES_TAX_LIABILITY,
     REPORT_SALES_TAX_PAYMENTS,
+    WRITE_OFFS_LIST,
 ];
 
 /// Looks up a covered operation.

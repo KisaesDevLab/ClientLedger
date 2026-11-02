@@ -454,6 +454,12 @@ pub struct PaymentTotals {
     /// Amounts written off (U-133).
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub write_offs: Money,
+    /// The sales tax part of the discounts (SSUTA, engine PR #221).
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub discount_tax: Option<Money>,
+    /// The sales tax part of the write-offs.
+    #[serde(default, deserialize_with = "de_cents_opt")]
+    pub write_off_tax: Option<Money>,
 }
 impl fmt::Debug for PaymentTotals {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -603,6 +609,10 @@ pub struct PaymentPreview {
     /// paid invoices).
     #[serde(default)]
     pub average_days_to_pay: Option<u32>,
+    /// The company follows Streamlined Sales Tax rules (engine PR #221;
+    /// `None` from older engines): the tax hints show only when true.
+    #[serde(default)]
+    pub sales_tax_ssuta: Option<bool>,
     /// Problems.
     #[serde(default, deserialize_with = "null_vec")]
     pub problems: Vec<PreviewProblem>,

@@ -122,15 +122,30 @@ impl RecoveryScreen {
         s
     }
 
-    /// The written-off invoices (the demo lists them; the engine's list
-    /// arrives with the recoveries contract, so live shows none yet).
+    /// The written-off invoices with something left to recover (`GET
+    /// /payments/write-offs`, engine PR #221; the engine's figures).
     fn read_invoices(&mut self) {
         let client = self.client;
         self.invoices_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
             move |d| Ok(crate::company::demo::sales_tax_owed::recoverable(d, client)),
-            |_s| async move { Ok(Vec::new()) },
+            move |s| async move {
+                Ok(s.recoveries()
+                    .write_offs(client, false)
+                    .await?
+                    .into_iter()
+                    .filter(|w| w.recoverable.is_positive())
+                    .map(|w| {
+                        (
+                            w.invoice_id,
+                            w.invoice_number.unwrap_or_default(),
+                            w.written_off,
+                            w.recoverable,
+                        )
+                    })
+                    .collect())
+            },
         ));
         self.poll();
     }
@@ -186,6 +201,9 @@ impl RecoveryScreen {
                         &[("available", &fmt(a))],
                     ));
                 }
+            }
+            Some(RecoveryRefusal::DateInvalid) => {
+                self.problem = Some(t("recover_bad_debt.date_invalid"));
             }
             Some(_) => self.problem = Some(t("recover_bad_debt.in_use")),
             None => self.error = Some(e),
@@ -436,6 +454,16 @@ impl Screen for RecoveryScreen {
             KIND => true,
             "form.save_close" | "form.save_new" => {
                 self.save();
+                true
+            }
+            // Demo only: golden 13's written-off invoice (the scenario).
+            "dev.demo_write_off_story" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                let _ = crate::company::demo::sales_tax_owed::write_off_story(&mut d);
+                drop(d);
+                self.set_client(None);
                 true
             }
             _ => false,

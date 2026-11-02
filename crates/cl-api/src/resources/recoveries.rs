@@ -20,7 +20,7 @@ use crate::idempotency::IdempotencyKey;
 use crate::resources::customer_payments::{
     PAYMENT_MEMO_MAX, de_cents, de_cents_opt, error_code, require, ser_cents, too_long,
 };
-use crate::resources::operations::WRITE_OFF_RECOVERY_CREATE;
+use crate::resources::operations::{WRITE_OFF_RECOVERY_CREATE, WRITE_OFFS_LIST};
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::sales_tax::decode_one;
 use crate::session::Session;
@@ -35,6 +35,9 @@ pub enum RecoveryRefusal {
     /// The recovery's reopened balance was paid: void the payment first
     /// (409 `RECOVERY_IN_USE`).
     InUse,
+    /// The date is before the write-off (400 `RECOVERY_DATE_INVALID`
+    /// `{earliestDate}`).
+    DateInvalid,
 }
 
 const REFUSALS: &[(&str, RecoveryRefusal)] = &[
@@ -43,6 +46,7 @@ const REFUSALS: &[(&str, RecoveryRefusal)] = &[
         RecoveryRefusal::ExceedsWriteOff,
     ),
     ("RECOVERY_IN_USE", RecoveryRefusal::InUse),
+    ("RECOVERY_DATE_INVALID", RecoveryRefusal::DateInvalid),
 ];
 
 /// Every engine code [`recovery_refusal`] knows.
@@ -174,5 +178,72 @@ impl Recoveries<'_> {
         let reply = s.send(&WRITE_OFF_RECOVERY_CREATE, call, None).await?;
         decode_one(&reply.body, "recovery", "bad-debt recovery")
             .map_err(crate::resources::versioning::saved_unreadable)
+    }
+}
+
+/// One written-off invoice (`GET /payments/write-offs`, engine PR #221).
+/// Every figure is the engine's.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteOff {
+    /// The invoice.
+    pub invoice_id: TransactionId,
+    /// Its number (owner data).
+    #[serde(default)]
+    pub invoice_number: Option<String>,
+    /// Its client.
+    #[serde(default)]
+    pub customer_id: Option<cl_core::ids::ContactId>,
+    /// The latest write-off date (a recovery can't be dated before the
+    /// first, `firstWriteOffDate`).
+    #[serde(default)]
+    pub write_off_date: Option<CalendarDate>,
+    /// The first write-off date.
+    #[serde(default)]
+    pub first_write_off_date: Option<CalendarDate>,
+    /// Written off in total.
+    #[serde(deserialize_with = "de_cents")]
+    pub written_off: Money,
+    /// Recovered so far.
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_zero"
+    )]
+    pub recovered: Money,
+    /// What can still be recovered.
+    #[serde(deserialize_with = "de_cents")]
+    pub recoverable: Money,
+}
+
+impl fmt::Debug for WriteOff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WriteOff")
+            .field("invoice_id", &self.invoice_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Recoveries<'_> {
+    /// The written-off invoices, oldest first (`customer` filters;
+    /// `include_recovered` keeps fully recovered ones).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `bad-debt-recovery-v1`; `Decode`; any
+    /// [`ApiError`].
+    pub async fn write_offs(
+        &self,
+        customer: Option<cl_core::ids::ContactId>,
+        include_recovered: bool,
+    ) -> Result<Vec<WriteOff>, ApiError> {
+        require(self.0, Capabilities::BAD_DEBT_RECOVERY)?;
+        let mut call = Call::at(Method::Get, WRITE_OFFS_LIST.route());
+        if let Some(c) = customer {
+            call.query.push(("customerId".into(), c.to_string()));
+        }
+        if include_recovered {
+            call.query.push(("includeRecovered".into(), "true".into()));
+        }
+        let reply = self.0.send(&WRITE_OFFS_LIST, call, None).await?;
+        crate::resources::sales_tax::decode_list(&reply.body, "writeOffs", "write-offs")
     }
 }

@@ -1157,6 +1157,15 @@ pub fn preview(
             amount: money(*x)?,
         });
     }
+    // The engine twin's totals of the rows' SSUTA tax parts (U-153).
+    let ssuta = state.sales_tax.ssuta;
+    let sum = |f: fn(&PreviewInvoice) -> Option<Money>| -> Result<Option<Money>, ApiError> {
+        if !ssuta {
+            return Ok(None);
+        }
+        money(invoices.iter().filter_map(f).map(Money::as_decimal).sum()).map(Some)
+    };
+    let (discount_tax, write_off_tax) = (sum(|i| i.discount_tax)?, sum(|i| i.write_off_tax)?);
     Ok(PaymentPreview {
         contact_balance_before: money(before)?,
         contact_balance_after: money(after)?,
@@ -1169,6 +1178,8 @@ pub fn preview(
             discounts_and_credits: money(discounts + credit_total)?,
             unapplied: money(unapplied)?,
             write_offs: money(write_offs)?,
+            discount_tax,
+            write_off_tax,
         },
         shortfalls,
         overpayment: (unapplied > Decimal::ZERO && !r.hold_as_deposit)
@@ -1181,6 +1192,7 @@ pub fn preview(
         pending_deposits: Some(PendingAfter { count, total }),
         average_days_to_pay: average_days(state, r.customer_id),
         problems,
+        sales_tax_ssuta: Some(ssuta),
     })
 }
 

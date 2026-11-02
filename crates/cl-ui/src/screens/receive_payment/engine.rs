@@ -94,8 +94,9 @@ pub(crate) fn figures_of(p: &PaymentPreview) -> PaymentFigures {
                 discount_date: i.discount_date,
                 discount_percent: i.discount_percent.clone(),
                 suggest_discount: i.suggest_discount,
-                discount_tax: i.discount_tax,
-                write_off_tax: i.write_off_tax,
+                // Shown only when the company follows SSUTA (engine PR #221).
+                discount_tax: i.discount_tax.filter(|_| p.sales_tax_ssuta != Some(false)),
+                write_off_tax: i.write_off_tax.filter(|_| p.sales_tax_ssuta != Some(false)),
             })
             .collect(),
         amount_due: p.totals.amount_due,

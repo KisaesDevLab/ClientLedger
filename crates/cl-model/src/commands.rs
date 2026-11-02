@@ -491,6 +491,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_sales_tax_story",
         "Demo Sales Tax Story (developer)",
     ),
+    // P23: golden 13's written-off invoice for the Recover a Bad Debt
+    // scenario.
+    dev_action(
+        "dev.demo_write_off_story",
+        "Demo Write-off Story (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

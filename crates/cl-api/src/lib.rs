@@ -312,8 +312,8 @@ pub use resources::sales_receipts::{
 };
 // P23: sales tax (engine U-147 to U-154, U-25).
 pub use resources::recoveries::{
-    NewRecovery, Recoveries, RecoveryRefusal, RecoveryResult, recovery_available, recovery_refusal,
-    recovery_refusal_codes,
+    NewRecovery, Recoveries, RecoveryRefusal, RecoveryResult, WriteOff, recovery_available,
+    recovery_refusal, recovery_refusal_codes,
 };
 pub use resources::sales_tax::{
     DocSalesTax, DocSalesTaxMember, DocTaxProblem, EXEMPTION_NOTE_MAX, EXEMPTION_NUMBER_MAX,

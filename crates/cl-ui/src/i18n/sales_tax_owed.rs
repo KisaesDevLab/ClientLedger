@@ -181,5 +181,6 @@ pub const ENGLISH_2: &[(&str, &str)] = &[
     ("recover_bad_debt.saved_tax", ", including {tax} sales tax owed again"),
     ("recover_bad_debt.receive", "Receive the payment now"),
     ("recover_bad_debt.exceeds", "That's more than is left to recover ({available}). The amount was changed to what is left."),
+    ("recover_bad_debt.date_invalid", "A recovery can't be dated before the invoice was written off. Pick a later date."),
     ("recover_bad_debt.in_use", "That recovery's invoice was paid again, so it can't change."),
 ];

@@ -460,10 +460,19 @@ pub struct PayPreview {
     /// The check amount.
     #[serde(deserialize_with = "de_cents")]
     pub total: Money,
-    /// What the payment's items owe in total (the engine's figure): sent
-    /// back as the post's top-level `expectedOwed`.
-    #[serde(deserialize_with = "de_cents")]
-    pub owed: Money,
+    /// What the payment's items owe in total (the engine's `owed`).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub owed: Option<Money>,
+    /// The figure to send back unchanged as the post's top-level
+    /// `expectedOwed` (engine PR #221; earlier engines: `owed`).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_cents_opt"
+    )]
+    pub expected_owed: Option<Money>,
     /// Warnings.
     #[serde(default, deserialize_with = "null_vec")]
     pub problems: Vec<SalesTaxPayProblem>,
@@ -479,6 +488,14 @@ impl fmt::Debug for PayPreview {
 }
 
 impl PayPreview {
+    /// What the post sends back as `expectedOwed`: the preview's
+    /// `expectedOwed`, else its `owed` (never a sum made here; `None` when
+    /// the engine sent neither, and then Pay can't post).
+    #[must_use]
+    pub fn expected_owed_total(&self) -> Option<Money> {
+        self.expected_owed.or(self.owed)
+    }
+
     /// The lines to post, each with the preview's amount and
     /// `expectedOwed` copied (unassigned lines can't be paid here).
     #[must_use]

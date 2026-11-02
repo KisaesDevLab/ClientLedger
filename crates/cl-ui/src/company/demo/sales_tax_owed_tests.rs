@@ -369,7 +369,7 @@ fn the_demo_engine_runs_the_golden_chain_through_case_10() {
                 let p = preview(&mut s.state, &r).expect("preview");
                 // The screen posts the owner's amounts (or the preview's)
                 // with each line's expectedOwed and the owed total copied.
-                r.expected_owed = Some(p.owed);
+                r.expected_owed = p.expected_owed_total();
                 r.lines = Some(
                     p.lines
                         .iter()

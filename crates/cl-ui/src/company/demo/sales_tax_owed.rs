@@ -849,6 +849,7 @@ fn figure(
             "basis": state.sales_tax.basis.as_wire(),
             "lines": out,
             "owed": s2(owed_total),
+            "expectedOwed": s2(owed_total),
             "total": s2(total),
             "problems": problems,
         }),

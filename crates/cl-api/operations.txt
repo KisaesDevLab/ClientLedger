@@ -384,3 +384,4 @@ GET     /api/v1/sales-tax/payments              idempotent
 POST    /api/v1/payments/write-off-recoveries   keyable-recovery
 GET     /api/v1/reports/sales-tax-liability     idempotent
 GET     /api/v1/reports/sales-tax-payments      idempotent
+GET     /api/v1/payments/write-offs           idempotent

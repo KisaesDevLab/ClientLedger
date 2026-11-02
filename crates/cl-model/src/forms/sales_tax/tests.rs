@@ -139,7 +139,7 @@ fn golden9_figures() -> PayFigures {
             },
         ],
         total: m("210.42"),
-        owed: m("212.38"),
+        owed: Some(m("212.38")),
         legacy_unassigned: true,
         more_than_owed: false,
     }

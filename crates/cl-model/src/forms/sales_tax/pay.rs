@@ -64,7 +64,7 @@ pub struct PayFigures {
     pub total: Money,
     /// The preview's owed total of the payment's items (`owed`), sent back
     /// as the top-level `expectedOwed` (a byte copy, never a sum made here).
-    pub owed: Money,
+    pub owed: Option<Money>,
     /// Legacy tax without an item is owed (the banner).
     pub legacy_unassigned: bool,
     /// More than owed is paid on an item (a warning only).
@@ -454,7 +454,7 @@ impl PayForm {
         Ok(PayPostPlan {
             request,
             lines,
-            expected_owed: f.owed,
+            expected_owed: f.owed.ok_or(PayProblem::PreviewPending)?,
             attempt: self.revision,
         })
     }
