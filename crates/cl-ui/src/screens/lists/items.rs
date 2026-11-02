@@ -57,6 +57,8 @@ const F_DESCRIPTION: u64 = 2;
 const F_PRICE: u64 = 3;
 const F_ACCOUNT: u64 = 4;
 const F_TAXABLE: u64 = 5;
+/// P23: the item's tax code.
+const F_TAX_CODE: u64 = 40;
 const F_KIND: u64 = 6;
 const F_DISCOUNT: u64 = 7;
 
@@ -188,6 +190,9 @@ pub struct ItemsScreen {
     just_hidden: Option<ItemId>,
     item_types: bool,
     price_levels: bool,
+    /// P23: the company's tax codes (the editor's Tax code picker).
+    tax_codes: Vec<cl_api::TaxCode>,
+    codes_job: Option<crate::screens::invoice::engine::Job<Vec<cl_api::TaxCode>>>,
     /// Saves in other windows (Q-262).
     bus: crate::data_bus::Subscription,
     /// The list being read again after a save elsewhere: the cursor stays
@@ -209,6 +214,15 @@ impl ItemsScreen {
                 || has(Capabilities::ITEM_KINDS_SALES)
                 || has(Capabilities::ITEM_TYPES),
             price_levels: link.is_demo() || has(Capabilities::PRICE_LEVELS),
+            tax_codes: Vec::new(),
+            codes_job: (link.is_demo() || has(Capabilities::SALES_TAX_SETUP)).then(|| {
+                crate::screens::invoice::engine::read(
+                    &link,
+                    group.as_ref(),
+                    |d| Ok(crate::company::demo::sales_tax::codes(d, false)),
+                    |s| async move { s.sales_tax().codes(false).await },
+                )
+            }),
             link,
             group,
             items: Vec::new(),
@@ -343,6 +357,7 @@ impl ItemsScreen {
                 price: i.fields.unit_price,
                 income_account: i.fields.income_account_id,
                 taxable: i.fields.is_taxable,
+                tax_code: i.fields.tax_code_id,
                 active: i.is_active,
                 kind: kind_of(i.fields.item_type),
                 discount_percent: i
@@ -628,7 +643,7 @@ impl ItemsScreen {
             discount_percent: checked
                 .discount_percent
                 .and_then(|q| cl_api::SignedPercent::parse(&q.to_wire()).ok()),
-            tax_code_id: None,
+            tax_code_id: checked.tax_code,
         };
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());
@@ -890,6 +905,14 @@ impl ItemsScreen {
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if let Some(Ok(c)) = crate::screens::invoice::engine::poll(&mut self.codes_job) {
+            self.tax_codes = c;
+        }
+        let codes: Vec<(cl_core::ids::TaxCodeId, String)> = self
+            .tax_codes
+            .iter()
+            .map(|c| (c.id, format!("{} \u{b7} {}", c.code, c.name)))
+            .collect();
         let item_types = self.item_types;
         let income_ids = {
             let keep = self
@@ -1014,6 +1037,37 @@ impl ItemsScreen {
             }
             if r.changed() {
                 panel.form.edit(F_TAXABLE, |x| x.taxable = taxable);
+            }
+            if !codes.is_empty() {
+                let shown = d
+                    .tax_code
+                    .and_then(|id| codes.iter().find(|(x, _)| *x == id))
+                    .map_or_else(|| t("items.tax_code.none"), |(_, n)| n.clone());
+                let mut pick = None;
+                ui.horizontal(|ui| {
+                    let l = ui.label(t("items.field.tax_code"));
+                    egui::ComboBox::from_id_salt("items/tax_code")
+                        .selected_text(shown)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(d.tax_code.is_none(), t("items.tax_code.none"))
+                                .clicked()
+                            {
+                                pick = Some(None);
+                            }
+                            for (id, n) in &codes {
+                                if ui.selectable_label(d.tax_code == Some(*id), n).clicked() {
+                                    pick = Some(Some(*id));
+                                }
+                            }
+                        })
+                        .response
+                        .labelled_by(l.id)
+                        .on_hover_text(t("items.tax_code.hint"));
+                });
+                if let Some(p) = pick {
+                    panel.form.edit(F_TAX_CODE, |x| x.tax_code = p);
+                }
             }
             ui.add_space(4.0);
             // The purchase side and units wait for U-39b (item-types-v1).

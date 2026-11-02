@@ -103,6 +103,8 @@ pub struct ItemEntry {
     pub kind: ItemKind,
     /// A discount item's percent off.
     pub discount_percent: Option<Quantity>,
+    /// The item's tax code (P23, U-25; None: the Taxable box decides).
+    pub tax_code: Option<cl_core::ids::TaxCodeId>,
 }
 
 /// What the Item List shows.
@@ -222,6 +224,8 @@ pub struct ItemDraft {
     /// A discount item's percent off as typed (blank: the price is the
     /// amount off).
     pub discount: String,
+    /// The tax code (P23; None: the Taxable box decides).
+    pub tax_code: Option<cl_core::ids::TaxCodeId>,
 }
 
 impl ItemDraft {
@@ -236,6 +240,7 @@ impl ItemDraft {
             income_account,
             taxable: true,
             discount: String::new(),
+            tax_code: None,
         }
     }
 
@@ -260,6 +265,7 @@ impl ItemDraft {
                         .to_string()
                 })
                 .unwrap_or_default(),
+            tax_code: e.tax_code,
         }
     }
 }
@@ -298,6 +304,8 @@ pub struct CheckedItem {
     pub kind: ItemKind,
     /// A discount's percent off.
     pub discount_percent: Option<Quantity>,
+    /// The tax code (P23).
+    pub tax_code: Option<cl_core::ids::TaxCodeId>,
 }
 
 /// The form field a problem belongs to.
@@ -470,6 +478,7 @@ pub fn check(
             taxable: draft.taxable,
             kind: draft.kind,
             discount_percent,
+            tax_code: draft.tax_code,
         }),
         _ => Err(problems),
     }
