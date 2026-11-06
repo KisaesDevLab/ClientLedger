@@ -173,7 +173,7 @@ Find these from the menus or with `Ctrl+K`.
 
 - **File:** New Company, Close Company, Open Practice Company, Back Up Company, Restore a Backup, Export All Data, Full Database Backup (Utilities), Delete Company, Print Forms, Printer Setup
 - **Edit:** Void Transaction
-- **Lists:** Item List, Price Levels, Tags, Terms, Payment Methods, Templates, Sales Tax Setup, Import or Export a List
+- **Lists:** Item List, Price Levels, Unit Sets, Tags, Terms, Payment Methods, Templates, Sales Tax Setup, Import or Export a List
 - **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements, Refund a Credit, Assess Finance Charges, Outbox, Tax Exemption Certificates, Recover a Bad Debt
 - **Vendors:** Vendors, Paid with Personal Funds, Sales Tax Owed, Pay Sales Tax, Adjust Quantity/Value on Hand, Physical Inventory Count, Items to Reorder, Receipt Inbox, Match Vendor Statement…, Review Documents
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
