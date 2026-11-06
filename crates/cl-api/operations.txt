@@ -400,3 +400,8 @@ GET     /api/v1/reports/inventory-valuation-detail idempotent
 GET     /api/v1/reports/inventory-stock-status  idempotent
 GET     /api/v1/items/reorder-alerts            idempotent
 GET     /api/v1/reports/reorder                 idempotent
+GET     /api/v1/unit-sets                       idempotent
+POST    /api/v1/unit-sets                       keyable-unit-sets
+GET     /api/v1/unit-sets/{id}                  idempotent
+PUT     /api/v1/unit-sets/{id}                  pre-handler-only
+DELETE  /api/v1/unit-sets/{id}                  pre-handler-only

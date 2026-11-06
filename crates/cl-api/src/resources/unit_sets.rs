@@ -12,8 +12,10 @@
 //!   stay in the unit entered, the engine stores the base quantity
 //!   `round4(quantity × factor)` (400 `UNIT_QUANTITY_TOO_SMALL` when that is
 //!   zero; 400 `UNIT_NOT_IN_SET` for a unit outside the item's set).
-//! - Unit-set writes carry no idempotency key: they move no money and a
-//!   repeat is refused as `DUPLICATE_NAME`.
+//! - Creating a set carries an idempotency key (the engine keys
+//!   `POST /unit-sets` under `units-of-measure-v1`), so a lost reply is
+//!   replayed rather than refused as `DUPLICATE_NAME`. Edits and deletes
+//!   carry `expectedUpdatedAt` instead.
 
 use std::fmt;
 
@@ -24,6 +26,7 @@ use serde_json::{Value, json};
 
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
+use crate::idempotency::IdempotencyKey;
 use crate::resources::customer_payments::{error_code, require};
 use crate::resources::operations::{
     UNIT_SET_CREATE, UNIT_SET_DELETE, UNIT_SET_GET, UNIT_SET_PUT, UNIT_SETS_LIST,
@@ -302,18 +305,20 @@ impl UnitSets<'_> {
         decode_one(&reply.body, "unitSet", "unit set")
     }
 
-    /// Creates a unit set.
+    /// Creates a unit set under `key` (one key per Save click, reused on a
+    /// retry).
     ///
     /// # Errors
     /// `Local(…)` from [`NewUnitSet::check`] (nothing sent); `DUPLICATE_NAME`;
     /// any [`ApiError`].
-    pub async fn create(&self, n: &NewUnitSet) -> Result<UnitSet, ApiError> {
+    pub async fn create(&self, n: &NewUnitSet, key: IdempotencyKey) -> Result<UnitSet, ApiError> {
         require(self.0, Capabilities::UNITS_OF_MEASURE)?;
         n.check().map_err(ApiError::Local)?;
-        let call = Call::at(Method::Post, UNIT_SET_CREATE.route()).json_body(
+        let mut call = Call::at(Method::Post, UNIT_SET_CREATE.route()).json_body(
             serde_json::to_vec(&n.body(false, None))
                 .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
         );
+        call.idempotency_key = Some(key);
         let reply = self.0.send(&UNIT_SET_CREATE, call, None).await?;
         decode_one(&reply.body, "unitSet", "unit set")
     }

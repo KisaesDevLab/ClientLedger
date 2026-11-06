@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 8] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 9] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -285,6 +285,13 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 8] = [
         "keyable-inventory",
         cl_api::KeySet::InventoryV1,
         5,
+    ),
+    // P24 (U-161): unit-set creation, keyed under units-of-measure-v1.
+    (
+        "idempotency_unit_sets_v1_routes.txt",
+        "keyable-unit-sets",
+        cl_api::KeySet::UnitSetsV1,
+        1,
     ),
 ];
 
@@ -439,6 +446,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             "idempotency-recovery-v1",
         ),
         ("idempotency_inventory_v1_routes.txt", "inventory-adjust-v1"),
+        ("idempotency_unit_sets_v1_routes.txt", "units-of-measure-v1"),
     ]
     .iter()
     .map(|(f, cap)| {

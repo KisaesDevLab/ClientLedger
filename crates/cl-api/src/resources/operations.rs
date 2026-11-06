@@ -55,6 +55,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::SalesTaxPayV1) => "keyable-sales-tax-pay",
             RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
+            RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -128,6 +129,9 @@ pub enum KeySet {
     /// Keyed under `inventory-adjust-v1` (U-159, P24; no separate capability): inventory adjustments
     /// (create, edit, delete, void) and posting a count.
     InventoryV1,
+    /// Keyed under `units-of-measure-v1` (U-161, P24) with `idempotency-v1`'s
+    /// contract: creating a unit set.
+    UnitSetsV1,
 }
 
 impl KeySet {
@@ -154,6 +158,7 @@ impl KeySet {
             KeySet::SalesTaxPayV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX_PAY,
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
+            KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
         }
     }
 }
@@ -1445,8 +1450,10 @@ pub(crate) const ITEMS_REORDER_ALERTS: Operation = read("/api/v1/items/reorder-a
 pub(crate) const REPORT_REORDER: Operation = read("/api/v1/reports/reorder");
 /// Unit sets (U-161).
 pub(crate) const UNIT_SETS_LIST: Operation = read("/api/v1/unit-sets");
-/// Creates a unit set (U-161; no key: it moves no money).
-pub(crate) const UNIT_SET_CREATE: Operation = write(Method::Post, "/api/v1/unit-sets");
+/// Creates a unit set (U-161; keyed while the engine advertises
+/// `units-of-measure-v1`).
+pub(crate) const UNIT_SET_CREATE: Operation =
+    keyable_in(KeySet::UnitSetsV1, Method::Post, "/api/v1/unit-sets");
 /// One unit set.
 pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 /// Stores a unit set (`expectedUpdatedAt`).
@@ -1923,6 +1930,8 @@ mod tests {
                 Some(KeySet::RecoveryV1)
             } else if KEYABLE_INVENTORY.contains(&route) {
                 Some(KeySet::InventoryV1)
+            } else if KEYABLE_UNIT_SETS.contains(&route) {
+                Some(KeySet::UnitSetsV1)
             } else {
                 None
             };
@@ -1960,7 +1969,8 @@ mod tests {
                 + KEYABLE_SALES_TAX.len()
                 + KEYABLE_SALES_TAX_PAY.len()
                 + KEYABLE_RECOVERY.len()
-                + KEYABLE_INVENTORY.len(),
+                + KEYABLE_INVENTORY.len()
+                + KEYABLE_UNIT_SETS.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2120,8 +2130,13 @@ mod tests {
         ("POST", "/api/v1/inventory/counts"),
     ];
 
+    const KEYABLE_UNIT_SETS: [(&str, &str); 1] = [("POST", "/api/v1/unit-sets")];
+
     #[test]
     fn p24_key_set_names_its_capability() {
+        assert_eq!(KeySet::UnitSetsV1.capability(), "units-of-measure-v1");
+        assert_eq!(UNIT_SET_CREATE.key_set(), Some(KeySet::UnitSetsV1));
+        assert_eq!(UNIT_SET_PUT.key_set(), None);
         assert_eq!(KeySet::InventoryV1.capability(), "inventory-adjust-v1");
         assert_eq!(INVENTORY_COUNT_POST.key_set(), Some(KeySet::InventoryV1));
         assert_eq!(INVENTORY_COUNT_SHEET.key_set(), None);

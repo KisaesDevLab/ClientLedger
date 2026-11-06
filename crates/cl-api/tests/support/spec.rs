@@ -43,10 +43,9 @@ use sha2::{Digest, Sha256};
 /// Since pin 9be6da51 (engine PRs #216-#221) the P23 sales tax routes are:
 /// setup, owed, exemptions, Pay Sales Tax, link and unlink, mark paid
 /// through and its undo, and bad-debt recoveries (U-147 to U-154).
-/// The P24 inventory rows are client-declared until the WP-2 pin bump: the
-/// P24 plan §2.4 contract (adjustments, the count sheet and counts, the
-/// valuation and stock status reports, reorder alerts; U-159, U-160, U-78).
-pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
+/// With the P24 engine branches (U-159, U-160, U-78, U-161) the inventory,
+/// report, reorder and unit-set routes are.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -56,24 +55,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P24 (engine U-159, U-160, U-78; until the WP-2 pin bump).
-    ("POST", "/api/v1/inventory/adjustments"),
-    ("GET", "/api/v1/inventory/adjustments/{id}"),
-    ("PUT", "/api/v1/inventory/adjustments/{id}"),
-    ("DELETE", "/api/v1/inventory/adjustments/{id}"),
-    ("POST", "/api/v1/inventory/adjustments/{id}/void"),
-    ("GET", "/api/v1/inventory/count-sheet"),
-    ("POST", "/api/v1/inventory/counts"),
-    ("GET", "/api/v1/reports/inventory-valuation"),
-    ("GET", "/api/v1/reports/inventory-valuation-detail"),
-    ("GET", "/api/v1/reports/inventory-stock-status"),
-    ("GET", "/api/v1/items/reorder-alerts"),
-    ("GET", "/api/v1/reports/reorder"),
-    ("GET", "/api/v1/unit-sets"),
-    ("POST", "/api/v1/unit-sets"),
-    ("GET", "/api/v1/unit-sets/{id}"),
-    ("PUT", "/api/v1/unit-sets/{id}"),
-    ("DELETE", "/api/v1/unit-sets/{id}"),
 ];
 
 /// Lowercase hex of a SHA-256.

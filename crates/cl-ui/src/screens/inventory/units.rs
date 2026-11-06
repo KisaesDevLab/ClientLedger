@@ -190,6 +190,8 @@ impl UnitsScreen {
         let editing = self.editing;
         let expected = current.and_then(|s| s.updated_at);
         let live = n.clone();
+        // One key per Save click: the engine replays a lost create's reply.
+        let key = cl_api::IdempotencyKey::new();
         self.save_job = Some(engine::write(
             &self.link,
             self.group.as_ref(),
@@ -203,7 +205,7 @@ impl UnitsScreen {
             },
             move |s| async move {
                 match editing {
-                    None => s.unit_sets().create(&live).await,
+                    None => s.unit_sets().create(&live, key).await,
                     Some(id) => s.unit_sets().update(id, &live, expected).await,
                 }
             },
