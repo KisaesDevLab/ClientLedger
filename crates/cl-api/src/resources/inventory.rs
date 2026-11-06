@@ -272,6 +272,7 @@ impl fmt::Debug for AdjustmentLine {
             .field("item_id", &self.item_id)
             .field("quantity", &self.quantity_change.is_some())
             .field("value", &self.value_change.is_some())
+            .field("unit_id", &self.unit_id)
             .finish()
     }
 }
