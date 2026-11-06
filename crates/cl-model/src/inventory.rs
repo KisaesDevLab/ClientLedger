@@ -13,7 +13,7 @@
 //!   closing date is refused for inventory, even with the password; the
 //!   forms say so before sending.
 
-use cl_core::ids::{AccountId, ContactId, ItemId};
+use cl_core::ids::{AccountId, ContactId, ItemId, UnitId, UnitSetId};
 use cl_core::{CalendarDate, Money, Quantity, UnitCost, UserInput};
 
 use crate::amount_entry::{self, Amount, AmountKind, AmountRules, Sign};
@@ -95,8 +95,14 @@ pub struct PartDraft {
     pub reorder_point: String,
     /// Quantity to reorder.
     pub reorder_quantity: String,
-    /// Unit label (display only, Q-P24i).
+    /// Unit label (display only, for an item without a unit set).
     pub unit_label: String,
+    /// The item's unit set (U-161; stock is kept in its base unit).
+    pub unit_set: Option<UnitSetId>,
+    /// The unit purchase lines start in (`None`: the base unit).
+    pub purchase_unit: Option<UnitId>,
+    /// The unit sales lines start in (`None`: the base unit).
+    pub sale_unit: Option<UnitId>,
     /// Opening quantity on hand (a new part only, Q-P24h).
     pub opening_quantity: String,
     /// Opening total value.
@@ -135,8 +141,14 @@ pub struct CheckedPart {
     pub reorder_point: Option<Quantity>,
     /// Reorder quantity.
     pub reorder_quantity: Option<Quantity>,
-    /// Unit label (`None` when blank).
+    /// Unit label (`None` when blank or when a unit set is chosen).
     pub unit_label: Option<String>,
+    /// Unit set.
+    pub unit_set: Option<UnitSetId>,
+    /// Default purchase unit (only with a unit set).
+    pub purchase_unit: Option<UnitId>,
+    /// Default sale unit (only with a unit set).
+    pub sale_unit: Option<UnitId>,
     /// Opening stock (a new part only).
     pub opening: Option<CheckedOpening>,
 }
@@ -293,7 +305,11 @@ pub fn check_part(
         preferred_vendor: d.preferred_vendor,
         reorder_point: if part { reorder_point } else { None },
         reorder_quantity: if part { reorder_quantity } else { None },
-        unit_label: (!label.is_empty()).then(|| label.to_string()),
+        // A unit set names the units; the label is for items without one.
+        unit_label: (!label.is_empty() && d.unit_set.is_none()).then(|| label.to_string()),
+        unit_set: d.unit_set,
+        purchase_unit: d.purchase_unit.filter(|_| d.unit_set.is_some()),
+        sale_unit: d.sale_unit.filter(|_| d.unit_set.is_some()),
         opening,
     })
 }

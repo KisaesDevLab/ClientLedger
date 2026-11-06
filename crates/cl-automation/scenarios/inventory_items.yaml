@@ -1,12 +1,12 @@
 # Lists > Items with inventory on (P24 WP-2) against `clientledger --demo`:
 # the sample parts with their on hand, the inventory panel of a part
 # (accounts, preferred vendor, reorder, the engine's on hand, average and
-# value), and a new part with its opening stock. Units of measure come
-# with WP-3. Synthetic.
+# value), a new part with its opening stock, and a part with a unit set
+# and its default purchase and sale units (U-161). Synthetic.
 name: inventory_items
-description: "Inventory panel of a part; a new part with opening stock."
+description: "Inventory panel of a part; a new part with opening stock; unit set and default units."
 steps:
-  - resize: {width: 1440, height: 940}
+  - resize: {width: 1440, height: 1080}
   - set_zoom: {percent: 100}
   - command: lists.items
   - command: dev.demo_inventory_reset
@@ -33,6 +33,34 @@ steps:
   - click: {role: text_input, label: Total value}
   - type: {text: "62.50"}
   - screenshot: new-part
+  - command: form.save_close
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.error, equals: false}
+  # Units of measure: a set made in Lists > Unit Sets, then a part that
+  # buys by the case and sells by the bottle.
+  - command: lists.unit_sets
+  - assert_state: {key: screen.screen, equals: unit_sets}
+  - click: {role: button, label: New unit set}
+  - type: {text: "Bottle", target: {role: text_input, label: Set name}}
+  - type: {text: "bottle", target: {role: text_input, label: Base unit}}
+  - type: {text: "case", target: {role: text_input, label: "Unit name, row 1"}}
+  - type: {text: "12", target: {role: text_input, label: "Base units in one, row 1"}}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: file.close_window
+  - command: lists.items
+  - command: list.new
+  - click: {role: combo_box, label: Type}
+  - click: {role: button, label: Inventory part}
+  - click: {role: text_input, label: Item name}
+  - type: {text: "House Red"}
+  - click: {role: combo_box, label: Unit set}
+  - click: {role: button, label: Bottle}
+  - click: {role: combo_box, label: Buy in}
+  - click: {role: button, label: case}
+  - assert_exists: {role: combo_box, label: Sell in}
+  - assert_not_exists: {role: text_input, label: "Unit (each, box)"}
+  - screenshot: unit-set
   - command: form.save_close
   - assert_state: {key: screen.panel, equals: none}
   - assert_state: {key: screen.error, equals: false}

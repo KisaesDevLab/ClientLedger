@@ -162,7 +162,14 @@ impl FormPanel {
     }
 
     fn save_failed(&mut self, e: ApiError, lock: Option<cl_core::CalendarDate>) {
-        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+        // An item's unit set is fixed once a saved line names the item.
+        let unit_set_locked = cl_api::unit_refusal(&e) == Some(cl_api::UnitRefusal::InUse);
+        let text = if unit_set_locked {
+            Some(t("inventory.refusal.unit_set_in_use"))
+        } else {
+            crate::screens::inventory::refusal_text(&e, lock)
+        };
+        if let Some(text) = text {
             self.form.save_failed(cl_model::forms::SaveFailure {
                 message: cl_core::OwnerFacing::owner_message(&e),
                 detail: cl_core::OwnerFacing::scrubbed_detail(&e),
@@ -197,6 +204,7 @@ struct Loaded {
     accounts: Vec<Account>,
     contacts: Vec<cl_api::Contact>,
     inventory: bool,
+    unit_sets: Vec<cl_api::UnitSet>,
 }
 
 /// The Item List window.
@@ -236,6 +244,8 @@ pub struct ItemsScreen {
     inventory: bool,
     /// Vendors and the rest (the inventory panel's preferred vendor).
     contacts: Vec<cl_api::Contact>,
+    /// Unit sets (the inventory panel's unit set and default units, U-161).
+    unit_sets: Vec<cl_api::UnitSet>,
     today: cl_core::CalendarDate,
     /// Saves in other windows (Q-262).
     bus: crate::data_bus::Subscription,
@@ -294,6 +304,7 @@ impl ItemsScreen {
             just_hidden: None,
             inventory: false,
             contacts: Vec::new(),
+            unit_sets: Vec::new(),
             today: crate::shell::today(),
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
@@ -341,6 +352,7 @@ impl ItemsScreen {
                 accounts: chart,
                 contacts,
                 inventory: d.inventory.enabled,
+                unit_sets: d.units.list(),
             }));
             return;
         }
@@ -361,11 +373,14 @@ impl ItemsScreen {
                 .await
                 .unwrap_or_default();
             let inventory = s.company_settings().await.is_ok_and(|c| c.inventory_on());
+            // U-161: an engine without units-of-measure-v1 has no sets.
+            let unit_sets = s.unit_sets().list().await.unwrap_or_default();
             Ok(Loaded {
                 items,
                 accounts,
                 contacts,
                 inventory,
+                unit_sets,
             })
         }) {
             Ok(p) => self.load = Some(Task::Pending(p)),
@@ -747,9 +762,9 @@ impl ItemsScreen {
                 reorder_point: part.reorder_point,
                 reorder_quantity: part.reorder_quantity,
                 unit_label: part.unit_label,
-                unit_set_id: None,
-                default_purchase_unit_id: None,
-                default_sale_unit_id: None,
+                unit_set_id: part.unit_set,
+                default_purchase_unit_id: part.purchase_unit,
+                default_sale_unit_id: part.sale_unit,
             },
             name: checked.name,
             description: checked.description,
@@ -876,6 +891,7 @@ impl ItemsScreen {
                     self.accounts = l.accounts;
                     self.contacts = l.contacts;
                     self.inventory = l.inventory;
+                    self.unit_sets = l.unit_sets;
                     self.apply();
                 }
                 Err(e) => {
@@ -1050,7 +1066,12 @@ impl ItemsScreen {
             .panel
             .as_ref()
             .map(|p| {
-                part_panel::PanelLists::new(&self.accounts, &self.contacts, &p.form.current().part)
+                part_panel::PanelLists::new(
+                    &self.accounts,
+                    &self.contacts,
+                    &self.unit_sets,
+                    &p.form.current().part,
+                )
             })
             .unwrap_or_default();
         let stock = self
@@ -1217,7 +1238,7 @@ impl ItemsScreen {
             }
             ui.add_space(4.0);
             if d.kind == ItemKind::InventoryPart {
-                // P24: the inventory panel (units of measure come with WP-3).
+                // P24: the inventory panel, units of measure included.
                 let focus = panel.part_focus.take();
                 if let Some(next) = part_panel::panel(
                     ui,
@@ -1308,6 +1329,12 @@ pub(crate) fn demo_save_with_opening(
             ));
         }
     }
+    if let (Some(i), Some(d)) = (existing.as_ref(), link.demo_state()) {
+        let moved = d.inventory.moves().iter().any(|m| m.item == i.id);
+        if moved && i.fields.purchase.unit_set_id != fields.purchase.unit_set_id {
+            return Err(crate::company::demo::units::UnitError::InUse.api());
+        }
+    }
     let saved = demo_save(link, existing, fields);
     if let (Some(o), Some(mut d)) = (opening, link.demo_state()) {
         crate::company::demo::stock::opening(&mut d, saved.record.id, o)?;
@@ -1344,11 +1371,17 @@ pub(crate) fn demo_save(
             updated_at: Some(crate::company::demo::DemoState::now()),
         }
     };
+    let mut item = item;
     if let Some(d) = d.as_mut() {
         let items = d.items_mut();
         match items.iter_mut().find(|i| i.id == item.id) {
             Some(i) => *i = item.clone(),
             None => items.push(item.clone()),
+        }
+        // The engine returns `unitPrices[]` with the item (U-161).
+        crate::company::demo::stock::refresh_unit_prices(d);
+        if let Some(i) = d.items_mut().iter().find(|i| i.id == item.id) {
+            item = i.clone();
         }
     }
     Versioned {

@@ -6,7 +6,7 @@
 //! The panel edits a copy of the form's [`PartDraft`]; the Item List
 //! records the change in its undo history.
 
-use cl_api::{Account, AccountType, Contact, ContactType, Item, ItemPurchase, ItemStock};
+use cl_api::{Account, AccountType, Contact, ContactType, Item, ItemPurchase, ItemStock, UnitSet};
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ContactId};
 use cl_model::inventory::{PartDraft, PartField, PartProblem, quantity_text};
@@ -27,13 +27,20 @@ pub struct PanelLists {
     pub cogs: Vec<(AccountId, String)>,
     /// Vendors.
     pub vendors: Vec<(ContactId, String)>,
+    /// Unit sets (active ones, plus the part's own).
+    pub unit_sets: Vec<UnitSet>,
 }
 
 impl PanelLists {
     /// The choices from the chart and the contacts (active ones, plus the
     /// part's own when it is no longer active).
     #[must_use]
-    pub fn new(accounts: &[Account], contacts: &[Contact], keep: &PartDraft) -> PanelLists {
+    pub fn new(
+        accounts: &[Account],
+        contacts: &[Contact],
+        unit_sets: &[UnitSet],
+        keep: &PartDraft,
+    ) -> PanelLists {
         let name = |a: &Account| match &a.fields.account_number {
             Some(n) if !n.is_empty() => format!("{n} {}", crate::account_names::shown_name(a)),
             _ => crate::account_names::shown_name(a),
@@ -66,6 +73,11 @@ impl PanelLists {
                 keep.cogs_account,
             ),
             vendors,
+            unit_sets: unit_sets
+                .iter()
+                .filter(|s| s.is_active || Some(s.id) == keep.unit_set)
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -83,6 +95,9 @@ pub fn draft_of(p: &ItemPurchase) -> PartDraft {
         reorder_point: p.reorder_point.map(quantity_text).unwrap_or_default(),
         reorder_quantity: p.reorder_quantity.map(quantity_text).unwrap_or_default(),
         unit_label: p.unit_label.clone().unwrap_or_default(),
+        unit_set: p.unit_set_id,
+        purchase_unit: p.default_purchase_unit_id,
+        sale_unit: p.default_sale_unit_id,
         opening_quantity: String::new(),
         opening_value: String::new(),
         opening_date: None,
@@ -248,12 +263,15 @@ pub fn panel(
         "inventory.panel.reorder_quantity",
         &mut out.reorder_quantity,
     );
-    text(
-        ui,
-        PartField::UnitLabel,
-        "inventory.panel.unit",
-        &mut out.unit_label,
-    );
+    let units_changed = units_rows(ui, tokens, lists, &mut out, has_stock && !new_item);
+    if out.unit_set.is_none() {
+        text(
+            ui,
+            PartField::UnitLabel,
+            "inventory.panel.unit",
+            &mut out.unit_label,
+        );
+    }
     if let Some(s) = stock.filter(|_| !new_item) {
         ui.add_space(4.0);
         let dash = || "\u{2014}".to_string();
@@ -301,7 +319,80 @@ pub fn panel(
             changed = true;
         }
     }
-    changed.then_some(out)
+    (changed || units_changed).then_some(out)
+}
+
+/// The unit set and default unit pickers (U-161). The set is fixed once the
+/// part has stock (the engine refuses a change while any saved line names
+/// the item, 409 `UNIT_IN_USE`). Returns true when a pick changed.
+fn units_rows(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    lists: &PanelLists,
+    out: &mut PartDraft,
+    locked: bool,
+) -> bool {
+    let mut changed = false;
+    let mut set_labels = vec![t("inventory.panel.no_unit_set")];
+    set_labels.extend(lists.unit_sets.iter().map(|s| s.name.clone()));
+    let at = out
+        .unit_set
+        .and_then(|id| lists.unit_sets.iter().position(|s| s.id == id))
+        .map_or(0, |i| i + 1);
+    ui.add_enabled_ui(!locked, |ui| {
+        if let Some(i) = pane::picker(
+            ui,
+            egui::Id::unique("items/part/unit_set"),
+            &t("inventory.panel.unit_set"),
+            &set_labels,
+            at,
+            false,
+        ) {
+            let next = i
+                .checked_sub(1)
+                .and_then(|i| lists.unit_sets.get(i))
+                .map(|s| s.id);
+            if next != out.unit_set {
+                out.unit_set = next;
+                out.purchase_unit = None;
+                out.sale_unit = None;
+                changed = true;
+            }
+        }
+    });
+    if locked && out.unit_set.is_some() {
+        form::hint(ui, tokens, &t("inventory.panel.unit_set_fixed"));
+    }
+    let Some(set) = out
+        .unit_set
+        .and_then(|id| lists.unit_sets.iter().find(|s| s.id == id))
+    else {
+        return changed;
+    };
+    let mut ids = vec![None];
+    ids.extend(set.units.iter().map(|u| u.id));
+    let names: Vec<String> = ids
+        .iter()
+        .map(|u| set.name_of(*u).unwrap_or_default().to_string())
+        .collect();
+    for (key, cur) in [
+        ("inventory.panel.purchase_unit", &mut out.purchase_unit),
+        ("inventory.panel.sale_unit", &mut out.sale_unit),
+    ] {
+        let at = ids.iter().position(|u| u == cur).unwrap_or(0);
+        if let Some(i) = pane::picker(
+            ui,
+            egui::Id::unique(("items/part", key)),
+            &t(key),
+            &names,
+            at,
+            false,
+        ) {
+            *cur = ids.get(i).copied().flatten();
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// The words of an inventory-section problem.

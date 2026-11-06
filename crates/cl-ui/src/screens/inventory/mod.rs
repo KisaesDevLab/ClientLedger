@@ -119,7 +119,10 @@ pub fn closed_text(lock: Option<CalendarDate>) -> String {
 /// The plain message of an inventory refusal (`None` for anything else).
 #[must_use]
 pub fn refusal_text(e: &ApiError, lock: Option<CalendarDate>) -> Option<String> {
-    let key = match cl_api::inventory_refusal(e)? {
+    let Some(refusal) = cl_api::inventory_refusal(e) else {
+        return unit_refusal_text(e);
+    };
+    let key = match refusal {
         InventoryRefusal::PeriodClosed => return Some(closed_text(lock)),
         InventoryRefusal::Off => "inventory.refusal.off",
         InventoryRefusal::InUse => "inventory.refusal.in_use",
@@ -132,6 +135,19 @@ pub fn refusal_text(e: &ApiError, lock: Option<CalendarDate>) -> Option<String> 
         InventoryRefusal::ReturnBeforeSale => "inventory.refusal.return_before_sale",
         InventoryRefusal::ReturnExceedsSale => "inventory.refusal.return_exceeds_sale",
         InventoryRefusal::SaleHasReturns => "inventory.refusal.sale_has_returns",
+    };
+    Some(t(key))
+}
+
+/// The words of a line unit the engine refused (U-161): a unit outside
+/// the item's set, a quantity too small for its unit, a unit in use.
+#[must_use]
+pub fn unit_refusal_text(e: &ApiError) -> Option<String> {
+    let key = match cl_api::unit_refusal(e)? {
+        cl_api::UnitRefusal::NotInSet => "units.refusal.not_in_set",
+        cl_api::UnitRefusal::QuantityTooSmall => "units.refusal.too_small",
+        cl_api::UnitRefusal::InUse => "units.refusal.in_use",
+        cl_api::UnitRefusal::DuplicateName => "units.refusal.duplicate",
     };
     Some(t(key))
 }

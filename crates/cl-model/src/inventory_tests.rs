@@ -82,6 +82,26 @@ fn a_part_needs_its_accounts_and_keeps_exact_figures() {
 }
 
 #[test]
+fn a_unit_set_names_the_default_units_and_drops_the_label() {
+    let set = UnitSetId::parse("d0000000-0000-4000-8000-f00000000001").expect("set");
+    let case = UnitId::parse("d0000000-0000-4000-8000-f00000000002").expect("unit");
+    let mut p = part();
+    p.purchase_unit = Some(case);
+    let c = check_part(&p, true, false, None, ok).expect("no set");
+    assert_eq!(
+        (c.unit_set, c.purchase_unit, c.unit_label.as_deref()),
+        (None, None, Some("each")),
+        "default units need a set"
+    );
+    p.unit_set = Some(set);
+    p.sale_unit = Some(case);
+    let c = check_part(&p, true, false, None, ok).expect("set");
+    assert_eq!(c.unit_set, Some(set));
+    assert_eq!((c.purchase_unit, c.sale_unit), (Some(case), Some(case)));
+    assert_eq!(c.unit_label, None, "the set names the units");
+}
+
+#[test]
 fn opening_stock_on_a_new_part_only() {
     let mut p = part();
     p.opening_quantity = "10".into();
