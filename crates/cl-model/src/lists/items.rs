@@ -17,6 +17,7 @@ use cl_core::ids::{AccountId, ItemId};
 use cl_core::{Money, Quantity};
 
 use crate::amount_entry::{self, Amount, AmountKind, AmountRules, Sign};
+use crate::inventory::{CheckedPart, PartDraft, PartProblem, check_part};
 use crate::lists::engine_len;
 use crate::text::TextKey;
 
@@ -122,6 +123,8 @@ pub struct ItemEntry {
     pub discount_percent: Option<Quantity>,
     /// The item's tax code (P23, U-25; None: the Taxable box decides).
     pub tax_code: Option<cl_core::ids::TaxCodeId>,
+    /// The purchase and inventory fields as the form shows them (P24).
+    pub part: PartDraft,
 }
 
 /// What the Item List shows.
@@ -243,6 +246,8 @@ pub struct ItemDraft {
     pub discount: String,
     /// The tax code (P23; None: the Taxable box decides).
     pub tax_code: Option<cl_core::ids::TaxCodeId>,
+    /// The purchase and inventory section (P24).
+    pub part: PartDraft,
 }
 
 impl ItemDraft {
@@ -258,6 +263,7 @@ impl ItemDraft {
             taxable: true,
             discount: String::new(),
             tax_code: None,
+            part: PartDraft::default(),
         }
     }
 
@@ -283,6 +289,7 @@ impl ItemDraft {
                 })
                 .unwrap_or_default(),
             tax_code: e.tax_code,
+            part: e.part.clone(),
         }
     }
 }
@@ -440,8 +447,83 @@ pub fn check(
     item_types: bool,
     income_ok: impl Fn(AccountId) -> bool,
 ) -> Result<CheckedItem, Vec<ItemProblem>> {
+    check_kinds(
+        draft,
+        list,
+        editing,
+        &ItemKind::available(item_types),
+        income_ok,
+    )
+}
+
+/// What the item form must also know to check a part (P24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PartRules {
+    /// The engine stores item kinds (`item-types-v1`).
+    pub item_types: bool,
+    /// The company tracks inventory (parts may be made).
+    pub inventory: bool,
+    /// The company's closing date (an opening on or before it is refused).
+    pub closing_date: Option<cl_core::CalendarDate>,
+}
+
+/// Why the whole form cannot be saved: the item's and the inventory
+/// section's problems.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FormProblems {
+    /// The item's.
+    pub item: Vec<ItemProblem>,
+    /// The inventory section's.
+    pub part: Vec<PartProblem>,
+}
+
+/// [`check`] with the purchase and inventory section (P24): an inventory
+/// part needs inventory on, an asset and a COGS account; a new part may
+/// bring its opening stock. `account_ok` says whether an account exists
+/// and is active.
+///
+/// # Errors
+/// Every problem found.
+pub fn check_with_part(
+    draft: &ItemDraft,
+    list: &ItemList,
+    editing: Option<ItemId>,
+    rules: PartRules,
+    income_ok: impl Fn(AccountId) -> bool,
+    account_ok: impl Fn(AccountId) -> bool,
+) -> Result<(CheckedItem, CheckedPart), FormProblems> {
+    let item = check_kinds(
+        draft,
+        list,
+        editing,
+        &ItemKind::available_with(rules.item_types, rules.inventory),
+        income_ok,
+    );
+    let part = check_part(
+        &draft.part,
+        draft.kind == ItemKind::InventoryPart,
+        editing.is_none(),
+        rules.closing_date,
+        account_ok,
+    );
+    match (item, part) {
+        (Ok(i), Ok(p)) => Ok((i, p)),
+        (i, p) => Err(FormProblems {
+            item: i.err().unwrap_or_default(),
+            part: p.err().unwrap_or_default(),
+        }),
+    }
+}
+
+fn check_kinds(
+    draft: &ItemDraft,
+    list: &ItemList,
+    editing: Option<ItemId>,
+    kinds: &[ItemKind],
+    income_ok: impl Fn(AccountId) -> bool,
+) -> Result<CheckedItem, Vec<ItemProblem>> {
     let mut problems = Vec::new();
-    if !ItemKind::available(item_types).contains(&draft.kind) {
+    if !kinds.contains(&draft.kind) {
         problems.push(ItemProblem::KindNotAvailable);
     }
     let name = draft.name.trim();
