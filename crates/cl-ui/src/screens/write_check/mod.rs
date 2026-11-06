@@ -776,6 +776,11 @@ impl WriteCheckScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
+        // P24: items or the inventory switch changed: the Items tab reads
+        // them again (its lines stay).
+        if changes.items && !self.items.loading() {
+            self.items.start_load(&self.link, self.group.as_ref());
+        }
         if self.lists_stale
             && !self.is_dirty()
             && self.accounts_task.is_none()

@@ -1,0 +1,92 @@
+# Parts on Write Checks and Record Card Charge (P24 WP-3, U-158) against
+# `clientledger --demo` with inventory on: the Items tab beside Expenses,
+# a part bought by check (2 landscape fabric rolls at 30.00) and by card
+# (1 sprinkler head kit at 20.00), each saved and read back into its Items
+# tab. Synthetic.
+name: inventory_forms
+description: "Items tab on Write Checks and card charges."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.inventory, equals: true}
+  - command: file.close_window
+
+  # --- Write Checks: a part on the Items tab ---------------------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.items_tab, equals: true}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "60.00", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  # The payee's last accounts came over on two Expenses lines: take them out.
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+Delete
+  - key: Ctrl+Delete
+  - assert_state: {key: screen.lines, equals: 0}
+  - click: {label_contains: "Items "}
+  - assert_state: {key: screen.tab, equals: items}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "30"}
+  - key: Tab
+  - wait: {ms: 300}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: check-items
+  - key: Alt+N
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  # Read back: the part comes back on the Items tab.
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.lines, equals: 0}
+  - assert_state: {key: screen.tab, equals: items}
+  - assert_state: {key: screen.dirty, equals: false}
+  - screenshot: check-read-back
+  - command: file.close_window
+
+  # --- Record Card Charge: a part bought by card -----------------------------
+  - key: Ctrl+Shift+C
+  - assert_state: {key: screen.screen, equals: card_charge}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.items_tab, equals: true}
+  - type: {text: Hollister Fuel, target: {role: text_input, label: Purchased from}}
+  - key: Tab
+  - type: {text: "20.00", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+Delete
+  - click: {label_contains: "Items "}
+  - assert_state: {key: screen.tab, equals: items}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Sprinkler"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "20"}
+  - key: Tab
+  - wait: {ms: 300}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: card-items
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_no_clipping: {}
+  - command: file.close_window
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - command: file.close_window

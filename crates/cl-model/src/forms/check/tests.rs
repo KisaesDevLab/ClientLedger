@@ -782,3 +782,77 @@ fn a_draft_fills_empty_fields_and_blocks_save_until_accepted() {
     assert!(later.read.state(ReadTarget::CheckNumber).is_none());
     assert!(matches!(later.number, NumberField::ToPrint { .. }));
 }
+
+// ---- P24: the Items tab (U-158) ---------------------------------------------
+
+fn part_line(keys: &mut RowKeyGen, qty: &str, cost: &str) -> crate::forms::item_lines::ItemLine {
+    let mut l = crate::forms::item_lines::ItemLine::blank(keys.next_key());
+    l.item = Some(cl_core::ids::ItemId::parse(&uuid(900)).expect("item"));
+    l.account = Some(account(1300));
+    l.set_qty(Some(cl_core::Quantity::parse_wire(qty).expect("qty")));
+    l.set_rate(Some(money(cost)));
+    l
+}
+
+#[test]
+fn item_lines_count_toward_the_check_amount_and_come_out_checked() {
+    let mut keys = RowKeyGen::new();
+    let mut f = valid(&mut keys);
+    // 10 × 3.3333 = 33.333 → 33.33 (half away from zero, D6).
+    f.items = crate::forms::item_lines::ItemLines::from_lines(
+        vec![part_line(&mut keys, "10", "3.3333")],
+        &mut keys,
+    );
+    f.amount = Some(money("1319.73"));
+    assert_eq!(f.lines_total(), Some(money("1319.73")));
+    assert_eq!(f.totals_status(), Some(TotalsStatus::Balanced));
+    let c = run(&f).expect("valid");
+    assert_eq!(c.lines.len(), 2);
+    assert_eq!(c.item_lines.len(), 1);
+    assert_eq!(c.item_lines[0].amount, money("33.33"));
+    assert_eq!(
+        c.item_lines[0]
+            .qty
+            .map(cl_core::Quantity::to_wire)
+            .as_deref(),
+        Some("10.0000")
+    );
+    // A cent off is refused, exactly.
+    f.amount = Some(money("1319.74"));
+    assert_eq!(
+        problems(&f),
+        vec![CheckProblem::LinesDisagree {
+            difference: money("0.01")
+        }]
+    );
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn an_item_line_without_an_account_or_with_a_cost_and_no_quantity_is_refused() {
+    let mut keys = RowKeyGen::new();
+    let mut f = valid(&mut keys);
+    let mut l = part_line(&mut keys, "1", "5");
+    l.account = None;
+    let mut m = crate::forms::item_lines::ItemLine::blank(keys.next_key());
+    m.item = l.item;
+    m.account = Some(account(1300));
+    m.set_rate(Some(money("5")));
+    m.set_amount(Some(money("5")));
+    f.items = crate::forms::item_lines::ItemLines::from_lines(vec![l, m], &mut keys);
+    let (k, k2) = (f.items.lines[0].key, f.items.lines[1].key);
+    f.amount = Some(money("1296.40"));
+    let p = problems(&f);
+    assert!(p.contains(&CheckProblem::ItemLine(
+        k,
+        crate::forms::item_lines::ItemIssue::AccountMissing
+    )));
+    assert!(p.contains(&CheckProblem::ItemLine(
+        k2,
+        crate::forms::item_lines::ItemIssue::RateNeedsQty
+    )));
+    assert_eq!(
+        CheckProblem::ItemLine(k, crate::forms::item_lines::ItemIssue::AccountMissing).field(),
+        CheckField::ItemLine(k)
+    );
+}

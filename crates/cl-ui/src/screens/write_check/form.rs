@@ -1010,7 +1010,7 @@ impl WriteCheckScreen {
     fn totals_ui(&self, ui: &mut Ui, tokens: &Tokens) {
         let style = self.style(ui);
         let form = self.compose();
-        let total = lines_total(&form.lines).unwrap_or(Money::ZERO);
+        let total = form.lines_total().unwrap_or(Money::ZERO);
         let (key, var, figure, warn) = match form.totals_status() {
             Some(TotalsStatus::Balanced) => ("check.totals.balanced", "total", total, false),
             Some(TotalsStatus::Remaining(m)) => ("check.totals.remaining", "amount", m, true),

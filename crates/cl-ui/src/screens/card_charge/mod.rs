@@ -276,6 +276,11 @@ impl CardChargeScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
+        // P24: items or the inventory switch changed: the Items tab reads
+        // them again (its lines stay).
+        if changes.items && !self.items.loading() {
+            self.items.start_load(&self.link, self.group.as_ref());
+        }
         if self.lists_stale && !self.is_dirty() && !self.books.busy() && !self.items.loading() {
             self.lists_stale = false;
             self.books.start(&self.link, self.group.as_ref());
@@ -1405,7 +1410,7 @@ impl CardChargeScreen {
 
     fn totals_ui(&self, ui: &mut Ui, tokens: &Tokens) {
         let form = self.compose();
-        let total = lines_total(&form.lines).unwrap_or(Money::ZERO);
+        let total = form.lines_total().unwrap_or(Money::ZERO);
         let (key, var, figure, warn) = match form.totals_status() {
             Some(TotalsStatus::Balanced) => ("helper.totals.balanced", "total", total, false),
             Some(TotalsStatus::Remaining(m)) => ("helper.totals.remaining", "amount", m, true),

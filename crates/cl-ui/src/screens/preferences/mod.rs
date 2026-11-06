@@ -1013,6 +1013,11 @@ impl PreferencesScreen {
         );
         after.cloud_reading = cloud;
         let typed_intake = after.intake.clone();
+        // P24: "Track inventory" changed: the forms with an Items tab read
+        // the switch again.
+        if after.flags.inventory_enabled != self.committed.flags.inventory_enabled {
+            self.link.bus().publish(crate::data_bus::Change::Items);
+        }
         match &outcome.intake {
             Some(stored) => self.finish_intake_save(stored, &mut after),
             // Not sent (unchanged, or no engine to take it): the baseline
