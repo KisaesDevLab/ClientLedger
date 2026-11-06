@@ -265,7 +265,8 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
             }
         }
     }
-    for step in c["steps"].as_array().expect("steps") {
+    // Report cases (S) have no steps of their own.
+    for step in c["steps"].as_array().map_or(&[][..], Vec::as_slice) {
         let n = step["n"].as_u64().expect("n");
         if limit.is_some_and(|l| n > l) {
             break;
