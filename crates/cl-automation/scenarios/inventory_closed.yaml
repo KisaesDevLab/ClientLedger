@@ -1,0 +1,37 @@
+# Inventory in a closed period (P24 WP-2, Q-P24b) against
+# `clientledger --demo` (closed through 09/30/2026): an invoice with a part
+# dated 09/15/2026 shows the plan's closed-period message and never asks
+# for the closing-date password. Synthetic.
+name: inventory_closed
+description: "A part dated in the closed period is refused in plain words."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Sprinkler"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "12"}
+  - key: Tab
+  - wait: {ms: 800}
+  - key: Alt+S
+  - assert_exists: {label_contains: "Inventory in a closed period can't change, even with the closing password."}
+  - assert_not_exists: {role: text_input, label_contains: "password"}
+  - screenshot: closed
+  - click: {role: button, label: Clear}
+  - command: file.close_window

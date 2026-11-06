@@ -1,0 +1,40 @@
+# Lists > Items with inventory on (P24 WP-2) against `clientledger --demo`:
+# the sample parts with their on hand, the inventory panel of a part
+# (accounts, preferred vendor, reorder, the engine's on hand, average and
+# value), and a new part with its opening stock. Units of measure come
+# with WP-3. Synthetic.
+name: inventory_items
+description: "Inventory panel of a part; a new part with opening stock."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.inventory, equals: true}
+  - assert_state: {key: screen.kinds_available, equals: 6}
+  - click: {role: text_input, label: Find}
+  - type: {text: "Hardwood"}
+  - key: Enter
+  - command: edit.edit_transaction
+  - assert_state: {key: screen.panel, equals: edit}
+  - assert_exists: {role: label, label: "Purchase and inventory"}
+  - assert_exists: {role: label, label: "390.00"}
+  - screenshot: part-panel
+  # The panel scrolls: its buttons sit below the fold for a part.
+  - command: form.revert
+  - command: list.new
+  - assert_state: {key: screen.panel, equals: new}
+  - click: {role: combo_box, label: Type}
+  - click: {role: button, label: Inventory part}
+  - click: {role: text_input, label: Item name}
+  - type: {text: "Edging Stake"}
+  - click: {role: text_input, label: Quantity on hand}
+  - type: {text: "50"}
+  - click: {role: text_input, label: Total value}
+  - type: {text: "62.50"}
+  - screenshot: new-part
+  - command: form.save_close
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.error, equals: false}
+  - command: dev.demo_inventory_reset
+  - command: file.close_window

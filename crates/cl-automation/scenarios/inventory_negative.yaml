@@ -1,0 +1,35 @@
+# Selling more than is on hand (P24 WP-2, Q-148) against
+# `clientledger --demo`: an invoice for 8 landscape fabric rolls with 6 on
+# hand saves and shows the plan's NEGATIVE_STOCK warning (never blocks);
+# the item list shows on hand below zero. Synthetic.
+name: inventory_negative
+description: "NEGATIVE_STOCK warns on an invoice and never blocks."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.inventory, equals: true}
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "8"}
+  - key: Tab
+  - type: {text: "34"}
+  - key: Tab
+  - wait: {ms: 800}
+  - screenshot: invoice
+  - key: Alt+S
+  - assert_state: {key: toast, equals: "You're selling more Landscape Fabric Roll than you have on 11/04/2026 (-2 on hand). You can save; the cost is corrected when you receive more."}
+  - screenshot: warning
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - command: file.close_window

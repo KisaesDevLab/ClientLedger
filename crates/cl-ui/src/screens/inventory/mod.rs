@@ -339,7 +339,10 @@ pub fn demo_reset(link: &CompanyLink) -> bool {
     let parts: Vec<ItemId> = (0..3)
         .map(|n| crate::company::demo::lists::item_id(first + n))
         .collect();
-    d.items_mut().retain(|i| !parts.contains(&i.id));
+    // Every part goes (the seeded ones and any made since).
+    d.items_mut().retain(|i| {
+        !parts.contains(&i.id) && i.fields.item_type != cl_api::ItemType::InventoryPart
+    });
     d.inventory = crate::company::demo::inventory::DemoInventory::default();
     let ok = crate::company::demo::stock::set_enabled(&mut d, true).is_ok();
     drop(d);
