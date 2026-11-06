@@ -46,6 +46,7 @@ fn split(l: &PostingLine) -> SplitLine {
         contact: l.contact,
         billable: false,
         tag: l.tag,
+        item: None,
     }
 }
 

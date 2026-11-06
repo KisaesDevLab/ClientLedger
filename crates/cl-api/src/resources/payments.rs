@@ -604,7 +604,9 @@ impl Payments<'_> {
         id: TransactionId,
         account: AccountId,
     ) -> Result<(DepositRecord, RecordVersion), ApiError> {
-        let Versioned { record, version } = self.0.transactions().get(id).await?;
+        let Versioned {
+            record, version, ..
+        } = self.0.transactions().get(id).await?;
         Ok((DepositRecord::from_transaction(record, account)?, version))
     }
 }
@@ -727,6 +729,7 @@ mod tests {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         );
         let p = BankPosting::deposit(d).expect("deposit");
@@ -792,6 +795,7 @@ mod tests {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         );
         let p = BankPosting::deposit(d).expect("deposit");

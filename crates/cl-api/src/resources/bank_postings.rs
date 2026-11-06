@@ -34,8 +34,8 @@
 //!   total is computed exactly and refused locally unless it is greater
 //!   than zero.
 
-use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
-use cl_core::{CalendarDate, Money};
+use cl_core::ids::{AccountId, ContactId, ItemId, TagId, TransactionId};
+use cl_core::{CalendarDate, Money, Quantity};
 use serde_json::{Value, json};
 
 use crate::client::{Call, Method};
@@ -80,6 +80,22 @@ pub struct SplitLine {
     pub billable: bool,
     /// Line tag.
     pub tag: Option<TagId>,
+    /// The item bought on a check or card-charge line (`inventory-costing-v1`,
+    /// U-158): an inventory part's line posts to the part's asset account.
+    pub item: Option<SplitItem>,
+}
+
+/// The item fields of a check or card-charge line (U-158, the bill rules of
+/// U-85): a part needs a quantity; with a unit price the amount must equal
+/// round2(quantity × unit price).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitItem {
+    /// The item.
+    pub item: ItemId,
+    /// Units bought (above zero, at most four places).
+    pub quantity: Option<Quantity>,
+    /// Cost per unit (at most four places).
+    pub unit_price: Option<Money>,
 }
 
 /// A check to write (`POST /checks`, or `PUT /checks/{id}` with
@@ -388,7 +404,34 @@ fn check_lines(lines: &[SplitLine], own: AccountId) -> Result<Money, LocalValida
     if lines.iter().any(|l| l.billable && l.contact.is_none()) {
         return Err(LocalValidation::InvalidValue);
     }
+    for i in lines.iter().filter_map(|l| l.item.as_ref().map(|i| (l, i))) {
+        split_item_ok(i.0.amount, i.1)?;
+    }
     Money::sum(lines.iter().map(|l| l.amount)).map_err(|_| LocalValidation::InvalidValue)
+}
+
+/// An item line's quantity and cost as the engine checks them
+/// (`itemLineDetails`): a cost needs a quantity, and with both the amount is
+/// round2(quantity × cost).
+fn split_item_ok(amount: Money, i: &SplitItem) -> Result<(), LocalValidation> {
+    if i.quantity.is_some_and(|q| !q.is_positive()) || i.unit_price.is_some_and(Money::is_negative)
+    {
+        return Err(LocalValidation::InvalidValue);
+    }
+    match (i.quantity, i.unit_price) {
+        (None, Some(_)) => Err(LocalValidation::LineAmountMismatch),
+        (Some(q), Some(rate)) => {
+            let want = rate
+                .mul_round(q, 2)
+                .map_err(|_| LocalValidation::InvalidValue)?;
+            if want == amount {
+                Ok(())
+            } else {
+                Err(LocalValidation::LineAmountMismatch)
+            }
+        }
+        _ => Ok(()),
+    }
 }
 
 /// A text the engine stores as `null` when empty; `None` when it is blank.
@@ -1060,14 +1103,23 @@ fn deposit_journal(d: &DepositDraft) -> Vec<L> {
     out
 }
 
-/// A check or expense line's customer and billable mark: sent only when
-/// set (the builder refuses them without `line-billable-v1`).
+/// A check or expense line's customer and billable mark (sent only when
+/// set; the builder refuses them without `line-billable-v1`) and its item.
 fn line_extras(v: &mut Value, l: &SplitLine) {
     if let Some(c) = l.contact {
         v["contactId"] = json!(c);
     }
     if l.billable {
         v["isBillable"] = Value::Bool(true);
+    }
+    if let Some(i) = &l.item {
+        v["itemId"] = json!(i.item);
+        if let Some(q) = i.quantity {
+            v["quantity"] = Value::String(q.to_wire());
+        }
+        if let Some(r) = i.unit_price {
+            v["unitPrice"] = Value::String(r.to_wire());
+        }
     }
 }
 

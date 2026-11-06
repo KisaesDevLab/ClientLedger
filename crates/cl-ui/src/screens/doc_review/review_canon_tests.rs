@@ -93,6 +93,7 @@ fn card() -> CheckedCard {
         memo: Some("November supplies".into()),
         header_tags: vec![tag(1)],
         lines: lines(),
+        item_lines: Vec::new(),
     }
 }
 
@@ -163,6 +164,7 @@ fn check() -> CheckedCheck {
         header_tags: vec![tag(3)],
         lines: lines(),
         draft_attachment: None,
+        item_lines: Vec::new(),
     }
 }
 

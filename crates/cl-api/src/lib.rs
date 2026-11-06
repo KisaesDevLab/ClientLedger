@@ -65,7 +65,7 @@ pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditIma
 pub use resources::bank_postings::{
     BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
     DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
-    PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+    PRINTED_MEMO_MAX, SplitItem, SplitLine, TransferDraft,
 };
 // P13 WP1: write check.
 pub use resources::checks::{

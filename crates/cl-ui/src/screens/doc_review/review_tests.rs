@@ -134,6 +134,7 @@ impl World {
                 billable: false,
                 tag: None,
             }],
+            item_lines: Vec::new(),
         }
     }
 

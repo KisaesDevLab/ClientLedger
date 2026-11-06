@@ -45,6 +45,7 @@ fn line(account: &str, amount: &str) -> SplitLine {
         contact: None,
         billable: false,
         tag: None,
+        item: None,
     }
 }
 
@@ -298,6 +299,7 @@ fn the_transaction_version_of_a_check_is_the_ledger_records() {
     let read = Versioned {
         version: RecordVersion::Fingerprint(r.fingerprint()),
         record: r.clone(),
+        stock_warnings: Vec::new(),
     };
     let txn = read.transaction_version();
     assert_eq!(
@@ -308,6 +310,7 @@ fn the_transaction_version_of_a_check_is_the_ledger_records() {
     let server = Versioned {
         version: RecordVersion::Server(7),
         record: r,
+        stock_warnings: Vec::new(),
     };
     assert_eq!(server.transaction_version(), RecordVersion::Server(7));
 }
@@ -819,4 +822,94 @@ async fn print_state_reads_void_and_gone_checks() {
     assert!(!printed.recorded_as(1002));
     assert_eq!(printed.print_batch_id.as_deref(), Some("b1"));
     assert_eq!(s.checks().print_state(id()).await.expect("gone"), None);
+}
+
+// ---- P24: parts bought by check (U-158) ------------------------------------
+
+const PART: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+
+fn part_line(qty: &str, cost: Option<&str>, amount: &str) -> SplitLine {
+    SplitLine {
+        item: Some(crate::resources::bank_postings::SplitItem {
+            item: cl_core::ids::ItemId::parse(PART).expect("item"),
+            quantity: Some(cl_core::Quantity::parse_wire(qty).expect("qty")),
+            unit_price: cost.map(m),
+        }),
+        ..line(MULCH, amount)
+    }
+}
+
+#[test]
+fn a_part_line_sends_its_item_quantity_and_cost_as_strings() {
+    let mut d = story();
+    d.lines = vec![
+        line(PLANTS, "842.15"),
+        part_line("10", Some("3.3333"), "33.33"),
+    ];
+    d.amount = m("875.48");
+    let body = posting(d.clone()).create_value();
+    let l = &body["lines"][1];
+    assert_eq!(l["itemId"], PART);
+    assert_eq!(l["quantity"], "10.0000");
+    assert_eq!(l["unitPrice"], "3.3333");
+    assert_eq!(l["amount"], "33.3300");
+    assert!(
+        body["lines"][0].get("itemId").is_none(),
+        "no item: nothing new"
+    );
+    // The expense path (an edit without check-edit-v1) sends them too.
+    let put = posting(d).update_value();
+    assert_eq!(put["lines"][1]["itemId"], PART);
+    assert_eq!(put["lines"][1]["quantity"], "10.0000");
+}
+
+#[test]
+fn a_part_line_whose_amount_is_not_quantity_times_cost_is_refused_locally() {
+    let mut d = story();
+    d.lines = vec![part_line("10", Some("3.3333"), "33.34")];
+    d.amount = m("33.34");
+    assert_eq!(
+        BankPosting::check_with(d.clone(), true),
+        Err(crate::errors::LocalValidation::LineAmountMismatch)
+    );
+    // A cost without a quantity: the engine's LINE_QTY_RATE_INCOMPLETE.
+    d.lines = vec![SplitLine {
+        item: Some(crate::resources::bank_postings::SplitItem {
+            item: cl_core::ids::ItemId::parse(PART).expect("item"),
+            quantity: None,
+            unit_price: Some(m("3.00")),
+        }),
+        ..line(MULCH, "33.34")
+    }];
+    assert_eq!(
+        BankPosting::check_with(d.clone(), true),
+        Err(crate::errors::LocalValidation::LineAmountMismatch)
+    );
+    // Quantity and a typed amount without a cost go through.
+    d.lines = vec![part_line("2", None, "33.34")];
+    assert!(BankPosting::check_with(d, true).is_ok());
+}
+
+#[test]
+fn a_saved_part_line_reads_back_its_item_fields_and_the_warnings() {
+    let mut v: Value = serde_json::from_str(RECORD).expect("json");
+    v["transaction"]["lines"][0]["itemId"] = Value::String(PART.into());
+    v["transaction"]["lines"][0]["quantity"] = Value::String("10.0000".into());
+    v["transaction"]["lines"][0]["unitPrice"] = Value::String("3.3333".into());
+    v["warnings"] = serde_json::json!([{
+        "code": "NEGATIVE_STOCK",
+        "details": {"itemId": PART, "date": "2026-11-04", "onHand": "-3.0000"}
+    }]);
+    let body = serde_json::to_vec(&v).expect("bytes");
+    let got: crate::resources::versioning::Versioned<CheckRecord> =
+        crate::resources::versioning::versioned_from(&body, "transaction").expect("record");
+    let l = &got.record.txn.lines[0];
+    assert_eq!(l.item_id.map(|i| i.to_string()).as_deref(), Some(PART));
+    assert_eq!(
+        l.quantity.map(cl_core::Quantity::to_wire).as_deref(),
+        Some("10.0000")
+    );
+    assert_eq!(l.unit_price.map(Money::to_wire).as_deref(), Some("3.3333"));
+    assert_eq!(got.stock_warnings.len(), 1);
+    assert_eq!(got.stock_warnings[0].on_hand.to_wire(), "-3.0000");
 }

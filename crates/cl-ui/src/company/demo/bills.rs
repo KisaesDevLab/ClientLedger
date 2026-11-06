@@ -838,7 +838,11 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<BillRec
         txn,
     };
     let version = RecordVersion::Fingerprint(record.fingerprint());
-    Some(Versioned { record, version })
+    Some(Versioned {
+        record,
+        version,
+        stock_warnings: Vec::new(),
+    })
 }
 
 /// The bills (or credits) newest first: (id, date), as `GET /bills?sortBy=

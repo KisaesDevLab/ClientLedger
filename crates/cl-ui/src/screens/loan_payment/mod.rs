@@ -523,6 +523,7 @@ impl LoanPaymentScreen {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             })
             .collect();
         let lender_name = c.lender.and_then(|l| self.books.contact_name(l));
@@ -569,7 +570,11 @@ impl LoanPaymentScreen {
             own_debit: false,
             lines: c.lines.iter().map(|l| (l.account, l.amount)).collect(),
         };
-        Ok(Outbound { posting, demo })
+        Ok(Outbound {
+            posting,
+            demo,
+            items: Vec::new(),
+        })
     }
 
     /// Checks the form and starts the save; nothing is sent unless the

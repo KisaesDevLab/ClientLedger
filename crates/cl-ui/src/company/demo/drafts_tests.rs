@@ -274,6 +274,7 @@ impl Runner {
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         };
         match kind {
             "bill" => DemoConvertBody::Bill(BillDraft {
@@ -367,6 +368,7 @@ impl Runner {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         };
         let id = post_expense(&mut self.s, &d, "card_charge").expect("posted");

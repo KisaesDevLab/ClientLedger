@@ -427,6 +427,7 @@ pub fn vendor_refund(
             contact: Some(r.vendor),
             billable: false,
             tag: None,
+            item: None,
         }),
     }
     super::deposits::create(state, &d, password)

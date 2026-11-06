@@ -102,6 +102,7 @@ fn auto(
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         }),
         schedule: Some(TemplateSchedule {
@@ -482,6 +483,7 @@ pub fn catch_up_capped_continues_next_call(h: &Harness) {
                     contact: None,
                     billable: false,
                     tag: None,
+                    item: None,
                 }],
             }),
             schedule: Some(TemplateSchedule {

@@ -47,6 +47,7 @@ fn split(account: &str, amount: &str) -> SplitLine {
         contact: None,
         billable: false,
         tag: Some(TagId::parse(TAG).expect("tag")),
+        item: None,
     }
 }
 

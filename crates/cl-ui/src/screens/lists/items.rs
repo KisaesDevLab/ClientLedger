@@ -634,6 +634,7 @@ impl ItemsScreen {
             Task::ready(Versioned {
                 version: RecordVersion::Fingerprint(changed.fingerprint()),
                 record: changed,
+                stock_warnings: Vec::new(),
             })
         } else {
             let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -1311,6 +1312,7 @@ pub(crate) fn demo_save_with_opening(
             return Ok(Versioned {
                 version: RecordVersion::Fingerprint(i.fingerprint()),
                 record: i.clone(),
+                stock_warnings: Vec::new(),
             });
         }
     }
@@ -1349,6 +1351,7 @@ pub(crate) fn demo_save(
     Versioned {
         version: RecordVersion::Fingerprint(item.fingerprint()),
         record: item,
+        stock_warnings: Vec::new(),
     }
 }
 

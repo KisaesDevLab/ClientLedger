@@ -818,7 +818,19 @@ impl InvoiceScreen {
             match r {
                 Ok((v, duplicate)) => {
                     self.inventory_note = None;
-                    crate::screens::inventory::announce_demo(&self.link, &self.item_names());
+                    // P24: NEGATIVE_STOCK warnings, never blocking (the
+                    // demo keeps its own; a live reply carries them).
+                    let names = self.item_names();
+                    if self.link.is_demo() {
+                        crate::screens::inventory::announce_demo(&self.link, &names);
+                    } else {
+                        let live = match &v {
+                            SavedDoc::CreditMemo(r) => r.stock_warnings.as_slice(),
+                            SavedDoc::SalesReceipt(r) => r.stock_warnings.as_slice(),
+                            SavedDoc::Invoice(_) => &[],
+                        };
+                        crate::screens::inventory::announce(&self.link, live, &names);
+                    }
                     self.saved(v);
                     self.duplicate_number = duplicate;
                     if duplicate {

@@ -601,6 +601,9 @@ mod tests {
             billed_status: None,
             source_transaction_id: None,
             line_role: None,
+            item_id: None,
+            quantity: None,
+            unit_price: None,
         }
     }
 
@@ -629,6 +632,7 @@ mod tests {
                 inventory_lines: Vec::new(),
             },
             version: RecordVersion::Fingerprint([7; 32]),
+            stock_warnings: Vec::new(),
         }
     }
 

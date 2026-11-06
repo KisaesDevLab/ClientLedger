@@ -773,6 +773,7 @@ impl TagsScreen {
             Task::ready(Versioned {
                 version: RecordVersion::Fingerprint(changed.fingerprint()),
                 record: changed,
+                stock_warnings: Vec::new(),
             })
         } else {
             let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -1977,6 +1978,7 @@ fn demo_save_tag(
     Versioned {
         version: RecordVersion::Fingerprint(tag.fingerprint()),
         record: tag,
+        stock_warnings: Vec::new(),
     }
 }
 

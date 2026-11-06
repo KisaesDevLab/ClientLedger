@@ -407,6 +407,9 @@ pub(crate) enum Pending {
 pub(crate) struct Outbound {
     pub posting: BankPosting,
     pub demo: DemoPosting,
+    /// P24: the item fields of the demo posting's lines (in line order;
+    /// empty when no line has an item).
+    pub items: Vec<Option<cl_api::SplitItem>>,
 }
 
 /// The record this window saved last (Void works on it).
@@ -477,7 +480,9 @@ pub(crate) type Answers = (
 /// The save and void of one helper form.
 #[derive(Default)]
 pub(crate) struct SaveFlow {
-    pub task: Option<Task<SavedRecord>>,
+    pub task: Option<Task<(SavedRecord, Vec<cl_api::NegativeStock>)>>,
+    /// P24: the last save's `NEGATIVE_STOCK` warnings (read once).
+    pub warnings: Vec<cl_api::NegativeStock>,
     pub void_task: Option<Task<()>>,
     pub intent: Option<SaveIntent>,
     key: Option<(SaveIdentity, IdempotencyKey)>,
@@ -600,7 +605,17 @@ impl SaveFlow {
         }
         self.intent = Some(intent);
         if let Some(mut demo) = link.demo_state() {
-            let r = demo_save(&mut demo, &out.demo, edit, closing, password.as_ref());
+            let r = demo_save(
+                &mut demo,
+                &out.demo,
+                &out.items,
+                edit,
+                closing,
+                password.as_ref(),
+            );
+            if r.is_ok() {
+                self.warnings = crate::company::demo::stock::take_warnings(&mut demo);
+            }
             drop(demo);
             return match r {
                 Ok(saved) => Sent::Saved(saved),
@@ -638,11 +653,14 @@ impl SaveFlow {
                         .await?
                 }
             };
-            Ok(SavedRecord {
-                id: v.record.id,
-                date: v.record.txn_date,
-                version: v.version,
-            })
+            Ok((
+                SavedRecord {
+                    id: v.record.id,
+                    date: v.record.txn_date,
+                    version: v.version,
+                },
+                v.stock_warnings,
+            ))
         });
         if let Ok(p) = written {
             self.task = Some(Task::Pending(p));
@@ -776,6 +794,12 @@ impl SaveFlow {
         if saved.is_some() {
             self.task = None;
         }
+        let saved = saved.map(|r| {
+            r.map(|(rec, w)| {
+                self.warnings = w;
+                rec
+            })
+        });
         let voided = self.void_task.as_mut().and_then(Task::try_take);
         if voided.is_some() {
             self.void_task = None;
@@ -833,9 +857,18 @@ impl SaveFlow {
             return false;
         }
         if let Some(mut demo) = link.demo_state() {
-            let r =
-                crate::company::demo::register::check_closing(closing, &[date], password.as_ref())
-                    .and_then(|()| demo.ledger.void(id));
+            // P24: a void of a charge with parts takes its stock out.
+            let r = crate::company::demo::stock::gate_remove(&demo, id)
+                .and_then(|()| {
+                    crate::company::demo::register::check_closing(
+                        closing,
+                        &[date],
+                        password.as_ref(),
+                    )
+                })
+                .and_then(|()| demo.ledger.void(id))
+                .and_then(|()| crate::company::demo::stock::remove(&mut demo, id))
+                .map(|w| self.warnings = w);
             drop(demo);
             return match r {
                 Ok(()) => true,
@@ -921,10 +954,12 @@ pub(crate) struct SaveIdentity {
 fn demo_save(
     demo: &mut crate::company::demo::DemoState,
     p: &DemoPosting,
+    items: &[Option<cl_api::SplitItem>],
     edit: Option<(TransactionId, RecordVersion)>,
     closing: Option<CalendarDate>,
     password: Option<&Secret>,
 ) -> Result<SavedRecord, ApiError> {
+    use crate::company::demo::stock;
     let chart = demo
         .chart
         .get_or_insert_with(crate::company::demo::chart)
@@ -947,11 +982,25 @@ fn demo_save(
         }
         dates.push(now.record.txn_date);
     }
+    // P24: parts bought by card move stock; the closed-period gate comes
+    // before the closing-date password (Q-P24b).
+    let stock_lines = stock::doc_lines(
+        demo,
+        stock::Side::Receipt,
+        p.lines.iter().enumerate().map(|(i, (_, amount))| {
+            let item = items.get(i).and_then(Option::as_ref);
+            (item.map(|x| x.item), item.and_then(|x| x.quantity), *amount)
+        }),
+    );
+    stock::gate(demo, edit.map(|(id, _)| id), p.date, &stock_lines)?;
     crate::company::demo::register::check_closing(closing, &dates, password)?;
     let id = demo
         .ledger
         .save(&chart, p, edit.map(|(id, _)| id))
         .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
+    demo.ledger
+        .set_line_items(&chart, id, p.own, items.to_vec());
+    stock::post(demo, id, cl_api::TxnType::Expense, p.date, &stock_lines)?;
     let version = demo
         .ledger
         .get(&chart, &contacts, id)

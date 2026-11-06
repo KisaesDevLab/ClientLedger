@@ -324,6 +324,7 @@ fn numbered_check(
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         }],
     })
     .expect("check")

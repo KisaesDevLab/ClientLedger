@@ -404,7 +404,10 @@ mod tests {
         s.inventory = true;
         assert!(s.flags_for(false).inventory_enabled);
         assert!(!s.flags_for(true).inventory_enabled);
-        assert_eq!(s.flags_for(true).sales_tax_enabled, s.flags().sales_tax_enabled);
+        assert_eq!(
+            s.flags_for(true).sales_tax_enabled,
+            s.flags().sales_tax_enabled
+        );
         assert_eq!(SetupIssue::FiscalMonth.key(), "setup.issue.fiscal_month");
     }
 }

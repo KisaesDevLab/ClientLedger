@@ -815,6 +815,7 @@ pub fn stale_u84(h: &Harness) {
             ..third.record.clone()
         },
         version: third.version,
+        stock_warnings: Vec::new(),
     };
     let e = h
         .run(s.bills().update(

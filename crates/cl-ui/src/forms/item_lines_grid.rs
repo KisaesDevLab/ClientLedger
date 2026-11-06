@@ -91,6 +91,8 @@ pub struct ItemLists {
     code_index: Option<LookupIndex>,
     /// P24: the inventory parts among the items.
     parts: Vec<ItemId>,
+    /// P24: each part's inventory asset account (a part bought posts there).
+    assets: Vec<(ItemId, AccountId)>,
 }
 
 impl ItemLists {
@@ -98,6 +100,13 @@ impl ItemLists {
     #[must_use]
     pub fn is_part(&self, id: ItemId) -> bool {
         self.parts.contains(&id)
+    }
+
+    /// A part's inventory asset account: the account a purchase of it posts
+    /// to (U-158; the engine refuses any other).
+    #[must_use]
+    pub fn asset_account(&self, id: ItemId) -> Option<AccountId> {
+        self.assets.iter().find(|(i, _)| *i == id).map(|(_, a)| *a)
     }
 
     /// Every item's id and name (the NEGATIVE_STOCK warning names it).
@@ -118,9 +127,13 @@ impl ItemLists {
         let mut descriptions = Vec::new();
         let mut entries = Vec::new();
         let mut parts = Vec::new();
+        let mut assets = Vec::new();
         for (i, it) in items.iter().enumerate() {
             if it.fields.item_type == cl_api::ItemType::InventoryPart {
                 parts.push(it.id);
+                if let Some(a) = it.fields.purchase.asset_account_id {
+                    assets.push((it.id, a));
+                }
             }
             ids.push(it.id);
             labels.push(it.fields.name.clone());
@@ -141,6 +154,7 @@ impl ItemLists {
             codes: Vec::new(),
             code_index: None,
             parts,
+            assets,
         }
     }
 
@@ -499,7 +513,10 @@ pub(crate) fn apply(
                 if l.description.trim().is_empty() {
                     l.description = lists.description(item).unwrap_or_default().to_string();
                 }
-                if l.account.is_none() {
+                if let Some(asset) = lists.asset_account(item) {
+                    // A part bought posts to its asset account (U-158).
+                    l.account = Some(asset);
+                } else if l.account.is_none() {
                     l.account = default_account;
                 }
             }
@@ -657,10 +674,20 @@ impl ItemsGrid {
     /// Never: the spec is fixed and covered by tests.
     #[must_use]
     pub fn new(lists: Arc<ItemLists>) -> ItemsGrid {
+        Self::named(lists, "enter_bill/items", "bill.items.label")
+    }
+
+    /// An empty grid with its own id and accessible label (Write Checks and
+    /// card charges, P24).
+    ///
+    /// # Panics
+    /// Never: the spec is fixed and covered by tests.
+    #[must_use]
+    pub fn named(lists: Arc<ItemLists>, id: &'static str, label: &str) -> ItemsGrid {
         let mut keys = RowKeyGen::new();
         let value = ItemLines::from_lines(Vec::new(), &mut keys);
         // The spec is fixed; `the_items_spec_is_valid` covers it.
-        let grid = Grid::new("enter_bill/items", grid_spec()).expect("the items spec is valid");
+        let grid = Grid::new(id, grid_spec()).expect("the items spec is valid");
         ItemsGrid {
             form: GridForm::new(
                 FormState::new(value),
@@ -672,7 +699,7 @@ impl ItemsGrid {
                     snapshot: None,
                 },
                 grid,
-                t("bill.items.label"),
+                t(label),
                 GridHeight::Rows { min: 4, max: 10 },
             ),
         }

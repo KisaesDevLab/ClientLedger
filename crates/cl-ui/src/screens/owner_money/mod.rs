@@ -384,6 +384,7 @@ impl OwnerMoneyScreen {
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         };
         let name = c
             .who
@@ -448,7 +449,11 @@ impl OwnerMoneyScreen {
             own_debit,
             lines: vec![(c.equity, c.amount)],
         };
-        Ok(Outbound { posting, demo })
+        Ok(Outbound {
+            posting,
+            demo,
+            items: Vec::new(),
+        })
     }
 
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {

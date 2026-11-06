@@ -23,8 +23,8 @@
 
 use std::collections::BTreeSet;
 
-use cl_core::ids::{AccountId, ContactId, JournalLineId, TagId, TransactionId};
-use cl_core::{CalendarDate, Money, Timestamp};
+use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId};
+use cl_core::{CalendarDate, Money, Quantity, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -724,6 +724,16 @@ pub struct TransactionLine {
     /// never part of a fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_role: Option<String>,
+    /// The item on a check, card-charge or bill line (`inventory-costing-v1`;
+    /// display and form loading only, never part of a fingerprint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<ItemId>,
+    /// The line's quantity (with `item_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<Quantity>,
+    /// The line's cost per unit (with `item_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_price: Option<Money>,
 }
 
 /// `line_role` of a deposit's cash-back line.

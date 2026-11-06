@@ -684,6 +684,7 @@ pub fn get_memo(state: &DemoState, id: TransactionId) -> Result<CreditMemoRecord
             .collect::<Result<_, ApiError>>()?,
         remaining: money(memo_remaining(state, id, m))?,
         send_history: m.sent.clone(),
+        stock_warnings: Vec::new(),
     })
 }
 
@@ -1383,6 +1384,7 @@ pub fn save_receipt(
             .as_ref()
             .map(|(_, o)| o.record.send_history.clone())
             .unwrap_or_default(),
+        stock_warnings: Vec::new(),
     };
     state.credits.receipts.insert(
         id,

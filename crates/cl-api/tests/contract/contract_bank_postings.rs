@@ -38,6 +38,7 @@ fn split(account: AccountId, amount: &str, memo: Option<&str>) -> SplitLine {
         contact: None,
         billable: false,
         tag: None,
+        item: None,
     }
 }
 

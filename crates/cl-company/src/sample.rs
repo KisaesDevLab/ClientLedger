@@ -447,6 +447,7 @@ impl SampleTemplate {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             })
         };
         let splits = || self.lines.iter().map(split).collect::<Option<Vec<_>>>();

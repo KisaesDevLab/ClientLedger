@@ -483,6 +483,7 @@ impl Prepared {
                 // The register has no billable column (Write Check does).
                 billable: false,
                 tag: l.tag,
+                item: None,
             })
             .collect()
     }

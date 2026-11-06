@@ -604,6 +604,7 @@ async fn update_is_fingerprint_guarded_and_reads_back_on_the_pin() {
     let stale = Versioned {
         record: read.record.clone(),
         version: RecordVersion::Fingerprint([7; 32]),
+        stock_warnings: Vec::new(),
     };
     let e = s
         .bills()
@@ -909,6 +910,7 @@ async fn vendor_credits_edit_needs_ap_edit_and_lists_read_exact() {
     let versioned = Versioned {
         version: RecordVersion::Fingerprint(read.fingerprint()),
         record: read,
+        stock_warnings: Vec::new(),
     };
     let e = s
         .vendor_credits()

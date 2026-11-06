@@ -586,6 +586,7 @@ impl PersonalFundsScreen {
                         contact: l.contact,
                         billable: l.billable,
                         tag: l.tag,
+                        item: None,
                     })
                     .collect(),
             },
@@ -601,7 +602,11 @@ impl PersonalFundsScreen {
             own_debit: false,
             lines: c.lines.iter().map(|l| (l.account, l.amount)).collect(),
         };
-        Ok(Outbound { posting, demo })
+        Ok(Outbound {
+            posting,
+            demo,
+            items: Vec::new(),
+        })
     }
 
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {

@@ -661,6 +661,7 @@ mod tests {
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         }
     }
 

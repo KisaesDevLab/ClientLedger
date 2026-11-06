@@ -234,6 +234,7 @@ fn credit_mode_in_draft_mode_says_why_and_sends_nothing() {
         memo: None,
         header_tags: Vec::new(),
         lines: Vec::new(),
+        item_lines: Vec::new(),
     };
     let before = link.demo_state().expect("demo").drafts.requests;
     assert!(!s.accept_draft(&c, cl_model::forms::SaveIntent::SaveAndClose, None));

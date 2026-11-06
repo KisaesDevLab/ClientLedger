@@ -780,6 +780,7 @@ fn post_row(state: &mut DemoState, p: &RowPost<'_>) -> Result<TransactionId, Api
         contact: None,
         billable: false,
         tag: p.row.tag,
+        item: None,
     };
     match p.kind {
         BatchKind::Check => {

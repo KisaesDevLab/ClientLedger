@@ -923,6 +923,7 @@ fn journal_entries_the_row_cant_show_go_to_make_journal_entry() {
         let v = cl_api::Versioned {
             record: t.clone(),
             version: cl_api::RecordVersion::Server(1),
+            stock_warnings: Vec::new(),
         };
         matches!(edit::seed(&v, own, C::OtherAsset), edit::Seed::ReadOnly(_))
     };
@@ -1802,6 +1803,7 @@ fn seeds_read_only(t: &cl_api::Transaction) -> bool {
     let v = cl_api::Versioned {
         record: t.clone(),
         version: cl_api::RecordVersion::Server(1),
+        stock_warnings: Vec::new(),
     };
     let own = t.lines[0].account_id;
     matches!(

@@ -719,7 +719,14 @@ impl EnterBillScreen {
     fn saved(&mut self, s: Saved) {
         self.save.lost.saved();
         self.save.inventory = None;
-        crate::screens::inventory::announce_demo(&self.link, &self.items.lists().names());
+        // P24: NEGATIVE_STOCK warnings, never blocking (the demo keeps its
+        // own; a live engine's come in the save reply).
+        let names = self.items.lists().names();
+        if self.link.is_demo() {
+            crate::screens::inventory::announce_demo(&self.link, &names);
+        } else {
+            crate::screens::inventory::announce(&self.link, &s.record.stock_warnings, &names);
+        }
         let vendor = s.record.record.txn.contact_id;
         self.publish(vendor);
         self.closing_prompt.saved();

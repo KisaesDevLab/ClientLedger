@@ -1183,6 +1183,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             tag: Some(tag),
         }],
         draft_attachment: None,
+        item_lines: Vec::new(),
     };
     let d = to_draft(&c, "Ozark Feed & Seed").expect("draft");
     assert_eq!(d.bank, bank);
@@ -1208,6 +1209,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             contact: Some(project),
             billable: true,
             tag: Some(tag),
+            item: None,
         }]
     );
     let named = CheckedCheck {
@@ -1450,6 +1452,7 @@ fn without_check_edit_an_edit_goes_through_the_ledger_record_and_saves_again() {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         };
         crate::company::demo::checks::update_expense(&mut demo, id, &version, &draft, None)
@@ -1578,13 +1581,13 @@ fn the_bank_line_is_the_credit_on_the_checks_bank_account() {
     let r = saved_check(&link, &s, 4418);
     let bank = account(&s, "1010");
     let keys = &mut cl_model::rowkey::RowKeyGen::new();
-    let (f, lines, exact) = save::form_of(&r, bank, keys);
+    let (f, lines, _, exact) = save::form_of(&r, bank, keys);
     assert!(exact);
     assert_eq!(f.bank, Some(bank));
     assert_eq!(f.amount, Some(money("1286.40")));
     assert_eq!(lines.used().count(), 2);
     // Read against another account: not this form's check.
-    let (_, _, exact) = save::form_of(&r, account(&s, "5100"), keys);
+    let (_, _, _, exact) = save::form_of(&r, account(&s, "5100"), keys);
     assert!(!exact);
     // A second credit line (before the bank line): shown read-only, never
     // taken for the bank line.
@@ -1593,13 +1596,14 @@ fn the_bank_line_is_the_credit_on_the_checks_bank_account() {
     refund.debit = Money::ZERO;
     refund.credit = money("5.00");
     odd.txn.lines.insert(0, refund);
-    let (_, _, exact) = save::form_of(&odd, bank, keys);
+    let (_, _, _, exact) = save::form_of(&odd, bank, keys);
     assert!(!exact);
     // Loaded into the screen: read-only with its note.
     s.load_bank = Some(bank);
     s.show_record(&cl_api::Versioned {
         version: RecordVersion::Fingerprint(cl_api::EditableFields::fingerprint(&odd)),
         record: odd,
+        stock_warnings: Vec::new(),
     });
     assert_eq!(s.state()["read_only"], true);
     assert_eq!(s.state()["read_only_note"], "check.read_only.shape");

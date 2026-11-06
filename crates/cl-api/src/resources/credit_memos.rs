@@ -602,6 +602,10 @@ pub struct CreditMemoRecord {
     /// cost, a cost correction; `inventory-costing-v1`): display only.
     #[serde(default, deserialize_with = "null_vec")]
     pub inventory_lines: Vec<crate::resources::transactions::InventoryLine>,
+    /// The save's `NEGATIVE_STOCK` warnings (`warnings[]` beside the
+    /// record on a create or edit; empty on a read). Never blocking.
+    #[serde(skip)]
+    pub stock_warnings: Vec<crate::resources::inventory::NegativeStock>,
     /// Σ lines.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub subtotal: Money,
@@ -708,8 +712,10 @@ pub(crate) fn decode_sales_doc<T: for<'de> Deserialize<'de>>(
 /// # Errors
 /// `SavedUnreadable` when the answer can't be read.
 pub fn saved_credit_memo(body: &[u8]) -> Result<CreditMemoRecord, ApiError> {
-    decode_sales_doc(body, "creditMemo", "credit memo")
-        .map_err(crate::resources::versioning::saved_unreadable)
+    let mut r: CreditMemoRecord = decode_sales_doc(body, "creditMemo", "credit memo")
+        .map_err(crate::resources::versioning::saved_unreadable)?;
+    r.stock_warnings = crate::resources::inventory::stock_warnings_from(body);
+    Ok(r)
 }
 
 /// Options of a credit memo edit, apply or unapply.

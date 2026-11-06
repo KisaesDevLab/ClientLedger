@@ -21,6 +21,7 @@ use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::check::{
     CheckContext, CheckField, CheckForm, CheckProblem, CheckedCheck, NumberField, check,
 };
+use cl_model::forms::item_lines::ItemLines;
 use cl_model::forms::lines::{FormLine, FormLines};
 use cl_model::forms::{SaveFailure, SaveIntent, SaveStart};
 
@@ -106,6 +107,8 @@ pub(crate) struct Saved {
     pub txn_version: RecordVersion,
     /// The date the check now has.
     pub date: CalendarDate,
+    /// P24: the save's `NEGATIVE_STOCK` warnings (never blocking).
+    pub warnings: Vec<cl_api::NegativeStock>,
 }
 
 /// The checked check as the engine's draft, field by field (no
@@ -150,8 +153,51 @@ pub fn to_draft(c: &CheckedCheck, payee_display: &str) -> Result<CheckDraft, Api
                 contact: l.contact,
                 billable: l.billable,
                 tag: l.tag,
+                item: None,
             })
+            .chain(c.item_lines.iter().map(item_split))
             .collect(),
+    })
+}
+
+/// A checked item line as the engine's split line (P24, U-158): the item,
+/// its quantity and cost go with the line; the amount is the checked one.
+#[must_use]
+pub fn item_split(l: &cl_model::forms::item_lines::CheckedItemLine) -> SplitLine {
+    SplitLine {
+        account: l.account,
+        amount: l.amount,
+        memo: l.description.clone(),
+        contact: l.contact,
+        billable: l.billable,
+        tag: l.tag,
+        item: l.item.map(|item| cl_api::SplitItem {
+            item,
+            quantity: l.qty,
+            unit_price: l.rate,
+        }),
+    }
+}
+
+/// A saved record's line that names an item (P24) as an Items-tab line.
+#[must_use]
+pub fn item_line_of(
+    l: &cl_api::TransactionLine,
+    amount: cl_core::Money,
+    keys: &mut cl_model::rowkey::RowKeyGen,
+) -> Option<cl_model::forms::item_lines::ItemLine> {
+    let item = l.item_id?;
+    Some(cl_model::forms::item_lines::ItemLine {
+        item: Some(item),
+        description: l.description.clone().unwrap_or_default(),
+        qty: l.quantity,
+        rate: l.unit_price,
+        amount: Some(amount),
+        account: Some(l.account_id),
+        customer: l.contact_id,
+        billable: l.is_billable,
+        tag: l.tag_id,
+        ..cl_model::forms::item_lines::ItemLine::blank(keys.next_key())
     })
 }
 
@@ -164,7 +210,7 @@ pub(crate) fn form_of(
     r: &CheckRecord,
     bank: AccountId,
     keys: &mut cl_model::rowkey::RowKeyGen,
-) -> (CheckForm, FormLines, bool) {
+) -> (CheckForm, FormLines, ItemLines, bool) {
     let credits: Vec<usize> = r
         .txn
         .lines
@@ -204,13 +250,21 @@ pub(crate) fn form_of(
     f.amount = amount;
     f.memo = r.txn.memo.clone().unwrap_or_default();
     f.header_tags.clone_from(&r.tag_ids);
-    let seeds = r
+    let mut seeds = Vec::new();
+    let mut items = Vec::new();
+    for (_, l) in r
         .txn
         .lines
         .iter()
         .enumerate()
         .filter(|(i, _)| Some(*i) != bank_line)
-        .map(|(_, l)| FormLine {
+    {
+        // P24: a line that names an item goes to the Items tab.
+        if let Some(i) = item_line_of(l, l.debit, keys) {
+            items.push(i);
+            continue;
+        }
+        seeds.push(FormLine {
             account: Some(l.account_id),
             amount: Some(l.debit),
             memo: l.description.clone().unwrap_or_default(),
@@ -218,9 +272,11 @@ pub(crate) fn form_of(
             billable: l.is_billable,
             tag: l.tag_id,
             ..FormLine::blank(keys.next_key())
-        })
-        .collect();
-    (f, FormLines::from_lines(seeds, keys), exact)
+        });
+    }
+    let lines = FormLines::from_lines(seeds, keys);
+    let items = ItemLines::from_lines(items, keys);
+    (f, lines, items, exact)
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -246,6 +302,22 @@ impl WriteCheckScreen {
             CheckField::LineAmount(k) => self.lines.form_mut().focus(cell(k, L_AMOUNT), &*lists),
             CheckField::LineCustomer(k) => {
                 self.lines.form_mut().focus(cell(k, L_CUSTOMER), &*lists);
+            }
+            CheckField::ItemLine(k) => {
+                use crate::forms::item_lines_grid as g;
+                use cl_model::forms::item_lines::ItemIssue;
+                let col = match p {
+                    CheckProblem::ItemLine(
+                        _,
+                        ItemIssue::RateNeedsQty | ItemIssue::QtyNotPositive,
+                    ) => g::I_QTY,
+                    CheckProblem::ItemLine(_, ItemIssue::RateNegative) => g::I_COST,
+                    CheckProblem::ItemLine(_, ItemIssue::AccountMissing) => g::I_ACCOUNT,
+                    CheckProblem::ItemLine(_, ItemIssue::BillableNeedsCustomer) => g::I_CUSTOMER,
+                    _ => g::I_AMOUNT,
+                };
+                self.items.tab = crate::forms::items_tab::LinesTab::Items;
+                self.items.grid.focus(k, col);
             }
             // A04 draft mode (WP-F2 puts the keyboard on Accept).
             CheckField::ReadBanner => {}
@@ -349,7 +421,7 @@ impl WriteCheckScreen {
             return false;
         }
         // The open cell (B4), then the header follows the lines.
-        if !self.lines.commit() {
+        if !self.lines.commit() || !self.items.grid.commit() {
             return false;
         }
         self.left_lines();
@@ -419,9 +491,24 @@ impl WriteCheckScreen {
             let _ = posting;
             return self.accept_draft(&checked, draft, intent, password);
         }
+        // P24 (Q-P24b): parts in the closed period are refused, password
+        // or not; say so instead of asking for it.
+        self.save.inventory = None;
+        let old = self.editing.as_ref().map(|e| e.old_date);
+        let item_lists = self.items.grid.lists();
+        let has_parts = checked
+            .item_lines
+            .iter()
+            .any(|l| l.item.is_some_and(|i| item_lists.is_part(i)));
+        let dates: Vec<_> = old.into_iter().chain([checked.date]).collect();
+        if let Some(text) =
+            crate::screens::inventory::closed_for_parts(has_parts, &dates, self.closing)
+        {
+            self.save.inventory = Some(text);
+            return false;
+        }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
-        let old = self.editing.as_ref().map(|e| e.old_date);
         if password.is_none() && needs_password(old, checked.date, self.closing) {
             let supported = self.closing_supported();
             if supported {
@@ -435,6 +522,7 @@ impl WriteCheckScreen {
         // Lock the form while the save runs (the grid commits again).
         let lists = Arc::clone(&self.lists);
         let _ = self.lines.form_mut().begin_save(intent, &*lists);
+        let _ = self.items.grid.form_mut().begin_save(intent, &*item_lists);
         if let SaveStart::Busy = self.header.begin_save(intent) {
             return false;
         }
@@ -497,6 +585,7 @@ impl WriteCheckScreen {
                         version: None,
                         txn_version: v.version,
                         date: v.record.txn_date,
+                        warnings: v.stock_warnings,
                     })
                 }
                 Some((id, version)) if check_edit => {
@@ -520,6 +609,7 @@ impl WriteCheckScreen {
                         txn_version: v.transaction_version(),
                         version: Some(v.version),
                         date: v.record.txn.txn_date,
+                        warnings: v.stock_warnings,
                     })
                 }
                 Some((id, version)) => {
@@ -534,6 +624,7 @@ impl WriteCheckScreen {
                         version: None,
                         txn_version: v.version,
                         date: v.record.txn_date,
+                        warnings: v.stock_warnings,
                     })
                 }
             }
@@ -589,6 +680,7 @@ impl WriteCheckScreen {
             txn_version: got.transaction_version(),
             version: Some(got.version),
             date: got.record.txn.txn_date,
+            warnings: crate::company::demo::stock::take_warnings(&mut demo),
         })
     }
 
@@ -678,6 +770,12 @@ impl WriteCheckScreen {
         self.header.save_ok(header);
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines, &*lists);
+        let items = self.items.grid.value().clone();
+        let item_lists = self.items.grid.lists();
+        self.items.grid.form_mut().save_ok(items, &*item_lists);
+        // P24: NEGATIVE_STOCK warnings, never blocking (Q-148).
+        crate::screens::inventory::announce(&self.link, &s.warnings, &self.items.names());
+        self.save.inventory = None;
         self.nav = super::Nav::default();
         self.save.printed_choice = None;
         self.printed = None;
@@ -746,6 +844,10 @@ impl WriteCheckScreen {
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.load(fresh, &*lists);
+        let fresh_items = ItemLines::from_lines(Vec::new(), self.items.grid.keys());
+        self.items.grid.load(fresh_items);
+        self.items.tab = crate::forms::items_tab::LinesTab::Expenses;
+        self.save.inventory = None;
         self.editing = None;
         self.template.forget();
         self.nav.at = None;
@@ -787,11 +889,20 @@ impl WriteCheckScreen {
         };
         if self.save.lost.lost(&e) {
             self.header.save_unknown(failure.clone());
-            self.lines.form_mut().save_failed(failure);
+            self.lines.form_mut().save_failed(failure.clone());
+            self.items.grid.form_mut().save_failed(failure);
             return;
         }
         self.header.save_failed(failure.clone());
-        self.lines.form_mut().save_failed(failure);
+        self.lines.form_mut().save_failed(failure.clone());
+        self.items.grid.form_mut().save_failed(failure);
+        // P24: an inventory refusal in plain language (the closed period
+        // never offers the password, Q-P24b).
+        let lock = crate::screens::inventory::lock_of(&self.link, &e);
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.save.inventory = Some(text);
+            return;
+        }
         // A closed-period refusal or a wrong password shows in the
         // closing-date dialog, which can send the save again.
         if self.closing_failed(&e, Pending::Save(intent)) {
@@ -1173,7 +1284,8 @@ impl WriteCheckScreen {
             return;
         };
         let lists = Arc::clone(&self.lists);
-        let (form, lines, exact) = form_of(r, bank, &mut self.lines.form_mut().adapter_mut().keys);
+        let (form, lines, items, exact) =
+            form_of(r, bank, &mut self.lines.form_mut().adapter_mut().keys);
         // Line customers the engine can't take yet (Q-P13x): changing the
         // check would drop them, so it is shown as it is.
         let line_customers = !self.line_billable()
@@ -1193,6 +1305,14 @@ impl WriteCheckScreen {
             };
         self.header.load(form);
         self.lines.load(lines, &*lists);
+        let has_items = items.used().next().is_some();
+        self.items.grid.load(items);
+        self.items.tab = if has_items && self.lines.value().used().next().is_none() {
+            crate::forms::items_tab::LinesTab::Items
+        } else {
+            crate::forms::items_tab::LinesTab::Expenses
+        };
+        self.save.inventory = None;
         self.template.forget();
         self.editing = Some(Editing {
             id: r.txn.id,
@@ -1275,9 +1395,15 @@ impl WriteCheckScreen {
             let r = crate::company::demo::checks::void(&mut demo, e.id, password.as_ref());
             drop(demo);
             self.void.task = Some(match r {
-                Ok(()) => Task::ready(()),
+                Ok(()) => {
+                    crate::screens::inventory::announce_demo(&self.link, &self.items.names());
+                    Task::ready(())
+                }
                 Err(err) => {
-                    if !self.closing_failed(&err, Pending::Void(reason)) {
+                    let lock = crate::screens::inventory::lock_of(&self.link, &err);
+                    if let Some(text) = crate::screens::inventory::refusal_text(&err, lock) {
+                        self.save.inventory = Some(text);
+                    } else if !self.closing_failed(&err, Pending::Void(reason)) {
                         self.save.error = Some(err);
                     }
                     return;

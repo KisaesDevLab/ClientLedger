@@ -247,6 +247,7 @@ pub fn card_register_columns_and_sign(h: &Harness) {
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         }],
     })
     .expect("charge");

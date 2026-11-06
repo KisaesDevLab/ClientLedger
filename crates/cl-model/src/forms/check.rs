@@ -19,9 +19,10 @@ use crate::forms::amount_words::MAX_CHECK_UNITS;
 use crate::forms::doc_read::{
     Confidence, DocReading, ReadState, ReadTarget, blocks_save, read_lines,
 };
-use crate::forms::lines::{
-    FormLine, FormLines, PostingLine, difference, exact_totals, lines_total, trimmed,
+use crate::forms::item_lines::{
+    CheckedItemLine, ItemIssue, ItemLines, check_item_lines, items_total,
 };
+use crate::forms::lines::{FormLine, FormLines, PostingLine, difference, lines_total, trimmed};
 use crate::lists::tags::{TagList, effective_line_tags, engine_line_tag};
 use crate::rowkey::{RowKey, RowKeyGen};
 use crate::text::TextKey;
@@ -167,6 +168,8 @@ pub struct CheckForm {
     pub header_tags: Vec<TagId>,
     /// The Expenses lines.
     pub lines: FormLines,
+    /// The Items lines (P24, U-158: parts bought by check).
+    pub items: ItemLines,
     /// A receipt uploaded before the first save.
     pub draft_attachment: Option<AttachmentRef>,
     /// A04 draft mode: which fields came from the document and whether the
@@ -192,6 +195,7 @@ impl fmt::Debug for CheckForm {
             .field("memo", &!self.memo.is_empty())
             .field("header_tags", &self.header_tags.len())
             .field("lines", &self.lines.lines.len())
+            .field("items", &self.items.lines.len())
             .field("draft_attachment", &self.draft_attachment.is_some())
             .field("read", &self.read.unaccepted().len())
             .finish()
@@ -228,9 +232,19 @@ impl CheckForm {
             memo: String::new(),
             header_tags: Vec::new(),
             lines: FormLines::from_lines(Vec::new(), keys),
+            items: ItemLines::from_lines(Vec::new(), keys),
             draft_attachment: None,
             read: ReadState::default(),
         }
+    }
+
+    /// The exact lines total, expenses plus items. `None` when an item's
+    /// quantity × cost cannot be computed or the sum leaves the money range.
+    #[must_use]
+    pub fn lines_total(&self) -> Option<Money> {
+        lines_total(&self.lines)?
+            .checked_add(items_total(&self.items)?)
+            .ok()
     }
 
     /// The owner typed the check amount (Q-P13r a). The amount is no longer
@@ -258,9 +272,10 @@ impl CheckForm {
         if self.amount.is_some() && !self.amount_from_lines {
             return;
         }
-        let any_typed = self.lines.lines.iter().any(|l| l.amount.is_some());
+        let any_typed = self.lines.lines.iter().any(|l| l.amount.is_some())
+            || self.items.lines.iter().any(|l| l.amount.is_some());
         if any_typed {
-            if let Some(total) = lines_total(&self.lines) {
+            if let Some(total) = self.lines_total() {
                 self.amount = Some(total);
                 self.amount_from_lines = true;
             }
@@ -274,7 +289,14 @@ impl CheckForm {
     /// a check amount or when the total leaves the money range.
     #[must_use]
     pub fn totals_status(&self) -> Option<TotalsStatus> {
-        exact_totals(self.amount, &self.lines)
+        let left = self.amount?.checked_sub(self.lines_total()?).ok()?;
+        Some(if left.is_zero() {
+            TotalsStatus::Balanced
+        } else if left.is_positive() {
+            TotalsStatus::Remaining(left)
+        } else {
+            TotalsStatus::Over(left.abs())
+        })
     }
 
     /// Ticks or unticks Print later (Q-246): ticked shows "To print" and
@@ -397,6 +419,8 @@ pub enum CheckField {
     LineAmount(RowKey),
     /// One line's customer.
     LineCustomer(RowKey),
+    /// One item line.
+    ItemLine(RowKey),
     /// The banner of values read from the document (A04 draft mode): its
     /// Accept button.
     ReadBanner,
@@ -441,6 +465,8 @@ pub enum CheckProblem {
     /// A04 draft mode: values read from the document are not accepted yet
     /// (Accept, Alt+A, or edit them).
     ReadNotAccepted,
+    /// One item line's issue.
+    ItemLine(RowKey, ItemIssue),
 }
 
 impl CheckProblem {
@@ -467,6 +493,7 @@ impl CheckProblem {
             CheckProblem::AmountTooLarge => TextKey("check.problem.amount_too_large"),
             CheckProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
             CheckProblem::ReadNotAccepted => TextKey("check.problem.read_not_accepted"),
+            CheckProblem::ItemLine(_, i) => i.key(),
         }
     }
 
@@ -487,6 +514,7 @@ impl CheckProblem {
             CheckProblem::NumberInvalid | CheckProblem::NumberWithPrintLater => CheckField::Number,
             CheckProblem::AddressTooLong => CheckField::Address,
             CheckProblem::ReadNotAccepted => CheckField::ReadBanner,
+            CheckProblem::ItemLine(k, _) => CheckField::ItemLine(k),
         }
     }
 }
@@ -518,6 +546,9 @@ pub struct CheckedCheck {
     pub header_tags: Vec<TagId>,
     /// The lines, each with its effective tag (Q-178).
     pub lines: Vec<PostingLine>,
+    /// The item lines (sent after the expense lines), each with its
+    /// effective tag.
+    pub item_lines: Vec<CheckedItemLine>,
     /// A receipt uploaded before the first save.
     pub draft_attachment: Option<AttachmentRef>,
 }
@@ -527,6 +558,7 @@ impl fmt::Debug for CheckedCheck {
         f.debug_struct("CheckedCheck")
             .field("print_later", &self.print_later)
             .field("lines", &self.lines.len())
+            .field("item_lines", &self.item_lines.len())
             .finish_non_exhaustive()
     }
 }
@@ -582,7 +614,7 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
     if form.address.chars().count() > ADDRESS_MAX {
         problems.push(CheckProblem::AddressTooLong);
     }
-    if form.lines.used().count() > MAX_LINES {
+    if form.lines.used().count() + form.items.used().count() > MAX_LINES {
         problems.push(CheckProblem::TooManyLines);
     }
     let mut lines = Vec::new();
@@ -609,8 +641,19 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
             });
         }
     }
+    let (item_lines, issues) = check_item_lines(&form.items, true, |t| {
+        line_tag_default(&form.header_tags, t, ctx.tags)
+    });
+    problems.extend(
+        issues
+            .into_iter()
+            .map(|(k, i)| CheckProblem::ItemLine(k, i)),
+    );
     if let Some(header) = form.amount {
-        let difference = difference(header, &form.lines);
+        let items = items_total(&form.items).unwrap_or(Money::ZERO);
+        let difference = difference(header, &form.lines)
+            .checked_sub(items)
+            .unwrap_or(Money::MIN);
         if !difference.is_zero() {
             problems.push(CheckProblem::LinesDisagree { difference });
         }
@@ -634,6 +677,7 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
             memo: trimmed(&form.memo),
             header_tags: form.header_tags.clone(),
             lines,
+            item_lines,
             draft_attachment: form.draft_attachment.clone(),
         }),
         // Every `None` above pushed a problem, so this arm is unreachable;

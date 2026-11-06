@@ -766,7 +766,11 @@ fn versioned(record: &Value) -> Result<Versioned<InvoiceRecord>, ApiError> {
     let r: InvoiceRecord =
         serde_json::from_value(record.clone()).map_err(|_| ApiError::Internal)?;
     let version = RecordVersion::Fingerprint(r.fingerprint());
-    Ok(Versioned { record: r, version })
+    Ok(Versioned {
+        record: r,
+        version,
+        stock_warnings: Vec::new(),
+    })
 }
 
 fn closing(state: &DemoState) -> Option<CalendarDate> {

@@ -98,6 +98,10 @@ pub struct CardChargeScreen {
     /// The header (its `lines` stay empty: the grid holds them).
     pub(crate) header: FormState<CardForm>,
     pub(crate) lines: LinesGrid<RegisterLists>,
+    /// P24: the Items tab of a charge (parts bought by card).
+    pub(crate) items: crate::forms::items_tab::ItemsTab,
+    /// P24: an inventory message (the closed period, a refusal).
+    pub(crate) inventory: Option<String>,
     pub(crate) inputs: Inputs,
     pub(crate) flow: SaveFlow,
     pub(crate) problems: Vec<CardProblem>,
@@ -147,6 +151,8 @@ impl CardChargeScreen {
             balances: Balances::default(),
             header: FormState::new(CardForm::new(None, Some(today))),
             lines,
+            items: crate::forms::items_tab::ItemsTab::new("card_charge/items", "card.items.label"),
+            inventory: None,
             inputs: Inputs {
                 date: DateInput::new(today),
                 payee: NameInput::default(),
@@ -171,6 +177,7 @@ impl CardChargeScreen {
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
+        s.items.start_load(&s.link, s.group.as_ref());
         s.poll();
         s
     }
@@ -180,6 +187,7 @@ impl CardChargeScreen {
     pub(crate) fn compose(&self) -> CardForm {
         let mut f = self.header.current().clone();
         f.lines = self.lines.value().clone();
+        f.items = self.items.grid.value().clone();
         f
     }
 
@@ -202,8 +210,10 @@ impl CardChargeScreen {
     }
 
     pub(crate) fn poll(&mut self) {
-        if self.books.poll() {
+        let items_changed = self.items.poll();
+        if self.books.poll() || items_changed {
             self.lines.set_lists(Arc::clone(&self.books.lists));
+            self.items.set_base(&self.books.lists);
             self.lock_columns();
             self.inputs.rev = u64::MAX;
             if self.card().is_none()
@@ -242,6 +252,7 @@ impl CardChargeScreen {
     /// Billable is a charge's column only; without `line-billable-v1` the
     /// customer columns are locked too.
     fn lock_columns(&mut self) {
+        use crate::forms::item_lines_grid::{I_BILLABLE, I_CUSTOMER};
         let mut locked = Vec::new();
         if !self.line_billable() {
             locked.extend([L_CUSTOMER, L_BILLABLE]);
@@ -249,6 +260,13 @@ impl CardChargeScreen {
             locked.push(L_BILLABLE);
         }
         self.lines.set_locked(locked);
+        let mut items = Vec::new();
+        if !self.line_billable() {
+            items.extend([I_CUSTOMER, I_BILLABLE]);
+        } else if self.header.current().mode == CardMode::Credit {
+            items.push(I_BILLABLE);
+        }
+        self.items.grid.set_locked(items);
     }
 
     /// Saves in other windows (Q-262): the balance owed again; the lists
@@ -258,9 +276,10 @@ impl CardChargeScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
-        if self.lists_stale && !self.is_dirty() && !self.books.busy() {
+        if self.lists_stale && !self.is_dirty() && !self.books.busy() && !self.items.loading() {
             self.lists_stale = false;
             self.books.start(&self.link, self.group.as_ref());
+            self.items.start_load(&self.link, self.group.as_ref());
         }
         if let Some(card) = self.card()
             && changes.ledger_touches(card)
@@ -288,7 +307,7 @@ impl CardChargeScreen {
     /// The form has unsaved edits.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.header.is_dirty() || self.lines.dirty()
+        self.header.is_dirty() || self.lines.dirty() || self.items.grid.dirty()
     }
 
     /// The owner left the lines: a blank amount takes the lines total.
@@ -475,6 +494,7 @@ impl CardChargeScreen {
             contact: l.contact,
             billable: l.billable,
             tag: l.tag,
+            item: None,
         };
         let posting = match c.mode {
             CardMode::Charge => BankPosting::card_charge_with(
@@ -484,7 +504,16 @@ impl CardChargeScreen {
                     number: c.ref_no.clone(),
                     payee: c.payee,
                     memo: c.memo.clone(),
-                    lines: c.lines.iter().map(split).collect(),
+                    lines: c
+                        .lines
+                        .iter()
+                        .map(split)
+                        .chain(
+                            c.item_lines
+                                .iter()
+                                .map(crate::screens::write_check::item_split),
+                        )
+                        .collect(),
                 },
                 self.line_billable(),
             )?,
@@ -517,9 +546,31 @@ impl CardChargeScreen {
             memo: c.memo.clone().unwrap_or_default(),
             own: c.card,
             own_debit: c.mode == CardMode::Credit,
-            lines: c.lines.iter().map(|l| (l.account, l.amount)).collect(),
+            lines: c
+                .lines
+                .iter()
+                .map(|l| (l.account, l.amount))
+                .chain(c.item_lines.iter().map(|l| (l.account, l.amount)))
+                .collect(),
         };
-        Ok(Outbound { posting, demo })
+        let items = if c.item_lines.is_empty() {
+            Vec::new()
+        } else {
+            c.lines
+                .iter()
+                .map(|_| None)
+                .chain(
+                    c.item_lines
+                        .iter()
+                        .map(|l| crate::screens::write_check::item_split(l).item),
+                )
+                .collect()
+        };
+        Ok(Outbound {
+            posting,
+            demo,
+            items,
+        })
     }
 
     /// Checks the form and starts the save. Nothing is sent when the check
@@ -529,7 +580,7 @@ impl CardChargeScreen {
         if !self.flow.idle() && password.is_none() {
             return false;
         }
-        if !self.commit_header() || !self.lines.commit() {
+        if !self.commit_header() || !self.lines.commit() || !self.items.grid.commit() {
             return false;
         }
         self.left_lines();
@@ -574,8 +625,25 @@ impl CardChargeScreen {
                 return false;
             }
         };
+        // P24 (Q-P24b): parts in the closed period are refused, password
+        // or not; say so instead of asking for it.
+        self.inventory = None;
+        let item_lists = self.items.grid.lists();
+        let has_parts = checked
+            .item_lines
+            .iter()
+            .any(|l| l.item.is_some_and(|i| item_lists.is_part(i)));
+        let old = self.flow.editing.map(|e| e.old_date);
+        let dates: Vec<_> = old.into_iter().chain([checked.date]).collect();
+        if let Some(text) =
+            crate::screens::inventory::closed_for_parts(has_parts, &dates, self.books.closing)
+        {
+            self.inventory = Some(text);
+            return false;
+        }
         let mut touched: Vec<AccountId> = vec![checked.card];
         touched.extend(checked.lines.iter().map(|l| l.account));
+        touched.extend(checked.item_lines.iter().map(|l| l.account));
         self.flow.published = touched;
         let closing = self.books.closing;
         let sent = self.flow.send(
@@ -594,6 +662,7 @@ impl CardChargeScreen {
             Sent::Queued => {
                 let lists = Arc::clone(&self.books.lists);
                 let _ = self.lines.form_mut().begin_save(intent, &*lists);
+                let _ = self.items.grid.form_mut().begin_save(intent, &*item_lists);
                 let _: SaveStart<CardForm> = self.header.begin_save(intent);
                 false
             }
@@ -608,6 +677,12 @@ impl CardChargeScreen {
             match first.field() {
                 CardField::Amount => self.focus_amount = true,
                 CardField::Lines => self.lines.focus_first(),
+                CardField::Line(k) if matches!(first, CardProblem::ItemLine(..)) => {
+                    self.items.tab = crate::forms::items_tab::LinesTab::Items;
+                    self.items
+                        .grid
+                        .focus(k, crate::forms::item_lines_grid::I_ITEM);
+                }
                 CardField::Line(k) => {
                     let col = match first {
                         CardProblem::Line(
@@ -643,6 +718,17 @@ impl CardChargeScreen {
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines.clone(), &*lists);
         self.lines.load(lines, &*lists);
+        let items = self.items.grid.value().clone();
+        let item_lists = self.items.grid.lists();
+        self.items
+            .grid
+            .form_mut()
+            .save_ok(items.clone(), &*item_lists);
+        self.items.grid.load(items);
+        // P24: NEGATIVE_STOCK warnings, never blocking (Q-148).
+        let warnings = std::mem::take(&mut self.flow.warnings);
+        crate::screens::inventory::announce(&self.link, &warnings, &self.items.names());
+        self.inventory = None;
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
         }
@@ -660,7 +746,15 @@ impl CardChargeScreen {
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
         kit::header_failed(&mut self.header, &e, failure.clone());
-        self.lines.form_mut().save_failed(failure);
+        self.lines.form_mut().save_failed(failure.clone());
+        self.items.grid.form_mut().save_failed(failure);
+        // P24: an inventory refusal in plain language (Q-P24b).
+        let lock = crate::screens::inventory::lock_of(&self.link, &e);
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.inventory = Some(text);
+            self.flow.intent = None;
+            return;
+        }
         self.flow.failed(&self.link, e, closing);
     }
 
@@ -714,6 +808,11 @@ impl CardChargeScreen {
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.load(fresh, &*lists);
+        let fresh_items =
+            cl_model::forms::item_lines::ItemLines::from_lines(Vec::new(), self.items.grid.keys());
+        self.items.grid.load(fresh_items);
+        self.items.tab = crate::forms::items_tab::LinesTab::Expenses;
+        self.inventory = None;
         self.template.forget();
         self.problems.clear();
         self.inputs.payee = NameInput::default();
@@ -775,6 +874,8 @@ impl CardChargeScreen {
     }
 
     fn voided(&mut self) {
+        let warnings = std::mem::take(&mut self.flow.warnings);
+        crate::screens::inventory::announce(&self.link, &warnings, &self.items.names());
         let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
@@ -793,7 +894,15 @@ impl CardChargeScreen {
     /// with debit lines; a credit is one debit on a card with credit lines.
     /// Anything else is shown read-only (`false`). Amounts are the
     /// engine's, copied as they are.
-    pub(crate) fn form_of(&mut self, v: &Versioned<Transaction>) -> (CardForm, FormLines, bool) {
+    pub(crate) fn form_of(
+        &mut self,
+        v: &Versioned<Transaction>,
+    ) -> (
+        CardForm,
+        FormLines,
+        cl_model::forms::item_lines::ItemLines,
+        bool,
+    ) {
         // Engine-made inventory lines never become form rows (P24 §3).
         let document = v.record.document_only();
         let txn = &document;
@@ -847,12 +956,20 @@ impl CardChargeScreen {
         });
         f.memo = txn.memo.clone().unwrap_or_default();
         let keys = &mut self.lines.form_mut().adapter_mut().keys;
-        let seeds = txn
+        let mut seeds = Vec::new();
+        let mut items = Vec::new();
+        for (_, l) in txn
             .lines
             .iter()
             .enumerate()
             .filter(|(i, _)| Some(*i) != card_line)
-            .map(|(_, l)| FormLine {
+        {
+            // P24: a line that names an item goes to the Items tab.
+            if let Some(i) = crate::screens::write_check::item_line_of(l, line_amount(l), keys) {
+                items.push(i);
+                continue;
+            }
+            seeds.push(FormLine {
                 account: Some(l.account_id),
                 amount: Some(line_amount(l)),
                 memo: l.description.clone().unwrap_or_default(),
@@ -860,17 +977,27 @@ impl CardChargeScreen {
                 billable: l.is_billable,
                 tag: l.tag_id,
                 ..FormLine::blank(keys.next_key())
-            })
-            .collect();
-        (f, FormLines::from_lines(seeds, keys), fits)
+            });
+        }
+        let lines = FormLines::from_lines(seeds, keys);
+        let items = cl_model::forms::item_lines::ItemLines::from_lines(items, keys);
+        (f, lines, items, fits)
     }
 
     /// Shows a saved charge or credit (Prev/Next, the register, Reload).
     pub(crate) fn show(&mut self, v: &Versioned<Transaction>) {
-        let (form, lines, fits) = self.form_of(v);
+        let (form, lines, items, fits) = self.form_of(v);
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
         self.lines.load(lines, &*lists);
+        let has_items = items.used().next().is_some();
+        self.items.grid.load(items);
+        self.items.tab = if has_items && self.lines.value().used().next().is_none() {
+            crate::forms::items_tab::LinesTab::Items
+        } else {
+            crate::forms::items_tab::LinesTab::Expenses
+        };
+        self.inventory = None;
         self.template.forget();
         self.flow.opened_txn(v, fits);
 
@@ -1054,19 +1181,36 @@ impl CardChargeScreen {
         ui.add_enabled_ui(enabled, |ui| self.header_ui(ui, tokens));
         ui.add_space(12.0);
         let total = lines_total(self.lines.value()).unwrap_or(Money::ZERO);
-        let job = kit::with_figure(
-            ui,
-            "card.lines.heading",
-            "total",
-            &total.format(self.money_style),
-            14.0,
-            tokens.text_primary,
-        );
-        ui.add(egui::Label::new(job).selectable(false));
-        ui.add_space(4.0);
-        ui.add_enabled_ui(enabled, |ui| {
-            let _ = self.lines.ui(ui);
-        });
+        // P24: Expenses · Items tabs on a charge while inventory is on.
+        let charge = self.header.current().mode == CardMode::Charge;
+        if charge && self.items.tab_bar(ui, tokens, total, self.money_style) {
+            ui.add_enabled_ui(enabled, |ui| match self.items.tab {
+                crate::forms::items_tab::LinesTab::Expenses => {
+                    let _ = self.lines.ui(ui);
+                }
+                crate::forms::items_tab::LinesTab::Items => {
+                    let _ = self.items.grid.ui(ui);
+                }
+            });
+        } else {
+            self.items.tab = crate::forms::items_tab::LinesTab::Expenses;
+            let job = kit::with_figure(
+                ui,
+                "card.lines.heading",
+                "total",
+                &total.format(self.money_style),
+                14.0,
+                tokens.text_primary,
+            );
+            ui.add(egui::Label::new(job).selectable(false));
+            ui.add_space(4.0);
+            ui.add_enabled_ui(enabled, |ui| {
+                let _ = self.lines.ui(ui);
+            });
+        }
+        if let Some(text) = &self.inventory {
+            ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+        }
         if !self.line_billable() {
             form::hint(ui, tokens, &t("helper.lines.billable_later"));
         }
@@ -1362,6 +1506,10 @@ impl CardChargeScreen {
             "has_payee": f.payee.is_some(),
             "amount_set": f.amount.is_some(),
             "lines": f.lines.used().count(),
+            "item_lines": f.items.used().count(),
+            "tab": self.items.tab.name(),
+            "items_tab": self.items.shown(),
+            "inventory_note": self.inventory.is_some(),
             "totals": totals,
             "dirty": self.is_dirty(),
             "line_billable": self.line_billable(),
@@ -1371,7 +1519,10 @@ impl CardChargeScreen {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
             },
-            "grid": { "focused": self.lines.has_focus() },
+            "grid": {
+                "focused": self.lines.has_focus(),
+                "items_focused": self.items.grid.has_focus(),
+            },
             "nav_prompt": self.records.prompt.is_some(),
             "nav_at": self.records.at,
             "focused": self.focused,
@@ -1421,7 +1572,7 @@ impl Screen for CardChargeScreen {
         }
         // A refused save's problems follow the owner's fixes.
         self.recheck_problems();
-        let in_grid = self.lines.has_focus();
+        let in_grid = self.lines.has_focus() || self.items.grid.has_focus();
         if self.in_grid && !in_grid {
             self.left_lines();
         }
@@ -1474,6 +1625,9 @@ impl Screen for CardChargeScreen {
             return true;
         }
         if let Some(handled) = self.lines.command(id) {
+            return handled;
+        }
+        if let Some(handled) = self.items.grid.command(id) {
             return handled;
         }
         self.form_command(id)

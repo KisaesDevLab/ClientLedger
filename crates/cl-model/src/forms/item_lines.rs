@@ -26,6 +26,7 @@ use cl_core::ids::{AccountId, ContactId, ItemId, TagId};
 use cl_core::{Money, MoneyError, Quantity};
 
 use crate::rowkey::{RowKey, RowKeyGen};
+use crate::text::TextKey;
 
 /// Why a quantity and a rate do not give an item amount.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -238,6 +239,145 @@ pub fn items_total(v: &ItemLines) -> Option<Money> {
         }
     }
     Money::sum(amounts).ok()
+}
+
+/// One checked item line. `Debug` is redacted.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CheckedItemLine {
+    /// The item.
+    pub item: Option<ItemId>,
+    /// Description, when typed (trimmed).
+    pub description: Option<String>,
+    /// Quantity (more than zero).
+    pub qty: Option<Quantity>,
+    /// Rate (zero or more); set only together with `qty`.
+    pub rate: Option<Money>,
+    /// Amount, more than zero: `rate × qty` rounded to cents when both are
+    /// set, otherwise as typed.
+    pub amount: Money,
+    /// Account.
+    pub account: AccountId,
+    /// Customer.
+    pub contact: Option<ContactId>,
+    /// Billable.
+    pub billable: bool,
+    /// Tag.
+    pub tag: Option<TagId>,
+}
+
+impl fmt::Debug for CheckedItemLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CheckedItemLine")
+            .field("item", &self.item.is_some())
+            .field("qty", &self.qty.is_some())
+            .field("billable", &self.billable)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Why one item line of a check or card charge can't be posted (the bill's
+/// item rules, D6; U-158 on checks and card charges).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ItemIssue {
+    /// A cost without a quantity.
+    RateNeedsQty,
+    /// The quantity is zero or less.
+    QtyNotPositive,
+    /// The cost is below zero.
+    RateNegative,
+    /// `qty × cost` leaves the money range.
+    AmountTooLarge,
+    /// The amount is blank, zero or less.
+    AmountNotPositive,
+    /// No account.
+    AccountMissing,
+    /// Billable without a customer.
+    BillableNeedsCustomer,
+}
+
+impl ItemIssue {
+    /// Plain-language message (strings live in `cl-ui::i18n`).
+    #[must_use]
+    pub const fn key(self) -> TextKey {
+        match self {
+            ItemIssue::RateNeedsQty => TextKey("bill.problem.item_rate_needs_qty"),
+            ItemIssue::QtyNotPositive => TextKey("bill.problem.item_qty_not_positive"),
+            ItemIssue::RateNegative => TextKey("bill.problem.item_rate_negative"),
+            ItemIssue::AmountTooLarge => TextKey("bill.problem.item_amount_too_large"),
+            ItemIssue::AmountNotPositive => TextKey("check.problem.line_amount_not_positive"),
+            ItemIssue::AccountMissing => TextKey("check.problem.line_account_missing"),
+            ItemIssue::BillableNeedsCustomer => TextKey("check.problem.billable_needs_customer"),
+        }
+    }
+
+    /// The control channel's name (no amounts).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            ItemIssue::RateNeedsQty => "item_rate_needs_qty",
+            ItemIssue::QtyNotPositive => "item_qty_not_positive",
+            ItemIssue::RateNegative => "item_rate_negative",
+            ItemIssue::AmountTooLarge => "item_amount_too_large",
+            ItemIssue::AmountNotPositive => "line_amount_not_positive",
+            ItemIssue::AccountMissing => "line_account_missing",
+            ItemIssue::BillableNeedsCustomer => "billable_needs_customer",
+        }
+    }
+}
+
+/// The used item lines checked (each with the tag `tag_of` gives it), and
+/// every issue in line order. `billable` is whether billable lines are
+/// allowed (not on a card credit).
+#[must_use]
+pub fn check_item_lines(
+    lines: &ItemLines,
+    billable: bool,
+    tag_of: impl Fn(Option<TagId>) -> Option<TagId>,
+) -> (Vec<CheckedItemLine>, Vec<(RowKey, ItemIssue)>) {
+    let mut out = Vec::new();
+    let mut issues = Vec::new();
+    for l in lines.used() {
+        let k = l.key;
+        let amount = match (l.qty, l.rate) {
+            (None, Some(_)) => Err(ItemIssue::RateNeedsQty),
+            (Some(q), _) if !q.is_positive() => Err(ItemIssue::QtyNotPositive),
+            _ => match l.line_amount() {
+                Ok(Some(a)) if a.is_positive() => Ok(a),
+                Ok(_) => Err(ItemIssue::AmountNotPositive),
+                Err(ItemAmountError::QuantityNotPositive) => Err(ItemIssue::QtyNotPositive),
+                Err(ItemAmountError::RateNegative) => Err(ItemIssue::RateNegative),
+                Err(ItemAmountError::TooLarge) => Err(ItemIssue::AmountTooLarge),
+            },
+        };
+        let amount = match amount {
+            Ok(a) => Some(a),
+            Err(i) => {
+                issues.push((k, i));
+                None
+            }
+        };
+        if l.account.is_none() {
+            issues.push((k, ItemIssue::AccountMissing));
+        }
+        let billable = l.billable && billable;
+        if billable && l.customer.is_none() {
+            issues.push((k, ItemIssue::BillableNeedsCustomer));
+        }
+        if let (Some(account), Some(amount)) = (l.account, amount) {
+            out.push(CheckedItemLine {
+                item: l.item,
+                description: crate::forms::lines::trimmed(&l.description),
+                qty: l.qty,
+                rate: l.rate.filter(|_| l.qty.is_some()),
+                amount,
+                account,
+                contact: l.customer,
+                billable,
+                tag: tag_of(l.tag),
+            });
+        }
+    }
+    (out, issues)
 }
 
 #[cfg(test)]
