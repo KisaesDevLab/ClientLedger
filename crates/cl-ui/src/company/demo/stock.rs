@@ -445,6 +445,18 @@ pub fn cogs_account(state: &mut DemoState) -> AccountId {
     )
 }
 
+/// The income account the sample parts sell on (a product, not a service).
+fn product_income_account(state: &mut DemoState) -> AccountId {
+    add_account(
+        state,
+        4100,
+        "Product Sales",
+        cl_api::AccountType::Revenue,
+        "sales_of_product_income",
+        "sales_of_product_income",
+    )
+}
+
 /// The opening balance equity account (Q-P24h: created if missing).
 pub fn opening_account(state: &mut DemoState) -> AccountId {
     add_account(
@@ -558,6 +570,7 @@ pub const FIRST_PART: u32 = 800;
 fn seed(state: &mut DemoState) {
     let asset = asset_account(state);
     let cogs = cogs_account(state);
+    let income = product_income_account(state);
     let opening = opening_account(state);
     let as_of = CalendarDate::from_ymd(2026, 10, 1).unwrap_or_else(|_| DemoState::today());
     for (n, p) in SAMPLE_PARTS.iter().enumerate() {
@@ -576,7 +589,7 @@ fn seed(state: &mut DemoState) {
                 name: name.into(),
                 description: Some(desc.into()),
                 unit_price: m(price),
-                income_account_id: super::account_id(4000),
+                income_account_id: income,
                 is_taxable: true,
                 item_type: ItemType::InventoryPart,
                 discount_percent: None,
