@@ -24,6 +24,7 @@ pub mod money;
 pub mod secret;
 pub mod tax_rate;
 pub mod unit_cost;
+pub mod unit_factor;
 
 pub use balance_token::BalanceToken;
 pub use dates::{CalendarDate, DateError, Timestamp, Weekday};
@@ -37,3 +38,4 @@ pub use money::{
 pub use secret::Secret;
 pub use tax_rate::{TaxRate, TaxRateInputError};
 pub use unit_cost::UnitCost;
+pub use unit_factor::UnitFactor;
