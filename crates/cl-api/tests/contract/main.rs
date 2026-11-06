@@ -1041,8 +1041,8 @@ fn main() -> std::process::ExitCode {
             contract_inventory::golden_a_and_valuation_equals_gl,
         ),
         (
-            "inventory::golden_r_linked_returns",
-            contract_inventory::golden_r_linked_returns,
+            "inventory::golden_every_case",
+            contract_inventory::golden_every_case,
         ),
         (
             "inventory::golden_u_units",
