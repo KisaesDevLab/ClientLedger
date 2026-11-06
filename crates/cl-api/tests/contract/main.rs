@@ -36,6 +36,7 @@ mod contract_finance_charges;
 mod contract_harness;
 mod contract_home;
 mod contract_idempotency;
+mod contract_inventory;
 mod contract_invoices;
 mod contract_items;
 mod contract_journal;
@@ -1029,6 +1030,27 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
+        ),
+        // P24 inventory (U-157 to U-161): fresh companies on S3.
+        (
+            "inventory::capabilities_and_golden_bytes",
+            contract_inventory::capabilities_and_golden_bytes,
+        ),
+        (
+            "inventory::golden_a_and_valuation_equals_gl",
+            contract_inventory::golden_a_and_valuation_equals_gl,
+        ),
+        (
+            "inventory::golden_r_linked_returns",
+            contract_inventory::golden_r_linked_returns,
+        ),
+        (
+            "inventory::golden_u_units",
+            contract_inventory::golden_u_units,
+        ),
+        (
+            "inventory::closed_period_refuses_inventory",
+            contract_inventory::closed_period_refuses_inventory,
         ),
         (
             "session::logout_ends_the_session",
