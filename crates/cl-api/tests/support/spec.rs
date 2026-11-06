@@ -46,7 +46,7 @@ use sha2::{Digest, Sha256};
 /// The P24 inventory rows are client-declared until the WP-2 pin bump: the
 /// P24 plan §2.4 contract (adjustments, the count sheet and counts, the
 /// valuation and stock status reports, reorder alerts; U-159, U-160, U-78).
-pub const OUTSIDE_SPEC: [(&str, &str); 20] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -69,6 +69,11 @@ pub const OUTSIDE_SPEC: [(&str, &str); 20] = [
     ("GET", "/api/v1/reports/inventory-stock-status"),
     ("GET", "/api/v1/items/reorder-alerts"),
     ("GET", "/api/v1/reports/reorder"),
+    ("GET", "/api/v1/unit-sets"),
+    ("POST", "/api/v1/unit-sets"),
+    ("GET", "/api/v1/unit-sets/{id}"),
+    ("PUT", "/api/v1/unit-sets/{id}"),
+    ("DELETE", "/api/v1/unit-sets/{id}"),
 ];
 
 /// Lowercase hex of a SHA-256.

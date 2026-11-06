@@ -142,6 +142,7 @@ pub use resources::transactions::{
     TxnSort, TxnStatus, TxnType, has_code, next_number_from_json,
 };
 pub use resources::transactions::{INVENTORY_DERIVED_ROLES, InventoryLine, is_inventory_derived};
+pub use resources::unit_sets::{NewUnitSet, Unit, UnitRefusal, UnitSet, UnitSets, unit_refusal};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

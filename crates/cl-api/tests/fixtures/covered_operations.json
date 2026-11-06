@@ -324,5 +324,10 @@
   {"method":"GET","path":"/api/v1/reports/inventory-valuation-detail","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/inventory-stock-status","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/items/reorder-alerts","inSpec":false,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/reports/reorder","inSpec":false,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/reports/reorder","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/unit-sets","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/unit-sets","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/unit-sets/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/unit-sets/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/unit-sets/{id}","inSpec":false,"fragmentHash":null}
 ]

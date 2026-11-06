@@ -59,6 +59,7 @@ pub mod tags;
 pub mod templates;
 pub mod tenants;
 pub mod transactions;
+pub mod unit_sets;
 pub mod vendor_credits;
 pub mod vendor_templates;
 pub mod versioning;

@@ -438,10 +438,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             "idempotency_recovery_v1_routes.txt",
             "idempotency-recovery-v1",
         ),
-        (
-            "idempotency_inventory_v1_routes.txt",
-            "inventory-adjust-v1",
-        ),
+        ("idempotency_inventory_v1_routes.txt", "inventory-adjust-v1"),
     ]
     .iter()
     .map(|(f, cap)| {

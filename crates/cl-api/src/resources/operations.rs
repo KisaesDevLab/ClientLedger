@@ -1443,6 +1443,16 @@ pub(crate) const REPORT_INVENTORY_STOCK_STATUS: Operation =
 pub(crate) const ITEMS_REORDER_ALERTS: Operation = read("/api/v1/items/reorder-alerts");
 /// The reorder report (U-78).
 pub(crate) const REPORT_REORDER: Operation = read("/api/v1/reports/reorder");
+/// Unit sets (U-161).
+pub(crate) const UNIT_SETS_LIST: Operation = read("/api/v1/unit-sets");
+/// Creates a unit set (U-161; no key: it moves no money).
+pub(crate) const UNIT_SET_CREATE: Operation = write(Method::Post, "/api/v1/unit-sets");
+/// One unit set.
+pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
+/// Stores a unit set (`expectedUpdatedAt`).
+pub(crate) const UNIT_SET_PUT: Operation = write(Method::Put, "/api/v1/unit-sets/{id}");
+/// Deletes a unit set no item or line names.
+pub(crate) const UNIT_SET_DELETE: Operation = write(Method::Delete, "/api/v1/unit-sets/{id}");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1456,7 +1466,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 326] = [
+pub const OPERATIONS: [Operation; 331] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1798,6 +1808,11 @@ pub const OPERATIONS: [Operation; 326] = [
     REPORT_INVENTORY_STOCK_STATUS,
     ITEMS_REORDER_ALERTS,
     REPORT_REORDER,
+    UNIT_SETS_LIST,
+    UNIT_SET_CREATE,
+    UNIT_SET_GET,
+    UNIT_SET_PUT,
+    UNIT_SET_DELETE,
 ];
 
 /// Looks up a covered operation.
