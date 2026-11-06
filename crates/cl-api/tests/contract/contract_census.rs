@@ -315,8 +315,28 @@ pub fn field_census(h: &Harness) {
             "updatedAt",
         ],
     );
+    // ItemFields flattens its purchase side (P24), so serde lists no
+    // fields: its own keys by hand, then ItemPurchase and ItemStock.
     let item_keys = with(
-        fields_of::<ItemFields>(),
+        with(
+            with(
+                fields_of::<cl_api::ItemPurchase>(),
+                &[
+                    "name",
+                    "description",
+                    "unitPrice",
+                    "incomeAccountId",
+                    "isTaxable",
+                    "itemType",
+                    "discountPercent",
+                    "taxCodeId",
+                ],
+            ),
+            &fields_of::<cl_api::ItemStock>()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        ),
         &["id", "isActive", "defaultTagId", "createdAt", "updatedAt"],
     );
     let tag_keys = with(
@@ -353,8 +373,24 @@ pub fn field_census(h: &Harness) {
         name,
         keys: item_keys.clone(),
         strings: &["unitPrice"],
-        // P23 (U-25): arrives with E1.
-        optional: &["taxCodeId"],
+        // P23 (U-25): arrives with E1. P24 (U-39b): the purchase side and
+        // the stock figures arrive with E1; required once the WP-2 pin
+        // carries them (stock only on parts).
+        optional: &[
+            "taxCodeId",
+            "purchaseDescription",
+            "purchaseCost",
+            "expenseAccountId",
+            "assetAccountId",
+            "cogsAccountId",
+            "preferredVendorId",
+            "reorderPoint",
+            "reorderQuantity",
+            "unitLabel",
+            "quantityOnHand",
+            "averageCost",
+            "assetValue",
+        ],
     };
     // U-75: `tagNumber` arrives with `tag-number-v1`; until then the engine
     // leaves it out.
@@ -460,6 +496,9 @@ pub fn field_census(h: &Harness) {
                 "salesTaxBasis",
                 "defaultSalesTaxId",
                 "salesTaxSsuta",
+                // P24 (U-25, Q-P24j): arrives with E1; required once the
+                // WP-2 pin carries it.
+                "inventoryEnabled",
             ],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],
@@ -539,7 +578,8 @@ pub fn field_census(h: &Harness) {
             name: "GET /transactions/{id} transaction",
             keys: fields_of::<Transaction>(),
             strings: &["total"],
-            optional: &[],
+            // P24 (U-157): only on documents with inventory movements.
+            optional: &["inventoryLines"],
         },
         &one["transaction"],
     );

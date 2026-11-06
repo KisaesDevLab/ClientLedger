@@ -633,6 +633,7 @@ pub fn get_memo(state: &DemoState, id: TransactionId) -> Result<CreditMemoRecord
         .ok_or(ApiError::NotFound { code: None })?;
     let number_of = |inv| receivable(state, inv).map(|r| r.number);
     Ok(CreditMemoRecord {
+        inventory_lines: Vec::new(),
         id,
         number: Some(m.number.clone()),
         date: m.date,
@@ -1345,6 +1346,7 @@ pub fn save_receipt(
         posting,
     )?;
     let record = SalesReceiptRecord {
+        inventory_lines: Vec::new(),
         id,
         number,
         date: r.txn_date,

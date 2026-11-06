@@ -852,6 +852,9 @@ impl<'de> Deserialize<'de> for BillRecord {
         pairs.sort_by_key(|(l, _)| l.line_order.unwrap_or(0));
         let lines = pairs
             .into_iter()
+            // Engine-made inventory lines (a cost correction or residual)
+            // are never bill lines (P24 §2.3 B3; `inventoryLines[]`).
+            .filter(|(l, _)| !l.is_inventory_derived())
             .filter_map(|(l, x)| {
                 let amount = match kind {
                     ApKind::Bill => l.debit,

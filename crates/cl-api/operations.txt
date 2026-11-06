@@ -388,3 +388,15 @@ POST    /api/v1/payments/write-off-recoveries   keyable-recovery
 GET     /api/v1/reports/sales-tax-liability     idempotent
 GET     /api/v1/reports/sales-tax-payments      idempotent
 GET     /api/v1/payments/write-offs           idempotent
+POST    /api/v1/inventory/adjustments           keyable-inventory
+GET     /api/v1/inventory/adjustments/{id}      idempotent
+PUT     /api/v1/inventory/adjustments/{id}      keyable-inventory
+DELETE  /api/v1/inventory/adjustments/{id}      keyable-inventory
+POST    /api/v1/inventory/adjustments/{id}/void keyable-inventory
+GET     /api/v1/inventory/count-sheet           idempotent
+POST    /api/v1/inventory/counts                keyable-inventory
+GET     /api/v1/reports/inventory-valuation     idempotent
+GET     /api/v1/reports/inventory-valuation-detail idempotent
+GET     /api/v1/reports/inventory-stock-status  idempotent
+GET     /api/v1/items/reorder-alerts            idempotent
+GET     /api/v1/reports/reorder                 idempotent

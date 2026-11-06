@@ -917,6 +917,7 @@ impl DemoLedger {
             reverses_transaction_id: None,
             reversal_transaction_id: None,
             reverse_on: None,
+            inventory_lines: Vec::new(),
         };
         let version = cl_api::RecordVersion::Fingerprint(record.fingerprint());
         Some(cl_api::Versioned { record, version })

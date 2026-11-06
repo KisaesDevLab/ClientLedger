@@ -177,6 +177,7 @@ pub fn type_key(t: TxnType, class: AccountClass, debit: bool) -> &'static str {
         TxnType::ReturnedPayment => "register.type.returned_payment",
         TxnType::SalesTaxPayment => "register.type.sales_tax_payment",
         TxnType::BadDebtRecovery => "register.type.bad_debt_recovery",
+        TxnType::InventoryAdjustment => "register.type.inventory_adjustment",
     }
 }
 

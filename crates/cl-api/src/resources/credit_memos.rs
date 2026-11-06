@@ -247,6 +247,23 @@ pub struct SalesDocLine {
 }
 ids_debug!(SalesDocLine, "SalesDocLine", account_id, item_id);
 
+/// A sales document's `lines`, without any engine-made inventory line that
+/// leaked into them (defensive, P24 §2.3 B3: the engine returns those in
+/// `inventoryLines[]`). `null` or absent is empty.
+pub(crate) fn doc_lines<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Vec<SalesDocLine>, D::Error> {
+    let raw: Vec<Value> = null_vec(d)?;
+    raw.into_iter()
+        .filter(|v| {
+            !crate::resources::transactions::is_inventory_derived(
+                v.get("lineRole").and_then(Value::as_str),
+            )
+        })
+        .map(|v| SalesDocLine::deserialize(v).map_err(serde::de::Error::custom))
+        .collect()
+}
+
 /// How a saved credit memo or sales receipt stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -578,9 +595,13 @@ pub struct CreditMemoRecord {
     /// The client.
     #[serde(alias = "contactId")]
     pub customer_id: ContactId,
-    /// Its lines.
-    #[serde(default, deserialize_with = "null_vec")]
+    /// Its lines (never an engine-made inventory line).
+    #[serde(default, deserialize_with = "doc_lines")]
     pub lines: Vec<SalesDocLine>,
+    /// The engine-made inventory lines (the return to stock at average
+    /// cost, a cost correction; `inventory-costing-v1`): display only.
+    #[serde(default, deserialize_with = "null_vec")]
+    pub inventory_lines: Vec<crate::resources::transactions::InventoryLine>,
     /// Σ lines.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub subtotal: Money,

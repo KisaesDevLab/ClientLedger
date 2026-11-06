@@ -54,6 +54,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::SalesTaxSetupV1) => "keyable-sales-tax",
             RetryClass::Keyable(KeySet::SalesTaxPayV1) => "keyable-sales-tax-pay",
             RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
+            RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -124,6 +125,9 @@ pub enum KeySet {
     SalesTaxPayV1,
     /// `idempotency-recovery-v1` (U-154, P23): bad-debt recoveries.
     RecoveryV1,
+    /// `idempotency-inventory-v1` (U-159, P24): inventory adjustments
+    /// (create, edit, delete, void) and posting a count.
+    InventoryV1,
 }
 
 impl KeySet {
@@ -149,6 +153,7 @@ impl KeySet {
             KeySet::SalesTaxSetupV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX,
             KeySet::SalesTaxPayV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX_PAY,
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
+            KeySet::InventoryV1 => crate::wire::Capabilities::IDEMPOTENCY_INVENTORY,
         }
     }
 }
@@ -1389,6 +1394,56 @@ pub(crate) const REPORT_SALES_TAX_LIABILITY: Operation =
 /// The sales tax payments report.
 pub(crate) const REPORT_SALES_TAX_PAYMENTS: Operation = read("/api/v1/reports/sales-tax-payments");
 
+// ---- P24 inventory (U-159, U-160, U-78; client-declared until the pin
+// bump, plan §2.4).
+/// Records an inventory adjustment (U-159).
+pub(crate) const INVENTORY_ADJUSTMENT_CREATE: Operation = keyable_in(
+    KeySet::InventoryV1,
+    Method::Post,
+    "/api/v1/inventory/adjustments",
+);
+/// One inventory adjustment.
+pub(crate) const INVENTORY_ADJUSTMENT_GET: Operation = read("/api/v1/inventory/adjustments/{id}");
+/// Edits an inventory adjustment (`expectedUpdatedAt`).
+pub(crate) const INVENTORY_ADJUSTMENT_PUT: Operation = keyable_in(
+    KeySet::InventoryV1,
+    Method::Put,
+    "/api/v1/inventory/adjustments/{id}",
+);
+/// Deletes an inventory adjustment.
+pub(crate) const INVENTORY_ADJUSTMENT_DELETE: Operation = keyable_in(
+    KeySet::InventoryV1,
+    Method::Delete,
+    "/api/v1/inventory/adjustments/{id}",
+);
+/// Voids an inventory adjustment.
+pub(crate) const INVENTORY_ADJUSTMENT_VOID: Operation = keyable_in(
+    KeySet::InventoryV1,
+    Method::Post,
+    "/api/v1/inventory/adjustments/{id}/void",
+);
+/// The physical count sheet as of a date.
+pub(crate) const INVENTORY_COUNT_SHEET: Operation = read("/api/v1/inventory/count-sheet");
+/// Posts a count as one adjustment (409 `STALE` when on hand moved).
+pub(crate) const INVENTORY_COUNT_POST: Operation = keyable_in(
+    KeySet::InventoryV1,
+    Method::Post,
+    "/api/v1/inventory/counts",
+);
+/// Inventory valuation summary as of a date, with the GL check (U-160).
+pub(crate) const REPORT_INVENTORY_VALUATION: Operation =
+    read("/api/v1/reports/inventory-valuation");
+/// Inventory valuation detail over dates (U-160).
+pub(crate) const REPORT_INVENTORY_VALUATION_DETAIL: Operation =
+    read("/api/v1/reports/inventory-valuation-detail");
+/// Inventory stock status as of a date (U-160).
+pub(crate) const REPORT_INVENTORY_STOCK_STATUS: Operation =
+    read("/api/v1/reports/inventory-stock-status");
+/// Items at or below their reorder point (U-78).
+pub(crate) const ITEMS_REORDER_ALERTS: Operation = read("/api/v1/items/reorder-alerts");
+/// The reorder report (U-78).
+pub(crate) const REPORT_REORDER: Operation = read("/api/v1/reports/reorder");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -1401,7 +1456,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 314] = [
+pub const OPERATIONS: [Operation; 326] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1731,6 +1786,18 @@ pub const OPERATIONS: [Operation; 314] = [
     REPORT_SALES_TAX_LIABILITY,
     REPORT_SALES_TAX_PAYMENTS,
     WRITE_OFFS_LIST,
+    INVENTORY_ADJUSTMENT_CREATE,
+    INVENTORY_ADJUSTMENT_GET,
+    INVENTORY_ADJUSTMENT_PUT,
+    INVENTORY_ADJUSTMENT_DELETE,
+    INVENTORY_ADJUSTMENT_VOID,
+    INVENTORY_COUNT_SHEET,
+    INVENTORY_COUNT_POST,
+    REPORT_INVENTORY_VALUATION,
+    REPORT_INVENTORY_VALUATION_DETAIL,
+    REPORT_INVENTORY_STOCK_STATUS,
+    ITEMS_REORDER_ALERTS,
+    REPORT_REORDER,
 ];
 
 /// Looks up a covered operation.
@@ -1839,6 +1906,8 @@ mod tests {
                 Some(KeySet::SalesTaxPayV1)
             } else if KEYABLE_RECOVERY.contains(&route) {
                 Some(KeySet::RecoveryV1)
+            } else if KEYABLE_INVENTORY.contains(&route) {
+                Some(KeySet::InventoryV1)
             } else {
                 None
             };
@@ -1875,7 +1944,8 @@ mod tests {
                 + KEYABLE_SALES_DOC_EMAIL.len()
                 + KEYABLE_SALES_TAX.len()
                 + KEYABLE_SALES_TAX_PAY.len()
-                + KEYABLE_RECOVERY.len(),
+                + KEYABLE_RECOVERY.len()
+                + KEYABLE_INVENTORY.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2025,6 +2095,26 @@ mod tests {
         ),
     ];
     const KEYABLE_RECOVERY: [(&str, &str); 1] = [("POST", "/api/v1/payments/write-off-recoveries")];
+    /// The P24 key set (U-159), as `idempotency_inventory_v1_routes.txt`
+    /// records it.
+    const KEYABLE_INVENTORY: [(&str, &str); 5] = [
+        ("POST", "/api/v1/inventory/adjustments"),
+        ("PUT", "/api/v1/inventory/adjustments/{id}"),
+        ("DELETE", "/api/v1/inventory/adjustments/{id}"),
+        ("POST", "/api/v1/inventory/adjustments/{id}/void"),
+        ("POST", "/api/v1/inventory/counts"),
+    ];
+
+    #[test]
+    fn p24_key_set_names_its_capability() {
+        assert_eq!(KeySet::InventoryV1.capability(), "idempotency-inventory-v1");
+        assert_eq!(INVENTORY_COUNT_POST.key_set(), Some(KeySet::InventoryV1));
+        assert_eq!(INVENTORY_COUNT_SHEET.key_set(), None);
+        assert_eq!(
+            RetryClass::Keyable(KeySet::InventoryV1).as_str(),
+            "keyable-inventory"
+        );
+    }
 
     #[test]
     fn p23_key_sets_name_their_capabilities() {

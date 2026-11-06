@@ -29,6 +29,7 @@ pub mod finance_charges;
 pub mod form1099;
 pub mod home_queries;
 pub mod intake;
+pub mod inventory;
 pub mod invoice_layouts;
 pub mod invoices;
 pub mod items;

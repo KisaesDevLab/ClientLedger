@@ -170,6 +170,11 @@ pub(super) enum Route {
 #[must_use]
 pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> Seed {
     let t = &v.record;
+    // Engine-made inventory lines (P24 §3 Loaders): the document's own
+    // form or read-only, never the inline editor.
+    if t.has_inventory_lines() {
+        return read_only(t);
+    }
     let own_lines: Vec<_> = t.lines.iter().filter(|l| l.account_id == own).collect();
     let others: Vec<_> = t.lines.iter().filter(|l| l.account_id != own).collect();
     let [mine] = own_lines.as_slice() else {
@@ -621,6 +626,7 @@ mod tests {
                 reverses_transaction_id: None,
                 reversal_transaction_id: None,
                 reverse_on: None,
+                inventory_lines: Vec::new(),
             },
             version: RecordVersion::Fingerprint([7; 32]),
         }

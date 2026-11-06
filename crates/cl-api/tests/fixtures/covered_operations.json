@@ -312,5 +312,17 @@
   {"method":"POST","path":"/api/v1/payments/write-off-recoveries","inSpec":true,"fragmentHash":"22bb8eaef5a6e8c24c35e522b354394fe55d5c8d490b9677306ab8349870322f"},
   {"method":"GET","path":"/api/v1/reports/sales-tax-liability","inSpec":true,"fragmentHash":"e82b4baf67b6e3365c158117db41e9da8540c00ab9755f0f7d353d936696e9bd"},
   {"method":"GET","path":"/api/v1/reports/sales-tax-payments","inSpec":true,"fragmentHash":"4c78ae89394282f4a4158e0323f7f59ff74ec750573b2d38f5566226806b897a"},
-  {"method":"GET","path":"/api/v1/payments/write-offs","inSpec":true,"fragmentHash":"cc4b42f152fca46d85b6636e7212b0d41400ef58d45d3a3c91857130792561fb"}
+  {"method":"GET","path":"/api/v1/payments/write-offs","inSpec":true,"fragmentHash":"cc4b42f152fca46d85b6636e7212b0d41400ef58d45d3a3c91857130792561fb"},
+  {"method":"POST","path":"/api/v1/inventory/adjustments","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/inventory/adjustments/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/inventory/adjustments/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/inventory/adjustments/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/inventory/adjustments/{id}/void","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/inventory/count-sheet","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/inventory/counts","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/inventory-valuation","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/inventory-valuation-detail","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/inventory-stock-status","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/items/reorder-alerts","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/reorder","inSpec":false,"fragmentHash":null}
 ]

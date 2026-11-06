@@ -86,6 +86,14 @@ pub use resources::contacts::{
 };
 pub use resources::export::{ExportFile, ExportManifest};
 pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
+pub use resources::inventory::{
+    ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
+    AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,
+    InventoryRefusal, NegativeStock, NewAdjustment, NewCount, Problem, ReorderAlert,
+    SavedAdjustment, StockStatusRow, ValuationAccount, ValuationDetailRow, ValuationRow,
+    ValuationSummary, count_stale_items, inventory_refusal, inventory_refusal_codes, problems_in,
+    stock_warnings, stock_warnings_from,
+};
 pub use resources::items::{
     Item, ItemFields, ItemFilter, ItemPurchase, ItemSort, ItemStock, ItemType, ItemUpdate, Items,
     OpeningStock, UNIT_LABEL_MAX_CHARS,
@@ -133,6 +141,7 @@ pub use resources::transactions::{
     Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
     TxnSort, TxnStatus, TxnType, has_code, next_number_from_json,
 };
+pub use resources::transactions::{INVENTORY_DERIVED_ROLES, InventoryLine, is_inventory_derived};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

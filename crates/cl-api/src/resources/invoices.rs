@@ -768,7 +768,13 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
                 || x.line_role.is_some()
                 || x.item_id.is_some()
                 || x.quantity.is_some();
-            if !document || x.line_role.as_deref() == Some("billable_markup") {
+            // Engine-made inventory lines (cost of goods sold, relief,
+            // corrections) are never document lines (P24 §2.3 B3); the
+            // engine returns them in `inventoryLines[]`.
+            if !document
+                || x.line_role.as_deref() == Some("billable_markup")
+                || crate::resources::transactions::is_inventory_derived(x.line_role.as_deref())
+            {
                 continue;
             }
             let mut amount = l
@@ -913,6 +919,9 @@ pub struct SavedInvoice {
     pub invoice: Versioned<InvoiceRecord>,
     /// `DOCUMENT_NUMBER_IN_USE` warnings (Q-94).
     pub warnings: Vec<DocumentNumberWarning>,
+    /// `NEGATIVE_STOCK` warnings (P24, Q-148): the save went through; the
+    /// cost is corrected when more is received.
+    pub stock_warnings: Vec<crate::resources::inventory::NegativeStock>,
 }
 
 // ---- The list ----------------------------------------------------------------
@@ -1729,10 +1738,17 @@ fn invoice_body(
 
 fn saved_invoice(body: &[u8]) -> Result<SavedInvoice, ApiError> {
     let invoice = saved_from(body, "invoice")?;
-    let warnings = serde_json::from_slice::<Value>(body)
-        .map(|v| number_warnings(&v))
+    let v = serde_json::from_slice::<Value>(body).ok();
+    let warnings = v.as_ref().map(number_warnings).unwrap_or_default();
+    let stock_warnings = v
+        .as_ref()
+        .map(crate::resources::inventory::stock_warnings)
         .unwrap_or_default();
-    Ok(SavedInvoice { invoice, warnings })
+    Ok(SavedInvoice {
+        invoice,
+        warnings,
+        stock_warnings,
+    })
 }
 
 /// Invoice operations of a session (`session.invoices()`).

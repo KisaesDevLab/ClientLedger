@@ -243,7 +243,9 @@ fn print_state_from(body: &[u8]) -> Result<CheckPrintState, ApiError> {
 impl<'de> Deserialize<'de> for CheckRecord {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        let txn = Transaction::deserialize(&v).map_err(|_| de::Error::custom("transaction"))?;
+        let mut txn = Transaction::deserialize(&v).map_err(|_| de::Error::custom("transaction"))?;
+        // Engine-made inventory lines are never check lines (P24 §3).
+        txn.lines.retain(|l| !l.is_inventory_derived());
         let w = CheckWire::deserialize(&v).map_err(|_| de::Error::custom("check fields"))?;
         // Q-PR2e: an engine that says `isCheck: false` is believed even when
         // the row carries a print status; older engines send no `isCheck`.

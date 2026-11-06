@@ -210,9 +210,16 @@ pub struct SalesReceiptRecord {
     /// Reference (owner data).
     #[serde(default)]
     pub ref_no: Option<String>,
-    /// Its lines.
-    #[serde(default, deserialize_with = "null_vec")]
+    /// Its lines (never an engine-made inventory line).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::credit_memos::doc_lines"
+    )]
     pub lines: Vec<SalesDocLine>,
+    /// The engine-made inventory lines (cost of goods sold and relief;
+    /// `inventory-costing-v1`): display only.
+    #[serde(default, deserialize_with = "null_vec")]
+    pub inventory_lines: Vec<crate::resources::transactions::InventoryLine>,
     /// Σ lines.
     #[serde(default, deserialize_with = "de_cents_zero")]
     pub subtotal: Money,

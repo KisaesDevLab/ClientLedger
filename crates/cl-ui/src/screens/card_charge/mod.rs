@@ -794,7 +794,9 @@ impl CardChargeScreen {
     /// Anything else is shown read-only (`false`). Amounts are the
     /// engine's, copied as they are.
     pub(crate) fn form_of(&mut self, v: &Versioned<Transaction>) -> (CardForm, FormLines, bool) {
-        let txn = &v.record;
+        // Engine-made inventory lines never become form rows (P24 §3).
+        let document = v.record.document_only();
+        let txn = &document;
         let is_card = |id| self.books.class(id) == Some(AccountClass::CreditCard);
         let mode = if txn.txn_type == TxnType::Deposit {
             CardMode::Credit

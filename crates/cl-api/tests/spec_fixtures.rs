@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 7] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 8] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -278,6 +278,13 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 7] = [
         "keyable-recovery",
         cl_api::KeySet::RecoveryV1,
         1,
+    ),
+    // P24 (U-159): client-declared until the WP-2 pin bump.
+    (
+        "idempotency_inventory_v1_routes.txt",
+        "keyable-inventory",
+        cl_api::KeySet::InventoryV1,
+        5,
     ),
 ];
 
@@ -430,6 +437,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         (
             "idempotency_recovery_v1_routes.txt",
             "idempotency-recovery-v1",
+        ),
+        (
+            "idempotency_inventory_v1_routes.txt",
+            "idempotency-inventory-v1",
         ),
     ]
     .iter()

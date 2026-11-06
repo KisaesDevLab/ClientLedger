@@ -447,7 +447,7 @@ impl Capabilities {
     /// U-25 (inventory half): `inventoryEnabled` on `/company/settings`.
     pub const COMPANY_INVENTORY_FLAG: &'static str = "company-inventory-flag-v1";
     /// U-157, U-158: average costing on every document, `inventoryLines[]`
-    /// outside `lines`, `NEGATIVE_STOCK` warnings, cost restatements.
+    /// outside `lines`, `NEGATIVE_STOCK` warnings; documents with inventory dated on or before the closing date are refused (409 `INVENTORY_PERIOD_CLOSED`, owner 2026-11-06).
     pub const INVENTORY_COSTING: &'static str = "inventory-costing-v1";
     /// U-159: inventory adjustments, the count sheet, posting a count and
     /// the opening quantity on item create.

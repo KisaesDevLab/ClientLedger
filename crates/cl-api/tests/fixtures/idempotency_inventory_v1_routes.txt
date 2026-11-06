@@ -1,0 +1,10 @@
+# The engine's `idempotency-inventory-v1` route set (U-159, P24 plan §2.0): inventory adjustments
+# and counts, `x-idempotency: true` in its openapi.json. Client-declared until the WP-2
+# pin bump. Append-only for this capability name: `keyable-inventory` in operations.txt
+# (`KeySet::InventoryV1`), keyed only while the engine advertises
+# `idempotency-inventory-v1`.
+DELETE /api/v1/inventory/adjustments/{id}
+POST /api/v1/inventory/adjustments
+POST /api/v1/inventory/adjustments/{id}/void
+POST /api/v1/inventory/counts
+PUT /api/v1/inventory/adjustments/{id}

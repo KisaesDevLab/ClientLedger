@@ -307,6 +307,9 @@ pub(crate) struct Executor {
     /// The engine replays keys on bad-debt recoveries
     /// (`idempotency-recovery-v1`, U-154).
     idempotency_recovery_v1: AtomicBool,
+    /// The engine replays keys on inventory adjustments and counts
+    /// (`idempotency-inventory-v1`, U-159).
+    idempotency_inventory_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -371,6 +374,7 @@ impl Executor {
             idempotency_sales_tax_v1: AtomicBool::new(false),
             idempotency_sales_tax_pay_v1: AtomicBool::new(false),
             idempotency_recovery_v1: AtomicBool::new(false),
+            idempotency_inventory_v1: AtomicBool::new(false),
         }
     }
 
@@ -455,6 +459,12 @@ impl Executor {
             .store(recovery, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `idempotency-inventory-v1`
+    /// (U-159, P24).
+    pub(crate) fn set_idempotency_inventory_v1(&self, on: bool) {
+        self.idempotency_inventory_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -484,6 +494,7 @@ impl Executor {
             KeySet::SalesTaxSetupV1 => self.idempotency_sales_tax_v1.load(Ordering::Relaxed),
             KeySet::SalesTaxPayV1 => self.idempotency_sales_tax_pay_v1.load(Ordering::Relaxed),
             KeySet::RecoveryV1 => self.idempotency_recovery_v1.load(Ordering::Relaxed),
+            KeySet::InventoryV1 => self.idempotency_inventory_v1.load(Ordering::Relaxed),
         }
     }
 
