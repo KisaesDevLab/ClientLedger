@@ -447,8 +447,9 @@ pub struct CountSheetRow {
     /// Usually bought from (plan §2.4).
     #[serde(default)]
     pub preferred_vendor_id: Option<ContactId>,
-    /// Its unit label.
-    #[serde(default)]
+    /// The unit it is counted in: the base unit of its set, else its unit
+    /// label (the engine sends `unit`; U-161).
+    #[serde(default, alias = "unit")]
     pub unit_label: Option<String>,
     /// On hand as of the date (send it back as `sheetOnHand`).
     pub on_hand: Quantity,

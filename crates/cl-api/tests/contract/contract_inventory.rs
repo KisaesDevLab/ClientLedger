@@ -5,22 +5,23 @@
 //! file step by step, valuation = GL, the closed-period refusal, the
 //! reorder report's purchase unit and the keyed unit-set create.
 //!
-//! Each case runs in a fresh company (the golden dates are January 2026 and
-//! the cases need an empty item history), opened on the S3 session; S3
-//! goes back to tenant B on its next use.
+//! The cases run in tenant B (S3; a new company would spend the run's
+//! rate-limited auth budget), each on its own part, so their histories
+//! never mix. Tenant B is closed through January 2026 by the closed-period
+//! tests, so every golden date moves one year later (2027): costing depends
+//! on the order of the rows, not on the year.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use cl_api::{
     AccountFilter, AccountType, AdjustmentLine, ApiError, BillDraft, BillLineDraft, Capabilities,
-    ClosingDateChange, ContactFields, ContactType, InventoryRefusal, InvoiceLine,
-    InvoiceWriteOptions, ItemFields, ItemPurchase, ItemType, ItemUpdate, NewAdjustment, NewContact,
-    NewCreditMemo, NewInvoice, NewUnitSet, PostingOptions, Session, Unit, UnitRefusal,
-    inventory_refusal, unit_refusal,
+    ContactFields, ContactType, InventoryRefusal, InvoiceLine, InvoiceWriteOptions, ItemFields,
+    ItemPurchase, ItemType, ItemUpdate, NewAdjustment, NewContact, NewCreditMemo, NewInvoice,
+    NewUnitSet, PostingOptions, Session, Unit, UnitRefusal, inventory_refusal, unit_refusal,
 };
 use cl_core::ids::{AccountId, ContactId, ItemId, TransactionId, UnitId, UnitSetId};
-use cl_core::{CalendarDate, Money, Quantity, Secret, UnitFactor};
+use cl_core::{CalendarDate, Money, Quantity, UnitFactor};
 use serde_json::Value;
 
 use crate::common::{account, key, m};
@@ -44,8 +45,10 @@ fn q(s: &str) -> Quantity {
     Quantity::parse_wire(s).expect("qty")
 }
 
+/// A golden date, one year later (see the module docs).
 fn d(s: &str) -> CalendarDate {
-    CalendarDate::parse_wire(s).expect("date")
+    let g = CalendarDate::parse_wire(s).expect("date");
+    CalendarDate::from_ymd(g.year() + 1, g.month(), g.day()).expect("date a year later")
 }
 
 fn st<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
@@ -90,18 +93,8 @@ struct Co {
     customer: ContactId,
 }
 
-fn fresh(h: &Harness, name: &str) -> Co {
-    let made = h
-        .run(h.s1.create_company(&cl_api::NewCompany {
-            company_name: unique(name),
-            business_type: Some("default".into()),
-            entity_type: None,
-            system_accounts_only: None,
-        }))
-        .unwrap_or_else(|e| panic!("create company: {e}"));
+fn fresh(h: &Harness, _name: &str) -> Co {
     let s = h.s3();
-    h.run(s.open_company(made.tenant_id))
-        .unwrap_or_else(|e| panic!("open company: {e}"));
     h.run(s.set_inventory_enabled(true, key()))
         .unwrap_or_else(|e| panic!("inventory on: {e}"));
     let accounts = h
@@ -454,7 +447,13 @@ pub fn golden_a_and_valuation_equals_gl(h: &Harness) {
         .iter()
         .find(|a| a.account_id == co.asset)
         .expect("the asset account's GL check");
-    assert_eq!(acct.valuation, m("16.20"));
+    // The account holds every case's parts: W's row is case A's.
+    let row = v
+        .rows
+        .iter()
+        .find(|r| r.item_id == book.items["W"])
+        .expect("W valued");
+    assert_eq!(row.value, m("16.20"));
     assert_eq!(acct.gl_balance, acct.valuation, "valuation = GL");
     assert!(acct.difference.is_zero());
     let gl = h
@@ -475,11 +474,7 @@ pub fn golden_a_and_valuation_equals_gl(h: &Harness) {
             .expect("valuation");
         let row = v.rows.iter().find(|r| r.item_id == book.items["W"]);
         let value = row.map_or(Money::ZERO, |r| r.value);
-        assert_eq!(
-            Some(value),
-            st(want, "value").map(m),
-            "S valuation {asof}"
-        );
+        assert_eq!(Some(value), st(want, "value").map(m), "S valuation {asof}");
     }
 }
 
@@ -542,6 +537,17 @@ pub fn golden_u_units(h: &Harness) {
     book.items.insert("W".into(), w);
     play(&co, h, &all, "U", None, &mut book);
 
+    // The count sheet counts a part with a set in its base unit.
+    let sheet = h
+        .run(co.s.inventory().count_sheet(d("2026-01-31")))
+        .expect("count sheet");
+    let row = sheet
+        .rows
+        .iter()
+        .find(|r| r.item_id == w)
+        .expect("W on the sheet");
+    assert_eq!(row.unit_label.as_deref(), Some("bottle"));
+
     // Reorder: buy by the case; 30 bottles to reorder = 2.5 cases.
     let got = h.run(co.s.items().get(w)).expect("item");
     let mut fields = got.record.fields.clone();
@@ -575,37 +581,52 @@ pub fn golden_u_units(h: &Harness) {
 
 /// Closed periods (owner 2026-11-06): with the books closed through Jan
 /// 10, a part bought on Jan 3 and an adjustment on Jan 10 are refused
-/// with `INVENTORY_PERIOD_CLOSED` even with the closing password; Jan 11 is
-/// fine.
+/// with `INVENTORY_PERIOD_CLOSED`; Jan 11 is fine. Tenant B's closing date
+/// is set through the settings route (as the closed-period tests do) and
+/// put back afterwards.
 pub fn closed_period_refuses_inventory(h: &Harness) {
-    if !all_caps(h) || !h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
+    if !all_caps(h) {
         return;
     }
     let co = fresh(h, "Inventory closed");
+    if h.run(co.s.closing_password_status())
+        .is_ok_and(|st| st.password_set)
+    {
+        h.pending(
+            "U-159",
+            "tenant B has a closing password; the lock date is not ours to move",
+        );
+        return;
+    }
+    let before = h.run(co.s.company_settings()).expect("settings").lock_date;
     let mut book = Book::default();
     book.items.insert("W".into(), co.part(h, "W", None));
     let all = golden();
     play(&co, h, &all, "A", Some(2), &mut book);
-    let pw = Secret::new("closing-password-123");
-    h.run(co.s.set_closing_date(
-        &ClosingDateChange {
-            closing_date: Some(d("2026-01-10")),
-            closing_password: Some(pw.clone()),
-        },
-        key(),
-    ))
-    .expect("close the books");
+    let lock = |date: Option<CalendarDate>| {
+        h.run(co.s.raw_mapped(
+            cl_api::Method::Put,
+            "/api/v1/company/settings",
+            Some(&serde_json::json!({ "lockDate": date.map(CalendarDate::to_wire) })),
+        ))
+        .expect("set the closing date");
+    };
+    lock(Some(d("2026-01-10")));
     let bill = serde_json::json!({"event": "bill", "date": "2026-01-03", "item": "W",
         "quantity": "6", "unitPrice": "2.00", "amount": "12.00"});
-    let e = step(&co, h, &mut book, &bill).expect_err("closed");
-    assert!(is_code(&e, "INVENTORY_PERIOD_CLOSED"), "{e}");
+    let refused_bill = step(&co, h, &mut book, &bill);
     let adjust = serde_json::json!({"event": "adjust_value", "date": "2026-01-10",
         "item": "W", "valueChange": "1.00"});
-    let e = step(&co, h, &mut book, &adjust).expect_err("closed");
-    assert!(is_code(&e, "INVENTORY_PERIOD_CLOSED"), "{e}");
+    let refused_adjust = step(&co, h, &mut book, &adjust);
     let open = serde_json::json!({"event": "adjust_value", "date": "2026-01-11",
         "item": "W", "valueChange": "1.00"});
-    step(&co, h, &mut book, &open).expect("after the closing date");
+    let after = step(&co, h, &mut book, &open);
+    lock(before);
+    let e = refused_bill.expect_err("closed");
+    assert!(is_code(&e, "INVENTORY_PERIOD_CLOSED"), "{e}");
+    let e = refused_adjust.expect_err("closed");
+    assert!(is_code(&e, "INVENTORY_PERIOD_CLOSED"), "{e}");
+    after.expect("after the closing date");
     let it = co.stock(h, book.items["W"]).stock;
     assert_eq!(it.asset_value, Some(m("54.83")));
 }

@@ -855,7 +855,14 @@ pub fn count_sheet(state: &mut DemoState, as_of: CalendarDate) -> Result<CountSh
                 name: Some(i.fields.name.clone()),
                 description: i.fields.description.clone(),
                 preferred_vendor_id: i.fields.purchase.preferred_vendor_id,
-                unit_label: i.fields.purchase.unit_label.clone(),
+                // U-161: a part with a set counts in its base unit.
+                unit_label: i
+                    .fields
+                    .purchase
+                    .unit_set_id
+                    .and_then(|set| state.units.get(set))
+                    .map(|set| set.base_unit_name)
+                    .or_else(|| i.fields.purchase.unit_label.clone()),
                 on_hand: s.quantity_on_hand.unwrap_or(Quantity::ZERO),
                 average_cost: s.average_cost,
                 value: s.asset_value,
