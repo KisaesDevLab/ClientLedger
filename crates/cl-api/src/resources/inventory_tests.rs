@@ -31,11 +31,10 @@ fn account(s: &str) -> AccountId {
     AccountId::parse(s).expect("account")
 }
 
-const ALL: [&str; 4] = [
+const ALL: [&str; 3] = [
     Capabilities::INVENTORY_ADJUST,
     Capabilities::INVENTORY_REPORTS,
     Capabilities::REORDER_ALERTS,
-    Capabilities::IDEMPOTENCY_INVENTORY,
 ];
 
 fn adjustment() -> NewAdjustment {

@@ -307,8 +307,8 @@ pub(crate) struct Executor {
     /// The engine replays keys on bad-debt recoveries
     /// (`idempotency-recovery-v1`, U-154).
     idempotency_recovery_v1: AtomicBool,
-    /// The engine replays keys on inventory adjustments and counts
-    /// (`idempotency-inventory-v1`, U-159).
+    /// The engine replays keys on inventory adjustments and counts (under
+    /// `inventory-adjust-v1`, U-159).
     idempotency_inventory_v1: AtomicBool,
 }
 
@@ -459,8 +459,8 @@ impl Executor {
             .store(recovery, Ordering::Relaxed);
     }
 
-    /// Record whether the engine advertises `idempotency-inventory-v1`
-    /// (U-159, P24).
+    /// Record whether the engine advertises `inventory-adjust-v1` (its
+    /// adjustment and count writes replay keys; U-159, P24).
     pub(crate) fn set_idempotency_inventory_v1(&self, on: bool) {
         self.idempotency_inventory_v1.store(on, Ordering::Relaxed);
     }

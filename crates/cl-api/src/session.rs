@@ -158,7 +158,7 @@ impl Client {
             info.capabilities.has(Capabilities::IDEMPOTENCY_RECOVERY),
         );
         self.exec().set_idempotency_inventory_v1(
-            info.capabilities.has(Capabilities::IDEMPOTENCY_INVENTORY),
+            info.capabilities.has(Capabilities::INVENTORY_ADJUST),
         );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)

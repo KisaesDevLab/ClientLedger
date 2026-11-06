@@ -125,7 +125,7 @@ pub enum KeySet {
     SalesTaxPayV1,
     /// `idempotency-recovery-v1` (U-154, P23): bad-debt recoveries.
     RecoveryV1,
-    /// `idempotency-inventory-v1` (U-159, P24): inventory adjustments
+    /// Keyed under `inventory-adjust-v1` (U-159, P24; no separate capability): inventory adjustments
     /// (create, edit, delete, void) and posting a count.
     InventoryV1,
 }
@@ -153,7 +153,7 @@ impl KeySet {
             KeySet::SalesTaxSetupV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX,
             KeySet::SalesTaxPayV1 => crate::wire::Capabilities::IDEMPOTENCY_SALES_TAX_PAY,
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
-            KeySet::InventoryV1 => crate::wire::Capabilities::IDEMPOTENCY_INVENTORY,
+            KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
         }
     }
 }
@@ -2107,7 +2107,7 @@ mod tests {
 
     #[test]
     fn p24_key_set_names_its_capability() {
-        assert_eq!(KeySet::InventoryV1.capability(), "idempotency-inventory-v1");
+        assert_eq!(KeySet::InventoryV1.capability(), "inventory-adjust-v1");
         assert_eq!(INVENTORY_COUNT_POST.key_set(), Some(KeySet::InventoryV1));
         assert_eq!(INVENTORY_COUNT_SHEET.key_set(), None);
         assert_eq!(

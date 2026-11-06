@@ -3,7 +3,7 @@
 //!
 //! - Adjustments move quantity, value or both for one or more parts against
 //!   an adjustment account (`inventory-adjust-v1`). Keyed under
-//!   `idempotency-inventory-v1`. Anything dated on or before the closing
+//!   `inventory-adjust-v1`. Anything dated on or before the closing
 //!   date is refused with 409 `INVENTORY_PERIOD_CLOSED`, even with the
 //!   closing-date password (owner 2026-11-06; nothing is restated).
 //! - The count sheet lists on hand as of a date; posting a count sends the

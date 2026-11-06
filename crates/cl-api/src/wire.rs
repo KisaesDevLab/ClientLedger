@@ -456,9 +456,12 @@ impl Capabilities {
     pub const INVENTORY_REPORTS: &'static str = "inventory-reports-v1";
     /// U-78: `GET /items/reorder-alerts` and the reorder report.
     pub const REORDER_ALERTS: &'static str = "reorder-alerts-v1";
-    /// `Idempotency-Key` on the inventory money writes (adjustments,
-    /// counts).
-    pub const IDEMPOTENCY_INVENTORY: &'static str = "idempotency-inventory-v1";
+    /// U-161: unit sets (`/unit-sets`), `unitId` on item lines, base
+    /// quantities, `unitPrices` on items, the reorder report's purchase
+    /// unit (Q-P24i). The engine keys the inventory writes (adjustments,
+    /// counts) under `inventory-adjust-v1`; there is no separate
+    /// idempotency capability for them.
+    pub const UNITS_OF_MEASURE: &'static str = "units-of-measure-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

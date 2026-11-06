@@ -440,7 +440,7 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         ),
         (
             "idempotency_inventory_v1_routes.txt",
-            "idempotency-inventory-v1",
+            "inventory-adjust-v1",
         ),
     ]
     .iter()
