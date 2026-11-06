@@ -17,6 +17,8 @@ pub mod deposits;
 pub mod drafts;
 pub mod home;
 pub mod intake;
+// P24: average costing (held to fixtures/inventory/golden.json).
+pub mod inventory;
 pub mod invoices;
 pub mod journal;
 pub mod lists;
@@ -155,6 +157,8 @@ pub struct DemoState {
     pub finance: finance_charges::DemoFinance,
     /// Sales tax setup, switches and stored tax rows (P23).
     pub sales_tax: sales_tax::DemoSalesTax,
+    /// Inventory movements and the costing replay (P24).
+    pub inventory: inventory::DemoInventory,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -278,6 +282,7 @@ impl DemoState {
             statements: statements::DemoStatements::default(),
             finance: finance_charges::DemoFinance::default(),
             sales_tax: sales_tax::DemoSalesTax::default(),
+            inventory: inventory::DemoInventory::default(),
         }
     }
 
