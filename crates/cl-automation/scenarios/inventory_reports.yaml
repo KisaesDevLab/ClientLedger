@@ -1,0 +1,36 @@
+# Inventory reports (P24 WP-2, Q-P24n) against `clientledger --demo`:
+# Inventory Value with the check against the books, Inventory Value Detail
+# (a row opens its document; adjustments say where they open), Stock
+# Status. Light and dark run in one app: the demo's inventory is put back
+# to its switched-on seed first. Synthetic.
+name: inventory_reports
+description: "Inventory Value with the GL check, Value Detail, Stock Status."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.inventory_value
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.screen, equals: inventory_value}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_state: {key: screen.total, equals: "785.4000"}
+  - assert_state: {key: screen.matches_books, equals: true}
+  - assert_exists: {role: label, label: "Matches the books."}
+  - assert_exists: {role: label, label: "Hardwood Mulch Bag"}
+  - screenshot: value
+  - assert_no_clipping: {}
+  - command: file.close_window
+  - command: reports.inventory_value_detail
+  - assert_state: {key: screen.screen, equals: inventory_value_detail}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_count: {target: {role: label, label: "Inventory adjustment"}, count: 3}
+  - screenshot: detail
+  - click: {role: link, label: "10/01/2026", index: 0}
+  - assert_state: {key: screen.note, equals: no_form}
+  - command: file.close_window
+  - command: reports.stock_status
+  - assert_state: {key: screen.screen, equals: stock_status}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_exists: {role: label, label: "Order", index: 0}
+  - screenshot: stock-status
+  - assert_no_clipping: {}
+  - command: file.close_window

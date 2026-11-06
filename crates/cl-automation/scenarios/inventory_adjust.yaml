@@ -1,0 +1,37 @@
+# Adjust Quantity/Value on Hand (P24 WP-2, U-159) against
+# `clientledger --demo`: a quantity adjustment saved at average cost, then
+# a date in the closed period refused with the plan's words (never the
+# password). Synthetic.
+name: inventory_adjust
+description: "Adjust quantity on hand; closed period refused."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.adjust_inventory
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.screen, equals: inventory_adjust}
+  - assert_state: {key: screen.parts, equals: 3}
+  - assert_state: {key: screen.account, equals: true}
+  - click: {role: combo_box, label: Item 1}
+  - click: {role: button, label: Hardwood Mulch Bag}
+  - click: {role: text_input, label: Qty change 1}
+  - type: {text: "-3"}
+  - assert_exists: {role: label, label: "117"}
+  - screenshot: adjust
+  - assert_no_clipping: {}
+  - click: {role: button, label: Save & New}
+  - assert_state: {key: screen.saved, equals: 1}
+  - assert_state: {key: screen.lines, equals: 0}
+  - click: {role: text_input, label: Adjustment date}
+  - key: Ctrl+A
+  - type: {text: "09/30/2026"}
+  - click: {role: combo_box, label: Item 1}
+  - click: {role: button, label: Sprinkler Head}
+  - click: {role: text_input, label: Qty change 1}
+  - type: {text: "1"}
+  - click: {role: button, label: Save & New}
+  - assert_state: {key: screen.saved, equals: 1}
+  - assert_exists: {role: label, label: "This is on or before your closing date (09/30/2026). Inventory in a closed period can't change, even with the closing password. Use a date after 09/30/2026, or change the closing date."}
+  - screenshot: closed
+  - click: {role: button, label: Clear}
+  - command: file.close_window
