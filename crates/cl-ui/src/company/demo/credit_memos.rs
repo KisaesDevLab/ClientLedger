@@ -537,7 +537,7 @@ pub fn create_memo(
     check_lines(&m.lines)?;
     // P24: returned parts come back at the current average (no link,
     // Q-P24e); the inventory gate comes before the password.
-    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &m.lines);
+    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &m.lines)?;
     super::stock::gate(state, None, m.txn_date, &stock)?;
     check_closing(closing(state), &[m.txn_date], password)?;
     let mut p = super::invoices::preview(
@@ -885,7 +885,7 @@ pub fn update_memo(
         .collect();
     let mut dates = vec![m.date, new.txn_date];
     dates.extend(refunds.iter().map(|r| r.0));
-    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &new.lines);
+    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &new.lines)?;
     super::stock::gate(state, Some(id), new.txn_date, &stock)?;
     check_closing(closing(state), &dates, password)?;
     let mut p = super::invoices::preview(
@@ -1314,7 +1314,7 @@ pub fn save_receipt(
     let mut dates = vec![r.txn_date];
     dates.extend(old.as_ref().map(|(_, o)| o.record.date));
     // P24: parts sold move stock; the inventory gate comes first.
-    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &r.lines);
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &r.lines)?;
     super::stock::gate(state, old.as_ref().map(|(id, _)| *id), r.txn_date, &stock)?;
     check_closing(closing(state), &dates, password)?;
     let preview = preview_receipt(state, r)?;

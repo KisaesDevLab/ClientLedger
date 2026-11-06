@@ -984,14 +984,19 @@ fn demo_save(
     }
     // P24: parts bought by card move stock; the closed-period gate comes
     // before the closing-date password (Q-P24b).
-    let stock_lines = stock::doc_lines(
+    let stock_lines = stock::unit_lines(
         demo,
         stock::Side::Receipt,
         p.lines.iter().enumerate().map(|(i, (_, amount))| {
             let item = items.get(i).and_then(Option::as_ref);
-            (item.map(|x| x.item), item.and_then(|x| x.quantity), *amount)
+            (
+                item.map(|x| x.item),
+                item.and_then(|x| x.quantity),
+                *amount,
+                item.and_then(|x| x.unit),
+            )
         }),
-    );
+    )?;
     stock::gate(demo, edit.map(|(id, _)| id), p.date, &stock_lines)?;
     crate::company::demo::register::check_closing(closing, &dates, password)?;
     let id = demo

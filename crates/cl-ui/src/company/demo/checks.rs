@@ -212,7 +212,7 @@ fn save(
         .collect();
     // P24: parts bought by check move stock; the closed-period gate comes
     // before the closing-date password (Q-P24b).
-    let stock_lines = super::stock::doc_lines(
+    let stock_lines = super::stock::unit_lines(
         state,
         super::stock::Side::Receipt,
         d.lines.iter().map(|l| {
@@ -220,9 +220,10 @@ fn save(
                 l.item.as_ref().map(|i| i.item),
                 l.item.as_ref().and_then(|i| i.quantity),
                 l.amount,
+                l.item.as_ref().and_then(|i| i.unit),
             )
         }),
-    );
+    )?;
     super::stock::gate(state, existing.map(|(id, _)| id), d.date, &stock_lines)?;
     check_closing(closing(state), &dates, password)?;
     let total = Money::sum(d.lines.iter().map(|l| l.amount)).map_err(|_| invalid())?;

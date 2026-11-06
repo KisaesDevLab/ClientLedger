@@ -921,7 +921,7 @@ pub fn create(
     }
     cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
     // P24: the inventory gate comes before the closing-date password.
-    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines);
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines)?;
     super::stock::gate(state, None, new.txn_date, &stock)?;
     check_closing(closing(state), &[new.txn_date], password)?;
     if new
@@ -1250,7 +1250,7 @@ pub fn update(
             details: cl_api::ConflictDetails::default(),
         });
     }
-    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines);
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines)?;
     super::stock::gate(state, Some(id), new.txn_date, &stock)?;
     check_closing(close, &[old_date, new.txn_date], password)?;
     let taken: BTreeSet<JournalLineId> = state

@@ -23,7 +23,7 @@ use cl_api::{
     SavedAdjustment, StockStatusRow, TxnStatus, TxnType, ValuationAccount, ValuationDetailRow,
     ValuationRow, ValuationSummary,
 };
-use cl_core::ids::{AccountId, ItemId, TransactionId};
+use cl_core::ids::{AccountId, ItemId, TransactionId, UnitId};
 use cl_core::{CalendarDate, Money, Quantity, UnitCost};
 use serde_json::json;
 
@@ -72,15 +72,37 @@ pub fn doc_lines(
     side: Side,
     lines: impl IntoIterator<Item = (Option<ItemId>, Option<Quantity>, Money)>,
 ) -> Vec<DocLine> {
+    // No line names a unit: nothing can be refused.
     linked_lines(
         state,
         side,
-        lines.into_iter().map(|(i, q, a)| (i, q, a, None)),
+        lines.into_iter().map(|(i, q, a)| (i, q, a, None, None)),
+    )
+    .unwrap_or_default()
+}
+
+/// [`doc_lines`] with each line's unit (U-161): quantities become base
+/// units (`round4(quantity × factor)`).
+///
+/// # Errors
+/// 400 `UNIT_NOT_IN_SET`, 400 `UNIT_QUANTITY_TOO_SMALL`.
+pub fn unit_lines(
+    state: &mut DemoState,
+    side: Side,
+    lines: impl IntoIterator<Item = (Option<ItemId>, Option<Quantity>, Money, Option<UnitId>)>,
+) -> Result<Vec<DocLine>, ApiError> {
+    linked_lines(
+        state,
+        side,
+        lines.into_iter().map(|(i, q, a, u)| (i, q, a, None, u)),
     )
 }
 
 /// [`doc_lines`] with each line's linked sale (a credit memo's Return of,
 /// Q-P24e/u): one movement per (part, linked sale).
+///
+/// # Errors
+/// 400 `UNIT_NOT_IN_SET`, 400 `UNIT_QUANTITY_TOO_SMALL` (a line's unit).
 pub fn linked_lines(
     state: &mut DemoState,
     side: Side,
@@ -90,16 +112,21 @@ pub fn linked_lines(
             Option<Quantity>,
             Money,
             Option<TransactionId>,
+            Option<UnitId>,
         ),
     >,
-) -> Vec<DocLine> {
+) -> Result<Vec<DocLine>, ApiError> {
     type Sum = (ItemId, Quantity, Money, Option<UnitCost>, Option<String>);
     let mut sums: BTreeMap<(String, Option<String>), Sum> = BTreeMap::new();
     let one = Quantity::parse_wire("1").unwrap_or(Quantity::ZERO);
-    for (item, qty, amount, sale) in lines {
+    for (item, qty, amount, sale, unit) in lines {
         let Some(id) = item else { continue };
         let Some(p) = part(state, id) else { continue };
-        let q = qty.unwrap_or(one).abs();
+        // Stock moves in base units (U-161); the unit is locked once used.
+        let q = super::units::line_base(state, id, unit, qty.unwrap_or(one).abs())?;
+        if let Some(u) = unit {
+            state.units.mark_used(u);
+        }
         let sale = sale
             .filter(|_| side == Side::CustomerReturn)
             .map(|t| t.to_string());
@@ -113,7 +140,8 @@ pub fn linked_lines(
         e.1 = e.1.checked_add(q).unwrap_or(e.1);
         e.2 = e.2.checked_add(amount.abs()).unwrap_or(e.2);
     }
-    sums.into_values()
+    Ok(sums
+        .into_values()
         .filter(|(_, q, _, _, _)| !q.is_zero())
         .map(
             |(item, quantity, amount, fallback_cost, return_of)| DocLine {
@@ -128,7 +156,7 @@ pub fn linked_lines(
                 return_of,
             },
         )
-        .collect()
+        .collect())
 }
 
 /// [`doc_lines`] over a sales document's lines (invoice, sales receipt,
@@ -137,13 +165,19 @@ pub fn sales_lines(
     state: &mut DemoState,
     side: Side,
     lines: &[cl_api::InvoiceLine],
-) -> Vec<DocLine> {
+) -> Result<Vec<DocLine>, ApiError> {
     linked_lines(
         state,
         side,
-        lines
-            .iter()
-            .map(|l| (l.item_id, l.quantity, Money::ZERO, l.return_of.flatten())),
+        lines.iter().map(|l| {
+            (
+                l.item_id,
+                l.quantity,
+                Money::ZERO,
+                l.return_of.flatten(),
+                l.unit_id,
+            )
+        }),
     )
 }
 
@@ -319,6 +353,21 @@ pub fn refresh(state: &mut DemoState) {
         if let Some(i) = state.items_mut().iter_mut().find(|i| i.id == id) {
             i.stock = s;
         }
+    }
+    refresh_unit_prices(state);
+}
+
+/// Every item's `unitPrices[]` from its unit set (U-161, engine-computed
+/// `round4(price × factor)`).
+pub fn refresh_unit_prices(state: &mut DemoState) {
+    let units = state.units.clone();
+    for i in state.items_mut().iter_mut() {
+        i.stock.unit_prices = i
+            .fields
+            .purchase
+            .unit_set_id
+            .map(|set| units.unit_prices(set, i.fields.unit_price))
+            .unwrap_or_default();
     }
 }
 

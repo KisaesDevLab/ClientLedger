@@ -317,11 +317,13 @@ fn save(
     } else {
         super::stock::Side::Receipt
     };
-    let stock_lines = super::stock::doc_lines(
+    let stock_lines = super::stock::unit_lines(
         state,
         side,
-        doc.lines.iter().map(|l| (l.item, l.quantity, l.amount)),
-    );
+        doc.lines
+            .iter()
+            .map(|l| (l.item, l.quantity, l.amount, l.unit)),
+    )?;
     super::stock::gate(state, existing, doc.date, &stock_lines)?;
     let old = existing.and_then(|id| state.ledger.date_of(id));
     let dates: Vec<CalendarDate> = old.into_iter().chain([doc.date]).collect();
