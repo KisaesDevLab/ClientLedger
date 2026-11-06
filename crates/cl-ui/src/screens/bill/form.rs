@@ -1243,6 +1243,9 @@ impl EnterBillScreen {
         if let Some(key) = self.save.refusal {
             ui.add(egui::Label::new(RichText::new(t(key)).color(tokens.warn_text)).wrap());
         }
+        if let Some(text) = &self.save.inventory {
+            ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+        }
         if self.save.stale {
             let mut reload = false;
             let mut keep = false;

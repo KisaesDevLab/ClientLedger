@@ -174,6 +174,11 @@ impl InvoiceScreen {
         let Some(req) = check_or_refuse(self) else {
             return false;
         };
+        self.inventory_note = None;
+        if let Some(text) = self.inventory_closed(&req) {
+            self.inventory_note = Some(text);
+            return false;
+        }
         if self.kind != cl_model::forms::invoice::SalesDocKind::Invoice {
             return self.start_doc_save(intent, password, req);
         }
@@ -245,12 +250,16 @@ impl InvoiceScreen {
                     .editing
                     .as_ref()
                     .and_then(|e| e.invoice().map(|r| (e.id, r.clone())));
+                let link = std::sync::Arc::clone(&self.link);
+                let names = self.item_names();
                 move |s| async move {
                     let opts = options(pw);
                     let saved = match edit {
                         None => s.invoices().create(&new2, &opts, key).await?,
                         Some((id, r)) => s.invoices().update(id, &r, &new2, &opts, key).await?,
                     };
+                    // P24: NEGATIVE_STOCK warns, never blocks (Q-148).
+                    crate::screens::inventory::announce(&link, &saved.stock_warnings, &names);
                     Ok((
                         SavedDoc::Invoice(saved.invoice.record),
                         !saved.warnings.is_empty(),
@@ -401,6 +410,11 @@ impl InvoiceScreen {
         }
         self.header.save_failed(failure.clone());
         self.grid.save_failed(failure);
+        let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.books.closing);
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.inventory_note = Some(text);
+            return;
+        }
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }

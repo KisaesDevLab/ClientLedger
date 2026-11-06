@@ -177,6 +177,26 @@ pub fn announce(link: &CompanyLink, warnings: &[NegativeStock], names: &[(ItemId
     link.push(crate::company::CompanyEvent::ToastText(texts.join(" ")));
 }
 
+/// The plan's closed-period message when a document with parts is dated
+/// (or moved from a date) on or before the closing date: the forms show
+/// it instead of asking for the closing-date password (Q-P24b).
+#[must_use]
+pub fn closed_for_parts(
+    has_parts: bool,
+    dates: &[CalendarDate],
+    closing: Option<CalendarDate>,
+) -> Option<String> {
+    let c = closing?;
+    (has_parts && dates.iter().any(|d| *d <= c)).then(|| closed_text(Some(c)))
+}
+
+/// After a demo save, void or delete: the warnings it found, announced.
+/// (A live engine's warnings come in the save reply.)
+pub fn announce_demo(link: &CompanyLink, names: &[(ItemId, String)]) {
+    let w = demo_warnings(link);
+    announce(link, &w, names);
+}
+
 /// The demo answers: the warnings its last write kept (read once).
 #[must_use]
 pub fn demo_warnings(link: &CompanyLink) -> Vec<NegativeStock> {

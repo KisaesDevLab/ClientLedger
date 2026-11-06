@@ -237,6 +237,9 @@ impl InvoiceScreen {
         if let Some(k) = self.notice {
             form::hint(ui, tokens, &t(k));
         }
+        if let Some(text) = &self.inventory_note {
+            form::inline_warning(ui, tokens, text);
+        }
         if let Some(k) = self.read_only() {
             form::hint(ui, tokens, &t(k));
         } else if self

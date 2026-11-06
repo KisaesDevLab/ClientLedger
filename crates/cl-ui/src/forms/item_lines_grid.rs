@@ -89,9 +89,27 @@ pub struct ItemLists {
     /// Tax codes (P23): id and code text.
     codes: Vec<(cl_core::ids::TaxCodeId, String)>,
     code_index: Option<LookupIndex>,
+    /// P24: the inventory parts among the items.
+    parts: Vec<ItemId>,
 }
 
 impl ItemLists {
+    /// The item is an inventory part (P24).
+    #[must_use]
+    pub fn is_part(&self, id: ItemId) -> bool {
+        self.parts.contains(&id)
+    }
+
+    /// Every item's id and name (the NEGATIVE_STOCK warning names it).
+    #[must_use]
+    pub fn names(&self) -> Vec<(ItemId, String)> {
+        self.ids
+            .iter()
+            .copied()
+            .zip(self.labels.iter().cloned())
+            .collect()
+    }
+
     /// The register's lists and the company's items.
     #[must_use]
     pub fn new(base: Arc<RegisterLists>, items: &[Item]) -> ItemLists {
@@ -99,7 +117,11 @@ impl ItemLists {
         let mut labels = Vec::new();
         let mut descriptions = Vec::new();
         let mut entries = Vec::new();
+        let mut parts = Vec::new();
         for (i, it) in items.iter().enumerate() {
+            if it.fields.item_type == cl_api::ItemType::InventoryPart {
+                parts.push(it.id);
+            }
             ids.push(it.id);
             labels.push(it.fields.name.clone());
             descriptions.push(it.fields.description.clone());
@@ -118,6 +140,7 @@ impl ItemLists {
             index: Some(LookupIndex::new(entries)),
             codes: Vec::new(),
             code_index: None,
+            parts,
         }
     }
 

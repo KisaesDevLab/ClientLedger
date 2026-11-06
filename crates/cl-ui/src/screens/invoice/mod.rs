@@ -392,6 +392,8 @@ pub struct InvoiceScreen {
     pub(crate) problems: Vec<InvoiceProblem>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
+    /// P24: an inventory refusal in plain words (closed period).
+    pub(crate) inventory_note: Option<String>,
     pub(crate) stale: bool,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) void_open: bool,
@@ -512,6 +514,7 @@ impl InvoiceScreen {
             problems: Vec::new(),
             error: None,
             notice: None,
+            inventory_note: None,
             stale: false,
             closing_prompt: ClosingPrompt::default(),
             void_open: false,
@@ -768,6 +771,32 @@ impl InvoiceScreen {
         self.item_set_up_back();
     }
 
+    /// Every item's id and name (the NEGATIVE_STOCK warning names it).
+    pub(crate) fn item_names(&self) -> Vec<(cl_core::ids::ItemId, String)> {
+        self.items
+            .iter()
+            .map(|i| (i.id, i.fields.name.clone()))
+            .collect()
+    }
+
+    /// P24 (Q-P24b): parts dated (or moved from a date) on or before the
+    /// closing date are refused, password or not.
+    pub(crate) fn inventory_closed(
+        &self,
+        req: &cl_model::forms::invoice::InvoiceRequest,
+    ) -> Option<String> {
+        let has_parts = req.lines.iter().any(|l| {
+            l.item.is_some_and(|id| {
+                self.items
+                    .iter()
+                    .any(|i| i.id == id && i.fields.item_type == cl_api::ItemType::InventoryPart)
+            })
+        });
+        let old = self.editing.as_ref().map(|e| e.old_date);
+        let dates: Vec<_> = old.into_iter().chain([req.date]).collect();
+        crate::screens::inventory::closed_for_parts(has_parts, &dates, self.books.closing)
+    }
+
     pub(crate) fn poll(&mut self) {
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
@@ -788,6 +817,8 @@ impl InvoiceScreen {
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
                 Ok((v, duplicate)) => {
+                    self.inventory_note = None;
+                    crate::screens::inventory::announce_demo(&self.link, &self.item_names());
                     self.saved(v);
                     self.duplicate_number = duplicate;
                     if duplicate {
