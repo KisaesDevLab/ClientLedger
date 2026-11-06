@@ -66,8 +66,9 @@ pub fn capabilities_and_golden_bytes(h: &Harness) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let engine = root.join("engine/packages/shared/fixtures/inventory-golden.json");
     match std::fs::read(&engine) {
+        // Byte-identical as committed: a checkout may turn LF into CRLF.
         Ok(bytes) => assert!(
-            bytes == GOLDEN.as_bytes(),
+            String::from_utf8_lossy(&bytes).replace("\r\n", "\n") == GOLDEN.replace("\r\n", "\n"),
             "fixtures/inventory/golden.json differs from {}",
             engine.display()
         ),
@@ -385,7 +386,7 @@ fn play(co: &Co, h: &Harness, all: &[Value], id: &str, limit: Option<u64>, book:
             }
             continue;
         }
-        let warnings = got.unwrap_or_else(|e| panic!("{ctx}: {e}"));
+        let warnings = got.unwrap_or_else(|e| panic!("{ctx}: {e} {e:?}"));
         let want_warn = expect["warnings"].as_array().map_or(0, Vec::len);
         assert_eq!(warnings.len(), want_warn, "{ctx} NEGATIVE_STOCK warnings");
         if let Some(prices) = expect
@@ -417,11 +418,7 @@ fn play(co: &Co, h: &Harness, all: &[Value], id: &str, limit: Option<u64>, book:
             );
         }
         if let Some(want) = st(expect, "assetValue") {
-            assert_eq!(
-                it.asset_value.map(Money::to_wire).as_deref(),
-                Some(want),
-                "{ctx} value"
-            );
+            assert_eq!(it.asset_value, Some(m(want)), "{ctx} value");
         }
         if let Some(want) = st(expect, "averageCost") {
             assert_eq!(
@@ -457,7 +454,7 @@ pub fn golden_a_and_valuation_equals_gl(h: &Harness) {
         .iter()
         .find(|a| a.account_id == co.asset)
         .expect("the asset account's GL check");
-    assert_eq!(acct.valuation.to_wire(), "16.20");
+    assert_eq!(acct.valuation, m("16.20"));
     assert_eq!(acct.gl_balance, acct.valuation, "valuation = GL");
     assert!(acct.difference.is_zero());
     let gl = h
@@ -477,10 +474,10 @@ pub fn golden_a_and_valuation_equals_gl(h: &Harness) {
             .run(co.s.inventory().valuation(d(asof)))
             .expect("valuation");
         let row = v.rows.iter().find(|r| r.item_id == book.items["W"]);
-        let value = row.map_or_else(|| "0.00".into(), |r| r.value.to_wire());
+        let value = row.map_or(Money::ZERO, |r| r.value);
         assert_eq!(
-            Some(value.as_str()),
-            st(want, "value"),
+            Some(value),
+            st(want, "value").map(m),
             "S valuation {asof}"
         );
     }
@@ -610,5 +607,5 @@ pub fn closed_period_refuses_inventory(h: &Harness) {
         "item": "W", "valueChange": "1.00"});
     step(&co, h, &mut book, &open).expect("after the closing date");
     let it = co.stock(h, book.items["W"]).stock;
-    assert_eq!(it.asset_value.map(Money::to_wire).as_deref(), Some("54.83"));
+    assert_eq!(it.asset_value, Some(m("54.83")));
 }

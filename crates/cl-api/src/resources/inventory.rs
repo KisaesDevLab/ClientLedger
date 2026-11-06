@@ -281,7 +281,8 @@ impl fmt::Debug for AdjustmentLine {
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewAdjustment {
-    /// The adjustment date.
+    /// The adjustment date (`txnDate` on the wire; the record reads `date`).
+    #[serde(rename = "txnDate")]
     pub date: CalendarDate,
     /// Where the other side posts (shrinkage, a write-down account).
     pub adjustment_account_id: AccountId,
