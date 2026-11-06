@@ -25,6 +25,7 @@ pub mod count;
 pub mod items;
 pub mod reorder;
 pub mod reports;
+pub mod units;
 
 /// The developer command that puts the demo's inventory back to its
 /// switched-on seed (the scenarios run light and dark in one app).
@@ -42,6 +43,7 @@ pub fn make(
         adjust::KIND => Some(Box::new(adjust::AdjustScreen::new(link, today))),
         count::KIND => Some(Box::new(count::CountScreen::new(link, today))),
         reorder::KIND => Some(Box::new(reorder::ReorderScreen::new(link))),
+        units::KIND => Some(Box::new(units::UnitsScreen::new(link))),
         reports::VALUE_KIND => Some(Box::new(reports::ReportScreen::new(
             link,
             reports::Report::Value,
@@ -347,6 +349,7 @@ pub fn demo_reset(link: &CompanyLink) -> bool {
         !parts.contains(&i.id) && i.fields.item_type != cl_api::ItemType::InventoryPart
     });
     d.inventory = crate::company::demo::inventory::DemoInventory::default();
+    d.units = crate::company::demo::units::DemoUnits::default();
     let ok = crate::company::demo::stock::set_enabled(&mut d, true).is_ok();
     drop(d);
     link.bus().publish(crate::data_bus::Change::Items);

@@ -340,6 +340,8 @@ pub const COMMANDS: &[Command] = &[
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
     built("lists.price_levels", "Price Levels", Some(Menu::Lists), 0, None),
+    // P24 (U-161): unit sets for inventory parts.
+    built("lists.unit_sets", "Unit Sets", Some(Menu::Lists), 0, None),
     built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
     built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
     built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
@@ -661,6 +663,7 @@ mod tests {
             "reports.inventory_value",
             "reports.inventory_value_detail",
             "reports.stock_status",
+            "lists.unit_sets",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

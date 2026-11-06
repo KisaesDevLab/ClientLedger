@@ -1,0 +1,46 @@
+# Unit Sets (P24 WP-3, U-161; Q-P24i, Q-P24w) against `clientledger --demo`:
+# a set "Bottle" with base unit bottle, a case of 12 and a half-case of 6;
+# a factor that isn't a number and a name used twice are refused in plain
+# words before anything is sent; the saved set reads back. Synthetic.
+name: inventory_units
+description: "Unit Sets: base unit, related units with factors, plain refusals."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.unit_sets
+  - assert_state: {key: screen.screen, equals: unit_sets}
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.sets, equals: 0}
+  - click: {role: button, label: New unit set}
+  - assert_state: {key: screen.mode, equals: new}
+  - type: {text: "Bottle", target: {role: text_input, label: Set name}}
+  - type: {text: "bottle", target: {role: text_input, label: Base unit}}
+  - type: {text: "case", target: {role: text_input, label: "Unit name, row 1"}}
+  - type: {text: "12x", target: {role: text_input, label: "Base units in one, row 1"}}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problems.0, equals: factor_invalid}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {label_contains: "Enter how many base units one unit holds"}
+  - screenshot: factor-refused
+  - click: {role: text_input, label: "Base units in one, row 1"}
+  - key: End
+  - key: Backspace
+  - click: {role: button, label: Add unit}
+  - type: {text: "Case", target: {role: text_input, label: "Unit name, row 2"}}
+  - type: {text: "6", target: {role: text_input, label: "Base units in one, row 2"}}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.problems.0, equals: duplicate_name}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: text_input, label: "Unit name, row 2"}
+  - key: Ctrl+A
+  - type: {text: "half-case"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.units, equals: 2}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: button, label: Bottle}
+  - assert_no_clipping: {}
+  - screenshot: saved
+  - command: file.close_window
