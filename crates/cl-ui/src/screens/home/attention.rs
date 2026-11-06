@@ -98,7 +98,13 @@ pub(crate) fn items(
                     None => AttentionItem::unknown(kind, true),
                 }
             }
-            AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck => {
+            // P24 (U-78): counted while the company tracks inventory.
+            AttentionKind::Reorder => match (&data.reorder.value, &data.reorder.error) {
+                (Some(Some(n)), _) => AttentionItem::counted(kind, *n),
+                (None, Some(_)) => AttentionItem::unknown(kind, true),
+                _ => AttentionItem::unknown(kind, false),
+            },
+            AttentionKind::ToDos | AttentionKind::HealthCheck => {
                 AttentionItem::unknown(kind, false)
             }
             AttentionKind::Backup => AttentionItem::backup(backup_due),
@@ -138,6 +144,46 @@ pub(crate) fn documents_demo(
         t,
         &crate::screens::doc_review::queue::count_query(),
     ))
+}
+
+/// Home's reorder count in the demo: the demo's parts at or below their
+/// reorder point (`None` while the demo company does not track inventory).
+#[must_use]
+pub(crate) fn reorder_demo(s: &crate::company::demo::DemoState) -> Option<u64> {
+    if !s.inventory.enabled {
+        return None;
+    }
+    let n = s
+        .items
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|i| {
+            i.is_active
+                && i.fields.item_type == cl_api::ItemType::InventoryPart
+                && i.fields.purchase.reorder_point.is_some_and(|p| {
+                    s.inventory
+                        .stock(i.id)
+                        .ok()
+                        .and_then(|st| st.quantity_on_hand)
+                        .is_some_and(|q| q <= p)
+                })
+        })
+        .count();
+    Some(u64::try_from(n).unwrap_or(u64::MAX))
+}
+
+/// Home's reorder count on the engine: `None` while inventory is off
+/// (Q-P24j), else the number of reorder alerts (U-78).
+///
+/// # Errors
+/// Any [`ApiError`].
+pub(crate) async fn reorder_count(s: cl_api::Session) -> Result<Option<u64>, ApiError> {
+    if !s.company_settings().await?.inventory_on() {
+        return Ok(None);
+    }
+    let n = s.inventory().reorder_alerts().await?.len();
+    Ok(Some(u64::try_from(n).unwrap_or(u64::MAX)))
 }
 
 /// [`documents_demo`] on the engine.
@@ -233,9 +279,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
         let shown = usize::try_from(n).unwrap_or(usize::MAX);
         let name = |key: &str| t(&format!("home.attention.{key}.name"));
         match kind {
-            AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck => {
+            AttentionKind::ToDos | AttentionKind::HealthCheck => {
                 later = true;
             }
+            // Inventory off (or an engine without U-78): no line at all.
+            AttentionKind::Reorder if !item.available => {}
             AttentionKind::Backup => {}
             _ if !item.available => {
                 out.push(Line::dash(name(kind.key()), t("home.footer.later.tip")));
@@ -247,6 +295,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                     AttentionKind::InvoicesOverdue => home.data.summary.error.is_some(),
                     AttentionKind::IntakeFolders => false,
                     AttentionKind::DocumentsToReview => home.data.documents.error.is_some(),
+                    AttentionKind::Reorder => home.data.reorder.error.is_some(),
                     _ => home.data.counts.value.as_ref().is_some_and(|c| match kind {
                         AttentionKind::BankWaiting => c.feed.is_err(),
                         AttentionKind::BillsDue { .. } => c.bills.is_err(),
@@ -308,6 +357,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             AttentionKind::DocumentsToReview => out.push(Line::task(
                 t_count("home.attention.documents", shown, &[]),
                 "home.attention.review",
+                opens,
+            )),
+            AttentionKind::Reorder => out.push(Line::task(
+                t_count("home.attention.reorder", shown, &[]),
+                "home.attention.reorder.open",
                 opens,
             )),
         }

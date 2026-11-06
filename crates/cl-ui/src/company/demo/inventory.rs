@@ -412,6 +412,9 @@ pub struct DemoInventory {
     /// The company's closing date (inventory writes on or before it are
     /// refused).
     pub closing_date: Option<CalendarDate>,
+    /// The demo company tracks inventory (`inventoryEnabled`; off like a
+    /// new engine company until Preferences turns it on, Q-P24j).
+    pub enabled: bool,
 }
 
 impl DemoInventory {

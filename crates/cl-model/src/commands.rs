@@ -387,6 +387,11 @@ pub const COMMANDS: &[Command] = &[
     // P23 WP-3: the liability report and Pay Sales Tax (no shortcut).
     built("vendors.sales_tax_owed", "Sales Tax Owed", Some(Menu::Vendors), 3, None),
     built("vendors.pay_sales_tax", "Pay Sales Tax", Some(Menu::Vendors), 3, None),
+    // P24: inventory (WP-2 builds the screens; Home's reorder line opens
+    // Items to Reorder). No shortcuts.
+    screen("vendors.adjust_inventory", "Adjust Quantity/Value on Hand", Some(Menu::Vendors), 4, None, "P24"),
+    screen("vendors.physical_count", "Physical Inventory Count", Some(Menu::Vendors), 4, None, "P24"),
+    screen("vendors.items_to_reorder", "Items to Reorder", Some(Menu::Vendors), 4, None, "P24"),
     // P17: the receipt inbox (the menu shows its count, Q-P17t) and the
     // vendor statement match; no shortcut
     built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),

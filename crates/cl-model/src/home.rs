@@ -182,15 +182,14 @@ impl AttentionKind {
         }
     }
 
-    /// Whether this build can count it at all. To-dos (U-37), reorder
-    /// alerts (U-78) and the health check (U-12) arrive later and share one
-    /// muted line on Home.
+    /// Whether this build can count it at all. To-dos (U-37) and the
+    /// health check (U-12) arrive later and share one muted line on Home.
+    /// Reorder alerts (U-78, P24) are counted when the company tracks
+    /// inventory; the UI decides that (Q-P24j) and marks the line
+    /// unavailable otherwise.
     #[must_use]
     pub const fn supported(self) -> bool {
-        !matches!(
-            self,
-            AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck
-        )
+        !matches!(self, AttentionKind::ToDos | AttentionKind::HealthCheck)
     }
 
     /// The command its link opens (a placeholder window until its screen
@@ -207,7 +206,9 @@ impl AttentionKind {
             AttentionKind::IntakeFolders => Some("edit.preferences"),
             AttentionKind::DocumentsToReview => Some("vendors.review_documents"),
             AttentionKind::Backup => Some("file.backup"),
-            AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck => None,
+            // Items to Reorder (P24).
+            AttentionKind::Reorder => Some("vendors.items_to_reorder"),
+            AttentionKind::ToDos | AttentionKind::HealthCheck => None,
         }
     }
 }
@@ -474,7 +475,14 @@ mod tests {
         );
         assert!(AttentionItem::counted(AttentionKind::DocumentsToReview, 3).needs_attention());
         assert!(!AttentionKind::ToDos.supported());
-        assert!(!AttentionKind::Reorder.supported());
+        // P24: reorder alerts are counted (when inventory is on, Q-P24j).
+        assert!(AttentionKind::Reorder.supported());
+        assert_eq!(
+            AttentionKind::Reorder.opens(),
+            Some("vendors.items_to_reorder")
+        );
+        assert!(AttentionItem::counted(AttentionKind::Reorder, 2).needs_attention());
+        assert!(!AttentionItem::counted(AttentionKind::Reorder, 0).needs_attention());
         assert!(!AttentionKind::HealthCheck.supported());
 
         let bank = AttentionItem::counted(AttentionKind::BankWaiting, 37);
@@ -487,7 +495,11 @@ mod tests {
         );
         let loading = AttentionItem::unknown(AttentionKind::InvoicesOverdue, true);
         assert!(loading.available && !loading.needs_attention());
-        assert!(!AttentionItem::unknown(AttentionKind::Reorder, true).available);
+        assert!(AttentionItem::unknown(AttentionKind::Reorder, true).available);
+        assert!(
+            !AttentionItem::unknown(AttentionKind::Reorder, false).available,
+            "inventory off"
+        );
         assert!(AttentionItem::backup(true).needs_attention());
         assert_eq!(AttentionItem::backup(false).count, Some(0));
     }
