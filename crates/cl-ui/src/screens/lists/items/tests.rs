@@ -327,3 +327,75 @@ fn a_new_part_with_opening_stock() {
     );
     assert!(made.fields.purchase.asset_account_id.is_some());
 }
+
+/// P24 review D1: an item saved from the list sends its `updatedAt` as
+/// read (`expectedUpdatedAt`), so a change saved elsewhere since is 409
+/// `STALE`, not overwritten.
+#[test]
+fn a_live_item_save_sends_expected_updated_at() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let item = r#"{"id":"d0000000-0000-4000-8000-b00000000010","name":"Widget",
+        "incomeAccountId":"d0000000-0000-4000-8000-a00000004000","itemType":"inventory_part",
+        "unitPrice":"9.0000","assetAccountId":"d0000000-0000-4000-8000-a00000001300",
+        "cogsAccountId":"d0000000-0000-4000-8000-a00000005000","isActive":true,
+        "updatedAt":"2026-10-01T10:00:00.000Z"}"#;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let body: serde_json::Value = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"mode":"desktop","initialized":true,"capabilities":["item-types-v1"]}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        // The fingerprint check reads the item; the name check the list.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/items/d0000000-0000-4000-8000-b00000000010"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(format!(r#"{{"item":{item}}}"#), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/items"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"data":[],"total":0}"#, "application/json"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(format!(r#"{{"item":{item}}}"#), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        let session = cl_api::testing::stub_session(server.address().port());
+        session.client().desktop_info().await.expect("info");
+        let it: cl_api::Item = serde_json::from_str(item).expect("item");
+        let update = cl_api::ItemUpdate {
+            fields: it.fields.clone(),
+            is_active: true,
+        };
+        super::save_existing(&session, &it, &update, cl_api::IdempotencyKey::new())
+            .await
+            .expect("saved");
+        let put = server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .into_iter()
+            .find(|r| r.method.as_str() == "PUT")
+            .expect("one PUT");
+        serde_json::from_slice(&put.body).expect("json")
+    });
+    assert_eq!(body["expectedUpdatedAt"], "2026-10-01T10:00:00.000Z");
+}

@@ -923,7 +923,8 @@ impl ItemsGrid {
         let mut keys = RowKeyGen::new();
         let value = ItemLines::from_lines(Vec::new(), &mut keys);
         let units = lists.has_units();
-        // Both specs are fixed; `the_items_spec_is_valid` covers them.
+        // Invariant: both specs (with and without Unit) are fixed and
+        // `the_items_spec_is_valid` builds each.
         let grid = Grid::new(id, grid_spec_for(units)).expect("the items spec is valid");
         ItemsGrid {
             id,
@@ -990,6 +991,8 @@ impl ItemsGrid {
         self.form.adapter_mut().lists = lists;
         if units != self.units {
             self.units = units;
+            // Invariant: both specs (with and without Unit) are fixed and
+            // `the_items_spec_is_valid` builds each.
             let grid = Grid::new(self.id, grid_spec_for(units)).expect("the items spec is valid");
             let lk = self.row_lookups();
             let _old = self.form.swap_grid(grid, self.label.clone(), &lk);
@@ -1103,6 +1106,16 @@ pub(crate) mod tests {
         }
         assert!(crate::i18n::has(COMPUTED.0));
         assert!(crate::i18n::has("bill.items.label"));
+        // Both specs the grid can build (the `expect`s in `named` and
+        // `set_lists` rest on this).
+        for units in [false, true] {
+            let spec = grid_spec_for(units);
+            assert_eq!(spec.validate(), Ok(()), "units {units}");
+            assert!(Grid::new("bill/items", spec.clone()).is_ok());
+            for c in &spec.columns {
+                assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+            }
+        }
     }
 
     #[test]

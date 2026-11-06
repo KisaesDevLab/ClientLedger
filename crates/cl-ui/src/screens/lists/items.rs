@@ -666,13 +666,12 @@ impl ItemsScreen {
                     s.items().get(id).await
                 })
             } else {
-                let version = RecordVersion::Fingerprint(item.fingerprint());
                 let update = ItemUpdate {
                     fields: item.fields.clone(),
                     is_active: true,
                 };
                 group.write(&session, label, move |s| async move {
-                    s.items().update(id, &version, &update, key).await
+                    save_existing(&s, &item, &update, key).await
                 })
             };
             match pending {
@@ -802,14 +801,12 @@ impl ItemsScreen {
         };
         let pending = match existing {
             Some(i) => {
-                let id = i.id;
-                let version = RecordVersion::Fingerprint(i.fingerprint());
                 let update = ItemUpdate {
                     fields,
                     is_active: i.is_active,
                 };
                 group.write(&session, label, move |s| async move {
-                    s.items().update(id, &version, &update, key).await
+                    save_existing(&s, &i, &update, key).await
                 })
             }
             None => group.write(&session, label, move |s| async move {
@@ -1614,6 +1611,21 @@ impl Screen for ItemsScreen {
             "price_levels_available": self.price_levels,
         })
     }
+}
+
+/// The live save of an item already in the list (P24 review D1): the
+/// record's fingerprint and its `updatedAt` as read go with the PUT, so a
+/// change saved elsewhere since is 409 `STALE` instead of overwritten.
+pub(crate) async fn save_existing(
+    s: &cl_api::Session,
+    item: &Item,
+    update: &ItemUpdate,
+    key: IdempotencyKey,
+) -> Result<Versioned<Item>, ApiError> {
+    let version = RecordVersion::Fingerprint(item.fingerprint());
+    s.items()
+        .update_expecting(item.id, &version, item.updated_at, update, key)
+        .await
 }
 
 #[cfg(test)]

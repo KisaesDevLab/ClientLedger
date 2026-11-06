@@ -323,7 +323,9 @@ impl UnitSets<'_> {
         decode_one(&reply.body, "unitSet", "unit set")
     }
 
-    /// Stores the whole set read at `expected`.
+    /// Stores the whole set read at `expected` (its `updatedAt`, sent as
+    /// `expectedUpdatedAt`; required so an edit never overwrites a change
+    /// saved since, P24 review D5).
     ///
     /// # Errors
     /// As [`UnitSets::create`]; `UNIT_IN_USE` (a used unit's factor or a
@@ -332,7 +334,7 @@ impl UnitSets<'_> {
         &self,
         id: UnitSetId,
         n: &NewUnitSet,
-        expected: Option<Timestamp>,
+        expected: Timestamp,
     ) -> Result<UnitSet, ApiError> {
         require(self.0, Capabilities::UNITS_OF_MEASURE)?;
         n.check().map_err(ApiError::Local)?;
@@ -342,7 +344,7 @@ impl UnitSets<'_> {
             id_path(UNIT_SET_PUT.route(), id),
         )
         .json_body(
-            serde_json::to_vec(&n.body(true, expected))
+            serde_json::to_vec(&n.body(true, Some(expected)))
                 .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
         );
         let reply = self.0.send(&UNIT_SET_PUT, call, None).await?;
@@ -436,5 +438,30 @@ mod tests {
         assert_eq!(s.factor_of(None), Some(UnitFactor::ONE));
         assert_eq!(s.name_of(None), Some("bottle"));
         assert!(s.in_use);
+    }
+    /// Review D5: an edit always sends the `updatedAt` it read.
+    #[tokio::test]
+    async fn an_edit_sends_expected_updated_at() {
+        use crate::resources::testkit::{json as reply, requests, session_with_caps};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer};
+        let server = MockServer::start().await;
+        let set = r#"{"unitSet":{"id":"6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Bottle",
+            "baseUnitName":"bottle","isActive":true,"updatedAt":"2026-11-06T10:00:00.000Z",
+            "units":[]}}"#;
+        Mock::given(method("PUT"))
+            .respond_with(reply(200, set))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &[Capabilities::UNITS_OF_MEASURE]).await;
+        let at = Timestamp::parse_wire("2026-11-06T10:00:00.000Z").expect("time");
+        let id = UnitSetId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        s.unit_sets()
+            .update(id, &bottle(), at)
+            .await
+            .expect("saved");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(put["expectedUpdatedAt"], "2026-11-06T10:00:00.000Z");
     }
 }

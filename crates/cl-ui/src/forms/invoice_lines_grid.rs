@@ -644,7 +644,8 @@ impl InvoiceGrid {
     pub fn new_for(lists: Arc<ItemLists>, coded: bool) -> InvoiceGrid {
         let mut keys = RowKeyGen::new();
         let value = InvoiceForm::new(None, &mut keys);
-        // The specs are fixed; `the_invoice_spec_is_valid` covers them.
+        // Invariant: the four specs (coded x units) are fixed and
+        // `the_invoice_spec_is_valid` builds every one.
         let units = lists.has_units();
         let grid = Grid::new("invoice/lines", grid_spec_with(coded, units))
             .expect("the invoice spec is valid");
@@ -727,6 +728,8 @@ impl InvoiceGrid {
         let coded = a.coded;
         if units != self.units {
             self.units = units;
+            // Invariant: the four specs (coded x units) are fixed and
+            // `the_invoice_spec_is_valid` builds every one.
             let grid = Grid::new("invoice/lines", grid_spec_with(coded, units))
                 .expect("the invoice spec is valid");
             let lk = self.row_lookups();
@@ -904,12 +907,17 @@ mod tests {
         }
         assert!(crate::i18n::has("invoice.lines.label"));
         assert!(crate::i18n::has("invoice.col.account.empty"));
-        let coded = grid_spec_for(true);
-        assert_eq!(coded.validate(), Ok(()));
-        for c in &coded.columns {
-            assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
-            for k in [c.empty, c.help].into_iter().flatten() {
-                assert!(crate::i18n::has(k.0), "{}", k.0);
+        // Every spec the grid can build (the `expect`s in `new_for` and
+        // `set_lists` rest on this).
+        for (coded, units) in [(false, false), (true, false), (false, true), (true, true)] {
+            let spec = grid_spec_with(coded, units);
+            assert_eq!(spec.validate(), Ok(()), "coded {coded} units {units}");
+            assert!(Grid::new("invoice/lines", spec.clone()).is_ok());
+            for c in &spec.columns {
+                assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+                for k in [c.empty, c.help].into_iter().flatten() {
+                    assert!(crate::i18n::has(k.0), "{}", k.0);
+                }
             }
         }
     }

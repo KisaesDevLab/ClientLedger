@@ -4,8 +4,8 @@
 use cl_api::{
     AccountFilter, CompanySettingsUpdate, IdempotencyKey, NewCompany, OpenCompany, Session,
 };
-use cl_core::Timestamp;
 use cl_core::ids::TenantId;
+use cl_core::{OwnerFacing, Timestamp};
 use cl_settings::{Accent, RecentStore};
 
 use crate::error::CompanyError;
@@ -134,10 +134,15 @@ async fn move_inventory_flag(session: &Session, store: &RecentStore, id: TenantI
                     r.flags.inventory_enabled = false;
                 }
             }) {
-                tracing::warn!(error = %e, "inventory flag moved; local record not updated");
+                // Scrubbed (review note): codes and statuses only.
+                let detail = CompanyError::from(e).scrubbed_detail();
+                tracing::warn!(error = %detail, "inventory flag moved; local record not updated");
             }
         }
-        Err(e) => tracing::warn!(error = %e, "inventory flag not moved to the engine yet"),
+        Err(e) => {
+            let detail = CompanyError::from(e).scrubbed_detail();
+            tracing::warn!(error = %detail, "inventory flag not moved to the engine yet");
+        }
     }
 }
 

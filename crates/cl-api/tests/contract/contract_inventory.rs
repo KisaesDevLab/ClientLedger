@@ -346,7 +346,8 @@ fn step(
                     })
                     .collect(),
             };
-            h.run(co.s.unit_sets().update(set, &n, cur.updated_at))?;
+            let at = cur.updated_at.expect("a unit set reads its updatedAt");
+            h.run(co.s.unit_sets().update(set, &n, at))?;
             None
         }
         other => panic!("golden event {other} has no runner"),

@@ -206,7 +206,12 @@ impl UnitsScreen {
             move |s| async move {
                 match editing {
                     None => s.unit_sets().create(&live, key).await,
-                    Some(id) => s.unit_sets().update(id, &live, expected).await,
+                    // The engine always sends updatedAt; without it the edit
+                    // could overwrite a change saved since (review D5).
+                    Some(id) => match expected {
+                        Some(at) => s.unit_sets().update(id, &live, at).await,
+                        None => Err(cl_api::ApiError::Decode { what: "unit set" }),
+                    },
                 }
             },
         ));

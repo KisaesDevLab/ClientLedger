@@ -842,34 +842,52 @@ impl Inventory<'_> {
         saved_adjustment(&reply.body)
     }
 
-    /// Voids an adjustment; answers the `NEGATIVE_STOCK` warnings the walk
-    /// found (S6).
+    /// Voids an adjustment if it is still at `updated_at` (409 `STALE`
+    /// otherwise); answers the `NEGATIVE_STOCK` warnings the walk found
+    /// (S6).
     ///
     /// # Errors
-    /// `Local(Unsupported)`; [`InventoryRefusal::PeriodClosed`]; any
-    /// [`ApiError`].
+    /// `Local(Unsupported)`; [`InventoryRefusal::PeriodClosed`];
+    /// `Conflict` (`STALE`); any [`ApiError`].
     pub async fn void_adjustment(
         &self,
         id: TransactionId,
+        updated_at: Timestamp,
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Vec<NegativeStock>, ApiError> {
-        self.remove(&INVENTORY_ADJUSTMENT_VOID, Method::Post, id, opts, key)
-            .await
+        self.remove(
+            &INVENTORY_ADJUSTMENT_VOID,
+            Method::Post,
+            id,
+            updated_at,
+            opts,
+            key,
+        )
+        .await
     }
 
-    /// Deletes an adjustment; answers the `NEGATIVE_STOCK` warnings.
+    /// Deletes an adjustment if it is still at `updated_at`; answers the
+    /// `NEGATIVE_STOCK` warnings.
     ///
     /// # Errors
     /// As [`Inventory::void_adjustment`].
     pub async fn delete_adjustment(
         &self,
         id: TransactionId,
+        updated_at: Timestamp,
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Vec<NegativeStock>, ApiError> {
-        self.remove(&INVENTORY_ADJUSTMENT_DELETE, Method::Delete, id, opts, key)
-            .await
+        self.remove(
+            &INVENTORY_ADJUSTMENT_DELETE,
+            Method::Delete,
+            id,
+            updated_at,
+            opts,
+            key,
+        )
+        .await
     }
 
     async fn remove(
@@ -877,12 +895,18 @@ impl Inventory<'_> {
         op: &'static crate::resources::operations::Operation,
         method: Method,
         id: TransactionId,
+        updated_at: Timestamp,
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Vec<NegativeStock>, ApiError> {
         let s = &self.0.pinned();
         require(s, Capabilities::INVENTORY_ADJUST)?;
-        let body = posting_body(s, Value::Object(serde_json::Map::new()), opts)?;
+        let mut m = serde_json::Map::new();
+        m.insert(
+            "expectedUpdatedAt".into(),
+            Value::String(updated_at.to_wire()),
+        );
+        let body = posting_body(s, Value::Object(m), opts)?;
         let mut call = Call::new(method, op.route(), id_path(op.route(), id)).json_body(body);
         call.idempotency_key = Some(key);
         let reply = s.send(op, call, None).await?;

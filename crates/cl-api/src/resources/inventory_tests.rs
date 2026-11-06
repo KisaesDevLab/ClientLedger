@@ -279,15 +279,26 @@ async fn adjustments_round_trip_with_keys_warnings_and_the_stale_guard() {
     assert_eq!(put["expectedUpdatedAt"], "2026-01-20T10:00:00.000Z");
 
     let w = inv
-        .void_adjustment(id, &o, IdempotencyKey::new())
+        .void_adjustment(id, at, &o, IdempotencyKey::new())
         .await
         .expect("void");
     assert_eq!(w.len(), 1, "a void answers its warnings (S6)");
     let w = inv
-        .delete_adjustment(id, &o, IdempotencyKey::new())
+        .delete_adjustment(id, at, &o, IdempotencyKey::new())
         .await
         .expect("delete");
     assert!(w.is_empty(), "no warnings");
+    // Review D5: the void and the delete send the updatedAt read, too.
+    let void = requests(&server, "POST")
+        .await
+        .into_iter()
+        .find(|r| r.url.path().ends_with("/void"))
+        .expect("void sent");
+    let void: Value = serde_json::from_slice(&void.body).expect("json");
+    assert_eq!(void["expectedUpdatedAt"], "2026-01-20T10:00:00.000Z");
+    let del: Value =
+        serde_json::from_slice(&requests(&server, "DELETE").await[0].body).expect("json");
+    assert_eq!(del["expectedUpdatedAt"], "2026-01-20T10:00:00.000Z");
     // The closing-date password needs closing-password-v1 (nothing sent).
     let locked = PostingOptions {
         closed_period: Some(crate::ClosedPeriodAuthorization::with_password(
