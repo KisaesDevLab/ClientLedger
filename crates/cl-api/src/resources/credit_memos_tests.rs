@@ -803,3 +803,50 @@ fn a_history_row_reads_its_last_send() {
     .expect("row");
     assert_eq!(never.last_sent_at, None);
 }
+
+// ---- P24: linked returns (U-158, Q-P24e/u/x) -------------------------------
+
+#[test]
+fn a_credit_memo_line_sends_return_of_as_an_object_or_null() {
+    let item = cl_core::ids::ItemId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("item");
+    let sale = TransactionId::parse("7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a18").expect("sale");
+    let q = Quantity::parse_wire("2").expect("q");
+    let mut l = crate::resources::sales::InvoiceLine::item(item, q);
+    let v = serde_json::to_value(&l).expect("json");
+    assert!(
+        v.get("returnOf").is_none(),
+        "left out: an edit keeps the stored link"
+    );
+    l.return_of = Some(None);
+    assert_eq!(
+        serde_json::to_value(&l).expect("json")["returnOf"],
+        Value::Null
+    );
+    l.return_of = Some(Some(sale));
+    assert_eq!(
+        serde_json::to_value(&l).expect("json")["returnOf"],
+        serde_json::json!({"transactionId": sale.to_string()})
+    );
+}
+
+#[test]
+fn a_saved_line_reads_its_return_link_and_the_three_codes_are_refusals() {
+    let sale = "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a18";
+    let line: SalesDocLine = serde_json::from_value(serde_json::json!({
+        "accountId": null, "itemId": null, "amount": "7.18",
+        "returnOf": {"transactionId": sale}
+    }))
+    .expect("line");
+    assert_eq!(line.return_of.map(|t| t.to_string()).as_deref(), Some(sale));
+    let unlinked: SalesDocLine =
+        serde_json::from_value(serde_json::json!({"amount": "7.60", "returnOf": null}))
+            .expect("line");
+    assert_eq!(unlinked.return_of, None);
+    for code in [
+        "RETURN_BEFORE_SALE",
+        "RETURN_EXCEEDS_SALE",
+        "SALE_HAS_RETURNS",
+    ] {
+        assert!(crate::resources::inventory::inventory_refusal_codes().contains(&code));
+    }
+}

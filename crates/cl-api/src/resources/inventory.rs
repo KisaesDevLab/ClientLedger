@@ -78,6 +78,15 @@ pub enum InventoryRefusal {
     /// Deactivating, deleting or merging an account parts use (409
     /// `ACCOUNT_IN_USE`).
     AccountInUse,
+    /// A credit memo line linked to a sale dated after it (400
+    /// `RETURN_BEFORE_SALE`, U-158).
+    ReturnBeforeSale,
+    /// The returns linked to a sale would be more than it sold (400
+    /// `RETURN_EXCEEDS_SALE`, U-158).
+    ReturnExceedsSale,
+    /// Voiding, deleting or changing a sale that has linked returns (409
+    /// `SALE_HAS_RETURNS`, Q-P24x): void or unlink the credit memo first.
+    SaleHasReturns,
 }
 
 const REFUSALS: &[(&str, InventoryRefusal)] = &[
@@ -90,6 +99,9 @@ const REFUSALS: &[(&str, InventoryRefusal)] = &[
     ("INVENTORY_ACCOUNT_DIRECT", InventoryRefusal::AccountDirect),
     ("INVENTORY_PERIOD_CLOSED", InventoryRefusal::PeriodClosed),
     ("ACCOUNT_IN_USE", InventoryRefusal::AccountInUse),
+    ("RETURN_BEFORE_SALE", InventoryRefusal::ReturnBeforeSale),
+    ("RETURN_EXCEEDS_SALE", InventoryRefusal::ReturnExceedsSale),
+    ("SALE_HAS_RETURNS", InventoryRefusal::SaleHasReturns),
 ];
 
 /// Every engine code [`inventory_refusal`] knows.

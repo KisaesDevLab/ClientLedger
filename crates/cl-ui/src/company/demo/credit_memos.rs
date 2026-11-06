@@ -266,6 +266,8 @@ fn doc_lines(
             amount: f.amount,
             tax_amount: f.tax_amount,
             tag_id: l.tag_id,
+            unit_id: l.unit_id,
+            return_of: l.return_of.flatten(),
         })
         .collect()
 }

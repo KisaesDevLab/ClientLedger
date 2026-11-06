@@ -26,7 +26,10 @@
 
 use std::fmt;
 
-use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, SalesTaxItemId, TagId, TaxCodeId};
+use cl_core::ids::{
+    AccountId, ContactId, ItemId, JournalLineId, SalesTaxItemId, TagId, TaxCodeId, TransactionId,
+    UnitId,
+};
 use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 
 use crate::rowkey::{RowKey, RowKeyGen};
@@ -99,6 +102,13 @@ pub struct InvoiceLine {
     /// engine choose: the client's non-taxable code, else the item's, else
     /// the taxable flag (Q-P23k).
     pub tax_code: Option<TaxCodeId>,
+    /// P24 (U-161): the unit the quantity and rate are in; `None` is the
+    /// item's base unit.
+    pub unit: Option<UnitId>,
+    /// P24 (Q-P24e/u): on a credit memo, the invoice or sales receipt this
+    /// part line returns (at that sale's cost); `None`: unlinked (current
+    /// average cost).
+    pub return_of: Option<TransactionId>,
 }
 
 impl InvoiceLine {
@@ -118,6 +128,8 @@ impl InvoiceLine {
             tag: None,
             billable: None,
             tax_code: None,
+            unit: None,
+            return_of: None,
         }
     }
 
@@ -771,6 +783,10 @@ pub struct RequestLine {
     /// The line's tax code (only with `sales-tax-setup-v1`; `None`: the
     /// engine's choice, Q-P23k).
     pub tax_code: Option<TaxCodeId>,
+    /// P24: the unit (`None`: the item's base unit).
+    pub unit: Option<UnitId>,
+    /// P24: a credit-memo part line's sale (`None`: unlinked).
+    pub return_of: Option<TransactionId>,
 }
 
 impl fmt::Debug for RequestLine {
@@ -880,6 +896,8 @@ fn request_line(l: &InvoiceLine, caps: InvoiceCaps) -> RequestLine {
         billable_source_line: l.billable.map(|b| b.source_line),
         markup_percent: l.billable.and_then(|b| b.markup_percent),
         tax_code: l.tax_code.filter(|_| caps.sales_tax),
+        unit: if billable { None } else { l.unit },
+        return_of: if billable { None } else { l.return_of },
     }
 }
 

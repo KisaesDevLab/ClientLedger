@@ -244,8 +244,25 @@ pub struct SalesDocLine {
     /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
     #[serde(default)]
     pub tax_code: Option<crate::resources::sales_tax::LineTaxCode>,
+    /// The unit the quantity and rate are in (`units-of-measure-v1`).
+    #[serde(default)]
+    pub unit_id: Option<cl_core::ids::UnitId>,
+    /// A credit-memo line's sale it returns (`returnOf.transactionId`,
+    /// U-158); `None` when unlinked.
+    #[serde(default, deserialize_with = "return_of")]
+    pub return_of: Option<TransactionId>,
 }
 ids_debug!(SalesDocLine, "SalesDocLine", account_id, item_id);
+
+/// `returnOf: {transactionId}` (or `null`) as the sale's id.
+fn return_of<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<TransactionId>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Link {
+        transaction_id: TransactionId,
+    }
+    Ok(Option::<Link>::deserialize(d)?.map(|l| l.transaction_id))
+}
 
 /// A sales document's `lines`, without any engine-made inventory line that
 /// leaked into them (defensive, P24 §2.3 B3: the engine returns those in

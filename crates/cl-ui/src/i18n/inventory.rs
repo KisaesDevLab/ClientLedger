@@ -29,6 +29,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inventory.refusal.document", "Transactions with inventory parts can't be moved in bulk or memorized. Change them one at a time."),
     ("inventory.refusal.account_direct", "Use an item line for inventory; this account takes item lines only (journal entries excepted)."),
     ("inventory.refusal.account_in_use", "Inventory parts use this account. Move them to another account first."),
+    ("inventory.refusal.return_before_sale", "This credit memo is dated before the sale it returns. Date it on or after the sale, or pick another sale in Return of."),
+    ("inventory.refusal.return_exceeds_sale", "That's more than is left to return from this sale. Lower the quantity, or pick another sale in Return of."),
+    ("inventory.refusal.sale_has_returns", "Items from this sale were returned on a credit memo. Void that credit memo or clear its Return of first."),
     // The item form's inventory panel.
     ("inventory.panel.title", "Purchase and inventory"),
     ("inventory.panel.purchase_description", "Purchase description"),

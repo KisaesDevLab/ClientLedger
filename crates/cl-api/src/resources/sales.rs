@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId};
+use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId, UnitId};
 use cl_core::{CalendarDate, Money, Quantity, TaxRate};
 use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Deserialize, Serialize, Serializer};
@@ -67,6 +67,14 @@ pub struct InvoiceLine {
     /// engine choose (the client's non-taxable code, else the item's, else
     /// the taxable flag; Q-P23k).
     pub tax_code_id: Option<TaxCodeId>,
+    /// The unit the quantity and price are in (`units-of-measure-v1`,
+    /// U-161); `None` is the item's base unit.
+    pub unit_id: Option<UnitId>,
+    /// A credit-memo line's link to the sale it returns (`returnOf`,
+    /// U-158, Q-P24e/u): `None` leaves it out (on an edit the engine keeps
+    /// the stored link), `Some(None)` sends `null` (unlinked, current
+    /// average), `Some(Some(sale))` returns at that sale's cost.
+    pub return_of: Option<Option<TransactionId>>,
 }
 
 impl InvoiceLine {
@@ -115,6 +123,8 @@ impl InvoiceLine {
             billable_source_line_id: None,
             markup_percent: None,
             tax_code_id: None,
+            unit_id: None,
+            return_of: None,
         }
     }
 }
@@ -175,6 +185,16 @@ impl Serialize for InvoiceLine {
         }
         if let Some(t) = &self.tax_code_id {
             m.serialize_entry("taxCodeId", t)?;
+        }
+        if let Some(u) = &self.unit_id {
+            m.serialize_entry("unitId", u)?;
+        }
+        match &self.return_of {
+            None => {}
+            Some(None) => m.serialize_entry("returnOf", &serde_json::Value::Null)?,
+            Some(Some(t)) => {
+                m.serialize_entry("returnOf", &serde_json::json!({ "transactionId": t }))?;
+            }
         }
         m.end()
     }

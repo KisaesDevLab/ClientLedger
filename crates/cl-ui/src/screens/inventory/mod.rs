@@ -127,6 +127,9 @@ pub fn refusal_text(e: &ApiError, lock: Option<CalendarDate>) -> Option<String> 
         InventoryRefusal::Document => "inventory.refusal.document",
         InventoryRefusal::AccountDirect => "inventory.refusal.account_direct",
         InventoryRefusal::AccountInUse => "inventory.refusal.account_in_use",
+        InventoryRefusal::ReturnBeforeSale => "inventory.refusal.return_before_sale",
+        InventoryRefusal::ReturnExceedsSale => "inventory.refusal.return_exceeds_sale",
+        InventoryRefusal::SaleHasReturns => "inventory.refusal.sale_has_returns",
     };
     Some(t(key))
 }

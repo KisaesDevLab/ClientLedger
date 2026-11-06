@@ -169,6 +169,10 @@ typed_id!(
     TaxCodeId,
     /// A client's exemption certificate (P23, U-151).
     TaxExemptionId,
+    /// A unit-of-measure set (P24, U-161).
+    UnitSetId,
+    /// One unit of a unit set (its base unit or a related unit; U-161).
+    UnitId,
 );
 
 #[cfg(test)]
