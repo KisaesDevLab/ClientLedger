@@ -175,9 +175,9 @@ Find these from the menus or with `Ctrl+K`.
 - **Edit:** Void Transaction
 - **Lists:** Item List, Price Levels, Tags, Terms, Payment Methods, Templates, Sales Tax Setup, Import or Export a List
 - **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements, Refund a Credit, Assess Finance Charges, Outbox, Tax Exemption Certificates, Recover a Bad Debt
-- **Vendors:** Vendors, Paid with Personal Funds, Sales Tax Owed, Pay Sales Tax, Receipt Inbox, Match Vendor Statement…, Review Documents
+- **Vendors:** Vendors, Paid with Personal Funds, Sales Tax Owed, Pay Sales Tax, Adjust Quantity/Value on Hand, Physical Inventory Count, Items to Reorder, Receipt Inbox, Match Vendor Statement…, Review Documents
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
-- **Reports:** Reports, Profit & Loss, Balance Sheet
+- **Reports:** Reports, Profit & Loss, Balance Sheet, Inventory Value, Inventory Value Detail, Stock Status
 - **Company:** Company Information, Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail
 - **Help:** Privacy Notice, Support ClientLedger on Ko-fi, About ClientLedger
