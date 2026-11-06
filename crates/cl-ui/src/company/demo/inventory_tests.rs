@@ -31,12 +31,13 @@ fn d(t: &str) -> CalendarDate {
     CalendarDate::parse_wire(t).expect("date")
 }
 
-/// A document the cases post: its date, item and movement.
+/// A document the cases post: its date, item, movement and linked sale.
 #[derive(Clone)]
 struct Doc {
     date: CalendarDate,
     item: ItemId,
     kind: MoveKind,
+    return_of: Option<String>,
 }
 
 /// The demo ledger plus the cases' document table.
@@ -85,20 +86,23 @@ fn line(doc: &Doc) -> Vec<DocLine> {
         item: doc.item,
         kind: doc.kind,
         fallback_cost: None,
+        return_of: doc.return_of.clone(),
     }]
 }
 
 /// Runs one step; answers the warnings and, for a count, the count lines.
+/// A refusal is the engine code (the step's `expect.code`).
 fn run(
     book: &mut Book,
     step: &Value,
     suffix: &str,
     item_name: Option<&str>,
-) -> Vec<cl_api::NegativeStock> {
+) -> Result<Vec<cl_api::NegativeStock>, &'static str> {
     let event = s(step, "event").expect("event");
     let doc = format!("{}{suffix}", s(step, "doc").unwrap_or("?"));
-    match event {
-        "void" | "delete" => book.inv.remove(&doc).expect("remove"),
+    let code = |e: DemoInventoryError| e.code();
+    Ok(match event {
+        "void" | "delete" => book.inv.remove(&doc).map_err(code)?,
         "edit" => {
             let mut e = book.docs.get(&doc).expect("doc").clone();
             if let Some(n) = s(step, "quantity") {
@@ -107,7 +111,7 @@ fn run(
             if let Some(t) = s(step, "date") {
                 e.date = d(t);
             }
-            let w = book.inv.edit(&doc, e.date, &line(&e)).expect("edit");
+            let w = book.inv.edit(&doc, e.date, &line(&e)).map_err(code)?;
             book.docs.insert(doc, e);
             w
         }
@@ -125,7 +129,7 @@ fn run(
             let (_, w) = book
                 .inv
                 .post_count(&doc, d(s(step, "date").expect("date")), &lines)
-                .expect("count");
+                .map_err(code)?;
             w
         }
         _ => {
@@ -133,12 +137,17 @@ fn run(
                 date: d(s(step, "date").expect("date")),
                 item: item(item_name.or_else(|| s(step, "item")).expect("item")),
                 kind: kind_of(step),
+                return_of: s(step, "returnOf").map(|r| format!("{r}{suffix}")),
             };
-            let w = book.inv.post(&doc, e.date, &line(&e)).expect("post");
+            // As the demo routes do: the linked-return rules first.
+            book.inv
+                .check_write(&doc, e.date, &line(&e))
+                .map_err(code)?;
+            let w = book.inv.post(&doc, e.date, &line(&e)).map_err(code)?;
             book.docs.insert(doc, e);
             w
         }
-    }
+    })
 }
 
 fn row<'a>(rows: &'a [Row], doc: &str, it: ItemId) -> &'a Row {
@@ -184,6 +193,20 @@ fn check_rows(book: &Book, expected: &Value, ctx: &str) {
     let rows = book.inv.rows().expect("rows");
     let w: Vec<&Row> = rows.iter().filter(|r| r.item == item("W")).collect();
     let list = expected.as_array().expect("rows");
+    if list.len() < w.len() {
+        // Only some rows listed (case R): each by its document, in order.
+        let mut at = 0;
+        for e in list {
+            let doc = s(e, "doc").expect("doc");
+            let i = w[at..]
+                .iter()
+                .position(|r| r.doc == doc)
+                .unwrap_or_else(|| panic!("{ctx}: no row {doc} after the last"));
+            at += i;
+            check_row(w[at], e, &format!("{ctx} {doc}"));
+        }
+        return;
+    }
     assert_eq!(w.len(), list.len(), "{ctx}: row count");
     for (r, e) in w.iter().zip(list) {
         assert_eq!(r.doc, s(e, "doc").expect("doc"), "{ctx}: position order");
@@ -218,23 +241,45 @@ fn case<'a>(all: &'a [Value], id: &str) -> &'a Value {
     reason = "the golden file's short keys"
 )]
 fn play(all: &[Value], id: &str) -> Book {
+    play_to(all, id, None)
+}
+
+/// [`play`], stopping after step `limit` (a case built on the first steps
+/// of another, `fromSteps`; the checks after the steps are left out then).
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the golden file's short keys"
+)]
+fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
     let c = case(all, id);
     let mut book = match s(c, "from") {
-        Some(from) => play(all, from),
+        Some(from) => play_to(all, from, c["fromSteps"].as_u64()),
         None => Book::default(),
     };
     if c.get("setup").is_some() {
         // F: X and Y run case A's steps as W does.
         for name in ["X", "Y"] {
             for step in case(all, "A")["steps"].as_array().expect("steps") {
-                run(&mut book, step, name, Some(name));
+                run(&mut book, step, name, Some(name)).expect("setup step");
             }
         }
     }
     for step in c["steps"].as_array().expect("steps") {
         let n = step["n"].as_u64().expect("n");
+        if limit.is_some_and(|l| n > l) {
+            break;
+        }
         let ctx = format!("case {id} step {n}");
-        let w = run(&mut book, step, "", None);
+        let refused = s(&step["expect"], "code");
+        let w = match (run(&mut book, step, "", None), refused) {
+            (Ok(w), None) => w,
+            (Err(got), Some(want)) => {
+                assert_eq!(got, want, "{ctx} refusal");
+                continue;
+            }
+            (Ok(_), Some(want)) => panic!("{ctx}: expected {want}"),
+            (Err(got), None) => panic!("{ctx}: refused {got}"),
+        };
         let Some(e) = step.get("expect") else {
             if let Some(after) = c.get("rowsAfter").and_then(|r| r.get(n.to_string())) {
                 check_rows(&book, after, &ctx);
@@ -280,6 +325,9 @@ fn play(all: &[Value], id: &str) -> Book {
             check_rows(&book, after, &ctx);
         }
     }
+    if limit.is_some() {
+        return book;
+    }
     if let Some(rows) = c.get("rows") {
         check_rows(&book, rows, &format!("case {id} rows"));
     }
@@ -312,6 +360,9 @@ fn play(all: &[Value], id: &str) -> Book {
     book
 }
 
+/// Golden U waits for the demo's unit sets (P24 WP-3 step 3).
+const UNIT_CASES_PENDING: bool = true;
+
 /// Every demo case of the golden file passes (P24 §6.2: average cost
 /// matches the reference, negative stock included).
 #[test]
@@ -323,11 +374,15 @@ fn inventory_golden() {
         if c.get("engineOnly").and_then(Value::as_bool) == Some(true) {
             continue;
         }
+        // Units of measure (golden U) come with the demo unit sets.
+        if UNIT_CASES_PENDING && c.get("unitSet").is_some() {
+            continue;
+        }
         let id = s(c, "id").expect("id");
         play(all, id);
         ran.push(id.to_string());
     }
-    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "F"] {
+    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "R", "F"] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
 }
@@ -346,6 +401,7 @@ fn rounding_is_half_away_from_zero_not_bankers() {
                 item: w,
                 kind,
                 fallback_cost: None,
+                return_of: None,
             }],
         )
         .expect("post")
@@ -429,6 +485,7 @@ fn the_result_depends_on_documents_not_entry_order() {
                     item: w,
                     kind: *kind,
                     fallback_cost: None,
+                    return_of: None,
                 }],
             )
             .expect("post");
@@ -450,6 +507,7 @@ fn closed_periods_no_stock_and_stale_counts_are_refused() {
             item: w,
             kind,
             fallback_cost: None,
+            return_of: None,
         }]
     };
     // A value-only change with nothing on hand (Q-P24s).
@@ -540,6 +598,7 @@ fn a_first_sale_uses_the_purchase_cost_snapshot() {
                 item: w,
                 kind: MoveKind::Sale { quantity: q("2") },
                 fallback_cost: Some(UnitCost::parse_wire("2.505").expect("cost")),
+                return_of: None,
             }],
         )
         .expect("sale");

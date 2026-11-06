@@ -428,6 +428,7 @@ fn reorder_alerts_show_while_inventory_is_on() {
                     amount: cl_core::Money::parse_wire("10.00").expect("m"),
                 },
                 fallback_cost: None,
+                return_of: None,
             }],
         )
         .expect("bill");

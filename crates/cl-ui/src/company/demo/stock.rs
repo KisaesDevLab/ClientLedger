@@ -72,30 +72,62 @@ pub fn doc_lines(
     side: Side,
     lines: impl IntoIterator<Item = (Option<ItemId>, Option<Quantity>, Money)>,
 ) -> Vec<DocLine> {
-    let mut sums: BTreeMap<String, (ItemId, Quantity, Money, Option<UnitCost>)> = BTreeMap::new();
+    linked_lines(
+        state,
+        side,
+        lines.into_iter().map(|(i, q, a)| (i, q, a, None)),
+    )
+}
+
+/// [`doc_lines`] with each line's linked sale (a credit memo's Return of,
+/// Q-P24e/u): one movement per (part, linked sale).
+pub fn linked_lines(
+    state: &mut DemoState,
+    side: Side,
+    lines: impl IntoIterator<
+        Item = (
+            Option<ItemId>,
+            Option<Quantity>,
+            Money,
+            Option<TransactionId>,
+        ),
+    >,
+) -> Vec<DocLine> {
+    type Sum = (ItemId, Quantity, Money, Option<UnitCost>, Option<String>);
+    let mut sums: BTreeMap<(String, Option<String>), Sum> = BTreeMap::new();
     let one = Quantity::parse_wire("1").unwrap_or(Quantity::ZERO);
-    for (item, qty, amount) in lines {
+    for (item, qty, amount, sale) in lines {
         let Some(id) = item else { continue };
         let Some(p) = part(state, id) else { continue };
         let q = qty.unwrap_or(one).abs();
-        let e =
-            sums.entry(id.to_string())
-                .or_insert((id, Quantity::ZERO, Money::ZERO, cost_of(&p)));
+        let sale = sale
+            .filter(|_| side == Side::CustomerReturn)
+            .map(|t| t.to_string());
+        let e = sums.entry((id.to_string(), sale.clone())).or_insert((
+            id,
+            Quantity::ZERO,
+            Money::ZERO,
+            cost_of(&p),
+            sale,
+        ));
         e.1 = e.1.checked_add(q).unwrap_or(e.1);
         e.2 = e.2.checked_add(amount.abs()).unwrap_or(e.2);
     }
     sums.into_values()
-        .filter(|(_, q, _, _)| !q.is_zero())
-        .map(|(item, quantity, amount, fallback_cost)| DocLine {
-            item,
-            kind: match side {
-                Side::Receipt => MoveKind::Receipt { quantity, amount },
-                Side::VendorReturn => MoveKind::VendorReturn { quantity, amount },
-                Side::Sale => MoveKind::Sale { quantity },
-                Side::CustomerReturn => MoveKind::CustomerReturn { quantity },
+        .filter(|(_, q, _, _, _)| !q.is_zero())
+        .map(
+            |(item, quantity, amount, fallback_cost, return_of)| DocLine {
+                item,
+                kind: match side {
+                    Side::Receipt => MoveKind::Receipt { quantity, amount },
+                    Side::VendorReturn => MoveKind::VendorReturn { quantity, amount },
+                    Side::Sale => MoveKind::Sale { quantity },
+                    Side::CustomerReturn => MoveKind::CustomerReturn { quantity },
+                },
+                fallback_cost,
+                return_of,
             },
-            fallback_cost,
-        })
+        )
         .collect()
 }
 
@@ -106,10 +138,12 @@ pub fn sales_lines(
     side: Side,
     lines: &[cl_api::InvoiceLine],
 ) -> Vec<DocLine> {
-    doc_lines(
+    linked_lines(
         state,
         side,
-        lines.iter().map(|l| (l.item_id, l.quantity, Money::ZERO)),
+        lines
+            .iter()
+            .map(|l| (l.item_id, l.quantity, Money::ZERO, l.return_of.flatten())),
     )
 }
 
@@ -138,6 +172,16 @@ pub fn refusal(e: &DemoInventoryError, lock: Option<CalendarDate>) -> ApiError {
             }}),
         ),
         DemoInventoryError::NotFound => ApiError::NotFound { code: None },
+        DemoInventoryError::ReturnBeforeSale | DemoInventoryError::ReturnExceedsSale => {
+            cl_api::engine_refusal(
+                400,
+                &json!({"error": {"message": "That return doesn't match the sale.", "code": e.code()}}),
+            )
+        }
+        DemoInventoryError::SaleHasReturns => cl_api::engine_refusal(
+            409,
+            &json!({"error": {"message": "This sale has returns.", "code": e.code()}}),
+        ),
         DemoInventoryError::Cost(_) => ApiError::Local(LocalValidation::InvalidValue),
     }
 }
@@ -171,14 +215,29 @@ pub fn gate(
     if closed(date) || old.is_some_and(closed) {
         return Err(refusal(&DemoInventoryError::PeriodClosed, lock));
     }
-    Ok(())
+    // Linked returns (U-158), before anything is saved.
+    let key = doc.map_or_else(|| "new-document".to_string(), |d| d.to_string());
+    state
+        .inventory
+        .check_write(&key, date, lines)
+        .map_err(|e| refusal(&e, lock))
 }
 
 /// The gate for a void or delete of `doc`.
 ///
 /// # Errors
-/// 409 `INVENTORY_PERIOD_CLOSED`.
+/// 409 `INVENTORY_PERIOD_CLOSED`; 409 `SALE_HAS_RETURNS`.
 pub fn gate_remove(state: &DemoState, doc: TransactionId) -> Result<(), ApiError> {
+    // Q-P24x: a sale with linked returns can't be voided or deleted.
+    let key = doc.to_string();
+    if state
+        .inventory
+        .moves()
+        .iter()
+        .any(|m| m.return_of.as_deref() == Some(key.as_str()))
+    {
+        return Err(refusal(&DemoInventoryError::SaleHasReturns, closing(state)));
+    }
     match state.inventory.date_of(&doc.to_string()) {
         Some(d) => gate(state, Some(doc), d, &[]),
         None => Ok(()),
@@ -574,6 +633,7 @@ fn adjust_lines(a: &NewAdjustment) -> Vec<DocLine> {
                 },
             },
             fallback_cost: None,
+            return_of: None,
         })
         .collect()
 }

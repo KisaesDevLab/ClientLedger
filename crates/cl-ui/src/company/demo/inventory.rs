@@ -87,6 +87,9 @@ pub struct Movement {
     pub kind: MoveKind,
     /// The item's purchase cost when the line was posted (Q-P24d).
     pub fallback_cost: Option<UnitCost>,
+    /// A credit memo's linked sale (Q-P24e/u): its units come back at that
+    /// sale's cost by cumulative difference.
+    pub return_of: Option<String>,
 }
 
 /// One row after a replay.
@@ -273,6 +276,25 @@ fn position(m: &Movement) -> (CalendarDate, u64, &str) {
     (m.date, m.seq, m.doc.as_str())
 }
 
+/// A sale linked returns come back from: its relief `R` for `S` units and
+/// the units returned so far `N`.
+#[derive(Clone, Copy, Debug, Default)]
+struct Sold {
+    relief: Money,
+    units: Quantity,
+    returned: Quantity,
+}
+
+impl Sold {
+    /// The next linked return of `q` units: `round2(R × N_k / S) −
+    /// round2(R × N_(k−1) / S)` (Q-P24e, cumulative difference).
+    fn take(&mut self, q: Quantity) -> Result<Money, CostError> {
+        let before = ratio(self.relief, self.returned, self.units)?;
+        self.returned = qadd(self.returned, q)?;
+        sub(ratio(self.relief, self.returned, self.units)?, before)
+    }
+}
+
 /// Replays every item's movements from zero, in position order. Rows come
 /// back per item, each item's rows in position order.
 ///
@@ -287,8 +309,31 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
     for list in by_item.values_mut() {
         list.sort_by(|a, b| position(a).cmp(&position(b)));
         let mut s = State::default();
+        let mut sold: BTreeMap<&str, Sold> = BTreeMap::new();
         for m in list.iter() {
-            let (value, correction) = s.apply(m)?;
+            let linked = match (m.kind, m.return_of.as_deref()) {
+                (MoveKind::CustomerReturn { quantity }, Some(sale)) => {
+                    sold.get_mut(sale).map(|x| (quantity, x))
+                }
+                _ => None,
+            };
+            let (value, correction) = match linked {
+                Some((quantity, x)) => {
+                    let a = x.take(quantity)?;
+                    s.inflow(quantity, a)?
+                }
+                None => s.apply(m)?,
+            };
+            if let MoveKind::Sale { quantity } = m.kind {
+                sold.insert(
+                    m.doc.as_str(),
+                    Sold {
+                        relief: value.abs(),
+                        units: quantity,
+                        returned: Quantity::ZERO,
+                    },
+                );
+            }
             let mut residual = Money::ZERO;
             if s.q.is_zero() && !s.t.is_zero() {
                 residual = s.t;
@@ -354,6 +399,13 @@ pub enum DemoInventoryError {
     NotFound,
     /// An amount left its range.
     Cost(CostError),
+    /// A linked return dated before its sale (`RETURN_BEFORE_SALE`).
+    ReturnBeforeSale,
+    /// Linked returns over what the sale sold (`RETURN_EXCEEDS_SALE`).
+    ReturnExceedsSale,
+    /// A sale with linked returns voided, deleted or cut below them
+    /// (`SALE_HAS_RETURNS`, Q-P24x).
+    SaleHasReturns,
 }
 
 impl From<CostError> for DemoInventoryError {
@@ -388,6 +440,9 @@ impl DemoInventoryError {
             DemoInventoryError::Stale(_) => "STALE",
             DemoInventoryError::NotFound => "NOT_FOUND",
             DemoInventoryError::Cost(_) => "VALIDATION_ERROR",
+            DemoInventoryError::ReturnBeforeSale => "RETURN_BEFORE_SALE",
+            DemoInventoryError::ReturnExceedsSale => "RETURN_EXCEEDS_SALE",
+            DemoInventoryError::SaleHasReturns => "SALE_HAS_RETURNS",
         }
     }
 }
@@ -401,6 +456,59 @@ pub struct DocLine {
     pub kind: MoveKind,
     /// The item's purchase cost now (the fallback snapshot).
     pub fallback_cost: Option<UnitCost>,
+    /// A credit memo line's linked sale (its demo key).
+    pub return_of: Option<String>,
+}
+
+/// The engine's linked-return rules over a ledger (U-158): each linked
+/// return is of a sale of the same item dated on or before it, and the
+/// returns linked to a sale never pass what it sold (Q-P24x: a sale edited
+/// below them, moved after one, or losing the item is refused too).
+fn check_links(moves: &[Movement], doc: &str) -> Result<(), DemoInventoryError> {
+    let mut linked: BTreeMap<(&str, String), (Quantity, CalendarDate)> = BTreeMap::new();
+    for m in moves {
+        let (Some(sale), MoveKind::CustomerReturn { quantity }) = (m.return_of.as_deref(), m.kind)
+        else {
+            continue;
+        };
+        let e = linked
+            .entry((sale, m.item.to_string()))
+            .or_insert((Quantity::ZERO, m.date));
+        e.0 = qadd(e.0, quantity)?;
+        e.1 = e.1.min(m.date);
+    }
+    for ((sale, item), (returned, first)) in linked {
+        let sold = moves.iter().find(|m| {
+            m.doc == sale && m.item.to_string() == item && matches!(m.kind, MoveKind::Sale { .. })
+        });
+        // The sale being written breaks its returns (409); a return asking
+        // for more than was sold, or before it, is the return's fault (400).
+        let sale_side = sale == doc;
+        let Some(sold) = sold else {
+            return Err(if sale_side {
+                DemoInventoryError::SaleHasReturns
+            } else {
+                DemoInventoryError::ReturnExceedsSale
+            });
+        };
+        if sold.date > first {
+            return Err(if sale_side {
+                DemoInventoryError::SaleHasReturns
+            } else {
+                DemoInventoryError::ReturnBeforeSale
+            });
+        }
+        if let MoveKind::Sale { quantity } = sold.kind
+            && returned > quantity
+        {
+            return Err(if sale_side {
+                DemoInventoryError::SaleHasReturns
+            } else {
+                DemoInventoryError::ReturnExceedsSale
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The demo engine's inventory ledger: every live movement, the closing
@@ -501,6 +609,37 @@ impl DemoInventory {
         self.replace(doc, date, old.1, lines, start)
     }
 
+    /// The linked-return rules for `doc` written with `lines` on `date`,
+    /// checked before anything is saved (nothing changes).
+    ///
+    /// # Errors
+    /// `ReturnBeforeSale`, `ReturnExceedsSale`, `SaleHasReturns`.
+    pub fn check_write(
+        &self,
+        doc: &str,
+        date: CalendarDate,
+        lines: &[DocLine],
+    ) -> Result<(), DemoInventoryError> {
+        let mut next: Vec<Movement> = self
+            .moves
+            .iter()
+            .filter(|m| m.doc != doc)
+            .cloned()
+            .collect();
+        for l in lines {
+            next.push(Movement {
+                doc: doc.to_string(),
+                item: l.item,
+                date,
+                seq: u64::MAX,
+                kind: l.kind,
+                fallback_cost: l.fallback_cost,
+                return_of: l.return_of.clone(),
+            });
+        }
+        check_links(&next, doc)
+    }
+
     /// Voids or deletes a document: its movements go; later rows are
     /// recomputed.
     ///
@@ -515,6 +654,14 @@ impl DemoInventory {
             .min()
             .ok_or(DemoInventoryError::NotFound)?;
         self.check_open(old.0)?;
+        // Q-P24x: a sale with linked returns stays until they go.
+        if self
+            .moves
+            .iter()
+            .any(|m| m.return_of.as_deref() == Some(doc))
+        {
+            return Err(DemoInventoryError::SaleHasReturns);
+        }
         self.moves.retain(|m| m.doc != doc);
         let rows = self.rows()?;
         Ok(negative_stock(&rows, old))
@@ -542,8 +689,10 @@ impl DemoInventory {
                 seq,
                 kind: l.kind,
                 fallback_cost: l.fallback_cost,
+                return_of: l.return_of.clone(),
             });
         }
+        check_links(&next, doc)?;
         let rows = replay(&next)?;
         // A value-only change needs stock on hand just before it (Q-P24s).
         for l in lines {
@@ -624,6 +773,7 @@ impl DemoInventory {
                     item: l.item_id,
                     kind: MoveKind::AdjustQuantity { change },
                     fallback_cost: None,
+                    return_of: None,
                 });
             }
         }
