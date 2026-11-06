@@ -164,3 +164,65 @@ fn routes_refuse_while_inventory_is_off() {
         Some(cl_api::InventoryRefusal::Off)
     );
 }
+
+/// U-161: an adjustment and a count entered in a unit move stock in base
+/// units, `round4(q × factor)` half away from zero.
+#[test]
+fn adjustments_and_counts_in_a_unit_move_base_units() {
+    let mut d = on();
+    let unit = |name: &str, factor: &str| cl_api::Unit {
+        id: None,
+        name: name.into(),
+        abbreviation: None,
+        factor: cl_core::UnitFactor::parse_wire(factor).expect("factor"),
+    };
+    let set = d
+        .units
+        .create(&cl_api::NewUnitSet {
+            name: "Bag".into(),
+            base_unit_name: "bag".into(),
+            base_unit_abbreviation: None,
+            is_active: true,
+            units: vec![unit("pallet", "40"), unit("third", "0.333333")],
+        })
+        .expect("set");
+    let pallet = set.units[0].id;
+    let third = set.units[1].id;
+    let item = part_id(0);
+    if let Some(i) = d.items_mut().iter_mut().find(|i| i.id == item) {
+        i.fields.purchase.unit_set_id = Some(set.id);
+    }
+    let before = d.inventory.stock(item).expect("stock").quantity_on_hand;
+    assert_eq!(before, Some(q("120")));
+    let a = NewAdjustment {
+        date: day(2026, 11, 2),
+        adjustment_account_id: opening_account(&mut d),
+        memo: None,
+        lines: vec![cl_api::AdjustmentLine {
+            item_id: item,
+            quantity_change: Some(q("-1")),
+            value_change: None,
+            unit_id: pallet,
+        }],
+    };
+    create_adjustment(&mut d, &a).expect("adjust");
+    let after = d.inventory.stock(item).expect("stock").quantity_on_hand;
+    assert_eq!(after, Some(q("80")), "one pallet is 40 bags");
+    // Counted 3 thirds: round4(3 × 0.333333 = 0.999999) = 1.0000 bag.
+    let c = NewCount {
+        as_of: day(2026, 11, 3),
+        adjustment_account_id: opening_account(&mut d),
+        memo: None,
+        lines: vec![cl_api::CountLine {
+            item_id: item,
+            sheet_on_hand: q("80"),
+            counted_quantity: q("3"),
+            unit_id: third,
+        }],
+    };
+    post_count(&mut d, &c).expect("count");
+    assert_eq!(
+        d.inventory.stock(item).expect("stock").quantity_on_hand,
+        Some(q("1"))
+    );
+}

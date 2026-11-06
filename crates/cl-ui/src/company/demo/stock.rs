@@ -675,12 +675,43 @@ fn next_adjustment_id(state: &DemoState) -> Result<TransactionId, ApiError> {
         .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))
 }
 
-fn adjust_lines(a: &NewAdjustment) -> Vec<DocLine> {
-    a.lines
-        .iter()
-        .map(|l| DocLine {
+/// A change entered in a unit as base units: `round4(|q| × factor)` with
+/// its sign (U-161, Q-P24v).
+fn base_change(
+    state: &mut DemoState,
+    item: ItemId,
+    unit: Option<UnitId>,
+    q: Quantity,
+) -> Result<Quantity, ApiError> {
+    if unit.is_none() {
+        return Ok(q);
+    }
+    let b = super::units::line_base(state, item, unit, q.abs())?;
+    if let Some(u) = unit {
+        state.units.mark_used(u);
+    }
+    if q.is_negative() {
+        b.checked_neg()
+            .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))
+    } else {
+        Ok(b)
+    }
+}
+
+fn adjust_lines(state: &mut DemoState, a: &NewAdjustment) -> Result<Vec<DocLine>, ApiError> {
+    let mut out = Vec::with_capacity(a.lines.len());
+    for l in &a.lines {
+        let change = match l.quantity_change {
+            Some(q) => Some(base_change(state, l.item_id, l.unit_id, q)?),
+            None => None,
+        };
+        out.push((l, change));
+    }
+    Ok(out
+        .into_iter()
+        .map(|(l, change)| DocLine {
             item: l.item_id,
-            kind: match (l.quantity_change, l.value_change) {
+            kind: match (change, l.value_change) {
                 (Some(change), Some(value)) => MoveKind::AdjustBoth { change, value },
                 (Some(change), None) => MoveKind::AdjustQuantity { change },
                 (None, Some(change)) => MoveKind::AdjustValue { change },
@@ -691,7 +722,7 @@ fn adjust_lines(a: &NewAdjustment) -> Vec<DocLine> {
             fallback_cost: None,
             return_of: None,
         })
-        .collect()
+        .collect())
 }
 
 /// The record of adjustment `id` with the values the replay posted.
@@ -741,7 +772,7 @@ pub fn create_adjustment(
         return Err(off());
     }
     a.check()?;
-    let lines = adjust_lines(a);
+    let lines = adjust_lines(state, a)?;
     gate(state, None, a.date, &lines)?;
     let id = next_adjustment_id(state)?;
     let warnings = post(state, id, TxnType::InventoryAdjustment, a.date, &lines)?;
@@ -846,9 +877,18 @@ pub fn post_count(state: &mut DemoState, c: &NewCount) -> Result<CountResult, Ap
     let lock = closing(state);
     state.inventory.closing_date = lock;
     let id = next_adjustment_id(state)?;
+    // Counted in a unit: compared with on hand in base units (U-161).
+    let mut base_lines = Vec::with_capacity(c.lines.len());
+    for l in &c.lines {
+        base_lines.push(cl_api::CountLine {
+            counted_quantity: base_change(state, l.item_id, l.unit_id, l.counted_quantity)?,
+            unit_id: None,
+            ..l.clone()
+        });
+    }
     let (lines, warnings) = state
         .inventory
-        .post_count(&id.to_string(), c.as_of, &c.lines)
+        .post_count(&id.to_string(), c.as_of, &base_lines)
         .map_err(|e| refusal(&e, lock))?;
     if lines.is_empty() {
         return Ok(CountResult {
