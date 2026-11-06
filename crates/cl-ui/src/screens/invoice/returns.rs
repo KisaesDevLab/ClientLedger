@@ -184,7 +184,7 @@ impl InvoiceScreen {
             ui.horizontal(|ui| {
                 ui.label(name);
                 let label = t_with("credit_memo.return_of.line", &[("n", &(n + 1).to_string())]);
-                egui::ComboBox::from_label(label)
+                egui::ComboBox::from_id_salt(("credit_memo_return_of", n))
                     .selected_text(shown)
                     .show_ui(ui, |ui| {
                         if ui.selectable_label(link.is_none(), &none).clicked() {
@@ -195,7 +195,9 @@ impl InvoiceScreen {
                                 picked = Some((*key, Some(o.id)));
                             }
                         }
-                    });
+                    })
+                    .response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &label));
             });
         }
         if let Some((key, sale)) = picked {

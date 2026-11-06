@@ -47,6 +47,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("units.row.name", "Unit name, row {n}"),
     ("units.row.abbreviation", "Abbreviation, row {n}"),
     ("units.row.factor", "Base units in one, row {n}"),
+    ("units.row.remove.short", "Remove"),
     ("units.row.remove", "Remove row {n}"),
     ("units.locked", "In use"),
     ("units.locked.tip", "This unit is on saved transactions, so its size can't change. Add a new unit instead."),

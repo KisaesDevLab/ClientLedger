@@ -353,12 +353,18 @@ impl UnitsScreen {
                                 .on_hover_text(t("units.locked.tip"));
                             }
                         });
-                        if r.locked.is_none()
-                            && ui
-                                .button(t_with("units.row.remove", &[("n", &n)]))
-                                .clicked()
-                        {
-                            remove = Some(i);
+                        if r.locked.is_none() {
+                            let button = ui.button(t("units.row.remove.short"));
+                            button.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::Button,
+                                    true,
+                                    t_with("units.row.remove", &[("n", &n)]),
+                                )
+                            });
+                            if button.clicked() {
+                                remove = Some(i);
+                            }
                         }
                         ui.end_row();
                     }

@@ -391,15 +391,21 @@ impl CountScreen {
         let mut print = false;
         ui.horizontal(|ui| {
             let can = self.sheet.can_post() && self.post_job.is_none();
-            if ui
+            let post_button = ui
                 .add_enabled(can, egui::Button::new(t("inventory.count.post")))
                 .on_hover_text(t("inventory.count.post.tip"))
-                .on_disabled_hover_text(t("inventory.count.post.disabled"))
-                .clicked()
-            {
+                .on_disabled_hover_text(t("inventory.count.post.disabled"));
+            if post_button.has_focus() {
+                post_button.scroll_to_me(None);
+            }
+            if post_button.clicked() {
                 post = true;
             }
-            if ui.button(t("inventory.count.print")).clicked() {
+            let print_button = ui.button(t("inventory.count.print"));
+            if print_button.has_focus() {
+                print_button.scroll_to_me(None);
+            }
+            if print_button.clicked() {
                 print = true;
             }
             ui.checkbox(&mut self.print_on_hand, t("inventory.count.print_on_hand"));
