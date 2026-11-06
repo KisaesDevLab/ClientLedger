@@ -71,7 +71,7 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
-  - assert_state: {key: toast, equals: "You're selling more Landscape Fabric Roll than you have on 11/04/2026 (-2 on hand). You can save; the cost is corrected when you receive more."}
+  - assert_state: {key: toast, equals: "On 11/04/2026 you'd have sold more Landscape Fabric Roll than you have (-2 on hand). The cost is corrected when you receive more."}
   - screenshot: void-warning
   - command: file.close_window
   - command: lists.items

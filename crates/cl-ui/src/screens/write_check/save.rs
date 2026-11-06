@@ -1399,7 +1399,7 @@ impl WriteCheckScreen {
             drop(demo);
             self.void.task = Some(match r {
                 Ok(()) => {
-                    crate::screens::inventory::announce_demo(&self.link, &self.items.names());
+                    crate::screens::inventory::announce_demo_void(&self.link, &self.items.names());
                     Task::ready(())
                 }
                 Err(err) => {

@@ -94,6 +94,19 @@ pub fn negative_text(name: &str, w: &NegativeStock) -> String {
     )
 }
 
+/// The same warning after a void or delete, worded for what the owner did.
+#[must_use]
+pub fn negative_void_text(name: &str, w: &NegativeStock) -> String {
+    t_with(
+        "inventory.negative_stock.void",
+        &[
+            ("item", name),
+            ("date", &crate::shell::us_date(w.date)),
+            ("on_hand", &qty(w.on_hand)),
+        ],
+    )
+}
+
 /// Every warning as text, the item named from `name_of`.
 #[must_use]
 pub fn negative_texts(
@@ -221,6 +234,15 @@ pub fn lock_of(link: &CompanyLink, e: &ApiError) -> Option<CalendarDate> {
 /// never blocking): one toast line per item, item names from the demo
 /// or `names`.
 pub fn announce(link: &CompanyLink, warnings: &[NegativeStock], names: &[(ItemId, String)]) {
+    announce_as(link, warnings, names, negative_text);
+}
+
+fn announce_as(
+    link: &CompanyLink,
+    warnings: &[NegativeStock],
+    names: &[(ItemId, String)],
+    text_of: fn(&str, &NegativeStock) -> String,
+) {
     if warnings.is_empty() {
         return;
     }
@@ -233,13 +255,17 @@ pub fn announce(link: &CompanyLink, warnings: &[NegativeStock], names: &[(ItemId
                 .collect()
         })
         .unwrap_or_default();
-    let texts = negative_texts(warnings, |id| {
+    let name_of = |id: ItemId| {
         names
             .iter()
             .chain(&demo_names)
             .find(|(i, _)| *i == id)
             .map(|(_, n)| n.clone())
-    });
+    };
+    let texts: Vec<String> = warnings
+        .iter()
+        .map(|w| text_of(&name_of(w.item_id).unwrap_or_else(|| t("inventory.an_item")), w))
+        .collect();
     link.push(crate::company::CompanyEvent::ToastText(texts.join(" ")));
 }
 
@@ -261,6 +287,12 @@ pub fn closed_for_parts(
 pub fn announce_demo(link: &CompanyLink, names: &[(ItemId, String)]) {
     let w = demo_warnings(link);
     announce(link, &w, names);
+}
+
+/// After a demo void or delete: the warnings it found, in the void's words.
+pub fn announce_demo_void(link: &CompanyLink, names: &[(ItemId, String)]) {
+    let w = demo_warnings(link);
+    announce_as(link, &w, names, negative_void_text);
 }
 
 /// The demo answers: the warnings its last write kept (read once).

@@ -1317,7 +1317,7 @@ impl EnterBillScreen {
     }
 
     fn voided(&mut self) {
-        crate::screens::inventory::announce_demo(&self.link, &self.items.lists().names());
+        crate::screens::inventory::announce_demo_void(&self.link, &self.items.lists().names());
         let vendor = self.vendor();
         self.publish(vendor);
         self.closing_prompt.saved();
