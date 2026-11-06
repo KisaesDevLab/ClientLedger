@@ -161,6 +161,9 @@ pub fn linked_lines(
 
 /// [`doc_lines`] over a sales document's lines (invoice, sales receipt,
 /// credit memo): the amount does not matter for a sale or a return.
+///
+/// # Errors
+/// 400 `UNIT_NOT_IN_SET`, 400 `UNIT_QUANTITY_TOO_SMALL`.
 pub fn sales_lines(
     state: &mut DemoState,
     side: Side,
