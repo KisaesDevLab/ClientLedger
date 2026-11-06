@@ -756,6 +756,7 @@ impl CardChargeScreen {
         // P24: an inventory refusal in plain language (Q-P24b).
         let lock = crate::screens::inventory::lock_of(&self.link, &e);
         if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.flow.closing_prompt.refused_elsewhere();
             self.inventory = Some(text);
             self.flow.intent = None;
             return;

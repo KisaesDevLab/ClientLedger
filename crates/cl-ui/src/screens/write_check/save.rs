@@ -902,6 +902,7 @@ impl WriteCheckScreen {
         // never offers the password, Q-P24b).
         let lock = crate::screens::inventory::lock_of(&self.link, &e);
         if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.closing_prompt.refused_elsewhere();
             self.save.inventory = Some(text);
             return;
         }
@@ -1404,6 +1405,7 @@ impl WriteCheckScreen {
                 Err(err) => {
                     let lock = crate::screens::inventory::lock_of(&self.link, &err);
                     if let Some(text) = crate::screens::inventory::refusal_text(&err, lock) {
+                        self.closing_prompt.refused_elsewhere();
                         self.save.inventory = Some(text);
                     } else if !self.closing_failed(&err, Pending::Void(reason)) {
                         self.save.error = Some(err);

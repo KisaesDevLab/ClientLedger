@@ -413,6 +413,9 @@ impl InvoiceScreen {
         self.grid.save_failed(failure);
         let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.books.closing);
         if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            // A closed document whose parts were removed meets this after
+            // the password (only new lines are checked first).
+            self.closing_prompt.refused_elsewhere();
             self.inventory_note = Some(text);
             return;
         }

@@ -703,6 +703,7 @@ impl EnterBillScreen {
     fn write_failed(&mut self, e: ApiError, pending: Pending) {
         let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.closing);
         if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.closing_prompt.refused_elsewhere();
             self.save.inventory = Some(text);
             return;
         }
@@ -863,6 +864,7 @@ impl EnterBillScreen {
         self.items.form_mut().save_failed(failure);
         let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.closing);
         if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.closing_prompt.refused_elsewhere();
             self.save.inventory = Some(text);
             return;
         }

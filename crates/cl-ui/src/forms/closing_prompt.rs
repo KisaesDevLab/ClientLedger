@@ -306,6 +306,14 @@ impl<P: Clone> ClosingPrompt<P> {
         }
     }
 
+    /// The engine refused the change for a reason the screen shows itself
+    /// (an inventory refusal such as 409 `INVENTORY_PERIOD_CLOSED`, which
+    /// no password lifts, P24 Q-P24b): a dialog waiting on that answer
+    /// closes instead of staying on "sending".
+    pub fn refused_elsewhere(&mut self) {
+        self.nothing_sent();
+    }
+
     /// Cancel (or OK on the "not available yet" message): nothing changes.
     pub fn cancel(&mut self) {
         self.limited_until = None;
@@ -505,6 +513,21 @@ mod tests {
         assert!(!p.dialog_open());
         assert!(p.pending().is_none());
         assert!(p.flow.password().is_none());
+    }
+
+    /// P24 review note: a refusal no password lifts (409
+    /// `INVENTORY_PERIOD_CLOSED` on a closed document whose parts were
+    /// removed) closes a dialog waiting on it.
+    #[test]
+    fn a_refusal_shown_elsewhere_closes_the_waiting_dialog() {
+        let mut p: ClosingPrompt<u8> = ClosingPrompt::default();
+        p.ask(7, true, None);
+        p.password = SecretText::from("right");
+        assert!(p.submit().is_some());
+        assert_eq!(p.stage(), ClosingStage::Sending);
+        p.refused_elsewhere();
+        assert!(!p.dialog_open());
+        assert!(p.pending().is_none());
     }
 
     #[test]
