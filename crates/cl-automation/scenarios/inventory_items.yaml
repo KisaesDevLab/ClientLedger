@@ -59,7 +59,7 @@ steps:
   - click: {role: combo_box, label: Buy in}
   - click: {role: button, label: case}
   - assert_exists: {role: combo_box, label: Sell in}
-  - assert_not_exists: {role: text_input, label: "Unit (each, box)"}
+  - assert_not_exists: {role: text_input, label: "Unit"}
   - screenshot: unit-set
   - command: form.save_close
   - assert_state: {key: screen.panel, equals: none}
