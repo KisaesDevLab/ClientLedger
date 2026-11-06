@@ -980,6 +980,15 @@ pub fn valuation(state: &mut DemoState, as_of: CalendarDate) -> Result<Valuation
             difference: Money::ZERO,
         })
         .collect();
+    // The engine's percentOfTotal: 2 places, half up, none when the total is 0.
+    if !total.is_zero() {
+        for r in &mut rows {
+            let mut pct = (r.value.as_decimal() / total.as_decimal() * rust_decimal::Decimal::ONE_HUNDRED)
+                .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            pct.rescale(2);
+            r.percent_of_total = Some(pct.to_string());
+        }
+    }
     Ok(ValuationSummary {
         as_of,
         rows,
