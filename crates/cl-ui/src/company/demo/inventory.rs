@@ -467,7 +467,9 @@ pub struct DocLine {
 /// sale never pass what it sold (Q-P24x: a sale edited below them, moved
 /// after one, or losing the item is refused too).
 fn check_links(moves: &[Movement], doc: &str) -> Result<(), DemoInventoryError> {
-    let mut linked: BTreeMap<(&str, String), (Quantity, (CalendarDate, u64))> = BTreeMap::new();
+    // (sale, item) -> (returned so far, the first return's position).
+    type Linked<'a> = BTreeMap<(&'a str, String), (Quantity, (CalendarDate, u64))>;
+    let mut linked: Linked = BTreeMap::new();
     for m in moves {
         let (Some(sale), MoveKind::CustomerReturn { quantity }) = (m.return_of.as_deref(), m.kind)
         else {

@@ -86,7 +86,10 @@ pub fn capabilities_and_golden_bytes(h: &Harness) {
                 engine.display(),
                 e.kind()
             );
-            h.pending("U-157", "no engine checkout to compare the golden file with");
+            h.pending(
+                "U-157",
+                "no engine checkout to compare the golden file with",
+            );
         }
     }
 }

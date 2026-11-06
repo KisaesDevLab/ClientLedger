@@ -506,3 +506,141 @@ fn a_memo_email_without_a_mail_server_offers_the_outbox() {
     .expect_err("unknown");
     assert!(matches!(e, cl_api::ApiError::NotFound { .. }));
 }
+
+/// One part line (`qty` at 10.00, not taxable), optionally a return of
+/// `sale`, then the blank entry line.
+fn part_line(
+    s: &mut InvoiceScreen,
+    part: cl_core::ids::ItemId,
+    qty: &str,
+    sale: Option<cl_core::ids::TransactionId>,
+) {
+    let key = s.grid.keys().next_key();
+    let line = InvoiceLine {
+        item: Some(part),
+        quantity: Some(Quantity::parse_wire(qty).expect("q")),
+        rate: Some(m("10.00")),
+        taxable: Some(false),
+        return_of: sale,
+        ..InvoiceLine::blank(key)
+    };
+    s.grid.edit(|v, keys| {
+        v.lines = vec![line];
+        v.ensure_entry_line(keys);
+    });
+}
+
+/// What the form shows of its part lines.
+type Shown = Vec<(
+    Option<cl_core::ids::ItemId>,
+    Option<Quantity>,
+    Option<Money>,
+    Option<cl_core::ids::UnitId>,
+    Option<cl_core::ids::TransactionId>,
+)>;
+
+fn shown(s: &InvoiceScreen) -> Shown {
+    s.grid
+        .value()
+        .lines
+        .iter()
+        .filter(|l| l.item.is_some())
+        .map(|l| (l.item, l.quantity, l.rate, l.unit, l.return_of))
+        .collect()
+}
+
+/// Opens the newest document of the screen's kind (`id`), changes the
+/// memo, saves (the lines go back as loaded) and opens it again.
+fn reload_save_reload(s: &mut InvoiceScreen, id: cl_core::ids::TransactionId, note: &str) {
+    s.new_form(false);
+    s.navigate(true);
+    assert_eq!(s.editing.as_ref().map(|e| e.id), Some(id), "loaded");
+    settle(s);
+    s.header.edit(super::field::MEMO, |h| h.memo = note.into());
+    settle(s);
+    assert!(s.is_dirty());
+    s.start_save(SaveIntent::Save, None);
+    assert!(s.error.is_none(), "{:?}", s.error);
+    assert!(s.inventory_note.is_none(), "{:?}", s.inventory_note);
+    s.new_form(false);
+    s.navigate(true);
+    assert_eq!(s.editing.as_ref().map(|e| e.id), Some(id), "loaded again");
+    settle(s);
+}
+
+/// P24 plan §6.3 (review missing test): a cash sale of a part and a credit
+/// memo linked to it (Return of) load, save and load again with the same
+/// lines (item, quantity, rate, unit, link), the same total and the same
+/// stock: the engine-made inventory lines never reach the form and a
+/// re-save moves nothing.
+#[test]
+fn a_cash_sale_and_its_linked_return_round_trip() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    assert!(crate::screens::inventory::demo_reset(&link));
+    let part = crate::company::demo::lists::item_id(crate::company::demo::stock::FIRST_PART);
+    let stock = || {
+        let mut d = link.demo_state().expect("demo");
+        d.items_mut()
+            .iter()
+            .find(|i| i.id == part)
+            .map(|i| i.stock.clone())
+            .expect("part")
+    };
+    let opening = stock();
+
+    // The cash sale.
+    let mut s =
+        InvoiceScreen::new_kind(Arc::clone(&link), None, today(), SalesDocKind::SalesReceipt);
+    let c = bluestem(&s);
+    s.pick_client(c);
+    part_line(&mut s, part, "3", None);
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    assert!(s.error.is_none(), "{:?}", s.error);
+    let sale = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let sold = stock();
+    assert_ne!(sold, opening, "the sale moved stock");
+    let lines = shown(&s);
+    assert_eq!(lines.len(), 1, "derived lines stay out of the form");
+    let total = s
+        .editing
+        .as_ref()
+        .and_then(Editing::receipt)
+        .map(|r| r.total);
+    reload_save_reload(&mut s, sale, "Round trip");
+    assert_eq!(shown(&s), lines);
+    assert_eq!(
+        s.editing
+            .as_ref()
+            .and_then(Editing::receipt)
+            .map(|r| r.total),
+        total
+    );
+    assert_eq!(stock(), sold, "a re-save moves nothing");
+
+    // The linked return.
+    let mut s = InvoiceScreen::new_kind(Arc::clone(&link), None, today(), SalesDocKind::CreditMemo);
+    s.pick_client(c);
+    part_line(&mut s, part, "1", Some(sale));
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    if s.apply_open.is_some() {
+        s.submit_apply_panel(true);
+    }
+    assert!(s.error.is_none(), "{:?}", s.error);
+    let memo = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let returned = stock();
+    assert_ne!(returned, sold, "the return moved stock");
+    let lines = shown(&s);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].4, Some(sale), "Return of kept");
+    let total = s.editing.as_ref().and_then(Editing::memo).map(|r| r.total);
+    reload_save_reload(&mut s, memo, "Round trip");
+    assert_eq!(shown(&s), lines);
+    assert_eq!(
+        s.editing.as_ref().and_then(Editing::memo).map(|r| r.total),
+        total
+    );
+    assert_eq!(stock(), returned, "a re-save moves nothing");
+}
