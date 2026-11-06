@@ -266,14 +266,64 @@ fn warnings_without_a_selection_and_with_a_dirty_form() {
 fn an_engine_name_conflict_reads_like_the_local_check() {
     let mut r = Rig::new();
     r.cmd("list.new");
-    r.form().save_failed(ApiError::Conflict {
-        reason: ConflictReason::AlreadyExists,
-        current_version: None,
-        code: None,
-        message: UserText::default(),
-        details: cl_api::ConflictDetails::default(),
-    });
+    r.form().save_failed(
+        ApiError::Conflict {
+            reason: ConflictReason::AlreadyExists,
+            current_version: None,
+            code: None,
+            message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        },
+        None,
+    );
     assert_eq!(r.form().problems, vec![ItemProblem::NameTaken]);
-    r.form().save_failed(ApiError::NotFound { code: None });
+    r.form()
+        .save_failed(ApiError::NotFound { code: None }, None);
     assert!(r.form().error.is_some());
+}
+
+/// P24: with inventory on, a new part takes its accounts and opening
+/// stock; an opening in the closed period is refused in plain words.
+#[test]
+fn a_new_part_with_opening_stock() {
+    let mut r = Rig::new();
+    assert!(r.cmd("dev.demo_inventory_reset"));
+    assert_eq!(r.state("inventory"), true);
+    assert_eq!(r.state("kinds_available"), 6);
+    assert!(r.cmd("list.new"));
+    {
+        let f = r.form();
+        let mut d = f.form.current().clone();
+        d.kind = ItemKind::InventoryPart;
+        d.name = "Edging Stake".into();
+        d.part.opening_quantity = "50".into();
+        d.part.opening_value = "62.50".into();
+        d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 9, 30).ok();
+        f.form.edit(99, |x| *x = d);
+    }
+    r.s.save_form(SaveIntent::SaveAndClose);
+    assert_eq!(r.state("part_problems")[0], "closed_period");
+    {
+        let f = r.form();
+        let mut d = f.form.current().clone();
+        d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 10, 5).ok();
+        f.form.edit(99, |x| *x = d);
+    }
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    let mut demo = r.link.demo_state().expect("demo");
+    let made = demo
+        .items_mut()
+        .iter()
+        .find(|i| i.fields.name == "Edging Stake")
+        .cloned()
+        .expect("made");
+    assert_eq!(
+        made.stock.quantity_on_hand,
+        cl_core::Quantity::parse_wire("50").ok()
+    );
+    assert_eq!(
+        made.stock.asset_value,
+        cl_core::Money::parse_wire("62.50").ok()
+    );
+    assert!(made.fields.purchase.asset_account_id.is_some());
 }

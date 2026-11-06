@@ -23,8 +23,10 @@ use cl_api::{
 use cl_core::ids::{AccountId, ItemId, TenantId};
 use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLookups, RowKey};
 use cl_model::forms::{AfterSave, FormState, SaveIntent, SaveStart};
+use cl_model::inventory::{PartField, PartProblem};
 use cl_model::lists::items::{
-    ItemDraft, ItemEntry, ItemField, ItemFilter, ItemKind, ItemList, ItemProblem, check, price_text,
+    ItemDraft, ItemEntry, ItemField, ItemFilter, ItemKind, ItemList, ItemProblem, PartRules,
+    check_with_part, price_text,
 };
 use cl_model::{CommandId, Scope, commands};
 use eframe::egui::{self, RichText, Ui};
@@ -34,7 +36,8 @@ use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, LIST_FRAME};
-use crate::screens::company::form;
+use crate::screens::company::form::{self, DateInput};
+use crate::screens::inventory::items as part_panel;
 use crate::screens::lists::detail_pane as pane;
 use crate::screens::lists::rows::{TextRow, TextRows, column, figure_column, list_spec};
 use crate::theme::Tokens;
@@ -61,6 +64,8 @@ const F_TAXABLE: u64 = 5;
 const F_TAX_CODE: u64 = 40;
 const F_KIND: u64 = 6;
 const F_DISCOUNT: u64 = 7;
+/// P24: the inventory panel's fields (one undo step per change).
+const F_PART: u64 = 41;
 
 /// Width of the add/edit panel.
 const PANEL_WIDTH: f32 = 420.0;
@@ -121,6 +126,13 @@ struct FormPanel {
     editing: Option<ItemId>,
     form: FormState<ItemDraft>,
     problems: Vec<ItemProblem>,
+    /// P24: the inventory section's problems.
+    part_problems: Vec<PartProblem>,
+    part_focus: Option<PartField>,
+    /// A refusal shown in plain words (an inventory refusal, P24).
+    refusal: Option<String>,
+    /// The opening date's text field (a new part).
+    opening_date: DateInput,
     error: Option<ApiError>,
     focus: Option<ItemField>,
     task: Option<Task<Versioned<Item>>>,
@@ -128,17 +140,36 @@ struct FormPanel {
 
 impl FormPanel {
     fn new(editing: Option<ItemId>, draft: ItemDraft) -> FormPanel {
+        let opening_date = draft.part.opening_date.map_or_else(
+            || DateInput {
+                text: String::new(),
+                value: None,
+            },
+            DateInput::new,
+        );
         FormPanel {
             editing,
             form: FormState::new(draft),
             problems: Vec::new(),
+            part_problems: Vec::new(),
+            part_focus: None,
+            refusal: None,
+            opening_date,
             error: None,
             focus: Some(ItemField::Name),
             task: None,
         }
     }
 
-    fn save_failed(&mut self, e: ApiError) {
+    fn save_failed(&mut self, e: ApiError, lock: Option<cl_core::CalendarDate>) {
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.form.save_failed(cl_model::forms::SaveFailure {
+                message: cl_core::OwnerFacing::owner_message(&e),
+                detail: cl_core::OwnerFacing::scrubbed_detail(&e),
+            });
+            self.refusal = Some(text);
+            return;
+        }
         self.form.save_failed(cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
@@ -160,6 +191,14 @@ impl FormPanel {
     }
 }
 
+/// What the list reads.
+struct Loaded {
+    items: Vec<Item>,
+    accounts: Vec<Account>,
+    contacts: Vec<cl_api::Contact>,
+    inventory: bool,
+}
+
 /// The Item List window.
 pub struct ItemsScreen {
     link: Arc<CompanyLink>,
@@ -170,7 +209,7 @@ pub struct ItemsScreen {
     filter: ItemFilter,
     model: TextRows<ItemId>,
     grid: Grid,
-    load: Option<Task<(Vec<Item>, Vec<Account>)>>,
+    load: Option<Task<Loaded>>,
     loaded: bool,
     load_error: Option<ApiError>,
     toggle: Option<(ItemId, Task<Versioned<Item>>)>,
@@ -193,6 +232,11 @@ pub struct ItemsScreen {
     /// P23: the company's tax codes (the editor's Tax code picker).
     tax_codes: Vec<cl_api::TaxCode>,
     codes_job: Option<crate::screens::invoice::engine::Job<Vec<cl_api::TaxCode>>>,
+    /// P24: the company tracks inventory (parts may be made).
+    inventory: bool,
+    /// Vendors and the rest (the inventory panel's preferred vendor).
+    contacts: Vec<cl_api::Contact>,
+    today: cl_core::CalendarDate,
     /// Saves in other windows (Q-262).
     bus: crate::data_bus::Subscription,
     /// The list being read again after a save elsewhere: the cursor stays
@@ -248,9 +292,15 @@ impl ItemsScreen {
             typed_at: f64::NEG_INFINITY,
             compact: false,
             just_hidden: None,
+            inventory: false,
+            contacts: Vec::new(),
+            today: crate::shell::today(),
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
         };
+        if s.link.is_demo() {
+            s.today = crate::company::demo::DemoState::today();
+        }
         s.bus = s.link.bus().subscribe();
         s.start_load();
         s
@@ -279,12 +329,19 @@ impl ItemsScreen {
     fn start_load(&mut self) {
         self.load_error = None;
         if let Some(mut d) = self.link.demo_state() {
+            crate::company::demo::stock::refresh(&mut d);
             let items = d.items_mut().clone();
             let chart = d
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            self.load = Some(Task::ready((items, chart)));
+            let contacts = d.contacts_mut().clone();
+            self.load = Some(Task::ready(Loaded {
+                items,
+                accounts: chart,
+                contacts,
+                inventory: d.inventory.enabled,
+            }));
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -294,7 +351,22 @@ impl ItemsScreen {
         match group.read(&session, |s| async move {
             let items = s.items().list_all(&ApiItemFilter::default()).await?;
             let accounts = s.accounts().list_all(&AccountFilter::default()).await?;
-            Ok((items, accounts))
+            // P24: the inventory panel's vendors and the company's switch.
+            let contacts = s
+                .contacts()
+                .list_all(&cl_api::ContactFilter {
+                    contact_type: Some(cl_api::ContactType::Vendor),
+                    ..cl_api::ContactFilter::default()
+                })
+                .await
+                .unwrap_or_default();
+            let inventory = s.company_settings().await.is_ok_and(|c| c.inventory_on());
+            Ok(Loaded {
+                items,
+                accounts,
+                contacts,
+                inventory,
+            })
         }) {
             Ok(p) => self.load = Some(Task::Pending(p)),
             Err(_) => self.loaded = true,
@@ -364,6 +436,7 @@ impl ItemsScreen {
                     .fields
                     .discount_percent
                     .and_then(|p| cl_core::Quantity::parse_wire(&p.to_wire()).ok()),
+                part: part_panel::draft_of(&i.fields.purchase),
             })
             .collect();
         self.list = ItemList::new(entries);
@@ -491,6 +564,18 @@ impl ItemsScreen {
         self.panel.as_ref().is_some_and(|p| p.form.is_dirty())
     }
 
+    /// A blank form: a service on `income` (or the default), with the
+    /// inventory panel's starting accounts (P24).
+    fn blank_draft(&self, income: Option<AccountId>) -> ItemDraft {
+        let mut d = ItemDraft::new(income.or_else(|| self.default_income()));
+        d.part = part_panel::defaults(&self.accounts, self.today);
+        d
+    }
+
+    fn lock(&self) -> Option<cl_core::CalendarDate> {
+        crate::screens::inventory::demo_lock(&self.link)
+    }
+
     fn default_income(&self) -> Option<AccountId> {
         self.selected()
             .and_then(|id| self.item(id))
@@ -505,10 +590,7 @@ impl ItemsScreen {
             return;
         }
         self.warn = None;
-        self.panel = Some(Box::new(FormPanel::new(
-            None,
-            ItemDraft::new(self.default_income()),
-        )));
+        self.panel = Some(Box::new(FormPanel::new(None, self.blank_draft(None))));
     }
 
     /// Enter or Ctrl+E on a row.
@@ -604,26 +686,41 @@ impl ItemsScreen {
             if panel.task.is_some() {
                 return false;
             }
-            check(
+            let rules = PartRules {
+                item_types,
+                inventory: self.inventory,
+                closing_date: self.lock(),
+            };
+            let accounts = &self.accounts;
+            check_with_part(
                 panel.form.current(),
                 &self.list,
                 panel.editing,
-                item_types,
+                rules,
                 |a| self.is_income(a),
+                |a| accounts.iter().any(|x| x.id == a && x.is_active),
             )
         };
         let Some(panel) = self.panel.as_mut() else {
             return false;
         };
-        let checked = match checked {
+        let (checked, part) = match checked {
             Ok(c) => c,
             Err(problems) => {
-                panel.focus = problems.first().map(|p| p.field());
-                panel.problems = problems;
+                panel.focus = problems.item.first().map(|p| p.field());
+                panel.part_focus = if panel.focus.is_none() {
+                    problems.part.first().map(|p| p.field())
+                } else {
+                    None
+                };
+                panel.problems = problems.item;
+                panel.part_problems = problems.part;
                 return false;
             }
         };
         panel.problems.clear();
+        panel.part_problems.clear();
+        panel.refusal = None;
         panel.error = None;
         match panel.form.begin_save(intent) {
             SaveStart::Send(_) => {}
@@ -633,8 +730,23 @@ impl ItemsScreen {
             }
             SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
+        let opening = part.opening.map(|o| cl_api::OpeningStock {
+            quantity: o.quantity,
+            value: o.value,
+            as_of: o.as_of,
+        });
         let fields = ItemFields {
-            purchase: cl_api::ItemPurchase::default(),
+            purchase: cl_api::ItemPurchase {
+                purchase_description: part.purchase_description,
+                purchase_cost: part.cost,
+                expense_account_id: part.expense_account,
+                asset_account_id: part.asset_account,
+                cogs_account_id: part.cogs_account,
+                preferred_vendor_id: part.preferred_vendor,
+                reorder_point: part.reorder_point,
+                reorder_quantity: part.reorder_quantity,
+                unit_label: part.unit_label,
+            },
             name: checked.name,
             description: checked.description,
             unit_price: checked.price,
@@ -649,9 +761,15 @@ impl ItemsScreen {
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());
         if self.link.is_demo() {
-            let saved = demo_save(&self.link, existing, fields);
-            if let Some(panel) = self.panel.as_mut() {
-                panel.task = Some(Task::ready(saved));
+            let saved = demo_save_with_opening(&self.link, existing, fields, opening.as_ref());
+            let lock = self.lock();
+            match (saved, self.panel.as_mut()) {
+                (Ok(v), Some(panel)) => panel.task = Some(Task::ready(v)),
+                (Err(e), Some(panel)) => {
+                    panel.save_failed(e, lock);
+                    return false;
+                }
+                _ => {}
             }
             return self.poll_save();
         }
@@ -676,7 +794,9 @@ impl ItemsScreen {
                 })
             }
             None => group.write(&session, label, move |s| async move {
-                s.items().create(&fields, key).await
+                s.items()
+                    .create_with_opening(&fields, opening.as_ref(), key)
+                    .await
             }),
         };
         if let (Ok(p), Some(panel)) = (pending, self.panel.as_mut()) {
@@ -709,7 +829,8 @@ impl ItemsScreen {
                 true
             }
             Err(e) => {
-                panel.save_failed(e);
+                let lock = crate::screens::inventory::demo_lock(&self.link);
+                panel.save_failed(e, lock);
                 false
             }
         }
@@ -731,7 +852,8 @@ impl ItemsScreen {
                     .panel
                     .as_ref()
                     .and_then(|p| p.form.current().income_account);
-                self.panel = Some(Box::new(FormPanel::new(None, ItemDraft::new(income))));
+                let d = self.blank_draft(income);
+                self.panel = Some(Box::new(FormPanel::new(None, d)));
             }
             AfterSave::CloseWindow => {
                 self.panel = None;
@@ -745,9 +867,11 @@ impl ItemsScreen {
         if let Some(result) = self.load.as_mut().and_then(Task::try_take) {
             self.load = None;
             match result {
-                Ok((items, accounts)) => {
-                    self.items = items;
-                    self.accounts = accounts;
+                Ok(l) => {
+                    self.items = l.items;
+                    self.accounts = l.accounts;
+                    self.contacts = l.contacts;
+                    self.inventory = l.inventory;
                     self.apply();
                 }
                 Err(e) => {
@@ -915,6 +1039,23 @@ impl ItemsScreen {
             .map(|c| (c.id, format!("{} \u{b7} {}", c.code, c.name)))
             .collect();
         let item_types = self.item_types;
+        let inventory = self.inventory;
+        let today = self.today;
+        let lock = self.lock();
+        let lists = self
+            .panel
+            .as_ref()
+            .map(|p| {
+                part_panel::PanelLists::new(&self.accounts, &self.contacts, &p.form.current().part)
+            })
+            .unwrap_or_default();
+        let stock = self
+            .panel
+            .as_ref()
+            .and_then(|p| p.editing)
+            .and_then(|id| self.items.iter().find(|i| i.id == id))
+            .and_then(|i| part_panel::stock_of(Some(i)))
+            .cloned();
         let income_ids = {
             let keep = self
                 .panel
@@ -941,7 +1082,7 @@ impl ItemsScreen {
             let focus = panel.focus.take();
             let want = |f: ItemField| focus == Some(f);
             // Kind: services only until U-39.
-            let kinds = ItemKind::available(item_types);
+            let kinds = ItemKind::available_with(item_types, inventory);
             let labels: Vec<String> = kinds.iter().map(|k| t(k.label().as_str())).collect();
             let cur = kinds.iter().position(|k| *k == d.kind).unwrap_or(0);
             if let Some(i) = pane::picker(
@@ -1071,12 +1212,38 @@ impl ItemsScreen {
                 }
             }
             ui.add_space(4.0);
-            // The purchase side and units wait for U-39b (item-types-v1).
-            pane::pending(ui, tokens, &t("items.form.purchase_later"));
+            if d.kind == ItemKind::InventoryPart {
+                // P24: the inventory panel (units of measure come with WP-3).
+                let focus = panel.part_focus.take();
+                if let Some(next) = part_panel::panel(
+                    ui,
+                    tokens,
+                    &lists,
+                    &d.part,
+                    stock.as_ref(),
+                    panel.editing.is_none(),
+                    &mut panel.opening_date,
+                    today,
+                    focus,
+                ) {
+                    panel.form.edit(F_PART, |x| x.part = next);
+                }
+            } else if !item_types {
+                // The purchase side waits for U-39b (item-types-v1).
+                pane::pending(ui, tokens, &t("items.form.purchase_later"));
+            } else if !inventory {
+                form::hint(ui, tokens, &t("inventory.panel.turn_on"));
+            }
         });
         ui.add_space(6.0);
         for p in &panel.problems {
             ui.label(RichText::new(t(p.key().as_str())).color(tokens.warn_text));
+        }
+        for p in &panel.part_problems {
+            ui.label(RichText::new(part_panel::problem_text(*p, lock)).color(tokens.warn_text));
+        }
+        if let Some(r) = &panel.refusal {
+            ui.label(RichText::new(r).color(tokens.warn_text));
         }
         if let Some(e) = &panel.error {
             form::inline_error(ui, tokens, e);
@@ -1117,6 +1284,37 @@ impl ItemsScreen {
         self.sync_compact();
         self.place_cursor(keep);
     }
+}
+
+/// [`demo_save`] for a new part with its opening stock (Q-P24h): the
+/// demo engine refuses a closed or switched-off opening before anything is
+/// made, as the engine's transaction would.
+pub(crate) fn demo_save_with_opening(
+    link: &CompanyLink,
+    existing: Option<Item>,
+    fields: ItemFields,
+    opening: Option<&cl_api::OpeningStock>,
+) -> Result<Versioned<Item>, ApiError> {
+    if let (Some(o), Some(d)) = (opening, link.demo_state()) {
+        let lock = crate::company::demo::stock::closing(&d);
+        if lock.is_some_and(|c| o.as_of <= c) {
+            return Err(crate::company::demo::stock::refusal(
+                &crate::company::demo::inventory::DemoInventoryError::PeriodClosed,
+                lock,
+            ));
+        }
+    }
+    let saved = demo_save(link, existing, fields);
+    if let (Some(o), Some(mut d)) = (opening, link.demo_state()) {
+        crate::company::demo::stock::opening(&mut d, saved.record.id, o)?;
+        if let Some(i) = d.items_mut().iter().find(|i| i.id == saved.record.id) {
+            return Ok(Versioned {
+                version: RecordVersion::Fingerprint(i.fingerprint()),
+                record: i.clone(),
+            });
+        }
+    }
+    Ok(saved)
 }
 
 /// Saves into the demo items at once (no engine).
@@ -1251,6 +1449,14 @@ impl Screen for ItemsScreen {
             "list.toggle_active" => self.toggle_active(),
             "list.show_inactive" => self.set_show_inactive(!self.filter.show_inactive),
             "edit.find" => self.focus_search = true,
+            // Demo only (P24 scenarios): inventory on, the sample parts.
+            crate::screens::inventory::DEV_RESET => {
+                if !crate::screens::inventory::demo_reset(&self.link) {
+                    return false;
+                }
+                self.start_load();
+                self.poll();
+            }
             "form.save_new" | "form.save_close" => {
                 if self.panel.is_none() {
                     return false;
@@ -1353,7 +1559,19 @@ impl Screen for ItemsScreen {
             "toggling": self.toggle.is_some(),
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
-            "kinds_available": ItemKind::available(self.item_types).len(),
+            "kinds_available": ItemKind::available_with(self.item_types, self.inventory).len(),
+            "inventory": self.inventory,
+            "part_problems": self.panel.as_ref().map(|p| p
+                .part_problems
+                .iter()
+                .map(|x| x.key().as_str().rsplit('.').next().unwrap_or_default())
+                .collect::<Vec<_>>()),
+            "refusal": self.panel.as_ref().is_some_and(|p| p.refusal.is_some()),
+            "selected_on_hand": self
+                .selected()
+                .and_then(|id| self.item(id))
+                .and_then(|i| i.stock.quantity_on_hand)
+                .map(crate::screens::inventory::qty),
             "price_levels_available": self.price_levels,
         })
     }

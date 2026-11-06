@@ -291,6 +291,9 @@ pub enum SaveBlock {
     Folder(cl_settings::FolderError),
     /// The engine's settings have not been read yet.
     NotLoaded,
+    /// Turning inventory off while stock or value remains (P24, 409
+    /// `INVENTORY_IN_USE`, Q-P24j).
+    InventoryInUse,
 }
 
 impl SaveBlock {
@@ -308,6 +311,7 @@ impl SaveBlock {
             SaveBlock::Intake(b) => b.message_key(),
             SaveBlock::Folder(e) => intake_folders::legacy::folder_error_key(*e),
             SaveBlock::NotLoaded => "prefs.err.not_loaded",
+            SaveBlock::InventoryInUse => "inventory.refusal.in_use",
         }
     }
 }
@@ -506,11 +510,19 @@ impl PreferencesScreen {
         }
         let demo = self.link.demo_state().map(|mut d| {
             let taxes = crate::company::demo::sales_tax::items(&mut d, false);
-            (d.ai, d.finance.clone(), d.sales_tax.clone(), taxes)
+            (
+                d.ai,
+                d.finance.clone(),
+                d.sales_tax.clone(),
+                taxes,
+                d.inventory.enabled,
+            )
         });
-        if let Some((switches, finance, st, taxes)) = demo {
+        if let Some((switches, finance, st, taxes, inventory)) = demo {
             let mut loaded = crate::company::demo::preferences_loaded_with(switches);
             if let Some(s) = loaded.settings.as_mut() {
+                // P24: the demo engine keeps "Track inventory".
+                s.inventory_enabled = Some(inventory);
                 crate::company::demo::finance_charges::fill_settings(&finance, s);
                 s.sales_tax_enabled = Some(st.enabled);
                 s.sales_tax_basis = Some(st.basis);
@@ -567,6 +579,13 @@ impl PreferencesScreen {
         if let Some(on) = base.accounting.sales_tax.engine_enabled {
             base.flags.sales_tax_enabled = on;
         }
+        // P24 (U-25): the engine keeps "Track inventory" (NULL is off,
+        // Q-P24j); the local flag only stands in for an older engine.
+        if self.inventory_flag_on_engine()
+            && let Some(s) = loaded.settings.as_ref()
+        {
+            base.flags.inventory_enabled = s.inventory_on();
+        }
         base.ai.apply_engine(
             loaded.ai.as_ref(),
             loaded.consent.as_ref(),
@@ -582,6 +601,16 @@ impl PreferencesScreen {
         }
         self.loaded = loaded;
         self.loaded.done = true;
+    }
+
+    /// The engine keeps the inventory switch (`company-inventory-flag-v1`,
+    /// or the demo engine).
+    fn inventory_flag_on_engine(&self) -> bool {
+        self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::COMPANY_INVENTORY_FLAG)
     }
 
     /// The edits as the control channel and tests see them.
@@ -811,6 +840,17 @@ impl PreferencesScreen {
                 crate::company::demo::finance_charges::fill_settings(&demo.finance, s);
             }
         }
+        // P24: "Track inventory" goes by its own write; the engine refuses
+        // turning it off while stock remains (shown in plain words).
+        let inventory = (self.inventory_flag_on_engine()
+            && edits.flags.inventory_enabled != self.committed.flags.inventory_enabled)
+            .then_some(edits.flags.inventory_enabled);
+        if let (Some(on), Some(mut demo)) = (inventory, self.link.demo_state())
+            && crate::company::demo::stock::set_enabled(&mut demo, on).is_err()
+        {
+            self.block = Some(SaveBlock::InventoryInUse);
+            return false;
+        }
         let smtp = edits.email.update_for(self.loaded.smtp.as_ref());
         // Intake folders: the engine takes the whole list against the stamp
         // it was read with. It goes last, so an earlier failure never leaves
@@ -930,6 +970,11 @@ impl PreferencesScreen {
             if let Some(u) = sales_tax {
                 session
                     .set_sales_tax_settings(&u, cl_api::IdempotencyKey::new())
+                    .await?;
+            }
+            if let Some(on) = inventory {
+                session
+                    .set_inventory_enabled(on, cl_api::IdempotencyKey::new())
                     .await?;
             }
             if let Some(u) = smtp {
@@ -1095,6 +1140,12 @@ impl PreferencesScreen {
                     // Reload (which replaces the typed folder changes).
                     if intake_folders::source::is_stale(&e) {
                         self.intake.stale = true;
+                    } else if matches!(
+                        &e,
+                        CompanyError::Api(a)
+                            if cl_api::inventory_refusal(a) == Some(cl_api::InventoryRefusal::InUse)
+                    ) {
+                        self.block = Some(SaveBlock::InventoryInUse);
                     } else {
                         self.error = Some(e);
                     }

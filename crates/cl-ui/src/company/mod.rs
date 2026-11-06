@@ -45,6 +45,9 @@ pub enum CompanyEvent {
     OpenWindow(cl_model::CommandId),
     /// A short confirmation for the toast line (i18n key).
     Toast(&'static str),
+    /// A toast whose words are already filled in (P24: the NEGATIVE_STOCK
+    /// warning names the item, its date and on hand). Shown longer.
+    ToastText(String),
     /// Take this toast (i18n key) off the status bar now, if it is the
     /// one showing (P15: a refusal the owner has since fixed).
     ClearToast(&'static str),

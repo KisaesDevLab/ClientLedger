@@ -125,9 +125,11 @@ mod credit_memo;
 // P22 D6: Statements.
 mod finance_charges;
 mod statements;
+// P24 WP-2: inventory screens and reports.
+mod inventory;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 45] = [
+const TABLES: [&[(&str, &str)]; 46] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -173,6 +175,7 @@ const TABLES: [&[(&str, &str)]; 45] = [
     credit_memo::ENGLISH,
     statements::ENGLISH,
     finance_charges::ENGLISH,
+    inventory::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -784,8 +787,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.company.markup_hint", "An income account. Needed before you bill a cost with a markup; the cost itself stays on the account you pick for each line."),
     ("prefs.company.tax_hint", "Tax items, agencies and the Sales Tax report are not available yet; the default rate is used on new invoices."),
     ("prefs.company.inventory_intro", "Track quantities and average cost for the items you sell."),
-    ("prefs.company.inventory_on", "This company tracks inventory"),
-    ("prefs.company.inventory_hint", "Inventory items and reorder alerts are not available yet."),
+    ("prefs.company.inventory_on", "Track inventory"),
+    ("prefs.company.inventory_tip", "Inventory parts keep quantity on hand and average cost; sales post their cost."),
+    ("prefs.company.inventory_hint", "Track quantity on hand and average cost for inventory parts, with reorder alerts. Turning it off is possible only once nothing is on hand."),
     // AI
     ("prefs.ai.title", "AI suggestions"),
     ("prefs.ai.intro", "Off unless you turn it on. AI suggests accounts, payees, and tags, and reads bills \u{2014} it never sets an amount, and you accept every suggestion."),

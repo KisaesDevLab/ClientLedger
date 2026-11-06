@@ -534,6 +534,24 @@ fn opening_stock(
     create_adjustment(state, &a)
 }
 
+/// The developer story `dev.demo_inventory_sale`: a sale of two of the
+/// first sample part on the story date, as if entered in another window.
+///
+/// # Errors
+/// As [`post`].
+pub fn story_sale(state: &mut DemoState) -> Result<Vec<NegativeStock>, ApiError> {
+    let n = state.inventory.doc_types.len() + 1;
+    let id = TransactionId::parse(&format!("d8100000-0000-4000-8000-{n:012}"))
+        .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
+    let item = super::lists::item_id(FIRST_PART);
+    let lines = doc_lines(
+        state,
+        Side::Sale,
+        [(Some(item), Quantity::parse_wire("2").ok(), Money::ZERO)],
+    );
+    post(state, id, TxnType::Invoice, DemoState::today(), &lines)
+}
+
 // ---- Adjustments and counts ----------------------------------------------------
 
 fn next_adjustment_id(state: &DemoState) -> Result<TransactionId, ApiError> {

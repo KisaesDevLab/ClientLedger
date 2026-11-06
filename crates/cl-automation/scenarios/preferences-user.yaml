@@ -87,7 +87,7 @@ steps:
   - click: {role: check_box, label: This company charges sales tax}
   - screenshot: sales-tax
   - click: {role: button, label: Inventory}
-  - assert_exists: {role: check_box, label: This company tracks inventory}
+  - assert_exists: {role: check_box, label: Track inventory}
   - click: {role: button, label: Document intake}
   - assert_state: {key: screen.category, equals: inbox}
   - assert_state: {key: screen.intake.load, equals: ready}

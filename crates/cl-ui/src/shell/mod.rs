@@ -475,6 +475,17 @@ impl Shell {
                         self.toast(ctx, key);
                     }
                 }
+                CompanyEvent::ToastText(text) => {
+                    if let Some(ctx) = ctx {
+                        let now = ctx.input(|i| i.time);
+                        self.toast = Some(Toast {
+                            key: String::new(),
+                            text,
+                            until: now + 10.0,
+                        });
+                        ctx.request_repaint_after(Duration::from_secs(10));
+                    }
+                }
                 CompanyEvent::ClearToast(key) => {
                     if self.toast.as_ref().is_some_and(|t| t.key == key) {
                         self.toast = None;
@@ -1601,6 +1612,9 @@ fn make_any(
             return s;
         }
         if let Some(s) = crate::screens::sales_tax::make(kind, link, open.clone(), today) {
+            return s;
+        }
+        if let Some(s) = crate::screens::inventory::make(kind, link, open.clone(), today) {
             return s;
         }
         if let Some(s) = crate::screens::register::make(kind, link, open.clone(), today) {
