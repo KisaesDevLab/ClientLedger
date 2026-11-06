@@ -1,7 +1,9 @@
 # Selling more than is on hand (P24 WP-2, Q-148) against
 # `clientledger --demo`: an invoice for 8 landscape fabric rolls with 6 on
 # hand saves and shows the plan's NEGATIVE_STOCK warning (never blocks);
-# the item list shows on hand below zero. Synthetic.
+# the item list shows on hand below zero. A bill dated before the invoice
+# brings 10 in (no warning); voiding that bill puts the shortfall back and
+# the warning comes again (plan §6.4). Synthetic.
 name: inventory_negative
 description: "NEGATIVE_STOCK warns on an invoice and never blocks."
 steps:
@@ -30,6 +32,48 @@ steps:
   - key: Alt+S
   - assert_state: {key: toast, equals: "You're selling more Landscape Fabric Roll than you have on 11/04/2026 (-2 on hand). You can save; the cost is corrected when you receive more."}
   - screenshot: warning
+  # A bill dated 11/03 brings 10 rolls in before the sale.
+  - key: Ctrl+B
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "11/03/2026"}
+  - key: Tab
+  - type: {text: "200.00", target: {role: text_input, label: "Amount due ($)"}}
+  - key: Tab
+  # The vendor's default account filled an Expenses line: take it out.
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+Delete
+  - click: {label_contains: "Items "}
+  - assert_state: {key: screen.tab, equals: items}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "10"}
+  - key: Tab
+  - type: {text: "20"}
+  - key: Tab
+  - wait: {ms: 500}
+  - key: Alt+N
+  - assert_state: {key: screen.save.error, equals: false}
+  # Void it: newest first by date (the sample's 11/04 bill, then this one).
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: toast, equals: "You're selling more Landscape Fabric Roll than you have on 11/04/2026 (-2 on hand). You can save; the cost is corrected when you receive more."}
+  - screenshot: void-warning
+  - command: file.close_window
   - command: lists.items
   - command: dev.demo_inventory_reset
   - command: file.close_window
