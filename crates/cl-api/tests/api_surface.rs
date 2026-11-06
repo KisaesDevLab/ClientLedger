@@ -148,6 +148,7 @@ fn every_request_type_omits_both_keys() {
         },
     );
     let item = ItemFields {
+        purchase: cl_api::ItemPurchase::default(),
         name: "i".into(),
         description: None,
         unit_price: Some(Money::ZERO),

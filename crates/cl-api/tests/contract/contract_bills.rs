@@ -915,6 +915,7 @@ pub fn item_lines_u85(h: &Harness) {
     let item = h
         .run(s.items().create(
             &cl_api::ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: unique("Hydraulic filter"),
                 description: None,
                 unit_price: None,

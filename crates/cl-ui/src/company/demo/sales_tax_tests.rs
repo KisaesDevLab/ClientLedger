@@ -56,8 +56,10 @@ pub(crate) fn seed(g: &Value) -> Seed {
         let id = super::super::lists::item_id(900 + u32::try_from(k).expect("k"));
         let code = by_code(&state, it["taxCode"].as_str().expect("code"));
         state.items_mut().push(Item {
+            stock: cl_api::ItemStock::default(),
             id,
             fields: ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: name.into(),
                 description: None,
                 unit_price: None,

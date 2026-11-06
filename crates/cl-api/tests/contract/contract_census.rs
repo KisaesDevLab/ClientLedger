@@ -264,6 +264,7 @@ pub fn field_census(h: &Harness) {
     let item = h
         .run(s.items().create(
             &ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: unique("Census item"),
                 description: None,
                 unit_price: Some(Money::parse_wire("3.2500").expect("money")),

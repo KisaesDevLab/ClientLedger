@@ -46,12 +46,16 @@ pub enum ItemKind {
     Discount,
     /// A subtotal of the lines above it.
     Subtotal,
+    /// A part bought, stocked and sold, tracked at average cost (P24,
+    /// `item-types-v1`).
+    InventoryPart,
 }
 
 impl ItemKind {
     /// Every kind, in list order.
-    pub const ALL: [ItemKind; 5] = [
+    pub const ALL: [ItemKind; 6] = [
         ItemKind::Service,
+        ItemKind::InventoryPart,
         ItemKind::NonInventory,
         ItemKind::OtherCharge,
         ItemKind::Discount,
@@ -67,15 +71,28 @@ impl ItemKind {
             ItemKind::OtherCharge => "items.kind.other_charge",
             ItemKind::Discount => "items.kind.discount",
             ItemKind::Subtotal => "items.kind.subtotal",
+            ItemKind::InventoryPart => "items.kind.inventory_part",
         })
     }
 
     /// The kinds the engine can keep: services only until it stores an
-    /// item type (U-39, capability `item-types-v1`).
+    /// item type (U-39, capability `item-types-v1`). Inventory parts need
+    /// inventory turned on as well ([`ItemKind::available_with`]).
     #[must_use]
     pub fn available(item_types: bool) -> Vec<ItemKind> {
+        ItemKind::available_with(item_types, false)
+    }
+
+    /// [`ItemKind::available`], with inventory parts when the company
+    /// tracks inventory (P24: `item-types-v1` and the engine's
+    /// `inventoryEnabled`; the UI decides, Q-P24j).
+    #[must_use]
+    pub fn available_with(item_types: bool, inventory: bool) -> Vec<ItemKind> {
         if item_types {
-            ItemKind::ALL.to_vec()
+            ItemKind::ALL
+                .into_iter()
+                .filter(|k| inventory || *k != ItemKind::InventoryPart)
+                .collect()
         } else {
             vec![ItemKind::Service]
         }

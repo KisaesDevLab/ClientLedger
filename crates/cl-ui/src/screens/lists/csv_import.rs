@@ -483,6 +483,7 @@ impl CsvScreen {
                     Mapped::Item(i) => items.push((
                         line,
                         ItemFields {
+                            purchase: cl_api::ItemPurchase::default(),
                             name: i.name,
                             description: i.description,
                             unit_price: i.price,
@@ -1193,6 +1194,7 @@ fn demo_import(link: &CompanyLink, rows: Vec<(usize, Mapped)>, role: ContactType
                     link,
                     None,
                     ItemFields {
+                        purchase: cl_api::ItemPurchase::default(),
                         name: i.name,
                         description: i.description,
                         unit_price: i.price,

@@ -8,6 +8,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("items.kind.other_charge", "Other charge"),
     ("items.kind.discount", "Discount"),
     ("items.kind.subtotal", "Subtotal"),
+    ("items.kind.inventory_part", "Inventory part"),
     ("items.problem.kind_not_available", "This kind of item can't be kept yet. Choose Service."),
     ("items.problem.name_missing", "Type a name for the item."),
     ("items.problem.name_too_long", "The name is too long. Use 255 characters or fewer."),

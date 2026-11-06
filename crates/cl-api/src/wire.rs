@@ -71,6 +71,10 @@ impl Capabilities {
     pub const VENDOR_W9_ON_FILE: &'static str = "vendor-w9-on-file-v1";
     /// U-39 item types (non-inventory, other charge, discount, subtotal),
     /// the purchase side of two-sided items and a unit-of-measure label.
+    /// Widened by P24 (U-39b, plan §2.4): the `inventory_part` kind, asset
+    /// and COGS accounts, preferred vendor, reorder fields, the read-only
+    /// `quantityOnHand`, `averageCost`, `assetValue`, and item PUT with
+    /// `expectedUpdatedAt`. One of the eight P24 capabilities.
     pub const ITEM_TYPES: &'static str = "item-types-v1";
     /// U-40 price levels.
     pub const PRICE_LEVELS: &'static str = "price-levels-v1";
@@ -435,6 +439,26 @@ impl Capabilities {
     pub const BAD_DEBT_RECOVERY: &'static str = "bad-debt-recovery-v1";
     /// U-154: `Idempotency-Key` on a recovery.
     pub const IDEMPOTENCY_RECOVERY: &'static str = "idempotency-recovery-v1";
+    // P24 inventory (plan §2.4; contract per the plan, client-declared
+    // until the pin bump).
+    /// U-156: the `inventory_asset` account tag; turning inventory on
+    /// adopts or creates "Inventory Asset" and a default COGS account.
+    pub const INVENTORY_ACCOUNT: &'static str = "inventory-account-v1";
+    /// U-25 (inventory half): `inventoryEnabled` on `/company/settings`.
+    pub const COMPANY_INVENTORY_FLAG: &'static str = "company-inventory-flag-v1";
+    /// U-157, U-158: average costing on every document, `inventoryLines[]`
+    /// outside `lines`, `NEGATIVE_STOCK` warnings, cost restatements.
+    pub const INVENTORY_COSTING: &'static str = "inventory-costing-v1";
+    /// U-159: inventory adjustments, the count sheet, posting a count and
+    /// the opening quantity on item create.
+    pub const INVENTORY_ADJUST: &'static str = "inventory-adjust-v1";
+    /// U-160: inventory valuation summary and detail, stock status.
+    pub const INVENTORY_REPORTS: &'static str = "inventory-reports-v1";
+    /// U-78: `GET /items/reorder-alerts` and the reorder report.
+    pub const REORDER_ALERTS: &'static str = "reorder-alerts-v1";
+    /// `Idempotency-Key` on the inventory money writes (adjustments,
+    /// counts).
+    pub const IDEMPOTENCY_INVENTORY: &'static str = "idempotency-inventory-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

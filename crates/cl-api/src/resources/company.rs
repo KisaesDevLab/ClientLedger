@@ -384,6 +384,19 @@ pub struct CompanySettings {
     /// (`salesTaxSsuta`, Q-P23m, Q-SPF6: off for existing companies).
     #[serde(default)]
     pub sales_tax_ssuta: Option<bool>,
+    /// Inventory on (`inventoryEnabled`, U-25 inventory half,
+    /// `company-inventory-flag-v1`; NULL and older engines read as off,
+    /// Q-P24j).
+    #[serde(default)]
+    pub inventory_enabled: Option<bool>,
+}
+
+impl CompanySettings {
+    /// Whether the company tracks inventory (NULL is off, Q-P24j).
+    #[must_use]
+    pub fn inventory_on(&self) -> bool {
+        self.inventory_enabled == Some(true)
+    }
 }
 
 /// An optional money string (a JSON number is refused).
@@ -838,6 +851,36 @@ impl Session {
         settings_from(&reply).map(Some)
     }
 
+    /// Turns inventory on or off (`inventoryEnabled`, U-25, Q-P24j).
+    /// Turning it on adopts or creates the "Inventory Asset" account and a
+    /// default COGS account (U-156, `inventory-account-v1`). Refused locally
+    /// without `company-inventory-flag-v1` (an older engine would drop the
+    /// field and answer success).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without the capability (nothing sent);
+    /// `Conflict` with code `INVENTORY_IN_USE` when turning it off while
+    /// stock or value remains; `NoCompanyOpen`; any [`ApiError`].
+    pub async fn set_inventory_enabled(
+        &self,
+        on: bool,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        self.require_company()?;
+        if !self
+            .client()
+            .capabilities()
+            .has(Capabilities::COMPANY_INVENTORY_FLAG)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        let body = json_body(&serde_json::json!({ "inventoryEnabled": on }))?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply)
+    }
+
     /// The company's entity type and its equity role accounts (U-56).
     /// Refused locally until the engine advertises `equity-roles-v1`.
     ///
@@ -1050,6 +1093,47 @@ mod tests {
         "industry":null,"entityType":"single_member_llc","smtpPass":"enc:secret",
         "lockDate":"2026-01-31","setupComplete":true,
         "createdAt":"2026-10-01T10:00:00.000Z","updatedAt":"2026-10-02T10:00:00.000Z"}}"#;
+
+    /// P24 (U-25, Q-P24j): the flag is read (NULL is off) and written only
+    /// with `company-inventory-flag-v1`.
+    #[tokio::test]
+    async fn inventory_flag_reads_null_as_off_and_writes_with_the_capability() {
+        let off: CompanySettings =
+            serde_json::from_str(r#"{"inventoryEnabled":null}"#).expect("settings");
+        assert!(!off.inventory_on());
+        let old: CompanySettings = serde_json::from_str("{}").expect("older engine");
+        assert!(!old.inventory_on());
+        let on: CompanySettings =
+            serde_json::from_str(r#"{"inventoryEnabled":true}"#).expect("settings");
+        assert!(on.inventory_on());
+
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/settings"))
+            .respond_with(json(200, r#"{"settings":{"inventoryEnabled":true}}"#))
+            .mount(&server)
+            .await;
+        let bare = company_session(&server);
+        let e = bare
+            .set_inventory_enabled(true, IdempotencyKey::new())
+            .await
+            .expect_err("no capability");
+        assert!(matches!(e, ApiError::Local(LocalValidation::Unsupported)));
+        assert!(requests(&server, "PUT").await.is_empty(), "nothing sent");
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[Capabilities::COMPANY_INVENTORY_FLAG],
+        )
+        .await;
+        let saved = s
+            .set_inventory_enabled(true, IdempotencyKey::new())
+            .await
+            .expect("saved");
+        assert!(saved.inventory_on());
+        let body: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(body, serde_json::json!({"inventoryEnabled": true}));
+    }
 
     #[tokio::test]
     async fn profile_read_and_guarded_update_never_send_lock_date() {

@@ -634,6 +634,7 @@ impl ItemsScreen {
             SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let fields = ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: checked.name,
             description: checked.description,
             unit_price: checked.price,
@@ -1131,6 +1132,7 @@ pub(crate) fn demo_save(
     } else {
         let n = d.as_mut().map_or(0, |d| d.items_mut().len());
         Item {
+            stock: cl_api::ItemStock::default(),
             id: crate::company::demo::lists::item_id(900_000 + u32::try_from(n).unwrap_or(0)),
             fields,
             is_active: true,
@@ -1160,6 +1162,7 @@ fn kind_of(t: cl_api::ItemType) -> ItemKind {
         cl_api::ItemType::OtherCharge => ItemKind::OtherCharge,
         cl_api::ItemType::Discount => ItemKind::Discount,
         cl_api::ItemType::Subtotal => ItemKind::Subtotal,
+        cl_api::ItemType::InventoryPart => ItemKind::InventoryPart,
     }
 }
 
@@ -1171,6 +1174,7 @@ fn type_of(k: ItemKind) -> cl_api::ItemType {
         ItemKind::OtherCharge => cl_api::ItemType::OtherCharge,
         ItemKind::Discount => cl_api::ItemType::Discount,
         ItemKind::Subtotal => cl_api::ItemType::Subtotal,
+        ItemKind::InventoryPart => cl_api::ItemType::InventoryPart,
     }
 }
 

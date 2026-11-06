@@ -72,8 +72,10 @@ pub fn items() -> Vec<Item> {
     rows.iter()
         .enumerate()
         .map(|(i, (name, description, p, taxable, active))| Item {
+            stock: cl_api::ItemStock::default(),
             id: item_id(u32::try_from(i + 1).unwrap_or(u32::MAX)),
             fields: ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: (*name).to_string(),
                 description: description.map(str::to_string),
                 unit_price: p.and_then(price),
@@ -96,8 +98,10 @@ pub fn items() -> Vec<Item> {
 /// discount (taxable, so it lowers the taxable base, Q-P20t) and a subtotal.
 fn sales_kinds() -> Vec<Item> {
     let item = |n: u32, name: &str, kind, pct: Option<&str>| Item {
+        stock: cl_api::ItemStock::default(),
         id: item_id(n),
         fields: ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: name.to_string(),
             description: None,
             unit_price: None,
