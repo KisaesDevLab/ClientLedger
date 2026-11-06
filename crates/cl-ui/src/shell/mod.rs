@@ -1173,6 +1173,17 @@ impl Shell {
         self.toast.as_ref().map(|t| t.text.as_str())
     }
 
+    /// The toast when it is a full-sentence notice (no i18n key: P24's
+    /// NEGATIVE_STOCK warnings), shown wrapped above the status bar
+    /// instead of truncated inside it.
+    #[must_use]
+    pub fn toast_banner(&self) -> Option<&str> {
+        self.toast
+            .as_ref()
+            .filter(|t| t.key.is_empty())
+            .map(|t| t.text.as_str())
+    }
+
     /// Draw one frame of the whole shell into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1486,6 +1497,28 @@ impl Shell {
             self.shortcuts_open = false;
         }
         self.about.show(ctx);
+        if let Some(text) = self.toast_banner() {
+            let tokens = Tokens::of(ctx);
+            egui::Area::new(egui::Id::unique("toast_banner"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -48.0])
+                .show(ctx, |ui| {
+                    Frame::new()
+                        .fill(tokens.warn_surface)
+                        .stroke(egui::Stroke::new(1.0, tokens.warn))
+                        .corner_radius(6.0)
+                        .inner_margin(Margin::symmetric(14, 10))
+                        .show(ui, |ui| {
+                            ui.set_max_width(560.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(text).size(13.0).color(tokens.warn_text),
+                                )
+                                .wrap(),
+                            );
+                        });
+                });
+        }
         if let Some(dialog) = &mut self.error
             && errors::show(ctx, dialog) == errors::DialogAction::Close
         {
