@@ -730,11 +730,9 @@ pub(crate) mod tests {
         );
         assert!(body.get("quantityOnHand").is_none(), "stock is never sent");
         // A float on the wire is refused (money is exact).
-        let float = serde_json::json!({
-            "id": "d0000000-0000-4000-8000-b00000000010", "name": "W",
-            "incomeAccountId": "d0000000-0000-4000-8000-a00000004000", "averageCost": 3.5,
-        });
-        assert!(serde_json::from_value::<Item>(float).is_err());
+        let float = r#"{"id": "d0000000-0000-4000-8000-b00000000010", "name": "W",
+            "incomeAccountId": "d0000000-0000-4000-8000-a00000004000", "averageCost": 3.5}"#;
+        assert!(serde_json::from_str::<Item>(float).is_err());
         // An older item: every new key absent, nothing new sent.
         let old: Item = serde_json::from_str(ITEM).expect("old");
         assert!(old.fields.purchase.is_empty());
