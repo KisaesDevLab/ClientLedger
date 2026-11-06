@@ -81,6 +81,42 @@ pub fn cost(c: UnitCost) -> String {
     c.format(MoneyStyle::default())
 }
 
+/// An amount or quantity cell, right-aligned (DESIGN.md: numbers end on
+/// the right of their column).
+pub(crate) fn num(ui: &mut eframe::egui::Ui, text: eframe::egui::RichText) {
+    use eframe::egui;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(text);
+    });
+}
+
+/// A grid header; the number columns' headers end on the right too.
+pub(crate) fn head(ui: &mut eframe::egui::Ui, key: &str) {
+    use eframe::egui;
+    const NUMBERS: [&str; 10] = [
+        "col.on_hand",
+        "col.value",
+        "col.new_qty",
+        "col.average_cost",
+        "col.percent",
+        "col.quantity",
+        "col.running_quantity",
+        "col.running_value",
+        "col.reorder_point",
+        "col.reorder_quantity",
+    ];
+    let text = egui::RichText::new(t(key)).strong().size(12.0);
+    let right = NUMBERS.iter().any(|n| key.ends_with(n))
+        || key == "inventory.reorder.col.point"
+        || key == "inventory.reorder.col.order"
+        || key == "inventory.reorder.col.cost";
+    if right {
+        num(ui, text);
+    } else {
+        ui.label(text);
+    }
+}
+
 /// The plan's NEGATIVE_STOCK warning (§3), with the item's name.
 #[must_use]
 pub fn negative_text(name: &str, w: &NegativeStock) -> String {
@@ -264,7 +300,12 @@ fn announce_as(
     };
     let texts: Vec<String> = warnings
         .iter()
-        .map(|w| text_of(&name_of(w.item_id).unwrap_or_else(|| t("inventory.an_item")), w))
+        .map(|w| {
+            text_of(
+                &name_of(w.item_id).unwrap_or_else(|| t("inventory.an_item")),
+                w,
+            )
+        })
         .collect();
     link.push(crate::company::CompanyEvent::ToastText(texts.join(" ")));
 }

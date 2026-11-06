@@ -182,7 +182,7 @@ impl ReorderScreen {
                     "inventory.reorder.col.order",
                     "inventory.reorder.col.cost",
                 ] {
-                    ui.label(RichText::new(t(h)).strong().size(12.0));
+                    super::head(ui, h);
                 }
                 ui.end_row();
                 let mut last: Option<Option<cl_core::ids::ContactId>> = None;
@@ -197,12 +197,13 @@ impl ReorderScreen {
                     last = Some(r.preferred_vendor);
                     ui.label(RichText::new(vendor).strong());
                     ui.label(&r.name);
-                    ui.label(
+                    super::num(
+                        ui,
                         RichText::new(super::qty(r.on_hand))
                             .monospace()
                             .color(tokens.warn_text),
                     );
-                    ui.label(RichText::new(super::qty(r.reorder_point)).monospace());
+                    super::num(ui, RichText::new(super::qty(r.reorder_point)).monospace());
                     // U-161: "48 (4 case)" for a part bought by the case.
                     let mut order = r.reorder_quantity.map(super::qty).unwrap_or_default();
                     if let Some((unit, q)) = &r.in_purchase_unit {
@@ -211,8 +212,9 @@ impl ReorderScreen {
                             &[("qty", &order), ("n", &super::qty(*q)), ("unit", unit)],
                         );
                     }
-                    ui.label(RichText::new(order).monospace());
-                    ui.label(
+                    super::num(ui, RichText::new(order).monospace());
+                    super::num(
+                        ui,
                         RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
                             .monospace(),
                     );

@@ -331,7 +331,7 @@ impl ReportScreen {
                     "inventory.report.col.value",
                     "inventory.report.col.percent",
                 ] {
-                    ui.label(RichText::new(t(h)).strong().size(12.0));
+                    super::head(ui, h);
                 }
                 ui.end_row();
                 for r in &v.rows {
@@ -341,13 +341,15 @@ impl ReportScreen {
                             .or_else(|| self.books.name(r.item_id))
                             .unwrap_or_default(),
                     );
-                    ui.label(RichText::new(super::qty(r.on_hand)).monospace());
-                    ui.label(
+                    super::num(ui, RichText::new(super::qty(r.on_hand)).monospace());
+                    super::num(
+                        ui,
                         RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
                             .monospace(),
                     );
-                    ui.label(RichText::new(super::money(r.value)).monospace());
-                    ui.label(
+                    super::num(ui, RichText::new(super::money(r.value)).monospace());
+                    super::num(
+                        ui,
                         RichText::new(r.percent_of_total.clone().unwrap_or_default()).monospace(),
                     );
                     ui.end_row();
@@ -356,7 +358,7 @@ impl ReportScreen {
                     ui.label(RichText::new(t("inventory.report.total")).strong());
                     ui.label("");
                     ui.label("");
-                    ui.label(RichText::new(super::money(total)).monospace().strong());
+                    super::num(ui, RichText::new(super::money(total)).monospace().strong());
                     ui.label("");
                     ui.end_row();
                 }
@@ -411,7 +413,7 @@ impl ReportScreen {
                     "inventory.report.col.running_value",
                     "inventory.report.col.average_cost",
                 ] {
-                    ui.label(RichText::new(t(h)).strong().size(12.0));
+                    super::head(ui, h);
                 }
                 ui.end_row();
                 for r in rows.iter().take(self.shown) {
@@ -425,16 +427,20 @@ impl ReportScreen {
                     }
                     ui.label(type_text(r.txn_type));
                     ui.label(self.books.name(r.item_id).unwrap_or_default());
-                    ui.label(RichText::new(super::qty(r.quantity)).monospace());
-                    ui.label(RichText::new(super::money(r.value)).monospace());
+                    super::num(ui, RichText::new(super::qty(r.quantity)).monospace());
+                    super::num(ui, RichText::new(super::money(r.value)).monospace());
                     let q = RichText::new(super::qty(r.running_quantity)).monospace();
-                    ui.label(if r.running_quantity.is_negative() {
-                        q.color(tokens.warn_text)
-                    } else {
-                        q
-                    });
-                    ui.label(RichText::new(super::money(r.running_value)).monospace());
-                    ui.label(
+                    super::num(
+                        ui,
+                        if r.running_quantity.is_negative() {
+                            q.color(tokens.warn_text)
+                        } else {
+                            q
+                        },
+                    );
+                    super::num(ui, RichText::new(super::money(r.running_value)).monospace());
+                    super::num(
+                        ui,
                         RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
                             .monospace(),
                     );
@@ -480,7 +486,7 @@ impl ReportScreen {
                     "inventory.report.col.order",
                     "inventory.report.col.reorder_quantity",
                 ] {
-                    ui.label(RichText::new(t(h)).strong().size(12.0));
+                    super::head(ui, h);
                 }
                 ui.end_row();
                 for r in rows {
@@ -493,11 +499,12 @@ impl ReportScreen {
                     ui.label(r.description.clone().unwrap_or_default());
                     ui.label(self.books.vendor_name(r.preferred_vendor_id));
                     ui.label(r.unit_label.clone().unwrap_or_default());
-                    ui.label(
+                    super::num(
+                        ui,
                         RichText::new(r.reorder_point.map(super::qty).unwrap_or_default())
                             .monospace(),
                     );
-                    ui.label(RichText::new(super::qty(r.on_hand)).monospace());
+                    super::num(ui, RichText::new(super::qty(r.on_hand)).monospace());
                     if r.reorder == Some(true) {
                         ui.label(
                             RichText::new(t("inventory.report.order_now"))
@@ -507,7 +514,8 @@ impl ReportScreen {
                     } else {
                         ui.label("");
                     }
-                    ui.label(
+                    super::num(
+                        ui,
                         RichText::new(r.reorder_quantity.map(super::qty).unwrap_or_default())
                             .monospace(),
                     );

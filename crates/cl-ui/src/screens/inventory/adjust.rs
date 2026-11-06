@@ -379,7 +379,7 @@ impl AdjustScreen {
             .spacing([12.0, 4.0])
             .show(ui, |ui| {
                 for h in &heads {
-                    ui.label(RichText::new(t(h)).strong().size(12.0));
+                    super::head(ui, h);
                 }
                 ui.end_row();
                 for (i, row) in self.draft.rows.iter_mut().enumerate() {
@@ -416,7 +416,8 @@ impl AdjustScreen {
                     }
                     let part = row.item.and_then(|id| self.books.part(id));
                     let stock = part.map(|p| &p.stock);
-                    ui.label(
+                    super::num(
+                        ui,
                         RichText::new(
                             stock
                                 .and_then(|s| s.quantity_on_hand)
@@ -425,7 +426,8 @@ impl AdjustScreen {
                         )
                         .monospace(),
                     );
-                    ui.label(
+                    super::num(
+                        ui,
                         RichText::new(
                             stock
                                 .and_then(|s| s.asset_value)
@@ -455,7 +457,8 @@ impl AdjustScreen {
                             );
                         });
                         let new_q = cl_model::inventory::new_quantity(row);
-                        ui.label(
+                        super::num(
+                            ui,
                             RichText::new(new_q.map(super::qty).unwrap_or_default())
                                 .monospace()
                                 .color(tokens.text_secondary),
