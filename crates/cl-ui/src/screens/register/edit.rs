@@ -604,6 +604,7 @@ mod tests {
             item_id: None,
             quantity: None,
             unit_price: None,
+            unit_id: None,
         }
     }
 

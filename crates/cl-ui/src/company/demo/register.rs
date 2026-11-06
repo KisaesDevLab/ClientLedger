@@ -920,6 +920,7 @@ impl DemoLedger {
                 item_id: None,
                 quantity: None,
                 unit_price: None,
+                unit_id: None,
             });
         }
         // P24: the Items lines keep their item, quantity and cost.
@@ -934,6 +935,7 @@ impl DemoLedger {
                     l.item_id = Some(i.item);
                     l.quantity = i.quantity;
                     l.unit_price = i.unit_price;
+                    l.unit_id = i.unit;
                 }
             }
         }

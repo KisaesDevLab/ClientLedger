@@ -228,6 +228,7 @@ fn bill() -> CheckedBill {
             item: Some(item(1)),
             description: Some("Rollers".into()),
             qty: Some(Quantity::parse_wire("2.5").expect("qty")),
+            unit: None,
             rate: Some(money("9.00")),
             amount: money("22.50"),
             account: account(14),

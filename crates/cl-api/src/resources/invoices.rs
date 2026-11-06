@@ -487,6 +487,9 @@ pub struct InvoiceRecordLine {
     pub display_rate: Option<Money>,
     /// The line's tax code as the engine resolved it (`sales-tax-setup-v1`).
     pub tax_code: Option<LineTaxCode>,
+    /// The unit quantity and price are in (`units-of-measure-v1`, U-161;
+    /// `None`: the item's base unit).
+    pub unit: Option<cl_core::ids::UnitId>,
 }
 
 impl InvoiceRecordLine {
@@ -738,6 +741,8 @@ struct LineWire {
     markup_percent: Option<SignedPercent>,
     #[serde(default)]
     tax_code: Option<LineTaxCode>,
+    #[serde(default)]
+    unit_id: Option<cl_core::ids::UnitId>,
 }
 
 /// Reads the object as the [`Transaction`] and again for the invoice
@@ -810,6 +815,7 @@ impl<'de> Deserialize<'de> for InvoiceRecord {
                 markup_percent,
                 display_rate,
                 tax_code: x.tax_code,
+                unit: x.unit_id,
             });
         }
         Ok(InvoiceRecord {

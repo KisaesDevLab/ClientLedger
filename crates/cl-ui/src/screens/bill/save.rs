@@ -116,7 +116,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
         unit_price: l.rate,
         customer: l.contact,
         billable: l.billable,
-        unit: None,
+        unit: l.unit,
     }));
     let draft_attachment = draft.filter(|_| lines && !c.attachments.is_empty());
     match c.kind {
@@ -230,6 +230,7 @@ pub(crate) fn form_of(
             item: l.item,
             description: l.description.clone().unwrap_or_default(),
             qty: l.quantity,
+            unit: l.unit,
             rate: l.unit_price,
             amount: Some(l.amount),
             account: Some(l.account),

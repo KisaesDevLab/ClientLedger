@@ -175,7 +175,7 @@ pub fn item_split(l: &cl_model::forms::item_lines::CheckedItemLine) -> SplitLine
             item,
             quantity: l.qty,
             unit_price: l.rate,
-            unit: None,
+            unit: l.unit,
         }),
     }
 }
@@ -192,6 +192,7 @@ pub fn item_line_of(
         item: Some(item),
         description: l.description.clone().unwrap_or_default(),
         qty: l.quantity,
+        unit: l.unit_id,
         rate: l.unit_price,
         amount: Some(amount),
         account: Some(l.account_id),

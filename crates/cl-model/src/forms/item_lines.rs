@@ -22,7 +22,7 @@
 
 use std::fmt;
 
-use cl_core::ids::{AccountId, ContactId, ItemId, TagId};
+use cl_core::ids::{AccountId, ContactId, ItemId, TagId, UnitId};
 use cl_core::{Money, MoneyError, Quantity};
 
 use crate::rowkey::{RowKey, RowKeyGen};
@@ -66,8 +66,11 @@ pub struct ItemLine {
     pub item: Option<ItemId>,
     /// Description (sent as the line memo).
     pub description: String,
-    /// Quantity.
+    /// Quantity (in `unit`).
     pub qty: Option<Quantity>,
+    /// The unit of the item's unit set the quantity and cost are in
+    /// (`None`: the base unit; U-161).
+    pub unit: Option<UnitId>,
     /// Cost per unit (the rate), up to four decimals.
     pub rate: Option<Money>,
     /// The amount: typed, or `rate × qty` when both are set (kept in step by
@@ -90,6 +93,7 @@ impl fmt::Debug for ItemLine {
             .field("item", &self.item.is_some())
             .field("description", &!self.description.is_empty())
             .field("qty", &self.qty.is_some())
+            .field("unit", &self.unit)
             .field("rate", &self.rate.is_some())
             .field("amount", &self.amount.is_some())
             .field("account", &self.account.is_some())
@@ -109,6 +113,7 @@ impl ItemLine {
             item: None,
             description: String::new(),
             qty: None,
+            unit: None,
             rate: None,
             amount: None,
             account: None,
@@ -250,6 +255,8 @@ pub struct CheckedItemLine {
     pub description: Option<String>,
     /// Quantity (more than zero).
     pub qty: Option<Quantity>,
+    /// The unit (`None`: the base unit).
+    pub unit: Option<UnitId>,
     /// Rate (zero or more); set only together with `qty`.
     pub rate: Option<Money>,
     /// Amount, more than zero: `rate × qty` rounded to cents when both are
@@ -368,6 +375,7 @@ pub fn check_item_lines(
                 item: l.item,
                 description: crate::forms::lines::trimmed(&l.description),
                 qty: l.qty,
+                unit: l.unit.filter(|_| l.item.is_some()),
                 rate: l.rate.filter(|_| l.qty.is_some()),
                 amount,
                 account,

@@ -734,6 +734,11 @@ pub struct TransactionLine {
     /// The line's cost per unit (with `item_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_price: Option<Money>,
+    /// The unit `quantity` and `unit_price` are in (`units-of-measure-v1`,
+    /// U-161; `None`: the item's base unit). Form loading only, never part
+    /// of a fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_id: Option<cl_core::ids::UnitId>,
 }
 
 /// `line_role` of a deposit's cash-back line.

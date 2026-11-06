@@ -7,6 +7,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.label", "Lines"),
     ("lines.col.account", "Account"),
     ("lines.col.amount", "Amount"),
+    ("lines.col.unit", "Unit"),
+    ("lines.col.unit.help", "The unit the quantity and price are in (case, bottle). Only items with a unit set have one."),
     ("lines.col.memo", "Memo"),
     ("lines.col.customer_project", "Customer / Project"),
     ("lines.empty", "\u{2014}"),

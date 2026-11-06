@@ -78,6 +78,7 @@ pub(crate) fn form_of(
                 discount_percent: pct(l.discount_percent),
                 taxable: Some(l.is_taxable),
                 tag: l.tag,
+                unit: l.unit,
                 ..InvoiceLine::blank(keys.next_key())
             },
         })

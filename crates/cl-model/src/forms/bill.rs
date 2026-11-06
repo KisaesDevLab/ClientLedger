@@ -835,6 +835,7 @@ fn check_items(
                 item: l.item,
                 description: trimmed(&l.description),
                 qty: l.qty,
+                unit: l.unit.filter(|_| l.item.is_some()),
                 rate: l.rate.filter(|_| l.qty.is_some()),
                 amount,
                 account,
