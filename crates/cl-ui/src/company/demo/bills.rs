@@ -310,6 +310,19 @@ fn save(
     password: Option<&Secret>,
 ) -> Result<TransactionId, ApiError> {
     state.bills.writes += 1;
+    // P24: inventory parts move stock; the closed-period gate comes before
+    // the closing-date password (Q-P24b).
+    let side = if doc.credit {
+        super::stock::Side::VendorReturn
+    } else {
+        super::stock::Side::Receipt
+    };
+    let stock_lines = super::stock::doc_lines(
+        state,
+        side,
+        doc.lines.iter().map(|l| (l.item, l.quantity, l.amount)),
+    );
+    super::stock::gate(state, existing, doc.date, &stock_lines)?;
     let old = existing.and_then(|id| state.ledger.date_of(id));
     let dates: Vec<CalendarDate> = old.into_iter().chain([doc.date]).collect();
     if !state.bills.closing_off {
@@ -417,6 +430,12 @@ fn save(
         })
         .collect();
     state.ledger.set_line_details(&chart, id, ap, &details);
+    let kind = if doc.credit {
+        cl_api::TxnType::VendorCredit
+    } else {
+        cl_api::TxnType::Bill
+    };
+    super::stock::post(state, id, kind, doc.date, &stock_lines)?;
     let due = due_of(state, doc);
     let kept = state
         .bills
@@ -631,6 +650,7 @@ pub fn void(
     if state.bills.closing_off && password.is_some() {
         return Err(ApiError::Local(LocalValidation::Unsupported));
     }
+    super::stock::gate_remove(state, id)?;
     check_closing(closing(state), &[old], password)?;
     let paid = state.bills.info.get(&id).map(|i| (i.credit, i.paid));
     if let Some((credit, paid)) = paid
@@ -644,6 +664,7 @@ pub fn void(
         return Err(conflict(code));
     }
     state.ledger.void(id)?;
+    super::stock::remove(state, id)?;
     if let Some(i) = state.bills.info.get_mut(&id) {
         i.revision += 1;
     }
@@ -668,6 +689,7 @@ pub fn delete(
         .ledger
         .date_of(id)
         .ok_or(ApiError::NotFound { code: None })?;
+    super::stock::gate_remove(state, id)?;
     check_closing(closing(state), &[old], password)?;
     if let Some(i) = state.bills.info.get(&id)
         && i.paid.is_positive()
@@ -680,6 +702,7 @@ pub fn delete(
         return Err(conflict(code));
     }
     state.ledger.void(id)?;
+    super::stock::remove(state, id)?;
     state.bills.history.push((id, "delete"));
     Ok(())
 }
@@ -1006,6 +1029,37 @@ mod tests {
             received: true,
             draft_attachment: None,
         }
+    }
+
+    /// P24: a bill's part lines move stock; a void takes them out; a part
+    /// bill on or before the closing date is refused even with the
+    /// closing-date password (Q-P24b).
+    #[test]
+    fn part_bills_move_stock_and_closed_periods_refuse_them() {
+        let mut s = DemoState::new();
+        crate::company::demo::stock::set_enabled(&mut s, true).expect("on");
+        let part = crate::company::demo::lists::item_id(crate::company::demo::stock::FIRST_PART);
+        let asset = crate::company::demo::stock::asset_account(&mut s);
+        let mut d = draft(&mut s);
+        let mut line = BillLineDraft::expense(asset, money("65.00"));
+        line.item = Some(part);
+        line.quantity = cl_core::Quantity::parse_wire("20").ok();
+        line.unit_price = Some(money("3.25"));
+        d.lines = vec![line];
+        d.amount_due = money("65.00");
+        let id = create_bill(&mut s, &d, None).expect("saved");
+        let on_hand = |s: &DemoState| s.inventory.stock(part).expect("stock").quantity_on_hand;
+        assert_eq!(on_hand(&s), cl_core::Quantity::parse_wire("140").ok());
+        void(&mut s, id, None).expect("void");
+        assert_eq!(on_hand(&s), cl_core::Quantity::parse_wire("120").ok());
+        d.date = CalendarDate::from_ymd(2026, 9, 15).expect("d");
+        let pw = Secret::new(crate::company::demo::register::DEMO_CLOSING_PASSWORD);
+        let e = create_bill(&mut s, &d, Some(&pw)).expect_err("closed");
+        assert_eq!(
+            cl_api::inventory_refusal(&e),
+            Some(cl_api::InventoryRefusal::PeriodClosed)
+        );
+        assert_eq!(on_hand(&s), cl_core::Quantity::parse_wire("120").ok());
     }
 
     #[test]

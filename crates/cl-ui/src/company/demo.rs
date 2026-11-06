@@ -39,7 +39,9 @@ pub mod register;
 pub mod sales_tax;
 // P23 WP-3: owed, Pay Sales Tax, exemption certificates, recoveries.
 pub mod sales_tax_owed;
+// P24 WP-2: documents feed the inventory ledger; the inventory routes.
 pub mod statements;
+pub mod stock;
 pub mod template_store;
 pub mod templates;
 

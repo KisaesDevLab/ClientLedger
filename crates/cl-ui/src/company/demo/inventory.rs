@@ -415,6 +415,14 @@ pub struct DemoInventory {
     /// The demo company tracks inventory (`inventoryEnabled`; off like a
     /// new engine company until Preferences turns it on, Q-P24j).
     pub enabled: bool,
+    /// Each document's kind, for the valuation detail (WP-2).
+    pub doc_types: BTreeMap<String, cl_api::TxnType>,
+    /// The warnings of the last write (the screens read them once).
+    pub last_warnings: Vec<cl_api::NegativeStock>,
+    /// Adjustments recorded in the demo (counts and openings included).
+    pub adjustments: Vec<cl_api::AdjustmentRecord>,
+    /// The sample parts were added (once, on the first switch-on).
+    pub seeded: bool,
 }
 
 impl DemoInventory {
@@ -431,6 +439,18 @@ impl DemoInventory {
     /// [`CostError::Overflow`].
     pub fn rows(&self) -> Result<Vec<Row>, CostError> {
         replay(&self.moves)
+    }
+
+    /// The date of `doc`'s movements (`None` without any).
+    #[must_use]
+    pub fn date_of(&self, doc: &str) -> Option<CalendarDate> {
+        self.moves.iter().find(|m| m.doc == doc).map(|m| m.date)
+    }
+
+    /// Every live movement (the valuation detail reads them).
+    #[must_use]
+    pub fn moves(&self) -> &[Movement] {
+        &self.moves
     }
 
     /// Whether `doc` has movements.

@@ -630,7 +630,7 @@ impl CountWorksheet {
                 changed: false,
             })
             .collect();
-        rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        rows.sort_by_key(|r| r.name.to_lowercase());
         CountWorksheet {
             as_of: Some(as_of),
             rows,

@@ -916,6 +916,9 @@ pub fn create(
         return Err(refused("VALIDATION_ERROR", &json!({})));
     }
     cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
+    // P24: the inventory gate comes before the closing-date password.
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines);
+    super::stock::gate(state, None, new.txn_date, &stock)?;
     check_closing(closing(state), &[new.txn_date], password)?;
     if new
         .lines
@@ -953,6 +956,7 @@ pub fn create(
     // P23: the document's stored tax rows.
     let figures = preview(state, new, Some(id))?;
     super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::Invoice, new.txn_date, &stock)?;
     Ok(saved)
 }
 
@@ -1113,6 +1117,7 @@ pub fn void(
         .as_str()
         .and_then(|d| CalendarDate::parse_wire(d).ok())
         .ok_or(ApiError::Internal)?;
+    super::stock::gate_remove(state, id)?;
     check_closing(close, &[date], password)?;
     // The engine refuses a void while payments or credits are applied
     // (PR-3 S2): unapply or void those first.
@@ -1137,6 +1142,7 @@ pub fn void(
     state.invoices.writes += 1;
     let saved = versioned(&s.record);
     super::sales_tax::void_rows(state, id);
+    super::stock::remove(state, id)?;
     saved
 }
 
@@ -1240,6 +1246,8 @@ pub fn update(
             details: cl_api::ConflictDetails::default(),
         });
     }
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines);
+    super::stock::gate(state, Some(id), new.txn_date, &stock)?;
     check_closing(close, &[old_date, new.txn_date], password)?;
     let taken: BTreeSet<JournalLineId> = state
         .invoices
@@ -1314,6 +1322,7 @@ pub fn update(
     );
     let figures = preview(state, new, Some(id))?;
     super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::Invoice, new.txn_date, &stock)?;
     Ok(saved)
 }
 

@@ -423,6 +423,12 @@ pub struct CountSheetRow {
     /// Its name (owner data).
     #[serde(default)]
     pub name: Option<String>,
+    /// Its description (owner data; plan §2.4).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Usually bought from (plan §2.4).
+    #[serde(default)]
+    pub preferred_vendor_id: Option<ContactId>,
     /// Its unit label.
     #[serde(default)]
     pub unit_label: Option<String>,
@@ -657,8 +663,14 @@ pub struct StockStatusRow {
     /// Its name (owner data).
     #[serde(default)]
     pub name: Option<String>,
+    /// Its description (owner data; plan §2.4).
+    #[serde(default)]
+    pub description: Option<String>,
     /// On hand as of the date.
     pub on_hand: Quantity,
+    /// At or below its reorder point (the engine's flag, plan §2.4).
+    #[serde(default)]
+    pub reorder: Option<bool>,
     /// Its reorder point.
     #[serde(default)]
     pub reorder_point: Option<Quantity>,

@@ -533,6 +533,10 @@ pub fn create_memo(
 ) -> Result<CreditMemoRecord, ApiError> {
     seed(state);
     check_lines(&m.lines)?;
+    // P24: returned parts come back at the current average (no link,
+    // Q-P24e); the inventory gate comes before the password.
+    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &m.lines);
+    super::stock::gate(state, None, m.txn_date, &stock)?;
     check_closing(closing(state), &[m.txn_date], password)?;
     let mut p = super::invoices::preview(
         state,
@@ -618,6 +622,7 @@ pub fn create_memo(
     );
     state.credits.writes += 1;
     super::sales_tax::post_rows(state, id, m.txn_date, &p, -Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::CreditMemo, m.txn_date, &stock)?;
     get_memo(state, id)
 }
 
@@ -829,6 +834,7 @@ pub fn void_memo(
             .filter(|a| !a.voided)
             .filter_map(|a| a.applied),
     );
+    super::stock::gate_remove(state, id)?;
     check_closing(closing(state), &dates, password)?;
     for a in m.apps.iter().filter(|a| !a.voided) {
         settle(state, a.invoice, -a.amount)?;
@@ -843,6 +849,7 @@ pub fn void_memo(
         }
     }
     super::sales_tax::void_rows(state, id);
+    super::stock::remove(state, id)?;
     bump(state, id);
     Ok(())
 }
@@ -875,6 +882,8 @@ pub fn update_memo(
         .collect();
     let mut dates = vec![m.date, new.txn_date];
     dates.extend(refunds.iter().map(|r| r.0));
+    let stock = super::stock::sales_lines(state, super::stock::Side::CustomerReturn, &new.lines);
+    super::stock::gate(state, Some(id), new.txn_date, &stock)?;
     check_closing(closing(state), &dates, password)?;
     let mut p = super::invoices::preview(
         state,
@@ -929,6 +938,7 @@ pub fn update_memo(
     }
     bump(state, id);
     super::sales_tax::post_rows(state, id, new.txn_date, &p, -Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::CreditMemo, new.txn_date, &stock)?;
     get_memo(state, id)
 }
 
@@ -1300,6 +1310,9 @@ pub fn save_receipt(
     };
     let mut dates = vec![r.txn_date];
     dates.extend(old.as_ref().map(|(_, o)| o.record.date));
+    // P24: parts sold move stock; the inventory gate comes first.
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &r.lines);
+    super::stock::gate(state, old.as_ref().map(|(id, _)| *id), r.txn_date, &stock)?;
     check_closing(closing(state), &dates, password)?;
     let preview = preview_receipt(state, r)?;
     let total = dec(preview.figures.total);
@@ -1382,6 +1395,7 @@ pub fn save_receipt(
     );
     state.credits.writes += 1;
     super::sales_tax::post_rows(state, id, r.txn_date, &preview.figures, Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::CashSale, r.txn_date, &stock)?;
     Ok(record)
 }
 
@@ -1473,6 +1487,7 @@ pub fn void_receipt(
     if r.record.status == SalesDocStatus::Void {
         return Ok(());
     }
+    super::stock::gate_remove(state, id)?;
     check_closing(closing(state), &[r.record.date], password)?;
     if let Some(l) = r.ledger {
         if state.ledger.deposited_in(l).is_some() {
@@ -1486,6 +1501,7 @@ pub fn void_receipt(
         x.record.updated_at = version_of(x.version);
     }
     super::sales_tax::void_rows(state, id);
+    super::stock::remove(state, id)?;
     state.credits.writes += 1;
     Ok(())
 }
