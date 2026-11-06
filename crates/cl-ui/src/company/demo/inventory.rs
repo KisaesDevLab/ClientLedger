@@ -461,21 +461,24 @@ pub struct DocLine {
 }
 
 /// The engine's linked-return rules over a ledger (U-158): each linked
-/// return is of a sale of the same item dated on or before it, and the
-/// returns linked to a sale never pass what it sold (Q-P24x: a sale edited
-/// below them, moved after one, or losing the item is refused too).
+/// return is of a sale of the same item that comes before it in position
+/// order (date, then entry order: a credit memo entered before its sale on
+/// the same date is refused too, review S2), and the returns linked to a
+/// sale never pass what it sold (Q-P24x: a sale edited below them, moved
+/// after one, or losing the item is refused too).
 fn check_links(moves: &[Movement], doc: &str) -> Result<(), DemoInventoryError> {
-    let mut linked: BTreeMap<(&str, String), (Quantity, CalendarDate)> = BTreeMap::new();
+    let mut linked: BTreeMap<(&str, String), (Quantity, (CalendarDate, u64))> = BTreeMap::new();
     for m in moves {
         let (Some(sale), MoveKind::CustomerReturn { quantity }) = (m.return_of.as_deref(), m.kind)
         else {
             continue;
         };
+        let at = (m.date, m.seq);
         let e = linked
             .entry((sale, m.item.to_string()))
-            .or_insert((Quantity::ZERO, m.date));
+            .or_insert((Quantity::ZERO, at));
         e.0 = qadd(e.0, quantity)?;
-        e.1 = e.1.min(m.date);
+        e.1 = e.1.min(at);
     }
     for ((sale, item), (returned, first)) in linked {
         let sold = moves.iter().find(|m| {
@@ -491,7 +494,7 @@ fn check_links(moves: &[Movement], doc: &str) -> Result<(), DemoInventoryError> 
                 DemoInventoryError::ReturnExceedsSale
             });
         };
-        if sold.date > first {
+        if (sold.date, sold.seq) > first {
             return Err(if sale_side {
                 DemoInventoryError::SaleHasReturns
             } else {
@@ -620,6 +623,15 @@ impl DemoInventory {
         date: CalendarDate,
         lines: &[DocLine],
     ) -> Result<(), DemoInventoryError> {
+        // An edit keeps its entry order (as `replace` will); a new
+        // document comes after everything.
+        let seq = self
+            .moves
+            .iter()
+            .filter(|m| m.doc == doc)
+            .map(|m| m.seq)
+            .min()
+            .unwrap_or(u64::MAX);
         let mut next: Vec<Movement> = self
             .moves
             .iter()
@@ -631,7 +643,7 @@ impl DemoInventory {
                 doc: doc.to_string(),
                 item: l.item,
                 date,
-                seq: u64::MAX,
+                seq,
                 kind: l.kind,
                 fallback_cost: l.fallback_cost,
                 return_of: l.return_of.clone(),

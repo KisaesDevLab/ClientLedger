@@ -711,3 +711,73 @@ fn a_first_sale_uses_the_purchase_cost_snapshot() {
     assert_eq!(r.value, m("-5.01"));
     assert_eq!(r.on_hand, q("-2"));
 }
+
+/// Review S2 (engine assertReturns / assertSaleReturnsKept compare full
+/// positions): a credit memo entered before its sale on the same date can
+/// not link to it, before or on save; one entered after can; the sale
+/// edited on its own date keeps its place before the return; moved past
+/// the return's date it is refused.
+#[test]
+fn a_same_day_return_must_come_after_its_sale_in_entry_order() {
+    let w = item("W");
+    let line = |kind, return_of: Option<&str>| DocLine {
+        item: w,
+        kind,
+        fallback_cost: None,
+        return_of: return_of.map(str::to_string),
+    };
+    let ret = |n: &str, sale: Option<&str>| line(MoveKind::CustomerReturn { quantity: q(n) }, sale);
+    let mut inv = DemoInventory::default();
+    inv.post(
+        "B",
+        d("2026-01-05"),
+        &[line(
+            MoveKind::Receipt {
+                quantity: q("10"),
+                amount: m("30.00"),
+            },
+            None,
+        )],
+    )
+    .expect("bill");
+    // Entered first, unlinked; then the sale on the same date.
+    inv.post("EARLY", d("2026-01-08"), &[ret("1", None)])
+        .expect("early memo");
+    inv.post(
+        "SALE",
+        d("2026-01-08"),
+        &[line(MoveKind::Sale { quantity: q("3") }, None)],
+    )
+    .expect("sale");
+    // Linking the early memo: refused by the pre-check and by the save.
+    assert_eq!(
+        inv.check_write("EARLY", d("2026-01-08"), &[ret("1", Some("SALE"))]),
+        Err(DemoInventoryError::ReturnBeforeSale)
+    );
+    assert_eq!(
+        inv.edit("EARLY", d("2026-01-08"), &[ret("1", Some("SALE"))]),
+        Err(DemoInventoryError::ReturnBeforeSale)
+    );
+    // A memo entered after the sale on the same day links.
+    inv.post("LATE", d("2026-01-08"), &[ret("1", Some("SALE"))])
+        .expect("late memo links");
+    // Dated after the sale's day the early memo may link.
+    inv.edit("EARLY", d("2026-01-09"), &[ret("1", Some("SALE"))])
+        .expect("early memo moved a day later");
+    // The sale edited on its own date keeps its place; moved past its
+    // returns it is the sale that is refused.
+    inv.edit(
+        "SALE",
+        d("2026-01-08"),
+        &[line(MoveKind::Sale { quantity: q("2") }, None)],
+    )
+    .expect("same-day sale edit");
+    assert_eq!(
+        inv.edit(
+            "SALE",
+            d("2026-01-09"),
+            &[line(MoveKind::Sale { quantity: q("2") }, None)],
+        ),
+        Err(DemoInventoryError::SaleHasReturns)
+    );
+}
