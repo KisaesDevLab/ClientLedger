@@ -319,6 +319,7 @@ impl InvoiceScreen {
         header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.grid.ui(ui);
             self.item_set_up_ui(ui);
+            self.returns_ui(ui, tokens);
         });
         ui.add_space(8.0);
         header::locked_scope(ui, enabled, read_only, |ui| self.footer_ui(ui, tokens));

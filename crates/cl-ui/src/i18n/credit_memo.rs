@@ -111,4 +111,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("orphan.credit_memo_void", "voiding a credit memo"),
     ("orphan.sales_receipt_save", "saving a sales receipt"),
     ("orphan.sales_receipt_void", "voiding a sales receipt"),
+    // P24 (Q-P24e/u): Return of.
+    ("credit_memo.return_of.title", "Return of"),
+    ("credit_memo.return_of.hint", "Pick the sale a returned part came from: it comes back at that sale's cost. Not linked uses the current average cost."),
+    ("credit_memo.return_of.none", "Not linked (current average cost)"),
+    ("credit_memo.return_of.invoice", "Invoice {number} · {date}"),
+    ("credit_memo.return_of.receipt", "Sales receipt {number} · {date}"),
+    ("credit_memo.return_of.line", "Return of, line {n}"),
 ];

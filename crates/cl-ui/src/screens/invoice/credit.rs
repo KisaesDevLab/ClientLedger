@@ -58,6 +58,9 @@ fn lines_of(lines: &[cl_api::SalesDocLine], keys: &mut cl_grid::RowKeyGen) -> Ve
             discount_percent: pct(l.discount_percent),
             taxable: Some(l.is_taxable),
             tag: l.tag_id,
+            // P24: the unit and the linked sale come back with the line.
+            unit: l.unit_id,
+            return_of: l.return_of,
             ..InvoiceLine::blank(keys.next_key())
         })
         .collect()

@@ -1666,3 +1666,25 @@ pub fn live_memo_rows_on(state: &DemoState, invoice: TransactionId) -> usize {
         .filter(|a| !a.voided && a.invoice == invoice)
         .count()
 }
+
+/// P24 (Return of, Q-P24e/u): the client's live sales receipts that sold
+/// `item`: id, number and date.
+#[must_use]
+pub fn receipts_with_item(
+    state: &DemoState,
+    client: ContactId,
+    item: cl_core::ids::ItemId,
+) -> Vec<(TransactionId, Option<String>, cl_core::CalendarDate)> {
+    state
+        .credits
+        .receipts
+        .values()
+        .map(|r| &r.record)
+        .filter(|r| {
+            r.customer_id == Some(client)
+                && r.status != cl_api::SalesDocStatus::Void
+                && r.lines.iter().any(|l| l.item_id == Some(item))
+        })
+        .map(|r| (r.id, r.number.clone(), r.date))
+        .collect()
+}

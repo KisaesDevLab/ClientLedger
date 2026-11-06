@@ -2,7 +2,8 @@
 # `clientledger --demo` with inventory on: the Items tab beside Expenses,
 # a part bought by check (2 landscape fabric rolls at 30.00) and by card
 # (1 sprinkler head kit at 20.00), each saved and read back into its Items
-# tab. Synthetic.
+# tab; then a credit memo returns a roll sold on an invoice, linked to that
+# invoice in Return of (Q-P24e/u). Synthetic.
 name: inventory_forms
 description: "Items tab on Write Checks and card charges."
 steps:
@@ -86,6 +87,55 @@ steps:
   - assert_state: {key: screen.save.refused, equals: null}
   - assert_state: {key: screen.saved_count, equals: 1}
   - assert_no_clipping: {}
+  - command: file.close_window
+
+  # --- Credit memo: Return of the invoice that sold the roll -------------------
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "34"}
+  - key: Tab
+  - wait: {ms: 800}
+  - key: Alt+S
+  - command: clients.credit_memo
+  - assert_state: {key: screen.screen, equals: credit_memo}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "34"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.returns.part_lines, equals: 1}
+  - assert_state: {key: screen.returns.linked, equals: 0}
+  - assert_exists: {role: combo_box, label: "Return of, line 1"}
+  - click: {role: combo_box, label: "Return of, line 1"}
+  - click: {role: button, label_contains: "Invoice ", index: 0}
+  - assert_state: {key: screen.returns.linked, equals: 1}
+  - screenshot: return-of
+  - key: Alt+N
+  - click: {role: radio_button, label: Keep as credit}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.returns.linked, equals: 1}
   - command: file.close_window
   - command: lists.items
   - command: dev.demo_inventory_reset

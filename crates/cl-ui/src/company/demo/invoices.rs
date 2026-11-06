@@ -1688,3 +1688,33 @@ fn client_change_allowed(
     }
     Ok(())
 }
+
+/// P24 (Return of, Q-P24e/u): the client's live invoices that sold `item`:
+/// id, number and date.
+#[must_use]
+pub fn invoices_with_item(
+    state: &DemoState,
+    client: cl_core::ids::ContactId,
+    item: cl_core::ids::ItemId,
+) -> Vec<(TransactionId, Option<String>, cl_core::CalendarDate)> {
+    let (client, item) = (client.to_string(), item.to_string());
+    state
+        .invoices
+        .stored
+        .iter()
+        .filter(|(_, s)| {
+            let r = &s.record;
+            r["contactId"].as_str() == Some(client.as_str())
+                && r["status"].as_str() != Some("void")
+                && r["lines"].as_array().is_some_and(|ls| {
+                    ls.iter()
+                        .any(|l| l["itemId"].as_str() == Some(item.as_str()))
+                })
+        })
+        .filter_map(|(id, s)| {
+            let date = cl_core::CalendarDate::parse_wire(s.record["txnDate"].as_str()?).ok()?;
+            let number = s.record["txnNumber"].as_str().map(str::to_string);
+            Some((*id, number, date))
+        })
+        .collect()
+}

@@ -38,6 +38,7 @@ pub(crate) mod deposit_card;
 pub(crate) mod draw;
 pub(crate) mod email;
 pub(crate) mod engine;
+pub(crate) mod returns;
 mod save;
 
 use std::collections::{BTreeMap, HashMap};
@@ -394,6 +395,8 @@ pub struct InvoiceScreen {
     pub(crate) notice: Option<&'static str>,
     /// P24: an inventory refusal in plain words (closed period).
     pub(crate) inventory_note: Option<String>,
+    /// P24: the Return of pickers' sales (credit memos).
+    pub(crate) returns: returns::Returns,
     pub(crate) stale: bool,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) void_open: bool,
@@ -515,6 +518,7 @@ impl InvoiceScreen {
             error: None,
             notice: None,
             inventory_note: None,
+            returns: returns::Returns::default(),
             stale: false,
             closing_prompt: ClosingPrompt::default(),
             void_open: false,
@@ -798,6 +802,7 @@ impl InvoiceScreen {
     }
 
     pub(crate) fn poll(&mut self) {
+        self.poll_returns();
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
@@ -1231,6 +1236,7 @@ impl InvoiceScreen {
             "lost": self.lost.state_json(),
             "grid": { "focused": self.grid.has_focus() },
         });
+        v["returns"] = self.returns_json();
         v["next_number"] = json!(self.next_number);
         v["client_locked"] = json!(self.client_lock());
         v["deposits_on_hand"] = json!(self.deposit_card.count());
