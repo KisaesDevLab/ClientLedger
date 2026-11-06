@@ -96,7 +96,7 @@ pub use resources::inventory::{
 };
 pub use resources::items::{
     Item, ItemFields, ItemFilter, ItemPurchase, ItemSort, ItemStock, ItemType, ItemUpdate, Items,
-    OpeningStock, UNIT_LABEL_MAX_CHARS,
+    OpeningStock, UNIT_LABEL_MAX_CHARS, UnitPrice,
 };
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};

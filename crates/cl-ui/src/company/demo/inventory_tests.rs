@@ -272,6 +272,23 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
         }
         let ctx = format!("case {id} step {n}");
         let refused = s(&step["expect"], "code");
+        // Units (golden U): the demo's unit rules, then the step in base units.
+        let (step, unit_refused) = match c.get("unitSet") {
+            Some(set) => unit_step(set, step, &ctx),
+            None => (step.clone(), None),
+        };
+        let step = &step;
+        if let Some(e) =
+            s(step, "event").filter(|e| *e == "item_unit_prices" || *e == "unit_factor_change")
+        {
+            let _ = e;
+            assert_eq!(unit_refused, refused.map(str::to_string), "{ctx}");
+            continue;
+        }
+        if let Some(got) = unit_refused {
+            assert_eq!(Some(got.as_str()), refused, "{ctx} refusal");
+            continue;
+        }
         let w = match (run(&mut book, step, "", None), refused) {
             (Ok(w), None) => w,
             (Err(got), Some(want)) => {
@@ -361,8 +378,91 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
     book
 }
 
-/// Golden U waits for the demo's unit sets (P24 WP-3 step 3).
-const UNIT_CASES_PENDING: bool = true;
+/// Golden U runs (the demo's unit sets, P24 WP-3 step 3).
+const UNIT_CASES_PENDING: bool = false;
+
+/// A golden U step through the demo's unit rules: a line in a unit becomes
+/// its base quantity (`round4`, refused at zero); the unit-price and
+/// factor-change events are checked here. Answers the step to run and any
+/// refusal code.
+fn unit_step(set: &Value, step: &Value, ctx: &str) -> (Value, Option<String>) {
+    use crate::company::demo::units;
+    use cl_core::UnitFactor;
+    let factor_of = |name: &str| -> UnitFactor {
+        if s(set, "base") == Some(name) {
+            return UnitFactor::ONE;
+        }
+        set["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|u| s(u, "name") == Some(name))
+            .and_then(|u| s(u, "factor"))
+            .map_or_else(
+                || panic!("{ctx}: no unit {name}"),
+                |f| UnitFactor::parse_wire(f).expect("factor"),
+            )
+    };
+    match s(step, "event").expect("event") {
+        "item_unit_prices" => {
+            let base = m(s(step, "basePrice").expect("base price"));
+            for (unit, want) in step["expect"].as_object().expect("prices") {
+                let got = units::unit_price(base, factor_of(unit)).expect("price");
+                assert_eq!(got.to_wire(), want.as_str().expect("price"), "{ctx} {unit}");
+            }
+            return (step.clone(), None);
+        }
+        "unit_factor_change" => {
+            // Every unit of the set has been on a posted line by now.
+            let saved = cl_api::UnitSet {
+                id: cl_core::ids::UnitSetId::parse("d0000000-0000-4000-8001-000000000001")
+                    .expect("id"),
+                name: "Bottle".into(),
+                base_unit_name: s(set, "base").expect("base").into(),
+                base_unit_abbreviation: None,
+                is_active: true,
+                units: vec![cl_api::Unit {
+                    id: Some(
+                        cl_core::ids::UnitId::parse("d0000000-0000-4000-8002-000000000001")
+                            .expect("id"),
+                    ),
+                    name: s(step, "unit").expect("unit").into(),
+                    abbreviation: None,
+                    factor: factor_of(s(step, "unit").expect("unit")),
+                }],
+                in_use: true,
+                updated_at: None,
+            };
+            let mut next = cl_api::NewUnitSet {
+                name: saved.name.clone(),
+                base_unit_name: saved.base_unit_name.clone(),
+                base_unit_abbreviation: None,
+                is_active: true,
+                units: saved.units.clone(),
+            };
+            next.units[0].factor =
+                UnitFactor::parse_wire(s(step, "factor").expect("factor")).expect("f");
+            let r = units::check_change(&saved, &next, |_| true);
+            return (step.clone(), r.err().map(|e| e.code().to_string()));
+        }
+        _ => {}
+    }
+    let Some(unit) = s(step, "unit") else {
+        return (step.clone(), None);
+    };
+    let qty = q(s(step, "quantity").expect("quantity"));
+    match units::base_quantity(factor_of(unit), qty) {
+        Ok(base) => {
+            if let Some(b) = s(&step["expect"], "baseQuantity") {
+                assert_eq!(base.to_wire(), b, "{ctx} baseQuantity");
+            }
+            let mut out = step.clone();
+            out["quantity"] = Value::String(base.to_wire());
+            (out, None)
+        }
+        Err(e) => (step.clone(), Some(e.code().to_string())),
+    }
+}
 
 /// Every demo case of the golden file passes (P24 §6.2: average cost
 /// matches the reference, negative stock included).
@@ -383,7 +483,7 @@ fn inventory_golden() {
         play(all, id);
         ran.push(id.to_string());
     }
-    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "R", "F"] {
+    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "R", "U", "F"] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
 }
