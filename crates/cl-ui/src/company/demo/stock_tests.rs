@@ -226,3 +226,41 @@ fn adjustments_and_counts_in_a_unit_move_base_units() {
         Some(q("1"))
     );
 }
+
+/// U-161: the reorder report gives the reorder quantity in the part's
+/// purchase unit, round4(q / factor) half away from zero.
+#[test]
+fn the_reorder_report_names_the_purchase_unit() {
+    let mut d = on();
+    let set = d
+        .units
+        .create(&cl_api::NewUnitSet {
+            name: "Bag".into(),
+            base_unit_name: "bag".into(),
+            base_unit_abbreviation: None,
+            is_active: true,
+            units: vec![cl_api::Unit {
+                id: None,
+                name: "pallet".into(),
+                abbreviation: None,
+                factor: cl_core::UnitFactor::parse_wire("40").expect("factor"),
+            }],
+        })
+        .expect("set");
+    let item = part_id(0);
+    if let Some(i) = d.items_mut().iter_mut().find(|i| i.id == item) {
+        let p = &mut i.fields.purchase;
+        p.unit_set_id = Some(set.id);
+        p.default_purchase_unit_id = set.units[0].id;
+        p.reorder_point = Some(q("500"));
+        p.reorder_quantity = Some(q("90"));
+    }
+    let rows = reorder_report(&mut d).expect("report");
+    let r = rows.iter().find(|r| r.item_id == item).expect("row");
+    assert_eq!(
+        r.purchase_unit.as_ref().map(|u| u.name.as_str()),
+        Some("pallet")
+    );
+    assert_eq!(r.reorder_quantity_in_purchase_unit, Some(q("2.25")));
+    assert_eq!(r.base_unit.as_deref(), Some("bag"));
+}

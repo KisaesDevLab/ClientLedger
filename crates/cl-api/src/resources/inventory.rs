@@ -704,6 +704,31 @@ pub struct StockStatusRow {
     /// Its unit label.
     #[serde(default)]
     pub unit_label: Option<String>,
+    /// The base unit's name of a part with a unit set (U-161).
+    #[serde(default)]
+    pub base_unit: Option<String>,
+    /// The reorder report: the part's default purchase unit (U-161).
+    #[serde(default)]
+    pub purchase_unit: Option<PurchaseUnit>,
+    /// The reorder report: the reorder quantity in that unit
+    /// (`round4(reorderQuantity / factor)`, engine-computed).
+    #[serde(default)]
+    pub reorder_quantity_in_purchase_unit: Option<Quantity>,
+}
+
+/// A part's default purchase unit on the reorder report (U-161).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurchaseUnit {
+    /// The unit.
+    pub id: cl_core::ids::UnitId,
+    /// Its name (`case`).
+    pub name: String,
+    /// Its abbreviation.
+    #[serde(default)]
+    pub abbreviation: Option<String>,
+    /// Base units per unit.
+    pub factor: cl_core::UnitFactor,
 }
 
 impl fmt::Debug for StockStatusRow {

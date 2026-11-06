@@ -765,8 +765,11 @@ pub struct ReorderRow {
     pub on_hand: Quantity,
     /// Its reorder point.
     pub reorder_point: Quantity,
-    /// How many to order (`None`: not set).
+    /// How many to order (`None`: not set), in base units.
     pub reorder_quantity: Option<Quantity>,
+    /// The same in the part's purchase unit, engine-computed (U-161):
+    /// the unit's name and the quantity.
+    pub in_purchase_unit: Option<(String, Quantity)>,
     /// Usually bought from.
     pub preferred_vendor: Option<ContactId>,
     /// Average cost (shown).

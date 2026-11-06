@@ -89,7 +89,7 @@ pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Up
 pub use resources::inventory::{
     ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
     AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,
-    InventoryRefusal, NegativeStock, NewAdjustment, NewCount, Problem, ReorderAlert,
+    InventoryRefusal, NegativeStock, NewAdjustment, NewCount, Problem, PurchaseUnit, ReorderAlert,
     SavedAdjustment, StockStatusRow, ValuationAccount, ValuationDetailRow, ValuationRow,
     ValuationSummary, count_stale_items, inventory_refusal, inventory_refusal_codes, problems_in,
     stock_warnings, stock_warnings_from,

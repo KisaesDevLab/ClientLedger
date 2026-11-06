@@ -1061,6 +1061,12 @@ pub fn stock_status(
                 reorder_quantity: p.reorder_quantity,
                 preferred_vendor_id: p.preferred_vendor_id,
                 unit_label: p.unit_label.clone(),
+                base_unit: p
+                    .unit_set_id
+                    .and_then(|s| state.units.get(s))
+                    .map(|s| s.base_unit_name),
+                purchase_unit: None,
+                reorder_quantity_in_purchase_unit: None,
             }
         })
         .collect())
@@ -1080,6 +1086,51 @@ pub fn reorder_alerts(state: &mut DemoState) -> Result<Vec<ReorderAlert>, ApiErr
         .into_iter()
         .filter(|r| r.reorder == Some(true))
         .collect())
+}
+
+/// `GET /reports/reorder` (U-78, U-161): the alerts with each part's
+/// default purchase unit and the reorder quantity in it,
+/// `round4(reorderQuantity / factor)` half away from zero.
+///
+/// # Errors
+/// `INVENTORY_OFF`.
+pub fn reorder_report(state: &mut DemoState) -> Result<Vec<ReorderAlert>, ApiError> {
+    let mut rows = reorder_alerts(state)?;
+    for r in &mut rows {
+        let Some(item) = state
+            .items_mut()
+            .iter()
+            .find(|i| i.id == r.item_id)
+            .cloned()
+        else {
+            continue;
+        };
+        let p = &item.fields.purchase;
+        let (Some(set), Some(unit)) = (p.unit_set_id, p.default_purchase_unit_id) else {
+            continue;
+        };
+        let Some(u) = state
+            .units
+            .get(set)
+            .and_then(|s| s.units.into_iter().find(|u| u.id == Some(unit)))
+        else {
+            continue;
+        };
+        r.reorder_quantity_in_purchase_unit = r.reorder_quantity.and_then(|q| {
+            let d = q
+                .as_decimal()
+                .checked_div(u.factor.as_decimal())?
+                .round_dp_with_strategy(4, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+            Quantity::parse_wire(&d.to_string()).ok()
+        });
+        r.purchase_unit = Some(cl_api::PurchaseUnit {
+            id: unit,
+            name: u.name,
+            abbreviation: u.abbreviation,
+            factor: u.factor,
+        });
+    }
+    Ok(rows)
 }
 
 #[cfg(test)]

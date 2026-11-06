@@ -82,6 +82,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inventory.panel.reorder_quantity", "Reorder quantity"),
     ("inventory.panel.unit", "Unit (each, box)"),
     ("inventory.panel.unit_set", "Unit set"),
+    ("inventory.reorder.in_unit", "{qty} ({n} {unit})"),
     ("inventory.panel.no_unit_set", "None (one unit)"),
     ("inventory.panel.unit_set_fixed", "This part is on saved transactions, so its unit set stays as it is."),
     ("inventory.panel.purchase_unit", "Buy in"),

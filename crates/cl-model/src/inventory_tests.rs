@@ -301,6 +301,7 @@ fn the_reorder_list_groups_by_vendor() {
         on_hand: q("2"),
         reorder_point: q("5"),
         reorder_quantity: Some(q("20")),
+        in_purchase_unit: None,
         preferred_vendor: vendor.map(vid),
         average_cost: None,
     };

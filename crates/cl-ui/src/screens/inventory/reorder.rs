@@ -64,8 +64,9 @@ impl ReorderScreen {
         self.alerts_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            crate::company::demo::stock::reorder_alerts,
-            |s| async move { s.inventory().reorder_alerts().await },
+            crate::company::demo::stock::reorder_report,
+            // The report form: the alerts with each part's purchase unit.
+            |s| async move { s.inventory().reorder_report().await },
         ));
         self.poll();
     }
@@ -107,6 +108,11 @@ impl ReorderScreen {
                     on_hand: a.on_hand,
                     reorder_point: a.reorder_point?,
                     reorder_quantity: a.reorder_quantity,
+                    in_purchase_unit: a
+                        .purchase_unit
+                        .as_ref()
+                        .zip(a.reorder_quantity_in_purchase_unit)
+                        .map(|(u, q)| (u.name.clone(), q)),
                     preferred_vendor: a.preferred_vendor_id,
                     average_cost: self
                         .books
@@ -197,10 +203,15 @@ impl ReorderScreen {
                             .color(tokens.warn_text),
                     );
                     ui.label(RichText::new(super::qty(r.reorder_point)).monospace());
-                    ui.label(
-                        RichText::new(r.reorder_quantity.map(super::qty).unwrap_or_default())
-                            .monospace(),
-                    );
+                    // U-161: "48 (4 case)" for a part bought by the case.
+                    let mut order = r.reorder_quantity.map(super::qty).unwrap_or_default();
+                    if let Some((unit, q)) = &r.in_purchase_unit {
+                        order = t_with(
+                            "inventory.reorder.in_unit",
+                            &[("qty", &order), ("n", &super::qty(*q)), ("unit", unit)],
+                        );
+                    }
+                    ui.label(RichText::new(order).monospace());
                     ui.label(
                         RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
                             .monospace(),
