@@ -195,7 +195,7 @@ impl NewUnitSet {
         Ok(())
     }
 
-    fn body(&self, edit: Option<Option<Timestamp>>) -> Value {
+    fn body(&self, edit: bool, expected: Option<Timestamp>) -> Value {
         let clean = |s: &Option<String>| {
             s.as_ref()
                 .map(|v| v.trim().to_string())
@@ -222,9 +222,9 @@ impl NewUnitSet {
             "baseUnitAbbreviation": clean(&self.base_unit_abbreviation),
             "units": units,
         });
-        if let Some(at) = edit {
+        if edit {
             v["isActive"] = Value::Bool(self.is_active);
-            if let Some(t) = at {
+            if let Some(t) = expected {
                 v["expectedUpdatedAt"] = Value::String(t.to_wire());
             }
         }
@@ -311,7 +311,7 @@ impl UnitSets<'_> {
         require(self.0, Capabilities::UNITS_OF_MEASURE)?;
         n.check().map_err(ApiError::Local)?;
         let call = Call::at(Method::Post, UNIT_SET_CREATE.route()).json_body(
-            serde_json::to_vec(&n.body(None))
+            serde_json::to_vec(&n.body(false, None))
                 .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
         );
         let reply = self.0.send(&UNIT_SET_CREATE, call, None).await?;
@@ -337,7 +337,7 @@ impl UnitSets<'_> {
             id_path(UNIT_SET_PUT.route(), id),
         )
         .json_body(
-            serde_json::to_vec(&n.body(Some(expected)))
+            serde_json::to_vec(&n.body(true, expected))
                 .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
         );
         let reply = self.0.send(&UNIT_SET_PUT, call, None).await?;
@@ -385,13 +385,13 @@ mod tests {
 
     #[test]
     fn a_set_goes_out_with_factors_as_six_place_strings() {
-        let b = bottle().body(None);
+        let b = bottle().body(false, None);
         assert_eq!(b["baseUnitName"], "bottle");
         assert_eq!(b["baseUnitAbbreviation"], "btl");
         assert_eq!(b["units"][0]["factor"], "12.000000");
         assert_eq!(b["units"][1]["factor"], "1.333333");
         assert!(b.get("isActive").is_none(), "a create sends no isActive");
-        let e = bottle().body(Some(None));
+        let e = bottle().body(true, None);
         assert_eq!(e["isActive"], true);
     }
 

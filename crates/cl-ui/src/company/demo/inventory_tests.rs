@@ -124,6 +124,7 @@ fn run(
                     item_id: item(s(l, "item").expect("item")),
                     sheet_on_hand: q(s(l, "sheetOnHand").expect("sheet")),
                     counted_quantity: q(s(l, "countedQuantity").expect("counted")),
+                    unit_id: None,
                 })
                 .collect();
             let (_, w) = book
@@ -566,6 +567,7 @@ fn closed_periods_no_stock_and_stale_counts_are_refused() {
             item_id: w,
             sheet_on_hand: q("9"),
             counted_quantity: q("8"),
+            unit_id: None,
         }],
     );
     assert_eq!(stale, Err(DemoInventoryError::Stale(vec![w])));
@@ -577,6 +579,7 @@ fn closed_periods_no_stock_and_stale_counts_are_refused() {
                 item_id: w,
                 sheet_on_hand: q("10"),
                 counted_quantity: q("10"),
+                unit_id: None,
             }],
         )
         .expect("a matching count");

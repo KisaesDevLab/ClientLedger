@@ -244,6 +244,7 @@ impl CountScreen {
                     item_id: l.item,
                     sheet_on_hand: l.sheet_on_hand,
                     counted_quantity: l.counted,
+                    unit_id: None,
                 })
                 .collect(),
         };

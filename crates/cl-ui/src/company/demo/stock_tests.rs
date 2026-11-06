@@ -121,6 +121,7 @@ fn a_count_on_a_stale_sheet_names_the_items() {
             item_id: row.item_id,
             sheet_on_hand: q("1"),
             counted_quantity: q("3"),
+            unit_id: None,
         }],
     };
     let e = post_count(&mut d, &c).expect_err("stale");
@@ -130,6 +131,7 @@ fn a_count_on_a_stale_sheet_names_the_items() {
             item_id: row.item_id,
             sheet_on_hand: row.on_hand,
             counted_quantity: q("100"),
+            unit_id: None,
         }],
         ..c
     };

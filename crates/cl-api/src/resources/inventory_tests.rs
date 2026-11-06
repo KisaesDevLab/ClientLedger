@@ -46,6 +46,7 @@ fn adjustment() -> NewAdjustment {
             item_id: item(),
             quantity_change: Some(q("-1")),
             value_change: None,
+            unit_id: None,
         }],
     }
 }
@@ -146,6 +147,7 @@ fn adjustments_are_checked_before_sending() {
             item_id: item(),
             sheet_on_hand: q("4"),
             counted_quantity: q("3.5"),
+            unit_id: None,
         }],
     };
     assert!(count.check().is_ok());
@@ -353,6 +355,7 @@ async fn counts_post_or_answer_stale_items() {
             item_id: item(),
             sheet_on_hand: sheet.rows[0].on_hand,
             counted_quantity: q("3.5"),
+            unit_id: None,
         }],
     };
     let o = PostingOptions::default();

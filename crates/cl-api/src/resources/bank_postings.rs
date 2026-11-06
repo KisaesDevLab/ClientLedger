@@ -96,6 +96,8 @@ pub struct SplitItem {
     pub quantity: Option<Quantity>,
     /// Cost per unit (at most four places).
     pub unit_price: Option<Money>,
+    /// The unit (`units-of-measure-v1`; `None`: the base unit).
+    pub unit: Option<cl_core::ids::UnitId>,
 }
 
 /// A check to write (`POST /checks`, or `PUT /checks/{id}` with
@@ -1119,6 +1121,9 @@ fn line_extras(v: &mut Value, l: &SplitLine) {
         }
         if let Some(r) = i.unit_price {
             v["unitPrice"] = Value::String(r.to_wire());
+        }
+        if let Some(u) = i.unit {
+            v["unitId"] = json!(u);
         }
     }
 }

@@ -103,6 +103,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
             unit_price: None,
             customer: l.contact,
             billable: l.billable,
+            unit: None,
         })
         .collect();
     out.extend(c.item_lines.iter().map(|l| BillLineDraft {
@@ -115,6 +116,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
         unit_price: l.rate,
         customer: l.contact,
         billable: l.billable,
+        unit: None,
     }));
     let draft_attachment = draft.filter(|_| lines && !c.attachments.is_empty());
     match c.kind {

@@ -93,10 +93,21 @@ pub struct ItemPurchase {
     /// How many to order when it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reorder_quantity: Option<Quantity>,
-    /// Display label of the unit (`each`, `bag`; at most 10 characters,
-    /// Q-P24i: no conversions).
+    /// Display label of the unit of an item without a unit set (`each`,
+    /// `bag`; at most 10 characters).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_label: Option<String>,
+    /// The item's unit set (`units-of-measure-v1`, U-161); stock is kept in
+    /// its base unit. Changes only while no line names the item (409
+    /// `UNIT_IN_USE`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_set_id: Option<cl_core::ids::UnitSetId>,
+    /// The unit purchase lines start in (`None`: the base unit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_purchase_unit_id: Option<cl_core::ids::UnitId>,
+    /// The unit sales lines start in (`None`: the base unit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_sale_unit_id: Option<cl_core::ids::UnitId>,
 }
 
 impl ItemPurchase {
@@ -118,6 +129,9 @@ const PURCHASE_KEYS: &[&str] = &[
     "reorderPoint",
     "reorderQuantity",
     "unitLabel",
+    "unitSetId",
+    "defaultPurchaseUnitId",
+    "defaultSaleUnitId",
 ];
 
 /// The most characters of a unit label (Q-P24i).
@@ -324,6 +338,34 @@ pub struct ItemStock {
     /// The value on hand (what the inventory asset account holds for it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_value: Option<Money>,
+    /// The sale price in each unit of the item's set, the base unit first
+    /// (`round4(price × factor)`, engine-computed; U-161). Empty without a
+    /// set.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub unit_prices: Vec<UnitPrice>,
+}
+
+/// One unit's sale price on `GET /items` (`unitPrices[]`, U-161).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitPrice {
+    /// The unit (`None`: the base unit).
+    #[serde(default)]
+    pub unit_id: Option<cl_core::ids::UnitId>,
+    /// Its name.
+    pub name: String,
+    /// Its abbreviation.
+    #[serde(default)]
+    pub abbreviation: Option<String>,
+    /// Base units per unit.
+    pub factor: cl_core::UnitFactor,
+    /// The price in this unit (`None` without a base price).
+    #[serde(default)]
+    pub unit_price: Option<Money>,
 }
 
 impl EditableFields for Item {
@@ -346,6 +388,9 @@ impl EditableFields for Item {
         "reorderPoint",
         "reorderQuantity",
         "unitLabel",
+        "unitSetId",
+        "defaultPurchaseUnitId",
+        "defaultSaleUnitId",
     ];
 
     fn editable(&self) -> Value {

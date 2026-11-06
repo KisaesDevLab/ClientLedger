@@ -254,6 +254,10 @@ pub struct AdjustmentLine {
     /// Signed units (`parseQuantityChange`: non-zero, `|q| < 1e8`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantity_change: Option<Quantity>,
+    /// The unit `quantity_change` is in (`units-of-measure-v1`; `None`:
+    /// the base unit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_id: Option<cl_core::ids::UnitId>,
     /// Signed value in whole cents.
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -481,8 +485,12 @@ pub struct CountLine {
     pub item_id: ItemId,
     /// On hand as the sheet showed it.
     pub sheet_on_hand: Quantity,
-    /// What was counted (zero or more).
+    /// What was counted (zero or more), in `unit_id`.
     pub counted_quantity: Quantity,
+    /// The unit counted in (`units-of-measure-v1`; `None`: the base unit;
+    /// `sheet_on_hand` stays in the base unit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_id: Option<cl_core::ids::UnitId>,
 }
 
 impl fmt::Debug for CountLine {

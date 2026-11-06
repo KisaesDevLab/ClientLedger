@@ -737,6 +737,7 @@ impl DemoInventory {
             quantity_on_hand: Some(last.map_or(Quantity::ZERO, |r| r.on_hand)),
             average_cost: last.and_then(|r| r.last_cost),
             asset_value: Some(last.map_or(Money::ZERO, |r| r.asset_value)),
+            unit_prices: Vec::new(),
         })
     }
 

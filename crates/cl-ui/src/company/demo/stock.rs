@@ -539,6 +539,9 @@ fn seed(state: &mut DemoState) {
                     reorder_point: q(point),
                     reorder_quantity: q(reorder),
                     unit_label: Some(unit.into()),
+                    unit_set_id: None,
+                    default_purchase_unit_id: None,
+                    default_sale_unit_id: None,
                 },
             },
             is_active: true,
@@ -588,6 +591,7 @@ fn opening_stock(
             item_id: item,
             quantity_change: Some(quantity),
             value_change: Some(value),
+            unit_id: None,
         }],
     };
     create_adjustment(state, &a)
@@ -815,6 +819,7 @@ pub fn post_count(state: &mut DemoState, c: &NewCount) -> Result<CountResult, Ap
                     item_id: l.item,
                     quantity_change: Some(change),
                     value_change: None,
+                    unit_id: None,
                 }),
                 _ => None,
             })

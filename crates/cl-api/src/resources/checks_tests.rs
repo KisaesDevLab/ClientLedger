@@ -834,6 +834,7 @@ fn part_line(qty: &str, cost: Option<&str>, amount: &str) -> SplitLine {
             item: cl_core::ids::ItemId::parse(PART).expect("item"),
             quantity: Some(cl_core::Quantity::parse_wire(qty).expect("qty")),
             unit_price: cost.map(m),
+            unit: None,
         }),
         ..line(MULCH, amount)
     }
@@ -878,6 +879,7 @@ fn a_part_line_whose_amount_is_not_quantity_times_cost_is_refused_locally() {
             item: cl_core::ids::ItemId::parse(PART).expect("item"),
             quantity: None,
             unit_price: Some(m("3.00")),
+            unit: None,
         }),
         ..line(MULCH, "33.34")
     }];

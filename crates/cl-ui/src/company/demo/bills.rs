@@ -767,6 +767,7 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<BillRec
             item: None,
             quantity: None,
             unit_price: None,
+            unit: None,
         })
         .collect();
     if let Some(i) = &info {

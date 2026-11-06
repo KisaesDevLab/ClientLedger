@@ -187,6 +187,7 @@ impl AdjustScreen {
                     item_id: l.item,
                     quantity_change: l.quantity_change,
                     value_change: l.value_change,
+                    unit_id: None,
                 })
                 .collect(),
         };

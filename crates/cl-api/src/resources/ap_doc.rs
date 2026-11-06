@@ -220,6 +220,9 @@ pub struct BillLineDraft {
     pub customer: Option<ContactId>,
     /// Billable to `customer` (`bill-lines-v1`; needs the customer).
     pub billable: bool,
+    /// The unit quantity and cost are in (`units-of-measure-v1`, U-161;
+    /// `None`: the item's base unit).
+    pub unit: Option<cl_core::ids::UnitId>,
 }
 
 impl BillLineDraft {
@@ -236,6 +239,7 @@ impl BillLineDraft {
             unit_price: None,
             customer: None,
             billable: false,
+            unit: None,
         }
     }
 
@@ -402,6 +406,9 @@ pub(crate) fn doc_body(p: &DocParts<'_>, caps: &Capabilities, update: bool) -> V
             }
             if let Some(r) = l.unit_price {
                 v["unitPrice"] = Value::String(r.to_wire());
+            }
+            if let Some(u) = l.unit {
+                v["unitId"] = json!(u);
             }
             if let Some(c) = l.customer {
                 v["contactId"] = json!(c);
@@ -705,6 +712,8 @@ pub struct BillRecordLine {
     pub quantity: Option<Quantity>,
     /// Cost per unit.
     pub unit_price: Option<Money>,
+    /// The unit (`None`: the base unit).
+    pub unit: Option<cl_core::ids::UnitId>,
 }
 
 impl fmt::Debug for BillRecordLine {
@@ -831,6 +840,8 @@ struct LineWire {
     quantity: Option<Quantity>,
     #[serde(default)]
     unit_price: Option<Money>,
+    #[serde(default)]
+    unit_id: Option<cl_core::ids::UnitId>,
 }
 
 /// Reads the object as the [`Transaction`] and again for the A/P fields.
@@ -870,6 +881,7 @@ impl<'de> Deserialize<'de> for BillRecord {
                     item: x.item_id,
                     quantity: x.quantity,
                     unit_price: x.unit_price,
+                    unit: x.unit_id,
                 })
             })
             .collect();
