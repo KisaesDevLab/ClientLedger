@@ -152,6 +152,51 @@ pub fn unit_refusal_text(e: &ApiError) -> Option<String> {
     Some(t(key))
 }
 
+/// The Unit picker of an adjustment or count row whose part has a unit
+/// set (`units`: its `unitPrices[]`, the base unit first; U-161). Nothing
+/// is drawn without units. Returns true when the unit changed.
+pub(crate) fn unit_picker(
+    ui: &mut eframe::egui::Ui,
+    salt: &'static str,
+    row: usize,
+    units: &[cl_api::UnitPrice],
+    unit: &mut Option<cl_core::ids::UnitId>,
+) -> bool {
+    use eframe::egui;
+    if units.is_empty() {
+        return false;
+    }
+    let current = *unit;
+    let shown = units
+        .iter()
+        .find(|u| u.unit_id == current)
+        .or_else(|| units.first())
+        .map(|u| u.name.clone())
+        .unwrap_or_default();
+    let label = format!("{} {}", t("lines.col.unit"), row + 1);
+    let mut pick = None;
+    egui::ComboBox::from_id_salt((salt, row))
+        .selected_text(shown)
+        .width(90.0)
+        .show_ui(ui, |ui| {
+            for u in units {
+                if ui.selectable_label(u.unit_id == current, &u.name).clicked() {
+                    pick = Some(u.unit_id);
+                }
+            }
+        })
+        .response
+        .on_hover_text(t("lines.col.unit.help"))
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &label));
+    match pick {
+        Some(p) if p != current => {
+            *unit = p;
+            true
+        }
+        _ => false,
+    }
+}
+
 /// The demo's closing date, else `None` (live screens read it from the
 /// engine's error when it refuses).
 #[must_use]

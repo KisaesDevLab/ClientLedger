@@ -380,6 +380,8 @@ pub struct AdjustRow {
     /// On hand at the date as the engine reported it (shown; used for the
     /// "New quantity" column).
     pub on_hand: Option<Quantity>,
+    /// The unit the quantity change is in (U-161; `None`: the base unit).
+    pub unit: Option<UnitId>,
 }
 
 /// The adjustment form.
@@ -406,6 +408,8 @@ pub struct CheckedAdjustLine {
     pub quantity_change: Option<Quantity>,
     /// Signed value change.
     pub value_change: Option<Money>,
+    /// The unit of `quantity_change` (`None`: the base unit).
+    pub unit: Option<UnitId>,
 }
 
 /// The adjustment, checked.
@@ -465,6 +469,11 @@ impl AdjustProblem {
 /// The new quantity a row shows (on hand + change), when both are known.
 #[must_use]
 pub fn new_quantity(row: &AdjustRow) -> Option<Quantity> {
+    // In another unit the engine converts (round4(q × factor)); the
+    // preview of on hand in base units is not the desktop's to derive.
+    if row.unit.is_some() {
+        return None;
+    }
     let change = parse_qty(&row.quantity, QTY_CHANGE_RULES).ok().flatten()?;
     row.on_hand?.checked_add(change).ok()
 }
@@ -535,6 +544,7 @@ pub fn check_adjustment(
         if quantity_change.is_some() || value_change.is_some() {
             lines.push(CheckedAdjustLine {
                 item,
+                unit: r.unit.filter(|_| quantity_change.is_some()),
                 quantity_change,
                 value_change,
             });
@@ -569,6 +579,8 @@ pub struct CountRow {
     pub on_hand: Quantity,
     /// What the owner counted, as typed (blank: not counted).
     pub counted: String,
+    /// The unit counted in (U-161; `None`: the base unit, as on hand is).
+    pub unit: Option<UnitId>,
     /// On hand changed since the owner started (after a 409 `STALE`
     /// reload): highlighted until the owner looks again.
     pub changed: bool,
@@ -623,8 +635,10 @@ pub struct CheckedCountLine {
     pub item: ItemId,
     /// On hand as the sheet showed it.
     pub sheet_on_hand: Quantity,
-    /// Counted.
+    /// Counted (in `unit`).
     pub counted: Quantity,
+    /// The unit counted in (`None`: the base unit).
+    pub unit: Option<UnitId>,
 }
 
 impl CountWorksheet {
@@ -643,6 +657,7 @@ impl CountWorksheet {
                 unit_label,
                 on_hand,
                 counted: String::new(),
+                unit: None,
                 changed: false,
             })
             .collect();
@@ -660,6 +675,10 @@ impl CountWorksheet {
     #[must_use]
     pub fn difference(&self, i: usize) -> Option<Quantity> {
         let r = self.rows.get(i)?;
+        // Counted in another unit: the engine converts it (Q-P24v).
+        if r.unit.is_some() {
+            return None;
+        }
         let counted = parse_qty(&r.counted, QTY_RULES).ok().flatten()?;
         counted.checked_sub(r.on_hand).ok()
     }
@@ -712,6 +731,7 @@ impl CountWorksheet {
                     item: r.item,
                     sheet_on_hand: r.on_hand,
                     counted,
+                    unit: r.unit,
                 }),
                 Ok(None) => {}
                 Err(()) => problems.push(CountProblem::CountInvalid(i)),

@@ -187,7 +187,7 @@ impl AdjustScreen {
                     item_id: l.item,
                     quantity_change: l.quantity_change,
                     value_change: l.value_change,
-                    unit_id: None,
+                    unit_id: l.unit,
                 })
                 .collect(),
         };
@@ -408,6 +408,9 @@ impl AdjustScreen {
                             )
                         });
                     if let Some(p) = pick {
+                        if row.item != Some(p) {
+                            row.unit = None;
+                        }
                         row.item = Some(p);
                         changed_item = true;
                     }
@@ -433,10 +436,23 @@ impl AdjustScreen {
                     );
                     if show_qty {
                         let label = format!("{} {}", t("inventory.adjust.col.qty_change"), i + 1);
-                        let r = ui
-                            .add_sized([90.0, 22.0], egui::TextEdit::singleline(&mut row.quantity));
-                        r.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, &label)
+                        let units = part.map_or(&[][..], |p| p.stock.unit_prices.as_slice());
+                        ui.horizontal(|ui| {
+                            let r = ui.add_sized(
+                                [90.0, 22.0],
+                                egui::TextEdit::singleline(&mut row.quantity),
+                            );
+                            r.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::TextInput, true, &label)
+                            });
+                            // U-161: a part with a unit set picks the unit.
+                            super::unit_picker(
+                                ui,
+                                "inventory_adjust_unit",
+                                i,
+                                units,
+                                &mut row.unit,
+                            );
                         });
                         let new_q = cl_model::inventory::new_quantity(row);
                         ui.label(

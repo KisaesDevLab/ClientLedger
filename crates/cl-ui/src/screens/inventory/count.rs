@@ -244,7 +244,7 @@ impl CountScreen {
                     item_id: l.item,
                     sheet_on_hand: l.sheet_on_hand,
                     counted_quantity: l.counted,
-                    unit_id: None,
+                    unit_id: l.unit,
                 })
                 .collect(),
         };
@@ -475,6 +475,7 @@ impl CountScreen {
             .map(|i| self.sheet.difference(i).map(super::qty))
             .collect();
         let descriptions = &self.descriptions;
+        let books = &self.books;
         egui::Grid::new("inventory_count_rows")
             .striped(true)
             .spacing([14.0, 4.0])
@@ -511,10 +512,17 @@ impl CountScreen {
                         on_hand.on_hover_text(t("inventory.count.changed"));
                     }
                     let label = format!("{} {}", t("inventory.count.col.counted"), r.name);
-                    ui.add_sized([90.0, 22.0], egui::TextEdit::singleline(&mut r.counted))
-                        .widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, &label)
-                        });
+                    let units = books
+                        .part(r.item)
+                        .map_or(&[][..], |p| p.stock.unit_prices.as_slice());
+                    ui.horizontal(|ui| {
+                        ui.add_sized([90.0, 22.0], egui::TextEdit::singleline(&mut r.counted))
+                            .widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::TextInput, true, &label)
+                            });
+                        // U-161: count a part with a unit set in any of its units.
+                        super::unit_picker(ui, "inventory_count_unit", i, units, &mut r.unit);
+                    });
                     ui.label(
                         RichText::new(diffs.get(i).cloned().flatten().unwrap_or_default())
                             .monospace(),

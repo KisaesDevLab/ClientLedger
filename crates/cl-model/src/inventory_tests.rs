@@ -159,6 +159,7 @@ fn row(item: u32, quantity: &str, value: &str) -> AdjustRow {
         quantity: quantity.into(),
         value: value.into(),
         on_hand: Some(q("7")),
+        unit: None,
     }
 }
 
@@ -178,7 +179,8 @@ fn adjustments_by_mode() {
         vec![CheckedAdjustLine {
             item: iid(1),
             quantity_change: Some(q("-1")),
-            value_change: None
+            value_change: None,
+            unit: None,
         }],
         "the value column is ignored in quantity mode"
     );
@@ -316,4 +318,26 @@ fn the_reorder_list_groups_by_vendor() {
     assert_eq!(ReorderList::default().count(), 0);
     assert_eq!(quantity_text(q("3.5")), "3.5");
     assert_eq!(quantity_text(q("10")), "10");
+}
+
+/// U-161: a change or a count in another unit goes to the engine with its
+/// unit; the desktop shows no base-unit figure it would have to convert.
+#[test]
+fn rows_in_a_unit_carry_it_and_derive_nothing() {
+    let case = UnitId::parse("d0000000-0000-4000-8000-f00000000002").expect("unit");
+    let mut r = row(1, "-1", "");
+    r.on_hand = Some(q("24"));
+    assert_eq!(new_quantity(&r), Some(q("23")));
+    r.unit = Some(case);
+    assert_eq!(new_quantity(&r), None);
+    let draft = adj(AdjustMode::Quantity, vec![r]);
+    let c = check_adjustment(&draft, None).expect("adjust");
+    assert_eq!(c.lines[0].unit, Some(case));
+    let mut w = CountWorksheet::new(d("2026-11-02"), [(iid(1), "Wine".into(), None, q("24"))]);
+    w.account = Some(aid(1));
+    w.rows[0].counted = "2".into();
+    assert_eq!(w.difference(0), Some(q("-22")));
+    w.rows[0].unit = Some(case);
+    assert_eq!(w.difference(0), None);
+    assert_eq!(w.check(None).expect("count")[0].unit, Some(case));
 }
