@@ -630,6 +630,18 @@ pub fn changed_rows_replace_and_add(h: &Harness) {
     assert_eq!(p.rows[0].status, ImportRowStatus::Changed);
     assert_eq!(p.rows[0].existing_item, Some(item));
     assert_eq!(p.rows[0].existing_pending, Some(true));
+    // Q-P25af "Skip": include false, no action; accepted, nothing touched.
+    let mut skip = changed.clone();
+    skip.include = Some(false);
+    let k = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, vec![skip]), key()),
+        )
+        .expect("skip");
+    assert_eq!(k.rows[0].status, ImportRowStatus::Changed);
+    assert!(!k.rows[0].inserted && !k.rows[0].replaced);
+    assert_eq!(k.counts.inserted, 0);
     let mut replace = changed.clone();
     replace.changed_action = Some(ChangedAction::Replace);
     let r = h
