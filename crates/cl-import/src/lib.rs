@@ -22,7 +22,6 @@ pub mod csv;
 pub mod dedupe;
 pub mod detect;
 pub mod error;
-pub mod link;
 pub mod normalize;
 pub mod ofx;
 pub mod qfx;
@@ -55,6 +54,11 @@ pub struct ParseOptions {
     /// values ([`csv::mapping::guess`]); a CSV with no usable guess fails
     /// with [`ImportError::CsvNeedsMapping`].
     pub csv_mapping: Option<CsvMapping>,
+    /// `csv_mapping` was remembered (the account's latest import, or a
+    /// profile on this computer): it is used only when it fits the file
+    /// ([`CsvMapping::fits`]), otherwise the mapping is guessed. The
+    /// parsed file's `csv_mapping` tells which one was used.
+    pub csv_mapping_remembered: bool,
 }
 
 impl ParseOptions {
@@ -65,6 +69,7 @@ impl ParseOptions {
             today,
             date_order: None,
             csv_mapping: None,
+            csv_mapping_remembered: false,
         }
     }
 }

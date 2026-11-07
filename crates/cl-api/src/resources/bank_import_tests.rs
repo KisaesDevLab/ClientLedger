@@ -47,8 +47,8 @@ fn request() -> BankImportRequest {
         csv_mapping: None,
         relink_identity: false,
         bank_identity: Some(BankIdentity {
-            mask: "\u{2022}\u{2022}\u{2022}\u{2022}2208".into(),
-            account_key_hash: SHA.into(),
+            bank_id: Some("123456789".into()),
+            acct_id: "000012342208".into(),
         }),
         file_ending_balance: Some(d("92431.07")),
         file_ending_date: Some(day("2026-11-03")),
@@ -98,7 +98,10 @@ fn the_body_has_the_contract_fields() {
     assert_eq!(b["dryRun"], true);
     assert_eq!(b["amountsFlipped"], false);
     assert_eq!(b["fileEndingBalance"], "92431.07");
-    assert_eq!(b["bankIdentity"]["accountKeyHash"], SHA);
+    assert_eq!(b["bankIdentity"]["acctId"], "000012342208");
+    assert_eq!(b["bankIdentity"]["bankId"], "123456789");
+    assert!(b["bankIdentity"].get("accountKeyHash").is_none());
+    assert!(!format!("{:?}", request()).contains("2208"));
     assert_eq!(b["rows"][0]["amount"], "925.00");
     assert_eq!(b["rows"][0]["checkNumber"], 4412);
     assert_eq!(b["rows"][1]["amount"], "-8450.50");
@@ -333,7 +336,7 @@ async fn batches_undo_and_lookup_read_their_answers() {
         ))
         .mount(&server)
         .await;
-    Mock::given(method("GET"))
+    Mock::given(method("POST"))
         .and(path("/api/v1/banking/connections/lookup"))
         .respond_with(json(
             200,
@@ -372,14 +375,26 @@ async fn batches_undo_and_lookup_read_their_answers() {
     );
     let found = s
         .bank_import()
-        .lookup(&BankLookupBy::Hash(SHA.into()))
+        .lookup(&BankLookupBy::Account(BankIdentity {
+            bank_id: None,
+            acct_id: "000012342208".into(),
+        }))
         .await
         .expect("lookup");
     assert_eq!(found[0].via, BankLookupVia::Hash);
     assert_eq!(found[0].account, account);
+    let posts = requests(&server, "POST").await;
+    let sent = posts.last().expect("post");
+    assert_eq!(query(sent), "", "the number never goes in the URL");
+    let body: serde_json::Value = serde_json::from_slice(&sent.body).expect("json");
+    assert_eq!(body, json!({"acctId": "000012342208"}));
+    assert!(sent.headers.get("idempotency-key").is_none());
     assert!(matches!(
         s.bank_import()
-            .lookup(&BankLookupBy::Hash("nope".into()))
+            .lookup(&BankLookupBy::Account(BankIdentity {
+                bank_id: None,
+                acct_id: "  ".into(),
+            }))
             .await,
         Err(ApiError::Local(LocalValidation::InvalidValue))
     ));

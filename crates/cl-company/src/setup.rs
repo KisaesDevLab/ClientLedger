@@ -144,7 +144,6 @@ impl CompanySetup {
             fiscal_calendar: self.fiscal_calendar,
             sales_tax_enabled: self.sales_tax,
             inventory_enabled: self.inventory,
-            bank_link_id: None,
         }
     }
 

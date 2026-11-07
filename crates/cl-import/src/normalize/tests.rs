@@ -148,7 +148,7 @@ fn zero_rows_are_skipped_not_sent() {
         });
     }
     let skipped: Vec<usize> = s.skipped.iter().map(|k| k.line).collect();
-    assert_eq!(skipped, vec![1, 4], "0.004 rounds to zero and is skipped");
+    assert_eq!(skipped, vec![1], "only a real zero is skipped");
     assert!(s.skipped.iter().all(|k| k.reason == SkipReason::ZeroAmount));
     assert_eq!(s.rows.len(), 2);
     assert_eq!(s.rows[0].fitid.as_deref(), Some("F1"));
@@ -158,10 +158,17 @@ fn zero_rows_are_skipped_not_sent() {
     assert_eq!(s.rows[1].rounded_from.as_deref(), Some("-1.005"));
     assert_eq!(
         s.problems,
-        vec![Problem {
-            line: 3,
-            kind: ProblemKind::BadAmount
-        }]
+        vec![
+            Problem {
+                line: 3,
+                kind: ProblemKind::BadAmount
+            },
+            // 0.004 rounds to zero: listed with its line, not dropped.
+            Problem {
+                line: 4,
+                kind: ProblemKind::BelowOneCent
+            }
+        ]
     );
     assert_eq!(s.total(), Some(dec("-5.51")));
 }

@@ -539,7 +539,10 @@
           "balance": null,
           "balanceDate": null,
           "problems": [],
-          "skipped": [],
+          "skipped": [
+            1,
+            2
+          ],
           "rowLines": [
             5,
             6,

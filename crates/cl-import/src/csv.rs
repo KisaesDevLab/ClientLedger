@@ -16,7 +16,6 @@ use thiserror::Error;
 
 pub mod dates;
 pub mod mapping;
-pub mod profile;
 
 /// Most data rows read from one file.
 pub const MAX_ROWS: usize = 100_000;

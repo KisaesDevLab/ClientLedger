@@ -99,30 +99,34 @@ const DEBIT_TYPES: [&str; 8] = [
 /// Runs the sign checks and stores the result on the section. For a
 /// continuous running balance with no stated balance, the ending balance
 /// is taken from it (in the file's sign).
+///
+/// For a card the card rule decides the suggestion even when the running
+/// balance is continuous: a card's balance column is usually the amount
+/// owed, which grows with charges, so "the amounts follow the balance"
+/// says nothing about which sign money out has (review DB1).
 pub(crate) fn analyze(section: &mut Section) {
     let continuity = continuity(section);
     let mut check = SignCheck {
         continuity,
         ..SignCheck::default()
     };
-    if let Continuity::Continuous { order, flipped } = continuity {
-        check.suggest_flip = flipped;
-        check.reason = Some(SignReason::RunningBalance);
-        if section.ledger_balance.is_none() {
-            let last = match order {
-                RowOrder::OldestFirst => section.rows.last(),
-                RowOrder::NewestFirst => section.rows.first(),
-            };
-            if let Some((bal, date)) = last.and_then(|r| r.running_balance.map(|b| (b, r.date))) {
-                // Stored in the file's sign: flipping it gives the balance as
-                // the bank shows it.
-                section.ledger_balance = Some(Balance {
-                    amount: if flipped { -bal } else { bal },
-                    date: Some(date),
-                });
-            }
+    if let Continuity::Continuous { order, flipped } = continuity
+        && section.ledger_balance.is_none()
+    {
+        let last = match order {
+            RowOrder::OldestFirst => section.rows.last(),
+            RowOrder::NewestFirst => section.rows.first(),
+        };
+        if let Some((bal, date)) = last.and_then(|r| r.running_balance.map(|b| (b, r.date))) {
+            // Stored in the file's sign: flipping it gives the balance as
+            // the bank shows it.
+            section.ledger_balance = Some(Balance {
+                amount: if flipped { -bal } else { bal },
+                date: Some(date),
+            });
         }
-    } else if section.kind.is_card() {
+    }
+    if section.kind.is_card() {
         let positive = section
             .rows
             .iter()
@@ -135,6 +139,9 @@ pub(crate) fn analyze(section: &mut Section) {
         } else if negative > 0 {
             check.reason = Some(SignReason::CardChargesNegative);
         }
+    } else if let Continuity::Continuous { flipped, .. } = continuity {
+        check.suggest_flip = flipped;
+        check.reason = Some(SignReason::RunningBalance);
     } else {
         let debits: Vec<bool> = section
             .rows
@@ -177,6 +184,7 @@ fn continuity(section: &Section) -> Continuity {
     }
     let mut best_break: Option<usize> = None;
     let mut best_ok = 0;
+    let mut fits: Vec<(RowOrder, bool)> = Vec::new();
     for order in [RowOrder::OldestFirst, RowOrder::NewestFirst] {
         for flipped in [false, true] {
             let mut ok = 0;
@@ -201,7 +209,7 @@ fn continuity(section: &Section) -> Continuity {
                 }
             }
             match broke {
-                None => return Continuity::Continuous { order, flipped },
+                None => fits.push((order, flipped)),
                 Some(line) if ok > best_ok || best_break.is_none() => {
                     best_ok = ok;
                     best_break = Some(line);
@@ -210,7 +218,32 @@ fn continuity(section: &Section) -> Continuity {
             }
         }
     }
-    best_break.map_or(Continuity::NotAvailable, |line| Continuity::Broken { line })
+    match fits.as_slice() {
+        [] => best_break.map_or(Continuity::NotAvailable, |line| Continuity::Broken { line }),
+        [(order, flipped)] => Continuity::Continuous {
+            order: *order,
+            flipped: *flipped,
+        },
+        // Several readings fit (equal amounts read oldest-first and
+        // newest-first flipped alike): the dates pick the order; when they
+        // cannot, the balance settles nothing.
+        many => {
+            let (first, last) = (rows[0].date, rows[rows.len() - 1].date);
+            let order = match first.cmp(&last) {
+                std::cmp::Ordering::Less => Some(RowOrder::OldestFirst),
+                std::cmp::Ordering::Greater => Some(RowOrder::NewestFirst),
+                std::cmp::Ordering::Equal => None,
+            };
+            let mut by_date = many.iter().filter(|(o, _)| Some(*o) == order);
+            match (by_date.next(), by_date.next()) {
+                (Some((o, f)), None) => Continuity::Continuous {
+                    order: *o,
+                    flipped: *f,
+                },
+                _ => Continuity::NotAvailable,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

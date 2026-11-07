@@ -37,6 +37,9 @@ pub struct CsvTable {
     pub header: Option<Row>,
     /// The data rows (after any header and preamble lines).
     pub rows: Vec<Row>,
+    /// Lines left out before the header (or the first data row):
+    /// "Account: …", "Statement period …" (review DS4). Listed as skipped.
+    pub preamble: Vec<usize>,
 }
 
 impl CsvTable {
@@ -186,13 +189,8 @@ pub fn read_table(bytes: &[u8]) -> Result<CsvTable, ImportError> {
     let decoded = decode(bytes, Declared::Nothing)?;
     let delimiter = sniff_bank_separator(&decoded.text);
     let rows = parse_with(&decoded.text, delimiter)?;
-    // Preamble lines ("Account: …", "Statement period …") are shorter than
-    // the table: start at the first row as wide as most rows.
-    let width = modal_width(&rows);
-    let start = rows
-        .iter()
-        .position(|r| r.fields.len() == width)
-        .unwrap_or(0);
+    let start = table_start(&rows);
+    let preamble = rows[..start].iter().map(|r| r.line).collect();
     let mut rows: Vec<Row> = rows.into_iter().skip(start).collect();
     let header = if rows.first().is_some_and(looks_like_header) {
         Some(rows.remove(0))
@@ -204,7 +202,55 @@ pub fn read_table(bytes: &[u8]) -> Result<CsvTable, ImportError> {
         encoding: decoded.encoding,
         header,
         rows,
+        preamble,
     })
+}
+
+/// Where the table starts. Preamble lines ("Account: …", "Statement
+/// period …") are shorter than the table, but so is a data row whose empty
+/// trailing memo the exporter dropped (review DS4). The table starts at
+/// the first row as wide as most rows, or earlier at the first row that
+/// reads like the data (a date and an amount in the same columns as the
+/// first full data row), with the header just before it.
+fn table_start(rows: &[Row]) -> usize {
+    let width = modal_width(rows);
+    let full = rows
+        .iter()
+        .position(|r| r.fields.len() == width)
+        .unwrap_or(0);
+    let Some(shape) = rows[full..]
+        .iter()
+        .find(|r| !looks_like_header(r))
+        .and_then(data_shape)
+    else {
+        return full;
+    };
+    match rows[..full]
+        .iter()
+        .position(|r| data_shape(r) == Some(shape))
+    {
+        Some(0) => 0,
+        Some(i) if looks_like_header(&rows[i - 1]) => i - 1,
+        Some(i) => i,
+        None => full,
+    }
+}
+
+/// The first column holding a date and the first other column holding an
+/// amount, when a row has both.
+fn data_shape(row: &Row) -> Option<(usize, usize)> {
+    let probe = probe_date();
+    let filled = |f: &String| !f.trim().is_empty();
+    let date = row
+        .fields
+        .iter()
+        .position(|f| filled(f) && parse_date(f, DateOrder::Mdy, probe).is_ok())?;
+    let amount = row
+        .fields
+        .iter()
+        .enumerate()
+        .position(|(i, f)| i != date && filled(f) && parse_amount(f).is_ok())?;
+    Some((date, amount))
 }
 
 /// The separator of a bank CSV: sniffed on whichever of the first 20
@@ -352,7 +398,7 @@ pub fn guess(table: &CsvTable) -> Option<CsvMapping> {
             credit: c,
         }
     } else {
-        let a = column_where(table, |f| parse_amount(f).is_ok()).filter(|a| !taken.contains(a))?;
+        let a = amount_column(table, &taken, &names)?;
         taken.push(a);
         AmountColumns::Signed { column: a }
     };
@@ -400,6 +446,38 @@ fn column_where(table: &CsvTable, test: impl Fn(&str) -> bool) -> Option<usize> 
         });
         all && any
     })
+}
+
+/// The amount column by its values: every filled value reads as an
+/// amount, it is filled on most rows (a check number column is mostly
+/// blank) and it is not named like a check number or a balance; one with a
+/// decimal point is preferred (review note on mapping.rs).
+fn amount_column(table: &CsvTable, taken: &[usize], names: &[String]) -> Option<usize> {
+    let sample: Vec<&Row> = table.rows.iter().take(50).collect();
+    let candidates: Vec<(usize, bool)> = (0..table.width())
+        .filter(|i| !taken.contains(i))
+        .filter(|i| {
+            names.get(*i).is_none_or(|n| {
+                !CHECK_WORDS.contains(&n.as_str()) && !BALANCE_WORDS.contains(&n.as_str())
+            })
+        })
+        .filter_map(|i| {
+            let filled: Vec<&str> = sample
+                .iter()
+                .filter_map(|r| r.fields.get(i).map(String::as_str))
+                .filter(|f| !f.trim().is_empty())
+                .collect();
+            let ok = !filled.is_empty()
+                && filled.len() * 2 > sample.len()
+                && filled.iter().all(|f| parse_amount(f).is_ok());
+            ok.then(|| (i, filled.iter().any(|f| f.contains('.'))))
+        })
+        .collect();
+    candidates
+        .iter()
+        .find(|(_, point)| *point)
+        .or_else(|| candidates.first())
+        .map(|(i, _)| *i)
 }
 
 fn column_has_text(table: &CsvTable, i: usize) -> bool {
@@ -582,14 +660,32 @@ fn amount(row: &Row, layout: AmountColumns) -> Result<ParsedAmount, Direction> {
 /// when no mapping was given and none can be guessed.
 pub fn parse(bytes: &[u8], options: &ParseOptions) -> Result<ParsedFile, ImportError> {
     let table = read_table(bytes)?;
-    let mut mapping = match &options.csv_mapping {
+    // A remembered mapping is used only when it fits this file's columns
+    // (review DB2): reordered columns with the same count, or swapped
+    // debit and credit headers, would otherwise be read with the old
+    // columns. A mapping the owner just chose is always applied.
+    let given = options
+        .csv_mapping
+        .as_ref()
+        .filter(|m| !options.csv_mapping_remembered || m.fits(&table));
+    let mut mapping = match given {
         Some(m) => m.clone(),
         None => guess(&table).ok_or(ImportError::CsvNeedsMapping)?,
     };
     if let Some(order) = options.date_order {
         mapping.date_order = order;
     }
-    let section = apply(&table, &mapping, options.today)?;
+    let mut section = apply(&table, &mapping, options.today)?;
+    section.skipped.splice(
+        0..0,
+        table
+            .preamble
+            .iter()
+            .map(|&line| crate::normalize::SkippedRow {
+                line,
+                reason: crate::normalize::SkipReason::Preamble,
+            }),
+    );
     Ok(ParsedFile {
         format: FileFormat::Csv,
         encoding: table.encoding,

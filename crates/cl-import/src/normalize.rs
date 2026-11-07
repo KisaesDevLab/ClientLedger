@@ -160,9 +160,10 @@ impl AccountKind {
     }
 }
 
-/// The account number a file names, kept whole for the link hash
-/// ([`crate::link::account_key_hash`]) but shown and printed masked only
-/// (Q-154): `Debug` never prints the account number (plan §4).
+/// The account number a file names, kept whole only to send to the local
+/// engine, which keeps the company's link key and makes the hash (Q-P25u);
+/// shown and printed masked only (Q-154): `Debug` never prints the account
+/// number (plan §4).
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AccountId {
     bank_id: Option<String>,
@@ -196,18 +197,45 @@ impl AccountId {
         format!("\u{2022}\u{2022}\u{2022}\u{2022}{tail}")
     }
 
-    /// The routing number (`BANKID`), when the file has one. Only for the
-    /// link hash; never display or log it.
+    /// The routing number (`BANKID`), when the file has one. Only to send
+    /// to the local engine for the link (Q-P25u); never display or log it.
     #[must_use]
-    pub(crate) fn bank_id(&self) -> Option<&str> {
+    pub fn bank_id(&self) -> Option<&str> {
         self.bank_id.as_deref()
     }
 
-    /// The full account number. Only for the link hash; never display or
-    /// log it.
+    /// The full account number. Only to send to the local engine for the
+    /// link (Q-P25u); never display, log or store it.
     #[must_use]
-    pub(crate) fn acct_id(&self) -> &str {
+    pub fn acct_id(&self) -> &str {
         &self.acct_id
+    }
+}
+
+#[cfg(test)]
+mod account_id_tests {
+    use super::AccountId;
+
+    #[test]
+    fn debug_and_mask_hide_the_number() {
+        let id = AccountId::new(Some("021000021"), "9876543210").unwrap();
+        let dbg = format!("{id:?}");
+        assert!(
+            !dbg.contains("9876543210") && !dbg.contains("021000021"),
+            "{dbg}"
+        );
+        assert_eq!(id.mask(), "\u{2022}\u{2022}\u{2022}\u{2022}3210");
+        assert_eq!(
+            AccountId::new(None, "1234").unwrap().mask(),
+            "\u{2022}\u{2022}\u{2022}\u{2022}34"
+        );
+        assert_eq!(
+            AccountId::new(None, "7").unwrap().mask(),
+            "\u{2022}\u{2022}\u{2022}\u{2022}"
+        );
+        assert!(AccountId::new(None, "  ").is_none());
+        let t = AccountId::new(Some(" 123 "), " 000012345678\t").unwrap();
+        assert_eq!((t.bank_id(), t.acct_id()), (Some("123"), "000012345678"));
     }
 }
 
@@ -279,6 +307,8 @@ pub enum SkipReason {
     /// itself): it states a balance, it is not a transaction. Its amount and
     /// date are in [`Section::opening_balance`].
     OpeningBalance,
+    /// A CSV line before the table ("Account: …", "Statement period …").
+    Preamble,
 }
 
 /// A row that could not be read.
@@ -312,6 +342,9 @@ pub enum ProblemKind {
     /// A debit/credit or indicator row whose direction cannot be told
     /// (both columns filled, or an unknown indicator).
     UnclearDirection,
+    /// The amount is under half a cent (`0.004`): it rounds to zero, so
+    /// the row is listed here rather than dropped as a zero row.
+    BelowOneCent,
 }
 
 /// How the bytes were decoded.
@@ -704,6 +737,13 @@ impl Section {
                 return;
             }
         };
+        if amount.is_zero() && p.amount.as_ref().is_ok_and(|a| a.rounded_from.is_some()) {
+            self.problems.push(Problem {
+                line: p.line,
+                kind: ProblemKind::BelowOneCent,
+            });
+            return;
+        }
         if amount.is_zero() {
             self.skipped.push(SkippedRow {
                 line: p.line,

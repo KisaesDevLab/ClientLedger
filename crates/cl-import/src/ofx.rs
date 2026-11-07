@@ -24,6 +24,10 @@ use cl_core::CalendarDate;
 pub const MAX_DEPTH: usize = 32;
 /// Longest tag name or value accepted, in bytes (review S12).
 pub const MAX_TOKEN_BYTES: usize = 64 * 1024;
+/// Most elements accepted in one file. A statement row is about ten
+/// elements, so this is far above 20,000 rows in several sections, yet a
+/// 25 MB file of empty tags stops early.
+pub const MAX_NODES: usize = 1_000_000;
 
 /// An element: its upper-cased name, its text (leaves), its children, and
 /// the line of its opening tag.

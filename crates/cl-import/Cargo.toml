@@ -9,7 +9,6 @@ description = "File readers for imports: list CSV, and bank files (OFX, QFX, QIF
 # All MIT OR Apache-2.0 (P25 plan §3).
 [dependencies]
 cl-core = { path = "../cl-core" }
-hmac = "0.13.0"
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 sha2 = "0.11.1"

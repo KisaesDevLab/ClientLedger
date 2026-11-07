@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use cl_api::{BankImportOutcome, ChangedAction, ImportRowResult, ImportRowStatus};
 use cl_core::{CalendarDate, MoneyStyle};
-use cl_import::{AccountKind, AmountColumns, DateOrder, FileFormat, Section};
+use cl_import::{AccountKind, AmountColumns, DateOrder, FileFormat, Section, SkipReason};
 use cl_model::CommandId;
 use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Ui};
 
@@ -279,13 +279,13 @@ impl ImportBankFileScreen {
                 form::progress_line(ui, tokens, &t("bankimport.reading"));
             }
             if let Some(e) = &self.read_error {
-                let (key, line) = e.key();
+                let (_, line) = e.key();
                 let text = match line {
                     Some(l) => t_with(
                         "bankimport.error.at_line",
-                        &[("line", &l.to_string()), ("problem", &t(key))],
+                        &[("line", &l.to_string()), ("problem", &e.text())],
                     ),
-                    None => t(key),
+                    None => e.text(),
                 };
                 ui.label(RichText::new(text).color(tokens.warn_text));
             }
@@ -333,15 +333,38 @@ impl ImportBankFileScreen {
         let Some(s) = self.current_section() else {
             return;
         };
-        if !s.skipped.is_empty() {
+        let of = |reason: SkipReason| {
+            s.skipped
+                .iter()
+                .filter(|k| k.reason == reason)
+                .map(|k| k.line.to_string())
+                .collect::<Vec<_>>()
+        };
+        let zero = of(SkipReason::ZeroAmount);
+        if !zero.is_empty() {
+            form::hint(
+                ui,
+                tokens,
+                &t_with("bankimport.skipped_zero", &[("n", &zero.len().to_string())]),
+            );
+        }
+        // Review DS4: lines before the table are listed, not hidden.
+        let preamble = of(SkipReason::Preamble);
+        if !preamble.is_empty() {
             form::hint(
                 ui,
                 tokens,
                 &t_with(
-                    "bankimport.skipped_zero",
-                    &[("n", &s.skipped.len().to_string())],
+                    "bankimport.skipped_preamble",
+                    &[
+                        ("n", &preamble.len().to_string()),
+                        ("lines", &preamble.join(", ")),
+                    ],
                 ),
             );
+        }
+        if !of(SkipReason::OpeningBalance).is_empty() {
+            form::hint(ui, tokens, &t("bankimport.skipped_opening"));
         }
         for p in s.problems.iter().take(50) {
             ui.label(
@@ -598,11 +621,12 @@ impl ImportBankFileScreen {
             return;
         };
         let needs = self.sign_needs_confirm();
+        let card = s.kind == AccountKind::CreditCard || self.card_target();
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("bankimport.sign.heading"));
-            let key = if s.sign.suggest_flip {
+            let key = if self.sign.suggest_flip {
                 "bankimport.sign.suggest"
-            } else if s.kind == AccountKind::CreditCard {
+            } else if card {
                 "bankimport.sign.card"
             } else {
                 "bankimport.sign.plain"
@@ -616,7 +640,15 @@ impl ImportBankFileScreen {
                 .show(ui, |ui| {
                     for r in s.rows.iter().take(3) {
                         ui.label(crate::shell::us_date(r.date));
-                        ui.label(&r.description);
+                        // Q-P25r: a row with no name shows its memo.
+                        match r.memo.as_deref() {
+                            Some(memo) if r.description.is_empty() => {
+                                ui.label(RichText::new(memo).color(tokens.text_secondary));
+                            }
+                            _ => {
+                                ui.label(&r.description);
+                            }
+                        }
                         let m = flow::shown(r.file_amount, self.flipped)
                             .map(|m| m.format(style))
                             .unwrap_or_default();
@@ -961,7 +993,9 @@ impl ImportBankFileScreen {
                                     // Q-P25r: the bank's memo is its own
                                     // detail, under the description.
                                     ui.vertical(|ui| {
-                                        ui.add(egui::Label::new(mono(r.description.clone())).extend());
+                                        ui.add(
+                                            egui::Label::new(mono(r.description.clone())).extend(),
+                                        );
                                         if let Some(memo) = r.memo.as_deref() {
                                             ui.label(
                                                 RichText::new(memo)
@@ -1120,8 +1154,12 @@ impl ImportBankFileScreen {
                 form::hint(ui, tokens, &t("bankimport.done.replayed"));
             }
             match r.post_processing {
+                Some(cl_api::ImportPostProcessing::Scheduled) if self.prep_gave_up => {
+                    form::hint(ui, tokens, &t("bankimport.done.prep_slow"));
+                }
                 Some(cl_api::ImportPostProcessing::Scheduled) => {
                     form::progress_line(ui, tokens, &t("bankimport.done.preparing"));
+                    form::hint(ui, tokens, &t("bankimport.done.prep_wait"));
                 }
                 Some(cl_api::ImportPostProcessing::Failed) => {
                     form::hint(ui, tokens, &t("bankimport.done.prep_failed"));
@@ -1137,7 +1175,8 @@ impl ImportBankFileScreen {
                 let can_undo = r.batch.is_some()
                     && r.counts.inserted > 0
                     && self.undone.is_none()
-                    && self.undo_task.is_none();
+                    && self.undo_task.is_none()
+                    && !self.preparing();
                 if ui
                     .add_enabled(can_undo, egui::Button::new(t("bankimport.undo")))
                     .clicked()

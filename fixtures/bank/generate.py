@@ -468,7 +468,7 @@ pre_text = ("Account Number : XXXXXX1234\r\nStatement period 11/01/2026 to 11/03
 write("preamble.csv", pre_text.encode("ascii"))
 EXPECTED["files"].append({"file": "preamble.csv", "format": "Csv", "sections": [{
     "kind": "Unknown", "mask": None, "rows": 3, "sum": "95.25", "start": "2026-11-01", "end": "2026-11-03",
-    "balance": None, "balanceDate": None, "problems": [], "skipped": [], "rowLines": [5, 6, 7]}]})
+    "balance": None, "balanceDate": None, "problems": [], "skipped": [1, 2], "rowLines": [5, 6, 7]}]})
 
 # ---------------------------------------------------------------- FITID files
 reuse_txns = [dict(fitid="R100", date="20261104", amt="-6.40", type="POS", name="SANDWICH SHOP"),

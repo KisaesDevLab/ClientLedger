@@ -3,7 +3,6 @@
 
 use cl_core::CalendarDate;
 use cl_import::csv::mapping::{guess, read_table};
-use cl_import::csv::profile::{CsvProfile, find, fingerprint};
 use cl_import::{
     AmountColumns, CsvMapping, DateOrder, EncodingNote, ParseOptions, ProblemKind, parse,
 };
@@ -56,23 +55,9 @@ fn indicator_and_profiles() {
             indicator: 3
         }
     );
-    let profiles = vec![
-        CsvProfile {
-            fingerprint: "cols:9".to_owned(),
-            mapping: m.clone(),
-        },
-        CsvProfile {
-            fingerprint: fingerprint(&table),
-            mapping: m.clone(),
-        },
-    ];
-    assert_eq!(
-        find(&profiles, &table).map(|p| &p.fingerprint),
-        Some(&profiles[1].fingerprint)
-    );
+    assert!(m.fits(&table));
     let other = read_table(&bytes("signed_amount_bom.csv")).unwrap();
-    assert!(find(&profiles, &other).is_none());
-    assert_ne!(fingerprint(&table), fingerprint(&other));
+    assert!(!m.fits(&other));
 }
 
 #[test]
@@ -125,4 +110,69 @@ fn qif_date_order_override() {
         dm.sections[0].rows[1].date,
         CalendarDate::from_ymd(2026, 4, 3).unwrap()
     );
+}
+
+fn csv(text: &str) -> cl_import::ParsedFile {
+    parse(
+        text.as_bytes(),
+        &ParseOptions::new(CalendarDate::from_ymd(2026, 11, 4).unwrap()),
+    )
+    .unwrap()
+}
+
+/// Review DB2: a remembered mapping that does not fit (the same number of
+/// columns, reordered; debit and credit swapped) is not applied: the
+/// mapping is guessed again. A mapping the owner chose is always applied.
+#[test]
+fn a_remembered_mapping_is_used_only_when_it_fits() {
+    let today = CalendarDate::from_ymd(2026, 11, 4).unwrap();
+    let old =
+        "Date,Description,Debit,Credit\n11/01/2026,COFFEE,4.50,\n11/02/2026,DEPOSIT,,120.00\n";
+    let stored = csv(old).csv_mapping.unwrap();
+    let swapped =
+        "Date,Description,Credit,Debit\n11/01/2026,COFFEE,,4.50\n11/02/2026,DEPOSIT,120.00,\n";
+    let mut o = ParseOptions::new(today);
+    o.csv_mapping = Some(stored.clone());
+    o.csv_mapping_remembered = true;
+    let p = parse(swapped.as_bytes(), &o).unwrap();
+    assert_ne!(p.csv_mapping.as_ref(), Some(&stored), "not applied");
+    assert_eq!(p.sections[0].rows[0].file_amount.to_string(), "-4.50");
+    let reordered = "Description,Date,Debit,Credit\nCOFFEE,11/01/2026,4.50,\n";
+    assert_ne!(
+        parse(reordered.as_bytes(), &o).unwrap().csv_mapping,
+        Some(stored.clone())
+    );
+    // The same layout: used.
+    assert_eq!(
+        parse(old.as_bytes(), &o).unwrap().csv_mapping,
+        Some(stored.clone())
+    );
+    // Chosen by the owner: applied as given.
+    o.csv_mapping_remembered = false;
+    let p = parse(swapped.as_bytes(), &o).unwrap();
+    assert_eq!(p.csv_mapping, Some(stored));
+}
+
+/// Review DS4: a headerless file whose first rows have no memo (the
+/// exporter dropped the empty last column) keeps those rows; only the real
+/// preamble is left out, and its lines are listed.
+#[test]
+fn short_leading_data_rows_are_not_preamble() {
+    let text = "Account: 1234\n11/01/2026,COFFEE,-4.50\n11/02/2026,DEPOSIT,120.00,PAYROLL\n11/03/2026,FEE,-1.00,MONTHLY\n";
+    let p = csv(text);
+    let s = &p.sections[0];
+    assert_eq!(s.rows.len(), 3, "{:?}", s.problems);
+    assert_eq!(s.rows[0].line, 2);
+    let skipped: Vec<usize> = s.skipped.iter().map(|k| k.line).collect();
+    assert_eq!(skipped, [1]);
+    assert_eq!(s.skipped[0].reason, cl_import::SkipReason::Preamble);
+}
+
+/// Review note: a mostly blank check-number column is not the amount.
+#[test]
+fn a_sparse_number_column_is_not_the_amount() {
+    let text = "11/01/2026,1043,COFFEE,-4.50\n11/02/2026,,DEPOSIT,120.00\n11/03/2026,,FEE,-1.00\n11/04/2026,,SHOP,-2.00\n";
+    let p = csv(text);
+    let m = p.csv_mapping.unwrap();
+    assert_eq!(m.amount, AmountColumns::Signed { column: 3 });
 }

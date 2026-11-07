@@ -14,9 +14,8 @@ use cl_core::ids::AccountId;
 use cl_core::{CalendarDate, Money};
 use cl_import::{
     AccountKind, Continuity, CsvMapping, FileFormat, ImportError, ParseOptions, ParsedFile,
-    Section, to_display, to_feed_amount,
+    Section, SignCheck, check_as, to_display, to_feed_amount,
 };
-use cl_settings::SecretStore;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 
@@ -39,11 +38,10 @@ pub struct Loaded {
     pub sha256: String,
     /// The bytes (kept to read a CSV again with other columns).
     pub bytes: Arc<Vec<u8>>,
-    /// What the reader found.
+    /// What the reader found. A section's account number stays in here
+    /// (never logged: its `Debug` is masked) and goes to the local engine
+    /// only, which keeps the link key (Q-P25u).
     pub parsed: ParsedFile,
-    /// Per section: the mask and keyed hash of the account number, when
-    /// the file names one and the link key could be read.
-    pub identities: Vec<Option<BankIdentity>>,
 }
 
 impl std::fmt::Debug for Loaded {
@@ -68,6 +66,18 @@ pub enum ReadFail {
 }
 
 impl ReadFail {
+    /// The owner's text (the problem only; the caller adds the line).
+    #[must_use]
+    pub fn text(&self) -> String {
+        match self {
+            ReadFail::Import(e) => match e.charset() {
+                Some(cs) => crate::i18n::t_with(import_error_key(e), &[("charset", cs)]),
+                None => crate::i18n::t(import_error_key(e)),
+            },
+            _ => crate::i18n::t(self.key().0),
+        }
+    }
+
     /// The i18n key and the line it points at.
     #[must_use]
     pub fn key(&self) -> (&'static str, Option<usize>) {
@@ -87,12 +97,12 @@ pub fn import_error_key(e: &ImportError) -> &'static str {
         ImportError::Empty => "bankimport.error.empty",
         ImportError::TooLarge { .. } => "bankimport.error.too_large",
         ImportError::UnknownFormat => "bankimport.error.unknown_format",
-        ImportError::UnsupportedCharset { .. } | ImportError::BadText { .. } => {
-            "bankimport.error.charset"
-        }
+        ImportError::UnsupportedCharset { .. } => "bankimport.error.charset_named",
+        ImportError::BadText { .. } => "bankimport.error.charset",
         ImportError::Doctype { .. }
         | ImportError::Entity { .. }
         | ImportError::UnknownEntity { .. } => "bankimport.error.refused_markup",
+        ImportError::TooManyElements { .. } => "bankimport.error.too_many_elements",
         ImportError::TooDeep { .. }
         | ImportError::TokenTooLong { .. }
         | ImportError::BadMarkup { .. } => "bankimport.error.bad_markup",
@@ -121,6 +131,7 @@ pub fn problem_key(p: cl_import::ProblemKind) -> &'static str {
         P::ImpossibleDate => "bankimport.problem.impossible_date",
         P::MissingColumns => "bankimport.problem.columns",
         P::UnclearDirection => "bankimport.problem.direction",
+        P::BelowOneCent => "bankimport.problem.below_cent",
         _ => "bankimport.problem.other",
     }
 }
@@ -164,34 +175,17 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
-fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
-        .collect()
-}
-
-/// The identity of each section: its mask, and the keyed hash when a link
-/// key is at hand (`key`: the company's 64-hex keychain value).
+/// The account a section names, to send to the local engine (Q-P25u).
 #[must_use]
-pub fn identities(parsed: &ParsedFile, key: Option<&str>) -> Vec<Option<BankIdentity>> {
-    let key = key.and_then(hex_bytes);
-    parsed
-        .sections
-        .iter()
-        .map(|s| {
-            let id = s.account.as_ref()?;
-            let key = key.as_ref()?;
-            Some(BankIdentity {
-                mask: id.mask(),
-                account_key_hash: cl_import::link::account_key_hash(key, id),
-            })
-        })
-        .collect()
+pub fn identity(section: &Section) -> Option<BankIdentity> {
+    let id = section.account.as_ref()?;
+    Some(BankIdentity {
+        bank_id: id.bank_id().map(str::to_owned),
+        acct_id: id.acct_id().to_owned(),
+    })
 }
 
-/// Reads and parses `path` (on a worker thread). The link key is read from
-/// `secrets` under `link_id` only when the file names an account.
+/// Reads and parses `path` (on a worker thread).
 ///
 /// # Errors
 /// [`ReadFail`] when the file can't be opened, is too large or can't be read.
@@ -199,7 +193,6 @@ pub fn read_file(
     path: &Path,
     today: CalendarDate,
     mapping: Option<CsvMapping>,
-    secrets: Option<(Arc<dyn SecretStore>, uuid::Uuid)>,
 ) -> Result<Loaded, ReadFail> {
     let size = std::fs::metadata(path).map_err(|_| ReadFail::Open)?.len();
     if size > u64::try_from(cl_import::MAX_FILE_BYTES).unwrap_or(u64::MAX) {
@@ -210,10 +203,12 @@ pub fn read_file(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    parse_bytes(file_name, Arc::new(bytes), today, mapping, secrets)
+    parse_bytes(file_name, Arc::new(bytes), today, mapping, false)
 }
 
 /// Parses `bytes` (a file already read, or read again with a new mapping).
+/// A `remembered` mapping is used only when it fits the file (review DB2);
+/// the parsed file's `csv_mapping` says which mapping was used.
 ///
 /// # Errors
 /// [`ReadFail`] when the reader refuses the file or it has no transactions.
@@ -222,10 +217,11 @@ pub fn parse_bytes(
     bytes: Arc<Vec<u8>>,
     today: CalendarDate,
     mapping: Option<CsvMapping>,
-    secrets: Option<(Arc<dyn SecretStore>, uuid::Uuid)>,
+    remembered: bool,
 ) -> Result<Loaded, ReadFail> {
     let mut options = ParseOptions::new(today);
     options.csv_mapping = mapping;
+    options.csv_mapping_remembered = remembered;
     let parsed = cl_import::parse(&bytes, &options).map_err(ReadFail::Import)?;
     if parsed
         .sections
@@ -234,18 +230,11 @@ pub fn parse_bytes(
     {
         return Err(ReadFail::NoTransactions);
     }
-    let key = if parsed.sections.iter().any(|s| s.account.is_some()) {
-        secrets.and_then(|(store, id)| cl_settings::link_key(store.as_ref(), id).ok())
-    } else {
-        None
-    };
-    let identities = identities(&parsed, key.as_ref().map(cl_core::Secret::expose));
     Ok(Loaded {
         file_name,
         sha256: sha256_hex(&bytes),
         bytes,
         parsed,
-        identities,
     })
 }
 
@@ -304,7 +293,7 @@ pub fn build_request(
         amounts_flipped: flipped,
         csv_mapping: csv_mapping.and_then(|m| serde_json::to_value(m).ok()),
         relink_identity: relink,
-        bank_identity: loaded.identities.get(section.index).cloned().flatten(),
+        bank_identity: identity(section),
         file_ending_balance: balance.map(|b| b.0),
         file_ending_date: balance.map(|b| b.1),
         rows,
@@ -337,12 +326,25 @@ pub fn shown(file_amount: Decimal, flipped: bool) -> Option<Money> {
     Money::parse_wire(&cl_api::wire_decimal(to_display(file_amount, flipped)).ok()?).ok()
 }
 
-/// Whether the owner must confirm the sign before going on (Q-196): the
-/// reader suggests a flip, or it is a card file the account has no earlier
-/// import of.
+/// The sign checks for `section` going into the chosen account (Q-196,
+/// review DB1): a file that does not say it is a card's (CSV, a bank QIF)
+/// gets the card rule once a card account is chosen.
 #[must_use]
-pub fn sign_needs_confirm(section: &Section, remembered: Option<bool>) -> bool {
-    remembered.is_none() && (section.sign.suggest_flip || section.kind == AccountKind::CreditCard)
+pub fn sign_check(section: &Section, card_target: bool) -> SignCheck {
+    if card_target && !section.kind.is_card() {
+        check_as(section, AccountKind::CreditCard)
+    } else {
+        section.sign
+    }
+}
+
+/// Whether the owner must confirm the sign before going on (Q-196,
+/// Q-P25t): with no earlier import of this account and format, when the
+/// file looks reversed, and always for a card account (asked once; the
+/// answer is kept with the batch).
+#[must_use]
+pub fn sign_needs_confirm(check: &SignCheck, card_target: bool, remembered: Option<bool>) -> bool {
+    remembered.is_none() && (check.suggest_flip || card_target)
 }
 
 #[cfg(test)]
@@ -356,8 +358,6 @@ mod tests {
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        assert_eq!(hex_bytes("0aff"), Some(vec![10, 255]));
-        assert_eq!(hex_bytes("zz"), None);
     }
 
     #[test]
@@ -367,6 +367,11 @@ mod tests {
             ImportError::UnknownFormat,
             ImportError::Doctype { line: 3 },
             ImportError::Truncated { line: 9 },
+            ImportError::TooManyElements { line: 9 },
+            ImportError::UnsupportedCharset {
+                line: 2,
+                charset: "KOI8-R".into(),
+            },
             ImportError::Investment { line: 1 },
             ImportError::CsvNeedsMapping,
         ] {
@@ -377,5 +382,87 @@ mod tests {
             ReadFail::Import(ImportError::Doctype { line: 3 }).key().1,
             Some(3)
         );
+        // Q-P25h: the refused charset is named, with what to do instead.
+        let text = ReadFail::Import(ImportError::UnsupportedCharset {
+            line: 2,
+            charset: "KOI8-R".into(),
+        })
+        .text();
+        assert!(text.contains("KOI8-R") && text.contains("UTF-8"), "{text}");
+    }
+
+    /// Every row problem and every engine refusal has owner text.
+    #[test]
+    fn every_problem_and_refusal_has_owner_text() {
+        use cl_import::ProblemKind as P;
+        for p in [
+            P::MissingAmount,
+            P::BadAmount,
+            P::TooManyDigits,
+            P::MissingDate,
+            P::BadDate,
+            P::ImpossibleDate,
+            P::MissingColumns,
+            P::UnclearDirection,
+            P::BelowOneCent,
+        ] {
+            let key = problem_key(p);
+            assert_ne!(key, "bankimport.problem.other", "{p:?} has its own text");
+            assert!(crate::i18n::has(key), "{key}");
+        }
+        for r in [
+            BankImportRefusal::NotBankOrCard,
+            BankImportRefusal::NotInCompany,
+            BankImportRefusal::InvalidRow {
+                line: Some(4),
+                field: None,
+            },
+            BankImportRefusal::TooManyRows,
+            BankImportRefusal::TotalTooLarge,
+            BankImportRefusal::LinkedElsewhere(cl_api::LinkedElsewhere {
+                account_name: String::new(),
+                mask: String::new(),
+            }),
+            BankImportRefusal::RowsAlreadyUsed(vec![3]),
+            BankImportRefusal::StillPreparing,
+            BankImportRefusal::AlreadyUndone,
+        ] {
+            let key = refusal_key(&r);
+            assert!(crate::i18n::has(key), "{key}");
+        }
+        for e in [
+            ImportError::Empty,
+            ImportError::TooLarge { limit_bytes: 1 },
+            ImportError::UnknownFormat,
+            ImportError::BadText { line: 1 },
+            ImportError::Entity { line: 1 },
+            ImportError::UnknownEntity { line: 1 },
+            ImportError::TooDeep { line: 1 },
+            ImportError::TokenTooLong { line: 1 },
+            ImportError::BadMarkup { line: 1 },
+            ImportError::BankError {
+                line: 1,
+                code: "2000".into(),
+            },
+            ImportError::UnsupportedQifType { line: 1 },
+            ImportError::NoStatement,
+            ImportError::TooManyRows { limit: 1 },
+            ImportError::MappingDoesNotFit,
+        ] {
+            let key = import_error_key(&e);
+            assert!(crate::i18n::has(key), "{key}");
+        }
+        for k in [
+            "bankimport.error.open",
+            "bankimport.error.no_transactions",
+            "bankimport.forbidden",
+            "bankimport.undo.forbidden",
+            "bankimport.done.prep_wait",
+            "bankimport.done.prep_slow",
+            "bankimport.skipped_preamble",
+            "bankimport.skipped_opening",
+        ] {
+            assert!(crate::i18n::has(k), "{k}");
+        }
     }
 }

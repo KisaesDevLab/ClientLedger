@@ -62,6 +62,26 @@ fn read(s: &mut ImportBankFileScreen, f: &Fixture, name: &str, text: &str) {
     panic!("the file was never read");
 }
 
+/// Waits for the demo's preparation of the import just sent (Q-P25v).
+fn prepared(s: &mut ImportBankFileScreen) {
+    for _ in 0..300 {
+        s.poll();
+        if !s.preparing() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("never prepared");
+}
+
+fn card_account(s: &ImportBankFileScreen) -> AccountId {
+    s.targets
+        .iter()
+        .find(|t| t.card)
+        .expect("a card account")
+        .id
+}
+
 fn bank_account(s: &ImportBankFileScreen) -> AccountId {
     s.targets
         .iter()
@@ -139,6 +159,12 @@ fn undo_takes_the_rows_out_and_they_come_back() {
     let mut s = screen(&f);
     previewed(&mut s, &f);
     s.next();
+    // Q-P25v: preparing first; Undo waits for it.
+    assert_eq!(s.state()["preparing"], true);
+    s.undo(false);
+    assert_eq!(s.state()["undo_trouble"], "bankimport.undo.preparing");
+    s.undo_trouble = None;
+    prepared(&mut s);
     s.undo(false);
     assert_eq!(s.undone.map(|u| u.removed), Some(3));
     assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 0);
@@ -348,4 +374,219 @@ fn the_mockup_story_on_the_real_fixtures() {
         assert_eq!(s.step, Step::Done, "{file}");
         s.start_over(false);
     }
+}
+
+/// Steps 1 and 2 of `path` into `account`.
+fn into_account(s: &mut ImportBankFileScreen, path: std::path::PathBuf, account: AccountId) {
+    read_path(s, path);
+    assert!(s.read_error.is_none(), "{:?}", s.read_error);
+    s.next();
+    s.pick_account(account);
+    wait_reading(s);
+}
+
+fn wait_reading(s: &mut ImportBankFileScreen) {
+    for _ in 0..500 {
+        s.poll();
+        if s.reading.is_none() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("never read");
+}
+
+/// Review DB1: a card CSV (charges positive) into a card account asks
+/// for the sign with the flip suggested; the answer is kept for the next
+/// file of that account and format (Q-P25t).
+#[test]
+fn a_card_csv_into_a_card_account_asks_once() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let card = card_account(&s);
+    into_account(&mut s, bank_fixture("card_positive_charges.csv"), card);
+    assert_eq!(s.state()["card_account"], true);
+    assert!(
+        s.sign_needs_confirm(),
+        "a card account asks on its first import"
+    );
+    assert!(s.flipped, "charges are positive: the flip is suggested");
+    assert!(!s.can_next());
+    s.set_flipped(s.flipped);
+    assert!(s.can_next());
+    s.next();
+    s.poll();
+    let req = s.request().expect("request");
+    let charge = req.rows.iter().find(|r| r.line == 2).expect("line 2");
+    assert_eq!(
+        cl_api::wire_decimal(charge.amount).as_deref(),
+        Ok("45.67"),
+        "a charge is money out: positive on the wire"
+    );
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    s.start_over(false);
+    into_account(&mut s, bank_fixture("card_positive_charges.csv"), card);
+    assert_eq!(s.remembered_flip, Some(true));
+    assert!(!s.sign_needs_confirm());
+    assert!(s.flipped);
+    // The same file into a bank account: no card rule, nothing to ask.
+    s.start_over(false);
+    let bank = bank_account(&s);
+    into_account(&mut s, bank_fixture("card_positive_charges.csv"), bank);
+    assert!(!s.sign_needs_confirm());
+    assert!(!s.flipped);
+}
+
+/// Review DB2: after the account's last batch set the columns, the
+/// owner's change stays (it is not put back by the history).
+#[test]
+fn an_owner_mapping_survives_the_history() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let bank = bank_account(&s);
+    into_account(&mut s, bank_fixture("dates_ambiguous.csv"), bank);
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    s.start_over(false);
+    into_account(&mut s, bank_fixture("dates_ambiguous.csv"), bank);
+    assert_eq!(s.state()["csv_source"], "batch");
+    let mut m = s.csv_mapping.clone().expect("mapping");
+    m.date_order = cl_import::DateOrder::Dmy;
+    s.set_mapping(m.clone());
+    wait_reading(&mut s);
+    assert_eq!(s.csv_mapping.as_ref(), Some(&m), "the owner's columns stay");
+    assert_eq!(s.state()["csv_source"], "owner");
+    assert_eq!(s.state()["csv_date_order"], "dmy");
+    for _ in 0..5 {
+        s.poll();
+    }
+    assert_eq!(s.csv_mapping.as_ref(), Some(&m));
+}
+
+/// Review DB2: a remembered layout whose columns were reordered (same
+/// count) is not applied; the columns are guessed again.
+#[test]
+fn a_remembered_layout_that_does_not_fit_is_not_used() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let bank = bank_account(&s);
+    read(
+        &mut s,
+        &f,
+        "a.csv",
+        "Date,Description,Debit,Credit\n11/01/2026,COFFEE,4.50,\n11/02/2026,DEPOSIT,,120.00\n",
+    );
+    s.next();
+    s.pick_account(bank);
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    s.start_over(false);
+    read(
+        &mut s,
+        &f,
+        "b.csv",
+        "Date,Description,Credit,Debit\n11/03/2026,COFFEE,,4.50\n11/04/2026,DEPOSIT,120.00,\n",
+    );
+    s.next();
+    s.pick_account(bank);
+    wait_reading(&mut s);
+    assert_eq!(s.state()["csv_source"], "guess");
+    let money_out = s.current_section().expect("section").rows[0].file_amount;
+    assert!(money_out.is_sign_negative(), "debit stays money out");
+}
+
+/// Q-P25aa (owner 2026-11-07): after a restore the company keeps its
+/// links (the engine holds the key, Q-P25u): the account links itself.
+#[test]
+fn after_a_restore_the_account_links_itself() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    assert!(s.command(CommandId::new("dev.demo_bank_import_restore")));
+    assert_eq!(s.step, Step::Choose);
+    read(&mut s, &f, "operating.qfx", OFX);
+    s.next();
+    assert_eq!(s.state()["linked"], "auto");
+    assert!(s.account.is_some());
+    assert!(!s.sign_needs_confirm());
+}
+
+/// Q-P25aa: a second computer has no layouts of its own; the company's
+/// latest batch brings the owner's columns.
+#[test]
+fn a_second_computer_reuses_the_companys_csv_layout() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let bank = bank_account(&s);
+    into_account(&mut s, bank_fixture("dates_ambiguous.csv"), bank);
+    let mut m = s.csv_mapping.clone().expect("mapping");
+    m.date_order = cl_import::DateOrder::Dmy;
+    s.set_mapping(m.clone());
+    wait_reading(&mut s);
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    assert!(s.command(CommandId::new("dev.bank_import_forget_local")));
+    let mut other = screen(&f);
+    into_account(&mut other, bank_fixture("dates_ambiguous.csv"), bank);
+    assert_eq!(other.state()["csv_source"], "batch");
+    assert_eq!(other.csv_mapping.as_ref(), Some(&m));
+}
+
+/// Q-P25v: the result waits for the preparation, then says it is done;
+/// the window may be closed meanwhile.
+#[test]
+fn the_result_waits_for_the_preparation() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    assert_eq!(s.state()["result"]["post_processing"], "scheduled");
+    assert!(s.busy(), "keeps repainting while preparing");
+    prepared(&mut s);
+    assert_eq!(s.state()["result"]["post_processing"], "done");
+    assert!(!s.busy());
+}
+
+/// The demo refuses a commit of a file linked to another account (the
+/// engine's 409) until the owner relinks it.
+#[test]
+fn a_file_linked_elsewhere_is_refused_until_relinked() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    s.start_over(false);
+    read(&mut s, &f, "operating.qfx", OFX);
+    s.next();
+    let other = s
+        .targets
+        .iter()
+        .find(|t| Some(t.id) != s.account)
+        .expect("another account")
+        .id;
+    s.pick_account(other);
+    if s.sign_needs_confirm() {
+        s.set_flipped(s.flipped);
+    }
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["preview"]["linked_elsewhere"], true);
+    assert!(!s.can_next());
+    s.send();
+    assert_eq!(s.state()["send_trouble"], "bankimport.linked_elsewhere");
+    s.relink = true;
+    s.send();
+    assert_eq!(s.step, Step::Done);
 }

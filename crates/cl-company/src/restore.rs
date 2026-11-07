@@ -238,15 +238,12 @@ pub async fn restore(
                     &l.companies.iter().map(|c| c.accent).collect::<Vec<_>>(),
                 )
             });
-        let mut flags = host_flags
+        // The bank account-link key is in the company's own data (the
+        // engine's, Q-P25u), so a restore keeps files linking themselves
+        // with nothing to carry over here.
+        let flags = host_flags
             .or_else(|| previous_rec.as_ref().map(|r| r.flags))
             .unwrap_or_default();
-        // The bank link key stays in this computer's keychain under the
-        // replaced company's link id (P25, Q-P25u): an older archive without
-        // one keeps this computer's, so files keep linking themselves.
-        if flags.bank_link_id.is_none() {
-            flags.bank_link_id = previous_rec.as_ref().and_then(|r| r.flags.bank_link_id);
-        }
         // Machine-local fields (receipt inbox, this month's token count,
         // the consent note) come from this computer's record, never the
         // archive; the token cap is the stricter of the two (M5).

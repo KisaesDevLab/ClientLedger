@@ -536,6 +536,17 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_bank_import_reset",
         "Reset Demo Bank Feed (developer)",
     ),
+    // P25 (Q-P25aa): a restore keeps the company's feed and link key but
+    // nothing of this computer's; this starts the wizard over as after one.
+    dev_action(
+        "dev.demo_bank_import_restore",
+        "Simulate Restore for Bank Import (developer)",
+    ),
+    // P25 (Q-P25aa): a second computer has no CSV layouts of its own.
+    dev_action(
+        "dev.bank_import_forget_local",
+        "Forget Local Bank CSV Layouts (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

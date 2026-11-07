@@ -6,9 +6,13 @@
 //!    25 MB). It is read and parsed off the egui thread by `cl-import`;
 //!    errors name their line.
 //! 2. **Link account.** The section (a file may hold several accounts,
-//!    Q-P25i), the account it goes into — found by the file's keyed
-//!    identity hash, then suggested by its mask, else picked — the CSV
-//!    columns (Q-P25w) and, once, the sign (Q-196).
+//!    Q-P25i), the account it goes into — found by the local engine from
+//!    the file's account number (the engine keeps the link key, Q-P25u),
+//!    then suggested by its mask, else picked — the CSV columns (Q-P25w;
+//!    a remembered layout only when it fits, an owner's choice always
+//!    wins) and the sign: asked once with a preview when the file looks
+//!    reversed, and always on a card account's first import of a format;
+//!    the answer is kept with the batch (Q-196, Q-P25t).
 //! 3. **Check transactions.** The engine's dry run (U-06): each row's
 //!    status, the counts, the closed-period flag and the balance check. A
 //!    possible duplicate can be added anyway; a row the bank changed can
@@ -16,8 +20,11 @@
 //!    dry run.
 //! 4. **Send to Bank Feed.** The commit, under one key made at the first
 //!    Send for that exact body (a retry after a lost answer reuses it, a
-//!    changed body gets a new one). The result shows the counts, Undo this
-//!    import and "Preparing suggestions…" until the engine is done.
+//!    changed body gets a new one). The result shows the counts and
+//!    "Preparing suggestions…" while the batch's preparation runs, polled
+//!    off the egui thread with backoff within the Import budget (Q-P25v);
+//!    the owner may close early (the rows are already in the feed). Undo
+//!    this import opens once it is prepared.
 //!
 //! Alt+N goes to the next step (it is Save & New's key in forms) and Alt+B
 //! back. Amounts are shown as the file has them, with money out negative;
@@ -37,7 +44,7 @@ use cl_api::{
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
-use cl_import::CsvMapping;
+use cl_import::{CsvMapping, SignCheck};
 use cl_model::CommandId;
 use serde_json::{Value, json};
 
@@ -109,6 +116,36 @@ pub enum LinkedHow {
     Owner,
 }
 
+/// Where the CSV columns came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CsvSource {
+    /// Guessed from the header and the values.
+    Guess,
+    /// The account's latest import of this format (the company's; Q-P25w).
+    Batch,
+    /// A layout saved on this computer (Q-P25f).
+    Local,
+    /// Chosen by the owner in this window: never replaced (review DB2).
+    Owner,
+}
+
+impl CsvSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            CsvSource::Guess => "guess",
+            CsvSource::Batch => "batch",
+            CsvSource::Local => "local",
+            CsvSource::Owner => "owner",
+        }
+    }
+}
+
+/// How long the wizard waits for an import's preparation (the Import
+/// time budget, Q-P25v).
+const PREPARING_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
+/// The longest pause between two checks of the preparation.
+const PREPARING_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// A bank or card account the file may go into.
 #[derive(Clone, Debug)]
 pub struct Target {
@@ -159,9 +196,14 @@ pub struct ImportBankFileScreen {
     history_task: Option<Task<Vec<ImportBatchSummary>>>,
     /// The account's last import of this format: its flip (Q-P25w).
     remembered_flip: Option<bool>,
+    /// The sign checks for the chosen account (the card rule for a card).
+    sign: SignCheck,
     flipped: bool,
     sign_confirmed: bool,
     csv_mapping: Option<CsvMapping>,
+    csv_source: CsvSource,
+    /// The mapping a reparse in flight applies, and where it came from.
+    reparse_as: Option<(CsvMapping, CsvSource)>,
     // Step 3.
     choices: BTreeMap<u32, RowChoice>,
     relink: bool,
@@ -175,7 +217,12 @@ pub struct ImportBankFileScreen {
     send_trouble: Option<EngineTrouble>,
     result: Option<BankImportOutcome>,
     prep_task: Option<Task<Vec<ImportBatchSummary>>>,
-    prep_polls: u32,
+    /// When the preparation began to be watched, and the next check.
+    prep_started: Option<std::time::Instant>,
+    prep_next: Option<std::time::Instant>,
+    prep_delay: std::time::Duration,
+    /// The budget ran out: the preparation goes on in the engine.
+    prep_gave_up: bool,
     undo_task: Option<Task<ImportUndoOutcome>>,
     undo_key: Option<IdempotencyKey>,
     undone: Option<ImportUndoOutcome>,
@@ -212,9 +259,12 @@ impl ImportBankFileScreen {
             lookup_task: None,
             history_task: None,
             remembered_flip: None,
+            sign: SignCheck::default(),
             flipped: false,
             sign_confirmed: false,
             csv_mapping: None,
+            csv_source: CsvSource::Guess,
+            reparse_as: None,
             choices: BTreeMap::new(),
             relink: false,
             preview_task: None,
@@ -226,7 +276,10 @@ impl ImportBankFileScreen {
             send_trouble: None,
             result: None,
             prep_task: None,
-            prep_polls: 0,
+            prep_started: None,
+            prep_next: None,
+            prep_delay: std::time::Duration::from_secs(1),
+            prep_gave_up: false,
             undo_task: None,
             undo_key: None,
             undone: None,
@@ -285,24 +338,6 @@ impl ImportBankFileScreen {
         self.targets = v;
     }
 
-    /// The link id of the open company, made on first use (Q-P25u). `None`
-    /// when the company has no local record (the file is then linked by
-    /// its mask only).
-    fn link_id(&self) -> Option<uuid::Uuid> {
-        let tenant = self.tenant?;
-        let mut id = None;
-        let _ = self.link.store().update(|l| {
-            if let Some(rec) = l.get_mut(tenant) {
-                id = Some(
-                    *rec.flags
-                        .bank_link_id
-                        .get_or_insert_with(cl_settings::new_link_id),
-                );
-            }
-        });
-        id
-    }
-
     // ---- Step 1: the file -------------------------------------------------
 
     /// Opens the system file window (answered by `dialog_answer` under the
@@ -314,14 +349,13 @@ impl ImportBankFileScreen {
 
     /// Reads `path` on a worker thread.
     pub(crate) fn read(&mut self, path: PathBuf, ctx: Option<&eframe::egui::Context>) {
-        let secrets = self.link_id().map(|id| (self.link.secrets(), id));
         let today = self.today;
         let (tx, rx) = std::sync::mpsc::channel();
         let repaint = ctx.cloned();
         let spawned = std::thread::Builder::new()
             .name("cl-bank-file".into())
             .spawn(move || {
-                let _ = tx.send(flow::read_file(&path, today, None, secrets));
+                let _ = tx.send(flow::read_file(&path, today, None));
                 if let Some(c) = repaint {
                     c.request_repaint();
                 }
@@ -334,28 +368,25 @@ impl ImportBankFileScreen {
         }
     }
 
-    /// Reads the loaded CSV again with `mapping`.
-    fn reparse(&mut self, mapping: CsvMapping) {
+    /// Reads the loaded CSV again with `mapping` from `source`. A
+    /// remembered mapping is used only when it fits the file (review DB2).
+    fn reparse(&mut self, mapping: CsvMapping, source: CsvSource) {
         let Some(l) = self.loaded.as_ref() else {
             return;
         };
-        let secrets = self.link_id().map(|id| (self.link.secrets(), id));
         let (name, bytes, today) = (l.file_name.clone(), Arc::clone(&l.bytes), self.today);
+        let remembered = matches!(source, CsvSource::Batch | CsvSource::Local);
         let (tx, rx) = std::sync::mpsc::channel();
+        let m = mapping.clone();
         if std::thread::Builder::new()
             .name("cl-bank-file".into())
             .spawn(move || {
-                let _ = tx.send(flow::parse_bytes(
-                    name,
-                    bytes,
-                    today,
-                    Some(mapping),
-                    secrets,
-                ));
+                let _ = tx.send(flow::parse_bytes(name, bytes, today, Some(m), remembered));
             })
             .is_ok()
         {
             self.reading = Some(rx);
+            self.reparse_as = Some((mapping, source));
         }
     }
 
@@ -367,7 +398,17 @@ impl ImportBankFileScreen {
                     .as_ref()
                     .is_some_and(|old| old.sha256 == l.sha256);
                 self.csv_mapping.clone_from(&l.parsed.csv_mapping);
-                if !keep_section {
+                // The mapping asked for was used (a remembered one that did
+                // not fit was not): its source holds; else it is a guess.
+                let asked = self.reparse_as.take();
+                if keep_section {
+                    if let Some((m, source)) = asked
+                        && l.parsed.csv_mapping.as_ref() == Some(&m)
+                    {
+                        self.csv_source = source;
+                    }
+                } else {
+                    self.csv_source = CsvSource::Guess;
                     self.section = l
                         .parsed
                         .sections
@@ -380,8 +421,10 @@ impl ImportBankFileScreen {
                 self.read_error = None;
                 self.forget_preview();
                 if keep_section {
-                    // A new CSV mapping: same file, same account.
-                    self.start_history();
+                    // A new CSV mapping: same file, same account; the
+                    // history is not asked again, so an owner's choice is
+                    // never put back (review DB2). New rows, new checks.
+                    self.refresh_sign();
                 } else {
                     self.start_lookup();
                 }
@@ -398,7 +441,34 @@ impl ImportBankFileScreen {
         self.remembered_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
-        self.flipped = self.current_section().is_some_and(|s| s.sign.suggest_flip);
+        self.refresh_sign();
+    }
+
+    /// Whether the chosen account is a credit card account.
+    fn card_target(&self) -> bool {
+        self.account
+            .is_some_and(|a| self.targets.iter().any(|t| t.id == a && t.card))
+    }
+
+    /// Runs the sign checks for the chosen account (once per change, not
+    /// per frame): a card account gets the card rule even for a CSV
+    /// (review DB1). Until the owner answered or a batch told the sign,
+    /// the suggestion sets it.
+    fn refresh_sign(&mut self) {
+        let card = self.card_target();
+        self.sign = self
+            .current_section()
+            .map(|s| flow::sign_check(s, card))
+            .unwrap_or_default();
+        let flipped = match self.remembered_flip {
+            Some(f) => f,
+            None if self.sign_confirmed => self.flipped,
+            None => self.sign.suggest_flip,
+        };
+        if flipped != self.flipped {
+            self.flipped = flipped;
+            self.forget_preview();
+        }
     }
 
     fn forget_preview(&mut self) {
@@ -413,7 +483,14 @@ impl ImportBankFileScreen {
     }
 
     fn identity(&self) -> Option<cl_api::BankIdentity> {
-        self.loaded.as_ref()?.identities.get(self.section)?.clone()
+        flow::identity(self.current_section()?)
+    }
+
+    fn mask(&self) -> Option<String> {
+        self.current_section()?
+            .account
+            .as_ref()
+            .map(cl_import::AccountId::mask)
     }
 
     // ---- Step 2: the account ---------------------------------------------
@@ -429,19 +506,18 @@ impl ImportBankFileScreen {
         self.start_lookup();
     }
 
-    /// Finds the account the file's identity was linked to: by the keyed
-    /// hash, else by the mask (a suggestion).
+    /// Finds the account the file's account number was linked to: the
+    /// engine matches it with the company's link key (Q-P25u), else the
+    /// mask suggests one.
     fn start_lookup(&mut self) {
-        let Some(id) = self.identity() else {
+        let (Some(id), Some(mask)) = (self.identity(), self.mask()) else {
             return;
         };
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
-            let mut found = demo
-                .bank_feed
-                .lookup(&BankLookupBy::Hash(id.account_key_hash.clone()));
+            let mut found = demo.bank_feed.lookup(&BankLookupBy::Account(id));
             if found.is_empty() {
-                found = demo.bank_feed.lookup(&BankLookupBy::Mask(id.mask.clone()));
+                found = demo.bank_feed.lookup(&BankLookupBy::Mask(mask));
             }
             drop(demo);
             self.lookup_task = Some(Task::ready(found));
@@ -452,14 +528,11 @@ impl ImportBankFileScreen {
         };
         self.lookup_task = group
             .read(&session, move |s| async move {
-                let by_hash = s
-                    .bank_import()
-                    .lookup(&BankLookupBy::Hash(id.account_key_hash))
-                    .await?;
-                if !by_hash.is_empty() {
-                    return Ok(by_hash);
+                let by_number = s.bank_import().lookup(&BankLookupBy::Account(id)).await?;
+                if !by_number.is_empty() {
+                    return Ok(by_number);
                 }
-                s.bank_import().lookup(&BankLookupBy::Mask(id.mask)).await
+                s.bank_import().lookup(&BankLookupBy::Mask(mask)).await
             })
             .ok()
             .map(Task::Pending);
@@ -480,6 +553,7 @@ impl ImportBankFileScreen {
             BankLookupVia::Hash => LinkedHow::Auto,
             BankLookupVia::Mask => LinkedHow::Mask,
         };
+        self.refresh_sign();
         self.start_history();
     }
 
@@ -494,6 +568,7 @@ impl ImportBankFileScreen {
         self.sign_confirmed = false;
         self.relink = false;
         self.forget_preview();
+        self.refresh_sign();
         self.start_history();
     }
 
@@ -525,19 +600,32 @@ impl ImportBankFileScreen {
             .map(Task::Pending);
     }
 
+    /// The account's latest import of this format told the sign and,
+    /// for a CSV, the columns. The columns are tried only when the owner
+    /// has not chosen them here, and used only when they fit (DB2).
     fn remember(&mut self, flip: bool, mapping: Option<Value>) {
         self.remembered_flip = Some(flip);
-        self.flipped = flip;
         self.sign_confirmed = true;
+        self.refresh_sign();
         let stored: Option<CsvMapping> = mapping.and_then(|m| serde_json::from_value(m).ok());
-        if let Some(m) = stored
-            && self.csv_mapping.as_ref() != Some(&m)
-            && self
-                .loaded
-                .as_ref()
-                .is_some_and(|l| l.parsed.csv_mapping.is_some())
-        {
-            self.reparse(m);
+        match stored {
+            Some(m) => self.try_stored_mapping(m, CsvSource::Batch),
+            None => self.apply_local_profile(),
+        }
+    }
+
+    fn try_stored_mapping(&mut self, m: CsvMapping, source: CsvSource) {
+        let is_csv = self
+            .loaded
+            .as_ref()
+            .is_some_and(|l| l.parsed.csv_mapping.is_some());
+        if !is_csv || self.csv_source == CsvSource::Owner {
+            return;
+        }
+        if self.csv_mapping.as_ref() == Some(&m) {
+            self.csv_source = source;
+        } else {
+            self.reparse(m, source);
         }
     }
 
@@ -554,13 +642,14 @@ impl ImportBankFileScreen {
     pub(crate) fn set_mapping(&mut self, m: CsvMapping) {
         if self.csv_mapping.as_ref() != Some(&m) {
             self.csv_mapping = Some(m.clone());
-            self.reparse(m);
+            self.csv_source = CsvSource::Owner;
+            self.reparse(m, CsvSource::Owner);
         }
     }
 
     pub(crate) fn sign_needs_confirm(&self) -> bool {
-        self.current_section()
-            .is_some_and(|s| flow::sign_needs_confirm(s, self.remembered_flip))
+        self.current_section().is_some()
+            && flow::sign_needs_confirm(&self.sign, self.card_target(), self.remembered_flip)
             && !self.sign_confirmed
     }
 
@@ -591,8 +680,13 @@ impl ImportBankFileScreen {
             let now = crate::company::demo::DemoState::now();
             let o = demo.bank_feed.import(&req, false, now);
             drop(demo);
-            self.preview_task = Some(Task::ready(o));
-            self.poll();
+            match o {
+                Ok(o) => {
+                    self.preview_task = Some(Task::ready(o));
+                    self.poll();
+                }
+                Err(r) => self.preview_trouble = Some(EngineTrouble::Refused(r)),
+            }
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -632,8 +726,13 @@ impl ImportBankFileScreen {
             let now = crate::company::demo::DemoState::now();
             let o = demo.bank_feed.import(&req, true, now);
             drop(demo);
-            self.send_task = Some(Task::ready(o));
-            self.poll();
+            match o {
+                Ok(o) => {
+                    self.send_task = Some(Task::ready(o));
+                    self.poll();
+                }
+                Err(r) => self.send_trouble = Some(EngineTrouble::Refused(r)),
+            }
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -689,8 +788,9 @@ impl ImportBankFileScreen {
             .map(cl_settings::CsvProfilesStore::in_dir)
     }
 
-    /// No batch of this account told the columns: a profile saved on this
-    /// computer does (Q-P25f).
+    /// No batch of this account told the columns: a layout saved on this
+    /// computer does (Q-P25f), when it fits. This is the one CSV profile
+    /// mechanism: the key is the company, the account and the header.
     fn apply_local_profile(&mut self) {
         let (Some(key), Some(store)) = (self.profile_key(), self.profiles()) else {
             return;
@@ -700,11 +800,16 @@ impl ImportBankFileScreen {
             .get(&key)
             .cloned()
             .and_then(|m| serde_json::from_value(m).ok());
-        if let Some(m) = stored
-            && self.csv_mapping.as_ref() != Some(&m)
+        if let Some(m) = stored {
+            self.try_stored_mapping(m, CsvSource::Local);
+        }
+    }
+
+    fn forget_local_layouts(&self) {
+        if let Some(store) = self.profiles()
+            && store.save(&cl_settings::CsvProfiles::default()).is_err()
         {
-            self.csv_mapping = Some(m.clone());
-            self.reparse(m);
+            tracing::warn!("the bank CSV layouts on this computer could not be cleared");
         }
     }
 
@@ -731,19 +836,51 @@ impl ImportBankFileScreen {
         self.sent += 1;
         self.frozen = None;
         self.step = Step::Done;
-        self.prep_polls = 0;
+        let now = std::time::Instant::now();
+        self.prep_started = Some(now);
+        self.prep_delay = std::time::Duration::from_secs(1);
+        self.prep_next = Some(now + self.prep_delay);
+        self.prep_gave_up = false;
         if o.counts.inserted > 0 {
             self.link.bus().publish(crate::data_bus::Change::BankFeed);
         }
         self.result = Some(o);
     }
 
-    fn poll_preparing(&mut self) {
-        let waiting = self
-            .result
+    /// Whether the import just sent is still being prepared.
+    fn preparing(&self) -> bool {
+        self.result
             .as_ref()
-            .is_some_and(|r| r.post_processing == Some(ImportPostProcessing::Scheduled));
-        if !waiting || self.prep_task.is_some() || self.prep_polls > 60 || self.link.is_demo() {
+            .is_some_and(|r| r.post_processing == Some(ImportPostProcessing::Scheduled))
+    }
+
+    /// Checks the preparation of the import just sent (Q-P25v): off the
+    /// egui thread, after 1, 2, 4, 8 then every 10 seconds, until it is
+    /// done or failed or the 120 s Import budget is spent.
+    fn poll_preparing(&mut self) {
+        let now = std::time::Instant::now();
+        let (Some(started), Some(next)) = (self.prep_started, self.prep_next) else {
+            return;
+        };
+        if !self.preparing() || self.prep_task.is_some() || self.prep_gave_up || now < next {
+            return;
+        }
+        if now.duration_since(started) > PREPARING_BUDGET {
+            self.prep_gave_up = true;
+            return;
+        }
+        self.prep_delay = (self.prep_delay * 2).min(PREPARING_MAX_DELAY);
+        self.prep_next = Some(now + self.prep_delay);
+        let Some(batch) = self.result.as_ref().and_then(|r| r.batch) else {
+            return;
+        };
+        let link = Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let p = demo.bank_feed.post_processing(batch);
+            drop(demo);
+            if let (Some(p), Some(res)) = (p, self.result.as_mut()) {
+                res.post_processing = Some(p);
+            }
             return;
         }
         let (Some(session), Some(group), Some(account)) =
@@ -751,10 +888,8 @@ impl ImportBankFileScreen {
         else {
             return;
         };
-        self.prep_polls += 1;
         self.prep_task = group
             .read(&session, move |s| async move {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 s.bank_import().batches(Some(account), None).await
             })
             .ok()
@@ -773,11 +908,8 @@ impl ImportBankFileScreen {
             let u = demo.bank_feed.undo(batch);
             drop(demo);
             match u {
-                Some(u) => self.take_undo(u),
-                None => {
-                    self.undo_trouble =
-                        Some(EngineTrouble::Refused(BankImportRefusal::AlreadyUndone));
-                }
+                Ok(u) => self.take_undo(u),
+                Err(r) => self.undo_trouble = Some(EngineTrouble::Refused(r)),
             }
             return;
         }
@@ -818,6 +950,10 @@ impl ImportBankFileScreen {
         self.undo_trouble = None;
         self.send_trouble = None;
         self.frozen = None;
+        self.prep_started = None;
+        self.prep_next = None;
+        self.prep_task = None;
+        self.prep_gave_up = false;
         self.forget_preview();
         if next_section {
             let next = self.section + 1;
@@ -879,6 +1015,15 @@ impl ImportBankFileScreen {
             Step::Check => Step::Link,
             Step::Done => return,
         };
+    }
+
+    /// Like [`Self::trouble`], for Undo: a view-only role gets its own
+    /// text (Q-P25ab).
+    fn undo_trouble_of(e: &ApiError) -> EngineTrouble {
+        match e {
+            ApiError::Forbidden { .. } => EngineTrouble::Other("bankimport.undo.forbidden"),
+            _ => Self::trouble(e),
+        }
     }
 
     fn trouble(e: &ApiError) -> EngineTrouble {
@@ -976,7 +1121,7 @@ impl ImportBankFileScreen {
             self.undo_task = None;
             match r {
                 Ok(u) => self.take_undo(u),
-                Err(e) => self.undo_trouble = Some(Self::trouble(&e)),
+                Err(e) => self.undo_trouble = Some(Self::undo_trouble_of(&e)),
             }
         }
     }
@@ -991,6 +1136,7 @@ impl ImportBankFileScreen {
             || self.send_task.is_some()
             || self.prep_task.is_some()
             || self.undo_task.is_some()
+            || (self.preparing() && !self.prep_gave_up)
     }
 }
 
@@ -1028,6 +1174,22 @@ impl Screen for ImportBankFileScreen {
                 true
             }
             // The scenario repeats in dark in one app: an empty demo feed.
+            // Q-P25aa: after a restore the company's feed and links are
+            // the same, nothing of this computer's is; the wizard starts
+            // over as in a freshly opened window.
+            "dev.demo_bank_import_restore" => {
+                if !self.link.is_demo() {
+                    return false;
+                }
+                self.forget_local_layouts();
+                self.start_over(false);
+                true
+            }
+            // Q-P25aa: a second computer has no CSV layouts of its own.
+            "dev.bank_import_forget_local" => {
+                self.forget_local_layouts();
+                true
+            }
             "dev.demo_bank_import_reset" => {
                 let link = Arc::clone(&self.link);
                 let Some(mut demo) = link.demo_state() else {
@@ -1065,7 +1227,7 @@ impl Screen for ImportBankFileScreen {
             "file": self.loaded.as_ref().map(|l| json!({
                 "format": flow::wire_format(l.parsed.format).as_wire(),
                 "sections": l.parsed.sections.len(),
-                "has_identity": l.identities.get(self.section).is_some_and(Option::is_some),
+                "has_identity": l.parsed.sections.get(self.section).is_some_and(|s| s.account.is_some()),
             })),
             "read_error": self.read_error.as_ref().map(|e| {
                 let (key, line) = e.key();
@@ -1076,6 +1238,13 @@ impl Screen for ImportBankFileScreen {
             "problems": section.map(|s| s.problems.iter().map(|p| p.line).collect::<Vec<_>>()),
             "skipped": section.map(|s| s.skipped.len()),
             "csv": self.csv_mapping.is_some(),
+            "csv_source": self.csv_mapping.as_ref().map(|_| self.csv_source.as_str()),
+            "csv_date_order": self.csv_mapping.as_ref().map(|m| match m.date_order {
+                cl_import::DateOrder::Mdy => "mdy",
+                cl_import::DateOrder::Dmy => "dmy",
+                cl_import::DateOrder::Ymd => "ymd",
+            }),
+            "card_account": self.card_target(),
             "accounts": self.targets.len(),
             "account_chosen": self.account.is_some(),
             "linked": match self.linked {
@@ -1096,6 +1265,8 @@ impl Screen for ImportBankFileScreen {
             "send_trouble": trouble_state(self.send_trouble.as_ref()),
             "has_key": self.frozen.is_some(),
             "result": result,
+            "preparing": self.preparing(),
+            "prep_gave_up": self.prep_gave_up,
             "undone": self.undone.map(|u| json!({"removed": u.removed, "kept": u.kept})),
             "undo_trouble": trouble_state(self.undo_trouble.as_ref()),
             "sent": self.sent,

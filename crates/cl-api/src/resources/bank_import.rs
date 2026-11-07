@@ -148,14 +148,36 @@ impl fmt::Debug for BankImportRow {
     }
 }
 
-/// The account identity a file carries: a mask and the keyed hash of the
-/// account number (never the number).
+/// The account a file names, sent only to the local engine (Q-P25u): the
+/// engine keeps the company's link key, makes the keyed hash and the mask,
+/// and stores only those. Never logged, shown or kept by the desktop
+/// beyond the open file; `Debug` prints nothing of it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct BankIdentity {
-    /// `••••1234`-style mask text (at most 10 characters).
-    pub mask: String,
-    /// 64 lower-case hex characters.
-    pub account_key_hash: String,
+    /// The routing number (`BANKID`), when the file has one.
+    pub bank_id: Option<String>,
+    /// The account number (`ACCTID`), trimmed.
+    pub acct_id: String,
+}
+
+impl BankIdentity {
+    fn valid(&self) -> bool {
+        !self.acct_id.trim().is_empty()
+            && !too_long(&self.acct_id, MAX_ACCT_ID)
+            && self
+                .bank_id
+                .as_deref()
+                .is_none_or(|b| !b.trim().is_empty() && !too_long(b, MAX_ACCT_ID))
+    }
+
+    fn wire(&self) -> Value {
+        let mut m = Map::new();
+        if let Some(b) = &self.bank_id {
+            m.insert("bankId".into(), json!(b));
+        }
+        m.insert("acctId".into(), json!(self.acct_id));
+        Value::Object(m)
+    }
 }
 
 impl fmt::Debug for BankIdentity {
@@ -163,6 +185,10 @@ impl fmt::Debug for BankIdentity {
         f.write_str("BankIdentity(..)")
     }
 }
+
+/// The longest `BANKID` or `ACCTID` sent (OFX allows 22 and 9; card
+/// numbers and odd exports stay well under this).
+const MAX_ACCT_ID: usize = 64;
 
 /// One account section of a bank file, ready to send.
 #[derive(Clone, PartialEq)]
@@ -318,13 +344,10 @@ impl BankImportRequest {
             body.insert("relinkIdentity".into(), json!(true));
         }
         if let Some(id) = &self.bank_identity {
-            if id.mask.is_empty() || too_long(&id.mask, 10) || !is_hex64(&id.account_key_hash) {
+            if !id.valid() {
                 return Err(LocalValidation::InvalidValue);
             }
-            body.insert(
-                "bankIdentity".into(),
-                json!({"mask": id.mask, "accountKeyHash": id.account_key_hash}),
-            );
+            body.insert("bankIdentity".into(), id.wire());
         }
         if let (Some(b), Some(d)) = (self.file_ending_balance, self.file_ending_date) {
             body.insert("fileEndingBalance".into(), json!(wire_decimal(b)?));
@@ -886,7 +909,8 @@ pub fn undo_from(body: &[u8]) -> Result<ImportUndoOutcome, ApiError> {
 /// How a lookup found the connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BankLookupVia {
-    /// By the keyed hash saved at an earlier import (certain).
+    /// By the account number, through the engine's keyed hash saved at an
+    /// earlier import (certain).
     Hash,
     /// By the masked number (a suggestion).
     Mask,
@@ -954,16 +978,17 @@ pub fn matches_from(body: &[u8]) -> Result<Vec<ConnectionMatch>, ApiError> {
 /// What to look a file's account up by.
 #[derive(Clone, PartialEq, Eq)]
 pub enum BankLookupBy {
-    /// The keyed hash (64 lower-case hex).
-    Hash(String),
-    /// The mask text.
+    /// The file's account number: the engine hashes it with the company's
+    /// link key (Q-P25u).
+    Account(BankIdentity),
+    /// The mask text (a suggestion).
     Mask(String),
 }
 
 impl fmt::Debug for BankLookupBy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            BankLookupBy::Hash(_) => "BankLookupBy::Hash(..)",
+            BankLookupBy::Account(_) => "BankLookupBy::Account(..)",
             BankLookupBy::Mask(_) => "BankLookupBy::Mask(..)",
         })
     }
@@ -1154,19 +1179,18 @@ impl BankImport<'_> {
     ///
     /// # Errors
     /// `Local(Unsupported)` without the capability; `Local(InvalidValue)`
-    /// for a malformed hash or mask; any [`ApiError`].
+    /// for a blank or too long number or mask; any [`ApiError`].
     pub async fn lookup(&self, by: &BankLookupBy) -> Result<Vec<ConnectionMatch>, ApiError> {
         require(self.0, Capabilities::BANK_IMPORT_BATCH)?;
-        let mut call = Call::at(Method::Get, BANK_CONNECTION_LOOKUP.route());
-        match by {
-            BankLookupBy::Hash(h) if is_hex64(h) => {
-                call.query.push(("accountKeyHash".into(), h.clone()));
-            }
-            BankLookupBy::Mask(m) if !m.is_empty() && !too_long(m, 10) => {
-                call.query.push(("mask".into(), m.clone()));
-            }
+        let body = match by {
+            BankLookupBy::Account(id) if id.valid() => id.wire(),
+            BankLookupBy::Mask(m) if !m.is_empty() && !too_long(m, 10) => json!({ "mask": m }),
             _ => return Err(ApiError::Local(LocalValidation::InvalidValue)),
-        }
+        };
+        let bytes = serde_json::to_vec(&body)
+            .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
+        let mut call = Call::at(Method::Post, BANK_CONNECTION_LOOKUP.route()).json_body(bytes);
+        call.no_key = true;
         let reply = self.0.send(&BANK_CONNECTION_LOOKUP, call, None).await?;
         matches_from(&reply.body)
     }

@@ -14,10 +14,57 @@
 //!   kept as text ("AT&T"). An unknown `&name;` is kept as text in SGML and
 //!   refused in XML.
 //! - Comments, processing instructions and CDATA are handled.
+//! - In SGML, a known OFX leaf ([`LEAVES`]) closes at the next tag even
+//!   when it is empty (`<FITID><NAME>SHOP`), so it never swallows the
+//!   fields after it.
+//! - At most [`MAX_NODES`] elements are built.
 
-use super::{MAX_DEPTH, MAX_TOKEN_BYTES, Node};
+use super::{MAX_DEPTH, MAX_NODES, MAX_TOKEN_BYTES, Node};
 use crate::error::ImportError;
 use crate::normalize::trim_ws;
+
+/// OFX elements that only ever hold a value (never other elements).
+const LEAVES: &[&str] = &[
+    "ACCTID",
+    "ACCTKEY",
+    "ACCTTYPE",
+    "BALAMT",
+    "BANKID",
+    "BRANCHID",
+    "CHECKNUM",
+    "CODE",
+    "CORRECTACTION",
+    "CORRECTFITID",
+    "CURDEF",
+    "CURRATE",
+    "CURSYM",
+    "DTACCTUP",
+    "DTASOF",
+    "DTAVAIL",
+    "DTEND",
+    "DTPOSTED",
+    "DTPROFUP",
+    "DTSERVER",
+    "DTSTART",
+    "DTUSER",
+    "FID",
+    "FITID",
+    "INTU.BID",
+    "INTU.USERID",
+    "LANGUAGE",
+    "MEMO",
+    "MESSAGE",
+    "NAME",
+    "ORG",
+    "PAYEEID",
+    "REFNUM",
+    "SEVERITY",
+    "SIC",
+    "SRVRTID",
+    "TRNAMT",
+    "TRNTYPE",
+    "TRNUID",
+];
 
 /// Builds the element tree of an OFX body. `xml` selects the stricter XML
 /// rules. Returns a nameless root holding the top-level elements.
@@ -31,6 +78,7 @@ pub(crate) fn build_tree(text: &str, xml: bool, first_line: usize) -> Result<Nod
         line: first_line,
         xml,
         stack: vec![Node::new(String::new(), first_line)],
+        nodes: 0,
     };
     b.run()?;
     b.finish()
@@ -43,6 +91,8 @@ struct Builder<'a> {
     xml: bool,
     /// Open elements; `stack[0]` is the nameless root.
     stack: Vec<Node>,
+    /// Elements opened so far.
+    nodes: usize,
 }
 
 impl Builder<'_> {
@@ -181,11 +231,21 @@ impl Builder<'_> {
         }
     }
 
+    /// The innermost element holds a value, or (SGML) is a known leaf that
+    /// is still empty: it closes at the next tag.
     fn top_is_leaf(&self) -> bool {
-        self.stack.len() > 1 && self.stack.last().is_some_and(|n| n.text.is_some())
+        self.stack.len() > 1
+            && self.stack.last().is_some_and(|n| {
+                n.text.is_some()
+                    || (!self.xml && n.children.is_empty() && LEAVES.contains(&n.name.as_str()))
+            })
     }
 
     fn open(&mut self, name: String, line: usize) -> Result<(), ImportError> {
+        self.nodes += 1;
+        if self.nodes > MAX_NODES {
+            return Err(ImportError::TooManyElements { line });
+        }
         if self.top_is_leaf() {
             self.pop();
         }
@@ -346,6 +406,31 @@ mod tests {
             ImportError::BadMarkup { line: 1 }
         );
         assert!(build_tree("<OFX></B></OFX>", false, 1).is_ok());
+    }
+
+    #[test]
+    fn empty_sgml_leaves_do_not_swallow_the_next_field() {
+        let t = "<OFX><STMTTRN><TRNAMT>-5.00<FITID><NAME>SHOP<MEMO></STMTTRN></OFX>";
+        let root = build_tree(t, false, 1).unwrap();
+        let trn = &root.children[0].children[0];
+        let names: Vec<&str> = trn.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["TRNAMT", "FITID", "NAME", "MEMO"]);
+        assert_eq!(trn.children[1].text, None);
+        assert_eq!(trn.children[2].text.as_deref(), Some("SHOP"));
+        // An unknown empty element still nests (an aggregate).
+        let root = build_tree("<OFX><AGG><X>1</AGG></OFX>", false, 1).unwrap();
+        assert_eq!(root.children[0].children[0].children[0].name, "X");
+    }
+
+    #[test]
+    fn the_element_count_is_capped() {
+        let many = format!("<OFX>{}</OFX>", "<A/>".repeat(MAX_NODES));
+        assert_eq!(
+            build_tree(&many, false, 1).unwrap_err(),
+            ImportError::TooManyElements { line: 1 }
+        );
+        let fine = format!("<OFX>{}</OFX>", "<A/>".repeat(1000));
+        assert!(build_tree(&fine, false, 1).is_ok());
     }
 
     #[test]

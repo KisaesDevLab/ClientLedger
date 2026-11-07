@@ -22,11 +22,15 @@ pub enum ImportError {
     /// Not OFX, QFX, QIF or CSV.
     #[error("the file is not a bank file this app can read (OFX, QFX, QIF or CSV)")]
     UnknownFormat,
-    /// A character set other than the accepted ones (Q-P25h).
-    #[error("line {line}: the file uses a character set this app cannot read")]
+    /// A character set other than the accepted ones (Q-P25h: UTF-8 and
+    /// Windows-1252 with its aliases; the owner declined other decoders).
+    #[error("line {line}: the file uses the character set {charset}, which this app cannot read")]
     UnsupportedCharset {
         /// Line of the declaration.
         line: usize,
+        /// The declared name, as written (printable ASCII, at most 40
+        /// characters; a charset name is not owner data).
+        charset: String,
     },
     /// Bytes that are not valid in the file's character set (UTF-16 only;
     /// single-byte sets accept every byte).
@@ -64,6 +68,13 @@ pub enum ImportError {
     #[error("line {line}: the file has a value that is too long")]
     TokenTooLong {
         /// Line the value starts on.
+        line: usize,
+    },
+    /// More elements than [`crate::ofx::MAX_NODES`] (a file of empty tags
+    /// would otherwise build millions of nodes).
+    #[error("line {line}: the file has too many elements")]
+    TooManyElements {
+        /// Line of the element over the limit.
         line: usize,
     },
     /// The file ends inside a tag, or with a block still open.
@@ -122,13 +133,34 @@ pub enum ImportError {
     MappingDoesNotFit,
 }
 
+/// A declared charset name as it may be shown: printable ASCII only, at
+/// most 40 characters.
+pub(crate) fn charset_name(declared: &str) -> String {
+    declared
+        .trim()
+        .chars()
+        .filter(char::is_ascii_graphic)
+        .take(40)
+        .collect()
+}
+
 impl ImportError {
+    /// The declared character set of an [`ImportError::UnsupportedCharset`].
+    #[must_use]
+    pub fn charset(&self) -> Option<&str> {
+        match self {
+            Self::UnsupportedCharset { charset, .. } => Some(charset),
+            _ => None,
+        }
+    }
+
     /// The 1-based line the error points at, when it has one.
     #[must_use]
     pub fn line(&self) -> Option<usize> {
         match self {
-            Self::UnsupportedCharset { line }
+            Self::UnsupportedCharset { line, .. }
             | Self::BadText { line }
+            | Self::TooManyElements { line }
             | Self::Doctype { line }
             | Self::Entity { line }
             | Self::UnknownEntity { line }

@@ -57,7 +57,10 @@ fn xml_header(head: &str) -> Result<Header, ImportError> {
             let line = 1 + head[..end].matches('\n').count();
             match attribute(prolog, "encoding") {
                 Some(enc) => {
-                    declared_charset(enc).ok_or(ImportError::UnsupportedCharset { line })?
+                    declared_charset(enc).ok_or_else(|| ImportError::UnsupportedCharset {
+                        line,
+                        charset: crate::error::charset_name(enc),
+                    })?
                 }
                 None => Declared::Utf8,
             }
@@ -103,11 +106,17 @@ fn sgml_header(head: &str) -> Result<Header, ImportError> {
     }
     let declared = match (&encoding, &charset) {
         (Some((line, enc)), _) if declared_charset(enc).is_none() => {
-            return Err(ImportError::UnsupportedCharset { line: *line });
+            return Err(ImportError::UnsupportedCharset {
+                line: *line,
+                charset: crate::error::charset_name(enc),
+            });
         }
         (Some((_, enc)), _) if declared_charset(enc) == Some(Declared::Utf8) => Declared::Utf8,
         (_, Some((line, cs))) => {
-            declared_charset(cs).ok_or(ImportError::UnsupportedCharset { line: *line })?
+            declared_charset(cs).ok_or_else(|| ImportError::UnsupportedCharset {
+                line: *line,
+                charset: crate::error::charset_name(cs),
+            })?
         }
         _ => Declared::SingleByte,
     };
@@ -142,7 +151,10 @@ mod tests {
         );
         assert_eq!(
             h("OFXHEADER:100\nENCODING:USASCII\nCHARSET:KOI8-R\n<OFX>"),
-            Err(ImportError::UnsupportedCharset { line: 3 })
+            Err(ImportError::UnsupportedCharset {
+                line: 3,
+                charset: "KOI8-R".into()
+            })
         );
         assert_eq!(
             h("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<?OFX ?>"),
@@ -151,7 +163,10 @@ mod tests {
         assert_eq!(h("<?xml version=\"1.0\"?>\n<?OFX ?>"), Ok(Declared::Utf8));
         assert_eq!(
             h("<?xml version=\"1.0\" encoding=\"Shift_JIS\"?>"),
-            Err(ImportError::UnsupportedCharset { line: 1 })
+            Err(ImportError::UnsupportedCharset {
+                line: 1,
+                charset: "Shift_JIS".into()
+            })
         );
         assert!(read_header("<?xml version=\"1.0\"?>").unwrap().xml);
     }

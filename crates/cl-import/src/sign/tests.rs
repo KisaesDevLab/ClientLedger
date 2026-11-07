@@ -170,3 +170,57 @@ fn continuity_settles_order_and_sign() {
     assert_eq!(s.sign.continuity, Continuity::Broken { line: 3 });
     assert_eq!(s.ledger_balance, None);
 }
+
+/// Review DB1: a card file whose balance column is the amount owed (it
+/// grows with charges, which are positive) still asks to flip, though the
+/// amounts follow the balance unflipped. The ending balance is kept.
+#[test]
+fn a_card_balance_column_never_hides_the_card_rule() {
+    let rows = vec![
+        row(1, "40", Some("40"), None),
+        row(2, "25", Some("65"), None),
+        row(3, "-15", Some("50"), None),
+    ];
+    let s = section(AccountKind::CreditCard, rows.clone());
+    assert!(matches!(s.sign.continuity, Continuity::Continuous { .. }));
+    assert!(s.sign.suggest_flip);
+    assert_eq!(s.sign.reason, Some(SignReason::CardChargesPositive));
+    assert_eq!(s.ledger_balance.map(|b| b.amount), Some(dec("50")));
+    // The same rows read as a plain CSV, then checked as a card.
+    let plain = section(AccountKind::Unknown, rows);
+    assert!(!plain.sign.suggest_flip);
+    let as_card = check_as(&plain, AccountKind::CreditCard);
+    assert!(as_card.suggest_flip);
+}
+
+/// Equal amounts fit oldest-first and newest-first flipped alike: the
+/// dates choose; with no date order the balance settles nothing.
+#[test]
+fn equal_amounts_are_decided_by_the_dates() {
+    let s = section(
+        AccountKind::Unknown,
+        vec![
+            row(1, "-10", Some("100"), None),
+            row(2, "-10", Some("90"), None),
+            row(3, "-10", Some("80"), None),
+        ],
+    );
+    assert_eq!(
+        s.sign.continuity,
+        Continuity::Continuous {
+            order: RowOrder::OldestFirst,
+            flipped: false
+        }
+    );
+    assert!(!s.sign.suggest_flip);
+    let mut same_day = vec![
+        row(1, "-10", Some("100"), None),
+        row(2, "-10", Some("90"), None),
+    ];
+    for r in &mut same_day {
+        r.date = CalendarDate::from_ymd(2026, 11, 5).unwrap();
+    }
+    let s = section(AccountKind::Unknown, same_day);
+    assert_eq!(s.sign.continuity, Continuity::NotAvailable);
+    assert!(!s.sign.suggest_flip);
+}
