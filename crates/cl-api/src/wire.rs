@@ -462,6 +462,14 @@ impl Capabilities {
     /// counts) under `inventory-adjust-v1`; there is no separate
     /// idempotency capability for them.
     pub const UNITS_OF_MEASURE: &'static str = "units-of-measure-v1";
+    /// U-06 (P25): bank file import batches (`POST /banking/feed/import-batch`
+    /// preview and commit, the batch list and undo, the connection lookup).
+    /// The commit and the undo are keyed under this capability; a preview
+    /// takes no key.
+    pub const BANK_IMPORT_BATCH: &'static str = "bank-import-batch-v1";
+    /// U-165 (P25, used from P26): the single-item bank feed routes take the
+    /// closing-date password.
+    pub const FEED_CLOSING_DATE: &'static str = "feed-closing-date-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
