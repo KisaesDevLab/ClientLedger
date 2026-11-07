@@ -20,6 +20,12 @@ steps:
   - assert_exists: {role: label, label: "Recovered"}
   - screenshot: accrual
   - assert_no_clipping: {}
+  # QA-7 (PR-4): at 1024 pt the Owed column stays in view.
+  - resize: {width: 1024, height: 940}
+  - wait: {ms: 300}
+  - screenshot: accrual-1024
+  - assert_no_clipping: {}
+  - resize: {width: 1440, height: 940}
   - click: {role: button, label: Springfield}
   - assert_state: {key: screen.open, equals: true}
   - assert_exists: {role: label, label: "Non-taxable sales by tax code"}
