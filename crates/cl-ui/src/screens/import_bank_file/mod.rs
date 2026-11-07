@@ -1434,6 +1434,10 @@ impl Screen for ImportBankFileScreen {
                 };
                 demo.bank_feed.reset();
                 drop(demo);
+                self.earlier = None;
+                self.earlier_task = None;
+                self.earlier_next = None;
+
                 self.link.bus().publish(crate::data_bus::Change::BankFeed);
                 self.recount_feed();
                 self.forget_local_layouts();
