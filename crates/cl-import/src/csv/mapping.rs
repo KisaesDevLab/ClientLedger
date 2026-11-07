@@ -230,7 +230,14 @@ fn table_start(rows: &[Row]) -> usize {
         .position(|r| data_shape(r) == Some(shape))
     {
         Some(0) => 0,
-        Some(i) if looks_like_header(&rows[i - 1]) => i - 1,
+        // A header is at least as wide as the data under it; a shorter
+        // line before the data ("Account: 1234") is preamble.
+        Some(i)
+            if looks_like_header(&rows[i - 1])
+                && rows[i - 1].fields.len() >= rows[i].fields.len() =>
+        {
+            i - 1
+        }
         Some(i) => i,
         None => full,
     }

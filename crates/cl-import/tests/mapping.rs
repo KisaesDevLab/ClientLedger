@@ -136,7 +136,9 @@ fn a_remembered_mapping_is_used_only_when_it_fits() {
     o.csv_mapping_remembered = true;
     let p = parse(swapped.as_bytes(), &o).unwrap();
     assert_ne!(p.csv_mapping.as_ref(), Some(&stored), "not applied");
-    assert_eq!(p.sections[0].rows[0].file_amount.to_string(), "-4.50");
+    // File amounts are kept normalized (-4.5); cl-api pads the wire to cents.
+    let debit = p.sections[0].rows[0].file_amount;
+    assert_eq!(debit, "-4.50".parse().unwrap());
     let reordered = "Description,Date,Debit,Credit\nCOFFEE,11/01/2026,4.50,\n";
     assert_ne!(
         parse(reordered.as_bytes(), &o).unwrap().csv_mapping,
