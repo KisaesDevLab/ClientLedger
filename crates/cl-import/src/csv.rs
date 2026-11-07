@@ -14,6 +14,10 @@
 
 use thiserror::Error;
 
+pub mod dates;
+pub mod mapping;
+pub mod profile;
+
 /// Most data rows read from one file.
 pub const MAX_ROWS: usize = 100_000;
 /// Most columns in one row.
@@ -71,7 +75,7 @@ pub fn decode(bytes: &[u8]) -> String {
 }
 
 /// Windows-1252 to Unicode (the 0x80–0x9F block differs from Latin-1).
-fn cp1252(b: u8) -> char {
+pub(crate) fn cp1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
         '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}',
