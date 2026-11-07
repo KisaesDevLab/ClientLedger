@@ -268,16 +268,12 @@ impl QuickAdd {
                 ui.label(t_with("quick_add.not_on_list", &[("name", p.name())]));
                 if p.accepts().asks_kind() {
                     ui.horizontal(|ui| {
-                        let l = ui.label(
-                            RichText::new(t("quick_add.add_as")).color(tokens.text_secondary),
-                        );
+                        ui.label(RichText::new(t("quick_add.add_as")).color(tokens.text_secondary));
                         for k in [NameKind::Vendor, NameKind::Client] {
-                            let r = ui
-                                .add_enabled(
-                                    p.stage() != Stage::Adding,
-                                    egui::RadioButton::new(p.kind() == k, t(k.key())),
-                                )
-                                .labelled_by(l.id);
+                            let r = ui.add_enabled(
+                                p.stage() != Stage::Adding,
+                                egui::RadioButton::new(p.kind() == k, t(k.key())),
+                            );
                             if r.clicked()
                                 && let Some(p) = self.prompt.as_mut()
                             {

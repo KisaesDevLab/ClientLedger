@@ -672,6 +672,7 @@ impl WriteCheckScreen {
         if r.changed() {
             self.payee_list = !self.inputs.payee.trim().is_empty();
             self.inputs.payee_problem = false;
+            self.quick_add.close();
         }
         // Q-250: a click opens the names list; the chevron toggles it.
         if let Some(open) = crate::list_field::mouse(ui, &r, self.payee_list) {
@@ -683,9 +684,18 @@ impl WriteCheckScreen {
         }
         if let Some(id) = picked {
             self.pick_payee(id);
+            self.quick_add.close();
         } else if r.lost_focus() {
             self.resolve_payee();
-            if crate::forms::enter::entered(&r).saves() {
+            if self.inputs.payee_problem {
+                // Q-PR4d: a payee may be a vendor or a client; the prompt
+                // asks, starting from vendor.
+                let typed = self.inputs.payee.clone();
+                self.quick_add.offer(
+                    &typed,
+                    cl_model::quick_add::Accepts::Either(cl_model::quick_add::NameKind::Vendor),
+                );
+            } else if crate::forms::enter::entered(&r).saves() {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
@@ -695,6 +705,11 @@ impl WriteCheckScreen {
                     .size(12.0)
                     .color(tokens.warn_text),
             );
+        }
+        if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+            self.quick_add.ui(ui, tokens, self.group.as_ref())
+        {
+            self.payee_added(*c);
         }
     }
 
@@ -1239,7 +1254,8 @@ impl WriteCheckScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
             _ => false,
         }
     }

@@ -74,6 +74,9 @@ pub(crate) struct Books {
     tags_task: Option<Task<Vec<Tag>>>,
     closing_task: Option<Task<Option<CalendarDate>>>,
     entity_task: Option<Task<EntityAnswer>>,
+    /// Q-PR4d: a name was added here (Quick Add): the next poll reports
+    /// the lists changed.
+    added: bool,
 }
 
 /// The entity type, the equity role accounts, and whether the engine gave
@@ -189,8 +192,23 @@ impl Books {
 
     /// Takes what arrived; true when the name, account or tag lists
     /// changed.
+    /// Q-PR4d: a name added by Quick Add (or saved in Set Up) joins the
+    /// name list at once; the next [`Books::poll`] reports the change.
+    pub(crate) fn add_contact(&mut self, c: Contact) {
+        match self.contacts.iter_mut().find(|x| x.id == c.id) {
+            Some(x) => *x = c,
+            None => self.contacts.push(c),
+        }
+        let mut lists = RegisterLists::default();
+        lists.set_accounts(&self.accounts);
+        lists.set_contacts(&self.contacts);
+        lists.set_tags(&self.tags);
+        self.lists = Arc::new(lists);
+        self.added = true;
+    }
+
     pub(crate) fn poll(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = std::mem::take(&mut self.added);
         if let Some(r) = self.accounts_task.as_mut().and_then(Task::try_take) {
             self.accounts_task = None;
             self.loaded = true;

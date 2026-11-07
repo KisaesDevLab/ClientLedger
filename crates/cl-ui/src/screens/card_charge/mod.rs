@@ -94,6 +94,8 @@ pub struct CardChargeScreen {
     pub(crate) group: Option<RequestGroup>,
     pub(crate) today: CalendarDate,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a payee not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     pub(crate) balances: Balances,
     /// The header (its `lines` stay empty: the grid holds them).
     pub(crate) header: FormState<CardForm>,
@@ -140,6 +142,7 @@ impl CardChargeScreen {
         today: CalendarDate,
     ) -> CardChargeScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let books = Books::default();
         let lines = LinesGrid::new(&LINES, Arc::clone(&books.lists), Vec::new());
         let mut s = CardChargeScreen {
@@ -148,6 +151,7 @@ impl CardChargeScreen {
             group,
             today,
             books,
+            quick_add,
             balances: Balances::default(),
             header: FormState::new(CardForm::new(None, Some(today))),
             lines,
@@ -281,7 +285,11 @@ impl CardChargeScreen {
         if changes.items && !self.items.loading() {
             self.items.start_load(&self.link, self.group.as_ref());
         }
-        if self.lists_stale && !self.is_dirty() && !self.books.busy() && !self.items.loading() {
+        if self.lists_stale
+            && (!self.is_dirty() || self.quick_add.waiting())
+            && !self.books.busy()
+            && !self.items.loading()
+        {
             self.lists_stale = false;
             self.books.start(&self.link, self.group.as_ref());
             self.items.start_load(&self.link, self.group.as_ref());
@@ -1354,10 +1362,33 @@ impl CardChargeScreen {
                             current,
                             third * 2.0 + 16.0,
                         );
+                        if r.changed() || matches!(out, NameOutcome::Picked(_)) {
+                            self.quick_add.close();
+                        }
+                        let typed = self.inputs.payee.text.trim().to_string();
+                        let unknown = out == NameOutcome::Cleared
+                            && self.inputs.payee.problem
+                            && !typed.is_empty();
                         self.apply_payee(out);
                         kit::track(&mut self.focused, &r, field::PAYEE);
-                        if crate::forms::enter::entered(&r).saves() {
+                        if unknown {
+                            // Q-PR4d: a payee may be a vendor or a client.
+                            self.quick_add.offer(
+                                &typed,
+                                cl_model::quick_add::Accepts::Either(
+                                    cl_model::quick_add::NameKind::Vendor,
+                                ),
+                            );
+                        } else if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
+                        }
+                        if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+                            self.quick_add.ui(ui, tokens, self.group.as_ref())
+                        {
+                            let id = c.id;
+                            self.books.add_contact(*c);
+                            self.inputs.payee.problem = false;
+                            self.apply_payee(NameOutcome::Picked(id));
                         }
                     });
                     ui.add_space(16.0);
@@ -1540,7 +1571,8 @@ impl CardChargeScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
             _ => false,
         }
     }
@@ -1599,6 +1631,7 @@ impl CardChargeScreen {
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
         }
+        v["quick_add"] = self.quick_add.state();
         v
     }
 }

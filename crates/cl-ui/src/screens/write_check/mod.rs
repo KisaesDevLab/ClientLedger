@@ -314,6 +314,8 @@ pub struct WriteCheckScreen {
     pub(crate) printed: Option<PrintedPrompt>,
     /// Saves in other windows (Q-262).
     pub(crate) bus: crate::data_bus::Subscription,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a payee not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     /// The names, accounts or tags changed elsewhere while the form had
     /// unsaved edits: read them again once it is clean.
     pub(crate) lists_stale: bool,
@@ -378,6 +380,7 @@ impl WriteCheckScreen {
         today: CalendarDate,
     ) -> WriteCheckScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let lists = Arc::new(RegisterLists::default());
         let lines = LinesGrid::new(&LINES, Arc::clone(&lists), Vec::new());
         let mut s = WriteCheckScreen {
@@ -438,6 +441,7 @@ impl WriteCheckScreen {
             print_after_save: false,
             printed: None,
             bus: crate::data_bus::Subscription::detached(),
+            quick_add,
             lists_stale: false,
             template: crate::screens::templates::SaveFlow::default(),
             draft: draft::CheckDraftMode::default(),
@@ -671,6 +675,18 @@ impl WriteCheckScreen {
         }
     }
 
+    /// Q-PR4d: a payee added by Quick Add (or saved in Set Up) joins the
+    /// list and fills the field.
+    pub(crate) fn payee_added(&mut self, c: cl_api::Contact) {
+        let id = c.id;
+        match self.contacts.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = c,
+            None => self.contacts.push(c),
+        }
+        self.apply_lists();
+        self.pick_payee(id);
+    }
+
     fn apply_lists(&mut self) {
         let mut lists = RegisterLists::default();
         lists.set_accounts(&self.accounts);
@@ -782,7 +798,7 @@ impl WriteCheckScreen {
             self.items.start_load(&self.link, self.group.as_ref());
         }
         if self.lists_stale
-            && !self.is_dirty()
+            && (!self.is_dirty() || self.quick_add.waiting())
             && self.accounts_task.is_none()
             && self.contacts_task.is_none()
             && self.tags_task.is_none()
@@ -1310,6 +1326,7 @@ impl WriteCheckScreen {
         ) {
             m.extend(c);
         }
+        v["quick_add"] = self.quick_add.state();
         v
     }
 }

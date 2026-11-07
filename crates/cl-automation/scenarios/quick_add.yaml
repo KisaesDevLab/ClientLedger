@@ -64,5 +64,22 @@ steps:
   - assert_value: {target: {role: text_input, label: Vendor}, equals: "Bluff Hardware Supply"}
   - screenshot: bill-back
   - click: {role: button, label: Clear}
-  - command: dev.demo_quick_add_reset
   - command: file.close_window
+  # --- Write Check: a payee may be a vendor or a customer ---------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: "Tumble Creek Farm", target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.asks_kind, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: vendor}
+  - click: {role: radio_button, label: Customer}
+  - assert_state: {key: screen.quick_add.kind, equals: client}
+  - screenshot: check-prompt
+  - click: {role: button, label: Quick Add}
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_state: {key: screen.has_payee, equals: true}
+  - click: {role: button, label: Clear}
+  - command: dev.demo_quick_add_reset
