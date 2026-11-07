@@ -961,7 +961,7 @@ impl ImportBankFileScreen {
                                     // Q-P25r: the bank's memo is its own
                                     // detail, under the description.
                                     ui.vertical(|ui| {
-                                        ui.label(mono(r.description.clone()));
+                                        ui.add(egui::Label::new(mono(r.description.clone())).extend());
                                         if let Some(memo) = r.memo.as_deref() {
                                             ui.label(
                                                 RichText::new(memo)
