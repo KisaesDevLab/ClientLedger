@@ -184,7 +184,7 @@ pub fn read_table(bytes: &[u8]) -> Result<CsvTable, ImportError> {
         });
     }
     let decoded = decode(bytes, Declared::Nothing)?;
-    let delimiter = super::sniff_separator(&decoded.text);
+    let delimiter = sniff_bank_separator(&decoded.text);
     let rows = parse_with(&decoded.text, delimiter)?;
     // Preamble lines ("Account: …", "Statement period …") are shorter than
     // the table: start at the first row as wide as most rows.
@@ -205,6 +205,20 @@ pub fn read_table(bytes: &[u8]) -> Result<CsvTable, ImportError> {
         header,
         rows,
     })
+}
+
+/// The separator of a bank CSV: sniffed on whichever of the first 20
+/// non-blank lines holds the most separators, so preamble lines
+/// ("Account: …", "Statement period") do not decide it.
+#[must_use]
+pub fn sniff_bank_separator(text: &str) -> char {
+    let count = |l: &str| l.matches([',', ';', '\t']).count();
+    let line = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .take(20)
+        .fold("", |best, l| if count(l) > count(best) { l } else { best });
+    super::sniff_separator(line)
 }
 
 fn modal_width(rows: &[Row]) -> usize {

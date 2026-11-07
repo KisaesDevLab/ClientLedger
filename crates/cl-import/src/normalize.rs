@@ -194,14 +194,14 @@ impl AccountId {
     /// The routing number (`BANKID`), when the file has one. Only for the
     /// link hash; never display or log it.
     #[must_use]
-    pub fn bank_id(&self) -> Option<&str> {
+    pub(crate) fn bank_id(&self) -> Option<&str> {
         self.bank_id.as_deref()
     }
 
     /// The full account number. Only for the link hash; never display or
     /// log it.
     #[must_use]
-    pub fn acct_id(&self) -> &str {
+    pub(crate) fn acct_id(&self) -> &str {
         &self.acct_id
     }
 }
