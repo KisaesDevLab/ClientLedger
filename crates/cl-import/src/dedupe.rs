@@ -83,20 +83,19 @@ pub fn fitid_key(fitid: &str) -> String {
     sha256_hex(&format!("v1|fitid|{}", trim_ws(fitid)))
 }
 
-/// The OFX description: NAME and MEMO trimmed; MEMO when NAME is empty;
-/// NAME when MEMO is empty or `norm(NAME)` contains `norm(MEMO)`;
-/// otherwise NAME, a space, MEMO.
+/// The OFX description: NAME only, trimmed (owner decision Q-P25r,
+/// 2026-11-07). MEMO is never merged in; it goes to the row's memo.
 #[must_use]
-pub fn ofx_description(name: Option<&str>, memo: Option<&str>) -> String {
-    let n = trim_ws(name.unwrap_or_default());
-    let m = trim_ws(memo.unwrap_or_default());
-    if n.is_empty() {
-        return m.to_owned();
-    }
-    if m.is_empty() || norm(n).contains(&norm(m)) {
-        return n.to_owned();
-    }
-    format!("{n} {m}")
+pub fn ofx_description(name: Option<&str>) -> String {
+    trim_ws(name.unwrap_or_default()).to_owned()
+}
+
+/// The OFX row memo: MEMO trimmed, `None` when empty (golden `memoOut`).
+#[must_use]
+pub fn ofx_memo(memo: Option<&str>) -> Option<String> {
+    memo.map(trim_ws)
+        .filter(|m| !m.is_empty())
+        .map(str::to_owned)
 }
 
 /// One row's key, with the ordinal it got.

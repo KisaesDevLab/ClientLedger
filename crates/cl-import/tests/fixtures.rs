@@ -225,6 +225,29 @@ fn check_section(name: &str, s: &Section, e: &Value) {
             assert_eq!(s.rows[idx(k)].file_amount, dec(v), "{ctx}: amount {k}");
         }
     }
+    assert_eq!(
+        s.opening_balance.map(|b| b.amount),
+        e.get("openingBalance")
+            .and_then(Value::as_str)
+            .map(|b| Decimal::from_str(b).unwrap()),
+        "{ctx}: opening balance"
+    );
+    if let Some(d) = e.get("openingBalanceDate").and_then(Value::as_str) {
+        assert_eq!(
+            s.opening_balance
+                .and_then(|b| b.date)
+                .map(CalendarDate::to_wire)
+                .as_deref(),
+            Some(d),
+            "{ctx}: opening balance date"
+        );
+        assert!(
+            s.skipped
+                .iter()
+                .any(|k| k.reason == cl_import::SkipReason::OpeningBalance),
+            "{ctx}: opening balance listed as skipped"
+        );
+    }
     if let Some(n) = e.get("accountName").and_then(Value::as_str) {
         assert_eq!(s.account_name.as_deref(), Some(n), "{ctx}: account name");
     }

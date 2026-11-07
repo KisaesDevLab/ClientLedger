@@ -112,8 +112,13 @@ fn fitid_key_cases() {
 fn ofx_description_cases() {
     for case in golden()["ofxDescription"].as_array().unwrap() {
         assert_eq!(
-            ofx_description(case["name"].as_str(), case["memo"].as_str()),
+            ofx_description(case["name"].as_str()),
             s(&case["description"]),
+            "{case}"
+        );
+        assert_eq!(
+            cl_import::dedupe::ofx_memo(case["memo"].as_str()).as_deref(),
+            case["memoOut"].as_str(),
             "{case}"
         );
     }

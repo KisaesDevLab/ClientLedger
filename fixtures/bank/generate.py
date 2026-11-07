@@ -133,20 +133,8 @@ def stmttrn_lines(stmts, xml, qfx, **kw):
 
 
 def ofx_desc(name, memo):
-    def tw(s):
-        return s.strip(" \t\n\r\x0b\x0c\xa0")
-    n, m = tw(name or ""), tw(memo or "")
-    if not n:
-        return m
-    def norm(s):
-        import re, unicodedata
-        s = unicodedata.normalize("NFC", s)
-        s = "".join(ch.upper() if "a" <= ch <= "z" else ch for ch in s)
-        s = re.sub(r"[\t\n\x0b\x0c\r \xa0]+", " ", s)
-        return tw(s)[:500]
-    if not m or norm(m) in norm(n):
-        return n
-    return f"{n} {m}"
+    # Owner decision Q-P25r (2026-11-07): NAME only; MEMO goes to the memo.
+    return (name or "").strip(" \t\n\r\x0b\x0c\xa0")
 
 
 def expect_ofx(file, fmt, stmts, sections_extra=None, encoding=None):
@@ -197,9 +185,9 @@ text = ofx([chk], charset="NONE", encoding="USASCII")
 write("checking_ofx102_sgml.ofx", text.encode("cp1252"))
 lines1 = stmttrn_lines([chk], False, False, charset="NONE", encoding="USASCII")
 expect_ofx("checking_ofx102_sgml.ofx", "Ofx", [chk], [{"rowLines": lines1[:3],
-           "descriptions": {"4": "AT&T WIRELESS AUTOPAY", "5": "CAFÉ LUMIÈRE TABLE 4",
-                            "7": "CHECK RENT OCTOBER", "11": "HARDWARE & GARDEN", "1": "POS PURCHASE COFFEE CO"},
-           "checks": {"3": 1001, "7": 1002}, "memos": {"6": "Ref: ATM0042"}}], encoding="Windows1252")
+           "descriptions": {"4": "AT&T WIRELESS AUTOPAY", "5": "CAFÉ LUMIÈRE",
+                            "7": "CHECK", "11": "HARDWARE & GARDEN", "1": "POS PURCHASE COFFEE CO"},
+           "checks": {"3": 1001, "7": 1002}, "memos": {"1": "coffee co", "2": "ACME WIDGETS", "5": "TABLE 4", "6": "Ref: ATM0042", "7": "RENT OCTOBER"}}], encoding="Windows1252")
 # Sum check by hand is in expected.json.
 
 # 2. checking_ofx22_xml.ofx (ISO-8859-1, [-8:PST] and [+12])
@@ -347,6 +335,18 @@ EXPECTED["files"].append({"file": "card.qif", "format": "Qif", "sections": [{
     "kind": "CreditCard", "mask": None, "rows": 5, "sum": str(sum(D(a) for _, a, _ in cq)),
     "start": "2026-10-03", "end": "2026-10-19", "balance": None, "balanceDate": None, "problems": [], "skipped": [],
     "suggestFlip": False, "accountName": "Business Card"}]})
+
+# Quicken's first record: "Opening Balance", a transfer to the account itself.
+# Skipped (not a transaction); its amount and date become the opening balance.
+ob = ["!Account", "NOperating", "TBank", "^", "!Type:Bank",
+      "D12/31/25", "T4,210.55", "CX", "POpening Balance", "L[Operating]", "^",
+      "D1/2/26", "T-25.00", "PPOST OFFICE", "LPostage", "^",
+      "D1/3/26", "T300.00", "PCLIENT C", "^"]
+write("opening_balance.qif", ("\r\n".join(ob) + "\r\n").encode("ascii"))
+EXPECTED["files"].append({"file": "opening_balance.qif", "format": "Qif", "sections": [{
+    "kind": "Checking", "mask": None, "rows": 2, "sum": "275.00", "start": "2026-01-02", "end": "2026-01-03",
+    "balance": None, "balanceDate": None, "problems": [], "skipped": [6], "rowLines": [12, 17],
+    "openingBalance": "4210.55", "openingBalanceDate": "2025-12-31", "accountName": "Operating"}]})
 
 # ---------------------------------------------------------------- CSV
 def csv_bytes(rows, enc="utf-8", bom=False, nl="\r\n", sep=","):

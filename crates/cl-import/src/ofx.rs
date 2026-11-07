@@ -4,8 +4,9 @@
 //!   (`INVSTMTRS`) are refused; a `SEVERITY` of `ERROR` is a file error.
 //! - Dates use the first 8 digits (`YYYYMMDD`), with no time-zone shift:
 //!   `20261103120000.000[-8:PST]` and `20261103[+12]` are both 2026-11-03.
-//! - The description is NAME + MEMO by the golden rule
-//!   ([`crate::dedupe::ofx_description`]); `PAYEE/NAME` stands in for NAME.
+//! - The description is NAME only ([`crate::dedupe::ofx_description`],
+//!   Q-P25r); `PAYEE/NAME` stands in for NAME. MEMO goes to the row's memo,
+//!   with "Ref: …" for `REFNUM`.
 //! - `TRNTYPE` is kept for the sign check.
 
 pub mod sgml;
@@ -308,9 +309,12 @@ fn push_transaction(section: &mut Section, trn: &Node) {
     let name = trn
         .text_of("NAME")
         .or_else(|| trn.child("PAYEE").and_then(|p| p.text_of("NAME")));
-    let description = crate::dedupe::ofx_description(name, trn.text_of("MEMO"));
+    let description = crate::dedupe::ofx_description(name);
     let reference = trn.text_of("REFNUM").map(trim_ws).filter(|r| !r.is_empty());
-    let memo = reference.map(|r| format!("Ref: {}", r.chars().take(100).collect::<String>()));
+    let memo = crate::normalize::memo_with_ref(
+        crate::dedupe::ofx_memo(trn.text_of("MEMO")).as_deref(),
+        reference,
+    );
     let amount = trn.text_of("TRNAMT").map_or(
         Err(crate::normalize::AmountProblem::Missing),
         parse_amount_detail,
