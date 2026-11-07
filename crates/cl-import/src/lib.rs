@@ -22,7 +22,6 @@ pub mod csv;
 pub mod dedupe;
 pub mod detect;
 pub mod error;
-pub mod fuzz;
 pub mod link;
 pub mod normalize;
 pub mod ofx;
