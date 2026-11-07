@@ -22,6 +22,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.email", "Email\u{2026}"),
     ("invoice.add_billable", "Add billable costs"),
     ("invoice.void", "Void"),
+    ("invoice.delete.void_instead", "Sales forms can't be deleted. Void it instead (Edit > Void Transaction): it stays in your books at $0 with its history."),
     ("invoice.void.tip", "Void this invoice: it stays in your books at $0 with its history ({keys})."),
     ("invoice.email.tip", "Email this invoice as a PDF ({keys})."),
     ("invoice.add_billable.tip", "Add this client's unbilled costs as lines ({keys})."),
