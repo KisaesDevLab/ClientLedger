@@ -1088,3 +1088,30 @@ pub fn closed_period_refuses_inventory(h: &Harness) {
     step(&co, h, &mut book, &after).expect("a bill dated Jan 11");
     drop(guard);
 }
+
+/// PR-4 S4: voiding a bill through its own route (as Enter Bills does)
+/// brings back the walk's `NEGATIVE_STOCK`: case A, then the Jan 15 bill
+/// that cured the shortfall is voided (golden V2: on hand -4 on Jan 20).
+pub fn bill_void_returns_negative_stock(h: &Harness) {
+    if !all_caps(h) {
+        return;
+    }
+    let co = fresh(h, "Inventory bill void");
+    let all = golden();
+    let mut book = Book::default();
+    book.items.insert("W".into(), co.part(h, "W S4", None));
+    play(&co, h, &all, "A", None, &mut book);
+    let bill = book.docs["A6"];
+    let cur = h.run(co.s.bills().get(bill)).expect("bill");
+    let opts = cl_api::ApWriteOptions {
+        posting: cl_api::PostingOptions::default(),
+        expected_updated_at: cur.record.txn.updated_at,
+    };
+    let w = h
+        .run(co.s.bills().void(bill, "golden V2", &opts, key()))
+        .expect("void");
+    assert_eq!(w.len(), 1, "one warning: {w:?}");
+    assert_eq!(w[0].item_id, book.items["W"]);
+    assert_eq!(w[0].date, d("2026-01-20"));
+    assert_eq!(w[0].on_hand.to_wire(), "-4.0000");
+}

@@ -1045,6 +1045,10 @@ fn main() -> std::process::ExitCode {
             contract_inventory::golden_every_case,
         ),
         (
+            "inventory::bill_void_returns_negative_stock",
+            contract_inventory::bill_void_returns_negative_stock,
+        ),
+        (
             "inventory::golden_u_units",
             contract_inventory::golden_u_units,
         ),

@@ -26,7 +26,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("sales_tax.owed.pay_agency", "Pay"),
     ("sales_tax.owed.pay_agency_tip", "Pay what this agency is owed."),
     ("sales_tax.owed.set_up_agency", "Set up agency\u{2026}"),
-    ("sales_tax.owed.set_up_agency_tip", "This tax isn't linked to the agency you pay it to yet. Add the agency in Sales Tax Setup and link your rate to it, then you can pay it here."),
+    ("sales_tax.owed.set_up_agency_tip", "This tax isn't linked to the agency you pay it to yet. In Sales Tax Setup, add the agency and choose it for the tax marked \u{201c}Needs agency\u{201d}; then you can pay it here."),
     ("sales_tax.owed.empty", "No sales tax in this period."),
     ("sales_tax.owed.no_agency", "No agency"),
     ("sales_tax.owed.agency_total", "Total"),
@@ -59,7 +59,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Pay Sales Tax
     ("sales_tax.pay.title", "Pay Sales Tax"),
     ("sales_tax.pay.needs_update", "Paying sales tax needs an engine update."),
-    ("sales_tax.pay.no_agencies", "To pay sales tax, first add the agency you pay it to (usually your state's tax department) in Sales Tax Setup, and link your sales tax rate to it."),
+    ("sales_tax.pay.no_agencies", "To pay sales tax, first add the agency you pay it to (usually your state's tax department) in Sales Tax Setup, then choose that agency for your sales tax (taxes marked \u{201c}Needs agency\u{201d})."),
     ("sales_tax.pay.open_setup", "Open Sales Tax Setup"),
     ("sales_tax.pay.agency", "Agency"),
     ("sales_tax.pay.through", "Pay tax owed through"),
