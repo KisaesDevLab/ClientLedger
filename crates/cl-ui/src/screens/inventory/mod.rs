@@ -430,6 +430,17 @@ pub fn announce_demo(link: &CompanyLink, names: &[(ItemId, String)]) {
     announce(link, &w, names);
 }
 
+/// A void or delete that went through (PR-4 S4): the live engine's
+/// NEGATIVE_STOCK warnings from its reply, in the void's words; with the
+/// demo and no warnings given, the warnings the demo found.
+pub fn announce_void(link: &CompanyLink, warnings: &[NegativeStock], names: &[(ItemId, String)]) {
+    if warnings.is_empty() && link.demo_state().is_some() {
+        announce_demo_void(link, names);
+    } else {
+        announce_as(link, warnings, names, negative_void_text);
+    }
+}
+
 /// After a demo void or delete: the warnings it found, in the void's words.
 pub fn announce_demo_void(link: &CompanyLink, names: &[(ItemId, String)]) {
     let w = demo_warnings(link);

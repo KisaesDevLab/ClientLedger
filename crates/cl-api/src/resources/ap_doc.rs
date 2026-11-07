@@ -1090,7 +1090,7 @@ pub(crate) async fn delete_doc(
     reason: Option<&str>,
     opts: &ApWriteOptions,
     key: IdempotencyKey,
-) -> Result<(), ApiError> {
+) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
     use crate::resources::operations::{TXN_DELETE, TXN_GET};
     use crate::resources::transactions::{DELETE_REASON_MAX_CHARS, SPEC};
     let s = &session.pinned();
@@ -1124,8 +1124,11 @@ pub(crate) async fn delete_doc(
     let probe = Probe::new(s, matcher, true).await;
     let mut call = Call::new(Method::Delete, TXN_DELETE.route(), path).json_body(body);
     call.idempotency_key = Some(key);
-    s.send(&TXN_DELETE, call, Some(&probe)).await?;
-    Ok(())
+    // PR-4 S4: NEGATIVE_STOCK warnings of the walk ride on the reply.
+    let reply = s.send(&TXN_DELETE, call, Some(&probe)).await?;
+    Ok(crate::resources::inventory::stock_warnings_from(
+        &reply.body,
+    ))
 }
 
 /// Every row of a document list in pages of `page_size`, at most

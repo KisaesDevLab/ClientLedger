@@ -228,7 +228,7 @@ pub(crate) struct Nav {
 pub(crate) struct VoidPrompt {
     pub open: bool,
     pub reason: String,
-    pub task: Option<Task<()>>,
+    pub task: Option<Task<Vec<cl_api::NegativeStock>>>,
 }
 
 /// History of a saved check.

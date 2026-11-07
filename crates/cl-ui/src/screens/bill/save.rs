@@ -665,7 +665,7 @@ impl EnterBillScreen {
         if let Some(r) = self.void.task.as_mut().and_then(Task::try_take) {
             self.void.task = None;
             match r {
-                Ok(()) => self.voided(),
+                Ok(w) => self.voided(&w),
                 Err(e) => {
                     // An unknown outcome keeps the key: the same void goes
                     // again under it (a replay where the engine keys the
@@ -1263,7 +1263,7 @@ impl EnterBillScreen {
             drop(demo);
             match r {
                 Ok(()) => {
-                    self.void.task = Some(Task::ready(()));
+                    self.void.task = Some(Task::ready(Vec::new()));
                     self.poll_save();
                 }
                 Err(err) => self.write_failed(err, pending),
@@ -1316,8 +1316,9 @@ impl EnterBillScreen {
         }
     }
 
-    fn voided(&mut self) {
-        crate::screens::inventory::announce_demo_void(&self.link, &self.items.lists().names());
+    fn voided(&mut self, warnings: &[cl_api::NegativeStock]) {
+        // PR-4 S4: a void or delete that drives stock below zero says so.
+        crate::screens::inventory::announce_void(&self.link, warnings, &self.items.lists().names());
         let vendor = self.vendor();
         self.publish(vendor);
         self.closing_prompt.saved();

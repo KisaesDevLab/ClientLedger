@@ -517,7 +517,7 @@ impl Bills<'_> {
         reason: &str,
         opts: &ApWriteOptions,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
         void_with(self.0, &BILL_VOID, BASE, id, reason, opts, key).await
     }
 
@@ -532,7 +532,7 @@ impl Bills<'_> {
         reason: Option<&str>,
         opts: &ApWriteOptions,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
         delete_doc(self.0, id, reason, opts, key).await
     }
 

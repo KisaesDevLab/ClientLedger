@@ -912,7 +912,7 @@ impl CardChargeScreen {
 
     fn voided(&mut self) {
         let warnings = std::mem::take(&mut self.flow.warnings);
-        crate::screens::inventory::announce(&self.link, &warnings, &self.items.names());
+        crate::screens::inventory::announce_void(&self.link, &warnings, &self.items.names());
         let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
