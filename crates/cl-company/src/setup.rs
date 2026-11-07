@@ -45,6 +45,10 @@ pub struct CompanySetup {
     pub sales_tax: bool,
     /// Default sales tax rate when on (exact).
     pub sales_tax_rate: Option<Rate>,
+    /// The agency the sales tax is paid to (Q-PR4c): made a vendor and a
+    /// sales tax agency after the company exists, with a "Sales tax" item
+    /// at the rate as the company default.
+    pub sales_tax_agency: Option<String>,
     /// Inventory features on.
     pub inventory: bool,
     /// Reporting basis (Q-44).
@@ -80,6 +84,7 @@ impl CompanySetup {
             chart: StarterChart::GeneralService,
             sales_tax: false,
             sales_tax_rate: None,
+            sales_tax_agency: None,
             inventory: false,
             basis: AccountingMethod::Accrual,
             closing_password: None,
@@ -101,11 +106,17 @@ impl CompanySetup {
         if !(1..=12).contains(&self.fiscal_year_start_month) {
             out.push(SetupIssue::FiscalMonth);
         }
-        if self.sales_tax
-            && let Some(r) = self.sales_tax_rate
-            && (r.is_negative() || r.to_ten_thousandths() > 10_000)
-        {
-            out.push(SetupIssue::TaxRateInvalid);
+        if self.sales_tax {
+            // Q-PR4c: the rate and the agency make the company's sales tax.
+            match self.sales_tax_rate {
+                Some(r) if !r.is_negative() && r.to_ten_thousandths() < 10_000 => {}
+                _ => out.push(SetupIssue::TaxRateInvalid),
+            }
+            match self.agency_name() {
+                None => out.push(SetupIssue::TaxAgencyRequired),
+                Some(a) if a.chars().count() > 255 => out.push(SetupIssue::TaxAgencyTooLong),
+                Some(_) => {}
+            }
         }
         if let Some(p) = &self.closing_password {
             if !closing_password_supported {
@@ -115,6 +126,15 @@ impl CompanySetup {
             }
         }
         out
+    }
+
+    /// The agency name, trimmed; `None` when blank.
+    #[must_use]
+    pub fn agency_name(&self) -> Option<&str> {
+        self.sales_tax_agency
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
 
     /// The local flags to record.
@@ -152,6 +172,10 @@ pub enum SetupIssue {
     FiscalMonth,
     /// The tax rate must be between 0 and 1 (a fraction).
     TaxRateInvalid,
+    /// Sales tax on needs the agency it is paid to (Q-PR4c).
+    TaxAgencyRequired,
+    /// Agency names are at most 255 characters.
+    TaxAgencyTooLong,
     /// The closing-date password needs 12+ characters.
     ClosingPasswordTooShort,
     /// The engine does not take a closing-date password yet (U-15).
@@ -167,6 +191,8 @@ impl SetupIssue {
             SetupIssue::NameTooLong => "setup.issue.name_too_long",
             SetupIssue::FiscalMonth => "setup.issue.fiscal_month",
             SetupIssue::TaxRateInvalid => "setup.issue.tax_rate",
+            SetupIssue::TaxAgencyRequired => "setup.issue.tax_agency",
+            SetupIssue::TaxAgencyTooLong => "setup.issue.tax_agency_too_long",
             SetupIssue::ClosingPasswordTooShort => "setup.issue.closing_password_short",
             SetupIssue::ClosingPasswordUnavailable => "setup.issue.closing_password_unavailable",
         }
@@ -186,6 +212,10 @@ pub struct Created {
     pub accounts_skipped: usize,
     /// The closing-date password was registered (U-15).
     pub closing_password_set: bool,
+    /// Q-PR4c: sales tax was asked for but its agency, item or default
+    /// could not all be made (the company is usable; Sales Tax Setup
+    /// finishes it).
+    pub sales_tax_incomplete: bool,
 }
 
 /// A new `ClientLedger` company follows the Streamlined Sales Tax rules for
@@ -207,6 +237,135 @@ async fn streamlined_sales_tax(session: &Session, on: bool) -> Result<(), Compan
             .await?;
     }
     Ok(())
+}
+
+/// The name of the sales tax item the interview makes (owner data once
+/// made; the owner renames it in Sales Tax Setup).
+pub const SALES_TAX_ITEM_NAME: &str = "Sales tax";
+
+/// Q-PR4c: the agency the owner named becomes a vendor and a sales tax
+/// agency, a "Sales tax" item at the typed rate is paid to it, and that
+/// item is the company default (`defaultSalesTaxId`). Each step looks for
+/// what an earlier run made first (same vendor name, same item name), so
+/// running it again makes nothing twice.
+///
+/// # Errors
+/// `Unavailable` without `sales-tax-setup-v1`; any [`cl_api::ApiError`].
+pub async fn set_up_sales_tax_agency(
+    session: &Session,
+    setup: &CompanySetup,
+) -> Result<(), CompanyError> {
+    let (true, Some(agency), Some(rate)) =
+        (setup.sales_tax, setup.agency_name(), setup.sales_tax_rate)
+    else {
+        return Ok(());
+    };
+    if !session
+        .client()
+        .capabilities()
+        .has(Capabilities::SALES_TAX_SETUP)
+    {
+        return Err(CompanyError::Unavailable("sales-tax-setup-v1"));
+    }
+    let st = session.sales_tax();
+    let same = |a: &str| a.trim().eq_ignore_ascii_case(agency);
+    // The agency: an existing one for a vendor of this name, else the
+    // vendor (found or made) made an agency.
+    let agencies = st.agencies(true).await?;
+    let agency_id = if let Some(a) = agencies.iter().find(|a| same(&a.vendor_name)) {
+        a.id
+    } else {
+        let found = session
+            .contacts()
+            .list_all(&cl_api::ContactFilter {
+                search: Some(agency.to_string()),
+                ..cl_api::ContactFilter::default()
+            })
+            .await?
+            .into_iter()
+            .find(|c| {
+                same(&c.fields.display_name)
+                    && matches!(
+                        c.fields.contact_type,
+                        cl_api::ContactType::Vendor | cl_api::ContactType::Both
+                    )
+            });
+        let vendor = match found {
+            Some(c) => c.id,
+            None => {
+                session
+                    .contacts()
+                    .create(
+                        &cl_api::NewContact {
+                            fields: cl_api::ContactFields::named(
+                                cl_api::ContactType::Vendor,
+                                agency,
+                            ),
+                            opening_balance: cl_core::Money::ZERO,
+                            opening_balance_date: None,
+                        },
+                        IdempotencyKey::new(),
+                    )
+                    .await?
+                    .record
+                    .id
+            }
+        };
+        st.create_agency(vendor, IdempotencyKey::new()).await?.id
+    };
+    // The item: one named "Sales tax" (not a legacy one) is reused.
+    let items = st.items(true).await?;
+    let item = if let Some(i) = items.iter().find(|i| {
+        !i.is_legacy()
+            && i.kind == cl_api::SalesTaxKind::Item
+            && i.name.trim().eq_ignore_ascii_case(SALES_TAX_ITEM_NAME)
+    }) {
+        i.id
+    } else {
+        st.create_item(
+            &cl_api::SalesTaxItemDraft {
+                kind: cl_api::SalesTaxKind::Item,
+                name: SALES_TAX_ITEM_NAME.to_string(),
+                description: Some(SALES_TAX_ITEM_NAME.to_string()),
+                rate: Some(cl_core::TaxRate::from(rate)),
+                agency_id: Some(agency_id),
+                member_ids: Vec::new(),
+            },
+            IdempotencyKey::new(),
+        )
+        .await?
+        .id
+    };
+    if !session
+        .client()
+        .capabilities()
+        .has(Capabilities::COMPANY_SALES_TAX_FLAGS)
+    {
+        return Err(CompanyError::Unavailable("company-sales-tax-flags-v1"));
+    }
+    session
+        .set_sales_tax_settings(
+            &cl_api::SalesTaxSettingsUpdate {
+                default_sales_tax_id: Some(Some(item)),
+                ..cl_api::SalesTaxSettingsUpdate::default()
+            },
+            IdempotencyKey::new(),
+        )
+        .await?;
+    Ok(())
+}
+
+/// [`set_up_sales_tax_agency`] for the interview: true when it finished; a
+/// failure is logged (scrubbed) and never fails the new company.
+async fn sales_tax_agency_done(session: &Session, setup: &CompanySetup) -> bool {
+    match set_up_sales_tax_agency(session, setup).await {
+        Ok(()) => true,
+        Err(e) => {
+            let detail = cl_core::OwnerFacing::scrubbed_detail(&e);
+            tracing::warn!(%detail, "sales tax agency not set up");
+            false
+        }
+    }
 }
 
 /// P24: the engine owns the inventory switch (`company-inventory-flag-v1`).
@@ -341,6 +500,10 @@ pub(crate) async fn create_company_steps(
     }
     session.setup_complete(IdempotencyKey::new()).await?;
 
+    // Q-PR4c: the company is usable whether or not this finishes; what is
+    // left is said on the done page and Sales Tax Setup finishes it.
+    let sales_tax_incomplete = !sales_tax_agency_done(session, setup).await;
+
     let now = cl_settings::recent::now();
     store.update(|list| {
         let rec = list.upsert(made.tenant_id, &name);
@@ -355,6 +518,7 @@ pub(crate) async fn create_company_steps(
         accounts_imported: imported,
         accounts_skipped: skipped,
         closing_password_set,
+        sales_tax_incomplete,
     })
 }
 
@@ -385,8 +549,24 @@ mod tests {
         );
         let mut s = CompanySetup::new("Ozark Ridge Landscaping LLC");
         s.sales_tax = true;
+        // Q-PR4c: sales tax needs a rate and the agency it is paid to.
+        assert_eq!(
+            s.validate(true),
+            vec![SetupIssue::TaxRateInvalid, SetupIssue::TaxAgencyRequired]
+        );
+        s.sales_tax_agency = Some("  ".into());
         s.sales_tax_rate = Some(Rate::parse_wire("1.5").expect("rate"));
-        assert_eq!(s.validate(true), vec![SetupIssue::TaxRateInvalid]);
+        assert_eq!(
+            s.validate(true),
+            vec![SetupIssue::TaxRateInvalid, SetupIssue::TaxAgencyRequired]
+        );
+        s.sales_tax_agency = Some("x".repeat(256));
+        assert_eq!(
+            s.validate(true),
+            vec![SetupIssue::TaxRateInvalid, SetupIssue::TaxAgencyTooLong]
+        );
+        s.sales_tax_agency = Some(" Missouri Department of Revenue ".into());
+        assert_eq!(s.agency_name(), Some("Missouri Department of Revenue"));
         s.sales_tax_rate = Some(Rate::parse_wire("0.0825").expect("rate"));
         s.closing_password = Some(Secret::new("short"));
         assert_eq!(
@@ -398,6 +578,7 @@ mod tests {
         assert_eq!(s.validate(true).len(), 0);
         assert!(!format!("{s:?}").contains("Ozark"));
         assert!(!format!("{s:?}").contains("long-enough"));
+        assert!(!format!("{s:?}").contains("Missouri"));
         assert!(s.flags().sales_tax_enabled);
         // P24: with the engine's inventory switch the local flag is never
         // recorded beside it.

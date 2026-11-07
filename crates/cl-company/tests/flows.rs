@@ -865,6 +865,108 @@ async fn create_company_runs_the_interview_steps_in_order() {
     assert_eq!(server.received_requests().await.expect("r").len(), before);
 }
 
+async fn mount_new_company(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/api/v1/auth/create-tenant"))
+        .respond_with(json(
+            201,
+            json!({"tenantId":T2,"companyId":CO,"tenantName":"New Co"}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/company/settings"))
+        .respond_with(json(200, json!({"settings":{"fiscalYearStartMonth":1}})))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/accounts/import"))
+        .respond_with(json(201, json!({"imported":40,"updated":0,"skipped":[]})))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/company/setup-complete"))
+        .respond_with(json(200, json!({"message":"Setup complete"})))
+        .mount(server)
+        .await;
+}
+
+fn taxed_setup() -> CompanySetup {
+    let mut setup = CompanySetup::new("New Co");
+    setup.sales_tax = true;
+    setup.sales_tax_rate = Some(cl_core::Rate::parse_wire("0.0825").expect("rate"));
+    setup.sales_tax_agency = Some("Missouri Department of Revenue".into());
+    setup
+}
+
+/// Q-PR4c: without the sales tax setup routes the company is still made;
+/// the done page says Sales Tax Setup finishes it.
+#[tokio::test]
+async fn sales_tax_agency_waits_for_setup_routes_without_failing_the_company() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&[]).await;
+    let s = session(&server).await;
+    let store = RecentStore::in_dir(&dir.path().join("settings"));
+    mount_new_company(&server).await;
+    let (_, stats) = counting_stats();
+    let made = create_company(&s, &store, &taxed_setup(), &stats)
+        .await
+        .expect("created");
+    assert!(made.sales_tax_incomplete);
+    assert_eq!(count(&server, "GET", "/api/v1/sales-tax/agencies").await, 0);
+}
+
+/// Q-PR4c: a re-run finds the agency and the "Sales tax" item an earlier
+/// run made and only sets the company default.
+#[tokio::test]
+async fn sales_tax_agency_reuses_what_an_earlier_run_made() {
+    const AGENCY: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a11";
+    const VENDOR: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a12";
+    const ITEM: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a13";
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["sales-tax-setup-v1", "company-sales-tax-flags-v1"]).await;
+    let s = session(&server).await;
+    let store = RecentStore::in_dir(&dir.path().join("settings"));
+    mount_new_company(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/sales-tax/agencies"))
+        .respond_with(json(
+            200,
+            json!({"agencies":[{"id":AGENCY,"vendorId":VENDOR,
+                "vendorName":"missouri department of revenue","isActive":true}]}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/sales-tax/items"))
+        .respond_with(json(
+            200,
+            json!({"items":[{"id":ITEM,"kind":"item","name":"Sales tax","rate":"0.082500",
+                "agencyId":AGENCY,"isActive":true}]}),
+        ))
+        .mount(&server)
+        .await;
+    let (_, stats) = counting_stats();
+    let made = create_company(&s, &store, &taxed_setup(), &stats)
+        .await
+        .expect("created");
+    assert!(!made.sales_tax_incomplete);
+    assert!(posts(&server, "/api/v1/sales-tax").await.is_empty());
+    assert!(posts(&server, "/api/v1/contacts").await.is_empty());
+    let puts: Vec<Value> = server
+        .received_requests()
+        .await
+        .expect("r")
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT" && r.url.path() == "/api/v1/company/settings")
+        .map(|r| serde_json::from_slice(&r.body).unwrap_or(Value::Null))
+        .collect();
+    assert!(
+        puts.iter().any(|b| b["defaultSalesTaxId"] == ITEM),
+        "{puts:?}"
+    );
+}
+
 /// B3: a company switch in the middle of the practice-company load must
 /// never send a post into the other company. The loader runs on a pinned
 /// session, so after the switch its posts fail with `StaleScope` and

@@ -269,5 +269,6 @@ pub async fn new_from_existing(
         accounts_imported: imported,
         accounts_skipped: skipped,
         closing_password_set: false,
+        sales_tax_incomplete: false,
     })
 }

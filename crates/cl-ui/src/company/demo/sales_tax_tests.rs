@@ -414,3 +414,27 @@ fn tax_off_charges_nothing_and_refuses_a_requested_tax() {
     );
     assert_eq!(settings_json(&st)["salesTaxEnabled"], false);
 }
+
+/// Q-PR4c: the interview's agency becomes a vendor, an agency and a "Sales
+/// tax" item at the rate that is the company default; a re-run makes
+/// nothing twice.
+#[test]
+fn the_interview_agency_is_made_once_and_is_the_default() {
+    let mut state = DemoState::new();
+    let rate = cl_core::Rate::parse_wire("0.0825").expect("rate");
+    let before_agencies = agencies(&mut state, true).len();
+    let item = interview_agency(&mut state, " Shoal County Collector ", rate).expect("made");
+    let made = agencies(&mut state, true);
+    assert_eq!(made.len(), before_agencies + 1);
+    let st_item = items(&mut state, true)
+        .into_iter()
+        .find(|i| i.id == item)
+        .expect("item");
+    assert_eq!(st_item.name, cl_company::SALES_TAX_ITEM_NAME);
+    assert_eq!(st_item.rate.to_wire(), TaxRate::from(rate).to_wire());
+    assert!(!st_item.needs_agency());
+    assert_eq!(state.sales_tax.default_id, Some(item));
+    let again = interview_agency(&mut state, "shoal county collector", rate).expect("again");
+    assert_eq!(again, item);
+    assert_eq!(agencies(&mut state, true).len(), before_agencies + 1);
+}
