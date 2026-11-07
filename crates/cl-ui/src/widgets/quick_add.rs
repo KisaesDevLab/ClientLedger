@@ -117,6 +117,39 @@ impl QuickAdd {
         self.focus = self.prompt.is_some();
     }
 
+    /// The prompt is showing (Enter in the field then adds, not saves).
+    pub(crate) fn is_open(&self) -> bool {
+        self.prompt.is_some()
+    }
+
+    /// For a `kit::name_field` (Q-PR4d): typing closes the prompt, a pick
+    /// closes it, leaving the field with a name not on the list offers it;
+    /// then the prompt is drawn under the field. Returns the contact Quick
+    /// Add (or Set Up) made, for the form to add to its list and pick.
+    pub(crate) fn after_name_field(
+        &mut self,
+        ui: &mut Ui,
+        tokens: &Tokens,
+        group: Option<&RequestGroup>,
+        field: (
+            &crate::screens::card_charge::kit::NameInput,
+            &egui::Response,
+        ),
+        out: crate::screens::card_charge::kit::NameOutcome,
+        accepts: Accepts,
+    ) -> Option<Contact> {
+        use crate::screens::card_charge::kit::NameOutcome;
+        let (input, r) = field;
+        if r.changed() || matches!(out, NameOutcome::Picked(_)) {
+            self.close();
+        }
+        let typed = input.text.trim();
+        if out == NameOutcome::Cleared && input.problem && !typed.is_empty() {
+            self.offer(typed, accepts);
+        }
+        self.ui(ui, tokens, group).map(|QuickAddEvent::Added(c)| *c)
+    }
+
     /// Esc (`form.revert`): closes the prompt. True when it was open.
     pub(crate) fn cancel(&mut self) -> bool {
         if self.prompt.is_none() || self.job.is_some() {

@@ -106,6 +106,9 @@ pub struct PersonalFundsScreen {
     pub(crate) group: Option<RequestGroup>,
     pub(crate) today: CalendarDate,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for Who paid and Paid to.
+    pub(crate) quick_who: crate::widgets::quick_add::QuickAdd,
+    pub(crate) quick_payee: crate::widgets::quick_add::QuickAdd,
     pub(crate) balances: Balances,
     /// The header (its `lines` stay empty: the grid holds them).
     pub(crate) header: FormState<PersonalFundsForm>,
@@ -175,6 +178,8 @@ impl PersonalFundsScreen {
         today: CalendarDate,
     ) -> PersonalFundsScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_who = crate::widgets::quick_add::QuickAdd::new(&link);
+        let quick_payee = crate::widgets::quick_add::QuickAdd::new(&link);
         let books = Books::default();
         let lines = LinesGrid::new(&LINES, Arc::clone(&books.lists), Vec::new());
         let mut s = PersonalFundsScreen {
@@ -183,6 +188,8 @@ impl PersonalFundsScreen {
             group,
             today,
             books,
+            quick_who,
+            quick_payee,
             balances: Balances::default(),
             header: FormState::new(PersonalFundsForm::new(Some(today), Treatment::PutIn)),
             lines,
@@ -1071,7 +1078,29 @@ impl PersonalFundsScreen {
                                     f.who,
                                     half,
                                 );
+                                let added = self.quick_who.after_name_field(
+                                    ui,
+                                    tokens,
+                                    self.group.as_ref(),
+                                    (&self.inputs.who, &r),
+                                    out,
+                                    cl_model::quick_add::Accepts::Either(
+                                        cl_model::quick_add::NameKind::Vendor,
+                                    ),
+                                );
                                 self.apply_name(field::WHO, out);
+                                if let Some(c) = added {
+                                    let id = c.id;
+                                    self.books.add_contact(c);
+                                    self.inputs.who.problem = false;
+                                    self.inputs.who.text = self
+                                        .books
+                                        .lists
+                                        .name_text(id)
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    self.apply_name(field::WHO, NameOutcome::Picked(id));
+                                }
                                 kit::track(&mut self.focused, &r, field::WHO);
                             });
                             ui.add_space(16.0);
@@ -1086,9 +1115,33 @@ impl PersonalFundsScreen {
                                     f.payee,
                                     half,
                                 );
+                                let added = self.quick_payee.after_name_field(
+                                    ui,
+                                    tokens,
+                                    self.group.as_ref(),
+                                    (&self.inputs.payee, &r),
+                                    out,
+                                    cl_model::quick_add::Accepts::Either(
+                                        cl_model::quick_add::NameKind::Vendor,
+                                    ),
+                                );
                                 self.apply_name(field::PAYEE, out);
+                                if let Some(c) = added {
+                                    let id = c.id;
+                                    self.books.add_contact(c);
+                                    self.inputs.payee.problem = false;
+                                    self.inputs.payee.text = self
+                                        .books
+                                        .lists
+                                        .name_text(id)
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    self.apply_name(field::PAYEE, NameOutcome::Picked(id));
+                                }
                                 kit::track(&mut self.focused, &r, field::PAYEE);
-                                if crate::forms::enter::entered(&r).saves() {
+                                if !self.quick_payee.is_open()
+                                    && crate::forms::enter::entered(&r).saves()
+                                {
                                     self.after_frame = Some(CommandId::new("form.save_new"));
                                 }
                             });
@@ -1301,7 +1354,9 @@ impl PersonalFundsScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            "form.revert" => {
+                self.quick_who.cancel() || self.quick_payee.cancel() || self.revert_field()
+            }
             _ => false,
         }
     }

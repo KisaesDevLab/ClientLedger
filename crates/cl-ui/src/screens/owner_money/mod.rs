@@ -99,6 +99,8 @@ pub struct OwnerMoneyScreen {
     pub(crate) group: Option<RequestGroup>,
     pub(crate) today: CalendarDate,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a name not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     pub(crate) balances: Balances,
     pub(crate) header: FormState<OwnerMoneyForm>,
     pub(crate) inputs: Inputs,
@@ -134,12 +136,14 @@ impl OwnerMoneyScreen {
         today: CalendarDate,
     ) -> OwnerMoneyScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let mut s = OwnerMoneyScreen {
             link,
             tenant,
             group,
             today,
             books: Books::default(),
+            quick_add,
             balances: Balances::default(),
             header: FormState::new(OwnerMoneyForm::new(
                 Direction::PayYourself,
@@ -897,9 +901,32 @@ impl OwnerMoneyScreen {
                                 f.who,
                                 half,
                             );
+                            let added = self.quick_add.after_name_field(
+                                ui,
+                                tokens,
+                                self.group.as_ref(),
+                                (&self.inputs.who, &r),
+                                out,
+                                cl_model::quick_add::Accepts::Either(
+                                    cl_model::quick_add::NameKind::Vendor,
+                                ),
+                            );
                             self.apply_who(out);
+                            if let Some(c) = added {
+                                let id = c.id;
+                                self.books.add_contact(c);
+                                self.inputs.who.problem = false;
+                                self.inputs.who.text = self
+                                    .books
+                                    .lists
+                                    .name_text(id)
+                                    .unwrap_or_default()
+                                    .to_string();
+                                self.apply_who(NameOutcome::Picked(id));
+                            }
                             kit::track(&mut self.focused, &r, field::WHO);
-                            if crate::forms::enter::entered(&r).saves() {
+                            if !self.quick_add.is_open() && crate::forms::enter::entered(&r).saves()
+                            {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         });
@@ -1126,7 +1153,7 @@ impl OwnerMoneyScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
             _ => false,
         }
     }
