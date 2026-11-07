@@ -905,8 +905,15 @@ dependencies = [
 name = "cl-import"
 version = "0.0.0"
 dependencies = [
+ "cl-core",
+ "hmac",
  "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.21",
+ "unicode-normalization",
 ]
 
 [[package]]
