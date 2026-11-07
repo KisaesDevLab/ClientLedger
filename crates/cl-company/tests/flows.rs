@@ -914,6 +914,16 @@ async fn sales_tax_agency_waits_for_setup_routes_without_failing_the_company() {
         .expect("created");
     assert!(made.sales_tax_incomplete);
     assert_eq!(count(&server, "GET", "/api/v1/sales-tax/agencies").await, 0);
+    // Without the routes the typed rate is the default, as before.
+    let rate_sent = server
+        .received_requests()
+        .await
+        .expect("r")
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT" && r.url.path() == "/api/v1/company/settings")
+        .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
+        .any(|b| b["defaultSalesTaxRate"].is_string());
+    assert!(rate_sent);
 }
 
 /// Q-PR4c: a re-run finds the agency and the "Sales tax" item an earlier
@@ -951,8 +961,14 @@ async fn sales_tax_agency_reuses_what_an_earlier_run_made() {
         .await
         .expect("created");
     assert!(!made.sales_tax_incomplete);
-    assert!(posts(&server, "/api/v1/sales-tax").await.is_empty());
-    assert!(posts(&server, "/api/v1/contacts").await.is_empty());
+    assert_eq!(
+        posts(&server, "/api/v1/sales-tax").await,
+        Vec::<Value>::new()
+    );
+    assert_eq!(
+        posts(&server, "/api/v1/contacts").await,
+        Vec::<Value>::new()
+    );
     let puts: Vec<Value> = server
         .received_requests()
         .await
@@ -963,6 +979,11 @@ async fn sales_tax_agency_reuses_what_an_earlier_run_made() {
         .collect();
     assert!(
         puts.iter().any(|b| b["defaultSalesTaxId"] == ITEM),
+        "{puts:?}"
+    );
+    // The rate alone would make a legacy item with no agency: not sent.
+    assert!(
+        puts.iter().all(|b| b.get("defaultSalesTaxRate").is_none()),
         "{puts:?}"
     );
 }

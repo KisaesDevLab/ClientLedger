@@ -346,6 +346,7 @@ pub async fn set_up_sales_tax_agency(
     session
         .set_sales_tax_settings(
             &cl_api::SalesTaxSettingsUpdate {
+                enabled: Some(true),
                 default_sales_tax_id: Some(Some(item)),
                 ..cl_api::SalesTaxSettingsUpdate::default()
             },
@@ -355,14 +356,42 @@ pub async fn set_up_sales_tax_agency(
     Ok(())
 }
 
+/// True when [`set_up_sales_tax_agency`] will make the agency and item (the
+/// engine has the routes and the owner named the agency).
+fn agency_step_runs(session: &Session, setup: &CompanySetup) -> bool {
+    let caps = session.client().capabilities();
+    setup.sales_tax
+        && setup.agency_name().is_some()
+        && setup.sales_tax_rate.is_some()
+        && caps.has(Capabilities::SALES_TAX_SETUP)
+        && caps.has(Capabilities::COMPANY_SALES_TAX_FLAGS)
+}
+
 /// [`set_up_sales_tax_agency`] for the interview: true when it finished; a
-/// failure is logged (scrubbed) and never fails the new company.
+/// failure is logged (scrubbed) and never fails the new company. After a
+/// failure the typed rate is still saved as the default (as before
+/// Q-PR4c), so documents are taxed until Sales Tax Setup finishes it.
 async fn sales_tax_agency_done(session: &Session, setup: &CompanySetup) -> bool {
+    let runs = agency_step_runs(session, setup);
     match set_up_sales_tax_agency(session, setup).await {
         Ok(()) => true,
         Err(e) => {
             let detail = cl_core::OwnerFacing::scrubbed_detail(&e);
             tracing::warn!(%detail, "sales tax agency not set up");
+            if runs && let Some(rate) = setup.sales_tax_rate {
+                let fallback = session
+                    .update_company_settings(
+                        &CompanySettingsUpdate {
+                            default_sales_tax_rate: Some(cl_core::TaxRate::from(rate)),
+                            ..CompanySettingsUpdate::default()
+                        },
+                        IdempotencyKey::new(),
+                    )
+                    .await;
+                if fallback.is_err() {
+                    tracing::warn!("default sales tax rate not saved");
+                }
+            }
             false
         }
     }
@@ -454,7 +483,10 @@ pub(crate) async fn create_company_steps(
             &CompanySettingsUpdate {
                 fiscal_year_start_month: Some(setup.fiscal_year_start_month),
                 accounting_method: Some(setup.basis),
-                default_sales_tax_rate: if setup.sales_tax {
+                // Q-PR4c: sent alone the rate makes a legacy item with no
+                // agency ("Needs agency"); when the agency step runs, the
+                // item it makes sets the rate instead.
+                default_sales_tax_rate: if setup.sales_tax && !agency_step_runs(session, setup) {
                     setup.sales_tax_rate.map(cl_core::TaxRate::from)
                 } else {
                     None
