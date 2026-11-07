@@ -744,7 +744,11 @@ impl PreferencesScreen {
                     // usage count and the consent note write theirs while
                     // Preferences is open (B3).
                     write_owned_prefs(&prefs, &mut rec.prefs, legacy);
+                    // The bank link id is not this screen's (P25): a bank
+                    // import may have made it while Preferences was open.
+                    let link = rec.flags.bank_link_id;
                     rec.flags = flags;
+                    rec.flags.bank_link_id = link.or(flags.bank_link_id);
                 }
             }) {
                 self.error = Some(e.into());
