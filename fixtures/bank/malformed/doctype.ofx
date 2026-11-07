@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<?OFX OFXHEADER="200" VERSION="220"?>
+<!DOCTYPE OFX [
+<!ENTITY lol "lol">
+<!ENTITY lol2 "&lol;&lol;&lol;">
+]>
+<OFX>&lol2;</OFX>
