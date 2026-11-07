@@ -640,8 +640,144 @@ fn a_remembered_layout_that_does_not_fit_is_not_used() {
     s.pick_account(bank);
     wait_reading(&mut s);
     assert_eq!(s.state()["csv_source"], "guess");
+    // QA-6: the owner is told the columns changed since last time.
+    assert_eq!(s.state()["layout_changed"], true);
     let money_out = s.current_section().expect("section").rows[0].file_amount;
     assert!(money_out.is_sign_negative(), "debit stays money out");
+}
+
+/// QA-4: the flip remembered from the issuer-signed QFX is not applied to
+/// a holder-signed file of the same card; the evidence wins and the owner
+/// is asked again, and the 8 rows are then already imported, not changed.
+#[test]
+fn a_remembered_flip_the_file_contradicts_is_asked_again() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let card = card_account(&s);
+    into_account(&mut s, bank_fixture("card_positive_issuer.qfx"), card);
+    assert!(s.flipped);
+    s.set_flipped(true);
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    prepared(&mut s);
+    s.start_over(false);
+
+    read_path(&mut s, bank_fixture("card_ccstmt.qfx"));
+    s.next();
+    assert_eq!(s.account, Some(card), "linked by the card number");
+    let st = s.state();
+    assert_eq!(st["remembered_flip"], true);
+    assert_eq!(st["sign_differs"], true, "{st}");
+    assert_eq!(st["sign_needs_confirm"], true);
+    assert!(!s.flipped, "the file's evidence is the default");
+    assert!(!s.can_next());
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!((p.counts.duplicate, p.counts.changed), (8, 0));
+
+    // The same issuer file again: the remembered flip agrees, no question.
+    s.start_over(false);
+    read_path(&mut s, bank_fixture("card_positive_issuer.qfx"));
+    s.next();
+    assert_eq!(s.state()["sign_differs"], false);
+    assert!(!s.sign_needs_confirm());
+    assert!(s.flipped);
+}
+
+/// QA-5: a checking section into a card account (and a card file into a
+/// bank account) warns; a CSV never does.
+#[test]
+fn the_file_and_account_kinds_are_compared() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let (card, bank) = (card_account(&s), bank_account(&s));
+    read_path(&mut s, bank_fixture("multi_account.ofx"));
+    s.next();
+    s.pick_section(0);
+    s.pick_account(card);
+    assert_eq!(s.type_mismatch(), Some("bankimport.type.bank_file"));
+    assert_eq!(s.state()["type_mismatch"], true);
+    s.pick_account(bank);
+    assert_eq!(s.type_mismatch(), None);
+    s.pick_section(2);
+    s.pick_account(bank);
+    assert_eq!(s.type_mismatch(), Some("bankimport.type.card_file"));
+    for k in ["bankimport.type.bank_file", "bankimport.type.card_file"] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+    assert_eq!(flow::type_mismatch(cl_import::AccountKind::Unknown, true), None);
+    assert_eq!(flow::type_mismatch(cl_import::AccountKind::CreditLine, false), None);
+}
+
+/// QA-7 and R2-5: a balance column can be chosen by hand (here one the
+/// guess doesn't know), and a layout using one column twice says why.
+#[test]
+fn a_balance_column_is_mapped_by_hand() {
+    let f = fixture();
+    let mut s = screen(&f);
+    read(
+        &mut s,
+        &f,
+        "bal.csv",
+        "Date,Description,Amount,Avail
+11/01/2026,COFFEE,-4.50,95.50
+11/02/2026,DEPOSIT,120.00,215.50
+",
+    );
+    let mut m = s.csv_mapping.clone().expect("csv");
+    assert_eq!(m.balance, None, "not guessed");
+    assert!(s.current_section().expect("s").ledger_balance.is_none());
+    m.balance = Some(3);
+    s.set_mapping(m.clone());
+    wait_reading(&mut s);
+    let b = s
+        .current_section()
+        .expect("s")
+        .ledger_balance
+        .expect("balance");
+    assert_eq!(b.amount, rust_decimal::Decimal::new(21550, 2));
+    assert_eq!(flow::mapping_clash(&m), None);
+    m.date = 2;
+    assert_eq!(flow::mapping_clash(&m), Some("bankimport.csv.same_date"));
+    m.date = 0;
+    m.amount = cl_import::AmountColumns::DebitCredit {
+        debit: 2,
+        credit: 2,
+    };
+    assert_eq!(flow::mapping_clash(&m), Some("bankimport.csv.same_in_out"));
+    for k in [
+        "bankimport.csv.same_date",
+        "bankimport.csv.same_in_out",
+        "bankimport.csv.same_indicator",
+        "bankimport.csv.changed",
+        "bankimport.csv.balance",
+        "bankimport.sign.remembered_differs",
+    ] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
+}
+
+/// QA-8: back to step 1 and another file replaces the first, and an
+/// answer still on its way for the first file is not applied.
+#[test]
+fn another_file_after_going_back_replaces_the_first() {
+    let f = fixture();
+    let mut s = screen(&f);
+    read(&mut s, &f, "first.csv", CSV);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.back();
+    assert_eq!(s.step, Step::Choose);
+    read(&mut s, &f, "operating.qfx", OFX);
+    let l = s.loaded.as_ref().expect("loaded");
+    assert_eq!(l.file_name, "operating.qfx");
+    assert_eq!(s.state()["file"]["format"], "ofx");
+    assert_eq!(s.account, None, "the link starts over");
+    assert!(s.history_task.is_none());
 }
 
 /// Q-P25aa (owner 2026-11-07): after a restore the company keeps its

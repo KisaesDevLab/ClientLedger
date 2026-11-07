@@ -638,6 +638,10 @@ impl ImportBankFileScreen {
                     form::hint(ui, tokens, &t("bankimport.linked.pick"));
                 }
             }
+            // QA-5: the file is from the other kind of account.
+            if let Some(key) = self.type_mismatch() {
+                form::inline_warning(ui, tokens, &t(key));
+            }
         });
     }
 
@@ -659,6 +663,10 @@ impl ImportBankFileScreen {
         let before = m.clone();
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("bankimport.csv.heading"));
+            if self.layout_changed {
+                // QA-6: the remembered layout did not fit this file.
+                form::inline_warning(ui, tokens, &t("bankimport.csv.changed"));
+            }
             form::hint(ui, tokens, &t("bankimport.csv.hint"));
             let column = |ui: &mut Ui, id: &str, label: &str, value: &mut usize| {
                 ui.horizontal(|ui| {
@@ -724,6 +732,28 @@ impl ImportBankFileScreen {
                     );
                 }
             }
+            // QA R2-5: say why Next is off.
+            if let Some(key) = flow::mapping_clash(&m) {
+                form::inline_warning(ui, tokens, &t(key));
+            }
+            // QA-7: the running balance column, or none.
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("bankimport.csv.balance")).selectable(false));
+                let shown = m
+                    .balance
+                    .map_or_else(|| t("bankimport.csv.no_column"), name);
+                egui::ComboBox::from_id_salt("bankimport/csv/balance")
+                    .width(220.0)
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut m.balance, None, t("bankimport.csv.no_column"));
+                        for i in 0..names.len() {
+                            ui.selectable_value(&mut m.balance, Some(i), name(i));
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+            });
             ui.horizontal(|ui| {
                 let l = ui.add(egui::Label::new(t("bankimport.csv.date_order")).selectable(false));
                 let text = |o: DateOrder| {
@@ -777,7 +807,9 @@ impl ImportBankFileScreen {
                 "bankimport.sign.plain"
             };
             form::hint(ui, tokens, &t(key));
-            if self.remembered_flip.is_some() {
+            if self.sign_differs() {
+                form::inline_warning(ui, tokens, &t("bankimport.sign.remembered_differs"));
+            } else if self.remembered_flip.is_some() {
                 form::hint(ui, tokens, &t("bankimport.sign.remembered"));
             }
             egui::Grid::new("bankimport/sign/sample")

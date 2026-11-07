@@ -1070,6 +1070,10 @@ fn main() -> std::process::ExitCode {
             contract_bank_import::card_fixture_balance_in_either_convention,
         ),
         (
+            "bank_import::hand_written_check_is_likely_in_books",
+            contract_bank_import::hand_written_check_is_likely_in_books,
+        ),
+        (
             "bank_import::reused_fitids_never_change",
             contract_bank_import::reused_fitids_never_change,
         ),

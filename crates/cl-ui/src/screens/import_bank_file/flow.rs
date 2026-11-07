@@ -281,6 +281,31 @@ pub fn balance_figures(b: &cl_api::ImportBalanceCheck, card: bool) -> BalanceFig
     }
 }
 
+/// QA R2-5: why a CSV layout can't be used as chosen (an i18n key), so
+/// Next being off is explained: money in and money out (or the amount and
+/// its debit/credit column) on one column, or the date on an amount column.
+#[must_use]
+pub fn mapping_clash(m: &CsvMapping) -> Option<&'static str> {
+    use cl_import::AmountColumns as A;
+    match m.amount {
+        A::DebitCredit { debit, credit } if debit == credit => {
+            return Some("bankimport.csv.same_in_out");
+        }
+        A::Indicator { amount, indicator } if amount == indicator => {
+            return Some("bankimport.csv.same_indicator");
+        }
+        _ => {}
+    }
+    let amount_columns = match m.amount {
+        A::Signed { column } => vec![column],
+        A::DebitCredit { debit, credit } => vec![debit, credit],
+        A::Indicator { amount, indicator } => vec![amount, indicator],
+    };
+    amount_columns
+        .contains(&m.date)
+        .then_some("bankimport.csv.same_date")
+}
+
 /// The batch for `section` going into `account`.
 #[must_use]
 #[allow(clippy::too_many_arguments, reason = "one batch has this many parts")]
@@ -373,9 +398,44 @@ pub fn sign_check(section: &Section, card_target: bool) -> SignCheck {
 /// Q-P25t): with no earlier import of this account and format, when the
 /// file looks reversed, and always for a card account (asked once; the
 /// answer is kept with the batch).
+///
+/// QA-4: the remembered answer is not applied blindly. The sign evidence
+/// runs on every file; when it has something to go on and says the other
+/// way, the owner is asked again.
 #[must_use]
 pub fn sign_needs_confirm(check: &SignCheck, card_target: bool, remembered: Option<bool>) -> bool {
-    remembered.is_none() && (check.suggest_flip || card_target)
+    match remembered {
+        None => check.suggest_flip || card_target,
+        Some(flip) => sign_disagrees(check, flip),
+    }
+}
+
+/// Whether this file's sign evidence says the other way from the
+/// remembered flip (QA-4). No evidence (`reason` none) never disagrees.
+#[must_use]
+pub fn sign_disagrees(check: &SignCheck, remembered_flip: bool) -> bool {
+    check.reason.is_some() && check.suggest_flip != remembered_flip
+}
+
+/// QA-5: the file says what kind of account it is from (OFX
+/// `BANKACCTFROM`/`CCACCTFROM`, QIF `!Type:Bank`/`CCard`/`Cash`) and the
+/// chosen account is the other kind. A file that does not say (CSV) or a
+/// credit line never warns. Returns the warning's i18n key.
+#[must_use]
+pub fn type_mismatch(kind: AccountKind, card_target: bool) -> Option<&'static str> {
+    match kind {
+        AccountKind::CreditCard if !card_target => Some("bankimport.type.card_file"),
+        AccountKind::Checking
+        | AccountKind::Savings
+        | AccountKind::MoneyMarket
+        | AccountKind::Cd
+        | AccountKind::Cash
+            if card_target =>
+        {
+            Some("bankimport.type.bank_file")
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

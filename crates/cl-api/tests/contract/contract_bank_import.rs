@@ -433,6 +433,44 @@ pub fn card_fixture_balance_in_either_convention(h: &Harness) {
     }
 }
 
+/// QA R2-4: a check written by hand (No. 2001, 150.00, 11/07) and the
+/// bank's CSV row for it (no bank id, check number 2001) — the balance
+/// check says it is likely already in the books.
+pub fn hand_written_check_is_likely_in_books(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let b = crate::contract_write_check::books(h, s);
+    let on = date(2026, 11, 7);
+    let mut d = crate::contract_write_check::story(&b, on, Some(2001), false);
+    d.amount = m("150.00");
+    d.lines.truncate(1);
+    d.lines[0].amount = m("150.00");
+    let p = cl_api::BankPosting::check_with(d, false).expect("check");
+    h.run(
+        s.transactions()
+            .create_bank_posting(&p, &cl_api::PostingOptions::default(), key()),
+    )
+    .unwrap_or_else(|e| panic!("write check: {e}"));
+    let mut check = row(2, on, "150.00", "CHECK", None);
+    check.check_number = Some(2001);
+    let mut req = request(
+        b.bank,
+        BankFileFormat::Csv,
+        vec![check, row(3, date(2026, 11, 8), "-100.00", "DEPOSIT", None)],
+    );
+    req.file_ending_balance = Some(dec("950.00"));
+    req.file_ending_date = Some(date(2026, 11, 8));
+    let out = h.run(s.bank_import().preview(&req)).expect("preview");
+    let bc = out.balance_check.expect("balance check");
+    assert_eq!(
+        (bc.likely_in_books_count, bc.likely_in_books_total),
+        (1, m("150.00")),
+        "{bc:?}"
+    );
+}
+
 fn fitid_row(line: u32, day: CalendarDate, amount: &str, text: &str, fitid: &str) -> BankImportRow {
     row(line, day, amount, text, Some(fitid))
 }

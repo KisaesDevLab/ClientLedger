@@ -204,6 +204,9 @@ pub struct ImportBankFileScreen {
     csv_source: CsvSource,
     /// The mapping a reparse in flight applies, and where it came from.
     reparse_as: Option<(CsvMapping, CsvSource)>,
+    /// A remembered layout did not fit this file and the columns were
+    /// guessed again (QA-6).
+    layout_changed: bool,
     // Step 3.
     choices: BTreeMap<u32, RowChoice>,
     relink: bool,
@@ -269,6 +272,7 @@ impl ImportBankFileScreen {
             csv_mapping: None,
             csv_source: CsvSource::Guess,
             reparse_as: None,
+            layout_changed: false,
             choices: BTreeMap::new(),
             relink: false,
             preview_task: None,
@@ -408,12 +412,21 @@ impl ImportBankFileScreen {
                 // not fit was not): its source holds; else it is a guess.
                 let asked = self.reparse_as.take();
                 if keep_section {
-                    if let Some((m, source)) = asked
-                        && l.parsed.csv_mapping.as_ref() == Some(&m)
-                    {
-                        self.csv_source = source;
+                    match asked {
+                        Some((m, source)) if l.parsed.csv_mapping.as_ref() == Some(&m) => {
+                            self.csv_source = source;
+                        }
+                        // QA-6: a remembered layout that did not fit.
+                        Some((_, CsvSource::Batch | CsvSource::Local)) => {
+                            self.layout_changed = true;
+                        }
+                        _ => {}
                     }
                 } else {
+                    // QA-8: another file; an answer still on its way for
+                    // the one before is dropped, never applied to this one.
+                    self.lookup_task = None;
+                    self.history_task = None;
                     self.csv_source = CsvSource::Guess;
                     self.section = l
                         .parsed
@@ -443,6 +456,7 @@ impl ImportBankFileScreen {
     }
 
     fn reset_link(&mut self) {
+        self.layout_changed = false;
         self.account = None;
         self.linked = LinkedHow::None;
         self.remembered_flip = None;
@@ -467,10 +481,12 @@ impl ImportBankFileScreen {
             .current_section()
             .map(|s| flow::sign_check(s, card))
             .unwrap_or_default();
+        // QA-4: a remembered answer this file's evidence contradicts is
+        // not applied; the evidence is the default until the owner answers.
         let flipped = match self.remembered_flip {
-            Some(f) => f,
-            None if self.sign_confirmed => self.flipped,
-            None => self.sign.suggest_flip,
+            Some(f) if !flow::sign_disagrees(&self.sign, f) => f,
+            _ if self.sign_confirmed => self.flipped,
+            _ => self.sign.suggest_flip,
         };
         if flipped != self.flipped {
             self.flipped = flipped;
@@ -557,6 +573,7 @@ impl ImportBankFileScreen {
         }
         self.account = Some(id);
         self.linked = LinkedHow::Owner;
+        self.layout_changed = false;
         self.remembered_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
@@ -598,8 +615,10 @@ impl ImportBankFileScreen {
     /// has not chosen them here, and used only when they fit (DB2).
     fn remember(&mut self, flip: bool, mapping: Option<Value>) {
         self.remembered_flip = Some(flip);
-        self.sign_confirmed = true;
+        // QA-4: asked again when this file's evidence says the other way.
+        self.sign_confirmed = false;
         self.refresh_sign();
+        self.sign_confirmed = !self.sign_differs();
         let stored: Option<CsvMapping> = mapping.and_then(|m| serde_json::from_value(m).ok());
         match stored {
             Some(m) => self.try_stored_mapping(m, CsvSource::Batch),
@@ -636,8 +655,21 @@ impl ImportBankFileScreen {
         if self.csv_mapping.as_ref() != Some(&m) {
             self.csv_mapping = Some(m.clone());
             self.csv_source = CsvSource::Owner;
+            self.layout_changed = false;
             self.reparse(m, CsvSource::Owner);
         }
+    }
+
+    /// The remembered flip and this file's evidence disagree (QA-4).
+    pub(crate) fn sign_differs(&self) -> bool {
+        self.remembered_flip
+            .is_some_and(|f| flow::sign_disagrees(&self.sign, f))
+    }
+
+    /// The file's account kind and the chosen account's differ (QA-5).
+    pub(crate) fn type_mismatch(&self) -> Option<&'static str> {
+        self.account?;
+        flow::type_mismatch(self.current_section()?.kind, self.card_target())
     }
 
     pub(crate) fn sign_needs_confirm(&self) -> bool {
@@ -1307,6 +1339,9 @@ impl Screen for ImportBankFileScreen {
             "flipped": self.flipped,
             "sign_needs_confirm": self.sign_needs_confirm(),
             "remembered_flip": self.remembered_flip.is_some(),
+            "sign_differs": self.sign_differs(),
+            "type_mismatch": self.type_mismatch().is_some(),
+            "layout_changed": self.layout_changed,
             "previewing": self.preview_task.is_some(),
             "preview": preview,
             "preview_trouble": trouble_state(self.preview_trouble.as_ref()),
