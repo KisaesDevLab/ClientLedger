@@ -31,12 +31,15 @@ come later (phase P35).
 
 ## Licensing
 
-- ClientLedger code: PolyForm Internal Use License 1.0.0, see
-  [LICENSE](LICENSE). Use it, and change it, for your own organization's
-  internal business; it may not be distributed.
-- The bundled engine in `engine/`: a commercial license from Kisaes LLC that is
-  included with ClientLedger at no charge and with no license key. See
-  [NOTICE.md](NOTICE.md). Only official releases include it.
+ClientLedger is licensed under the **VibeMyFirm Community License 1.0**, see
+[LICENSE.md](LICENSE.md) and <https://vibemyfirm.com/licenses/community-1.0>.
+
+In plain language (not part of the license): you may use and modify this
+software for free to keep the books of entities you own, control, or work for.
+If you are paid to work on someone else's books, you need a Pro License Key. If
+you want to distribute the software or a modified version, you need a Developer
+License Key. The accounting engine inside is licensed separately and may only be
+run as Kisaes ships it. See [NOTICE.md](NOTICE.md).
 
 ## Contributing
 

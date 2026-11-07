@@ -80,11 +80,12 @@ paste them into the issue. Please do not attach real business data.
 
 LICENSES
 --------
-ClientLedger is licensed under the PolyForm Internal Use License 1.0.0
-(LICENSE): you may use it, and change it, for your own organization's internal
-business, but not share or distribute it. The books engine is the Vibe MyBooks
-engine; you use it under a commercial license from Kisaes LLC that is included
-with ClientLedger at no charge (see NOTICE.md). Fonts and bundled programs,
+ClientLedger is licensed under the VibeMyFirm Community License 1.0
+(LICENSE.md, https://vibemyfirm.com/licenses/community-1.0): keeping the books
+of a business you own, control, or work for is free; keeping books for clients
+for pay needs a Pro License Key; distributing it needs a Developer License Key.
+The books engine (the Kisaes GL Engine) runs only as Kisaes ships it (see
+NOTICE.md). Fonts and bundled programs,
 including PostgreSQL, are listed with their licenses in ATTRIBUTION.md.
 
 ClientLedger is not affiliated with Intuit or QuickBooks.

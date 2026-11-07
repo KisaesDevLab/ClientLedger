@@ -173,9 +173,9 @@ mod tests {
         let body = |k: &str| t(k);
         assert!(body("app.tagline").contains("powered by Vibe MyBooks"));
         assert!(body("about.affiliation.body").contains("Intuit"));
-        assert!(body("about.engine.body").contains("internal"));
-        assert!(body("about.engine.body").contains("commercial license included"));
-        assert!(body("about.license.body").contains("PolyForm Internal Use"));
+        assert!(body("about.engine.body").contains("unchanged"));
+        assert!(body("about.engine.body").contains("VibeMyFirm Community License"));
+        assert!(body("about.license.body").contains("VibeMyFirm Community License 1.0"));
         assert!(body("privacy.body").contains("no analytics"));
         assert!(FONT_LICENSE.contains("SIL Open Font License"));
     }
