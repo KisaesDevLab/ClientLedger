@@ -467,6 +467,11 @@ impl Capabilities {
     /// The commit and the undo are keyed under this capability; a preview
     /// takes no key.
     pub const BANK_IMPORT_BATCH: &'static str = "bank-import-batch-v1";
+    /// Bank import preparation progress (U-06 follow-up, engine PR #234):
+    /// `processed`/`total` on the batch list, `cancelled` post-processing,
+    /// undo while preparing, and `existingAmount`/`existingDate` on changed
+    /// rows.
+    pub const BANK_IMPORT_PROGRESS: &'static str = "bank-import-progress-v1";
     /// U-165 (P25, used from P26): the single-item bank feed routes take the
     /// closing-date password.
     pub const FEED_CLOSING_DATE: &'static str = "feed-closing-date-v1";
