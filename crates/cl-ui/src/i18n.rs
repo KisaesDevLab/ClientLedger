@@ -39,6 +39,20 @@ pub fn t_with(key: &str, args: &[(&str, &str)]) -> String {
     text
 }
 
+/// A count as the owner reads it: digits grouped by thousands ("20,000").
+#[must_use]
+pub fn count_text(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Translate a counted text: `{key}.one` when `n` is 1 and that entry
 /// exists (English's singular), else `key`; `{n}` and each of `args` are
 /// replaced. A locale with more plural forms adds its own suffixes here.
@@ -50,7 +64,7 @@ pub fn t_count(key: &str, n: usize, args: &[(&str, &str)]) -> String {
     } else {
         key
     };
-    let count = n.to_string();
+    let count = count_text(u64::try_from(n).unwrap_or(u64::MAX));
     let mut all = Vec::with_capacity(args.len() + 1);
     all.push(("n", count.as_str()));
     all.extend_from_slice(args);

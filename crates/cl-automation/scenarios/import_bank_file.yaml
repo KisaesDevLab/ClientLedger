@@ -141,7 +141,17 @@ steps:
   - assert_state: {key: screen.preview.changed, equals: 1}
   - assert_state: {key: screen.preview.new, equals: 1}
   - assert_state: {key: screen.to_send, equals: 1}
+  # Q-P25af: no default for a changed row; Send waits for an answer, and
+  # the card shows what it was and what it is now (R2-3).
+  - assert_state: {key: screen.changed_unanswered, equals: 1}
+  - assert_state: {key: screen.can_next, equals: false}
+  - assert_exists: {role: label, label: "Choose what to do with the changed transaction before sending."}
+  - assert_exists: {role: label, label_contains: "Was "}
   - screenshot: changed
+  - click: {role: button, label: Skip}
+  - assert_state: {key: screen.changed_unanswered, equals: 0}
+  - assert_state: {key: screen.to_send, equals: 1}
+  - assert_state: {key: screen.can_next, equals: true}
   - click: {label: Add as new}
   - assert_state: {key: screen.preview.chosen, equals: 1}
   - assert_state: {key: screen.to_send, equals: 2}
@@ -230,7 +240,35 @@ steps:
   - click: {role: button, label: "2050 · Business Credit Card (credit card)"}
   - assert_state: {key: screen.remembered_flip, equals: true}
   - assert_state: {key: screen.sign_needs_confirm, equals: false}
+  - assert_state: {key: screen.sign_differs, equals: false}
   - key: Alt+B
+  # QA-4: the same card in the issuer's signs: the remembered answer is
+  # not applied; the evidence is the default and the owner is asked.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/card_positive_issuer.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - assert_state: {key: screen.linked, equals: auto}
+  - assert_state: {key: screen.remembered_flip, equals: true}
+  - assert_state: {key: screen.sign_differs, equals: true}
+  - assert_state: {key: screen.sign_needs_confirm, equals: true}
+  - assert_state: {key: screen.flipped, equals: true}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: card-sign-differs
+  - key: Alt+B
+  # QA-5: a checking account's section into the card warns.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/multi_account.ofx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "2050 · Business Credit Card (credit card)"}
+  - assert_state: {key: screen.type_mismatch, equals: true}
+  - assert_exists: {role: label, label_contains: "This file is from a bank account"}
+  - screenshot: wrong-type
+  # Q-P25ae: Esc goes back one step.
+  - key: Escape
+  - assert_state: {key: screen.step, equals: choose}
   # A card CSV (charges positive) into the card: a CSV is another format,
   # so the card asks once more, with the flip suggested (review DB1,
   # Q-P25t), and the preview shows the first rows flipped.
@@ -342,6 +380,21 @@ steps:
   - screenshot: closed-period
   - key: Alt+B
   - key: Alt+B
+
+  # --- 9b. 1024 x 900 (QA-1): the list keeps the room under the cards --------
+  - resize: {width: 1024, height: 900}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_2026-11-03.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click_if_present: {role: button, label: These look right}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - screenshot: check-1024x900
+  - key: Escape
+  - assert_state: {key: screen.step, equals: link}
+  - key: Escape
+  - assert_state: {key: screen.step, equals: choose}
 
   # --- 10. The smallest window, 100% and 200% (Q-265) -----------------------------
   # The title, the step bar and the buttons stay; the step's content

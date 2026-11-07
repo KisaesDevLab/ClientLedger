@@ -427,6 +427,13 @@ pub struct ImportRowResult {
     pub inserted: bool,
     /// Replaced the waiting item (a changed row with "replace").
     pub replaced: bool,
+    /// The matched item's amount in the feed sign (money out positive) and
+    /// its date, for a changed row's "was / now" (Q-P25af). Read when the
+    /// engine sends `existingAmount`/`existingDate`; an engine that doesn't
+    /// (or a value that doesn't read) leaves them empty.
+    pub existing_amount: Option<Money>,
+    /// See `existing_amount`.
+    pub existing_date: Option<CalendarDate>,
 }
 
 /// The counts of a preview or commit.
@@ -596,6 +603,10 @@ struct WireRow {
     inserted: bool,
     #[serde(default)]
     replaced: Option<bool>,
+    #[serde(default)]
+    existing_amount: Option<Value>,
+    #[serde(default)]
+    existing_date: Option<Value>,
 }
 
 #[derive(Deserialize, Default)]
@@ -735,6 +746,16 @@ pub fn outcome_from(body: &[u8], replayed: bool) -> Result<BankImportOutcome, Ap
             closed_period: r.closed_period,
             inserted: r.inserted,
             replaced: r.replaced.unwrap_or(false),
+            existing_amount: r
+                .existing_amount
+                .as_ref()
+                .and_then(Value::as_str)
+                .and_then(|a| Money::parse_wire(a).ok()),
+            existing_date: r
+                .existing_date
+                .as_ref()
+                .and_then(Value::as_str)
+                .and_then(|d| date(d).ok()),
         });
     }
     Ok(BankImportOutcome {
@@ -801,6 +822,10 @@ pub struct ImportBatchSummary {
     pub undone_at: Option<Timestamp>,
     /// When it was imported.
     pub created_at: Option<Timestamp>,
+    /// How far the preparation is: items prepared and items in all, when
+    /// the engine says (Q-P25ad; an older engine doesn't, and a value
+    /// that isn't a count is ignored).
+    pub progress: Option<(u32, u32)>,
 }
 
 impl fmt::Debug for ImportBatchSummary {
@@ -836,6 +861,18 @@ struct WireBatch {
     undone_at: Option<String>,
     #[serde(default)]
     created_at: Option<String>,
+    #[serde(default)]
+    processed: Option<Value>,
+    #[serde(default)]
+    total: Option<Value>,
+}
+
+/// A preparation's progress (Q-P25ad), read tolerantly: both counts
+/// present, whole and fitting, the total not zero, else none.
+fn progress(processed: Option<&Value>, total: Option<&Value>) -> Option<(u32, u32)> {
+    let count = |v: Option<&Value>| v?.as_u64().and_then(|n| u32::try_from(n).ok());
+    let (done, all) = (count(processed)?, count(total)?);
+    (all > 0).then_some((done.min(all), all))
 }
 
 /// Reads a batch list answer (`{batches: […]}`).
@@ -875,6 +912,7 @@ pub fn batches_from(body: &[u8]) -> Result<Vec<ImportBatchSummary>, ApiError> {
                     .created_at
                     .as_deref()
                     .and_then(|t| Timestamp::parse_wire(t).ok()),
+                progress: progress(b.processed.as_ref(), b.total.as_ref()),
             })
         })
         .collect()

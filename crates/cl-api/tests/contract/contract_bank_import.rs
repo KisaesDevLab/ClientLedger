@@ -386,7 +386,7 @@ pub fn card_balance_check(h: &Harness) {
 /// sent: on a fresh card account the rows net -70.78 owed (charges
 /// 454.22, credits 525.00), so projected is -70.78 and the difference is
 /// -(-429.12) - (-70.78) = 499.90. The desktop shows "Bank says you owe"
-/// as -file_balance so the three figures read in one sign.
+/// as `-file_balance` so the three figures read in one sign.
 pub fn card_fixture_balance_in_either_convention(h: &Harness) {
     if !caps(h) {
         return;

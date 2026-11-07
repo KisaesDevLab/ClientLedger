@@ -370,6 +370,7 @@ async fn batches_undo_and_lookup_read_their_answers() {
     assert_eq!(listed[0].csv_mapping, Some(json!({"date": 0})));
     assert_eq!(listed[0].inserted, 4);
     assert_eq!(listed[0].post_processing, Some(ImportPostProcessing::Done));
+    assert_eq!(listed[0].progress, None, "an engine without the counts");
     let gets = requests(&server, "GET").await;
     let sent = query(gets.last().expect("get"));
     assert!(
@@ -413,4 +414,55 @@ async fn batches_undo_and_lookup_read_their_answers() {
     assert_eq!((undone.removed, undone.kept, undone.restored), (3, 1, 1));
     let deletes = requests(&server, "DELETE").await;
     assert_eq!(query(&deletes[0]), "pendingOnly=true");
+}
+
+/// Q-P25ad: the preparation's progress is read when the engine sends it,
+/// and anything that isn't a pair of counts is ignored (never an error).
+#[test]
+fn preparation_progress_is_read_tolerantly() {
+    let body = |extra: &str| {
+        format!(
+            r#"{{"batches":[{{"id":"{BATCH}","accountId":"{ACCOUNT}","counts":{{"inserted":2}},
+            "postProcessing":"scheduled"{extra}}}]}}"#
+        )
+    };
+    let read = |extra: &str| batches_from(body(extra).as_bytes()).expect("read")[0].progress;
+    assert_eq!(
+        read(r#","processed":1200,"total":20000"#),
+        Some((1200, 20000))
+    );
+    assert_eq!(read(r#","processed":30,"total":20"#), Some((20, 20)));
+    assert_eq!(read(r#","processed":"12","total":20"#), None);
+    assert_eq!(read(r#","processed":1,"total":0"#), None);
+    assert_eq!(read(r#","processed":null"#), None);
+    assert_eq!(read(""), None);
+}
+
+/// Q-P25af: a changed row's earlier amount and date are read when the
+/// engine sends them; anything else leaves them empty (never an error).
+#[test]
+fn a_changed_rows_earlier_values_are_read_tolerantly() {
+    let body = |extra: &str| {
+        format!(
+            r#"{{"insertedItemIds":[],"rows":[{{"line":4,"status":"changed","existingItemId":"{ITEM}",
+            "existingPending":true,"closedPeriod":false,"inserted":false{extra}}}],
+            "counts":{{"inFile":1,"changed":1}},"insertedTotal":"0.00"}}"#
+        )
+    };
+    let read = |extra: &str| {
+        let o = outcome_from(body(extra).as_bytes(), false).expect("read");
+        (o.rows[0].existing_amount, o.rows[0].existing_date)
+    };
+    assert_eq!(
+        read(r#","existingAmount":"301.22","existingDate":"2026-11-03""#),
+        (
+            Some(Money::parse_wire("301.22").expect("m")),
+            Some(day("2026-11-03"))
+        )
+    );
+    assert_eq!(
+        read(r#","existingAmount":301.22,"existingDate":7"#),
+        (None, None)
+    );
+    assert_eq!(read(""), (None, None));
 }

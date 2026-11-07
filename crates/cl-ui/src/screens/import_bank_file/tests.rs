@@ -185,7 +185,21 @@ fn a_changed_row_replaces_or_is_added() {
         .find(|r| r.status == ImportRowStatus::Changed)
         .expect("changed")
         .line;
+    // R2-3: what it was (the waiting item, feed sign) and the new date.
+    let row = p.rows.iter().find(|r| r.line == line).expect("row");
+    assert_eq!(
+        row.existing_amount,
+        Some(cl_core::Money::parse_wire("186.40").expect("m"))
+    );
+    assert_eq!(row.existing_date, CalendarDate::from_ymd(2026, 10, 31).ok());
+    // Q-P25af: no default; Send waits for an answer.
     assert!(!s.can_next(), "nothing chosen yet");
+    assert_eq!(s.state()["changed_unanswered"], 1);
+    s.choose(line, changed_skip());
+    s.poll();
+    assert_eq!(s.unanswered_changed(), 0);
+    assert_eq!(s.replacing(), 0);
+    assert!(!s.can_next(), "skipped and nothing new: nothing to send");
     s.choose(line, changed_choice(ChangedAction::Replace));
     s.poll();
     assert_eq!(s.replacing(), 1);
@@ -414,10 +428,57 @@ fn alt_n_and_alt_b_move_between_steps() {
     assert_eq!(s.scope(), cl_model::Scope::Form);
 }
 
+/// Q-P25ae: Esc goes back one step; on step 1 the window closes (the
+/// shell asks first while a chosen file is not sent).
+#[test]
+fn esc_goes_back_then_closes_asking_while_a_file_is_chosen() {
+    let f = fixture();
+    let mut s = screen(&f);
+    assert!(
+        !s.command(CommandId::new("form.revert")),
+        "nothing chosen: close"
+    );
+    assert!(!s.dirty());
+    previewed(&mut s, &f);
+    assert!(s.dirty(), "a file chosen and not sent");
+    assert!(s.command(CommandId::new("form.revert")));
+    assert_eq!(s.step, Step::Link);
+    assert!(s.command(CommandId::new("form.revert")));
+    assert_eq!(s.step, Step::Choose);
+    assert!(
+        !s.command(CommandId::new("form.revert")),
+        "step 1: the shell closes"
+    );
+    s.next();
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    assert!(!s.dirty(), "sent: closes without asking");
+    assert!(!s.command(CommandId::new("form.revert")));
+}
+
 #[test]
 fn every_text_key_is_in_the_catalog() {
     for k in [
         "bankimport.subtitle",
+        "bankimport.changed.heading",
+        "bankimport.changed.heading.one",
+        "bankimport.changed.hint",
+        "bankimport.changed.was",
+        "bankimport.changed.now",
+        "bankimport.changed.skip",
+        "bankimport.changed.replace_off",
+        "bankimport.changed.left",
+        "bankimport.changed.chosen_replace",
+        "bankimport.changed.chosen_add",
+        "bankimport.changed.chosen_skip",
+        "bankimport.balance.bank_says_owe",
+        "bankimport.balance.books_will_owe",
+        "bankimport.balance.books_pending",
+        "bankimport.balance.books_pending_owe",
+        "bankimport.balance.books_now",
+        "bankimport.balance.books_now_owe",
         "bankimport.status.possible_on",
         "bankimport.linked_elsewhere",
         "bankimport.undo.used",
@@ -709,8 +770,14 @@ fn the_file_and_account_kinds_are_compared() {
     for k in ["bankimport.type.bank_file", "bankimport.type.card_file"] {
         assert!(crate::i18n::has(k), "{k}");
     }
-    assert_eq!(flow::type_mismatch(cl_import::AccountKind::Unknown, true), None);
-    assert_eq!(flow::type_mismatch(cl_import::AccountKind::CreditLine, false), None);
+    assert_eq!(
+        flow::type_mismatch(cl_import::AccountKind::Unknown, true),
+        None
+    );
+    assert_eq!(
+        flow::type_mismatch(cl_import::AccountKind::CreditLine, false),
+        None
+    );
 }
 
 /// QA-7 and R2-5: a balance column can be chosen by hand (here one the
@@ -867,4 +934,37 @@ fn a_file_linked_elsewhere_is_refused_until_relinked() {
     s.relink = true;
     s.send();
     assert_eq!(s.step, Step::Done);
+}
+
+/// Q-P25ac: past the 120 s wait the owner is told the preparation goes on,
+/// and it is still checked, so Undo opens once it is done; counts are
+/// grouped by thousands (R2-7).
+#[test]
+fn after_the_wait_gives_up_the_preparation_is_still_checked() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    let now = std::time::Instant::now();
+    s.prep_started = now.checked_sub(PREPARING_BUDGET + std::time::Duration::from_secs(1));
+    s.prep_next = Some(now);
+    s.poll();
+    assert_eq!(s.state()["prep_gave_up"], true);
+    assert!(s.preparing() || s.state()["result"]["post_processing"] == "done");
+    // The demo's preparation ends after 800 ms; the slow check finds it.
+    std::thread::sleep(std::time::Duration::from_millis(900));
+    s.prep_next = Some(std::time::Instant::now());
+    s.poll();
+    assert_eq!(s.state()["result"]["post_processing"], "done");
+    assert!(!s.preparing(), "Undo opens");
+    assert_eq!(crate::i18n::count_text(20_000), "20,000");
+    assert_eq!(crate::i18n::count_text(999), "999");
+    assert_eq!(crate::i18n::count_text(1_234_567), "1,234,567");
+    assert_eq!(
+        crate::i18n::t_count("bankimport.done.sent_all", 20_000, &[]),
+        "Sent 20,000 to the Bank Feed."
+    );
+    for k in ["bankimport.done.preparing_of", "bankimport.done.prep_done"] {
+        assert!(crate::i18n::has(k), "{k}");
+    }
 }

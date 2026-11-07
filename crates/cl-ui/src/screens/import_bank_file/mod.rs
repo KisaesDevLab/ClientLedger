@@ -145,6 +145,9 @@ impl CsvSource {
 const PREPARING_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
 /// The longest pause between two checks of the preparation.
 const PREPARING_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+/// After the budget, the preparation is still checked this often, so Undo
+/// opens when it is done (Q-P25ac).
+const PREPARING_SLOW_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A bank or card account the file may go into.
 #[derive(Clone, Debug)]
@@ -224,8 +227,11 @@ pub struct ImportBankFileScreen {
     prep_started: Option<std::time::Instant>,
     prep_next: Option<std::time::Instant>,
     prep_delay: std::time::Duration,
-    /// The budget ran out: the preparation goes on in the engine.
+    /// The budget ran out: the preparation goes on in the engine and is
+    /// checked every 30 seconds (Q-P25ac).
     prep_gave_up: bool,
+    /// Items prepared and items in all, when the engine says (Q-P25ad).
+    prep_progress: Option<(u32, u32)>,
     undo_task: Option<Task<ImportUndoOutcome>>,
     undo_key: Option<IdempotencyKey>,
     undone: Option<ImportUndoOutcome>,
@@ -288,6 +294,7 @@ impl ImportBankFileScreen {
             prep_next: None,
             prep_delay: std::time::Duration::from_secs(1),
             prep_gave_up: false,
+            prep_progress: None,
             undo_task: None,
             undo_key: None,
             undone: None,
@@ -868,6 +875,7 @@ impl ImportBankFileScreen {
         self.prep_delay = std::time::Duration::from_secs(1);
         self.prep_next = Some(now + self.prep_delay);
         self.prep_gave_up = false;
+        self.prep_progress = None;
         if o.counts.inserted > 0 || o.rows.iter().any(|r| r.replaced) {
             self.link.bus().publish(crate::data_bus::Change::BankFeed);
             self.recount_feed();
@@ -890,14 +898,19 @@ impl ImportBankFileScreen {
         let (Some(started), Some(next)) = (self.prep_started, self.prep_next) else {
             return;
         };
-        if !self.preparing() || self.prep_task.is_some() || self.prep_gave_up || now < next {
+        if !self.preparing() || self.prep_task.is_some() || now < next {
             return;
         }
+        // Q-P25ac: past the budget the owner is told it goes on, and it is
+        // still checked (slowly) so Undo opens once it is done.
         if now.duration_since(started) > PREPARING_BUDGET {
             self.prep_gave_up = true;
-            return;
         }
-        self.prep_delay = (self.prep_delay * 2).min(PREPARING_MAX_DELAY);
+        self.prep_delay = if self.prep_gave_up {
+            PREPARING_SLOW_DELAY
+        } else {
+            (self.prep_delay * 2).min(PREPARING_MAX_DELAY)
+        };
         self.prep_next = Some(now + self.prep_delay);
         let Some(batch) = self.result.as_ref().and_then(|r| r.batch) else {
             return;
@@ -1005,6 +1018,7 @@ impl ImportBankFileScreen {
         self.prep_next = None;
         self.prep_task = None;
         self.prep_gave_up = false;
+        self.prep_progress = None;
         self.forget_preview();
         if next_section {
             let next = self.section + 1;
@@ -1033,9 +1047,11 @@ impl ImportBankFileScreen {
             // UI review 8: Send opens only when it would add or replace
             // something.
             Step::Check => {
-                self.preview.as_ref().is_some_and(|p| {
-                    flow::rows_to_send(p, &self.choices) > 0 || self.replacing() > 0
-                }) && self.preview_task.is_none()
+                self.unanswered_changed() == 0
+                    && self.preview.as_ref().is_some_and(|p| {
+                        flow::rows_to_send(p, &self.choices) > 0 || self.replacing() > 0
+                    })
+                    && self.preview_task.is_none()
                     && self.send_task.is_none()
                     && self
                         .preview
@@ -1044,6 +1060,20 @@ impl ImportBankFileScreen {
             }
             Step::Done => false,
         }
+    }
+
+    /// Changed rows the owner has not answered yet (Q-P25af): Send stays
+    /// closed until each is replaced, added or skipped.
+    pub(crate) fn unanswered_changed(&self) -> usize {
+        self.preview.as_ref().map_or(0, |p| {
+            p.rows
+                .iter()
+                .filter(|r| {
+                    r.status == ImportRowStatus::Changed
+                        && !changed_answered(self.choices.get(&r.line).copied().unwrap_or_default())
+                })
+                .count()
+        })
     }
 
     /// Changed rows set to replace their waiting item (the dry run says
@@ -1185,6 +1215,7 @@ impl ImportBankFileScreen {
                 && let Some(b) = batches.iter().find(|b| Some(b.id) == res.batch)
             {
                 res.post_processing = b.post_processing;
+                self.prep_progress = b.progress;
             }
         }
         self.poll_preparing();
@@ -1229,11 +1260,20 @@ impl Screen for ImportBankFileScreen {
         true
     }
 
+    /// A chosen file not yet sent: closing asks first (Q-P25ae).
+    fn dirty(&self) -> bool {
+        self.loaded.is_some() && self.step != Step::Done
+    }
+
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.poll();
         if self.busy() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
+        } else if self.preparing() {
+            // Q-P25ac: still checked after the wait gave up.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
         }
         self.draw(ui);
     }
@@ -1284,8 +1324,16 @@ impl Screen for ImportBankFileScreen {
                 self.sent = 0;
                 true
             }
-            // Esc never throws a chosen file away.
-            "form.revert" => self.loaded.is_some() && self.step != Step::Done,
+            // Q-P25ae: Esc goes back one step; on step 1 (and after the
+            // send) the window closes, asking first while a file is chosen
+            // and not sent (`dirty`).
+            "form.revert" => match self.step {
+                Step::Link | Step::Check => {
+                    self.back();
+                    true
+                }
+                Step::Choose | Step::Done => false,
+            },
             _ => false,
         }
     }
@@ -1347,12 +1395,14 @@ impl Screen for ImportBankFileScreen {
             "preview_trouble": trouble_state(self.preview_trouble.as_ref()),
             "only_skipped": self.only_skipped,
             "to_send": self.preview.as_ref().map(|p| flow::rows_to_send(p, &self.choices)),
+            "changed_unanswered": self.unanswered_changed(),
             "sending": self.send_task.is_some(),
             "send_trouble": trouble_state(self.send_trouble.as_ref()),
             "has_key": self.frozen.is_some(),
             "result": result,
             "preparing": self.preparing(),
             "prep_gave_up": self.prep_gave_up,
+            "prep_progress": self.prep_progress.map(|(d, a)| json!([d, a])),
             "undone": self.undone.map(|u| json!({"removed": u.removed, "kept": u.kept, "restored": u.restored})),
             "undo_trouble": trouble_state(self.undo_trouble.as_ref()),
             "sent": self.sent,
@@ -1408,4 +1458,17 @@ pub(crate) fn changed_choice(action: ChangedAction) -> RowChoice {
         include: None,
         changed: Some(action),
     }
+}
+
+/// Q-P25af: a changed row left out (neither replace nor add).
+pub(crate) fn changed_skip() -> RowChoice {
+    RowChoice {
+        include: Some(false),
+        changed: None,
+    }
+}
+
+/// Whether the owner has answered a changed row (Q-P25af: no default).
+pub(crate) fn changed_answered(c: RowChoice) -> bool {
+    c.changed.is_some() || c.include == Some(false)
 }

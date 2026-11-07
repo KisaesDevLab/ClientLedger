@@ -197,4 +197,33 @@ mod tests {
         let big = vec![b','; MAX_FILE_BYTES + 1];
         assert!(matches!(detect(&big), Err(ImportError::TooLarge { .. })));
     }
+
+    /// Q-P25h: UTF-16 is read only with a byte-order mark (Excel's
+    /// "Unicode text"); without one its NUL bytes make it unreadable, and
+    /// it is refused rather than guessed.
+    #[test]
+    fn utf16_needs_a_byte_order_mark() {
+        let text = "Date	Description	Amount
+11/01/2026	COFFEE	-4.50
+";
+        let le: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let be: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        let with_bom = |bom: &[u8], body: &[u8]| [bom, body].concat();
+        assert_eq!(
+            detect(&with_bom(&[0xFF, 0xFE], &le)).map(|d| (d.format, d.encoding)),
+            Ok((FileFormat::Csv, TextEncoding::Utf16Le))
+        );
+        assert_eq!(
+            detect(&with_bom(&[0xFE, 0xFF], &be)).map(|d| (d.format, d.encoding)),
+            Ok((FileFormat::Csv, TextEncoding::Utf16Be))
+        );
+        assert_eq!(detect(&le), Err(ImportError::UnknownFormat));
+        assert_eq!(detect(&be), Err(ImportError::UnknownFormat));
+        let ofx: Vec<u8> = "OFXHEADER:100
+<OFX>"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        assert_eq!(detect(&ofx), Err(ImportError::UnknownFormat));
+    }
 }

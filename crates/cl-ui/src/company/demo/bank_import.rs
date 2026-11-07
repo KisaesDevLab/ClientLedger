@@ -366,6 +366,14 @@ impl DemoBankFeed {
                 closed_period,
                 inserted: insert && commit,
                 replaced: replace && commit,
+                // Q-P25af: what a changed row was (the engine's follow-up).
+                existing_amount: existing_item
+                    .filter(|_| status == ImportRowStatus::Changed)
+                    .and_then(|i| cl_api::wire_decimal(i.amount).ok())
+                    .and_then(|a| Money::parse_wire(&a).ok()),
+                existing_date: existing_item
+                    .filter(|_| status == ImportRowStatus::Changed)
+                    .map(|i| i.date),
             });
         }
         let same_file = self
