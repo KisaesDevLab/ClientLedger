@@ -25,7 +25,7 @@ use std::process::Command;
 const README_TEMPLATE: &str = include_str!("../preview/README-PREVIEW.txt");
 
 /// Repository documents copied into the folder root.
-const DOCS: [&str; 3] = ["LICENSE", "NOTICE.md", "ATTRIBUTION.md"];
+const DOCS: [&str; 3] = ["LICENSE.md", "NOTICE.md", "ATTRIBUTION.md"];
 
 /// Archive format for a platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

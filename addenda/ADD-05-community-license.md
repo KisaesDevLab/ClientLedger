@@ -6,7 +6,7 @@ Owner request, 2026-11-06: the build-plan addendum "ClientLedger: VibeMyFirm Com
 
 ## Source files
 
-- `licensing/LICENSE-VibeMyFirm-Community-1.0.md` — received 2026-11-06; becomes `LICENSE.md` in L1 (Sections 5–9 and 18 drive the UI copy).
+- `LICENSE.md` — the Community License, received 2026-11-06 and **swapped in on 2026-11-06** (owner, phase-end Q&A after P24; pulled forward from L1). NOTICE.md, README, crate license fields, cargo-deny, the About text and the preview README were updated with it. Still in L1: Required Notice source headers and the full About block.
 - `licensing/KISAES-GL-ENGINE-LICENSE-AND-GRANT.md` — received 2026-11-06 (Part A grant, Part B notice).
 - The engine OEM License Agreement — received 2026-11-06; **not committed here** (an engine-repo document with fee terms; the engine notice points to it by URL).
 - **Still waiting:** `PROMPT-kisaes-gl-engine.md` (the engine addendum: `GET /license` contract and the host-signature mechanism). Items needing it stay PENDING.
