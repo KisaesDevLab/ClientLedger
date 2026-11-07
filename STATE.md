@@ -40,7 +40,7 @@
 | P22 | Credit memos, refunds, statements, finance charges | M | Done 2026-11-01 |
 | P23 | Sales tax | H | Done 2026-11-02 |
 | P24 | Inventory (average cost) | H | Done 2026-11-06 |
-| P25 | Bank file import (QIF, QFX, OFX, CSV) | H | |
+| P25 | Bank file import (QIF, QFX, OFX, CSV) | H | In progress |
 | P26 | Bank feed review | M | |
 | P27 | Reconcile | H | |
 | P28 | Report engine UI | H | |
