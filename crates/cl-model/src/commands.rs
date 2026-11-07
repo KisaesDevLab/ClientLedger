@@ -252,6 +252,8 @@ pub const COMMANDS: &[Command] = &[
     // Form and grid commands (not in a menu; listed in the palette and overlay)
     cmd("form.save_new", "Save & New", None, 0, alt('N'), Scope::Form),
     cmd("form.save_close", "Save & Close", None, 0, alt('S'), Scope::Form),
+    // P25: a wizard's Back (its Alt+N is Save & New's key: "next step").
+    cmd("form.step_back", "Back a Step", None, 0, alt('B'), Scope::Form),
     cmd("form.revert", "Revert Field, Then Form", None, 0, key(Mods::NONE, Key::Escape), Scope::Form),
     cmd("form.next_record", "Next Record", None, 1, key(Mods::NONE, Key::PageDown), Scope::Form),
     cmd("form.prev_record", "Previous Record", None, 1, key(Mods::NONE, Key::PageUp), Scope::Form),
@@ -415,7 +417,7 @@ pub const COMMANDS: &[Command] = &[
     // Bulk Entry (P15A): no global shortcut (Q-P15Ah)
     built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
-    screen("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None, "P25"),
+    built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
     screen("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None, "P26"),
     // Payroll
     screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
@@ -670,6 +672,8 @@ mod tests {
             "reports.inventory_value_detail",
             "reports.stock_status",
             "lists.unit_sets",
+            // P25
+            "banking.import_file",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
