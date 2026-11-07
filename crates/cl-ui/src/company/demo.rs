@@ -45,6 +45,8 @@ pub mod stock;
 pub mod template_store;
 pub mod templates;
 pub mod units;
+// P25: the in-memory bank feed of Import Bank File.
+pub mod bank_import;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +108,8 @@ pub struct DemoState {
     pub deposits: deposits::DemoDeposits,
     /// Daily-sales layouts and days (P14).
     pub daily_sales: daily_sales::DemoDailySales,
+    /// Bank files imported in the demo (P25).
+    pub bank_feed: bank_import::DemoBankFeed,
     /// The open company's entity type (the sample's single-member LLC).
     pub entity_type: cl_api::EntityType,
     /// The demo company's AI switches (Preferences > AI).
@@ -263,6 +267,7 @@ impl DemoState {
             checks: checks::DemoChecks::default(),
             deposits: deposits::DemoDeposits::default(),
             daily_sales: daily_sales::DemoDailySales::default(),
+            bank_feed: bank_import::DemoBankFeed::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,
             ai: DemoAi::default(),
             templates: Vec::new(),

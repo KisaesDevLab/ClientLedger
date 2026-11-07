@@ -128,9 +128,11 @@ mod finance_charges;
 mod statements;
 // P24 WP-2: inventory screens and reports.
 mod inventory;
+// P25: Import Bank File.
+mod bank_import;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 47] = [
+const TABLES: [&[(&str, &str)]; 48] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -178,6 +180,7 @@ const TABLES: [&[(&str, &str)]; 47] = [
     statements::ENGLISH,
     finance_charges::ENGLISH,
     inventory::ENGLISH,
+    bank_import::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
