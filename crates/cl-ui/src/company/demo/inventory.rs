@@ -18,7 +18,7 @@
 //!
 //! Money is exact: `Money`, `Quantity`, `UnitCost` and `Decimal` only.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 use cl_core::ids::ItemId;
 use cl_core::{CalendarDate, Money, Quantity, UnitCost};
@@ -117,6 +117,13 @@ pub struct Row {
     pub asset_value: Money,
     /// The true last positive average after the row.
     pub last_cost: Option<UnitCost>,
+    /// What the movement does (the warnings read its direction).
+    pub kind: MoveKind,
+    /// A linked return's sale (the row's place inside its document).
+    pub link: Option<String>,
+    /// A sale's `correction_share` (PR-4 S5): the corrections attributed to
+    /// the units it sold below 0 (zero on every other row).
+    pub correction_share: Money,
 }
 
 /// Why the demo costing could not compute (an amount out of range).
@@ -274,18 +281,20 @@ impl State {
 /// A sale's place: its date and entry order.
 type SalePos = (CalendarDate, u64);
 
-/// Position order: date, then entry order, then the document key; inside
-/// one document the unlinked row first, then the linked rows by their sale
-/// (PR-4 B1, the golden rule). `sales` holds each sale's position.
-fn position<'m>(
-    m: &'m Movement,
-    sales: &BTreeMap<&str, SalePos>,
-) -> (CalendarDate, u64, &'m str, Option<(SalePos, &'m str)>) {
-    let link = m.return_of.as_deref().map(|s| {
-        let at = sales.get(s).copied().unwrap_or((m.date, u64::MAX));
-        (at, s)
-    });
-    (m.date, m.seq, m.doc.as_str(), link)
+/// A row's position key (see [`position`]).
+type PosKey<'m> = (CalendarDate, u64, &'m str, Option<SalePos>, Option<&'m str>);
+
+/// Position order, as the engine's `positionAsc` (PR-4 B1, RB1): date,
+/// then entry order, then the document key; inside one document the
+/// linked sale's position (date, entry order; none first, so the unlinked
+/// row leads), then the sale's key. The row id the engine ends on never
+/// decides inside one item: a document has one row per item and linked
+/// sale (the caller aggregates its lines, S4). `sales` holds each sale's
+/// position.
+fn position<'m>(m: &'m Movement, sales: &BTreeMap<&str, SalePos>) -> PosKey<'m> {
+    let sale = m.return_of.as_deref();
+    let at = sale.and_then(|s| sales.get(s).copied());
+    (m.date, m.seq, m.doc.as_str(), at, sale)
 }
 
 /// A sale linked returns come back from: its relief `R` for `S` units
@@ -297,14 +306,26 @@ struct Sold {
     units: Quantity,
     returned: Quantity,
     brought: Money,
+    /// The corrections attributed to it (its `correction_share`).
+    share: Money,
+    /// Its row in the replay's output.
+    row: usize,
 }
 
 impl Sold {
-    /// The next linked return of `q` units: `round2(R × (N + q) / S) − B`
-    /// (Q-P24e; the cumulative difference while R does not change).
+    /// The next linked return of `q` units: `max(0, round2(R × (N + q) / S)
+    /// − B)` (Q-P24e; the cumulative difference while R does not change;
+    /// never below 0, PR-4 RS2: R can fall under what earlier returns
+    /// brought back when its short units are cured at a lower cost).
     fn take(&mut self, q: Quantity) -> Result<Money, CostError> {
-        self.returned = qadd(self.returned, q)?;
-        let v = sub(ratio(self.relief, self.returned, self.units)?, self.brought)?;
+        let next = qadd(self.returned, q)?;
+        let v = if self.units.is_positive() {
+            let v = sub(ratio(self.relief, next, self.units)?, self.brought)?;
+            if v.is_negative() { Money::ZERO } else { v }
+        } else {
+            Money::ZERO
+        };
+        self.returned = next;
         self.brought = add(self.brought, v)?;
         Ok(v)
     }
@@ -335,7 +356,7 @@ fn flows(k: MoveKind) -> (Quantity, Quantity) {
 /// each entry is the sale (none for another outflow) and its units still
 /// short.
 #[derive(Default)]
-struct Short(VecDeque<(Option<String>, Quantity)>);
+struct Short(Vec<(Option<String>, Quantity)>);
 
 impl Short {
     /// An outflow of `q` units with `on` on hand before it.
@@ -343,35 +364,54 @@ impl Short {
         let held = if on.is_positive() { on } else { Quantity::ZERO };
         let excess = q.checked_sub(held).map_err(|_| CostError::Overflow)?;
         if excess.is_positive() {
-            self.0.push_back((sale.map(str::to_string), excess));
+            self.0.push((sale.map(str::to_string), excess));
         }
         Ok(())
     }
 
-    /// An inflow curing `k` units with correction `c`: each sale taken gets
-    /// `round2(C × K_i / k) − round2(C × K_(i−1) / k)`.
-    fn cure(&mut self, k: Quantity, c: Money) -> Result<Vec<(String, Money)>, CostError> {
+    /// An inflow curing `k` units with correction `c`: a linked return
+    /// first takes its own sale's short units (`own`, PR-4 RS2), then the
+    /// oldest; each sale taken gets `round2(C × K_i / k) − round2(C ×
+    /// K_(i−1) / k)` (`K_i` the units taken so far; a zero share is left
+    /// out, as the engine's `trackShort`).
+    fn cure(
+        &mut self,
+        k: Quantity,
+        c: Money,
+        own: Option<&str>,
+    ) -> Result<Vec<(String, Money)>, CostError> {
         let mut out = Vec::new();
-        let mut left = k;
         let mut taken = Quantity::ZERO;
-        let mut before = Money::ZERO;
-        while left.is_positive() {
-            let Some(head) = self.0.front_mut() else {
-                break;
-            };
-            let t = if head.1 < left { head.1 } else { left };
-            head.1 = head.1.checked_sub(t).map_err(|_| CostError::Overflow)?;
-            left = left.checked_sub(t).map_err(|_| CostError::Overflow)?;
-            taken = qadd(taken, t)?;
-            let now = ratio(c, taken, k)?;
-            if let Some(sale) = head.0.clone() {
-                out.push((sale, sub(now, before)?));
+        let mut given = Money::ZERO;
+        let mut take = |e: &mut (Option<String>, Quantity)| -> Result<(), CostError> {
+            let left = k.checked_sub(taken).map_err(|_| CostError::Overflow)?;
+            let u = if e.1 < left { e.1 } else { left };
+            if !u.is_positive() {
+                return Ok(());
             }
-            before = now;
-            if !head.1.is_positive() {
-                self.0.pop_front();
+            taken = qadd(taken, u)?;
+            let up_to = ratio(c, taken, k)?;
+            let share = sub(up_to, given)?;
+            given = up_to;
+            if let Some(sale) = &e.0
+                && !share.is_zero()
+            {
+                out.push((sale.clone(), share));
+            }
+            e.1 = e.1.checked_sub(u).map_err(|_| CostError::Overflow)?;
+            Ok(())
+        };
+        if let Some(own) = own {
+            for e in &mut self.0 {
+                if e.0.as_deref() == Some(own) {
+                    take(e)?;
+                }
             }
         }
+        for e in &mut self.0 {
+            take(e)?;
+        }
+        self.0.retain(|e| e.1.is_positive());
         Ok(out)
     }
 }
@@ -407,6 +447,7 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
                 }
                 _ => None,
             };
+            let is_linked = linked.is_some();
             let (value, correction) = match linked {
                 Some((quantity, x)) => {
                     let a = x.take(quantity)?;
@@ -418,10 +459,10 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
                 sold.insert(
                     m.doc.as_str(),
                     Sold {
-                        relief: value.abs(),
+                        relief: value.checked_neg().map_err(|_| CostError::Overflow)?,
                         units: quantity,
-                        returned: Quantity::ZERO,
-                        brought: Money::ZERO,
+                        row: out.len(),
+                        ..Sold::default()
                     },
                 );
             }
@@ -434,9 +475,11 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
             if in_q.is_positive() && on_before.is_negative() {
                 let short_q = on_before.abs();
                 let k = if in_q < short_q { in_q } else { short_q };
-                for (sale, share) in short.cure(k, correction)? {
+                let own = m.return_of.as_deref().filter(|_| is_linked);
+                for (sale, share) in short.cure(k, correction, own)? {
                     if let Some(x) = sold.get_mut(sale.as_str()) {
                         x.relief = add(x.relief, share)?;
+                        x.share = add(x.share, share)?;
                     }
                 }
             }
@@ -459,18 +502,30 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
                 on_hand: s.q,
                 asset_value: s.t,
                 last_cost: s.l,
+                kind: m.kind,
+                link: m.return_of.clone(),
+                correction_share: Money::ZERO,
             });
+        }
+        for x in sold.values() {
+            if let Some(r) = out.get_mut(x.row) {
+                r.correction_share = x.share;
+            }
         }
     }
     Ok(out)
 }
 
 /// `NEGATIVE_STOCK` over the rows at or after `from` (the walk's start),
-/// as the engine (PR-4 S1): per item, the first walked row below zero
-/// whose stored on hand before this posting (`old`, the rows before it)
-/// was zero or more, or that belongs to the posting `trigger` itself (its
-/// rows are written anew, stored as 0). So voiding the receipt that cured
-/// a shortfall warns, and each sale while already below zero warns again.
+/// as the engine's `negativeWarning` (PR-4 S1, RS1), at most one per item:
+/// the first walked row that
+/// - is the posting `trigger`'s own outflow ending below 0 (each sale while
+///   already below 0 warns again; its own inflows never warn);
+/// - or is an earlier posting's row now below 0 whose stored on hand
+///   before this posting (`old`) was 0 or more (voiding the receipt that
+///   cured a shortfall warns);
+/// - or is an earlier value-only adjustment that had stock (stored on hand
+///   above 0) and now sits at 0 or below.
 #[must_use]
 pub fn negative_stock(
     rows: &[Row],
@@ -479,26 +534,24 @@ pub fn negative_stock(
     trigger: &str,
 ) -> Vec<cl_api::NegativeStock> {
     let mut out: Vec<cl_api::NegativeStock> = Vec::new();
-    // The n-th row of a document and item matches the n-th before.
-    let mut seen: BTreeMap<(String, String), usize> = BTreeMap::new();
     for r in rows {
-        let key = (r.doc.clone(), r.item.to_string());
-        let n = seen.entry(key).or_insert(0);
-        let stored = if r.doc == trigger {
-            Quantity::ZERO
+        if (r.date, r.seq) < from || out.iter().any(|w| w.item_id == r.item) {
+            continue;
+        }
+        let fresh = if r.doc == trigger {
+            flows(r.kind).0.is_positive() && r.on_hand.is_negative()
         } else {
-            old.iter()
-                .filter(|o| o.doc == r.doc && o.item == r.item)
-                .nth(*n)
-                .map_or(Quantity::ZERO, |o| o.on_hand)
+            // A row keeps its document, item and linked sale.
+            let stored = old
+                .iter()
+                .find(|o| o.doc == r.doc && o.item == r.item && o.link == r.link)
+                .map_or(Quantity::ZERO, |o| o.on_hand);
+            (r.on_hand.is_negative() && !stored.is_negative())
+                || (matches!(r.kind, MoveKind::AdjustValue { .. })
+                    && !r.on_hand.is_positive()
+                    && stored.is_positive())
         };
-        *n += 1;
-        let walked = (r.date, r.seq) >= from;
-        if walked
-            && r.on_hand.is_negative()
-            && !stored.is_negative()
-            && !out.iter().any(|w| w.item_id == r.item)
-        {
+        if fresh {
             out.push(cl_api::NegativeStock {
                 item_id: r.item,
                 date: r.date,

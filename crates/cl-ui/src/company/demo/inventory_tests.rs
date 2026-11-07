@@ -229,6 +229,43 @@ fn check_row(r: &Row, e: &Value, ctx: &str) {
     }
 }
 
+/// A step's `expect` as the engine's golden runner reads it: `value`,
+/// `correction` and `residual` (each 0.00 when left out) are the
+/// document's row; `onHand`, `assetValue` and `averageCost` are the item's
+/// figures after the step (GET /items), whichever row is last (golden V4:
+/// a backdated invoice).
+fn check_step(book: &Book, rows: &[Row], doc: Option<&str>, e: &Value, ctx: &str) {
+    let figures = ["value", "correction", "residual"];
+    if let Some(doc) = doc.filter(|_| figures.iter().any(|k| e.get(k).is_some())) {
+        let r = row(rows, doc, item("W"));
+        if let Some(v) = s(e, "value") {
+            assert_eq!(r.value, m(v), "{ctx} value");
+        }
+        let neg = |x: Money| x.checked_neg().expect("neg");
+        let want = |k: &str| m(s(e, k).unwrap_or("0.00"));
+        assert_eq!(neg(r.correction), want("correction"), "{ctx} correction");
+        assert_eq!(neg(r.residual), want("residual"), "{ctx} residual");
+    }
+    let st = book.inv.stock(item("W")).expect("stock");
+    if let Some(v) = s(e, "onHand") {
+        assert_eq!(
+            st.quantity_on_hand.map(Quantity::to_wire).as_deref(),
+            Some(v),
+            "{ctx} onHand"
+        );
+    }
+    if let Some(v) = s(e, "assetValue") {
+        assert_eq!(st.asset_value, Some(m(v)), "{ctx} assetValue");
+    }
+    if let Some(v) = s(e, "averageCost") {
+        assert_eq!(
+            st.average_cost.map(UnitCost::to_wire).as_deref(),
+            Some(v),
+            "{ctx} averageCost"
+        );
+    }
+}
+
 fn check_rows(book: &Book, expected: &Value, ctx: &str) {
     let rows = book.inv.rows().expect("rows");
     let w: Vec<&Row> = rows.iter().filter(|r| r.item == item("W")).collect();
@@ -376,11 +413,8 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
                     "{ctx} no line"
                 );
             }
-        } else if let Some(doc) = s(step, "doc").filter(|_| e.get("value").is_some()) {
-            check_row(row(&rows, doc, item("W")), e, &ctx);
-        } else if e.get("onHand").is_some() {
-            let last = rows.iter().rfind(|r| r.item == item("W")).expect("a row");
-            check_row(last, e, &ctx);
+        } else {
+            check_step(&book, &rows, s(step, "doc"), e, &ctx);
         }
         if let Some(after) = c.get("rowsAfter").and_then(|r| r.get(n.to_string())) {
             check_rows(&book, after, &ctx);
@@ -398,6 +432,20 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
             &case(all, other)["rows"],
             &format!("case {id} rows as {other}"),
         );
+    }
+    // PR-4 S5: each sale's correction_share (the corrections attributed to
+    // the units it sold below 0).
+    if let Some(shares) = c.get("correctionShares").and_then(Value::as_object) {
+        let rows = book.inv.rows().expect("rows");
+        for (doc, want) in shares {
+            let r = row(&rows, doc, item("W"));
+            assert!(matches!(r.kind, MoveKind::Sale { .. }), "case {id} {doc}");
+            assert_eq!(
+                r.correction_share,
+                m(want.as_str().expect("share")),
+                "case {id} correctionShares {doc}"
+            );
+        }
     }
     if let Some(f) = c.get("final").and_then(Value::as_object) {
         for (name, e) in f {
@@ -527,7 +575,8 @@ fn inventory_golden() {
         ran.push(id.to_string());
     }
     for must in [
-        "A", "B", "V", "V2", "X", "M", "D", "N", "E", "R", "R2", "R3", "U", "F",
+        "A", "B", "V", "V2", "V3", "V4", "X", "M", "D", "N", "E", "R", "R2", "R3", "R4", "R5", "U",
+        "F",
     ] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
