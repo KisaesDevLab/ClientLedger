@@ -13,6 +13,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.step.link", "Link account"),
     ("bankimport.step.check", "Check transactions"),
     ("bankimport.step.send", "Send to Bank Feed"),
+    ("bankimport.step_of", "Step {n} of 4: {step}"),
     // Step 1.
     ("bankimport.choose.heading", "Choose the file from your bank"),
     ("bankimport.choose.hint", "QFX, OFX, QIF or CSV, downloaded from your bank's website. Up to 25 MB. The file is read on this computer."),

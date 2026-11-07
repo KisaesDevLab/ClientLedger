@@ -20,6 +20,9 @@ use crate::theme::Tokens;
 /// Rows drawn at once in the check table (the rest are counted).
 const SHOWN_ROWS: usize = 200;
 
+/// Below this height (points) the step bar becomes one line of text.
+const SHORT_HEIGHT: f32 = 300.0;
+
 /// A command's shortcut as the keymap has it ("Alt+N").
 fn shortcut_hint(id: &str) -> String {
     cl_model::commands::find(id)
@@ -140,13 +143,23 @@ fn titled_card(ui: &mut Ui, tokens: &Tokens, title: &str, add: impl FnOnce(&mut 
         .corner_radius(CornerRadius::same(6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // The mockup's compact heading bar (UI review: the grid
+            // below keeps its room).
+            ui.spacing_mut().item_spacing.y = 0.0;
             egui::Frame::new()
-                .inner_margin(Margin::symmetric(12, 8))
+                .fill(tokens.surface_subtle)
+                .corner_radius(CornerRadius {
+                    nw: 6,
+                    ne: 6,
+                    sw: 0,
+                    se: 0,
+                })
+                .inner_margin(Margin::symmetric(12, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new(title).strong().color(tokens.text_primary));
                 });
-            ui.separator();
+            ui.add(egui::Separator::default().spacing(0.0));
             egui::Frame::new()
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {
@@ -184,8 +197,13 @@ impl ImportBankFileScreen {
             .fill(tokens.surface_window)
             .inner_margin(Margin::symmetric(20, 12))
             .show(ui, |ui| {
+                // A short window (the smallest at 200% zoom) says the step in
+                // one line under the title, so the step's content keeps room.
+                let short = ui.available_height() < SHORT_HEIGHT;
+                let width = ui.available_width();
                 let mut frame = FixedFrame::begin(ui, "import_bank_file", FrameOpts::default());
                 frame.top(|ui| {
+                    ui.set_max_width(width);
                     ui.horizontal_wrapped(|ui| {
                         ui.add(
                             egui::Label::new(
@@ -197,12 +215,29 @@ impl ImportBankFileScreen {
                             .selectable(false),
                         );
                         ui.add_space(8.0);
-                        ui.label(
-                            RichText::new(t("bankimport.subtitle")).color(tokens.text_secondary),
-                        );
+                        if short {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(self.step_line())
+                                        .strong()
+                                        .color(tokens.accent),
+                                )
+                                .wrap(),
+                            );
+                        } else {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(t("bankimport.subtitle"))
+                                        .color(tokens.text_secondary),
+                                )
+                                .wrap(),
+                            );
+                        }
                     });
-                    ui.add_space(6.0);
-                    self.steps_ui(ui, &tokens);
+                    if !short {
+                        ui.add_space(6.0);
+                        self.steps_ui(ui, &tokens);
+                    }
                 });
                 frame.body(Body::Scroll, |ui| {
                     ui.set_width(ui.available_width());
@@ -219,6 +254,21 @@ impl ImportBankFileScreen {
                 });
                 self.layout = frame.end();
             });
+    }
+
+    /// The step in words ("Step 3 of 4: Check transactions"), for a
+    /// short window.
+    fn step_line(&self) -> String {
+        let (n, key) = match self.step {
+            Step::Choose => (1, "bankimport.step.choose"),
+            Step::Link => (2, "bankimport.step.link"),
+            Step::Check => (3, "bankimport.step.check"),
+            Step::Done => (4, "bankimport.step.send"),
+        };
+        t_with(
+            "bankimport.step_of",
+            &[("n", &n.to_string()), ("step", &t(key))],
+        )
     }
 
     fn steps_ui(&self, ui: &mut Ui, tokens: &Tokens) {
@@ -1054,6 +1104,9 @@ impl ImportBankFileScreen {
                             .with_row_color(move |row, _| already.contains(&row).then_some(shade))
                             .spacing([24.0, 6.0])
                             .min_col_width(60.0)
+                            // Status, the last column, takes the rest of
+                            // the width (UI review: the table fills).
+                            .num_columns(5)
                             .show(ui, |ui| {
                                 for k in [
                                     "bankimport.col.date",
@@ -1090,18 +1143,25 @@ impl ImportBankFileScreen {
                                     ui.label(mono(crate::shell::us_date(r.date)));
                                     // Q-P25r: the bank's memo is its own
                                     // detail, under the description.
-                                    ui.vertical(|ui| {
-                                        ui.add(
-                                            egui::Label::new(mono(r.description.clone())).extend(),
-                                        );
-                                        if let Some(memo) = r.memo.as_deref() {
+                                    if let Some(memo) = r.memo.as_deref() {
+                                        ui.vertical(|ui| {
+                                            ui.add(
+                                                egui::Label::new(mono(r.description.clone()))
+                                                    .extend(),
+                                            );
                                             ui.label(
                                                 RichText::new(memo)
                                                     .size(12.0)
                                                     .color(tokens.text_secondary),
                                             );
-                                        }
-                                    });
+                                        });
+                                    } else {
+                                        // On the row's line, like the date
+                                        // and the amount.
+                                        ui.add(
+                                            egui::Label::new(mono(r.description.clone())).extend(),
+                                        );
+                                    }
                                     ui.label(mono(
                                         r.check_number.map(|n| n.to_string()).unwrap_or_default(),
                                     ));
@@ -1201,20 +1261,19 @@ impl ImportBankFileScreen {
                 if ui
                     .add_enabled(
                         can_replace,
-                        egui::Button::selectable(
-                            current.changed == Some(ChangedAction::Replace),
-                            t("bankimport.replace"),
-                        ),
+                        // Framed: they read as buttons next to the chip.
+                        egui::Button::new(t("bankimport.replace"))
+                            .selected(current.changed == Some(ChangedAction::Replace)),
                     )
                     .clicked()
                 {
                     out = Some(super::changed_choice(ChangedAction::Replace));
                 }
                 if ui
-                    .add(egui::Button::selectable(
-                        current.changed == Some(ChangedAction::Add),
-                        t("bankimport.add_as_new"),
-                    ))
+                    .add(
+                        egui::Button::new(t("bankimport.add_as_new"))
+                            .selected(current.changed == Some(ChangedAction::Add)),
+                    )
                     .clicked()
                 {
                     out = Some(super::changed_choice(ChangedAction::Add));
