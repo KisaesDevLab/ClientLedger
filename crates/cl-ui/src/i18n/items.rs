@@ -74,6 +74,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("items.form.description", "Description"),
     ("items.form.price", "Sales price"),
     ("items.form.income_account", "Income account"),
+    ("items.form.choose_account", "Choose an account\u{2026}"),
     ("items.form.taxable", "Taxable"),
     ("items.form.purchase_later", "A purchase price and expense account (for items you buy and resell) and a unit such as \"hour\" aren't available yet."),
     ("items.form.saving", "Saving the item\u{2026}"),

@@ -105,23 +105,12 @@ pub fn draft_of(p: &ItemPurchase) -> PartDraft {
 }
 
 /// A new part's starting accounts: the company's Inventory Asset and its
-/// first cost of goods sold account.
+/// "Cost of goods sold" account (none when the chart has neither).
 #[must_use]
 pub fn defaults(accounts: &[Account], today: CalendarDate) -> PartDraft {
-    let tagged = |tag: &str| {
-        accounts
-            .iter()
-            .find(|a| a.is_active && a.system_tag.as_deref() == Some(tag))
-            .map(|a| a.id)
-    };
     PartDraft {
-        asset_account: tagged("inventory_asset"),
-        cogs_account: tagged("cost_of_goods_sold").or_else(|| {
-            accounts
-                .iter()
-                .find(|a| a.is_active && a.fields.account_type == AccountType::Cogs)
-                .map(|a| a.id)
-        }),
+        asset_account: super::inventory_asset_account(accounts),
+        cogs_account: super::inventory_cogs_account(accounts),
         opening_date: Some(today),
         ..PartDraft::default()
     }

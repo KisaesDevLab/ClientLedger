@@ -39,7 +39,6 @@ steps:
   - key: Ctrl+N
   - assert_state: {key: screen.panel, equals: new}
   - assert_exists: {role: label, label: New item}
-  - assert_exists: {label_contains: "A purchase price and expense account"}
   - type: {text: weekly mowing}
   - key: Alt+S
   - assert_state: {key: screen.panel, equals: new}

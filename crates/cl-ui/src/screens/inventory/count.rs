@@ -546,6 +546,7 @@ impl CountScreen {
             "counted": self.sheet.rows.iter().filter(|r| !r.counted.trim().is_empty()).count(),
             "changed": self.sheet.rows.iter().filter(|r| r.changed).count(),
             "can_post": self.sheet.can_post(),
+            "account_name": self.sheet.account.map(|a| self.books.account_name(a)),
             "loading": self.sheet_job.is_some(),
             "posting": self.post_job.is_some(),
             "posted": self.posted,
@@ -575,15 +576,7 @@ fn render(
 }
 
 fn default_account(b: &Books) -> Option<AccountId> {
-    b.accounts
-        .iter()
-        .find(|a| a.is_active && a.system_tag.as_deref() == Some("cost_of_goods_sold"))
-        .or_else(|| {
-            b.accounts
-                .iter()
-                .find(|a| a.is_active && a.fields.account_type == AccountType::Cogs)
-        })
-        .map(|a| a.id)
+    super::inventory_cogs_account(&b.accounts)
 }
 
 impl Screen for CountScreen {

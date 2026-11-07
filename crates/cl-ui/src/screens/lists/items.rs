@@ -587,6 +587,26 @@ impl ItemsScreen {
         d
     }
 
+    /// QA-1/QA-3 (PR-4): a new, untouched form opened before the chart
+    /// arrived (or before inventory was turned on) takes the defaults the
+    /// chart now offers, so it never shows an account it hasn't set.
+    fn refresh_blank_form(&mut self) {
+        let Some(p) = self.panel.as_ref() else {
+            return;
+        };
+        if p.editing.is_some() || p.form.is_dirty() {
+            return;
+        }
+        let kind = p.form.current().kind;
+        let mut d = self.blank_draft(None);
+        d.kind = kind;
+        if let Some(p) = self.panel.as_mut() {
+            let focus = p.focus;
+            **p = FormPanel::new(None, d);
+            p.focus = focus;
+        }
+    }
+
     fn lock(&self) -> Option<cl_core::CalendarDate> {
         crate::screens::inventory::demo_lock(&self.link)
     }
@@ -890,6 +910,7 @@ impl ItemsScreen {
                     self.inventory = l.inventory;
                     self.unit_sets = l.unit_sets;
                     self.apply();
+                    self.refresh_blank_form();
                 }
                 Err(e) => {
                     self.loaded = true;
@@ -1085,7 +1106,9 @@ impl ItemsScreen {
                 .and_then(|p| p.form.current().income_account);
             self.income_choices(keep)
         };
-        let income_labels: Vec<String> = income_ids.iter().map(|a| self.account_name(*a)).collect();
+        let income_labels: Vec<String> = std::iter::once(t("items.form.choose_account"))
+            .chain(income_ids.iter().map(|a| self.account_name(*a)))
+            .collect();
         let Some(panel) = self.panel.as_mut() else {
             return;
         };
@@ -1179,10 +1202,13 @@ impl ItemsScreen {
             if enter_left(ui, &r) {
                 save = Some(SaveIntent::SaveAndNew);
             }
+            // QA-1 (PR-4): index 0 is "Choose an account…", so an unset
+            // account never shows (or silently means) the first one, and
+            // choosing the shown account always fires.
             let cur = d
                 .income_account
                 .and_then(|a| income_ids.iter().position(|x| *x == a))
-                .unwrap_or(0);
+                .map_or(0, |i| i + 1);
             if let Some(i) = pane::picker(
                 ui,
                 field_id(ItemField::IncomeAccount),
@@ -1191,8 +1217,8 @@ impl ItemsScreen {
                 cur,
                 want(ItemField::IncomeAccount),
             ) {
-                let a = income_ids[i];
-                panel.form.edit(F_ACCOUNT, |x| x.income_account = Some(a));
+                let a = i.checked_sub(1).and_then(|i| income_ids.get(i)).copied();
+                panel.form.edit(F_ACCOUNT, |x| x.income_account = a);
             }
             let mut taxable = d.taxable;
             let r = ui.checkbox(&mut taxable, t("items.form.taxable"));

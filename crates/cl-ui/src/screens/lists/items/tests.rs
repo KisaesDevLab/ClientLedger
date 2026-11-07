@@ -399,3 +399,30 @@ fn a_live_item_save_sends_expected_updated_at() {
     });
     assert_eq!(body["expectedUpdatedAt"], "2026-10-01T10:00:00.000Z");
 }
+
+#[test]
+fn qa1_a_blank_form_opened_before_the_chart_takes_the_default_for_real() {
+    let mut r = Rig::new();
+    // A form opened before the chart arrived holds no income account.
+    r.s.panel = Some(Box::new(FormPanel::new(
+        None,
+        cl_model::lists::items::ItemDraft::new(None),
+    )));
+    r.s.refresh_blank_form();
+    assert_eq!(
+        r.form().form.current().income_account,
+        Some(account_id(4000)),
+        "the account shown is the account set"
+    );
+    // A form the owner has typed in is never replaced.
+    r.s.panel = Some(Box::new(FormPanel::new(
+        None,
+        cl_model::lists::items::ItemDraft::new(None),
+    )));
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Typed".into());
+    r.s.refresh_blank_form();
+    assert_eq!(r.form().form.current().income_account, None);
+    assert_eq!(r.form().form.current().name, "Typed");
+}

@@ -266,6 +266,106 @@ pub fn lock_of(link: &CompanyLink, e: &ApiError) -> Option<CalendarDate> {
     })
 }
 
+/// The company's cost of goods sold account for inventory (QA-2/QA-3,
+/// PR-4): an active cost-of-goods-sold account whose detail type is
+/// "Cost of goods sold" (what turning inventory on creates), else `None`
+/// so the owner must choose. Never just the first COGS-type account: in a
+/// service chart that is "Subcontractors", which isn't an inventory cost.
+#[must_use]
+pub fn inventory_cogs_account(accounts: &[cl_api::Account]) -> Option<cl_core::ids::AccountId> {
+    let active_cogs = || {
+        accounts
+            .iter()
+            .filter(|a| a.is_active && a.fields.account_type == cl_api::AccountType::Cogs)
+    };
+    active_cogs()
+        .find(|a| a.system_tag.as_deref() == Some("cost_of_goods_sold"))
+        .or_else(|| {
+            active_cogs().find(|a| a.fields.detail_type.as_deref() == Some("cost_of_goods_sold"))
+        })
+        .map(|a| a.id)
+}
+
+#[cfg(test)]
+mod default_account_tests {
+    use cl_api::{Account, AccountType};
+
+    fn acct(n: u32, name: &str, ty: AccountType, detail: &str) -> Account {
+        let mut a: Account = serde_json::from_value(serde_json::json!({
+            "id": format!("a0000000-0000-4000-8000-{n:012}"),
+            "name": name,
+            "accountType": "asset",
+            "detailType": detail,
+        }))
+        .expect("account");
+        a.fields.account_type = ty;
+        a
+    }
+
+    #[test]
+    fn qa2_service_chart_has_no_inventory_cogs_default() {
+        let a = [acct(
+            1,
+            "Subcontractors",
+            AccountType::Cogs,
+            "other_cost_of_service",
+        )];
+        assert_eq!(super::inventory_cogs_account(&a), None);
+    }
+
+    #[test]
+    fn qa2_cogs_default_is_the_cost_of_goods_sold_account() {
+        let a = [
+            acct(
+                1,
+                "Subcontractors",
+                AccountType::Cogs,
+                "other_cost_of_service",
+            ),
+            acct(
+                2,
+                "Cost of Goods Sold",
+                AccountType::Cogs,
+                "cost_of_goods_sold",
+            ),
+        ];
+        assert_eq!(super::inventory_cogs_account(&a), Some(a[1].id));
+    }
+
+    #[test]
+    fn qa3_asset_default_by_tag_or_name() {
+        let mut a = [acct(
+            1,
+            "Inventory Asset",
+            AccountType::Asset,
+            "other_current_asset",
+        )];
+        assert_eq!(super::inventory_asset_account(&a), Some(a[0].id));
+        a[0].fields.name = "Stock".into();
+        assert_eq!(super::inventory_asset_account(&a), None);
+        a[0].system_tag = Some("inventory_asset".into());
+        assert_eq!(super::inventory_asset_account(&a), Some(a[0].id));
+    }
+}
+
+/// The company's inventory asset account (the one tagged
+/// `inventory_asset`, else an active asset account named "Inventory
+/// Asset", the name the engine adopts when inventory is turned on).
+#[must_use]
+pub fn inventory_asset_account(accounts: &[cl_api::Account]) -> Option<cl_core::ids::AccountId> {
+    accounts
+        .iter()
+        .find(|a| a.is_active && a.system_tag.as_deref() == Some("inventory_asset"))
+        .or_else(|| {
+            accounts.iter().find(|a| {
+                a.is_active
+                    && a.fields.account_type == cl_api::AccountType::Asset
+                    && a.fields.name.trim().eq_ignore_ascii_case("Inventory Asset")
+            })
+        })
+        .map(|a| a.id)
+}
+
 /// Shows the NEGATIVE_STOCK warnings of a save that went through (Q-148:
 /// never blocking): one toast line per item, item names from the demo
 /// or `names`.

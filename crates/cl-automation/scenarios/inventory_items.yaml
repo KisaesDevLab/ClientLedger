@@ -28,6 +28,11 @@ steps:
   - click: {role: button, label: Inventory part}
   - click: {role: text_input, label: Item name}
   - type: {text: "Edging Stake"}
+  # QA-1 (PR-4): the income account list starts with "Choose an
+  # account…", and choosing the account it shows sets it for real.
+  - click: {role: combo_box, label: Income account}
+  - assert_exists: {role: button, label: "Choose an account…"}
+  - click: {role: button, label: "4100 Product Sales"}
   - click: {role: text_input, label: Quantity on hand}
   - type: {text: "50"}
   - click: {role: text_input, label: Total value}
