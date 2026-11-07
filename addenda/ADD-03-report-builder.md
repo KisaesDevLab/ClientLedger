@@ -121,11 +121,13 @@ Mark A07–A10 in STATE.md like any other phase. Branches `phase/A07-…`; PRs `
 1. Memorized Reports list with P28's groups: builder and standard reports together, author shown, visible to everyone with report access (Q-310). Edit and Delete only for the author or an admin; others get **Memorize a copy**.
 2. Export to Excel, CSV and PDF and print reproduce exactly the rows on screen (open paths plus paged detail). Excel cells are numbers, converted from the exact strings only at export; totals are values, not formulas.
 3. Backups and the transfer file carry the definitions with ids remapped (a test proves it).
+4. **Export and import a report definition file** (owner 2026-11-07, Q-A09a). From Memorized Reports or the builder: **Export report…** writes one definition, or a whole group, to a `.clreport` file (JSON with `schemaVersion`, the report name, its group, and the definition). The file never holds amounts or company data, and names stand in for ids. **Import report…** reads the file, refuses a newer `schemaVersion` with "update ClientLedger", validates it with the same rules as the builder, and matches references by name and number. Those references are accounts, items, tags, clients, vendors and classes. Anything that doesn't match goes to a review step: pick a replacement, drop the filter, or cancel. Import then opens the result in the builder so the owner can check it before memorizing. A name clash offers Rename or Replace (Replace only for the author or an admin, Q-310). Import and export are both audited. The file works across companies and computers. Tests: round trip within one company (identical definition), into a second company with different ids (remapped by name), unmatched references, newer schemaVersion refused, malformed and oversized files refused (cap 256 KB, as the definition cap), no amounts in an exported file.
 
 **Acceptance**
 - [ ] Golden CSVs for collapsed, partly expanded and fully expanded states.
 - [ ] Excel numbers stay numeric.
 - [ ] Transfer and backup round trips keep definitions and their ids.
+- [ ] A report exported to a `.clreport` file imports into another company with its references matched by name, and unmatched ones are resolved by the owner before saving.
 
 ## A10 — AI drafting
 
