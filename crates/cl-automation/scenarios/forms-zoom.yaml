@@ -141,7 +141,6 @@ steps:
   - assert_focused: {role: text_input, label: Memo}
   - assert_state: {key: screen.layout.body_scrolled, equals: true}
   - screenshot: bill-z200-memo
-  - key: Escape
   - command: file.close_window
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
