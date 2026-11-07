@@ -571,6 +571,7 @@ impl EnterBillScreen {
         if r.changed() {
             self.vendor_list = !self.inputs.vendor.trim().is_empty();
             self.inputs.vendor_problem = false;
+            self.quick_add.close();
         }
         if let Some(open) = crate::list_field::mouse(ui, &r, self.vendor_list) {
             self.vendor_list = open;
@@ -588,9 +589,20 @@ impl EnterBillScreen {
         }
         if let Some(id) = picked {
             self.pick_vendor(id);
+            self.quick_add.close();
         } else if r.lost_focus() {
             self.resolve_vendor();
-            if crate::forms::enter::entered(&r).saves() {
+            if self.inputs.vendor_problem {
+                // Q-PR4d: a name not on the list offers Quick Add (Enter
+                // then adds it instead of saving the bill).
+                let typed = self.inputs.vendor.clone();
+                // The prompt takes the focus Tab would give the Date.
+                self.focus = None;
+                self.quick_add.offer(
+                    &typed,
+                    cl_model::quick_add::Accepts::One(cl_model::quick_add::NameKind::Vendor),
+                );
+            } else if crate::forms::enter::entered(&r).saves() {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
@@ -600,6 +612,11 @@ impl EnterBillScreen {
                     .size(12.0)
                     .color(tokens.warn_text),
             );
+        }
+        if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+            self.quick_add.ui(ui, tokens, self.group.as_ref())
+        {
+            self.vendor_added(*c);
         }
     }
 
@@ -1475,7 +1492,11 @@ impl EnterBillScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
+            crate::widgets::quick_add::DEV_RESET => {
+                crate::widgets::quick_add::demo_reset(&self.link)
+            }
             _ => false,
         }
     }

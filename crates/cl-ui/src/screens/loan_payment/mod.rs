@@ -123,6 +123,8 @@ pub struct LoanPaymentScreen {
     pub(crate) group: Option<RequestGroup>,
     pub(crate) today: CalendarDate,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a lender not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     pub(crate) balances: Balances,
     /// The header (its `extras` stay empty: the grid holds them).
     pub(crate) header: FormState<LoanPaymentForm>,
@@ -185,6 +187,7 @@ impl LoanPaymentScreen {
         today: CalendarDate,
     ) -> LoanPaymentScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let books = Books::default();
         let extras = LinesGrid::new(&EXTRAS, Arc::clone(&books.lists), Vec::new());
         let mut s = LoanPaymentScreen {
@@ -193,6 +196,7 @@ impl LoanPaymentScreen {
             group,
             today,
             books,
+            quick_add,
             balances: Balances::default(),
             header: FormState::new(LoanPaymentForm::new(Some(today))),
             extras,
@@ -1106,9 +1110,33 @@ impl LoanPaymentScreen {
                                     f.lender,
                                     half,
                                 );
+                                let added = self.quick_add.after_name_field(
+                                    ui,
+                                    tokens,
+                                    self.group.as_ref(),
+                                    (&self.inputs.lender, &r),
+                                    out,
+                                    cl_model::quick_add::Accepts::One(
+                                        cl_model::quick_add::NameKind::Vendor,
+                                    ),
+                                );
                                 self.pick_lender(out);
+                                if let Some(c) = added {
+                                    let id = c.id;
+                                    self.books.add_contact(c);
+                                    self.inputs.lender.problem = false;
+                                    self.inputs.lender.text = self
+                                        .books
+                                        .lists
+                                        .name_text(id)
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    self.pick_lender(NameOutcome::Picked(id));
+                                }
                                 kit::track(&mut self.focused, &r, field::LENDER);
-                                if crate::forms::enter::entered(&r).saves() {
+                                if !self.quick_add.is_open()
+                                    && crate::forms::enter::entered(&r).saves()
+                                {
                                     self.after_frame = Some(CommandId::new("form.save_new"));
                                 }
                             });
@@ -1416,7 +1444,7 @@ impl LoanPaymentScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
             _ => false,
         }
     }

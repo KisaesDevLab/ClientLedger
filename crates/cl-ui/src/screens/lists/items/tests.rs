@@ -426,3 +426,31 @@ fn qa1_a_blank_form_opened_before_the_chart_takes_the_default_for_real() {
     assert_eq!(r.form().form.current().income_account, None);
     assert_eq!(r.form().form.current().name, "Typed");
 }
+
+/// QA-16: with inventory on the list shows On hand for parts (the engine's
+/// exact quantity and the part's unit), blank for every other kind; with
+/// inventory off there is no such column.
+#[test]
+fn on_hand_shows_for_parts_only_while_inventory_is_on() {
+    let mut r = Rig::new();
+    assert_eq!(r.state("on_hand_column"), false);
+    let width = r.s.model.rows()[0].cells.len();
+    assert!(r.cmd(crate::screens::inventory::DEV_RESET));
+    r.frames(4);
+    assert_eq!(r.state("inventory"), true);
+    assert_eq!(r.state("on_hand_column"), true);
+    let rows = r.s.model.rows();
+    assert_eq!(rows[0].cells.len(), width + 1);
+    let part = rows
+        .iter()
+        .find(|x| x.id == item_id(crate::company::demo::stock::FIRST_PART))
+        .expect("the first sample part");
+    assert_eq!(part.cells[4], "120 bag");
+    assert!(
+        rows.iter()
+            .filter(|x| x.id != part.id && !x.label.contains("Mulch"))
+            .any(|x| x.cells[4].is_empty())
+    );
+    r.select(crate::company::demo::stock::FIRST_PART);
+    assert_eq!(r.state("selected_on_hand_text"), "120 bag");
+}

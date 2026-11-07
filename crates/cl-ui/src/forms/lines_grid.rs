@@ -413,6 +413,9 @@ pub struct LinesState<L> {
     suggested: std::collections::BTreeMap<RowKey, AccountId>,
     /// Suggestions the owner accepted with Tab since the screen last asked.
     accepted: Vec<(RowKey, AccountId)>,
+    /// Q-PR4d: the last name typed in the name column that isn't on the
+    /// list (its line and text), for the screen's Quick Add prompt.
+    unknown_name: Option<(RowKey, String)>,
 }
 
 struct View<'a, L> {
@@ -609,6 +612,12 @@ impl<L: LineLists> EditableModel for View<'_, L> {
             return Err(CellProblem::new(BAD_VALUE).at(pos.col));
         }
         let lists = Arc::clone(&self.a.lists);
+        if pos.col == L_CUSTOMER
+            && let CellInput::Unresolved(text) = &value
+            && !text.trim().is_empty()
+        {
+            self.a.unknown_name = Some((pos.row, text.trim().to_string()));
+        }
         if source == Source::SuggestionAccepted
             && pos.col == L_ACCOUNT
             && let CellInput::Ref(id) = &value
@@ -728,6 +737,7 @@ impl<L: LineLists + 'static> LinesGrid<L> {
                     snapshot: None,
                     suggested: std::collections::BTreeMap::new(),
                     accepted: Vec::new(),
+                    unknown_name: None,
                 },
                 grid,
                 t(spec.label),
@@ -800,6 +810,31 @@ impl<L: LineLists + 'static> LinesGrid<L> {
                 s.remove(&key);
             }
         }
+    }
+
+    /// Q-PR4d: the name typed in the name column that isn't on the list,
+    /// once (its line and text).
+    pub fn take_unknown_name(&mut self) -> Option<(RowKey, String)> {
+        self.form.adapter_mut().unknown_name.take()
+    }
+
+    /// Q-PR4d: a name Quick Add made fills the line's name column (one
+    /// undo step). False when the line is gone.
+    pub fn set_customer(&mut self, key: RowKey, c: cl_core::ids::ContactId) -> bool {
+        let mut found = false;
+        let applied = self.form.edit_step(|v| {
+            if let Some(l) = v.lines.iter_mut().find(|l| l.key == key) {
+                l.customer = Some(c);
+                found = true;
+            }
+        });
+        if applied && found {
+            // The cell's editor (still holding the typed text and its "pick
+            // from the list") closes; the cell shows the name.
+            let lists = Arc::clone(&self.form.adapter().lists);
+            self.form.reset_view(&*lists);
+        }
+        applied && found
     }
 
     /// Removes every suggestion.

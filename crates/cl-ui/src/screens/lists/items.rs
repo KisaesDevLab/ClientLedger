@@ -53,6 +53,8 @@ const COL_PRICE: cl_grid::ColumnId = cl_grid::ColumnId(4);
 const COL_ACCOUNT: cl_grid::ColumnId = cl_grid::ColumnId(5);
 const COL_TAXABLE: cl_grid::ColumnId = cl_grid::ColumnId(6);
 const COL_STATUS: cl_grid::ColumnId = cl_grid::ColumnId(7);
+/// QA-16: an inventory part's quantity on hand (only with inventory on).
+const COL_ON_HAND: cl_grid::ColumnId = cl_grid::ColumnId(8);
 
 // Field ids for undo merging.
 const F_NAME: u64 = 1;
@@ -87,7 +89,7 @@ fn shortcut_hint(id: &str) -> String {
         .unwrap_or_default()
 }
 
-fn cols(compact: bool) -> Vec<cl_grid::Column> {
+fn cols(compact: bool, inventory: bool) -> Vec<cl_grid::Column> {
     if compact {
         vec![
             column(COL_NAME, "items.col.name", 220, 2),
@@ -95,20 +97,26 @@ fn cols(compact: bool) -> Vec<cl_grid::Column> {
             column(COL_STATUS, "items.col.status", 90, 0),
         ]
     } else {
-        vec![
+        let mut v = vec![
             column(COL_NAME, "items.col.name", 220, 2),
             column(COL_DESCRIPTION, "items.col.description", 240, 2),
             column(COL_KIND, "items.col.kind", 110, 0),
             figure_column(COL_PRICE, "items.col.price", 110),
+        ];
+        if inventory {
+            v.push(figure_column(COL_ON_HAND, "items.col.on_hand", 110));
+        }
+        v.extend([
             column(COL_ACCOUNT, "items.col.account", 170, 1),
             column(COL_TAXABLE, "items.col.taxable", 80, 0),
             column(COL_STATUS, "items.col.status", 90, 0),
-        ]
+        ]);
+        v
     }
 }
 
-fn new_grid(compact: bool) -> (Grid, TextRows<ItemId>) {
-    let spec_cols = cols(compact);
+fn new_grid(compact: bool, inventory: bool) -> (Grid, TextRows<ItemId>) {
+    let spec_cols = cols(compact, inventory);
     let ids = spec_cols.iter().map(|c| c.id).collect();
     let salt = if compact {
         "items/list-compact"
@@ -266,7 +274,7 @@ impl ItemsScreen {
         let group = link.group().and_then(Result::ok);
         let caps = link.client().map(cl_api::Client::capabilities);
         let has = |c: &str| caps.as_ref().is_some_and(|k| k.has(c));
-        let (grid, model) = new_grid(false);
+        let (grid, model) = new_grid(false, false);
         let mut s = ItemsScreen {
             // The sales kinds (U-39a); the purchase side waits for U-39b.
             item_types: link.is_demo()
@@ -499,15 +507,21 @@ impl ItemsScreen {
                 let cells = if self.compact {
                     vec![e.name.clone(), price, status]
                 } else {
-                    vec![
+                    let mut v = vec![
                         e.name.clone(),
                         e.description.clone().unwrap_or_default(),
                         t(e.kind.label().as_str()),
                         price,
+                    ];
+                    if self.inventory {
+                        v.push(self.on_hand_text(e.id));
+                    }
+                    v.extend([
                         self.account_name(e.income_account),
                         if e.taxable { yes.clone() } else { no.clone() },
                         status,
-                    ]
+                    ]);
+                    v
                 };
                 TextRow {
                     id: e.id,
@@ -517,6 +531,38 @@ impl ItemsScreen {
             })
             .collect();
         self.model.set(rows);
+    }
+
+    /// QA-16: an inventory part's quantity on hand as the engine reports it
+    /// (exact), with its unit: the unit set's base unit, else the part's
+    /// own label. Blank for every other kind.
+    fn on_hand_text(&self, id: ItemId) -> String {
+        let Some(item) = self.item(id) else {
+            return String::new();
+        };
+        if item.fields.item_type != cl_api::ItemType::InventoryPart {
+            return String::new();
+        }
+        let Some(q) = item.stock.quantity_on_hand else {
+            return String::new();
+        };
+        let p = &item.fields.purchase;
+        let unit = p
+            .unit_set_id
+            .and_then(|s| self.unit_sets.iter().find(|u| u.id == s))
+            .map(|u| {
+                u.base_unit_abbreviation
+                    .clone()
+                    .filter(|a| !a.trim().is_empty())
+                    .unwrap_or_else(|| u.base_unit_name.clone())
+            })
+            .or_else(|| p.unit_label.clone())
+            .filter(|u| !u.trim().is_empty());
+        let n = crate::screens::inventory::qty(q);
+        match unit {
+            Some(u) => format!("{n} {}", u.trim()),
+            None => n,
+        }
     }
 
     fn place_cursor(&mut self, id: Option<ItemId>) {
@@ -558,7 +604,7 @@ impl ItemsScreen {
         }
         let keep = self.selected();
         self.compact = want;
-        (self.grid, self.model) = new_grid(want);
+        (self.grid, self.model) = new_grid(want, self.inventory);
         self.refilter();
         if let Some(key) = keep.and_then(|id| self.model.key_of(id)) {
             self.focus_row(key, !want);
@@ -913,6 +959,11 @@ impl ItemsScreen {
                     self.items = l.items;
                     self.accounts = l.accounts;
                     self.contacts = l.contacts;
+                    if l.inventory != self.inventory {
+                        // QA-16: the On hand column comes and goes with
+                        // inventory.
+                        (self.grid, self.model) = new_grid(self.compact, l.inventory);
+                    }
                     self.inventory = l.inventory;
                     self.unit_sets = l.unit_sets;
                     self.apply();
@@ -1652,6 +1703,8 @@ impl Screen for ItemsScreen {
                 .and_then(|i| i.stock.quantity_on_hand)
                 .map(crate::screens::inventory::qty),
             "price_levels_available": self.price_levels,
+            "on_hand_column": self.inventory && !self.compact,
+            "selected_on_hand_text": self.selected().map(|id| self.on_hand_text(id)),
         })
     }
 }

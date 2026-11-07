@@ -95,6 +95,7 @@ pub struct NewCompanyScreen {
     page: Page,
     setup: CompanySetup,
     tax_rate_text: String,
+    tax_agency_text: String,
     closing_password: String,
     closing_confirm: String,
     legal_name: String,
@@ -115,6 +116,7 @@ struct Committed {
     name: String,
     legal_name: String,
     tax_rate_text: String,
+    tax_agency_text: String,
     closing_password: String,
     closing_confirm: String,
 }
@@ -125,6 +127,7 @@ impl NewCompanyScreen {
             name: self.setup.name.clone(),
             legal_name: self.legal_name.clone(),
             tax_rate_text: self.tax_rate_text.clone(),
+            tax_agency_text: self.tax_agency_text.clone(),
             closing_password: self.closing_password.clone(),
             closing_confirm: self.closing_confirm.clone(),
         }
@@ -140,6 +143,7 @@ impl NewCompanyScreen {
         self.setup.name = c.name;
         self.legal_name = c.legal_name;
         self.tax_rate_text = c.tax_rate_text;
+        self.tax_agency_text = c.tax_agency_text;
         self.closing_password = c.closing_password;
         self.closing_confirm = c.closing_confirm;
         self.issues.clear();
@@ -161,6 +165,7 @@ impl NewCompanyScreen {
             page: Page::Names,
             setup,
             tax_rate_text: String::new(),
+            tax_agency_text: String::new(),
             closing_password: String::new(),
             closing_confirm: String::new(),
             legal_name: String::new(),
@@ -182,6 +187,10 @@ impl NewCompanyScreen {
         } else {
             None
         };
+        // Q-PR4c: the agency the tax is paid to.
+        self.setup.sales_tax_agency = (self.setup.sales_tax
+            && !self.tax_agency_text.trim().is_empty())
+        .then(|| self.tax_agency_text.trim().to_string());
         self.setup.closing_password =
             (!self.closing_password.is_empty()).then(|| Secret::new(self.closing_password.clone()));
     }
@@ -192,7 +201,12 @@ impl NewCompanyScreen {
             .filter(|i| match self.page {
                 Page::Names => matches!(i, SetupIssue::NameRequired | SetupIssue::NameTooLong),
                 Page::Year => matches!(i, SetupIssue::FiscalMonth),
-                Page::Features => matches!(i, SetupIssue::TaxRateInvalid),
+                Page::Features => matches!(
+                    i,
+                    SetupIssue::TaxRateInvalid
+                        | SetupIssue::TaxAgencyRequired
+                        | SetupIssue::TaxAgencyTooLong
+                ),
                 Page::Security => matches!(
                     i,
                     SetupIssue::ClosingPasswordTooShort | SetupIssue::ClosingPasswordUnavailable
@@ -227,6 +241,19 @@ impl NewCompanyScreen {
             return;
         }
         if let Some(mut demo) = self.link.demo_state() {
+            // Q-PR4c: the agency, its "Sales tax" item and the default, as
+            // the engine path makes them (a failure leaves the company).
+            let sales_tax_incomplete = match (
+                self.setup.sales_tax,
+                self.setup.agency_name(),
+                self.setup.sales_tax_rate,
+            ) {
+                (true, Some(agency), Some(rate)) => {
+                    crate::company::demo::sales_tax::interview_agency(&mut demo, agency, rate)
+                        .is_err()
+                }
+                _ => false,
+            };
             let id = demo.fresh_id();
             demo.companies.push(crate::company::demo::DemoCompany {
                 tenant_id: id,
@@ -252,6 +279,7 @@ impl NewCompanyScreen {
                 .unwrap_or(0),
                 accounts_skipped: 0,
                 closing_password_set: self.setup.closing_password.is_some(),
+                sales_tax_incomplete,
             })));
             return;
         }
@@ -464,12 +492,23 @@ impl NewCompanyScreen {
             self.dirty = true;
         }
         if self.setup.sales_tax {
+            let before = (self.tax_rate_text.clone(), self.tax_agency_text.clone());
             form::field(
                 ui,
                 &t("interview.features.tax_rate"),
                 &mut self.tax_rate_text,
             );
             form::hint(ui, tokens, &t("interview.features.tax_rate_hint"));
+            form::field(
+                ui,
+                &t("interview.features.tax_agency"),
+                &mut self.tax_agency_text,
+            );
+            form::hint(ui, tokens, &t("interview.features.tax_agency_hint"));
+            if before != (self.tax_rate_text.clone(), self.tax_agency_text.clone()) {
+                self.dirty = true;
+                self.issues.clear();
+            }
         }
         if ui
             .checkbox(&mut self.setup.inventory, t("interview.features.inventory"))
@@ -581,6 +620,12 @@ impl NewCompanyScreen {
                 }),
             ),
             (
+                t("interview.features.tax_agency"),
+                self.setup
+                    .agency_name()
+                    .map_or_else(|| t("interview.review.no"), str::to_string),
+            ),
+            (
                 t("interview.features.inventory"),
                 t(if self.setup.inventory {
                     "interview.review.yes"
@@ -627,6 +672,15 @@ impl NewCompanyScreen {
                     &[("n", &created.accounts_imported.to_string())],
                 ),
             );
+            if created.sales_tax_incomplete {
+                // Q-PR4c: the company works; Sales Tax Setup finishes it.
+                form::inline_warning(ui, tokens, &t("interview.done.sales_tax_incomplete"));
+                if ui.button(t("interview.done.sales_tax_setup")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::sales_tax::setup::KIND,
+                    )));
+                }
+            }
             ui.add_space(8.0);
             // The recovery key is offered only when first-run setup produced
             // one that has not been shown yet (M1); it is never made here.
@@ -810,6 +864,8 @@ impl Screen for NewCompanyScreen {
             "dirty": self.dirty,
             "chart": self.setup.chart.id(),
             "sales_tax": self.setup.sales_tax,
+            "tax_agency": !self.tax_agency_text.trim().is_empty(),
+            "sales_tax_incomplete": self.created.as_ref().is_some_and(|c| c.sales_tax_incomplete),
             "inventory": self.setup.inventory,
             "closing_supported": self.closing_supported,
         })

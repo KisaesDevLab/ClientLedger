@@ -45,6 +45,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("items.col.description", "Description"),
     ("items.col.kind", "Type"),
     ("items.col.price", "Price"),
+    ("items.col.on_hand", "On hand"),
     ("items.col.account", "Income account"),
     ("items.col.taxable", "Taxable"),
     ("items.col.status", "Status"),

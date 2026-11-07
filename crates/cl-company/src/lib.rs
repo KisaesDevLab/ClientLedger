@@ -47,7 +47,9 @@ pub use export_all::{ExportAllOutcome, export_all};
 pub use lifecycle::{CompanyEntry, close_company, list_companies, new_from_existing, open_company};
 pub use restore::{ArchiveInfo, RestoreOutcome, RestoreRequest, inspect_archive, restore};
 pub use sample::{SAMPLE_NAME, Sample};
-pub use setup::{CompanySetup, Created, SetupIssue, create_company};
+pub use setup::{
+    CompanySetup, Created, SALES_TAX_ITEM_NAME, SetupIssue, create_company, set_up_sales_tax_agency,
+};
 pub use statistics::Statistics;
 pub use templates::{StarterChart, Template};
 pub use year_end::{YearEndPrompt, year_end_prompt};

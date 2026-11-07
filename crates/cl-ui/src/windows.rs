@@ -178,6 +178,28 @@ pub enum OpenPayload {
     /// P22: Assess Finance Charges on this date (Statements' "Assess
     /// finance charges first?").
     OnDate(cl_core::CalendarDate),
+    /// Q-PR4d: Set Up from a name field's Quick Add prompt: the center's
+    /// new-name form prefilled with the typed name; when it is saved the
+    /// window closes and the form comes back to the front.
+    SetUpName(SetUpName),
+}
+
+/// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no
+/// name (owner data).
+#[derive(Clone, PartialEq, Eq)]
+pub struct SetUpName {
+    /// The typed name.
+    pub name: String,
+    /// Client or vendor.
+    pub kind: cl_model::quick_add::NameKind,
+}
+
+impl std::fmt::Debug for SetUpName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetUpName")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Stand-in for a screen a later phase builds.

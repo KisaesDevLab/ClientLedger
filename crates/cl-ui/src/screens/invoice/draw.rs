@@ -534,6 +534,11 @@ impl InvoiceScreen {
             NameOutcome::Cleared => {
                 let typed = self.inputs.client.text.trim().to_string();
                 if self.inputs.client.problem && !typed.is_empty() {
+                    // Q-PR4d: Quick Add, Set Up or Cancel.
+                    self.quick_add.offer(
+                        &typed,
+                        cl_model::quick_add::Accepts::One(cl_model::quick_add::NameKind::Client),
+                    );
                     self.unknown_client = Some(typed);
                 } else if current.is_some() {
                     self.header.edit(field::CLIENT, |h| h.client = None);
@@ -542,20 +547,15 @@ impl InvoiceScreen {
             }
             NameOutcome::None => {}
         }
-        // Q-P20i: a name not in the list offers Set Up (no Quick Add).
-        if let Some(name) = self.unknown_client.clone() {
-            let label = t_with("invoice.client.set_up", &[("name", &name)]);
-            if ui
-                .button(label)
-                .on_hover_text(t("invoice.client.set_up.tip"))
-                .clicked()
-            {
-                self.setting_up = Some(name);
-                self.link
-                    .push(crate::company::CompanyEvent::OpenWindow(CommandId::new(
-                        "clients.center",
-                    )));
-            }
+        if r.changed() {
+            self.quick_add.close();
+        }
+        // Q-PR4d (replaces Q-P20i's Set Up link): a name not on the list
+        // offers Quick Add, Set Up or Cancel.
+        if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+            self.quick_add.ui(ui, tokens, self.group.as_ref())
+        {
+            self.client_added(*c);
         }
     }
 

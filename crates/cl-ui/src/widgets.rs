@@ -19,6 +19,7 @@ pub mod doc_worker;
 // A01 WP-D: the native Browse dialogs (folders and files).
 pub mod file_picker;
 pub mod pdf_viewer;
+pub(crate) mod quick_add;
 
 /// A keyboard chip such as `Ctrl K`.
 pub fn kbd(ui: &mut Ui, text: &str) -> Response {

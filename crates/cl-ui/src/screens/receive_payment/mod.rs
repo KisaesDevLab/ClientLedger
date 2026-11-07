@@ -136,6 +136,8 @@ pub struct ReceivePaymentScreen {
     pub(crate) today: CalendarDate,
     pub(crate) started: Instant,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a client not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     pub(crate) form: PaymentForm,
     pub(crate) client_input: NameInput,
     pub(crate) date: DateInput,
@@ -229,6 +231,7 @@ impl ReceivePaymentScreen {
     /// A new, empty payment.
     #[must_use]
     pub fn new(link: Arc<CompanyLink>, today: CalendarDate) -> ReceivePaymentScreen {
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let group = link.group().and_then(Result::ok);
         let bus = link.bus().subscribe();
         let mut s = ReceivePaymentScreen {
@@ -238,6 +241,7 @@ impl ReceivePaymentScreen {
             today,
             started: Instant::now(),
             books: Books::default(),
+            quick_add,
             form: PaymentForm::new(Some(today), None),
             client_input: NameInput::default(),
             date: DateInput::new(today),
@@ -1310,7 +1314,9 @@ impl Screen for ReceivePaymentScreen {
                 }
             }
             "form.revert" => {
-                if self.dialog.is_some() {
+                // Q-PR4d: Esc cancels an open Quick Add prompt first.
+                if self.quick_add.cancel() {
+                } else if self.dialog.is_some() {
                     self.dialog = None;
                 } else if !self.dirty {
                     self.link
@@ -1436,6 +1442,7 @@ impl ReceivePaymentScreen {
                 "reopened": b.bounce.as_ref().map(|o| o.reopened.iter().map(|(_, m)| shown(*m)).collect::<Vec<_>>()),
             });
         }
+        v["quick_add"] = self.quick_add.state();
         v
     }
 }

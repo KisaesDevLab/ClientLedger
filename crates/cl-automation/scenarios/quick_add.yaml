@@ -1,0 +1,103 @@
+# Quick Add (Q-PR4d, QA-13) against `clientledger --demo`: a name typed in
+# a name field that isn't on the list offers Quick Add, Set Up or Cancel.
+# On an invoice: Esc cancels, then Enter quick-adds the client and the
+# field takes it. On a bill: Set Up opens the Vendor Center's new-vendor
+# form with the name filled in; Save & Close brings the bill back with the
+# new vendor picked. Light and dark run in one app: the developer reset
+# drops the names added. All names are synthetic.
+name: quick_add
+description: Quick Add a client on an invoice (Esc cancels, Enter adds); Set Up a vendor from a bill and come back.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- Invoice: Esc cancels, Enter adds ----------------------------------------
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - command: dev.demo_quick_add_reset
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Shoal Bend Nursery"}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: client}
+  - assert_state: {key: screen.quick_add.asks_kind, equals: false}
+  - assert_exists: {role: label, label_contains: "isn't on your list yet"}
+  - assert_exists: {role: button, label: Quick Add}
+  - assert_exists: {role: button, label: "Set Up…"}
+  - assert_exists: {role: button, label: Cancel}
+  - assert_focused: {role: button, label: Quick Add}
+  - screenshot: invoice-prompt
+  - key: Escape
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_state: {key: screen.client, equals: false}
+  - click: {role: text_input, label: Client}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_focused: {role: button, label: Quick Add}
+  - key: Enter
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_state: {key: screen.client, equals: true}
+  - assert_value: {target: {role: text_input, label: Client}, equals: "Shoal Bend Nursery"}
+  - screenshot: invoice-added
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  # --- Bill: Set Up and back ----------------------------------------------------
+  - key: Ctrl+B
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: "Bluff Hardware Supply", target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: vendor}
+  - screenshot: bill-prompt
+  - click: {role: button, label: "Set Up…"}
+  - assert_state: {key: screen.screen, equals: vendor_center}
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_value: {target: {role: text_input, label: Name}, equals: "Bluff Hardware Supply"}
+  - screenshot: set-up
+  - command: form.save_close
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.quick_add.waiting_set_up, equals: false}
+  - assert_value: {target: {role: text_input, label: Vendor}, equals: "Bluff Hardware Supply"}
+  - screenshot: bill-back
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  # --- Write Check: a payee may be a vendor or a customer ---------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: "Tumble Creek Farm", target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.asks_kind, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: vendor}
+  - click: {role: radio_button, label: Customer}
+  - assert_state: {key: screen.quick_add.kind, equals: client}
+  - screenshot: check-prompt
+  - click: {role: button, label: Quick Add}
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_state: {key: screen.has_payee, equals: true}
+  - click: {role: button, label: Clear}
+  # --- Make Deposits: Received from in the lines grid --------------------------
+  - command: banking.deposit
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label: "Received from, line 1"}
+  - type: {text: "Hidden Valley Co-op"}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: client}
+  - assert_state: {key: screen.quick_add.asks_kind, equals: true}
+  - screenshot: deposit-prompt
+  - click: {role: button, label: Quick Add}
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_value: {target: {label: "Received from, line 1"}, equals: "Hidden Valley Co-op"}
+  - assert_not_exists: {label_contains: "Choose one from the list"}
+  - screenshot: deposit-added
+  - click: {role: button, label: Clear}
+  - command: dev.demo_quick_add_reset

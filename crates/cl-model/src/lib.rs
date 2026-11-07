@@ -30,6 +30,7 @@ pub mod keymap;
 pub mod lists;
 pub mod lookup;
 pub mod numbering;
+pub mod quick_add;
 pub mod register;
 pub mod rowkey;
 pub mod statement_match;

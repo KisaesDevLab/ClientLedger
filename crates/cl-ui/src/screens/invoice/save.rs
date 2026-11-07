@@ -926,7 +926,11 @@ impl InvoiceScreen {
                 self.clear();
                 true
             }
-            "form.revert" => self.revert_field(),
+            // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
+            crate::widgets::quick_add::DEV_RESET => {
+                crate::widgets::quick_add::demo_reset(&self.link)
+            }
             "form.prev_record" | "edit.find" => {
                 self.navigate(true);
                 true

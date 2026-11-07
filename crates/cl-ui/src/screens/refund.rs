@@ -112,6 +112,8 @@ pub struct RefundScreen {
     pub(crate) bus: Subscription,
     pub(crate) today: CalendarDate,
     pub(crate) books: Books,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a client not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     pub(crate) clients: Arc<RegisterLists>,
     pub(crate) form: RefundForm,
     pub(crate) client: Option<ContactId>,
@@ -196,6 +198,7 @@ impl RefundScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>, today: CalendarDate) -> RefundScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let bus = link.bus().subscribe();
         if let Some(mut d) = link.demo_state() {
             crate::company::demo::receivables::seed(&mut d);
@@ -207,6 +210,7 @@ impl RefundScreen {
             bus,
             today,
             books: Books::default(),
+            quick_add,
             clients: Arc::new(RegisterLists::default()),
             form: RefundForm::new(Some(today), None),
             client: None,
@@ -766,7 +770,7 @@ impl RefundScreen {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 kit::wrap_item(ui, "refund/client", |ui| {
                     let lists = Arc::clone(&self.clients);
-                    let (out, _) = kit::name_field(
+                    let (out, r) = kit::name_field(
                         ui,
                         tokens,
                         &t("refund.client"),
@@ -775,6 +779,21 @@ impl RefundScreen {
                         self.client,
                         260.0,
                     );
+                    if let Some(c) = self.quick_add.after_name_field(
+                        ui,
+                        tokens,
+                        self.group.as_ref(),
+                        (&self.client_input, &r),
+                        out,
+                        cl_model::quick_add::Accepts::One(cl_model::quick_add::NameKind::Client),
+                    ) {
+                        let id = c.id;
+                        self.books.add_contact(c);
+                        self.lists_arrived();
+                        self.client_input.problem = false;
+                        self.client_input.text = self.books.contact_name(id).unwrap_or_default();
+                        self.set_client(Some(id));
+                    }
                     match out {
                         NameOutcome::Picked(c) if Some(c) != self.client => {
                             self.set_client(Some(c));
@@ -1148,7 +1167,9 @@ impl Screen for RefundScreen {
                 }
             }
             "form.revert" => {
-                if self.void_open {
+                // Q-PR4d: Esc cancels an open Quick Add prompt first.
+                if self.quick_add.cancel() {
+                } else if self.void_open {
                     self.void_open = false;
                 } else if !self.dirty() {
                     self.link

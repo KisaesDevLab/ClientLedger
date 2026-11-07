@@ -713,6 +713,91 @@ pub fn deactivate_code(state: &mut DemoState, id: TaxCodeId) -> Result<TaxCode, 
     Ok(c.clone())
 }
 
+/// Q-PR4c, demo parity of `cl_company::set_up_sales_tax_agency`: the
+/// interview's agency as a vendor and agency, a "Sales tax" item at the
+/// rate paid to it, and that item as the company default. What an earlier
+/// run made is reused.
+///
+/// # Errors
+/// As [`create_agency`], [`save_item`] and [`save_settings`].
+pub fn interview_agency(
+    state: &mut DemoState,
+    agency: &str,
+    rate: cl_core::Rate,
+) -> Result<SalesTaxItemId, ApiError> {
+    ensure(state);
+    let agency = agency.trim();
+    let same = |s: &str| s.trim().eq_ignore_ascii_case(agency);
+    let found = agencies(state, true)
+        .into_iter()
+        .find(|a| same(&a.vendor_name))
+        .map(|a| a.id);
+    let agency_id = if let Some(id) = found {
+        id
+    } else {
+        let contacts = state.contacts_mut();
+        let vendor = contacts
+            .iter()
+            .find(|c| {
+                same(&c.fields.display_name)
+                    && matches!(
+                        c.fields.contact_type,
+                        cl_api::ContactType::Vendor | cl_api::ContactType::Both
+                    )
+            })
+            .map(|c| c.id);
+        let vendor = if let Some(v) = vendor {
+            v
+        } else {
+            let id =
+                super::contacts::contact_id(900_000 + u32::try_from(contacts.len()).unwrap_or(0));
+            contacts.push(cl_api::Contact {
+                id,
+                fields: cl_api::ContactFields::named(cl_api::ContactType::Vendor, agency),
+                is_active: true,
+                opening_balance: Some(cl_core::Money::ZERO),
+                opening_balance_date: None,
+                created_at: Some(DemoState::now()),
+                updated_at: Some(DemoState::now()),
+            });
+            id
+        };
+        create_agency(state, vendor)?.id
+    };
+    let name = cl_company::SALES_TAX_ITEM_NAME;
+    let existing = items(state, true)
+        .into_iter()
+        .find(|i| i.kind == SalesTaxKind::Item && i.name.trim().eq_ignore_ascii_case(name))
+        .map(|i| i.id);
+    let item = if let Some(id) = existing {
+        id
+    } else {
+        save_item(
+            state,
+            None,
+            &SalesTaxItemDraft {
+                kind: SalesTaxKind::Item,
+                name: name.to_string(),
+                description: Some(name.to_string()),
+                rate: Some(TaxRate::from(rate)),
+                agency_id: Some(agency_id),
+                member_ids: Vec::new(),
+            },
+            None,
+        )?
+        .id
+    };
+    save_settings(
+        state,
+        &cl_api::SalesTaxSettingsUpdate {
+            enabled: Some(true),
+            default_sales_tax_id: Some(Some(item)),
+            ..cl_api::SalesTaxSettingsUpdate::default()
+        },
+    )?;
+    Ok(item)
+}
+
 /// `PUT /company/settings` with the sales tax fields.
 ///
 /// # Errors

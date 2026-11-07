@@ -213,6 +213,10 @@ pub struct DepositScreen {
     pub(crate) local: Option<Box<dyn LocalDeposits>>,
     pub(crate) accounts: Vec<Account>,
     pub(crate) contacts: Vec<Contact>,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a Received from name not on
+    /// the list, and the line it is for.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
+    pub(crate) quick_row: Option<cl_grid::RowKey>,
     pub(crate) tags: Vec<Tag>,
     pub(crate) lists: Arc<RegisterLists>,
     lists_task: Option<Task<Loaded>>,
@@ -287,6 +291,7 @@ impl DepositScreen {
         local: Option<Box<dyn LocalDeposits>>,
     ) -> DepositScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let lists = Arc::new(RegisterLists::default());
         let lines = LinesGrid::new(&LINES, Arc::clone(&lists), Vec::new());
         let mut s = DepositScreen {
@@ -326,6 +331,8 @@ impl DepositScreen {
             layout: crate::layout::FrameReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
+            quick_add,
+            quick_row: None,
             lists_stale: false,
             nav_prompt: None,
             after_save_nav: None,
@@ -486,6 +493,20 @@ impl DepositScreen {
         }) {
             Ok(p) => self.lists_task = Some(Task::Pending(p)),
             Err(_) => self.loaded = true,
+        }
+    }
+
+    /// Q-PR4d: a name Quick Add (or Set Up) made joins the lists and fills
+    /// the line it was typed on.
+    pub(crate) fn received_from_added(&mut self, c: Contact) {
+        let id = c.id;
+        match self.contacts.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = c,
+            None => self.contacts.push(c),
+        }
+        self.apply_lists();
+        if let Some(row) = self.quick_row.take() {
+            self.lines.set_customer(row, id);
         }
     }
 
@@ -681,6 +702,7 @@ impl DepositScreen {
         ) {
             m.extend(c);
         }
+        v["quick_add"] = self.quick_add.state();
         v
     }
 }

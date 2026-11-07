@@ -39,6 +39,13 @@ steps:
   - assert_state: {key: screen.sales_tax, equals: true}
   - click: {role: text_input, label: Default sales tax rate (%)}
   - type: {text: "8.25"}
+  # Q-PR4c: the agency the tax is paid to is required with sales tax.
+  - click: {role: button, label: Next, index: 0}
+  - assert_state: {key: screen.page, equals: features}
+  - assert_exists: {role: label, label: "Enter who you pay sales tax to (usually your state's tax department)."}
+  - click: {role: text_input, label: Who you pay sales tax to}
+  - type: {text: Missouri Department of Revenue}
+  - assert_state: {key: screen.tax_agency, equals: true}
   - click: {role: radio_button, label: Cash (when money moves)}
   - screenshot: features
   - click: {role: button, label: Next, index: 0}
@@ -60,6 +67,7 @@ steps:
 
   - click: {role: button, label: Create company, index: 0}
   - assert_state: {key: screen.created, equals: true}
+  - assert_state: {key: screen.sales_tax_incomplete, equals: false}
   - assert_state: {key: company_open, equals: true}
   - assert_exists: {role: label, label_contains: Shoal Creek Farm, index: 0}
   - assert_exists: {role: button, label: Show my recovery key}

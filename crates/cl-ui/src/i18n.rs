@@ -82,6 +82,7 @@ mod deposit;
 mod loan_payment;
 mod owner_money;
 mod personal_funds;
+mod quick_add;
 mod transfer;
 // P15 (one module per screen).
 mod journal_entry;
@@ -129,7 +130,7 @@ mod statements;
 mod inventory;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 46] = [
+const TABLES: [&[(&str, &str)]; 47] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -145,6 +146,7 @@ const TABLES: [&[(&str, &str)]; 46] = [
     card_charge::ENGLISH,
     owner_money::ENGLISH,
     personal_funds::ENGLISH,
+    quick_add::ENGLISH,
     loan_payment::ENGLISH,
     journal_entry::ENGLISH,
     templates::ENGLISH,
@@ -385,6 +387,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("interview.features.sales_tax", "I collect sales tax"),
     ("interview.features.tax_rate", "Default sales tax rate (%)"),
     ("interview.features.tax_rate_hint", "For example 8.25. Rates by location come later."),
+    ("interview.features.tax_agency", "Who you pay sales tax to"),
+    ("interview.features.tax_agency_hint", "Usually your state's tax department, for example Missouri Department of Revenue. It's added as a vendor."),
     ("interview.features.inventory", "I track inventory (products I buy and resell)"),
     ("interview.features.basis", "How should reports count income?"),
     ("interview.basis.accrual", "Accrual (when invoiced or billed)"),
@@ -413,10 +417,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("interview.done.recovery", "Show my recovery key"),
     ("interview.done.opening", "Enter opening balances"),
     ("interview.done.later", "Go to Home"),
+    ("interview.done.sales_tax_incomplete", "Your company is ready, but your sales tax couldn't be finished. Open Sales Tax Setup to add the agency and the rate."),
+    ("interview.done.sales_tax_setup", "Open Sales Tax Setup"),
     ("setup.issue.name_required", "The business needs a name."),
     ("setup.issue.name_too_long", "That name is too long (255 characters at most)."),
     ("setup.issue.fiscal_month", "Pick the month the fiscal year starts in."),
     ("setup.issue.tax_rate", "The tax rate should be a percentage between 0 and 100."),
+    ("setup.issue.tax_agency", "Enter who you pay sales tax to (usually your state's tax department)."),
+    ("setup.issue.tax_agency_too_long", "That agency name is too long (255 characters at most)."),
     ("setup.issue.closing_password_short", "The closing-date password needs at least 12 characters, and both entries must match."),
     ("setup.issue.closing_password_unavailable", "A closing-date password is not available in this version yet; leave it blank for now."),
     ("recovery.tab", "Recovery Key"),

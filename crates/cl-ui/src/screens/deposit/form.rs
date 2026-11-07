@@ -407,6 +407,20 @@ impl DepositScreen {
         header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.lines.ui(ui);
         });
+        // Q-PR4d: a Received from name not on the list offers Quick Add
+        // (a payer is usually a customer; the prompt asks).
+        if let Some((row, name)) = self.lines.take_unknown_name() {
+            self.quick_row = Some(row);
+            self.quick_add.offer(
+                &name,
+                cl_model::quick_add::Accepts::Either(cl_model::quick_add::NameKind::Client),
+            );
+        }
+        if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+            self.quick_add.ui(ui, tokens, self.group.as_ref())
+        {
+            self.received_from_added(*c);
+        }
         let hint = if self.caps().cashback {
             "deposit.lines.fee_hint"
         } else {
@@ -754,7 +768,11 @@ impl DepositScreen {
                 }
                 done
             }
-            "form.revert" => self.revert_field(),
+            // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            "form.revert" => self.quick_add.cancel() || self.revert_field(),
+            crate::widgets::quick_add::DEV_RESET => {
+                crate::widgets::quick_add::demo_reset(&self.link)
+            }
             "form.save_as_template" => {
                 self.save_as_template();
                 true

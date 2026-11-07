@@ -195,7 +195,8 @@ impl Screen for DocumentViewScreen {
             | OpenPayload::BounceCheck(_)
             | OpenPayload::OnDate(_)
             | OpenPayload::ReprintCheck(..)
-            | OpenPayload::PrintDeposit(..) => false,
+            | OpenPayload::PrintDeposit(..)
+            | OpenPayload::SetUpName(_) => false,
         }
     }
 
