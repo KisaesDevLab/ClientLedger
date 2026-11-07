@@ -15,6 +15,10 @@ steps:
   - click: {role: text_input, label: Find}
   - type: {text: "Hardwood"}
   - key: Enter
+  # QA-16: the list's On hand column, the engine's quantity with the unit.
+  - assert_state: {key: screen.on_hand_column, equals: true}
+  - assert_state: {key: screen.selected_on_hand_text, equals: "120 bag"}
+  - screenshot: on-hand
   - command: edit.edit_transaction
   - assert_state: {key: screen.panel, equals: edit}
   - assert_exists: {role: label, label: "Purchase and inventory"}
