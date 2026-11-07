@@ -132,6 +132,19 @@ pub fn keep_focus_in_view(ui: &Ui) {
         }
         return;
     };
+    if seen == Some(focused) {
+        return;
+    }
+    // A click put the keyboard there: the widget is under the pointer,
+    // already in view. Nothing is read either: `read_response` on a frame
+    // with a press would make egui drop the new focus (a grid cell's
+    // editor) when the widget's last known rect isn't under the pointer.
+    let pointer =
+        ctx.input(|i| i.pointer.any_down() || i.pointer.any_pressed() || i.pointer.any_released());
+    if pointer {
+        ctx.data_mut(|d| d.insert_temp(seen_key, focused));
+        return;
+    }
     let content = ui.min_rect();
     let here = ctx.read_response(focused).filter(|r| {
         r.layer_id == ui.layer_id()
@@ -142,17 +155,19 @@ pub fn keep_focus_in_view(ui: &Ui) {
             && r.rect.max.x <= content.max.x + 0.5
     });
     match here {
-        Some(r) if seen != Some(focused) => {
+        Some(r) => {
             // At once, not animated: the field is there when the next key
-            // (or a screenshot) comes.
-            ui.scroll_to_rect_animation(r.rect, None, egui::style::ScrollAnimation::none());
+            // (or a screenshot) comes. Up and down only: a grid cell's
+            // editor may run past the right edge, and a sideways jump
+            // moves the cells the next click is aimed at.
+            let target = Rect::from_x_y_ranges(ui.clip_rect().x_range(), r.rect.y_range());
+            ui.scroll_to_rect_animation(target, None, egui::style::ScrollAnimation::none());
             ctx.data_mut(|d| d.insert_temp(seen_key, focused));
         }
         None if seen.is_some() => ctx.data_mut(|d| d.remove::<Id>(seen_key)),
-        _ => {}
+        None => {}
     }
 }
-
 /// Space between the bars and the body.
 const GAP: f32 = 6.0;
 
