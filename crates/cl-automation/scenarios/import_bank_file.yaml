@@ -168,7 +168,8 @@ steps:
   - assert_state: {key: screen.undone.removed, equals: 1}
   - assert_state: {key: screen.undone.restored, equals: 1}
   - screenshot: changed-undone
-  # A CSV row a day after one already there, with no bank id: added, flagged.
+  # A CSV row a day after one already there, with no bank id: added, flagged
+  # (the earlier row is inside the file's date range, Q-P25c).
   - click: {role: button, label: Import another file}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_lookalike.csv"]}
   - click: {role: button, label: "Choose a file…"}

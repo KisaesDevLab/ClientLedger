@@ -513,10 +513,12 @@ write("operating_changed.qfx", ofx([s_chg], qfx=True).encode("ascii"))
 expect_ofx("operating_changed.qfx", "Qfx", [s_chg], encoding="Utf8")
 
 # A CSV of the same account a day later than an 11/03 row, with no bank id:
-# it looks like that row (a possible duplicate, added with a flag); plus one new.
-look = [["11/04/2026", "RIVERBEND FUEL #212 MONETT MO", "-84.17"], ["11/05/2026", "FARM SUPPLY CO-OP", "-212.40"]]
+# it looks like that row (a possible duplicate, added with a flag); plus one
+# new. Look-alikes are compared only within the file's own date range (Q-P25c,
+# owner confirmed 2026-11-07), so the file starts before the 11/03 row.
+look = [["11/02/2026", "FARM SUPPLY CO-OP", "-212.40"], ["11/04/2026", "RIVERBEND FUEL #212 MONETT MO", "-84.17"]]
 write("operating_lookalike.csv", csv_bytes([["Date", "Description", "Amount"]] + look))
-expect_csv("operating_lookalike.csv", look, amt3, "2026-11-04", "2026-11-05")
+expect_csv("operating_lookalike.csv", look, amt3, "2026-11-02", "2026-11-04")
 
 # ---------------------------------------------------------------- malformed
 def mal_error(name, data, error, line):

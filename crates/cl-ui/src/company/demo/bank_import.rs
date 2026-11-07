@@ -9,7 +9,8 @@
 //! same row seen before; then the same bank id with another amount, a date
 //! within 5 days and a matching description is a changed row (replace or
 //! add as new); any other seen bank id was reused by the bank and is
-//! ignored; then look-alikes (Q-P25c). The balance check is the engine's
+//! ignored; then look-alikes (Q-P25c), compared only with items dated
+//! inside the file's own date range, as the engine does. The balance check is the engine's
 //! ("not available in demo"). The account link is keyed like the
 //! engine's (Q-P25u: the hash is made here, standing in for the engine, and
 //! only the hash and mask are kept). A commit's preparation finishes after
@@ -74,6 +75,13 @@ struct Item {
 /// are equal, the dates are within 3 days, the bank ids and check numbers
 /// do not differ, and the descriptions are equal or one starts the other
 /// (the shorter at least 8 characters).
+/// Q-P25c (owner confirmed 2026-11-07): like the engine, only items dated
+/// inside the file's own date range are compared for look-alikes.
+fn in_range(item: &Item, req: &BankImportRequest) -> bool {
+    req.section_start.is_none_or(|start| item.date >= start)
+        && req.section_end.is_none_or(|end| item.date <= end)
+}
+
 fn looks_alike(item: &Item, row: &cl_api::BankImportRow) -> bool {
     if item.amount != row.amount {
         return false;
@@ -255,46 +263,45 @@ impl DemoBankFeed {
                     .position(|i| i.row_key == k.row_key || i.dedupe_key == k.row_key)
                     .filter(|p| !used.contains(p))
             };
-            let (status, reason, existing) = if let Some(p) = by_fitid {
-                (
-                    ImportRowStatus::Duplicate,
-                    Some(ImportRowReason::SameBankId),
-                    Some(p),
-                )
-            } else if let Some(p) = by_row() {
-                (
-                    ImportRowStatus::Duplicate,
-                    Some(ImportRowReason::SameRow),
-                    Some(p),
-                )
-            } else if let Some(p) = same_id_other.filter(|p| {
-                mine.get(*p).is_some_and(|i| {
-                    i.date.days_until(r.date).abs() <= 5
-                        && descriptions_match(&i.description, &r.description)
-                })
-            }) {
-                (ImportRowStatus::Changed, None, Some(p))
-            } else if let Some(p) = mine
-                .iter()
-                .enumerate()
-                .position(|(i, it)| !used.contains(&i) && looks_alike(it, r))
-            {
-                (
-                    ImportRowStatus::PossibleDuplicate,
-                    Some(ImportRowReason::SimilarExisting),
-                    Some(p),
-                )
-            } else {
-                let reason = if same_id_other.is_some() {
-                    Some(ImportRowReason::BankIdReused)
+            let (status, reason, existing) =
+                if let Some(p) = by_fitid {
+                    (
+                        ImportRowStatus::Duplicate,
+                        Some(ImportRowReason::SameBankId),
+                        Some(p),
+                    )
+                } else if let Some(p) = by_row() {
+                    (
+                        ImportRowStatus::Duplicate,
+                        Some(ImportRowReason::SameRow),
+                        Some(p),
+                    )
+                } else if let Some(p) = same_id_other.filter(|p| {
+                    mine.get(*p).is_some_and(|i| {
+                        i.date.days_until(r.date).abs() <= 5
+                            && descriptions_match(&i.description, &r.description)
+                    })
+                }) {
+                    (ImportRowStatus::Changed, None, Some(p))
+                } else if let Some(p) = mine.iter().enumerate().position(|(i, it)| {
+                    !used.contains(&i) && in_range(it, req) && looks_alike(it, r)
+                }) {
+                    (
+                        ImportRowStatus::PossibleDuplicate,
+                        Some(ImportRowReason::SimilarExisting),
+                        Some(p),
+                    )
                 } else {
-                    r.fitid
-                        .as_deref()
-                        .is_some_and(|f| seen_fitids.get(f.trim()).copied().unwrap_or(0) > 1)
-                        .then_some(ImportRowReason::RepeatedBankId)
+                    let reason = if same_id_other.is_some() {
+                        Some(ImportRowReason::BankIdReused)
+                    } else {
+                        r.fitid
+                            .as_deref()
+                            .is_some_and(|f| seen_fitids.get(f.trim()).copied().unwrap_or(0) > 1)
+                            .then_some(ImportRowReason::RepeatedBankId)
+                    };
+                    (ImportRowStatus::New, reason, None)
                 };
-                (ImportRowStatus::New, reason, None)
-            };
             if let Some(p) = existing {
                 used.insert(p);
             }
@@ -586,6 +593,36 @@ mod tests {
             file_ending_date: None,
             rows,
         }
+    }
+
+    /// Q-P25c (owner confirmed 2026-11-07): a look-alike dated outside the
+    /// file's own date range is not compared, so not flagged; inside, it is.
+    #[test]
+    fn look_alikes_are_compared_only_within_the_files_range() {
+        let mut f = DemoBankFeed::default();
+        let now = crate::company::demo::DemoState::now();
+        let mut first = req(vec![row(1, 3, "84.17", "RIVERBEND FUEL #212", "R1")], 'a');
+        first.section_start = CalendarDate::from_ymd(2026, 11, 3).ok();
+        first.section_end = first.section_start;
+        f.import(&first, true, now, None).expect("first");
+        let mut csv = row(2, 4, "84.17", "RIVERBEND FUEL #212", "x");
+        csv.fitid = None;
+        let mut out = req(vec![csv.clone()], 'b');
+        out.bank_identity = None;
+        out.section_start = CalendarDate::from_ymd(2026, 11, 4).ok();
+        out.section_end = out.section_start;
+        let o = f.import(&out, false, now, None).expect("out of range");
+        assert_eq!(
+            o.rows[0].status,
+            ImportRowStatus::New,
+            "11/03 is before the file"
+        );
+        let mut inside = req(vec![csv], 'c');
+        inside.bank_identity = None;
+        inside.section_start = CalendarDate::from_ymd(2026, 11, 2).ok();
+        inside.section_end = CalendarDate::from_ymd(2026, 11, 4).ok();
+        let o = f.import(&inside, false, now, None).expect("in range");
+        assert_eq!(o.rows[0].status, ImportRowStatus::PossibleDuplicate);
     }
 
     /// Review DS7 (engine fixture 23): a bank that numbers each download

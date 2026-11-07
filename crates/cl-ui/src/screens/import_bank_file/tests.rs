@@ -514,7 +514,8 @@ fn a_look_alike_is_added_with_a_flag() {
         &mut s,
         &f,
         "b.csv",
-        "Date,Description,Amount\n11/03/2026,COFFEE ROASTERS,-4.50\n",
+        // The file's range (11/01-11/03) holds the 11/01 row (Q-P25c).
+        "Date,Description,Amount\n11/01/2026,BAKERY,-3.00\n11/03/2026,COFFEE ROASTERS,-4.50\n",
     );
     s.next();
     s.pick_account(bank_account(&s));
@@ -523,10 +524,10 @@ fn a_look_alike_is_added_with_a_flag() {
     s.poll();
     let p = s.preview.as_ref().expect("preview");
     assert_eq!(p.counts.possible_duplicate, 1, "{:?}", p.rows);
-    assert_eq!(flow::rows_to_send(p, &s.choices), 1);
-    assert!(p.rows[0].existing_imported_at.is_some());
+    assert_eq!(flow::rows_to_send(p, &s.choices), 2);
+    assert!(p.rows[1].existing_imported_at.is_some());
     s.next();
-    assert_eq!(s.result.as_ref().expect("sent").counts.inserted, 1);
+    assert_eq!(s.result.as_ref().expect("sent").counts.inserted, 2);
 }
 
 fn bank_fixture(name: &str) -> std::path::PathBuf {
