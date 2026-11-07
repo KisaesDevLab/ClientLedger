@@ -81,6 +81,38 @@ pub fn cost(c: UnitCost) -> String {
     c.format(MoneyStyle::default())
 }
 
+/// QA2-14 (PR-4): the average cost cell. The engine's figure as it is,
+/// except a zero average while nothing (or less than nothing) is on hand,
+/// which isn't a cost: "—", with the tooltip saying why (`true`). The UI
+/// never works an average out itself.
+#[must_use]
+pub fn average_text(on_hand: Quantity, average: Option<UnitCost>) -> (String, bool) {
+    match average {
+        Some(a) if a.is_zero() && !on_hand.is_positive() => ("\u{2014}".into(), true),
+        Some(a) => (cost(a), false),
+        None if !on_hand.is_positive() => ("\u{2014}".into(), true),
+        None => (String::new(), false),
+    }
+}
+
+/// [`average_text`] as a right-aligned cell with its tooltip.
+pub(crate) fn average_cell(
+    ui: &mut eframe::egui::Ui,
+    on_hand: Quantity,
+    average: Option<UnitCost>,
+) {
+    let (text, dash) = average_text(on_hand, average);
+    let r = ui
+        .with_layout(
+            eframe::egui::Layout::right_to_left(eframe::egui::Align::Center),
+            |ui| ui.label(eframe::egui::RichText::new(text).monospace()),
+        )
+        .inner;
+    if dash {
+        r.on_hover_text(t("inventory.report.average_none.tip"));
+    }
+}
+
 /// An amount or quantity cell, right-aligned (DESIGN.md: numbers end on
 /// the right of their column).
 pub(crate) fn num(ui: &mut eframe::egui::Ui, text: eframe::egui::RichText) {
@@ -340,6 +372,25 @@ mod default_account_tests {
             ),
         ];
         assert_eq!(super::inventory_cogs_account(&a), Some(a[1].id));
+    }
+
+    /// QA2-14: −24 on hand with a zero average shows "—" (tooltip), the
+    /// engine's non-zero figure shows as it is.
+    #[test]
+    fn qa2_14_no_zero_average_below_zero() {
+        let q = |s: &str| cl_core::Quantity::parse_wire(s).expect("q");
+        let c = |s: &str| cl_core::UnitCost::parse_wire(s).expect("c");
+        assert_eq!(
+            super::average_text(q("-24"), Some(c("0"))),
+            ("\u{2014}".to_string(), true)
+        );
+        assert_eq!(super::average_text(q("0"), None).1, true);
+        assert_eq!(
+            super::average_text(q("-24"), Some(c("1.1"))).0,
+            super::cost(c("1.1"))
+        );
+        assert_eq!(super::average_text(q("60"), Some(c("1.1"))).1, false);
+        assert!(crate::i18n::has("inventory.report.average_none.tip"));
     }
 
     /// QA2-5: a starter chart's "5000 Cost of Goods Sold" imported without

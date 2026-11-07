@@ -354,11 +354,7 @@ impl ReportScreen {
                             .unwrap_or_default(),
                     );
                     super::num(ui, RichText::new(super::qty(r.on_hand)).monospace());
-                    super::num(
-                        ui,
-                        RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
-                            .monospace(),
-                    );
+                    super::average_cell(ui, r.on_hand, r.average_cost);
                     super::num(ui, RichText::new(super::money(r.value)).monospace());
                     super::num(
                         ui,
@@ -451,11 +447,7 @@ impl ReportScreen {
                         },
                     );
                     super::num(ui, RichText::new(super::money(r.running_value)).monospace());
-                    super::num(
-                        ui,
-                        RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
-                            .monospace(),
-                    );
+                    super::average_cell(ui, r.running_quantity, r.average_cost);
                     ui.end_row();
                 }
             });
