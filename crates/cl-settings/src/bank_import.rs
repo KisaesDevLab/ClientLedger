@@ -227,7 +227,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let store = CsvProfilesStore::in_dir(dir.path());
         let mut p = store.load();
-        assert!(p.profiles.is_empty());
+        assert_eq!(p.profiles, Vec::new());
         p.put("co/acct/h1", serde_json::json!({"date": 0}));
         p.put("co/acct/h1", serde_json::json!({"date": 1}));
         store.save(&p).expect("save");
