@@ -56,6 +56,42 @@ pub fn item_amount(qty: Quantity, rate: Money) -> Result<Money, ItemAmountError>
         .map_err(|_: MoneyError| ItemAmountError::TooLarge)
 }
 
+/// QA2-10 (PR-4): an item's purchase cost per base unit in a unit holding
+/// `factor` base units: `round4(cost × factor)`, half away from zero (the
+/// rule the engine uses for a unit's sale price). `None` when it leaves
+/// the money range. Exact integer arithmetic, no floats.
+#[must_use]
+pub fn cost_in_unit(cost: Money, factor: cl_core::UnitFactor) -> Option<Money> {
+    // Ten-thousandths × millionths: scale 10, back to scale 4.
+    let prod = cost
+        .to_ten_thousandths()
+        .checked_mul(factor.to_millionths())?;
+    let div: i128 = 1_000_000;
+    let mut q = prod / div;
+    if (prod % div).unsigned_abs() * 2 >= div.unsigned_abs() {
+        q += prod.signum();
+    }
+    Money::from_ten_thousandths(q).ok()
+}
+
+/// QA2-17 (PR-4): the cost per unit a typed amount implies for `qty`
+/// (`amount ÷ qty`), only when it is exact to four decimals and `qty ×
+/// cost` gives the amount back to the cent; otherwise `None` and the
+/// cost stays blank, so the owner's amount never changes.
+#[must_use]
+pub fn rate_from_amount(qty: Quantity, amount: Money) -> Option<Money> {
+    if !qty.is_positive() || amount.is_negative() {
+        return None;
+    }
+    let num = amount.to_ten_thousandths().checked_mul(10_000)?;
+    let q = qty.to_ten_thousandths();
+    if num % q != 0 {
+        return None;
+    }
+    let rate = Money::from_ten_thousandths(num / q).ok()?;
+    (item_amount(qty, rate).ok()? == amount).then_some(rate)
+}
+
 /// One item line. `Debug` is redacted (amounts and descriptions are owner
 /// data).
 #[derive(Clone, PartialEq, Eq)]
@@ -177,6 +213,20 @@ impl ItemLine {
         }
         self.amount = amount;
         true
+    }
+
+    /// QA2-17: a line with a quantity and a typed amount but no cost
+    /// shows the cost the amount implies, when [`rate_from_amount`] finds
+    /// an exact one (the amount stays exactly as typed).
+    pub fn fill_rate_from_amount(&mut self) {
+        if self.rate.is_some() {
+            return;
+        }
+        if let (Some(q), Some(a)) = (self.qty, self.amount)
+            && let Some(r) = rate_from_amount(q, a)
+        {
+            self.set_rate(Some(r));
+        }
     }
 }
 
@@ -400,6 +450,72 @@ mod tests {
 
     fn qty(s: &str) -> Quantity {
         Quantity::parse_wire(s).expect("qty")
+    }
+
+    fn factor(s: &str) -> cl_core::UnitFactor {
+        cl_core::UnitFactor::parse_wire(s).expect("factor")
+    }
+
+    /// QA2-10: 1.10 per each, a box of 12 is 13.20; round4, half away.
+    #[test]
+    fn qa2_10_cost_in_a_unit_is_round4_of_cost_times_factor() {
+        assert_eq!(
+            cost_in_unit(money("1.10"), factor("12")),
+            Some(money("13.20"))
+        );
+        assert_eq!(
+            cost_in_unit(money("1.10"), factor("1")),
+            Some(money("1.10"))
+        );
+        // 0.3333 × 1.5 = 0.49995 → 0.5000 (half away from zero).
+        assert_eq!(
+            cost_in_unit(money("0.3333"), factor("1.5")),
+            Some(money("0.5"))
+        );
+        // 2.0001 × 1.333333 = 2.66679999… → 2.6668.
+        assert_eq!(
+            cost_in_unit(money("2.0001"), factor("1.333333")),
+            Some(money("2.6668"))
+        );
+        assert_eq!(cost_in_unit(Money::ZERO, factor("12")), Some(Money::ZERO));
+        assert_eq!(cost_in_unit(Money::MAX, factor("1000000")), None);
+    }
+
+    /// QA2-17: 1 box for 12.00 costs 12.00; a cost that isn't exact stays
+    /// blank and the typed amount never changes.
+    #[test]
+    fn qa2_17_cost_from_a_typed_amount_only_when_exact() {
+        assert_eq!(
+            rate_from_amount(qty("1"), money("12.00")),
+            Some(money("12"))
+        );
+        assert_eq!(
+            rate_from_amount(qty("5"), money("66.00")),
+            Some(money("13.2"))
+        );
+        assert_eq!(
+            rate_from_amount(qty("8"), money("1.00")),
+            Some(money("0.125"))
+        );
+        // 10.00 ÷ 3 = 3.3333… is not exact: blank.
+        assert_eq!(rate_from_amount(qty("3"), money("10.00")), None);
+        // 1.00 ÷ 0.0003 = 3333.33… is not exact either.
+        assert_eq!(rate_from_amount(qty("0.0003"), money("1.00")), None);
+        assert_eq!(rate_from_amount(Quantity::ZERO, money("1")), None);
+        assert_eq!(rate_from_amount(qty("2"), money("-4")), None);
+
+        let mut l = ItemLine::blank(crate::rowkey::RowKeyGen::new().next_key());
+        l.set_qty(Some(qty("1")));
+        assert!(l.set_amount(Some(money("12.00"))));
+        l.fill_rate_from_amount();
+        assert_eq!(l.rate, Some(money("12")));
+        assert_eq!(l.amount, Some(money("12.00")), "the amount as typed");
+        let mut odd = ItemLine::blank(crate::rowkey::RowKeyGen::new().next_key());
+        odd.set_qty(Some(qty("3")));
+        assert!(odd.set_amount(Some(money("10.00"))));
+        odd.fill_rate_from_amount();
+        assert_eq!(odd.rate, None);
+        assert_eq!(odd.amount, Some(money("10.00")));
     }
 
     #[test]

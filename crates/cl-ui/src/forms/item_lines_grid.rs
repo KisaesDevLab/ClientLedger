@@ -74,6 +74,8 @@ pub struct UnitChoice {
     pub name: String,
     /// The engine's default sale price in it (`round4(price × factor)`).
     pub price: Option<cl_core::Money>,
+    /// Base units per one of it (QA2-10: the purchase cost in it).
+    pub factor: cl_core::UnitFactor,
 }
 
 /// An item's units and its default purchase and sale units.
@@ -140,6 +142,8 @@ pub struct ItemLists {
     assets: Vec<(ItemId, AccountId)>,
     /// U-161: the units of each item with a unit set.
     units: std::collections::HashMap<ItemId, ItemUnits>,
+    /// QA2-10: each item's purchase cost per base unit.
+    costs: std::collections::HashMap<ItemId, cl_core::Money>,
 }
 
 impl ItemLists {
@@ -176,7 +180,11 @@ impl ItemLists {
         let mut parts = Vec::new();
         let mut assets = Vec::new();
         let mut units = std::collections::HashMap::new();
+        let mut costs = std::collections::HashMap::new();
         for (i, it) in items.iter().enumerate() {
+            if let Some(c) = it.fields.purchase.purchase_cost {
+                costs.insert(it.id, c);
+            }
             if it.fields.purchase.unit_set_id.is_some() && !it.stock.unit_prices.is_empty() {
                 let choices = it
                     .stock
@@ -186,6 +194,7 @@ impl ItemLists {
                         unit: u.unit_id,
                         name: u.name.clone(),
                         price: u.unit_price,
+                        factor: u.factor,
                     })
                     .collect();
                 units.insert(
@@ -224,7 +233,27 @@ impl ItemLists {
             parts,
             assets,
             units,
+            costs,
         }
+    }
+
+    /// QA2-10 (PR-4): what a purchase line of `item` in `unit` starts at:
+    /// the item's purchase cost (per base unit) times the unit's factor,
+    /// rounded to four places as the engine rounds a unit's sale price.
+    /// `None` without a purchase cost or for a unit the item doesn't have.
+    #[must_use]
+    pub fn cost_in(
+        &self,
+        item: ItemId,
+        unit: Option<cl_core::ids::UnitId>,
+    ) -> Option<cl_core::Money> {
+        let cost = *self.costs.get(&item)?;
+        let factor = match self.units.get(&item) {
+            Some(u) => u.choices.iter().find(|c| c.unit == unit)?.factor,
+            None if unit.is_none() => cl_core::UnitFactor::ONE,
+            None => return None,
+        };
+        cl_model::forms::item_lines::cost_in_unit(cost, factor)
     }
 
     /// Some item has a unit set (the grids show their Unit column).
@@ -728,8 +757,23 @@ pub(crate) fn apply(
         (I_ITEM, CellInput::Ref(id)) => match lists.item(id) {
             Some(item) => {
                 if l.item != Some(item) {
+                    // QA2-10: a cost the line took from the old item (or
+                    // none yet) follows the new one; a typed cost stays.
+                    let auto = l.item.and_then(|old| lists.cost_in(old, l.unit));
+                    let follows = (l.rate.is_none() && l.amount.is_none())
+                        || (l.rate.is_some() && l.rate == auto);
                     // Another item: its default purchase unit (U-161).
                     l.unit = lists.units_of(item).and_then(|u| u.purchase);
+                    if follows {
+                        match lists.cost_in(item, l.unit) {
+                            Some(c) => l.set_rate(Some(c)),
+                            None if l.rate.is_some() => {
+                                l.rate = None;
+                                l.amount = None;
+                            }
+                            None => {}
+                        }
+                    }
                 }
                 l.item = Some(item);
                 if l.description.trim().is_empty() {
@@ -749,7 +793,16 @@ pub(crate) fn apply(
             None => return Some(PICK_FROM_LIST),
         },
         (I_UNIT, CellInput::Ref(id)) => match lists.unit_of_key(id) {
-            Some((item, unit)) if l.item == Some(item) => l.unit = unit,
+            Some((item, unit)) if l.item == Some(item) => {
+                // QA2-10: a cost taken from the item follows the unit.
+                let auto = lists.cost_in(item, l.unit);
+                if l.rate.is_some() && l.rate == auto {
+                    if let Some(c) = lists.cost_in(item, unit) {
+                        l.set_rate(Some(c));
+                    }
+                }
+                l.unit = unit;
+            }
             _ => return Some(PICK_FROM_LIST),
         },
         (I_UNIT, CellInput::Unresolved(_)) => return Some(PICK_FROM_LIST),
@@ -777,7 +830,11 @@ pub(crate) fn apply(
         (I_TAG, CellInput::Clear) => l.tag = None,
         (I_DESC, CellInput::Text(v)) => l.description = v,
         (I_DESC, CellInput::Clear) => l.description.clear(),
-        (I_QTY, CellInput::Quantity(q)) => l.set_qty(Some(q)),
+        (I_QTY, CellInput::Quantity(q)) => {
+            l.set_qty(Some(q));
+            // QA2-17: a typed amount with no cost shows its exact cost.
+            l.fill_rate_from_amount();
+        }
         (I_QTY, CellInput::Clear) => l.set_qty(None),
         (I_COST, CellInput::Money(m)) => l.set_rate(Some(m)),
         (I_COST, CellInput::Clear) => l.set_rate(None),
@@ -785,6 +842,7 @@ pub(crate) fn apply(
             if !l.set_amount(Some(m)) {
                 return Some(COMPUTED);
             }
+            l.fill_rate_from_amount();
         }
         (I_AMOUNT, CellInput::Clear) => {
             if !l.set_amount(None) {
@@ -1222,6 +1280,84 @@ pub(crate) mod tests {
         .expect("items")
     }
 
+    /// QA2-10, QA2-17 (PR-4): a bought part's cost fills in its purchase
+    /// unit (1.10 each, box of 12: 13.20), follows a unit change, and a
+    /// typed amount with no cost shows the exact cost.
+    #[test]
+    fn qa2_10_purchase_cost_fills_in_the_unit_and_qa2_17_from_the_amount() {
+        let mut items = unit_items();
+        items[0].fields.purchase.purchase_cost = Some(money("1.10"));
+        items[1].fields.purchase.purchase_cost = Some(money("2.50"));
+        let lists = ItemLists::new(Arc::new(RegisterLists::default()), &items);
+        let wine = items[0].id;
+        let mut l = ItemLine::blank(RowKeyGen::new().next_key());
+        let key = lists.item_key(wine).expect("key");
+        assert_eq!(
+            apply(&mut l, I_ITEM, CellInput::Ref(key), &lists, None),
+            None
+        );
+        assert_eq!(l.rate, Some(money("13.20")), "case of 12 × 1.10");
+        let q = Quantity::parse_wire("5").expect("q");
+        assert_eq!(
+            apply(&mut l, I_QTY, CellInput::Quantity(q), &lists, None),
+            None
+        );
+        assert_eq!(l.amount, Some(money("66.00")));
+        // The base unit: the cost follows.
+        let bottle = lists.unit_key(wine, None).expect("base");
+        assert_eq!(
+            apply(&mut l, I_UNIT, CellInput::Ref(bottle), &lists, None),
+            None
+        );
+        assert_eq!(l.rate, Some(money("1.10")));
+        // A typed cost stays when the unit changes back.
+        assert_eq!(
+            apply(
+                &mut l,
+                I_COST,
+                CellInput::Money(money("1.00")),
+                &lists,
+                None
+            ),
+            None
+        );
+        let case = lists
+            .unit_key(wine, items[0].fields.purchase.default_purchase_unit_id)
+            .expect("case");
+        assert_eq!(
+            apply(&mut l, I_UNIT, CellInput::Ref(case), &lists, None),
+            None
+        );
+        assert_eq!(l.rate, Some(money("1.00")));
+        // An item without a unit set: its own cost.
+        let mut m = ItemLine::blank(RowKeyGen::new().next_key());
+        let mulch = lists.item_key(items[1].id).expect("key");
+        assert_eq!(
+            apply(&mut m, I_ITEM, CellInput::Ref(mulch), &lists, None),
+            None
+        );
+        assert_eq!(m.rate, Some(money("2.50")));
+        // QA2-17: no cost, qty 1, amount 12.00 typed: cost 12.00.
+        let mut t = ItemLine::blank(RowKeyGen::new().next_key());
+        let one = Quantity::parse_wire("1").expect("q");
+        assert_eq!(
+            apply(&mut t, I_QTY, CellInput::Quantity(one), &lists, None),
+            None
+        );
+        assert_eq!(
+            apply(
+                &mut t,
+                I_AMOUNT,
+                CellInput::Money(money("12.00")),
+                &lists,
+                None
+            ),
+            None
+        );
+        assert_eq!(t.rate, Some(money("12")));
+        assert_eq!(t.amount, Some(money("12.00")));
+    }
+
     #[test]
     fn a_unit_column_comes_with_the_first_unit_set_and_takes_the_purchase_unit() {
         let spec = grid_spec_for(true);
@@ -1255,7 +1391,7 @@ pub(crate) mod tests {
             None
         );
         assert_eq!(l.unit, None);
-        assert_eq!(l.rate, None, "a purchase cost is never derived");
+        assert_eq!(l.rate, None, "no purchase cost on the item: no cost");
         // Another item's unit is refused; an item without a set has none.
         let mut mulch = ItemLine::blank(RowKeyGen::new().next_key());
         mulch.item = Some(items[1].id);

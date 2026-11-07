@@ -12,6 +12,11 @@ steps:
   - command: lists.items
   - command: dev.demo_inventory_reset
   - assert_state: {key: screen.inventory, equals: true}
+  # QA2-9: the open Item List follows the postings below.
+  - click: {role: text_input, label: Find}
+  - type: {text: "Landscape Fabric"}
+  - key: Enter
+  - assert_state: {key: screen.selected_on_hand, equals: "6"}
   - key: Ctrl+I
   - assert_state: {key: screen.screen, equals: create_invoice}
   - assert_state: {key: screen.loaded, equals: true}
@@ -32,6 +37,9 @@ steps:
   - key: Alt+S
   - assert_state: {key: toast, equals: "Saved. You sold more Landscape Fabric Roll than you had on 11/04/2026 (-2 on hand); the cost is corrected when you receive more."}
   - screenshot: warning
+  - command: lists.items
+  - assert_state: {key: screen.screen, equals: items}
+  - assert_state: {key: screen.selected_on_hand, equals: "-2"}
   # A bill dated 11/03 brings 10 rolls in before the sale.
   - key: Ctrl+B
   - assert_state: {key: screen.screen, equals: enter_bill}
@@ -75,5 +83,6 @@ steps:
   - screenshot: void-warning
   - command: file.close_window
   - command: lists.items
+  - assert_state: {key: screen.selected_on_hand, equals: "-2"}
   - command: dev.demo_inventory_reset
   - command: file.close_window
