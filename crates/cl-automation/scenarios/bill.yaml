@@ -289,8 +289,18 @@ steps:
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
   - assert_state: {key: screen.save.error, equals: false}
-  - assert_state: {key: screen.mode, equals: new}
+  # QA2-15: the voided bill stays on screen (read-only), the reason
+  # prompt's notice is gone and a toast says it worked.
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.read_only, equals: true}
+  - assert_state: {key: screen.notice, equals: null}
+  - assert_state: {key: toast, equals: "Voided. The bill stays in your books with a zero amount."}
+  - screenshot: voided-bill
   - assert_no_clipping: {}
+  # (the toast sits over Clear: press it from the keyboard)
+  - focus: {role: button, label: Clear}
+  - key: Space
+  - assert_state: {key: screen.mode, equals: new}
 
   # --- 9. Read with AI (WP7): the demo engine's canned reading of the story
   # invoice (no AI provider is called). Read values wait for the owner's
@@ -374,6 +384,9 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.mode, equals: edit}
+  - focus: {role: button, label: Clear}
+  - key: Space
   - assert_state: {key: screen.mode, equals: new}
 
   # --- 10. Reading switched off (AC3): no Read with AI, nothing sent, and
@@ -420,6 +433,8 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
+  - focus: {role: button, label: Clear}
+  - key: Space
 
   # --- 11. Read document (A03, Q-A03l): the document is read on this
   # computer by the sandboxed worker, with AI reading still off. Values are

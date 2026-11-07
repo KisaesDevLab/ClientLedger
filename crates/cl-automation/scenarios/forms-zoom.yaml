@@ -130,6 +130,18 @@ steps:
   - screenshot: vendors-z200
   - assert_no_clipping: *centers
   - command: file.close_window
+  # QA2-1, QA2-3: Enter Bill at 200%: the title bar scrolls on its own so
+  # the form keeps rows, and a field the keyboard moves to below the fold
+  # scrolls into view.
+  - key: Ctrl+B
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - screenshot: bill-z200
+  - focus: {role: text_input, label: Memo}
+  - assert_focused: {role: text_input, label: Memo}
+  - assert_state: {key: screen.layout.body_scrolled, equals: true}
+  - screenshot: bill-z200-memo
+  - command: file.close_window
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
   - click: {role: tab, label: Home}

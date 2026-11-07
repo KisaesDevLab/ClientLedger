@@ -395,16 +395,10 @@ impl CountScreen {
                 .add_enabled(can, egui::Button::new(t("inventory.count.post")))
                 .on_hover_text(t("inventory.count.post.tip"))
                 .on_disabled_hover_text(t("inventory.count.post.disabled"));
-            if post_button.has_focus() {
-                post_button.scroll_to_me(None);
-            }
             if post_button.clicked() {
                 post = true;
             }
             let print_button = ui.button(t("inventory.count.print"));
-            if print_button.has_focus() {
-                print_button.scroll_to_me(None);
-            }
             if print_button.clicked() {
                 print = true;
             }
@@ -586,7 +580,10 @@ impl Screen for CountScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
-        egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
+        egui::ScrollArea::both().show(ui, |ui| {
+            self.draw(ui);
+            crate::layout::keep_focus_in_view(ui);
+        });
         if self.sheet_job.is_some() || self.post_job.is_some() || self.pdf_job.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

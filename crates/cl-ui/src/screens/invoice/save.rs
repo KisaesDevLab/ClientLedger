@@ -940,6 +940,12 @@ impl InvoiceScreen {
                 true
             }
             "edit.void_transaction" => self.start_void(),
+            // QA2-12 (PR-4): the engine never deletes a sales document
+            // (TXN_DELETE_UNSUPPORTED, Q-245); say so instead of nothing.
+            "form.delete_item" => {
+                self.notice = Some("invoice.delete.void_instead");
+                true
+            }
             "edit.undo" => {
                 if self.header.undo() {
                     self.sync_inputs();

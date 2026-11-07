@@ -1731,7 +1731,11 @@ fn draw_screen(ui: &mut egui::Ui, screen: &mut dyn crate::windows::Screen) {
     } else {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
-            .show(ui, |ui| screen.ui(ui));
+            .show(ui, |ui| {
+                screen.ui(ui);
+                // QA2-1: Tab at 200% zoom brings the field into view.
+                crate::layout::keep_focus_in_view(ui);
+            });
     }
 }
 

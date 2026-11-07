@@ -332,10 +332,12 @@ impl ItemsScreen {
 
     /// Saves in other windows of this app (Q-262): the items and the
     /// account names come again from the engine; the cursor stays on its
-    /// item and an open form keeps its edits.
+    /// item and an open form keeps its edits. QA2-9 (PR-4): a posting
+    /// (bill, invoice, adjustment, void) changes a part's on hand and
+    /// value, so any ledger change reads the items again too.
     fn hear_changes(&mut self) {
         let changes = self.link.bus().take(&mut self.bus);
-        if (changes.items || changes.accounts) && self.load.is_none() {
+        if (changes.items || changes.accounts || changes.ledger_any()) && self.load.is_none() {
             self.refreshing = true;
             self.start_load();
             if self.load.is_none() {

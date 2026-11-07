@@ -699,7 +699,9 @@ impl WriteCheckScreen {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
-        if self.inputs.payee_problem {
+        // QA2-4: the Quick Add prompt replaces the "choose from the list"
+        // line while it is open.
+        if self.inputs.payee_problem && !self.quick_add.is_open() {
             ui.label(
                 RichText::new(t("check.payee.pick"))
                     .size(12.0)
@@ -797,6 +799,7 @@ impl WriteCheckScreen {
                     .align(egui::Align2::RIGHT_CENTER),
             )
             .labelled_by(l.id);
+        crate::widgets::select_all_on_focus(&r, &self.inputs.amount);
         self.take_focus(Field::Amount, &r);
         if r.changed() {
             self.inputs.amount_problem = None;
