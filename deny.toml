@@ -21,8 +21,8 @@ allow = [
 confidence-threshold = 0.9
 unused-allowed-license = "allow"
 
-# ClientLedger's own crates (all `publish = false`) are PolyForm Internal Use
-# 1.0.0 (LICENSE); the allowlist is for dependencies only.
+# ClientLedger's own crates (all `publish = false`) are under the VibeMyFirm
+# Community License 1.0 (LICENSE.md, Q-336); the allowlist is for dependencies only.
 [licenses.private]
 ignore = true
 
