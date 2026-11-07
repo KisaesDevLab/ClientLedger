@@ -14,18 +14,22 @@
 //! ("not available in demo"). The account link is keyed like the
 //! engine's (Q-P25u: the hash is made here, standing in for the engine, and
 //! only the hash and mask are kept). A commit's preparation finishes after
-//! a short delay, like the engine's (Q-P25v).
+//! a short delay, like the engine's (Q-P25v), reporting how far it is
+//! (Q-P25ad); an undo while it runs stops it (`Cancelled`, engine PR #234).
 
 use std::collections::BTreeSet;
 
 use cl_api::{
     BankIdentity, BankImportCounts, BankImportOutcome, BankImportRefusal, BankImportRequest,
-    BankLookupBy, BankLookupVia, ChangedAction, ConnectionMatch, ImportBatchId,
+    BankLookupBy, BankLookupVia, ChangedAction, ConnectionMatch, ImportBatchId, ImportBatchSummary,
     ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus, ImportUndoOutcome,
 };
 
 /// How long the demo's preparation of a commit takes.
 const DEMO_PREPARING: std::time::Duration = std::time::Duration::from_millis(800);
+/// How long it takes after `dev.demo_bank_import_slow`, so a scenario can
+/// undo or close the window while it runs.
+const DEMO_PREPARING_SLOW: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The demo's stand-in for the engine's keyed hash of an account number
 /// (the engine keeps the real key, Q-P25u).
@@ -135,8 +139,43 @@ struct Batch {
     at: Timestamp,
     undone: bool,
     inserted: u32,
-    /// When its preparation is done (Q-P25v).
+    /// When its preparation started and when it is done (Q-P25v).
+    started_at: std::time::Instant,
     ready_at: std::time::Instant,
+    /// An undo stopped the preparation (engine PR #234).
+    cancelled: bool,
+}
+
+impl Batch {
+    fn state(&self, now: std::time::Instant) -> ImportPostProcessing {
+        if self.cancelled {
+            ImportPostProcessing::Cancelled
+        } else if now >= self.ready_at {
+            ImportPostProcessing::Done
+        } else {
+            ImportPostProcessing::Scheduled
+        }
+    }
+
+    /// Items prepared of all, like the engine's `processed`/`total`
+    /// (counts of items; no money involved).
+    fn progress(&self, now: std::time::Instant) -> Option<(u32, u32)> {
+        let all = self.inserted;
+        if all == 0 {
+            return None;
+        }
+        let whole = self
+            .ready_at
+            .saturating_duration_since(self.started_at)
+            .as_millis()
+            .max(1);
+        let gone = now
+            .min(self.ready_at)
+            .saturating_duration_since(self.started_at)
+            .as_millis();
+        let part = gone.saturating_mul(u128::from(all)) / whole;
+        Some((u32::try_from(part).unwrap_or(all).min(all), all))
+    }
 }
 
 /// A linked file identity.
@@ -153,6 +192,8 @@ pub struct DemoBankFeed {
     items: Vec<Item>,
     batches: Vec<Batch>,
     identities: Vec<Identity>,
+    /// Commits are prepared slowly (`dev.demo_bank_import_slow`).
+    slow: bool,
 }
 
 fn batch_id(n: usize) -> ImportBatchId {
@@ -164,6 +205,12 @@ impl DemoBankFeed {
     /// Empties the feed (`dev.demo_bank_import_reset`).
     pub fn reset(&mut self) {
         *self = DemoBankFeed::default();
+    }
+
+    /// Prepares the next commits slowly (`dev.demo_bank_import_slow`), so
+    /// Undo and Close can be tried while it runs.
+    pub fn set_slow(&mut self, slow: bool) {
+        self.slow = slow;
     }
 
     /// Items waiting in the feed (all accounts).
@@ -419,7 +466,14 @@ impl DemoBankFeed {
                 at: now,
                 undone: false,
                 inserted: counts.inserted,
-                ready_at: std::time::Instant::now() + DEMO_PREPARING,
+                started_at: std::time::Instant::now(),
+                ready_at: std::time::Instant::now()
+                    + if self.slow {
+                        DEMO_PREPARING_SLOW
+                    } else {
+                        DEMO_PREPARING
+                    },
+                cancelled: false,
             });
             if let Some((hash, mask)) = identity {
                 self.identities.retain(|i| i.hash != hash);
@@ -445,22 +499,57 @@ impl DemoBankFeed {
     }
 
     /// Where a batch's preparation is (Q-P25v): done once its short delay
-    /// has passed.
+    /// has passed, cancelled when an undo stopped it.
     #[must_use]
     pub fn post_processing(&self, id: ImportBatchId) -> Option<ImportPostProcessing> {
-        self.batches.iter().find(|b| b.id == id).map(|b| {
-            if std::time::Instant::now() >= b.ready_at {
-                ImportPostProcessing::Done
-            } else {
-                ImportPostProcessing::Scheduled
-            }
-        })
+        let now = std::time::Instant::now();
+        self.batches
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| b.state(now))
     }
 
-    /// Undoes a batch: its waiting rows leave the feed.
+    /// Items prepared of all (Q-P25ad), like the engine's batch list.
+    #[must_use]
+    pub fn progress(&self, id: ImportBatchId) -> Option<(u32, u32)> {
+        let now = std::time::Instant::now();
+        self.batches
+            .iter()
+            .find(|b| b.id == id)
+            .and_then(|b| b.progress(now))
+    }
+
+    /// The imports, newest first, like `GET /banking/feed/import-batches`
+    /// (the fields the wizard reads).
+    #[must_use]
+    pub fn summaries(&self) -> Vec<ImportBatchSummary> {
+        let now = std::time::Instant::now();
+        self.batches
+            .iter()
+            .rev()
+            .map(|b| ImportBatchSummary {
+                id: b.id,
+                account: b.account,
+                format: Some(b.format),
+                amounts_flipped: b.flipped,
+                csv_mapping: b.mapping.clone(),
+                file_ending_balance: None,
+                file_ending_date: None,
+                inserted: b.inserted,
+                post_processing: Some(b.state(now)),
+                undone_at: b.undone.then_some(b.at),
+                created_at: Some(b.at),
+                progress: b.progress(now),
+            })
+            .collect()
+    }
+
+    /// Undoes a batch: its waiting rows leave the feed. While the batch is
+    /// still prepared, the preparation stops first (`Cancelled`), as the
+    /// engine's undo does (PR #234).
     ///
     /// # Errors
-    /// `AlreadyUndone`, or `StillPreparing` while the batch is prepared.
+    /// `AlreadyUndone`.
     pub fn undo(&mut self, id: ImportBatchId) -> Result<ImportUndoOutcome, BankImportRefusal> {
         let b = self
             .batches
@@ -468,7 +557,7 @@ impl DemoBankFeed {
             .find(|b| b.id == id && !b.undone)
             .ok_or(BankImportRefusal::AlreadyUndone)?;
         if std::time::Instant::now() < b.ready_at {
-            return Err(BankImportRefusal::StillPreparing);
+            b.cancelled = true;
         }
         b.undone = true;
         let before = self.items.len();
@@ -749,7 +838,7 @@ mod tests {
 
     /// The link is kept as a hash and a mask only; a file linked to
     /// another account is refused on commit unless relinked; preparation
-    /// takes a moment and undo waits for it.
+    /// takes a moment and an undo while it runs stops it.
     #[test]
     fn links_relinks_and_prepares() {
         let mut f = DemoBankFeed::default();
@@ -758,7 +847,7 @@ mod tests {
         let o = f.import(&r, true, now, None).expect("first");
         assert_eq!(o.post_processing, Some(ImportPostProcessing::Scheduled));
         let batch = o.batch.expect("batch");
-        assert_eq!(f.undo(batch), Err(BankImportRefusal::StillPreparing));
+        assert_eq!(f.progress(batch).map(|(_, all)| all), Some(1));
         assert!(
             !format!("{f:?}").contains("12342208"),
             "no account number kept"
@@ -784,6 +873,44 @@ mod tests {
         assert!(f.import(&other, true, now, None).is_ok());
         std::thread::sleep(DEMO_PREPARING);
         assert_eq!(f.post_processing(batch), Some(ImportPostProcessing::Done));
+        assert_eq!(f.progress(batch), Some((1, 1)));
         assert!(f.undo(batch).is_ok());
+        assert_eq!(f.post_processing(batch), Some(ImportPostProcessing::Done));
+        assert_eq!(f.undo(batch), Err(BankImportRefusal::AlreadyUndone));
+    }
+
+    /// PR #234: an undo while the preparation runs stops it and undoes;
+    /// the batch then reads `Cancelled`, in the list too.
+    #[test]
+    fn undo_while_preparing_cancels() {
+        let mut f = DemoBankFeed::default();
+        f.set_slow(true);
+        let now = crate::company::demo::DemoState::now();
+        let r = req(vec![row(1, 2, "5.00", "SHOP", "A")], 'b');
+        let batch = f
+            .import(&r, true, now, None)
+            .expect("send")
+            .batch
+            .expect("batch");
+        assert_eq!(
+            f.post_processing(batch),
+            Some(ImportPostProcessing::Scheduled)
+        );
+        let listed = f.summaries();
+        assert_eq!(
+            listed[0].post_processing,
+            Some(ImportPostProcessing::Scheduled)
+        );
+        assert!(listed[0].undone_at.is_none());
+        let u = f.undo(batch).expect("undo");
+        assert_eq!(u.removed, 1);
+        assert_eq!(f.waiting(), 0);
+        assert_eq!(
+            f.post_processing(batch),
+            Some(ImportPostProcessing::Cancelled)
+        );
+        assert!(f.summaries()[0].undone_at.is_some());
+        f.reset();
+        assert!(!f.slow);
     }
 }
