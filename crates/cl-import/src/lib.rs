@@ -36,10 +36,10 @@ pub use detect::{Detected, FileFormat, OfxDialect, detect};
 pub use error::ImportError;
 pub use normalize::{
     AccountId, AccountKind, Balance, BankRow, EncodingNote, Institution, MAX_DESCRIPTION_CHARS,
-    MAX_FILE_BYTES, MAX_INTEGER_DIGITS, MAX_MEMO_CHARS, MAX_ROWS, ParsedFile, Problem, ProblemKind,
-    Section, SkipReason, SkippedRow, TextEncoding,
+    MAX_FILE_BYTES, MAX_INTEGER_DIGITS, MAX_MEMO_CHARS, MAX_ROWS, ParsedAmount, ParsedFile,
+    Problem, ProblemKind, Section, SkipReason, SkippedRow, TextEncoding,
 };
-pub use sign::{Continuity, RowOrder, SignCheck, SignReason, to_display, to_feed_amount};
+pub use sign::{Continuity, RowOrder, SignCheck, SignReason, check_as, to_display, to_feed_amount};
 
 use cl_core::CalendarDate;
 

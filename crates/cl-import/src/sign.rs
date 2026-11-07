@@ -156,6 +156,18 @@ pub(crate) fn analyze(section: &mut Section) {
     section.sign = check;
 }
 
+/// The sign checks for a section as if it were for an account of `kind`.
+/// CSV files do not say what account they are for; once the owner picks a
+/// card account, the wizard runs the card check (Q-196) with this.
+#[must_use]
+pub fn check_as(section: &Section, kind: crate::AccountKind) -> SignCheck {
+    let mut copy = Section::new(section.index, kind);
+    copy.rows.clone_from(&section.rows);
+    copy.ledger_balance = section.ledger_balance;
+    analyze(&mut copy);
+    copy.sign
+}
+
 /// Checks every row's running balance against the one before it, in file
 /// order and reversed, with the amounts as they are and flipped.
 fn continuity(section: &Section) -> Continuity {

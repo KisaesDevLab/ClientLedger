@@ -1,0 +1,64 @@
+!Type:Cat
+NOffice
+DOffice expenses
+E
+^
+NRent
+E
+^
+!Type:Bank
+D 1/ 5/26
+T-12.50
+PCOFFEE HOUSE
+Mmorning
+N1001
+LOffice
+^
+D 1/ 6/26
+T1,250.00
+PCLIENT A
+LOffice
+^
+D1/7'26
+T-60.00
+PATM
+NATM
+LOffice
+^
+D01/09/2026
+T-310.45
+PLANDLORD LLC
+MJan rent
+N1002
+LOffice
+^
+D1/12/26
+T-19.99
+PWEB HOSTING
+LOffice
+^
+D1/15/26
+T-0.00
+PVOID CHECK
+N1003
+LOffice
+^
+D1/20/26
+T475.00
+PCLIENT B
+LOffice
+^
+D1/22/26
+T-88.10
+POFFICE STORE
+LOffice
+^
+D1/28/26
+T-5.00
+PBANK FEE
+LOffice
+^
+D1/30/26
+T-140.00
+PINSURANCE CO
+LOffice

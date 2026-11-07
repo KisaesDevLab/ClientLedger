@@ -194,14 +194,14 @@ impl AccountId {
     /// The routing number (`BANKID`), when the file has one. Only for the
     /// link hash; never display or log it.
     #[must_use]
-    pub fn bank_id(&self) -> Option<&str> {
+    pub(crate) fn bank_id(&self) -> Option<&str> {
         self.bank_id.as_deref()
     }
 
     /// The full account number. Only for the link hash; never display or
     /// log it.
     #[must_use]
-    pub fn acct_id(&self) -> &str {
+    pub(crate) fn acct_id(&self) -> &str {
         &self.acct_id
     }
 }
@@ -233,6 +233,10 @@ pub struct BankRow {
     /// to at most 2 decimals. Use [`crate::to_display`] and
     /// [`crate::to_feed_amount`] for the shown and sent signs.
     pub file_amount: Decimal,
+    /// The amount as written, when it had more than 2 decimals and was
+    /// rounded to the cent (owner answer Q-P25q): the preview says
+    /// "rounded from 12.345".
+    pub rounded_from: Option<String>,
     /// The bank's description: NFC, at most [`MAX_DESCRIPTION_CHARS`]
     /// characters. For OFX it is NAME + MEMO by the golden rule
     /// ([`crate::dedupe::ofx_description`]).
@@ -286,8 +290,6 @@ pub enum ProblemKind {
     /// The amount is not a number (letters, an exponent, two signs, a
     /// decimal comma).
     BadAmount,
-    /// More than 2 decimal places after dropping trailing zeros (`12.345`).
-    TooManyDecimals,
     /// More than [`MAX_INTEGER_DIGITS`] digits before the point.
     TooManyDigits,
     /// No date.
@@ -476,8 +478,6 @@ pub enum AmountProblem {
     Missing,
     /// Not a number.
     Bad,
-    /// More than 2 decimals.
-    TooManyDecimals,
     /// More than 12 integer digits.
     TooManyDigits,
 }
@@ -487,23 +487,43 @@ impl From<AmountProblem> for ProblemKind {
         match p {
             AmountProblem::Missing => Self::MissingAmount,
             AmountProblem::Bad => Self::BadAmount,
-            AmountProblem::TooManyDecimals => Self::TooManyDecimals,
             AmountProblem::TooManyDigits => Self::TooManyDigits,
         }
     }
 }
 
-/// Reads an amount exactly, through `cl-core` money.
+/// An amount read from a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedAmount {
+    /// The value, at most 2 decimals.
+    pub value: Decimal,
+    /// The text as written in the file, when it had more than 2 decimals
+    /// and was rounded to the cent (owner answer Q-P25q, 2026-11-07).
+    pub rounded_from: Option<String>,
+}
+
+/// [`parse_amount_detail`]'s value only (balances, column sniffing).
+///
+/// # Errors
+/// As [`parse_amount_detail`].
+pub fn parse_amount(text: &str) -> Result<Decimal, AmountProblem> {
+    parse_amount_detail(text).map(|a| a.value)
+}
+
+/// Reads an amount through `cl-core` money, rounding to the cent.
 ///
 /// Accepts a leading or trailing minus (`-45.00`, `45.00-`), U+2212 `−`,
 /// parentheses `(45.00)`, a `$`, a `+`, and US thousands groups
 /// (`1,234.56`). Trailing zeros after the point are dropped first, so
-/// `45.1000` is 45.10. Refused: more than 2 decimals, more than 12 integer
-/// digits, exponents, decimal commas, letters.
+/// `45.1000` is 45.10 and counts as not rounded. More than 2 decimals round
+/// half away from zero (`12.345` → 12.35, `-2.005` → −2.01) and the
+/// original text is kept in [`ParsedAmount::rounded_from`] (owner answer
+/// Q-P25q). Refused: more than 12 integer digits (after rounding),
+/// exponents, decimal commas, letters.
 ///
 /// # Errors
 /// The [`AmountProblem`] that makes the text unusable.
-pub fn parse_amount(text: &str) -> Result<Decimal, AmountProblem> {
+pub fn parse_amount_detail(text: &str) -> Result<ParsedAmount, AmountProblem> {
     let t = text.trim_matches(is_ws);
     if t.is_empty() {
         return Err(AmountProblem::Missing);
@@ -533,21 +553,32 @@ pub fn parse_amount(text: &str) -> Result<Decimal, AmountProblem> {
     }
     // Drop zeros after the last fraction digit that matters: `45.1000`.
     let s = strip_fraction_zeros(&s);
-    let money = Money::parse_user(&s, UserInput::FULL).map_err(|e| match e {
-        cl_core::MoneyInputError::TooManyDecimals { .. } => AmountProblem::TooManyDecimals,
+    let decimals = s.find('.').map_or(0, |dot| {
+        s[dot + 1..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .count()
+    });
+    // MONEY rounds extra decimals half away from zero (Q-232's rule).
+    let money = Money::parse_user(&s, UserInput::MONEY).map_err(|e| match e {
         cl_core::MoneyInputError::Empty => AmountProblem::Missing,
         cl_core::MoneyInputError::TooLarge => AmountProblem::TooManyDigits,
         _ => AmountProblem::Bad,
     })?;
-    let d = money.as_decimal().normalize();
-    if d.scale() > 2 {
-        return Err(AmountProblem::TooManyDecimals);
-    }
-    let int_digits = d.trunc().abs().to_string().trim_start_matches('0').len();
+    let value = money.as_decimal().normalize();
+    let int_digits = value
+        .trunc()
+        .abs()
+        .to_string()
+        .trim_start_matches('0')
+        .len();
     if int_digits > MAX_INTEGER_DIGITS {
         return Err(AmountProblem::TooManyDigits);
     }
-    Ok(d)
+    Ok(ParsedAmount {
+        value,
+        rounded_from: (decimals > 2).then(|| t.to_owned()),
+    })
 }
 
 /// `"(1,234.5000)"` → `"(1,234.5)"`; text without a point is unchanged.
@@ -635,7 +666,7 @@ pub fn memo_with_ref(memo: Option<&str>, reference: Option<&str>) -> Option<Stri
 pub(crate) struct RowParts<'a> {
     pub line: usize,
     pub date: Result<CalendarDate, ProblemKind>,
-    pub amount: Result<Decimal, AmountProblem>,
+    pub amount: Result<ParsedAmount, AmountProblem>,
     pub description: &'a str,
     pub memo: Option<&'a str>,
     pub check: Option<&'a str>,
@@ -647,12 +678,12 @@ pub(crate) struct RowParts<'a> {
 impl Section {
     /// Files one row: a problem, a skipped zero, or a [`BankRow`].
     pub(crate) fn push_parts(&mut self, p: &RowParts<'_>) {
-        let amount = match p.amount {
-            Ok(a) => a,
+        let amount = match &p.amount {
+            Ok(a) => a.value,
             Err(e) => {
                 self.problems.push(Problem {
                     line: p.line,
-                    kind: e.into(),
+                    kind: (*e).into(),
                 });
                 return;
             }
@@ -676,6 +707,7 @@ impl Section {
             line: p.line,
             date,
             file_amount: amount,
+            rounded_from: p.amount.as_ref().ok().and_then(|a| a.rounded_from.clone()),
             description: clean_text(p.description, MAX_DESCRIPTION_CHARS),
             memo: memo_with_ref(p.memo, reference.as_deref()),
             check_number,

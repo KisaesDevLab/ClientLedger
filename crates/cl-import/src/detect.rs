@@ -99,7 +99,10 @@ pub fn detect(bytes: &[u8]) -> Result<Detected, ImportError> {
             encoding: decoded.encoding,
         });
     }
-    if upper.starts_with("!TYPE") || upper.starts_with("!ACCOUNT") || upper.starts_with("!OPTION") {
+    if ["!TYPE", "!ACCOUNT", "!OPTION", "!CLEAR"]
+        .iter()
+        .any(|p| upper.starts_with(p))
+    {
         return Ok(Detected {
             format: FileFormat::Qif,
             dialect: None,
@@ -111,7 +114,7 @@ pub fn detect(bytes: &[u8]) -> Result<Detected, ImportError> {
         return Ok(Detected {
             format: FileFormat::Csv,
             dialect: None,
-            delimiter: Some(crate::csv::sniff_separator(text)),
+            delimiter: Some(crate::csv::mapping::sniff_bank_separator(text)),
             encoding: decoded.encoding,
         });
     }
@@ -149,8 +152,12 @@ fn looks_delimited(text: &str) -> bool {
     {
         return false;
     }
-    let first = text.lines().next().unwrap_or_default();
-    first.contains([',', ';', '\t'])
+    // Bank exports may start with preamble lines ("Account: …"), so any of
+    // the first 20 non-blank lines may hold the separator.
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .take(20)
+        .any(|l| l.contains([',', ';', '\t']))
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use crate::detect::FileFormat;
 use crate::error::ImportError;
 use crate::normalize::{
     AccountKind, AmountProblem, Declared, ParsedFile, ProblemKind, RowParts, Section, decode,
-    parse_amount,
+    parse_amount_detail,
 };
 use cl_core::CalendarDate;
 
@@ -211,7 +211,7 @@ fn section(
             amount: r
                 .amount
                 .as_deref()
-                .map_or(Err(AmountProblem::Missing), parse_amount),
+                .map_or(Err(AmountProblem::Missing), parse_amount_detail),
             description,
             memo,
             check: r.number.as_deref(),
