@@ -328,7 +328,7 @@ impl ReceivePaymentScreen {
         crate::forms::header::wrap_row(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, 12.0);
             kit::wrap_item(ui, "payment/client", |ui| {
-                let (out, _) = kit::name_field(
+                let (out, r) = kit::name_field(
                     ui,
                     tokens,
                     &t("payment.received_from"),
@@ -337,10 +337,42 @@ impl ReceivePaymentScreen {
                     self.form.client,
                     span(3.0),
                 );
+                if r.changed() {
+                    self.quick_add.close();
+                }
                 match out {
-                    NameOutcome::Picked(c) => self.set_client(Some(c)),
-                    NameOutcome::Cleared => self.set_client(None),
+                    NameOutcome::Picked(c) => {
+                        self.quick_add.close();
+                        self.set_client(Some(c));
+                    }
+                    NameOutcome::Cleared => {
+                        let typed = self.client_input.text.trim().to_string();
+                        if self.client_input.problem && !typed.is_empty() {
+                            // Q-PR4d: Quick Add, Set Up or Cancel.
+                            self.quick_add.offer(
+                                &typed,
+                                cl_model::quick_add::Accepts::One(
+                                    cl_model::quick_add::NameKind::Client,
+                                ),
+                            );
+                        }
+                        self.set_client(None);
+                    }
                     NameOutcome::None => {}
+                }
+                if let Some(crate::widgets::quick_add::QuickAddEvent::Added(c)) =
+                    self.quick_add.ui(ui, tokens, self.group.as_ref())
+                {
+                    let id = c.id;
+                    self.books.add_contact(*c);
+                    self.client_input.problem = false;
+                    self.client_input.text = self
+                        .books
+                        .lists
+                        .name_text(id)
+                        .unwrap_or_default()
+                        .to_string();
+                    self.set_client(Some(id));
                 }
             });
             kit::wrap_item(ui, "payment/date", |ui| {
