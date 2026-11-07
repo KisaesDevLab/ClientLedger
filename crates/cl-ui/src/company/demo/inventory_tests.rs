@@ -38,6 +38,9 @@ struct Doc {
     item: ItemId,
     kind: MoveKind,
     return_of: Option<String>,
+    /// More lines of the document (golden R2: two rows of one part on
+    /// one credit memo).
+    extra: Vec<DocLine>,
 }
 
 /// The demo ledger plus the cases' document table.
@@ -48,9 +51,15 @@ struct Book {
 }
 
 fn kind_of(step: &Value) -> MoveKind {
+    kind_for(s(step, "event").expect("event"), step)
+}
+
+/// The movement of `event` with the quantities of `step` (a step, or one
+/// of its `lines`).
+fn kind_for(event: &str, step: &Value) -> MoveKind {
     let qty = || q(s(step, "quantity").expect("quantity"));
     let amount = || m(s(step, "amount").expect("amount"));
-    match s(step, "event").expect("event") {
+    match event {
         "bill" => MoveKind::Receipt {
             quantity: qty(),
             amount: amount(),
@@ -82,12 +91,47 @@ fn with_quantity(k: MoveKind, quantity: Quantity) -> MoveKind {
 }
 
 fn line(doc: &Doc) -> Vec<DocLine> {
-    vec![DocLine {
+    let mut out = vec![DocLine {
         item: doc.item,
         kind: doc.kind,
         fallback_cost: None,
         return_of: doc.return_of.clone(),
-    }]
+    }];
+    out.extend(doc.extra.iter().cloned());
+    out
+}
+
+/// A step's document: its one line, or its `lines` (golden R2).
+fn doc_of(step: &Value, suffix: &str, item_name: Option<&str>) -> Doc {
+    let date = d(s(step, "date").expect("date"));
+    let link = |v: &Value| s(v, "returnOf").map(|r| format!("{r}{suffix}"));
+    if let Some(lines) = step.get("lines").and_then(Value::as_array) {
+        let event = s(step, "event").expect("event");
+        let mut all: Vec<DocLine> = lines
+            .iter()
+            .map(|l| DocLine {
+                item: item(item_name.or_else(|| s(l, "item")).expect("item")),
+                kind: kind_for(event, l),
+                fallback_cost: None,
+                return_of: link(l),
+            })
+            .collect();
+        let first = all.remove(0);
+        return Doc {
+            date,
+            item: first.item,
+            kind: first.kind,
+            return_of: first.return_of,
+            extra: all,
+        };
+    }
+    Doc {
+        date,
+        item: item(item_name.or_else(|| s(step, "item")).expect("item")),
+        kind: kind_of(step),
+        return_of: link(step),
+        extra: Vec::new(),
+    }
 }
 
 /// Runs one step; answers the warnings and, for a count, the count lines.
@@ -134,12 +178,7 @@ fn run(
             w
         }
         _ => {
-            let e = Doc {
-                date: d(s(step, "date").expect("date")),
-                item: item(item_name.or_else(|| s(step, "item")).expect("item")),
-                kind: kind_of(step),
-                return_of: s(step, "returnOf").map(|r| format!("{r}{suffix}")),
-            };
+            let e = doc_of(step, suffix, item_name);
             // As the demo routes do: the linked-return rules first.
             book.inv
                 .check_write(&doc, e.date, &line(&e))
@@ -205,6 +244,9 @@ fn check_rows(book: &Book, expected: &Value, ctx: &str) {
                 .unwrap_or_else(|| panic!("{ctx}: no row {doc} after the last"));
             at += i;
             check_row(w[at], e, &format!("{ctx} {doc}"));
+            // The next listed row comes after this one (R2: two rows of
+            // one document).
+            at += 1;
         }
         return;
     }
@@ -484,7 +526,7 @@ fn inventory_golden() {
         play(all, id);
         ran.push(id.to_string());
     }
-    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "R", "U", "F"] {
+    for must in ["A", "B", "V", "V2", "X", "M", "D", "N", "E", "R", "R2", "R3", "U", "F"] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
 }

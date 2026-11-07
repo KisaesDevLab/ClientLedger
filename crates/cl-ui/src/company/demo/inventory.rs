@@ -18,7 +18,7 @@
 //!
 //! Money is exact: `Money`, `Quantity`, `UnitCost` and `Decimal` only.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use cl_core::ids::ItemId;
 use cl_core::{CalendarDate, Money, Quantity, UnitCost};
@@ -271,27 +271,108 @@ impl State {
     }
 }
 
-/// Position order: date, then entry order, then the document key.
-fn position(m: &Movement) -> (CalendarDate, u64, &str) {
-    (m.date, m.seq, m.doc.as_str())
+/// A sale's place: its date and entry order.
+type SalePos = (CalendarDate, u64);
+
+/// Position order: date, then entry order, then the document key; inside
+/// one document the unlinked row first, then the linked rows by their sale
+/// (PR-4 B1, the golden rule). `sales` holds each sale's position.
+fn position<'m>(
+    m: &'m Movement,
+    sales: &BTreeMap<&str, SalePos>,
+) -> (CalendarDate, u64, &'m str, Option<(SalePos, &'m str)>) {
+    let link = m.return_of.as_deref().map(|s| {
+        let at = sales.get(s).copied().unwrap_or((m.date, u64::MAX));
+        (at, s)
+    });
+    (m.date, m.seq, m.doc.as_str(), link)
 }
 
-/// A sale linked returns come back from: its relief `R` for `S` units and
-/// the units returned so far `N`.
+/// A sale linked returns come back from: its relief `R` for `S` units
+/// (plus the corrections of units it sold below 0, PR-4 S5), the units
+/// returned so far `N` and the value they brought back `B`.
 #[derive(Clone, Copy, Debug, Default)]
 struct Sold {
     relief: Money,
     units: Quantity,
     returned: Quantity,
+    brought: Money,
 }
 
 impl Sold {
-    /// The next linked return of `q` units: `round2(R × N_k / S) −
-    /// round2(R × N_(k−1) / S)` (Q-P24e, cumulative difference).
+    /// The next linked return of `q` units: `round2(R × (N + q) / S) − B`
+    /// (Q-P24e; the cumulative difference while R does not change).
     fn take(&mut self, q: Quantity) -> Result<Money, CostError> {
-        let before = ratio(self.relief, self.returned, self.units)?;
         self.returned = qadd(self.returned, q)?;
-        sub(ratio(self.relief, self.returned, self.units)?, before)
+        let v = sub(ratio(self.relief, self.returned, self.units)?, self.brought)?;
+        self.brought = add(self.brought, v)?;
+        Ok(v)
+    }
+}
+
+/// The units a movement takes out (sales, vendor returns, adjustments
+/// down) and brings in.
+fn flows(k: MoveKind) -> (Quantity, Quantity) {
+    match k {
+        MoveKind::Sale { quantity } | MoveKind::VendorReturn { quantity, .. } => {
+            (quantity, Quantity::ZERO)
+        }
+        MoveKind::Receipt { quantity, .. } | MoveKind::CustomerReturn { quantity } => {
+            (Quantity::ZERO, quantity)
+        }
+        MoveKind::AdjustQuantity { change } | MoveKind::AdjustBoth { change, .. } => {
+            if change.is_negative() {
+                (change.abs(), Quantity::ZERO)
+            } else {
+                (Quantity::ZERO, change)
+            }
+        }
+        MoveKind::AdjustValue { .. } => (Quantity::ZERO, Quantity::ZERO),
+    }
+}
+
+/// The first-short, first-cured queue of units sold below 0 (PR-4 S5):
+/// each entry is the sale (none for another outflow) and its units still
+/// short.
+#[derive(Default)]
+struct Short(VecDeque<(Option<String>, Quantity)>);
+
+impl Short {
+    /// An outflow of `q` units with `on` on hand before it.
+    fn join(&mut self, sale: Option<&str>, q: Quantity, on: Quantity) -> Result<(), CostError> {
+        let held = if on.is_positive() { on } else { Quantity::ZERO };
+        let excess = q.checked_sub(held).map_err(|_| CostError::Overflow)?;
+        if excess.is_positive() {
+            self.0.push_back((sale.map(str::to_string), excess));
+        }
+        Ok(())
+    }
+
+    /// An inflow curing `k` units with correction `c`: each sale taken gets
+    /// `round2(C × K_i / k) − round2(C × K_(i−1) / k)`.
+    fn cure(&mut self, k: Quantity, c: Money) -> Result<Vec<(String, Money)>, CostError> {
+        let mut out = Vec::new();
+        let mut left = k;
+        let mut taken = Quantity::ZERO;
+        let mut before = Money::ZERO;
+        while left.is_positive() {
+            let Some(head) = self.0.front_mut() else {
+                break;
+            };
+            let t = if head.1 < left { head.1 } else { left };
+            head.1 = head.1.checked_sub(t).map_err(|_| CostError::Overflow)?;
+            left = left.checked_sub(t).map_err(|_| CostError::Overflow)?;
+            taken = qadd(taken, t)?;
+            let now = ratio(c, taken, k)?;
+            if let Some(sale) = head.0.clone() {
+                out.push((sale, sub(now, before)?));
+            }
+            before = now;
+            if !head.1.is_positive() {
+                self.0.pop_front();
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -305,12 +386,21 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
     for m in moves {
         by_item.entry(m.item.to_string()).or_default().push(m);
     }
+    let sales: BTreeMap<&str, SalePos> = moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Sale { .. }))
+        .map(|m| (m.doc.as_str(), (m.date, m.seq)))
+        .collect();
     let mut out = Vec::with_capacity(moves.len());
     for list in by_item.values_mut() {
-        list.sort_by(|a, b| position(a).cmp(&position(b)));
+        // Stable: rows of one document and link keep their line order.
+        list.sort_by(|a, b| position(a, &sales).cmp(&position(b, &sales)));
         let mut s = State::default();
         let mut sold: BTreeMap<&str, Sold> = BTreeMap::new();
+        let mut short = Short::default();
         for m in list.iter() {
+            let on_before = s.q;
+            let (out_q, in_q) = flows(m.kind);
             let linked = match (m.kind, m.return_of.as_deref()) {
                 (MoveKind::CustomerReturn { quantity }, Some(sale)) => {
                     sold.get_mut(sale).map(|x| (quantity, x))
@@ -331,8 +421,24 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
                         relief: value.abs(),
                         units: quantity,
                         returned: Quantity::ZERO,
+                        brought: Money::ZERO,
                     },
                 );
+            }
+            // PR-4 S5: units sold below 0 and the corrections that cure
+            // them, attributed to their sales.
+            if out_q.is_positive() {
+                let sale = matches!(m.kind, MoveKind::Sale { .. }).then_some(m.doc.as_str());
+                short.join(sale, out_q, on_before)?;
+            }
+            if in_q.is_positive() && on_before.is_negative() {
+                let short_q = on_before.abs();
+                let k = if in_q < short_q { in_q } else { short_q };
+                for (sale, share) in short.cure(k, correction)? {
+                    if let Some(x) = sold.get_mut(sale.as_str()) {
+                        x.relief = add(x.relief, share)?;
+                    }
+                }
             }
             let mut residual = Money::ZERO;
             if s.q.is_zero() && !s.t.is_zero() {
@@ -359,20 +465,39 @@ pub fn replay(moves: &[Movement]) -> Result<Vec<Row>, CostError> {
     Ok(out)
 }
 
-/// `NEGATIVE_STOCK` over the rows at or after `from` (the walk's start):
-/// per item, the first row whose on hand newly goes below zero.
+/// `NEGATIVE_STOCK` over the rows at or after `from` (the walk's start),
+/// as the engine (PR-4 S1): per item, the first walked row below zero
+/// whose stored on hand before this posting (`old`, the rows before it)
+/// was zero or more, or that belongs to the posting `trigger` itself (its
+/// rows are written anew, stored as 0). So voiding the receipt that cured
+/// a shortfall warns, and each sale while already below zero warns again.
 #[must_use]
-pub fn negative_stock(rows: &[Row], from: (CalendarDate, u64)) -> Vec<cl_api::NegativeStock> {
+pub fn negative_stock(
+    rows: &[Row],
+    from: (CalendarDate, u64),
+    old: &[Row],
+    trigger: &str,
+) -> Vec<cl_api::NegativeStock> {
     let mut out: Vec<cl_api::NegativeStock> = Vec::new();
-    let mut before: BTreeMap<String, Quantity> = BTreeMap::new();
+    // The n-th row of a document and item matches the n-th before.
+    let mut seen: BTreeMap<(String, String), usize> = BTreeMap::new();
     for r in rows {
-        let key = r.item.to_string();
-        let prev = before.insert(key, r.on_hand).unwrap_or(Quantity::ZERO);
+        let key = (r.doc.clone(), r.item.to_string());
+        let n = seen.entry(key).or_insert(0);
+        let stored = if r.doc == trigger {
+            Quantity::ZERO
+        } else {
+            old.iter()
+                .filter(|o| o.doc == r.doc && o.item == r.item)
+                .nth(*n)
+                .map_or(Quantity::ZERO, |o| o.on_hand)
+        };
+        *n += 1;
         let walked = (r.date, r.seq) >= from;
         if walked
             && r.on_hand.is_negative()
-            && !prev.is_negative()
-            && !out.iter().any(|n| n.item_id == r.item)
+            && !stored.is_negative()
+            && !out.iter().any(|w| w.item_id == r.item)
         {
             out.push(cl_api::NegativeStock {
                 item_id: r.item,
@@ -676,9 +801,10 @@ impl DemoInventory {
         {
             return Err(DemoInventoryError::SaleHasReturns);
         }
+        let before = self.rows()?;
         self.moves.retain(|m| m.doc != doc);
         let rows = self.rows()?;
-        Ok(negative_stock(&rows, old))
+        Ok(negative_stock(&rows, old, &before, doc))
     }
 
     fn replace(
@@ -722,8 +848,9 @@ impl DemoInventory {
                 }
             }
         }
+        let before = self.rows()?;
         self.moves = next;
-        Ok(negative_stock(&rows, start))
+        Ok(negative_stock(&rows, start, &before, doc))
     }
 
     /// An item's on hand, value and average after every posting (Q-P24l).

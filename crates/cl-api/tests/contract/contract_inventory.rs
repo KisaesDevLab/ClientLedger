@@ -188,6 +188,7 @@ struct Book {
     docs: HashMap<String, TransactionId>,
     invoices: HashMap<String, NewInvoice>,
     bills: HashMap<String, BillDraft>,
+    credit_memos: HashMap<String, NewCreditMemo>,
     items: HashMap<String, ItemId>,
     units: HashMap<String, UnitId>,
     set: Option<UnitSetId>,
@@ -280,6 +281,23 @@ fn edit(
         let cur = h.run(co.s.invoices().get(doc))?;
         let saved = h.run(co.s.invoices().update(doc, &cur.record, &new, opts, key()))?;
         book.invoices.insert(name.to_string(), new);
+        return Ok(saved.stock_warnings);
+    }
+    // Golden R3: a linked return's quantity changes.
+    if let Some(mut new) = book.credit_memos.get(name).cloned() {
+        if let Some(n) = st(s, "quantity") {
+            new.lines[0].quantity = Some(q(n));
+        }
+        if let Some(t) = date {
+            new.txn_date = t;
+        }
+        let cur = h.run(co.s.credit_memos().get(doc))?;
+        let o = cl_api::CreditWriteOptions {
+            posting: opts.clone(),
+            expected_updated_at: Some(cur.updated_at),
+        };
+        let saved = h.run(co.s.credit_memos().update(doc, &new, &o, key()))?;
+        book.credit_memos.insert(name.to_string(), new);
         return Ok(saved.stock_warnings);
     }
     let mut draft = book.bills.get(name).cloned().expect("an edited bill");
@@ -389,13 +407,26 @@ fn step(
             Some(saved.invoice.record.txn.id)
         }
         "credit_memo" => {
-            let sale = st(s, "returnOf").map(|doc| book.docs[doc]);
-            let line = InvoiceLine {
-                return_of: Some(sale),
-                ..InvoiceLine::item(item.expect("item"), q(st(s, "quantity").expect("qty")))
+            // One line, or `lines` (golden R2: two rows of one part).
+            let one = |l: &Value| {
+                let sale = st(l, "returnOf").map(|doc| book.docs[doc]);
+                let part = st(l, "item").map_or_else(|| item.expect("item"), |n| book.items[n]);
+                InvoiceLine {
+                    return_of: Some(sale),
+                    ..InvoiceLine::item(part, q(st(l, "quantity").expect("qty")))
+                }
             };
-            let new = NewCreditMemo::new(co.customer, date.expect("date"), vec![line]);
-            Some(h.run(co.s.credit_memos().create(&new, &opts, key()))?.id)
+            let lines = match s.get("lines").and_then(Value::as_array) {
+                Some(ls) => ls.iter().map(one).collect(),
+                None => vec![one(s)],
+            };
+            let new = NewCreditMemo::new(co.customer, date.expect("date"), lines);
+            let saved = h.run(co.s.credit_memos().create(&new, &opts, key()))?;
+            warnings = saved.stock_warnings;
+            if let Some(doc) = st(s, "doc") {
+                book.credit_memos.insert(doc.to_string(), new);
+            }
+            Some(saved.id)
         }
         "adjust_qty" | "adjust_value" => {
             let a = NewAdjustment {
@@ -861,7 +892,7 @@ pub fn golden_every_case(h: &Harness) {
         if let Some(rows) = c.get("rows") {
             // Case R lists only the rows its returns change (as the
             // engine's golden test reads it).
-            check_rows(&co, h, &book, rows, &ctx, id == "R");
+            check_rows(&co, h, &book, rows, &ctx, matches!(id, "R" | "R2" | "R3"));
         }
         if let Some(other) = st(c, "rowsAs") {
             check_rows(&co, h, &book, &case(&all, other)["rows"], &ctx, false);

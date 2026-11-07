@@ -1060,7 +1060,7 @@ async fn lost_credit_create_bill_edit_and_void_are_reconciled() {
 }
 
 /// PR-4 S4: a bill void or delete that drives a part below zero brings
-/// the engine's NEGATIVE_STOCK warnings back to the form.
+/// the engine's `NEGATIVE_STOCK` warnings back to the form.
 #[tokio::test]
 async fn a_void_and_a_delete_return_the_negative_stock_warnings() {
     let server = MockServer::start().await;
