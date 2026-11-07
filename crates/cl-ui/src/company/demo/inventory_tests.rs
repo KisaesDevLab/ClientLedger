@@ -526,7 +526,9 @@ fn inventory_golden() {
         play(all, id);
         ran.push(id.to_string());
     }
-    for must in ["A", "B", "V", "V2", "X", "M", "D", "N", "E", "R", "R2", "R3", "U", "F"] {
+    for must in [
+        "A", "B", "V", "V2", "X", "M", "D", "N", "E", "R", "R2", "R3", "U", "F",
+    ] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
 }
