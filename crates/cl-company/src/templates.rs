@@ -224,6 +224,41 @@ mod tests {
         assert!(StarterChart::from_id("nope").is_none());
     }
 
+    /// QA2-8, QA2-5 (PR-4): turning inventory on adopts the chart's
+    /// "Inventory Asset" only when it is an other-current-asset account
+    /// (engine U-156, `ensureInventoryAccounts`), else it makes a second
+    /// one; the COGS default is found by its detail type.
+    #[test]
+    fn inventory_accounts_carry_the_detail_types_the_engine_adopts() {
+        for chart in StarterChart::ALL {
+            let rows = chart.template().import_rows(true, true);
+            let asset: Vec<_> = rows
+                .iter()
+                .filter(|r| r.name == "Inventory Asset")
+                .collect();
+            assert_eq!(asset.len(), 1, "{}", chart.id());
+            assert_eq!(asset[0].account_type, AccountType::Asset);
+            assert_eq!(
+                asset[0].detail_type.as_deref(),
+                Some("other_current_asset"),
+                "{}",
+                chart.id()
+            );
+            let cogs: Vec<_> = rows
+                .iter()
+                .filter(|r| r.name == "Cost of Goods Sold")
+                .collect();
+            assert_eq!(cogs.len(), 1, "{}", chart.id());
+            assert_eq!(cogs[0].account_type, AccountType::Cogs);
+            assert_eq!(
+                cogs[0].detail_type.as_deref(),
+                Some("cost_of_goods_sold"),
+                "{}",
+                chart.id()
+            );
+        }
+    }
+
     #[test]
     fn an_equity_row_is_a_problem() {
         let mut t = StarterChart::Retail.template();

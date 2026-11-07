@@ -354,11 +354,7 @@ impl ReportScreen {
                             .unwrap_or_default(),
                     );
                     super::num(ui, RichText::new(super::qty(r.on_hand)).monospace());
-                    super::num(
-                        ui,
-                        RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
-                            .monospace(),
-                    );
+                    super::average_cell(ui, r.on_hand, r.average_cost);
                     super::num(ui, RichText::new(super::money(r.value)).monospace());
                     super::num(
                         ui,
@@ -451,11 +447,7 @@ impl ReportScreen {
                         },
                     );
                     super::num(ui, RichText::new(super::money(r.running_value)).monospace());
-                    super::num(
-                        ui,
-                        RichText::new(r.average_cost.map(super::cost).unwrap_or_default())
-                            .monospace(),
-                    );
+                    super::average_cell(ui, r.running_quantity, r.average_cost);
                     ui.end_row();
                 }
             });
@@ -601,7 +593,10 @@ impl Screen for ReportScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         self.follow_bus();
-        egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
+        egui::ScrollArea::both().show(ui, |ui| {
+            self.draw(ui);
+            crate::layout::keep_focus_in_view(ui);
+        });
         if self.job.is_some() || self.books_job.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

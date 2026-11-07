@@ -177,3 +177,7 @@ compare:
   - wait: {ms: 800}
   - assert_state: {key: screen.totals, equals: ready}
   - assert_state: {key: screen.total, equals: "3,234.87"}
+  # QA2-12: invoices can't be deleted (engine Q-245); Delete says to void.
+  - command: form.delete_item
+  - assert_state: {key: screen.notice, equals: invoice.delete.void_instead}
+  - assert_exists: {label_contains: "Sales forms can't be deleted"}

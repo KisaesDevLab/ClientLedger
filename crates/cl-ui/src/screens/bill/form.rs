@@ -571,6 +571,9 @@ impl EnterBillScreen {
         if r.changed() {
             self.vendor_list = !self.inputs.vendor.trim().is_empty();
             self.inputs.vendor_problem = false;
+            if self.save.notice == Some("bill.vendor.fix_first") {
+                self.save.notice = None;
+            }
             self.quick_add.close();
         }
         if let Some(open) = crate::list_field::mouse(ui, &r, self.vendor_list) {
@@ -606,7 +609,9 @@ impl EnterBillScreen {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
-        if self.inputs.vendor_problem {
+        // QA2-4: while Quick Add asks about the name, its prompt is the
+        // message; the older "add the vendor first" would contradict it.
+        if self.inputs.vendor_problem && !self.quick_add.is_open() {
             ui.label(
                 RichText::new(t("bill.vendor.pick"))
                     .size(12.0)
@@ -893,11 +898,15 @@ impl EnterBillScreen {
             )
             .labelled_by(l.id)
             .on_disabled_hover_text(t("bill.paid.locked"));
+        crate::widgets::select_all_on_focus(&r, &self.inputs.amount);
         self.take_focus(Field::Amount, &r);
         let read = self.read_state_of(ReadTarget::AmountDue);
         super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.inputs.amount_problem = None;
+            if self.save.notice == Some("bill.amount.fix_first") {
+                self.save.notice = None;
+            }
         }
         if r.lost_focus() {
             self.amount_left();
@@ -1200,7 +1209,11 @@ impl EnterBillScreen {
                 self.tab_button(ui, tokens, Tab::Items, items);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.compose().totals_status() == Some(TotalsStatus::Balanced) {
+                // QA2-11: not while the typed amount due isn't an amount
+                // (the figure checked is the one before the bad text).
+                if self.inputs.amount_problem.is_none()
+                    && self.compose().totals_status() == Some(TotalsStatus::Balanced)
+                {
                     crate::widgets::label_with_check(
                         ui,
                         RichText::new(t("bill.totals.balanced"))

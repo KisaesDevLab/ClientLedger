@@ -21,6 +21,23 @@ pub mod file_picker;
 pub mod pdf_viewer;
 pub(crate) mod quick_add;
 
+/// QA2-11 (PR-4): an amount field the keyboard or a click just moved to
+/// selects its whole text, so typing replaces the amount instead of
+/// appending to it ("66.0066.00"). Call right after adding the field with
+/// the text it shows.
+pub fn select_all_on_focus(r: &Response, text: &str) {
+    if !r.gained_focus() {
+        return;
+    }
+    let mut state = egui::TextEdit::load_state(&r.ctx, r.id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(egui::text_selection::CCursorRange::select_all_str(
+            text,
+        )));
+    state.store(&r.ctx, r.id);
+}
+
 /// A keyboard chip such as `Ctrl K`.
 pub fn kbd(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::of(ui.ctx());

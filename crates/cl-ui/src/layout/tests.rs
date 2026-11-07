@@ -142,3 +142,53 @@ fn the_report_says_whether_a_scrolling_body_is_scrolled_and_at_its_end() {
     let s = frame(Vec2::new(480.0, 320.0), 1, Body::Fill);
     assert!(!s.report.body_scrolled && s.report.body_at_end);
 }
+
+/// QA2-1 (PR-4): a field the keyboard moves to below the visible body is
+/// scrolled into view once; afterwards the body stays where it is.
+#[test]
+fn a_focused_field_below_the_fold_scrolls_into_view() {
+    let ctx = Context::default();
+    let size = Vec2::new(480.0, 320.0);
+    let target = egui::Id::unique("field 50");
+    let mut field = Rect::NOTHING;
+    let mut body = Rect::NOTHING;
+    let mut report = FrameReport::default();
+    for frame in 0..8 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            let mut f = FixedFrame::begin(ui, "focus", FrameOpts::default());
+            f.top(|ui| ui.label("Title"));
+            let (b, r) = f.body(Body::Scroll, |ui| {
+                let b = ui.clip_rect();
+                let mut found = Rect::NOTHING;
+                for i in 0..60 {
+                    let mut text = format!("{i}");
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .id(egui::Id::unique(format!("field {i}"))),
+                    );
+                    if resp.id == target {
+                        found = resp.rect;
+                    }
+                }
+                (b, found)
+            });
+            f.bottom(|ui| ui.button("Save"));
+            report = f.end();
+            body = b;
+            field = r;
+        });
+        out.textures_delta.clear();
+        if frame == 1 {
+            ctx.memory_mut(|m| m.request_focus(target));
+        }
+    }
+    assert!(report.body_scrolled, "{report:?}");
+    assert!(
+        field.top() >= body.top() - 0.5 && field.bottom() <= body.bottom() + 0.5,
+        "{field:?} shows in {body:?}"
+    );
+}

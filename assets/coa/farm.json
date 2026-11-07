@@ -26,6 +26,7 @@
       "number": "1300",
       "name": "Inventory Asset",
       "type": "asset",
+      "detail": "other_current_asset",
       "requires": "inventory"
     },
     {
@@ -209,6 +210,7 @@
       "number": "5450",
       "name": "Cost of Goods Sold",
       "type": "cogs",
+      "detail": "cost_of_goods_sold",
       "requires": "inventory"
     },
     {

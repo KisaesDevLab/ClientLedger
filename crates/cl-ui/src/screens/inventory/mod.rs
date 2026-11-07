@@ -81,6 +81,38 @@ pub fn cost(c: UnitCost) -> String {
     c.format(MoneyStyle::default())
 }
 
+/// QA2-14 (PR-4): the average cost cell. The engine's figure as it is,
+/// except a zero average while nothing (or less than nothing) is on hand,
+/// which isn't a cost: "—", with the tooltip saying why (`true`). The UI
+/// never works an average out itself.
+#[must_use]
+pub fn average_text(on_hand: Quantity, average: Option<UnitCost>) -> (String, bool) {
+    match average {
+        Some(a) if a.is_zero() && !on_hand.is_positive() => ("\u{2014}".into(), true),
+        Some(a) => (cost(a), false),
+        None if !on_hand.is_positive() => ("\u{2014}".into(), true),
+        None => (String::new(), false),
+    }
+}
+
+/// [`average_text`] as a right-aligned cell with its tooltip.
+pub(crate) fn average_cell(
+    ui: &mut eframe::egui::Ui,
+    on_hand: Quantity,
+    average: Option<UnitCost>,
+) {
+    let (text, dash) = average_text(on_hand, average);
+    let r = ui
+        .with_layout(
+            eframe::egui::Layout::right_to_left(eframe::egui::Align::Center),
+            |ui| ui.label(eframe::egui::RichText::new(text).monospace()),
+        )
+        .inner;
+    if dash {
+        r.on_hover_text(t("inventory.report.average_none.tip"));
+    }
+}
+
 /// An amount or quantity cell, right-aligned (DESIGN.md: numbers end on
 /// the right of their column).
 pub(crate) fn num(ui: &mut eframe::egui::Ui, text: eframe::egui::RichText) {
@@ -267,10 +299,12 @@ pub fn lock_of(link: &CompanyLink, e: &ApiError) -> Option<CalendarDate> {
 }
 
 /// The company's cost of goods sold account for inventory (QA-2/QA-3,
-/// PR-4): an active cost-of-goods-sold account whose detail type is
-/// "Cost of goods sold" (what turning inventory on creates), else `None`
-/// so the owner must choose. Never just the first COGS-type account: in a
-/// service chart that is "Subcontractors", which isn't an inventory cost.
+/// PR-4): the engine's choice when inventory is turned on (U-156): an
+/// active cost-of-goods-sold account named "Cost of Goods Sold" first
+/// (QA2-5: a starter chart's 5000 had no detail type), else one whose
+/// detail type is "Cost of goods sold", else `None` so the owner must
+/// choose. Never just the first COGS-type account: in a service chart that
+/// is "Subcontractors", which isn't an inventory cost.
 #[must_use]
 pub fn inventory_cogs_account(accounts: &[cl_api::Account]) -> Option<cl_core::ids::AccountId> {
     let active_cogs = || {
@@ -280,6 +314,14 @@ pub fn inventory_cogs_account(accounts: &[cl_api::Account]) -> Option<cl_core::i
     };
     active_cogs()
         .find(|a| a.system_tag.as_deref() == Some("cost_of_goods_sold"))
+        .or_else(|| {
+            active_cogs().find(|a| {
+                a.fields
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case("Cost of Goods Sold")
+            })
+        })
         .or_else(|| {
             active_cogs().find(|a| a.fields.detail_type.as_deref() == Some("cost_of_goods_sold"))
         })
@@ -330,6 +372,43 @@ mod default_account_tests {
             ),
         ];
         assert_eq!(super::inventory_cogs_account(&a), Some(a[1].id));
+    }
+
+    /// QA2-14: −24 on hand with a zero average shows "—" (tooltip), the
+    /// engine's non-zero figure shows as it is.
+    #[test]
+    fn qa2_14_no_zero_average_below_zero() {
+        let q = |s: &str| cl_core::Quantity::parse_wire(s).expect("q");
+        let c = |s: &str| cl_core::UnitCost::parse_wire(s).expect("c");
+        assert_eq!(
+            super::average_text(q("-24"), Some(c("0"))),
+            ("\u{2014}".to_string(), true)
+        );
+        assert!(super::average_text(q("0"), None).1);
+        assert_eq!(
+            super::average_text(q("-24"), Some(c("1.1"))).0,
+            super::cost(c("1.1"))
+        );
+        assert!(!super::average_text(q("60"), Some(c("1.1"))).1);
+        assert!(crate::i18n::has("inventory.report.average_none.tip"));
+    }
+
+    /// QA2-5: a starter chart's "5000 Cost of Goods Sold" imported without
+    /// a detail type is the default, as the engine adopts it by name.
+    #[test]
+    fn qa2_5_cogs_default_by_name_without_a_detail_type() {
+        let mut a = [
+            acct(1, "Freight In", AccountType::Cogs, "cost_of_goods_sold"),
+            acct(2, "cost of goods sold", AccountType::Cogs, ""),
+        ];
+        a[1].fields.detail_type = None;
+        assert_eq!(
+            super::inventory_cogs_account(&a),
+            Some(a[1].id),
+            "the name wins, as in the engine"
+        );
+        a[1].is_active = false;
+        assert_eq!(super::inventory_cogs_account(&a), Some(a[0].id));
     }
 
     #[test]

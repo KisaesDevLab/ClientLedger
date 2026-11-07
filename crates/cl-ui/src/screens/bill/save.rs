@@ -381,12 +381,16 @@ impl EnterBillScreen {
         if self.inputs.vendor.trim() != vendor_shown.trim() {
             self.resolve_vendor();
         }
+        // QA2-11: a refused save always says why at the top, not only
+        // under a field the window may have scrolled away.
         if self.inputs.amount_problem.is_some() {
             self.focus = Some(Field::Amount);
+            self.save.notice = Some("bill.amount.fix_first");
             return false;
         }
         if self.inputs.vendor_problem {
             self.focus = Some(Field::Vendor);
+            self.save.notice = Some("bill.vendor.fix_first");
             return false;
         }
         true
@@ -1317,15 +1321,34 @@ impl EnterBillScreen {
     }
 
     fn voided(&mut self, warnings: &[cl_api::NegativeStock]) {
-        // PR-4 S4: a void or delete that drives stock below zero says so.
+        let delete = self.void.delete;
+        // QA2-15: the window says it worked, the reason prompt's "Enter a
+        // reason." goes, and a voided bill stays on screen, now void; a
+        // deleted one is gone, so a new bill opens.
+        let key = match (delete, self.kind()) {
+            (true, _) => "bill.delete.done",
+            (false, BillKind::Credit) => "bill.void.credit_done",
+            (false, BillKind::Bill) => "bill.void.done",
+        };
+        self.link
+            .push(crate::company::CompanyEvent::ToastText(crate::i18n::t(key)));
+        // PR-4 S4: a void or delete that drives stock below zero says so
+        // (this toast replaces the one above).
         crate::screens::inventory::announce_void(&self.link, warnings, &self.items.lists().names());
         let vendor = self.vendor();
         self.publish(vendor);
         self.closing_prompt.saved();
-        self.save.last_action = Some(if self.void.delete { "delete" } else { "void" });
+        self.save.notice = None;
+        let shown = self.editing.as_ref().map(|e| (e.id, e.kind));
         self.void = super::VoidPrompt::default();
         self.nav = super::Nav::default();
-        self.new_bill(true);
+        match shown {
+            Some((id, kind)) if !delete => {
+                self.read_bill(id, Some(kind));
+            }
+            _ => self.new_bill(true),
+        }
+        self.save.last_action = Some(if delete { "delete" } else { "void" });
     }
 
     /// The bill is saved but its files are not on it: try moving them again.

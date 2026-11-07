@@ -415,7 +415,10 @@ impl Screen for UnitsScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
-        egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
+        egui::ScrollArea::both().show(ui, |ui| {
+            self.draw(ui);
+            crate::layout::keep_focus_in_view(ui);
+        });
         if self.list_job.is_some() || self.save_job.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

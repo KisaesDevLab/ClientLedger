@@ -4,7 +4,8 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     // Shared.
-    ("inventory.negative_stock.void", "On {date} you'd have sold more {item} than you have ({on_hand} on hand). The cost is corrected when you receive more."),
+    ("inventory.negative_stock.void", "Done. That leaves {item} below zero on {date} ({on_hand} on hand); the cost is corrected when you receive more."),
+    ("inventory.report.average_none.tip", "No average cost while nothing is on hand. Sales below zero use the last average until you receive more."),
     ("inventory.negative_stock", "Saved. You sold more {item} than you had on {date} ({on_hand} on hand); the cost is corrected when you receive more."),
     ("inventory.period_closed", "This is on or before your closing date ({date}). Inventory in a closed period can't change, even with the closing password. Use a date after {date}, or change the closing date."),
     ("inventory.closing_date", "the closing date"),
