@@ -681,6 +681,44 @@
       "encoding": "Utf8"
     },
     {
+      "file": "operating_changed.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 2,
+          "sum": "-332.72",
+          "start": "2026-11-02",
+          "end": "2026-11-04",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "LAKESIDE POWER COOP AUTOPAY"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "operating_lookalike.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 2,
+          "sum": "-296.57",
+          "start": "2026-11-04",
+          "end": "2026-11-05",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": []
+        }
+      ]
+    },
+    {
       "file": "rounded_amounts.ofx",
       "format": "Ofx",
       "encoding": "Utf8",

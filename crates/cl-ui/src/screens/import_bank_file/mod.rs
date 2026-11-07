@@ -229,6 +229,10 @@ pub struct ImportBankFileScreen {
     undo_trouble: Option<EngineTrouble>,
     /// Imports sent from this window (control channel).
     sent: u32,
+    /// The fixed frame's sizes last frame (control channel).
+    layout: crate::layout::FrameReport,
+    /// The Bank Feed's count after a send or an undo, for the rail badge.
+    feed_count_task: Option<Task<u64>>,
 }
 
 impl ImportBankFileScreen {
@@ -285,6 +289,8 @@ impl ImportBankFileScreen {
             undone: None,
             undo_trouble: None,
             sent: 0,
+            layout: crate::layout::FrameReport::default(),
+            feed_count_task: None,
         };
         s.load_targets();
         s
@@ -665,7 +671,8 @@ impl ImportBankFileScreen {
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let now = crate::company::demo::DemoState::now();
-            let o = demo.bank_feed.import(&req, false, now);
+            let lock = crate::company::demo::home::closing_date(&demo);
+            let o = demo.bank_feed.import(&req, false, now, lock);
             drop(demo);
             match o {
                 Ok(o) => {
@@ -711,7 +718,8 @@ impl ImportBankFileScreen {
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let now = crate::company::demo::DemoState::now();
-            let o = demo.bank_feed.import(&req, true, now);
+            let lock = crate::company::demo::home::closing_date(&demo);
+            let o = demo.bank_feed.import(&req, true, now, lock);
             drop(demo);
             match o {
                 Ok(o) => {
@@ -828,8 +836,9 @@ impl ImportBankFileScreen {
         self.prep_delay = std::time::Duration::from_secs(1);
         self.prep_next = Some(now + self.prep_delay);
         self.prep_gave_up = false;
-        if o.counts.inserted > 0 {
+        if o.counts.inserted > 0 || o.rows.iter().any(|r| r.replaced) {
             self.link.bus().publish(crate::data_bus::Change::BankFeed);
+            self.recount_feed();
         }
         self.result = Some(o);
     }
@@ -923,6 +932,29 @@ impl ImportBankFileScreen {
         self.undo_key = None;
         self.undone = Some(u);
         self.link.bus().publish(crate::data_bus::Change::BankFeed);
+        self.recount_feed();
+    }
+
+    /// Reads the Bank Feed's waiting count again for the rail's badge
+    /// (UI review 11): Home, which reads it otherwise, is not in front.
+    fn recount_feed(&mut self) {
+        let link = Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let n = crate::company::demo::home::feed_waiting(&demo);
+            drop(demo);
+            self.feed_count_task = Some(Task::ready(n));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        let today = self.today;
+        self.feed_count_task = group
+            .read(&session, move |s| async move {
+                s.home().feed_pending_count(today).await
+            })
+            .ok()
+            .map(Task::Pending);
     }
 
     /// Back to step 1 for another file (or the next section of this one).
@@ -966,9 +998,12 @@ impl ImportBankFileScreen {
                     && self.reading.is_none()
                     && self.current_section().is_some_and(|s| !s.rows.is_empty())
             }
+            // UI review 8: Send opens only when it would add or replace
+            // something.
             Step::Check => {
-                self.preview.is_some()
-                    && self.preview_task.is_none()
+                self.preview.as_ref().is_some_and(|p| {
+                    flow::rows_to_send(p, &self.choices) > 0 || self.replacing() > 0
+                }) && self.preview_task.is_none()
                     && self.send_task.is_none()
                     && self
                         .preview
@@ -977,6 +1012,23 @@ impl ImportBankFileScreen {
             }
             Step::Done => false,
         }
+    }
+
+    /// Changed rows set to replace their waiting item (the dry run says
+    /// the item is still waiting).
+    pub(crate) fn replacing(&self) -> usize {
+        let Some(p) = self.preview.as_ref() else {
+            return 0;
+        };
+        p.rows
+            .iter()
+            .filter(|r| {
+                r.status == ImportRowStatus::Changed
+                    && r.existing_pending == Some(true)
+                    && self.choices.get(&r.line).and_then(|c| c.changed)
+                        == Some(ChangedAction::Replace)
+            })
+            .count()
     }
 
     /// Next step (Alt+N).
@@ -1104,6 +1156,14 @@ impl ImportBankFileScreen {
             }
         }
         self.poll_preparing();
+        if let Some(r) = self.feed_count_task.as_mut().and_then(Task::try_take) {
+            self.feed_count_task = None;
+            if let Ok(n) = r {
+                self.link.push(crate::company::CompanyEvent::BankFeedCount(
+                    u32::try_from(n).unwrap_or(u32::MAX),
+                ));
+            }
+        }
         if let Some(r) = self.undo_task.as_mut().and_then(Task::try_take) {
             self.undo_task = None;
             match r {
@@ -1123,6 +1183,7 @@ impl ImportBankFileScreen {
             || self.send_task.is_some()
             || self.prep_task.is_some()
             || self.undo_task.is_some()
+            || self.feed_count_task.is_some()
             || (self.preparing() && !self.prep_gave_up)
     }
 }
@@ -1184,6 +1245,8 @@ impl Screen for ImportBankFileScreen {
                 };
                 demo.bank_feed.reset();
                 drop(demo);
+                self.link.bus().publish(crate::data_bus::Change::BankFeed);
+                self.recount_feed();
                 self.forget_local_layouts();
                 self.start_over(false);
                 self.sent = 0;
@@ -1258,6 +1321,7 @@ impl Screen for ImportBankFileScreen {
             "undone": self.undone.map(|u| json!({"removed": u.removed, "kept": u.kept, "restored": u.restored})),
             "undo_trouble": trouble_state(self.undo_trouble.as_ref()),
             "sent": self.sent,
+            "layout": self.layout.json(),
         })
     }
 }

@@ -530,6 +530,11 @@ impl Shell {
                         self.windows.activate(back);
                     }
                 }
+                CompanyEvent::BankFeedCount(n) => {
+                    if self.open_tenant.is_some() || self.demo {
+                        self.counts.bank_feed = Some(n);
+                    }
+                }
                 CompanyEvent::RailCounts(c) => {
                     // Only while a company is open (Opened and Closed clear
                     // them; the new company's Home reads its own).

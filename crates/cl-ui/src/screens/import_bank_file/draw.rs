@@ -12,12 +12,21 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Ui};
 use super::flow::{self, RowChoice};
 use super::{EngineTrouble, ImportBankFileScreen, LinkedHow, Step};
 use crate::company::CompanyEvent;
-use crate::i18n::{t, t_with};
+use crate::i18n::{t, t_count, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
 /// Rows drawn at once in the check table (the rest are counted).
 const SHOWN_ROWS: usize = 200;
+
+/// A command's shortcut as the keymap has it ("Alt+N").
+fn shortcut_hint(id: &str) -> String {
+    cl_model::commands::find(id)
+        .and_then(|c| c.shortcut)
+        .map(crate::input::shortcut_text)
+        .unwrap_or_default()
+}
 
 fn short_date(d: CalendarDate) -> String {
     format!("{:02}/{:02}", d.month(), d.day())
@@ -41,6 +50,26 @@ fn format_name(f: FileFormat) -> &'static str {
     }
 }
 
+/// The file's format as the mockup names it: an OFX or QFX file also
+/// says its OFX version (2.x is XML, 1.x the older SGML).
+fn format_label(l: &flow::Loaded) -> String {
+    let name = t(format_name(l.parsed.format));
+    if !matches!(l.parsed.format, FileFormat::Ofx | FileFormat::Qfx) {
+        return name;
+    }
+    let head = &l.bytes[..l.bytes.len().min(1024)];
+    let xml = head.windows(5).any(|w| w.eq_ignore_ascii_case(b"<?ofx"))
+        || head.windows(5).any(|w| w.eq_ignore_ascii_case(b"<?xml"));
+    t_with(
+        if xml {
+            "bankimport.format.v2"
+        } else {
+            "bankimport.format.v1"
+        },
+        &[("format", &name)],
+    )
+}
+
 fn kind_name(k: AccountKind) -> &'static str {
     match k {
         AccountKind::CreditCard => "bankimport.kind.card",
@@ -53,6 +82,22 @@ fn kind_name(k: AccountKind) -> &'static str {
 
 /// A small rounded flag (the mockup's chips).
 fn chip(ui: &mut Ui, tokens: &Tokens, text: &str, accent: bool) {
+    chip_sensing(ui, tokens, text, accent, egui::Sense::hover());
+}
+
+/// A chip with a tooltip: it takes keyboard focus, so the tip is reached
+/// by Tab and by a screen reader as well as by the mouse (UI review 4).
+fn chip_with_tip(ui: &mut Ui, tokens: &Tokens, text: &str, tip: &str) {
+    chip_sensing(ui, tokens, text, false, egui::Sense::click()).on_hover_text(tip);
+}
+
+fn chip_sensing(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    text: &str,
+    accent: bool,
+    sense: egui::Sense,
+) -> egui::Response {
     let (fill, color) = if accent {
         (tokens.accent_tint, tokens.accent)
     } else {
@@ -63,8 +108,13 @@ fn chip(ui: &mut Ui, tokens: &Tokens, text: &str, accent: bool) {
         .corner_radius(CornerRadius::same(9))
         .inner_margin(Margin::symmetric(8, 2))
         .show(ui, |ui| {
-            ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).selectable(false));
-        });
+            ui.add(
+                egui::Label::new(RichText::new(text).size(12.0).color(color))
+                    .selectable(false)
+                    .sense(sense),
+            )
+        })
+        .inner
 }
 
 /// A label and a value on one line, the value right-aligned.
@@ -127,42 +177,47 @@ impl ImportBankFileScreen {
     pub(super) fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
+        // Q-265: the title and the step bar stay at the top, the buttons at
+        // the bottom, and only the step's content scrolls between them (the
+        // smallest window at 200% zoom keeps the buttons in reach).
         egui::Frame::new()
             .fill(tokens.surface_window)
-            .inner_margin(Margin::symmetric(20, 16))
+            .inner_margin(Margin::symmetric(20, 12))
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.set_min_height(ui.available_height());
-                ui.horizontal_wrapped(|ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(t("cmd.banking.import_file"))
-                                .size(22.0)
-                                .strong()
-                                .color(tokens.text_primary),
-                        )
-                        .selectable(false),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(t("bankimport.subtitle")).color(tokens.text_secondary));
+                let mut frame = FixedFrame::begin(ui, "import_bank_file", FrameOpts::default());
+                frame.top(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t("cmd.banking.import_file"))
+                                    .size(22.0)
+                                    .strong()
+                                    .color(tokens.text_primary),
+                            )
+                            .selectable(false),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t("bankimport.subtitle")).color(tokens.text_secondary),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    self.steps_ui(ui, &tokens);
                 });
-                ui.add_space(10.0);
-                self.steps_ui(ui, &tokens);
-                ui.add_space(12.0);
-                let buttons_height = 56.0;
-                let body = (ui.available_height() - buttons_height).max(120.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("bankimport/body")
-                    .max_height(body)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| match self.step {
+                frame.body(Body::Scroll, |ui| {
+                    ui.set_width(ui.available_width());
+                    match self.step {
                         Step::Choose => self.choose_ui(ui, &tokens),
                         Step::Link => self.link_ui(ui, &tokens, style),
                         Step::Check => self.check_ui(ui, &tokens, style),
                         Step::Done => self.done_ui(ui, &tokens),
-                    });
-                ui.add_space(8.0);
-                self.buttons_ui(ui, &tokens);
+                    }
+                });
+                frame.bottom(|ui| {
+                    ui.add_space(4.0);
+                    self.buttons_ui(ui, &tokens);
+                });
+                self.layout = frame.end();
             });
     }
 
@@ -178,83 +233,107 @@ impl ImportBankFileScreen {
             .corner_radius(CornerRadius::same(6))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                let w = ui.available_width() / 4.0;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    for (i, (step, key)) in steps.iter().enumerate() {
-                        let done =
-                            *step < self.step || (self.step == Step::Done && *step == Step::Done);
-                        let current = *step == self.step && self.step != Step::Done;
-                        let fill = if current {
-                            tokens.accent_tint
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(w, 44.0), egui::Sense::hover());
-                        ui.painter().rect_filled(rect, 0.0, fill);
-                        if i > 0 {
-                            ui.painter().vline(
-                                rect.left(),
-                                rect.y_range(),
-                                Stroke::new(1.0, tokens.border_default),
+                // The mockup's cells are at least 160 px wide: a narrower
+                // bar (a small window or 200% zoom) puts them in two rows.
+                let bar_w = ui.available_width();
+                let per_row = if bar_w >= 4.0 * 160.0 { 4 } else { 2 };
+                #[allow(clippy::cast_precision_loss)] // 2 or 4
+                let w = bar_w / per_row as f32;
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for row in steps.chunks(per_row) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for (step, key) in row {
+                            let i = steps.iter().position(|(s, _)| s == step).unwrap_or(0);
+                            let done = *step < self.step
+                                || (self.step == Step::Done && *step == Step::Done);
+                            let current = *step == self.step && self.step != Step::Done;
+                            let fill = if current {
+                                tokens.accent_tint
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+                            let (rect, _) =
+                                ui.allocate_exact_size(egui::vec2(w, 44.0), egui::Sense::hover());
+                            ui.painter().rect_filled(rect, 0.0, fill);
+                            if i % per_row > 0 {
+                                ui.painter().vline(
+                                    rect.left(),
+                                    rect.y_range(),
+                                    Stroke::new(1.0, tokens.border_default),
+                                );
+                            }
+                            let center = egui::pos2(rect.left() + 26.0, rect.center().y);
+                            let dot = if done {
+                                tokens.accent
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+                            ui.painter().circle(
+                                center,
+                                11.0,
+                                dot,
+                                Stroke::new(
+                                    1.5,
+                                    if done || current {
+                                        tokens.accent
+                                    } else {
+                                        tokens.border_strong
+                                    },
+                                ),
+                            );
+                            let mark = if done {
+                                "\u{2713}".to_string()
+                            } else {
+                                (i + 1).to_string()
+                            };
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                mark,
+                                egui::FontId::proportional(12.0),
+                                if done {
+                                    tokens.on_accent
+                                } else {
+                                    tokens.text_primary
+                                },
+                            );
+                            let label = t(key);
+                            let font = if current {
+                                egui::FontId::new(14.0, egui::FontFamily::Name("bold".into()))
+                            } else {
+                                egui::FontId::proportional(14.0)
+                            };
+                            let font = if ui.fonts(|f| f.families().contains(&font.family)) {
+                                font
+                            } else {
+                                egui::FontId::proportional(14.0)
+                            };
+                            // Wrapped to the cell and clipped to it: a label
+                            // never runs into the next step (UI review 2).
+                            let wrap = (rect.width() - 46.0 - 8.0).max(20.0);
+                            let galley =
+                                ui.fonts_mut(|f| f.layout(label, font, tokens.text_primary, wrap));
+                            let pos = egui::pos2(
+                                rect.left() + 46.0,
+                                rect.center().y - galley.size().y / 2.0,
+                            );
+                            ui.painter().with_clip_rect(rect).galley(
+                                pos,
+                                galley,
+                                tokens.text_primary,
                             );
                         }
-                        let center = egui::pos2(rect.left() + 26.0, rect.center().y);
-                        let dot = if done {
-                            tokens.accent
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        ui.painter().circle(
-                            center,
-                            11.0,
-                            dot,
-                            Stroke::new(
-                                1.5,
-                                if done || current {
-                                    tokens.accent
-                                } else {
-                                    tokens.border_strong
-                                },
-                            ),
-                        );
-                        let mark = if done {
-                            "\u{2713}".to_string()
-                        } else {
-                            (i + 1).to_string()
-                        };
-                        ui.painter().text(
-                            center,
-                            egui::Align2::CENTER_CENTER,
-                            mark,
-                            egui::FontId::proportional(12.0),
-                            if done {
-                                tokens.on_accent
-                            } else {
-                                tokens.text_primary
-                            },
-                        );
-                        let label = t(key);
-                        let font = if current {
-                            egui::FontId::new(14.0, egui::FontFamily::Name("bold".into()))
-                        } else {
-                            egui::FontId::proportional(14.0)
-                        };
-                        let font = if ui.fonts(|f| f.families().contains(&font.family)) {
-                            font
-                        } else {
-                            egui::FontId::proportional(14.0)
-                        };
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 46.0, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            label,
-                            font,
-                            tokens.text_primary,
+                    });
+                    if row.len() == per_row && per_row == 2 && row[0].0 == Step::Choose {
+                        let r = ui.min_rect();
+                        ui.painter().hline(
+                            r.x_range(),
+                            r.bottom(),
+                            Stroke::new(1.0, tokens.border_default),
                         );
                     }
-                });
+                }
             });
     }
 
@@ -308,10 +387,7 @@ impl ImportBankFileScreen {
                 ui,
                 tokens,
                 &t("bankimport.file.format"),
-                &t_with(
-                    "bankimport.file.detected",
-                    &[("format", &t(format_name(l.parsed.format)))],
-                ),
+                &t_with("bankimport.file.detected", &[("format", &format_label(l))]),
                 false,
             );
             if let Some(s) = section {
@@ -345,7 +421,7 @@ impl ImportBankFileScreen {
             form::hint(
                 ui,
                 tokens,
-                &t_with("bankimport.skipped_zero", &[("n", &zero.len().to_string())]),
+                &t_count("bankimport.skipped_zero", zero.len(), &[]),
             );
         }
         // Review DS4: lines before the table are listed, not hidden.
@@ -354,12 +430,10 @@ impl ImportBankFileScreen {
             form::hint(
                 ui,
                 tokens,
-                &t_with(
+                &t_count(
                     "bankimport.skipped_preamble",
-                    &[
-                        ("n", &preamble.len().to_string()),
-                        ("lines", &preamble.join(", ")),
-                    ],
+                    preamble.len(),
+                    &[("lines", &preamble.join(", "))],
                 ),
             );
         }
@@ -400,10 +474,7 @@ impl ImportBankFileScreen {
                         text.push_str(" \u{b7} ");
                         text.push_str(n);
                     }
-                    text.push_str(&t_with(
-                        "bankimport.section.rows",
-                        &[("n", &s.rows.len().to_string())],
-                    ));
+                    text.push_str(&t_count("bankimport.section.rows", s.rows.len(), &[]));
                     text
                 };
                 let mut picked = None;
@@ -853,9 +924,10 @@ impl ImportBankFileScreen {
         }
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new(t_with(
+                RichText::new(t_count(
                     "bankimport.in_file",
-                    &[("n", &p.counts.in_file.to_string())],
+                    usize::try_from(p.counts.in_file).unwrap_or(usize::MAX),
+                    &[],
                 ))
                 .strong()
                 .color(tokens.text_primary),
@@ -879,9 +951,10 @@ impl ImportBankFileScreen {
                 chip(
                     ui,
                     tokens,
-                    &t_with(
+                    &t_count(
                         "bankimport.chip.possible",
-                        &[("n", &p.counts.possible_duplicate.to_string())],
+                        usize::try_from(p.counts.possible_duplicate).unwrap_or(usize::MAX),
+                        &[],
                     ),
                     false,
                 );
@@ -898,20 +971,20 @@ impl ImportBankFileScreen {
                 );
             }
             if p.counts.closed_period > 0 {
-                chip(
+                chip_with_tip(
                     ui,
                     tokens,
                     &t_with(
                         "bankimport.chip.closed",
                         &[("n", &p.counts.closed_period.to_string())],
                     ),
-                    false,
+                    &t("bankimport.status.closed.tip"),
                 );
             }
             chip(
                 ui,
                 tokens,
-                &t_with("bankimport.chip.problems", &[("n", &problems.to_string())]),
+                &t_count("bankimport.chip.problems", problems, &[]),
                 false,
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -947,11 +1020,27 @@ impl ImportBankFileScreen {
             .filter_map(|r| {
                 let line = u32::try_from(r.line).ok()?;
                 let res = results.get(&line).copied();
-                let skipped = res.is_some_and(|x| x.status != ImportRowStatus::New);
+                // UI review 5: only the rows that are not added. Look-alikes
+                // and changed rows are added (Q-P25c, Q-P25x).
+                let skipped = res.is_some_and(|x| x.status == ImportRowStatus::Duplicate);
                 (!self.only_skipped || skipped).then_some((line, r, res))
             })
             .collect();
         let total = rows.len();
+        // The mockup's shaded rows: already imported, not sent again
+        // (grid row 0 is the heading).
+        let already: std::collections::BTreeSet<usize> = rows
+            .iter()
+            .take(SHOWN_ROWS)
+            .enumerate()
+            .filter(|(_, (_, _, res))| res.is_some_and(|x| x.status == ImportRowStatus::Duplicate))
+            .map(|(i, _)| i + 1)
+            .collect();
+        let shade = tokens.locked_row;
+        let rounded = rows
+            .iter()
+            .take(SHOWN_ROWS)
+            .any(|(_, r, _)| r.rounded_from.is_some());
         egui::Frame::new()
             .stroke(Stroke::new(1.0, tokens.border_default))
             .corner_radius(CornerRadius::same(6))
@@ -962,7 +1051,7 @@ impl ImportBankFileScreen {
                     .id_salt("bankimport/table")
                     .show(ui, |ui| {
                         egui::Grid::new("bankimport/rows")
-                            .striped(true)
+                            .with_row_color(move |row, _| already.contains(&row).then_some(shade))
                             .spacing([24.0, 6.0])
                             .min_col_width(60.0)
                             .show(ui, |ui| {
@@ -986,8 +1075,17 @@ impl ImportBankFileScreen {
                                 }
                                 ui.end_row();
                                 for (line, r, res) in rows.iter().take(SHOWN_ROWS) {
+                                    let dim =
+                                        res.is_some_and(|x| x.status == ImportRowStatus::Duplicate);
+                                    let ink = if dim {
+                                        tokens.locked_text
+                                    } else {
+                                        tokens.text_primary
+                                    };
                                     let mono = |s: String| {
-                                        RichText::new(s).text_style(egui::TextStyle::Monospace)
+                                        RichText::new(s)
+                                            .text_style(egui::TextStyle::Monospace)
+                                            .color(ink)
                                     };
                                     ui.label(mono(crate::shell::us_date(r.date)));
                                     // Q-P25r: the bank's memo is its own
@@ -1010,9 +1108,7 @@ impl ImportBankFileScreen {
                                     let amount = flow::shown(r.file_amount, self.flipped)
                                         .map(|m| m.format(style))
                                         .unwrap_or_default();
-                                    ui.label(
-                                        mono(format!("{amount:>14}")).color(tokens.text_primary),
-                                    );
+                                    ui.label(mono(format!("{amount:>14}")));
                                     ui.horizontal(|ui| {
                                         // Q-P25q: a sub-cent amount was rounded.
                                         if let Some(orig) = r.rounded_from.as_deref() {
@@ -1040,8 +1136,13 @@ impl ImportBankFileScreen {
         form::hint(
             ui,
             tokens,
+            // UI review 6: rounded rows say so in the footnote too.
             &t_with(
-                "bankimport.footnote",
+                if rounded {
+                    "bankimport.footnote.rounded"
+                } else {
+                    "bankimport.footnote"
+                },
                 &[
                     ("shown", &total.min(SHOWN_ROWS).to_string()),
                     ("n", &total.to_string()),
@@ -1121,9 +1222,12 @@ impl ImportBankFileScreen {
             }
         }
         if res.closed_period {
-            chip(ui, tokens, &t("bankimport.status.closed"), false);
-            ui.label("")
-                .on_hover_text(t("bankimport.status.closed.tip"));
+            chip_with_tip(
+                ui,
+                tokens,
+                &t("bankimport.status.closed"),
+                &t("bankimport.status.closed.tip"),
+            );
         }
         out
     }
@@ -1135,17 +1239,37 @@ impl ImportBankFileScreen {
             return;
         };
         form::card(ui, tokens, |ui| {
-            let text = if r.counts.inserted == 0 {
+            // UI review 7: after Undo the heading says what is left.
+            let text = if let Some(u) = self.undone {
+                t_count(
+                    "bankimport.done.undone",
+                    usize::try_from(u.removed).unwrap_or(usize::MAX),
+                    &[],
+                )
+            } else if r.counts.inserted == 0 {
                 t_with(
                     "bankimport.done.nothing",
                     &[("n", &r.counts.duplicate.to_string())],
+                )
+            } else if r.counts.duplicate == 0 {
+                t_count(
+                    "bankimport.done.sent_all",
+                    usize::try_from(r.counts.inserted).unwrap_or(usize::MAX),
+                    &[],
                 )
             } else {
                 t_with(
                     "bankimport.done.sent",
                     &[
                         ("n", &r.counts.inserted.to_string()),
-                        ("skipped", &r.counts.duplicate.to_string()),
+                        (
+                            "skipped",
+                            &t_count(
+                                "bankimport.done.already",
+                                usize::try_from(r.counts.duplicate).unwrap_or(usize::MAX),
+                                &[],
+                            ),
+                        ),
                     ],
                 )
             };
@@ -1199,25 +1323,31 @@ impl ImportBankFileScreen {
             if self.undo_task.is_some() {
                 form::progress_line(ui, tokens, &t("bankimport.undoing"));
             }
-            if let Some(u) = self.undone {
+            if let Some(u) = self.undone
+                && u.kept > 0
+            {
                 form::hint(
                     ui,
                     tokens,
-                    &t_with(
-                        "bankimport.undone",
-                        &[("n", &u.removed.to_string()), ("kept", &u.kept.to_string())],
+                    &t_count(
+                        "bankimport.undone_kept",
+                        usize::try_from(u.kept).unwrap_or(usize::MAX),
+                        &[],
                     ),
                 );
-                if u.restored > 0 {
-                    form::hint(
-                        ui,
-                        tokens,
-                        &t_with(
-                            "bankimport.undone_restored",
-                            &[("n", &u.restored.to_string())],
-                        ),
-                    );
-                }
+            }
+            if let Some(u) = self.undone
+                && u.restored > 0
+            {
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_count(
+                        "bankimport.undone_restored",
+                        usize::try_from(u.restored).unwrap_or(usize::MAX),
+                        &[],
+                    ),
+                );
             }
             if let Some(tr) = self.undo_trouble.clone() {
                 ui.label(RichText::new(trouble_text(&tr)).color(tokens.warn_text));
@@ -1245,15 +1375,27 @@ impl ImportBankFileScreen {
                         .preview
                         .as_ref()
                         .map_or(0, |p| flow::rows_to_send(p, &self.choices));
-                    t_with("bankimport.send", &[("n", &n.to_string())])
+                    // UI review 8: nothing to add says so (the button is
+                    // closed); replacing waiting items only is an update.
+                    if n > 0 {
+                        t_with("bankimport.send", &[("n", &n.to_string())])
+                    } else if self.replacing() > 0 {
+                        t_count("bankimport.send_updates", self.replacing(), &[])
+                    } else {
+                        t("bankimport.send_nothing")
+                    }
                 }
                 Step::Done => t("bankimport.close"),
             };
             let enabled = self.step == Step::Done || self.can_next();
             let r = ui
                 .add_enabled_ui(enabled, |ui| crate::widgets::primary_button(ui, &primary))
-                .inner
-                .on_hover_text(t("bankimport.next.tip"));
+                .inner;
+            let r = if self.step == Step::Done {
+                r
+            } else {
+                r.on_hover_text(shortcut_hint("form.save_new"))
+            };
             if r.clicked() {
                 if self.step == Step::Done {
                     self.link
@@ -1270,7 +1412,7 @@ impl ImportBankFileScreen {
                 if self.step != Step::Choose
                     && ui
                         .button(t("bankimport.back"))
-                        .on_hover_text(t("bankimport.back.tip"))
+                        .on_hover_text(shortcut_hint("form.step_back"))
                         .clicked()
                 {
                     self.back();

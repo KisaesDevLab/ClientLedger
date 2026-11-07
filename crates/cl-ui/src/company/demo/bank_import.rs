@@ -164,7 +164,9 @@ impl DemoBankFeed {
         self.items.iter().filter(|i| i.pending).count()
     }
 
-    /// Previews or commits `req` at `now`.
+    /// Previews or commits `req` at `now`. A row dated on or before
+    /// `lock` (the company's closing date) is flagged like the engine's
+    /// (`closedPeriod`: `row.date <= lockDate`); it is still added.
     ///
     /// # Errors
     /// A commit of a file whose account is linked to another account,
@@ -174,6 +176,7 @@ impl DemoBankFeed {
         req: &BankImportRequest,
         commit: bool,
         now: Timestamp,
+        lock: Option<cl_core::CalendarDate>,
     ) -> Result<BankImportOutcome, BankImportRefusal> {
         let identity = req
             .bank_identity
@@ -349,6 +352,10 @@ impl DemoBankFeed {
                 counts.inserted += 1;
             }
             let existing_item = existing.and_then(|p| mine.get(p));
+            let closed_period = lock.is_some_and(|l| r.date <= l);
+            if closed_period {
+                counts.closed_period += 1;
+            }
             rows.push(ImportRowResult {
                 line: r.line,
                 status,
@@ -356,7 +363,7 @@ impl DemoBankFeed {
                 existing_item: None,
                 existing_imported_at: existing_item.map(|i| i.imported_at),
                 existing_pending: existing_item.map(|i| i.pending),
-                closed_period: false,
+                closed_period,
                 inserted: insert && commit,
                 replaced: replace && commit,
             });
@@ -590,7 +597,7 @@ mod tests {
                 )
             })
             .collect();
-        f.import(&req(nov, 'e'), true, now).expect("nov");
+        f.import(&req(nov, 'e'), true, now, None).expect("nov");
         let dec = (1..=3)
             .map(|i| {
                 row(
@@ -602,7 +609,7 @@ mod tests {
                 )
             })
             .collect();
-        let o = f.import(&req(dec, 'f'), true, now).expect("dec");
+        let o = f.import(&req(dec, 'f'), true, now, None).expect("dec");
         assert_eq!((o.counts.new, o.counts.inserted), (3, 3));
         assert!(
             o.rows
@@ -611,7 +618,9 @@ mod tests {
         );
         // A date moved 2 days with the same amount is still the same.
         let shifted = vec![row(1, 13, "10.00", "NOV 1", "1")];
-        let o = f.import(&req(shifted, 'a'), false, now).expect("shift");
+        let o = f
+            .import(&req(shifted, 'a'), false, now, None)
+            .expect("shift");
         assert_eq!(o.counts.duplicate, 1);
     }
 
@@ -627,18 +636,19 @@ mod tests {
                 &req(vec![row(1, 20, "80.00", "HARDWARE STORE 12", "CH")], 'a'),
                 true,
                 now,
+                None,
             )
             .expect("first");
         std::thread::sleep(DEMO_PREPARING);
         let mut changed = row(1, 21, "85.00", "HARDWARE STORE 12", "CH");
         let p = f
-            .import(&req(vec![changed.clone()], 'b'), false, now)
+            .import(&req(vec![changed.clone()], 'b'), false, now, None)
             .expect("p");
         assert_eq!(p.rows[0].status, ImportRowStatus::Changed);
         assert_eq!(p.rows[0].existing_pending, Some(true));
         changed.changed_action = Some(ChangedAction::Replace);
         let r = f
-            .import(&req(vec![changed.clone()], 'b'), true, now)
+            .import(&req(vec![changed.clone()], 'b'), true, now, None)
             .expect("r");
         assert!(r.rows[0].replaced && !r.rows[0].inserted);
         assert_eq!(f.waiting(), 1);
@@ -651,14 +661,45 @@ mod tests {
                 .any(|i| i.amount == "80.00".parse().expect("d"))
         );
         changed.changed_action = Some(ChangedAction::Add);
-        let a = f.import(&req(vec![changed], 'c'), true, now).expect("add");
+        let a = f
+            .import(&req(vec![changed], 'c'), true, now, None)
+            .expect("add");
         assert_eq!(a.counts.inserted, 1);
         assert_eq!(f.waiting(), 2);
         // Another description: the bank reused the id.
         let other = row(1, 22, "99.00", "SOMETHING ELSE", "CH");
-        let o = f.import(&req(vec![other], 'd'), false, now).expect("o");
+        let o = f
+            .import(&req(vec![other], 'd'), false, now, None)
+            .expect("o");
         assert_eq!(o.rows[0].reason, Some(ImportRowReason::BankIdReused));
         let _ = first;
+    }
+
+    /// The engine's rule: a row dated on or before the closing date is
+    /// flagged (and counted), still added; with no closing date none is.
+    #[test]
+    fn rows_on_or_before_the_closing_date_are_flagged() {
+        let mut f = DemoBankFeed::default();
+        let now = crate::company::demo::DemoState::now();
+        let rows = vec![
+            row(1, 9, "-1.00", "ON THE DAY", "C1"),
+            row(2, 10, "-2.00", "AFTER", "C2"),
+            row(3, 8, "-3.00", "BEFORE", "C3"),
+        ];
+        let lock = CalendarDate::from_ymd(2026, 11, 9).ok();
+        let o = f
+            .import(&req(rows.clone(), 'a'), false, now, lock)
+            .expect("preview");
+        let flags: Vec<bool> = o.rows.iter().map(|r| r.closed_period).collect();
+        assert_eq!(flags, vec![true, false, true]);
+        assert_eq!(o.counts.closed_period, 2);
+        assert_eq!(o.counts.new, 3);
+        let c = f
+            .import(&req(rows.clone(), 'a'), true, now, lock)
+            .expect("send");
+        assert_eq!(c.counts.inserted, 3);
+        let none = f.import(&req(rows, 'b'), false, now, None).expect("none");
+        assert_eq!(none.counts.closed_period, 0);
     }
 
     /// The link is kept as a hash and a mask only; a file linked to
@@ -669,7 +710,7 @@ mod tests {
         let mut f = DemoBankFeed::default();
         let now = crate::company::demo::DemoState::now();
         let r = req(vec![row(1, 2, "5.00", "SHOP", "A")], 'b');
-        let o = f.import(&r, true, now).expect("first");
+        let o = f.import(&r, true, now, None).expect("first");
         assert_eq!(o.post_processing, Some(ImportPostProcessing::Scheduled));
         let batch = o.batch.expect("batch");
         assert_eq!(f.undo(batch), Err(BankImportRefusal::StillPreparing));
@@ -685,17 +726,17 @@ mod tests {
         let mut other = req(vec![row(1, 3, "6.00", "SHOP 2", "B")], 'c');
         other.account = account(2);
         assert!(
-            f.import(&other, false, now)
+            f.import(&other, false, now, None)
                 .expect("preview")
                 .identity_linked_elsewhere
                 .is_some()
         );
         assert!(matches!(
-            f.import(&other, true, now),
+            f.import(&other, true, now, None),
             Err(BankImportRefusal::LinkedElsewhere(_))
         ));
         other.relink_identity = true;
-        assert!(f.import(&other, true, now).is_ok());
+        assert!(f.import(&other, true, now, None).is_ok());
         std::thread::sleep(DEMO_PREPARING);
         assert_eq!(f.post_processing(batch), Some(ImportPostProcessing::Done));
         assert!(f.undo(batch).is_ok());

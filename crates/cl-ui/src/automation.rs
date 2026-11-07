@@ -1334,6 +1334,8 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "tabs_hidden": ctx
             .data(|d| d.get_temp::<usize>(crate::shell::tabs::hidden_count_id()))
             .unwrap_or(0),
+        // The rail's Bank Feed badge (a count only).
+        "rail": {"bank_feed": shell.counts.bank_feed},
         "palette_open": shell.palette.open,
         "shortcuts_open": shell.shortcuts_open(),
         "about_open": shell.about_open(),

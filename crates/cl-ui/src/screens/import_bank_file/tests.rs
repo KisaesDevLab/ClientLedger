@@ -148,9 +148,69 @@ fn a_file_previews_sends_and_a_second_import_adds_nothing() {
         s.remembered_flip.is_some(),
         "the account's last import sets the sign"
     );
+    // UI review 8: nothing to add or replace closes Send.
+    assert!(!s.can_next(), "nothing to send");
     s.next();
-    assert_eq!(s.result.as_ref().expect("result").counts.inserted, 0);
+    assert_eq!(s.step, Step::Check);
+    assert!(s.result.is_none());
     assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 3);
+}
+
+/// A row the bank changed after it was imported: Replace waiting item
+/// opens Send with nothing added (an update); Add as new adds it; the
+/// rail's badge is told the feed's new count.
+#[test]
+fn a_changed_row_replaces_or_is_added() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    prepared(&mut s);
+    let _ = f.link.drain();
+    s.start_over(false);
+    let changed = OFX.replace(
+        "<DTPOSTED>20261031<TRNAMT>-186.40<FITID>A1",
+        "<DTPOSTED>20261101<TRNAMT>-196.40<FITID>A1",
+    );
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    assert_eq!((p.counts.changed, p.counts.duplicate), (1, 2));
+    let line = p
+        .rows
+        .iter()
+        .find(|r| r.status == ImportRowStatus::Changed)
+        .expect("changed")
+        .line;
+    assert!(!s.can_next(), "nothing chosen yet");
+    s.choose(line, changed_choice(ChangedAction::Replace));
+    s.poll();
+    assert_eq!(s.replacing(), 1);
+    assert!(s.can_next(), "an update opens Send");
+    s.choose(line, changed_choice(ChangedAction::Add));
+    s.poll();
+    assert_eq!(s.replacing(), 0);
+    assert_eq!(
+        flow::rows_to_send(s.preview.as_ref().expect("preview"), &s.choices),
+        1
+    );
+    s.next();
+    assert_eq!(s.result.as_ref().expect("result").counts.inserted, 1);
+    assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 4);
+    s.poll();
+    let counts: Vec<u32> = f
+        .link
+        .drain()
+        .into_iter()
+        .filter_map(|e| match e {
+            crate::company::CompanyEvent::BankFeedCount(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(counts, vec![37 + 4], "the sample's 37 and these 4");
 }
 
 #[test]

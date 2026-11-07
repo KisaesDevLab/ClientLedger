@@ -504,6 +504,20 @@ s_shift = acct_stmt([shift], "20261103", "20261103", acct=OP_ACCT)
 write("fitid_date_shift.qfx", ofx([s_shift], qfx=True).encode("ascii"))
 expect_ofx("fitid_date_shift.qfx", "Qfx", [s_shift], [{"fitids": [lake["fitid"]]}], encoding="Utf8")
 
+# The bank changed an 11/03 row after it was imported (same id, 4.00 more, a
+# day later): "changed" (replace the waiting item or add as new); plus one new.
+changed = dict(lake, date="20261102", amt="-305.22")
+park = dict(fitid="OVB202611040901", date="20261104", amt="-27.50", type="POS", name="PARKING GARAGE 14")
+s_chg = acct_stmt([changed, park], "20261102", "20261104", acct=OP_ACCT)
+write("operating_changed.qfx", ofx([s_chg], qfx=True).encode("ascii"))
+expect_ofx("operating_changed.qfx", "Qfx", [s_chg], encoding="Utf8")
+
+# A CSV of the same account a day later than an 11/03 row, with no bank id:
+# it looks like that row (a possible duplicate, added with a flag); plus one new.
+look = [["11/04/2026", "RIVERBEND FUEL #212 MONETT MO", "-84.17"], ["11/05/2026", "FARM SUPPLY CO-OP", "-212.40"]]
+write("operating_lookalike.csv", csv_bytes([["Date", "Description", "Amount"]] + look))
+expect_csv("operating_lookalike.csv", look, amt3, "2026-11-04", "2026-11-05")
+
 # ---------------------------------------------------------------- malformed
 def mal_error(name, data, error, line):
     wmal(name, data)

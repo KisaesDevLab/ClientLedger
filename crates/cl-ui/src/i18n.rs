@@ -271,6 +271,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.new_group", "new group"),
     ("status.hint.edit", "edit"),
     ("status.hint.close", "close"),
+    ("status.hint.next_step", "next step"),
+    ("status.hint.bank_formats", "Accepts QIF, QFX, OFX, and CSV"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay
