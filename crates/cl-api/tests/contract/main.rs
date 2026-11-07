@@ -1065,6 +1065,42 @@ fn main() -> std::process::ExitCode {
             "bank_import::card_balance_check",
             contract_bank_import::card_balance_check,
         ),
+        (
+            "bank_import::reused_fitids_never_change",
+            contract_bank_import::reused_fitids_never_change,
+        ),
+        (
+            "bank_import::per_download_fitids_are_new",
+            contract_bank_import::per_download_fitids_are_new,
+        ),
+        (
+            "bank_import::date_shift_is_a_duplicate",
+            contract_bank_import::date_shift_is_a_duplicate,
+        ),
+        (
+            "bank_import::changed_rows_replace_and_add",
+            contract_bank_import::changed_rows_replace_and_add,
+        ),
+        (
+            "bank_import::identity_links_and_relinks",
+            contract_bank_import::identity_links_and_relinks,
+        ),
+        (
+            "bank_import::too_many_rows",
+            contract_bank_import::too_many_rows,
+        ),
+        (
+            "bank_import::batch_total_too_large",
+            contract_bank_import::batch_total_too_large,
+        ),
+        (
+            "bank_import::view_only_previews_but_cannot_import",
+            contract_bank_import::view_only_previews_but_cannot_import,
+        ),
+        (
+            "bank_import::undo_names_the_used_lines",
+            contract_bank_import::undo_names_the_used_lines,
+        ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (
             "inventory::capabilities_and_golden_bytes",

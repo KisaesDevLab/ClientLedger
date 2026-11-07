@@ -2,15 +2,19 @@
 //! `bank-import-batch-v1`): the preview changes nothing and takes no key,
 //! a commit needs one and replays it, re-importing adds nothing (by bank id
 //! and, without one, by row), undo brings rows back on the next import,
-//! amounts stay exact, and a non-bank account is refused.
+//! amounts stay exact, and a non-bank account is refused. The review
+//! fix pass adds the bank id rules (reused, per-download, a moved date),
+//! changed rows, the engine-held account link (Q-P25u), the row and total
+//! limits, a view-only role (Q-P25ab) and Undo's used lines.
 //!
 //! Every test makes its own bank (or card) account in Contract Co, so the
 //! feeds never mix. Rows are built inline (synthetic; the parsers' fixtures
 //! are cl-import's own tests).
 
 use cl_api::{
-    AccountType, BankFileFormat, BankImportRefusal, BankImportRequest, BankImportRow, Capabilities,
-    ImportRowReason, ImportRowStatus, Method, Session, bank_import_refusal,
+    AccountType, ApiError, BankFileFormat, BankIdentity, BankImportRefusal, BankImportRequest,
+    BankImportRow, BankLookupBy, BankLookupVia, Capabilities, ChangedAction, ImportRowReason,
+    ImportRowStatus, LocalValidation, Method, Session, bank_import_refusal,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
@@ -307,7 +311,14 @@ pub fn amounts_are_exact(h: &Harness) {
     assert_eq!(done.inserted_total, m("-999999999999.98"));
     let mut bad = req.clone();
     bad.rows[0].amount = dec("12.345");
-    assert!(h.run(s.bank_import().preview(&bad)).is_err());
+    // Refused here, never sent (review DS6: not any error, this one).
+    let e = h
+        .run(s.bank_import().preview(&bad))
+        .expect_err("3 decimals");
+    assert!(
+        matches!(e, ApiError::Local(LocalValidation::NotWholeCents)),
+        "{e:?}"
+    );
 }
 
 /// An income account is not a bank or card account (422).
@@ -366,4 +377,413 @@ pub fn card_balance_check(h: &Harness) {
         m("0.00"),
         "owed 100.00 once both are accepted"
     );
+}
+
+fn fitid_row(line: u32, day: CalendarDate, amount: &str, text: &str, fitid: &str) -> BankImportRow {
+    row(line, day, amount, text, Some(fitid))
+}
+
+/// Waits out the detached preparation, then undoes `batch`.
+fn undo_when_prepared(
+    h: &Harness,
+    s: &Session,
+    batch: cl_api::ImportBatchId,
+    pending_only: bool,
+) -> Result<cl_api::ImportUndoOutcome, ApiError> {
+    for _ in 0..40 {
+        match h.run(s.bank_import().undo(batch, pending_only, key())) {
+            Err(e) if bank_import_refusal(&e) == Some(BankImportRefusal::StillPreparing) => {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            other => return other,
+        }
+    }
+    panic!("the import was never prepared");
+}
+
+/// Engine fixtures 22, 22r, 22b: a bank id repeated in one file is
+/// ignored on every occurrence, in any order; nothing becomes "changed".
+pub fn reused_fitids_never_change(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let id = unique("DUP");
+    let f22 = vec![
+        fitid_row(1, date(2027, 7, 10), "15.00", "LUNCH SPOT", &id),
+        fitid_row(2, date(2027, 7, 11), "30.00", "BOOK STORE", &id),
+    ];
+    let first = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, f22.clone()), key()),
+        )
+        .expect("first");
+    assert_eq!((first.counts.new, first.counts.inserted), (2, 2));
+    assert!(
+        first
+            .rows
+            .iter()
+            .all(|r| r.reason == Some(ImportRowReason::RepeatedBankId))
+    );
+    let mut reversed = f22.clone();
+    reversed.reverse();
+    for rows in [f22.clone(), reversed, vec![f22[1].clone()]] {
+        let r = h
+            .run(
+                s.bank_import()
+                    .commit(&request(acct, BankFileFormat::Qfx, rows), key()),
+            )
+            .expect("again");
+        assert_eq!((r.counts.inserted, r.counts.changed), (0, 0));
+    }
+}
+
+/// Engine fixture 23: a bank that numbers each download from 1 reuses
+/// ids for other transactions; the next month's rows are new
+/// (`bank_id_reused`), and both files again add nothing.
+pub fn per_download_fitids_are_new(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let tag = unique("PD");
+    let month = |m: u32, cents: &str| -> Vec<BankImportRow> {
+        (1..=3)
+            .map(|i| {
+                fitid_row(
+                    i,
+                    date(2027, m, 10 + i),
+                    &format!("{i}{cents}"),
+                    &format!("{tag} {m} {i}"),
+                    &format!("{tag}-{i}"),
+                )
+            })
+            .collect()
+    };
+    let mut nov = request(acct, BankFileFormat::Qfx, month(8, "0.00"));
+    nov.source_file_sha256 = "e".repeat(64);
+    let mut dec = request(acct, BankFileFormat::Qfx, month(9, "1.00"));
+    dec.source_file_sha256 = "f".repeat(64);
+    h.run(s.bank_import().commit(&nov, key())).expect("nov");
+    let d = h.run(s.bank_import().commit(&dec, key())).expect("dec");
+    assert_eq!(
+        (d.counts.new, d.counts.changed, d.counts.inserted),
+        (3, 0, 3)
+    );
+    assert!(
+        d.rows
+            .iter()
+            .all(|r| r.reason == Some(ImportRowReason::BankIdReused))
+    );
+    for again in [&nov, &dec] {
+        let r = h.run(s.bank_import().commit(again, key())).expect("again");
+        assert_eq!(r.counts.inserted, 0);
+    }
+}
+
+/// Engine fixture 24: the same bank id, amount and a date moved 2 days is
+/// the same transaction.
+pub fn date_shift_is_a_duplicate(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let rows = ofx_rows();
+    h.run(
+        s.bank_import()
+            .commit(&request(acct, BankFileFormat::Qfx, rows.clone()), key()),
+    )
+    .expect("first");
+    let mut shifted = rows[0].clone();
+    shifted.date = date(2027, 3, 4);
+    let p = h
+        .run(
+            s.bank_import()
+                .preview(&request(acct, BankFileFormat::Qfx, vec![shifted])),
+        )
+        .expect("preview");
+    assert_eq!(p.rows[0].status, ImportRowStatus::Duplicate);
+    assert_eq!(p.rows[0].reason, Some(ImportRowReason::SameBankId));
+}
+
+/// A row the bank changed (same id, another amount): "replace" updates the
+/// waiting item; once the item is used, replace is refused for the row
+/// and "add" inserts it as new.
+pub fn changed_rows_replace_and_add(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let id = unique("CH");
+    let first = fitid_row(1, date(2027, 8, 20), "80.00", "HARDWARE STORE 12", &id);
+    let c = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, vec![first]), key()),
+        )
+        .expect("first");
+    let item = c.inserted_items[0];
+    let changed = fitid_row(1, date(2027, 8, 21), "85.00", "HARDWARE STORE 12", &id);
+    let p = h
+        .run(
+            s.bank_import()
+                .preview(&request(acct, BankFileFormat::Qfx, vec![changed.clone()])),
+        )
+        .expect("preview");
+    assert_eq!(p.rows[0].status, ImportRowStatus::Changed);
+    assert_eq!(p.rows[0].existing_item, Some(item));
+    assert_eq!(p.rows[0].existing_pending, Some(true));
+    let mut replace = changed.clone();
+    replace.changed_action = Some(ChangedAction::Replace);
+    let r = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, vec![replace]), key()),
+        )
+        .expect("replace");
+    assert!(r.rows[0].replaced && !r.rows[0].inserted);
+    // The owner uses the item in the Bank Feed (excluded).
+    let used = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/banking/feed/{item}/exclude"),
+            &[],
+            None,
+        ))
+        .expect("exclude");
+    assert_eq!(used.status, 200, "{}", used.body);
+    let mut again = changed.clone();
+    again.amount = dec("90.00");
+    again.changed_action = Some(ChangedAction::Replace);
+    let refused = h
+        .run(s.bank_import().commit(
+            &request(acct, BankFileFormat::Qfx, vec![again.clone()]),
+            key(),
+        ))
+        .expect("replace refused for the row");
+    assert!(!refused.rows[0].replaced && !refused.rows[0].inserted);
+    again.changed_action = Some(ChangedAction::Add);
+    let added = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, vec![again]), key()),
+        )
+        .expect("add");
+    assert!(added.rows[0].inserted);
+    assert_eq!(added.counts.inserted, 1);
+}
+
+/// Q-P25u: the engine links a file's account number (raw in the body,
+/// hashed under the company's key) on commit; lookup by number finds it
+/// by hash, by mask (last 4) otherwise; another account's preview says so,
+/// its commit is refused (409) until relinked.
+pub fn identity_links_and_relinks(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh_account(h, s, AccountType::Asset, "bank");
+    let card = fresh_account(h, s, AccountType::Liability, "credit_card");
+    let digits: String = unique("")
+        .chars()
+        .filter(char::is_ascii_digit)
+        .chain("0000000000".chars())
+        .take(10)
+        .collect();
+    let ident = BankIdentity {
+        bank_id: Some("021000021".into()),
+        acct_id: format!("88{digits}"),
+    };
+    let mut req = request(bank, BankFileFormat::Qfx, ofx_rows());
+    req.bank_identity = Some(ident.clone());
+    h.run(s.bank_import().commit(&req, key())).expect("linked");
+    let hit = h
+        .run(
+            s.bank_import()
+                .lookup(&BankLookupBy::Account(ident.clone())),
+        )
+        .expect("lookup");
+    assert_eq!(hit[0].account, bank);
+    assert_eq!(hit[0].via, BankLookupVia::Hash);
+    let mask = hit[0].mask.clone().expect("mask");
+    assert!(ident.acct_id.ends_with(&mask), "the last 4 only");
+    let other_bank = BankIdentity {
+        bank_id: Some("111000025".into()),
+        acct_id: ident.acct_id.clone(),
+    };
+    let by_mask = h
+        .run(s.bank_import().lookup(&BankLookupBy::Account(other_bank)))
+        .expect("by mask");
+    assert!(
+        by_mask
+            .iter()
+            .any(|m| m.account == bank && m.via == BankLookupVia::Mask)
+    );
+    let mut to_card = request(card, BankFileFormat::Qfx, ofx_rows());
+    to_card.bank_identity = Some(ident);
+    let p = h.run(s.bank_import().preview(&to_card)).expect("preview");
+    assert!(p.identity_linked_elsewhere.is_some());
+    let e = h
+        .run(s.bank_import().commit(&to_card, key()))
+        .expect_err("409");
+    assert!(matches!(
+        bank_import_refusal(&e),
+        Some(BankImportRefusal::LinkedElsewhere(_))
+    ));
+    to_card.relink_identity = true;
+    h.run(s.bank_import().commit(&to_card, key()))
+        .expect("relinked");
+}
+
+/// Over 20,000 rows: refused by the desktop before sending, and by the
+/// engine (422 `too_many_rows`) when sent anyway.
+pub fn too_many_rows(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let tag = unique("MANY");
+    let rows: Vec<BankImportRow> = (1..=20_001)
+        .map(|i| row(i, date(2027, 1, 5), "1.00", &tag, None))
+        .collect();
+    let req = request(acct, BankFileFormat::Csv, rows);
+    let e = h
+        .run(s.bank_import().preview(&req))
+        .expect_err("refused here");
+    assert!(
+        matches!(e, ApiError::Local(LocalValidation::TooManyLines)),
+        "{e:?}"
+    );
+    let mut small = req.clone();
+    small.rows.truncate(1);
+    let mut raw = small.body(true).expect("body");
+    raw["rows"] = serde_json::Value::Array(
+        (1..=20_001)
+            .map(|i| serde_json::json!({"line": i, "date": "2027-01-05", "amount": "1.00", "description": tag}))
+            .collect(),
+    );
+    let r = h
+        .run(s.raw(
+            Method::Post,
+            "/api/v1/banking/feed/import-batch",
+            &[],
+            Some(&raw),
+        ))
+        .expect("raw");
+    assert_eq!(r.status, 422, "{}", r.body);
+    assert_eq!(
+        r.body["error"]["code"]
+            .as_str()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("too_many_rows")
+    );
+}
+
+/// The rows of one batch may not add up to 10^15 or more (422
+/// `batch_total_too_large`).
+pub fn batch_total_too_large(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let tag = unique("HUGE");
+    let rows: Vec<BankImportRow> = (1..=1001)
+        .map(|i| {
+            row(
+                i,
+                date(2027, 1, 6),
+                "999999999999.99",
+                &format!("{tag} {i}"),
+                None,
+            )
+        })
+        .collect();
+    let e = h
+        .run(
+            s.bank_import()
+                .preview(&request(acct, BankFileFormat::Csv, rows)),
+        )
+        .expect_err("422");
+    assert_eq!(
+        bank_import_refusal(&e),
+        Some(BankImportRefusal::TotalTooLarge)
+    );
+}
+
+/// Q-P25ab: a role that may only view banking can preview a file but not
+/// import it (403).
+pub fn view_only_previews_but_cannot_import(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let (user, bk) = h.bookkeeper();
+    let r = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&serde_json::json!({ "overrides": { "banking": "view" } })),
+        ))
+        .expect("permissions");
+    assert_eq!(r.status, 200, "{}", r.body);
+    let req = request(acct, BankFileFormat::Qfx, ofx_rows());
+    let p = h
+        .run(bk.bank_import().preview(&req))
+        .expect("a view may preview");
+    assert_eq!(p.counts.new, 3);
+    let e = h
+        .run(bk.bank_import().commit(&req, key()))
+        .expect_err("403");
+    assert!(matches!(e, ApiError::Forbidden { .. }), "{e:?}");
+    // Back to the bookkeeper's defaults for the tests after this one.
+    let _ = h.run(s.raw(
+        Method::Put,
+        &format!("/api/v1/company/users/{user}/permissions"),
+        &[],
+        Some(&serde_json::json!({ "overrides": { "banking": "full" } })),
+    ));
+}
+
+/// Undo refuses a batch whose rows were used, naming their lines; with
+/// pending-only the rest go.
+pub fn undo_names_the_used_lines(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let c = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, ofx_rows()), key()),
+        )
+        .expect("commit");
+    let batch = c.batch.expect("batch");
+    let first = c.inserted_items[0];
+    let used = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/banking/feed/{first}/exclude"),
+            &[],
+            None,
+        ))
+        .expect("exclude");
+    assert_eq!(used.status, 200, "{}", used.body);
+    let e = undo_when_prepared(h, s, batch, false).expect_err("409");
+    assert_eq!(
+        bank_import_refusal(&e),
+        Some(BankImportRefusal::RowsAlreadyUsed(vec![10]))
+    );
+    let u = undo_when_prepared(h, s, batch, true).expect("pending only");
+    assert_eq!((u.removed, u.kept), (2, 1));
 }

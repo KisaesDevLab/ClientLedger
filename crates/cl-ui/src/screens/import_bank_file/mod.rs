@@ -486,13 +486,6 @@ impl ImportBankFileScreen {
         flow::identity(self.current_section()?)
     }
 
-    fn mask(&self) -> Option<String> {
-        self.current_section()?
-            .account
-            .as_ref()
-            .map(cl_import::AccountId::mask)
-    }
-
     // ---- Step 2: the account ---------------------------------------------
 
     /// Picks section `i` of the file.
@@ -507,18 +500,15 @@ impl ImportBankFileScreen {
     }
 
     /// Finds the account the file's account number was linked to: the
-    /// engine matches it with the company's link key (Q-P25u), else the
-    /// mask suggests one.
+    /// engine matches it with the company's link key (Q-P25u), else its
+    /// last 4 characters suggest one (the engine does both in one call).
     fn start_lookup(&mut self) {
-        let (Some(id), Some(mask)) = (self.identity(), self.mask()) else {
+        let Some(id) = self.identity() else {
             return;
         };
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
-            let mut found = demo.bank_feed.lookup(&BankLookupBy::Account(id));
-            if found.is_empty() {
-                found = demo.bank_feed.lookup(&BankLookupBy::Mask(mask));
-            }
+            let found = demo.bank_feed.lookup(&BankLookupBy::Account(id));
             drop(demo);
             self.lookup_task = Some(Task::ready(found));
             return;
@@ -528,11 +518,7 @@ impl ImportBankFileScreen {
         };
         self.lookup_task = group
             .read(&session, move |s| async move {
-                let by_number = s.bank_import().lookup(&BankLookupBy::Account(id)).await?;
-                if !by_number.is_empty() {
-                    return Ok(by_number);
-                }
-                s.bank_import().lookup(&BankLookupBy::Mask(mask)).await
+                s.bank_import().lookup(&BankLookupBy::Account(id)).await
             })
             .ok()
             .map(Task::Pending);

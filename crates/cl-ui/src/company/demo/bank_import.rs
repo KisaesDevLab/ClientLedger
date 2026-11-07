@@ -35,11 +35,10 @@ fn demo_hash(id: &BankIdentity) -> String {
     crate::screens::import_bank_file::flow::sha256_hex(text.as_bytes())
 }
 
-/// The mask the engine stores (the reader's masking rule).
+/// The mask the engine stores: the last 4 characters of the number.
 fn demo_mask(id: &BankIdentity) -> String {
-    cl_import::normalize::AccountId::new(id.bank_id.as_deref(), &id.acct_id)
-        .map(|a| a.mask())
-        .unwrap_or_default()
+    let chars: Vec<char> = id.acct_id.trim().chars().collect();
+    chars[chars.len().saturating_sub(4)..].iter().collect()
 }
 use cl_core::ids::AccountId;
 use cl_core::{Money, Timestamp};
@@ -402,27 +401,38 @@ impl DemoBankFeed {
             .map(|b| (b.flipped, b.mapping.clone()))
     }
 
-    /// The accounts a file identity was linked to.
+    /// The accounts a file identity was linked to: by the account
+    /// number's hash, else (like the engine) by its last 4 characters.
     #[must_use]
     pub fn lookup(&self, by: &BankLookupBy) -> Vec<ConnectionMatch> {
-        let hash = match by {
-            BankLookupBy::Account(id) => Some(demo_hash(id)),
-            BankLookupBy::Mask(_) => None,
-        };
+        if let BankLookupBy::Account(id) = by {
+            let hash = demo_hash(id);
+            let found = self.matches(|i| i.hash == hash, BankLookupVia::Hash);
+            if !found.is_empty() {
+                return found;
+            }
+            let mask = demo_mask(id);
+            return self.matches(|i| i.mask == mask, BankLookupVia::Mask);
+        }
+        match by {
+            BankLookupBy::Mask(m) => self.matches(|i| &i.mask == m, BankLookupVia::Mask),
+            BankLookupBy::Account(_) => Vec::new(),
+        }
+    }
+
+    fn matches(
+        &self,
+        keep: impl Fn(&Identity) -> bool,
+        via: BankLookupVia,
+    ) -> Vec<ConnectionMatch> {
         self.identities
             .iter()
-            .filter(|i| match by {
-                BankLookupBy::Account(_) => Some(&i.hash) == hash.as_ref(),
-                BankLookupBy::Mask(m) => &i.mask == m,
-            })
+            .filter(|i| keep(i))
             .map(|i| ConnectionMatch {
                 account: i.account,
                 account_name: String::new(),
                 mask: Some(i.mask.clone()),
-                via: match by {
-                    BankLookupBy::Account(_) => BankLookupVia::Hash,
-                    BankLookupBy::Mask(_) => BankLookupVia::Mask,
-                },
+                via,
             })
             .collect()
     }
