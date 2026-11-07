@@ -43,6 +43,8 @@ use sha2::{Digest, Sha256};
 /// Since pin 9be6da51 (engine PRs #216-#221) the P23 sales tax routes are:
 /// setup, owed, exemptions, Pay Sales Tax, link and unlink, mark paid
 /// through and its undo, and bad-debt recoveries (U-147 to U-154).
+/// With the P24 engine branches (U-159, U-160, U-78, U-161) the inventory,
+/// report, reorder and unit-set routes are.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

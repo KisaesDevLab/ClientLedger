@@ -215,6 +215,7 @@ pub fn keyed_routes_replay(h: &Harness) {
                         contact: None,
                         billable: false,
                         tag: None,
+                        item: None,
                     }],
                 }),
                 schedule: None,

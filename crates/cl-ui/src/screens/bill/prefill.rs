@@ -109,6 +109,7 @@ pub(crate) fn last_form(
                 item: l.item,
                 description: desc(&l.description),
                 qty: l.quantity,
+                unit: l.unit,
                 rate: l.unit_price,
                 amount: Some(l.amount),
                 account: Some(l.account),

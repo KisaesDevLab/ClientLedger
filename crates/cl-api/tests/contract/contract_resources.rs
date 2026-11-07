@@ -137,6 +137,7 @@ pub fn items(h: &Harness) {
     let s = &h.s1;
     let income = account(h, s, AccountType::Revenue, "Sales");
     let fields = ItemFields {
+        purchase: cl_api::ItemPurchase::default(),
         name: unique("Widget"),
         description: Some("contract item".into()),
         unit_price: Some(m("19.9999")),

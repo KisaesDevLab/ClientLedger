@@ -1,0 +1,209 @@
+# Parts on Write Checks and Record Card Charge (P24 WP-3, U-158) against
+# `clientledger --demo` with inventory on: the Items tab beside Expenses,
+# a part bought by check (2 landscape fabric rolls at 30.00) and by card
+# (1 sprinkler head kit at 20.00), each saved and read back into its Items
+# tab; then a credit memo returns a roll sold on an invoice, linked to that
+# invoice in Return of (Q-P24e/u); last, a part with a unit set gets a
+# Unit column on Create Invoice (its sale unit at the engine's price in
+# it) and on the Write Checks Items tab (U-161). Synthetic.
+name: inventory_forms
+description: "Items tab on Write Checks and card charges; Return of; Unit column."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.inventory, equals: true}
+  - command: file.close_window
+
+  # --- Write Checks: a part on the Items tab ---------------------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.items_tab, equals: true}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "60.00", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  # The payee's last accounts came over on two Expenses lines: take them out.
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+Delete
+  - key: Ctrl+Delete
+  - assert_state: {key: screen.lines, equals: 0}
+  - click: {label_contains: "Items "}
+  - assert_state: {key: screen.tab, equals: items}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "30"}
+  - key: Tab
+  - wait: {ms: 300}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: check-items
+  - key: Alt+N
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  # Read back: the part comes back on the Items tab.
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.lines, equals: 0}
+  - assert_state: {key: screen.tab, equals: items}
+  - assert_state: {key: screen.dirty, equals: false}
+  - screenshot: check-read-back
+  - command: file.close_window
+
+  # --- Record Card Charge: a part bought by card -----------------------------
+  - key: Ctrl+Shift+C
+  - assert_state: {key: screen.screen, equals: card_charge}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.items_tab, equals: true}
+  - type: {text: Hollister Fuel, target: {role: text_input, label: Purchased from}}
+  - key: Tab
+  - type: {text: "20.00", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+Delete
+  - click: {label_contains: "Items "}
+  - assert_state: {key: screen.tab, equals: items}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Sprinkler"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "20"}
+  - key: Tab
+  - wait: {ms: 300}
+  - assert_state: {key: screen.item_lines, equals: 1}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: card-items
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_no_clipping: {}
+  - command: file.close_window
+
+  # --- Credit memo: Return of the invoice that sold the roll -------------------
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - type: {text: "34"}
+  - key: Tab
+  - wait: {ms: 800}
+  - key: Alt+S
+  - command: clients.credit_memo
+  - assert_state: {key: screen.screen, equals: credit_memo}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "Landscape"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - type: {text: "34"}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_state: {key: screen.returns.part_lines, equals: 1}
+  - assert_state: {key: screen.returns.linked, equals: 0}
+  - assert_exists: {role: combo_box, label: "Return of, line 1"}
+  - click: {role: combo_box, label: "Return of, line 1"}
+  - click: {role: button, label_contains: "Invoice ", index: 0}
+  - assert_state: {key: screen.returns.linked, equals: 1}
+  - screenshot: return-of
+  - key: Alt+N
+  - click: {role: radio_button, label: Keep as credit}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.returns.linked, equals: 1}
+  - command: file.close_window
+
+  # --- Units of measure: a part sold and bought by the case -------------------
+  - command: lists.unit_sets
+  - click: {role: button, label: New unit set}
+  - type: {text: "Bottle", target: {role: text_input, label: Set name}}
+  - type: {text: "bottle", target: {role: text_input, label: Base unit}}
+  - type: {text: "case", target: {role: text_input, label: "Unit name, row 1"}}
+  - type: {text: "12", target: {role: text_input, label: "Base units in one, row 1"}}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - command: file.close_window
+  - command: lists.items
+  - command: list.new
+  - click: {role: combo_box, label: Type}
+  - click: {role: button, label: Inventory part}
+  - type: {text: "House Red", target: {role: text_input, label: Item name}}
+  - type: {text: "4.50", target: {role: text_input, label: Sales price}}
+  - click: {role: combo_box, label: Unit set}
+  - click: {role: button, label: Bottle}
+  - click: {role: combo_box, label: Buy in}
+  - click: {role: button, label: case}
+  - click: {role: combo_box, label: Sell in}
+  - click: {role: button, label: case}
+  - command: form.save_close
+  - assert_state: {key: screen.panel, equals: none}
+  - command: file.close_window
+  - key: Ctrl+I
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Client}
+  - type: {text: "Long Creek"}
+  - key: Tab
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "House Red"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "2"}
+  - key: Tab
+  - assert_exists: {label_contains: "Unit, line 1"}
+  - key: Tab
+  - wait: {ms: 800}
+  - screenshot: invoice-unit
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - key: Ctrl+W
+  - click: {role: button, label: Clear}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "60.00", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - click: {label_contains: "Items "}
+  - click: {label_contains: "Item, line 1"}
+  - type: {text: "House Red"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Qty, line 1"}
+  - type: {text: "1"}
+  - key: Tab
+  - assert_exists: {label_contains: "Unit, line 1"}
+  - key: Tab
+  - type: {text: "60"}
+  - key: Tab
+  - wait: {ms: 300}
+  - screenshot: check-unit
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - command: lists.items
+  - command: dev.demo_inventory_reset
+  - command: file.close_window

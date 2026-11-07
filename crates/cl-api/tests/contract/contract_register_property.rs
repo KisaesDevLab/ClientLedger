@@ -171,6 +171,7 @@ fn split(account: AccountId, amount: Money) -> SplitLine {
         contact: None,
         billable: false,
         tag: None,
+        item: None,
     }
 }
 

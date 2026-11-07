@@ -59,6 +59,21 @@ pub struct Versioned<T> {
     pub record: T,
     /// Its version.
     pub version: RecordVersion,
+    /// The `NEGATIVE_STOCK` warnings of the save that answered with this
+    /// record (`warnings[]` beside it, `inventory-costing-v1`); empty on a
+    /// read. Never blocking (Q-148).
+    pub stock_warnings: Vec<crate::resources::inventory::NegativeStock>,
+}
+
+impl<T> Versioned<T> {
+    /// A record read at `version` (no warnings).
+    pub fn new(record: T, version: RecordVersion) -> Versioned<T> {
+        Versioned {
+            record,
+            version,
+            stock_warnings: Vec::new(),
+        }
+    }
 }
 
 /// The fields of a record that its edit form writes.
@@ -150,6 +165,7 @@ where
 {
     let mut root: Value =
         serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: key })?;
+    let stock_warnings = crate::resources::inventory::stock_warnings(&root);
     let inner = root
         .get_mut(key)
         .map(Value::take)
@@ -160,7 +176,11 @@ where
         || RecordVersion::Fingerprint(record.fingerprint()),
         RecordVersion::Server,
     );
-    Ok(Versioned { record, version })
+    Ok(Versioned {
+        record,
+        version,
+        stock_warnings,
+    })
 }
 
 /// [`versioned_from`] for the 2xx answer of a mutation: the save is

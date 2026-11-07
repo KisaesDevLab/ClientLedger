@@ -1,0 +1,5 @@
+# The engine's units-of-measure-v1 keyed route set (U-161, P24): creating a unit set,
+# `x-idempotency: true` in its openapi.json, with idempotency-v1's contract. Append-only for
+# this capability name: `keyable-unit-sets` in operations.txt (`KeySet::UnitSetsV1`), keyed
+# only while the engine advertises `units-of-measure-v1`.
+POST /api/v1/unit-sets

@@ -266,14 +266,136 @@ fn warnings_without_a_selection_and_with_a_dirty_form() {
 fn an_engine_name_conflict_reads_like_the_local_check() {
     let mut r = Rig::new();
     r.cmd("list.new");
-    r.form().save_failed(ApiError::Conflict {
-        reason: ConflictReason::AlreadyExists,
-        current_version: None,
-        code: None,
-        message: UserText::default(),
-        details: cl_api::ConflictDetails::default(),
-    });
+    r.form().save_failed(
+        ApiError::Conflict {
+            reason: ConflictReason::AlreadyExists,
+            current_version: None,
+            code: None,
+            message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        },
+        None,
+    );
     assert_eq!(r.form().problems, vec![ItemProblem::NameTaken]);
-    r.form().save_failed(ApiError::NotFound { code: None });
+    r.form()
+        .save_failed(ApiError::NotFound { code: None }, None);
     assert!(r.form().error.is_some());
+}
+
+/// P24: with inventory on, a new part takes its accounts and opening
+/// stock; an opening in the closed period is refused in plain words.
+#[test]
+fn a_new_part_with_opening_stock() {
+    let mut r = Rig::new();
+    assert!(r.cmd("dev.demo_inventory_reset"));
+    assert_eq!(r.state("inventory"), true);
+    assert_eq!(r.state("kinds_available"), 6);
+    assert!(r.cmd("list.new"));
+    {
+        let f = r.form();
+        let mut d = f.form.current().clone();
+        d.kind = ItemKind::InventoryPart;
+        d.name = "Edging Stake".into();
+        d.part.opening_quantity = "50".into();
+        d.part.opening_value = "62.50".into();
+        d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 9, 30).ok();
+        f.form.edit(99, |x| *x = d);
+    }
+    r.s.save_form(SaveIntent::SaveAndClose);
+    assert_eq!(r.state("part_problems")[0], "closed_period");
+    {
+        let f = r.form();
+        let mut d = f.form.current().clone();
+        d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 10, 5).ok();
+        f.form.edit(99, |x| *x = d);
+    }
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    let mut demo = r.link.demo_state().expect("demo");
+    let made = demo
+        .items_mut()
+        .iter()
+        .find(|i| i.fields.name == "Edging Stake")
+        .cloned()
+        .expect("made");
+    assert_eq!(
+        made.stock.quantity_on_hand,
+        cl_core::Quantity::parse_wire("50").ok()
+    );
+    assert_eq!(
+        made.stock.asset_value,
+        cl_core::Money::parse_wire("62.50").ok()
+    );
+    assert!(made.fields.purchase.asset_account_id.is_some());
+}
+
+/// P24 review D1: an item saved from the list sends its `updatedAt` as
+/// read (`expectedUpdatedAt`), so a change saved elsewhere since is 409
+/// `STALE`, not overwritten.
+#[test]
+fn a_live_item_save_sends_expected_updated_at() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let item = r#"{"id":"d0000000-0000-4000-8000-b00000000010","name":"Widget",
+        "incomeAccountId":"d0000000-0000-4000-8000-a00000004000","itemType":"inventory_part",
+        "unitPrice":"9.0000","assetAccountId":"d0000000-0000-4000-8000-a00000001300",
+        "cogsAccountId":"d0000000-0000-4000-8000-a00000005000","isActive":true,
+        "updatedAt":"2026-10-01T10:00:00.000Z"}"#;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let body: serde_json::Value = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"mode":"desktop","initialized":true,"capabilities":["item-types-v1"]}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        // The fingerprint check reads the item; the name check the list.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/items/d0000000-0000-4000-8000-b00000000010"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(format!(r#"{{"item":{item}}}"#), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/items"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"data":[],"total":0}"#, "application/json"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(format!(r#"{{"item":{item}}}"#), "application/json"),
+            )
+            .mount(&server)
+            .await;
+        let session = cl_api::testing::stub_session(server.address().port());
+        session.client().desktop_info().await.expect("info");
+        let it: cl_api::Item = serde_json::from_str(item).expect("item");
+        let update = cl_api::ItemUpdate {
+            fields: it.fields.clone(),
+            is_active: true,
+        };
+        super::save_existing(&session, &it, &update, cl_api::IdempotencyKey::new())
+            .await
+            .expect("saved");
+        let put = server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .into_iter()
+            .find(|r| r.method.as_str() == "PUT")
+            .expect("one PUT");
+        serde_json::from_slice(&put.body).expect("json")
+    });
+    assert_eq!(body["expectedUpdatedAt"], "2026-10-01T10:00:00.000Z");
 }

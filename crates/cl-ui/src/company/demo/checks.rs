@@ -210,6 +210,21 @@ fn save(
         .into_iter()
         .chain([d.date])
         .collect();
+    // P24: parts bought by check move stock; the closed-period gate comes
+    // before the closing-date password (Q-P24b).
+    let stock_lines = super::stock::unit_lines(
+        state,
+        super::stock::Side::Receipt,
+        d.lines.iter().map(|l| {
+            (
+                l.item.as_ref().map(|i| i.item),
+                l.item.as_ref().and_then(|i| i.quantity),
+                l.amount,
+                l.item.as_ref().and_then(|i| i.unit),
+            )
+        }),
+    )?;
+    super::stock::gate(state, existing.map(|(id, _)| id), d.date, &stock_lines)?;
     check_closing(closing(state), &dates, password)?;
     let total = Money::sum(d.lines.iter().map(|l| l.amount)).map_err(|_| invalid())?;
     if d.lines.is_empty() || total != d.amount {
@@ -259,6 +274,9 @@ fn save(
         .map(|l| (l.memo.clone(), tag_name(state, l.tag)))
         .collect();
     state.ledger.set_line_details(&chart, id, d.bank, &details);
+    let items: Vec<Option<cl_api::SplitItem>> = d.lines.iter().map(|l| l.item.clone()).collect();
+    state.ledger.set_line_items(&chart, id, d.bank, items);
+    super::stock::post(state, id, cl_api::TxnType::Expense, d.date, &stock_lines)?;
     let print_status = if d.print_later {
         PrintStatus::Queue
     } else {
@@ -503,8 +521,10 @@ pub fn void(
         .ledger
         .date_of(id)
         .ok_or(ApiError::NotFound { code: None })?;
+    super::stock::gate_remove(state, id)?;
     check_closing(closing(state), &[old], password)?;
     state.ledger.void(id)?;
+    super::stock::remove(state, id)?;
     // U-115: a check voided while waiting to print leaves the queue with
     // no print status.
     if let Some(i) = state.checks.info.get_mut(&id)
@@ -562,7 +582,11 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<CheckRe
         }
     }
     let version = RecordVersion::Fingerprint(record.fingerprint());
-    Some(Versioned { record, version })
+    Some(Versioned {
+        record,
+        version,
+        stock_warnings: Vec::new(),
+    })
 }
 
 /// The checks drawn on `bank`, newest first (as `GET /checks` sends them).
@@ -1166,6 +1190,7 @@ mod tests {
                     contact: None,
                     billable: false,
                     tag: None,
+                    item: None,
                 },
                 SplitLine {
                     account: mulch,
@@ -1174,6 +1199,7 @@ mod tests {
                     contact: None,
                     billable: false,
                     tag: None,
+                    item: None,
                 },
             ],
         }

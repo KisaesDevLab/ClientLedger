@@ -38,6 +38,7 @@ pub(crate) mod deposit_card;
 pub(crate) mod draw;
 pub(crate) mod email;
 pub(crate) mod engine;
+pub(crate) mod returns;
 mod save;
 
 use std::collections::{BTreeMap, HashMap};
@@ -392,6 +393,10 @@ pub struct InvoiceScreen {
     pub(crate) problems: Vec<InvoiceProblem>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
+    /// P24: an inventory refusal in plain words (closed period).
+    pub(crate) inventory_note: Option<String>,
+    /// P24: the Return of pickers' sales (credit memos).
+    pub(crate) returns: returns::Returns,
     pub(crate) stale: bool,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) void_open: bool,
@@ -512,6 +517,8 @@ impl InvoiceScreen {
             problems: Vec::new(),
             error: None,
             notice: None,
+            inventory_note: None,
+            returns: returns::Returns::default(),
             stale: false,
             closing_prompt: ClosingPrompt::default(),
             void_open: false,
@@ -768,7 +775,34 @@ impl InvoiceScreen {
         self.item_set_up_back();
     }
 
+    /// Every item's id and name (the NEGATIVE_STOCK warning names it).
+    pub(crate) fn item_names(&self) -> Vec<(cl_core::ids::ItemId, String)> {
+        self.items
+            .iter()
+            .map(|i| (i.id, i.fields.name.clone()))
+            .collect()
+    }
+
+    /// P24 (Q-P24b): parts dated (or moved from a date) on or before the
+    /// closing date are refused, password or not.
+    pub(crate) fn inventory_closed(
+        &self,
+        req: &cl_model::forms::invoice::InvoiceRequest,
+    ) -> Option<String> {
+        let has_parts = req.lines.iter().any(|l| {
+            l.item.is_some_and(|id| {
+                self.items
+                    .iter()
+                    .any(|i| i.id == id && i.fields.item_type == cl_api::ItemType::InventoryPart)
+            })
+        });
+        let old = self.editing.as_ref().map(|e| e.old_date);
+        let dates: Vec<_> = old.into_iter().chain([req.date]).collect();
+        crate::screens::inventory::closed_for_parts(has_parts, &dates, self.books.closing)
+    }
+
     pub(crate) fn poll(&mut self) {
+        self.poll_returns();
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
@@ -788,6 +822,20 @@ impl InvoiceScreen {
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
                 Ok((v, duplicate)) => {
+                    self.inventory_note = None;
+                    // P24: NEGATIVE_STOCK warnings, never blocking (the
+                    // demo keeps its own; a live reply carries them).
+                    let names = self.item_names();
+                    if self.link.is_demo() {
+                        crate::screens::inventory::announce_demo(&self.link, &names);
+                    } else {
+                        let live = match &v {
+                            SavedDoc::CreditMemo(r) => r.stock_warnings.as_slice(),
+                            SavedDoc::SalesReceipt(r) => r.stock_warnings.as_slice(),
+                            SavedDoc::Invoice(_) => &[],
+                        };
+                        crate::screens::inventory::announce(&self.link, live, &names);
+                    }
                     self.saved(v);
                     self.duplicate_number = duplicate;
                     if duplicate {
@@ -1188,6 +1236,7 @@ impl InvoiceScreen {
             "lost": self.lost.state_json(),
             "grid": { "focused": self.grid.has_focus() },
         });
+        v["returns"] = self.returns_json();
         v["next_number"] = json!(self.next_number);
         v["client_locked"] = json!(self.client_lock());
         v["deposits_on_hand"] = json!(self.deposit_card.count());

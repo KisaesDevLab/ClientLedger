@@ -488,11 +488,13 @@ pub(crate) fn form_doc(f: &QueuedForm, address: &[String], lines: &[(String, Mon
 }
 
 /// A form's income lines from its transaction: credits other than the
-/// receivable or the deposit account.
+/// receivable or the deposit account. Engine-made inventory lines (cost of
+/// goods sold, relief, corrections) never print (P24 §3 Loaders).
 #[must_use]
 pub(crate) fn form_lines(t: &Transaction) -> Vec<(String, Money)> {
     t.lines
         .iter()
+        .filter(|l| !l.is_inventory_derived())
         .filter(|l| l.credit.is_positive())
         .map(|l| {
             (
@@ -562,6 +564,30 @@ pub(crate) fn company(name: &str, lines: Vec<String>) -> CompanyInfo {
 mod tests {
     use super::*;
     use cl_core::ids::TransactionId;
+
+    /// P24: an engine-made inventory line that leaked into `lines` never
+    /// prints on the form.
+    #[test]
+    fn derived_inventory_lines_never_print() {
+        let t: Transaction = serde_json::from_value(serde_json::json!({
+            "id": "d1000000-0000-4000-8000-000000000001",
+            "txnType": "invoice",
+            "txnDate": "2026-11-02",
+            "status": "posted",
+            "lines": [
+                {"id": "d1000000-0000-4000-8000-0000000000a1",
+                 "accountId": "d0000000-0000-4000-8000-a00000004000", "debit": "0.0000",
+                 "credit": "40.0000", "description": "Mulch"},
+                {"id": "d1000000-0000-4000-8000-0000000000a2",
+                 "accountId": "d0000000-0000-4000-8000-a00000001300", "debit": "0.0000",
+                 "credit": "14.3500", "lineRole": "inventory_relief"},
+            ],
+        }))
+        .expect("transaction");
+        let lines = form_lines(&t);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, "Mulch");
+    }
 
     fn m(s: &str) -> Money {
         Money::parse_wire(s).expect("money")

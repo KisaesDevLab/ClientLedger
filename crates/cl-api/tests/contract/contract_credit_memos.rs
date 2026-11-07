@@ -130,6 +130,7 @@ pub(crate) fn seed(h: &Harness, s: &Session, name: &str) -> Seed {
 fn item(h: &Harness, s: &Session, income: AccountId, name: &str, price: &str, tax: bool) -> ItemId {
     h.run(s.items().create(
         &ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: unique(name),
             description: None,
             unit_price: Some(m(price)),

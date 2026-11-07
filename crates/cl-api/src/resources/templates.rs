@@ -499,6 +499,7 @@ impl<'a> Reader<'a> {
             contact: self.id("contactId")?,
             billable: self.flag("isBillable")?,
             tag: self.id("tagId")?,
+            item: None,
         })
     }
 

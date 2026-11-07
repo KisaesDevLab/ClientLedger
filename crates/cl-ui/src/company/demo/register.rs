@@ -386,6 +386,9 @@ pub struct DemoLedger {
     /// payment, a daily-sales day or a vendor credit) with their amounts.
     /// A void or deleted deposit releases them.
     links: std::collections::BTreeMap<u32, Vec<(u32, Money)>>,
+    /// P24: the item fields of a posting's lines other than its own
+    /// account's (a check's or card charge's Items lines), in line order.
+    items: std::collections::BTreeMap<u32, (String, Vec<Option<cl_api::SplitItem>>)>,
 }
 
 /// The demo company's closing-date password (synthetic; the demo plays an
@@ -734,6 +737,29 @@ impl DemoLedger {
         }
     }
 
+    /// P24: the item, quantity and cost of each line other than `own`'s
+    /// (in line order; `None` for a line without an item).
+    pub fn set_line_items(
+        &mut self,
+        chart: &[Account],
+        id: TransactionId,
+        own: AccountId,
+        items: Vec<Option<cl_api::SplitItem>>,
+    ) {
+        let own_number = chart
+            .iter()
+            .find(|a| a.id == own)
+            .and_then(number_of)
+            .map(str::to_string)
+            .unwrap_or_default();
+        let Some(n) = sample_id(id) else { return };
+        if items.iter().all(Option::is_none) {
+            self.items.remove(&n);
+        } else {
+            self.items.insert(n, (own_number, items));
+        }
+    }
+
     /// Records (or, with `existing`, replaces) a posting; `None` when an
     /// account is not in the chart or the transaction is unknown.
     pub fn save(
@@ -891,7 +917,27 @@ impl DemoLedger {
                 billed_status: None,
                 source_transaction_id: None,
                 line_role: None,
+                item_id: None,
+                quantity: None,
+                unit_price: None,
+                unit_id: None,
             });
+        }
+        // P24: the Items lines keep their item, quantity and cost.
+        if let Some((own, items)) = self.items.get(&t.id) {
+            let others = lines
+                .iter_mut()
+                .zip(&t.lines)
+                .filter(|(_, l)| &l.account != own)
+                .map(|(x, _)| x);
+            for (l, i) in others.zip(items) {
+                if let Some(i) = i {
+                    l.item_id = Some(i.item);
+                    l.quantity = i.quantity;
+                    l.unit_price = i.unit_price;
+                    l.unit_id = i.unit;
+                }
+            }
         }
         let record = cl_api::Transaction {
             id: txn_id(&t),
@@ -917,9 +963,14 @@ impl DemoLedger {
             reverses_transaction_id: None,
             reversal_transaction_id: None,
             reverse_on: None,
+            inventory_lines: Vec::new(),
         };
         let version = cl_api::RecordVersion::Fingerprint(record.fingerprint());
-        Some(cl_api::Versioned { record, version })
+        Some(cl_api::Versioned {
+            record,
+            version,
+            stock_warnings: Vec::new(),
+        })
     }
 }
 

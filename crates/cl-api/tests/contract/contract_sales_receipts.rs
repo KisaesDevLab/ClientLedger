@@ -57,6 +57,7 @@ pub fn sales_receipt_items_tax(h: &Harness) {
     let leash = h
         .run(s.items().create(
             &ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: unique("Leash"),
                 description: None,
                 unit_price: Some(m("49.99")),

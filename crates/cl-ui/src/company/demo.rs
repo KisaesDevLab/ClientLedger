@@ -17,6 +17,8 @@ pub mod deposits;
 pub mod drafts;
 pub mod home;
 pub mod intake;
+// P24: average costing (held to fixtures/inventory/golden.json).
+pub mod inventory;
 pub mod invoices;
 pub mod journal;
 pub mod lists;
@@ -37,9 +39,12 @@ pub mod register;
 pub mod sales_tax;
 // P23 WP-3: owed, Pay Sales Tax, exemption certificates, recoveries.
 pub mod sales_tax_owed;
+// P24 WP-2: documents feed the inventory ledger; the inventory routes.
 pub mod statements;
+pub mod stock;
 pub mod template_store;
 pub mod templates;
+pub mod units;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +160,10 @@ pub struct DemoState {
     pub finance: finance_charges::DemoFinance,
     /// Sales tax setup, switches and stored tax rows (P23).
     pub sales_tax: sales_tax::DemoSalesTax,
+    /// Inventory movements and the costing replay (P24).
+    pub inventory: inventory::DemoInventory,
+    /// P24: unit sets (U-161).
+    pub units: units::DemoUnits,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -278,6 +287,8 @@ impl DemoState {
             statements: statements::DemoStatements::default(),
             finance: finance_charges::DemoFinance::default(),
             sales_tax: sales_tax::DemoSalesTax::default(),
+            inventory: inventory::DemoInventory::default(),
+            units: units::DemoUnits::default(),
         }
     }
 

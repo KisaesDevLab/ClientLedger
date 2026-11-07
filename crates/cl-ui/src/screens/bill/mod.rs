@@ -235,6 +235,8 @@ pub(crate) struct SaveState {
     pub error: Option<ApiError>,
     /// The engine's refusal of the save, void or delete (i18n key).
     pub refusal: Option<&'static str>,
+    /// P24: an inventory refusal in plain words (closed period).
+    pub inventory: Option<String>,
     /// The bill changed somewhere else since it was read.
     pub stale: bool,
     pub count: u32,

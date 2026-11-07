@@ -1,0 +1,35 @@
+# Physical Inventory Count (P24 WP-2, Q-P24g) against
+# `clientledger --demo`: a count typed, a sale posted "in another window",
+# Post meets 409 STALE: the sheet is read again, the count kept and the
+# changed row highlighted; post again; the printable count sheet.
+# Synthetic.
+name: inventory_count
+description: "Count worksheet, stale reload with changed rows, count sheet print."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.physical_count
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.screen, equals: inventory_count}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_state: {key: screen.can_post, equals: false}
+  - assert_disabled: {role: button, label: Post the count}
+  - click: {role: text_input, label: Counted Hardwood Mulch Bag}
+  - type: {text: "110"}
+  - assert_state: {key: screen.can_post, equals: true}
+  - screenshot: counting
+  - assert_no_clipping: {}
+  - command: dev.demo_inventory_sale
+  - click: {role: button, label: Post the count}
+  - assert_state: {key: screen.posted, equals: 0}
+  - assert_state: {key: screen.changed, equals: 1}
+  - assert_state: {key: screen.counted, equals: 1}
+  - assert_state: {key: screen.notice, equals: true}
+  - screenshot: stale-reload
+  - click: {role: button, label: Post the count}
+  - assert_state: {key: screen.posted, equals: 1}
+  - click: {role: check_box, label: Show on hand on the sheet}
+  - click: {role: button, label: Print count sheet}
+  - screenshot: count-sheet
+  - command: file.close_window
+  - command: file.close_window

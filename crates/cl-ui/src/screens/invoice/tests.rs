@@ -943,3 +943,28 @@ fn the_document_sales_tax_comes_from_the_picker_and_the_engine() {
         assert!(crate::i18n::has(k), "{k}");
     }
 }
+
+/// P24 review note: parts removed from a document in a closed period pass
+/// the form's own check (it looks at the lines being saved), so the
+/// closing-date password is asked; the engine's 409
+/// `INVENTORY_PERIOD_CLOSED` then closes the dialog and says, in plain
+/// words, that no password lifts it.
+#[test]
+fn removing_parts_from_a_closed_document_ends_in_the_plain_message() {
+    let (_d, mut s) = screen();
+    let closed = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    s.books.closing = Some(closed);
+    s.closing_prompt
+        .ask(Pending::Save(SaveIntent::Save), true, Some(closed));
+    s.closing_prompt.password = crate::screens::company::form::SecretText::from("pw");
+    assert!(s.closing_prompt.submit().is_some());
+    s.intent = Some(SaveIntent::Save);
+    let e = cl_api::engine_refusal(
+        409,
+        &serde_json::json!({"error": {"message": "closed", "code": "INVENTORY_PERIOD_CLOSED"}}),
+    );
+    s.save_failed(e);
+    assert!(!s.closing_prompt.dialog_open(), "the dialog closes");
+    let note = s.inventory_note.clone().expect("the plain message");
+    assert!(note.contains("even with the closing password"), "{note}");
+}

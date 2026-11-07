@@ -340,6 +340,8 @@ pub const COMMANDS: &[Command] = &[
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
     built("lists.price_levels", "Price Levels", Some(Menu::Lists), 0, None),
+    // P24 (U-161): unit sets for inventory parts.
+    built("lists.unit_sets", "Unit Sets", Some(Menu::Lists), 0, None),
     built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
     built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
     built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
@@ -387,6 +389,11 @@ pub const COMMANDS: &[Command] = &[
     // P23 WP-3: the liability report and Pay Sales Tax (no shortcut).
     built("vendors.sales_tax_owed", "Sales Tax Owed", Some(Menu::Vendors), 3, None),
     built("vendors.pay_sales_tax", "Pay Sales Tax", Some(Menu::Vendors), 3, None),
+    // P24: inventory (WP-2 builds the screens; Home's reorder line opens
+    // Items to Reorder). No shortcuts.
+    built("vendors.adjust_inventory", "Adjust Quantity/Value on Hand", Some(Menu::Vendors), 4, None),
+    built("vendors.physical_count", "Physical Inventory Count", Some(Menu::Vendors), 4, None),
+    built("vendors.items_to_reorder", "Items to Reorder", Some(Menu::Vendors), 4, None),
     // P17: the receipt inbox (the menu shows its count, Q-P17t) and the
     // vendor statement match; no shortcut
     built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),
@@ -417,6 +424,10 @@ pub const COMMANDS: &[Command] = &[
     screen("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None, "P28"),
     screen("reports.balance_sheet", "Balance Sheet", Some(Menu::Reports), 1, None, "P28"),
     screen("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T'), "P28"),
+    // P24 (Q-P24n): the inventory reports; print and export come with P28.
+    built("reports.inventory_value", "Inventory Value", Some(Menu::Reports), 2, None),
+    built("reports.inventory_value_detail", "Inventory Value Detail", Some(Menu::Reports), 2, None),
+    built("reports.stock_status", "Stock Status", Some(Menu::Reports), 2, None),
     // Company
     built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
     // P19: logo, form footers and document numbering (no shortcut)
@@ -503,6 +514,14 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_mark_paid_reset",
         "Reset Demo Mark Paid Through (developer)",
     ),
+    // P24: the inventory scenarios run light and dark in one app; this
+    // puts the demo's inventory back to its switched-on seed. The second
+    // posts a sale "from another window" for the stale count sheet.
+    dev_action(
+        "dev.demo_inventory_reset",
+        "Reset Demo Inventory (developer)",
+    ),
+    dev_action("dev.demo_inventory_sale", "Demo Inventory Sale (developer)"),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -637,6 +656,14 @@ mod tests {
             "vendors.sales_tax_owed",
             "vendors.pay_sales_tax",
             "clients.recover_bad_debt",
+            // P24
+            "vendors.adjust_inventory",
+            "vendors.physical_count",
+            "vendors.items_to_reorder",
+            "reports.inventory_value",
+            "reports.inventory_value_detail",
+            "reports.stock_status",
+            "lists.unit_sets",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

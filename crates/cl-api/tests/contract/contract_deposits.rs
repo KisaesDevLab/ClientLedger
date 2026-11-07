@@ -244,6 +244,7 @@ pub fn fees_and_cash_back(h: &Harness) {
         contact: None,
         billable: false,
         tag: None,
+        item: None,
     };
     let mut d = DepositDraft::plain(
         bank,
@@ -337,6 +338,7 @@ pub fn closed_period(h: &Harness) {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         ))
         .expect("deposit")
@@ -626,6 +628,7 @@ pub fn clearing_warning_on_create_and_edit(h: &Harness) {
                     contact: None,
                     billable: false,
                     tag: None,
+                    item: None,
                 }],
             ),
             caps(h),

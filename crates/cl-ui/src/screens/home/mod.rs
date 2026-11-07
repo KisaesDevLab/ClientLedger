@@ -182,6 +182,9 @@ pub(crate) struct HomeData {
     pub outbox: Slot<u64>,
     /// Sales tax owed today, every agency (P23, Q-P23l): the engine's total.
     pub sales_tax: Slot<cl_core::Money>,
+    /// Parts at or below their reorder point (P24, U-78); `None` while the
+    /// company does not track inventory (Q-P24j).
+    pub reorder: Slot<Option<u64>>,
 }
 
 impl HomeData {
@@ -201,6 +204,7 @@ impl HomeData {
             || self.documents.loading()
             || self.outbox.loading()
             || self.sales_tax.loading()
+            || self.reorder.loading()
     }
 }
 
@@ -404,6 +408,20 @@ impl HomeScreen {
             |_| Ok(demo::checklist_facts()),
             |s| async move { checklist::read(&s).await },
         ));
+        if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::REORDER_ALERTS)
+        {
+            self.data.reorder.start(run(
+                &self.link,
+                group,
+                None,
+                |s| Ok(attention::reorder_demo(s)),
+                attention::reorder_count,
+            ));
+        }
         let tenant = self.tenant.as_ref().map(|(t, _)| *t);
         self.data.documents.start(run(
             &self.link,
@@ -509,6 +527,7 @@ impl HomeScreen {
         self.data.checklist.poll();
         self.data.documents.poll();
         self.data.sales_tax.poll();
+        self.data.reorder.poll();
         if self.data.outbox.poll()
             && let Some(n) = self.data.outbox.value
         {

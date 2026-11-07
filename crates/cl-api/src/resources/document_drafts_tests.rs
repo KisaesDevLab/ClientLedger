@@ -471,6 +471,7 @@ async fn convert_builds_each_kind_with_the_typed_builders() {
         contact: None,
         billable: false,
         tag: None,
+        item: None,
     };
     let charge = CardChargeDraft {
         pay_from: acct(CARD),

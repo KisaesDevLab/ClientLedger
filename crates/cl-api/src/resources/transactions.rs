@@ -23,8 +23,8 @@
 
 use std::collections::BTreeSet;
 
-use cl_core::ids::{AccountId, ContactId, JournalLineId, TagId, TransactionId};
-use cl_core::{CalendarDate, Money, Timestamp};
+use cl_core::ids::{AccountId, ContactId, ItemId, JournalLineId, TagId, TransactionId};
+use cl_core::{CalendarDate, Money, Quantity, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -95,6 +95,9 @@ pub enum TxnType {
     /// Cr the write-off account and Sales Tax Payable; the invoice reopens.
     /// Posted only by `POST /payments/write-off-recoveries`.
     BadDebtRecovery,
+    /// An inventory adjustment (P24, U-159, `inventory-adjust-v1`): Dr/Cr
+    /// the item's asset account against the adjustment account.
+    InventoryAdjustment,
 }
 
 impl TxnType {
@@ -721,10 +724,80 @@ pub struct TransactionLine {
     /// never part of a fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_role: Option<String>,
+    /// The item on a check, card-charge or bill line (`inventory-costing-v1`;
+    /// display and form loading only, never part of a fingerprint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<ItemId>,
+    /// The line's quantity (with `item_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<Quantity>,
+    /// The line's cost per unit (with `item_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_price: Option<Money>,
+    /// The unit `quantity` and `unit_price` are in (`units-of-measure-v1`,
+    /// U-161; `None`: the item's base unit). Form loading only, never part
+    /// of a fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_id: Option<cl_core::ids::UnitId>,
 }
 
 /// `line_role` of a deposit's cash-back line.
 pub const LINE_ROLE_CASH_BACK: &str = "cash_back";
+
+/// The engine-made inventory line roles (P24 §2.1: cost of goods sold,
+/// inventory relief, cost correction, cost residual). They belong to the
+/// engine's costing walk: readers return them in `inventoryLines[]`, never
+/// in `lines`, and a client may never send them (400).
+pub const INVENTORY_DERIVED_ROLES: [&str; 4] = [
+    "cogs",
+    "inventory_relief",
+    "cost_correction",
+    "cost_residual",
+];
+
+/// Whether `role` is an engine-made inventory role (never a form row, never
+/// sent back, never part of a fingerprint).
+#[must_use]
+pub fn is_inventory_derived(role: Option<&str>) -> bool {
+    role.is_some_and(|r| INVENTORY_DERIVED_ROLES.contains(&r))
+}
+
+impl TransactionLine {
+    /// An engine-made inventory line that leaked into `lines` (defensive:
+    /// the engine returns them in `inventoryLines[]`, P24 §2.3 B3).
+    #[must_use]
+    pub fn is_inventory_derived(&self) -> bool {
+        is_inventory_derived(self.line_role.as_deref())
+    }
+}
+
+/// One engine-made inventory line of a document (`inventoryLines[]`, P24
+/// §2.3): cost of goods sold, relief, a cost correction or a residual.
+/// Display only: never a form row, never sent back, never summed by the
+/// desktop.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryLine {
+    /// `cogs`, `inventory_relief`, `cost_correction` or `cost_residual`
+    /// (kept as sent so a later role still reads).
+    pub role: String,
+    /// The account it posts to.
+    pub account_id: AccountId,
+    /// The signed amount as the engine reports it (debit positive).
+    pub amount: Money,
+    /// The inventory movement it belongs to.
+    #[serde(default)]
+    pub movement_id: Option<String>,
+}
+
+impl std::fmt::Debug for InventoryLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InventoryLine")
+            .field("role", &self.role)
+            .field("account_id", &self.account_id)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Whether a billable line was invoiced yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -797,6 +870,35 @@ pub struct Transaction {
     /// On a reversed entry: the live reversal's date (`je-reversing-v1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reverse_on: Option<CalendarDate>,
+    /// The engine-made inventory lines (`inventory-costing-v1`): outside
+    /// `lines`, never sent back, never part of a fingerprint (P24 §2.3).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::resources::customer_payments::null_vec"
+    )]
+    pub inventory_lines: Vec<InventoryLine>,
+}
+
+impl Transaction {
+    /// Whether the transaction carries engine-made inventory lines: it
+    /// opens in its own form or read-only, never in the register's inline
+    /// editor (P24 §3 Loaders).
+    #[must_use]
+    pub fn has_inventory_lines(&self) -> bool {
+        !self.inventory_lines.is_empty()
+            || self.lines.iter().any(TransactionLine::is_inventory_derived)
+    }
+
+    /// The transaction without engine-made inventory lines in `lines`
+    /// (defensive, P24 §3 Loaders: a form never turns them into rows; the
+    /// engine sends them in `inventoryLines[]`).
+    #[must_use]
+    pub fn document_only(&self) -> Transaction {
+        let mut t = self.clone();
+        t.lines.retain(|l| !l.is_inventory_derived());
+        t
+    }
 }
 
 impl EditableFields for Transaction {
@@ -823,7 +925,12 @@ impl EditableFields for Transaction {
     ];
 
     fn editable(&self) -> Value {
-        let mut lines: Vec<&TransactionLine> = self.lines.iter().collect();
+        // Engine-made inventory lines are never the owner's (P24 B3).
+        let mut lines: Vec<&TransactionLine> = self
+            .lines
+            .iter()
+            .filter(|l| !l.is_inventory_derived())
+            .collect();
         lines.sort_by_key(|l| l.line_order.unwrap_or(0));
         let lines = lines
             .into_iter()

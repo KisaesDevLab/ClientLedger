@@ -93,6 +93,7 @@ fn card() -> CheckedCard {
         memo: Some("November supplies".into()),
         header_tags: vec![tag(1)],
         lines: lines(),
+        item_lines: Vec::new(),
     }
 }
 
@@ -163,6 +164,7 @@ fn check() -> CheckedCheck {
         header_tags: vec![tag(3)],
         lines: lines(),
         draft_attachment: None,
+        item_lines: Vec::new(),
     }
 }
 
@@ -226,6 +228,7 @@ fn bill() -> CheckedBill {
             item: Some(item(1)),
             description: Some("Rollers".into()),
             qty: Some(Quantity::parse_wire("2.5").expect("qty")),
+            unit: None,
             rate: Some(money("9.00")),
             amount: money("22.50"),
             account: account(14),

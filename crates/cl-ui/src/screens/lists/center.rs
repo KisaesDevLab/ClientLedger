@@ -668,6 +668,7 @@ impl CenterScreen {
             Task::ready(Versioned {
                 version: RecordVersion::Fingerprint(changed.fingerprint()),
                 record: changed,
+                stock_warnings: Vec::new(),
             })
         } else {
             let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -831,6 +832,7 @@ impl CenterScreen {
                 m.task = Some(Task::ready(Versioned {
                     version: RecordVersion::Fingerprint(kept.fingerprint()),
                     record: kept,
+                    stock_warnings: Vec::new(),
                 }));
             }
             return;

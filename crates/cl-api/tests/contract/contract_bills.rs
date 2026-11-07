@@ -815,6 +815,7 @@ pub fn stale_u84(h: &Harness) {
             ..third.record.clone()
         },
         version: third.version,
+        stock_warnings: Vec::new(),
     };
     let e = h
         .run(s.bills().update(
@@ -915,6 +916,7 @@ pub fn item_lines_u85(h: &Harness) {
     let item = h
         .run(s.items().create(
             &cl_api::ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: unique("Hydraulic filter"),
                 description: None,
                 unit_price: None,

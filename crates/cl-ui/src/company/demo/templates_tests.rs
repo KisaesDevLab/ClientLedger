@@ -41,6 +41,7 @@ fn card(amount: &str) -> TemplateDraft {
             contact: None,
             billable: false,
             tag: None,
+            item: None,
         }],
     })
 }

@@ -126,6 +126,19 @@ impl CompanySetup {
             inventory_enabled: self.inventory,
         }
     }
+
+    /// The local flags to record when the engine stores the inventory
+    /// switch itself (`company-inventory-flag-v1`, P24): the local
+    /// inventory flag is never kept beside the engine's (one owner,
+    /// Q-P24j).
+    #[must_use]
+    pub fn flags_for(&self, engine_has_inventory_flag: bool) -> CompanyFlags {
+        let mut f = self.flags();
+        if engine_has_inventory_flag {
+            f.inventory_enabled = false;
+        }
+        f
+    }
 }
 
 /// Something to fix before the company can be created.
@@ -194,6 +207,23 @@ async fn streamlined_sales_tax(session: &Session, on: bool) -> Result<(), Compan
             .await?;
     }
     Ok(())
+}
+
+/// P24: the engine owns the inventory switch (`company-inventory-flag-v1`).
+/// Turned on after the chart import so the engine adopts the starter
+/// chart's "Inventory Asset" (U-156) instead of making a second one.
+/// Answers whether the engine stores the switch.
+async fn engine_inventory(session: &Session, on: bool) -> Result<bool, CompanyError> {
+    let owns = session
+        .client()
+        .capabilities()
+        .has(Capabilities::COMPANY_INVENTORY_FLAG);
+    if owns && on {
+        session
+            .set_inventory_enabled(true, IdempotencyKey::new())
+            .await?;
+    }
+    Ok(owns)
 }
 
 /// Runs the interview's answers against the engine and records the
@@ -294,6 +324,8 @@ pub(crate) async fn create_company_steps(
         skipped += r.skipped.len();
     }
 
+    let engine_inventory = engine_inventory(session, setup.inventory).await?;
+
     let mut closing_password_set = false;
     if let Some(password) = &setup.closing_password {
         session
@@ -313,7 +345,7 @@ pub(crate) async fn create_company_steps(
     store.update(|list| {
         let rec = list.upsert(made.tenant_id, &name);
         rec.accent = setup.accent;
-        rec.flags = setup.flags();
+        rec.flags = setup.flags_for(engine_inventory);
         rec.transaction_count = Some(0);
         list.touch_opened(made.tenant_id, now);
     })?;
@@ -367,6 +399,15 @@ mod tests {
         assert!(!format!("{s:?}").contains("Ozark"));
         assert!(!format!("{s:?}").contains("long-enough"));
         assert!(s.flags().sales_tax_enabled);
+        // P24: with the engine's inventory switch the local flag is never
+        // recorded beside it.
+        s.inventory = true;
+        assert!(s.flags_for(false).inventory_enabled);
+        assert!(!s.flags_for(true).inventory_enabled);
+        assert_eq!(
+            s.flags_for(true).sales_tax_enabled,
+            s.flags().sales_tax_enabled
+        );
         assert_eq!(SetupIssue::FiscalMonth.key(), "setup.issue.fiscal_month");
     }
 }

@@ -378,6 +378,63 @@ fn attention_lines_show_dashes_and_the_later_note() {
     }
 }
 
+/// P24 (U-78, Q-P24j): the reorder line counts parts at or below their
+/// reorder point while inventory is on; off, or none to reorder, shows
+/// nothing; a failed read shows a dash.
+#[test]
+fn reorder_alerts_show_while_inventory_is_on() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let reorder_line = |h: &HomeScreen| {
+        attention::lines(h, &h.attention())
+            .into_iter()
+            .find(|l| l.text.contains("reorder point"))
+    };
+    h.data.reorder = Slot::ready(None);
+    assert!(reorder_line(&h).is_none(), "inventory off");
+    h.data.reorder = Slot::ready(Some(0));
+    assert!(reorder_line(&h).is_none(), "nothing to reorder");
+    h.data.reorder = Slot::ready(Some(2));
+    let shown = reorder_line(&h).expect("a line");
+    assert_eq!(shown.text, "2 items at or below their reorder point");
+    assert!(shown.link.is_some());
+    h.data.reorder = Slot::failed(ApiError::Internal);
+    assert!(
+        attention::lines(&h, &h.attention())
+            .iter()
+            .any(|l| l.text == "Items to reorder" && l.dash.is_some()),
+        "a failed read is a dash"
+    );
+
+    // The demo count: active parts at or below their point, inventory on.
+    let mut s = DemoState::new();
+    assert_eq!(attention::reorder_demo(&s), None, "off in the demo");
+    s.inventory.enabled = true;
+    assert_eq!(attention::reorder_demo(&s), Some(0));
+    let part = cl_core::ids::ItemId::parse("d0000000-0000-4000-8000-e00000000001").expect("id");
+    let mut item = crate::company::demo::lists::items()[0].clone();
+    item.id = part;
+    item.fields.item_type = cl_api::ItemType::InventoryPart;
+    item.fields.purchase.reorder_point = cl_core::Quantity::parse_wire("5").ok();
+    s.items_mut().push(item);
+    s.inventory
+        .post(
+            "B1",
+            cl_core::CalendarDate::from_ymd(2026, 11, 2).expect("date"),
+            &[crate::company::demo::inventory::DocLine {
+                item: part,
+                kind: crate::company::demo::inventory::MoveKind::Receipt {
+                    quantity: cl_core::Quantity::parse_wire("4").expect("q"),
+                    amount: cl_core::Money::parse_wire("10.00").expect("m"),
+                },
+                fallback_cost: None,
+                return_of: None,
+            }],
+        )
+        .expect("bill");
+    assert_eq!(attention::reorder_demo(&s), Some(1), "4 on hand, point 5");
+}
+
 /// A01: intake folders needing attention get one line that opens
 /// Preferences › Document intake; none shows nothing.
 #[test]

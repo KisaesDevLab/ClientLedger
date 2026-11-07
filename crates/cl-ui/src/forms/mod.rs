@@ -14,6 +14,7 @@ pub mod enter;
 pub mod header;
 pub mod invoice_lines_grid;
 pub mod item_lines_grid;
+pub mod items_tab;
 pub mod lines_grid;
 pub mod lost_save;
 pub mod nav_prompt;

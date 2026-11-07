@@ -808,6 +808,7 @@ mod tests {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         );
         dep.payments.push(cl_api::GroupedPayment {

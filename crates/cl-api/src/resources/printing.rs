@@ -583,8 +583,16 @@ pub struct DocumentNumberWarning {
 /// idempotent replay leaves it out).
 #[must_use]
 pub fn number_warnings(body: &Value) -> Vec<DocumentNumberWarning> {
+    // Only number warnings: a `NEGATIVE_STOCK` in the same list (P24) is
+    // read by `inventory::stock_warnings`, never shown as a number clash.
     body.get("warnings")
-        .and_then(|w| serde_json::from_value(w.clone()).ok())
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter(|w| w.get("code").and_then(Value::as_str) == Some("DOCUMENT_NUMBER_IN_USE"))
+                .filter_map(|w| serde_json::from_value(w.clone()).ok())
+                .collect()
+        })
         .unwrap_or_default()
 }
 

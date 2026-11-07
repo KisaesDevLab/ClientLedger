@@ -115,6 +115,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.type.returned_payment", "RETURNED"),
     ("register.type.sales_tax_payment", "TAXPMT"),
     ("register.type.bad_debt_recovery", "RECOVERY"),
+    ("register.type.inventory_adjustment", "INV ADJ"),
     ("register.split", "\u{2014} Split \u{2014}"),
     ("register.void_prefix", "VOID"),
     ("register.draft", "Draft"),

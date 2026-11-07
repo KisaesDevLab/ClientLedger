@@ -145,6 +145,8 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
             billable_source_line_id: l.billable_source_line,
             markup_percent: markup,
             tax_code_id: l.tax_code,
+            unit_id: l.unit,
+            return_of: None,
         });
     }
     let mut n = NewInvoice::new(r.client, r.date, lines);
@@ -177,7 +179,14 @@ pub(crate) fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
 /// # Errors
 /// As [`new_invoice`].
 pub(crate) fn new_credit_memo(r: &InvoiceRequest) -> Result<cl_api::NewCreditMemo, ApiError> {
-    let inv = new_invoice(r)?;
+    let mut inv = new_invoice(r)?;
+    // P24 (Q-P24e/u): every item line says which sale it returns (`null`:
+    // unlinked), so an edit never keeps a link the owner took off.
+    for (line, req) in inv.lines.iter_mut().zip(&r.lines) {
+        if req.item.is_some() {
+            line.return_of = Some(req.return_of);
+        }
+    }
     let mut m = cl_api::NewCreditMemo::new(r.client, r.date, inv.lines);
     m.memo = inv.memo;
     m.customer_message = inv.customer_message;
@@ -378,6 +387,8 @@ mod tests {
                 billable_source_line: None,
                 markup_percent: Some(Quantity::parse_wire("10").expect("q")),
                 tax_code: None,
+                unit: None,
+                return_of: None,
             }],
             sales_tax: None,
             use_current_rates: false,

@@ -107,6 +107,7 @@ pub fn boundaries_round_trip(h: &Harness) {
     );
     let income = account(h, &s, AccountType::Revenue, "Sales");
     let item = ItemFields {
+        purchase: cl_api::ItemPurchase::default(),
         name: unique("Max item"),
         description: None,
         unit_price: Some(m("999999999999999.9999")),

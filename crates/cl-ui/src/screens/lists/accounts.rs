@@ -569,6 +569,7 @@ impl ChartScreen {
             Task::ready(Versioned {
                 version: RecordVersion::Fingerprint(changed.fingerprint()),
                 record: changed,
+                stock_warnings: Vec::new(),
             })
         } else {
             let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -750,6 +751,7 @@ impl ChartScreen {
                 let current = Versioned {
                     version: RecordVersion::Fingerprint(a.fingerprint()),
                     record: Account { fields, ..a },
+                    stock_warnings: Vec::new(),
                 };
                 group.write(&session, label, move |s| async move {
                     s.accounts().set_card_last4(&current, digits, key).await
@@ -1462,6 +1464,7 @@ pub(crate) fn demo_save(
     Versioned {
         version: RecordVersion::Fingerprint(account.fingerprint()),
         record: account,
+        stock_warnings: Vec::new(),
     }
 }
 

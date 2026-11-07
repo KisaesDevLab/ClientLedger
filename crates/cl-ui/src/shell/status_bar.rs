@@ -281,7 +281,10 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> Option
                 {
                     chip_clicked = Some(crate::screens::outbox::KIND);
                 }
-                if let Some(toast) = shell.toast_text() {
+                if let Some(toast) = shell
+                    .toast_text()
+                    .filter(|_| shell.toast_banner().is_none())
+                {
                     // Leave room for the shortcut chips on the right so the
                     // text never runs under them.
                     let room = if narrow {

@@ -25,6 +25,7 @@ pub mod date_rules;
 pub mod doc_draft;
 pub mod forms;
 pub mod home;
+pub mod inventory;
 pub mod keymap;
 pub mod lists;
 pub mod lookup;
@@ -36,6 +37,7 @@ pub mod tags;
 pub mod templates;
 pub mod text;
 pub mod undo;
+pub mod units;
 
 pub use commands::{COMMANDS, Command, CommandId, Menu};
 pub use keymap::{EnterMode, Key, Keymap, KeymapError, Mods, Scope, Shortcut};

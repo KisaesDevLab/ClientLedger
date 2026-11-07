@@ -750,7 +750,8 @@ pub fn inventory(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
         ui.checkbox(
             &mut edits.flags.inventory_enabled,
             t("prefs.company.inventory_on"),
-        );
+        )
+        .on_hover_text(t("prefs.company.inventory_tip"));
         form::hint(ui, tokens, &t("prefs.company.inventory_hint"));
     });
 }

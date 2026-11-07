@@ -307,6 +307,12 @@ pub(crate) struct Executor {
     /// The engine replays keys on bad-debt recoveries
     /// (`idempotency-recovery-v1`, U-154).
     idempotency_recovery_v1: AtomicBool,
+    /// The engine replays keys on inventory adjustments and counts (under
+    /// `inventory-adjust-v1`, U-159).
+    idempotency_inventory_v1: AtomicBool,
+    /// The engine replays keys on unit-set creation (`units-of-measure-v1`,
+    /// U-161).
+    unit_sets_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -371,6 +377,8 @@ impl Executor {
             idempotency_sales_tax_v1: AtomicBool::new(false),
             idempotency_sales_tax_pay_v1: AtomicBool::new(false),
             idempotency_recovery_v1: AtomicBool::new(false),
+            idempotency_inventory_v1: AtomicBool::new(false),
+            unit_sets_v1: AtomicBool::new(false),
         }
     }
 
@@ -455,6 +463,18 @@ impl Executor {
             .store(recovery, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `inventory-adjust-v1` (its
+    /// adjustment and count writes replay keys; U-159, P24).
+    pub(crate) fn set_idempotency_inventory_v1(&self, on: bool) {
+        self.idempotency_inventory_v1.store(on, Ordering::Relaxed);
+    }
+
+    /// Record whether the engine advertises `units-of-measure-v1` (its
+    /// unit-set creation replays keys; U-161, P24).
+    pub(crate) fn set_unit_sets_v1(&self, on: bool) {
+        self.unit_sets_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -484,6 +504,8 @@ impl Executor {
             KeySet::SalesTaxSetupV1 => self.idempotency_sales_tax_v1.load(Ordering::Relaxed),
             KeySet::SalesTaxPayV1 => self.idempotency_sales_tax_pay_v1.load(Ordering::Relaxed),
             KeySet::RecoveryV1 => self.idempotency_recovery_v1.load(Ordering::Relaxed),
+            KeySet::InventoryV1 => self.idempotency_inventory_v1.load(Ordering::Relaxed),
+            KeySet::UnitSetsV1 => self.unit_sets_v1.load(Ordering::Relaxed),
         }
     }
 

@@ -118,6 +118,29 @@ impl ConflictDetails {
         self.text(key)?.parse().ok()
     }
 
+    /// The ids listed under `key`: an array of id strings, or of objects
+    /// with an `itemId` or `id` (count `STALE` `{items: […]}`, P24). Anything
+    /// unreadable is skipped.
+    #[must_use]
+    pub fn ids<T: std::str::FromStr>(&self, key: &str) -> Vec<T> {
+        let Some(list) = self
+            .0
+            .as_deref()
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_array)
+        else {
+            return Vec::new();
+        };
+        list.iter()
+            .filter_map(|e| {
+                e.as_str()
+                    .or_else(|| e.get("itemId").and_then(Value::as_str))
+                    .or_else(|| e.get("id").and_then(Value::as_str))
+            })
+            .filter_map(|s| s.parse().ok())
+            .collect()
+    }
+
     /// True when the engine sent no details.
     #[must_use]
     pub fn is_empty(&self) -> bool {

@@ -22,6 +22,9 @@ use crate::forms::check::line_tag_default;
 use crate::forms::doc_read::{
     Confidence, DocReading, ReadState, ReadTarget, blocks_save, read_lines,
 };
+use crate::forms::item_lines::{
+    CheckedItemLine, ItemIssue, ItemLines, check_item_lines, items_total,
+};
 use crate::forms::lines::{
     FormLine, FormLines, PostingLine, TotalsStatus, difference, exact_totals, trimmed,
 };
@@ -175,6 +178,8 @@ pub struct CardForm {
     pub header_tags: Vec<TagId>,
     /// The lines (where the money went, or came back from).
     pub lines: FormLines,
+    /// The Items lines of a charge (P24, U-158: parts bought by card).
+    pub items: ItemLines,
     /// A04 draft mode: which fields came from the document and whether the
     /// owner accepted them (empty outside draft mode).
     pub read: ReadState,
@@ -193,6 +198,7 @@ impl fmt::Debug for CardForm {
             .field("memo", &!self.memo.is_empty())
             .field("header_tags", &self.header_tags.len())
             .field("lines", &self.lines.lines.len())
+            .field("items", &self.items.lines.len())
             .field("read", &self.read.unaccepted().len())
             .finish()
     }
@@ -214,8 +220,18 @@ impl CardForm {
             memo: String::new(),
             header_tags: Vec::new(),
             lines: FormLines::default(),
+            items: ItemLines::default(),
             read: ReadState::default(),
         }
+    }
+
+    /// The exact lines total, expenses plus items. `None` when an item's
+    /// quantity × cost cannot be computed or the sum leaves the money range.
+    #[must_use]
+    pub fn lines_total(&self) -> Option<Money> {
+        crate::forms::lines::lines_total(&self.lines)?
+            .checked_add(items_total(&self.items)?)
+            .ok()
     }
 
     /// The owner typed the amount: one used line with a blank amount (or
@@ -238,8 +254,10 @@ impl CardForm {
         if self.amount.is_some() && !self.amount_from_lines {
             return;
         }
-        if self.lines.lines.iter().any(|l| l.amount.is_some()) {
-            if let Some(total) = crate::forms::lines::lines_total(&self.lines) {
+        if self.lines.lines.iter().any(|l| l.amount.is_some())
+            || self.items.lines.iter().any(|l| l.amount.is_some())
+        {
+            if let Some(total) = self.lines_total() {
                 self.amount = Some(total);
                 self.amount_from_lines = true;
             }
@@ -252,7 +270,17 @@ impl CardForm {
     /// The footer (tri-state).
     #[must_use]
     pub fn totals_status(&self) -> Option<TotalsStatus> {
-        exact_totals(self.amount, &self.lines)
+        if self.items.used().next().is_none() {
+            return exact_totals(self.amount, &self.lines);
+        }
+        let left = self.amount?.checked_sub(self.lines_total()?).ok()?;
+        Some(if left.is_zero() {
+            TotalsStatus::Balanced
+        } else if left.is_positive() {
+            TotalsStatus::Remaining(left)
+        } else {
+            TotalsStatus::Over(left.abs())
+        })
     }
 
     /// Prefill (Q-191) may fill the form: no line used and no memo typed.
@@ -355,6 +383,10 @@ pub enum CardProblem {
     TooManyLines,
     /// One line's issue.
     Line(RowKey, LineIssue),
+    /// One item line's issue.
+    ItemLine(RowKey, ItemIssue),
+    /// Item lines on a credit (a card credit is a deposit: no parts).
+    ItemsOnCredit,
     /// A04 draft mode: values read from the document are not accepted yet
     /// (Accept, Alt+A, or edit them).
     ReadNotAccepted,
@@ -379,6 +411,8 @@ impl CardProblem {
             CardProblem::NoLines => TextKey("card.problem.no_lines"),
             CardProblem::TooManyLines => TextKey("helper.problem.too_many_lines"),
             CardProblem::Line(_, i) => i.key(),
+            CardProblem::ItemLine(_, i) => i.key(),
+            CardProblem::ItemsOnCredit => TextKey("card.problem.items_on_credit"),
             CardProblem::ReadNotAccepted => TextKey("card.problem.read_not_accepted"),
         }
     }
@@ -397,6 +431,8 @@ impl CardProblem {
             CardProblem::NoLines => "no_lines",
             CardProblem::TooManyLines => "too_many_lines",
             CardProblem::Line(_, i) => i.name(),
+            CardProblem::ItemLine(_, i) => i.name(),
+            CardProblem::ItemsOnCredit => "items_on_credit",
             CardProblem::ReadNotAccepted => "read_not_accepted",
         }
     }
@@ -411,8 +447,9 @@ impl CardProblem {
             CardProblem::Amount(_) => CardField::Amount,
             CardProblem::LinesDisagree { .. }
             | CardProblem::NoLines
-            | CardProblem::TooManyLines => CardField::Lines,
-            CardProblem::Line(k, _) => CardField::Line(k),
+            | CardProblem::TooManyLines
+            | CardProblem::ItemsOnCredit => CardField::Lines,
+            CardProblem::Line(k, _) | CardProblem::ItemLine(k, _) => CardField::Line(k),
             CardProblem::ReadNotAccepted => CardField::ReadBanner,
         }
     }
@@ -440,6 +477,8 @@ pub struct CheckedCard {
     pub header_tags: Vec<TagId>,
     /// The lines.
     pub lines: Vec<PostingLine>,
+    /// The item lines of a charge (sent after the expense lines).
+    pub item_lines: Vec<CheckedItemLine>,
 }
 
 impl fmt::Debug for CheckedCard {
@@ -470,7 +509,8 @@ pub fn check(form: &CardForm, tags: &TagList) -> Result<CheckedCard, Vec<CardPro
     if let Some(i) = amount_problem(form.amount) {
         problems.push(CardProblem::Amount(i));
     }
-    let used = form.lines.used().count();
+    let items_used = form.items.used().count();
+    let used = form.lines.used().count() + items_used;
     if used == 0 {
         problems.push(CardProblem::NoLines);
     } else if used > MAX_LINES {
@@ -479,8 +519,18 @@ pub fn check(form: &CardForm, tags: &TagList) -> Result<CheckedCard, Vec<CardPro
     let billable = form.mode == CardMode::Charge;
     let (lines, issues) = check_lines(&form.lines, form.card, &form.header_tags, tags, billable);
     problems.extend(issues.into_iter().map(|(k, i)| CardProblem::Line(k, i)));
+    if items_used > 0 && !billable {
+        problems.push(CardProblem::ItemsOnCredit);
+    }
+    let (item_lines, issues) = check_item_lines(&form.items, billable, |t| {
+        line_tag_default(&form.header_tags, t, tags)
+    });
+    problems.extend(issues.into_iter().map(|(k, i)| CardProblem::ItemLine(k, i)));
     if let Some(header) = form.amount {
-        let difference = difference(header, &form.lines);
+        let items = items_total(&form.items).unwrap_or(Money::ZERO);
+        let difference = difference(header, &form.lines)
+            .checked_sub(items)
+            .unwrap_or(Money::MIN);
         if !difference.is_zero() {
             problems.push(CardProblem::LinesDisagree { difference });
         }
@@ -502,6 +552,7 @@ pub fn check(form: &CardForm, tags: &TagList) -> Result<CheckedCard, Vec<CardPro
             memo: trimmed(&form.memo),
             header_tags: form.header_tags.clone(),
             lines,
+            item_lines,
         }),
         // Every `None` above pushed a problem.
         _ => Err(vec![CardProblem::Amount(AmountIssue::Missing)]),

@@ -24,6 +24,7 @@ fn entry(n: u32, name: &str, active: bool) -> ItemEntry {
         kind: ItemKind::Service,
         discount_percent: None,
         tax_code: None,
+        part: PartDraft::default(),
     }
 }
 
@@ -257,4 +258,42 @@ fn the_tax_code_rides_through_the_check() {
     let mut e = entry(9, "Mulch", true);
     e.tax_code = Some(code);
     assert_eq!(ItemDraft::from_entry(&e).tax_code, Some(code));
+}
+
+/// P24: a part needs inventory on and its two accounts; a new part's
+/// opening stock is checked with it, and refused on or before the closing
+/// date.
+#[test]
+fn a_part_is_checked_with_its_inventory_section() {
+    let list = sample();
+    let mut d = ItemDraft::new(Some(aid(1)));
+    d.name = "Mulch bag".into();
+    d.kind = ItemKind::InventoryPart;
+    let rules = PartRules {
+        item_types: true,
+        inventory: false,
+        closing_date: cl_core::CalendarDate::from_ymd(2026, 9, 30).ok(),
+    };
+    let ok = |_| true;
+    let e = check_with_part(&d, &list, None, rules, ok, ok).expect_err("inventory off");
+    assert!(e.item.contains(&ItemProblem::KindNotAvailable));
+    assert!(e.part.contains(&PartProblem::AssetAccountMissing));
+    let on = PartRules {
+        inventory: true,
+        ..rules
+    };
+    d.part.asset_account = Some(aid(7));
+    d.part.cogs_account = Some(aid(8));
+    d.part.opening_quantity = "12".into();
+    d.part.opening_value = "39.00".into();
+    d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 9, 30).ok();
+    let e = check_with_part(&d, &list, None, on, ok, ok).expect_err("closed");
+    assert_eq!(e.part, vec![PartProblem::OpeningInClosedPeriod]);
+    d.part.opening_date = cl_core::CalendarDate::from_ymd(2026, 10, 1).ok();
+    let (item, part) = check_with_part(&d, &list, None, on, ok, ok).expect("ok");
+    assert_eq!(item.kind, ItemKind::InventoryPart);
+    assert_eq!(part.opening.map(|o| o.value), Some(m("39.00")));
+    // An edit never sends an opening.
+    let (_, part) = check_with_part(&d, &list, Some(iid(9)), on, ok, ok).expect("edit");
+    assert!(part.opening.is_none());
 }

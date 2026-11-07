@@ -144,6 +144,7 @@ pub fn price_level_and_discount(h: &Harness) {
     let item = |kind, name: &str, price: Option<Money>, pct: Option<&str>| {
         h.run(s.items().create(
             &ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
                 name: unique(name),
                 description: None,
                 unit_price: price,

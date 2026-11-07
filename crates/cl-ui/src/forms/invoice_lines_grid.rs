@@ -26,7 +26,9 @@ use cl_model::forms::FormState;
 use cl_model::forms::invoice::{InvoiceForm, InvoiceLine, LineView, PreviewTracker, RateSource};
 use eframe::egui::Ui;
 
-use crate::forms::item_lines_grid::{ITEMS, ItemLists, TAX_CODES};
+use crate::forms::item_lines_grid::{
+    ITEMS, ItemLists, RowLookups, TAX_CODES, unit_cell, unit_column,
+};
 use crate::forms::lines_grid::LineLists;
 use crate::grid_form::{GridForm, LinesAdapter, Routed};
 use crate::i18n::t;
@@ -48,6 +50,8 @@ pub const V_AMOUNT: ColumnId = ColumnId(36);
 pub const V_TAX: ColumnId = ColumnId(37);
 /// Income account (blank: the item's).
 pub const V_ACCOUNT: ColumnId = ColumnId(38);
+/// Unit (U-161; only while some item has a unit set).
+pub const V_UNIT: ColumnId = ColumnId(39);
 
 const PICK_FROM_LIST: TextKey = TextKey("register.entry.pick_from_list");
 const BAD_VALUE: TextKey = TextKey("register.entry.bad_value");
@@ -137,6 +141,13 @@ pub fn grid_spec() -> GridSpec {
 /// tax code picker instead of the taxable box.
 #[must_use]
 pub fn grid_spec_for(coded: bool) -> GridSpec {
+    grid_spec_with(coded, false)
+}
+
+/// The columns; `units`: a Unit column after Qty (U-161, shown while some
+/// item has a unit set; blank and skipped on other lines).
+#[must_use]
+pub fn grid_spec_with(coded: bool, units: bool) -> GridSpec {
     let picker = |list| CellKind::Picker {
         list,
         add_new: false,
@@ -217,6 +228,9 @@ pub fn grid_spec_for(coded: bool) -> GridSpec {
             )
         },
     ]);
+    if units {
+        spec.columns.insert(4, unit_column(V_UNIT));
+    }
     // Rows grow with a several-line description and carry a billable
     // cost's source caption under them.
     spec.height = RowHeight::Measured { max_rows: 1_000 };
@@ -349,6 +363,7 @@ impl RowModel for View<'_> {
             // A billable line shows the engine's display rate (amount /
             // quantity, Q-P20w): "Updating…" while a preview is pending,
             // never the source's cost (N4).
+            V_UNIT => unit_cell(lists, l.item, l.unit),
             V_RATE if l.billable.is_some() => match shown {
                 Shown::Ready { rate: Some(r), .. } => CellValue::Money(r),
                 Shown::Updating => CellValue::Text(Cow::Borrowed(&self.a.updating)),
@@ -426,7 +441,17 @@ pub(crate) fn apply(
                 // Another item: the old price and discount no longer apply
                 // (S8); the engine prices the new one unless a rate is
                 // typed after this.
+                let other = l.item != Some(item);
                 l.item_changed(Some(item));
+                if other {
+                    // Its default sale unit at the engine's price in that
+                    // unit (U-161: a line in a unit sends its price).
+                    let units = lists.units_of(item);
+                    l.unit = units.and_then(|u| u.sale);
+                    if l.unit.is_some() {
+                        l.rate = units.and_then(|u| u.price(l.unit));
+                    }
+                }
                 if l.description.trim().is_empty() {
                     l.description = lists.description(item).unwrap_or_default().to_string();
                 }
@@ -437,8 +462,18 @@ pub(crate) fn apply(
             Some(a) => l.account = Some(a),
             None => return Some(PICK_FROM_LIST),
         },
-        (V_ITEM | V_ACCOUNT | V_TAX, CellInput::Unresolved(_)) => return Some(PICK_FROM_LIST),
-        (V_ITEM, CellInput::Clear) => l.item_changed(None),
+        (V_UNIT, CellInput::Ref(id)) => match lists.unit_of_key(id) {
+            Some((item, unit)) if l.item == Some(item) => set_unit(l, unit, lists),
+            _ => return Some(PICK_FROM_LIST),
+        },
+        (V_UNIT, CellInput::Clear) => set_unit(l, None, lists),
+        (V_ITEM | V_ACCOUNT | V_TAX | V_UNIT, CellInput::Unresolved(_)) => {
+            return Some(PICK_FROM_LIST);
+        }
+        (V_ITEM, CellInput::Clear) => {
+            l.item_changed(None);
+            l.unit = None;
+        }
         (V_ACCOUNT, CellInput::Clear) => l.account = None,
         (V_DESC, CellInput::Text(v)) => l.description = v,
         (V_DESC, CellInput::Clear) => l.description.clear(),
@@ -459,6 +494,19 @@ pub(crate) fn apply(
     None
 }
 
+/// The owner picked the line's unit: the price follows it, the engine's
+/// default in that unit (the base unit: the engine prices it).
+fn set_unit(l: &mut InvoiceLine, unit: Option<cl_core::ids::UnitId>, lists: &ItemLists) {
+    if l.unit == unit {
+        return;
+    }
+    l.unit = unit;
+    l.rate = match (unit, l.item.and_then(|i| lists.units_of(i))) {
+        (Some(_), Some(u)) => u.price(unit),
+        _ => None,
+    };
+}
+
 impl EditableModel for View<'_> {
     fn cell_editable(&self, index: usize, col: ColumnId) -> bool {
         let Some(l) = self.lines().get(index) else {
@@ -466,6 +514,9 @@ impl EditableModel for View<'_> {
         };
         match col {
             V_AMOUNT => false,
+            V_UNIT => {
+                !l.amounts_locked() && l.item.is_some_and(|i| self.a.lists.units_of(i).is_some())
+            }
             V_TAX | V_ACCOUNT if self.subtotal(l) => false,
             V_ITEM | V_QTY | V_RATE => !l.amounts_locked(),
             _ => true,
@@ -571,6 +622,8 @@ const GRID_COMMANDS: &[&str] = &[
 /// The invoice's lines on the grid.
 pub struct InvoiceGrid {
     form: GridForm<InvoiceForm, InvState>,
+    /// The Unit column is shown (U-161).
+    units: bool,
 }
 
 impl InvoiceGrid {
@@ -591,10 +644,13 @@ impl InvoiceGrid {
     pub fn new_for(lists: Arc<ItemLists>, coded: bool) -> InvoiceGrid {
         let mut keys = RowKeyGen::new();
         let value = InvoiceForm::new(None, &mut keys);
-        // The specs are fixed; `the_invoice_spec_is_valid` covers them.
-        let grid =
-            Grid::new("invoice/lines", grid_spec_for(coded)).expect("the invoice spec is valid");
+        // Invariant: the four specs (coded x units) are fixed and
+        // `the_invoice_spec_is_valid` builds every one.
+        let units = lists.has_units();
+        let grid = Grid::new("invoice/lines", grid_spec_with(coded, units))
+            .expect("the invoice spec is valid");
         InvoiceGrid {
+            units,
             form: GridForm::new(
                 FormState::new(value),
                 InvState {
@@ -638,8 +694,8 @@ impl InvoiceGrid {
 
     /// A save starts (edits wait until it ends).
     pub fn begin_save(&mut self, intent: cl_model::forms::SaveIntent) -> bool {
-        let lists = Arc::clone(&self.form.adapter().lists);
-        self.form.begin_save(intent, &*lists).is_ok()
+        let lists = self.row_lookups();
+        self.form.begin_save(intent, &lists).is_ok()
     }
 
     /// The save failed (the lines stay as typed).
@@ -649,21 +705,57 @@ impl InvoiceGrid {
 
     /// Commits the open cell. False when it is not valid.
     pub fn commit(&mut self) -> bool {
-        let lists = Arc::clone(&self.form.adapter().lists);
-        self.form.commit_pending(&*lists).is_ok()
+        let lists = self.row_lookups();
+        self.form.commit_pending(&lists).is_ok()
     }
 
-    /// The pickers and the items' taxable flags changed.
+    /// The pickers and the items' taxable flags changed. The Unit column
+    /// comes or goes with the first or last item with a unit set (U-161).
+    ///
+    /// # Panics
+    /// Never: the specs are fixed and covered by tests.
     pub fn set_lists(
         &mut self,
         lists: Arc<ItemLists>,
         taxable: HashMap<ItemId, bool>,
         subtotals: HashSet<ItemId>,
     ) {
+        let units = lists.has_units();
         let a = self.form.adapter_mut();
         a.lists = lists;
         a.taxable = taxable;
         a.subtotals = subtotals;
+        let coded = a.coded;
+        if units != self.units {
+            self.units = units;
+            // Invariant: the four specs (coded x units) are fixed and
+            // `the_invoice_spec_is_valid` builds every one.
+            let grid = Grid::new("invoice/lines", grid_spec_with(coded, units))
+                .expect("the invoice spec is valid");
+            let lk = self.row_lookups();
+            let _old = self.form.swap_grid(grid, t("invoice.lines.label"), &lk);
+        }
+    }
+
+    /// The Unit column is shown.
+    #[must_use]
+    pub fn units_shown(&self) -> bool {
+        self.units
+    }
+
+    /// The pickers for the cursor's line (its item's units).
+    fn row_lookups(&self) -> RowLookups {
+        let item = self
+            .form
+            .grid()
+            .core()
+            .cursor()
+            .and_then(|p| self.value().lines.iter().find(|l| l.key == p.row))
+            .and_then(|l| l.item);
+        RowLookups {
+            lists: Arc::clone(&self.form.adapter().lists),
+            item,
+        }
     }
 
     /// The item name typed on a line that is not in the list, if any.
@@ -741,29 +833,29 @@ impl InvoiceGrid {
 
     /// Replaces the lines (a load, Clear): not an edit.
     pub fn load(&mut self, lines: Vec<InvoiceLine>) {
-        let lists = Arc::clone(&self.form.adapter().lists);
+        let lists = self.row_lookups();
         let mut v = InvoiceForm {
             lines,
             ..InvoiceForm::default()
         };
         v.ensure_entry_line(&mut self.form.adapter_mut().keys);
-        self.form.load(v, &*lists);
+        self.form.load(v, &lists);
     }
 
     /// One undoable edit of the lines (Add billable costs).
     pub fn edit(&mut self, f: impl FnOnce(&mut InvoiceForm, &mut RowKeyGen)) -> bool {
-        let lists = Arc::clone(&self.form.adapter().lists);
+        let lists = self.row_lookups();
         let mut v = self.value().clone();
         f(&mut v, &mut self.form.adapter_mut().keys);
         let done = self.form.edit_step(|x| *x = v);
-        self.form.rebind_view(&*lists);
+        self.form.rebind_view(&lists);
         done
     }
 
     /// Puts the cursor on `col` of line `key`.
     pub fn focus(&mut self, key: RowKey, col: ColumnId) {
-        let lists = Arc::clone(&self.form.adapter().lists);
-        self.form.focus(CellPos { row: key, col }, &*lists);
+        let lists = self.row_lookups();
+        self.form.focus(CellPos { row: key, col }, &lists);
     }
 
     /// A keymap command while the grid has the keyboard.
@@ -771,8 +863,8 @@ impl InvoiceGrid {
         if self.suspended() || !self.has_focus() || !GRID_COMMANDS.contains(&id.as_str()) {
             return None;
         }
-        let lists = Arc::clone(&self.form.adapter().lists);
-        match self.form.command(id, &*lists) {
+        let lists = self.row_lookups();
+        match self.form.command(id, &lists) {
             Routed::Handled => Some(true),
             _ => None,
         }
@@ -792,8 +884,8 @@ impl InvoiceGrid {
 
     /// Draws the grid.
     pub fn ui(&mut self, ui: &mut Ui) -> GridOutput {
-        let lists = Arc::clone(&self.form.adapter().lists);
-        self.form.ui(ui, &*lists)
+        let lists = self.row_lookups();
+        self.form.ui(ui, &lists)
     }
 }
 
@@ -815,12 +907,17 @@ mod tests {
         }
         assert!(crate::i18n::has("invoice.lines.label"));
         assert!(crate::i18n::has("invoice.col.account.empty"));
-        let coded = grid_spec_for(true);
-        assert_eq!(coded.validate(), Ok(()));
-        for c in &coded.columns {
-            assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
-            for k in [c.empty, c.help].into_iter().flatten() {
-                assert!(crate::i18n::has(k.0), "{}", k.0);
+        // Every spec the grid can build (the `expect`s in `new_for` and
+        // `set_lists` rest on this).
+        for (coded, units) in [(false, false), (true, false), (false, true), (true, true)] {
+            let spec = grid_spec_with(coded, units);
+            assert_eq!(spec.validate(), Ok(()), "coded {coded} units {units}");
+            assert!(Grid::new("invoice/lines", spec.clone()).is_ok());
+            for c in &spec.columns {
+                assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+                for k in [c.empty, c.help].into_iter().flatten() {
+                    assert!(crate::i18n::has(k.0), "{}", k.0);
+                }
             }
         }
     }
@@ -930,5 +1027,48 @@ mod tests {
         let mut g = g;
         g.show(&tracker);
         assert_eq!(g.shown(key), Shown::Nothing);
+    }
+
+    /// U-161: a line of an item with a unit set starts in its sale unit at
+    /// the engine's price in that unit; the base unit leaves pricing to the
+    /// engine.
+    #[test]
+    fn a_unit_line_takes_the_sale_unit_and_its_price() {
+        let spec = grid_spec_with(true, true);
+        assert_eq!(spec.validate(), Ok(()));
+        let ids: Vec<ColumnId> = spec.columns.iter().map(|c| c.id).collect();
+        assert_eq!(&ids[3..6], &[V_QTY, V_UNIT, V_RATE]);
+        let items = crate::forms::item_lines_grid::tests::unit_items();
+        let lists = ItemLists::new(
+            Arc::new(crate::screens::register::lists::RegisterLists::default()),
+            &items,
+        );
+        let wine = items[0].id;
+        let mut l = InvoiceLine::blank(RowKeyGen::new().next_key());
+        let key = lists.item_key(wine).expect("key");
+        assert_eq!(apply(&mut l, V_ITEM, CellInput::Ref(key), &lists), None);
+        assert_eq!(l.unit, items[0].fields.purchase.default_sale_unit_id);
+        assert_eq!(
+            l.rate,
+            Money::parse_wire("54.0000").ok(),
+            "sent with the unit"
+        );
+        let bottle = lists.unit_key(wine, None).expect("base");
+        assert_eq!(apply(&mut l, V_UNIT, CellInput::Ref(bottle), &lists), None);
+        assert_eq!((l.unit, l.rate), (None, None));
+        let case = lists.unit_key(
+            wine,
+            l.item
+                .and_then(|_| items[0].fields.purchase.default_sale_unit_id),
+        );
+        assert_eq!(
+            apply(&mut l, V_UNIT, CellInput::Ref(case.expect("case")), &lists),
+            None
+        );
+        assert_eq!(l.rate, Money::parse_wire("54.0000").ok());
+        assert_eq!(apply(&mut l, V_ITEM, CellInput::Clear, &lists), None);
+        assert_eq!(l.unit, None);
+        let g = InvoiceGrid::new_for(Arc::new(lists), false);
+        assert!(g.units_shown());
     }
 }

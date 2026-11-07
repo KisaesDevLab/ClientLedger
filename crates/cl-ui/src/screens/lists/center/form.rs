@@ -915,6 +915,7 @@ fn demo_save(
         contact: Versioned {
             version: RecordVersion::Fingerprint(contact.fingerprint()),
             record: contact,
+            stock_warnings: Vec::new(),
         },
         profile,
     }

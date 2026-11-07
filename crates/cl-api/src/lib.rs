@@ -65,7 +65,7 @@ pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditIma
 pub use resources::bank_postings::{
     BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
     DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
-    PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+    PRINTED_MEMO_MAX, SplitItem, SplitLine, TransferDraft,
 };
 // P13 WP1: write check.
 pub use resources::checks::{
@@ -86,7 +86,18 @@ pub use resources::contacts::{
 };
 pub use resources::export::{ExportFile, ExportManifest};
 pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
-pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemType, ItemUpdate, Items};
+pub use resources::inventory::{
+    ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
+    AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,
+    InventoryRefusal, NegativeStock, NewAdjustment, NewCount, Problem, PurchaseUnit, ReorderAlert,
+    SavedAdjustment, StockStatusRow, ValuationAccount, ValuationDetailRow, ValuationRow,
+    ValuationSummary, count_stale_items, inventory_refusal, inventory_refusal_codes, problems_in,
+    stock_warnings, stock_warnings_from,
+};
+pub use resources::items::{
+    Item, ItemFields, ItemFilter, ItemPurchase, ItemSort, ItemStock, ItemType, ItemUpdate, Items,
+    OpeningStock, UNIT_LABEL_MAX_CHARS, UnitPrice,
+};
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
@@ -130,6 +141,8 @@ pub use resources::transactions::{
     Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
     TxnSort, TxnStatus, TxnType, has_code, next_number_from_json,
 };
+pub use resources::transactions::{INVENTORY_DERIVED_ROLES, InventoryLine, is_inventory_derived};
+pub use resources::unit_sets::{NewUnitSet, Unit, UnitRefusal, UnitSet, UnitSets, unit_refusal};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

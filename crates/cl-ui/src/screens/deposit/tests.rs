@@ -171,6 +171,7 @@ impl LocalDeposits for Fake {
         Ok(Versioned {
             record,
             version: RecordVersion::Fingerprint([1; 32]),
+            stock_warnings: Vec::new(),
         })
     }
     fn list(&mut self, _link: &CompanyLink, _account: AccountId) -> Vec<DepositRow> {

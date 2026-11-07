@@ -103,6 +103,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
             unit_price: None,
             customer: l.contact,
             billable: l.billable,
+            unit: None,
         })
         .collect();
     out.extend(c.item_lines.iter().map(|l| BillLineDraft {
@@ -115,6 +116,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
         unit_price: l.rate,
         customer: l.contact,
         billable: l.billable,
+        unit: l.unit,
     }));
     let draft_attachment = draft.filter(|_| lines && !c.attachments.is_empty());
     match c.kind {
@@ -228,6 +230,7 @@ pub(crate) fn form_of(
             item: l.item,
             description: l.description.clone().unwrap_or_default(),
             qty: l.quantity,
+            unit: l.unit,
             rate: l.unit_price,
             amount: Some(l.amount),
             account: Some(l.account),
@@ -449,6 +452,22 @@ impl EnterBillScreen {
         // refused by the engine (423) and asks then (review B1).
         if self.draft.is_some() {
             return self.accept_draft(&checked, intent, password);
+        }
+        // P24 (Q-P24b): parts in the closed period are refused, password
+        // or not; say so instead of asking for it.
+        self.save.inventory = None;
+        let lists = self.items.lists();
+        let has_parts = checked
+            .item_lines
+            .iter()
+            .any(|l| l.item.is_some_and(|i| lists.is_part(i)));
+        let old = self.editing.as_ref().map(|e| e.record.record.txn.txn_date);
+        let dates: Vec<_> = old.into_iter().chain([checked.date]).collect();
+        if let Some(text) =
+            crate::screens::inventory::closed_for_parts(has_parts, &dates, self.closing)
+        {
+            self.save.inventory = Some(text);
+            return false;
         }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
@@ -682,6 +701,12 @@ impl EnterBillScreen {
     /// A refused void or delete: the closing dialog, a plain refusal, or
     /// the error.
     fn write_failed(&mut self, e: ApiError, pending: Pending) {
+        let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.closing);
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.closing_prompt.refused_elsewhere();
+            self.save.inventory = Some(text);
+            return;
+        }
         if self.closing_failed(&e, pending) {
             return;
         }
@@ -697,6 +722,15 @@ impl EnterBillScreen {
     /// The engine took the save.
     fn saved(&mut self, s: Saved) {
         self.save.lost.saved();
+        self.save.inventory = None;
+        // P24: NEGATIVE_STOCK warnings, never blocking (the demo keeps its
+        // own; a live engine's come in the save reply).
+        let names = self.items.lists().names();
+        if self.link.is_demo() {
+            crate::screens::inventory::announce_demo(&self.link, &names);
+        } else {
+            crate::screens::inventory::announce(&self.link, &s.record.stock_warnings, &names);
+        }
         let vendor = s.record.record.txn.contact_id;
         self.publish(vendor);
         self.closing_prompt.saved();
@@ -828,6 +862,12 @@ impl EnterBillScreen {
         self.header.save_failed(failure.clone());
         self.expenses.form_mut().save_failed(failure.clone());
         self.items.form_mut().save_failed(failure);
+        let lock = crate::screens::inventory::lock_of(&self.link, &e).or(self.closing);
+        if let Some(text) = crate::screens::inventory::refusal_text(&e, lock) {
+            self.closing_prompt.refused_elsewhere();
+            self.save.inventory = Some(text);
+            return;
+        }
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
@@ -1277,6 +1317,7 @@ impl EnterBillScreen {
     }
 
     fn voided(&mut self) {
+        crate::screens::inventory::announce_demo_void(&self.link, &self.items.lists().names());
         let vendor = self.vendor();
         self.publish(vendor);
         self.closing_prompt.saved();

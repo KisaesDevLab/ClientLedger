@@ -285,6 +285,9 @@ impl WriteCheckScreen {
         if let Some(key) = self.save.notice {
             form::hint(ui, tokens, &t(key));
         }
+        if let Some(text) = &self.save.inventory {
+            ui.add(egui::Label::new(egui::RichText::new(text).color(tokens.warn_text)).wrap());
+        }
         if self.void.open {
             self.void_ui(ui, tokens);
         }
@@ -955,6 +958,25 @@ impl WriteCheckScreen {
     fn lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {
         let style = self.style(ui);
         let total = lines_total(self.lines.value()).unwrap_or(Money::ZERO);
+        // P24: Expenses · Items tabs while the company tracks inventory.
+        if self.items.tab_bar(ui, tokens, total, style) {
+            ui.add_enabled_ui(enabled, |ui| match self.items.tab {
+                crate::forms::items_tab::LinesTab::Expenses => {
+                    let _ = self.lines.ui(ui);
+                }
+                crate::forms::items_tab::LinesTab::Items => {
+                    let _ = self.items.grid.ui(ui);
+                }
+            });
+            ui.add_space(4.0);
+            if self.items.tab == crate::forms::items_tab::LinesTab::Expenses {
+                self.suggestions_ui(ui, tokens);
+            }
+            if !self.line_billable() {
+                form::hint(ui, tokens, &t("check.lines.billable_later"));
+            }
+            return;
+        }
         // One section, Expenses, drawn as the selected tab of the mockup
         // (Q-247: no Items tab before P20). A label, not a tab: the window
         // tabs are the only tabs.
@@ -988,7 +1010,7 @@ impl WriteCheckScreen {
     fn totals_ui(&self, ui: &mut Ui, tokens: &Tokens) {
         let style = self.style(ui);
         let form = self.compose();
-        let total = lines_total(&form.lines).unwrap_or(Money::ZERO);
+        let total = form.lines_total().unwrap_or(Money::ZERO);
         let (key, var, figure, warn) = match form.totals_status() {
             Some(TotalsStatus::Balanced) => ("check.totals.balanced", "total", total, false),
             Some(TotalsStatus::Remaining(m)) => ("check.totals.remaining", "amount", m, true),

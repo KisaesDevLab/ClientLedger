@@ -82,6 +82,7 @@ pub fn exports_and_imports(h: &Harness) {
     let name = unique("Exported item");
     h.run(s.items().create(
         &ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: name.clone(),
             description: None,
             unit_price: Some(m("45.0450")),

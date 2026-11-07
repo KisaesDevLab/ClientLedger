@@ -65,6 +65,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ),
     ("card.lines.label", "Card lines"),
     ("card.lines.heading", "Where it went {total}"),
+    ("card.items.label", "Items lines"),
+    ("card.problem.items_on_credit", "Items are for purchases. Record a returned item as a vendor credit, or switch this to a charge."),
     ("card.no_card", "There is no credit card account yet. Add one in the Chart of Accounts to record card charges."),
     ("card.panel.title", "This card"),
     ("card.panel.explain", "Charges raise the balance owed; credits and payments lower it."),

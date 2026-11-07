@@ -61,12 +61,13 @@ use crate::screens::register::lists::RegisterLists;
 use crate::windows::Screen;
 
 pub(crate) use prefill::billing_address;
-pub use save::to_draft;
+pub use save::{item_line_of, item_split, to_draft};
 
 /// The command and window kind.
 pub const KIND: &str = "vendors.write_check";
 
-/// The Expenses lines (every column, Q-247: no Items tab).
+/// The Expenses lines (every column). P24 adds an Items tab beside them
+/// while the company tracks inventory (plan §3; Q-247 had none).
 pub const LINES: LinesSpec = LinesSpec::all("write_check/lines", "check.lines.label");
 
 /// The Write Check window for `kind`, if it is one.
@@ -183,6 +184,8 @@ pub(crate) struct SaveState {
     pub last_action: Option<&'static str>,
     /// A plain note under the toolbar (i18n key).
     pub notice: Option<&'static str>,
+    /// P24: an inventory message (the closed period, a refusal).
+    pub inventory: Option<String>,
     /// The owner's answer for a printed check whose printed face changes
     /// (sent with the next save of this check).
     pub printed_choice: Option<cl_api::PrintedCheckChange>,
@@ -259,6 +262,8 @@ pub struct WriteCheckScreen {
     /// The header (its `lines` stay empty: the grid holds them).
     pub(crate) header: FormState<CheckForm>,
     pub(crate) lines: LinesGrid<RegisterLists>,
+    /// P24: the Items tab (parts bought by check).
+    pub(crate) items: crate::forms::items_tab::ItemsTab,
     pub(crate) inputs: Inputs,
     /// The engine's next number and the highest check number in the
     /// account, for the proposal (Q-P13m).
@@ -395,6 +400,7 @@ impl WriteCheckScreen {
             company: CompanyCard::default(),
             header: FormState::new(blank(None, today, NumberField::Typed(String::new()))),
             lines,
+            items: crate::forms::items_tab::ItemsTab::new("write_check/items", "check.items.label"),
             inputs: Inputs {
                 number: String::new(),
                 date: DateInput::new(today),
@@ -518,6 +524,7 @@ impl WriteCheckScreen {
     pub(crate) fn compose(&self) -> CheckForm {
         let mut f = self.header.current().clone();
         f.lines = self.lines.value().clone();
+        f.items = self.items.grid.value().clone();
         f
     }
 
@@ -578,6 +585,7 @@ impl WriteCheckScreen {
             self.accounts_task = Some(Task::ready(chart));
             self.contacts_task = Some(Task::ready(contacts));
             self.tags_task = Some(Task::ready(tags));
+            self.items.start_load(&self.link, self.group.as_ref());
             self.company_task = Some(Task::ready(CompanyCard {
                 name: "Ozark Ridge Landscaping LLC".into(),
                 address: "410 Ridge Rd \u{b7} Monett, MO 65708".into(),
@@ -605,6 +613,7 @@ impl WriteCheckScreen {
         }) {
             self.tags_task = Some(Task::Pending(p));
         }
+        self.items.start_load(&self.link, self.group.as_ref());
         if let Ok(p) = group.read(&session, |s| async move { s.company_settings().await }) {
             self.settings_task = Some(Task::Pending(p));
         }
@@ -669,9 +678,14 @@ impl WriteCheckScreen {
         lists.set_tags(&self.tags);
         self.lists = Arc::new(lists);
         self.lines.set_lists(Arc::clone(&self.lists));
+        self.items.set_base(&self.lists);
         self.tag_list = tag_list(&self.tags);
         if !self.line_billable() {
             self.lines.set_locked(vec![L_CUSTOMER, L_BILLABLE]);
+            self.items.grid.set_locked(vec![
+                crate::forms::item_lines_grid::I_CUSTOMER,
+                crate::forms::item_lines_grid::I_BILLABLE,
+            ]);
         }
         self.inputs.rev = u64::MAX;
     }
@@ -719,6 +733,7 @@ impl WriteCheckScreen {
                 lists_changed = true;
             }
         }
+        lists_changed |= self.items.poll();
         if lists_changed {
             self.apply_lists();
         }
@@ -761,11 +776,17 @@ impl WriteCheckScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
+        // P24: items or the inventory switch changed: the Items tab reads
+        // them again (its lines stay).
+        if changes.items && !self.items.loading() {
+            self.items.start_load(&self.link, self.group.as_ref());
+        }
         if self.lists_stale
             && !self.is_dirty()
             && self.accounts_task.is_none()
             && self.contacts_task.is_none()
             && self.tags_task.is_none()
+            && !self.items.loading()
         {
             self.lists_stale = false;
             self.start_load();
@@ -859,7 +880,7 @@ impl WriteCheckScreen {
     /// The form has unsaved edits.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.header.is_dirty() || self.lines.dirty()
+        self.header.is_dirty() || self.lines.dirty() || self.items.grid.dirty()
     }
 
     /// The owner left the lines grid (Q-P13r b): a blank check amount
@@ -977,6 +998,7 @@ pub(crate) fn problem_name(p: CheckProblem) -> &'static str {
         CheckProblem::AmountTooLarge => "amount_too_large",
         CheckProblem::TooManyLines => "too_many_lines",
         CheckProblem::ReadNotAccepted => "read_not_accepted",
+        CheckProblem::ItemLine(_, i) => i.name(),
     }
 }
 
@@ -1017,7 +1039,7 @@ impl Screen for WriteCheckScreen {
             d.dialogs_ui(ui.ctx(), self.money_style);
         }
         // Leaving the grid (Q-P13r b).
-        let in_grid = self.lines.has_focus();
+        let in_grid = self.lines.has_focus() || self.items.grid.has_focus();
         if self.in_grid && !in_grid {
             self.left_lines();
         }
@@ -1067,6 +1089,9 @@ impl Screen for WriteCheckScreen {
             return true;
         }
         if let Some(handled) = self.lines.command(id) {
+            return handled;
+        }
+        if let Some(handled) = self.items.grid.command(id) {
             return handled;
         }
         self.form_command(id)
@@ -1189,6 +1214,9 @@ impl WriteCheckScreen {
             "amount_from_lines": f.amount_from_lines,
             "words": f.amount.and_then(cl_model::forms::amount_words::amount_in_words).is_some(),
             "lines": form.lines.used().count(),
+            "item_lines": form.items.used().count(),
+            "tab": self.items.tab.name(),
+            "items_tab": self.items.shown(),
             "totals": totals,
             "dirty": self.is_dirty(),
             "saving": self.save.task.is_some(),
@@ -1215,6 +1243,7 @@ impl WriteCheckScreen {
             "focused": self.focused.map(|f| format!("{f:?}").to_lowercase()),
             "grid": {
                 "focused": self.lines.has_focus(),
+                "items_focused": self.items.grid.has_focus(),
             },
             "layout": self.layout.json(),
             "draft": self.draft_state(),

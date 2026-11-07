@@ -1,0 +1,29 @@
+# Items to Reorder (P24 WP-2, U-78) against `clientledger --demo`: the
+# landscape fabric (6 on hand, reorder point 10) under its preferred
+# vendor. Home's Needs attention counts it and its Reorder link opens the
+# same window (plan §6.4). Synthetic.
+name: inventory_reorder
+description: "Items to Reorder grouped by preferred vendor."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.items_to_reorder
+  - command: dev.demo_inventory_reset
+  - assert_state: {key: screen.screen, equals: inventory_reorder}
+  - assert_state: {key: screen.rows, equals: 1}
+  - assert_exists: {role: label, label: "Landscape Fabric Roll"}
+  - assert_exists: {role: label, label: "Ozark Mulch Supply"}
+  - screenshot: reorder
+  - assert_no_clipping: {}
+  - command: file.close_window
+  # Home → Needs attention → Reorder.
+  - key: Alt+H
+  - click: {role: button, label_contains: "Refresh"}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.attention.reorder, equals: 1}
+  - assert_exists: {role: label, label: "1 item at or below its reorder point"}
+  - screenshot: home-reorder
+  - click: {role: link, label: Reorder}
+  - assert_state: {key: screen.screen, equals: inventory_reorder}
+  - assert_state: {key: screen.rows, equals: 1}
+  - command: file.close_window

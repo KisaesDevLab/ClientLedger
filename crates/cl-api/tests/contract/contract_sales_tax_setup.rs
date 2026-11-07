@@ -157,6 +157,7 @@ pub(crate) fn tax_item(
 fn product(h: &Harness, s: &Session, income: AccountId, name: &str, code: TaxCodeId) -> ItemId {
     h.run(s.items().create(
         &ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: unique(name),
             description: None,
             unit_price: None,

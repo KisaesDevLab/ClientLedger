@@ -19,6 +19,7 @@ fn service(h: &Harness, prefix: &str) -> cl_api::Item {
     let income = account(h, s, AccountType::Revenue, "Service income");
     h.run(s.items().create(
         &ItemFields {
+            purchase: cl_api::ItemPurchase::default(),
             name: unique(prefix),
             description: None,
             unit_price: Some(m("45.0450")),
@@ -134,6 +135,7 @@ pub fn sales_kinds_u39a(h: &Harness) {
     let income = account(h, s, AccountType::Revenue, "Discounts given");
     let pct = cl_api::SignedPercent::parse("10").expect("pct");
     let fields = ItemFields {
+        purchase: cl_api::ItemPurchase::default(),
         name: unique("Loyalty discount"),
         description: None,
         unit_price: None,
@@ -172,6 +174,7 @@ pub fn price_levels_u40(h: &Harness) {
         let item = h
             .run(s.items().create(
                 &ItemFields {
+                    purchase: cl_api::ItemPurchase::default(),
                     name: unique("Shrubs"),
                     description: None,
                     unit_price: Some(cl_core::Money::parse_wire("32.50").expect("m")),

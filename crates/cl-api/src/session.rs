@@ -157,6 +157,10 @@ impl Client {
                 .has(Capabilities::IDEMPOTENCY_SALES_TAX_PAY),
             info.capabilities.has(Capabilities::IDEMPOTENCY_RECOVERY),
         );
+        self.exec()
+            .set_idempotency_inventory_v1(info.capabilities.has(Capabilities::INVENTORY_ADJUST));
+        self.exec()
+            .set_unit_sets_v1(info.capabilities.has(Capabilities::UNITS_OF_MEASURE));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

@@ -766,7 +766,11 @@ fn versioned(record: &Value) -> Result<Versioned<InvoiceRecord>, ApiError> {
     let r: InvoiceRecord =
         serde_json::from_value(record.clone()).map_err(|_| ApiError::Internal)?;
     let version = RecordVersion::Fingerprint(r.fingerprint());
-    Ok(Versioned { record: r, version })
+    Ok(Versioned {
+        record: r,
+        version,
+        stock_warnings: Vec::new(),
+    })
 }
 
 fn closing(state: &DemoState) -> Option<CalendarDate> {
@@ -916,6 +920,9 @@ pub fn create(
         return Err(refused("VALIDATION_ERROR", &json!({})));
     }
     cl_api::check_invoice(new, &all_caps()).map_err(|_| invalid())?;
+    // P24: the inventory gate comes before the closing-date password.
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines)?;
+    super::stock::gate(state, None, new.txn_date, &stock)?;
     check_closing(closing(state), &[new.txn_date], password)?;
     if new
         .lines
@@ -953,6 +960,7 @@ pub fn create(
     // P23: the document's stored tax rows.
     let figures = preview(state, new, Some(id))?;
     super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::Invoice, new.txn_date, &stock)?;
     Ok(saved)
 }
 
@@ -1113,6 +1121,7 @@ pub fn void(
         .as_str()
         .and_then(|d| CalendarDate::parse_wire(d).ok())
         .ok_or(ApiError::Internal)?;
+    super::stock::gate_remove(state, id)?;
     check_closing(close, &[date], password)?;
     // The engine refuses a void while payments or credits are applied
     // (PR-3 S2): unapply or void those first.
@@ -1137,6 +1146,7 @@ pub fn void(
     state.invoices.writes += 1;
     let saved = versioned(&s.record);
     super::sales_tax::void_rows(state, id);
+    super::stock::remove(state, id)?;
     saved
 }
 
@@ -1240,6 +1250,8 @@ pub fn update(
             details: cl_api::ConflictDetails::default(),
         });
     }
+    let stock = super::stock::sales_lines(state, super::stock::Side::Sale, &new.lines)?;
+    super::stock::gate(state, Some(id), new.txn_date, &stock)?;
     check_closing(close, &[old_date, new.txn_date], password)?;
     let taken: BTreeSet<JournalLineId> = state
         .invoices
@@ -1314,6 +1326,7 @@ pub fn update(
     );
     let figures = preview(state, new, Some(id))?;
     super::sales_tax::post_rows(state, id, new.txn_date, &figures, Decimal::ONE);
+    super::stock::post(state, id, cl_api::TxnType::Invoice, new.txn_date, &stock)?;
     Ok(saved)
 }
 
@@ -1674,4 +1687,34 @@ fn client_change_allowed(
         ));
     }
     Ok(())
+}
+
+/// P24 (Return of, Q-P24e/u): the client's live invoices that sold `item`:
+/// id, number and date.
+#[must_use]
+pub fn invoices_with_item(
+    state: &DemoState,
+    client: cl_core::ids::ContactId,
+    item: cl_core::ids::ItemId,
+) -> Vec<(TransactionId, Option<String>, cl_core::CalendarDate)> {
+    let (client, item) = (client.to_string(), item.to_string());
+    state
+        .invoices
+        .stored
+        .iter()
+        .filter(|(_, s)| {
+            let r = &s.record;
+            r["contactId"].as_str() == Some(client.as_str())
+                && r["status"].as_str() != Some("void")
+                && r["lines"].as_array().is_some_and(|ls| {
+                    ls.iter()
+                        .any(|l| l["itemId"].as_str() == Some(item.as_str()))
+                })
+        })
+        .filter_map(|(id, s)| {
+            let date = cl_core::CalendarDate::parse_wire(s.record["txnDate"].as_str()?).ok()?;
+            let number = s.record["txnNumber"].as_str().map(str::to_string);
+            Some((*id, number, date))
+        })
+        .collect()
 }

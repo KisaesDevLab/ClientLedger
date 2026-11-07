@@ -4,8 +4,8 @@
 use cl_api::{
     AccountFilter, CompanySettingsUpdate, IdempotencyKey, NewCompany, OpenCompany, Session,
 };
-use cl_core::Timestamp;
 use cl_core::ids::TenantId;
+use cl_core::{OwnerFacing, Timestamp};
 use cl_settings::{Accent, RecentStore};
 
 use crate::error::CompanyError;
@@ -95,7 +95,55 @@ pub async fn open_company(
     let open = session.open_company(id).await?;
     let now = cl_settings::recent::now();
     store.update(|list| list.touch_opened(id, now))?;
+    move_inventory_flag(session, store, id).await;
     Ok(open)
+}
+
+/// The one-time move of a company's local inventory flag (P08, Q-P08c) to
+/// the engine (P24, U-25, `company-inventory-flag-v1`): a company created
+/// with inventory on before the engine stored the switch gets it turned on
+/// there (adopting its "Inventory Asset", U-156), then the local flag is
+/// cleared so the engine is the only owner. A failure is logged and
+/// retried on the next open; it never blocks opening the company.
+async fn move_inventory_flag(session: &Session, store: &RecentStore, id: TenantId) {
+    let local = store
+        .load()
+        .ok()
+        .and_then(|l| l.get(id).map(|r| r.flags.inventory_enabled))
+        .unwrap_or(false);
+    if !local
+        || !session
+            .client()
+            .capabilities()
+            .has(cl_api::Capabilities::COMPANY_INVENTORY_FLAG)
+    {
+        return;
+    }
+    let on = match session.company_settings().await {
+        Ok(s) if s.inventory_on() => Ok(()),
+        Ok(_) => session
+            .set_inventory_enabled(true, cl_api::IdempotencyKey::new())
+            .await
+            .map(drop),
+        Err(e) => Err(e),
+    };
+    match on {
+        Ok(()) => {
+            if let Err(e) = store.update(|list| {
+                if let Some(r) = list.get_mut(id) {
+                    r.flags.inventory_enabled = false;
+                }
+            }) {
+                // Scrubbed (review note): codes and statuses only.
+                let detail = CompanyError::from(e).scrubbed_detail();
+                tracing::warn!(error = %detail, "inventory flag moved; local record not updated");
+            }
+        }
+        Err(e) => {
+            let detail = CompanyError::from(e).scrubbed_detail();
+            tracing::warn!(error = %detail, "inventory flag not moved to the engine yet");
+        }
+    }
 }
 
 /// Back to the workspace (no company open).

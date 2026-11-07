@@ -30,7 +30,7 @@
 
 use std::fmt;
 
-use cl_core::ids::{AccountId, ContactId, ItemId, TagId, TransactionId};
+use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
 use cl_core::money::UserInput;
 use cl_core::{CalendarDate, Money, Quantity};
 
@@ -667,39 +667,7 @@ pub struct CheckedTerms {
     pub discount_days: Option<u16>,
 }
 
-/// One checked item line. `Debug` is redacted.
-#[derive(Clone, PartialEq, Eq)]
-pub struct CheckedItemLine {
-    /// The item.
-    pub item: Option<ItemId>,
-    /// Description, when typed (trimmed).
-    pub description: Option<String>,
-    /// Quantity (more than zero).
-    pub qty: Option<Quantity>,
-    /// Rate (zero or more); set only together with `qty`.
-    pub rate: Option<Money>,
-    /// Amount, more than zero: `rate × qty` rounded to cents when both are
-    /// set, otherwise as typed.
-    pub amount: Money,
-    /// Account.
-    pub account: AccountId,
-    /// Customer.
-    pub contact: Option<ContactId>,
-    /// Billable.
-    pub billable: bool,
-    /// Tag.
-    pub tag: Option<TagId>,
-}
-
-impl fmt::Debug for CheckedItemLine {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CheckedItemLine")
-            .field("item", &self.item.is_some())
-            .field("qty", &self.qty.is_some())
-            .field("billable", &self.billable)
-            .finish_non_exhaustive()
-    }
-}
+pub use crate::forms::item_lines::CheckedItemLine;
 
 /// A bill or credit that passed [`check`], trimmed, ready to map field by
 /// field onto the engine draft (no arithmetic left to do). `Debug` is
@@ -867,6 +835,7 @@ fn check_items(
                 item: l.item,
                 description: trimmed(&l.description),
                 qty: l.qty,
+                unit: l.unit.filter(|_| l.item.is_some()),
                 rate: l.rate.filter(|_| l.qty.is_some()),
                 amount,
                 account,

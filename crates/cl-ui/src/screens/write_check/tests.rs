@@ -1183,6 +1183,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             tag: Some(tag),
         }],
         draft_attachment: None,
+        item_lines: Vec::new(),
     };
     let d = to_draft(&c, "Ozark Feed & Seed").expect("draft");
     assert_eq!(d.bank, bank);
@@ -1208,6 +1209,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             contact: Some(project),
             billable: true,
             tag: Some(tag),
+            item: None,
         }]
     );
     let named = CheckedCheck {
@@ -1450,6 +1452,7 @@ fn without_check_edit_an_edit_goes_through_the_ledger_record_and_saves_again() {
                 contact: None,
                 billable: false,
                 tag: None,
+                item: None,
             }],
         };
         crate::company::demo::checks::update_expense(&mut demo, id, &version, &draft, None)
@@ -1578,13 +1581,13 @@ fn the_bank_line_is_the_credit_on_the_checks_bank_account() {
     let r = saved_check(&link, &s, 4418);
     let bank = account(&s, "1010");
     let keys = &mut cl_model::rowkey::RowKeyGen::new();
-    let (f, lines, exact) = save::form_of(&r, bank, keys);
+    let (f, lines, _, exact) = save::form_of(&r, bank, keys);
     assert!(exact);
     assert_eq!(f.bank, Some(bank));
     assert_eq!(f.amount, Some(money("1286.40")));
     assert_eq!(lines.used().count(), 2);
     // Read against another account: not this form's check.
-    let (_, _, exact) = save::form_of(&r, account(&s, "5100"), keys);
+    let (_, _, _, exact) = save::form_of(&r, account(&s, "5100"), keys);
     assert!(!exact);
     // A second credit line (before the bank line): shown read-only, never
     // taken for the bank line.
@@ -1593,13 +1596,14 @@ fn the_bank_line_is_the_credit_on_the_checks_bank_account() {
     refund.debit = Money::ZERO;
     refund.credit = money("5.00");
     odd.txn.lines.insert(0, refund);
-    let (_, _, exact) = save::form_of(&odd, bank, keys);
+    let (_, _, _, exact) = save::form_of(&odd, bank, keys);
     assert!(!exact);
     // Loaded into the screen: read-only with its note.
     s.load_bank = Some(bank);
     s.show_record(&cl_api::Versioned {
         version: RecordVersion::Fingerprint(cl_api::EditableFields::fingerprint(&odd)),
         record: odd,
+        stock_warnings: Vec::new(),
     });
     assert_eq!(s.state()["read_only"], true);
     assert_eq!(s.state()["read_only_note"], "check.read_only.shape");
@@ -2090,4 +2094,116 @@ fn print_on_a_new_check_saves_it_to_print_and_opens_the_preview() {
     // Save & New: a fresh check is in front.
     assert!(s.editing.is_none());
     assert!(!s.print_after_save);
+}
+
+/// P24 plan §6.3 (review missing test): a check buying a part while it is
+/// oversold (so its receipt carries a cost correction) loads, saves and
+/// loads again with the same item line and the same stock: the engine-made
+/// lines never reach the form and a re-save moves nothing.
+#[test]
+fn a_check_with_a_part_and_its_correction_round_trips() {
+    let (_d, link) = link();
+    assert!(crate::screens::inventory::demo_reset(&link));
+    let part = crate::company::demo::lists::item_id(crate::company::demo::stock::FIRST_PART + 1);
+    let stock = || {
+        let mut d = link.demo_state().expect("demo");
+        d.items_mut()
+            .iter()
+            .find(|i| i.id == part)
+            .map(|i| i.stock.clone())
+            .expect("part")
+    };
+    // Oversell: 6 on hand, 8 sold.
+    {
+        let mut d = link.demo_state().expect("demo");
+        let clearing = crate::company::demo::receivables::clearing(&mut d);
+        let mut r = cl_api::NewSalesReceipt::new(
+            today(),
+            vec![cl_api::InvoiceLine::item(
+                part,
+                cl_core::Quantity::parse_wire("8").expect("q"),
+            )],
+        );
+        r.deposit_to_account_id = clearing;
+        crate::company::demo::credit_memos::save_receipt(&mut d, &r, None, None).expect("oversold");
+    }
+    let oversold = stock();
+    assert!(
+        oversold
+            .quantity_on_hand
+            .is_some_and(cl_core::Quantity::is_negative)
+    );
+
+    let mut s = screen(&link);
+    let payee = contact(&s, "Ozark Feed & Seed");
+    s.pick_payee(payee);
+    // Only the item line: the payee's last-check prefill goes.
+    let blank = FormLine::blank(s.lines.form_mut().adapter_mut().keys.next_key());
+    s.lines.form_mut().edit_step(|v| v.lines = vec![blank]);
+    s.header.edit_step(|h| h.amount = Some(money("80.00")));
+    let mut item = cl_model::forms::item_lines::ItemLine::blank(s.items.grid.keys().next_key());
+    item.item = Some(part);
+    // What picking the part fills in: its inventory asset account.
+    item.account = link
+        .demo_state()
+        .expect("demo")
+        .items_mut()
+        .iter()
+        .find(|i| i.id == part)
+        .and_then(|i| i.fields.purchase.asset_account_id);
+    item.set_qty(Some(cl_core::Quantity::parse_wire("4").expect("q")));
+    item.set_rate(Some(money("20.00")));
+    let entry = cl_model::forms::item_lines::ItemLine::blank(s.items.grid.keys().next_key());
+    s.items
+        .grid
+        .form_mut()
+        .edit_step(|v| v.lines = vec![item, entry]);
+    s.sync_inputs();
+    assert!(
+        s.start_save(SaveIntent::Save, None),
+        "{:?} {}",
+        s.save.error,
+        s.state()
+    );
+    s.poll();
+    let bought = stock();
+    assert_ne!(bought, oversold, "the check moved stock");
+    let shown = |s: &WriteCheckScreen| {
+        s.items
+            .grid
+            .value()
+            .lines
+            .iter()
+            .filter(|l| l.item.is_some())
+            .map(|l| (l.item, l.qty, l.rate, l.amount, l.unit))
+            .collect::<Vec<_>>()
+    };
+    let lines = shown(&s);
+    assert_eq!(lines.len(), 1, "derived lines stay out of the form");
+    let number = s.save.last.as_ref().and_then(|r| r.number).expect("saved");
+    let mut s = screen(&link);
+
+    for note in ["Round trip", "Round trip again"] {
+        s.navigate(true);
+        s.poll();
+        assert!(s.editing.is_some(), "loaded");
+        assert_eq!(s.state()["number"], number, "the newest check");
+        assert_eq!(shown(&s), lines);
+        assert!(
+            s.lines.value().lines.iter().all(|l| l.account.is_none()),
+            "no expense lines"
+        );
+        s.header.edit_step(|h| h.memo = note.into());
+        s.sync_inputs();
+        assert!(
+            s.start_save(SaveIntent::SaveAndNew, None),
+            "{:?}",
+            s.save.error
+        );
+        s.poll();
+        assert!(s.save.error.is_none(), "{:?}", s.save.error);
+        assert!(s.save.inventory.is_none(), "{:?}", s.save.inventory);
+        assert_eq!(stock(), bought, "a re-save moves nothing");
+        s = screen(&link);
+    }
 }
