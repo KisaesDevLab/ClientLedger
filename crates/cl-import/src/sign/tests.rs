@@ -13,6 +13,7 @@ fn row(line: usize, amount: &str, balance: Option<&str>, ty: Option<&str>) -> Ba
         line,
         date: CalendarDate::from_ymd(2026, 11, u32::try_from(line).unwrap()).unwrap(),
         file_amount: dec(amount),
+        rounded_from: None,
         description: String::new(),
         memo: None,
         check_number: None,

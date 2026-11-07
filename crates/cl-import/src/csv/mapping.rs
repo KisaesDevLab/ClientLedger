@@ -16,8 +16,8 @@ use crate::ParseOptions;
 use crate::detect::FileFormat;
 use crate::error::ImportError;
 use crate::normalize::{
-    AccountKind, AmountProblem, Declared, ParsedFile, ProblemKind, RowParts, Section, TextEncoding,
-    decode, parse_amount,
+    AccountKind, AmountProblem, Declared, ParsedAmount, ParsedFile, ProblemKind, RowParts, Section,
+    TextEncoding, decode, parse_amount, parse_amount_detail,
 };
 use cl_core::CalendarDate;
 use rust_decimal::Decimal;
@@ -501,28 +501,43 @@ enum Direction {
     Unclear,
 }
 
-fn amount(row: &Row, layout: AmountColumns) -> Result<Decimal, Direction> {
+fn amount(row: &Row, layout: AmountColumns) -> Result<ParsedAmount, Direction> {
     let get = |i: usize| row.fields.get(i).map_or("", String::as_str);
     let blank = |s: &str| s.trim().is_empty();
+    let with = |a: ParsedAmount, value: Decimal| ParsedAmount {
+        value,
+        rounded_from: a.rounded_from,
+    };
     match layout {
-        AmountColumns::Signed { column } => parse_amount(get(column)).map_err(Direction::Problem),
+        AmountColumns::Signed { column } => {
+            parse_amount_detail(get(column)).map_err(Direction::Problem)
+        }
         AmountColumns::DebitCredit { debit, credit } => {
             let d = (!blank(get(debit)))
-                .then(|| parse_amount(get(debit)))
+                .then(|| parse_amount_detail(get(debit)))
                 .transpose()
                 .map_err(Direction::Problem)?;
             let c = (!blank(get(credit)))
-                .then(|| parse_amount(get(credit)))
+                .then(|| parse_amount_detail(get(credit)))
                 .transpose()
                 .map_err(Direction::Problem)?;
-            let d = d.filter(|v| !v.is_zero());
-            let c = c.filter(|v| !v.is_zero());
+            let d = d.filter(|v| !v.value.is_zero());
+            let c = c.filter(|v| !v.value.is_zero());
             match (d, c) {
                 (Some(_), Some(_)) => Err(Direction::Unclear),
-                (Some(d), None) => Ok(-d.abs()),
-                (None, Some(c)) => Ok(c.abs()),
+                (Some(d), None) => {
+                    let v = -d.value.abs();
+                    Ok(with(d, v))
+                }
+                (None, Some(c)) => {
+                    let v = c.value.abs();
+                    Ok(with(c, v))
+                }
                 // Both blank or zero: a zero row, skipped like any other.
-                (None, None) if !blank(get(debit)) || !blank(get(credit)) => Ok(Decimal::ZERO),
+                (None, None) if !blank(get(debit)) || !blank(get(credit)) => Ok(ParsedAmount {
+                    value: Decimal::ZERO,
+                    rounded_from: None,
+                }),
                 (None, None) => Err(Direction::Problem(AmountProblem::Missing)),
             }
         }
@@ -530,10 +545,16 @@ fn amount(row: &Row, layout: AmountColumns) -> Result<Decimal, Direction> {
             amount,
             indicator: ind,
         } => {
-            let a = parse_amount(get(amount)).map_err(Direction::Problem)?;
+            let a = parse_amount_detail(get(amount)).map_err(Direction::Problem)?;
             match indicator(get(ind)) {
-                Some(true) => Ok(-a.abs()),
-                Some(false) => Ok(a.abs()),
+                Some(true) => {
+                    let v = -a.value.abs();
+                    Ok(with(a, v))
+                }
+                Some(false) => {
+                    let v = a.value.abs();
+                    Ok(with(a, v))
+                }
                 None => Err(Direction::Unclear),
             }
         }

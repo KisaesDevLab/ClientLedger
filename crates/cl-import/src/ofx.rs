@@ -15,7 +15,7 @@ use crate::detect::FileFormat;
 use crate::error::ImportError;
 use crate::normalize::{
     AccountId, AccountKind, Balance, Decoded, Institution, ParsedFile, ProblemKind, RowParts,
-    Section, decode, parse_amount, trim_ws,
+    Section, decode, parse_amount, parse_amount_detail, trim_ws,
 };
 use cl_core::CalendarDate;
 
@@ -311,9 +311,10 @@ fn push_transaction(section: &mut Section, trn: &Node) {
     let description = crate::dedupe::ofx_description(name, trn.text_of("MEMO"));
     let reference = trn.text_of("REFNUM").map(trim_ws).filter(|r| !r.is_empty());
     let memo = reference.map(|r| format!("Ref: {}", r.chars().take(100).collect::<String>()));
-    let amount = trn
-        .text_of("TRNAMT")
-        .map_or(Err(crate::normalize::AmountProblem::Missing), parse_amount);
+    let amount = trn.text_of("TRNAMT").map_or(
+        Err(crate::normalize::AmountProblem::Missing),
+        parse_amount_detail,
+    );
     section.push_parts(&RowParts {
         line: trn.line,
         date: trn
