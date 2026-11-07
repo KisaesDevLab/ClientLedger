@@ -13,6 +13,8 @@ steps:
   - assert_state: {key: screen.screen, equals: inventory_count}
   - assert_state: {key: screen.rows, equals: 3}
   - assert_state: {key: screen.can_post, equals: false}
+  # QA-2 (PR-4): differences post to Cost of Goods Sold by default.
+  - assert_state: {key: screen.account_name, equals: "5050 Cost of Goods Sold"}
   - assert_disabled: {role: button, label: Post the count}
   - click: {role: text_input, label: Counted Hardwood Mulch Bag}
   - type: {text: "110"}

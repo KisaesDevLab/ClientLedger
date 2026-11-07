@@ -1034,8 +1034,26 @@ impl WriteCheckScreen {
     }
 
     fn problems_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        // QA-4 (PR-4): a line problem names its tab and line.
+        let tabs = self.items.shown();
+        let expense_lines = &self.lines.value().lines;
+        let item_lines = &self.items.grid.value().lines;
+        let position = |tab: cl_model::forms::lines::LineTab, k: cl_model::rowkey::RowKey| {
+            if !tabs {
+                return None;
+            }
+            match tab {
+                cl_model::forms::lines::LineTab::Expenses => {
+                    expense_lines.iter().position(|l| l.key == k)
+                }
+                cl_model::forms::lines::LineTab::Items => {
+                    item_lines.iter().position(|l| l.key == k)
+                }
+            }
+        };
         for p in &self.save.problems {
-            ui.add(egui::Label::new(RichText::new(t(p.key().0)).color(tokens.warn_text)).wrap());
+            let text = crate::forms::line_problem_text(p.row(), p.key().0, position);
+            ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
         }
         if let Some((refused, offer)) = self.save.duplicate {
             let mut take = false;

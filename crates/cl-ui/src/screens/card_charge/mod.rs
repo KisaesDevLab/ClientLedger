@@ -317,6 +317,18 @@ impl CardChargeScreen {
 
     /// The owner left the lines: a blank amount takes the lines total.
     fn left_lines(&mut self) {
+        // QA-4/QA-5 (PR-4): items that took the amount release the Expenses
+        // line that only followed it, and drop the lines payee prefill
+        // copied that never got an amount.
+        let mut g = self.compose();
+        let mut changed = g.release_follow(&self.payee.filled);
+        changed |=
+            cl_model::forms::lines::drop_unpriced(&mut g.lines, &self.payee.filled, &g.items);
+        if changed {
+            let mut lines = g.lines;
+            lines.ensure_entry(&mut self.lines.form_mut().adapter_mut().keys);
+            self.lines.form_mut().edit_step(|v| *v = lines);
+        }
         let mut f = self.compose();
         f.leave_lines();
         let (amount, from) = (f.amount, f.amount_from_lines);
@@ -344,6 +356,24 @@ impl CardChargeScreen {
         let allowed = self.flow.idle() && self.flow.read_only().is_none() && !self.draft_locked();
         self.lines
             .fill_remaining(total, Money::ZERO, allowed, &held);
+    }
+
+    /// QA-5 (PR-4): when the items total changes, the Expenses line that
+    /// only followed the typed amount lets go of it at once.
+    pub(crate) fn follow_items(&mut self) {
+        let now = cl_model::forms::item_lines::items_total(self.items.grid.value());
+        if now == self.payee.items_seen {
+            return;
+        }
+        self.payee.items_seen = now;
+        if !(self.flow.idle() && self.flow.read_only().is_none() && !self.draft_locked()) {
+            return;
+        }
+        let mut g = self.compose();
+        if g.release_follow(&self.payee.filled) {
+            let lines = g.lines;
+            self.lines.form_mut().edit_step(|v| *v = lines);
+        }
     }
 
     /// The owner typed the amount: one line follows it.
@@ -826,6 +856,7 @@ impl CardChargeScreen {
         self.records.new_record();
         self.payee.prefill = None;
         self.payee.applied = false;
+        self.payee.filled.clear();
         self.payee.source = None;
         self.payee.dropped = false;
         self.attach.reset();
@@ -881,7 +912,7 @@ impl CardChargeScreen {
 
     fn voided(&mut self) {
         let warnings = std::mem::take(&mut self.flow.warnings);
-        crate::screens::inventory::announce(&self.link, &warnings, &self.items.names());
+        crate::screens::inventory::announce_void(&self.link, &warnings, &self.items.names());
         let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
@@ -1010,6 +1041,7 @@ impl CardChargeScreen {
         self.problems.clear();
         self.payee.prefill = None;
         self.payee.applied = false;
+        self.payee.filled.clear();
         self.payee.dropped = false;
         self.focused = None;
         self.lock_columns();
@@ -1222,8 +1254,29 @@ impl CardChargeScreen {
         }
         ui.add_space(6.0);
         self.totals_ui(ui, tokens);
-        let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
-        kit::problems(ui, tokens, &keys);
+        // QA-4 (PR-4): a line problem names its tab and line.
+        let tabs = self.items.shown();
+        let expense_lines = &self.lines.value().lines;
+        let item_lines = &self.items.grid.value().lines;
+        let position = |tab: cl_model::forms::lines::LineTab, k: cl_model::rowkey::RowKey| {
+            if !tabs {
+                return None;
+            }
+            match tab {
+                cl_model::forms::lines::LineTab::Expenses => {
+                    expense_lines.iter().position(|l| l.key == k)
+                }
+                cl_model::forms::lines::LineTab::Items => {
+                    item_lines.iter().position(|l| l.key == k)
+                }
+            }
+        };
+        let texts: Vec<String> = self
+            .problems
+            .iter()
+            .map(|p| crate::forms::line_problem_text(p.row(), p.key().0, position))
+            .collect();
+        kit::problem_texts(ui, tokens, &texts);
         if let Some(ev) = kit::status(
             ui,
             tokens,
@@ -1571,6 +1624,7 @@ impl Screen for CardChargeScreen {
         self.compare_before();
         self.draw(ui);
         self.fill_remaining();
+        self.follow_items();
         self.compare_after();
         self.track_draft_read();
         if let Some(d) = self.draft.session.as_mut() {

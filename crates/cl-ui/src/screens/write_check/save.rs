@@ -726,7 +726,11 @@ impl WriteCheckScreen {
         if let Some(r) = self.void.task.as_mut().and_then(Task::try_take) {
             self.void.task = None;
             match r {
-                Ok(()) => self.voided(),
+                Ok(w) => {
+                    // PR-4 S4: a void that drives stock below zero says so.
+                    crate::screens::inventory::announce_void(&self.link, &w, &self.items.names());
+                    self.voided();
+                }
                 Err(e) => {
                     let reason = self.void.reason.clone();
                     if !self.closing_failed(&e, Pending::Void(reason)) {
@@ -1398,10 +1402,7 @@ impl WriteCheckScreen {
             let r = crate::company::demo::checks::void(&mut demo, e.id, password.as_ref());
             drop(demo);
             self.void.task = Some(match r {
-                Ok(()) => {
-                    crate::screens::inventory::announce_demo_void(&self.link, &self.items.names());
-                    Task::ready(())
-                }
+                Ok(()) => Task::ready(Vec::new()),
                 Err(err) => {
                     let lock = crate::screens::inventory::lock_of(&self.link, &err);
                     if let Some(text) = crate::screens::inventory::refusal_text(&err, lock) {
@@ -1425,10 +1426,10 @@ impl WriteCheckScreen {
             key: Some(key.clone()),
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.transactions()
+            Ok(s.transactions()
                 .void(e.id, &reason, &options(password), key)
-                .await?;
-            Ok(())
+                .await?
+                .stock_warnings)
         }) {
             self.void.task = Some(Task::Pending(p));
         }

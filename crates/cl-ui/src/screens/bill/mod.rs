@@ -275,7 +275,7 @@ pub(crate) struct VoidPrompt {
     /// Delete rather than void (`ap-edit-v1`).
     pub delete: bool,
     pub reason: String,
-    pub task: Option<Task<()>>,
+    pub task: Option<Task<Vec<cl_api::NegativeStock>>>,
     /// The key of the last void or delete sent, kept after an unknown
     /// outcome so sending the same one again is a replay (Q-PR1a,
     /// `idempotency-ap-v1` / `idempotency-v1`), never a second write.

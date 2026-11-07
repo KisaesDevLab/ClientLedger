@@ -1058,3 +1058,41 @@ async fn lost_credit_create_bill_edit_and_void_are_reconciled() {
         .expect("reconciled credit void (same path)");
     assert_eq!(requests(&server, "POST").await.len(), 2);
 }
+
+/// PR-4 S4: a bill void or delete that drives a part below zero brings
+/// the engine's `NEGATIVE_STOCK` warnings back to the form.
+#[tokio::test]
+async fn a_void_and_a_delete_return_the_negative_stock_warnings() {
+    let server = MockServer::start().await;
+    let mut reply: Value = serde_json::from_str(&bill_body("INV-55871")).expect("json");
+    reply["warnings"] = json!([{
+        "code": "NEGATIVE_STOCK",
+        "details": {"itemId": ITEM, "date": "2026-01-15", "onHand": "-3.0000"}
+    }]);
+    let reply = reply.to_string();
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/bills/{ID}/void")))
+        .respond_with(json(200, &reply))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v1/transactions/{ID}")))
+        .respond_with(json(200, &reply))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &[Capabilities::AP_EDIT, Capabilities::TXN_DELETE]).await;
+    let opts = ApWriteOptions::default();
+    let w = s
+        .bills()
+        .void(id(), "returned", &opts, IdempotencyKey::new())
+        .await
+        .expect("void");
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0].item_id.to_string(), ITEM);
+    let w = s
+        .bills()
+        .delete(id(), Some("typed twice"), &opts, IdempotencyKey::new())
+        .await
+        .expect("delete");
+    assert_eq!(w.len(), 1);
+}

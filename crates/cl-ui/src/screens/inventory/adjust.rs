@@ -327,17 +327,15 @@ impl AdjustScreen {
             }
         });
         ui.horizontal(|ui| {
-            let l = ui.label(t("inventory.adjust.mode"));
+            // QA-11 (PR-4): each radio keeps its own name for AccessKit
+            // (labelling them by the caption made all three read "Adjust").
+            ui.label(t("inventory.adjust.mode"));
             for (m, key) in [
                 (AdjustMode::Quantity, "inventory.adjust.mode.quantity"),
                 (AdjustMode::Value, "inventory.adjust.mode.value"),
                 (AdjustMode::Both, "inventory.adjust.mode.both"),
             ] {
-                if ui
-                    .radio(self.draft.mode == m, t(key))
-                    .labelled_by(l.id)
-                    .clicked()
-                {
+                if ui.radio(self.draft.mode == m, t(key)).clicked() {
                     self.draft.mode = m;
                 }
             }
@@ -504,6 +502,7 @@ impl AdjustScreen {
                 AdjustMode::Both => "both",
             },
             "account": self.draft.account.is_some(),
+            "account_name": self.draft.account.map(|a| self.books.account_name(a)),
             "rows": self.draft.rows.len(),
             "lines": self
                 .draft
@@ -535,17 +534,10 @@ impl AdjustScreen {
     }
 }
 
-/// The adjustment account the form starts on: cost of goods sold.
+/// The adjustment account the form starts on: the company's cost of goods
+/// sold account, else none so the owner chooses (QA-2).
 fn default_account(b: &Books) -> Option<AccountId> {
-    b.accounts
-        .iter()
-        .find(|a| a.is_active && a.system_tag.as_deref() == Some("cost_of_goods_sold"))
-        .or_else(|| {
-            b.accounts
-                .iter()
-                .find(|a| a.is_active && a.fields.account_type == AccountType::Cogs)
-        })
-        .map(|a| a.id)
+    super::inventory_cogs_account(&b.accounts)
 }
 
 /// Accounts an adjustment may post to: expense, cost of goods sold and

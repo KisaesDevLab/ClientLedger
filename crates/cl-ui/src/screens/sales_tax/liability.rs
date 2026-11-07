@@ -64,6 +64,8 @@ pub struct OwedScreen {
     error: Option<ApiError>,
     problem: Option<&'static str>,
     loads: u32,
+    /// QA-10 (PR-4): other windows' saves run the report again.
+    bus: crate::data_bus::Subscription,
 }
 
 fn fmt(m: Money) -> String {
@@ -94,7 +96,9 @@ impl OwedScreen {
             error: None,
             problem: None,
             loads: 0,
+            bus: crate::data_bus::Subscription::detached(),
         };
+        s.bus = s.link.bus().subscribe();
         s.refresh();
         s
     }
@@ -299,9 +303,16 @@ impl OwedScreen {
         ]);
         let mut clicked = None;
         let mut pay = None;
+        // QA-7 (PR-4): at a narrow window (1024 pt) the columns close up
+        // so Owed, the figure the owner needs, stays in view.
+        let gap = if ui.available_width() < 1180.0 {
+            5.0
+        } else {
+            14.0
+        };
         egui::Grid::new("sales_tax_owed_grid")
             .striped(true)
-            .spacing([14.0, 4.0])
+            .spacing([gap, 4.0])
             .show(ui, |ui| {
                 for h in &heads {
                     ui.label(RichText::new(t(h)).strong().size(12.0));
@@ -320,13 +331,24 @@ impl OwedScreen {
                     for _ in 1..heads.len() - 1 {
                         ui.label("");
                     }
-                    if a.agency_id.is_some()
-                        && ui
+                    if a.agency_id.is_some() {
+                        if ui
                             .button(t("sales_tax.owed.pay_agency"))
                             .on_hover_text(t("sales_tax.owed.pay_agency_tip"))
                             .clicked()
+                        {
+                            pay = Some(a.agency_id);
+                        }
+                    } else if ui
+                        .button(t("sales_tax.owed.set_up_agency"))
+                        .on_hover_text(t("sales_tax.owed.set_up_agency_tip"))
+                        .clicked()
                     {
-                        pay = Some(a.agency_id);
+                        // QA-6 (PR-4): tax under "No agency" can't be paid
+                        // until it has one; setup is a click away.
+                        self.link.push(crate::company::CompanyEvent::OpenWindow(
+                            cl_model::CommandId::new(super::setup::KIND),
+                        ));
                     }
                     ui.end_row();
                     for i in &a.items {
@@ -530,6 +552,10 @@ impl Screen for OwedScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
+        // QA-10 (PR-4): a posting elsewhere refreshes the open report.
+        if !self.busy() && !self.link.bus().take(&mut self.bus).is_empty() {
+            self.refresh();
+        }
         egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
         if self.busy() {
             ui.ctx()

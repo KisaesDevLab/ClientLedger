@@ -1153,6 +1153,11 @@ impl ChartScreen {
             if !d.detail.is_empty() && !details.contains(&d.detail) {
                 details.push(d.detail.clone());
             }
+            // QA-1 (PR-4): an account saved with no detail type shows a
+            // blank first entry, never a detail type it doesn't have.
+            if d.detail.is_empty() {
+                details.insert(0, String::new());
+            }
             let labels: Vec<String> = details.iter().map(|s| detail_text(Some(s))).collect();
             let cur = details.iter().position(|s| *s == d.detail).unwrap_or(0);
             if let Some(i) = picker(

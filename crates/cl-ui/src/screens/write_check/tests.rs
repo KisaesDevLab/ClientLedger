@@ -2207,3 +2207,55 @@ fn a_check_with_a_part_and_its_correction_round_trips() {
         s = screen(&link);
     }
 }
+
+/// QA-4 (PR-4): the payee's last check prefills Expenses lines (an
+/// account, no amount); the owner enters the purchase on the Items tab
+/// only and saves. The copied lines that never got an amount go, the save
+/// passes, and the next check to the payee never copies the part's
+/// Inventory Asset onto an Expenses line.
+#[test]
+fn qa4_items_only_purchase_saves_over_prefilled_expense_lines() {
+    let (_d, link) = link();
+    assert!(crate::screens::inventory::demo_reset(&link));
+    let part = crate::company::demo::lists::item_id(crate::company::demo::stock::FIRST_PART + 1);
+    let asset = link
+        .demo_state()
+        .expect("demo")
+        .items_mut()
+        .iter()
+        .find(|i| i.id == part)
+        .and_then(|i| i.fields.purchase.asset_account_id);
+    let mut s = screen(&link);
+    let payee = contact(&s, "Ozark Feed & Seed");
+    s.pick_payee(payee);
+    let prefilled = s.lines.value().used().count();
+    assert!(prefilled > 0, "the payee's last check prefilled lines");
+    s.header.edit_step(|h| h.amount = Some(money("80.00")));
+    let mut item = cl_model::forms::item_lines::ItemLine::blank(s.items.grid.keys().next_key());
+    item.item = Some(part);
+    item.account = asset;
+    item.set_qty(Some(cl_core::Quantity::parse_wire("4").expect("q")));
+    item.set_rate(Some(money("20.00")));
+    let entry = cl_model::forms::item_lines::ItemLine::blank(s.items.grid.keys().next_key());
+    s.items
+        .grid
+        .form_mut()
+        .edit_step(|v| v.lines = vec![item, entry]);
+    s.sync_inputs();
+    assert!(
+        s.start_save(SaveIntent::SaveAndNew, None),
+        "{:?} {}",
+        s.save.problems,
+        s.state()
+    );
+    s.poll();
+    // The next check to the payee: no Expenses line on Inventory Asset.
+    s.pick_payee(payee);
+    s.poll();
+    assert!(
+        s.lines.value().used().all(|l| l.account != asset),
+        "an item line never prefills an Expenses line"
+    );
+    // The last check had item lines only: the vendor default fills in.
+    assert_eq!(s.prefill.source, Some("default"));
+}

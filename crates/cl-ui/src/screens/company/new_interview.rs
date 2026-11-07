@@ -710,6 +710,17 @@ impl Screen for NewCompanyScreen {
             self.done_panel(ui, &tokens, &created);
             return;
         }
+        // QA-12 (PR-4): with no owner account (or nobody signed in) a
+        // company can't be made; say so up front, not after six pages.
+        if !self.link.is_demo() && self.link.session().is_none() {
+            form::inline_warning(ui, &tokens, &t("interview.needs_owner"));
+            if ui.button(t("interview.needs_owner.open")).clicked() {
+                self.link.push(crate::company::CompanyEvent::OpenWindow(
+                    cl_model::CommandId::new("file.open_company"),
+                ));
+            }
+            return;
+        }
         ui.horizontal_wrapped(|ui| {
             for (i, p) in Page::ALL.iter().enumerate() {
                 let current = *p == self.page;

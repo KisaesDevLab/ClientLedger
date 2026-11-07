@@ -948,7 +948,13 @@ impl PayScreen {
             form::hint(ui, &tokens, &t(n));
         }
         if self.agencies.is_empty() && self.agencies_job.is_none() {
+            // QA-6 (PR-4): no dead end: the owner goes straight to setup.
             form::hint(ui, &tokens, &t("sales_tax.pay.no_agencies"));
+            if ui.button(t("sales_tax.pay.open_setup")).clicked() {
+                self.link.push(crate::company::CompanyEvent::OpenWindow(
+                    cl_model::CommandId::new(crate::screens::sales_tax::setup::KIND),
+                ));
+            }
             return;
         }
         self.header(ui);

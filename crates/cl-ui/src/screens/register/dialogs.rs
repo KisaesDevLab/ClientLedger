@@ -159,7 +159,10 @@ pub(super) struct RowWrite {
 /// `Conflict { Stale }` when the transaction changed since the owner was
 /// asked; `Local(InvalidValue)` for the refused combinations; any
 /// [`ApiError`] from the engine.
-pub(super) async fn row_write(s: Session, w: RowWrite) -> Result<(), ApiError> {
+pub(super) async fn row_write(
+    s: Session,
+    w: RowWrite,
+) -> Result<Vec<cl_api::NegativeStock>, ApiError> {
     if w.route.is_ap() && (w.kind == ActionKind::Delete || w.password.is_some()) {
         return Err(ApiError::Local(cl_api::LocalValidation::InvalidValue));
     }
@@ -183,27 +186,29 @@ pub(super) async fn row_write(s: Session, w: RowWrite) -> Result<(), ApiError> {
         }
     }
     let ap = s.ap_voids();
-    match (w.kind, w.route) {
+    // PR-4 S4: the costing walk's NEGATIVE_STOCK warnings come back.
+    Ok(match (w.kind, w.route) {
         (ActionKind::Void, VoidRoute::Generic) => {
             t.void(w.id, &w.void_reason, &with_password(w.password), w.key)
-                .await?;
+                .await?
+                .stock_warnings
         }
         (ActionKind::Void, VoidRoute::Bill) => ap.bill(w.id, &w.void_reason, w.key).await?,
         (ActionKind::Void, VoidRoute::VendorCredit) => {
-            ap.vendor_credit(w.id, &w.void_reason, w.key).await?;
+            ap.vendor_credit(w.id, &w.void_reason, w.key).await?
         }
         (ActionKind::Void, VoidRoute::BillPayment) => {
             ap.bill_payment(w.id, &w.void_reason, w.key).await?;
+            Vec::new()
         }
         (ActionKind::Delete, _) => {
             let opts = DeleteOptions {
                 reason: w.reason,
                 closing_password: w.password,
             };
-            t.delete(w.id, &opts, w.key).await?;
+            t.delete(w.id, &opts, w.key).await?.stock_warnings
         }
-    }
-    Ok(())
+    })
 }
 
 /// A change waiting for the closing-date password (no `Debug`: it holds
@@ -266,7 +271,7 @@ pub(super) struct RowActions {
     /// The closing-date password prompt (shared with Write Check).
     pub(super) closing: ClosingPrompt<Pending>,
     /// A void or delete on its way.
-    task: Option<(Pending, Task<()>)>,
+    task: Option<(Pending, Task<Vec<cl_api::NegativeStock>>)>,
     /// The last row action's failure.
     pub(super) error: Option<ApiError>,
     /// What Reload re-reads after a conflict.
@@ -546,9 +551,10 @@ impl RegisterScreen {
                 return;
             };
             match result {
-                Ok(()) => {
+                Ok(warnings) => {
                     self.actions.key = None;
                     self.row_action_done(&pending);
+                    crate::screens::inventory::announce_void(&self.link, &warnings, &[]);
                 }
                 Err(e) => {
                     if !super::record::keeps_key(&e) {
@@ -624,7 +630,10 @@ impl RegisterScreen {
         if self.link.is_demo() {
             let result = self.demo_row_action(kind, id, date, password.as_ref());
             match result {
-                Ok(()) => self.row_action_done(&pending),
+                Ok(()) => {
+                    self.row_action_done(&pending);
+                    crate::screens::inventory::announce_void(&self.link, &[], &[]);
+                }
                 Err(e) => self.row_action_failed(&pending, e),
             }
             return;

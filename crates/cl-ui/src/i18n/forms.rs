@@ -4,6 +4,8 @@
 /// The shared form components' part of the English catalog.
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
+    ("forms.line_where.expenses", "Expenses tab, line {line}: {problem}"),
+    ("forms.line_where.items", "Items tab, line {line}: {problem}"),
     ("lines.label", "Lines"),
     ("lines.col.account", "Account"),
     ("lines.col.amount", "Amount"),

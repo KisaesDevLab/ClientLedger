@@ -12,6 +12,13 @@ steps:
   - assert_state: {key: screen.screen, equals: inventory_adjust}
   - assert_state: {key: screen.parts, equals: 3}
   - assert_state: {key: screen.account, equals: true}
+  # QA-2 (PR-4): the adjustment account starts on Cost of Goods Sold
+  # (never the first cost account, e.g. Subcontractors).
+  - assert_state: {key: screen.account_name, equals: "5050 Cost of Goods Sold"}
+  # QA-11 (PR-4): each mode radio has its own accessible name.
+  - assert_exists: {role: radio_button, label: Quantity}
+  - assert_exists: {role: radio_button, label: Total value}
+  - assert_not_exists: {role: radio_button, label: Adjust}
   - click: {role: combo_box, label: Item 1}
   - click: {role: button, label: Hardwood Mulch Bag}
   - click: {role: text_input, label: Qty change 1}

@@ -57,7 +57,7 @@ impl ApVoids<'_> {
         id: TransactionId,
         reason: &str,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
         void(self.0, &BILL_VOID, "/api/v1/bills", id, reason, key).await
     }
 
@@ -73,7 +73,7 @@ impl ApVoids<'_> {
         id: TransactionId,
         reason: &str,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
         void(
             self.0,
             &VENDOR_CREDIT_VOID,
@@ -108,6 +108,7 @@ impl ApVoids<'_> {
             key,
         )
         .await
+        .map(|_| ())
     }
 }
 
@@ -118,7 +119,7 @@ async fn void(
     id: TransactionId,
     reason: &str,
     key: IdempotencyKey,
-) -> Result<(), ApiError> {
+) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
     void_with(
         session,
         op,
@@ -143,7 +144,7 @@ pub(crate) async fn void_with(
     reason: &str,
     opts: &ApWriteOptions,
     key: IdempotencyKey,
-) -> Result<(), ApiError> {
+) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
     // One company for the stamp read, the probe and the write.
     let s = &session.pinned();
     let reason = reason.trim();
@@ -168,8 +169,12 @@ pub(crate) async fn void_with(
     let probe = Probe::new(s, matcher, true).await;
     let mut call = Call::new(Method::Post, op.route(), format!("{base}/{id}/void")).json_body(body);
     call.idempotency_key = Some(key);
-    s.send(op, call, Some(&probe)).await?;
-    Ok(())
+    // PR-4 S4: the costing walk's NEGATIVE_STOCK warnings ride on the
+    // reply (none when a lost reply was resolved by reading back).
+    let reply = s.send(op, call, Some(&probe)).await?;
+    Ok(crate::resources::inventory::stock_warnings_from(
+        &reply.body,
+    ))
 }
 
 #[cfg(test)]

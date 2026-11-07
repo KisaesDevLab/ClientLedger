@@ -98,6 +98,8 @@ pub struct ReportScreen {
     error: Option<ApiError>,
     problem: Option<&'static str>,
     note: Option<&'static str>,
+    /// QA-10 (PR-4): other windows' saves run the report again.
+    bus: crate::data_bus::Subscription,
 }
 
 impl ReportScreen {
@@ -125,9 +127,19 @@ impl ReportScreen {
             error: None,
             problem: None,
             note: None,
+            bus: crate::data_bus::Subscription::detached(),
         };
+        s.bus = s.link.bus().subscribe();
         s.refresh();
         s
+    }
+
+    /// QA-10 (PR-4): a posting elsewhere (a data-bus notice) runs the
+    /// open report again; a notice that comes while it runs waits.
+    pub(crate) fn follow_bus(&mut self) {
+        if self.job.is_none() && !self.link.bus().take(&mut self.bus).is_empty() {
+            self.refresh();
+        }
     }
 
     /// Runs the report for the dates on screen.
@@ -425,7 +437,7 @@ impl ReportScreen {
                     {
                         open = Some((r.transaction_id, r.txn_type));
                     }
-                    ui.label(type_text(r.txn_type));
+                    ui.label(type_text(r.txn_type, r.expense_kind.as_deref()));
                     ui.label(self.books.name(r.item_id).unwrap_or_default());
                     super::num(ui, RichText::new(super::qty(r.quantity)).monospace());
                     super::num(ui, RichText::new(super::money(r.value)).monospace());
@@ -559,7 +571,16 @@ impl ReportScreen {
     }
 }
 
-fn type_text(k: Option<TxnType>) -> String {
+fn type_text(k: Option<TxnType>, expense: Option<&str>) -> String {
+    // QA-9 (PR-4): an expense-type row says which form made it.
+    if k == Some(TxnType::Expense) {
+        return t(match expense {
+            Some("check") => "inventory.txn.check",
+            Some("card_charge") => "inventory.txn.card_charge",
+            Some("expense") => "inventory.txn.expense",
+            _ => "inventory.txn.purchase",
+        });
+    }
     t(match k {
         Some(TxnType::Bill) => "inventory.txn.bill",
         Some(TxnType::VendorCredit) => "inventory.txn.vendor_credit",
@@ -579,6 +600,7 @@ impl Screen for ReportScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
+        self.follow_bus();
         egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
         if self.job.is_some() || self.books_job.is_some() {
             ui.ctx()

@@ -5,7 +5,7 @@
 pub const ENGLISH: &[(&str, &str)] = &[
     // Shared.
     ("inventory.negative_stock.void", "On {date} you'd have sold more {item} than you have ({on_hand} on hand). The cost is corrected when you receive more."),
-    ("inventory.negative_stock", "You're selling more {item} than you have on {date} ({on_hand} on hand). You can save; the cost is corrected when you receive more."),
+    ("inventory.negative_stock", "Saved. You sold more {item} than you had on {date} ({on_hand} on hand); the cost is corrected when you receive more."),
     ("inventory.period_closed", "This is on or before your closing date ({date}). Inventory in a closed period can't change, even with the closing password. Use a date after {date}, or change the closing date."),
     ("inventory.closing_date", "the closing date"),
     ("inventory.an_item", "an item"),
@@ -205,6 +205,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inventory.txn.credit_memo", "Credit memo"),
     ("inventory.txn.sales_receipt", "Sales receipt"),
     ("inventory.txn.check", "Check"),
+    ("inventory.txn.card_charge", "Card charge"),
+    ("inventory.txn.expense", "Expense"),
+    ("inventory.txn.purchase", "Purchase"),
     ("inventory.txn.adjustment", "Inventory adjustment"),
     ("inventory.txn.other", "Other"),
 ];

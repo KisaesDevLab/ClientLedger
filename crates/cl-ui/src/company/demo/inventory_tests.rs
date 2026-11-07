@@ -38,6 +38,9 @@ struct Doc {
     item: ItemId,
     kind: MoveKind,
     return_of: Option<String>,
+    /// More lines of the document (golden R2: two rows of one part on
+    /// one credit memo).
+    extra: Vec<DocLine>,
 }
 
 /// The demo ledger plus the cases' document table.
@@ -48,9 +51,15 @@ struct Book {
 }
 
 fn kind_of(step: &Value) -> MoveKind {
+    kind_for(s(step, "event").expect("event"), step)
+}
+
+/// The movement of `event` with the quantities of `step` (a step, or one
+/// of its `lines`).
+fn kind_for(event: &str, step: &Value) -> MoveKind {
     let qty = || q(s(step, "quantity").expect("quantity"));
     let amount = || m(s(step, "amount").expect("amount"));
-    match s(step, "event").expect("event") {
+    match event {
         "bill" => MoveKind::Receipt {
             quantity: qty(),
             amount: amount(),
@@ -82,12 +91,47 @@ fn with_quantity(k: MoveKind, quantity: Quantity) -> MoveKind {
 }
 
 fn line(doc: &Doc) -> Vec<DocLine> {
-    vec![DocLine {
+    let mut out = vec![DocLine {
         item: doc.item,
         kind: doc.kind,
         fallback_cost: None,
         return_of: doc.return_of.clone(),
-    }]
+    }];
+    out.extend(doc.extra.iter().cloned());
+    out
+}
+
+/// A step's document: its one line, or its `lines` (golden R2).
+fn doc_of(step: &Value, suffix: &str, item_name: Option<&str>) -> Doc {
+    let date = d(s(step, "date").expect("date"));
+    let link = |v: &Value| s(v, "returnOf").map(|r| format!("{r}{suffix}"));
+    if let Some(lines) = step.get("lines").and_then(Value::as_array) {
+        let event = s(step, "event").expect("event");
+        let mut all: Vec<DocLine> = lines
+            .iter()
+            .map(|l| DocLine {
+                item: item(item_name.or_else(|| s(l, "item")).expect("item")),
+                kind: kind_for(event, l),
+                fallback_cost: None,
+                return_of: link(l),
+            })
+            .collect();
+        let first = all.remove(0);
+        return Doc {
+            date,
+            item: first.item,
+            kind: first.kind,
+            return_of: first.return_of,
+            extra: all,
+        };
+    }
+    Doc {
+        date,
+        item: item(item_name.or_else(|| s(step, "item")).expect("item")),
+        kind: kind_of(step),
+        return_of: link(step),
+        extra: Vec::new(),
+    }
 }
 
 /// Runs one step; answers the warnings and, for a count, the count lines.
@@ -134,12 +178,7 @@ fn run(
             w
         }
         _ => {
-            let e = Doc {
-                date: d(s(step, "date").expect("date")),
-                item: item(item_name.or_else(|| s(step, "item")).expect("item")),
-                kind: kind_of(step),
-                return_of: s(step, "returnOf").map(|r| format!("{r}{suffix}")),
-            };
+            let e = doc_of(step, suffix, item_name);
             // As the demo routes do: the linked-return rules first.
             book.inv
                 .check_write(&doc, e.date, &line(&e))
@@ -190,6 +229,43 @@ fn check_row(r: &Row, e: &Value, ctx: &str) {
     }
 }
 
+/// A step's `expect` as the engine's golden runner reads it: `value`,
+/// `correction` and `residual` (each 0.00 when left out) are the
+/// document's row; `onHand`, `assetValue` and `averageCost` are the item's
+/// figures after the step (GET /items), whichever row is last (golden V4:
+/// a backdated invoice).
+fn check_step(book: &Book, rows: &[Row], doc: Option<&str>, e: &Value, ctx: &str) {
+    let figures = ["value", "correction", "residual"];
+    if let Some(doc) = doc.filter(|_| figures.iter().any(|k| e.get(k).is_some())) {
+        let r = row(rows, doc, item("W"));
+        if let Some(v) = s(e, "value") {
+            assert_eq!(r.value, m(v), "{ctx} value");
+        }
+        let neg = |x: Money| x.checked_neg().expect("neg");
+        let want = |k: &str| m(s(e, k).unwrap_or("0.00"));
+        assert_eq!(neg(r.correction), want("correction"), "{ctx} correction");
+        assert_eq!(neg(r.residual), want("residual"), "{ctx} residual");
+    }
+    let st = book.inv.stock(item("W")).expect("stock");
+    if let Some(v) = s(e, "onHand") {
+        assert_eq!(
+            st.quantity_on_hand.map(Quantity::to_wire).as_deref(),
+            Some(v),
+            "{ctx} onHand"
+        );
+    }
+    if let Some(v) = s(e, "assetValue") {
+        assert_eq!(st.asset_value, Some(m(v)), "{ctx} assetValue");
+    }
+    if let Some(v) = s(e, "averageCost") {
+        assert_eq!(
+            st.average_cost.map(UnitCost::to_wire).as_deref(),
+            Some(v),
+            "{ctx} averageCost"
+        );
+    }
+}
+
 fn check_rows(book: &Book, expected: &Value, ctx: &str) {
     let rows = book.inv.rows().expect("rows");
     let w: Vec<&Row> = rows.iter().filter(|r| r.item == item("W")).collect();
@@ -205,6 +281,9 @@ fn check_rows(book: &Book, expected: &Value, ctx: &str) {
                 .unwrap_or_else(|| panic!("{ctx}: no row {doc} after the last"));
             at += i;
             check_row(w[at], e, &format!("{ctx} {doc}"));
+            // The next listed row comes after this one (R2: two rows of
+            // one document).
+            at += 1;
         }
         return;
     }
@@ -334,11 +413,8 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
                     "{ctx} no line"
                 );
             }
-        } else if let Some(doc) = s(step, "doc").filter(|_| e.get("value").is_some()) {
-            check_row(row(&rows, doc, item("W")), e, &ctx);
-        } else if e.get("onHand").is_some() {
-            let last = rows.iter().rfind(|r| r.item == item("W")).expect("a row");
-            check_row(last, e, &ctx);
+        } else {
+            check_step(&book, &rows, s(step, "doc"), e, &ctx);
         }
         if let Some(after) = c.get("rowsAfter").and_then(|r| r.get(n.to_string())) {
             check_rows(&book, after, &ctx);
@@ -356,6 +432,20 @@ fn play_to(all: &[Value], id: &str, limit: Option<u64>) -> Book {
             &case(all, other)["rows"],
             &format!("case {id} rows as {other}"),
         );
+    }
+    // PR-4 S5: each sale's correction_share (the corrections attributed to
+    // the units it sold below 0).
+    if let Some(shares) = c.get("correctionShares").and_then(Value::as_object) {
+        let rows = book.inv.rows().expect("rows");
+        for (doc, want) in shares {
+            let r = row(&rows, doc, item("W"));
+            assert!(matches!(r.kind, MoveKind::Sale { .. }), "case {id} {doc}");
+            assert_eq!(
+                r.correction_share,
+                m(want.as_str().expect("share")),
+                "case {id} correctionShares {doc}"
+            );
+        }
     }
     if let Some(f) = c.get("final").and_then(Value::as_object) {
         for (name, e) in f {
@@ -484,7 +574,10 @@ fn inventory_golden() {
         play(all, id);
         ran.push(id.to_string());
     }
-    for must in ["A", "B", "V", "X", "M", "D", "N", "E", "R", "U", "F"] {
+    for must in [
+        "A", "B", "V", "V2", "V3", "V4", "X", "M", "D", "N", "E", "R", "R2", "R3", "R4", "R5", "U",
+        "F",
+    ] {
         assert!(ran.iter().any(|r| r == must), "case {must} ran");
     }
 }

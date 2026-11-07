@@ -235,17 +235,33 @@ impl CardForm {
     }
 
     /// The owner typed the amount: one used line with a blank amount (or
-    /// the previous amount) follows it (Q-P13r a, as on a check).
+    /// the previous amount) follows it (Q-P13r a, as on a check), unless
+    /// item lines already carry amounts (QA-5).
     pub fn set_amount(&mut self, amount: Option<Money>) {
         let previous = self.amount;
         self.amount = amount;
         self.amount_from_lines = false;
+        if self.items.lines.iter().any(|l| l.amount.is_some()) {
+            return;
+        }
         let mut used = self.lines.used_mut();
         if let (Some(line), None) = (used.next(), used.next())
             && (line.amount.is_none() || line.amount == previous)
         {
             line.amount = amount;
         }
+    }
+
+    /// Item lines took the typed amount (QA-5, PR-4): see
+    /// [`crate::forms::lines::release_follow`]. True when a line changed.
+    pub fn release_follow(&mut self, filled: &[RowKey]) -> bool {
+        crate::forms::lines::release_follow(
+            self.amount,
+            self.amount_from_lines,
+            &mut self.lines,
+            &self.items,
+            filled,
+        )
     }
 
     /// The owner left the lines (Q-P13r b): a blank amount takes the lines
@@ -414,6 +430,17 @@ impl CardProblem {
             CardProblem::ItemLine(_, i) => i.key(),
             CardProblem::ItemsOnCredit => TextKey("card.problem.items_on_credit"),
             CardProblem::ReadNotAccepted => TextKey("card.problem.read_not_accepted"),
+        }
+    }
+
+    /// The tab and line a line problem is about (QA-4).
+    #[must_use]
+    pub const fn row(self) -> Option<(crate::forms::lines::LineTab, RowKey)> {
+        use crate::forms::lines::LineTab;
+        match self {
+            CardProblem::Line(k, _) => Some((LineTab::Expenses, k)),
+            CardProblem::ItemLine(k, _) => Some((LineTab::Items, k)),
+            _ => None,
         }
     }
 

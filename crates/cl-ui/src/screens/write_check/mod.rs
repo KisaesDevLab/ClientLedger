@@ -228,7 +228,7 @@ pub(crate) struct Nav {
 pub(crate) struct VoidPrompt {
     pub open: bool,
     pub reason: String,
-    pub task: Option<Task<()>>,
+    pub task: Option<Task<Vec<cl_api::NegativeStock>>>,
 }
 
 /// History of a saved check.
@@ -886,6 +886,18 @@ impl WriteCheckScreen {
     /// The owner left the lines grid (Q-P13r b): a blank check amount
     /// takes the lines total; an amount from the lines follows them.
     pub(crate) fn left_lines(&mut self) {
+        // QA-4/QA-5 (PR-4): items that took the amount release the Expenses
+        // line that only followed it, and drop the lines payee prefill
+        // copied that never got an amount.
+        let mut g = self.compose();
+        let mut changed = g.release_follow(&self.prefill.filled);
+        changed |=
+            cl_model::forms::lines::drop_unpriced(&mut g.lines, &self.prefill.filled, &g.items);
+        if changed {
+            let mut lines = g.lines;
+            lines.ensure_entry(&mut self.lines.form_mut().adapter_mut().keys);
+            self.lines.form_mut().edit_step(|v| *v = lines);
+        }
         let mut f = self.compose();
         f.leave_lines();
         let (amount, from) = (f.amount, f.amount_from_lines);
@@ -907,6 +919,24 @@ impl WriteCheckScreen {
             && !self.closing_prompt.dialog_open()
             && !read_only
             && !self.draft_locked()
+    }
+
+    /// QA-5 (PR-4): when the items total changes, the Expenses line that
+    /// only followed the typed amount lets go of it at once.
+    pub(crate) fn follow_items(&mut self) {
+        let now = cl_model::forms::item_lines::items_total(self.items.grid.value());
+        if now == self.prefill.items_seen {
+            return;
+        }
+        self.prefill.items_seen = now;
+        if !self.lines_editable() {
+            return;
+        }
+        let mut g = self.compose();
+        if g.release_follow(&self.prefill.filled) {
+            let lines = g.lines;
+            self.lines.form_mut().edit_step(|v| *v = lines);
+        }
     }
 
     /// A line that just got its account with no amount takes what is left
@@ -1033,6 +1063,7 @@ impl Screen for WriteCheckScreen {
         self.compare_before();
         self.draw(ui);
         self.fill_remaining();
+        self.follow_items();
         self.compare_after();
         self.track_draft_read();
         if let Some(d) = self.draft.session.as_mut() {

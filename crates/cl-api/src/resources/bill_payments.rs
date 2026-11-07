@@ -201,6 +201,7 @@ impl BillPayments<'_> {
             key,
         )
         .await
+        .map(|_| ())
     }
 }
 

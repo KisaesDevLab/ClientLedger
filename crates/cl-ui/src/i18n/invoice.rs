@@ -63,6 +63,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.memo.tip", "Shows in registers and reports, never on the invoice."),
     ("invoice.email_after_save", "Email a PDF after saving"),
     ("invoice.hide_zero", "Hide $0 lines on the printed invoice"),
+    ("invoice.hide_zero.receipt", "Hide $0 lines on the printed receipt"),
+    ("invoice.hide_zero.credit_memo", "Hide $0 lines on the printed credit memo"),
     ("invoice.totals.subtotal", "Subtotal"),
     ("invoice.totals.tax", "Sales tax"),
     ("invoice.totals.tax_rate", "Sales tax ({rate})"),

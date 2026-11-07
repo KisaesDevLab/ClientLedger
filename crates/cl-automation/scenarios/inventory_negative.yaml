@@ -30,7 +30,7 @@ steps:
   - wait: {ms: 800}
   - screenshot: invoice
   - key: Alt+S
-  - assert_state: {key: toast, equals: "You're selling more Landscape Fabric Roll than you have on 11/04/2026 (-2 on hand). You can save; the cost is corrected when you receive more."}
+  - assert_state: {key: toast, equals: "Saved. You sold more Landscape Fabric Roll than you had on 11/04/2026 (-2 on hand); the cost is corrected when you receive more."}
   - screenshot: warning
   # A bill dated 11/03 brings 10 rolls in before the sale.
   - key: Ctrl+B

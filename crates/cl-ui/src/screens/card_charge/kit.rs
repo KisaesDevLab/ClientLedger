@@ -483,7 +483,7 @@ pub(crate) struct SaveFlow {
     pub task: Option<Task<(SavedRecord, Vec<cl_api::NegativeStock>)>>,
     /// P24: the last save's `NEGATIVE_STOCK` warnings (read once).
     pub warnings: Vec<cl_api::NegativeStock>,
-    pub void_task: Option<Task<()>>,
+    pub void_task: Option<Task<Vec<cl_api::NegativeStock>>>,
     pub intent: Option<SaveIntent>,
     key: Option<(SaveIdentity, IdempotencyKey)>,
     /// The saved record open in the form (`None`: a new one).
@@ -804,6 +804,12 @@ impl SaveFlow {
         if voided.is_some() {
             self.void_task = None;
         }
+        // PR-4 S4: the void's NEGATIVE_STOCK warnings, read once.
+        let voided = voided.map(|r| {
+            r.map(|w| {
+                self.warnings = w;
+            })
+        });
         (saved, voided)
     }
 
@@ -890,10 +896,10 @@ impl SaveFlow {
             key: Some(key.clone()),
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.transactions()
+            Ok(s.transactions()
                 .void(id, &reason, &options(password), key)
-                .await?;
-            Ok(())
+                .await?
+                .stock_warnings)
         }) {
             self.void_task = Some(Task::Pending(p));
         }
@@ -1488,6 +1494,13 @@ pub(crate) fn status<V: Clone + PartialEq>(
 pub(crate) fn problems(ui: &mut Ui, tokens: &Tokens, keys: &[&'static str]) {
     for key in keys {
         ui.add(egui::Label::new(RichText::new(t(key)).color(tokens.warn_text)).wrap());
+    }
+}
+
+/// Problems already in words (a line problem names its tab, QA-4).
+pub(crate) fn problem_texts(ui: &mut Ui, tokens: &Tokens, texts: &[String]) {
+    for text in texts {
+        ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
     }
 }
 

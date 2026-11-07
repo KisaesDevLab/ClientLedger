@@ -67,6 +67,12 @@ pub(crate) struct PrefillState {
     pub source: Option<&'static str>,
     /// Some details of the last transaction were inactive and left out.
     pub dropped: bool,
+    /// The lines prefill filled (QA-4: dropped on save when the items
+    /// carry the amount and they never got one).
+    pub filled: Vec<cl_model::rowkey::RowKey>,
+    /// The items total last seen (QA-5: the following line lets go as
+    /// soon as the items take the amount).
+    pub items_seen: Option<cl_core::Money>,
     /// The address the screen filled in (an address the owner typed is
     /// never replaced).
     pub auto_address: Option<String>,
@@ -86,7 +92,15 @@ pub(crate) fn last_of(t: &Transaction) -> LastTxn {
         lines: t
             .lines
             .iter()
-            .filter(|l| l.debit.is_positive() && l.credit.is_zero())
+            // QA-4 (PR-4): item lines (and the engine's derived inventory
+            // lines) are not Expenses lines: their account is the part's
+            // Inventory Asset, which an Expenses line must never take.
+            .filter(|l| {
+                l.debit.is_positive()
+                    && l.credit.is_zero()
+                    && l.item_id.is_none()
+                    && l.line_role.is_none()
+            })
             .map(|l| LastLine {
                 account: l.account_id,
                 memo: l.description.clone().unwrap_or_default(),
@@ -290,6 +304,13 @@ impl WriteCheckScreen {
             self.lines.form_mut().edit_step(|x| *x = v);
         }
         self.prefill.applied = true;
+        self.prefill.filled = self
+            .lines
+            .value()
+            .used()
+            .filter(|l| l.amount.is_none())
+            .map(|l| l.key)
+            .collect();
         self.prefill.source = Some("last");
         self.prefill.dropped = dropped;
         self.focus = Some(Field::Amount);
@@ -314,6 +335,13 @@ impl WriteCheckScreen {
             let lines = f.lines;
             self.lines.form_mut().edit_step(|v| *v = lines);
             self.prefill.applied = true;
+            self.prefill.filled = self
+                .lines
+                .value()
+                .used()
+                .filter(|l| l.amount.is_none())
+                .map(|l| l.key)
+                .collect();
             self.prefill.source = Some("default");
         }
     }

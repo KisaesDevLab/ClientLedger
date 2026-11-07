@@ -453,6 +453,10 @@ impl OpenCompanyScreen {
                     }
                     self.stage = Stage::Ready;
                     self.loaded_once = false;
+                    // QA-17 (PR-4): an earlier setup problem doesn't stay
+                    // on screen after the sign-up went through.
+                    self.error = None;
+                    self.notice = None;
                 }
                 Err(e) => self.error = Some(e),
             }

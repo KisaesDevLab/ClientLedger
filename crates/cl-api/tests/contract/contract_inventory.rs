@@ -188,6 +188,7 @@ struct Book {
     docs: HashMap<String, TransactionId>,
     invoices: HashMap<String, NewInvoice>,
     bills: HashMap<String, BillDraft>,
+    credit_memos: HashMap<String, NewCreditMemo>,
     items: HashMap<String, ItemId>,
     units: HashMap<String, UnitId>,
     set: Option<UnitSetId>,
@@ -280,6 +281,23 @@ fn edit(
         let cur = h.run(co.s.invoices().get(doc))?;
         let saved = h.run(co.s.invoices().update(doc, &cur.record, &new, opts, key()))?;
         book.invoices.insert(name.to_string(), new);
+        return Ok(saved.stock_warnings);
+    }
+    // Golden R3: a linked return's quantity changes.
+    if let Some(mut new) = book.credit_memos.get(name).cloned() {
+        if let Some(n) = st(s, "quantity") {
+            new.lines[0].quantity = Some(q(n));
+        }
+        if let Some(t) = date {
+            new.txn_date = t;
+        }
+        let cur = h.run(co.s.credit_memos().get(doc))?;
+        let o = cl_api::CreditWriteOptions {
+            posting: opts.clone(),
+            expected_updated_at: Some(cur.updated_at),
+        };
+        let saved = h.run(co.s.credit_memos().update(doc, &new, &o, key()))?;
+        book.credit_memos.insert(name.to_string(), new);
         return Ok(saved.stock_warnings);
     }
     let mut draft = book.bills.get(name).cloned().expect("an edited bill");
@@ -389,13 +407,26 @@ fn step(
             Some(saved.invoice.record.txn.id)
         }
         "credit_memo" => {
-            let sale = st(s, "returnOf").map(|doc| book.docs[doc]);
-            let line = InvoiceLine {
-                return_of: Some(sale),
-                ..InvoiceLine::item(item.expect("item"), q(st(s, "quantity").expect("qty")))
+            // One line, or `lines` (golden R2: two rows of one part).
+            let one = |l: &Value| {
+                let sale = st(l, "returnOf").map(|doc| book.docs[doc]);
+                let part = st(l, "item").map_or_else(|| item.expect("item"), |n| book.items[n]);
+                InvoiceLine {
+                    return_of: Some(sale),
+                    ..InvoiceLine::item(part, q(st(l, "quantity").expect("qty")))
+                }
             };
-            let new = NewCreditMemo::new(co.customer, date.expect("date"), vec![line]);
-            Some(h.run(co.s.credit_memos().create(&new, &opts, key()))?.id)
+            let lines = match s.get("lines").and_then(Value::as_array) {
+                Some(ls) => ls.iter().map(one).collect(),
+                None => vec![one(s)],
+            };
+            let new = NewCreditMemo::new(co.customer, date.expect("date"), lines);
+            let saved = h.run(co.s.credit_memos().create(&new, &opts, key()))?;
+            warnings = saved.stock_warnings;
+            if let Some(doc) = st(s, "doc") {
+                book.credit_memos.insert(doc.to_string(), new);
+            }
+            Some(saved.id)
         }
         "adjust_qty" | "adjust_value" => {
             let a = NewAdjustment {
@@ -544,7 +575,7 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         book.docs.iter().map(|(k, v)| (*v, k.as_str())).collect();
     let want = want.as_array().expect("rows");
     let listed: Vec<&str> = want.iter().filter_map(|r| st(r, "doc")).collect();
-    let got: Vec<_> = h
+    let every: Vec<_> = h
         .run(
             co.s.inventory()
                 .valuation_detail(d("2026-01-01"), d("2026-12-31"), Some(item)),
@@ -552,6 +583,16 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         .expect("valuation detail")
         .into_iter()
         .filter(|r| r.item_id == item)
+        .collect();
+    // The running value just before each row (the report's rows are whole
+    // documents in position order).
+    let before = |r: &cl_api::ValuationDetailRow| {
+        let at = every.iter().position(|x| x == r).expect("row");
+        at.checked_sub(1)
+            .map_or(Money::ZERO, |i| every[i].running_value)
+    };
+    let got: Vec<_> = every
+        .iter()
         .filter(|r| {
             !subset
                 || name
@@ -572,7 +613,22 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         if let Some(c) = st(e, "correction") {
             value = value.checked_add(m(c)).expect("sum");
         }
-        assert_eq!(r.value, value, "{ctx} {doc} value");
+        if let Some(c) = st(e, "residual") {
+            value = value.checked_add(m(c)).expect("sum");
+        }
+        // A row that leaves nothing on hand moves what is left to COGS (the
+        // residual); a golden row that doesn't list it (V4: A8's 1.50) is
+        // the movement's own value, and the report shows the net change.
+        let swept = st(e, "residual").is_none()
+            && st(e, "onHand") == Some("0.0000")
+            && st(e, "assetValue") == Some("0.00")
+            && r.value != value;
+        if swept {
+            let net = r.running_value.checked_sub(before(r)).expect("net");
+            assert_eq!(r.value, net, "{ctx} {doc} value with its residual");
+        } else {
+            assert_eq!(r.value, value, "{ctx} {doc} value");
+        }
         if let Some(n) = st(e, "onHand") {
             assert_eq!(r.running_quantity.to_wire(), n, "{ctx} {doc} on hand");
         }
@@ -859,9 +915,16 @@ pub fn golden_every_case(h: &Harness) {
         play(&co, h, &all, id, None, &mut book);
         let ctx = format!("case {id}");
         if let Some(rows) = c.get("rows") {
-            // Case R lists only the rows its returns change (as the
-            // engine's golden test reads it).
-            check_rows(&co, h, &book, rows, &ctx, id == "R");
+            // Cases R and V4 list only the rows they change (as the
+            // engine's golden test reads them).
+            check_rows(
+                &co,
+                h,
+                &book,
+                rows,
+                &ctx,
+                matches!(id, "R" | "R2" | "R3" | "V4"),
+            );
         }
         if let Some(other) = st(c, "rowsAs") {
             check_rows(&co, h, &book, &case(&all, other)["rows"], &ctx, false);
@@ -1056,4 +1119,31 @@ pub fn closed_period_refuses_inventory(h: &Harness) {
         "quantity": "6", "unitPrice": "2.00", "amount": "12.00"});
     step(&co, h, &mut book, &after).expect("a bill dated Jan 11");
     drop(guard);
+}
+
+/// PR-4 S4: voiding a bill through its own route (as Enter Bills does)
+/// brings back the walk's `NEGATIVE_STOCK`: case A, then the Jan 15 bill
+/// that cured the shortfall is voided (golden V2: on hand -4 on Jan 20).
+pub fn bill_void_returns_negative_stock(h: &Harness) {
+    if !all_caps(h) {
+        return;
+    }
+    let co = fresh(h, "Inventory bill void");
+    let all = golden();
+    let mut book = Book::default();
+    book.items.insert("W".into(), co.part(h, "W S4", None));
+    play(&co, h, &all, "A", None, &mut book);
+    let bill = book.docs["A6"];
+    let cur = h.run(co.s.bills().get(bill)).expect("bill");
+    let opts = cl_api::ApWriteOptions {
+        posting: cl_api::PostingOptions::default(),
+        expected_updated_at: cur.record.txn.updated_at,
+    };
+    let w = h
+        .run(co.s.bills().void(bill, "golden V2", &opts, key()))
+        .expect("void");
+    assert_eq!(w.len(), 1, "one warning: {w:?}");
+    assert_eq!(w[0].item_id, book.items["W"]);
+    assert_eq!(w[0].date, d("2026-01-20"));
+    assert_eq!(w[0].on_hand.to_wire(), "-4.0000");
 }
