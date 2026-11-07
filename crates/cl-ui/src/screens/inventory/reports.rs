@@ -601,7 +601,10 @@ impl Screen for ReportScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         self.follow_bus();
-        egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
+        egui::ScrollArea::both().show(ui, |ui| {
+            self.draw(ui);
+            crate::layout::keep_focus_in_view(ui);
+        });
         if self.job.is_some() || self.books_job.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

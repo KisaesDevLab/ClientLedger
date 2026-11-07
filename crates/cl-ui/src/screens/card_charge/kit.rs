@@ -1274,6 +1274,7 @@ pub(crate) fn amount_field(
                 .align(egui::Align2::RIGHT_CENTER),
         )
         .labelled_by(l.id);
+    crate::widgets::select_all_on_focus(&r, &input.text);
     if r.changed() {
         input.problem = None;
     }

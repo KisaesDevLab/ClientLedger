@@ -116,6 +116,44 @@ impl FrameReport {
     }
 }
 
+/// QA2-1 (PR-4): call at the end of a scroll area's content. When the
+/// keyboard moved to a widget drawn in this content (Tab, Shift+Tab, a
+/// field a refused save puts the keyboard in, the control channel's
+/// `focus`), the area scrolls just enough to show it, once: the mouse
+/// wheel may scroll away from it afterwards. A widget elsewhere (a toolbar
+/// button, a popup, another area) is left to its own area.
+pub fn keep_focus_in_view(ui: &Ui) {
+    let ctx = ui.ctx();
+    let seen_key = ui.scope_id().with("cl.focus_in_view");
+    let seen: Option<Id> = ctx.data(|d| d.get_temp(seen_key));
+    let Some(focused) = ctx.memory(|m| m.focused()) else {
+        if seen.is_some() {
+            ctx.data_mut(|d| d.remove::<Id>(seen_key));
+        }
+        return;
+    };
+    let content = ui.min_rect();
+    let here = ctx.read_response(focused).filter(|r| {
+        r.layer_id == ui.layer_id()
+            && r.rect.is_positive()
+            && r.rect.min.y >= content.min.y - 0.5
+            && r.rect.max.y <= content.max.y + 0.5
+            && r.rect.min.x >= content.min.x - 0.5
+            && r.rect.max.x <= content.max.x + 0.5
+    });
+    match here {
+        Some(r) if seen != Some(focused) => {
+            // At once, not animated: the field is there when the next key
+            // (or a screenshot) comes.
+            ui.scroll_to_rect_animation(r.rect, None, egui::style::ScrollAnimation::none());
+            ctx.data_mut(|d| d.insert_temp(seen_key, focused));
+        }
+        Some(_) => {}
+        None if seen.is_some() => ctx.data_mut(|d| d.remove::<Id>(seen_key)),
+        None => {}
+    }
+}
+
 /// Space between the bars and the body.
 const GAP: f32 = 6.0;
 
@@ -246,7 +284,11 @@ impl<'u> FixedFrame<'u> {
                 .auto_shrink([false, true])
                 .max_height(cap)
                 .min_scrolled_height(cap)
-                .show(&mut child, add);
+                .show(&mut child, |ui| {
+                    let r = add(ui);
+                    keep_focus_in_view(ui);
+                    r
+                });
             (out.inner, out.content_size.y, out.inner_rect.height())
         } else {
             let out = egui::ScrollArea::horizontal()
@@ -279,7 +321,11 @@ impl<'u> FixedFrame<'u> {
                     .auto_shrink([false, false])
                     .max_height(rect.height())
                     .min_scrolled_height(rect.height())
-                    .show(&mut child, add);
+                    .show(&mut child, |ui| {
+                        let r = add(ui);
+                        keep_focus_in_view(ui);
+                        r
+                    });
                 let offset = out.state.clamped_offset().y;
                 self.report.body_scrolled = offset > 0.5;
                 self.report.body_at_end =
@@ -301,6 +347,7 @@ impl<'u> FixedFrame<'u> {
                         let room = Rect::from_min_size(r.min, egui::vec2(r.width(), min));
                         let out = ui.scope_builder(UiBuilder::new().max_rect(room), add);
                         ui.advance_cursor_after_rect(room);
+                        keep_focus_in_view(ui);
                         out.inner
                     })
                     .inner
@@ -340,7 +387,11 @@ impl<'u> FixedFrame<'u> {
                 .max_height(cap)
                 .min_scrolled_height(cap)
                 .stick_to_bottom(true)
-                .show(&mut child, add);
+                .show(&mut child, |ui| {
+                    let r = add(ui);
+                    keep_focus_in_view(ui);
+                    r
+                });
             (out.inner, out.content_size.y, out.inner_rect.height())
         } else {
             let inner = add(&mut child);
