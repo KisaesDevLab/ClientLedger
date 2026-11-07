@@ -146,7 +146,7 @@ steps:
   - assert_state: {key: screen.changed_unanswered, equals: 1}
   - assert_state: {key: screen.can_next, equals: false}
   - assert_exists: {role: label, label: "Choose what to do with the changed transaction before sending."}
-  - assert_exists: {role: label, label_contains: "Was "}
+  - assert_exists: {role: label, label_contains: "Was 11/01/2026"}
   - screenshot: changed
   - click: {role: button, label: Skip}
   - assert_state: {key: screen.changed_unanswered, equals: 0}

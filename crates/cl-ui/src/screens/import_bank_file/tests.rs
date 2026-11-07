@@ -213,6 +213,7 @@ fn a_changed_row_replaces_or_is_added() {
     prepared(&mut s);
     s.undo(false);
     assert_eq!(s.undone.map(|u| u.restored), Some(1));
+    assert!(crate::i18n::has("bankimport.done.undone_restored.one"));
     s.start_over(false);
     read(&mut s, &f, "operating2.qfx", &changed);
     s.next();

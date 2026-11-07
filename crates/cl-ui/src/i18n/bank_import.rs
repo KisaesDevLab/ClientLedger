@@ -200,6 +200,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.done.already.one", "1 was already there."),
     ("bankimport.done.undone", "Undone: took {n} back out of the Bank Feed."),
     ("bankimport.done.undone.one", "Undone: took 1 back out of the Bank Feed."),
+    ("bankimport.done.undone_restored", "Undone: {n} waiting in the Bank Feed are back as they were."),
+    ("bankimport.done.undone_restored.one", "Undone: the one waiting in the Bank Feed is back as it was."),
     ("bankimport.done.nothing", "Nothing new \u{2014} {n} already imported."),
     ("bankimport.done.replayed", "This import had already gone through; nothing was added twice."),
     ("bankimport.done.preparing", "Preparing suggestions\u{2026}"),

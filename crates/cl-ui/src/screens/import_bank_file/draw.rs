@@ -1020,16 +1020,25 @@ impl ImportBankFileScreen {
                 });
             return;
         }
+        // A short list leaves the cards (and a changed row's choices) all
+        // the room they need; a long one keeps at least 55% for itself.
+        let rows = self
+            .current_section()
+            .map_or(0, |s| s.rows.len())
+            .min(SHOWN_ROWS);
+        #[allow(clippy::cast_precision_loss)] // at most SHOWN_ROWS
+        let list_needs = rows as f32 * 30.0 + 170.0;
+        let top = (height - list_needs).max(height * 0.45).max(120.0);
         egui::ScrollArea::vertical()
             .id_salt("bankimport/check/top")
-            .max_height((height * 0.45).max(120.0))
+            .max_height(top)
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 self.check_top(ui, tokens, style);
             });
         // The footnotes and a send problem keep their lines under it.
-        let list = (ui.available_height() - 64.0).max(90.0);
+        let list = (ui.available_height() - 88.0).max(90.0);
         self.check_list(ui, tokens, style, Some(list));
     }
 
@@ -1539,7 +1548,14 @@ impl ImportBankFileScreen {
         let replaced = r.rows.iter().filter(|x| x.replaced).count();
         form::card(ui, tokens, |ui| {
             // UI review 7: after Undo the heading says what is left.
-            let text = if let Some(u) = self.undone {
+            let text = if let Some(u) = self.undone.filter(|u| u.removed == 0 && u.restored > 0) {
+                // R2 note: undoing a replace only puts the earlier items back.
+                t_count(
+                    "bankimport.done.undone_restored",
+                    usize::try_from(u.restored).unwrap_or(usize::MAX),
+                    &[],
+                )
+            } else if let Some(u) = self.undone {
                 t_count(
                     "bankimport.done.undone",
                     usize::try_from(u.removed).unwrap_or(usize::MAX),
