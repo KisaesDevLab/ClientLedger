@@ -21,6 +21,7 @@ steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: banking.import_file
+  - command: dev.demo_bank_import_reset
   - assert_state: {key: screen.screen, equals: import_bank_file}
   - assert_state: {key: screen.step, equals: choose}
   - assert_exists: {role: label, label: Choose the file from your bank}
@@ -39,7 +40,7 @@ steps:
   - assert_state: {key: screen.reading, equals: false}
   - assert_state: {key: screen.read_error, equals: null}
   - assert_state: {key: screen.file.format, equals: qfx}
-  - assert_state: {key: screen.rows, equals: 41}
+  - assert_state: {key: screen.rows, equals: 9}
   - screenshot: file-chosen
   - key: Alt+N
   - assert_state: {key: screen.step, equals: link}
@@ -49,10 +50,10 @@ steps:
   - screenshot: link-account
   - key: Alt+N
   - assert_state: {key: screen.step, equals: check}
-  - assert_state: {key: screen.preview.in_file, equals: 41}
+  - assert_state: {key: screen.preview.in_file, equals: 9}
   - key: Alt+N
   - assert_state: {key: screen.step, equals: done}
-  - assert_state: {key: screen.result.inserted, equals: 41}
+  - assert_state: {key: screen.result.inserted, equals: 9}
   - assert_state: {key: screen.sent, equals: 1}
 
   # --- 3. The 11/03 file: the mockup ----------------------------------------------
@@ -117,10 +118,10 @@ steps:
   - click: {role: button, label: "1010 · Operating Checking"}
   - key: Alt+N
   - assert_state: {key: screen.preview.new, equals: 0}
-  - assert_state: {key: screen.preview.duplicate, equals: 41}
+  - assert_state: {key: screen.preview.duplicate, equals: 9}
   - assert_state: {key: screen.preview.same_file_before, equals: true}
   - assert_state: {key: screen.to_send, equals: 0}
-  - assert_exists: {role: label, label: "Nothing new — 41 already imported."}
+  - assert_exists: {role: label, label: "Nothing new — 9 already imported."}
   - screenshot: nothing-new
   - key: Alt+N
   - assert_state: {key: screen.result.inserted, equals: 0}
@@ -167,8 +168,17 @@ compare:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: banking.import_file
-  - click: {role: button, label: Cancel}
-  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - click: {role: button, label: Import another file}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_2026-11-03.qfx"]}
   - click: {role: button, label: "Choose a file…"}
   - assert_state: {key: screen.reading, equals: false}

@@ -1027,6 +1027,18 @@ impl Screen for ImportBankFileScreen {
                 self.back();
                 true
             }
+            // The scenario repeats in dark in one app: an empty demo feed.
+            "dev.demo_bank_import_reset" => {
+                let link = Arc::clone(&self.link);
+                let Some(mut demo) = link.demo_state() else {
+                    return false;
+                };
+                demo.bank_feed.reset();
+                drop(demo);
+                self.start_over(false);
+                self.sent = 0;
+                true
+            }
             // Esc never throws a chosen file away.
             "form.revert" => self.loaded.is_some() && self.step != Step::Done,
             _ => false,

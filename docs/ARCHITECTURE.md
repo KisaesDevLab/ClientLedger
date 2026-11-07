@@ -60,7 +60,7 @@ A "company" is an engine **tenant** inside the single local database (Q-05), plu
 | Full data backup | whole-database `pg_dump -Fc` of all companies (File › Utilities), for disaster recovery |
 | Send to my accountant | `.clxfer` transfer file (P32) for MyBooks Online: lists, transactions, attachments, audit history, manifest, verification totals; secrets excluded |
 
-Automatic backups: on company close (configurable), before every migration, import, restore, and app upgrade. Retention configurable (default: keep last 10 + one per month for 12 months); it only ever deletes regular backups the app recorded, never before-delete copies or older portable copies (Q-268).
+Automatic backups: on company close (configurable), before every migration, company import, restore, and app upgrade. A bank file import takes none: it only adds waiting rows to the Bank Feed, posts nothing, and Undo this import takes them out again (Q-P25p). Retention configurable (default: keep last 10 + one per month for 12 months); it only ever deletes regular backups the app recorded, never before-delete copies or older portable copies (Q-268).
 
 ## Engine contract
 

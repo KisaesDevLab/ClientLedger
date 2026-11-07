@@ -131,7 +131,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.footnote", "Showing {shown} of {n} \u{b7} Amounts are copied exactly from the file. Same file twice? Nothing is added the second time."),
     ("bankimport.footnote.flipped", "The file's signs were flipped so money out shows as negative."),
     ("bankimport.balance.bank_says", "Bank says ({date})"),
-    ("bankimport.balance.books_will", "Your books will say, if all {n} are added"),
+    ("bankimport.balance.books_will", "Your books will say, if all {n} are added as new"),
     ("bankimport.balance.difference", "Difference"),
     ("bankimport.balance.likely", "{n} of them ({total}) look already entered in your register; accept them as matches in the Bank Feed."),
     ("bankimport.balance.none", "The file has no ending balance to check against."),

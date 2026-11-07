@@ -105,6 +105,11 @@ fn batch_id(n: usize) -> ImportBatchId {
 }
 
 impl DemoBankFeed {
+    /// Empties the feed (`dev.demo_bank_import_reset`).
+    pub fn reset(&mut self) {
+        *self = DemoBankFeed::default();
+    }
+
     /// Items waiting in the feed (all accounts).
     #[must_use]
     pub fn waiting(&self) -> usize {

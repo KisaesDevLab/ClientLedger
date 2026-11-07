@@ -530,6 +530,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_quick_add_reset",
         "Reset Demo Quick Add Names (developer)",
     ),
+    // P25: the Import Bank File scenario runs light and dark in one app;
+    // this empties the demo Bank Feed and starts the wizard over.
+    dev_action(
+        "dev.demo_bank_import_reset",
+        "Reset Demo Bank Feed (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

@@ -648,32 +648,45 @@ impl ImportBankFileScreen {
         let mut change = false;
         let mut cards = |ui: &mut Ui, me: &mut Self| {
             let width = if wide { third } else { ui.available_width() };
-            ui.allocate_ui(egui::vec2(width, 0.0), |ui| me.file_card(ui, tokens));
-            ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-                titled_card(ui, tokens, &t("bankimport.card.goes_into"), |ui| {
-                    let name = me
-                        .targets
-                        .iter()
-                        .find(|a| Some(a.id) == me.account)
-                        .map(|a| a.name.clone())
-                        .unwrap_or_default();
-                    ui.label(RichText::new(name).strong().color(tokens.text_primary));
-                    let key = match me.linked {
-                        LinkedHow::Auto => "bankimport.linked.auto",
-                        LinkedHow::Mask => "bankimport.linked.mask",
-                        LinkedHow::Owner | LinkedHow::None => "bankimport.linked.owner",
-                    };
-                    ui.add(
-                        egui::Label::new(RichText::new(t(key)).color(tokens.text_secondary)).wrap(),
-                    );
-                    if ui.link(t("bankimport.change_account")).clicked() {
-                        change = true;
-                    }
-                });
-            });
-            ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-                me.balance_card(ui, tokens, style);
-            });
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| me.file_card(ui, tokens),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    titled_card(ui, tokens, &t("bankimport.card.goes_into"), |ui| {
+                        let name = me
+                            .targets
+                            .iter()
+                            .find(|a| Some(a.id) == me.account)
+                            .map(|a| a.name.clone())
+                            .unwrap_or_default();
+                        ui.label(RichText::new(name).strong().color(tokens.text_primary));
+                        let key = match me.linked {
+                            LinkedHow::Auto => "bankimport.linked.auto",
+                            LinkedHow::Mask => "bankimport.linked.mask",
+                            LinkedHow::Owner | LinkedHow::None => "bankimport.linked.owner",
+                        };
+                        ui.add(
+                            egui::Label::new(RichText::new(t(key)).color(tokens.text_secondary))
+                                .wrap(),
+                        );
+                        if ui.link(t("bankimport.change_account")).clicked() {
+                            change = true;
+                        }
+                    });
+                },
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    me.balance_card(ui, tokens, style);
+                },
+            );
         };
         if wide {
             ui.horizontal_top(|ui| {
@@ -945,7 +958,18 @@ impl ImportBankFileScreen {
                                         RichText::new(s).text_style(egui::TextStyle::Monospace)
                                     };
                                     ui.label(mono(crate::shell::us_date(r.date)));
-                                    ui.label(mono(r.description.clone()));
+                                    // Q-P25r: the bank's memo is its own
+                                    // detail, under the description.
+                                    ui.vertical(|ui| {
+                                        ui.label(mono(r.description.clone()));
+                                        if let Some(memo) = r.memo.as_deref() {
+                                            ui.label(
+                                                RichText::new(memo)
+                                                    .size(12.0)
+                                                    .color(tokens.text_secondary),
+                                            );
+                                        }
+                                    });
                                     ui.label(mono(
                                         r.check_number.map(|n| n.to_string()).unwrap_or_default(),
                                     ));

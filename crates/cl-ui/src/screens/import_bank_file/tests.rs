@@ -323,7 +323,10 @@ fn read_path(s: &mut ImportBankFileScreen, path: std::path::PathBuf) {
 fn the_mockup_story_on_the_real_fixtures() {
     let f = fixture();
     let mut s = screen(&f);
-    for (file, expect_new) in [("operating_prior.qfx", None), ("operating_2026-11-03.qfx", Some(37))] {
+    for (file, expect_new) in [
+        ("operating_prior.qfx", None),
+        ("operating_2026-11-03.qfx", Some(37)),
+    ] {
         read_path(&mut s, bank_fixture(file));
         assert!(s.read_error.is_none(), "{file}: {:?}", s.read_error);
         s.next();
