@@ -575,7 +575,7 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         book.docs.iter().map(|(k, v)| (*v, k.as_str())).collect();
     let want = want.as_array().expect("rows");
     let listed: Vec<&str> = want.iter().filter_map(|r| st(r, "doc")).collect();
-    let got: Vec<_> = h
+    let every: Vec<_> = h
         .run(
             co.s.inventory()
                 .valuation_detail(d("2026-01-01"), d("2026-12-31"), Some(item)),
@@ -583,6 +583,16 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         .expect("valuation detail")
         .into_iter()
         .filter(|r| r.item_id == item)
+        .collect();
+    // The running value just before each row (the report's rows are whole
+    // documents in position order).
+    let before = |r: &cl_api::ValuationDetailRow| {
+        let at = every.iter().position(|x| x == r).expect("row");
+        at.checked_sub(1)
+            .map_or(Money::ZERO, |i| every[i].running_value)
+    };
+    let got: Vec<_> = every
+        .iter()
         .filter(|r| {
             !subset
                 || name
@@ -603,7 +613,20 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         if let Some(c) = st(e, "correction") {
             value = value.checked_add(m(c)).expect("sum");
         }
-        assert_eq!(r.value, value, "{ctx} {doc} value");
+        if let Some(c) = st(e, "residual") {
+            value = value.checked_add(m(c)).expect("sum");
+        }
+        // A row that leaves nothing on hand moves what is left to COGS (the
+        // residual); a golden row that doesn't list it (V4: A8's 1.50) is
+        // the movement's own value, and the report shows the net change.
+        let swept =
+            st(e, "residual").is_none() && st(e, "onHand") == Some("0.0000") && r.value != value;
+        if swept {
+            let net = r.running_value.checked_sub(before(r)).expect("net");
+            assert_eq!(r.value, net, "{ctx} {doc} value with its residual");
+        } else {
+            assert_eq!(r.value, value, "{ctx} {doc} value");
+        }
         if let Some(n) = st(e, "onHand") {
             assert_eq!(r.running_quantity.to_wire(), n, "{ctx} {doc} on hand");
         }
@@ -890,9 +913,16 @@ pub fn golden_every_case(h: &Harness) {
         play(&co, h, &all, id, None, &mut book);
         let ctx = format!("case {id}");
         if let Some(rows) = c.get("rows") {
-            // Case R lists only the rows its returns change (as the
-            // engine's golden test reads it).
-            check_rows(&co, h, &book, rows, &ctx, matches!(id, "R" | "R2" | "R3"));
+            // Cases R and V4 list only the rows they change (as the
+            // engine's golden test reads them).
+            check_rows(
+                &co,
+                h,
+                &book,
+                rows,
+                &ctx,
+                matches!(id, "R" | "R2" | "R3" | "V4"),
+            );
         }
         if let Some(other) = st(c, "rowsAs") {
             check_rows(&co, h, &book, &case(&all, other)["rows"], &ctx, false);
