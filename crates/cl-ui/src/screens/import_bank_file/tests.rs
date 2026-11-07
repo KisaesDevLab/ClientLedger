@@ -298,3 +298,51 @@ fn a_look_alike_is_added_with_a_flag() {
     s.next();
     assert_eq!(s.result.as_ref().expect("sent").counts.inserted, 1);
 }
+
+fn bank_fixture(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/bank")
+        .join(name)
+}
+
+fn read_path(s: &mut ImportBankFileScreen, path: std::path::PathBuf) {
+    s.read(path, None);
+    for _ in 0..1000 {
+        s.poll();
+        if s.reading.is_none() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the file was never read");
+}
+
+/// The mockup's story: the prior download, then the 11/03 file shows 41
+/// transactions, 37 new and 4 already imported (scenario `import_bank_file`).
+#[test]
+fn the_mockup_story_on_the_real_fixtures() {
+    let f = fixture();
+    let mut s = screen(&f);
+    for (file, expect_new) in [("operating_prior.qfx", None), ("operating_2026-11-03.qfx", Some(37))] {
+        read_path(&mut s, bank_fixture(file));
+        assert!(s.read_error.is_none(), "{file}: {:?}", s.read_error);
+        s.next();
+        s.pick_account(bank_account(&s));
+        if s.sign_needs_confirm() {
+            s.set_flipped(s.flipped);
+        }
+        s.next();
+        s.poll();
+        let p = s.preview.as_ref().expect("preview");
+        if let Some(n) = expect_new {
+            assert_eq!(
+                (p.counts.in_file, p.counts.new, p.counts.duplicate),
+                (41, n, 4),
+                "{file}"
+            );
+        }
+        s.next();
+        assert_eq!(s.step, Step::Done, "{file}");
+        s.start_over(false);
+    }
+}

@@ -1,0 +1,179 @@
+# Import Bank File (P25, plan §6 "Mockup") against `clientledger --demo`:
+# Banking › Import Bank File opens on step 1. The system file window is
+# answered with the synthetic fixtures in `fixtures/bank/` (`dialog_answer`;
+# no dialog opens under the control channel). The demo keeps an in-memory
+# Bank Feed classified with the Rust copy of the engine's keys v1.
+#
+# 1. A broken file names its line and never moves on.
+# 2. `operating_prior.qfx` into 1010 · Operating Checking: sent.
+# 3. `operating_2026-11-03.qfx`: 41 in the file, 37 new, 4 already imported
+#    (the mockup's view, screenshot `check`), sent.
+# 4. Undo that import; the same file again brings the rows back (not sent,
+#    so the compare view below is the mockup's).
+# 5. The prior file again: nothing new, 0 sent. A card file asks for the
+#    sign once; its second file reuses it.
+# 6. A CSV: its columns are shown and zero rows skipped.
+# Alt+N moves to the next step and Alt+B back. The balance check reads
+# "Not available in demo".
+name: import_bank_file
+description: Import the prior and the 11/03 bank files (37 new, 4 skipped), re-import adds nothing, undo, CSV columns, broken file.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - assert_state: {key: screen.screen, equals: import_bank_file}
+  - assert_state: {key: screen.step, equals: choose}
+  - assert_exists: {role: label, label: Choose the file from your bank}
+  - assert_state: {key: screen.can_next, equals: false}
+
+  # --- 1. A broken file ----------------------------------------------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/malformed/doctype.ofx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: broken-file
+
+  # --- 2. The prior download --------------------------------------------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - assert_state: {key: screen.read_error, equals: null}
+  - assert_state: {key: screen.file.format, equals: qfx}
+  - assert_state: {key: screen.rows, equals: 41}
+  - screenshot: file-chosen
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: link}
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - assert_state: {key: screen.account_chosen, equals: true}
+  - screenshot: link-account
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - assert_state: {key: screen.preview.in_file, equals: 41}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - assert_state: {key: screen.result.inserted, equals: 41}
+  - assert_state: {key: screen.sent, equals: 1}
+
+  # --- 3. The 11/03 file: the mockup ----------------------------------------------
+  - click: {role: button, label: Import another file}
+  - assert_state: {key: screen.step, equals: choose}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_2026-11-03.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: link}
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - assert_state: {key: screen.remembered_flip, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - assert_state: {key: screen.preview.in_file, equals: 41}
+  - assert_state: {key: screen.preview.new, equals: 37}
+  - assert_state: {key: screen.preview.duplicate, equals: 4}
+  - assert_state: {key: screen.to_send, equals: 37}
+  - assert_exists: {role: button, label: Send 37 to Bank Feed}
+  - assert_exists: {role: label, label: Not available in demo.}
+  - screenshot: check
+  - click: {role: check_box, label: Show only skipped}
+  - assert_state: {key: screen.only_skipped, equals: true}
+  - screenshot: only-skipped
+  - click: {role: check_box, label: Show only skipped}
+  # Back and forth keep the choices.
+  - key: Alt+B
+  - assert_state: {key: screen.step, equals: link}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - click: {role: button, label: Send 37 to Bank Feed}
+  - assert_state: {key: screen.step, equals: done}
+  - assert_state: {key: screen.result.inserted, equals: 37}
+  - assert_state: {key: screen.result.post_processing, equals: done}
+  - screenshot: sent
+
+  # --- 4. Undo, then the same file again: the rows come back -------------------
+  - click: {role: button, label: Undo this import}
+  - assert_state: {key: screen.undone.removed, equals: 37}
+  - screenshot: undone
+  - click: {role: button, label: Import another file}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_2026-11-03.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - assert_state: {key: screen.preview.new, equals: 37}
+  - assert_state: {key: screen.preview.duplicate, equals: 4}
+  - key: Alt+B
+  - key: Alt+B
+  - assert_state: {key: screen.step, equals: choose}
+
+  # --- 5. A file already imported: nothing new -------------------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - assert_state: {key: screen.preview.new, equals: 0}
+  - assert_state: {key: screen.preview.duplicate, equals: 41}
+  - assert_state: {key: screen.preview.same_file_before, equals: true}
+  - assert_state: {key: screen.to_send, equals: 0}
+  - assert_exists: {role: label, label: "Nothing new — 41 already imported."}
+  - screenshot: nothing-new
+  - key: Alt+N
+  - assert_state: {key: screen.result.inserted, equals: 0}
+
+  # --- A card file: the sign is confirmed once ----------------------------------
+  - click: {role: button, label: Import another file}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/card_ccstmt.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "2050 · Business Credit Card (credit card)"}
+  - assert_state: {key: screen.sign_needs_confirm, equals: true}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: card-sign
+  - click: {role: button, label: These look right}
+  - assert_state: {key: screen.sign_needs_confirm, equals: false}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  # A second card file of this account reuses its sign (Q-P25w).
+  - click: {role: button, label: Import another file}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/card_ccstmt.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "2050 · Business Credit Card (credit card)"}
+  - assert_state: {key: screen.remembered_flip, equals: true}
+  - assert_state: {key: screen.sign_needs_confirm, equals: false}
+  - key: Alt+B
+
+  # --- 6. A CSV: its columns -------------------------------------------------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/zero_amounts.csv"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - assert_state: {key: screen.csv, equals: true}
+  - key: Alt+N
+  - assert_exists: {role: label, label: Columns in this file}
+  - screenshot: csv-columns
+
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - click: {role: button, label: Cancel}
+  - command: banking.import_file
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_2026-11-03.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}

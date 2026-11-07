@@ -269,9 +269,14 @@ impl ImportBankFileScreen {
                     (AccountType::Liability, Some("credit_card")) => true,
                     _ => return None,
                 };
+                let shown = crate::account_names::shown_name(&a);
+                let name = match a.fields.account_number.as_deref() {
+                    Some(n) if !n.trim().is_empty() => format!("{} \u{b7} {shown}", n.trim()),
+                    _ => shown,
+                };
                 Some(Target {
                     id: a.id,
-                    name: crate::account_names::shown_name(&a),
+                    name,
                     card,
                 })
             })
