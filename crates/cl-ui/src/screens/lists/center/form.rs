@@ -418,6 +418,10 @@ impl CenterScreen {
                 // A new contact's opening balance is a transaction.
                 self.publish(true);
                 self.after_save(after, Some(id));
+                if std::mem::take(&mut self.set_up) {
+                    // Q-PR4d: back to the form whose Quick Add asked.
+                    self.link.push(crate::company::CompanyEvent::SetUpSaved);
+                }
                 true
             }
             Err(e) => {

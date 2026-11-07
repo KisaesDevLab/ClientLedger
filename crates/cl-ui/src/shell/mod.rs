@@ -133,6 +133,9 @@ struct Toast {
 pub struct Shell {
     /// Remembered theme and zoom.
     pub prefs: UiPrefs,
+    /// Q-PR4d: the Set Up window a Quick Add prompt opened and the window
+    /// to bring back when it saves.
+    set_up_return: Option<(crate::windows::WindowId, crate::windows::WindowId)>,
     store: Option<UiStore>,
     company_key: String,
     log_path: Option<PathBuf>,
@@ -238,6 +241,7 @@ impl Shell {
             prompt_focused: None,
             demo: options.demo,
             prefs,
+            set_up_return: None,
             store: options.store,
             company_key: if options.company_key.is_empty() {
                 "default".into()
@@ -360,9 +364,15 @@ impl Shell {
     /// (P17). A screen that takes the payload opens as a new window; any
     /// other kind just opens (or comes to the front) as usual.
     fn open_with(&mut self, kind: CommandId, payload: crate::windows::OpenPayload) {
+        let set_up = matches!(payload, crate::windows::OpenPayload::SetUpName(_));
+        let back = self.windows.active().map(|w| w.id);
         let mut screen = self.make_screen(kind);
         if screen.open_with(payload) {
-            self.windows.open_new(kind, screen);
+            let id = self.windows.open_new(kind, screen);
+            // Q-PR4d: Set Up comes back to the form that asked.
+            if set_up && let Some(back) = back {
+                self.set_up_return = Some((id, back));
+            }
         } else {
             self.open_screen(kind);
         }
@@ -514,6 +524,12 @@ impl Shell {
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
                 CompanyEvent::OpenTemplate(t) => self.open_template(*t),
                 CompanyEvent::OpenWith(kind, payload) => self.open_with(kind, *payload),
+                CompanyEvent::SetUpSaved => {
+                    if let Some((set_up, back)) = self.set_up_return.take() {
+                        self.windows.close_now(set_up);
+                        self.windows.activate(back);
+                    }
+                }
                 CompanyEvent::RailCounts(c) => {
                     // Only while a company is open (Opened and Closed clear
                     // them; the new company's Home reads its own).

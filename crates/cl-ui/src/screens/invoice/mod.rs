@@ -407,8 +407,9 @@ pub struct InvoiceScreen {
     pub(crate) email_after_save: bool,
     /// A name typed in Client that isn't in the list (Set Up offered).
     pub(crate) unknown_client: Option<String>,
-    /// The client form was opened for this name: picked once it arrives.
-    pub(crate) setting_up: Option<String>,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a client not on the list
+    /// (Set Up's new client is picked once it is saved).
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     /// Set Up of an item typed on a line (Q-P20i): the line and the name.
     pub(crate) setting_up_item: Option<(cl_grid::RowKey, String)>,
     pub(crate) saved_count: u32,
@@ -451,6 +452,7 @@ impl InvoiceScreen {
         kind: SalesDocKind,
     ) -> InvoiceScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         // P23: the Tax column picks a tax code where the engine has them.
         let coded = link.is_demo() || link.capabilities().has(Capabilities::SALES_TAX_SETUP);
         if kind != SalesDocKind::Invoice
@@ -526,7 +528,7 @@ impl InvoiceScreen {
             offer_send: false,
             email_after_save: false,
             unknown_client: None,
-            setting_up: None,
+            quick_add,
             setting_up_item: None,
             saved_count: 0,
             last_action: None,
@@ -721,6 +723,19 @@ impl InvoiceScreen {
         }
     }
 
+    /// Q-PR4d: a client added by Quick Add (or saved in Set Up) joins the
+    /// list and fills the field.
+    pub(crate) fn client_added(&mut self, c: cl_api::Contact) {
+        let id = c.id;
+        match self.books.contacts.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = c,
+            None => self.books.contacts.push(c),
+        }
+        self.apply_lists();
+        self.unknown_client = None;
+        self.pick_client(id);
+    }
+
     /// The pickers from the lists read.
     fn apply_lists(&mut self) {
         let customers: Vec<cl_api::Contact> = self
@@ -759,19 +774,6 @@ impl InvoiceScreen {
             subtotals,
         );
         self.inputs.rev = u64::MAX;
-        if let Some(name) = self.setting_up.clone()
-            && let Some(id) = self
-                .books
-                .contacts
-                .iter()
-                .find(|c| c.fields.display_name == name)
-                .map(|c| c.id)
-        {
-            // Set Up came back: the new client fills the field (Q-P20i).
-            self.setting_up = None;
-            self.unknown_client = None;
-            self.pick_client(id);
-        }
         self.item_set_up_back();
     }
 
@@ -1037,6 +1039,7 @@ impl InvoiceScreen {
         self.inputs.client.text = self.clients.name_text(id).unwrap_or_default().to_string();
         self.inputs.client.problem = false;
         self.unknown_client = None;
+        self.quick_add.close();
         self.client_changed();
     }
 
@@ -1103,6 +1106,7 @@ impl InvoiceScreen {
         self.sales = None;
         self.billable.forget();
         self.unknown_client = None;
+        self.quick_add.close();
         self.duplicate_number = false;
         self.attach = attach::InvoiceAttach::default();
         self.sync_inputs();
@@ -1237,6 +1241,7 @@ impl InvoiceScreen {
             "grid": { "focused": self.grid.has_focus() },
         });
         v["returns"] = self.returns_json();
+        v["quick_add"] = self.quick_add.state();
         v["next_number"] = json!(self.next_number);
         v["client_locked"] = json!(self.client_lock());
         v["deposits_on_hand"] = json!(self.deposit_card.count());
@@ -1315,7 +1320,7 @@ impl InvoiceScreen {
         if changes.lists() {
             self.lists_stale = true;
         }
-        let waiting = self.setting_up.is_some() || self.setting_up_item.is_some();
+        let waiting = self.quick_add.waiting() || self.setting_up_item.is_some();
         if self.lists_stale && (waiting || !self.is_dirty()) && !self.books.busy() {
             self.lists_stale = false;
             self.start_lists();

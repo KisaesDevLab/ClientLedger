@@ -391,6 +391,8 @@ pub struct EnterBillScreen {
     pub(crate) after_save_nav: Option<bool>,
     /// Saves in other windows (Q-262).
     pub(crate) bus: crate::data_bus::Subscription,
+    /// Q-PR4d: Quick Add / Set Up / Cancel for a vendor not on the list.
+    pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
     /// The names, accounts, tags or items changed elsewhere while the form
     /// had unsaved edits: read them again once it is clean.
     pub(crate) lists_stale: bool,
@@ -432,6 +434,7 @@ impl EnterBillScreen {
         today: CalendarDate,
     ) -> EnterBillScreen {
         let group = link.group().and_then(Result::ok);
+        let quick_add = crate::widgets::quick_add::QuickAdd::new(&link);
         let lists = Arc::new(RegisterLists::default());
         let expenses = LinesGrid::new(&EXPENSES, Arc::clone(&lists), Vec::new());
         let items = items::ItemsGrid::new(Arc::new(items::ItemLists::new(Arc::clone(&lists), &[])));
@@ -498,6 +501,7 @@ impl EnterBillScreen {
             nav_prompt: None,
             after_save_nav: None,
             bus: crate::data_bus::Subscription::detached(),
+            quick_add,
             lists_stale: false,
             draft: None,
         };
@@ -690,6 +694,18 @@ impl EnterBillScreen {
         }
     }
 
+    /// Q-PR4d: a vendor added by Quick Add (or saved in Set Up) joins the
+    /// list and fills the field.
+    pub(crate) fn vendor_added(&mut self, c: cl_api::Contact) {
+        let id = c.id;
+        match self.contacts.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = c,
+            None => self.contacts.push(c),
+        }
+        self.apply_lists();
+        self.pick_vendor(id);
+    }
+
     fn apply_lists(&mut self) {
         let mut lists = RegisterLists::default();
         lists.set_accounts(&self.accounts);
@@ -796,7 +812,7 @@ impl EnterBillScreen {
             self.lists_stale = true;
         }
         if self.lists_stale
-            && !self.is_dirty()
+            && (!self.is_dirty() || self.quick_add.waiting())
             && self.accounts_task.is_none()
             && self.contacts_task.is_none()
             && self.tags_task.is_none()
@@ -1147,6 +1163,7 @@ impl EnterBillScreen {
             "nav_at": self.nav.at,
             "nav_prompt": self.nav_prompt.is_some(),
             "vendor_list": self.vendor_list,
+            "quick_add": self.quick_add.state(),
             "focused": self.focused.map(|f| format!("{f:?}").to_lowercase()),
             "grid": {
                 "expenses_focused": self.expenses.has_focus(),
@@ -1322,7 +1339,8 @@ impl Screen for EnterBillScreen {
             | OpenPayload::BounceCheck(_)
             | OpenPayload::OnDate(_)
             | OpenPayload::ReprintCheck(..)
-            | OpenPayload::PrintDeposit(..) => false,
+            | OpenPayload::PrintDeposit(..)
+            | OpenPayload::SetUpName(_) => false,
         }
     }
 

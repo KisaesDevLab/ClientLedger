@@ -82,6 +82,7 @@ mod deposit;
 mod loan_payment;
 mod owner_money;
 mod personal_funds;
+mod quick_add;
 mod transfer;
 // P15 (one module per screen).
 mod journal_entry;
@@ -129,7 +130,7 @@ mod statements;
 mod inventory;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 46] = [
+const TABLES: [&[(&str, &str)]; 47] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -145,6 +146,7 @@ const TABLES: [&[(&str, &str)]; 46] = [
     card_charge::ENGLISH,
     owner_money::ENGLISH,
     personal_funds::ENGLISH,
+    quick_add::ENGLISH,
     loan_payment::ENGLISH,
     journal_entry::ENGLISH,
     templates::ENGLISH,

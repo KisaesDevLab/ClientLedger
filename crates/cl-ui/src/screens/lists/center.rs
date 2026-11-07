@@ -225,6 +225,9 @@ pub struct CenterScreen {
     /// The engine applies the closing date to merges and takes the
     /// closing-date password for them (`merge-closing-date-v1`, U-47).
     merge_closing: bool,
+    /// Q-PR4d: the form was opened by Set Up from a Quick Add prompt; its
+    /// save sends the owner back to that form.
+    set_up: bool,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -300,6 +303,7 @@ impl CenterScreen {
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
             merge_closing: false,
+            set_up: false,
         };
         s.merge_closing = merge_closing_supported(&s.link);
         s.bus = s.link.bus().subscribe();
@@ -1607,6 +1611,27 @@ fn address_text(lines: [&Option<String>; 2], place: [&Option<String>; 3]) -> Str
 impl Screen for CenterScreen {
     fn title(&self) -> String {
         t(&format!("cmd.{}", self.kind()))
+    }
+
+    /// Q-PR4d: Set Up from a name field's Quick Add prompt opens the new
+    /// name form with the typed name; saving it sends the owner back.
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        let crate::windows::OpenPayload::SetUpName(n) = payload else {
+            return false;
+        };
+        let role = match n.kind {
+            cl_model::quick_add::NameKind::Client => Role::Client,
+            cl_model::quick_add::NameKind::Vendor => Role::Vendor,
+        };
+        if role != self.role {
+            return false;
+        }
+        self.open_new();
+        if let Panel::Form(panel) = &mut self.panel {
+            panel.form.edit_step(|d| d.name = n.name);
+        }
+        self.set_up = true;
+        true
     }
 
     fn ui(&mut self, ui: &mut Ui) {

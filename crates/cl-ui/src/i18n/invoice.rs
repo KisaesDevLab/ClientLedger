@@ -27,8 +27,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("invoice.add_billable.tip", "Add this client's unbilled costs as lines ({keys})."),
     // Header
     ("invoice.client", "Client"),
-    ("invoice.client.set_up", "Set up \u{201c}{name}\u{201d}\u{2026}"),
-    ("invoice.client.set_up.tip", "This name isn't in your client list. Set it up, then come back: the invoice picks it up."),
+
     ("invoice.date", "Date"),
     ("invoice.number", "Invoice #"),
     ("invoice.number.tip", "Leave it blank to use the next number."),
