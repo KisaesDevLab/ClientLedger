@@ -956,6 +956,18 @@ impl ImportBankFileScreen {
                                         mono(format!("{amount:>14}")).color(tokens.text_primary),
                                     );
                                     ui.horizontal(|ui| {
+                                        // Q-P25q: a sub-cent amount was rounded.
+                                        if let Some(orig) = r.rounded_from.as_deref() {
+                                            chip(
+                                                ui,
+                                                tokens,
+                                                &t_with(
+                                                    "bankimport.status.rounded",
+                                                    &[("original", orig)],
+                                                ),
+                                                false,
+                                            );
+                                        }
                                         if let Some(c) =
                                             Self::status_ui(ui, tokens, *line, *res, &self.choices)
                                         {

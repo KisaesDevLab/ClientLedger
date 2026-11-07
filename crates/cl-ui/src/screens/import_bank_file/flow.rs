@@ -115,7 +115,6 @@ pub fn problem_key(p: cl_import::ProblemKind) -> &'static str {
     match p {
         P::MissingAmount => "bankimport.problem.missing_amount",
         P::BadAmount => "bankimport.problem.bad_amount",
-        P::TooManyDecimals => "bankimport.problem.decimals",
         P::TooManyDigits => "bankimport.problem.digits",
         P::MissingDate => "bankimport.problem.missing_date",
         P::BadDate => "bankimport.problem.bad_date",

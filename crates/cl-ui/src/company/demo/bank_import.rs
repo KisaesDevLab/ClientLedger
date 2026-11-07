@@ -28,6 +28,45 @@ struct Item {
     imported_at: Timestamp,
     /// Still waiting (undo removes the waiting ones).
     pending: bool,
+    /// For the look-alike rule (Q-P25c).
+    date: cl_core::CalendarDate,
+    amount: rust_decimal::Decimal,
+    description: String,
+    fitid: Option<String>,
+    check_number: Option<u32>,
+}
+
+/// Q-P25c (owner 2026-11-07): `row` looks like `item` when the amounts
+/// are equal, the dates are within 3 days, the bank ids and check numbers
+/// do not differ, and the descriptions are equal or one starts the other
+/// (the shorter at least 8 characters).
+fn looks_alike(item: &Item, row: &cl_api::BankImportRow) -> bool {
+    if item.amount != row.amount {
+        return false;
+    }
+    let days = item.date.days_until(row.date).abs();
+    if days > 3 {
+        return false;
+    }
+    let a = cl_import::dedupe::norm(&item.description);
+    let b = cl_import::dedupe::norm(&row.description);
+    if let (Some(x), Some(y)) = (item.fitid.as_deref(), row.fitid.as_deref())
+        && x.trim() != y.trim()
+        && !(days == 0 && a == b)
+    {
+        return false;
+    }
+    if let (Some(x), Some(y)) = (item.check_number, row.check_number)
+        && x != y
+    {
+        return false;
+    }
+    let (short, long) = if a.len() <= b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    a == b || (short.chars().count() >= 8 && long.starts_with(short.as_str()))
 }
 
 /// One import.
@@ -134,6 +173,16 @@ impl DemoBankFeed {
                     Some(ImportRowReason::SameRow),
                     Some(p),
                 )
+            } else if let Some(p) = mine
+                .iter()
+                .enumerate()
+                .position(|(i, it)| !used.contains(&i) && looks_alike(it, r))
+            {
+                (
+                    ImportRowStatus::PossibleDuplicate,
+                    Some(ImportRowReason::SimilarExisting),
+                    Some(p),
+                )
             } else {
                 let reason = r
                     .fitid
@@ -144,11 +193,18 @@ impl DemoBankFeed {
             };
             if let Some(p) = existing {
                 used.insert(p);
-                counts.duplicate += 1;
-            } else {
-                counts.new += 1;
             }
-            let insert = status == ImportRowStatus::New && r.include != Some(false);
+            match status {
+                ImportRowStatus::Duplicate => counts.duplicate += 1,
+                ImportRowStatus::PossibleDuplicate => counts.possible_duplicate += 1,
+                ImportRowStatus::Changed => counts.changed += 1,
+                ImportRowStatus::New => counts.new += 1,
+            }
+            // Q-P25c: look-alikes are added with a flag, like new rows.
+            let insert = matches!(
+                status,
+                ImportRowStatus::New | ImportRowStatus::PossibleDuplicate
+            ) && r.include != Some(false);
             if insert && commit {
                 to_insert.push(Item {
                     account: req.account,
@@ -157,6 +213,11 @@ impl DemoBankFeed {
                     row_key: k.row_key.clone(),
                     imported_at: now,
                     pending: true,
+                    date: r.date,
+                    amount: r.amount,
+                    description: r.description.clone(),
+                    fitid: r.fitid.clone(),
+                    check_number: r.check_number,
                 });
                 if let Some(m) = cl_api::wire_decimal(r.amount)
                     .ok()

@@ -503,8 +503,9 @@ impl ImportBankFileScreen {
         if let Some(demo) = link.demo_state() {
             let latest = demo.bank_feed.latest(account, format);
             drop(demo);
-            if let Some((flip, mapping)) = latest {
-                self.remember(flip, mapping);
+            match latest {
+                Some((flip, mapping)) => self.remember(flip, mapping),
+                None => self.apply_local_profile(),
             }
             return;
         }
@@ -662,7 +663,66 @@ impl ImportBankFileScreen {
         }
     }
 
+    /// The local CSV profile key (Q-P25f fallback): the company, the
+    /// account and the header names, hashed (no owner text is stored).
+    fn profile_key(&self) -> Option<String> {
+        let l = self.loaded.as_ref()?;
+        let headers = l.parsed.csv_headers.as_ref()?.join("\u{1f}");
+        Some(format!(
+            "{}/{}/{}",
+            self.tenant.map(|t| t.to_string()).unwrap_or_default(),
+            self.account.map(|a| a.to_string()).unwrap_or_default(),
+            &flow::sha256_hex(headers.as_bytes())[..16]
+        ))
+    }
+
+    fn profiles(&self) -> Option<cl_settings::CsvProfilesStore> {
+        self.link
+            .store()
+            .path()
+            .parent()
+            .map(cl_settings::CsvProfilesStore::in_dir)
+    }
+
+    /// No batch of this account told the columns: a profile saved on this
+    /// computer does (Q-P25f).
+    fn apply_local_profile(&mut self) {
+        let (Some(key), Some(store)) = (self.profile_key(), self.profiles()) else {
+            return;
+        };
+        let stored: Option<CsvMapping> = store
+            .load()
+            .get(&key)
+            .cloned()
+            .and_then(|m| serde_json::from_value(m).ok());
+        if let Some(m) = stored
+            && self.csv_mapping.as_ref() != Some(&m)
+        {
+            self.csv_mapping = Some(m.clone());
+            self.reparse(m);
+        }
+    }
+
+    fn save_local_profile(&self) {
+        let (Some(key), Some(store), Some(m)) = (
+            self.profile_key(),
+            self.profiles(),
+            self.csv_mapping.as_ref(),
+        ) else {
+            return;
+        };
+        let Ok(v) = serde_json::to_value(m) else {
+            return;
+        };
+        let mut p = store.load();
+        p.put(&key, v);
+        if store.save(&p).is_err() {
+            tracing::warn!("the bank CSV columns could not be saved on this computer");
+        }
+    }
+
     fn after_send(&mut self, o: BankImportOutcome) {
+        self.save_local_profile();
         self.sent += 1;
         self.frozen = None;
         self.step = Step::Done;
@@ -874,12 +934,14 @@ impl ImportBankFileScreen {
                 .loaded
                 .as_ref()
                 .map(|l| flow::wire_format(l.parsed.format));
-            if let Ok(batches) = r
-                && let Some(b) = batches
+            let latest = r.ok().and_then(|batches| {
+                batches
                     .into_iter()
                     .find(|b| b.undone_at.is_none() && b.format == format && b.inserted > 0)
-            {
-                self.remember(b.amounts_flipped, b.csv_mapping);
+            });
+            match latest {
+                Some(b) => self.remember(b.amounts_flipped, b.csv_mapping),
+                None => self.apply_local_profile(),
             }
         }
         if let Some(r) = self.preview_task.as_mut().and_then(Task::try_take) {

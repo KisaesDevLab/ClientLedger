@@ -259,3 +259,42 @@ fn every_text_key_is_in_the_catalog() {
         assert!(crate::i18n::has(k), "{k}");
     }
 }
+
+/// Q-P25c (owner 2026-11-07): a look-alike row is added with a flag, not
+/// skipped; the demo applies the same rule as the engine.
+#[test]
+fn a_look_alike_is_added_with_a_flag() {
+    let f = fixture();
+    let mut s = screen(&f);
+    read(
+        &mut s,
+        &f,
+        "a.csv",
+        "Date,Description,Amount\n11/01/2026,COFFEE ROASTERS 0031,-4.50\n",
+    );
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.result.as_ref().expect("sent").counts.inserted, 1);
+    s.start_over(false);
+    read(
+        &mut s,
+        &f,
+        "b.csv",
+        "Date,Description,Amount\n11/03/2026,COFFEE ROASTERS,-4.50\n",
+    );
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.set_flipped(s.flipped);
+    s.next();
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!(p.counts.possible_duplicate, 1, "{:?}", p.rows);
+    assert_eq!(flow::rows_to_send(p, &s.choices), 1);
+    assert!(p.rows[0].existing_imported_at.is_some());
+    s.next();
+    assert_eq!(s.result.as_ref().expect("sent").counts.inserted, 1);
+}
