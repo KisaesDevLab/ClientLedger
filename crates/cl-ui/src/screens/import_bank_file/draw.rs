@@ -170,6 +170,30 @@ fn titled_card(ui: &mut Ui, tokens: &Tokens, title: &str, add: impl FnOnce(&mut 
         });
 }
 
+/// The balance check's labels (QA-2, QA-3): a card's say "owe"; with no
+/// row to add, the books' line says what it counts instead of "if all 0
+/// are added".
+pub(super) fn balance_keys(
+    card: bool,
+    to_send: usize,
+    b: &cl_api::ImportBalanceCheck,
+) -> (&'static str, &'static str) {
+    let bank = if card {
+        "bankimport.balance.bank_says_owe"
+    } else {
+        "bankimport.balance.bank_says"
+    };
+    let books = match (to_send, b.pending_total.is_zero(), card) {
+        (n, _, false) if n > 0 => "bankimport.balance.books_will",
+        (n, _, true) if n > 0 => "bankimport.balance.books_will_owe",
+        (_, false, false) => "bankimport.balance.books_pending",
+        (_, false, true) => "bankimport.balance.books_pending_owe",
+        (_, true, false) => "bankimport.balance.books_now",
+        (_, true, true) => "bankimport.balance.books_now_owe",
+    };
+    (bank, books)
+}
+
 fn trouble_text(trouble: &EngineTrouble) -> String {
     match trouble {
         EngineTrouble::Unknown => t("bankimport.lost"),
@@ -861,29 +885,32 @@ impl ImportBankFileScreen {
             };
             match p.balance_check.as_ref() {
                 Some(b) => {
+                    // QA-3: one sign for all three; a card's is the amount
+                    // owed, and the labels say so.
+                    let card = self.card_target();
+                    let fig = flow::balance_figures(b, card);
+                    let (bank_key, books_key) =
+                        balance_keys(card, flow::rows_to_send(p, &self.choices), b);
                     pair(
                         ui,
                         tokens,
-                        &t_with(
-                            "bankimport.balance.bank_says",
-                            &[("date", &short_date(b.file_date))],
-                        ),
-                        &b.file_balance.format(style),
+                        &t_with(bank_key, &[("date", &short_date(b.file_date))]),
+                        &fig.bank.format(style),
                         true,
                     );
                     pair(
                         ui,
                         tokens,
                         &t_with(
-                            "bankimport.balance.books_will",
-                            &[("n", &p.counts.new.to_string())],
+                            books_key,
+                            &[("n", &flow::rows_to_send(p, &self.choices).to_string())],
                         ),
-                        &b.projected.format(style),
+                        &fig.books.format(style),
                         true,
                     );
-                    let ok = b.difference.is_zero();
+                    let ok = fig.difference.is_zero();
                     let color = if ok { tokens.accent } else { tokens.warn_text };
-                    let mut diff = b.difference.format(style);
+                    let mut diff = fig.difference.format(style);
                     if ok {
                         diff.push_str(" \u{2713}");
                     }

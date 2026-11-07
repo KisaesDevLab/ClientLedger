@@ -379,6 +379,60 @@ pub fn card_balance_check(h: &Harness) {
     );
 }
 
+/// QA-3: `fixtures/bank/card_positive_issuer.qfx` (issuer's signs, the
+/// wizard flips them) and `card_ccstmt.qfx` (holder's signs, as is) send
+/// the same feed-sign rows and the same holder-signed balance, -429.12.
+/// The engine answers in amounts owed and echoes the file's balance as
+/// sent: on a fresh card account the rows net -70.78 owed (charges
+/// 454.22, credits 525.00), so projected is -70.78 and the difference is
+/// -(-429.12) - (-70.78) = 499.90. The desktop shows "Bank says you owe"
+/// as -file_balance so the three figures read in one sign.
+pub fn card_fixture_balance_in_either_convention(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let tag = unique("CC");
+    let day = |d: u32| date(2026, 10, d);
+    // Feed sign: a charge (money out) is positive.
+    let rows = || {
+        [
+            (5, "45.67", "OFFICE DEPOT #221"),
+            (7, "12.00", "PARKING GARAGE"),
+            (10, "230.40", "AIRLINE TICKET"),
+            (12, "-500.00", "PAYMENT THANK YOU"),
+            (15, "89.10", "HOTEL STAY"),
+            (18, "15.25", "LUNCH MEETING"),
+            (22, "-25.00", "RETURN OFFICE DEPOT"),
+            (25, "61.80", "FUEL"),
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, (d, amount, text))| {
+            let line = u32::try_from(i).expect("line") * 6 + 40;
+            row(line, day(*d), amount, text, Some(&format!("{tag}-{i}")))
+        })
+        .collect::<Vec<_>>()
+    };
+    for flipped in [true, false] {
+        let acct = fresh_account(h, s, AccountType::Liability, "credit_card");
+        let mut req = request(acct, BankFileFormat::Qfx, rows());
+        req.amounts_flipped = flipped;
+        req.file_ending_balance = Some(dec("-429.12"));
+        req.file_ending_date = Some(day(31));
+        let p = h.run(s.bank_import().preview(&req)).expect("preview");
+        let b = p.balance_check.expect("balance check");
+        assert_eq!(b.file_balance, m("-429.12"), "echoed in the holder's sign");
+        assert_eq!(b.books_at_date, m("0.00"));
+        assert_eq!(b.new_total, m("-70.78"), "feed sign, all 8 rows");
+        assert_eq!(b.projected, m("-70.78"), "owed once accepted");
+        assert_eq!(b.difference, m("499.90"), "flipped={flipped}");
+        // The desktop's reading: owed 429.12 - owed -70.78.
+        let owed = m("0.00").checked_sub(b.file_balance).expect("neg");
+        assert_eq!(owed.checked_sub(b.projected).expect("sub"), b.difference);
+    }
+}
+
 fn fitid_row(line: u32, day: CalendarDate, amount: &str, text: &str, fitid: &str) -> BankImportRow {
     row(line, day, amount, text, Some(fitid))
 }

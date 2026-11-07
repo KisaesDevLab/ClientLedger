@@ -250,6 +250,37 @@ pub fn ending_balance(section: &Section, flipped: bool) -> Option<(Decimal, Cale
     Some((to_display(b.amount, flipped), date))
 }
 
+/// The balance check's three figures as the owner reads them, in one sign
+/// convention (QA-3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BalanceFigures {
+    /// What the bank's file says.
+    pub bank: Money,
+    /// What the books will say once the rows are accepted.
+    pub books: Money,
+    /// `bank` minus `books`.
+    pub difference: Money,
+}
+
+/// The engine's balance check in one sign: a bank account's balance as
+/// is; a card's as the amount owed. The engine echoes the file's balance
+/// in the holder's sign (a card's owed balance is negative there) while its
+/// projection and difference are amounts owed (U-06: `difference =
+/// -fileBalance - projected`), so a card's file balance is negated here.
+#[must_use]
+pub fn balance_figures(b: &cl_api::ImportBalanceCheck, card: bool) -> BalanceFigures {
+    let bank = if card {
+        b.file_balance.checked_neg().unwrap_or(b.file_balance)
+    } else {
+        b.file_balance
+    };
+    BalanceFigures {
+        bank,
+        books: b.projected,
+        difference: b.difference,
+    }
+}
+
 /// The batch for `section` going into `account`.
 #[must_use]
 #[allow(clippy::too_many_arguments, reason = "one batch has this many parts")]

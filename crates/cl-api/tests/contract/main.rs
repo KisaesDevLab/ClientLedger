@@ -1066,6 +1066,10 @@ fn main() -> std::process::ExitCode {
             contract_bank_import::card_balance_check,
         ),
         (
+            "bank_import::card_fixture_balance_in_either_convention",
+            contract_bank_import::card_fixture_balance_in_either_convention,
+        ),
+        (
             "bank_import::reused_fitids_never_change",
             contract_bank_import::reused_fitids_never_change,
         ),

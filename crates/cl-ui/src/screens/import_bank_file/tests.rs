@@ -296,6 +296,72 @@ fn rows_are_sent_in_the_feed_sign_with_the_holders_balance() {
     assert_eq!(req.file_name, "operating.qfx");
 }
 
+/// QA-3: the card fixture in the issuer's signs (flipped) and in the
+/// holder's signs (as is) sends the same rows and the same holder-signed
+/// balance, -429.12; the balance check then reads in one sign, the amount
+/// owed: Bank says 429.12, Books will say X, Difference = 429.12 - X.
+#[test]
+fn a_card_file_sends_one_balance_in_either_sign_convention() {
+    let mut sent = Vec::new();
+    for (file, flip) in [
+        ("card_positive_issuer.qfx", true),
+        ("card_ccstmt.qfx", false),
+    ] {
+        let f = fixture();
+        let mut s = screen(&f);
+        let card = card_account(&s);
+        into_account(&mut s, bank_fixture(file), card);
+        assert!(s.sign_needs_confirm(), "{file}: a card asks once");
+        assert_eq!(s.flipped, flip, "{file}: the suggestion");
+        s.set_flipped(s.flipped);
+        let req = s.request().expect("request");
+        let amounts: Vec<String> = req
+            .rows
+            .iter()
+            .map(|r| cl_api::wire_decimal(r.amount).expect("amount"))
+            .collect();
+        let balance = req
+            .file_ending_balance
+            .and_then(|b| cl_api::wire_decimal(b).ok());
+        assert_eq!(balance.as_deref(), Some("-429.12"), "{file}");
+        // Feed sign: a charge (money out) is positive.
+        assert_eq!(amounts[0], "45.67", "{file}");
+        assert_eq!(amounts[3], "-500.00", "{file}");
+        sent.push(amounts);
+    }
+    assert_eq!(sent[0], sent[1], "the same rows either way");
+
+    // The engine's answer for this file (U-06, amounts owed): a fresh card
+    // account owes 0.00; the rows net -70.78 owed (525.00 of credits,
+    // 454.22 of charges), so the books will say -70.78 and the difference
+    // is 429.12 - (-70.78) = 499.90. QA's run: the card owed 98.00 on
+    // 10/31, books 27.22, difference 429.12 - 27.22 = 401.90.
+    let m = |s: &str| cl_core::Money::parse_wire(s).expect("money");
+    for (projected, difference) in [("-70.78", "499.90"), ("27.22", "401.90")] {
+        let check = cl_api::ImportBalanceCheck {
+            file_balance: m("-429.12"),
+            file_date: CalendarDate::from_ymd(2026, 10, 31).expect("date"),
+            books_at_date: m("0.00"),
+            pending_total: m("0.00"),
+            new_total: m("0.00"),
+            likely_in_books_count: 0,
+            likely_in_books_total: m("0.00"),
+            projected: m(projected),
+            difference: m(difference),
+        };
+        let fig = flow::balance_figures(&check, true);
+        assert_eq!(fig.bank, m("429.12"), "owed, as the books say it");
+        assert_eq!(fig.books, m(projected));
+        assert_eq!(
+            fig.bank.checked_sub(fig.books).expect("sub"),
+            fig.difference,
+            "Difference = Bank says - Books will say"
+        );
+        // A bank account's balance is shown as the file has it.
+        assert_eq!(flow::balance_figures(&check, false).bank, m("-429.12"));
+    }
+}
+
 #[test]
 fn a_csv_shows_its_columns_and_skips_zero_rows() {
     let f = fixture();
