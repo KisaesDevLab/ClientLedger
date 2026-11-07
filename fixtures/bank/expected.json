@@ -23,8 +23,8 @@
           ],
           "descriptions": {
             "4": "AT&T WIRELESS AUTOPAY",
-            "5": "CAFÉ LUMIÈRE TABLE 4",
-            "7": "CHECK RENT OCTOBER",
+            "5": "CAFÉ LUMIÈRE",
+            "7": "CHECK",
             "11": "HARDWARE & GARDEN",
             "1": "POS PURCHASE COFFEE CO"
           },
@@ -33,7 +33,11 @@
             "7": 1002
           },
           "memos": {
-            "6": "Ref: ATM0042"
+            "1": "coffee co",
+            "2": "ACME WIDGETS",
+            "5": "TABLE 4",
+            "6": "Ref: ATM0042",
+            "7": "RENT OCTOBER"
           }
         }
       ],

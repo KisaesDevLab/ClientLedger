@@ -243,10 +243,10 @@ pub struct BankRow {
     /// "rounded from 12.345".
     pub rounded_from: Option<String>,
     /// The bank's description: NFC, at most [`MAX_DESCRIPTION_CHARS`]
-    /// characters. For OFX it is NAME + MEMO by the golden rule
-    /// ([`crate::dedupe::ofx_description`]).
+    /// characters. For OFX it is NAME only
+    /// ([`crate::dedupe::ofx_description`], Q-P25r).
     pub description: String,
-    /// A memo, at most [`MAX_MEMO_CHARS`] characters: the QIF/CSV memo,
+    /// A memo, at most [`MAX_MEMO_CHARS`] characters: the OFX/QIF/CSV memo,
     /// plus "Ref: …" for references that are not check numbers.
     pub memo: Option<String>,
     /// A check number of at most 9 digits.

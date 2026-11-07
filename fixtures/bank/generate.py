@@ -133,20 +133,8 @@ def stmttrn_lines(stmts, xml, qfx, **kw):
 
 
 def ofx_desc(name, memo):
-    def tw(s):
-        return s.strip(" \t\n\r\x0b\x0c\xa0")
-    n, m = tw(name or ""), tw(memo or "")
-    if not n:
-        return m
-    def norm(s):
-        import re, unicodedata
-        s = unicodedata.normalize("NFC", s)
-        s = "".join(ch.upper() if "a" <= ch <= "z" else ch for ch in s)
-        s = re.sub(r"[\t\n\x0b\x0c\r \xa0]+", " ", s)
-        return tw(s)[:500]
-    if not m or norm(m) in norm(n):
-        return n
-    return f"{n} {m}"
+    # Owner decision Q-P25r (2026-11-07): NAME only; MEMO goes to the memo.
+    return (name or "").strip(" \t\n\r\x0b\x0c\xa0")
 
 
 def expect_ofx(file, fmt, stmts, sections_extra=None, encoding=None):
@@ -197,9 +185,9 @@ text = ofx([chk], charset="NONE", encoding="USASCII")
 write("checking_ofx102_sgml.ofx", text.encode("cp1252"))
 lines1 = stmttrn_lines([chk], False, False, charset="NONE", encoding="USASCII")
 expect_ofx("checking_ofx102_sgml.ofx", "Ofx", [chk], [{"rowLines": lines1[:3],
-           "descriptions": {"4": "AT&T WIRELESS AUTOPAY", "5": "CAFÉ LUMIÈRE TABLE 4",
-                            "7": "CHECK RENT OCTOBER", "11": "HARDWARE & GARDEN", "1": "POS PURCHASE COFFEE CO"},
-           "checks": {"3": 1001, "7": 1002}, "memos": {"6": "Ref: ATM0042"}}], encoding="Windows1252")
+           "descriptions": {"4": "AT&T WIRELESS AUTOPAY", "5": "CAFÉ LUMIÈRE",
+                            "7": "CHECK", "11": "HARDWARE & GARDEN", "1": "POS PURCHASE COFFEE CO"},
+           "checks": {"3": 1001, "7": 1002}, "memos": {"1": "coffee co", "2": "ACME WIDGETS", "5": "TABLE 4", "6": "Ref: ATM0042", "7": "RENT OCTOBER"}}], encoding="Windows1252")
 # Sum check by hand is in expected.json.
 
 # 2. checking_ofx22_xml.ofx (ISO-8859-1, [-8:PST] and [+12])
