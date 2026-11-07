@@ -353,6 +353,10 @@ steps:
   - assert_state: {key: screen.reading, equals: false}
   - assert_state: {key: screen.layout.bottom_scrolls, equals: false}
   - screenshot: choose-960x640
+  # 150%: still short, the step in one line under the title.
+  - set_zoom: {percent: 150}
+  - assert_state: {key: screen.layout.bottom_scrolls, equals: false}
+  - screenshot: choose-960x640-z150
   - set_zoom: {percent: 200}
   - assert_state: {key: screen.layout.bottom_scrolls, equals: false}
   - screenshot: choose-960x640-z200

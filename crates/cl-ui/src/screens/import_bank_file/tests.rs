@@ -190,6 +190,21 @@ fn a_changed_row_replaces_or_is_added() {
     s.poll();
     assert_eq!(s.replacing(), 1);
     assert!(s.can_next(), "an update opens Send");
+    // Replace only: nothing added, the waiting item updated; undo puts
+    // it back.
+    s.next();
+    let sent = s.result.clone().expect("result");
+    assert_eq!(sent.counts.inserted, 0);
+    assert!(sent.rows.iter().any(|x| x.replaced));
+    prepared(&mut s);
+    s.undo(false);
+    assert_eq!(s.undone.map(|u| u.restored), Some(1));
+    s.start_over(false);
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.next();
+    s.poll();
+    assert_eq!(s.preview.as_ref().expect("preview").counts.changed, 1);
     s.choose(line, changed_choice(ChangedAction::Add));
     s.poll();
     assert_eq!(s.replacing(), 0);
@@ -197,6 +212,7 @@ fn a_changed_row_replaces_or_is_added() {
         flow::rows_to_send(s.preview.as_ref().expect("preview"), &s.choices),
         1
     );
+    let _ = f.link.drain();
     s.next();
     assert_eq!(s.result.as_ref().expect("result").counts.inserted, 1);
     assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 4);

@@ -1297,6 +1297,7 @@ impl ImportBankFileScreen {
         let Some(r) = self.result.clone() else {
             return;
         };
+        let replaced = r.rows.iter().filter(|x| x.replaced).count();
         form::card(ui, tokens, |ui| {
             // UI review 7: after Undo the heading says what is left.
             let text = if let Some(u) = self.undone {
@@ -1305,6 +1306,9 @@ impl ImportBankFileScreen {
                     usize::try_from(u.removed).unwrap_or(usize::MAX),
                     &[],
                 )
+            } else if r.counts.inserted == 0 && replaced > 0 {
+                // Only waiting items were replaced (nothing added).
+                t_count("bankimport.done.replaced", replaced, &[])
             } else if r.counts.inserted == 0 {
                 t_with(
                     "bankimport.done.nothing",
@@ -1356,7 +1360,7 @@ impl ImportBankFileScreen {
                         .push(CompanyEvent::OpenWindow(CommandId::new("banking.feed")));
                 }
                 let can_undo = r.batch.is_some()
-                    && r.counts.inserted > 0
+                    && (r.counts.inserted > 0 || replaced > 0)
                     && self.undone.is_none()
                     && self.undo_task.is_none()
                     && !self.preparing();

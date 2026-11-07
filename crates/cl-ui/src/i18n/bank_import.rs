@@ -167,6 +167,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Step 4.
     ("bankimport.done.sent", "Sent {n} to the Bank Feed. {skipped}"),
     ("bankimport.done.sent_all", "Sent {n} to the Bank Feed."),
+    ("bankimport.done.replaced", "Updated {n} waiting in the Bank Feed with the bank's changes."),
+    ("bankimport.done.replaced.one", "Updated 1 waiting in the Bank Feed with the bank's changes."),
     ("bankimport.done.already", "{n} were already there."),
     ("bankimport.done.already.one", "1 was already there."),
     ("bankimport.done.undone", "Undone: took {n} back out of the Bank Feed."),
