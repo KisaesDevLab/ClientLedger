@@ -619,8 +619,10 @@ fn check_rows(co: &Co, h: &Harness, book: &Book, want: &Value, ctx: &str, subset
         // A row that leaves nothing on hand moves what is left to COGS (the
         // residual); a golden row that doesn't list it (V4: A8's 1.50) is
         // the movement's own value, and the report shows the net change.
-        let swept =
-            st(e, "residual").is_none() && st(e, "onHand") == Some("0.0000") && r.value != value;
+        let swept = st(e, "residual").is_none()
+            && st(e, "onHand") == Some("0.0000")
+            && st(e, "assetValue") == Some("0.00")
+            && r.value != value;
         if swept {
             let net = r.running_value.checked_sub(before(r)).expect("net");
             assert_eq!(r.value, net, "{ctx} {doc} value with its residual");
