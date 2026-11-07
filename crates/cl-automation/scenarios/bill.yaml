@@ -297,7 +297,9 @@ steps:
   - assert_state: {key: toast, equals: "Voided. The bill stays in your books with a zero amount."}
   - screenshot: voided-bill
   - assert_no_clipping: {}
-  - click: {role: button, label: Clear}
+  # (the toast sits over Clear: press it from the keyboard)
+  - focus: {role: button, label: Clear}
+  - key: Space
   - assert_state: {key: screen.mode, equals: new}
 
   # --- 9. Read with AI (WP7): the demo engine's canned reading of the story
@@ -383,7 +385,8 @@ steps:
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
   - assert_state: {key: screen.mode, equals: edit}
-  - click: {role: button, label: Clear}
+  - focus: {role: button, label: Clear}
+  - key: Space
   - assert_state: {key: screen.mode, equals: new}
 
   # --- 10. Reading switched off (AC3): no Read with AI, nothing sent, and
@@ -430,7 +433,8 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
-  - click: {role: button, label: Clear}
+  - focus: {role: button, label: Clear}
+  - key: Space
 
   # --- 11. Read document (A03, Q-A03l): the document is read on this
   # computer by the sandboxed worker, with AI reading still off. Values are
