@@ -82,4 +82,22 @@ steps:
   - assert_state: {key: screen.quick_add.open, equals: false}
   - assert_state: {key: screen.has_payee, equals: true}
   - click: {role: button, label: Clear}
+  # --- Make Deposits: Received from in the lines grid --------------------------
+  - command: banking.deposit
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label: "Received from, line 1"}
+  - type: {text: "Hidden Valley Co-op"}
+  - key: Tab
+  - assert_state: {key: screen.quick_add.open, equals: true}
+  - assert_state: {key: screen.quick_add.kind, equals: client}
+  - assert_state: {key: screen.quick_add.asks_kind, equals: true}
+  - screenshot: deposit-prompt
+  - click: {role: button, label: Quick Add}
+  - assert_state: {key: screen.quick_add.open, equals: false}
+  - assert_value: {target: {label: "Received from, line 1"}, equals: "Hidden Valley Co-op"}
+  - assert_not_exists: {label_contains: "Choose one from the list"}
+  - screenshot: deposit-added
+  - click: {role: button, label: Clear}
   - command: dev.demo_quick_add_reset
