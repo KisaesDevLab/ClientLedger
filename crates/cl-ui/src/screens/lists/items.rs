@@ -136,6 +136,8 @@ struct FormPanel {
     error: Option<ApiError>,
     focus: Option<ItemField>,
     task: Option<Task<Versioned<Item>>>,
+    /// QA-8 (PR-4): a refused save scrolls its message into view once.
+    show_problem: bool,
 }
 
 impl FormPanel {
@@ -158,6 +160,7 @@ impl FormPanel {
             error: None,
             focus: Some(ItemField::Name),
             task: None,
+            show_problem: false,
         }
     }
 
@@ -175,6 +178,7 @@ impl FormPanel {
                 detail: cl_core::OwnerFacing::scrubbed_detail(&e),
             });
             self.refusal = Some(text);
+            self.show_problem = true;
             return;
         }
         self.form.save_failed(cl_model::forms::SaveFailure {
@@ -195,6 +199,7 @@ impl FormPanel {
         } else {
             self.error = Some(e);
         }
+        self.show_problem = true;
     }
 }
 
@@ -750,6 +755,7 @@ impl ItemsScreen {
                 };
                 panel.problems = problems.item;
                 panel.part_problems = problems.part;
+                panel.show_problem = true;
                 return false;
             }
         };
@@ -1284,17 +1290,28 @@ impl ItemsScreen {
             }
         });
         ui.add_space(6.0);
-        for p in &panel.problems {
-            ui.label(RichText::new(t(p.key().as_str())).color(tokens.warn_text));
-        }
-        for p in &panel.part_problems {
-            ui.label(RichText::new(part_panel::problem_text(*p, lock)).color(tokens.warn_text));
-        }
-        if let Some(r) = &panel.refusal {
-            ui.label(RichText::new(r).color(tokens.warn_text));
-        }
-        if let Some(e) = &panel.error {
-            form::inline_error(ui, tokens, e);
+        let shown = ui
+            .vertical(|ui| {
+                for p in &panel.problems {
+                    ui.label(RichText::new(t(p.key().as_str())).color(tokens.warn_text));
+                }
+                for p in &panel.part_problems {
+                    ui.label(
+                        RichText::new(part_panel::problem_text(*p, lock)).color(tokens.warn_text),
+                    );
+                }
+                if let Some(r) = &panel.refusal {
+                    ui.label(RichText::new(r).color(tokens.warn_text));
+                }
+                if let Some(e) = &panel.error {
+                    form::inline_error(ui, tokens, e);
+                }
+            })
+            .response;
+        // QA-8 (PR-4): the message of a refused save is never left below
+        // the window.
+        if std::mem::take(&mut panel.show_problem) {
+            shown.scroll_to_me(Some(egui::Align::Max));
         }
         if saving {
             form::progress_line(ui, tokens, &t("items.form.saving"));

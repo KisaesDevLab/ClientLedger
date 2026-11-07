@@ -47,3 +47,19 @@ fn an_empty_date_shows_nothing_and_off_is_refused() {
     let s = ReportScreen::new(link, Report::Value, DemoState::today());
     assert_eq!(s.state()["error"], true, "inventory is off");
 }
+
+/// QA-10 (PR-4): a posting saved in another window (its data-bus notice)
+/// runs the open report again; no Refresh needed.
+#[test]
+fn qa10_an_open_report_follows_postings_elsewhere() {
+    let (_d, mut s) = screen(Report::Value);
+    let before = s.state()["total"].clone();
+    {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::stock::story_sale(&mut d).expect("sale");
+    }
+    s.link.bus().publish(crate::data_bus::Change::ledger([]));
+    s.follow_bus();
+    s.poll();
+    assert_ne!(s.state()["total"], before, "the sale lowered the value");
+}

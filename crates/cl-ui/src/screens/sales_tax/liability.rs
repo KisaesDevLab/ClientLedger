@@ -64,6 +64,8 @@ pub struct OwedScreen {
     error: Option<ApiError>,
     problem: Option<&'static str>,
     loads: u32,
+    /// QA-10 (PR-4): other windows' saves run the report again.
+    bus: crate::data_bus::Subscription,
 }
 
 fn fmt(m: Money) -> String {
@@ -94,7 +96,9 @@ impl OwedScreen {
             error: None,
             problem: None,
             loads: 0,
+            bus: crate::data_bus::Subscription::detached(),
         };
+        s.bus = s.link.bus().subscribe();
         s.refresh();
         s
     }
@@ -548,6 +552,10 @@ impl Screen for OwedScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
+        // QA-10 (PR-4): a posting elsewhere refreshes the open report.
+        if !self.busy() && !self.link.bus().take(&mut self.bus).is_empty() {
+            self.refresh();
+        }
         egui::ScrollArea::both().show(ui, |ui| self.draw(ui));
         if self.busy() {
             ui.ctx()
