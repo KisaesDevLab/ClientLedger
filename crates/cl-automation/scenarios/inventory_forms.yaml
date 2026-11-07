@@ -26,11 +26,10 @@ steps:
   - key: Tab
   - type: {text: "60.00", target: {role: text_input, label: "Amount ($)"}}
   - key: Tab
-  # The payee's last accounts came over on two Expenses lines: take them out.
-  - click: {role: grid_cell, label: "Amount, line 1"}
-  - key: Ctrl+Delete
-  - key: Ctrl+Delete
-  - assert_state: {key: screen.lines, equals: 0}
+  # QA-4 (PR-4): the payee's last accounts came over on the Expenses tab
+  # with no amounts; the purchase goes on the Items tab only, and the save
+  # drops the copied lines instead of refusing over the hidden tab.
+  - assert_state: {key: screen.prefill.applied, equals: true}
   - click: {label_contains: "Items "}
   - assert_state: {key: screen.tab, equals: items}
   - click: {label_contains: "Item, line 1"}
@@ -69,8 +68,8 @@ steps:
   - key: Tab
   - type: {text: "20.00", target: {role: text_input, label: Amount}}
   - key: Tab
-  - click: {role: grid_cell, label: "Amount, line 1"}
-  - key: Ctrl+Delete
+  # QA-4/QA-5 (PR-4): the prefilled Expenses line followed the amount;
+  # the items take it over on save (no Ctrl+Delete needed).
   - click: {label_contains: "Items "}
   - assert_state: {key: screen.tab, equals: items}
   - click: {label_contains: "Item, line 1"}

@@ -249,11 +249,16 @@ impl CheckForm {
 
     /// The owner typed the check amount (Q-P13r a). The amount is no longer
     /// "from the lines". When exactly one line is used and its amount is
-    /// blank or equal to the previous check amount, it follows.
+    /// blank or equal to the previous check amount, it follows, unless item
+    /// lines already carry amounts (the amount is theirs then, QA-5).
     pub fn set_amount(&mut self, amount: Option<Money>) {
         let previous = self.amount;
         self.amount = amount;
         self.amount_from_lines = false;
+        if self.items.lines.iter().any(|l| l.amount.is_some()) {
+            collapse_trailing_blanks(&mut self.lines.lines);
+            return;
+        }
         {
             let mut used = self.lines.used_mut();
             if let (Some(line), None) = (used.next(), used.next())
@@ -263,6 +268,24 @@ impl CheckForm {
             }
         }
         collapse_trailing_blanks(&mut self.lines.lines);
+    }
+
+    /// Item lines took the typed check amount (QA-5, PR-4): the one
+    /// Expenses line that only followed it (no account, the whole check
+    /// amount) is cleared, so the amount isn't counted twice. True when a
+    /// line changed.
+    pub fn release_follow(&mut self, filled: &[RowKey]) -> bool {
+        let released = crate::forms::lines::release_follow(
+            self.amount,
+            self.amount_from_lines,
+            &mut self.lines,
+            &self.items,
+            filled,
+        );
+        if released {
+            collapse_trailing_blanks(&mut self.lines.lines);
+        }
+        released
     }
 
     /// The owner left the lines grid (Q-P13r b): a blank check amount takes
@@ -494,6 +517,19 @@ impl CheckProblem {
             CheckProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
             CheckProblem::ReadNotAccepted => TextKey("check.problem.read_not_accepted"),
             CheckProblem::ItemLine(_, i) => i.key(),
+        }
+    }
+
+    /// The tab and line a line problem is about (QA-4).
+    #[must_use]
+    pub const fn row(self) -> Option<(crate::forms::lines::LineTab, RowKey)> {
+        use crate::forms::lines::LineTab;
+        match self {
+            CheckProblem::LineAccountMissing(k)
+            | CheckProblem::LineAmountNotPositive(k)
+            | CheckProblem::BillableNeedsCustomer(k) => Some((LineTab::Expenses, k)),
+            CheckProblem::ItemLine(k, _) => Some((LineTab::Items, k)),
+            _ => None,
         }
     }
 

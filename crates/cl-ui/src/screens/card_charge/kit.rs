@@ -1491,6 +1491,13 @@ pub(crate) fn problems(ui: &mut Ui, tokens: &Tokens, keys: &[&'static str]) {
     }
 }
 
+/// Problems already in words (a line problem names its tab, QA-4).
+pub(crate) fn problem_texts(ui: &mut Ui, tokens: &Tokens, texts: &[String]) {
+    for text in texts {
+        ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+    }
+}
+
 /// A side-panel card with a heading.
 pub(crate) fn panel_card(ui: &mut Ui, tokens: &Tokens, heading: &str, add: impl FnOnce(&mut Ui)) {
     form::card(ui, tokens, |ui| {

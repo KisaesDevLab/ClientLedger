@@ -54,6 +54,10 @@ pub(crate) struct PayeeState {
     pub source: Option<&'static str>,
     /// Some inactive details of the last transaction were left out.
     pub dropped: bool,
+    /// The lines prefill filled (QA-4).
+    pub filled: Vec<cl_model::rowkey::RowKey>,
+    /// The items total last seen (QA-5).
+    pub items_seen: Option<cl_core::Money>,
     /// The payee the recent charges are for.
     pub recent_for: Option<ContactId>,
     pub recent_task: Option<Task<Vec<RecentCharge>>>,
@@ -260,6 +264,13 @@ impl CardChargeScreen {
         self.header.edit(field::PAYEE, |h| h.memo = memo);
         self.lines.form_mut().edit_step(|v| *v = lines);
         self.payee.applied = true;
+        self.payee.filled = self
+            .lines
+            .value()
+            .used()
+            .filter(|l| l.amount.is_none())
+            .map(|l| l.key)
+            .collect();
         self.payee.source = Some("last");
         self.payee.dropped = dropped;
         self.inputs.rev = u64::MAX;
@@ -287,6 +298,13 @@ impl CardChargeScreen {
             let lines = f.lines;
             self.lines.form_mut().edit_step(|v| *v = lines);
             self.payee.applied = true;
+            self.payee.filled = self
+                .lines
+                .value()
+                .used()
+                .filter(|l| l.amount.is_none())
+                .map(|l| l.key)
+                .collect();
             self.payee.source = Some("default");
         }
     }

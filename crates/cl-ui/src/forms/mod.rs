@@ -39,6 +39,32 @@ pub fn publish_saved(link: &CompanyLink, from: &Subscription, accounts: &[Accoun
     link.bus().publish_from(from, Change::ledger(unique))
 }
 
+/// A line problem's words with the tab and line it is on (QA-4, PR-4):
+/// "Expenses tab, line 1: Enter an amount…". `position` finds the line's
+/// place on its tab (0-based); a problem not about a line reads as is.
+pub fn line_problem_text(
+    row: Option<(cl_model::forms::lines::LineTab, cl_model::rowkey::RowKey)>,
+    key: &str,
+    position: impl Fn(cl_model::forms::lines::LineTab, cl_model::rowkey::RowKey) -> Option<usize>,
+) -> String {
+    use cl_model::forms::lines::LineTab;
+    let text = crate::i18n::t(key);
+    let Some((tab, k)) = row else {
+        return text;
+    };
+    let Some(at) = position(tab, k) else {
+        return text;
+    };
+    let where_key = match tab {
+        LineTab::Expenses => "forms.line_where.expenses",
+        LineTab::Items => "forms.line_where.items",
+    };
+    crate::i18n::t_with(
+        where_key,
+        &[("line", &(at + 1).to_string()), ("problem", &text)],
+    )
+}
+
 /// A refused save's problems after the owner's edits: `now` is the form's
 /// check as it is now, and only the kinds of problem already shown stay
 /// (a fixed one goes away at once; a new one waits for the next save, as

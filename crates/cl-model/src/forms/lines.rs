@@ -119,6 +119,67 @@ pub fn ensure_entry(lines: &mut Vec<FormLine>, keys: &mut RowKeyGen) {
     }
 }
 
+/// The tab a line sits on (QA-4, PR-4): a line problem names its tab and
+/// line number, because the other tab may be the one hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineTab {
+    /// The Expenses tab (account lines).
+    Expenses,
+    /// The Items tab (item lines).
+    Items,
+}
+
+/// Item lines took a typed header amount (QA-5, PR-4). When the owner
+/// typed the amount first, the one used Expenses line followed it
+/// (Q-P13r a); once item lines carry amounts, that line (no account, the
+/// whole header amount) would count the amount twice, so its amount is
+/// cleared. A line with an account is released only when payee prefill
+/// put it there (`filled`); one the owner chose is theirs. True when a
+/// line changed.
+pub fn release_follow(
+    header: Option<Money>,
+    from_lines: bool,
+    lines: &mut FormLines,
+    items: &crate::forms::item_lines::ItemLines,
+    filled: &[RowKey],
+) -> bool {
+    let Some(header) = header.filter(|_| !from_lines) else {
+        return false;
+    };
+    if !items.lines.iter().any(|l| l.amount.is_some()) {
+        return false;
+    }
+    let mut used = lines.used_mut();
+    if let (Some(line), None) = (used.next(), used.next())
+        && (line.account.is_none() || filled.contains(&line.key))
+        && line.amount == Some(header)
+    {
+        line.amount = None;
+        return true;
+    }
+    false
+}
+
+/// The lines payee prefill filled (QA-4, PR-4) that still have no
+/// amount, once item lines carry amounts: the owner entered the purchase
+/// on the Items tab, so the copied Expenses lines (an account, no amount)
+/// are dropped instead of refusing the save over a tab the owner never
+/// looked at. They post nothing either way. True when a line went.
+pub fn drop_unpriced(
+    lines: &mut FormLines,
+    filled: &[RowKey],
+    items: &crate::forms::item_lines::ItemLines,
+) -> bool {
+    if filled.is_empty() || !items.lines.iter().any(|l| l.amount.is_some()) {
+        return false;
+    }
+    let before = lines.lines.len();
+    lines
+        .lines
+        .retain(|l| !(filled.contains(&l.key) && l.amount.is_none() && !l.is_blank()));
+    lines.lines.len() != before
+}
+
 /// The exact sum of the amounts typed on the lines (blank amounts count as
 /// nothing; no lines is zero). `None` only when the sum leaves the money
 /// range.

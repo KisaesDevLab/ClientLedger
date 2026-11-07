@@ -856,3 +856,42 @@ fn an_item_line_without_an_account_or_with_a_cost_and_no_quantity_is_refused() {
         CheckField::ItemLine(k)
     );
 }
+
+#[test]
+fn qa5_items_take_a_typed_amount_from_the_following_expense_line() {
+    let mut keys = RowKeyGen::new();
+    let mut f = CheckForm::new(None, Some(date()), NumberField::Proposed(1), &mut keys);
+    // The owner typed a memo on line 1, then the check amount: line 1
+    // follows it (Q-P13r a), with no account.
+    f.lines.lines[0].memo = "soil".into();
+    f.set_amount(Some(money("24.00")));
+    assert_eq!(f.lines.lines[0].amount, Some(money("24.00")));
+    // Items now carry the 24.00: the following line lets go of it.
+    let mut item = crate::forms::item_lines::ItemLine::blank(RowKey(900));
+    item.set_amount(Some(money("24.00")));
+    f.items.lines.push(item);
+    assert!(f.release_follow(&[]));
+    assert_eq!(f.lines.lines[0].amount, None);
+    assert_eq!(f.totals_status(), Some(TotalsStatus::Balanced));
+    assert!(!f.release_follow(&[]), "once");
+    // A typed amount with item amounts never lands on an Expenses line.
+    f.set_amount(Some(money("30.00")));
+    assert_eq!(f.lines.lines[0].amount, None);
+    // A line with an account is the owner's: never cleared, unless payee
+    // prefill put it there.
+    f.lines.lines[0].account = Some(account(5));
+    f.lines.lines[0].amount = Some(money("30.00"));
+    assert!(!f.release_follow(&[]));
+    let k = f.lines.lines[0].key;
+    assert!(f.release_follow(&[k]));
+}
+
+#[test]
+fn qa4_line_problems_name_their_tab() {
+    use crate::forms::lines::LineTab;
+    assert_eq!(
+        CheckProblem::LineAmountNotPositive(RowKey(3)).row(),
+        Some((LineTab::Expenses, RowKey(3)))
+    );
+    assert_eq!(CheckProblem::BankMissing.row(), None);
+}
