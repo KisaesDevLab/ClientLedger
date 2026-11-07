@@ -1,0 +1,44 @@
+# cargo-fuzz targets for the bank file readers (P25 step 8, review S12).
+# Outside the workspace (its own [workspace] table) so the workspace build,
+# cargo-deny and the license check never see libfuzzer-sys ((MIT OR
+# Apache-2.0) AND NCSA: NCSA covers the bundled libFuzzer sources). It is a
+# developer tool only; nothing here ships in ClientLedger.
+# Run: cargo +nightly fuzz run ofx  (from crates/cl-import)
+# Compile check: cargo check --manifest-path crates/cl-import/fuzz/Cargo.toml
+[package]
+name = "cl-import-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "LicenseRef-VibeMyFirm-Community-1.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+cl-import = { path = ".." }
+libfuzzer-sys = "0.4"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ofx"
+path = "fuzz_targets/ofx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qif"
+path = "fuzz_targets/qif.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "csv"
+path = "fuzz_targets/csv.rs"
+test = false
+doc = false
+bench = false
