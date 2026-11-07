@@ -8,3 +8,7 @@ useDefault = true
 [allowlist]
 description = "synthetic test ids"
 regexes = ['''3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0[12]''']
+# The bank import dedupe golden file (P25, U-06) is a byte copy of the engine's;
+# its SHA-256 dedupe keys look like API keys to the generic-api-key rule. The
+# engine repo allowlists the same file. Synthetic data only.
+paths = ['''^fixtures/bank/dedupe_v1\.json$''']
