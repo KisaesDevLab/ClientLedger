@@ -205,6 +205,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inventory.txn.credit_memo", "Credit memo"),
     ("inventory.txn.sales_receipt", "Sales receipt"),
     ("inventory.txn.check", "Check"),
+    ("inventory.txn.card_charge", "Card charge"),
+    ("inventory.txn.expense", "Expense"),
+    ("inventory.txn.purchase", "Purchase"),
     ("inventory.txn.adjustment", "Inventory adjustment"),
     ("inventory.txn.other", "Other"),
 ];

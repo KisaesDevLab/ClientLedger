@@ -1053,6 +1053,8 @@ pub fn valuation_detail(
             transaction_id: txn,
             txn_type: state.inventory.doc_types.get(&r.doc).copied(),
             kind: None,
+            // QA-9: the demo knows its checks; other expenses stay plain.
+            expense_kind: super::checks::get(state, txn).map(|_| "check".to_string()),
             quantity,
             value,
             running_quantity: r.on_hand,

@@ -437,7 +437,7 @@ impl ReportScreen {
                     {
                         open = Some((r.transaction_id, r.txn_type));
                     }
-                    ui.label(type_text(r.txn_type));
+                    ui.label(type_text(r.txn_type, r.expense_kind.as_deref()));
                     ui.label(self.books.name(r.item_id).unwrap_or_default());
                     super::num(ui, RichText::new(super::qty(r.quantity)).monospace());
                     super::num(ui, RichText::new(super::money(r.value)).monospace());
@@ -571,7 +571,16 @@ impl ReportScreen {
     }
 }
 
-fn type_text(k: Option<TxnType>) -> String {
+fn type_text(k: Option<TxnType>, expense: Option<&str>) -> String {
+    // QA-9 (PR-4): an expense-type row says which form made it.
+    if k == Some(TxnType::Expense) {
+        return t(match expense {
+            Some("check") => "inventory.txn.check",
+            Some("card_charge") => "inventory.txn.card_charge",
+            Some("expense") => "inventory.txn.expense",
+            _ => "inventory.txn.purchase",
+        });
+    }
     t(match k {
         Some(TxnType::Bill) => "inventory.txn.bill",
         Some(TxnType::VendorCredit) => "inventory.txn.vendor_credit",

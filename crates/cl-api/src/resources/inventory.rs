@@ -655,6 +655,10 @@ pub struct ValuationDetailRow {
     /// The movement kind (`receipt`, `sale`, `adjust_qty`, …; as sent).
     #[serde(default)]
     pub kind: Option<String>,
+    /// What an expense-type document is (`card_charge`, `check` or
+    /// `expense`; PR-4 QA-9, absent from older engines).
+    #[serde(default)]
+    pub expense_kind: Option<String>,
     /// Signed units.
     pub quantity: Quantity,
     /// Signed value posted.
