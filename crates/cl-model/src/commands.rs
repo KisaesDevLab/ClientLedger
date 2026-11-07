@@ -522,6 +522,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Reset Demo Inventory (developer)",
     ),
     dev_action("dev.demo_inventory_sale", "Demo Inventory Sale (developer)"),
+    // Q-PR4d: the Quick Add scenario runs light and dark in one app; this
+    // drops the names it added so the second pass is offered them again.
+    dev_action(
+        "dev.demo_quick_add_reset",
+        "Reset Demo Quick Add Names (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

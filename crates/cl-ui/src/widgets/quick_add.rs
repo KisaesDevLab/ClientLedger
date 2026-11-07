@@ -374,6 +374,34 @@ impl QuickAdd {
     }
 }
 
+/// The developer command that drops the names Quick Add and Set Up added
+/// to the demo (the scenario repeats in dark).
+pub(crate) const DEV_RESET: &str = "dev.demo_quick_add_reset";
+
+/// [`DEV_RESET`]: the demo forgets the names Quick Add (and the centers'
+/// Set Up) added. True on the demo.
+pub(crate) fn demo_reset(link: &CompanyLink) -> bool {
+    let Some(mut d) = link.demo_state() else {
+        return false;
+    };
+    let list = d.contacts_mut();
+    let n = u32::try_from(list.len())
+        .unwrap_or(u32::MAX)
+        .saturating_add(64);
+    let added: std::collections::HashSet<_> = (0..n)
+        .flat_map(|k| {
+            [
+                crate::company::demo::contacts::contact_id(910_000 + k),
+                crate::company::demo::contacts::contact_id(900_000 + k),
+            ]
+        })
+        .collect();
+    list.retain(|c| !added.contains(&c.id));
+    drop(d);
+    link.bus().publish(crate::data_bus::Change::Contacts);
+    true
+}
+
 fn found(c: &Contact, name: &str, kind: NameKind) -> bool {
     c.is_active && c.fields.display_name.trim().eq_ignore_ascii_case(name) && is_kind(c, kind)
 }

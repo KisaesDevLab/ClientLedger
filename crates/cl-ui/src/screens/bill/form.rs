@@ -596,6 +596,8 @@ impl EnterBillScreen {
                 // Q-PR4d: a name not on the list offers Quick Add (Enter
                 // then adds it instead of saving the bill).
                 let typed = self.inputs.vendor.clone();
+                // The prompt takes the focus Tab would give the Date.
+                self.focus = None;
                 self.quick_add.offer(
                     &typed,
                     cl_model::quick_add::Accepts::One(cl_model::quick_add::NameKind::Vendor),
@@ -1492,6 +1494,9 @@ impl EnterBillScreen {
             }
             // Q-PR4d: Esc cancels an open Quick Add prompt first.
             "form.revert" => self.quick_add.cancel() || self.revert_field(),
+            crate::widgets::quick_add::DEV_RESET => {
+                crate::widgets::quick_add::demo_reset(&self.link)
+            }
             _ => false,
         }
     }
