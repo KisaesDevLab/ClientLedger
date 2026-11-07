@@ -70,6 +70,10 @@ pub struct Section {
     /// The ending balance the file states (`LEDGERBAL`) or the CSV running
     /// balance proves (in the file's sign; flip with [`crate::to_display`]).
     pub ledger_balance: Option<Balance>,
+    /// The opening balance a QIF register states in its "Opening Balance"
+    /// record (in the file's sign). That record is not a transaction and is
+    /// skipped; this is display information only.
+    pub opening_balance: Option<Balance>,
     /// The rows to send, in file order.
     pub rows: Vec<BankRow>,
     /// Rows left out on purpose (zero amounts, review S10).
@@ -96,6 +100,7 @@ impl Section {
             start: None,
             end: None,
             ledger_balance: None,
+            opening_balance: None,
             rows: Vec::new(),
             skipped: Vec::new(),
             problems: Vec::new(),
@@ -270,6 +275,10 @@ pub struct SkippedRow {
 pub enum SkipReason {
     /// The amount is zero (review S10): listed, never sent.
     ZeroAmount,
+    /// Quicken's "Opening Balance" record (a transfer to the account
+    /// itself): it states a balance, it is not a transaction. Its amount and
+    /// date are in [`Section::opening_balance`].
+    OpeningBalance,
 }
 
 /// A row that could not be read.

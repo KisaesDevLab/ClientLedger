@@ -348,6 +348,18 @@ EXPECTED["files"].append({"file": "card.qif", "format": "Qif", "sections": [{
     "start": "2026-10-03", "end": "2026-10-19", "balance": None, "balanceDate": None, "problems": [], "skipped": [],
     "suggestFlip": False, "accountName": "Business Card"}]})
 
+# Quicken's first record: "Opening Balance", a transfer to the account itself.
+# Skipped (not a transaction); its amount and date become the opening balance.
+ob = ["!Account", "NOperating", "TBank", "^", "!Type:Bank",
+      "D12/31/25", "T4,210.55", "CX", "POpening Balance", "L[Operating]", "^",
+      "D1/2/26", "T-25.00", "PPOST OFFICE", "LPostage", "^",
+      "D1/3/26", "T300.00", "PCLIENT C", "^"]
+write("opening_balance.qif", ("\r\n".join(ob) + "\r\n").encode("ascii"))
+EXPECTED["files"].append({"file": "opening_balance.qif", "format": "Qif", "sections": [{
+    "kind": "Checking", "mask": None, "rows": 2, "sum": "275.00", "start": "2026-01-02", "end": "2026-01-03",
+    "balance": None, "balanceDate": None, "problems": [], "skipped": [6], "rowLines": [12, 17],
+    "openingBalance": "4210.55", "openingBalanceDate": "2025-12-31", "accountName": "Operating"}]})
+
 # ---------------------------------------------------------------- CSV
 def csv_bytes(rows, enc="utf-8", bom=False, nl="\r\n", sep=","):
     def q(v):

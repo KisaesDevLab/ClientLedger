@@ -14,8 +14,8 @@ use crate::csv::dates::{DateOrder, judge_column, parse_date};
 use crate::detect::FileFormat;
 use crate::error::ImportError;
 use crate::normalize::{
-    AccountKind, AmountProblem, Declared, ParsedFile, ProblemKind, RowParts, Section, decode,
-    parse_amount_detail,
+    AccountKind, AmountProblem, Balance, Declared, ParsedFile, ProblemKind, RowParts, Section,
+    SkipReason, SkippedRow, decode, parse_amount_detail,
 };
 use cl_core::CalendarDate;
 
@@ -27,6 +27,7 @@ struct Record {
     payee: Option<String>,
     memo: Option<String>,
     number: Option<String>,
+    category: Option<String>,
 }
 
 impl Record {
@@ -166,6 +167,7 @@ fn read_registers(text: &str) -> Result<Vec<Register>, ImportError> {
                     "P" => rec.payee = Some(value),
                     "M" => rec.memo = Some(value),
                     "N" => rec.number = Some(value),
+                    "L" => rec.category = Some(value),
                     // Category, cleared flag, address, splits: not needed.
                     _ => {}
                 }
@@ -195,6 +197,26 @@ fn section(
     let mut section = Section::new(index, reg.kind);
     section.account_name = reg.name;
     for r in &reg.records {
+        if is_opening_balance(r) {
+            if section.opening_balance.is_none()
+                && let (Some(Ok(amount)), Some(Ok(date))) = (
+                    r.amount.as_deref().map(parse_amount_detail),
+                    r.date
+                        .as_deref()
+                        .map(|d| parse_date(d, column.order, today)),
+                )
+            {
+                section.opening_balance = Some(Balance {
+                    amount: amount.value,
+                    date: Some(date),
+                });
+            }
+            section.skipped.push(SkippedRow {
+                line: r.line,
+                reason: SkipReason::OpeningBalance,
+            });
+            continue;
+        }
         let (description, memo) = match (&r.payee, &r.memo) {
             (Some(p), m) if !p.trim().is_empty() => (p.as_str(), m.as_deref()),
             (_, Some(m)) => (m.as_str(), None),
@@ -225,6 +247,15 @@ fn section(
     section.fill_range_from_rows();
     crate::sign::analyze(&mut section);
     Ok(section)
+}
+
+/// Quicken's first record: payee "Opening Balance" and a category in
+/// brackets (a transfer to the account itself).
+fn is_opening_balance(r: &Record) -> bool {
+    let payee = r.payee.as_deref().map(str::trim);
+    let category = r.category.as_deref().map(str::trim);
+    payee.is_some_and(|p| p.eq_ignore_ascii_case("Opening Balance"))
+        && category.is_some_and(|c| c.starts_with('[') && c.ends_with(']'))
 }
 
 /// Ends the current record (at `^`, a header, or the end of the file).
