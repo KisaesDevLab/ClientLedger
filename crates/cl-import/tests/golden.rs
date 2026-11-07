@@ -133,8 +133,11 @@ fn copy_matches_the_engine_when_present() {
         return;
     };
     let ours = std::fs::read(repo().join("fixtures/bank/dedupe_v1.json")).unwrap();
+    // A Windows checkout with core.autocrlf turns the engine copy's line endings into
+    // CRLF; the committed content is what must match, so compare with CR removed.
+    let lf = |b: &[u8]| b.iter().copied().filter(|c| *c != 13).collect::<Vec<u8>>();
     assert!(
-        ours == theirs,
+        lf(&ours) == lf(&theirs),
         "fixtures/bank/dedupe_v1.json drifted from the engine's golden file"
     );
 }
