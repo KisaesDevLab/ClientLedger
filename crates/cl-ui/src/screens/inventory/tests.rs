@@ -13,7 +13,7 @@ fn the_negative_stock_warning_names_item_date_and_on_hand() {
     assert!(text.contains("Mulch"), "{text}");
     assert!(text.contains("11/02/2026"), "{text}");
     assert!(text.contains("-2 on hand"), "{text}");
-    assert!(text.contains("You can save"), "{text}");
+    assert!(text.starts_with("Saved."), "QA-14: {text}");
 }
 
 #[test]

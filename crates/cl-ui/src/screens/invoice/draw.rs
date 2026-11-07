@@ -717,7 +717,13 @@ impl InvoiceScreen {
                 ui.checkbox(&mut s.email_after_save, t("invoice.email_after_save"));
             }
             let mut hide = s.header.current().hide_zero_lines;
-            if ui.checkbox(&mut hide, t("invoice.hide_zero")).changed() {
+            // QA-16 (PR-4): the checkbox names the document it prints.
+            let hide_key = match s.kind {
+                SalesDocKind::Invoice => "invoice.hide_zero",
+                SalesDocKind::SalesReceipt => "invoice.hide_zero.receipt",
+                SalesDocKind::CreditMemo => "invoice.hide_zero.credit_memo",
+            };
+            if ui.checkbox(&mut hide, t(hide_key)).changed() {
                 s.header.edit_step(|h| h.hide_zero_lines = hide);
             }
         };
