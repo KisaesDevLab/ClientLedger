@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// Directories scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 6] = [
+pub const SCAN_DIRS: [&str; 7] = [
     "crates/cl-core/src",
     "crates/cl-api/src",
     // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
@@ -31,6 +31,8 @@ pub const SCAN_DIRS: [&str; 6] = [
     // The compare tools (A04 D4, N3): click to fill turns page words into
     // amounts; only `overlay.rs` holds their float geometry.
     "crates/cl-ui/src/widgets/compare",
+    // Bank file readers (P25 review S12).
+    "crates/cl-import/src",
 ];
 
 /// Files inside [`SCAN_DIRS`] that may use floating point for page geometry

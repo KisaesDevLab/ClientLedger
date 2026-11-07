@@ -1,0 +1,15 @@
+# cl-import parses bank amounts: no floating point may appear here (P25 plan
+# §3, review S12). Clippy reads this file for cl-import only (the crate's own
+# manifest folder). `disallowed-types` catches `parse::<f64>()` and `as f64`,
+# which the float lints miss; tests/float_ban.rs proves each entry fires.
+disallowed-types = [
+    { path = "f32", reason = "no floats in bank import (P25 S12)" },
+    { path = "f64", reason = "no floats in bank import (P25 S12)" },
+]
+disallowed-methods = [
+    { path = "rust_decimal::Decimal::from_f32_retain", reason = "no floats in bank import (P25 S12)" },
+    { path = "rust_decimal::Decimal::from_f64_retain", reason = "no floats in bank import (P25 S12)" },
+    { path = "rust_decimal::Decimal::as_f64", reason = "no floats in bank import (P25 S12)" },
+    { path = "std::time::Duration::as_secs_f64", reason = "no floats in bank import (P25 S12)" },
+    { path = "std::time::Duration::as_secs_f32", reason = "no floats in bank import (P25 S12)" },
+]

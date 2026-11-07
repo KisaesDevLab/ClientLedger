@@ -1,0 +1,774 @@
+{
+  "files": [
+    {
+      "file": "checking_ofx102_sgml.ofx",
+      "format": "Ofx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••6789",
+          "rows": 12,
+          "sum": "984.11",
+          "start": "2026-10-01",
+          "end": "2026-10-31",
+          "balance": "5234.61",
+          "balanceDate": "2026-10-31",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "POS PURCHASE COFFEE CO",
+          "rowLines": [
+            43,
+            51,
+            59
+          ],
+          "descriptions": {
+            "4": "AT&T WIRELESS AUTOPAY",
+            "5": "CAFÉ LUMIÈRE",
+            "7": "CHECK",
+            "11": "HARDWARE & GARDEN",
+            "1": "POS PURCHASE COFFEE CO"
+          },
+          "checks": {
+            "3": 1001,
+            "7": 1002
+          },
+          "memos": {
+            "1": "coffee co",
+            "2": "ACME WIDGETS",
+            "5": "TABLE 4",
+            "6": "Ref: ATM0042",
+            "7": "RENT OCTOBER"
+          }
+        }
+      ],
+      "encoding": "Windows1252"
+    },
+    {
+      "file": "checking_ofx22_xml.ofx",
+      "format": "Ofx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••3210",
+          "rows": 8,
+          "sum": "857.54",
+          "start": "2026-11-01",
+          "end": "2026-11-07",
+          "balance": "3120.33",
+          "balanceDate": "2026-11-07",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "GROCERY OUTLET",
+          "descriptions": {
+            "3": "CRÈME BAKERY",
+            "7": "REFUND <ONLINE>"
+          },
+          "dates": {
+            "1": "2026-11-01",
+            "2": "2026-11-01",
+            "8": "2026-11-07"
+          }
+        }
+      ],
+      "encoding": "Windows1252"
+    },
+    {
+      "file": "operating_2026-11-03.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 41,
+          "sum": "16487.46",
+          "start": "2026-10-28",
+          "end": "2026-11-03",
+          "balance": "92431.07",
+          "balanceDate": "2026-11-03",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "ACH CREDIT BRANSON HILLS HOA"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "operating_prior.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 9,
+          "sum": "13886.36",
+          "start": "2026-10-20",
+          "end": "2026-10-30",
+          "balance": "88000.00",
+          "balanceDate": "2026-10-30",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "SQ *MAIN ST DELI"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "card_ccstmt.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "CreditCard",
+          "mask": "••••2222",
+          "rows": 8,
+          "sum": "70.78",
+          "start": "2026-10-01",
+          "end": "2026-10-31",
+          "balance": "-429.12",
+          "balanceDate": "2026-10-31",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "OFFICE DEPOT #221",
+          "suggestFlip": false
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "card_positive_issuer.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "CreditCard",
+          "mask": "••••2222",
+          "rows": 8,
+          "sum": "-70.78",
+          "start": "2026-10-01",
+          "end": "2026-10-31",
+          "balance": "429.12",
+          "balanceDate": "2026-10-31",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "OFFICE DEPOT #221",
+          "suggestFlip": true
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "multi_account.ofx",
+      "format": "Ofx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••3333",
+          "rows": 2,
+          "sum": "-320.00",
+          "start": "2026-11-01",
+          "end": "2026-11-05",
+          "balance": "1500.00",
+          "balanceDate": "2026-11-05",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "CAFE"
+        },
+        {
+          "kind": "Savings",
+          "mask": "••••4444",
+          "rows": 2,
+          "sum": "301.12",
+          "start": "2026-11-01",
+          "end": "2026-11-05",
+          "balance": "10300.00",
+          "balanceDate": "2026-11-05",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "FROM CHECKING"
+        },
+        {
+          "kind": "CreditCard",
+          "mask": "••••1234",
+          "rows": 1,
+          "sum": "-75.00",
+          "start": "2026-11-01",
+          "end": "2026-11-05",
+          "balance": "-75.00",
+          "balanceDate": "2026-11-05",
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "SOFTWARE SUBSCRIPTION"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "checking.qif",
+      "format": "Qif",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": null,
+          "rows": 9,
+          "sum": "1088.96",
+          "start": "2026-01-05",
+          "end": "2026-01-30",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [
+            40
+          ],
+          "rowLines": [
+            10,
+            17,
+            22
+          ],
+          "checks": {
+            "1": 1001
+          },
+          "memos": {
+            "1": "morning",
+            "3": "Ref: ATM"
+          }
+        }
+      ]
+    },
+    {
+      "file": "card.qif",
+      "format": "Qif",
+      "sections": [
+        {
+          "kind": "CreditCard",
+          "mask": null,
+          "rows": 5,
+          "sum": "146.04",
+          "start": "2026-10-03",
+          "end": "2026-10-19",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "suggestFlip": false,
+          "accountName": "Business Card"
+        }
+      ]
+    },
+    {
+      "file": "opening_balance.qif",
+      "format": "Qif",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": null,
+          "rows": 2,
+          "sum": "275.00",
+          "start": "2026-01-02",
+          "end": "2026-01-03",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [
+            6
+          ],
+          "rowLines": [
+            12,
+            17
+          ],
+          "openingBalance": "4210.55",
+          "openingBalanceDate": "2025-12-31",
+          "accountName": "Operating"
+        }
+      ]
+    },
+    {
+      "file": "signed_amount_bom.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 10,
+          "sum": "1652.96",
+          "start": "2026-11-01",
+          "end": "2026-11-07",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "descriptions": {
+            "1": "Café Lumière",
+            "6": "SOFTWARE, INC."
+          }
+        }
+      ]
+    },
+    {
+      "file": "win1252.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 10,
+          "sum": "1652.96",
+          "start": "2026-11-01",
+          "end": "2026-11-07",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "descriptions": {
+            "1": "Café Lumière"
+          }
+        }
+      ]
+    },
+    {
+      "file": "utf16le_tab.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 10,
+          "sum": "1652.96",
+          "start": "2026-11-01",
+          "end": "2026-11-07",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": []
+        }
+      ]
+    },
+    {
+      "file": "debit_credit_balance.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 8,
+          "sum": "233.36",
+          "start": "2026-10-01",
+          "end": "2026-10-10",
+          "balance": "1233.36",
+          "balanceDate": "2026-10-10",
+          "problems": [],
+          "skipped": [],
+          "continuity": "OldestFirst",
+          "suggestFlip": false
+        }
+      ]
+    },
+    {
+      "file": "drcr_indicator.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 6,
+          "sum": "559.97",
+          "start": "2026-10-01",
+          "end": "2026-10-08",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": []
+        }
+      ]
+    },
+    {
+      "file": "newest_first_balance.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 5,
+          "sum": "1512.67",
+          "start": "2026-09-01",
+          "end": "2026-09-09",
+          "balance": "3512.67",
+          "balanceDate": "2026-09-09",
+          "problems": [],
+          "skipped": [],
+          "continuity": "NewestFirst",
+          "suggestFlip": false
+        }
+      ]
+    },
+    {
+      "file": "card_positive_charges.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 5,
+          "sum": "-337.98",
+          "start": "2026-10-02",
+          "end": "2026-10-09",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "cardSuggestFlip": true
+        }
+      ]
+    },
+    {
+      "file": "identical_same_day.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 4,
+          "sum": "-19.75",
+          "start": "2026-11-02",
+          "end": "2026-11-03",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "ordinals": [
+            1,
+            2,
+            3,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "file": "overlap.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 7,
+          "sum": "1207.99",
+          "start": "2026-11-05",
+          "end": "2026-11-10",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": []
+        }
+      ]
+    },
+    {
+      "file": "dates_ambiguous.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 4,
+          "sum": "-10.00",
+          "start": "2026-01-01",
+          "end": "2026-07-08",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "ambiguous": true,
+          "dayFirstLine": null
+        }
+      ]
+    },
+    {
+      "file": "dates_ddmm_impossible.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 2,
+          "sum": "-6.00",
+          "start": "2026-01-03",
+          "end": "2026-03-02",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [
+            3,
+            4,
+            5
+          ],
+          "skipped": [],
+          "ambiguous": false,
+          "dayFirstLine": 3
+        }
+      ]
+    },
+    {
+      "file": "zero_amounts.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 2,
+          "sum": "96.25",
+          "start": "2026-11-01",
+          "end": "2026-11-02",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [
+            2,
+            4,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "file": "preamble.csv",
+      "format": "Csv",
+      "sections": [
+        {
+          "kind": "Unknown",
+          "mask": null,
+          "rows": 3,
+          "sum": "95.25",
+          "start": "2026-11-01",
+          "end": "2026-11-03",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "rowLines": [
+            5,
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "file": "reused_fitid.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 4,
+          "sum": "-37.40",
+          "start": "2026-11-04",
+          "end": "2026-11-06",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "SANDWICH SHOP",
+          "fitids": [
+            "R100",
+            "R200",
+            "R200",
+            "R300"
+          ]
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "reused_fitid_reversed.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 4,
+          "sum": "-37.40",
+          "start": "2026-11-04",
+          "end": "2026-11-06",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "CAR WASH"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "reused_fitid_second_only.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 1,
+          "sum": "-4.50",
+          "start": "2026-11-05",
+          "end": "2026-11-05",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "COFFEE CART"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "per_download_fitid_nov.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 3,
+          "sum": "-60.00",
+          "start": "2026-11-10",
+          "end": "2026-11-12",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "NOV ONE"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "per_download_fitid_dec.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 4,
+          "sum": "-104.00",
+          "start": "2026-12-10",
+          "end": "2026-12-13",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "DEC ONE"
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "fitid_date_shift.qfx",
+      "format": "Qfx",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 1,
+          "sum": "-301.22",
+          "start": "2026-11-03",
+          "end": "2026-11-03",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "firstDescription": "LAKESIDE POWER COOP AUTOPAY",
+          "fitids": [
+            "OVB202611010023"
+          ]
+        }
+      ],
+      "encoding": "Utf8"
+    },
+    {
+      "file": "rounded_amounts.ofx",
+      "format": "Ofx",
+      "encoding": "Utf8",
+      "sections": [
+        {
+          "kind": "Checking",
+          "mask": "••••2208",
+          "rows": 4,
+          "sum": "16.44",
+          "start": "2026-11-01",
+          "end": "2026-11-04",
+          "balance": null,
+          "balanceDate": null,
+          "problems": [],
+          "skipped": [],
+          "roundedFrom": {
+            "2": "12.345",
+            "3": "-2.005"
+          },
+          "amounts": {
+            "2": "12.35",
+            "3": "-2.01",
+            "4": "7.10"
+          }
+        }
+      ]
+    }
+  ],
+  "malformed": [
+    {
+      "file": "malformed/bad_amount.csv",
+      "problems": [
+        3
+      ]
+    },
+    {
+      "file": "malformed/truncated.ofx",
+      "error": "Truncated",
+      "line": 43
+    },
+    {
+      "file": "malformed/doctype.ofx",
+      "error": "Doctype",
+      "line": 3
+    },
+    {
+      "file": "malformed/entity.ofx",
+      "error": "Entity",
+      "line": 4
+    },
+    {
+      "file": "malformed/bad_date.qif",
+      "problems": [
+        6
+      ]
+    },
+    {
+      "file": "malformed/ragged.csv",
+      "problems": [
+        3
+      ]
+    },
+    {
+      "file": "malformed/investment.qif",
+      "error": "Investment",
+      "line": 6
+    },
+    {
+      "file": "malformed/investment.ofx",
+      "error": "Investment",
+      "line": 28
+    },
+    {
+      "file": "malformed/empty.csv",
+      "error": "Empty",
+      "line": null
+    },
+    {
+      "file": "malformed/severity.ofx",
+      "error": "BankError",
+      "line": 16
+    },
+    {
+      "file": "malformed/unclosed_quote.csv",
+      "error": "Csv",
+      "line": 2
+    },
+    {
+      "file": "malformed/koi8_charset.ofx",
+      "error": "UnsupportedCharset",
+      "line": 6
+    }
+  ]
+}
