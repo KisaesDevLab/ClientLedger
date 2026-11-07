@@ -41,6 +41,8 @@ pub enum PickUse {
     SavePdf,
     /// The company logo (P19, Q-P19v).
     Logo,
+    /// A bank file to import (P25).
+    BankFile,
 }
 
 impl PickUse {
@@ -51,6 +53,7 @@ impl PickUse {
             PickUse::Attachment => "picker.title.attachment",
             PickUse::SavePdf => "picker.title.save_pdf",
             PickUse::Logo => "picker.title.logo",
+            PickUse::BankFile => "picker.title.bank_file",
         }
     }
 }
@@ -69,6 +72,13 @@ pub struct Filter {
 pub const DOCUMENTS: Filter = Filter {
     name_key: "picker.filter.documents",
     extensions: &["pdf", "jpg", "jpeg", "png", "tif", "tiff"],
+};
+
+/// A bank file: QFX, OFX, QIF or CSV (P25; the content decides, never the
+/// extension).
+pub const BANK_FILES: Filter = Filter {
+    name_key: "picker.filter.bank_files",
+    extensions: &["qfx", "ofx", "qbo", "qif", "csv", "txt"],
 };
 
 /// A company logo: PNG or JPEG (Q-P19v).

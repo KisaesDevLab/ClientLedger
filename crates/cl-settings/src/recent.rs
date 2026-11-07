@@ -93,6 +93,12 @@ pub struct CompanyFlags {
     pub sales_tax_enabled: bool,
     /// Inventory features on.
     pub inventory_enabled: bool,
+    /// Names this company's bank link key in the OS keychain (P25,
+    /// Q-P25u; `bank_import::link_key`). Made on the first bank file
+    /// import and kept with the company record, so a restore on this
+    /// computer keeps auto-linking. Not a secret.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bank_link_id: Option<uuid::Uuid>,
 }
 
 /// What a backup file was made for.

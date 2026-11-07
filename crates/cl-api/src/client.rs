@@ -65,6 +65,11 @@ pub struct Timeouts {
     pub create_tenant: Budget,
     /// Archive export start, import and safe delete (P08).
     pub archive: Budget,
+    /// Bank file import commits and previews (P25 plan §3, the Import
+    /// class): one attempt of up to 120 s. The overall limit leaves no room
+    /// for an automatic second attempt after a timeout; the owner's retry
+    /// sends the same body with the same key, which the engine replays.
+    pub import: Budget,
     /// Budget of outcome reconciliation after an ambiguous mutation.
     pub reconcile: Duration,
     /// How often a waiting request re-reads the endpoint.
@@ -87,6 +92,7 @@ impl Default for Timeouts {
             auth: Budget::secs(15, 20),
             create_tenant: Budget::secs(120, 140),
             archive: Budget::secs(600, 620),
+            import: Budget::secs(120, 125),
             reconcile: Duration::from_secs(15),
             poll: Duration::from_millis(150),
             refused_settle: Duration::from_secs(1),
@@ -177,6 +183,8 @@ pub(crate) enum TimeoutClass {
     /// Tenant archive export, import and safe delete (key derivation plus
     /// a full copy of the company).
     Archive,
+    /// A bank file import (P25): one long attempt.
+    Import,
 }
 
 impl Timeouts {
@@ -188,6 +196,7 @@ impl Timeouts {
             TimeoutClass::Auth => self.auth,
             TimeoutClass::CreateTenant => self.create_tenant,
             TimeoutClass::Archive => self.archive,
+            TimeoutClass::Import => self.import,
         }
     }
 }
@@ -220,6 +229,10 @@ pub(crate) struct Call {
     /// `Content-Type` of a non-JSON body (a multipart upload); `None`
     /// means `application/json`.
     pub content_type: Option<String>,
+    /// Never send an `Idempotency-Key` (a bank import preview on a keyed
+    /// route: the engine refuses a key there, P25 U-06). Such a call changes
+    /// nothing, so it is retried like a read.
+    pub no_key: bool,
 }
 
 impl std::fmt::Debug for Call {
@@ -253,6 +266,7 @@ impl Call {
             if_match: None,
             sensitive: false,
             content_type: None,
+            no_key: false,
         }
     }
 

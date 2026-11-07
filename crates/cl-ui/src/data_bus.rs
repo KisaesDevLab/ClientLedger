@@ -47,6 +47,9 @@ pub enum Change {
     /// Printed checks were recorded, answered or put off (P19): Home's
     /// "Did all checks print correctly?" reminder reads its file again.
     Printing,
+    /// Bank file rows were added to or taken out of the Bank Feed (P25):
+    /// Home's waiting count and the Bank Feed read again.
+    BankFeed,
 }
 
 impl Change {
@@ -91,6 +94,8 @@ pub struct Changes {
     pub bills_all: bool,
     /// Printing (P19).
     pub printing: bool,
+    /// The Bank Feed (P25).
+    pub bank_feed: bool,
 }
 
 impl Changes {
@@ -107,6 +112,7 @@ impl Changes {
             bill_vendors: BTreeSet::new(),
             bills_all: true,
             printing: true,
+            bank_feed: true,
         }
     }
 
@@ -160,6 +166,7 @@ impl Changes {
             Change::Items => self.items = true,
             Change::Templates => self.templates = true,
             Change::Printing => self.printing = true,
+            Change::BankFeed => self.bank_feed = true,
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }

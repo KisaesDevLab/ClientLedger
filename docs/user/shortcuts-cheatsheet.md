@@ -74,6 +74,7 @@
 
 - `Alt+N` Save & New
 - `Alt+S` Save & Close
+- `Alt+B` Back a Step
 - `Esc` Revert Field, Then Form
 - `Page Down` Next Record
 - `Page Up` Previous Record

@@ -967,6 +967,7 @@ name = "cl-settings"
 version = "0.0.0"
 dependencies = [
  "cl-core",
+ "getrandom 0.4.3",
  "keyring",
  "proptest",
  "serde",
@@ -975,6 +976,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

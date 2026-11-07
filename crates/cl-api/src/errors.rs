@@ -141,6 +141,19 @@ impl ConflictDetails {
             .collect()
     }
 
+    /// The whole numbers listed under `key` (`rows_already_used`
+    /// `{lines: [3, 9]}`, U-06): line numbers, never money. Anything else in
+    /// the list is skipped.
+    #[must_use]
+    pub fn numbers(&self, key: &str) -> Vec<u64> {
+        self.0
+            .as_deref()
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_array)
+            .map(|l| l.iter().filter_map(Value::as_u64).collect())
+            .unwrap_or_default()
+    }
+
     /// True when the engine sent no details.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -203,6 +216,7 @@ pub struct ValidationError {
     message: UserText,
     issues: Vec<ValidationIssue>,
     reason: Option<ErrorCode>,
+    line: Option<u64>,
 }
 
 impl ValidationError {
@@ -237,6 +251,12 @@ impl ValidationError {
         self.reason.as_ref()
     }
 
+    /// The file line the engine named (`invalid_row` `{line, field}`, U-06).
+    #[must_use]
+    pub fn line(&self) -> Option<u64> {
+        self.line
+    }
+
     /// A refusal naming one field, as the engine's object-shaped
     /// `details: {field, ...}` reads (demo twins build the same).
     pub(crate) fn for_field(code: &str, field: &str, message: &str) -> ValidationError {
@@ -248,6 +268,7 @@ impl ValidationError {
                 message: UserText::new(message),
             }],
             reason: None,
+            line: None,
         }
     }
 }
@@ -946,10 +967,11 @@ pub(crate) enum Mapped {
     SessionRejected,
 }
 
-/// The engine's lower-case AI and document-reading codes (P17 WP2), kept
+/// The engine's lower-case AI, document-reading (P17 WP2) and bank import
+/// (U-06) codes, kept
 /// upper-cased so they survive [`ErrorCode`]'s rule. Only these exact
 /// texts: any other lower-case code is still "no code".
-const KNOWN_LOWERCASE: [&str; 8] = [
+const KNOWN_LOWERCASE: [&str; 17] = [
     "ai_disabled",
     "ai_disabled_globally",
     "ai_function_disabled",
@@ -958,6 +980,16 @@ const KNOWN_LOWERCASE: [&str; 8] = [
     "ai_ocr_failed",
     "ai_parse_failed",
     "ocr_unreadable_at_pii_level",
+    // Bank file imports (U-06, P25).
+    "account_not_bank_or_card",
+    "account_not_in_company",
+    "invalid_row",
+    "too_many_rows",
+    "batch_total_too_large",
+    "identity_linked_elsewhere",
+    "rows_already_used",
+    "still_preparing",
+    "already_undone",
 ];
 
 fn known_lowercase(c: &str) -> Option<ErrorCode> {
@@ -1045,6 +1077,7 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
             .pointer("/error/details/reason")
             .and_then(Value::as_str)
             .and_then(|r| ErrorCode::parse(&r.to_ascii_uppercase())),
+        line: body.pointer("/error/details/line").and_then(Value::as_u64),
     }
 }
 

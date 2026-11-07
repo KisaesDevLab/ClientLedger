@@ -65,6 +65,8 @@ pub mod statements;
 pub mod sales_tax;
 // P24 WP-2: inventory screens and reports.
 pub mod inventory;
+// P25: Import Bank File.
+pub mod import_bank_file;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -117,6 +119,9 @@ pub(crate) const P22_SCREENS: [crate::shell::MakeScreen; 5] = [
     statements::make,
     finance_charges::make,
 ];
+
+/// Every P25 screen's `make` (the shell tries each after P22's).
+pub(crate) const P25_SCREENS: [crate::shell::MakeScreen; 1] = [import_bank_file::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];

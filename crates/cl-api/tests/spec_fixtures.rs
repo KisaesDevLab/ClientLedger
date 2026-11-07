@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 9] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 10] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -292,6 +292,14 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 9] = [
         "keyable-unit-sets",
         cl_api::KeySet::UnitSetsV1,
         1,
+    ),
+    // P25 (U-06): bank file import commit and undo, keyed under
+    // bank-import-batch-v1; client-declared until the pin bump.
+    (
+        "idempotency_bank_import_v1_routes.txt",
+        "keyable-bank-import",
+        cl_api::KeySet::BankImportV1,
+        2,
     ),
 ];
 

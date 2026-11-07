@@ -313,6 +313,7 @@ pub(crate) struct Executor {
     /// The engine replays keys on unit-set creation (`units-of-measure-v1`,
     /// U-161).
     unit_sets_v1: AtomicBool,
+    bank_import_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -379,6 +380,7 @@ impl Executor {
             idempotency_recovery_v1: AtomicBool::new(false),
             idempotency_inventory_v1: AtomicBool::new(false),
             unit_sets_v1: AtomicBool::new(false),
+            bank_import_v1: AtomicBool::new(false),
         }
     }
 
@@ -475,6 +477,12 @@ impl Executor {
         self.unit_sets_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `bank-import-batch-v1` (its
+    /// import commit and undo replay keys; U-06, P25).
+    pub(crate) fn set_bank_import_v1(&self, on: bool) {
+        self.bank_import_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -506,6 +514,7 @@ impl Executor {
             KeySet::RecoveryV1 => self.idempotency_recovery_v1.load(Ordering::Relaxed),
             KeySet::InventoryV1 => self.idempotency_inventory_v1.load(Ordering::Relaxed),
             KeySet::UnitSetsV1 => self.unit_sets_v1.load(Ordering::Relaxed),
+            KeySet::BankImportV1 => self.bank_import_v1.load(Ordering::Relaxed),
         }
     }
 
@@ -517,6 +526,22 @@ impl Executor {
         auth: &dyn AuthHook,
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
+        if call.no_key {
+            // A call that changes nothing on a keyed route (a bank import
+            // preview): no key at all, and retried like a read.
+            call.idempotency_key = None;
+            call.send_key = false;
+            let span = tracing::debug_span!(
+                "engine_request",
+                method = call.method.as_str(),
+                route = call.route,
+                request_id = %call.request_id,
+            );
+            return self
+                .run_inner(op, RetryClass::Idempotent, &call, auth, reconciler)
+                .instrument(span)
+                .await;
+        }
         if !call.method.is_read() && call.idempotency_key.is_none() {
             call.idempotency_key = Some(IdempotencyKey::new());
         }
