@@ -13,6 +13,7 @@ mod common;
 mod contract_accounts;
 mod contract_ap_void;
 mod contract_audit;
+mod contract_bank_import;
 mod contract_bank_postings;
 mod contract_batch;
 mod contract_billable;
@@ -1030,6 +1031,39 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
+        ),
+        // P25 bank file import (U-06): its own accounts in Contract Co.
+        (
+            "bank_import::capabilities",
+            contract_bank_import::capabilities,
+        ),
+        (
+            "bank_import::preview_changes_nothing_and_commit_needs_a_key",
+            contract_bank_import::preview_changes_nothing_and_commit_needs_a_key,
+        ),
+        (
+            "bank_import::reimport_adds_nothing",
+            contract_bank_import::reimport_adds_nothing,
+        ),
+        (
+            "bank_import::commit_replays_its_key",
+            contract_bank_import::commit_replays_its_key,
+        ),
+        (
+            "bank_import::undo_then_reimport_brings_rows_back",
+            contract_bank_import::undo_then_reimport_brings_rows_back,
+        ),
+        (
+            "bank_import::amounts_are_exact",
+            contract_bank_import::amounts_are_exact,
+        ),
+        (
+            "bank_import::non_bank_account_is_refused",
+            contract_bank_import::non_bank_account_is_refused,
+        ),
+        (
+            "bank_import::card_balance_check",
+            contract_bank_import::card_balance_check,
         ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (
