@@ -384,12 +384,12 @@ mod default_account_tests {
             super::average_text(q("-24"), Some(c("0"))),
             ("\u{2014}".to_string(), true)
         );
-        assert_eq!(super::average_text(q("0"), None).1, true);
+        assert!(super::average_text(q("0"), None).1);
         assert_eq!(
             super::average_text(q("-24"), Some(c("1.1"))).0,
             super::cost(c("1.1"))
         );
-        assert_eq!(super::average_text(q("60"), Some(c("1.1"))).1, false);
+        assert!(!super::average_text(q("60"), Some(c("1.1"))).1);
         assert!(crate::i18n::has("inventory.report.average_none.tip"));
     }
 

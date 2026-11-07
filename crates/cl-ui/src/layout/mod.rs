@@ -126,7 +126,7 @@ pub fn keep_focus_in_view(ui: &Ui) {
     let ctx = ui.ctx();
     let seen_key = ui.scope_id().with("cl.focus_in_view");
     let seen: Option<Id> = ctx.data(|d| d.get_temp(seen_key));
-    let Some(focused) = ctx.memory(|m| m.focused()) else {
+    let Some(focused) = ctx.memory(egui::Memory::focused) else {
         if seen.is_some() {
             ctx.data_mut(|d| d.remove::<Id>(seen_key));
         }
@@ -148,9 +148,8 @@ pub fn keep_focus_in_view(ui: &Ui) {
             ui.scroll_to_rect_animation(r.rect, None, egui::style::ScrollAnimation::none());
             ctx.data_mut(|d| d.insert_temp(seen_key, focused));
         }
-        Some(_) => {}
         None if seen.is_some() => ctx.data_mut(|d| d.remove::<Id>(seen_key)),
-        None => {}
+        _ => {}
     }
 }
 

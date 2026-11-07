@@ -796,10 +796,11 @@ pub(crate) fn apply(
             Some((item, unit)) if l.item == Some(item) => {
                 // QA2-10: a cost taken from the item follows the unit.
                 let auto = lists.cost_in(item, l.unit);
-                if l.rate.is_some() && l.rate == auto {
-                    if let Some(c) = lists.cost_in(item, unit) {
-                        l.set_rate(Some(c));
-                    }
+                if l.rate.is_some()
+                    && l.rate == auto
+                    && let Some(c) = lists.cost_in(item, unit)
+                {
+                    l.set_rate(Some(c));
                 }
                 l.unit = unit;
             }
