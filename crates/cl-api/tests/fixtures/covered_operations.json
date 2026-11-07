@@ -329,5 +329,9 @@
   {"method":"POST","path":"/api/v1/unit-sets","inSpec":true,"fragmentHash":"b7136ab39815ab7e9a083486d4cba5dd464528789a1e6b5f37a655540e2bcb6c"},
   {"method":"GET","path":"/api/v1/unit-sets/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
   {"method":"PUT","path":"/api/v1/unit-sets/{id}","inSpec":true,"fragmentHash":"9ff87a7a3fe17e8437948950dea00c6e4a890e95f74cf9ddcf32d6de3d8b341c"},
-  {"method":"DELETE","path":"/api/v1/unit-sets/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"}
+  {"method":"DELETE","path":"/api/v1/unit-sets/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
+  {"method":"POST","path":"/api/v1/banking/feed/import-batch","inSpec":true,"fragmentHash":"bcdc65eff80fe17487789e9b9f7db428bd0d4a34f5455c9fc4889e283548649f"},
+  {"method":"GET","path":"/api/v1/banking/feed/import-batches","inSpec":true,"fragmentHash":"fbb0cd4a31f52cb775bf4b5096d6a8f572466752cdb2d0b561a338b7cc1e87a6"},
+  {"method":"DELETE","path":"/api/v1/banking/feed/import-batches/{id}","inSpec":true,"fragmentHash":"f12e69ee042e46af041383dd1646456f2d3b68b643b771a4426c239101a32110"},
+  {"method":"POST","path":"/api/v1/banking/connections/lookup","inSpec":true,"fragmentHash":"8917d2bc12b13111254b8ea1e7a194438ba32b8255ba186348c960e1ccdf1ecf"}
 ]

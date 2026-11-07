@@ -60,10 +60,11 @@ pub trait SecretStore: Send + Sync {
     }
 }
 
-/// Secret names: lowercase letters, digits and dashes, 1-40 characters.
+/// Secret names: lowercase letters, digits and dashes, 1-48 characters
+/// (`bank-link-` and a 32-digit id is the longest, P25).
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 40
+        && name.len() <= 48
         && name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')

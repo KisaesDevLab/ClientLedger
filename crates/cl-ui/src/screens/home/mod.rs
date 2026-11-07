@@ -364,7 +364,7 @@ impl HomeScreen {
                 let through = today.add_days(i64::from(days)).unwrap_or(today);
                 let (clients, vendors) = demo::contact_counts(s);
                 Ok(Counts {
-                    feed: Ok(demo::feed_waiting()),
+                    feed: Ok(demo::feed_waiting(s)),
                     bills: Ok(demo::bills_due(through).0),
                     payroll: Ok(demo::PAYROLL_UNPOSTED),
                     clients: Ok(clients),

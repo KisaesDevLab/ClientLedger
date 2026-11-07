@@ -160,6 +160,16 @@ fn base_hints(active: Option<CommandId>) -> Vec<Hint> {
             out.extend(keymap_hints(&[("form.save_close", "status.hint.pay")]));
             return out;
         }
+        // Import Bank File (mockup ImportBankFile.html): the formats it
+        // reads, and Alt+N for the next step.
+        Some("banking.import_file") => {
+            let mut out = vec![Hint {
+                chips: Vec::new(),
+                label: t("status.hint.bank_formats"),
+            }];
+            out.extend(keymap_hints(&[("form.save_new", "status.hint.next_step")]));
+            return out;
+        }
         Some(kind @ ("lists.templates" | "lists.templates_due")) => {
             let (enter, rest): (&str, &[(&str, &str)]) = if kind == "lists.templates" {
                 ("status.hint.use", &TEMPLATES_HINTS)

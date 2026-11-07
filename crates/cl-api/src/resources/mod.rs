@@ -6,6 +6,7 @@ pub mod ap_doc;
 pub mod ap_void;
 pub mod attachments;
 pub mod audit;
+pub mod bank_import;
 pub mod bank_postings;
 pub mod batch;
 pub mod bill_ocr;

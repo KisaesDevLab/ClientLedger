@@ -530,6 +530,11 @@ impl Shell {
                         self.windows.activate(back);
                     }
                 }
+                CompanyEvent::BankFeedCount(n) => {
+                    if self.open_tenant.is_some() || self.demo {
+                        self.counts.bank_feed = Some(n);
+                    }
+                }
                 CompanyEvent::RailCounts(c) => {
                     // Only while a company is open (Opened and Closed clear
                     // them; the new company's Home reads its own).
@@ -1684,6 +1689,7 @@ fn make_any(
             .chain(&crate::screens::P20_SCREENS)
             .chain(&crate::screens::P21_SCREENS)
             .chain(&crate::screens::P22_SCREENS)
+            .chain(&crate::screens::P25_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

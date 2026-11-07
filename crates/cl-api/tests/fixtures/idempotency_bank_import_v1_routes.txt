@@ -1,0 +1,7 @@
+# The engine's bank-import-batch-v1 keyed route set (U-06, P25): committing a bank file import
+# and undoing an import batch, `x-idempotency: true` in its openapi.json, with idempotency-v1's
+# contract. Append-only for this capability name: `KeySet::BankImportV1` in operations.rs,
+# keyed only while the engine advertises `bank-import-batch-v1`. The dry-run preview is sent
+# without a key (400 IDEMPOTENCY_KEY_NOT_ALLOWED if one is sent).
+DELETE /api/v1/banking/feed/import-batches/{id}
+POST /api/v1/banking/feed/import-batch

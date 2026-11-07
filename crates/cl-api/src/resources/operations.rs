@@ -56,6 +56,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
+            RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -132,6 +133,10 @@ pub enum KeySet {
     /// Keyed under `units-of-measure-v1` (U-161, P24) with `idempotency-v1`'s
     /// contract: creating a unit set.
     UnitSetsV1,
+    /// `bank-import-batch-v1` (U-06, P25): a bank import commit (its
+    /// preview on the same route takes no key, [`crate::client`] `no_key`)
+    /// and undoing an import.
+    BankImportV1,
 }
 
 impl KeySet {
@@ -159,6 +164,7 @@ impl KeySet {
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
             KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
+            KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
         }
     }
 }
@@ -1454,6 +1460,31 @@ pub(crate) const UNIT_SETS_LIST: Operation = read("/api/v1/unit-sets");
 /// `units-of-measure-v1`).
 pub(crate) const UNIT_SET_CREATE: Operation =
     keyable_in(KeySet::UnitSetsV1, Method::Post, "/api/v1/unit-sets");
+/// A bank file import, preview or commit (U-06): the Import time class.
+/// The commit is keyed under `bank-import-batch-v1`; the preview is sent
+/// with no key.
+pub(crate) const FEED_IMPORT_BATCH: Operation = op(
+    Method::Post,
+    "/api/v1/banking/feed/import-batch",
+    RetryClass::Keyable(KeySet::BankImportV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Earlier bank file imports, newest first (U-06).
+pub(crate) const FEED_IMPORT_BATCHES: Operation = read("/api/v1/banking/feed/import-batches");
+/// Undoes a bank file import (U-06; keyed).
+pub(crate) const FEED_IMPORT_BATCH_UNDO: Operation = keyable_in(
+    KeySet::BankImportV1,
+    Method::Delete,
+    "/api/v1/banking/feed/import-batches/{id}",
+);
+/// Which bank connection a file's account belongs to (U-06). A POST so
+/// the account number travels in the body, never in a URL or a log
+/// (Q-P25u). It changes nothing; as a POST it is retried only before
+/// the engine's handler ran, like any unkeyed write.
+pub(crate) const BANK_CONNECTION_LOOKUP: Operation =
+    write(Method::Post, "/api/v1/banking/connections/lookup");
 /// One unit set.
 pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 /// Stores a unit set (`expectedUpdatedAt`).
@@ -1473,7 +1504,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 331] = [
+pub const OPERATIONS: [Operation; 335] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1820,6 +1851,10 @@ pub const OPERATIONS: [Operation; 331] = [
     UNIT_SET_GET,
     UNIT_SET_PUT,
     UNIT_SET_DELETE,
+    FEED_IMPORT_BATCH,
+    FEED_IMPORT_BATCHES,
+    FEED_IMPORT_BATCH_UNDO,
+    BANK_CONNECTION_LOOKUP,
 ];
 
 /// Looks up a covered operation.
@@ -1932,6 +1967,8 @@ mod tests {
                 Some(KeySet::InventoryV1)
             } else if KEYABLE_UNIT_SETS.contains(&route) {
                 Some(KeySet::UnitSetsV1)
+            } else if KEYABLE_BANK_IMPORT.contains(&route) {
+                Some(KeySet::BankImportV1)
             } else {
                 None
             };
@@ -1970,7 +2007,8 @@ mod tests {
                 + KEYABLE_SALES_TAX_PAY.len()
                 + KEYABLE_RECOVERY.len()
                 + KEYABLE_INVENTORY.len()
-                + KEYABLE_UNIT_SETS.len(),
+                + KEYABLE_UNIT_SETS.len()
+                + KEYABLE_BANK_IMPORT.len(),
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2131,6 +2169,21 @@ mod tests {
     ];
 
     const KEYABLE_UNIT_SETS: [(&str, &str); 1] = [("POST", "/api/v1/unit-sets")];
+
+    const KEYABLE_BANK_IMPORT: [(&str, &str); 2] = [
+        ("POST", "/api/v1/banking/feed/import-batch"),
+        ("DELETE", "/api/v1/banking/feed/import-batches/{id}"),
+    ];
+
+    #[test]
+    fn bank_import_key_set_names_its_capability() {
+        assert_eq!(KeySet::BankImportV1.capability(), "bank-import-batch-v1");
+        assert_eq!(FEED_IMPORT_BATCH.key_set(), Some(KeySet::BankImportV1));
+        assert_eq!(FEED_IMPORT_BATCH.timeout, TimeoutClass::Import);
+        assert_eq!(FEED_IMPORT_BATCH_UNDO.key_set(), Some(KeySet::BankImportV1));
+        assert_eq!(FEED_IMPORT_BATCHES.key_set(), None);
+        assert_eq!(BANK_CONNECTION_LOOKUP.key_set(), None);
+    }
 
     #[test]
     fn p24_key_set_names_its_capability() {

@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<?OFX OFXHEADER="200" VERSION="220"?>
+<OFX>
+<!ENTITY x SYSTEM "file:///etc/passwd">
+</OFX>

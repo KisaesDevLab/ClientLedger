@@ -9,3 +9,5 @@
 *.woff2 binary
 # Bulk Entry fixtures keep their exact bytes (BOM, CRLF inside quotes).
 fixtures/batch/** -text
+# Bank import fixtures keep their exact bytes (CRLF, BOM, Windows-1252, UTF-16).
+fixtures/bank/** -text

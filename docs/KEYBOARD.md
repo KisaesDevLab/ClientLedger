@@ -65,6 +65,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+L` | Open List for This Field | `edit.open_list` |
 | `Alt+N` | Save & New | `form.save_new` |
 | `Alt+S` | Save & Close | `form.save_close` |
+| `Alt+B` | Back a Step | `form.step_back` |
 | `Esc` | Revert Field, Then Form | `form.revert` |
 | `Page Down` | Next Record | `form.next_record` |
 | `Page Up` | Previous Record | `form.prev_record` |

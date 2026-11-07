@@ -238,6 +238,9 @@ pub async fn restore(
                     &l.companies.iter().map(|c| c.accent).collect::<Vec<_>>(),
                 )
             });
+        // The bank account-link key is in the company's own data (the
+        // engine's, Q-P25u), so a restore keeps files linking themselves
+        // with nothing to carry over here.
         let flags = host_flags
             .or_else(|| previous_rec.as_ref().map(|r| r.flags))
             .unwrap_or_default();

@@ -103,11 +103,13 @@ pub fn bills_due(through: CalendarDate) -> (u64, Money) {
     (count, sample.bills_due(through))
 }
 
-/// Bank-feed items waiting (ready, to review and matches: 37).
+/// Bank-feed items waiting: the sample's (ready, to review and matches:
+/// 37) and those Import Bank File sent and not undone (UI review 11).
 #[must_use]
-pub fn feed_waiting() -> u64 {
+pub fn feed_waiting(state: &DemoState) -> u64 {
     let (ready, review, matched) = cl_company::Sample::load().feed_counts();
-    u64::try_from(ready + review + matched).unwrap_or(u64::MAX)
+    let imported = state.bank_feed.waiting();
+    u64::try_from(ready + review + matched + imported).unwrap_or(u64::MAX)
 }
 
 /// Active clients and vendors (a contact that is both counts in each).
@@ -217,7 +219,7 @@ pub fn summary(state: &mut DemoState, today: CalendarDate, days: u16) -> Dashboa
             ap_balance: due_amount,
         }),
         action_items: Some(ActionItems {
-            pending_feed_count: feed_waiting(),
+            pending_feed_count: feed_waiting(state),
             overdue_invoice_count: OVERDUE_INVOICES,
             stale_reconciliations: Vec::new(),
             pending_deposit_count: 0,
@@ -335,7 +337,7 @@ mod tests {
         assert_eq!(pay.due_within_days, 7);
         assert!(pay.due_soon_count > 0);
         assert_eq!(s.action_items.expect("actions").pending_feed_count, 37);
-        assert_eq!(feed_waiting(), 37);
+        assert_eq!(feed_waiting(&state), 37);
         assert_eq!(
             summary(&mut state, today, 200)
                 .payables

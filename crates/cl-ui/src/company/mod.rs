@@ -76,6 +76,9 @@ pub enum CompanyEvent {
     /// Home read the rail's counts (clients, vendors, bank items waiting;
     /// P16). Counts only.
     RailCounts(crate::shell::RailCounts),
+    /// A bank file was sent to the Bank Feed or taken back out: the rail's
+    /// badge shows the new count of items waiting (P25). A count only.
+    BankFeedCount(u32),
     /// Q-PR4d: the name a Quick Add prompt sent to Set Up was saved: the
     /// Set Up window closes and the form that asked comes to the front.
     SetUpSaved,

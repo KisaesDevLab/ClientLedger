@@ -161,6 +161,8 @@ impl Client {
             .set_idempotency_inventory_v1(info.capabilities.has(Capabilities::INVENTORY_ADJUST));
         self.exec()
             .set_unit_sets_v1(info.capabilities.has(Capabilities::UNITS_OF_MEASURE));
+        self.exec()
+            .set_bank_import_v1(info.capabilities.has(Capabilities::BANK_IMPORT_BATCH));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

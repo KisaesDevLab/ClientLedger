@@ -22,6 +22,7 @@
 //!   the Needs-attention reminder survives a restart (P19, Q-P19n).
 //! - [`email_templates`]: the company's email templates (one per document
 //!   type, fields like `{invoice_number}`) and the BCC-self choice (P20).
+//! - [`bank_import`]: the local CSV column profiles of bank files (P25).
 //! - [`secrets`]: a small keychain-backed secret store for the backup
 //!   passphrase (Q-P02i). Secrets never touch the JSON file.
 //!
@@ -30,6 +31,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ai;
+pub mod bank_import;
 pub mod company_prefs;
 pub mod email_templates;
 pub mod inbox_state;
@@ -45,6 +47,7 @@ pub mod user_prefs;
 pub use ai::{
     AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, is_ollama_cloud_model, validate_ollama_url,
 };
+pub use bank_import::{CsvProfile, CsvProfiles, CsvProfilesStore};
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
 };

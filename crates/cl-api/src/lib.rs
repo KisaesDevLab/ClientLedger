@@ -206,6 +206,13 @@ pub use resources::payments::{
 };
 
 // P14 lane A: the bank feed.
+pub use resources::bank_import::{
+    BankFileFormat, BankIdentity, BankImport, BankImportCounts, BankImportOutcome,
+    BankImportRefusal, BankImportRequest, BankImportRow, BankLookupBy, BankLookupVia,
+    ChangedAction, ConnectionMatch, ImportBalanceCheck, ImportBatchId, ImportBatchSummary,
+    ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus, ImportUndoOutcome,
+    LinkedElsewhere, bank_import_refusal, wire_decimal,
+};
 pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
 };
