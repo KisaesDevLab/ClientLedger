@@ -130,6 +130,9 @@ fn the_body_refuses_what_the_engine_would() {
         .collect();
     assert_eq!(r.body(true), Err(LocalValidation::TooManyLines));
     let mut r = request();
+    r.csv_mapping = Some(serde_json::json!({ "headers": ["x".repeat(16_400)] }));
+    assert_eq!(r.body(true), Err(LocalValidation::InvalidValue));
+    let mut r = request();
     r.rows[0].memo = Some("m".repeat(600));
     r.rows = std::iter::repeat_n(r.rows[0].clone(), MAX_ROWS).collect();
     assert_eq!(r.body_bytes(true), Err(LocalValidation::BatchFileSize));
@@ -350,7 +353,7 @@ async fn batches_undo_and_lookup_read_their_answers() {
         .respond_with(json(
             200,
             &format!(
-                r#"{{"batchId":"{BATCH}","removed":3,"kept":1,"undoneAt":"2026-11-03T10:00:00.000Z"}}"#
+                r#"{{"batchId":"{BATCH}","removed":3,"kept":1,"restored":1,"undoneAt":"2026-11-03T10:00:00.000Z"}}"#
             ),
         ))
         .mount(&server)
@@ -407,7 +410,7 @@ async fn batches_undo_and_lookup_read_their_answers() {
         )
         .await
         .expect("undo");
-    assert_eq!((undone.removed, undone.kept), (3, 1));
+    assert_eq!((undone.removed, undone.kept, undone.restored), (3, 1, 1));
     let deletes = requests(&server, "DELETE").await;
     assert_eq!(query(&deletes[0]), "pendingOnly=true");
 }

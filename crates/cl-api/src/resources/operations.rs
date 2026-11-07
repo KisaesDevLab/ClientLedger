@@ -1481,15 +1481,10 @@ pub(crate) const FEED_IMPORT_BATCH_UNDO: Operation = keyable_in(
 );
 /// Which bank connection a file's account belongs to (U-06). A POST so
 /// the account number travels in the body, never in a URL or a log
-/// (Q-P25u); it changes nothing, so it is retried like a read.
-pub(crate) const BANK_CONNECTION_LOOKUP: Operation = op(
-    Method::Post,
-    "/api/v1/banking/connections/lookup",
-    RetryClass::Idempotent,
-    RouteKind::Session,
-    TimeoutClass::Read,
-    true,
-);
+/// (Q-P25u). It changes nothing; as a POST it is retried only before
+/// the engine's handler ran, like any unkeyed write.
+pub(crate) const BANK_CONNECTION_LOOKUP: Operation =
+    write(Method::Post, "/api/v1/banking/connections/lookup");
 /// One unit set.
 pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 /// Stores a unit set (`expectedUpdatedAt`).

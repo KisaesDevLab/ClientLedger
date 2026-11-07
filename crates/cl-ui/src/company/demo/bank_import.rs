@@ -3,12 +3,14 @@
 //! classifies a batch with the Rust copy of the engine's keys v1
 //! (`cl_import::dedupe`), so re-importing a file adds nothing here too.
 //!
-//! The demo runs the engine's exact rules and its look-alike rule: a bank
-//! id seen before is a duplicate only with the same amount and a date
-//! within 5 days, otherwise the bank reused the id and it is ignored
-//! (review DS7); the same row seen before; a bank id repeated in one file;
-//! look-alikes (Q-P25c). Changed rows and the balance check are the
-//! engine's ("not available in demo"). The account link is keyed like the
+//! The demo runs the engine's rules in its order (U-06): a bank id
+//! repeated in one file is ignored; a bank id seen before is a duplicate
+//! with the same amount and a date within 5 days (review DS7); then the
+//! same row seen before; then the same bank id with another amount, a date
+//! within 5 days and a matching description is a changed row (replace or
+//! add as new); any other seen bank id was reused by the bank and is
+//! ignored; then look-alikes (Q-P25c). The balance check is the engine's
+//! ("not available in demo"). The account link is keyed like the
 //! engine's (Q-P25u: the hash is made here, standing in for the engine, and
 //! only the hash and mask are kept). A commit's preparation finishes after
 //! a short delay, like the engine's (Q-P25v).
@@ -17,12 +19,12 @@ use std::collections::BTreeSet;
 
 use cl_api::{
     BankIdentity, BankImportCounts, BankImportOutcome, BankImportRefusal, BankImportRequest,
-    BankLookupBy, BankLookupVia, ConnectionMatch, ImportBatchId, ImportPostProcessing,
-    ImportRowReason, ImportRowResult, ImportRowStatus, ImportUndoOutcome,
+    BankLookupBy, BankLookupVia, ChangedAction, ConnectionMatch, ImportBatchId,
+    ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus, ImportUndoOutcome,
 };
 
 /// How long the demo's preparation of a commit takes.
-const DEMO_PREPARING: std::time::Duration = std::time::Duration::from_millis(1200);
+const DEMO_PREPARING: std::time::Duration = std::time::Duration::from_millis(800);
 
 /// The demo's stand-in for the engine's keyed hash of an account number
 /// (the engine keeps the real key, Q-P25u).
@@ -53,6 +55,13 @@ struct Item {
     imported_at: Timestamp,
     /// Still waiting (undo removes the waiting ones).
     pending: bool,
+    /// Replaced by a changed row: its values before (put back on undo).
+    replaced: Option<(
+        ImportBatchId,
+        cl_core::CalendarDate,
+        rust_decimal::Decimal,
+        String,
+    )>,
     /// For the look-alike rule (Q-P25c).
     date: cl_core::CalendarDate,
     amount: rust_decimal::Decimal,
@@ -87,6 +96,18 @@ fn looks_alike(item: &Item, row: &cl_api::BankImportRow) -> bool {
         return false;
     }
     let (short, long) = if a.len() <= b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    a == b || (short.chars().count() >= 8 && long.starts_with(short.as_str()))
+}
+
+/// The engine's description match: equal, or one starts the other and
+/// the shorter has at least 8 characters (normalized).
+fn descriptions_match(a: &str, b: &str) -> bool {
+    let (a, b) = (cl_import::dedupe::norm(a), cl_import::dedupe::norm(b));
+    let (short, long) = if a.chars().count() <= b.chars().count() {
         (&a, &b)
     } else {
         (&b, &a)
@@ -199,6 +220,8 @@ impl DemoBankFeed {
         let mut total = Money::ZERO;
         let batch = batch_id(self.batches.len() + 1);
         let mut used: BTreeSet<usize> = BTreeSet::new();
+        let mut replacing: Vec<(String, cl_core::CalendarDate, rust_decimal::Decimal, String)> =
+            Vec::new();
         for (r, k) in req.rows.iter().zip(&keyed) {
             let fitid = r
                 .fitid
@@ -218,8 +241,12 @@ impl DemoBankFeed {
                 mine.get(*p)
                     .is_some_and(|i| i.amount == r.amount && i.date.days_until(r.date).abs() <= 5)
             });
-            let reused = seen.is_some() && by_fitid.is_none();
-            let fitid_key = if reused { None } else { fitid_key };
+            let same_id_other = seen.filter(|_| by_fitid.is_none());
+            let fitid_key = if same_id_other.is_some() {
+                None
+            } else {
+                fitid_key
+            };
             let by_row = || {
                 mine.iter()
                     .position(|i| i.row_key == k.row_key || i.dedupe_key == k.row_key)
@@ -237,6 +264,13 @@ impl DemoBankFeed {
                     Some(ImportRowReason::SameRow),
                     Some(p),
                 )
+            } else if let Some(p) = same_id_other.filter(|p| {
+                mine.get(*p).is_some_and(|i| {
+                    i.date.days_until(r.date).abs() <= 5
+                        && descriptions_match(&i.description, &r.description)
+                })
+            }) {
+                (ImportRowStatus::Changed, None, Some(p))
             } else if let Some(p) = mine
                 .iter()
                 .enumerate()
@@ -248,7 +282,7 @@ impl DemoBankFeed {
                     Some(p),
                 )
             } else {
-                let reason = if reused {
+                let reason = if same_id_other.is_some() {
                     Some(ImportRowReason::BankIdReused)
                 } else {
                     r.fitid
@@ -267,11 +301,30 @@ impl DemoBankFeed {
                 ImportRowStatus::Changed => counts.changed += 1,
                 ImportRowStatus::New => counts.new += 1,
             }
-            // Q-P25c: look-alikes are added with a flag, like new rows.
-            let insert = matches!(
-                status,
-                ImportRowStatus::New | ImportRowStatus::PossibleDuplicate
-            ) && r.include != Some(false);
+            // Q-P25c: look-alikes are added with a flag, like new rows; a
+            // changed row is added only as new ("add").
+            let insert = match status {
+                ImportRowStatus::New | ImportRowStatus::PossibleDuplicate => {
+                    r.include != Some(false)
+                }
+                ImportRowStatus::Changed => r.changed_action == Some(ChangedAction::Add),
+                ImportRowStatus::Duplicate => false,
+            };
+            let existing_pending = existing.and_then(|p| mine.get(p)).map(|i| i.pending);
+            let replace = status == ImportRowStatus::Changed
+                && r.changed_action == Some(ChangedAction::Replace)
+                && existing_pending == Some(true);
+            if replace
+                && commit
+                && let Some(it) = existing.and_then(|p| mine.get(p))
+            {
+                replacing.push((
+                    it.dedupe_key.clone(),
+                    r.date,
+                    r.amount,
+                    r.description.clone(),
+                ));
+            }
             if insert && commit {
                 to_insert.push(Item {
                     account: req.account,
@@ -280,6 +333,7 @@ impl DemoBankFeed {
                     row_key: k.row_key.clone(),
                     imported_at: now,
                     pending: true,
+                    replaced: None,
                     date: r.date,
                     amount: r.amount,
                     description: r.description.clone(),
@@ -304,7 +358,7 @@ impl DemoBankFeed {
                 existing_pending: existing_item.map(|i| i.pending),
                 closed_period: false,
                 inserted: insert && commit,
-                replaced: false,
+                replaced: replace && commit,
             });
         }
         let same_file = self
@@ -314,6 +368,24 @@ impl DemoBankFeed {
             .find(|b| b.account == req.account && b.sha256 == req.source_file_sha256 && !b.undone)
             .map(|b| b.at);
         if commit {
+            for (key, date, amount, description) in replacing {
+                if let Some(it) = self
+                    .items
+                    .iter_mut()
+                    .find(|i| i.account == req.account && i.dedupe_key == key)
+                {
+                    let before = (
+                        batch,
+                        it.date,
+                        it.amount,
+                        std::mem::take(&mut it.description),
+                    );
+                    it.date = date;
+                    it.amount = amount;
+                    it.description = description;
+                    it.replaced = Some(before);
+                }
+            }
             self.items.extend(to_insert);
             self.batches.push(Batch {
                 id: batch,
@@ -380,10 +452,24 @@ impl DemoBankFeed {
         let before = self.items.len();
         self.items.retain(|i| !(i.batch == id && i.pending));
         let removed = u32::try_from(before - self.items.len()).unwrap_or(u32::MAX);
+        let mut restored = 0;
+        for it in &mut self.items {
+            if let Some((b, date, amount, description)) = it.replaced.take() {
+                if b == id {
+                    it.date = date;
+                    it.amount = amount;
+                    it.description = description;
+                    restored += 1;
+                } else {
+                    it.replaced = Some((b, date, amount, description));
+                }
+            }
+        }
         Ok(ImportUndoOutcome {
             batch: id,
             removed,
             kept: 0,
+            restored,
         })
     }
 
@@ -439,6 +525,7 @@ impl DemoBankFeed {
 }
 
 #[cfg(test)]
+#[allow(clippy::many_single_char_names, reason = "short test names")]
 mod tests {
     use super::*;
     use cl_api::{BankFileFormat, BankImportRow};
@@ -526,6 +613,52 @@ mod tests {
         let shifted = vec![row(1, 13, "10.00", "NOV 1", "1")];
         let o = f.import(&req(shifted, 'a'), false, now).expect("shift");
         assert_eq!(o.counts.duplicate, 1);
+    }
+
+    /// The engine's order: the same bank id with another amount, a date
+    /// within 5 days and a matching description is changed; replace
+    /// updates the waiting item and undo restores it; add inserts it.
+    #[test]
+    fn a_changed_row_replaces_and_undo_restores() {
+        let mut f = DemoBankFeed::default();
+        let now = crate::company::demo::DemoState::now();
+        let first = f
+            .import(
+                &req(vec![row(1, 20, "80.00", "HARDWARE STORE 12", "CH")], 'a'),
+                true,
+                now,
+            )
+            .expect("first");
+        std::thread::sleep(DEMO_PREPARING);
+        let mut changed = row(1, 21, "85.00", "HARDWARE STORE 12", "CH");
+        let p = f
+            .import(&req(vec![changed.clone()], 'b'), false, now)
+            .expect("p");
+        assert_eq!(p.rows[0].status, ImportRowStatus::Changed);
+        assert_eq!(p.rows[0].existing_pending, Some(true));
+        changed.changed_action = Some(ChangedAction::Replace);
+        let r = f
+            .import(&req(vec![changed.clone()], 'b'), true, now)
+            .expect("r");
+        assert!(r.rows[0].replaced && !r.rows[0].inserted);
+        assert_eq!(f.waiting(), 1);
+        std::thread::sleep(DEMO_PREPARING);
+        let u = f.undo(r.batch.expect("batch")).expect("undo");
+        assert_eq!((u.removed, u.restored), (0, 1));
+        assert!(
+            f.items
+                .iter()
+                .any(|i| i.amount == "80.00".parse().expect("d"))
+        );
+        changed.changed_action = Some(ChangedAction::Add);
+        let a = f.import(&req(vec![changed], 'c'), true, now).expect("add");
+        assert_eq!(a.counts.inserted, 1);
+        assert_eq!(f.waiting(), 2);
+        // Another description: the bank reused the id.
+        let other = row(1, 22, "99.00", "SOMETHING ELSE", "CH");
+        let o = f.import(&req(vec![other], 'd'), false, now).expect("o");
+        assert_eq!(o.rows[0].reason, Some(ImportRowReason::BankIdReused));
+        let _ = first;
     }
 
     /// The link is kept as a hash and a mask only; a file linked to

@@ -88,7 +88,13 @@ steps:
   - click: {role: button, label: Send 37 to Bank Feed}
   - assert_state: {key: screen.step, equals: done}
   - assert_state: {key: screen.result.inserted, equals: 37}
-  - assert_state: {key: screen.result.post_processing, equals: done}
+  # Q-P25v: "Preparing suggestions…" until the batch is prepared; Undo
+  # opens then.
+  - assert_state: {key: screen.preparing, equals: true}
+  - assert_disabled: {role: button, label: Undo this import}
+  - screenshot: preparing
+  - assert_state: {key: screen.result.post_processing, equals: done, within_ms: 6000}
+  - assert_state: {key: screen.preparing, equals: false}
   - screenshot: sent
 
   # --- 4. Undo, then the same file again: the rows come back -------------------
@@ -154,6 +160,27 @@ steps:
   - assert_state: {key: screen.remembered_flip, equals: true}
   - assert_state: {key: screen.sign_needs_confirm, equals: false}
   - key: Alt+B
+  # A card CSV (charges positive) into the card: a CSV is another format,
+  # so the card asks once more, with the flip suggested (review DB1,
+  # Q-P25t), and the preview shows the first rows flipped.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/card_positive_charges.csv"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "2050 · Business Credit Card (credit card)"}
+  - assert_state: {key: screen.card_account, equals: true}
+  - assert_state: {key: screen.sign_needs_confirm, equals: true}
+  - assert_state: {key: screen.flipped, equals: true}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: card-csv-sign
+  - click: {role: button, label: These look right}
+  - assert_state: {key: screen.can_next, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - click: {role: button, label: Import another file}
 
   # --- 6. A CSV: its columns -------------------------------------------------------------
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/zero_amounts.csv"]}
@@ -163,6 +190,56 @@ steps:
   - key: Alt+N
   - assert_exists: {role: label, label: Columns in this file}
   - screenshot: csv-columns
+  - key: Alt+B
+
+  # --- 7. After a restore (Q-P25aa, Q-P25u) ----------------------------------------
+  # The company keeps its feed and the engine its link key; nothing of
+  # this computer's is needed: the account links itself, no question.
+  - command: dev.demo_bank_import_restore
+  - assert_state: {key: screen.step, equals: choose}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - assert_state: {key: screen.linked, equals: auto}
+  - assert_state: {key: screen.account_chosen, equals: true}
+  - assert_state: {key: screen.sign_needs_confirm, equals: false}
+  - assert_state: {key: screen.can_next, equals: true}
+  - assert_exists: {role: label, label: "Linked automatically — this bank account was linked on your first import."}
+  - screenshot: restore-linked
+  - key: Alt+B
+
+  # --- 8. A second computer (Q-P25aa) -------------------------------------------------
+  # The owner sets this file's date order; the batch keeps the layout. A
+  # computer with no layouts of its own gets it from the latest batch.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/dates_ambiguous.csv"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - assert_state: {key: screen.csv_source, equals: guess}
+  - click: {role: combo_box, label: Dates are written}
+  - click: {role: button, label: Day/month/year}
+  - assert_state: {key: screen.reading, equals: false}
+  - assert_state: {key: screen.csv_source, equals: owner}
+  - assert_state: {key: screen.csv_date_order, equals: dmy}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - command: dev.bank_import_forget_local
+  - click: {role: button, label: Import another file}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/dates_ambiguous.csv"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - assert_state: {key: screen.csv_date_order, equals: mdy}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - assert_state: {key: screen.csv_source, equals: batch}
+  - assert_state: {key: screen.csv_date_order, equals: dmy}
+  - screenshot: second-computer
 
 compare:
   - resize: {width: 1440, height: 940}

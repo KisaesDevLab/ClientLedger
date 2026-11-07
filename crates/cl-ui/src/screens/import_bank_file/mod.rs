@@ -430,6 +430,7 @@ impl ImportBankFileScreen {
                 }
             }
             Err(e) => {
+                self.reparse_as = None;
                 self.read_error = Some(e);
             }
         }
@@ -1183,6 +1184,7 @@ impl Screen for ImportBankFileScreen {
                 };
                 demo.bank_feed.reset();
                 drop(demo);
+                self.forget_local_layouts();
                 self.start_over(false);
                 self.sent = 0;
                 true
@@ -1253,7 +1255,7 @@ impl Screen for ImportBankFileScreen {
             "result": result,
             "preparing": self.preparing(),
             "prep_gave_up": self.prep_gave_up,
-            "undone": self.undone.map(|u| json!({"removed": u.removed, "kept": u.kept})),
+            "undone": self.undone.map(|u| json!({"removed": u.removed, "kept": u.kept, "restored": u.restored})),
             "undo_trouble": trouble_state(self.undo_trouble.as_ref()),
             "sent": self.sent,
         })

@@ -1208,6 +1208,16 @@ impl ImportBankFileScreen {
                         &[("n", &u.removed.to_string()), ("kept", &u.kept.to_string())],
                     ),
                 );
+                if u.restored > 0 {
+                    form::hint(
+                        ui,
+                        tokens,
+                        &t_with(
+                            "bankimport.undone_restored",
+                            &[("n", &u.restored.to_string())],
+                        ),
+                    );
+                }
             }
             if let Some(tr) = self.undo_trouble.clone() {
                 ui.label(RichText::new(trouble_text(&tr)).color(tokens.warn_text));

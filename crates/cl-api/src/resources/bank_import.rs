@@ -186,6 +186,9 @@ impl fmt::Debug for BankIdentity {
     }
 }
 
+/// The longest CSV mapping the engine keeps, in characters of JSON.
+const MAX_CSV_MAPPING: usize = 16_384;
+
 /// The longest `BANKID` or `ACCTID` sent (OFX allows 22 and 9; card
 /// numbers and odd exports stay well under this).
 const MAX_ACCT_ID: usize = 64;
@@ -337,6 +340,10 @@ impl BankImportRequest {
         }
         body.insert("amountsFlipped".into(), json!(self.amounts_flipped));
         if let Some(m) = &self.csv_mapping {
+            // The engine keeps at most 16,384 characters of it as JSON.
+            if !m.is_object() || m.to_string().chars().count() > MAX_CSV_MAPPING {
+                return Err(LocalValidation::InvalidValue);
+            }
             body.insert("csvMapping".into(), m.clone());
         }
         body.insert("dryRun".into(), json!(dry_run));
@@ -882,6 +889,8 @@ pub struct ImportUndoOutcome {
     pub removed: u32,
     /// Rows kept (already used).
     pub kept: u32,
+    /// Waiting items a `changed` row had replaced, put back as they were.
+    pub restored: u32,
 }
 
 /// Reads an undo answer.
@@ -897,12 +906,15 @@ pub fn undo_from(body: &[u8]) -> Result<ImportUndoOutcome, ApiError> {
         removed: u32,
         #[serde(default)]
         kept: u32,
+        #[serde(default)]
+        restored: u32,
     }
     let w: W = serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: WHAT })?;
     Ok(ImportUndoOutcome {
         batch: ImportBatchId::parse(&w.batch_id)?,
         removed: w.removed,
         kept: w.kept,
+        restored: w.restored,
     })
 }
 

@@ -168,6 +168,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.undo", "Undo this import"),
     ("bankimport.undoing", "Undoing\u{2026}"),
     ("bankimport.undone", "Took {n} back out of the Bank Feed; {kept} were already used and stay."),
+    ("bankimport.undone_restored", "{n} restored: transactions this import had replaced are back as they were."),
     ("bankimport.undo.used", "Some of these were already used in the Bank Feed, so the import can't be undone whole."),
     ("bankimport.undo.rest", "Take out the rest"),
     ("bankimport.undo.preparing", "This import is still being prepared. Try again in a moment."),

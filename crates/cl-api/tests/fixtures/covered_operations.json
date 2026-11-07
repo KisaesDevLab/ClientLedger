@@ -333,5 +333,5 @@
   {"method":"POST","path":"/api/v1/banking/feed/import-batch","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/banking/feed/import-batches","inSpec":true,"fragmentHash":null},
   {"method":"DELETE","path":"/api/v1/banking/feed/import-batches/{id}","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/banking/connections/lookup","inSpec":true,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/banking/connections/lookup","inSpec":true,"fragmentHash":null}
 ]

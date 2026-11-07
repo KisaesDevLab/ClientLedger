@@ -408,4 +408,4 @@ DELETE  /api/v1/unit-sets/{id}                  pre-handler-only
 POST    /api/v1/banking/feed/import-batch       keyable-bank-import
 GET     /api/v1/banking/feed/import-batches     idempotent
 DELETE  /api/v1/banking/feed/import-batches/{id} keyable-bank-import
-GET     /api/v1/banking/connections/lookup      idempotent
+POST    /api/v1/banking/connections/lookup      pre-handler-only
