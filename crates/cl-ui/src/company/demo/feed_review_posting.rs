@@ -864,7 +864,10 @@ pub fn accept(
                 _ => None,
             };
             let dups = match (state.open, item.inner()) {
-                (Some(tenant), AcceptItem::AsProposed(_) | AcceptItem::Values(..)) => {
+                // Money in posts no bill or expense: not checked (as the engine).
+                (Some(tenant), AcceptItem::AsProposed(_) | AcceptItem::Values(..))
+                    if r.amount.is_positive() =>
+                {
                     super::super::drafts::feed_duplicates(
                         state,
                         tenant,

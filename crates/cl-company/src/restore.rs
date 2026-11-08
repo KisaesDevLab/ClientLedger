@@ -265,6 +265,14 @@ pub async fn restore(
         rec.flags = flags;
         rec.prefs = prefs;
         rec.source = Some("restore".into());
+        // PR-A1 S2 (Q-PRA1c): the restored drafts are this computer's own;
+        // documents handled after the backup are offered back once.
+        rec.restored = Some(cl_settings::RestoreNote {
+            at: cl_settings::recent::now(),
+            backup_made: info.created_at,
+            previous,
+            bring_back_answered: false,
+        });
     })?;
 
     let mut names_swapped = false;

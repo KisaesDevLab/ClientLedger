@@ -651,7 +651,7 @@ pub fn accept_body(req: &AcceptRequest) -> Result<Value, ApiError> {
                     dm.insert("expectedUpdatedAt".into(), json!(d.expected_updated_at));
                     if !d.acknowledged_duplicates.is_empty() {
                         dm.insert(
-                            "acknowledgedDuplicates".into(),
+                            "acknowledgeDuplicateOf".into(),
                             Value::Array(
                                 d.acknowledged_duplicates
                                     .iter()

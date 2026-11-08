@@ -523,7 +523,7 @@ impl Capabilities {
     /// PR-A1 B1 (Q-PRA1b): a feed accept item carrying a document draft
     /// runs the convert's duplicate check on the posted row and fails the
     /// row `DOCUMENT_POSSIBLE_DUPLICATE {matches}` unless
-    /// `documentDraft.acknowledgedDuplicates` lists every match.
+    /// `documentDraft.acknowledgeDuplicateOf` lists every match.
     pub const FEED_ACCEPT_DRAFT_DUPLICATES: &'static str = "feed-accept-draft-duplicates-v1";
 
     /// True when the engine advertises `name`.

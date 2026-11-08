@@ -59,7 +59,7 @@ pub use email_templates::{
 pub use printer_prefs::{OffsetError, PrintKind, PrinterOffset, PrinterPrefs, PrinterPrefsStore};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
-    RecentCompanies, RecentError, RecentStore,
+    RecentCompanies, RecentError, RecentStore, RestoreNote,
 };
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
 pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};

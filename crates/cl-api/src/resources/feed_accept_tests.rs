@@ -473,7 +473,7 @@ fn a_document_duplicate_is_the_receipts_and_names_its_matches() {
 }
 
 /// B1: "Use it anyway" sends the confirmed entries as
-/// `acknowledgedDuplicates`; none: the key is left out.
+/// `acknowledgeDuplicateOf`; none: the key is left out.
 #[test]
 fn acknowledged_duplicates_ride_on_the_draft_only_when_there_are_any() {
     let acked = DraftLink {
@@ -495,12 +495,12 @@ fn acknowledged_duplicates_ride_on_the_draft_only_when_there_are_any() {
     ]))
     .expect("body");
     assert_eq!(
-        body["items"][0]["documentDraft"]["acknowledgedDuplicates"],
+        body["items"][0]["documentDraft"]["acknowledgeDuplicateOf"],
         json!([T])
     );
     assert!(
         body["items"][1]["documentDraft"]
-            .get("acknowledgedDuplicates")
+            .get("acknowledgeDuplicateOf")
             .is_none()
     );
 }
