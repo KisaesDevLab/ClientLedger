@@ -133,3 +133,162 @@ fn coding_debug_has_no_owner_data() {
     assert!(!shown.contains("60"));
     assert!(!shown.contains("R-1042"));
 }
+
+// ------------------------------------------- the panel on the demo engine
+
+mod panel {
+    use std::sync::Arc;
+
+    use cl_model::CommandId;
+
+    use super::super::super::BankFeedScreen;
+    use super::super::super::send::{self, Send};
+    use super::super::*;
+    use crate::company::CompanyLink;
+    use crate::windows::Screen;
+
+    /// The demo's receipt line in the panel, its receipt read in full.
+    fn seeded() -> (tempfile::TempDir, BankFeedScreen, FeedRow, egui::Context) {
+        let dir = tempfile::tempdir().expect("dir");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = BankFeedScreen::new(link, None);
+        assert!(s.command(CommandId::new("dev.demo_feed_receipt")));
+        s.poll();
+        let line = *s
+            .receipts
+            .offers
+            .keys()
+            .next()
+            .expect("a line with a receipt");
+        let r = s.rows.iter().find(|r| r.id == line).cloned().expect("row");
+        s.detail.row = Some(line);
+        s.detail.account = r.suggested_account.as_ref().map(|a| a.id);
+        reset(&mut s, line);
+        let ctx = egui::Context::default();
+        follow(&mut s, &ctx);
+        assert!(s.detail.receipt.full.is_some(), "read in full");
+        (dir, s, r, ctx)
+    }
+
+    fn values(s: &BankFeedScreen, r: &FeedRow) -> Send {
+        Send::Categorize(
+            r.id,
+            Some(FeedChoice {
+                account: s.detail.account,
+                ..FeedChoice::default()
+            }),
+        )
+    }
+
+    fn carried(send: Option<&Send>) -> Option<&AcceptItem> {
+        match send {
+            Some(Send::Accept(items)) => items.first().filter(|i| i.draft().is_some()),
+            _ => None,
+        }
+    }
+
+    /// Review 5: a draft whose file is gone is never offered (the engine
+    /// would refuse it every time).
+    #[test]
+    fn a_draft_without_its_file_is_never_offered() {
+        let (_d, s, _r, _ctx) = seeded();
+        assert_eq!(offers_for(&s.rows, &s.receipts.drafts).len(), 1);
+        let mut drafts = s.receipts.drafts.clone();
+        for d in &mut drafts {
+            d.attachment_id = None;
+        }
+        assert!(offers_for(&s.rows, &drafts).is_empty());
+    }
+
+    /// Review 2 (Q-A05c): a total edited since the list was read doesn't
+    /// travel with the line; the line posts without it.
+    #[test]
+    fn a_receipt_whose_total_changed_is_not_carried() {
+        let (_d, mut s, r, _ctx) = seeded();
+        let send = with_receipt(&s, &r, Some(values(&s, &r)));
+        assert!(carried(send.as_ref()).is_some(), "as read: carried");
+        if let Some(full) = s.detail.receipt.full.as_mut() {
+            full.doc_total = full
+                .doc_total
+                .and_then(|m| m.checked_add(Money::parse_wire("0.01").expect("m")).ok());
+        }
+        let send = with_receipt(&s, &r, Some(values(&s, &r)));
+        assert!(matches!(send, Some(Send::Categorize(..))), "posts alone");
+    }
+
+    /// Nit: a row staged by a rule posts as staged, the receipt filed on it
+    /// (its split and memo kept).
+    #[test]
+    fn a_staged_row_posts_as_staged_with_the_receipt() {
+        let (_d, s, r, _ctx) = seeded();
+        let send = with_receipt(&s, &r, Some(Send::Categorize(r.id, None)));
+        let item = carried(send.as_ref()).expect("carried");
+        assert_eq!(item.inner(), &AcceptItem::AsProposed(r.id));
+    }
+
+    /// Nit: a receipt that couldn't be read holds Accept; Try again reads
+    /// it again.
+    #[test]
+    fn a_receipt_that_couldnt_be_read_holds_accept_until_read_again() {
+        let (_d, mut s, r, ctx) = seeded();
+        s.detail.receipt.failed = true;
+        assert!(with_receipt(&s, &r, Some(values(&s, &r))).is_none());
+        read_again(&mut s);
+        follow(&mut s, &ctx);
+        assert!(!s.detail.receipt.failed);
+        assert!(carried(with_receipt(&s, &r, Some(values(&s, &r))).as_ref()).is_some());
+    }
+
+    /// Review 1: a STALE refusal reads the receipt again, so the next A
+    /// carries the fresh change token and posts.
+    #[test]
+    fn a_stale_receipt_is_read_again_and_the_next_accept_posts() {
+        let (_d, mut s, r, ctx) = seeded();
+        if let Some(full) = s.detail.receipt.full.as_mut() {
+            full.updated_at = "2020-01-01T00:00:00.000Z".into();
+        }
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 0, "nothing posted");
+        assert_eq!(
+            s.notice.map(|n| n.0),
+            Some("bank_feed.notice.receipt_changed")
+        );
+        // The panel reads it again: the stored token, not the stale one.
+        follow(&mut s, &ctx);
+        let fresh = s.detail.receipt.full.as_ref().expect("read again");
+        assert_ne!(fresh.updated_at, "2020-01-01T00:00:00.000Z");
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 1, "the next A posts");
+    }
+
+    /// Review 1: a list showing a newer token than the one read reads the
+    /// receipt again.
+    #[test]
+    fn a_newer_listed_token_reads_the_receipt_again() {
+        let (_d, mut s, _r, ctx) = seeded();
+        let pick = s.detail.receipt.pick.expect("pick");
+        if let Some(d) = s.receipts.drafts.iter_mut().find(|d| d.id == pick) {
+            d.updated_at = "2099-01-01T00:00:00.000Z".into();
+        }
+        refresh(&mut s);
+        assert!(s.detail.receipt.full.is_none(), "read again");
+        follow(&mut s, &ctx);
+        assert!(s.detail.receipt.full.is_some());
+    }
+
+    /// Review 3: refused for permission, the panel stops offering it.
+    #[test]
+    fn forbidden_declines_the_receipt() {
+        let (_d, mut s, r, _ctx) = seeded();
+        forbidden(&mut s);
+        assert!(s.detail.receipt.declined);
+        let x = with_receipt(&s, &r, Some(values(&s, &r)));
+        assert!(matches!(x, Some(Send::Categorize(..))));
+        refresh(&mut s);
+        assert!(s.detail.receipt.pick.is_none(), "stays declined");
+    }
+}

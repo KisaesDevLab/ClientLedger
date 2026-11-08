@@ -289,6 +289,16 @@ impl AcceptFailure {
     pub const DRAFT_FILE_MISSING: &'static str = "DOCUMENT_FILE_MISSING";
     /// U-181: the draft is a vendor statement (never filed on an entry).
     pub const DRAFT_INVALID_KIND: &'static str = "INVALID_KIND";
+    /// U-181: the receipt's file is already filed on a record.
+    pub const DRAFT_FILE_FILED: &'static str = crate::ATTACHMENT_NOT_DRAFT;
+    /// U-181: the matched entry can't take files.
+    pub const DRAFT_TARGET: &'static str = crate::TARGET_NOT_ATTACHABLE;
+    /// U-181: the user may not file this receipt (the locked rows'
+    /// recheck).
+    pub const DRAFT_DENIED: &'static str = "PERMISSION_DENIED";
+    /// U-181: not this company's draft. (A row that isn't found is
+    /// skipped, never a failure, so on an accept this is the receipt.)
+    pub const DRAFT_NOT_FOUND: &'static str = "NOT_FOUND";
 
     /// Dated on or before the closing date: needs the password.
     #[must_use]
@@ -305,6 +315,10 @@ impl AcceptFailure {
                 | Self::DRAFT_STALE
                 | Self::DRAFT_FILE_MISSING
                 | Self::DRAFT_INVALID_KIND
+                | Self::DRAFT_FILE_FILED
+                | Self::DRAFT_TARGET
+                | Self::DRAFT_DENIED
+                | Self::DRAFT_NOT_FOUND
         )
     }
 }

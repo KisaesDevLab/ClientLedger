@@ -299,13 +299,15 @@ pub fn why(i: WhyInput, ai_on: bool) -> Why {
     if i.bucket == Some(Bucket::Matches) || i.match_candidates > 0 {
         return Why::Match;
     }
+    // A line without an account still needs one: "Needs you" says so (the
+    // panel offers the receipt too).
+    if !i.has_account {
+        return Why::NeedsYou;
+    }
     // After Match: an entry already in the books is matched (the receipt
     // goes with it), never posted again.
     if i.has_receipt && i.bucket.is_some() {
         return Why::Receipt;
-    }
-    if !i.has_account {
-        return Why::NeedsYou;
     }
     if i.has_rule || i.source == Source::Rule {
         return Why::Rule;

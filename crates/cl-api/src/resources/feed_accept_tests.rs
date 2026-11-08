@@ -315,6 +315,36 @@ fn receipt_failures_are_named() {
     assert!(!other.is_receipt());
 }
 
+/// Every refusal of the receipt the engine documents (U-181) reads as one.
+#[test]
+fn every_documented_receipt_refusal_is_a_receipt_failure() {
+    for code in [
+        "DOCUMENT_DRAFT_CLOSED",
+        "STALE",
+        "DOCUMENT_FILE_MISSING",
+        "ATTACHMENT_NOT_DRAFT",
+        "INVALID_KIND",
+        "TARGET_NOT_ATTACHABLE",
+        "PERMISSION_DENIED",
+        "NOT_FOUND",
+    ] {
+        let f = AcceptFailure {
+            id: fid(A),
+            code: code.into(),
+            details: ConflictDetails::default(),
+        };
+        assert!(f.is_receipt(), "{code}");
+    }
+    for code in ["SPLITS_DONT_BALANCE", "MATCH_MISMATCH", "TB_PERIOD_LOCKED"] {
+        let f = AcceptFailure {
+            id: fid(A),
+            code: code.into(),
+            details: ConflictDetails::default(),
+        };
+        assert!(!f.is_receipt(), "{code}");
+    }
+}
+
 /// U-180: Undo lists the drafts it put back in the review queue; an engine
 /// without it says nothing (empty).
 #[test]

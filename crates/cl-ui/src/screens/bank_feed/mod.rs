@@ -445,6 +445,14 @@ impl BankFeedScreen {
     /// question, the Undo toast, a notice; the next page of a rule's rows.
     fn take_outcome(&mut self, o: send::Outcome) {
         self.list.drop_rows(&o.stale);
+        // A05: a refused receipt is read again (a fresh change token, or
+        // gone from the offers once the list is read); one the user may not
+        // file is no longer offered on this line.
+        if o.receipt_forbidden {
+            receipts::forbidden(self);
+        } else if o.receipt_refused {
+            receipts::read_again(self);
+        }
         if o.view_only {
             self.view_only = true;
         }
@@ -614,7 +622,12 @@ impl BankFeedScreen {
             // says what's missing.
             self.detail_request = Some(FeedAction::Accept(id));
             self.list.focus(id);
-            self.notice = Some((incomplete_notice(why), 0));
+            let key = if why == Why::NeedsYou && !self.receipts.of(id).is_empty() {
+                "bank_feed.notice.pick_receipt_account"
+            } else {
+                incomplete_notice(why)
+            };
+            self.notice = Some((key, 0));
         }
     }
 

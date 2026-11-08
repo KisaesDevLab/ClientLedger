@@ -3,11 +3,15 @@
 //! line's attachment and coding instead of a new transaction.
 //!
 //! - **Which drafts** ([`load_live`], [`load_demo`]): live, non-statement
-//!   drafts (`status=new,ready`, `view=summary`, paged), read with the list
-//!   while Show › Waiting is up, only on an engine with
+//!   drafts with a file (`status=new,ready`, `view=summary`, paged), read
+//!   with the list while Show › Waiting is up, only on an engine with
 //!   `feed-accept-draft-v1` (the receipt is filed in the accept's own
 //!   transaction, U-181; without it nothing is offered, never a second
-//!   call after the posting).
+//!   call after the posting) and `document-drafts-reopen-v1` (Undo puts
+//!   the receipt back in the queue, U-180). At most [`MAX_PAGES`] pages of
+//!   200, newest first: in a queue of more than 2,000 receipts only the
+//!   newest 2,000 are offered (the rest still attach from the review
+//!   queue, A04).
 //! - **Which lines**: [`cl_docread::feed_match`] (exact total, money out,
 //!   ±7 days, payee first, best 3).
 //! - **The panel** ([`section`]): the offers, the best one picked, "Don't
@@ -101,6 +105,23 @@ pub(crate) fn facts(d: &DocumentDraft) -> DraftFacts<DocumentDraftId> {
     }
 }
 
+/// The rules' view of a bank line.
+fn bank_line(r: &FeedRow) -> BankLine {
+    BankLine {
+        amount: r.amount,
+        money_out: r.is_money_out(),
+        date: r.date,
+        contact: payee_of(r),
+    }
+}
+
+/// The full receipt still goes with the line (its total, date and kind as
+/// read in full, not only as listed: an edit in the review queue since the
+/// list was read may have changed them, Q-A05c).
+pub(crate) fn fits(r: &FeedRow, full: &DocumentDraft) -> bool {
+    full.attachment_id.is_some() && feed_match::check(&bank_line(r), &facts(full)).is_ok()
+}
+
 /// The offers for every waiting line.
 #[must_use]
 pub(crate) fn offers_for(
@@ -110,17 +131,17 @@ pub(crate) fn offers_for(
     if drafts.is_empty() {
         return BTreeMap::new();
     }
-    let facts: Vec<DraftFacts<DocumentDraftId>> = drafts.iter().map(facts).collect();
+    // A draft without a file (deleted since it was read) can't be filed:
+    // the engine would refuse it (`DOCUMENT_FILE_MISSING`) every time.
+    let facts: Vec<DraftFacts<DocumentDraftId>> = drafts
+        .iter()
+        .filter(|d| d.attachment_id.is_some())
+        .map(facts)
+        .collect();
     rows.iter()
         .filter(|r| r.status.is_waiting() && !r.possible_duplicate && !r.entry_voided)
         .filter_map(|r| {
-            let line = BankLine {
-                amount: r.amount,
-                money_out: r.is_money_out(),
-                date: r.date,
-                contact: payee_of(r),
-            };
-            let o: Vec<DocumentDraftId> = feed_match::offers(&line, &facts)
+            let o: Vec<DocumentDraftId> = feed_match::offers(&bank_line(r), &facts)
                 .into_iter()
                 .map(|o| o.id)
                 .collect();
@@ -162,10 +183,14 @@ pub(crate) fn load_demo(
 }
 
 /// The engine's live drafts (`None` when receipts are off: no
-/// `feed-accept-draft-v1` or no drafts). A list that fails offers nothing.
+/// `feed-accept-draft-v1`, no `document-drafts-reopen-v1` or no drafts). A
+/// list that fails offers nothing.
 pub(crate) async fn load_live(s: &Session) -> Option<Vec<DocumentDraft>> {
     let caps = s.client().capabilities();
-    if !caps.has(Capabilities::FEED_ACCEPT_DRAFT) || !caps.has(Capabilities::DOCUMENT_DRAFTS) {
+    if !caps.has(Capabilities::FEED_ACCEPT_DRAFT)
+        || !caps.has(Capabilities::DOCUMENT_DRAFTS)
+        || !caps.has(Capabilities::DOCUMENT_DRAFTS_REOPEN)
+    {
         return None;
     }
     let mut all = Vec::new();
@@ -321,19 +346,44 @@ pub(crate) fn reset(s: &mut BankFeedScreen, id: FeedItemId) {
 
 /// The list was read again: a panel whose pick is no longer offered (used
 /// elsewhere, or a receipt arrived) takes the best one now, unless the
-/// owner declined.
+/// owner declined; a pick still offered whose receipt changed since it was
+/// read in full is read again (its new change token and coding).
 pub(crate) fn refresh(s: &mut BankFeedScreen) {
     let Some(id) = s.detail.row else {
         return;
     };
     let offers = s.receipts.of(id);
     let p = &s.detail.receipt;
-    if p.declined || p.pick.is_some_and(|x| offers.contains(&x)) {
+    if p.declined {
+        return;
+    }
+    if let Some(x) = p.pick.filter(|x| offers.contains(x)) {
+        let listed = s.receipts.draft(x).map(|d| d.updated_at.as_str());
+        let read = p.full.as_ref().map(|d| d.updated_at.as_str());
+        if read.is_some() && listed != read {
+            read_again(s);
+        }
         return;
     }
     if p.pick.is_some() || !offers.is_empty() {
         reset(s, id);
     }
+}
+
+/// The picked receipt is read in full again (after a refusal, or "Try
+/// again"): Accept waits for the fresh copy and its change token.
+pub(crate) fn read_again(s: &mut BankFeedScreen) {
+    s.detail.receipt.full = None;
+    s.detail.receipt.failed = false;
+    read_full(s);
+}
+
+/// The engine refused to file the receipt for this request (403): the
+/// panel stops offering it, so the next A posts the line alone.
+pub(crate) fn forbidden(s: &mut BankFeedScreen) {
+    s.detail.receipt.pick = None;
+    s.detail.receipt.full = None;
+    s.detail.receipt.declined = true;
 }
 
 /// Picks `pick` (or none) and reads it.
@@ -504,10 +554,21 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
     if s.detail.receipt.pick.is_some() {
         if s.detail.receipt.failed {
             form::inline_warning(ui, tokens, &t("bank_feed.receipt.read_failed"));
-        } else if s.detail.receipt.full.is_none() {
-            form::progress_line(ui, tokens, &t("bank_feed.receipt.reading"));
+            if ui
+                .button(t("bank_feed.receipt.try_again"))
+                .on_hover_text(t("bank_feed.receipt.try_again.tip"))
+                .clicked()
+            {
+                read_again(s);
+            }
+        } else if let Some(full) = &s.detail.receipt.full {
+            if fits(r, full) {
+                form::hint(ui, tokens, &t("bank_feed.receipt.goes_with"));
+            } else {
+                form::inline_warning(ui, tokens, &t("bank_feed.receipt.no_longer_fits"));
+            }
         } else {
-            form::hint(ui, tokens, &t("bank_feed.receipt.goes_with"));
+            form::progress_line(ui, tokens, &t("bank_feed.receipt.reading"));
         }
     }
     ui.add_space(6.0);
@@ -524,8 +585,11 @@ fn contact_name(_s: &BankFeedScreen, r: &FeedRow, c: ContactId) -> Option<String
 }
 
 /// Accept with the picked receipt: what the panel would send, coded from
-/// the receipt and carrying it. `None` while the receipt is being read
-/// (Accept waits); the panel's own send without a receipt.
+/// the receipt and carrying it. `None` while the receipt is being read or
+/// couldn't be read (Accept waits; "Try again" or "Don't use this
+/// receipt"); the panel's own send without a receipt when none is picked,
+/// or when the receipt as read in full no longer goes with the line (its
+/// total edited since the list was read: the panel says so).
 pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) -> Option<Send> {
     let p = &s.detail.receipt;
     let Some(pick) = p.pick.filter(|_| takes_receipt(s.detail.mode)) else {
@@ -534,7 +598,13 @@ pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) 
     if !s.receipts.of(r.id).contains(&pick) {
         return send;
     }
+    if p.failed {
+        return None;
+    }
     let full = p.full.as_ref().filter(|d| d.id == pick)?;
+    if !fits(r, full) {
+        return send;
+    }
     let draft = DraftLink {
         id: pick,
         expected_updated_at: full.updated_at.clone(),
@@ -551,13 +621,13 @@ pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) 
                 ..c
             },
         ),
+        // Staged on the row (a rule's split or memo): posts as staged,
+        // with the receipt filed on it.
+        Send::Categorize(id, None) => AcceptItem::AsProposed(id),
         // One account: the receipt's coding on it (its lines as splits
         // when they add up exactly).
-        Send::Categorize(id, choice) => {
-            let account = choice
-                .as_ref()
-                .and_then(|c| c.account)
-                .or(s.detail.account)?;
+        Send::Categorize(id, Some(c)) => {
+            let account = c.account.or(s.detail.account)?;
             AcceptItem::Values(id, choice_of(&coded, account, payee_of(r)))
         }
         Send::Match(id, transaction, line) => AcceptItem::Match {

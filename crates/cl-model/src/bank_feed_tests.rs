@@ -66,8 +66,8 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
         ..rule
     };
     assert_eq!(why(voided, true), Why::EntryVoided);
-    // A05: a receipt shows over the proposal and over "Needs you", never
-    // over a match, a transfer, a duplicate or a voided entry.
+    // A05: a receipt shows over the proposal, never over "Needs you" (no
+    // account yet), a match, a transfer, a duplicate or a voided entry.
     let receipt = WhyInput {
         has_receipt: true,
         ..rule
@@ -81,7 +81,7 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
             },
             true
         ),
-        Why::Receipt
+        Why::NeedsYou
     );
     assert_eq!(
         why(
