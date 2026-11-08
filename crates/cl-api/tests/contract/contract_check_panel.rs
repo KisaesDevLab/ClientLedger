@@ -363,7 +363,14 @@ pub fn rules_evaluate(h: &Harness) {
         toggle(false);
         let off = h.run(s.rules().evaluate(&asked));
         toggle(true);
-        assert_eq!(off.expect("rules off read as no match"), None);
+        if h.s1.client().capabilities().has(Capabilities::FEED_ACCEPT) {
+            // Engine PR #238 (U-170): the desktop keeps conditional rules
+            // on whatever the flag says (`DESKTOP_ALWAYS_ON`).
+            let still = off.expect("evaluate").expect("still matches");
+            assert_eq!(still.rule_id, rule_id);
+        } else {
+            assert_eq!(off.expect("rules off read as no match"), None);
+        }
         h.run(s.raw_mapped(
             Method::Delete,
             &format!("/api/v1/practice/conditional-rules/{rule_id}"),
