@@ -88,7 +88,10 @@ steps:
   # Receipt section and Accept; Undo is back at the top.
   - command: dev.demo_feed_reset
   - assert_state: {key: screen.counts.waiting, equals: 37}
+  # Sizes are window pixels: resize at 100%, then zoom.
+  - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 200}
   - command: dev.demo_feed_receipt
   - assert_state: {key: screen.busy, equals: false}
   - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
@@ -103,7 +106,9 @@ steps:
   - click: {role: button, label: Undo}
   - assert_state: {key: screen.busy, equals: false}
   - assert_state: {key: screen.counts.accepted, equals: 0}
+  - set_zoom: {percent: 100}
   - resize: {width: 1024, height: 768}
+  - set_zoom: {percent: 200}
   - command: dev.demo_feed_receipt
   - assert_state: {key: screen.busy, equals: false}
   - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
