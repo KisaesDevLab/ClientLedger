@@ -20,6 +20,7 @@
 
 pub mod bulk;
 pub mod detail;
+pub mod rules;
 pub mod send;
 pub mod view;
 
@@ -146,6 +147,8 @@ pub struct BankFeedScreen {
     pub(crate) transfer_window: u8,
     /// The last action sent (control channel).
     pub(crate) last_send: Option<&'static str>,
+    /// The Rules panel.
+    pub(crate) rules: rules::RulesPanel,
     loaded_at: Option<Instant>,
     pub(crate) load_failed: bool,
     /// The last action's message (i18n key and its count).
@@ -203,11 +206,13 @@ impl BankFeedScreen {
             confirm: None,
             transfer_window: transfer_window(&link_for_prefs, tenant),
             last_send: None,
+            rules: rules::RulesPanel::default(),
             loaded_at: None,
             load_failed: false,
             notice: None,
         };
         s.read_meta();
+        rules::read(&mut s);
         s.poll();
         s
     }
@@ -362,6 +367,7 @@ impl BankFeedScreen {
                 Err(_) => self.load_failed = true,
             }
         }
+        rules::poll(self);
         if let Some(r) = finished(&mut self.act) {
             let o = r.unwrap_or_else(|_| send::Outcome {
                 failed: 1,
@@ -463,7 +469,12 @@ impl BankFeedScreen {
         match action {
             FeedAction::Accept(id) => self.accept_one(id),
             FeedAction::AcceptSelected(ids) => bulk::accept_selected(self, &ids),
-            other @ (FeedAction::Split(_) | FeedAction::Rule(_)) => {
+            FeedAction::Rule(id) => {
+                self.detail_request = Some(FeedAction::Rule(id));
+                rules::from_row(self, id);
+            }
+            other @ FeedAction::Split(_) => {
+                self.rules.open = false;
                 self.detail_request = Some(other);
             }
         }
@@ -551,6 +562,7 @@ impl BankFeedScreen {
                 self.toast = None;
                 self.confirm = None;
                 self.closing.cancel();
+                self.rules = rules::RulesPanel::default();
                 if let Some(open) = d.open
                     && let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open)
                 {
@@ -807,12 +819,14 @@ impl Screen for BankFeedScreen {
             "load_failed": self.load_failed,
             "notice": self.notice.map(|(k, _)| k),
             "detail": detail::state(self),
+            "rules": rules::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),
             "undo_changed": self.confirm.as_ref().map(|c| c.1),
             "closing": self.closing.state_json(self.closing_supported),
             "last_send": self.last_send,
             "transfer_window": self.transfer_window,
             "detail": detail::state(self),
+            "rules": rules::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),
             "undo_changed": self.confirm.as_ref().map(|c| c.1),
             "closing": self.closing.state_json(self.closing_supported),

@@ -30,6 +30,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     controls(s, ui, &tokens);
     ui.add_space(6.0);
     rule_banner(s, ui, &tokens);
+    rule_offer(s, ui, &tokens);
     bulk::bar(s, ui, &tokens);
     toast(s, ui, &tokens);
     undo_changed(s, ui, &tokens);
@@ -55,7 +56,13 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(DETAIL_W, avail.y),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| super::detail::draw(s, ui, &tokens),
+            |ui| {
+                if s.rules.open {
+                    super::rules::draw(s, ui, &tokens);
+                } else {
+                    super::detail::draw(s, ui, &tokens);
+                }
+            },
         );
     });
 }
@@ -108,7 +115,7 @@ fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             // Rules is hidden for a view-only user (plan §5).
             if !s.view_only && ui.button(t("bank_feed.rules")).clicked() {
                 s.detail_request = None;
-                s.notice = Some(("bank_feed.notice.rules", 0));
+                super::rules::open(s);
             }
             if ui.button(t("cmd.banking.import_file")).clicked() {
                 s.link.push(crate::company::CompanyEvent::OpenWindow(
@@ -634,5 +641,24 @@ fn closing(s: &mut BankFeedScreen, ui: &Ui, tokens: &Tokens) {
         }
         ClosingClick::Cancel => s.closing.cancel(),
         ClosingClick::None => {}
+    }
+}
+
+/// The rule offer (Q-P26k): the engine saw the same choice often enough.
+fn rule_offer(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+    let n = s.rules.ideas.len();
+    if n == 0 || s.view_only || s.rules.open || s.show != Show::Waiting {
+        return;
+    }
+    let mut open = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(crate::i18n::t_count("bank_feed.rule_offer", n, &[]))
+                .color(tokens.text_secondary),
+        );
+        open = ui.small_button(t("bank_feed.rule_offer.open")).clicked();
+    });
+    if open {
+        super::rules::open(s);
     }
 }

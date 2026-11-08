@@ -1,0 +1,28 @@
+# Bank Feed rules (P26 DI-2, plan §3 rules.rs) against `clientledger --demo`:
+# R on a bank line opens a new rule made from it (its first words, money
+# out, this bank account, its account); "Offer Accept all" is the
+# auto-accept flag (it never posts on its own, Q-P26a); Save lists it.
+name: bank_feed_rules
+description: R makes a rule from a bank line; the Rules panel lists and edits rules.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - click: {role: button, label: Ready 28}
+  - click: {role: button, label: Bank line 1 of 28}
+  - key: R
+  - assert_state: {key: screen.rules.open, equals: true}
+  - assert_state: {key: screen.rules.editing, equals: true}
+  - assert_state: {key: screen.rules.draft_ready, equals: true}
+  - click: {role: check_box, label_contains: "Accept all from this rule"}
+  - screenshot: rule-editor
+  - click: {role: button, label: Save rule}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.rules.editing, equals: false}
+  - assert_state: {key: screen.rules.notice, equals: bank_feed.rules.saved}
+  - screenshot: rules-list
+  - click: {role: button, label: Close}
+  - assert_state: {key: screen.rules.open, equals: false}

@@ -209,3 +209,32 @@ fn split_lines_insert_and_delete() {
     assert!(s.command(CommandId::new("form.delete_line")));
     assert_eq!(s.detail.split.len(), 1);
 }
+
+/// DI-2: R makes a rule from the cursor's line; Rules lists and edits.
+#[test]
+fn r_makes_a_rule_from_the_line() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.rule");
+    s.poll();
+    assert!(s.rules.open);
+    let draft = s.rules.draft.clone().expect("draft");
+    assert_eq!(draft.rule.sign, cl_api::RuleSign::MoneyOut);
+    assert!(draft.rule.account.is_some());
+    let before = s.rules.rules.len();
+    assert!(rules::state(&s)["draft_ready"].as_bool().unwrap_or(false));
+    let r = s
+        .rules
+        .draft
+        .as_ref()
+        .map(|d| d.rule.clone())
+        .expect("rule");
+    assert!(
+        crate::company::demo::feed_review::save_rule(&mut s.link.demo_state().expect("demo"), &r)
+            .is_ok()
+    );
+    rules::read(&mut s);
+    s.poll();
+    assert_eq!(s.rules.rules.len(), before + 1);
+}
