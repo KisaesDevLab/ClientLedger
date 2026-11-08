@@ -636,3 +636,74 @@ fn rule_mode_skips_rows_whose_staging_differs() {
     assert_eq!(o.posted, 0);
     assert!(o.skipped.contains(&(fuel.id, AcceptSkip::StagingDiffers)));
 }
+
+/// Engine #238: an Undo that keeps the entry (a later match alone) takes
+/// back only the rows asked for; one with the row that posted the entry
+/// deletes it and takes back every row on it.
+#[test]
+fn undo_of_a_later_match_alone_keeps_the_entry_and_its_other_rows() {
+    let mut s = state();
+    let before = entries(&s);
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    let posted = transfer(&mut s, card.id, TransferTarget::Account(to), None).expect("transfer");
+    let t = posted.transaction.expect("entry");
+    // A later bank line matched to the transfer's other line.
+    let link = |s: &mut DemoState, id: FeedItemId| {
+        let r = s.feed_review.row_mut(id).expect("row");
+        r.status = FeedStatus::Matched;
+        r.matched = Some(t);
+        r.posted = false;
+        r.how = "match";
+        r.group = Some(UndoGroupId::new_random());
+    };
+    let later = find(&mut s, "MONETT TIRE").id;
+    link(&mut s, later);
+    let u = undo(&mut s, &UndoTarget::Items(vec![later]), false, None).expect("undo");
+    assert_eq!(u.undone.len(), 1);
+    assert_eq!(u.undone[0].id, later);
+    assert!(!u.undone[0].deleted, "a match alone keeps the entry");
+    assert_eq!(entries(&s), before + 1);
+    let own = s
+        .feed_review
+        .rows
+        .iter()
+        .find(|r| r.id == card.id)
+        .expect("row");
+    assert_eq!(own.matched, Some(t), "the transfer's own row stays");
+    link(&mut s, later);
+    let u = undo(
+        &mut s,
+        &UndoTarget::Items(vec![card.id, later]),
+        false,
+        None,
+    )
+    .expect("undo");
+    assert_eq!(u.undone.len(), 2);
+    assert!(u.undone.iter().all(|x| x.deleted));
+    assert_eq!(entries(&s), before);
+}
+
+/// Engine #238: transfer and deposit refuse a side flagged as a possible
+/// duplicate (409 `FEED_ITEM_POSSIBLE_DUPLICATE`).
+#[test]
+fn transfer_and_deposit_refuse_a_possible_duplicate() {
+    let mut s = state();
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    let zelle = find(&mut s, "ZELLE FROM T ROCK");
+    for id in [card.id, zelle.id] {
+        s.feed_review.row_mut(id).expect("row").possible_duplicate = true;
+    }
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    let e = transfer(&mut s, card.id, TransferTarget::Account(to), None).expect_err("dup");
+    assert!(matches!(
+        cl_api::feed_refusal(&e),
+        Some(cl_api::FeedRefusal::PossibleDuplicate { id: Some(i), .. }) if i == card.id
+    ));
+    let pay = deposit_payments(&mut s, zelle.id)[0].source;
+    let e = deposit(&mut s, zelle.id, &[pay], &[], None).expect_err("dup");
+    assert!(matches!(
+        cl_api::feed_refusal(&e),
+        Some(cl_api::FeedRefusal::PossibleDuplicate { .. })
+    ));
+}

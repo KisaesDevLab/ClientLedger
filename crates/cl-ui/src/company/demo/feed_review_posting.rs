@@ -452,6 +452,21 @@ pub fn transfer_candidates(
         .collect()
 }
 
+/// 409 `FEED_ITEM_POSSIBLE_DUPLICATE`: transfer and deposit refuse a side
+/// flagged as a possible duplicate until the owner decides (engine #238).
+fn no_duplicate(r: &Row) -> Result<(), ApiError> {
+    if r.possible_duplicate {
+        return Err(conflict(
+            "FEED_ITEM_POSSIBLE_DUPLICATE",
+            json!({
+                "id": r.id.to_string(),
+                "possibleDuplicateOf": r.duplicate_of.map(|d| d.to_string()),
+            }),
+        ));
+    }
+    Ok(())
+}
+
 /// `POST /banking/feed/:id/transfer`: one transfer between the row's bank
 /// account and the other account; both rows (when the other side is a
 /// bank line) are matched to it. Dated on the money-out side.
@@ -466,6 +481,7 @@ pub fn transfer(
     password: Option<&Secret>,
 ) -> Result<FeedPosted, ApiError> {
     let r = waiting_row(state, id)?;
+    no_duplicate(&r)?;
     let (other_account, other) = match target {
         TransferTarget::Account(a) => (a, None),
         TransferTarget::OtherItem(o) => {
@@ -478,7 +494,9 @@ pub fn transfer(
                     json!({ "field": "otherFeedItemId" }),
                 ));
             }
-            (row(state, o)?.account, Some(row(state, o)?))
+            let o = row(state, o)?;
+            no_duplicate(&o)?;
+            (o.account, Some(o))
         }
     };
     if other_account == r.account {
@@ -562,6 +580,7 @@ pub fn deposit(
     password: Option<&Secret>,
 ) -> Result<FeedPosted, ApiError> {
     let r = waiting_row(state, id)?;
+    no_duplicate(&r)?;
     if r.amount.is_positive() {
         return Err(validation(
             "FEED_ITEM_MISMATCH",
@@ -860,19 +879,30 @@ pub fn undo(
                 continue;
             }
         };
-        // The entry goes when the feed posted it for any row on it (P26
-        // review M1); a match alone only unlinks.
-        let deletes = !r.entry_voided
-            && state.feed_review.rows.iter().any(|x| {
-                x.matched.is_some() && x.matched == r.matched && x.status.is_accepted() && x.posted
-            });
-        if deletes
+        todo.push(r);
+    }
+    // The entry goes when a row that posted it (categorize, transfer,
+    // deposit) is in the request, even with later-matched rows selected
+    // too; a match alone only unlinks (engine #238).
+    let posting: Vec<TransactionId> = todo
+        .iter()
+        .filter(|r| r.posted && !r.entry_voided)
+        .filter_map(|r| r.matched)
+        .collect();
+    let todo: Vec<(Row, bool)> = todo
+        .into_iter()
+        .map(|r| {
+            let deletes = !r.entry_voided && r.matched.is_some_and(|t| posting.contains(&t));
+            (r, deletes)
+        })
+        .collect();
+    for (r, deletes) in &todo {
+        if *deletes
             && r.fingerprint.is_some()
             && r.matched.and_then(|t| fingerprint(state, t)).as_ref() != r.fingerprint.as_ref()
         {
-            changed.push(id);
+            changed.push(r.id);
         }
-        todo.push((r, deletes));
     }
     if !changed.is_empty() && !force {
         return Err(conflict(
@@ -929,15 +959,19 @@ pub fn undo(
                 continue;
             }
         }
-        // Every row on the entry goes back (the other side of a transfer
-        // too, as the engine unlinks every item pointing at it).
-        let on_entry: Vec<Row> = state
-            .feed_review
-            .rows
-            .iter()
-            .filter(|x| x.matched == Some(t) && x.status.is_accepted())
-            .cloned()
-            .collect();
+        // A deleted entry takes every row on it back (the other side of a
+        // transfer too); a kept one only the rows asked for.
+        let on_entry: Vec<Row> = if deletes {
+            state
+                .feed_review
+                .rows
+                .iter()
+                .filter(|x| x.matched == Some(t) && x.status.is_accepted())
+                .cloned()
+                .collect()
+        } else {
+            vec![r.clone()]
+        };
         for x in on_entry {
             let group = x.group.or(r.group).unwrap_or_else(UndoGroupId::new_random);
             if let Some(key) = state.feed_review.taught.remove(&x.id) {

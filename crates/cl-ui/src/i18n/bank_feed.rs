@@ -166,6 +166,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.notice.undone", "{n} taken back to the list."),
     ("bank_feed.notice.undo_changed", "Some entries were changed since they were accepted. Choose below."),
     ("bank_feed.notice.undo_stale", "That was already taken back."),
+    ("bank_feed.notice.in_use", "Someone else is working on this bank line or its entry. Try again in a moment."),
+    ("bank_feed.notice.possible_duplicate", "One of these bank lines may be a duplicate. Choose Keep both or Remove this one on it first, then try again."),
     ("bank_feed.notice.reconciled", "An entry is in a finished reconciliation, so it can't be undone. Undo the reconciliation first."),
     ("bank_feed.notice.bounced", "That deposit holds a bounced payment, so it stays. Void the bounce first."),
     ("bank_feed.notice.split_off", "The split doesn't add up to the bank amount. Check the amounts."),

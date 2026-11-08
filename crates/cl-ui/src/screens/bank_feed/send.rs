@@ -168,6 +168,10 @@ impl Outcome {
                 AcceptFailure::UNDO_RECONCILED => self.notice = Some("bank_feed.notice.reconciled"),
                 AcceptFailure::PAYMENT_BOUNCED => self.notice = Some("bank_feed.notice.bounced"),
                 AcceptFailure::NOT_ACCEPTED => self.notice = Some("bank_feed.notice.undo_stale"),
+                AcceptFailure::IN_USE => {
+                    self.notice = Some("bank_feed.notice.in_use");
+                    self.failed += 1;
+                }
                 AcceptFailure::PERIOD_LOCKED => {}
                 _ => self.failed += 1,
             }
@@ -206,6 +210,8 @@ pub(crate) fn refusal_key(r: &FeedRefusal) -> &'static str {
         FeedRefusal::FeeAccountInvalid { .. } => "bank_feed.notice.fee_account",
         FeedRefusal::PaymentNotPendingDeposit => "bank_feed.notice.payment_gone",
         FeedRefusal::PaymentBounced => "bank_feed.notice.bounced",
+        FeedRefusal::PossibleDuplicate { .. } => "bank_feed.notice.possible_duplicate",
+        FeedRefusal::InUse => "bank_feed.notice.in_use",
         FeedRefusal::RuleChanged { .. } => "bank_feed.notice.rule_changed",
         FeedRefusal::RuleNotAutoAccept => "bank_feed.notice.rule_not_auto",
         FeedRefusal::RuleNotFound => "bank_feed.notice.rule_gone",
@@ -662,5 +668,22 @@ mod tests {
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].amount, "842.50");
         assert_eq!(held[0].label, "Synthetic Client");
+    }
+
+    /// Engine #238: an Undo of an entry someone else holds says "try again".
+    #[test]
+    fn undo_in_use_says_try_again() {
+        let o = UndoOutcome {
+            undone: Vec::new(),
+            failures: vec![AcceptFailure {
+                id: item(3),
+                code: AcceptFailure::IN_USE.into(),
+                details: cl_api::ConflictDetails::default(),
+            }],
+        };
+        let mut out = Outcome::default();
+        out.undid(&o, &Send::Undo(UndoTarget::Items(vec![item(3)]), false));
+        assert_eq!(out.notice, Some("bank_feed.notice.in_use"));
+        assert_eq!(out.done, 0);
     }
 }

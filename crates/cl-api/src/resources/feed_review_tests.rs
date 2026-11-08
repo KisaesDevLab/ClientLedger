@@ -481,3 +481,25 @@ fn candidates_and_overlaps_read_lines() {
     .expect("posted");
     assert_eq!(p.payments[0].1.to_wire(), "720.0000");
 }
+
+/// Engine #238: transfer and deposit refuse a side flagged as a possible
+/// duplicate (409 `FEED_ITEM_POSSIBLE_DUPLICATE {id, possibleDuplicateOf}`).
+#[test]
+fn possible_duplicate_refusal_names_both_rows() {
+    let a = "d26f9300-0000-4000-8000-000000000001";
+    let b = "d26f9300-0000-4000-8000-000000000002";
+    let e = crate::errors::from_response_for_tests(
+        409,
+        format!(r#"{{"error":{{"message":"m","code":"FEED_ITEM_POSSIBLE_DUPLICATE","details":{{"id":"{a}","possibleDuplicateOf":"{b}"}}}}}}"#)
+            .as_bytes(),
+    );
+    let Some(FeedRefusal::PossibleDuplicate { id, of }) = feed_refusal(&e) else {
+        panic!("refusal {e:?}");
+    };
+    assert_eq!(id, a.parse().ok());
+    assert_eq!(of, b.parse().ok());
+    assert!(
+        !is_stale_row(&e),
+        "the owner decides; nothing changed elsewhere"
+    );
+}

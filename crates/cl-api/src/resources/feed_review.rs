@@ -767,6 +767,14 @@ pub enum FeedRefusal {
     PaymentNotPendingDeposit,
     /// 409 `PAYMENT_BOUNCED`.
     PaymentBounced,
+    /// 409 `FEED_ITEM_POSSIBLE_DUPLICATE` (transfer, deposit): a side is a
+    /// possible duplicate; the owner decides Keep both / Remove first.
+    PossibleDuplicate {
+        /// The flagged row.
+        id: Option<FeedItemId>,
+        /// The row it looks like.
+        of: Option<FeedItemId>,
+    },
     /// 409 `RULE_CHANGED`: the rule changed since the list was read.
     RuleChanged {
         /// Its change token now.
@@ -809,6 +817,7 @@ impl fmt::Debug for FeedRefusal {
             FeedRefusal::FeeAccountInvalid { .. } => "FeeAccountInvalid(..)",
             FeedRefusal::PaymentNotPendingDeposit => "PaymentNotPendingDeposit",
             FeedRefusal::PaymentBounced => "PaymentBounced",
+            FeedRefusal::PossibleDuplicate { .. } => "PossibleDuplicate(..)",
             FeedRefusal::RuleChanged { .. } => "RuleChanged(..)",
             FeedRefusal::RuleNotAutoAccept => "RuleNotAutoAccept",
             FeedRefusal::RuleNotFound => "RuleNotFound",
@@ -860,6 +869,10 @@ pub fn feed_refusal(e: &ApiError) -> Option<FeedRefusal> {
         },
         "PAYMENT_NOT_PENDING_DEPOSIT" => FeedRefusal::PaymentNotPendingDeposit,
         "PAYMENT_BOUNCED" => FeedRefusal::PaymentBounced,
+        "FEED_ITEM_POSSIBLE_DUPLICATE" => FeedRefusal::PossibleDuplicate {
+            id: details.and_then(|d| d.id("id")),
+            of: details.and_then(|d| d.id("possibleDuplicateOf")),
+        },
         "RULE_CHANGED" => FeedRefusal::RuleChanged {
             updated_at: text("updatedAt"),
         },
