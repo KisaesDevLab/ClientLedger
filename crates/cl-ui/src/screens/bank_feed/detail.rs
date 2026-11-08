@@ -180,6 +180,9 @@ impl Line {
 #[derive(Default)]
 pub(crate) struct Detail {
     pub row: Option<FeedItemId>,
+    /// What the row was when the panel opened on it (QA-8: a row that
+    /// turns into a match under the cursor opens again).
+    shape: Option<RowShape>,
     pub mode: Mode,
     pub account: Option<AccountId>,
     pub split: Vec<Line>,
@@ -198,6 +201,38 @@ pub(crate) struct Detail {
     pub find: Option<String>,
     pub find_pick: usize,
     find_focus: bool,
+    /// A05: the receipt for the row.
+    pub receipt: super::receipts::Panel,
+}
+
+/// What the panel opens a row on: its state, review bucket and the
+/// engine's suggestions. Not the receipts (a receipt arriving keeps the
+/// owner's picks) nor the change token (staging on the row changes it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowShape {
+    status: cl_api::FeedStatus,
+    bucket: Option<cl_api::FeedBucket>,
+    candidates: u32,
+    duplicate: bool,
+    voided: bool,
+    matched: Option<TransactionId>,
+    transfer: Option<FeedItemId>,
+    account: Option<AccountId>,
+}
+
+impl RowShape {
+    pub(crate) fn of(r: &FeedRow) -> RowShape {
+        RowShape {
+            status: r.status,
+            bucket: r.bucket,
+            candidates: r.match_candidate_count,
+            duplicate: r.possible_duplicate,
+            voided: r.entry_voided,
+            matched: r.matched_transaction,
+            transfer: r.transfer_candidate.as_ref().map(|h| h.feed_item),
+            account: r.suggested_account.as_ref().map(|a| a.id),
+        }
+    }
 }
 
 impl Detail {
@@ -205,6 +240,7 @@ impl Detail {
     fn reset(&mut self, r: &FeedRow, why: Why) {
         *self = Detail {
             row: Some(r.id),
+            shape: Some(RowShape::of(r)),
             mode: match why {
                 // Money in with no entry to match: waiting payments to
                 // deposit. With a candidate the row opens on Match, as the
@@ -444,14 +480,18 @@ pub(crate) fn follow(s: &mut BankFeedScreen) {
         s.detail.row = None;
         return;
     };
-    if s.detail.row == Some(id) {
-        return;
-    }
     let Some(r) = s.row(id).cloned() else {
         return;
     };
+    // The same row, as it was: the panel keeps the owner's picks. A row
+    // read again as something else (an entry saved elsewhere made it a
+    // match, QA-8) opens again on what it is now.
+    if s.detail.row == Some(id) && s.detail.shape.as_ref() == Some(&RowShape::of(&r)) {
+        return;
+    }
     let why = s.why(&r);
     s.detail.reset(&r, why);
+    super::receipts::reset(s, id);
     if s.detail_request == Some(model::FeedAction::Split(id)) {
         enter_split(s);
     }
@@ -545,9 +585,16 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     } else {
         String::new()
     };
+    // A waiting line's Accept and Exclude stay below the scrolling part.
+    let pinned = !r.entry_voided
+        && !r.possible_duplicate
+        && r.status.is_waiting()
+        && s.show == Show::Waiting;
+    let reserve = if pinned { ACTIONS_H } else { 0.0 };
     egui::ScrollArea::vertical()
         .id_salt("bank_feed.detail")
         .auto_shrink([false, true])
+        .max_height((ui.available_height() - reserve).max(80.0))
         .show(ui, |ui| {
             ui.set_max_width(ui.available_width());
             if r.entry_voided {
@@ -557,12 +604,18 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             } else if r.possible_duplicate && r.status.is_waiting() {
                 duplicate(s, ui, tokens, &r, can, &tip);
             } else if r.status.is_waiting() && s.show == Show::Waiting {
-                waiting(s, ui, tokens, &r, why, can, &tip);
+                waiting(s, ui, tokens, &r, why);
             } else {
                 form::hint(ui, tokens, &t("bank_feed.detail.excluded"));
             }
         });
+    if pinned {
+        actions(s, ui, tokens, &r, can, &tip);
+    }
 }
+
+/// The height kept under the panel's scrolling part for Accept / Exclude.
+const ACTIONS_H: f32 = 44.0;
 
 fn voided(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, can: bool, tip: &str) {
     form::inline_warning(ui, tokens, &t("bank_feed.detail.entry_voided"));
@@ -723,22 +776,16 @@ fn account_combo(
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, label));
 }
 
-#[allow(clippy::too_many_arguments, reason = "the panel's shared inputs")]
-fn waiting(
-    s: &mut BankFeedScreen,
-    ui: &mut Ui,
-    tokens: &Tokens,
-    r: &FeedRow,
-    why: Why,
-    can: bool,
-    tip: &str,
-) {
+fn waiting(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, why: Why) {
     match why {
         Why::Ai { high: false } => {
             form::inline_warning(ui, tokens, &t("bank_feed.detail.ai_unsure"));
         }
-        Why::NeedsYou => form::inline_warning(ui, tokens, &t("bank_feed.detail.needs_you")),
-        _ => {}
+        _ => {
+            if let Some(key) = missing_key(s, r, why) {
+                form::inline_warning(ui, tokens, &t(key));
+            }
+        }
     }
     ui.horizontal_wrapped(|ui| {
         for m in Mode::ALL {
@@ -763,6 +810,7 @@ fn waiting(
         }
     });
     ui.add_space(6.0);
+    super::receipts::section(s, ui, tokens, r);
     let chart = s.chart.clone();
     let send = match s.detail.mode {
         Mode::Categorize => categorize_ui(s, ui, &chart, r),
@@ -771,8 +819,23 @@ fn waiting(
         Mode::Transfer => transfer_ui(s, ui, tokens, &chart, r),
         Mode::Deposit => deposit_ui(s, ui, tokens, &chart, r),
     };
-    s.detail.ready.clone_from(&send);
-    ui.add_space(10.0);
+    let send = super::receipts::with_receipt(s, r, send);
+    s.detail.ready = send;
+}
+
+/// Accept and Exclude under the panel's scrolling part (QA-6): a long
+/// receipt section or split grid at 1024x768 scrolls; the buttons stay in
+/// the window.
+fn actions(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    can: bool,
+    tip: &str,
+) {
+    let send = s.detail.ready.clone();
+    ui.add_space(6.0);
     ui.horizontal(|ui| {
         let accept = egui::Button::new(
             RichText::new(format!("{}  A", t("bank_feed.detail.accept"))).color(tokens.on_accent),
@@ -801,6 +864,29 @@ fn waiting(
             super::bulk::exclude_selected(s);
         }
     });
+}
+
+/// What the panel says is still missing on a line that needs the owner
+/// (QA-2): nothing once an account is picked (Accept is enabled; the payee
+/// is optional), "an account" when the payee is known or a receipt supplies
+/// the vendor, else "a payee and an account".
+pub(crate) fn missing_key(s: &BankFeedScreen, r: &FeedRow, why: Why) -> Option<&'static str> {
+    if !matches!(why, Why::NeedsYou | Why::Receipt) || s.detail.mode != Mode::Categorize {
+        return None;
+    }
+    let has_account = r.assigned_account.is_some() || r.suggested_account.is_some();
+    if has_account || s.detail.account.is_some() {
+        return None;
+    }
+    let payee = r.assigned_contact.is_some() || r.suggested_contact.is_some();
+    let receipt = super::receipts::takes_receipt(s.detail.mode)
+        && s.detail.receipt.pick.is_some()
+        && s.receipts.of(r.id).contains(&s.detail.receipt.pick?);
+    Some(if payee || receipt {
+        "bank_feed.detail.needs_account"
+    } else {
+        "bank_feed.detail.needs_you"
+    })
 }
 
 fn categorize_ui(
@@ -963,6 +1049,25 @@ fn split_ui(
     ))
 }
 
+/// A match candidate's label (its AccessKit name): date, kind and number,
+/// payee, amount, each left out when empty (A05 QA: no "· ·" for a
+/// missing payee). The amount is its size: a candidate always goes the
+/// bank line's way, whose sign the panel's heading already shows.
+pub(crate) fn candidate_text(date: &str, kind: &str, c: &MatchCandidate, amount: &str) -> String {
+    let num = c.txn_number.as_deref().map(str::trim).unwrap_or_default();
+    let what = [kind.trim(), num]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let who = c.contact_name.as_deref().map(str::trim).unwrap_or_default();
+    [date, what.as_str(), who, amount]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
 fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -> Option<Send> {
     if s.detail.data.forbidden {
         form::hint(ui, tokens, &t("bank_feed.match.forbidden"));
@@ -980,15 +1085,10 @@ fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -
             .map(|k| format!("bank_feed.txn.{k}"))
             .filter(|k| crate::i18n::has(k))
             .map_or_else(String::new, |k| t(&k));
-        let who = c.contact_name.clone().unwrap_or_default();
-        let num = c.txn_number.clone().unwrap_or_default();
         rows.push((
             c.transaction,
             Some(c.line),
-            format!(
-                "{date} \u{b7} {kind} {num} \u{b7} {who} \u{b7} {}",
-                amount_text(ui, model::display_amount(c.amount))
-            ),
+            candidate_text(&date, &kind, c, &amount_text(ui, c.amount.abs())),
         ));
     }
     for p in &s.detail.data.payroll {

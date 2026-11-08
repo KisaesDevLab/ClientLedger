@@ -206,3 +206,225 @@ fn debug_prints_no_owner_data() {
     };
     assert!(!format!("{f:?}").contains("12.34"));
 }
+
+// ------------------------------------------------------------- A05 receipts
+
+const D: &str = "66666666-6666-4666-8666-666666666666";
+const TOKEN: &str = "2026-11-08T10:00:00.123Z";
+
+fn link() -> DraftLink {
+    DraftLink {
+        id: DocumentDraftId::parse(D).expect("draft"),
+        expected_updated_at: TOKEN.into(),
+    }
+}
+
+/// U-181: a receipt rides on its item as `documentDraft {id,
+/// expectedUpdatedAt}`, the token sent exactly as read.
+#[test]
+fn a_receipt_item_carries_the_draft_and_its_token_exactly() {
+    let choice = FeedChoice {
+        account: Some(ACCT.parse().expect("acct")),
+        memo: Some("Receipt 4411".into()),
+        ..FeedChoice::default()
+    };
+    let body = accept_body(&AcceptRequest::Items(vec![
+        AcceptItem::Receipt {
+            item: Box::new(AcceptItem::Values(fid(A), choice)),
+            draft: link(),
+        },
+        AcceptItem::Receipt {
+            item: Box::new(AcceptItem::Match {
+                id: fid(B),
+                transaction: T.parse().expect("t"),
+                line: None,
+            }),
+            draft: DraftLink {
+                id: DocumentDraftId::parse("77777777-7777-4777-8777-777777777777").expect("draft"),
+                expected_updated_at: TOKEN.into(),
+            },
+        },
+    ]))
+    .expect("body");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items[0]["id"], A);
+    assert_eq!(items[0]["accountId"], ACCT);
+    assert_eq!(
+        items[0]["documentDraft"],
+        json!({ "id": D, "expectedUpdatedAt": TOKEN })
+    );
+    assert_eq!(items[1]["matchTransactionId"], T);
+    assert_eq!(items[1]["documentDraft"]["expectedUpdatedAt"], TOKEN);
+    assert!(items[1].get("accountId").is_none());
+}
+
+#[test]
+fn a_receipt_inside_a_receipt_or_without_a_token_is_refused() {
+    let nested = AcceptItem::Receipt {
+        item: Box::new(AcceptItem::Receipt {
+            item: Box::new(AcceptItem::AsProposed(fid(A))),
+            draft: link(),
+        }),
+        draft: link(),
+    };
+    let blank = AcceptItem::Receipt {
+        item: Box::new(AcceptItem::AsProposed(fid(A))),
+        draft: DraftLink {
+            expected_updated_at: "  ".into(),
+            ..link()
+        },
+    };
+    for i in [nested, blank] {
+        assert_eq!(
+            accept_body(&AcceptRequest::Items(vec![i])),
+            Err(ApiError::Local(LocalValidation::InvalidValue))
+        );
+    }
+    // The row id is the inner item's (a repeat is still a repeat).
+    let twice = vec![
+        AcceptItem::AsProposed(fid(A)),
+        AcceptItem::Receipt {
+            item: Box::new(AcceptItem::AsProposed(fid(A))),
+            draft: link(),
+        },
+    ];
+    assert!(accept_body(&AcceptRequest::Items(twice)).is_err());
+}
+
+#[test]
+fn receipt_failures_are_named() {
+    let body = json!({
+        "undoGroupId": G,
+        "posted": 0,
+        "matched": 0,
+        "failures": [
+            { "id": A, "code": "DOCUMENT_DRAFT_CLOSED", "details": { "transactionId": T } },
+            { "id": B, "code": "STALE", "details": { "updatedAt": TOKEN } },
+        ],
+    });
+    let o = accept_outcome_from(body.to_string().as_bytes()).expect("outcome");
+    assert!(o.failures.iter().all(AcceptFailure::is_receipt));
+    assert_eq!(o.failures[0].code, AcceptFailure::DRAFT_CLOSED);
+    assert_eq!(o.failures[1].code, AcceptFailure::DRAFT_STALE);
+    assert_eq!(o.locked(), Vec::<FeedItemId>::new());
+    let other = AcceptFailure {
+        id: fid(A),
+        code: AcceptFailure::PERIOD_LOCKED.into(),
+        details: ConflictDetails::default(),
+    };
+    assert!(!other.is_receipt());
+}
+
+/// Every refusal of the receipt the engine documents (U-181) reads as one.
+#[test]
+fn every_documented_receipt_refusal_is_a_receipt_failure() {
+    for code in [
+        "DOCUMENT_DRAFT_CLOSED",
+        "STALE",
+        "DOCUMENT_FILE_MISSING",
+        "ATTACHMENT_NOT_DRAFT",
+        "INVALID_KIND",
+        "TARGET_NOT_ATTACHABLE",
+        "PERMISSION_DENIED",
+        "NOT_FOUND",
+    ] {
+        let f = AcceptFailure {
+            id: fid(A),
+            code: code.into(),
+            details: ConflictDetails::default(),
+        };
+        assert!(f.is_receipt(), "{code}");
+    }
+    for code in ["SPLITS_DONT_BALANCE", "MATCH_MISMATCH", "TB_PERIOD_LOCKED"] {
+        let f = AcceptFailure {
+            id: fid(A),
+            code: code.into(),
+            details: ConflictDetails::default(),
+        };
+        assert!(!f.is_receipt(), "{code}");
+    }
+}
+
+/// U-180: Undo lists the drafts it put back in the review queue; an engine
+/// without it says nothing (empty).
+#[test]
+fn undo_answer_reads_reopened_drafts() {
+    let body = json!({
+        "undone": [{ "id": A, "kind": "categorize", "transactionId": T,
+                     "entry": "deleted", "undoGroupId": G }],
+        "failures": [],
+        "reopenedDrafts": [D],
+    });
+    let o = undo_outcome_from(body.to_string().as_bytes()).expect("undo");
+    assert_eq!(
+        o.reopened_drafts,
+        vec![DocumentDraftId::parse(D).expect("d")]
+    );
+    let old = json!({ "undone": [], "failures": [] });
+    let o = undo_outcome_from(old.to_string().as_bytes()).expect("undo");
+    assert_eq!(o.reopened_drafts, Vec::<DocumentDraftId>::new());
+    let bad = json!({ "undone": [], "reopenedDrafts": ["nope"] });
+    assert!(undo_outcome_from(bad.to_string().as_bytes()).is_err());
+}
+
+#[test]
+fn a_receipt_link_debug_has_no_token() {
+    let i = AcceptItem::Receipt {
+        item: Box::new(AcceptItem::AsProposed(fid(A))),
+        draft: link(),
+    };
+    let shown = format!("{i:?}");
+    assert!(shown.contains(D));
+    assert!(!shown.contains(TOKEN));
+}
+
+/// Without `feed-accept-draft-v1` an accept with a receipt sends nothing;
+/// one without a receipt still goes.
+#[tokio::test]
+async fn a_receipt_needs_its_capability_and_nothing_is_sent_without_it() {
+    use crate::resources::testkit::{json as reply, requests, session_with_caps};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer};
+
+    let server = MockServer::start().await;
+    let answer = json!({ "undoGroupId": G, "posted": 1, "matched": 0 });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/banking/feed/accept"))
+        .respond_with(reply(200, &answer.to_string()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &[Capabilities::FEED_ACCEPT]).await;
+    let with = AcceptRequest::Items(vec![AcceptItem::Receipt {
+        item: Box::new(AcceptItem::AsProposed(fid(A))),
+        draft: link(),
+    }]);
+    let e = s
+        .feed()
+        .accept(&with, None, IdempotencyKey::new())
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(requests(&server, "POST").await.is_empty());
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/banking/feed/accept"))
+        .respond_with(reply(200, &answer.to_string()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[Capabilities::FEED_ACCEPT, Capabilities::FEED_ACCEPT_DRAFT],
+    )
+    .await;
+    let o = s
+        .feed()
+        .accept(&with, None, IdempotencyKey::new())
+        .await
+        .expect("accepted");
+    assert_eq!(o.posted, 1);
+    let posts = requests(&server, "POST").await;
+    assert_eq!(posts.len(), 1);
+    let sent: Value = serde_json::from_slice(&posts[0].body).expect("json");
+    assert_eq!(sent["items"][0]["documentDraft"]["id"], D);
+}

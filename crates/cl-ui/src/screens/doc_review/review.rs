@@ -61,7 +61,7 @@ use cl_api::{
     DraftStatus, IdempotencyKey, LocalValidation, OrphanLabel, PostingOptions, RequestGroup,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
-use cl_core::{CalendarDate, MoneyStyle, Secret};
+use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_docread::card::card_account;
 use cl_docread::model::{Bbox, Confidence as Bp, Last4, Payment, Reader, Reading, Spot};
 use cl_docread::vendor_match::{VendorMatch, VendorTier};
@@ -592,6 +592,13 @@ enum Work {
     Choosing {
         accept: Box<Accept>,
     },
+    /// The Bank Feed's waiting lines are searched for one this document
+    /// would be entered twice with (QA-4, Q-A05h).
+    FeedMatching {
+        accept: Box<Accept>,
+        ack: Vec<TransactionId>,
+        task: Task<Option<FeedHit>>,
+    },
     /// The convert is in flight.
     Converting {
         accept: Box<Accept>,
@@ -636,6 +643,7 @@ impl Work {
             Work::Matching { .. } => "matching",
             Work::SearchFailed { .. } => "search_failed",
             Work::Choosing { .. } => "choosing",
+            Work::FeedMatching { .. } => "feed_matching",
             Work::Converting { .. } => "converting",
             Work::Resend { .. } => "resend",
             Work::Unknown { .. } => "unknown",
@@ -662,6 +670,29 @@ pub(crate) enum Dialog {
     ConfirmDiscard,
     /// Page Up/Down with unsaved changes: leave them?
     Leave(DraftOpen),
+    /// The document matches a bank line waiting in the Bank Feed (QA-4,
+    /// Q-A05h): Go to Bank Feed (the default) or Save anyway.
+    FeedLine {
+        accept: Box<Accept>,
+        ack: Vec<TransactionId>,
+        hit: FeedHit,
+    },
+}
+
+/// A waiting Bank Feed line the document matches (owner data: drawn,
+/// never logged; `Debug` shows nothing of it).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FeedHit {
+    /// The bank's date.
+    pub date: CalendarDate,
+    /// The bank amount (its size).
+    pub amount: Money,
+}
+
+impl std::fmt::Debug for FeedHit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FeedHit")
+    }
 }
 
 impl Dialog {
@@ -672,6 +703,7 @@ impl Dialog {
             Dialog::DiscardedElsewhere => "discarded_elsewhere",
             Dialog::ConfirmDiscard => "confirm_discard",
             Dialog::Leave(_) => "leave",
+            Dialog::FeedLine { .. } => "feed_line",
         }
     }
 }
@@ -782,6 +814,9 @@ pub(crate) struct DraftSession {
     pub dialog: Option<Dialog>,
     /// The attach dialog.
     pub attach: Option<AttachDialog>,
+    /// The Bank Feed was searched for this body (QA-4): it isn't again
+    /// (a resend with the closing-date password, Save anyway).
+    feed_checked: Option<PostBody>,
     /// A plain note on the banner (i18n key).
     pub note: Option<&'static str>,
     /// The record it became.
@@ -876,6 +911,7 @@ impl DraftSession {
             matched: None,
             dialog: None,
             attach: None,
+            feed_checked: None,
             note: None,
             posted: None,
             hide_source_line: false,
@@ -1343,7 +1379,7 @@ impl DraftSession {
             && *body == a.body
         {
             let ack = ack.clone();
-            self.send_convert(a, ack);
+            self.convert_after_feed(Box::new(a), ack);
             return true;
         }
         self.start_search(Box::new(a));
@@ -1364,9 +1400,30 @@ impl DraftSession {
             // duplicate check still runs).
             Search::Unsupported => {
                 self.matched = Some((a.body.clone(), Vec::new()));
-                self.send_convert(*a, Vec::new());
+                self.convert_after_feed(a, Vec::new());
             }
             Search::Failed => self.search_failed(a),
+        }
+    }
+
+    /// After the register search: the Bank Feed's waiting lines (QA-4,
+    /// Q-A05h). A line this document matches (the Bank Feed's receipt
+    /// rules, Q-A05a) asks first: entering it here and accepting the line
+    /// there would put it in the books twice. Searched once per body.
+    fn convert_after_feed(&mut self, accept: Box<Accept>, ack: Vec<TransactionId>) {
+        if self.feed_checked.as_ref() == Some(&accept.body) {
+            self.send_convert(*accept, ack);
+            return;
+        }
+        match super::feed_check::search(&self.link, self.group.as_ref(), &accept.probe) {
+            Some(task) => {
+                self.work = Work::FeedMatching { accept, ack, task };
+                self.poll_work();
+            }
+            None => {
+                self.feed_checked = Some(accept.body.clone());
+                self.send_convert(*accept, ack);
+            }
         }
     }
 
@@ -1554,11 +1611,33 @@ impl DraftSession {
                     let cands = cl_docread::register_match::candidates(&probe, &rows);
                     if cands.is_empty() {
                         self.matched = Some((accept.body.clone(), Vec::new()));
-                        self.send_convert(*accept, Vec::new());
+                        self.convert_after_feed(accept, Vec::new());
                         return;
                     }
                     self.attach = Some(AttachDialog::from_candidates(&accept.probe, &rows, &cands));
                     Work::Choosing { accept }
+                }
+            },
+            Work::FeedMatching {
+                accept,
+                ack,
+                mut task,
+            } => match task.try_take() {
+                None => Work::FeedMatching { accept, ack, task },
+                Some(r) => {
+                    match r {
+                        Ok(Some(hit)) => {
+                            self.dialog = Some(Dialog::FeedLine { accept, ack, hit });
+                            Work::Idle
+                        }
+                        // None waiting, or the feed couldn't be read: the
+                        // engine's own checks still run.
+                        Ok(None) | Err(_) => {
+                            self.feed_checked = Some(accept.body.clone());
+                            self.send_convert(*accept, ack);
+                            return;
+                        }
+                    }
                 }
             },
             Work::Converting {
@@ -1847,7 +1926,7 @@ impl DraftSession {
             }
             DialogAnswer::EnterAsNew(ids) => {
                 self.matched = Some((accept.body.clone(), ids.clone()));
-                self.send_convert(*accept, ids);
+                self.convert_after_feed(accept, ids);
             }
             DialogAnswer::Attach(target) => self.send_attach(accept, target, 0),
         }
@@ -2304,6 +2383,20 @@ impl DraftSession {
                     self.events.push(DraftEvent::Next(Some(to)));
                 }
             }
+            // Go to Bank Feed: nothing posts; the draft stays in the queue
+            // for the line's Receipt offer. Save anyway: posts.
+            Dialog::FeedLine { accept, ack, .. } => {
+                if yes {
+                    self.link
+                        .push(CompanyEvent::OpenWindow(CommandId::new("banking.feed")));
+                    self.events.push(DraftEvent::Cancelled);
+                } else {
+                    // Asked once: a resend (the closing-date password)
+                    // doesn't ask again.
+                    self.feed_checked = Some(accept.body.clone());
+                    self.send_convert(*accept, ack);
+                }
+            }
         }
     }
 
@@ -2321,6 +2414,12 @@ impl DraftSession {
             return;
         };
         let (title, body, yes, no): (&str, &str, &str, Option<&str>) = match &dialog {
+            Dialog::FeedLine { .. } => (
+                "doc_form.feed_line.title",
+                "doc_form.feed_line.body",
+                "doc_form.feed_line.go",
+                Some("doc_form.feed_line.save"),
+            ),
             Dialog::Stale { .. } => (
                 "doc_form.stale.title",
                 "doc_form.stale.body",
@@ -2367,7 +2466,17 @@ impl DraftSession {
             .resizable(false)
             .show(ctx, |ui| {
                 ui.set_width(width);
-                ui.add(egui::Label::new(t(body)).wrap());
+                let text = match &dialog {
+                    Dialog::FeedLine { hit, .. } => t_with(
+                        body,
+                        &[
+                            ("date", &crate::shell::us_date(hit.date)),
+                            ("amount", &hit.amount.abs().format(style)),
+                        ],
+                    ),
+                    _ => t(body),
+                };
+                ui.add(egui::Label::new(text).wrap());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let first = if matches!(dialog, Dialog::ConfirmDiscard) {
@@ -2378,10 +2487,16 @@ impl DraftSession {
                     if first.clicked() {
                         answer = Some(true);
                     }
+                    // Go to Bank Feed is the safe answer there (nothing
+                    // is entered).
+                    let safe_first = matches!(dialog, Dialog::FeedLine { .. });
+                    if safe_first && !ui.ctx().memory(|m| m.focused().is_some()) {
+                        first.request_focus();
+                    }
                     if let Some(no) = no {
                         // The safe answer is the default (Enter on it).
                         let r = ui.button(t(no));
-                        if !ui.ctx().memory(|m| m.focused().is_some()) {
+                        if !safe_first && !ui.ctx().memory(|m| m.focused().is_some()) {
                             r.request_focus();
                         }
                         if r.clicked() {

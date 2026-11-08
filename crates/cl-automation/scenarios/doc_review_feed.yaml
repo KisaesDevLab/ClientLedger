@@ -1,0 +1,69 @@
+# A05 QA-4 (Q-A05h) against `clientledger --demo`: a receipt in Review
+# Documents whose total and date fit a bank line still waiting in the Bank
+# Feed asks before it is entered. `dev.demo_feed_receipt` seeds a synthetic
+# cash-expense receipt that matches a waiting money-out line. Saving it as
+# an expense asks "This receipt matches a bank line waiting in the Bank
+# Feed ..."; Go to Bank Feed (the default) enters nothing and brings the
+# Bank Feed to the front, the receipt still offered there; saving again asks
+# again, and Save anyway enters it once. The second run (dark) finds the
+# first run's expense in the register first: Enter as new, then the same
+# question. All data is synthetic.
+name: doc_review_feed
+description: A receipt matching a waiting Bank Feed line asks first - Go to Bank Feed enters nothing; Save anyway enters it once.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - command: dev.demo_feed_receipt
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.lines, equals: 1}
+
+  # --- The receipt as an expense ------------------------------------------------
+  - command: vendors.review_documents
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 1, within_ms: 5000}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: card_charge, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: cash_expense}
+  - key: Alt+A
+  - click: {role: combo_box, label: Expense paid from}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - key: Alt+S
+  # The dark run: the light run's expense is in the register.
+  - click_if_present: {role: button, label_contains: Enter as new}
+  - assert_state: {key: screen.draft.dialog, equals: feed_line, within_ms: 5000}
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - assert_exists: {label_contains: "matches a bank line waiting in the Bank Feed"}
+  - assert_exists: {role: button, label: Go to Bank Feed}
+  - assert_exists: {role: button, label: Save anyway}
+  - screenshot: feed-line-question
+
+  # --- Go to Bank Feed: nothing entered -------------------------------------------
+  - click: {role: button, label: Go to Bank Feed}
+  - assert_state: {key: screen.screen, equals: bank_feed, within_ms: 5000}
+  - assert_state: {key: screen.receipts.drafts, equals: 1, within_ms: 5000}
+  - assert_state: {key: screen.receipts.lines, equals: 1}
+  - screenshot: feed-line-bank-feed
+
+  # --- Back on the form: asked again; Save anyway enters it once ------------------
+  - click: {role: tab, label_contains: "Record Expense"}
+  - assert_state: {key: screen.screen, equals: card_charge, within_ms: 5000}
+  - key: Alt+S
+  - click_if_present: {role: button, label_contains: Enter as new}
+  - assert_state: {key: screen.draft.dialog, equals: feed_line, within_ms: 5000}
+  - click: {role: button, label: Save anyway}
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_not_exists: {role: tab, label_contains: "Record Expense"}

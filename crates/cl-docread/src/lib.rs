@@ -43,6 +43,7 @@ pub mod card;
 pub mod correct;
 pub mod dates;
 pub mod dupes;
+pub mod feed_match;
 pub mod fields;
 pub mod kind;
 pub mod layout;

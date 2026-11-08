@@ -109,6 +109,10 @@ fn put(
 /// Draws the whole window.
 pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     let tokens = Tokens::of(ui.ctx());
+    // A short window (200% zoom, QA-9): the key hints leave the bulk bar
+    // and the list and panel keep a usable height; the window body
+    // scrolls to them.
+    let short = ui.available_height() < SHORT_BELOW;
     header(s, ui, &tokens);
     if !s.supported {
         form::hint(ui, &tokens, &t("bank_feed.unsupported"));
@@ -118,7 +122,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     ui.add_space(6.0);
     rule_banner(s, ui, &tokens);
     rule_offer(s, ui, &tokens);
-    bulk::bar(s, ui, &tokens);
+    bulk::bar(s, ui, &tokens, !short);
     toast(s, ui, &tokens);
     undo_changed(s, ui, &tokens);
     closing(s, ui, &tokens);
@@ -140,9 +144,10 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
             super::detail::draw(s, ui, &tokens);
         }
     };
-    if avail.x < STACK_BELOW {
+    let stacked = avail.x < STACK_BELOW;
+    let (list_h, panel_h) = body_heights(avail.y, stacked);
+    if stacked {
         // Narrow window or large zoom: the panel goes under the list.
-        let list_h = (avail.y * 0.5).max(160.0);
         ui.allocate_ui_with_layout(
             Vec2::new(avail.x, list_h),
             egui::Layout::top_down(egui::Align::Min),
@@ -153,22 +158,29 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
             },
         );
         ui.separator();
-        // The panel scrolls inside what is left of the window.
-        let rest = ui.available_size();
-        ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_max_height(rest.y);
-            side(s, ui);
-        });
+        // The panel scrolls inside its own height; Accept stays under it.
+        ui.allocate_ui_with_layout(
+            Vec2::new(avail.x, panel_h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_height(panel_h);
+                side(s, ui);
+            },
+        );
         return;
     }
     let detail_w = (avail.x * 0.3).clamp(DETAIL_MIN_W, DETAIL_W);
-    let list_w = avail.x - detail_w - 12.0;
+    // The separator and the spacing on both sides of it (QA-2: the panel
+    // ran a few points past the window's right edge, cutting its text).
+    let gap = ui.spacing().item_spacing.x * 2.0 + 8.0;
+    let list_w = avail.x - detail_w - gap;
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
-            Vec2::new(list_w, avail.y),
+            Vec2::new(list_w, list_h),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_max_width(list_w);
+                ui.set_max_height(list_h);
                 // Room for the footnote's two lines.
                 list(s, ui, &tokens, 52.0);
                 footnote(s, ui, &tokens);
@@ -176,14 +188,38 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
         );
         ui.separator();
         ui.allocate_ui_with_layout(
-            Vec2::new(detail_w, avail.y),
+            Vec2::new(detail_w, panel_h),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_max_width(detail_w);
+                ui.set_max_height(panel_h);
                 side(s, ui);
             },
         );
     });
+}
+
+/// Below this body height the window is short (QA-9: 200% zoom).
+const SHORT_BELOW: f32 = 560.0;
+/// The list's least height: its headings, four rows and the footnote.
+const LIST_MIN_H: f32 = 28.0 + 4.0 * ROW_H + 60.0;
+/// The panel's least height: the line, a receipt's offers and Accept.
+const PANEL_MIN_H: f32 = 340.0;
+
+/// The list's and the panel's heights in `avail` points of body height
+/// (`stacked`: the panel under the list). Never less than they need to be
+/// usable (QA-9): on a short window they run past its bottom edge and the
+/// window body scrolls to them.
+pub(crate) fn body_heights(avail: f32, stacked: bool) -> (f32, f32) {
+    let avail = avail.max(0.0);
+    if stacked {
+        let list = (avail * 0.5).max(LIST_MIN_H);
+        let panel = (avail - list - 8.0).max(PANEL_MIN_H);
+        (list, panel)
+    } else {
+        let h = avail.max(LIST_MIN_H.max(PANEL_MIN_H));
+        (h, h)
+    }
 }
 
 fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
@@ -381,6 +417,31 @@ fn badge(ui: &Ui, rect: egui::Rect, tokens: &Tokens, why: Why) {
     p.galley(r.min + Vec2::new(6.0, 2.0), g, color);
 }
 
+/// The account picked in the panel, when `r` is the panel's row.
+fn panel_account(s: &BankFeedScreen, r: &FeedRow) -> Option<String> {
+    if s.detail.row != Some(r.id) {
+        return None;
+    }
+    let a = s.detail.account?;
+    s.chart
+        .iter()
+        .find(|(id, _)| *id == a)
+        .map(|(_, n)| n.clone())
+}
+
+/// The vendor the picked receipt reads, when `r` is the panel's row.
+fn receipt_payee(s: &BankFeedScreen, r: &FeedRow) -> Option<String> {
+    if s.detail.row != Some(r.id) {
+        return None;
+    }
+    let pick = s.detail.receipt.pick?;
+    s.receipts
+        .of(r.id)
+        .contains(&pick)
+        .then(|| super::receipts::receipt_vendor(s, pick))
+        .flatten()
+}
+
 /// What the row will be recorded as: a payee line and an account line.
 fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
     if r.status == FeedStatus::Excluded {
@@ -424,7 +485,21 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
                 t("bank_feed.recorded.transfer.sub"),
             ),
         },
-        Why::NeedsYou => (t("bank_feed.recorded.choose"), String::new()),
+        // The account picked in the panel shows on its row (QA-2).
+        Why::NeedsYou => match panel_account(s, r) {
+            Some(a) => (payee.unwrap_or_else(|| r.description.clone()), a),
+            None => (t("bank_feed.recorded.choose"), String::new()),
+        },
+        // A receipt line (A05 QA-1): its vendor (the payee, else the name
+        // the picked receipt reads), and the account, else what's missing.
+        Why::Receipt => (
+            payee
+                .or_else(|| receipt_payee(s, r))
+                .unwrap_or_else(|| r.description.clone()),
+            account
+                .or_else(|| panel_account(s, r))
+                .unwrap_or_else(|| t("bank_feed.recorded.choose_account")),
+        ),
         // A look-alike reads like any row needing a choice (P26 QA-21).
         Why::Duplicate if account.is_none() => (t("bank_feed.recorded.choose"), String::new()),
         Why::Accepted => {
@@ -825,7 +900,8 @@ fn toast(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         .fill(tokens.surface_subtle)
         .inner_margin(egui::Margin::symmetric(16, 6))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            // Wraps on a narrow or zoomed window: Undo never leaves it.
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t_with("bank_feed.toast", &[("n", &rows.to_string())]));
                 undo = ui
                     .add_enabled(

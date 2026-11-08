@@ -1052,6 +1052,30 @@ pub(crate) fn move_draft_key(
     moved
 }
 
+/// U-180 (A05): `file`, filed on the deleted record `from`, goes back on
+/// the draft key `key`. False when it isn't there.
+pub(crate) fn refile_as_draft(
+    state: &mut DemoState,
+    file: cl_api::AttachmentId,
+    from: TransactionId,
+    key: String,
+) -> bool {
+    let from = from.to_string();
+    match state
+        .checks
+        .files
+        .iter_mut()
+        .find(|f| f.id == file && f.kind != "draft" && f.to == from)
+    {
+        Some(f) => {
+            f.kind = "draft";
+            f.to = key;
+            true
+        }
+        None => false,
+    }
+}
+
 /// `POST /attachments/{id}/link`: files one attachment on `to`. A file a
 /// live document draft reads is refused (409 `ATTACHMENT_IN_USE`,
 /// `details.draftId`; A04, U-95 guard): attach the draft or discard it

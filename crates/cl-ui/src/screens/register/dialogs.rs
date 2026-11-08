@@ -699,7 +699,10 @@ impl RegisterScreen {
             .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
         match kind {
             ActionKind::Void => demo.ledger.void(id),
-            ActionKind::Delete => demo.ledger.delete(id),
+            // U-180: its documents go back to the review queue.
+            ActionKind::Delete => {
+                crate::company::demo::drafts::delete_entry(&mut demo, id).map(|_| ())
+            }
         }
     }
 

@@ -509,6 +509,18 @@ impl Capabilities {
     /// U-178 (P26 QA-9): list rows carry `acceptKind`.
     pub const FEED_ACCEPT_KIND: &'static str = "feed-accept-kind-v1";
 
+    // ---- A05: document drafts in the Bank Feed (engine U-180, U-181)
+    /// U-181: an accept item may carry `documentDraft {id,
+    /// expectedUpdatedAt}`; the draft's file is attached to the posted or
+    /// matched entry and the draft closes in the same transaction. Per-item
+    /// failures `DOCUMENT_DRAFT_CLOSED {transactionId}`, `STALE
+    /// {updatedAt}`, `DOCUMENT_FILE_MISSING`, `INVALID_KIND`.
+    pub const FEED_ACCEPT_DRAFT: &'static str = "feed-accept-draft-v1";
+    /// U-180: deleting an entry (feed Undo, `DELETE /transactions/:id`)
+    /// returns the drafts converted or attached to it to the review queue
+    /// with their files; the answers list them in `reopenedDrafts`.
+    pub const DOCUMENT_DRAFTS_REOPEN: &'static str = "document-drafts-reopen-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

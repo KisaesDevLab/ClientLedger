@@ -43,3 +43,24 @@ pub fn install(service: ReadingService) {
 pub fn shared() -> Option<Arc<ReadingService>> {
     SHARED.get().cloned()
 }
+
+/// The total a draft was read with, its sign kept (A05 QA-7). The engine
+/// stores only totals of zero or more as `docTotal` (its schema and a
+/// table check refuse a minus), so a credit read as a negative total is
+/// stored without one and its sign lives only in the reading's header: a
+/// full draft gives it, a summary without a stored total gives `None`.
+#[must_use]
+pub fn read_total(d: &cl_api::DocumentDraft) -> Option<cl_core::Money> {
+    if d.doc_total.is_some() {
+        return d.doc_total;
+    }
+    let h: cl_docread::model::Header = serde_json::from_value(d.fields.clone()?).ok()?;
+    h.total.as_ref().or(h.balance_due.as_ref()).map(|f| f.value)
+}
+
+/// A summary whose total may be a credit: read (a reader, a date) but no
+/// stored total. Only the full draft tells (see [`read_total`]).
+#[must_use]
+pub fn total_needs_full(d: &cl_api::DocumentDraft) -> bool {
+    d.doc_total.is_none() && d.doc_date.is_some() && d.reader.is_some() && d.fields.is_none()
+}

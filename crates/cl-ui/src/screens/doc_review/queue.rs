@@ -175,7 +175,7 @@ pub struct RowView {
     pub date: Option<CalendarDate>,
     /// Its reference as read.
     pub reference: Option<String>,
-    /// Its total as read.
+    /// Its total as read, sign kept (a credit is below zero, QA-7).
     pub total: Option<Money>,
     /// The day it arrived (UI check item 5).
     pub arrived: Option<CalendarDate>,
@@ -194,7 +194,7 @@ impl RowView {
         RowView {
             date: d.doc_date,
             reference: d.doc_reference.clone(),
-            total: d.doc_total,
+            total: crate::reading::read_total(d),
             arrived: d.created_at.and_then(|t| {
                 let local = t.as_utc().with_timezone(&chrono::Local).date_naive();
                 CalendarDate::from_naive(local).ok()
@@ -813,5 +813,30 @@ mod tests {
         assert_eq!(q.names_missing(), Vec::<AttachmentId>::new());
         assert!(!format!("{q:?}").contains("acme"));
         assert!(!format!("{:?}", q.views[&id]).contains("acme"));
+    }
+    /// QA-7: the engine stores a credit's total without its minus (none at
+    /// all), so the row takes it from the reading and says "credit".
+    #[test]
+    fn a_credit_shows_its_total_as_a_credit() {
+        let mut credit = draft(
+            1,
+            "ready",
+            json!({"total": found("-45.10", 9_500)}),
+            json!([]),
+        );
+        credit.doc_total = None;
+        let v = RowView::of(&credit);
+        assert_eq!(v.total, Money::parse_wire("-45.10").ok());
+        let style = cl_core::MoneyStyle::default();
+        assert_eq!(
+            super::super::total_text(v.total.expect("total"), style),
+            "45.10 credit"
+        );
+        let plain = draft(2, "ready", json!({}), json!([]));
+        assert_eq!(RowView::of(&plain).total, Money::parse_wire("12.50").ok());
+        assert_eq!(
+            super::super::total_text(Money::parse_wire("12.50").expect("m"), style),
+            "12.50"
+        );
     }
 }

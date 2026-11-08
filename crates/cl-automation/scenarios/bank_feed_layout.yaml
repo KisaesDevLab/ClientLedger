@@ -21,6 +21,19 @@ steps:
         - {x: 212, y: 680, width: 560, height: 200}
   - screenshot: w1024
 
+  # --- A05 QA-6: a receipt section keeps Accept in the window ------------------
+  - command: dev.demo_feed_receipt
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - assert_exists: {role: radio_button, label: "Don't use this receipt"}
+  - assert_exists: {role: button, label: Accept  A}
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 680, width: 560, height: 200}
+  - screenshot: w1024-receipt
+  - command: dev.demo_feed_reset
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+
   # --- QA-3: the bulk bar's combo is named --------------------------------------
   - click: {role: button, label: Bank line 1 of 37}
   - key: Space
@@ -68,5 +81,42 @@ steps:
   - screenshot: zoom200
   - resize: {width: 1024, height: 768}
   - screenshot: zoom200-1024
+
+  # --- A05 QA-9: a receipt line at 200% zoom ------------------------------------
+  # The toolbars fill most of a 200% window: the list and the panel keep
+  # their height below them and the window body scrolls to the panel's
+  # Receipt section and Accept; Undo is back at the top.
+  - command: dev.demo_feed_reset
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+  # Sizes are window pixels: resize at 100%, then zoom.
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 200}
+  - command: dev.demo_feed_receipt
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - scroll: {target: {role: button, label: Rules}, to: end}
+  - assert_exists: {role: radio_button, label: "Don't use this receipt"}
+  - screenshot: zoom200-receipt
+  - click: {role: button, label: Accept  A}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 1}
+  - scroll: {target: {role: button, label: Rules}, to: start}
+  - screenshot: zoom200-recorded
+  - click: {role: button, label: Undo}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 0}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1024, height: 768}
+  - set_zoom: {percent: 200}
+  - command: dev.demo_feed_receipt
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - scroll: {target: {role: button, label: Rules}, to: end}
+  - screenshot: zoom200-1024-receipt
+  - click: {role: button, label: Accept  A}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 1}
+  - command: dev.demo_feed_reset
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}

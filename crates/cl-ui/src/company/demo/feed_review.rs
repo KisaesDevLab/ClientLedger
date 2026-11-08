@@ -31,6 +31,13 @@ use super::DemoState;
 mod posting;
 pub use posting::*;
 
+#[path = "feed_review_receipts.rs"]
+mod receipts;
+pub use receipts::{
+    SeedLine, discard_seeded, seed_credit, seed_receipt, seed_receipt_for, seed_receipt_on,
+    seed_two_receipts,
+};
+
 /// One row of the demo review.
 #[derive(Clone, Debug)]
 struct Row {

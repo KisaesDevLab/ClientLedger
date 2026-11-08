@@ -402,6 +402,37 @@ fn match_rows_open_on_match_and_a_is_never_silent() {
     assert_eq!(s.notice.map(|n| n.0), Some("bank_feed.notice.pick_account"));
 }
 
+/// A05 QA-8: the line under the cursor turns into a match (an entry saved
+/// elsewhere) while the panel is open: the panel opens again on Match; a
+/// reload that leaves the line as it was keeps the owner's pick.
+#[test]
+fn the_panel_follows_a_line_that_turns_into_a_match() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Review;
+    s.reload();
+    let id = s
+        .rows
+        .iter()
+        .find(|r| s.why(r) == Why::NeedsYou && r.is_money_out())
+        .map(|r| r.id)
+        .expect("a needs-you row");
+    s.list.focus(id);
+    detail::follow(&mut s);
+    assert_eq!(s.detail.mode, detail::Mode::Categorize);
+    let picked = s.chart.first().map(|(a, _)| *a);
+    s.detail.account = picked;
+    // Read again, unchanged: the pick stays.
+    detail::follow(&mut s);
+    assert_eq!(s.detail.account, picked);
+    // Read again as a match.
+    let r = s.rows.iter_mut().find(|r| r.id == id).expect("row");
+    r.bucket = Some(cl_api::FeedBucket::Matches);
+    r.match_candidate_count = 1;
+    detail::follow(&mut s);
+    assert_eq!(s.detail.mode, detail::Mode::Match, "opened again on Match");
+    assert_eq!(s.detail.row, Some(id));
+}
+
 /// P26 QA-18: C opens the account box; the chart narrows as you type.
 #[test]
 fn c_opens_the_account_box() {
@@ -513,4 +544,56 @@ fn the_bank_text_is_the_banks_own() {
     assert_eq!(bank_text(&r), "ONLINE TRANSFER TO CARD");
     r.original_description = Some("  ".into());
     assert_eq!(bank_text(&r), "Online");
+}
+
+/// A05 QA (minor): a match candidate without a payee or number reads
+/// "date · kind · amount", never "· ·", and its amount is the size.
+#[test]
+fn a_candidate_label_leaves_out_what_is_empty() {
+    let mut c = cl_api::MatchCandidate {
+        transaction: "70000000-0000-4000-8000-000000000001".parse().expect("txn"),
+        line: "71000000-0000-4000-8000-000000000001"
+            .parse()
+            .expect("line"),
+        txn_type: Some("expense".into()),
+        txn_number: None,
+        date: None,
+        amount: cl_core::Money::parse_wire("685.55").expect("m"),
+        memo: None,
+        contact_name: None,
+        check_number: None,
+    };
+    assert_eq!(
+        detail::candidate_text("10/02/2025", "Expense", &c, "685.55"),
+        "10/02/2025 \u{b7} Expense \u{b7} 685.55"
+    );
+    c.txn_number = Some("1042".into());
+    c.contact_name = Some("Ozark Valley Electric".into());
+    assert_eq!(
+        detail::candidate_text("10/02/2025", "Check", &c, "685.55"),
+        "10/02/2025 \u{b7} Check 1042 \u{b7} Ozark Valley Electric \u{b7} 685.55"
+    );
+    c.contact_name = Some("  ".into());
+    assert_eq!(
+        detail::candidate_text("10/02/2025", "", &c, "685.55"),
+        "10/02/2025 \u{b7} 1042 \u{b7} 685.55"
+    );
+}
+
+/// A05 QA-9: at 200% zoom the body under the toolbars is a few points
+/// tall; the list and the panel keep a usable height (the window body
+/// scrolls to them) instead of shrinking to a sliver.
+#[test]
+fn a_short_window_keeps_the_list_and_panel_usable() {
+    for stacked in [true, false] {
+        for avail in [0.0, 40.0, 120.0] {
+            let (list, panel) = view::body_heights(avail, stacked);
+            assert!(list >= 4.0 * 46.0, "{avail} {stacked}: list {list}");
+            assert!(panel >= 300.0, "{avail} {stacked}: panel {panel}");
+        }
+    }
+    // A tall window: the panel takes what the list leaves.
+    let (list, panel) = view::body_heights(900.0, true);
+    assert!((list + panel - 892.0).abs() < 0.5);
+    assert_eq!(view::body_heights(900.0, false), (900.0, 900.0));
 }

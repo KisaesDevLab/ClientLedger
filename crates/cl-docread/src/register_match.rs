@@ -1,7 +1,7 @@
 //! Register match (A04 D3, Q-282, Q-A04d, review M5): which transactions
 //! already in the books a document could be, so the owner can attach it
 //! instead of entering it twice. Pure rules: no I/O, no clock, no floats.
-//! A05 reuses them for bank lines.
+//! A05 reuses its window for bank lines ([`crate::feed_match`]).
 //!
 //! A row is a **candidate** when all of these hold:
 //!

@@ -182,6 +182,8 @@ pub struct RegisterScreen {
     edit_lines: Vec<splits::SplitRow>,
     /// A transaction being read for an edit.
     edit_load: Option<edit::EditLoad>,
+    /// The edited transaction read again after a change elsewhere.
+    edit_check: Option<edit::EditCheck>,
     /// A transaction the register can't change, shown read-only.
     read_only: Option<Vec<edit::ReadLine>>,
     /// The quick filters as typed.
@@ -292,6 +294,7 @@ impl RegisterScreen {
             splits: None,
             edit_lines: Vec::new(),
             edit_load: None,
+            edit_check: None,
             read_only: None,
             quick: filters::QuickInput::default(),
             goto: goto::GotoBar::default(),
@@ -566,6 +569,7 @@ impl RegisterScreen {
     fn poll(&mut self) {
         self.poll_entry();
         self.poll_edit();
+        self.poll_edit_check();
         self.poll_actions();
         self.drive_goto();
         self.poll_report();
@@ -776,6 +780,8 @@ impl RegisterScreen {
     fn ledger_changed(&mut self) {
         self.model.invalidate();
         self.footer.invalidate();
+        // The transaction open in the pinned row may be gone (A05 QA-3).
+        self.check_edit();
     }
 
     /// Saves in other windows of this app (Q-262): the rows and the footer

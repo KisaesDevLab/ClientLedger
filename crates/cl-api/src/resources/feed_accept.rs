@@ -13,12 +13,20 @@
 //!   `FEED_UNDO_CHANGED {ids}` (edited since) undoes nothing: ask the
 //!   owner, then send again with `force`.
 //!
+//! A05 (U-181, `feed-accept-draft-v1`): an item may carry a document
+//! draft ([`AcceptItem::Receipt`]); the engine attaches its file to the
+//! entry it posts or matches and closes the draft in the same transaction.
+//! A05 (U-180, `document-drafts-reopen-v1`): an Undo that deletes an entry
+//! returns its drafts to the review queue ([`UndoOutcome::reopened_drafts`]).
+//!
 //! Amounts: a split travels as in [`choice_body`]; nothing here totals.
 
 use std::fmt;
 
 use cl_core::ids::{JournalLineId, TransactionId};
 use serde::Deserialize;
+
+use crate::resources::document_drafts::DocumentDraftId;
 use serde_json::{Map, Value, json};
 
 use crate::client::{Call, Method};
@@ -64,6 +72,23 @@ impl fmt::Display for UndoGroupId {
     }
 }
 
+/// A document draft an accept files on the row's entry (U-181).
+#[derive(Clone, PartialEq, Eq)]
+pub struct DraftLink {
+    /// The draft.
+    pub id: DocumentDraftId,
+    /// Its change token exactly as read (`updatedAt`), never reformatted.
+    pub expected_updated_at: String,
+}
+
+impl fmt::Debug for DraftLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DraftLink")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// One row of an accept.
 #[derive(Clone, PartialEq, Eq)]
 pub enum AcceptItem {
@@ -81,6 +106,15 @@ pub enum AcceptItem {
         /// Its bank line.
         line: Option<JournalLineId>,
     },
+    /// `item` (as proposed, values or a match) with a document draft whose
+    /// file is attached to the entry and which closes with it (U-181,
+    /// `feed-accept-draft-v1`). Never nested.
+    Receipt {
+        /// What posts or matches.
+        item: Box<AcceptItem>,
+        /// The draft.
+        draft: DraftLink,
+    },
 }
 
 impl AcceptItem {
@@ -91,6 +125,25 @@ impl AcceptItem {
             AcceptItem::AsProposed(id)
             | AcceptItem::Values(id, _)
             | AcceptItem::Match { id, .. } => *id,
+            AcceptItem::Receipt { item, .. } => item.id(),
+        }
+    }
+
+    /// The draft this item files, if any.
+    #[must_use]
+    pub fn draft(&self) -> Option<&DraftLink> {
+        match self {
+            AcceptItem::Receipt { draft, .. } => Some(draft),
+            _ => None,
+        }
+    }
+
+    /// What posts or matches (the item without its draft).
+    #[must_use]
+    pub fn inner(&self) -> &AcceptItem {
+        match self {
+            AcceptItem::Receipt { item, .. } => item,
+            other => other,
         }
     }
 }
@@ -104,6 +157,9 @@ impl fmt::Debug for AcceptItem {
                 id, transaction, ..
             } => {
                 write!(f, "Match({id} -> {transaction})")
+            }
+            AcceptItem::Receipt { item, draft } => {
+                write!(f, "Receipt({item:?}, {})", draft.id)
             }
         }
     }
@@ -223,11 +279,47 @@ impl AcceptFailure {
     pub const NOT_ACCEPTED: &'static str = "FEED_ITEM_NOT_ACCEPTED";
     /// Another request holds the row.
     pub const IN_USE: &'static str = "FEED_ITEM_IN_USE";
+    /// U-181: the receipt was already used or thrown away
+    /// (`details.transactionId` when it was used). The row didn't post.
+    pub const DRAFT_CLOSED: &'static str = "DOCUMENT_DRAFT_CLOSED";
+    /// U-181: the receipt changed since it was read (`details.updatedAt`).
+    /// The row didn't post.
+    pub const DRAFT_STALE: &'static str = "STALE";
+    /// U-181: the receipt's file was deleted. The row didn't post.
+    pub const DRAFT_FILE_MISSING: &'static str = "DOCUMENT_FILE_MISSING";
+    /// U-181: the draft is a vendor statement (never filed on an entry).
+    pub const DRAFT_INVALID_KIND: &'static str = "INVALID_KIND";
+    /// U-181: the receipt's file is already filed on a record.
+    pub const DRAFT_FILE_FILED: &'static str = crate::ATTACHMENT_NOT_DRAFT;
+    /// U-181: the matched entry can't take files.
+    pub const DRAFT_TARGET: &'static str = crate::TARGET_NOT_ATTACHABLE;
+    /// U-181: the user may not file this receipt (the locked rows'
+    /// recheck).
+    pub const DRAFT_DENIED: &'static str = "PERMISSION_DENIED";
+    /// U-181: not this company's draft. (A row that isn't found is
+    /// skipped, never a failure, so on an accept this is the receipt.)
+    pub const DRAFT_NOT_FOUND: &'static str = "NOT_FOUND";
 
     /// Dated on or before the closing date: needs the password.
     #[must_use]
     pub fn is_locked(&self) -> bool {
         self.code == Self::PERIOD_LOCKED
+    }
+
+    /// A refusal of the row's receipt (U-181); the row didn't post.
+    #[must_use]
+    pub fn is_receipt(&self) -> bool {
+        matches!(
+            self.code.as_str(),
+            Self::DRAFT_CLOSED
+                | Self::DRAFT_STALE
+                | Self::DRAFT_FILE_MISSING
+                | Self::DRAFT_INVALID_KIND
+                | Self::DRAFT_FILE_FILED
+                | Self::DRAFT_TARGET
+                | Self::DRAFT_DENIED
+                | Self::DRAFT_NOT_FOUND
+        )
     }
 }
 
@@ -293,6 +385,9 @@ pub struct UndoOutcome {
     pub undone: Vec<Undone>,
     /// Rows that stayed (`FEED_UNDO_RECONCILED`, `TB_PERIOD_LOCKED`, …).
     pub failures: Vec<AcceptFailure>,
+    /// Drafts whose entry was deleted: back in the review queue with their
+    /// files (U-180, `document-drafts-reopen-v1`; empty without it).
+    pub reopened_drafts: Vec<DocumentDraftId>,
 }
 
 impl UndoOutcome {
@@ -391,11 +486,14 @@ struct WireUndone {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WireUndo {
     #[serde(default)]
     undone: Vec<WireUndone>,
     #[serde(default)]
     failures: Vec<WireFailure>,
+    #[serde(default)]
+    reopened_drafts: Vec<String>,
 }
 
 /// Reads an undo answer.
@@ -418,9 +516,16 @@ pub fn undo_outcome_from(body: &[u8]) -> Result<UndoOutcome, ApiError> {
             group: UndoGroupId::parse(&u.undo_group_id)?,
         });
     }
+    let reopened_drafts = w
+        .reopened_drafts
+        .iter()
+        .map(|d| DocumentDraftId::parse(d))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| ApiError::Decode { what: WHAT })?;
     Ok(UndoOutcome {
         undone,
         failures: failures_of(w.failures)?,
+        reopened_drafts,
     })
 }
 
@@ -450,7 +555,7 @@ pub fn accept_body(req: &AcceptRequest) -> Result<Value, ApiError> {
                 if !seen.insert(i.id()) {
                     return Err(bad());
                 }
-                let mut m = match i {
+                let mut m = match i.inner() {
                     AcceptItem::AsProposed(_) => Map::new(),
                     AcceptItem::Values(_, c) => match choice_body(c)? {
                         Value::Object(m) => m,
@@ -466,7 +571,21 @@ pub fn accept_body(req: &AcceptRequest) -> Result<Value, ApiError> {
                         }
                         m
                     }
+                    // A receipt inside a receipt.
+                    AcceptItem::Receipt { .. } => return Err(bad()),
                 };
+                if let Some(d) = i.draft() {
+                    if d.expected_updated_at.trim().is_empty() {
+                        return Err(bad());
+                    }
+                    m.insert(
+                        "documentDraft".into(),
+                        json!({
+                            "id": d.id.to_string(),
+                            "expectedUpdatedAt": d.expected_updated_at,
+                        }),
+                    );
+                }
                 m.insert("id".into(), json!(i.id().to_string()));
                 out.push(Value::Object(m));
             }
@@ -530,7 +649,8 @@ impl Feed<'_> {
     /// retry of the locked rows takes a **fresh** key.
     ///
     /// # Errors
-    /// `Local(Unsupported)` without `feed-accept-v1` (nothing sent);
+    /// `Local(Unsupported)` without `feed-accept-v1`, or without
+    /// `feed-accept-draft-v1` for an item with a receipt (nothing sent);
     /// [`accept_body`]'s checks; 409 `RULE_CHANGED` / `RULE_NOT_AUTO_ACCEPT`
     /// and 404 `RULE_NOT_FOUND` ([`crate::feed_refusal`]); a wrong password;
     /// any [`ApiError`].
@@ -541,6 +661,11 @@ impl Feed<'_> {
         key: IdempotencyKey,
     ) -> Result<AcceptOutcome, ApiError> {
         self.need(Capabilities::FEED_ACCEPT)?;
+        if let AcceptRequest::Items(items) = req
+            && items.iter().any(|i| i.draft().is_some())
+        {
+            self.need(Capabilities::FEED_ACCEPT_DRAFT)?;
+        }
         let body = self.with_password(accept_body(req)?, auth)?;
         let mut call = Call::at(Method::Post, FEED_ACCEPT.route()).json_body(body);
         call.idempotency_key = Some(key);

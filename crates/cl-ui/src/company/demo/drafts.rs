@@ -92,6 +92,9 @@ struct Row {
     /// Creation order (the list is newest first).
     seq: u64,
     draft: DocumentDraft,
+    /// A05: the draft key its file had before a Bank Feed accept filed it
+    /// on an entry (U-180 puts it back there when the entry is deleted).
+    filed_from: Option<String>,
 }
 
 /// What a keyed request was, for the replay rule (the closing-date
@@ -168,6 +171,10 @@ pub struct DemoDrafts {
     /// A06: the vendors' statement layouts (`stmt:` keys), apart from
     /// their bill layouts (Q-299).
     pub statement_layouts: Vec<(ContactId, cl_docread::model::Template)>,
+    /// A05: the receipts the demo's Bank Feed made for its lines
+    /// (`dev.demo_feed_receipt`); a new one throws away the earlier ones
+    /// still live, so every scenario run starts with one.
+    pub feed_seeded: Vec<DocumentDraftId>,
     /// Records the converts posted (not the ones attach filed on), so the
     /// demo's inbox can void them when it lays its files out again: every
     /// scenario run starts with the books as found (A04 step 15).
@@ -455,6 +462,7 @@ pub fn create(
         tenant,
         seq,
         draft: draft.clone(),
+        filed_from: None,
     });
     remember(state, &key, request, Reply::Draft(draft.clone()));
     Ok(draft)
@@ -1321,6 +1329,148 @@ pub fn attach(
         return Err(lost(&key));
     }
     Ok(attached)
+}
+
+// ------------------------------------------------------- A05: Bank Feed
+
+/// A Bank Feed accept's receipt refused (U-181): the per-item failure's
+/// code and details. Nothing posted for the row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeedDraftRefusal {
+    /// `DOCUMENT_DRAFT_CLOSED`, `STALE`, `DOCUMENT_FILE_MISSING`,
+    /// `INVALID_KIND` or `NOT_FOUND`.
+    pub code: &'static str,
+    /// Its details (`transactionId`, `updatedAt`).
+    pub details: Value,
+}
+
+/// U-181, before the row posts: the draft is live, unchanged since it was
+/// read, not a statement, and its file is still on its draft key.
+///
+/// # Errors
+/// The refusal the engine reports as the row's failure.
+pub(crate) fn feed_draft_ready(
+    state: &DemoState,
+    tenant: Option<TenantId>,
+    link: &cl_api::DraftLink,
+) -> Result<(), FeedDraftRefusal> {
+    let refuse = |code, details| Err(FeedDraftRefusal { code, details });
+    if !state.drafts.enabled {
+        return refuse("NOT_FOUND", Value::Null);
+    }
+    let Some(row) = tenant.and_then(|t| state.drafts.find(t, link.id)) else {
+        return refuse("NOT_FOUND", Value::Null);
+    };
+    let d = &row.draft;
+    if !d.status.is_live() {
+        return refuse(
+            cl_api::AcceptFailure::DRAFT_CLOSED,
+            json!({"status": d.status.as_str(), "transactionId": d.converted_transaction_id}),
+        );
+    }
+    if d.updated_at != link.expected_updated_at {
+        return refuse(
+            cl_api::AcceptFailure::DRAFT_STALE,
+            json!({"updatedAt": d.updated_at}),
+        );
+    }
+    if d.kind == DraftKind::Statement {
+        return refuse(cl_api::AcceptFailure::DRAFT_INVALID_KIND, Value::Null);
+    }
+    if draft_key_of(state, d.attachment_id).is_none() {
+        return refuse(cl_api::AcceptFailure::DRAFT_FILE_MISSING, Value::Null);
+    }
+    Ok(())
+}
+
+/// U-181, after the row posted or matched: the draft's file goes onto
+/// `transaction` and the draft closes (as an attach), in the same step.
+/// Checked first with [`feed_draft_ready`].
+///
+/// # Errors
+/// `NotFound` when the draft or the entry is gone.
+pub(crate) fn feed_file_on(
+    state: &mut DemoState,
+    tenant: TenantId,
+    id: DocumentDraftId,
+    transaction: TransactionId,
+) -> Result<(), ApiError> {
+    let kind = state
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|t| DemoLedger::id_of(t) == transaction)
+        .map(|t| t.kind)
+        .ok_or_else(not_found)?;
+    let to = AttachTo::Txn(engine_type(&kind), transaction);
+    let file = state
+        .drafts
+        .find(tenant, id)
+        .ok_or_else(not_found)?
+        .draft
+        .attachment_id;
+    let key = draft_key_of(state, file).ok_or_else(not_found)?;
+    super::checks::move_draft_key(state, &key, to, Some(id));
+    let type_name = to.attachable_type().to_string();
+    let updated_at = state.drafts.stamp();
+    let row = state.drafts.find_mut(tenant, id).ok_or_else(not_found)?;
+    row.draft.status = DraftStatus::Converted;
+    row.draft.converted_transaction_id = Some(transaction);
+    row.draft.converted_type = Some(type_name);
+    row.draft.updated_at = updated_at;
+    row.filed_from = Some(key);
+    Ok(())
+}
+
+/// U-180: `transaction` was deleted: every draft converted or attached to
+/// it is ready again, its file back on its draft key. The ids, oldest
+/// first.
+pub(crate) fn reopen_for(
+    state: &mut DemoState,
+    transaction: TransactionId,
+) -> Vec<DocumentDraftId> {
+    let ids: Vec<DocumentDraftId> = state
+        .drafts
+        .rows
+        .iter()
+        .filter(|r| {
+            r.draft.status == DraftStatus::Converted
+                && r.draft.converted_transaction_id == Some(transaction)
+        })
+        .map(|r| r.draft.id)
+        .collect();
+    for id in &ids {
+        let updated_at = state.drafts.stamp();
+        let Some(r) = state.drafts.rows.iter_mut().find(|r| r.draft.id == *id) else {
+            continue;
+        };
+        r.draft.status = DraftStatus::Ready;
+        r.draft.converted_transaction_id = None;
+        r.draft.converted_type = None;
+        r.draft.updated_at = updated_at;
+        let file = r.draft.attachment_id;
+        // The key it was filed from, else the draft's id (the engine's
+        // `originalDraftKey ?? draft.id`).
+        let key = r.filed_from.take().unwrap_or_else(|| id.to_string());
+        if let Some(file) = file {
+            super::checks::refile_as_draft(state, file, transaction, key);
+        }
+    }
+    ids
+}
+
+/// Deletes an entry as the engine's `deleteTransactionInTx` does: the
+/// drafts entered as or attached to it go back to the review queue
+/// (U-180). Every demo delete goes through here.
+///
+/// # Errors
+/// As [`super::register::DemoLedger::delete`].
+pub(crate) fn delete_entry(
+    state: &mut DemoState,
+    transaction: TransactionId,
+) -> Result<Vec<DocumentDraftId>, ApiError> {
+    state.ledger.delete(transaction)?;
+    Ok(reopen_for(state, transaction))
 }
 
 // ---------------------------------------------------- the register search

@@ -90,6 +90,14 @@ pub(crate) struct Outcome {
     pub undone: usize,
     /// What each single-row accept was (the Accepted view's text).
     pub accepted_as: Vec<(FeedItemId, &'static str)>,
+    /// Receipts Undo put back in the review queue (A05).
+    pub reopened: usize,
+    /// A05: the engine refused a row's receipt (the row didn't post): the
+    /// panel reads the receipt again before the next A.
+    pub receipt_refused: bool,
+    /// A05: 403 for a request carrying a receipt (the receipt's or the
+    /// entry's permission): not view-only; the panel stops offering it.
+    pub receipt_forbidden: bool,
 }
 
 impl Outcome {
@@ -129,6 +137,23 @@ impl Outcome {
         }
         let locked = o.locked();
         self.failed += o.failures.len() - locked.len();
+        // A05: a refused receipt says why (the row didn't post). Only rows
+        // that carried one: another row's code never reads as a receipt's.
+        let carried = |id: FeedItemId| match send {
+            Send::Accept(items) => items.iter().any(|i| i.id() == id && i.draft().is_some()),
+            _ => false,
+        };
+        if let Some(f) = o.failures.iter().find(|f| f.is_receipt() && carried(f.id)) {
+            self.notice = Some(receipt_key(&f.code));
+            // Changed or used: read again (a fresh token, or gone from the
+            // offers). Any other refusal would repeat: no longer offered.
+            match f.code.as_str() {
+                AcceptFailure::DRAFT_STALE
+                | AcceptFailure::DRAFT_CLOSED
+                | AcceptFailure::DRAFT_FILE_MISSING => self.receipt_refused = true,
+                _ => self.receipt_forbidden = true,
+            }
+        }
         if o.posted + o.matched > 0 {
             self.undo = Some((
                 UndoTarget::Group(o.undo_group),
@@ -186,9 +211,42 @@ impl Outcome {
                 Send::Undo(UndoTarget::Items(locked), *force),
             ));
         }
+        self.reopened += o.reopened_drafts.len();
         if self.done > 0 && self.notice.is_none() {
-            self.notice = Some("bank_feed.notice.undone");
+            // A05: the receipt went back to the review queue (U-180).
+            self.notice = Some(if o.reopened_drafts.is_empty() {
+                "bank_feed.notice.undone"
+            } else {
+                "bank_feed.notice.undone_receipt"
+            });
         }
+    }
+}
+
+/// An accept that failed as a whole: a 403 for a request carrying a
+/// receipt is the receipt's permission (U-181: the draft kind's resource
+/// or the entry's), not a view-only user (A05 review 3).
+fn accept_failed(o: &mut Outcome, send: &Send, e: ApiError) {
+    if let Send::Accept(items) = send
+        && cl_api::is_view_only(&e)
+        && items.iter().any(|i| i.draft().is_some())
+    {
+        o.receipt_forbidden = true;
+        o.failed += 1;
+        o.notice = Some("bank_feed.notice.receipt_forbidden");
+        return;
+    }
+    single(o, send, Err(e));
+}
+
+/// The notice for a refused receipt (U-181).
+pub(crate) fn receipt_key(code: &str) -> &'static str {
+    match code {
+        AcceptFailure::DRAFT_CLOSED => "bank_feed.notice.receipt_used",
+        AcceptFailure::DRAFT_STALE => "bank_feed.notice.receipt_changed",
+        AcceptFailure::DRAFT_FILE_MISSING => "bank_feed.notice.receipt_file_missing",
+        AcceptFailure::DRAFT_DENIED => "bank_feed.notice.receipt_forbidden",
+        _ => "bank_feed.notice.receipt_refused",
     }
 }
 
@@ -311,7 +369,7 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
                 Send::Accept(items) => {
                     match demo::accept(d, &AcceptRequest::Items(items.clone()), pw) {
                         Ok(a) => o.accepted(&a, &demo_send),
-                        Err(e) => single(&mut o, &demo_send, Err(e)),
+                        Err(e) => accept_failed(&mut o, &demo_send, e),
                     }
                 }
                 Send::Rule(r) => match demo::accept(d, &AcceptRequest::Rule(r.clone()), pw) {
@@ -341,7 +399,7 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
                         .await
                     {
                         Ok(a) => o.accepted(&a, &send),
-                        Err(e) => single(&mut o, &send, Err(e)),
+                        Err(e) => accept_failed(&mut o, &send, e),
                     }
                 }
                 Send::Rule(r) => match f.accept(&AcceptRequest::Rule(r.clone()), auth, key).await {
@@ -623,6 +681,82 @@ mod tests {
             .expect("id")
     }
 
+    fn receipt_link() -> cl_api::DraftLink {
+        cl_api::DraftLink {
+            id: "d0000000-0000-4000-8000-dd0000000001".parse().expect("d"),
+            expected_updated_at: "2026-11-08T10:00:00.000Z".into(),
+        }
+    }
+
+    /// A05 review 3: a 403 for an accept carrying a receipt is the
+    /// receipt's permission, not a view-only user; without a receipt it is.
+    #[test]
+    fn a_forbidden_receipt_is_not_view_only() {
+        let with = Send::Accept(vec![AcceptItem::Receipt {
+            item: Box::new(AcceptItem::AsProposed(item(1))),
+            draft: receipt_link(),
+        }]);
+        let mut o = Outcome::default();
+        accept_failed(&mut o, &with, ApiError::Forbidden { code: None });
+        assert!(o.receipt_forbidden && !o.view_only);
+        assert_eq!(o.notice, Some("bank_feed.notice.receipt_forbidden"));
+        let without = Send::Accept(vec![AcceptItem::AsProposed(item(1))]);
+        let mut o = Outcome::default();
+        accept_failed(&mut o, &without, ApiError::Forbidden { code: None });
+        assert!(o.view_only && !o.receipt_forbidden);
+    }
+
+    /// A05 review 4: a receipt code on a row that carried no receipt isn't
+    /// the receipt's (no re-read, no receipt notice); on a row that did, a
+    /// refusal that would repeat declines the receipt.
+    #[test]
+    fn a_receipt_code_counts_only_on_a_row_that_carried_one() {
+        let o = AcceptOutcome {
+            undo_group: UndoGroupId::new_random(),
+            posted: 0,
+            matched: 0,
+            skipped: Vec::new(),
+            failures: vec![AcceptFailure {
+                id: item(1),
+                code: AcceptFailure::DRAFT_NOT_FOUND.into(),
+                details: cl_api::ConflictDetails::default(),
+            }],
+            remaining: 0,
+            next_after: None,
+        };
+        let mut plain = Outcome::default();
+        plain.accepted(&o, &Send::Accept(vec![AcceptItem::AsProposed(item(1))]));
+        assert!(!plain.receipt_refused);
+        let mut with = Outcome::default();
+        with.accepted(
+            &o,
+            &Send::Accept(vec![AcceptItem::Receipt {
+                item: Box::new(AcceptItem::AsProposed(item(1))),
+                draft: receipt_link(),
+            }]),
+        );
+        assert!(with.receipt_forbidden && !with.receipt_refused);
+        assert_eq!(with.notice, Some("bank_feed.notice.receipt_refused"));
+        // A changed receipt is read again instead.
+        let stale = AcceptOutcome {
+            failures: vec![AcceptFailure {
+                id: item(1),
+                code: AcceptFailure::DRAFT_STALE.into(),
+                details: cl_api::ConflictDetails::default(),
+            }],
+            ..o.clone()
+        };
+        let mut again = Outcome::default();
+        again.accepted(
+            &stale,
+            &Send::Accept(vec![AcceptItem::Receipt {
+                item: Box::new(AcceptItem::AsProposed(item(1))),
+                draft: receipt_link(),
+            }]),
+        );
+        assert!(again.receipt_refused && !again.receipt_forbidden);
+    }
+
     /// P26 review m2: "Accept all from this rule" asks for the password for
     /// its locked rows and sends them again as proposed.
     #[test]
@@ -702,6 +836,7 @@ mod tests {
                 code: AcceptFailure::IN_USE.into(),
                 details: cl_api::ConflictDetails::default(),
             }],
+            reopened_drafts: Vec::new(),
         };
         let mut out = Outcome::default();
         out.undid(&o, &Send::Undo(UndoTarget::Items(vec![item(3)]), false));

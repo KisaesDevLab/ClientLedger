@@ -24,6 +24,7 @@
 //! (Q-A04n).
 
 pub mod attach;
+pub(crate) mod feed_check;
 pub mod queue;
 pub mod review;
 
@@ -145,6 +146,9 @@ pub struct DocReviewScreen {
     problem: Option<&'static str>,
     /// Read all was running last frame.
     was_reading: bool,
+    /// A05: a Bank Feed accept or Undo files receipts or puts them back
+    /// (U-180, U-181): the queue reads its page again.
+    bus: crate::data_bus::Subscription,
 }
 
 impl std::fmt::Debug for DocReviewScreen {
@@ -164,7 +168,9 @@ impl DocReviewScreen {
         today: CalendarDate,
     ) -> DocReviewScreen {
         let group = link.group().and_then(Result::ok);
+        let bus = link.bus().subscribe();
         let mut s = DocReviewScreen {
+            bus,
             link,
             tenant,
             today,
@@ -588,7 +594,7 @@ impl DocReviewScreen {
                             status,
                             status_color,
                         );
-                        let amount = view.total.map(|m| m.format(style)).unwrap_or_default();
+                        let amount = view.total.map(|m| total_text(m, style)).unwrap_or_default();
                         let amount = p.layout_no_wrap(
                             amount,
                             egui::FontId::monospace(13.0),
@@ -684,6 +690,17 @@ impl DocReviewScreen {
     }
 }
 
+/// A row's total: its size, and "credit" when it was read below zero (a
+/// credit memo or refund, QA-7).
+#[must_use]
+pub fn total_text(m: cl_core::Money, style: cl_core::MoneyStyle) -> String {
+    if m.is_negative() {
+        crate::i18n::t_with("doc_review.credit", &[("amount", &m.abs().format(style))])
+    } else {
+        m.format(style)
+    }
+}
+
 /// A draft form's name in the "What is this document?" chooser.
 #[must_use]
 pub fn form_key(f: DraftForm) -> &'static str {
@@ -705,6 +722,10 @@ impl Screen for DocReviewScreen {
         let tokens = Tokens::of(&ctx);
         self.poll();
         self.follow_reading(&ctx);
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.bank_feed {
+            self.loaded_at = None;
+        }
         if self.loaded_at.is_none_or(|at| at.elapsed() >= REFRESH) {
             self.reload();
         }

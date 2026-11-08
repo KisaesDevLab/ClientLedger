@@ -284,6 +284,13 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
     }
 }
 
+/// The edited transaction as it is now, read after a change elsewhere
+/// (A05 QA-3): `None` when it is gone (deleted, or voided).
+pub(super) struct EditCheck {
+    id: TransactionId,
+    task: Task<Option<cl_api::RecordVersion>>,
+}
+
 /// An edit being read.
 pub(super) struct EditLoad {
     splits: bool,
@@ -509,6 +516,80 @@ impl RegisterScreen {
         let id = e.id;
         let splits = self.splits.is_some();
         self.load_edit(id, splits);
+    }
+
+    /// The ledger changed elsewhere while a transaction is open in the
+    /// pinned row (A05 QA-3): read it again. A transaction deleted or
+    /// voided in the meantime (a Bank Feed Undo, another window) closes the
+    /// edit, so Enter can never save the old values over nothing or onto
+    /// the row now under the cursor.
+    pub(super) fn check_edit(&mut self) {
+        let Some(id) = self.entry.editing.as_ref().map(|e| e.id) else {
+            return;
+        };
+        let task = if let Some(mut demo) = self.link.demo_state() {
+            let chart = demo
+                .chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .clone();
+            let contacts = demo.contacts_mut().clone();
+            let now = demo
+                .ledger
+                .get(&chart, &contacts, id)
+                .filter(|_| !demo.ledger.is_void(id))
+                .map(|v| v.version);
+            Task::ready(now)
+        } else {
+            let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+                return;
+            };
+            match group.read(&session, move |s| async move {
+                match s.transactions().get(id).await {
+                    Ok(v) if matches!(v.record.status, TxnStatus::Void | TxnStatus::Deleted) => {
+                        Ok(None)
+                    }
+                    Ok(v) => Ok(Some(v.version)),
+                    Err(ApiError::NotFound { .. }) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }) {
+                Ok(p) => Task::Pending(p),
+                Err(_) => return,
+            }
+        };
+        self.edit_check = Some(EditCheck { id, task });
+        self.poll_edit_check();
+    }
+
+    /// Takes the check's answer: a transaction gone closes the edit with a
+    /// plain note; one changed elsewhere and not touched here opens again
+    /// as it is now (a typed change keeps the stale-save offer).
+    pub(super) fn poll_edit_check(&mut self) {
+        let Some(check) = self.edit_check.as_mut() else {
+            return;
+        };
+        let Some(result) = check.task.try_take() else {
+            return;
+        };
+        let id = check.id;
+        self.edit_check = None;
+        let Some(e) = self.entry.editing.as_ref().filter(|e| e.id == id) else {
+            return;
+        };
+        match result {
+            Ok(None) => {
+                self.finish_edit();
+                self.entry.error = None;
+                self.entry.problems = vec![TextKey("register.edit.removed_elsewhere")];
+            }
+            Ok(Some(v)) if v != e.version && !self.entry_dirty() => {
+                let splits = self.splits.is_some();
+                self.load_edit(id, splits);
+            }
+            // Unchanged, typed over, or the read failed: the save's own
+            // version check still guards it.
+            Ok(Some(_)) | Err(_) => {}
+        }
     }
 
     /// The last save failed because the record changed elsewhere.

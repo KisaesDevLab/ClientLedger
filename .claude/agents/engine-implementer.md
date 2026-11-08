@@ -16,6 +16,6 @@ Rules:
 - Update `openapi.json` for any route change and run the engine's export script.
 - Add or update engine tests; the engine's full test suite must pass.
 - Update the matching row in UPSTREAM.md (status, branch, files, migration notes).
-- Open a pull request on the engine repo for the owner to review (Q-29); do not merge it.
+- Open a pull request on the engine repo (KisaesDevLab/kisaes-gl-engine since A12). Merge only when the orchestrator's brief says so (owner rule Q-301: engine PRs merge when green; the orchestrator usually merges them itself). Never merge the base of a stacked PR with --delete-branch.
 
 Final report (under 400 words): change summary, endpoints added/changed, migrations, tests, PR link, server-appliance impact.

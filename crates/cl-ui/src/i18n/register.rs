@@ -182,6 +182,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.edit.finish_entry", "Record or clear the new transaction first."),
     ("register.edit.changed_elsewhere", "This transaction was changed somewhere else after you opened it. Your change wasn't saved."),
     ("register.edit.reload", "Reload"),
+    ("register.edit.removed_elsewhere", "The transaction you were changing was removed or voided somewhere else (for example by Undo in the Bank Feed). Nothing was saved."),
     ("register.edit.read_only", "You'll be able to change this kind of transaction in its own form."),
     ("register.edit.debit", "Debit"),
     ("register.edit.credit", "Credit"),

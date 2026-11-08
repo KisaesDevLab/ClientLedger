@@ -782,7 +782,33 @@ pub fn accept(
             out.skipped.push((id, AcceptSkip::PossibleDuplicate));
             continue;
         }
-        let result = match &item {
+        // U-181: the receipt is checked before the row posts; a refused
+        // receipt fails the row (nothing posted). The closing date comes
+        // first, as on the engine (a locked row asks for the password
+        // whatever its receipt).
+        let draft = item.draft().cloned();
+        if draft.is_some()
+            && !matches!(item.inner(), AcceptItem::Match { .. })
+            && let Err(e) = check_closing(journal::closing(state), &[r.date], password)
+        {
+            out.failures.push(failure(id, &e));
+            continue;
+        }
+        if let Some(link) = &draft
+            && let Err(e) = super::super::drafts::feed_draft_ready(state, state.open, link)
+        {
+            out.failures.push(AcceptFailure {
+                id,
+                code: e.code.to_string(),
+                details: cl_api::ConflictDetails::new(e.details),
+            });
+            continue;
+        }
+        // The row and its receipt are one step: a filing that fails after
+        // the posting takes the posting back (the engine's transaction).
+        let savepoint = draft.as_ref().map(|_| state.clone());
+        let result = match item.inner() {
+            AcceptItem::Receipt { .. } => Err(invalid()),
             AcceptItem::Match { transaction, .. } => {
                 match_with(state, id, *transaction, group).map(|()| false)
             }
@@ -827,6 +853,26 @@ pub fn accept(
                 true
             }),
         };
+        if let (Ok(_), Some(link)) = (&result, &draft) {
+            let entry = row(state, id).ok().and_then(|r| r.matched);
+            let filed = match (state.open, entry) {
+                (Some(tenant), Some(t)) => {
+                    super::super::drafts::feed_file_on(state, tenant, link.id, t)
+                }
+                _ => Err(ApiError::NotFound { code: None }),
+            };
+            if filed.is_err() {
+                if let Some(before) = savepoint {
+                    *state = before;
+                }
+                out.failures.push(AcceptFailure {
+                    id,
+                    code: AcceptFailure::DRAFT_NOT_FOUND.to_string(),
+                    details: cl_api::ConflictDetails::default(),
+                });
+                continue;
+            }
+        }
         match result {
             Ok(true) => out.posted += 1,
             Ok(false) => out.matched += 1,
@@ -952,11 +998,19 @@ pub fn undo(
                 out.failures.push(fail(AcceptFailure::PAYMENT_BOUNCED));
                 continue;
             }
-            if state.ledger.date_of(t).is_some()
-                && let Err(e) = state.ledger.delete(t)
-            {
-                out.failures.push(undo_failure(r.id, &e));
-                continue;
+            // U-180: its receipts go back to the review queue with their
+            // files.
+            if state.ledger.date_of(t).is_some() {
+                match super::super::drafts::delete_entry(state, t) {
+                    Ok(back) => out.reopened_drafts.extend(back),
+                    Err(e) => {
+                        out.failures.push(undo_failure(r.id, &e));
+                        continue;
+                    }
+                }
+            } else {
+                out.reopened_drafts
+                    .extend(super::super::drafts::reopen_for(state, t));
             }
         }
         // A deleted entry takes every row on it back (the other side of a
