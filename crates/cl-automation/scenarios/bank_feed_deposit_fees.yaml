@@ -1,0 +1,49 @@
+# Bank Feed deposit with processor fees (P26 DI-2, Q-P26t, plan §6 test 25)
+# against `clientledger --demo`: the 925.00 Zelle deposit is the 1,250.00
+# waiting payment less a 325.00 fee. Pick the payment, add a fee line
+# (Bank and Merchant Fees), the difference reaches 0.00 and Accept posts
+# one demo deposit with the fee line. Then the entry is voided in the
+# register: the line stays under Accepted, marked "Entry voided" (Q-P26u),
+# and Review again puts it back to waiting.
+name: bank_feed_deposit_fees
+description: Deposit = payment - fee line at a 0.00 difference, then the entry is voided and Review again returns the line.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - click: {role: button, label: Needs review 6}
+  - click: {role: button, label: Bank line 3 of 6}
+  - click: {role: button, label: Deposit}
+  - assert_state: {key: screen.detail.mode, equals: deposit}
+  - assert_state: {key: screen.detail.payments, equals: 2}
+  - click: {role: check_box, label_contains: "1,250.00"}
+  - assert_state: {key: screen.detail.picked, equals: 1}
+  - assert_state: {key: screen.detail.deposit_balanced, equals: false}
+  - click: {role: button, label: Add fee line}
+  - click: {role: combo_box, label: Line 1 account}
+  - click: {role: button, label_contains: "Bank and Merchant Fees"}
+  - click: {role: text_input, label: Line 1 amount}
+  - type: {text: "325.00"}
+  - assert_state: {key: screen.detail.deposit_difference, equals: "0.0000"}
+  - assert_state: {key: screen.detail.deposit_balanced, equals: true}
+  - screenshot: fee-balanced
+  - click: {role: button, label: Accept  A}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 1}
+
+  # --- Voided in the register, then Review again --------------------------
+  - command: dev.demo_feed_void_entry
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label: Accepted}
+  - assert_state: {key: screen.counts.entry_voided, equals: 1}
+  - click: {role: button, label: Entry voided (1)}
+  - click: {role: button, label: Bank line 1 of 1}
+  - assert_state: {key: screen.detail.entry_voided, equals: true}
+  - screenshot: entry-voided
+  - click: {role: button, label: Review again}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.entry_voided, equals: 0}
+  - assert_state: {key: screen.counts.waiting, equals: 37}

@@ -340,6 +340,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         .id_salt("bank_feed.detail")
         .auto_shrink([false, true])
         .show(ui, |ui| {
+            ui.set_max_width(ui.available_width());
             if r.entry_voided {
                 voided(s, ui, tokens, &r, can, &tip);
             } else if r.status.is_accepted() {
@@ -483,13 +484,15 @@ fn account_combo(
     chart: &[(AccountId, String)],
     value: &mut Option<AccountId>,
     label: &str,
+    width: f32,
 ) {
     let shown = value
         .and_then(|a| chart.iter().find(|(id, _)| *id == a))
         .map_or_else(|| t("bank_feed.detail.choose_account"), |(_, n)| n.clone());
     let r = egui::ComboBox::from_id_salt(salt)
         .selected_text(shown)
-        .width(ui.available_width().min(280.0))
+        .truncate()
+        .width(ui.available_width().min(width))
         .show_ui(ui, |ui| {
             for (id, name) in chart {
                 ui.selectable_value(value, Some(*id), name);
@@ -598,6 +601,7 @@ fn categorize_ui(
         chart,
         &mut s.detail.account,
         &label,
+        280.0,
     );
     let account = s.detail.account?;
     let proposed = r
@@ -622,62 +626,53 @@ fn categorize_ui(
     ))
 }
 
-/// A grid of typed lines (split or fee): Account · Amount · Memo.
-fn lines_grid(ui: &mut Ui, salt: &str, chart: &[(AccountId, String)], lines: &mut Vec<Line>) {
+/// Typed lines (split or fee), two rows each so they fit the panel:
+/// the account and a delete button, then the amount and the memo.
+fn lines_grid(
+    ui: &mut Ui,
+    salt: &str,
+    chart: &[(AccountId, String)],
+    lines: &mut [Line],
+) -> Option<usize> {
     let mut remove = None;
-    egui::Grid::new(salt)
-        .num_columns(4)
-        .spacing([6.0, 4.0])
-        .show(ui, |ui| {
-            ui.label(t("bank_feed.grid.account"));
-            ui.label(t("bank_feed.grid.amount"));
-            ui.label(t("bank_feed.grid.memo"));
-            ui.label("");
-            ui.end_row();
-            for (i, l) in lines.iter_mut().enumerate() {
-                let label = t_with(
-                    "bank_feed.grid.line_account",
-                    &[("n", &(i + 1).to_string())],
-                );
-                ui.scope(|ui| {
-                    ui.set_max_width(150.0);
-                    account_combo(
-                        ui,
-                        egui::IdSalt::new((salt, "a", i)),
-                        chart,
-                        &mut l.account,
-                        &label,
-                    );
-                });
-                let r = ui.add_sized(
-                    [80.0, 22.0],
-                    egui::TextEdit::singleline(&mut l.amount).font(egui::TextStyle::Monospace),
-                );
-                let amount_label =
-                    t_with("bank_feed.grid.line_amount", &[("n", &(i + 1).to_string())]);
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, &amount_label)
-                });
-                let memo_label = t_with("bank_feed.grid.line_memo", &[("n", &(i + 1).to_string())]);
-                let m = ui.add_sized([70.0, 22.0], egui::TextEdit::singleline(&mut l.memo));
-                m.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, &memo_label)
-                });
-                let del_label =
-                    t_with("bank_feed.grid.delete_line", &[("n", &(i + 1).to_string())]);
-                if ui
-                    .small_button("\u{2715}")
-                    .on_hover_text(&del_label)
-                    .clicked()
-                {
-                    remove = Some(i);
-                }
-                ui.end_row();
+    for (i, l) in lines.iter_mut().enumerate() {
+        let n = (i + 1).to_string();
+        let label = t_with("bank_feed.grid.line_account", &[("n", &n)]);
+        ui.horizontal(|ui| {
+            account_combo(
+                ui,
+                egui::IdSalt::new((salt, "a", i)),
+                chart,
+                &mut l.account,
+                &label,
+                250.0,
+            );
+            let del_label = t_with("bank_feed.grid.delete_line", &[("n", &n)]);
+            let d = ui.small_button("\u{d7}").on_hover_text(&del_label);
+            d.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &del_label));
+            if d.clicked() {
+                remove = Some(i);
             }
         });
-    if let Some(i) = remove {
-        lines.remove(i);
+        ui.horizontal(|ui| {
+            let amount_label = t_with("bank_feed.grid.line_amount", &[("n", &n)]);
+            let r = ui.add_sized(
+                [100.0, 22.0],
+                egui::TextEdit::singleline(&mut l.amount)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text(t("bank_feed.grid.amount")),
+            );
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &amount_label));
+            let memo_label = t_with("bank_feed.grid.line_memo", &[("n", &n)]);
+            let m = ui.add_sized(
+                [ui.available_width().min(170.0), 22.0],
+                egui::TextEdit::singleline(&mut l.memo).hint_text(t("bank_feed.grid.memo")),
+            );
+            m.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &memo_label));
+        });
+        ui.add_space(4.0);
     }
+    remove
 }
 
 fn split_ui(
@@ -691,7 +686,9 @@ fn split_ui(
         form::hint(ui, tokens, &t("bank_feed.split.not_cents"));
         return None;
     }
-    lines_grid(ui, "bank_feed.split", chart, &mut s.detail.split);
+    if let Some(i) = lines_grid(ui, "bank_feed.split", chart, &mut s.detail.split) {
+        s.detail.split.remove(i);
+    }
     if ui
         .small_button(t("bank_feed.grid.add_line"))
         .on_hover_text(t("bank_feed.grid.add_line.tip"))
@@ -850,6 +847,7 @@ fn transfer_ui(
         &others,
         &mut s.detail.transfer_to,
         &label,
+        280.0,
     );
     if s.detail.transfer_to != before {
         s.detail.pick_transfer = None;
@@ -916,7 +914,9 @@ fn deposit_ui(
     }
     ui.add_space(6.0);
     ui.label(RichText::new(t("bank_feed.deposit.fees")).strong());
-    lines_grid(ui, "bank_feed.fees", chart, &mut s.detail.fees);
+    if let Some(i) = lines_grid(ui, "bank_feed.fees", chart, &mut s.detail.fees) {
+        s.detail.fees.remove(i);
+    }
     let full = s.detail.fees.len() >= cl_api::FEE_LINES_MAX;
     if ui
         .add_enabled(
@@ -934,22 +934,24 @@ fn deposit_ui(
     }
     let d = s.detail.deposit_draft(r);
     let show = |m: Option<Money>| m.map_or_else(String::new, |m| amount_text(ui, m));
-    ui.label(
-        RichText::new(t_with(
-            "bank_feed.deposit.sum",
-            &[
-                ("payments", &show(d.payments_total())),
-                ("fees", &show(d.fees_total())),
-                ("bank", &show(Some(d.bank))),
-                ("difference", &show(d.difference())),
-            ],
-        ))
-        .monospace()
-        .color(if d.is_balanced() {
-            tokens.text_secondary
-        } else {
-            tokens.warn_text
-        }),
+    ui.add(
+        egui::Label::new(
+            RichText::new(t_with(
+                "bank_feed.deposit.sum",
+                &[
+                    ("payments", &show(d.payments_total())),
+                    ("fees", &show(d.fees_total())),
+                    ("bank", &show(Some(d.bank))),
+                    ("difference", &show(d.difference())),
+                ],
+            ))
+            .color(if d.is_balanced() {
+                tokens.text_secondary
+            } else {
+                tokens.warn_text
+            }),
+        )
+        .wrap(),
     );
     if !d.is_balanced() {
         return None;

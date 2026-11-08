@@ -577,6 +577,18 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_feed_void_entry",
         "Void a Demo Bank Feed Entry (developer)",
     ),
+    dev_action(
+        "dev.demo_feed_duplicate",
+        "Flag a Demo Bank Feed Duplicate (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_next_file",
+        "Bring In the Demo's Next Bank File (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_close_books",
+        "Close the Demo Books Through 11/01 (developer)",
+    ),
     dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
     dev_action(
         "dev.demo_feed_reset",

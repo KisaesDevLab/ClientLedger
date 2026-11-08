@@ -151,7 +151,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.deposit.fees", "Fees taken out (card processor fees)"),
     ("bank_feed.deposit.add_fee", "Add fee line"),
     ("bank_feed.deposit.fees_max", "A deposit can have at most 10 fee lines."),
-    ("bank_feed.deposit.sum", "Payments {payments} \u{2212} fees {fees} = bank amount {bank}, difference {difference}"),
+    ("bank_feed.deposit.sum", "Payments {payments} \u{2212} fees {fees} = bank amount {bank}. Difference {difference}"),
     ("bank_feed.rule_banner", "Rule \u{201c}{rule}\u{201d} can accept its {n} waiting bank lines together."),
     ("bank_feed.rule_banner.accept", "Accept all from this rule"),
     ("bank_feed.rule_banner.tip", "Records every waiting bank line this rule set up. Logged, and Undo takes them all back."),
