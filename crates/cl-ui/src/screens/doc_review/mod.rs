@@ -24,6 +24,7 @@
 //! (Q-A04n).
 
 pub mod attach;
+pub(crate) mod feed_check;
 pub mod queue;
 pub mod review;
 

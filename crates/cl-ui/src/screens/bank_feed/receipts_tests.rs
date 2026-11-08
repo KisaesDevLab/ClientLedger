@@ -296,7 +296,9 @@ mod panel {
     }
 
     /// The demo screen after `command`, the cursor's line in the panel.
-    fn opened(command: &'static str) -> (tempfile::TempDir, BankFeedScreen, FeedRow, egui::Context) {
+    fn opened(
+        command: &'static str,
+    ) -> (tempfile::TempDir, BankFeedScreen, FeedRow, egui::Context) {
         let dir = tempfile::tempdir().expect("dir");
         let company = Arc::new(CompanyLink::demo(dir.path()));
         let mut s = BankFeedScreen::new(company, None);

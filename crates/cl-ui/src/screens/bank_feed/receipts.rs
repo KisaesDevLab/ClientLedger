@@ -106,7 +106,7 @@ pub(crate) fn facts(d: &DocumentDraft) -> DraftFacts<DocumentDraftId> {
 }
 
 /// The rules' view of a bank line.
-fn bank_line(r: &FeedRow) -> BankLine {
+pub(crate) fn bank_line(r: &FeedRow) -> BankLine {
     BankLine {
         amount: r.amount,
         money_out: r.is_money_out(),

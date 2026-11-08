@@ -704,3 +704,82 @@ fn a_failed_read_shows_couldnt_read_and_can_be_tried_again() {
     s.read_failed();
     assert_eq!(s.state_json()["stored"], "failed");
 }
+
+/// A waiting money-out line of the demo's Bank Feed: its date and amount.
+fn waiting_line(w: &World) -> (CalendarDate, Money) {
+    let mut d = w.demo();
+    let q = cl_api::FeedQuery {
+        waiting_only: true,
+        limit: 500,
+        ..cl_api::FeedQuery::default()
+    };
+    let page = crate::company::demo::feed_review::list(&mut d, &q).expect("feed");
+    page.rows
+        .iter()
+        .find(|r| {
+            r.is_money_out() && !r.possible_duplicate && !r.entry_voided && r.status.is_waiting()
+        })
+        .map(|r| (r.date, r.amount.abs()))
+        .expect("a waiting line")
+}
+
+/// A05 QA-4 (Q-A05h): a document matching a bank line waiting in the Bank
+/// Feed asks first. Go to Bank Feed enters nothing and opens the feed;
+/// Save anyway posts once and isn't asked again.
+#[test]
+fn a_receipt_waiting_in_the_bank_feed_asks_before_it_is_entered() {
+    let w = World::new();
+    let (date, amount) = waiting_line(&w);
+    let amount = amount.to_wire();
+    let id = w.draft("feed", &amount, date);
+    let mut s = w.session(id);
+    let before = w.transactions();
+    let _ = w.link.drain();
+    assert!(s.accept(w.accept(&amount, date, None)));
+    let _ = tick(&w, &mut s);
+    assert!(
+        matches!(s.dialog, Some(Dialog::FeedLine { .. })),
+        "{:?}",
+        s.dialog
+    );
+    assert_eq!(s.state_json()["dialog"], "feed_line");
+    // Go to Bank Feed: nothing entered, the feed opens.
+    s.answer_dialog(true, None);
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(e, DraftEvent::Cancelled)));
+    assert_eq!(w.transactions(), before);
+    assert_eq!(w.status(id), DraftStatus::Ready);
+    assert!(w.link.drain().iter().any(|e| matches!(
+        e,
+        CompanyEvent::OpenWindow(c) if c.as_str() == "banking.feed"
+    )));
+    // Saved again: asked again; Save anyway posts once.
+    assert!(s.accept(w.accept(&amount, date, None)));
+    let _ = tick(&w, &mut s);
+    assert!(matches!(s.dialog, Some(Dialog::FeedLine { .. })));
+    s.answer_dialog(false, None);
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+}
+
+/// A document a cent off, or dated more than 7 days from every waiting
+/// line, is entered without the question.
+#[test]
+fn a_receipt_unlike_any_waiting_line_is_entered_without_asking() {
+    let w = World::new();
+    let (date, amount) = waiting_line(&w);
+    let off = amount.checked_add(money("0.01")).expect("sum").to_wire();
+    let id = w.draft("feed-off", &off, date);
+    let mut s = w.session(id);
+    assert!(s.accept(w.accept(&off, date, None)));
+    let ev = tick(&w, &mut s);
+    assert!(s.dialog.is_none());
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+}
