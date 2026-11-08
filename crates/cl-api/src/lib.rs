@@ -218,9 +218,9 @@ pub use resources::feed::{
 };
 // P26: bank feed review.
 pub use resources::feed_accept::{
-    ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, RuleAccept,
-    UndoGroupId, UndoOutcome, UndoTarget, Undone, accept_body, accept_outcome_from, undo_body,
-    undo_outcome_from,
+    ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, DraftLink,
+    RuleAccept, UndoGroupId, UndoOutcome, UndoTarget, Undone, accept_body, accept_outcome_from,
+    undo_body, undo_outcome_from,
 };
 pub use resources::feed_review::{
     AcceptKind, AccountBalance, BankConnection, BankConnectionId, DEPOSIT_PAYMENTS_MAX,
