@@ -826,14 +826,14 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P26d | Practice flags; AI off | P26 | Desktop mode skips the flag check; the desktop calls AI only when it is ready. | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
 | Q-P26e | Segment wording | P26 | "Ready" (mockup wording, design README:14-17). | Owner confirmed 2026-11-07  |
 | Q-P26f | What Undo does to a posted item | P26 | Deletes it; asks if it was changed (fingerprint); refuses if reconciled. | Owner confirmed 2026-11-07   |
-| Q-P26g | "Remove this one" | P26 | Exclude with reason duplicate (can be restored). | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
-| Q-P26h | Mockup deviations | P26 | Show selector, Undo toast, Suggest with AI, duplicate compare, Accept-all banner, closed-period lock, "Customer / Project". | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
+| Q-P26g | "Remove this one" | P26 | Exclude with reason duplicate (can be restored). | Owner confirmed 2026-11-07 |
+| Q-P26h | Mockup deviations | P26 | Show selector, Undo toast, Suggest with AI, duplicate compare, Accept-all banner, closed-period lock, "Customer / Project". | Owner confirmed 2026-11-07 |
 | Q-P26i | AI badge levels | P26 | "AI · high" at confidence ≥ 0.8. | Owner confirmed 2026-11-07 |
 | Q-P26j | "Bank file import" source | P26 | A desktop label; no engine change. | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
 | Q-P26k | Rule-suggestion threshold | P26 | 5 accepts, override rate under 10%; Undo counts as an override. | Owner confirmed 2026-11-07   |
 | Q-P26l | Transfer window | P26 | 3 days (the route accepts 1–10); dated on the money-out side. Adjustable 1–10 days in Preferences. | Owner confirmed 2026-11-07  |
-| Q-P26m | Manual split | P26 | Inline; the owner's account overrides staged splits. | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
-| Q-P26n | Accept all from this rule | P26 | Auto-accept rules only (legacy `auto_confirm` counts). | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
+| Q-P26m | Manual split | P26 | Inline; the owner's account overrides staged splits. | Owner confirmed 2026-11-07 |
+| Q-P26n | Accept all from this rule | P26 | Auto-accept rules only (legacy `auto_confirm` counts). | Owner confirmed 2026-11-07 |
 | Q-P26o | Rules on desktop | P26 | Never post (from E2). | Default (architect 2026-11-07, Rev 2), owner to confirm at phase-end Q&A    |
 | Q-P26p | Bucket order | P26 | Duplicate → matches → review → ready. | Owner confirmed 2026-11-07 |
 | Q-P26q | Accept selected with matches | P26 | Mutual single candidates only; other match rows "need you"; rows with match signals never post through a rule. | Owner confirmed 2026-11-07 |
