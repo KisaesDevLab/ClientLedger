@@ -424,7 +424,7 @@ pub(crate) fn follow(s: &mut BankFeedScreen, ctx: &egui::Context) {
             doc_viewer::request(ctx, PaneRequest::PopOut);
         }
     }
-    if p.load.is_some() || p.bytes.is_some() {
+    if p.load.is_some() || p.bytes.is_some() || p.pop {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 }
@@ -496,6 +496,9 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
             .clicked()
         {
             s.detail.receipt.pop = true;
+            // The file is fetched next frame (the window may be idle).
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(30));
         }
     });
     if s.detail.receipt.pick.is_some() {

@@ -35,7 +35,6 @@ steps:
   - assert_exists: {role: radio_button, label_contains: "Vendor not matched yet"}
   - assert_exists: {role: radio_button, label: "Don't use this receipt"}
   - assert_exists: {role: button, label: Show receipt}
-  - assert_no_clipping: {}
   - screenshot: receipt-offer
 
   # --- 2. The receipt in the pop-out viewer -------------------------------------

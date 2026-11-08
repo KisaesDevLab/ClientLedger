@@ -125,12 +125,20 @@ pub fn seed_receipt_for(
 /// receipt.
 pub fn seed_receipt(state: &mut DemoState, lines: bool) -> Option<(FeedItemId, DocumentDraftId)> {
     super::refresh(state);
-    let tenant = state.open?;
+    discard_seeded(state);
+    let r = pick_line(state)?;
+    seed_receipt_for(state, r.id, lines).map(|d| (r.id, d))
+}
+
+/// Throws away the receipts [`seed_receipt`] made that are still live
+/// (`dev.demo_feed_reset`: every scenario run starts without them).
+pub fn discard_seeded(state: &mut DemoState) {
+    let Some(tenant) = state.open else {
+        return;
+    };
     for old in std::mem::take(&mut state.drafts.feed_seeded) {
         let _ = super::super::drafts::discard(state, tenant, old);
     }
-    let r = pick_line(state)?;
-    seed_receipt_for(state, r.id, lines).map(|d| (r.id, d))
 }
 
 /// `total` (whole cents) as two positive whole-cent parts that add up to

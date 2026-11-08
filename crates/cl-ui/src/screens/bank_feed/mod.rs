@@ -653,6 +653,7 @@ impl BankFeedScreen {
             }
             "dev.demo_feed_reset" => {
                 demo::reset(&mut d);
+                demo::discard_seeded(&mut d);
                 // The window starts over too (scenarios run light, then dark).
                 self.segment = Segment::All;
                 self.show = Show::Waiting;
