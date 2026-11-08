@@ -34,6 +34,7 @@ mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
 mod contract_feed_accept;
+mod contract_feed_match_post;
 mod contract_feed_review;
 mod contract_finance_charges;
 mod contract_harness;
@@ -1169,6 +1170,19 @@ fn main() -> std::process::ExitCode {
         (
             "feed_accept::locked_rows_need_the_password",
             contract_feed_accept::locked_rows_need_the_password,
+        ),
+        // P26 E4 / E2 (U-171, U-166): deposit, match, assign and approve.
+        (
+            "feed_match_post::deposit_of_two_payments_and_a_fee",
+            contract_feed_match_post::deposit_of_two_payments_and_a_fee,
+        ),
+        (
+            "feed_match_post::match_then_undo_keeps_the_entry",
+            contract_feed_match_post::match_then_undo_keeps_the_entry,
+        ),
+        (
+            "feed_match_post::assign_approve_then_undo_restores_the_staging",
+            contract_feed_match_post::assign_approve_then_undo_restores_the_staging,
         ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (

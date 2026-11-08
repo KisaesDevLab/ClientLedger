@@ -26,7 +26,7 @@ fn gated(h: &Harness) -> bool {
         && h.require_cap(Capabilities::BANK_IMPORT_BATCH, "U-06")
 }
 
-fn fresh(h: &Harness, s: &Session, t: AccountType, detail: Option<&str>) -> AccountId {
+pub(crate) fn fresh(h: &Harness, s: &Session, t: AccountType, detail: Option<&str>) -> AccountId {
     let mut f = account_fields(t, "Accept");
     f.detail_type = detail.map(str::to_string);
     h.run(s.accounts().create(&f, key()))
@@ -35,7 +35,7 @@ fn fresh(h: &Harness, s: &Session, t: AccountType, detail: Option<&str>) -> Acco
         .id
 }
 
-fn import(
+pub(crate) fn import(
     h: &Harness,
     s: &Session,
     account: AccountId,
@@ -92,7 +92,7 @@ fn import(
     out
 }
 
-fn status_of(h: &Harness, s: &Session, id: cl_api::FeedItemId) -> Option<FeedStatus> {
+pub(crate) fn status_of(h: &Harness, s: &Session, id: cl_api::FeedItemId) -> Option<FeedStatus> {
     let page = h
         .run(s.feed().list(&FeedQuery {
             limit: 500,
@@ -102,7 +102,7 @@ fn status_of(h: &Harness, s: &Session, id: cl_api::FeedItemId) -> Option<FeedSta
     page.rows.iter().find(|r| r.id == id).map(|r| r.status)
 }
 
-fn values(account: AccountId) -> FeedChoice {
+pub(crate) fn values(account: AccountId) -> FeedChoice {
     FeedChoice {
         account: Some(account),
         ..FeedChoice::default()
