@@ -202,10 +202,12 @@ fn deposit_with_a_fee_from_the_panel() {
 fn split_lines_insert_and_delete() {
     let (_d, mut s) = screen();
     detail::follow(&mut s);
-    s.detail.mode = detail::Mode::Split;
+    cmd(&mut s, "feed.split");
+    assert_eq!(s.detail.mode, detail::Mode::Split);
+    assert_eq!(s.detail.split.len(), 2, "S opens two lines");
     assert!(s.command(CommandId::new("feed.insert_line")));
-    assert!(s.command(CommandId::new("feed.insert_line")));
-    assert_eq!(s.detail.split.len(), 2);
+    assert_eq!(s.detail.split.len(), 3);
+    assert!(s.command(CommandId::new("feed.delete_line")));
     assert!(s.command(CommandId::new("feed.delete_line")));
     assert_eq!(s.detail.split.len(), 1);
 }

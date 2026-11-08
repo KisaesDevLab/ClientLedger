@@ -210,6 +210,20 @@ impl Detail {
     }
 }
 
+/// S: the split grid with two lines (the first on the proposed account).
+pub(crate) fn enter_split(s: &mut BankFeedScreen) {
+    s.detail.mode = Mode::Split;
+    if s.detail.split.is_empty() {
+        s.detail.split = vec![
+            Line {
+                account: s.detail.account,
+                ..Line::default()
+            },
+            Line::default(),
+        ];
+    }
+}
+
 /// Ctrl+Insert / Ctrl+Delete in the split or fee grid.
 pub(crate) fn line_command(s: &mut BankFeedScreen, id: &str) -> bool {
     let lines = match s.detail.mode {
@@ -255,7 +269,7 @@ pub(crate) fn follow(s: &mut BankFeedScreen) {
     let why = s.why(&r);
     s.detail.reset(&r, why);
     if s.detail_request == Some(model::FeedAction::Split(id)) {
-        s.detail.mode = Mode::Split;
+        enter_split(s);
     }
     if r.status.is_waiting() {
         read(s, &r);
@@ -536,15 +550,10 @@ fn waiting(
                 _ => t(m.key()),
             };
             if ui.selectable_label(s.detail.mode == m, label).clicked() {
-                s.detail.mode = m;
-                if m == Mode::Split && s.detail.split.is_empty() {
-                    s.detail.split = vec![
-                        Line {
-                            account: s.detail.account,
-                            ..Line::default()
-                        },
-                        Line::default(),
-                    ];
+                if m == Mode::Split {
+                    enter_split(s);
+                } else {
+                    s.detail.mode = m;
                 }
             }
         }

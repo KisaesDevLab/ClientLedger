@@ -473,9 +473,14 @@ impl BankFeedScreen {
                 self.detail_request = Some(FeedAction::Rule(id));
                 rules::from_row(self, id);
             }
-            other @ FeedAction::Split(_) => {
+            other @ FeedAction::Split(id) => {
                 self.rules.open = false;
                 self.detail_request = Some(other);
+                // The row already in the panel goes to its split grid now;
+                // another row does when the panel follows it.
+                if self.detail.row == Some(id) {
+                    detail::enter_split(self);
+                }
             }
         }
     }
