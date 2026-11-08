@@ -746,7 +746,7 @@ fn an_edit_closes_when_its_transaction_is_removed_elsewhere() {
     s.hear_changes();
     settle(&mut s, None);
     assert_eq!(s.entry.editing.as_ref().map(|e| e.id), Some(id));
-    assert!(s.entry.problems.is_empty());
+    assert_eq!(s.entry.problems, Vec::<cl_grid::TextKey>::new());
 
     // The Bank Feed's Undo deletes it.
     link.demo_state()

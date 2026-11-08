@@ -27,9 +27,20 @@ fn found<T>(value: T) -> Found<T> {
     }
 }
 
-/// A waiting money-out line of the sample with an account proposed, whole
-/// cents, no receipt yet: the first one in the list's order.
-fn pick_line(state: &DemoState) -> Option<Row> {
+/// Which line a seeded receipt goes with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeedLine {
+    /// A line with an account proposed.
+    Proposed,
+    /// A line nothing was suggested for (A05 QA-1: in a new company, every
+    /// line).
+    Bare,
+}
+
+/// A waiting money-out line of the sample, whole cents, no receipt yet,
+/// with an account proposed or with nothing suggested: the first one in
+/// the list's order.
+fn pick_line(state: &DemoState, which: SeedLine) -> Option<Row> {
     let mut rows: Vec<&Row> = state
         .feed_review
         .rows
@@ -37,10 +48,13 @@ fn pick_line(state: &DemoState) -> Option<Row> {
         .filter(|r| {
             r.waiting()
                 && r.amount.is_positive()
-                && r.kind == "ready"
+                && match which {
+                    SeedLine::Proposed => r.kind == "ready" && r.suggested.is_some(),
+                    SeedLine::Bare => r.suggested.is_none(),
+                }
                 && !r.transfer
                 && !r.possible_duplicate
-                && r.suggested.is_some()
+                && r.kind != "match"
                 && cl_model::bank_feed::whole_cents(r.amount)
         })
         .collect();
@@ -56,13 +70,23 @@ pub fn seed_receipt_for(
     id: FeedItemId,
     lines: bool,
 ) -> Option<DocumentDraftId> {
+    seed_receipt_named(state, id, lines, "receipt.pdf")
+}
+
+/// [`seed_receipt_for`] with the file named `file_name`.
+pub fn seed_receipt_named(
+    state: &mut DemoState,
+    id: FeedItemId,
+    lines: bool,
+    file_name: &str,
+) -> Option<DocumentDraftId> {
     let r = state.feed_review.rows.iter().find(|r| r.id == id)?.clone();
     let tenant = state.open?;
     // Each receipt's bytes differ (a draft claims its file's hash).
     let key = DraftKey::new();
     let bytes = format!("%PDF-1.4\n% synthetic demo receipt {key}\n%%EOF\n");
     let file =
-        super::super::checks::upload(state, AttachTo::Draft(key), "receipt.pdf", bytes.as_bytes())
+        super::super::checks::upload(state, AttachTo::Draft(key), file_name, bytes.as_bytes())
             .ok()?;
     let d = super::super::drafts::create(
         state,
@@ -124,10 +148,32 @@ pub fn seed_receipt_for(
 /// with an account proposed (`dev.demo_feed_receipt`): the line and the
 /// receipt.
 pub fn seed_receipt(state: &mut DemoState, lines: bool) -> Option<(FeedItemId, DocumentDraftId)> {
+    seed_receipt_on(state, SeedLine::Proposed, lines)
+}
+
+/// [`seed_receipt`] on a line of kind `which`
+/// (`dev.demo_feed_receipt_bare` takes a line with nothing suggested).
+pub fn seed_receipt_on(
+    state: &mut DemoState,
+    which: SeedLine,
+    lines: bool,
+) -> Option<(FeedItemId, DocumentDraftId)> {
     super::refresh(state);
     discard_seeded(state);
-    let r = pick_line(state)?;
+    let r = pick_line(state, which)?;
     seed_receipt_for(state, r.id, lines).map(|d| (r.id, d))
+}
+
+/// Two copies of one receipt for the same line, files `receipt-a.pdf` and
+/// `receipt-b.pdf` (`dev.demo_feed_receipt_two`, QA-5: the offers must be
+/// told apart).
+pub fn seed_two_receipts(state: &mut DemoState) -> Option<(FeedItemId, [DocumentDraftId; 2])> {
+    super::refresh(state);
+    discard_seeded(state);
+    let r = pick_line(state, SeedLine::Proposed)?;
+    let a = seed_receipt_named(state, r.id, false, "receipt-a.pdf")?;
+    let b = seed_receipt_named(state, r.id, false, "receipt-b.pdf")?;
+    Some((r.id, [a, b]))
 }
 
 /// Throws away the receipts [`seed_receipt`] made that are still live

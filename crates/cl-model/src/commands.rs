@@ -597,6 +597,14 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_feed_receipt",
         "Add a Demo Receipt for a Bank Feed Line (developer)",
     ),
+    dev_action(
+        "dev.demo_feed_receipt_bare",
+        "Add a Demo Receipt for a Bank Feed Line Without a Suggestion (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_receipt_two",
+        "Add Two Demo Receipts for One Bank Feed Line (developer)",
+    ),
     dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
     dev_action(
         "dev.demo_feed_reset",

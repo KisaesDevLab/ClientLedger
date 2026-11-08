@@ -622,7 +622,7 @@ impl BankFeedScreen {
             // says what's missing.
             self.detail_request = Some(FeedAction::Accept(id));
             self.list.focus(id);
-            let key = if why == Why::NeedsYou && !self.receipts.of(id).is_empty() {
+            let key = if why == Why::Receipt && !has_account {
                 "bank_feed.notice.pick_receipt_account"
             } else {
                 incomplete_notice(why)
@@ -660,6 +660,15 @@ impl BankFeedScreen {
             "dev.demo_feed_receipt" => {
                 // The cursor goes to its line once the list is read.
                 self.focus_next = demo::seed_receipt(&mut d, true).map(|(line, _)| line);
+            }
+            // A05 QA-1: the same on a line nothing was suggested for.
+            "dev.demo_feed_receipt_bare" => {
+                self.focus_next = demo::seed_receipt_on(&mut d, demo::SeedLine::Bare, false)
+                    .map(|(line, _)| line);
+            }
+            // A05 QA-5: two copies of one receipt for the same line.
+            "dev.demo_feed_receipt_two" => {
+                self.focus_next = demo::seed_two_receipts(&mut d).map(|(line, _)| line);
             }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;

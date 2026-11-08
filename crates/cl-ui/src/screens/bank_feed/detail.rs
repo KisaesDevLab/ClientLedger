@@ -548,9 +548,16 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     } else {
         String::new()
     };
+    // A waiting line's Accept and Exclude stay below the scrolling part.
+    let pinned = !r.entry_voided
+        && !r.possible_duplicate
+        && r.status.is_waiting()
+        && s.show == Show::Waiting;
+    let reserve = if pinned { ACTIONS_H } else { 0.0 };
     egui::ScrollArea::vertical()
         .id_salt("bank_feed.detail")
         .auto_shrink([false, true])
+        .max_height((ui.available_height() - reserve).max(80.0))
         .show(ui, |ui| {
             ui.set_max_width(ui.available_width());
             if r.entry_voided {
@@ -560,12 +567,18 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             } else if r.possible_duplicate && r.status.is_waiting() {
                 duplicate(s, ui, tokens, &r, can, &tip);
             } else if r.status.is_waiting() && s.show == Show::Waiting {
-                waiting(s, ui, tokens, &r, why, can, &tip);
+                waiting(s, ui, tokens, &r, why);
             } else {
                 form::hint(ui, tokens, &t("bank_feed.detail.excluded"));
             }
         });
+    if pinned {
+        actions(s, ui, tokens, &r, can, &tip);
+    }
 }
+
+/// The height kept under the panel's scrolling part for Accept / Exclude.
+const ACTIONS_H: f32 = 44.0;
 
 fn voided(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, can: bool, tip: &str) {
     form::inline_warning(ui, tokens, &t("bank_feed.detail.entry_voided"));
@@ -726,22 +739,16 @@ fn account_combo(
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, label));
 }
 
-#[allow(clippy::too_many_arguments, reason = "the panel's shared inputs")]
-fn waiting(
-    s: &mut BankFeedScreen,
-    ui: &mut Ui,
-    tokens: &Tokens,
-    r: &FeedRow,
-    why: Why,
-    can: bool,
-    tip: &str,
-) {
+fn waiting(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, why: Why) {
     match why {
         Why::Ai { high: false } => {
             form::inline_warning(ui, tokens, &t("bank_feed.detail.ai_unsure"));
         }
-        Why::NeedsYou => form::inline_warning(ui, tokens, &t("bank_feed.detail.needs_you")),
-        _ => {}
+        _ => {
+            if let Some(key) = missing_key(s, r, why) {
+                form::inline_warning(ui, tokens, &t(key));
+            }
+        }
     }
     ui.horizontal_wrapped(|ui| {
         for m in Mode::ALL {
@@ -776,8 +783,22 @@ fn waiting(
         Mode::Deposit => deposit_ui(s, ui, tokens, &chart, r),
     };
     let send = super::receipts::with_receipt(s, r, send);
-    s.detail.ready.clone_from(&send);
-    ui.add_space(10.0);
+    s.detail.ready = send;
+}
+
+/// Accept and Exclude under the panel's scrolling part (QA-6): a long
+/// receipt section or split grid at 1024x768 scrolls; the buttons stay in
+/// the window.
+fn actions(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    can: bool,
+    tip: &str,
+) {
+    let send = s.detail.ready.clone();
+    ui.add_space(6.0);
     ui.horizontal(|ui| {
         let accept = egui::Button::new(
             RichText::new(format!("{}  A", t("bank_feed.detail.accept"))).color(tokens.on_accent),
@@ -806,6 +827,29 @@ fn waiting(
             super::bulk::exclude_selected(s);
         }
     });
+}
+
+/// What the panel says is still missing on a line that needs the owner
+/// (QA-2): nothing once an account is picked (Accept is enabled; the payee
+/// is optional), "an account" when the payee is known or a receipt supplies
+/// the vendor, else "a payee and an account".
+pub(crate) fn missing_key(s: &BankFeedScreen, r: &FeedRow, why: Why) -> Option<&'static str> {
+    if !matches!(why, Why::NeedsYou | Why::Receipt) || s.detail.mode != Mode::Categorize {
+        return None;
+    }
+    let has_account = r.assigned_account.is_some() || r.suggested_account.is_some();
+    if has_account || s.detail.account.is_some() {
+        return None;
+    }
+    let payee = r.assigned_contact.is_some() || r.suggested_contact.is_some();
+    let receipt = super::receipts::takes_receipt(s.detail.mode)
+        && s.detail.receipt.pick.is_some()
+        && s.receipts.of(r.id).contains(&s.detail.receipt.pick?);
+    Some(if payee || receipt {
+        "bank_feed.detail.needs_account"
+    } else {
+        "bank_feed.detail.needs_you"
+    })
 }
 
 fn categorize_ui(

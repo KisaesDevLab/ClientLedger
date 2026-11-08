@@ -239,6 +239,13 @@ fn clean(s: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The vendor's name as the receipt reads it (full draft only; the list's
+/// summaries leave the reading out). Owner data: drawn, never logged.
+pub(crate) fn read_vendor(d: &DocumentDraft) -> Option<String> {
+    let header: cl_docread::model::Header = serde_json::from_value(d.fields.clone()?).ok()?;
+    clean(header.vendor.as_ref().map(|v| v.value.as_str()))
+}
+
 /// The coding of the full draft `d` for a bank line of `bank` (either
 /// sign). Lines become splits only when every one is a positive whole-cent
 /// amount and they total `|bank|` exactly; otherwise the line posts on one
@@ -331,6 +338,18 @@ pub(crate) struct Panel {
     pop: bool,
     /// The owner chose "Don't use this receipt".
     pub declined: bool,
+    /// What tells the row's offers apart (QA-5): each one's read vendor
+    /// and file name, read once per row.
+    pub details: BTreeMap<DocumentDraftId, OfferDetail>,
+    details_load: Option<Job<Vec<(DocumentDraftId, OfferDetail)>>>,
+}
+
+/// An offer's read vendor name and file name (owner data: drawn, never
+/// logged).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(crate) struct OfferDetail {
+    pub vendor: Option<String>,
+    pub file: Option<String>,
 }
 
 /// The row moved: its best receipt is picked.
@@ -342,6 +361,64 @@ pub(crate) fn reset(s: &mut BankFeedScreen, id: FeedItemId) {
         ..Panel::default()
     };
     read_full(s);
+    read_details(s, id);
+}
+
+/// Reads the offers of `id` in full, and their files' names (at most
+/// [`feed_match::MAX_OFFERS`]): the offer labels name the read vendor and
+/// the file, so two copies of one receipt can be told apart (QA-5).
+fn read_details(s: &mut BankFeedScreen, id: FeedItemId) {
+    let wanted: Vec<(DocumentDraftId, Option<AttachmentId>)> = s
+        .receipts
+        .of(id)
+        .iter()
+        .map(|d| (*d, s.receipts.draft(*d).and_then(|x| x.attachment_id)))
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
+    let tenant = s.tenant;
+    let demo_wanted = wanted.clone();
+    s.detail.receipt.details_load = Some(run(
+        &s.link,
+        s.group.as_ref(),
+        None,
+        move |d| {
+            let t = tenant.or(d.open).ok_or(ApiError::NoCompanyOpen)?;
+            Ok(demo_wanted
+                .iter()
+                .map(|(id, file)| {
+                    let vendor = crate::company::demo::drafts::get(d, t, *id)
+                        .ok()
+                        .as_ref()
+                        .and_then(read_vendor);
+                    let file = file
+                        .and_then(|f| crate::company::demo::checks::find_attachment(d, f))
+                        .map(|m| m.file_name);
+                    (*id, OfferDetail { vendor, file })
+                })
+                .collect())
+        },
+        move |sess| async move {
+            let mut out = Vec::new();
+            for (id, file) in wanted {
+                // A detail that can't be read only leaves the label shorter.
+                let vendor = sess
+                    .document_drafts()
+                    .get(id)
+                    .await
+                    .ok()
+                    .as_ref()
+                    .and_then(read_vendor);
+                let file = match file {
+                    Some(f) => sess.attachments().get(f).await.ok().map(|m| m.file_name),
+                    None => None,
+                };
+                out.push((id, OfferDetail { vendor, file }));
+            }
+            Ok(out)
+        },
+    ));
 }
 
 /// The list was read again: a panel whose pick is no longer offered (used
@@ -450,6 +527,9 @@ pub(crate) fn follow(s: &mut BankFeedScreen, ctx: &egui::Context) {
             Err(_) => p.failed = true,
         }
     }
+    if let Some(Ok(got)) = finished(&mut p.details_load) {
+        p.details = got.into_iter().collect();
+    }
     if let Some(r) = finished(&mut p.bytes)
         && let (Ok(Some(src)), Some(id)) = (r, p.bytes_for.take())
     {
@@ -474,7 +554,7 @@ pub(crate) fn follow(s: &mut BankFeedScreen, ctx: &egui::Context) {
             doc_viewer::request(ctx, PaneRequest::PopOut);
         }
     }
-    if p.load.is_some() || p.bytes.is_some() || p.pop {
+    if p.load.is_some() || p.bytes.is_some() || p.details_load.is_some() || p.pop {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 }
@@ -505,23 +585,9 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
         return;
     }
     let mut pick = s.detail.receipt.pick;
-    for id in &offers {
-        let Some(d) = s.receipts.draft(*id) else {
-            continue;
-        };
-        let date = d.doc_date.map(crate::shell::us_date).unwrap_or_default();
-        let amount = d
-            .doc_total
-            .map(|m| m.format(crate::grid_env::shell_frame(ui.ctx()).money_style))
-            .unwrap_or_default();
-        let who = d
-            .suggested_contact_id
-            .and_then(|c| contact_name(s, r, c))
-            .unwrap_or_else(|| t("bank_feed.receipt.vendor_unknown"));
-        let text = t_with(
-            "bank_feed.receipt.offer",
-            &[("date", &date), ("who", &who), ("amount", &amount)],
-        );
+    let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
+    let texts = offer_texts(s, r, &offers, style);
+    for (id, text) in offers.iter().zip(texts) {
         if ui.radio(pick == Some(*id), text).clicked() {
             pick = Some(*id);
         }
@@ -572,6 +638,68 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
         }
     }
     ui.add_space(6.0);
+}
+
+/// The offers' labels (also their AccessKit names), told apart (QA-5):
+/// the date, the vendor (the list's name, else the name as read), the
+/// amount, then the reference and the file name when known; labels still
+/// alike are numbered.
+pub(crate) fn offer_texts(
+    s: &BankFeedScreen,
+    r: &FeedRow,
+    offers: &[DocumentDraftId],
+    style: cl_core::MoneyStyle,
+) -> Vec<String> {
+    let mut out: Vec<String> = offers
+        .iter()
+        .map(|id| {
+            let Some(d) = s.receipts.draft(*id) else {
+                return String::new();
+            };
+            let detail = s.detail.receipt.details.get(id);
+            let date = d.doc_date.map(crate::shell::us_date).unwrap_or_default();
+            let amount = d.doc_total.map(|m| m.format(style)).unwrap_or_default();
+            let who = d
+                .suggested_contact_id
+                .and_then(|c| contact_name(s, r, c))
+                .or_else(|| receipt_vendor(s, *id))
+                .unwrap_or_else(|| t("bank_feed.receipt.vendor_unknown"));
+            let mut text = t_with(
+                "bank_feed.receipt.offer",
+                &[("date", &date), ("who", &who), ("amount", &amount)],
+            );
+            if let Some(reference) = clean(d.doc_reference.as_deref()) {
+                text.push_str(" \u{b7} ");
+                text.push_str(&t_with("bank_feed.receipt.ref", &[("ref", &reference)]));
+            }
+            if let Some(file) = detail.and_then(|x| clean(x.file.as_deref())) {
+                text.push_str(" \u{b7} ");
+                text.push_str(&file);
+            }
+            text
+        })
+        .collect();
+    let first = out.clone();
+    for (i, text) in out.iter_mut().enumerate() {
+        if first.iter().filter(|x| *x == text).count() > 1 {
+            let n = (i + 1).to_string();
+            *text = t_with(
+                "bank_feed.receipt.nth",
+                &[("text", text.as_str()), ("n", &n)],
+            );
+        }
+    }
+    out
+}
+
+/// The vendor's name as receipt `id` reads it (its details, or the picked
+/// receipt read in full).
+pub(crate) fn receipt_vendor(s: &BankFeedScreen, id: DocumentDraftId) -> Option<String> {
+    let p = &s.detail.receipt;
+    p.details
+        .get(&id)
+        .and_then(|x| x.vendor.clone())
+        .or_else(|| p.full.as_ref().filter(|f| f.id == id).and_then(read_vendor))
 }
 
 /// The receipt's vendor as the row names it (the only name the feed has

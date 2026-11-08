@@ -162,7 +162,10 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
         return;
     }
     let detail_w = (avail.x * 0.3).clamp(DETAIL_MIN_W, DETAIL_W);
-    let list_w = avail.x - detail_w - 12.0;
+    // The separator and the spacing on both sides of it (QA-2: the panel
+    // ran a few points past the window's right edge, cutting its text).
+    let gap = ui.spacing().item_spacing.x * 2.0 + 8.0;
+    let list_w = avail.x - detail_w - gap;
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(list_w, avail.y),
@@ -381,6 +384,31 @@ fn badge(ui: &Ui, rect: egui::Rect, tokens: &Tokens, why: Why) {
     p.galley(r.min + Vec2::new(6.0, 2.0), g, color);
 }
 
+/// The account picked in the panel, when `r` is the panel's row.
+fn panel_account(s: &BankFeedScreen, r: &FeedRow) -> Option<String> {
+    if s.detail.row != Some(r.id) {
+        return None;
+    }
+    let a = s.detail.account?;
+    s.chart
+        .iter()
+        .find(|(id, _)| *id == a)
+        .map(|(_, n)| n.clone())
+}
+
+/// The vendor the picked receipt reads, when `r` is the panel's row.
+fn receipt_payee(s: &BankFeedScreen, r: &FeedRow) -> Option<String> {
+    if s.detail.row != Some(r.id) {
+        return None;
+    }
+    let pick = s.detail.receipt.pick?;
+    s.receipts
+        .of(r.id)
+        .contains(&pick)
+        .then(|| super::receipts::receipt_vendor(s, pick))
+        .flatten()
+}
+
 /// What the row will be recorded as: a payee line and an account line.
 fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
     if r.status == FeedStatus::Excluded {
@@ -424,7 +452,21 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
                 t("bank_feed.recorded.transfer.sub"),
             ),
         },
-        Why::NeedsYou => (t("bank_feed.recorded.choose"), String::new()),
+        // The account picked in the panel shows on its row (QA-2).
+        Why::NeedsYou => match panel_account(s, r) {
+            Some(a) => (payee.unwrap_or_else(|| r.description.clone()), a),
+            None => (t("bank_feed.recorded.choose"), String::new()),
+        },
+        // A receipt line (A05 QA-1): its vendor (the payee, else the name
+        // the picked receipt reads), and the account, else what's missing.
+        Why::Receipt => (
+            payee
+                .or_else(|| receipt_payee(s, r))
+                .unwrap_or_else(|| r.description.clone()),
+            account
+                .or_else(|| panel_account(s, r))
+                .unwrap_or_else(|| t("bank_feed.recorded.choose_account")),
+        ),
         // A look-alike reads like any row needing a choice (P26 QA-21).
         Why::Duplicate if account.is_none() => (t("bank_feed.recorded.choose"), String::new()),
         Why::Accepted => {

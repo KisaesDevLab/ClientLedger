@@ -66,8 +66,10 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
         ..rule
     };
     assert_eq!(why(voided, true), Why::EntryVoided);
-    // A05: a receipt shows over the proposal, never over "Needs you" (no
-    // account yet), a match, a transfer, a duplicate or a voided entry.
+    // A05: a receipt shows over the proposal and over "Needs you" (QA-1:
+    // a line without a suggestion, so no bucket and no account, still says
+    // it has a receipt), never over a match, a transfer, a duplicate or a
+    // voided entry.
     let receipt = WhyInput {
         has_receipt: true,
         ..rule
@@ -81,8 +83,9 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
             },
             true
         ),
-        Why::NeedsYou
+        Why::Receipt
     );
+
     assert_eq!(
         why(
             WhyInput {
@@ -105,6 +108,36 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
     );
     assert_eq!(Source::parse(Some("fuzzy")), Source::History);
     assert_eq!(Source::parse(None), Source::None);
+}
+
+/// A05 QA-1: in a new company no line has a suggestion (no bucket, no
+/// account); a line with a receipt still shows the Receipt badge, never
+/// over a transfer.
+#[test]
+fn a_receipt_shows_on_a_line_without_a_suggestion() {
+    let bare = WhyInput {
+        bucket: None,
+        source: Source::None,
+        has_account: false,
+        ..input()
+    };
+    assert_eq!(why(bare, false), Why::NeedsYou);
+    let receipt = WhyInput {
+        has_receipt: true,
+        ..bare
+    };
+    assert_eq!(why(receipt, false), Why::Receipt);
+    assert_eq!(why(receipt, true), Why::Receipt);
+    assert_eq!(
+        why(
+            WhyInput {
+                transfer: true,
+                ..receipt
+            },
+            true
+        ),
+        Why::Transfer
+    );
 }
 
 #[test]

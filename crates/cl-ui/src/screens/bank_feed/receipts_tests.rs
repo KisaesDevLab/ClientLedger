@@ -294,4 +294,80 @@ mod panel {
         refresh(&mut s);
         assert!(s.detail.receipt.pick.is_none(), "stays declined");
     }
+
+    /// The demo screen after `command`, the cursor's line in the panel.
+    fn opened(command: &'static str) -> (tempfile::TempDir, BankFeedScreen, FeedRow, egui::Context) {
+        let dir = tempfile::tempdir().expect("dir");
+        let company = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = BankFeedScreen::new(company, None);
+        assert!(s.command(CommandId::new(command)));
+        s.poll();
+        let line = *s.receipts.offers.keys().next().expect("a receipt line");
+        let r = s.rows.iter().find(|r| r.id == line).cloned().expect("row");
+        s.detail.row = Some(line);
+        s.detail.account = r.suggested_account.as_ref().map(|a| a.id);
+        reset(&mut s, line);
+        let ctx = egui::Context::default();
+        follow(&mut s, &ctx);
+        (dir, s, r, ctx)
+    }
+
+    /// QA-1: a line nothing was suggested for still shows the Receipt
+    /// badge; the panel asks for an account only (the receipt supplies the
+    /// vendor), and says nothing once one is picked (QA-2); A without one
+    /// says the receipt needs an account.
+    #[test]
+    fn a_line_without_a_suggestion_shows_its_receipt() {
+        let (_d, mut s, r, _ctx) = opened("dev.demo_feed_receipt_bare");
+        assert!(r.suggested_account.is_none() && r.assigned_account.is_none());
+        assert_eq!(s.why(&r), cl_model::bank_feed::Why::Receipt);
+        assert_eq!(
+            super::super::super::detail::missing_key(&s, &r, s.why(&r)),
+            Some("bank_feed.detail.needs_account")
+        );
+        s.accept_one(r.id);
+        assert_eq!(
+            s.notice.map(|(k, _)| k),
+            Some("bank_feed.notice.pick_receipt_account")
+        );
+        s.detail.account = s.chart.first().map(|(a, _)| *a);
+        assert_eq!(
+            super::super::super::detail::missing_key(&s, &r, s.why(&r)),
+            None,
+            "an account picked: nothing missing"
+        );
+        // "Don't use this receipt" and no payee: both are asked for.
+        s.detail.account = None;
+        s.detail.receipt.pick = None;
+        assert_eq!(
+            super::super::super::detail::missing_key(&s, &r, s.why(&r)),
+            Some("bank_feed.detail.needs_you")
+        );
+    }
+
+    /// QA-2 / QA-5: the offers name the vendor as read when it isn't in
+    /// the list, the reference and the file; two copies of one receipt
+    /// read differently.
+    #[test]
+    fn same_amount_offers_are_told_apart() {
+        let (_d, s, r, _ctx) = opened("dev.demo_feed_receipt_two");
+        let offers = s.receipts.of(r.id).to_vec();
+        assert_eq!(offers.len(), 2);
+        let texts = offer_texts(&s, &r, &offers, cl_core::MoneyStyle::default());
+        assert_ne!(texts[0], texts[1]);
+        for t in &texts {
+            assert!(t.contains("Synthetic Hardware Co."), "read vendor");
+            assert!(t.contains("Ref R-1042"), "reference");
+            assert!(!t.contains("Vendor not matched yet"));
+        }
+        assert!(texts.iter().any(|t| t.contains("receipt-a.pdf")));
+        assert!(texts.iter().any(|t| t.contains("receipt-b.pdf")));
+        // Still alike (no file names known): numbered.
+        let mut bare = s;
+        bare.detail.receipt.details.clear();
+        bare.detail.receipt.full = None;
+        let texts = offer_texts(&bare, &r, &offers, cl_core::MoneyStyle::default());
+        assert_ne!(texts[0], texts[1]);
+        assert!(texts[1].contains("(receipt 2)"));
+    }
 }
