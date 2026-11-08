@@ -95,6 +95,17 @@ pub(crate) struct Pay {
     pub label: String,
 }
 
+/// A waiting payment that can't be deposited here (its amount is display
+/// only).
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Held {
+    pub date: CalendarDate,
+    /// "Received from · ref" (owner data, never logged).
+    pub label: String,
+    /// The amount as the engine sent it, for display only.
+    pub amount: String,
+}
+
 /// What the panel reads for a row.
 #[derive(Clone, Default)]
 pub(crate) struct DetailData {
@@ -104,6 +115,9 @@ pub(crate) struct DetailData {
     pub transfers: Vec<TransferCandidate>,
     pub groupings: Vec<Vec<Pay>>,
     pub payments: Vec<Pay>,
+    /// Waiting payments whose amount the engine didn't send exactly: shown
+    /// as "can't be deposited here", never picked.
+    pub held: Vec<Held>,
     /// 403: candidates aren't available for this role.
     pub forbidden: bool,
 }
@@ -303,6 +317,7 @@ fn read(s: &mut BankFeedScreen, r: &FeedRow) {
                     .map(|g| g.iter().map(pay).collect())
                     .collect(),
                 payments: demo::deposit_payments(d, id).iter().map(pay).collect(),
+                held: Vec::new(),
                 forbidden: d.feed_review.view_only,
             })
         },
@@ -905,7 +920,7 @@ fn deposit_ui(
     }
     ui.label(RichText::new(t("bank_feed.deposit.pick")).strong());
     let payments = s.detail.data.payments.clone();
-    if payments.is_empty() && s.detail.load.is_none() {
+    if payments.is_empty() && s.detail.data.held.is_empty() && s.detail.load.is_none() {
         form::hint(ui, tokens, &t("bank_feed.deposit.none"));
     }
     for p in &payments {
@@ -923,6 +938,19 @@ fn deposit_ui(
                 s.detail.picks.remove(&p.id);
             }
         }
+    }
+    for p in &s.detail.data.held {
+        let text = t_with(
+            "bank_feed.deposit.held",
+            &[
+                ("date", &crate::shell::us_date(p.date)),
+                ("from", &p.label),
+                ("amount", &p.amount),
+            ],
+        );
+        let mut off = false;
+        ui.add_enabled(false, egui::Checkbox::new(&mut off, text))
+            .on_disabled_hover_text(t("bank_feed.deposit.held.tip"));
     }
     ui.add_space(6.0);
     ui.label(RichText::new(t("bank_feed.deposit.fees")).strong());
@@ -999,6 +1027,7 @@ pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
         "transfers": s.detail.data.transfers.len(),
         "groupings": s.detail.data.groupings.len(),
         "payments": s.detail.data.payments.len(),
+        "held_payments": s.detail.data.held.len(),
         "picked": s.detail.picks.len(),
         "fees": s.detail.fees.len(),
         "split_lines": s.detail.split.len(),

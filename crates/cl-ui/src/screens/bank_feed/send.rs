@@ -22,7 +22,7 @@ use cl_core::Secret;
 use cl_core::ids::{JournalLineId, TransactionId};
 
 use super::BankFeedScreen;
-use super::detail::{DetailData, Pay};
+use super::detail::{DetailData, Held, Pay};
 use crate::company::demo::feed_review as demo;
 use crate::screens::templates::engine::run;
 
@@ -427,26 +427,52 @@ pub(crate) async fn live_detail(
         d.transfers = f.transfer_candidates(id, window).await.unwrap_or_default();
     }
     if money_in && !d.forbidden {
-        let pay = |p: &cl_api::PendingPayment| {
-            p.amount.exact().map(|amount| Pay {
-                id: p.source,
-                amount,
-                date: p.date,
-                label: p.received_from.clone().unwrap_or_default(),
-            })
-        };
         if let Ok(g) = f.deposit_groupings(id).await {
+            // A grouping with an amount that isn't exact isn't offered (its
+            // exact part wouldn't add up).
             d.groupings = g
                 .candidates
                 .iter()
-                .map(|c| c.items.iter().filter_map(pay).collect())
+                .filter_map(|c| c.items.iter().map(|p| pay_of(p).ok()).collect())
                 .collect();
         }
         if let Ok(p) = s.payments().pending_deposits().await {
-            d.payments = p.items.iter().filter_map(pay).collect();
+            (d.payments, d.held) = split_payments(&p.items);
         }
     }
     Ok(d)
+}
+
+/// A waiting payment the panel may deposit, or (its amount display only)
+/// one it shows as "can't be deposited here".
+fn pay_of(p: &cl_api::PendingPayment) -> Result<Pay, Held> {
+    let label = p.received_from.clone().unwrap_or_default();
+    match p.amount.exact() {
+        Some(amount) => Ok(Pay {
+            id: p.source,
+            amount,
+            date: p.date,
+            label,
+        }),
+        None => Err(Held {
+            date: p.date,
+            label,
+            amount: p.amount.display(false).unwrap_or_default(),
+        }),
+    }
+}
+
+/// The waiting payments: the depositable ones and the held ones.
+fn split_payments(items: &[cl_api::PendingPayment]) -> (Vec<Pay>, Vec<Held>) {
+    let mut pays = Vec::new();
+    let mut held = Vec::new();
+    for p in items {
+        match pay_of(p) {
+            Ok(x) => pays.push(x),
+            Err(h) => held.push(h),
+        }
+    }
+    (pays, held)
 }
 
 /// The plan's rows as accept items: ready rows as proposed, matches with
@@ -603,5 +629,38 @@ mod tests {
         assert!(matches!(e, ApiError::ClosedPeriod(_)));
         assert_eq!(again, vec![AcceptItem::AsProposed(locked)]);
         assert!(!again.iter().any(|i| i.id() == open));
+    }
+
+    /// P26 review m8: a waiting payment whose amount isn't exact is shown
+    /// as "can't be deposited here", not dropped.
+    #[test]
+    fn a_payment_that_isnt_exact_is_held_not_dropped() {
+        let p = |n: u8, amount: cl_api::PendingAmount| cl_api::PendingPayment {
+            source: format!("d26f9200-0000-4000-8000-0000000000{n:02}")
+                .parse()
+                .expect("id"),
+            txn_type: "customer_payment".into(),
+            date: cl_core::CalendarDate::from_ymd(2026, 11, 2).expect("date"),
+            received_from: Some("Synthetic Client".into()),
+            contact: None,
+            ref_no: None,
+            method: None,
+            memo: None,
+            amount,
+        };
+        let exact = p(
+            1,
+            cl_api::PendingAmount::Exact(cl_core::Money::parse_wire("1250.00").expect("m")),
+        );
+        let shown = p(
+            2,
+            cl_api::PendingAmount::DisplayOnly(serde_json::from_str("842.5").expect("amount")),
+        );
+        let (pays, held) = split_payments(&[exact, shown]);
+        assert_eq!(pays.len(), 1);
+        assert_eq!(pays[0].amount.to_wire(), "1250.0000");
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].amount, "842.50");
+        assert_eq!(held[0].label, "Synthetic Client");
     }
 }

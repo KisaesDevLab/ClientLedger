@@ -147,6 +147,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.deposit.grouping", "{items}"),
     ("bank_feed.deposit.pick", "Or choose waiting payments"),
     ("bank_feed.deposit.none", "No payments are waiting to be deposited near this date."),
+    ("bank_feed.deposit.held", "{date} \u{b7} {from} \u{b7} {amount} \u{2014} can\u{2019}t be deposited here"),
+    ("bank_feed.deposit.held.tip", "This payment\u{2019}s amount didn\u{2019}t come through exactly, so it can\u{2019}t be added to a deposit from here. It stays waiting in your books."),
     ("bank_feed.deposit.fees", "Fees taken out (card processor fees)"),
     ("bank_feed.deposit.add_fee", "Add fee line"),
     ("bank_feed.deposit.fees_max", "A deposit can have at most 10 fee lines."),
