@@ -1211,6 +1211,11 @@ fn main() -> std::process::ExitCode {
             "feed_receipts::a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in",
             contract_feed_receipts::a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in,
         ),
+        // PR-A1 B1 (feed-accept-draft-duplicates-v1).
+        (
+            "feed_receipts::a_receipt_of_a_bill_in_the_books_needs_a_confirmation",
+            contract_feed_receipts::a_receipt_of_a_bill_in_the_books_needs_a_confirmation,
+        ),
         // U-178 (engine PR #238, feed-accept-kind-v1).
         (
             "feed_accept::rows_carry_their_accept_kind",

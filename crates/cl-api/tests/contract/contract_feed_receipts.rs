@@ -85,6 +85,7 @@ fn link(d: &DocumentDraft) -> DraftLink {
     DraftLink {
         id: d.id,
         expected_updated_at: d.updated_at.clone(),
+        acknowledged_duplicates: Vec::new(),
     }
 }
 
@@ -182,6 +183,7 @@ pub fn stale_or_used_receipts_post_nothing(h: &Harness) {
         draft: DraftLink {
             id: d.id,
             expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         },
     }]);
     let o = h.run(s.feed().accept(&stale, None, key())).expect("accept");
@@ -495,4 +497,128 @@ pub fn a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in(h: &Harness)
         filed_on(h, s, &full, t),
         "the credit is filed on the deposit"
     );
+}
+
+/// PR-A1 B1 / T1 (`feed-accept-draft-duplicates-v1`, Q-PRA1b): the owner
+/// entered the bill by hand; the vendor's PDF of it is a live receipt; the
+/// autopay line comes in. An accept carrying the receipt fails its row
+/// `DOCUMENT_POSSIBLE_DUPLICATE` naming the bill (not the bank line's own
+/// duplicate), posts nothing and leaves the receipt waiting; sent again
+/// acknowledging the bill, it posts once and files the receipt.
+pub fn a_receipt_of_a_bill_in_the_books_needs_a_confirmation(h: &Harness) {
+    if !gated(h)
+        || !h.require_cap(
+            Capabilities::FEED_ACCEPT_DRAFT_DUPLICATES,
+            "PR-A1 B1 feed accept duplicates",
+        )
+    {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh(h, s, AccountType::Asset, Some("bank"));
+    let utilities = fresh(h, s, AccountType::Expense, None);
+    let vendor = h
+        .run(s.contacts().create(
+            &cl_api::NewContact {
+                fields: cl_api::ContactFields::named(
+                    cl_api::ContactType::Vendor,
+                    format!("Synthetic Power {}", key().as_header()),
+                ),
+                opening_balance: Money::ZERO,
+                opening_balance_date: None,
+            },
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("vendor: {e}"))
+        .record
+        .id;
+    let bill = h
+        .run(s.bills().create(
+            &cl_api::BillDraft {
+                vendor,
+                date: date(2027, 7, 2),
+                vendor_invoice_number: Some("SYN-33994105".into()),
+                terms: None,
+                due_date: None,
+                memo: None,
+                amount_due: m("685.55"),
+                lines: vec![cl_api::BillLineDraft::expense(utilities, m("685.55"))],
+                received: true,
+                draft_attachment: None,
+            },
+            &cl_api::PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("bill: {e:?}"))
+        .record
+        .txn
+        .id;
+    // The vendor's PDF of the same invoice, read with the vendor.
+    let plain = receipt(h, s, "685.55", date(2027, 7, 2));
+    let reading = DraftReading {
+        kind: DraftKind::CashExpense,
+        reader: DraftReader::TextPdf,
+        fields: Map::new(),
+        lines: Vec::new(),
+        checks: Vec::new(),
+        suggested_contact: Some(vendor),
+        doc_reference: Some("SYN-33994105".into()),
+        doc_total: Some(m("685.55")),
+        doc_date: Some(date(2027, 7, 2)),
+    };
+    let d = h
+        .run(
+            s.document_drafts()
+                .store_reading(plain.id, &plain.updated_at, &reading),
+        )
+        .unwrap_or_else(|e| panic!("store reading: {e:?}"));
+    let rows = import(
+        h,
+        s,
+        bank,
+        &[(date(2027, 7, 5), "685.55", "SYN POWER AUTOPAY")],
+    );
+    let item = |draft: DraftLink| {
+        AcceptRequest::Items(vec![AcceptItem::Receipt {
+            item: Box::new(AcceptItem::Values(rows[0].id, values(utilities))),
+            draft,
+        }])
+    };
+    let o = h
+        .run(s.feed().accept(&item(link(&d)), None, key()))
+        .expect("accept");
+    assert_eq!((o.posted, o.failures.len()), (0, 1), "{o:?}");
+    let f = &o.failures[0];
+    assert_eq!(f.code, AcceptFailure::DRAFT_POSSIBLE_DUPLICATE);
+    assert!(f.is_receipt());
+    let named: Vec<_> = f.duplicates().into_iter().map(|x| x.source).collect();
+    assert!(
+        named.contains(&cl_api::MatchSource::Transaction(bill)),
+        "names the bill: {named:?}"
+    );
+    assert!(status_of(h, s, rows[0].id).is_some_and(FeedStatus::is_waiting));
+    let still = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert!(still.status.is_live(), "the receipt waits");
+    assert_eq!(still.updated_at, d.updated_at, "unchanged");
+
+    // "Use it anyway": acknowledged, it posts once.
+    let acked = DraftLink {
+        acknowledged_duplicates: f
+            .duplicates()
+            .into_iter()
+            .filter_map(|x| match x.source {
+                cl_api::MatchSource::Transaction(t) => Some(t),
+                cl_api::MatchSource::Draft(_) => None,
+            })
+            .collect(),
+        ..link(&d)
+    };
+    let o = h
+        .run(s.feed().accept(&item(acked), None, key()))
+        .expect("accept");
+    assert_eq!((o.posted, o.failures.len()), (1, 0), "{:?}", o.failures);
+    let t = entry_of(h, s, rows[0].id).expect("entry");
+    assert_ne!(t, bill);
+    let closed = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert_eq!(closed.converted_transaction_id, Some(t));
 }

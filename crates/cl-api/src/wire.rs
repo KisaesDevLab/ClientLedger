@@ -520,6 +520,11 @@ impl Capabilities {
     /// returns the drafts converted or attached to it to the review queue
     /// with their files; the answers list them in `reopenedDrafts`.
     pub const DOCUMENT_DRAFTS_REOPEN: &'static str = "document-drafts-reopen-v1";
+    /// PR-A1 B1 (Q-PRA1b): a feed accept item carrying a document draft
+    /// runs the convert's duplicate check on the posted row and fails the
+    /// row `DOCUMENT_POSSIBLE_DUPLICATE {matches}` unless
+    /// `documentDraft.acknowledgedDuplicates` lists every match.
+    pub const FEED_ACCEPT_DRAFT_DUPLICATES: &'static str = "feed-accept-draft-duplicates-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

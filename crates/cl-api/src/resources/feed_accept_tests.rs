@@ -216,6 +216,7 @@ fn link() -> DraftLink {
     DraftLink {
         id: DocumentDraftId::parse(D).expect("draft"),
         expected_updated_at: TOKEN.into(),
+        acknowledged_duplicates: Vec::new(),
     }
 }
 
@@ -242,6 +243,7 @@ fn a_receipt_item_carries_the_draft_and_its_token_exactly() {
             draft: DraftLink {
                 id: DocumentDraftId::parse("77777777-7777-4777-8777-777777777777").expect("draft"),
                 expected_updated_at: TOKEN.into(),
+                acknowledged_duplicates: Vec::new(),
             },
         },
     ]))
@@ -271,6 +273,7 @@ fn a_receipt_inside_a_receipt_or_without_a_token_is_refused() {
         item: Box::new(AcceptItem::AsProposed(fid(A))),
         draft: DraftLink {
             expected_updated_at: "  ".into(),
+            acknowledged_duplicates: Vec::new(),
             ..link()
         },
     };
@@ -427,4 +430,133 @@ async fn a_receipt_needs_its_capability_and_nothing_is_sent_without_it() {
     assert_eq!(posts.len(), 1);
     let sent: Value = serde_json::from_slice(&posts[0].body).expect("json");
     assert_eq!(sent["items"][0]["documentDraft"]["id"], D);
+}
+
+// ------------------------------------------------- PR-A1 B1 duplicates
+
+/// B1: the document-duplicate failure is the receipt's (the row didn't
+/// post), distinct from the bank line's own duplicate, and names the
+/// posted entries it looks like (both wire shapes).
+#[test]
+fn a_document_duplicate_is_the_receipts_and_names_its_matches() {
+    let body = json!({
+        "undoGroupId": G,
+        "failures": [
+            { "id": A, "code": "DOCUMENT_POSSIBLE_DUPLICATE", "details": { "matches": [
+                { "transactionId": T, "type": "bill", "date": "2026-10-02",
+                  "total": "685.55", "reference": "33994105" },
+                { "source": "transaction", "id": L, "reason": "reference", "txnType": "expense" },
+                { "source": "draft", "id": D },
+                { "transactionId": "not-an-id" }
+            ] } },
+            { "id": B, "code": "POSSIBLE_DUPLICATE" }
+        ]
+    });
+    let o = accept_outcome_from(body.to_string().as_bytes()).expect("outcome");
+    let dup = &o.failures[0];
+    assert!(dup.is_receipt() && !dup.is_locked());
+    let m = dup.duplicates();
+    assert_eq!(m.len(), 2, "transactions only, unreadable ones left out");
+    assert_eq!(
+        m[0].source,
+        crate::MatchSource::Transaction(T.parse().expect("t"))
+    );
+    assert_eq!(m[0].txn_type.as_deref(), Some("bill"));
+    assert_eq!(m[0].total, Some(Money::parse_wire("685.55").expect("m")));
+    assert_eq!(
+        m[1].source,
+        crate::MatchSource::Transaction(L.parse().expect("t"))
+    );
+    // The bank line's own duplicate is not the receipt's.
+    assert!(!o.failures[1].is_receipt());
+    assert_eq!(o.failures[1].duplicates(), Vec::new());
+}
+
+/// B1: "Use it anyway" sends the confirmed entries as
+/// `acknowledgedDuplicates`; none: the key is left out.
+#[test]
+fn acknowledged_duplicates_ride_on_the_draft_only_when_there_are_any() {
+    let acked = DraftLink {
+        acknowledged_duplicates: vec![T.parse().expect("t")],
+        ..link()
+    };
+    let body = accept_body(&AcceptRequest::Items(vec![
+        AcceptItem::Receipt {
+            item: Box::new(AcceptItem::AsProposed(fid(A))),
+            draft: acked,
+        },
+        AcceptItem::Receipt {
+            item: Box::new(AcceptItem::AsProposed(fid(B))),
+            draft: DraftLink {
+                id: DocumentDraftId::parse("77777777-7777-4777-8777-777777777777").expect("d"),
+                ..link()
+            },
+        },
+    ]))
+    .expect("body");
+    assert_eq!(
+        body["items"][0]["documentDraft"]["acknowledgedDuplicates"],
+        json!([T])
+    );
+    assert!(
+        body["items"][1]["documentDraft"]
+            .get("acknowledgedDuplicates")
+            .is_none()
+    );
+}
+
+/// B1: acknowledged duplicates need `feed-accept-draft-duplicates-v1`
+/// (an older engine would ignore them and post twice); nothing is sent.
+#[tokio::test]
+async fn acknowledged_duplicates_need_their_capability() {
+    use crate::resources::testkit::{json as reply, requests, session_with_caps};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer};
+
+    let server = MockServer::start().await;
+    let answer = json!({ "undoGroupId": G, "posted": 1, "matched": 0 });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/banking/feed/accept"))
+        .respond_with(reply(200, &answer.to_string()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[Capabilities::FEED_ACCEPT, Capabilities::FEED_ACCEPT_DRAFT],
+    )
+    .await;
+    let acked = AcceptRequest::Items(vec![AcceptItem::Receipt {
+        item: Box::new(AcceptItem::AsProposed(fid(A))),
+        draft: DraftLink {
+            acknowledged_duplicates: vec![T.parse().expect("t")],
+            ..link()
+        },
+    }]);
+    let e = s
+        .feed()
+        .accept(&acked, None, IdempotencyKey::new())
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(requests(&server, "POST").await.is_empty());
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/banking/feed/accept"))
+        .respond_with(reply(200, &answer.to_string()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[
+            Capabilities::FEED_ACCEPT,
+            Capabilities::FEED_ACCEPT_DRAFT,
+            Capabilities::FEED_ACCEPT_DRAFT_DUPLICATES,
+        ],
+    )
+    .await;
+    s.feed()
+        .accept(&acked, None, IdempotencyKey::new())
+        .await
+        .expect("accepted");
+    assert_eq!(requests(&server, "POST").await.len(), 1);
 }
