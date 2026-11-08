@@ -21,7 +21,7 @@ const DETAIL_MIN_W: f32 = 270.0;
 const ROW_H: f32 = 46.0;
 /// Below this many points side by side, the detail panel goes under the
 /// list (P26 QA-1, QA-23: 1024 wide, 200% zoom).
-const STACK_BELOW: f32 = 900.0;
+const STACK_BELOW: f32 = 700.0;
 /// Below this list width, a row puts what it will be recorded as on its
 /// second line.
 const COMPACT_BELOW: f32 = 620.0;
@@ -148,12 +148,17 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_max_height(list_h);
-                list(s, ui, &tokens, 44.0);
+                list(s, ui, &tokens, 52.0);
                 footnote(s, ui, &tokens);
             },
         );
         ui.separator();
-        side(s, ui);
+        // The panel scrolls inside what is left of the window.
+        let rest = ui.available_size();
+        ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_max_height(rest.y);
+            side(s, ui);
+        });
         return;
     }
     let detail_w = (avail.x * 0.3).clamp(DETAIL_MIN_W, DETAIL_W);
@@ -164,7 +169,8 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_max_width(list_w);
-                list(s, ui, &tokens, 28.0);
+                // Room for the footnote's two lines.
+                list(s, ui, &tokens, 52.0);
                 footnote(s, ui, &tokens);
             },
         );

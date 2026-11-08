@@ -442,7 +442,9 @@ impl BankFeedScreen {
             Some(("bank_feed.notice.done", o.done))
         };
         if o.done > 0 {
-            self.link.bus().publish(crate::data_bus::Change::BankFeed);
+            self.link
+                .bus()
+                .publish_from(&self.bus, crate::data_bus::Change::BankFeed);
             // Accepts and Undo post or remove entries: open registers and the
             // Chart of Accounts read their balances again (P26 QA-5).
             self.link
@@ -796,7 +798,13 @@ impl Screen for BankFeedScreen {
         }
         self.drawn_at = Some(pass);
         self.poll();
-        if !self.link.bus().take(&mut self.bus).is_empty() {
+        let changes = self.link.bus().take(&mut self.bus);
+        if !changes.is_empty() {
+            // A new bank file (another window): the last action's notice no
+            // longer describes the list (P26 QA-21).
+            if changes.bank_feed {
+                self.notice = None;
+            }
             self.read_meta();
             self.reload();
         }

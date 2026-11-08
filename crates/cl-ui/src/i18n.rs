@@ -1162,7 +1162,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.balances.bank_file", "Bank file"),
     ("home.balances.bank_file.tip", "The bank's figure appears after you import a bank file with an ending balance."),
     ("home.balances.bank_file.as_of", "The ending balance of the bank file dated {date}."),
-    ("home.balances.note", "Bank figures appear after you import a bank file (coming with bank file import)."),
+    ("home.balances.note", "Bank file shows the balance in the last bank file you imported for that account (point at it to see the file's date); \u{2014} means no file yet."),
     ("home.balances.loading", "Loading balances\u{2026}"),
     ("home.balances.empty", "Add a bank account to see balances here."),
     ("home.balances.failed", "Couldn't load balances. Try again."),
