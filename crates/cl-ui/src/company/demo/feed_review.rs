@@ -72,11 +72,17 @@ struct Row {
     duplicate_of: Option<FeedItemId>,
 }
 
-/// A row's review state before an accept.
+/// A row's review state before an accept: the status, what was staged and
+/// the suggestion (the engine's `PRIOR_STATE_COLUMNS`).
 #[derive(Clone, Debug)]
 struct Prior {
     status: FeedStatus,
     assigned: Option<Named<AccountId>>,
+    suggested: Option<Named<AccountId>>,
+    payee: Option<String>,
+    source: Option<&'static str>,
+    confidence: Option<Decimal>,
+    rule: Option<SuggestedRule>,
 }
 
 impl Row {

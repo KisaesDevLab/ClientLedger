@@ -485,3 +485,154 @@ fn a_transfer_posts_one_entry_and_undo_deletes_it() {
         Err(Some(cl_api::FeedRefusal::TransferMismatch { .. }))
     ));
 }
+
+/// P26 review M2: Undo of one side of a two-row transfer deletes the entry
+/// and takes both rows back (the engine unlinks every row on the entry);
+/// the other side's Undo is then a stale one, not "changed since".
+#[test]
+fn undo_of_one_side_of_a_transfer_restores_both_rows() {
+    let mut s = state();
+    let before = entries(&s);
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    // The card's own bank line: the other side, money in on the card.
+    let mut other = s
+        .feed_review
+        .rows
+        .iter()
+        .find(|r| r.id == card.id)
+        .cloned()
+        .expect("row");
+    other.id = super::super::id("d26f9000", 1);
+    other.account = to;
+    other.amount = card.amount.checked_neg().expect("neg");
+    other.transfer = false;
+    other.rule = None;
+    s.feed_review.rows.push(other.clone());
+    let p = transfer(&mut s, card.id, TransferTarget::OtherItem(other.id), None).expect("transfer");
+    assert_eq!(p.items.len(), 2);
+    assert_eq!(entries(&s), before + 1);
+    let u = undo(&mut s, &UndoTarget::Items(vec![card.id]), false, None).expect("undo");
+    let mut ids: Vec<FeedItemId> = u.undone.iter().map(|x| x.id).collect();
+    ids.sort();
+    let mut want = vec![card.id, other.id];
+    want.sort();
+    assert_eq!(ids, want, "both sides are reported");
+    assert!(u.undone.iter().all(|x| x.deleted));
+    assert_eq!(entries(&s), before);
+    for id in [card.id, other.id] {
+        let r = s.feed_review.rows.iter().find(|r| r.id == id).expect("row");
+        assert!(r.waiting() && r.matched.is_none() && r.group.is_none());
+    }
+    let again = undo(&mut s, &UndoTarget::Items(vec![other.id]), false, None)
+        .expect("a stale undo, not FEED_UNDO_CHANGED");
+    assert_eq!(again.undone.len(), 0);
+    assert_eq!(again.failures[0].code, AcceptFailure::NOT_ACCEPTED);
+    // Undo of the group after a fresh transfer reports each row once.
+    let p = transfer(&mut s, card.id, TransferTarget::OtherItem(other.id), None)
+        .expect("transfer again");
+    let u = undo(
+        &mut s,
+        &UndoTarget::Group(p.undo_group.expect("g")),
+        false,
+        None,
+    )
+    .expect("undo group");
+    assert_eq!(u.undone.len(), 2);
+    assert_eq!(entries(&s), before);
+}
+
+/// P26 review m7: Undo puts the suggestion back as it was (the engine's
+/// prior state), not only the status.
+#[test]
+fn undo_restores_the_suggestion() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    categorize(&mut s, fuel.id, None, None).expect("posted");
+    if let Ok(r) = s.feed_review.row_mut(fuel.id) {
+        r.suggested = None;
+        r.rule = None;
+    }
+    undo(&mut s, &UndoTarget::Items(vec![fuel.id]), false, None).expect("undo");
+    let back = find(&mut s, "RIVERBEND FUEL");
+    assert_eq!(back.suggested_account, fuel.suggested_account);
+    assert_eq!(
+        back.suggested_rule.map(|r| r.id),
+        fuel.suggested_rule.map(|r| r.id)
+    );
+}
+
+/// P26 review m7: the owner's payee and memo are on the posted entry.
+#[test]
+fn categorize_keeps_the_owners_payee_and_memo() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    let contact = s.contacts_mut()[0].clone();
+    let choice = FeedChoice {
+        account: fuel.suggested_account.as_ref().map(|a| a.id),
+        contact: Some(contact.id),
+        memo: Some("Truck fuel".into()),
+        ..FeedChoice::default()
+    };
+    let t = categorize(&mut s, fuel.id, Some(&choice), None)
+        .expect("posted")
+        .expect("entry");
+    let tx = s
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|x| DemoLedger::id_of(x) == t)
+        .expect("entry");
+    assert_eq!(
+        tx.contact.as_deref(),
+        Some(contact.fields.display_name.as_str())
+    );
+    assert_eq!(tx.memo, "Truck fuel");
+    let unknown = FeedChoice {
+        contact: Some("d26c0000-0000-4000-8000-000000000999".parse().expect("id")),
+        ..choice
+    };
+    let other = find(&mut s, "MONETT TIRE");
+    assert!(matches!(
+        categorize(&mut s, other.id, Some(&unknown), None),
+        Err(ApiError::NotFound { .. })
+    ));
+}
+
+/// P26 review m7: rule mode skips a row whose staging no longer matches the
+/// rule (`staging_differs`), as the engine.
+#[test]
+fn rule_mode_skips_rows_whose_staging_differs() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    let staged = fuel.suggested_rule.clone().expect("rule");
+    let other_account = crate::company::demo::account_id(6050);
+    assert_ne!(
+        fuel.suggested_account.as_ref().map(|a| a.id),
+        Some(other_account)
+    );
+    let mut rule = rules(&mut s)
+        .into_iter()
+        .find(|r| r.id.as_deref() == Some(staged.id.as_str()))
+        .expect("rule");
+    rule.account = Some(other_account);
+    save_rule(&mut s, &rule).expect("saved");
+    let token = find(&mut s, "RIVERBEND FUEL")
+        .suggested_rule
+        .and_then(|r| r.updated_at)
+        .expect("token");
+    let o = accept(
+        &mut s,
+        &AcceptRequest::Rule(RuleAccept {
+            rule_id: staged.id.clone(),
+            kind: staged.kind.clone(),
+            updated_at: token,
+            connection: None,
+            after: None,
+        }),
+        None,
+    )
+    .expect("accept");
+    assert_eq!(o.posted, 0);
+    assert!(o.skipped.contains(&(fuel.id, AcceptSkip::StagingDiffers)));
+}

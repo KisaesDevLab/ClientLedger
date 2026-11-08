@@ -22,7 +22,7 @@ use cl_api::{
     MatchCandidate, SplitLine, TransferCandidate, TransferTarget, UndoGroupId, UndoOutcome,
     UndoTarget, Undone, ValidationError,
 };
-use cl_core::ids::{AccountId, JournalLineId, TransactionId};
+use cl_core::ids::{AccountId, ContactId, JournalLineId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 use serde_json::json;
 
@@ -107,6 +107,11 @@ fn accept_row(
         r.prior = Some(Prior {
             status: r.status,
             assigned: r.assigned.clone(),
+            suggested: r.suggested.clone(),
+            payee: r.payee.clone(),
+            source: r.source,
+            confidence: r.confidence,
+            rule: r.rule.clone(),
         });
         r.status = status;
         r.matched = entry;
@@ -168,12 +173,22 @@ fn post(
     }
     check_closing(journal::closing(state), &[r.date], password)?;
     let money_out = r.amount.is_positive();
+    // The owner's payee and memo win over the row's (as the engine).
+    let contact = match choice.and_then(|c| c.contact) {
+        Some(id) => Some(contact_name(state, id).ok_or(ApiError::NotFound { code: None })?),
+        None => r.payee.clone(),
+    };
+    let memo = choice
+        .and_then(|c| c.memo.as_deref())
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map_or_else(|| r.description.clone(), str::to_string);
     let p = DemoPosting {
         kind: if money_out { "expense" } else { "deposit" },
         date: r.date,
         number: String::new(),
-        contact: r.payee.clone(),
-        memo: r.description.clone(),
+        contact,
+        memo,
         own: r.account,
         own_debit: !money_out,
         lines,
@@ -185,6 +200,15 @@ fn post(
         state.feed_review.taught.insert(r.id, key);
     }
     Ok(t)
+}
+
+/// A demo contact's display name (owner data, never logged).
+fn contact_name(state: &mut DemoState, id: ContactId) -> Option<String> {
+    state
+        .contacts_mut()
+        .iter()
+        .find(|c| c.id == id)
+        .map(|c| c.fields.display_name.clone())
 }
 
 /// The description words before the first one with a digit (the demo's
@@ -663,6 +687,9 @@ pub fn accept(
         remaining: 0,
         next_after: None,
     };
+    // Rule mode: the rule's account as it stands now (a row whose staging
+    // no longer matches it is skipped `staging_differs`, as the engine).
+    let mut rule_account: Option<Option<AccountId>> = None;
     let items: Vec<AcceptItem> = match req {
         AcceptRequest::Items(items) => {
             let mut v = items.clone();
@@ -670,6 +697,12 @@ pub fn accept(
             v
         }
         AcceptRequest::Rule(rule) => {
+            rule_account = Some(
+                rules(state)
+                    .iter()
+                    .find(|x| x.id.as_deref() == Some(rule.rule_id.as_str()))
+                    .and_then(|x| x.account),
+            );
             let staged: Vec<&Row> = state
                 .feed_review
                 .rows
@@ -736,6 +769,14 @@ pub fn accept(
             }
             AcceptItem::AsProposed(_) if has_match(state, &r) => {
                 out.skipped.push((id, AcceptSkip::HasMatch));
+                continue;
+            }
+            AcceptItem::AsProposed(_)
+                if rule_account.is_some_and(|a| {
+                    a.is_some_and(|a| r.suggested.as_ref().map(|s| s.id) != Some(a))
+                }) =>
+            {
+                out.skipped.push((id, AcceptSkip::StagingDiffers));
                 continue;
             }
             AcceptItem::AsProposed(_) if r.assigned.is_none() && r.suggested.is_none() => {
@@ -819,8 +860,14 @@ pub fn undo(
                 continue;
             }
         };
-        let deletes = r.posted && !r.entry_voided;
+        // The entry goes when the feed posted it for any row on it (P26
+        // review M1); a match alone only unlinks.
+        let deletes = !r.entry_voided
+            && state.feed_review.rows.iter().any(|x| {
+                x.matched.is_some() && x.matched == r.matched && x.status.is_accepted() && x.posted
+            });
         if deletes
+            && r.fingerprint.is_some()
             && r.matched.and_then(|t| fingerprint(state, t)).as_ref() != r.fingerprint.as_ref()
         {
             changed.push(id);
@@ -836,6 +883,10 @@ pub fn undo(
     let closing = journal::closing(state);
     for (r, deletes) in todo {
         let Some(t) = r.matched else { continue };
+        // Already taken back with the other side of its entry.
+        if out.undone.iter().any(|u| u.id == r.id) {
+            continue;
+        }
         let entry = state
             .ledger
             .transactions()
@@ -859,27 +910,65 @@ pub fn undo(
                 out.failures.push(fail(AcceptFailure::PERIOD_LOCKED));
                 continue;
             }
-            // Another row on the same entry (the other side of a transfer)
-            // has already deleted it.
-            if state.ledger.date_of(t).is_some() && state.ledger.delete(t).is_err() {
+            // A deposit holding a bounced payment stays (the engine's
+            // `assertDepositSourcesNotBounced`).
+            if entry.as_ref().is_some_and(|e| e.kind == "deposit")
+                && state
+                    .ledger
+                    .deposit_links(t)
+                    .iter()
+                    .any(|(src, _)| super::super::receivables::is_bounced_source(state, *src))
+            {
                 out.failures.push(fail(AcceptFailure::PAYMENT_BOUNCED));
                 continue;
             }
+            if state.ledger.date_of(t).is_some()
+                && let Err(e) = state.ledger.delete(t)
+            {
+                out.failures.push(undo_failure(r.id, &e));
+                continue;
+            }
         }
-        let group = r.group.unwrap_or_else(UndoGroupId::new_random);
-        if let Some(key) = state.feed_review.taught.remove(&r.id) {
-            state.feed_review.learned.entry(key).or_default().1 += 1;
+        // Every row on the entry goes back (the other side of a transfer
+        // too, as the engine unlinks every item pointing at it).
+        let on_entry: Vec<Row> = state
+            .feed_review
+            .rows
+            .iter()
+            .filter(|x| x.matched == Some(t) && x.status.is_accepted())
+            .cloned()
+            .collect();
+        for x in on_entry {
+            let group = x.group.or(r.group).unwrap_or_else(UndoGroupId::new_random);
+            if let Some(key) = state.feed_review.taught.remove(&x.id) {
+                state.feed_review.learned.entry(key).or_default().1 += 1;
+            }
+            restore(state, x.id);
+            out.undone.push(Undone {
+                id: x.id,
+                kind: x.how.to_string(),
+                transaction: t,
+                deleted: deletes,
+                group,
+            });
         }
-        restore(state, r.id);
-        out.undone.push(Undone {
-            id: r.id,
-            kind: r.how.to_string(),
-            transaction: t,
-            deleted: deletes,
-            group,
-        });
     }
     Ok(out)
+}
+
+/// An Undo delete the demo ledger refused, in the engine's words.
+fn undo_failure(id: FeedItemId, e: &ApiError) -> AcceptFailure {
+    match e {
+        ApiError::Conflict {
+            reason: cl_api::ConflictReason::Reconciled,
+            ..
+        } => AcceptFailure {
+            id,
+            code: AcceptFailure::UNDO_RECONCILED.into(),
+            details: cl_api::ConflictDetails::default(),
+        },
+        other => failure(id, other),
+    }
 }
 
 /// Puts a row back to its state before the accept.
@@ -887,9 +976,18 @@ fn restore(state: &mut DemoState, id: FeedItemId) {
     let review = &mut state.feed_review;
     let mut group = None;
     if let Some(r) = review.rows.iter_mut().find(|r| r.id == id) {
-        let prior = r.prior.take();
-        r.status = prior.as_ref().map_or(FeedStatus::Pending, |p| p.status);
-        r.assigned = prior.and_then(|p| p.assigned);
+        if let Some(p) = r.prior.take() {
+            r.status = p.status;
+            r.assigned = p.assigned;
+            r.suggested = p.suggested;
+            r.payee = p.payee;
+            r.source = p.source;
+            r.confidence = p.confidence;
+            r.rule = p.rule;
+        } else {
+            r.status = FeedStatus::Pending;
+            r.assigned = None;
+        }
         r.matched = None;
         r.posted = false;
         r.how = "";
