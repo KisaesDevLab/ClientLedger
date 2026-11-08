@@ -49,7 +49,8 @@ pub use ai::{
 };
 pub use bank_import::{CsvProfile, CsvProfiles, CsvProfilesStore};
 pub use company_prefs::{
-    AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
+    AiConsentNote, CompanyPrefs, FEED_TRANSFER_WINDOW_DEFAULT, FolderError, HereNote,
+    check_inbox_folder, path_hash,
 };
 pub use email_templates::{
     EmailPrefs, EmailTemplate, Field as EmailField, FieldValues, Filled, TemplateDoc,

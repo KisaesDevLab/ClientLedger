@@ -1,0 +1,998 @@
+//! The detail panel (P26 DI-2, mockup right panel): the cursor's row and
+//! what to do with it.
+//!
+//! - **Categorize**: the account (the proposal preselected), Accept.
+//! - **Split** (S): an inline grid (Account · Amount · Memo, Ctrl+Insert /
+//!   Ctrl+Delete) that must place the bank amount exactly; disabled for an
+//!   amount with more than 2 decimals.
+//! - **Match**: the bank lines already in the books it may be, one per
+//!   line (payroll lines each on their own, Q-P26r).
+//! - **Transfer**: the other account's bank line within the transfer
+//!   window (Preferences, Q-P26l), or an account with no bank line yet.
+//! - **Deposit** (money in): the exact groupings of waiting payments, or a
+//!   manual pick (±10 days) with fee lines; Accept at a 0.00 difference
+//!   (Q-P26t). Display only: the engine reads the live payment amounts.
+//! - A possible duplicate is shown beside the row it resembles with Keep
+//!   both / Remove this one (Q-P26b, Q-P26g).
+//! - Accepted rows have Undo; rows whose entry was voided have Review
+//!   again (Q-P26u).
+//!
+//! Amounts typed here are parsed with at most 2 decimals and never
+//! rounded ([`UserInput::CENTS`]); sums are display-only.
+
+use std::collections::BTreeSet;
+
+use cl_api::{
+    DuplicateDecision, FeeLine, FeedChoice, FeedItemId, FeedRow, FeedSplitLine, MatchCandidate,
+    PayrollOverlap, TransferCandidate, TransferTarget, UndoTarget,
+};
+use cl_core::ids::{AccountId, JournalLineId, TransactionId};
+use cl_core::money::UserInput;
+use cl_core::{CalendarDate, Money};
+use cl_model::bank_feed::{self as model, DepositDraft, Show, SplitDraft, Why};
+use eframe::egui::{self, RichText, Ui};
+
+use super::BankFeedScreen;
+use super::send::{self, Send};
+use crate::i18n::{t, t_with};
+use crate::screens::company::form;
+use crate::screens::templates::engine::{Job, finished, run};
+use crate::theme::Tokens;
+
+/// What the panel is doing with a waiting row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// Choose an account.
+    #[default]
+    Categorize,
+    /// Split across accounts.
+    Split,
+    /// Match an entry in the books.
+    Match,
+    /// A transfer between own accounts.
+    Transfer,
+    /// A deposit of waiting payments.
+    Deposit,
+}
+
+impl Mode {
+    const ALL: [Mode; 5] = [
+        Mode::Categorize,
+        Mode::Split,
+        Mode::Match,
+        Mode::Transfer,
+        Mode::Deposit,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            Mode::Categorize => "bank_feed.mode.categorize",
+            Mode::Split => "bank_feed.mode.split",
+            Mode::Match => "bank_feed.mode.match",
+            Mode::Transfer => "bank_feed.mode.transfer",
+            Mode::Deposit => "bank_feed.mode.deposit",
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Mode::Categorize => "categorize",
+            Mode::Split => "split",
+            Mode::Match => "match",
+            Mode::Transfer => "transfer",
+            Mode::Deposit => "deposit",
+        }
+    }
+}
+
+/// A waiting payment a deposit may take (its live amount).
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Pay {
+    pub id: TransactionId,
+    pub amount: Money,
+    pub date: CalendarDate,
+    /// "Received from · ref" (owner data, never logged).
+    pub label: String,
+}
+
+/// What the panel reads for a row.
+#[derive(Clone, Default)]
+pub(crate) struct DetailData {
+    pub row: Option<FeedItemId>,
+    pub candidates: Vec<MatchCandidate>,
+    pub payroll: Vec<PayrollOverlap>,
+    pub transfers: Vec<TransferCandidate>,
+    pub groupings: Vec<Vec<Pay>>,
+    pub payments: Vec<Pay>,
+    /// 403: candidates aren't available for this role.
+    pub forbidden: bool,
+}
+
+/// One typed line (split or fee).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(crate) struct Line {
+    pub account: Option<AccountId>,
+    pub amount: String,
+    pub memo: String,
+}
+
+impl Line {
+    fn money(&self) -> Option<Money> {
+        let s = self.amount.trim();
+        if s.is_empty() {
+            return None;
+        }
+        Money::parse_user(s, UserInput::CENTS)
+            .ok()
+            .filter(|m| m.is_positive())
+    }
+
+    fn memo(&self) -> Option<String> {
+        Some(self.memo.trim().to_string()).filter(|m| !m.is_empty())
+    }
+}
+
+/// The panel's state for the cursor's row.
+#[derive(Default)]
+pub(crate) struct Detail {
+    pub row: Option<FeedItemId>,
+    pub mode: Mode,
+    pub account: Option<AccountId>,
+    pub split: Vec<Line>,
+    /// The chosen match: entry and line.
+    pub pick_match: Option<(TransactionId, Option<JournalLineId>)>,
+    pub pick_transfer: Option<FeedItemId>,
+    pub transfer_to: Option<AccountId>,
+    pub picks: BTreeSet<TransactionId>,
+    pub fees: Vec<Line>,
+    pub data: DetailData,
+    load: Option<Job<DetailData>>,
+    /// What Accept (A) sends now, when the panel's draft is complete.
+    pub ready: Option<Send>,
+}
+
+impl Detail {
+    /// The row moved: a fresh draft and a fresh read.
+    fn reset(&mut self, r: &FeedRow, why: Why) {
+        *self = Detail {
+            row: Some(r.id),
+            mode: match why {
+                Why::Match if !r.is_money_out() => Mode::Deposit,
+                Why::Match => Mode::Match,
+                Why::Transfer => Mode::Transfer,
+                _ => Mode::Categorize,
+            },
+            account: r
+                .assigned_account
+                .as_ref()
+                .or(r.suggested_account.as_ref())
+                .map(|a| a.id),
+            ..Detail::default()
+        };
+        self.transfer_to = r.suggested_account.as_ref().map(|a| a.id);
+        // The engine's one counterpart within 3 days (Q-P26y) is chosen.
+        self.pick_transfer = r.transfer_candidate.as_ref().map(|h| h.feed_item);
+    }
+
+    /// The split draft for the row's amount (`None`: more than 2 decimals).
+    pub(crate) fn split_draft(&self, r: &FeedRow) -> Option<SplitDraft<AccountId>> {
+        let mut d = SplitDraft::new(r.amount)?;
+        d.lines = self.split.iter().map(|l| (l.account, l.money())).collect();
+        Some(d)
+    }
+
+    /// The deposit draft: the bank amount, the picked payments, the fees.
+    pub(crate) fn deposit_draft(&self, r: &FeedRow) -> DepositDraft<TransactionId, AccountId> {
+        let pool = self
+            .data
+            .payments
+            .iter()
+            .chain(self.data.groupings.iter().flatten());
+        let mut payments: Vec<(TransactionId, Money)> = Vec::new();
+        for p in pool {
+            if self.picks.contains(&p.id) && !payments.iter().any(|(id, _)| *id == p.id) {
+                payments.push((p.id, p.amount));
+            }
+        }
+        DepositDraft {
+            bank: r.amount.abs(),
+            payments,
+            fees: self.fees.iter().map(|l| (l.account, l.money())).collect(),
+        }
+    }
+
+    /// A typed line went wrong (not a positive amount with at most 2
+    /// decimals).
+    fn bad_amount(lines: &[Line]) -> bool {
+        lines
+            .iter()
+            .any(|l| !l.amount.trim().is_empty() && l.money().is_none())
+    }
+}
+
+/// Ctrl+Insert / Ctrl+Delete in the split or fee grid.
+pub(crate) fn line_command(s: &mut BankFeedScreen, id: &str) -> bool {
+    let lines = match s.detail.mode {
+        Mode::Split => &mut s.detail.split,
+        Mode::Deposit => &mut s.detail.fees,
+        _ => return false,
+    };
+    match id {
+        "form.insert_line" => {
+            if s.detail.mode == Mode::Deposit && lines.len() >= cl_api::FEE_LINES_MAX {
+                return true;
+            }
+            lines.push(Line::default());
+            true
+        }
+        "form.delete_line" => {
+            lines.pop();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Keeps the panel on the cursor's row and its data read.
+pub(crate) fn follow(s: &mut BankFeedScreen) {
+    if let Some(r) = finished(&mut s.detail.load) {
+        match r {
+            Ok(d) if d.row == s.detail.row => s.detail.data = d,
+            Ok(_) => {}
+            Err(e) => s.detail.data.forbidden = cl_api::is_view_only(&e),
+        }
+    }
+    let Some(id) = s.list.current() else {
+        s.detail.row = None;
+        return;
+    };
+    if s.detail.row == Some(id) {
+        return;
+    }
+    let Some(r) = s.row(id).cloned() else {
+        return;
+    };
+    let why = s.why(&r);
+    s.detail.reset(&r, why);
+    if s.detail_request == Some(model::FeedAction::Split(id)) {
+        s.detail.mode = Mode::Split;
+    }
+    if r.status.is_waiting() {
+        read(s, &r);
+    }
+}
+
+/// Reads the candidates, transfer partners and payments for `r`.
+fn read(s: &mut BankFeedScreen, r: &FeedRow) {
+    let id = r.id;
+    let money_in = !r.is_money_out();
+    let window = s.transfer_window;
+    s.detail.load = Some(run(
+        &s.link,
+        s.group.as_ref(),
+        None,
+        move |d| {
+            use crate::company::demo::feed_review as demo;
+            let pay = |p: &crate::company::demo::deposits::DemoPending| Pay {
+                id: p.source,
+                amount: p.amount,
+                date: p.date,
+                label: p.received_from.clone().unwrap_or_default(),
+            };
+            Ok(DetailData {
+                row: Some(id),
+                candidates: demo::match_candidates(d, id),
+                payroll: Vec::new(),
+                transfers: demo::transfer_candidates(d, id, window),
+                groupings: demo::deposit_groupings(d, id)
+                    .iter()
+                    .map(|g| g.iter().map(pay).collect())
+                    .collect(),
+                payments: demo::deposit_payments(d, id).iter().map(pay).collect(),
+                forbidden: d.feed_review.view_only,
+            })
+        },
+        move |sess| async move { send::live_detail(sess, id, money_in, window).await },
+    ));
+}
+
+fn amount_text(ui: &Ui, m: Money) -> String {
+    m.format(crate::grid_env::shell_frame(ui.ctx()).money_style)
+}
+
+/// Draws the panel.
+pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+    let Some(id) = s.list.current() else {
+        form::hint(ui, tokens, &t("bank_feed.detail.none"));
+        return;
+    };
+    let Some(r) = s.row(id).cloned() else {
+        return;
+    };
+    let why = s.why(&r);
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let date = crate::shell::us_date(r.date);
+        ui.label(
+            RichText::new(format!(
+                "{} \u{b7} {}",
+                date.get(..5).unwrap_or(&date),
+                amount_text(ui, model::display_amount(r.amount))
+            ))
+            .monospace()
+            .strong(),
+        );
+    });
+    ui.label(
+        RichText::new(&r.description)
+            .monospace()
+            .size(12.0)
+            .color(tokens.text_secondary),
+    );
+    ui.add_space(6.0);
+    let can = !s.view_only && s.act.is_none();
+    let tip = if s.view_only {
+        t("bank_feed.view_only.tip")
+    } else {
+        String::new()
+    };
+    egui::ScrollArea::vertical()
+        .id_salt("bank_feed.detail")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            if r.entry_voided {
+                voided(s, ui, tokens, &r, can, &tip);
+            } else if r.status.is_accepted() {
+                accepted(s, ui, tokens, &r, can, &tip);
+            } else if r.possible_duplicate && r.status.is_waiting() {
+                duplicate(s, ui, tokens, &r, can, &tip);
+            } else if r.status.is_waiting() && s.show == Show::Waiting {
+                waiting(s, ui, tokens, &r, why, can, &tip);
+            } else {
+                form::hint(ui, tokens, &t("bank_feed.detail.excluded"));
+            }
+        });
+}
+
+fn voided(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, can: bool, tip: &str) {
+    form::inline_warning(ui, tokens, &t("bank_feed.detail.entry_voided"));
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.detail.review_again")))
+            .on_hover_text(t("bank_feed.detail.review_again.tip"))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            send::start(s, Send::ReviewAgain(r.id), None);
+        }
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.detail.undo")))
+            .on_hover_text(t("bank_feed.detail.undo.voided_tip"))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            send::start(s, Send::Undo(UndoTarget::Items(vec![r.id]), false), None);
+        }
+    });
+}
+
+fn accepted(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    can: bool,
+    tip: &str,
+) {
+    let key = if r.status == cl_api::FeedStatus::Matched {
+        "bank_feed.detail.matched"
+    } else {
+        "bank_feed.detail.posted"
+    };
+    form::hint(ui, tokens, &t(key));
+    ui.add_space(8.0);
+    if ui
+        .add_enabled(can, egui::Button::new(t("bank_feed.detail.undo")))
+        .on_hover_text(t("bank_feed.detail.undo.tip"))
+        .on_disabled_hover_text(tip)
+        .clicked()
+    {
+        send::start(s, Send::Undo(UndoTarget::Items(vec![r.id]), false), None);
+    }
+}
+
+fn duplicate(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    can: bool,
+    tip: &str,
+) {
+    form::inline_warning(ui, tokens, &t("bank_feed.detail.duplicate"));
+    ui.add_space(6.0);
+    let other = r.duplicate_of.clone();
+    ui.columns(2, |cols| {
+        cols[0].label(RichText::new(t("bank_feed.dup.this")).strong());
+        side(
+            &mut cols[0],
+            tokens,
+            Some(r.date),
+            Some(r.amount),
+            Some(&r.description),
+        );
+        cols[1].label(RichText::new(t("bank_feed.dup.other")).strong());
+        match &other {
+            Some(o) => side(
+                &mut cols[1],
+                tokens,
+                o.date,
+                o.amount,
+                o.description.as_deref(),
+            ),
+            None => {
+                cols[1].label(t("bank_feed.dup.unknown"));
+            }
+        }
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.dup.keep")))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            send::start(s, Send::Duplicate(r.id, DuplicateDecision::Keep), None);
+        }
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.dup.remove")))
+            .on_hover_text(t("bank_feed.dup.remove.tip"))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            send::start(s, Send::Duplicate(r.id, DuplicateDecision::Remove), None);
+        }
+    });
+}
+
+fn side(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    date: Option<CalendarDate>,
+    amount: Option<Money>,
+    text: Option<&str>,
+) {
+    if let Some(d) = date {
+        ui.label(RichText::new(crate::shell::us_date(d)).monospace());
+    }
+    if let Some(a) = amount {
+        let shown = amount_text(ui, model::display_amount(a));
+        ui.label(RichText::new(shown).monospace());
+    }
+    ui.label(
+        RichText::new(text.unwrap_or_default())
+            .size(12.0)
+            .color(tokens.text_secondary),
+    );
+}
+
+fn account_combo(
+    ui: &mut Ui,
+    salt: egui::IdSalt,
+    chart: &[(AccountId, String)],
+    value: &mut Option<AccountId>,
+    label: &str,
+) {
+    let shown = value
+        .and_then(|a| chart.iter().find(|(id, _)| *id == a))
+        .map_or_else(|| t("bank_feed.detail.choose_account"), |(_, n)| n.clone());
+    let r = egui::ComboBox::from_id_salt(salt)
+        .selected_text(shown)
+        .width(ui.available_width().min(280.0))
+        .show_ui(ui, |ui| {
+            for (id, name) in chart {
+                ui.selectable_value(value, Some(*id), name);
+            }
+        })
+        .response;
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, label));
+}
+
+#[allow(clippy::too_many_arguments, reason = "the panel's shared inputs")]
+fn waiting(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    why: Why,
+    can: bool,
+    tip: &str,
+) {
+    match why {
+        Why::Ai { high: false } => {
+            form::inline_warning(ui, tokens, &t("bank_feed.detail.ai_unsure"));
+        }
+        Why::NeedsYou => form::inline_warning(ui, tokens, &t("bank_feed.detail.needs_you")),
+        _ => {}
+    }
+    ui.horizontal_wrapped(|ui| {
+        for m in Mode::ALL {
+            if m == Mode::Deposit && r.is_money_out() {
+                continue;
+            }
+            let label = match m {
+                Mode::Match => format!(
+                    "{} ({})",
+                    t(m.key()),
+                    s.detail.data.candidates.len() + s.detail.data.payroll.len()
+                ),
+                _ => t(m.key()),
+            };
+            if ui.selectable_label(s.detail.mode == m, label).clicked() {
+                s.detail.mode = m;
+                if m == Mode::Split && s.detail.split.is_empty() {
+                    s.detail.split = vec![
+                        Line {
+                            account: s.detail.account,
+                            ..Line::default()
+                        },
+                        Line::default(),
+                    ];
+                }
+            }
+        }
+    });
+    ui.add_space(6.0);
+    let chart = s.chart.clone();
+    let send = match s.detail.mode {
+        Mode::Categorize => categorize_ui(s, ui, &chart, r),
+        Mode::Split => split_ui(s, ui, tokens, &chart, r),
+        Mode::Match => match_ui(s, ui, tokens, r),
+        Mode::Transfer => transfer_ui(s, ui, tokens, &chart, r),
+        Mode::Deposit => deposit_ui(s, ui, tokens, &chart, r),
+    };
+    s.detail.ready.clone_from(&send);
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        let accept = egui::Button::new(
+            RichText::new(format!("{}  A", t("bank_feed.detail.accept"))).color(tokens.on_accent),
+        )
+        .fill(tokens.accent);
+        let why_off = if send.is_none() {
+            t("bank_feed.detail.accept.incomplete")
+        } else {
+            tip.to_string()
+        };
+        if ui
+            .add_enabled(can && send.is_some(), accept)
+            .on_disabled_hover_text(&why_off)
+            .clicked()
+            && let Some(x) = send
+        {
+            send::start(s, x, None);
+        }
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.detail.exclude")))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            s.list.clear_selection();
+            s.list.toggle(r.id);
+            super::bulk::exclude_selected(s);
+        }
+    });
+}
+
+fn categorize_ui(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    chart: &[(AccountId, String)],
+    r: &FeedRow,
+) -> Option<Send> {
+    ui.label(t("bank_feed.detail.account"));
+    let label = t("bank_feed.detail.account");
+    account_combo(
+        ui,
+        egui::IdSalt::new("bank_feed.detail.account"),
+        chart,
+        &mut s.detail.account,
+        &label,
+    );
+    let account = s.detail.account?;
+    let proposed = r
+        .assigned_account
+        .as_ref()
+        .or(r.suggested_account.as_ref())
+        .map(|a| a.id);
+    if proposed == Some(account) && r.status == cl_api::FeedStatus::Assigned {
+        return Some(Send::Categorize(r.id, None));
+    }
+    Some(Send::Categorize(
+        r.id,
+        Some(FeedChoice {
+            account: Some(account),
+            contact: r
+                .assigned_contact
+                .as_ref()
+                .or(r.suggested_contact.as_ref())
+                .map(|c| c.id),
+            ..FeedChoice::default()
+        }),
+    ))
+}
+
+/// A grid of typed lines (split or fee): Account · Amount · Memo.
+fn lines_grid(ui: &mut Ui, salt: &str, chart: &[(AccountId, String)], lines: &mut Vec<Line>) {
+    let mut remove = None;
+    egui::Grid::new(salt)
+        .num_columns(4)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            ui.label(t("bank_feed.grid.account"));
+            ui.label(t("bank_feed.grid.amount"));
+            ui.label(t("bank_feed.grid.memo"));
+            ui.label("");
+            ui.end_row();
+            for (i, l) in lines.iter_mut().enumerate() {
+                let label = t_with(
+                    "bank_feed.grid.line_account",
+                    &[("n", &(i + 1).to_string())],
+                );
+                ui.scope(|ui| {
+                    ui.set_max_width(150.0);
+                    account_combo(
+                        ui,
+                        egui::IdSalt::new((salt, "a", i)),
+                        chart,
+                        &mut l.account,
+                        &label,
+                    );
+                });
+                let r = ui.add_sized(
+                    [80.0, 22.0],
+                    egui::TextEdit::singleline(&mut l.amount).font(egui::TextStyle::Monospace),
+                );
+                let amount_label =
+                    t_with("bank_feed.grid.line_amount", &[("n", &(i + 1).to_string())]);
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, &amount_label)
+                });
+                let memo_label = t_with("bank_feed.grid.line_memo", &[("n", &(i + 1).to_string())]);
+                let m = ui.add_sized([70.0, 22.0], egui::TextEdit::singleline(&mut l.memo));
+                m.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, &memo_label)
+                });
+                let del_label =
+                    t_with("bank_feed.grid.delete_line", &[("n", &(i + 1).to_string())]);
+                if ui
+                    .small_button("\u{2715}")
+                    .on_hover_text(&del_label)
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(i) = remove {
+        lines.remove(i);
+    }
+}
+
+fn split_ui(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    chart: &[(AccountId, String)],
+    r: &FeedRow,
+) -> Option<Send> {
+    if !model::whole_cents(r.amount) {
+        form::hint(ui, tokens, &t("bank_feed.split.not_cents"));
+        return None;
+    }
+    lines_grid(ui, "bank_feed.split", chart, &mut s.detail.split);
+    if ui
+        .small_button(t("bank_feed.grid.add_line"))
+        .on_hover_text(t("bank_feed.grid.add_line.tip"))
+        .clicked()
+    {
+        s.detail.split.push(Line::default());
+    }
+    let draft = s.detail.split_draft(r)?;
+    if Detail::bad_amount(&s.detail.split) {
+        form::inline_warning(ui, tokens, &t("bank_feed.grid.bad_amount"));
+    }
+    let left = draft
+        .remainder()
+        .map_or_else(String::new, |m| amount_text(ui, m));
+    ui.label(
+        RichText::new(t_with("bank_feed.split.left", &[("amount", &left)]))
+            .monospace()
+            .color(if draft.is_complete() {
+                tokens.text_secondary
+            } else {
+                tokens.warn_text
+            }),
+    );
+    if !draft.is_complete() {
+        return None;
+    }
+    let splits = s
+        .detail
+        .split
+        .iter()
+        .filter_map(|l| {
+            Some(FeedSplitLine {
+                account: l.account?,
+                amount: l.money()?,
+                tag: None,
+                memo: l.memo(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(Send::Categorize(
+        r.id,
+        Some(FeedChoice {
+            account: splits.first().map(|l| l.account),
+            splits,
+            ..FeedChoice::default()
+        }),
+    ))
+}
+
+fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -> Option<Send> {
+    if s.detail.data.forbidden {
+        form::hint(ui, tokens, &t("bank_feed.match.forbidden"));
+        return None;
+    }
+    if s.detail.load.is_some() {
+        form::progress_line(ui, tokens, &t("bank_feed.match.reading"));
+    }
+    let mut rows: Vec<(TransactionId, Option<JournalLineId>, String)> = Vec::new();
+    for c in &s.detail.data.candidates {
+        let date = c.date.map(crate::shell::us_date).unwrap_or_default();
+        let kind = c
+            .txn_type
+            .as_deref()
+            .map(|k| format!("bank_feed.txn.{k}"))
+            .filter(|k| crate::i18n::has(k))
+            .map_or_else(String::new, |k| t(&k));
+        let who = c.contact_name.clone().unwrap_or_default();
+        let num = c.txn_number.clone().unwrap_or_default();
+        rows.push((
+            c.transaction,
+            Some(c.line),
+            format!(
+                "{date} \u{b7} {kind} {num} \u{b7} {who} \u{b7} {}",
+                amount_text(ui, model::display_amount(c.amount))
+            ),
+        ));
+    }
+    for p in &s.detail.data.payroll {
+        let date = p.date.map(crate::shell::us_date).unwrap_or_default();
+        rows.push((
+            p.transaction,
+            Some(p.line),
+            format!(
+                "{date} \u{b7} {} \u{b7} {}",
+                t("bank_feed.match.payroll"),
+                amount_text(ui, model::display_amount(p.amount))
+            ),
+        ));
+    }
+    if rows.is_empty() {
+        if s.detail.load.is_none() {
+            form::hint(ui, tokens, &t("bank_feed.match.none"));
+        }
+        return None;
+    }
+    if rows.len() == 1 && s.detail.pick_match.is_none() {
+        s.detail.pick_match = Some((rows[0].0, rows[0].1));
+    }
+    for (txn, line, text) in rows {
+        let on = s.detail.pick_match == Some((txn, line));
+        if ui.radio(on, text).clicked() {
+            s.detail.pick_match = Some((txn, line));
+        }
+    }
+    let (txn, line) = s.detail.pick_match?;
+    Some(Send::Match(r.id, txn, line))
+}
+
+fn transfer_ui(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    chart: &[(AccountId, String)],
+    r: &FeedRow,
+) -> Option<Send> {
+    form::hint(
+        ui,
+        tokens,
+        &t_with(
+            "bank_feed.transfer.window",
+            &[("n", &s.transfer_window.to_string())],
+        ),
+    );
+    let mut chosen = None;
+    for c in &s.detail.data.transfers {
+        let on = s.detail.pick_transfer == Some(c.feed_item);
+        let text = format!(
+            "{} \u{b7} {} \u{b7} {}",
+            crate::shell::us_date(c.date),
+            c.account_name,
+            amount_text(ui, model::display_amount(c.amount))
+        );
+        if ui.radio(on, text).clicked() {
+            chosen = Some(c.feed_item);
+        }
+    }
+    if let Some(c) = chosen {
+        s.detail.pick_transfer = Some(c);
+    }
+    let label = t(if r.is_money_out() {
+        "bank_feed.transfer.to"
+    } else {
+        "bank_feed.transfer.from"
+    });
+    ui.label(&label);
+    let before = s.detail.transfer_to;
+    let own = s.current_account().and_then(|a| a.account);
+    let others: Vec<(AccountId, String)> = chart
+        .iter()
+        .filter(|(id, _)| Some(*id) != own)
+        .cloned()
+        .collect();
+    account_combo(
+        ui,
+        egui::IdSalt::new("bank_feed.transfer.account"),
+        &others,
+        &mut s.detail.transfer_to,
+        &label,
+    );
+    if s.detail.transfer_to != before {
+        s.detail.pick_transfer = None;
+    }
+    if let Some(o) = s.detail.pick_transfer {
+        return Some(Send::Transfer(r.id, TransferTarget::OtherItem(o)));
+    }
+    s.detail
+        .transfer_to
+        .map(|a| Send::Transfer(r.id, TransferTarget::Account(a)))
+}
+
+fn deposit_ui(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    chart: &[(AccountId, String)],
+    r: &FeedRow,
+) -> Option<Send> {
+    if s.detail.load.is_some() {
+        form::progress_line(ui, tokens, &t("bank_feed.match.reading"));
+    }
+    if !s.detail.data.groupings.is_empty() {
+        ui.label(RichText::new(t("bank_feed.deposit.groupings")).strong());
+        let groupings = s.detail.data.groupings.clone();
+        for (i, g) in groupings.iter().enumerate() {
+            let ids: BTreeSet<TransactionId> = g.iter().map(|p| p.id).collect();
+            let on = s.detail.picks == ids && s.detail.fees.is_empty();
+            let names: Vec<String> = g
+                .iter()
+                .map(|p| format!("{} {}", p.label, amount_text(ui, p.amount)))
+                .collect();
+            let text = t_with(
+                "bank_feed.deposit.grouping",
+                &[("n", &(i + 1).to_string()), ("items", &names.join(" + "))],
+            );
+            if ui.radio(on, text).clicked() {
+                s.detail.picks = ids;
+                s.detail.fees.clear();
+            }
+        }
+        ui.add_space(6.0);
+    }
+    ui.label(RichText::new(t("bank_feed.deposit.pick")).strong());
+    let payments = s.detail.data.payments.clone();
+    if payments.is_empty() && s.detail.load.is_none() {
+        form::hint(ui, tokens, &t("bank_feed.deposit.none"));
+    }
+    for p in &payments {
+        let mut on = s.detail.picks.contains(&p.id);
+        let text = format!(
+            "{} \u{b7} {} \u{b7} {}",
+            crate::shell::us_date(p.date),
+            p.label,
+            amount_text(ui, p.amount)
+        );
+        if ui.checkbox(&mut on, text).changed() {
+            if on {
+                s.detail.picks.insert(p.id);
+            } else {
+                s.detail.picks.remove(&p.id);
+            }
+        }
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new(t("bank_feed.deposit.fees")).strong());
+    lines_grid(ui, "bank_feed.fees", chart, &mut s.detail.fees);
+    let full = s.detail.fees.len() >= cl_api::FEE_LINES_MAX;
+    if ui
+        .add_enabled(
+            !full,
+            egui::Button::new(t("bank_feed.deposit.add_fee")).small(),
+        )
+        .on_hover_text(t("bank_feed.grid.add_line.tip"))
+        .on_disabled_hover_text(t("bank_feed.deposit.fees_max"))
+        .clicked()
+    {
+        s.detail.fees.push(Line::default());
+    }
+    if Detail::bad_amount(&s.detail.fees) {
+        form::inline_warning(ui, tokens, &t("bank_feed.grid.bad_amount"));
+    }
+    let d = s.detail.deposit_draft(r);
+    let show = |m: Option<Money>| m.map_or_else(String::new, |m| amount_text(ui, m));
+    ui.label(
+        RichText::new(t_with(
+            "bank_feed.deposit.sum",
+            &[
+                ("payments", &show(d.payments_total())),
+                ("fees", &show(d.fees_total())),
+                ("bank", &show(Some(d.bank))),
+                ("difference", &show(d.difference())),
+            ],
+        ))
+        .monospace()
+        .color(if d.is_balanced() {
+            tokens.text_secondary
+        } else {
+            tokens.warn_text
+        }),
+    );
+    if !d.is_balanced() {
+        return None;
+    }
+    let fees = s
+        .detail
+        .fees
+        .iter()
+        .filter_map(|l| {
+            Some(FeeLine {
+                account: l.account?,
+                amount: l.money()?,
+                memo: l.memo(),
+            })
+        })
+        .collect();
+    Some(Send::Deposit(
+        r.id,
+        d.payments.iter().map(|(id, _)| *id).collect(),
+        fees,
+    ))
+}
+
+/// The panel's control-channel state (flags and counts only).
+pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
+    let row = s.detail.row.and_then(|id| s.row(id));
+    let deposit = row.map(|r| s.detail.deposit_draft(r));
+    let split = row.and_then(|r| s.detail.split_draft(r));
+    serde_json::json!({
+        "mode": s.detail.mode.as_str(),
+        "candidates": s.detail.data.candidates.len(),
+        "payroll": s.detail.data.payroll.len(),
+        "transfers": s.detail.data.transfers.len(),
+        "groupings": s.detail.data.groupings.len(),
+        "payments": s.detail.data.payments.len(),
+        "picked": s.detail.picks.len(),
+        "fees": s.detail.fees.len(),
+        "split_lines": s.detail.split.len(),
+        "split_complete": split.as_ref().is_some_and(SplitDraft::is_complete),
+        "deposit_difference": deposit.as_ref().and_then(DepositDraft::difference).map(Money::to_wire),
+        "deposit_balanced": deposit.as_ref().is_some_and(DepositDraft::is_balanced),
+        "forbidden": s.detail.data.forbidden,
+        "duplicate": row.is_some_and(|r| r.possible_duplicate),
+        "entry_voided": row.is_some_and(|r| r.entry_voided),
+    })
+}

@@ -29,7 +29,11 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     }
     controls(s, ui, &tokens);
     ui.add_space(6.0);
+    rule_banner(s, ui, &tokens);
     bulk::bar(s, ui, &tokens);
+    toast(s, ui, &tokens);
+    undo_changed(s, ui, &tokens);
+    closing(s, ui, &tokens);
     if s.load_failed {
         form::inline_warning(ui, &tokens, &t("bank_feed.load_failed"));
     }
@@ -51,7 +55,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
         ui.allocate_ui_with_layout(
             Vec2::new(DETAIL_W, avail.y),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| detail_panel(s, ui, &tokens),
+            |ui| super::detail::draw(s, ui, &tokens),
         );
     });
 }
@@ -481,98 +485,154 @@ fn footnote(s: &BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     ui.label(RichText::new(text).size(12.5).color(tokens.text_secondary));
 }
 
-/// The detail panel until DI-2's `detail.rs`: the cursor's row, its
-/// proposal, and Accept / Exclude.
-pub(crate) fn detail_panel(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
-    let Some(id) = s.list.current() else {
-        form::hint(ui, tokens, &t("bank_feed.detail.none"));
+/// "Accept all from this rule" (Q-P26a, Q-P26n): the cursor's row was
+/// staged by an auto-accept rule; one click accepts every waiting row the
+/// rule staged (logged, undoable), 500 a call. The rule's change token is
+/// sent exactly as listed (409 `RULE_CHANGED` refreshes).
+fn rule_banner(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+    if s.show != Show::Waiting || s.view_only {
+        return;
+    }
+    let Some(r) = s.list.current().and_then(|id| s.row(id)) else {
         return;
     };
-    let Some(r) = s.row(id).cloned() else {
+    let Some(rule) = r.suggested_rule.clone().filter(|x| x.auto_accept) else {
         return;
     };
-    let why = s.why(&r);
-    let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        let date = crate::shell::us_date(r.date);
-        ui.label(
-            RichText::new(format!(
-                "{} \u{b7} {}",
-                date.get(..5).unwrap_or(&date),
-                model::display_amount(r.amount).format(style)
-            ))
-            .monospace()
-            .strong(),
-        );
-        ui.label(
-            RichText::new(&r.description)
-                .monospace()
-                .size(12.0)
-                .color(tokens.text_secondary),
-        );
-    });
-    ui.add_space(6.0);
-    match why {
-        Why::Ai { high: false } => {
-            form::inline_warning(ui, tokens, &t("bank_feed.detail.ai_unsure"));
-        }
-        Why::NeedsYou => form::inline_warning(ui, tokens, &t("bank_feed.detail.needs_you")),
-        Why::EntryVoided => {
-            form::inline_warning(ui, tokens, &t("bank_feed.detail.entry_voided"));
-        }
-        _ => {}
+    let Some(token) = rule.updated_at.clone() else {
+        return;
+    };
+    if !r.status.is_waiting() {
+        return;
     }
-    ui.add_space(6.0);
-    let (payee, account) = recorded(s, &r, why);
-    ui.label(RichText::new(t("bank_feed.detail.payee")).color(tokens.text_secondary));
-    ui.label(RichText::new(payee).strong());
-    ui.add_space(6.0);
-    ui.label(RichText::new(t("bank_feed.detail.account")).color(tokens.text_secondary));
-    ui.label(RichText::new(if account.is_empty() {
-        "\u{2014}".into()
-    } else {
-        account
-    }));
-    if let Some(req) = &s.detail_request {
-        ui.add_space(8.0);
-        let key = match req {
-            cl_model::bank_feed::FeedAction::Split(_) => "bank_feed.detail.split",
-            cl_model::bank_feed::FeedAction::Rule(_) => "bank_feed.detail.rule",
-            _ => "bank_feed.detail.choose",
-        };
-        form::hint(ui, tokens, &t(key));
+    let n = s
+        .rows
+        .iter()
+        .filter(|x| {
+            x.status.is_waiting() && x.suggested_rule.as_ref().is_some_and(|y| y.id == rule.id)
+        })
+        .count();
+    let connection = s.current_account().map(|a| a.connection);
+    let mut go = false;
+    egui::Frame::new()
+        .fill(tokens.info_tint)
+        .inner_margin(egui::Margin::symmetric(16, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t_with(
+                        "bank_feed.rule_banner",
+                        &[("rule", &rule.name), ("n", &n.to_string())],
+                    ))
+                    .color(tokens.text_primary),
+                );
+                go = ui
+                    .add_enabled(
+                        s.act.is_none(),
+                        egui::Button::new(t("bank_feed.rule_banner.accept")),
+                    )
+                    .on_hover_text(t("bank_feed.rule_banner.tip"))
+                    .clicked();
+            });
+        });
+    if go {
+        super::send::start(
+            s,
+            super::send::Send::Rule(cl_api::RuleAccept {
+                rule_id: rule.id,
+                kind: rule.kind,
+                updated_at: token,
+                connection,
+                after: None,
+            }),
+            None,
+        );
     }
-    ui.add_space(16.0);
-    if s.show == Show::Waiting {
-        let can = !s.view_only && s.act.is_none();
-        let tip = if s.view_only {
-            t("bank_feed.view_only.tip")
-        } else {
-            String::new()
-        };
+}
+
+/// How long the Undo toast stays.
+const TOAST_FOR: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// The Undo toast after an accept (Q-P26h): "n accepted · Undo".
+fn toast(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+    let Some(x) = &s.toast else {
+        return;
+    };
+    if x.at.elapsed() >= TOAST_FOR {
+        s.toast = None;
+        return;
+    }
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(500));
+    let (target, rows) = (x.target.clone(), x.rows);
+    let mut undo = false;
+    egui::Frame::new()
+        .fill(tokens.surface_subtle)
+        .inner_margin(egui::Margin::symmetric(16, 6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(t_with("bank_feed.toast", &[("n", &rows.to_string())]));
+                undo = ui
+                    .add_enabled(
+                        s.act.is_none() && !s.view_only,
+                        egui::Button::new(t("bank_feed.toast.undo")),
+                    )
+                    .on_hover_text(t("bank_feed.toast.undo.tip"))
+                    .clicked();
+            });
+        });
+    if undo {
+        s.toast = None;
+        super::send::start(s, super::send::Send::Undo(target, false), None);
+    }
+}
+
+/// 409 `FEED_UNDO_CHANGED`: the entry was edited after it was accepted.
+fn undo_changed(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+    let Some((target, n)) = s.confirm.clone() else {
+        return;
+    };
+    let mut answer = None;
+    form::card(ui, tokens, |ui| {
+        ui.add(egui::Label::new(t_with("bank_feed.undo_changed", &[("n", &n.to_string())])).wrap());
         ui.horizontal(|ui| {
-            let accept = egui::Button::new(
-                RichText::new(format!("{}  A", t("bank_feed.detail.accept")))
-                    .color(tokens.on_accent),
-            )
-            .fill(tokens.accent);
-            if ui
-                .add_enabled(can, accept)
-                .on_disabled_hover_text(&tip)
-                .clicked()
-            {
-                s.accept_one(id);
+            if crate::widgets::destructive_button(ui, &t("bank_feed.undo_changed.yes")).clicked() {
+                answer = Some(true);
             }
-            if ui
-                .add_enabled(can, egui::Button::new(t("bank_feed.detail.exclude")))
-                .on_disabled_hover_text(&tip)
-                .clicked()
-            {
-                s.list.clear_selection();
-                s.list.toggle(id);
-                bulk::exclude_selected(s);
+            if ui.button(t("bank_feed.undo_changed.no")).clicked() {
+                answer = Some(false);
             }
         });
+    });
+    match answer {
+        Some(true) => {
+            s.confirm = None;
+            super::send::start(s, super::send::Send::Undo(target, true), None);
+        }
+        Some(false) => s.confirm = None,
+        None => {}
+    }
+}
+
+/// The closing-date password for locked rows (plan §5).
+fn closing(s: &mut BankFeedScreen, ui: &Ui, tokens: &Tokens) {
+    use crate::forms::closing_prompt::ClosingClick;
+    s.closing.set_ask(
+        "bank_feed.closing.ask",
+        s.closing.pending().map_or(1, |_| 1),
+    );
+    match s.closing.window(ui.ctx(), tokens, "bank_feed") {
+        ClosingClick::Submit => {
+            if let Some((again, pw)) = s.closing.submit() {
+                let busy = s.act.is_some();
+                super::send::start(s, again, Some(pw));
+                if busy {
+                    s.closing.nothing_sent();
+                }
+            }
+        }
+        ClosingClick::Cancel => s.closing.cancel(),
+        ClosingClick::None => {}
     }
 }

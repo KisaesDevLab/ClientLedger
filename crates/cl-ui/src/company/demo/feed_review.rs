@@ -141,6 +141,7 @@ impl Row {
             entry_voided_at: None,
             exclusion_reason: self.exclusion_reason.clone(),
             match_candidate_count: u32::from(self.kind == "match"),
+            transfer_candidate: None,
             updated_at: None,
         }
     }
@@ -417,6 +418,10 @@ fn matches_query(r: &Row, q: &FeedQuery) -> bool {
     }
     if let Some(s) = q.status {
         if r.status != s {
+            return false;
+        }
+    } else if q.accepted {
+        if !r.status.is_accepted() {
             return false;
         }
     } else if q.waiting_only && !r.waiting() {

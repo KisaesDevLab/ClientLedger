@@ -130,6 +130,7 @@ fn waiting_row(state: &mut DemoState, id: FeedItemId) -> Result<Row, ApiError> {
 }
 
 /// Posts `r` with its account (or the owner's split) as a demo entry.
+#[allow(clippy::single_match_else, reason = "a split or one line")]
 fn post(
     state: &mut DemoState,
     r: &Row,
@@ -690,6 +691,14 @@ pub fn accept(
             page.into_iter().map(AcceptItem::AsProposed).collect()
         }
     };
+    // `conflict_next`: another computer takes the first row now.
+    if std::mem::take(&mut state.feed_review.conflict_next)
+        && let Some(first) = items.first()
+        && let Ok(r) = state.feed_review.row_mut(first.id())
+        && r.waiting()
+    {
+        r.status = FeedStatus::Categorized;
+    }
     for item in items {
         let id = item.id();
         let Ok(r) = row(state, id) else {

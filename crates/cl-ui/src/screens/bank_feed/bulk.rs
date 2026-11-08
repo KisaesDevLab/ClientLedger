@@ -10,7 +10,8 @@ use cl_core::ids::AccountId;
 use cl_model::bank_feed::{self as model, PlanRow, Show, Why};
 use eframe::egui::{self, RichText, Ui};
 
-use super::{BankFeedScreen, Outcome};
+use super::BankFeedScreen;
+use super::send::Outcome;
 use crate::company::demo::feed_review as demo;
 use crate::i18n::{t, t_with};
 use crate::screens::templates::engine::run;
@@ -60,34 +61,7 @@ pub(crate) fn accept_selected(s: &mut BankFeedScreen, ids: &[FeedItemId]) {
         s.notice = Some(("bank_feed.notice.accept_route", 0));
         return;
     }
-    let (categorize, matches) = (p.categorize.clone(), p.matches.clone());
-    s.act = Some(run(
-        &s.link,
-        s.group.as_ref(),
-        Some("bank_feed.orphan.accept"),
-        move |d| {
-            let mut o = Outcome {
-                skipped,
-                ..Outcome::default()
-            };
-            for id in categorize {
-                o.take(id, demo::categorize(d, id, None, None).map(|_| ()));
-            }
-            for id in matches {
-                o.take(id, demo::match_one(d, id));
-            }
-            Ok(o)
-        },
-        // E3 fills this in with `/banking/feed/accept` (typed in cl-api
-        // once its contract is reported); the button is disabled until the
-        // engine advertises `feed-accept-v1`.
-        move |_s| async move {
-            Err(cl_api::ApiError::Local(
-                cl_api::LocalValidation::Unsupported,
-            ))
-        },
-    ));
-    s.poll();
+    super::send::accept_selected(s, &p.categorize, &p.matches, skipped);
 }
 
 /// Change account on the selected waiting rows (stages it; nothing posts).

@@ -230,7 +230,7 @@ fn accept_selection_skips_and_locks_then_posts_with_the_password() {
         .filter(|r| r.date <= CalendarDate::from_ymd(2026, 11, 1).expect("d"))
         .map(|r| r.id)
         .collect();
-    assert!(!locked.is_empty());
+    assert_ne!(locked.len(), 0);
     let fence = find(&mut s, "SYCAMORE FENCE");
     let mut items: Vec<AcceptItem> = ready.iter().map(|r| AcceptItem::AsProposed(r.id)).collect();
     items.push(AcceptItem::AsProposed(fence.id));

@@ -227,8 +227,8 @@ pub use resources::feed_review::{
     DuplicateOf, FEE_LINES_MAX, FEED_PAGE_MAX, FeeLine, FeedBucket, FeedChoice, FeedCounts,
     FeedPage, FeedPosted, FeedQuery, FeedRefusal, FeedRow, FeedSplitLine, FeedStatus,
     MatchCandidate, Named, PayrollOverlap, SPLIT_LINES_MAX, SuggestedRule, TRANSFER_WINDOW_DAYS,
-    TransferCandidate, TransferTarget, feed_counts_from, feed_page_from, feed_refusal,
-    is_stale_row, is_view_only,
+    TransferCandidate, TransferHint, TransferTarget, feed_counts_from, feed_page_from,
+    feed_refusal, is_stale_row, is_view_only,
 };
 
 // P14 lane B: daily sales.

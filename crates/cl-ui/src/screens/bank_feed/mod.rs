@@ -19,6 +19,8 @@
 //! is disabled with a tooltip on a live engine (the demo accepts).
 
 pub mod bulk;
+pub mod detail;
+pub mod send;
 pub mod view;
 
 use std::sync::Arc;
@@ -26,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use cl_api::{
     ApiError, Capabilities, FeedChoice, FeedCounts, FeedItemId, FeedQuery, FeedRow, FeedStatus,
-    IdempotencyKey, RequestGroup, Session,
+    RequestGroup, Session, UndoTarget,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
@@ -81,6 +83,14 @@ pub(crate) struct Meta {
     view_only: bool,
     accept_route: bool,
     supported: bool,
+    closing_supported: bool,
+}
+
+/// The Undo toast after an accept.
+pub(crate) struct Toast {
+    pub target: UndoTarget,
+    pub rows: usize,
+    pub at: Instant,
 }
 
 /// One read of the list.
@@ -90,31 +100,6 @@ pub(crate) struct Loaded {
     last_import: Option<CalendarDate>,
     /// Waiting in every account (the rail badge).
     waiting_all: u64,
-}
-
-/// What an action did.
-#[derive(Default)]
-pub(crate) struct Outcome {
-    pub done: usize,
-    pub skipped: usize,
-    pub failed: usize,
-    /// Rows that changed elsewhere (refreshed, out of the selection).
-    pub stale: Vec<FeedItemId>,
-    pub view_only: bool,
-    pub closed: bool,
-}
-
-impl Outcome {
-    /// Folds one row's answer in.
-    pub(crate) fn take(&mut self, id: FeedItemId, r: Result<(), ApiError>) {
-        match r {
-            Ok(()) => self.done += 1,
-            Err(e) if cl_api::is_view_only(&e) => self.view_only = true,
-            Err(e) if cl_api::is_stale_row(&e) => self.stale.push(id),
-            Err(ApiError::ClosedPeriod(_)) => self.closed = true,
-            Err(_) => self.failed += 1,
-        }
-    }
 }
 
 /// The Bank Feed window.
@@ -146,7 +131,21 @@ pub struct BankFeedScreen {
     pub(crate) change_to: Option<AccountId>,
     meta: Option<Job<Meta>>,
     load: Option<Job<Loaded>>,
-    pub(crate) act: Option<Job<Outcome>>,
+    pub(crate) act: Option<Job<send::Outcome>>,
+    /// The detail panel (DI-2).
+    pub(crate) detail: detail::Detail,
+    /// The closing-date password for a locked accept or Undo.
+    pub(crate) closing: crate::forms::closing_prompt::ClosingPrompt<send::Send>,
+    /// The engine takes the closing-date password on feed routes.
+    pub(crate) closing_supported: bool,
+    /// The Undo toast: what the last accept can take back.
+    pub(crate) toast: Option<Toast>,
+    /// 409 `FEED_UNDO_CHANGED`: Undo anyway?
+    pub(crate) confirm: Option<(UndoTarget, usize)>,
+    /// The transfer window in days (Preferences, Q-P26l).
+    pub(crate) transfer_window: u8,
+    /// The last action sent (control channel).
+    pub(crate) last_send: Option<&'static str>,
     loaded_at: Option<Instant>,
     pub(crate) load_failed: bool,
     /// The last action's message (i18n key and its count).
@@ -169,6 +168,7 @@ impl BankFeedScreen {
     pub fn new(link: Arc<CompanyLink>, tenant: Option<TenantId>) -> BankFeedScreen {
         let group = link.group().and_then(Result::ok);
         let bus = link.bus().subscribe();
+        let link_for_prefs = Arc::clone(&link);
         let mut s = BankFeedScreen {
             link,
             tenant,
@@ -196,6 +196,13 @@ impl BankFeedScreen {
             meta: None,
             load: None,
             act: None,
+            detail: detail::Detail::default(),
+            closing: crate::forms::closing_prompt::ClosingPrompt::default(),
+            closing_supported: false,
+            toast: None,
+            confirm: None,
+            transfer_window: transfer_window(&link_for_prefs, tenant),
+            last_send: None,
             loaded_at: None,
             load_failed: false,
             notice: None,
@@ -213,6 +220,12 @@ impl BankFeedScreen {
     /// The row with `id` on the page.
     pub(crate) fn row(&self, id: FeedItemId) -> Option<&FeedRow> {
         self.rows.iter().find(|r| r.id == id)
+    }
+
+    /// The engine lists every accepted row in one read (`status=accepted`,
+    /// with `feed-accept-v1`; the demo too).
+    pub(crate) fn accepted_filter(&self) -> bool {
+        self.accept_route || self.link.is_demo()
     }
 
     /// The list query for the current choices.
@@ -234,7 +247,9 @@ impl BankFeedScreen {
                 });
             }
             Show::Accepted if self.voided_only => q.entry_voided = Some(true),
-            // Accepted: posted and matched rows (two reads, see `read`).
+            // Accepted: one read with `status=accepted` (Q-P26y); an engine
+            // without it: posted and matched rows, two reads (`reload`).
+            Show::Accepted if self.accepted_filter() => q.accepted = true,
             Show::Accepted => q.status = Some(FeedStatus::Categorized),
             Show::Excluded => q.status = Some(FeedStatus::Excluded),
         }
@@ -267,6 +282,7 @@ impl BankFeedScreen {
                     view_only: d.feed_review.view_only,
                     accept_route: true,
                     supported: true,
+                    closing_supported: true,
                 })
             },
             move |s| async move { live_meta(s, tenant, under_cap).await },
@@ -279,7 +295,8 @@ impl BankFeedScreen {
             return;
         }
         let q = self.query();
-        let accepted_too = self.show == Show::Accepted && !self.voided_only;
+        let accepted_too =
+            self.show == Show::Accepted && !self.voided_only && !self.accepted_filter();
         let account = self.current_account().and_then(|a| a.account);
         let connection = q.connection;
         let live = q.clone();
@@ -324,6 +341,7 @@ impl BankFeedScreen {
                     self.view_only = self.view_only || m.view_only;
                     self.accept_route = m.accept_route;
                     self.supported = m.supported;
+                    self.closing_supported = m.closing_supported;
                     self.reload();
                 }
                 Err(_) => self.load_failed = true,
@@ -345,32 +363,65 @@ impl BankFeedScreen {
             }
         }
         if let Some(r) = finished(&mut self.act) {
-            let o = r.unwrap_or_else(|_| Outcome {
+            let o = r.unwrap_or_else(|_| send::Outcome {
                 failed: 1,
-                ..Outcome::default()
+                ..send::Outcome::default()
             });
-            self.list.drop_rows(&o.stale);
-            if o.view_only {
-                self.view_only = true;
+            self.take_outcome(o);
+        }
+    }
+
+    /// Shows what an action did: the password prompt, the "changed since"
+    /// question, the Undo toast, a notice; the next page of a rule's rows.
+    fn take_outcome(&mut self, o: send::Outcome) {
+        self.list.drop_rows(&o.stale);
+        if o.view_only {
+            self.view_only = true;
+        }
+        let closed = o.closed.is_some();
+        match o.closed {
+            Some((e, again)) => {
+                self.closing.failed(&e, again, self.closing_supported, None);
             }
-            self.notice = if o.view_only {
-                Some(("bank_feed.notice.view_only", 0))
-            } else if o.closed {
-                Some(("bank_feed.notice.closed", 0))
-            } else if !o.stale.is_empty() {
-                Some(("bank_feed.notice.changed", o.stale.len()))
-            } else if o.failed > 0 {
-                Some(("bank_feed.notice.failed", o.failed))
-            } else if o.skipped > 0 {
-                Some(("bank_feed.notice.skipped", o.skipped))
-            } else {
-                Some(("bank_feed.notice.done", o.done))
-            };
-            if o.done > 0 {
-                self.link.bus().publish(crate::data_bus::Change::BankFeed);
-            }
-            self.read_meta();
-            self.reload();
+            None => self.closing.saved(),
+        }
+        self.confirm.clone_from(&o.changed);
+        if o.undone > 0 {
+            self.toast = None;
+        }
+        if let Some((target, rows)) = o.undo.clone() {
+            self.toast = Some(Toast {
+                target,
+                rows,
+                at: Instant::now(),
+            });
+        }
+        self.notice = if o.view_only {
+            Some(("bank_feed.notice.view_only", 0))
+        } else if closed || self.closing.dialog_open() {
+            Some(("bank_feed.notice.closed", 0))
+        } else if o.changed.is_some() {
+            Some(("bank_feed.notice.undo_changed", 0))
+        } else if let Some(k) = o.notice {
+            Some((k, o.failed.max(o.done)))
+        } else if !o.stale.is_empty() {
+            Some(("bank_feed.notice.changed", o.stale.len()))
+        } else if o.failed > 0 {
+            Some(("bank_feed.notice.failed", o.failed))
+        } else if o.skipped > 0 {
+            Some(("bank_feed.notice.skipped", o.skipped))
+        } else {
+            Some(("bank_feed.notice.done", o.done))
+        };
+        if o.done > 0 {
+            self.link.bus().publish(crate::data_bus::Change::BankFeed);
+            // The panel reads its row again (candidates, payments).
+            self.detail.row = None;
+        }
+        self.read_meta();
+        self.reload();
+        if let Some(next) = o.next_rule {
+            send::start(self, send::Send::Rule(next), None);
         }
     }
 
@@ -393,7 +444,10 @@ impl BankFeedScreen {
                 confidence_bp,
                 possible_duplicate: r.possible_duplicate,
                 match_candidates: r.match_candidate_count,
-                transfer: r.match_type.as_deref() == Some("transfer"),
+                // The engine's one counterpart (Q-P26y) or the demo's word.
+                transfer: r.status.is_waiting()
+                    && (r.transfer_candidate.is_some()
+                        || r.match_type.as_deref() == Some("transfer")),
                 has_account: r.assigned_account.is_some() || r.suggested_account.is_some(),
                 entry_voided: r.entry_voided,
             },
@@ -415,8 +469,9 @@ impl BankFeedScreen {
         }
     }
 
-    /// A: accepts the row as proposed (its staged or suggested account, or
-    /// its one match). A row that needs the owner goes to the detail panel.
+    /// A: accepts the row as the panel has it (the owner's account, split,
+    /// match, transfer or deposit), else as proposed (staged or suggested
+    /// account). A row that needs the owner goes to the detail panel.
     pub(crate) fn accept_one(&mut self, id: FeedItemId) {
         if self.view_only || self.act.is_some() || self.show != Show::Waiting {
             return;
@@ -424,49 +479,33 @@ impl BankFeedScreen {
         let Some(r) = self.row(id).cloned() else {
             return;
         };
+        if self.detail.row == Some(id)
+            && let Some(x) = self.detail.ready.clone()
+        {
+            send::start(self, x, None);
+            return;
+        }
         let why = self.why(&r);
         let has_account = r.assigned_account.is_some() || r.suggested_account.is_some();
-        let kind = match why {
-            Why::Match if r.match_candidate_count == 1 => How::Match,
-            Why::Match | Why::Transfer | Why::Duplicate | Why::NeedsYou => {
-                self.detail_request = Some(FeedAction::Accept(id));
-                self.list.focus(id);
-                return;
-            }
-            _ if r.status == FeedStatus::Assigned => How::Approve,
-            _ if has_account => How::Categorize(FeedChoice {
-                account: r.suggested_account.as_ref().map(|a| a.id),
-                contact: r.suggested_contact.as_ref().map(|c| c.id),
-                ..FeedChoice::default()
-            }),
-            _ => {
-                self.detail_request = Some(FeedAction::Accept(id));
-                return;
-            }
+        let x = match why {
+            Why::Match | Why::Transfer | Why::Duplicate | Why::NeedsYou | Why::EntryVoided => None,
+            _ if r.status == FeedStatus::Assigned => Some(send::Send::Categorize(id, None)),
+            _ if has_account => Some(send::Send::Categorize(
+                id,
+                Some(FeedChoice {
+                    account: r.suggested_account.as_ref().map(|a| a.id),
+                    contact: r.suggested_contact.as_ref().map(|c| c.id),
+                    ..FeedChoice::default()
+                }),
+            )),
+            _ => None,
         };
-        let demo_kind = kind.clone();
-        let key = IdempotencyKey::new();
-        self.act = Some(run(
-            &self.link,
-            self.group.as_ref(),
-            Some("bank_feed.orphan.accept"),
-            move |d| {
-                let mut o = Outcome::default();
-                let r = match demo_kind {
-                    How::Match => demo::match_one(d, id),
-                    How::Approve => demo::categorize(d, id, None, None).map(|_| ()),
-                    How::Categorize(c) => demo::categorize(d, id, Some(&c), None).map(|_| ()),
-                };
-                o.take(id, r);
-                Ok(o)
-            },
-            move |s| async move {
-                let mut o = Outcome::default();
-                o.take(id, live_accept(&s, id, kind, key).await);
-                Ok(o)
-            },
-        ));
-        self.poll();
+        if let Some(x) = x {
+            send::start(self, x, None);
+        } else {
+            self.detail_request = Some(FeedAction::Accept(id));
+            self.list.focus(id);
+        }
     }
 
     fn dev_command(&mut self, id: &str) -> bool {
@@ -478,6 +517,20 @@ impl BankFeedScreen {
             "dev.demo_feed_conflict" => d.feed_review.conflict_next = true,
             "dev.demo_feed_void_entry" => {
                 demo::void_first_accepted(&mut d);
+            }
+            "dev.demo_feed_duplicate" => {
+                demo::mark_duplicate(&mut d);
+            }
+            "dev.demo_feed_next_file" => {
+                demo::add_next_file(&mut d);
+            }
+            // The books closed through 11/01 (the sample's first bank day).
+            "dev.demo_feed_close_books" => {
+                if let Some(open) = d.open
+                    && let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open)
+                {
+                    c.closed_through = CalendarDate::from_ymd(2026, 11, 1).ok();
+                }
             }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;
@@ -494,6 +547,15 @@ impl BankFeedScreen {
                 self.notice = None;
                 self.detail_request = None;
                 self.list = ReviewList::default();
+                self.detail = detail::Detail::default();
+                self.toast = None;
+                self.confirm = None;
+                self.closing.cancel();
+                if let Some(open) = d.open
+                    && let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open)
+                {
+                    c.closed_through = CalendarDate::from_ymd(2026, 9, 30).ok();
+                }
             }
             _ => return false,
         }
@@ -504,35 +566,13 @@ impl BankFeedScreen {
     }
 }
 
-/// How a single Accept is sent.
-#[derive(Clone)]
-pub(crate) enum How {
-    Match,
-    Approve,
-    Categorize(FeedChoice),
-}
-
-async fn live_accept(
-    s: &Session,
-    id: FeedItemId,
-    how: How,
-    key: IdempotencyKey,
-) -> Result<(), ApiError> {
-    let f = s.feed();
-    match how {
-        How::Approve => f.approve(id, None, key).await.map(|_| ()),
-        How::Categorize(c) => f.categorize(id, &c, None, key).await.map(|_| ()),
-        How::Match => {
-            let c = f.match_candidates(id).await?;
-            match c.as_slice() {
-                [one] => f
-                    .match_line(id, one.transaction, Some(one.line), key)
-                    .await
-                    .map(|_| ()),
-                _ => Err(ApiError::Local(cl_api::LocalValidation::InvalidValue)),
-            }
-        }
-    }
+/// The transfer window from the company's preferences (Q-P26l).
+fn transfer_window(link: &CompanyLink, tenant: Option<TenantId>) -> u8 {
+    tenant
+        .and_then(|t| link.store().load().ok().and_then(|l| l.get(t).cloned()))
+        .map_or(cl_settings::FEED_TRANSFER_WINDOW_DEFAULT, |r| {
+            r.prefs.transfer_window()
+        })
 }
 
 fn merge(into: &mut cl_api::FeedPage, more: cl_api::FeedPage) {
@@ -615,6 +655,7 @@ async fn live_meta(
         view_only,
         accept_route: caps.has(Capabilities::FEED_ACCEPT),
         supported,
+        closing_supported: caps.has(Capabilities::FEED_CLOSING_DATE),
     })
 }
 
@@ -672,6 +713,7 @@ impl Screen for BankFeedScreen {
             self.reload();
         }
         self.act_on_keys();
+        detail::follow(self);
         if self.load.is_some() || self.meta.is_some() || self.act.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         } else {
@@ -688,6 +730,15 @@ impl Screen for BankFeedScreen {
         let s = id.as_str();
         if s.starts_with("dev.") {
             return self.dev_command(s);
+        }
+        if let Some(done) = self.closing.command(id) {
+            return done;
+        }
+        if matches!(s, "form.insert_line" | "form.delete_line") {
+            return detail::line_command(self, s);
+        }
+        if s == "form.revert" && self.confirm.take().is_some() {
+            return true;
         }
         if s.starts_with("feed.") {
             // Writes are refused at once for a view-only user; moving and
@@ -755,6 +806,18 @@ impl Screen for BankFeedScreen {
             "busy": self.act.is_some() || self.load.is_some(),
             "load_failed": self.load_failed,
             "notice": self.notice.map(|(k, _)| k),
+            "detail": detail::state(self),
+            "toast": self.toast.as_ref().map(|x| x.rows),
+            "undo_changed": self.confirm.as_ref().map(|c| c.1),
+            "closing": self.closing.state_json(self.closing_supported),
+            "last_send": self.last_send,
+            "transfer_window": self.transfer_window,
+            "detail": detail::state(self),
+            "toast": self.toast.as_ref().map(|x| x.rows),
+            "undo_changed": self.confirm.as_ref().map(|c| c.1),
+            "closing": self.closing.state_json(self.closing_supported),
+            "last_send": self.last_send,
+            "transfer_window": self.transfer_window,
             "detail_request": self.detail_request.as_ref().map(|a| match a {
                 FeedAction::Accept(_) => "accept",
                 FeedAction::Split(_) => "split",

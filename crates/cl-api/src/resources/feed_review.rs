@@ -182,6 +182,10 @@ pub struct FeedQuery {
     pub status: Option<FeedStatus>,
     /// Only waiting rows (pending and assigned); ignored with `status`.
     pub waiting_only: bool,
+    /// Every accepted row, categorized and matched, voided entries
+    /// included (`status=accepted`, `feed-accept-v1`, Q-P26y); ignored
+    /// with `status`.
+    pub accepted: bool,
     /// One review bucket.
     pub bucket: Option<FeedBucket>,
     /// Possible duplicates waiting for a decision (true) or the others.
@@ -203,6 +207,7 @@ impl Default for FeedQuery {
         FeedQuery {
             status: None,
             waiting_only: false,
+            accepted: false,
             bucket: None,
             possible_duplicate: None,
             entry_voided: None,
@@ -227,6 +232,8 @@ impl FeedQuery {
         let flag = |b: bool| if b { "true" } else { "false" }.to_string();
         if let Some(s) = self.status {
             q.push(("status".into(), s.as_str().into()));
+        } else if self.accepted {
+            q.push(("status".into(), "accepted".into()));
         } else if self.waiting_only {
             q.push(("actionableOnly".into(), "true".into()));
         }
@@ -322,6 +329,26 @@ impl fmt::Debug for DuplicateOf {
     }
 }
 
+/// The one transfer counterpart of a waiting row (`transferCandidate`,
+/// Q-P26y): a bank line on another account within 3 days.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TransferHint {
+    /// The other bank line.
+    pub feed_item: FeedItemId,
+    /// Its account.
+    pub account: Option<AccountId>,
+    /// The account's name.
+    pub account_name: Option<String>,
+}
+
+impl fmt::Debug for TransferHint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TransferHint")
+            .field("feed_item", &self.feed_item)
+            .finish_non_exhaustive()
+    }
+}
+
 /// One bank feed row. `Debug` prints ids, the state and the bucket only.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FeedRow {
@@ -383,6 +410,8 @@ pub struct FeedRow {
     pub exclusion_reason: Option<String>,
     /// Journal lines it may match.
     pub match_candidate_count: u32,
+    /// The one transfer counterpart, when exactly one exists (Q-P26y).
+    pub transfer_candidate: Option<TransferHint>,
     /// The row's change token.
     pub updated_at: Option<String>,
 }
@@ -998,7 +1027,19 @@ struct WireRow {
     #[serde(default)]
     match_candidate_count: Option<u64>,
     #[serde(default)]
+    transfer_candidate: Option<WireTransferHint>,
+    #[serde(default)]
     updated_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireTransferHint {
+    feed_item_id: String,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    account_name: Option<String>,
 }
 
 impl WireRow {
@@ -1092,6 +1133,14 @@ impl WireRow {
                 .match_candidate_count
                 .and_then(|n| u32::try_from(n).ok())
                 .unwrap_or(0),
+            transfer_candidate: match self.transfer_candidate {
+                Some(t) => Some(TransferHint {
+                    feed_item: FeedItemId::parse(&t.feed_item_id)?,
+                    account: t.account_id.as_deref().and_then(|a| a.parse().ok()),
+                    account_name: t.account_name,
+                }),
+                None => None,
+            },
             updated_at: self.updated_at,
         }))
     }
@@ -1625,6 +1674,9 @@ impl Feed<'_> {
     pub async fn list(&self, q: &FeedQuery) -> Result<FeedPage, ApiError> {
         if q.bucket.is_some() || q.possible_duplicate.is_some() || q.entry_voided.is_some() {
             self.need(Capabilities::FEED_REVIEW)?;
+        }
+        if q.accepted && q.status.is_none() {
+            self.need(Capabilities::FEED_ACCEPT)?;
         }
         let mut call = Call::at(Method::Get, FEED_LIST.route());
         call.query = q.to_query()?;

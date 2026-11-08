@@ -21,7 +21,8 @@ fn page_body() -> String {
           "amount":"84.1700","description":"RIVERBEND FUEL #212","status":"pending","bucket":"ready",
           "suggestedAccountId":"{ACCT}","suggestedAccountName":"Fuel","confidenceScore":"0.9500","matchType":"rule",
           "suggestedRule":{{"id":"r1","kind":"conditional","name":"Riverbend","autoAccept":false,"updatedAt":"2026-11-01T10:00:00Z"}},
-          "possibleDuplicate":false,"duplicateOf":null,"entryVoided":false,"matchCandidateCount":0,"checkNumber":4412}},
+          "possibleDuplicate":false,"duplicateOf":null,"entryVoided":false,"matchCandidateCount":0,"checkNumber":4412,
+          "transferCandidate":{{"feedItemId":"{B}","accountId":"{ACCT}","accountName":"Savings"}}}},
         {{"id":"{B}","feedDate":"2026-11-02","amount":"-8450.00","description":"ACH CREDIT","status":"categorized",
           "bucket":null,"entryVoided":true,"entryVoidedAt":"2026-11-04T09:00:00Z","matchedTransactionId":"{TXN}",
           "matchedJournalLineId":"{LINE}"}},
@@ -53,12 +54,29 @@ fn a_page_reads_exact_rows_in_the_feed_sign() {
         (rule.kind.as_str(), rule.auto_accept),
         ("conditional", false)
     );
+    let hint = r.transfer_candidate.as_ref().expect("transfer counterpart");
+    assert_eq!(hint.feed_item, id(B));
+    assert_eq!(hint.account_name.as_deref(), Some("Savings"));
     let v = &p.rows[1];
+    assert!(v.transfer_candidate.is_none());
     assert!(v.entry_voided);
     assert!(v.status.is_accepted());
     assert_eq!(v.matched_line.map(|l| l.to_string()).as_deref(), Some(LINE));
     let dbg = format!("{p:?}");
     assert!(!dbg.contains("84.17") && !dbg.contains("RIVERBEND") && !dbg.contains("Fuel"));
+}
+
+#[test]
+fn the_accepted_filter_is_one_status() {
+    let q = FeedQuery {
+        accepted: true,
+        waiting_only: true,
+        ..FeedQuery::default()
+    }
+    .to_query()
+    .expect("query");
+    assert!(q.contains(&("status".into(), "accepted".into())));
+    assert!(!q.iter().any(|(k, _)| k == "actionableOnly"));
 }
 
 #[test]

@@ -97,3 +97,115 @@ fn view_only_and_another_computer() {
     cmd(&mut s, "feed.next");
     assert_eq!(s.list.cursor(), Some(1), "moving still works");
 }
+
+/// DI-2: A records the row, the Undo toast takes it back (Q-P26x: a real
+/// demo entry is made and removed).
+#[test]
+fn accept_then_undo_from_the_toast() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.counts.accepted, 1);
+    let target = s.toast.as_ref().map(|x| x.target.clone()).expect("toast");
+    send::start(&mut s, send::Send::Undo(target, false), None);
+    s.poll();
+    assert_eq!(s.counts.accepted, 0);
+    assert_eq!(s.counts.waiting, 37);
+    assert!(s.toast.is_none());
+    assert_eq!(s.notice.map(|n| n.0), Some("bank_feed.notice.undone"));
+}
+
+/// DI-2 (plan §5): locked rows in a selection ask for the password once;
+/// the right one records them.
+#[test]
+fn closed_period_asks_for_the_password_and_retries() {
+    let (_d, mut s) = screen();
+    assert!(s.command(CommandId::new("dev.demo_feed_close_books")));
+    s.poll();
+    s.segment = Segment::Ready;
+    s.reload();
+    s.list.toggle_all();
+    let before = s.counts.accepted;
+    cmd(&mut s, "feed.accept_selected");
+    assert!(s.closing.dialog_open(), "the password prompt is up");
+    let open_posted = s.counts.accepted - before;
+    assert!(open_posted > 0, "the open rows posted");
+    s.closing.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+    );
+    let (again, pw) = s.closing.submit().expect("submit");
+    send::start(&mut s, again, Some(pw));
+    s.poll();
+    assert!(!s.closing.dialog_open());
+    assert!(
+        s.counts.accepted > before + open_posted,
+        "the locked rows posted"
+    );
+}
+
+/// DI-2 (Q-P26t): a deposit of one waiting payment less a fee line, at a
+/// 0.00 difference, from the detail panel.
+#[test]
+fn deposit_with_a_fee_from_the_panel() {
+    let (_d, mut s) = screen();
+    let zelle = s
+        .rows
+        .iter()
+        .find(|r| r.description.contains("ZELLE"))
+        .map(|r| r.id)
+        .expect("zelle");
+    s.list.focus(zelle);
+    detail::follow(&mut s);
+    s.poll();
+    detail::follow(&mut s);
+    s.detail.mode = detail::Mode::Deposit;
+    let pay = s
+        .detail
+        .data
+        .payments
+        .iter()
+        .find(|p| p.amount.to_wire() == "1250.0000")
+        .map(|p| p.id)
+        .expect("payment");
+    s.detail.picks.insert(pay);
+    assert_eq!(detail::state(&s)["deposit_balanced"], false);
+    s.detail.fees.push(detail::Line {
+        account: Some(crate::company::demo::account_id(6050)),
+        amount: "325.00".into(),
+        memo: String::new(),
+    });
+    assert_eq!(detail::state(&s)["deposit_difference"], "0.0000");
+    assert_eq!(detail::state(&s)["deposit_balanced"], true);
+    let row = s.row(zelle).cloned().expect("row");
+    let d = s.detail.deposit_draft(&row);
+    send::start(
+        &mut s,
+        send::Send::Deposit(
+            zelle,
+            d.payments.iter().map(|(id, _)| *id).collect(),
+            vec![cl_api::FeeLine {
+                account: crate::company::demo::account_id(6050),
+                amount: cl_core::Money::parse_wire("325.00").expect("m"),
+                memo: None,
+            }],
+        ),
+        None,
+    );
+    s.poll();
+    assert_eq!(s.counts.accepted, 1);
+    assert!(s.toast.is_some(), "a deposit can be undone");
+}
+
+/// DI-2: Ctrl+Insert / Ctrl+Delete in the split grid.
+#[test]
+fn split_lines_insert_and_delete() {
+    let (_d, mut s) = screen();
+    detail::follow(&mut s);
+    s.detail.mode = detail::Mode::Split;
+    assert!(s.command(CommandId::new("form.insert_line")));
+    assert!(s.command(CommandId::new("form.insert_line")));
+    assert_eq!(s.detail.split.len(), 2);
+    assert!(s.command(CommandId::new("form.delete_line")));
+    assert_eq!(s.detail.split.len(), 1);
+}
