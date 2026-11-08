@@ -38,7 +38,11 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     if s.load_failed {
         form::inline_warning(ui, &tokens, &t("bank_feed.load_failed"));
     }
-    if let Some((k, n)) = s.notice {
+    // The Undo toast already says what was recorded.
+    if let Some((k, n)) = s
+        .notice
+        .filter(|(k, _)| !(s.toast.is_some() && *k == "bank_feed.notice.done"))
+    {
         form::hint(ui, &tokens, &t_with(k, &[("n", &n.to_string())]));
     }
     let avail = ui.available_size();
