@@ -431,6 +431,13 @@ pub(crate) fn refresh(s: &mut BankFeedScreen) {
     };
     let offers = s.receipts.of(id);
     let p = &s.detail.receipt;
+    // A receipt that arrived for the open row gets its vendor and file in
+    // its label too (QA-5).
+    if p.details_load.is_none() && offers.iter().any(|o| !p.details.contains_key(o)) {
+        read_details(s, id);
+    }
+    let offers = s.receipts.of(id);
+    let p = &s.detail.receipt;
     if p.declined {
         return;
     }
