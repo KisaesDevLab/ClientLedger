@@ -203,10 +203,10 @@ fn split_lines_insert_and_delete() {
     let (_d, mut s) = screen();
     detail::follow(&mut s);
     s.detail.mode = detail::Mode::Split;
-    assert!(s.command(CommandId::new("form.insert_line")));
-    assert!(s.command(CommandId::new("form.insert_line")));
+    assert!(s.command(CommandId::new("feed.insert_line")));
+    assert!(s.command(CommandId::new("feed.insert_line")));
     assert_eq!(s.detail.split.len(), 2);
-    assert!(s.command(CommandId::new("form.delete_line")));
+    assert!(s.command(CommandId::new("feed.delete_line")));
     assert_eq!(s.detail.split.len(), 1);
 }
 

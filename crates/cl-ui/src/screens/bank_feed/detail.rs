@@ -218,14 +218,14 @@ pub(crate) fn line_command(s: &mut BankFeedScreen, id: &str) -> bool {
         _ => return false,
     };
     match id {
-        "form.insert_line" => {
+        "form.insert_line" | "feed.insert_line" => {
             if s.detail.mode == Mode::Deposit && lines.len() >= cl_api::FEE_LINES_MAX {
                 return true;
             }
             lines.push(Line::default());
             true
         }
-        "form.delete_line" => {
+        "form.delete_line" | "feed.delete_line" => {
             lines.pop();
             true
         }
@@ -471,10 +471,13 @@ fn side(
         let shown = amount_text(ui, model::display_amount(a));
         ui.label(RichText::new(shown).monospace());
     }
-    ui.label(
-        RichText::new(text.unwrap_or_default())
-            .size(12.0)
-            .color(tokens.text_secondary),
+    ui.add(
+        egui::Label::new(
+            RichText::new(text.unwrap_or_default())
+                .size(12.0)
+                .color(tokens.text_secondary),
+        )
+        .wrap(),
     );
 }
 

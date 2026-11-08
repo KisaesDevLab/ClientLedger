@@ -482,6 +482,10 @@ pub const BANK_FEED_KEYS: &[(&str, &str)] = &[
     ("S", "Split"),
     ("R", "Make a rule"),
     ("Ctrl+Enter", "Accept selected"),
+    (
+        "Ctrl+Insert / Ctrl+Delete",
+        "Add / remove a split or fee line",
+    ),
 ];
 
 #[cfg(test)]

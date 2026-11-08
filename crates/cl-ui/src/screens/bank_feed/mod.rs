@@ -746,7 +746,10 @@ impl Screen for BankFeedScreen {
         if let Some(done) = self.closing.command(id) {
             return done;
         }
-        if matches!(s, "form.insert_line" | "form.delete_line") {
+        if matches!(
+            s,
+            "form.insert_line" | "form.delete_line" | "feed.insert_line" | "feed.delete_line"
+        ) {
             return detail::line_command(self, s);
         }
         if s == "form.revert" && self.confirm.take().is_some() {
@@ -764,8 +767,11 @@ impl Screen for BankFeedScreen {
     }
 
     fn keeps_text_key(&self, ctx: &egui::Context, s: cl_model::Shortcut) -> bool {
-        let _ = s;
-        ctx.text_edit_focused()
+        // Ctrl+Insert / Ctrl+Delete reach the split and fee grids from
+        // their amount and memo boxes.
+        let line_key = s.mods == cl_model::Mods::CMD
+            && matches!(s.key, cl_model::Key::Insert | cl_model::Key::Delete);
+        ctx.text_edit_focused() && !line_key
     }
 
     fn state(&self) -> Value {

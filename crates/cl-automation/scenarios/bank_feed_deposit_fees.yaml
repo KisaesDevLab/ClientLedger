@@ -22,7 +22,8 @@ steps:
   - click: {role: check_box, label_contains: "1,250.00"}
   - assert_state: {key: screen.detail.picked, equals: 1}
   - assert_state: {key: screen.detail.deposit_balanced, equals: false}
-  - click: {role: button, label: Add fee line}
+  - key: Ctrl+Insert
+  - assert_state: {key: screen.detail.fees, equals: 1}
   - click: {role: combo_box, label: Line 1 account}
   - click: {role: button, label_contains: "Bank and Merchant Fees"}
   - click: {role: text_input, label: Line 1 amount}
