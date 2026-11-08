@@ -454,8 +454,8 @@ impl BankFeedScreen {
                 let mut o = Outcome::default();
                 let r = match demo_kind {
                     How::Match => demo::match_one(d, id),
-                    How::Approve => demo::categorize(d, id, None).map(|_| ()),
-                    How::Categorize(c) => demo::categorize(d, id, Some(&c)).map(|_| ()),
+                    How::Approve => demo::categorize(d, id, None, None).map(|_| ()),
+                    How::Categorize(c) => demo::categorize(d, id, Some(&c), None).map(|_| ()),
                 };
                 o.take(id, r);
                 Ok(o)

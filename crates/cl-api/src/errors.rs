@@ -282,6 +282,20 @@ impl ValidationError {
             details: ConflictDetails::default(),
         }
     }
+
+    /// A refusal with the engine's code and object-shaped details (the
+    /// demo answers the same as the engine, P26).
+    #[must_use]
+    pub fn coded(code: &str, details: Value) -> ValidationError {
+        ValidationError {
+            code: ErrorCode::parse(code),
+            message: UserText::default(),
+            issues: Vec::new(),
+            reason: None,
+            line: None,
+            details: ConflictDetails::new(details),
+        }
+    }
 }
 
 /// Input refused by cl-api before anything was sent.

@@ -71,7 +71,7 @@ pub(crate) fn accept_selected(s: &mut BankFeedScreen, ids: &[FeedItemId]) {
                 ..Outcome::default()
             };
             for id in categorize {
-                o.take(id, demo::categorize(d, id, None).map(|_| ()));
+                o.take(id, demo::categorize(d, id, None, None).map(|_| ()));
             }
             for id in matches {
                 o.take(id, demo::match_one(d, id));

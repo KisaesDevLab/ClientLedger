@@ -19,13 +19,17 @@ use std::collections::BTreeMap;
 use cl_api::{
     ApiError, BankConnection, BankConnectionId, ConflictDetails, ConflictReason, FeedBucket,
     FeedChoice, FeedCounts, FeedItemId, FeedPage, FeedQuery, FeedRow, FeedStatus, Named,
-    SuggestedRule,
+    SuggestedRule, UndoGroupId,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money};
 use rust_decimal::Decimal;
 
 use super::DemoState;
+
+#[path = "feed_review_posting.rs"]
+mod posting;
+pub use posting::*;
 
 /// One row of the demo review.
 #[derive(Clone, Debug)]
@@ -52,6 +56,27 @@ struct Row {
     matched: Option<TransactionId>,
     /// The import feed's key of an imported row.
     import_key: Option<String>,
+    /// The accept posted `matched` (Undo deletes it; else only unlinks).
+    posted: bool,
+    /// What the accept was (`categorize`, `match`, `transfer`, `deposit`).
+    how: &'static str,
+    /// The review state before the accept (Undo and Review again restore it).
+    prior: Option<Prior>,
+    /// The accept group.
+    group: Option<UndoGroupId>,
+    /// The posted entry as it was posted (Undo asks when it changed).
+    fingerprint: Option<String>,
+    /// Flagged as a possible duplicate.
+    possible_duplicate: bool,
+    /// The row it looks like.
+    duplicate_of: Option<FeedItemId>,
+}
+
+/// A row's review state before an accept.
+#[derive(Clone, Debug)]
+struct Prior {
+    status: FeedStatus,
+    assigned: Option<Named<AccountId>>,
 }
 
 impl Row {
@@ -62,6 +87,9 @@ impl Row {
     fn bucket(&self) -> Option<FeedBucket> {
         if !self.waiting() {
             return None;
+        }
+        if self.possible_duplicate {
+            return Some(FeedBucket::Review);
         }
         Some(match self.kind {
             // The sample's own buckets (README: 28 / 6 / 3); a transfer
@@ -105,7 +133,7 @@ impl Row {
             assigned_tag: None,
             assigned_memo: self.payee.clone(),
             suggested_rule: self.rule.clone(),
-            possible_duplicate: false,
+            possible_duplicate: self.possible_duplicate && self.waiting(),
             duplicate_of: None,
             matched_transaction: self.matched,
             matched_line: None,
@@ -130,6 +158,8 @@ pub struct DemoFeedReview {
     pub view_only: bool,
     /// The next row written was taken by another computer.
     pub conflict_next: bool,
+    /// Accept groups: what each accept took in (Undo takes it back).
+    groups: BTreeMap<UndoGroupId, Vec<FeedItemId>>,
 }
 
 fn id(prefix: &str, n: u64) -> FeedItemId {
@@ -175,6 +205,29 @@ fn suggestion_for(description: &str) -> Option<(&'static str, &'static str)> {
         .iter()
         .find(|(k, ..)| description.contains(k))
         .map(|(_, a, p)| (*a, *p))
+}
+
+/// The demo rule for a payee: one rule per payee (its id is fixed by the
+/// payee's account and name), auto-accept for the regular fuel and office
+/// supply payees ("Accept all from this rule").
+fn demo_rule(account: &str, payee: &str) -> SuggestedRule {
+    let n: u64 = payee
+        .bytes()
+        .fold(u64::from(account.parse::<u16>().unwrap_or(0)), |h, b| {
+            h.wrapping_mul(31).wrapping_add(u64::from(b))
+        })
+        % 1_000_000_000_000;
+    SuggestedRule {
+        id: format!("d26a0000-0000-4000-8000-{n:012}"),
+        kind: "conditional".into(),
+        name: if payee.is_empty() {
+            "Customer payments".into()
+        } else {
+            payee.to_string()
+        },
+        auto_accept: matches!(payee, "Riverbend Fuel" | "Ozark Office Supply"),
+        updated_at: Some("2026-10-01T09:00:00.000Z".into()),
+    }
 }
 
 fn account_named(chart: &[cl_api::Account], number: &str) -> Option<Named<AccountId>> {
@@ -225,17 +278,7 @@ impl DemoFeedReview {
                 ("ready", true) if n.is_multiple_of(4) => {
                     (Some("ai"), Some(Decimal::new(92, 2)), None)
                 }
-                ("ready", true) => (
-                    Some("rule"),
-                    None,
-                    Some(SuggestedRule {
-                        id: format!("demo-rule-{n}"),
-                        kind: "conditional".into(),
-                        name: found.map(|(_, p)| p.to_string()).unwrap_or_default(),
-                        auto_accept: false,
-                        updated_at: Some("2026-10-01T09:00:00Z".into()),
-                    }),
-                ),
+                ("ready", true) => (Some("rule"), None, found.map(|(a, p)| demo_rule(a, p))),
                 ("review", true) => (Some("ai"), Some(Decimal::new(55, 2)), None),
                 _ => (None, None, None),
             };
@@ -258,6 +301,13 @@ impl DemoFeedReview {
                 exclusion_reason: None,
                 matched: None,
                 import_key: None,
+                posted: false,
+                how: "",
+                prior: None,
+                group: None,
+                fingerprint: None,
+                possible_duplicate: false,
+                duplicate_of: None,
             });
         }
     }
@@ -301,6 +351,13 @@ impl DemoFeedReview {
                 exclusion_reason: None,
                 matched: None,
                 import_key: Some(w.key),
+                posted: false,
+                how: "",
+                prior: None,
+                group: None,
+                fingerprint: None,
+                possible_duplicate: false,
+                duplicate_of: None,
             });
         }
     }
@@ -388,6 +445,20 @@ fn matches_query(r: &Row, q: &FeedQuery) -> bool {
     true
 }
 
+/// Mirrors the import feed and flags rows whose entry was voided in the
+/// register (Q-P26u: they stay accepted, marked).
+fn refresh(state: &mut DemoState) {
+    let feed = state.bank_feed.clone();
+    state.feed_review.sync(&feed);
+    let ledger = &state.ledger;
+    for r in &mut state.feed_review.rows {
+        if r.status.is_accepted() && !r.entry_voided && r.matched.is_some_and(|t| ledger.is_void(t))
+        {
+            r.entry_voided = true;
+        }
+    }
+}
+
 /// `GET /banking/feed`.
 ///
 /// # Errors
@@ -395,9 +466,9 @@ fn matches_query(r: &Row, q: &FeedQuery) -> bool {
 pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> {
     q.to_query()?;
     let ai = ai_on(state);
-    let feed = state.bank_feed.clone();
-    let review = &mut state.feed_review;
-    review.sync(&feed);
+    refresh(state);
+    let signals = posting::match_signals(state);
+    let review = &state.feed_review;
     let mut rows: Vec<&Row> = review.rows.iter().filter(|r| matches_query(r, q)).collect();
     // Newest first, then the sample's order.
     rows.sort_by(|a, b| b.date.cmp(&a.date).then(a.id.cmp(&b.id)));
@@ -406,7 +477,24 @@ pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> 
         .into_iter()
         .skip(usize::try_from(q.offset).unwrap_or(usize::MAX))
         .take(usize::from(q.limit))
-        .map(|r| r.to_row(ai))
+        .map(|r| {
+            let mut row = r.to_row(ai);
+            if let Some(n) = signals.get(&r.id) {
+                row.match_candidate_count = *n;
+            }
+            row.duplicate_of = r
+                .duplicate_of
+                .filter(|_| row.possible_duplicate)
+                .and_then(|d| review.rows.iter().find(|x| x.id == d))
+                .map(|d| cl_api::DuplicateOf {
+                    id: d.id,
+                    date: Some(d.date),
+                    amount: Some(d.amount),
+                    description: Some(d.description.clone()),
+                    status: Some(d.status),
+                });
+            row
+        })
         .collect();
     Ok(FeedPage {
         rows: page,
@@ -418,9 +506,8 @@ pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> 
 /// `GET /banking/feed/counts` for one connection or all.
 #[must_use]
 pub fn counts(state: &mut DemoState, connection: Option<BankConnectionId>) -> FeedCounts {
-    let feed = state.bank_feed.clone();
-    let review = &mut state.feed_review;
-    review.sync(&feed);
+    refresh(state);
+    let review = &state.feed_review;
     let mut c = FeedCounts::default();
     for r in review
         .rows
@@ -501,35 +588,6 @@ fn settle(state: &mut DemoState, id: FeedItemId) {
     }
 }
 
-/// `PUT /banking/feed/:id/categorize` (and approve with `None`): posts the
-/// owner's choice, or what is staged or suggested.
-///
-/// # Errors
-/// 403 for a view-only user; 409 `FEED_ITEM_NOT_PENDING`; `NotFound`.
-pub fn categorize(
-    state: &mut DemoState,
-    id: FeedItemId,
-    choice: Option<&FeedChoice>,
-) -> Result<Option<TransactionId>, ApiError> {
-    state.feed_review.write_check(id)?;
-    let chart = super::chart();
-    let r = state.feed_review.row_mut(id)?;
-    if !r.waiting() {
-        return Err(not_pending(r.status));
-    }
-    let account = choice
-        .and_then(|c| c.account)
-        .or_else(|| r.assigned.as_ref().map(|a| a.id))
-        .or_else(|| r.suggested.as_ref().map(|a| a.id))
-        .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
-    if !chart.iter().any(|a| a.id == account) {
-        return Err(ApiError::NotFound { code: None });
-    }
-    r.status = FeedStatus::Categorized;
-    settle(state, id);
-    Ok(None)
-}
-
 /// `PUT /banking/feed/:id/assign`: stages an account.
 ///
 /// # Errors
@@ -557,24 +615,6 @@ pub fn assign(state: &mut DemoState, id: FeedItemId, choice: &FeedChoice) -> Res
     }
     r.assigned = Some(named);
     r.status = FeedStatus::Assigned;
-    Ok(())
-}
-
-/// `PUT /banking/feed/:id/match` to the row's one candidate.
-///
-/// # Errors
-/// As [`categorize`]; 400 `MATCH_MISMATCH` without a candidate.
-pub fn match_one(state: &mut DemoState, id: FeedItemId) -> Result<(), ApiError> {
-    state.feed_review.write_check(id)?;
-    let r = state.feed_review.row_mut(id)?;
-    if !r.waiting() {
-        return Err(not_pending(r.status));
-    }
-    if r.kind != "match" {
-        return Err(ApiError::Local(cl_api::LocalValidation::InvalidValue));
-    }
-    r.status = FeedStatus::Matched;
-    settle(state, id);
     Ok(())
 }
 
@@ -606,25 +646,6 @@ pub fn unexclude(state: &mut DemoState, id: FeedItemId) -> Result<(), ApiError> 
     r.status = FeedStatus::Pending;
     r.exclusion_reason = None;
     Ok(())
-}
-
-/// Developer: the entry of the first accepted row was voided in the
-/// register (Q-P26u): the row is flagged "Entry voided".
-pub fn void_first_accepted(state: &mut DemoState) -> bool {
-    let feed = state.bank_feed.clone();
-    state.feed_review.sync(&feed);
-    match state
-        .feed_review
-        .rows
-        .iter_mut()
-        .find(|r| r.status.is_accepted() && !r.entry_voided)
-    {
-        Some(r) => {
-            r.entry_voided = true;
-            true
-        }
-        None => false,
-    }
 }
 
 /// Starts the review over (`dev.demo_bank_import_reset` empties the feed
@@ -706,11 +727,11 @@ mod tests {
             ..FeedQuery::default()
         };
         let rows = list(&mut s, &q).expect("list").rows;
-        categorize(&mut s, rows[0].id, None).expect("accepted");
+        categorize(&mut s, rows[0].id, None, None).expect("accepted");
         exclude(&mut s, rows[1].id).expect("excluded");
         let c = counts(&mut s, None);
         assert_eq!((c.waiting, c.accepted, c.excluded), (35, 1, 1));
-        let again = categorize(&mut s, rows[0].id, None).expect_err("not waiting");
+        let again = categorize(&mut s, rows[0].id, None, None).expect_err("not waiting");
         assert!(cl_api::is_stale_row(&again));
         unexclude(&mut s, rows[1].id).expect("restored");
         s.feed_review.view_only = true;
@@ -719,7 +740,7 @@ mod tests {
         ));
         s.feed_review.view_only = false;
         s.feed_review.conflict_next = true;
-        let e = categorize(&mut s, rows[2].id, None).expect_err("taken");
+        let e = categorize(&mut s, rows[2].id, None, None).expect_err("taken");
         assert!(cl_api::is_stale_row(&e));
         assert_eq!(
             counts(&mut s, None).accepted,
