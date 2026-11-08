@@ -1608,6 +1608,11 @@ pub(crate) const FEED_RULE_SUGGESTION_DISMISS: Operation = write(
     Method::Post,
     "/api/v1/practice/conditional-rules/suggestions/dismiss",
 );
+/// Runs the rules again over waiting bank lines (P26 QA-10: a rule saved
+/// in the Bank Feed sets up the lines already waiting). Desktop engines
+/// only stage what a rule sets (Q-P26o); nothing posts.
+pub(crate) const FEED_REPROCESS_RULES: Operation =
+    write(Method::Post, "/api/v1/banking/feed/bulk-reprocess-rules");
 /// The linked bank accounts (one connection per account a bank file was
 /// imported into).
 pub(crate) const BANK_CONNECTIONS: Operation = read("/api/v1/banking/connections");

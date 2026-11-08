@@ -231,8 +231,8 @@ pub use resources::feed_review::{
     feed_refusal, is_stale_row, is_view_only,
 };
 pub use resources::feed_rules::{
-    FeedRule, FeedRules, RuleSign, RuleSuggestion, feed_rule_body, feed_rules_from,
-    rule_suggestions_from,
+    FeedRule, FeedRules, RuleSign, RuleSuggestion, RulesRerun, feed_rule_body, feed_rules_from,
+    rule_suggestions_from, rules_rerun_from,
 };
 
 // P14 lane B: daily sales.

@@ -15,6 +15,8 @@ use std::fmt;
 
 use cl_core::Money;
 use cl_core::ids::{AccountId, TagId};
+
+use crate::resources::feed_review::BankConnectionId;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -22,8 +24,8 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::resources::bank_import::wire_decimal;
 use crate::resources::operations::{
-    FEED_RULE_CREATE, FEED_RULE_DELETE, FEED_RULE_LIST, FEED_RULE_SUGGESTION_DISMISS,
-    FEED_RULE_SUGGESTIONS, FEED_RULE_UPDATE,
+    FEED_REPROCESS_RULES, FEED_RULE_CREATE, FEED_RULE_DELETE, FEED_RULE_LIST,
+    FEED_RULE_SUGGESTION_DISMISS, FEED_RULE_SUGGESTIONS, FEED_RULE_UPDATE,
 };
 use crate::session::{Session, json_body};
 
@@ -323,6 +325,43 @@ pub fn feed_rule_body(r: &FeedRule) -> Result<Value, ApiError> {
     Ok(Value::Object(m))
 }
 
+/// What running the rules again did (`bulk-reprocess-rules`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesRerun {
+    /// Waiting lines looked at.
+    #[serde(default)]
+    pub processed: u64,
+    /// Lines a rule fits.
+    #[serde(default)]
+    pub matched: u64,
+    /// Lines posted (always 0 on a desktop engine).
+    #[serde(default)]
+    pub auto_categorized: u64,
+    /// Lines whose suggestion a rule set.
+    #[serde(default)]
+    pub suggestions_updated: u64,
+}
+
+fn reprocess_body(connection: Option<BankConnectionId>) -> Value {
+    let mut m = Map::new();
+    m.insert("allPending".into(), json!(true));
+    if let Some(c) = connection {
+        m.insert("bankConnectionId".into(), json!(c.to_string()));
+    }
+    Value::Object(m)
+}
+
+/// Reads a `bulk-reprocess-rules` answer.
+///
+/// # Errors
+/// `Decode` when it isn't the engine's shape.
+pub fn rules_rerun_from(body: &[u8]) -> Result<RulesRerun, ApiError> {
+    serde_json::from_slice(body).map_err(|_| ApiError::Decode {
+        what: "rules rerun",
+    })
+}
+
 // ---------------------------------------------------------------- calls
 
 /// The Bank Feed rules (`/practice/conditional-rules`).
@@ -391,6 +430,23 @@ impl FeedRules<'_> {
         let call = Call::at(Method::Get, FEED_RULE_SUGGESTIONS.route());
         let reply = self.0.send(&FEED_RULE_SUGGESTIONS, call, None).await?;
         rule_suggestions_from(&reply.body)
+    }
+
+    /// Runs the rules again over the waiting bank lines of `connection`
+    /// (every account when `None`), so a rule saved now sets up the lines
+    /// already waiting (P26 QA-10). A desktop engine only stages what a
+    /// rule sets (Q-P26o); nothing posts.
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn reprocess(
+        &self,
+        connection: Option<BankConnectionId>,
+    ) -> Result<RulesRerun, ApiError> {
+        let body = json_body(&reprocess_body(connection))?;
+        let call = Call::at(Method::Post, FEED_REPROCESS_RULES.route()).json_body(body);
+        let reply = self.0.send(&FEED_REPROCESS_RULES, call, None).await?;
+        rules_rerun_from(&reply.body)
     }
 
     /// Never suggests this one again.
@@ -489,6 +545,21 @@ mod tests {
         );
     }
 
+    /// P26 QA-10: a saved rule runs over the account's waiting lines.
+    #[test]
+    fn reprocess_asks_for_every_waiting_line_of_one_account() {
+        let c = BankConnectionId::parse(BANK).expect("id");
+        let body = reprocess_body(Some(c));
+        assert_eq!(body["allPending"], true);
+        assert_eq!(body["bankConnectionId"], BANK);
+        assert!(reprocess_body(None).get("bankConnectionId").is_none());
+        let r = rules_rerun_from(
+            br#"{"processed":4,"matched":1,"autoCategorized":0,"suggestionsUpdated":1,"untouched":3}"#,
+        )
+        .expect("rerun");
+        assert_eq!((r.processed, r.matched, r.suggestions_updated), (4, 1, 1));
+        assert!(rules_rerun_from(b"\"done\"").is_err());
+    }
     #[test]
     fn suggestions_read_without_floats() {
         let s = rule_suggestions_from(
