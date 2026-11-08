@@ -635,10 +635,9 @@ impl Shell {
         // The real register of the demo's operating account (P12).
         let register = self.make_screen(mk("banking.register"));
         self.windows.open_new(mk("banking.register"), register);
-        self.windows.open_new(
-            mk("banking.feed"),
-            Box::new(Placeholder::for_command(mk("banking.feed"))),
-        );
+        // The real Bank Feed (P26).
+        let feed = self.make_screen(mk("banking.feed"));
+        self.windows.open_new(mk("banking.feed"), feed);
         if let Some(first) = self.windows.all().first().map(|w| w.id) {
             self.windows.activate(first);
         }

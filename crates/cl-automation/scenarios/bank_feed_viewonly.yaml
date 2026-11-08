@@ -1,0 +1,25 @@
+# Bank Feed for a view-only user (P26 plan §5, test 23): reads work, moving
+# and selecting work, every action is disabled with a tooltip, Rules is
+# hidden, and nothing is written.
+name: bank_feed_viewonly
+description: View-only - the list reads, actions are disabled, Rules is hidden, nothing is written.
+steps:
+  - resize: {width: 1440, height: 940}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - command: dev.demo_feed_view_only
+  - assert_state: {key: screen.view_only, equals: true}
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+  - assert_not_exists: {role: button, label: Rules}
+  - click: {role: button, label: Bank line 1 of 37}
+  - key: J
+  - assert_state: {key: screen.cursor, equals: 1}
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 1}
+  - key: A
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.counts.accepted, equals: 0}
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+  - screenshot: view-only

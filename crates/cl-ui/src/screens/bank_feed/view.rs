@@ -349,6 +349,21 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 if is_cur {
                     resp.scroll_to_me(None);
                 }
+                // The row's fill first, so its check box draws on top.
+                if ui.is_rect_visible(rect) {
+                    let fill = if is_cur {
+                        Some(tokens.accent_tint)
+                    } else if why == Why::NeedsYou {
+                        Some(tokens.warn_surface)
+                    } else if resp.hovered() {
+                        Some(tokens.surface_subtle)
+                    } else {
+                        None
+                    };
+                    if let Some(f) = fill {
+                        ui.painter().rect_filled(rect, 0.0, f);
+                    }
+                }
                 let mut sel = s.list.is_selected(r.id);
                 let cb = ui.put(
                     egui::Rect::from_min_size(
@@ -376,13 +391,7 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                     continue;
                 }
                 let p = ui.painter();
-                if is_cur {
-                    p.rect_filled(rect, 0.0, tokens.accent_tint);
-                } else if why == Why::NeedsYou {
-                    p.rect_filled(rect, 0.0, tokens.warn_surface);
-                } else if resp.hovered() {
-                    p.rect_filled(rect, 0.0, tokens.surface_subtle);
-                }
+
                 p.hline(rect.x_range(), rect.bottom(), (1.0, tokens.border_row));
                 let mono = egui::FontId::monospace(13.0);
                 let font = egui::FontId::proportional(14.0);

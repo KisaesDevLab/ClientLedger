@@ -1,0 +1,25 @@
+# Bank Feed with AI off (P26 acceptance "Offline and AI off: rules work,
+# no AI badges, no errors"). The demo works offline; turning AI off leaves
+# the rule suggestions and shows no AI badge or AI wording anywhere.
+name: bank_feed_offline
+description: AI off - rules still propose accounts, no AI badges, no errors.
+steps:
+  - resize: {width: 1440, height: 940}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - command: dev.demo_ai_off
+  - assert_state: {key: screen.ai_on, equals: false}
+  - assert_state: {key: screen.ai_badges, equals: 0}
+  - assert_state: {key: screen.badges.ai_high, equals: 0}
+  - assert_state: {key: screen.badges.ai_check, equals: 0}
+  - assert_state: {key: screen.load_failed, equals: false}
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+  - assert_not_exists: {role: label, label: "AI · high"}
+  - click: {role: button, label: Ready 28}
+  - click: {role: button, label: Bank line 1 of 28}
+  - key: A
+  - assert_state: {key: screen.counts.accepted, equals: 1}
+  - assert_state: {key: screen.notice, equals: bank_feed.notice.done}
+  - screenshot: ai-off

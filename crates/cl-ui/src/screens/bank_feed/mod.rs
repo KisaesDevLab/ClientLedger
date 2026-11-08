@@ -482,7 +482,19 @@ impl BankFeedScreen {
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;
             }
-            "dev.demo_feed_reset" => demo::reset(&mut d),
+            "dev.demo_feed_reset" => {
+                demo::reset(&mut d);
+                // The window starts over too (scenarios run light, then dark).
+                self.segment = Segment::All;
+                self.show = Show::Waiting;
+                self.voided_only = false;
+                self.filter.clear();
+                self.offset = 0;
+                self.view_only = false;
+                self.notice = None;
+                self.detail_request = None;
+                self.list = ReviewList::default();
+            }
             _ => return false,
         }
         drop(d);

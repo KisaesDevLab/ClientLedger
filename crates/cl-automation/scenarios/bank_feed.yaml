@@ -1,0 +1,71 @@
+# Bank Feed review (P26 DI-1, plan §6 "Mockup") against `clientledger --demo`:
+# Banking › Bank Feed opens on Operating with the sample's 37 waiting lines
+# (28 ready, 6 to review, 3 matches; README sample). Keyboard triage: J/K
+# move, Space selects, Ctrl+Enter accepts the selection, A accepts the
+# cursor's line. The rail badge follows. Show › Accepted lists them with
+# the "Entry voided" chip after a register void. Q-P26h deviations: Show
+# selector, Entry voided chip.
+name: bank_feed
+description: Bank Feed with the sample's 37 lines, segments, keyboard triage, Accept selected, Show Accepted and Entry voided.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - assert_state: {key: screen.screen, equals: bank_feed}
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+  - assert_state: {key: screen.counts.ready, equals: 28}
+  - assert_state: {key: screen.counts.review, equals: 6}
+  - assert_state: {key: screen.counts.matches, equals: 3}
+  - assert_state: {key: screen.rows, equals: 37}
+  - assert_state: {key: rail.bank_feed, equals: 37}
+  - assert_exists: {role: button, label: Accept selected  Ctrl+Enter}
+  - screenshot: mockup
+
+  # --- Segments ---------------------------------------------------------------
+  - click: {role: button, label: Ready 28}
+  - assert_state: {key: screen.segment, equals: ready}
+  - assert_state: {key: screen.rows, equals: 28}
+  - click: {role: button, label: Matches 3}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_state: {key: screen.badges.match, equals: 3}
+  - click: {role: button, label: Needs review 6}
+  - assert_state: {key: screen.rows, equals: 6}
+  - screenshot: needs-review
+  - click: {role: button, label: Ready 28}
+
+  # --- Keyboard triage ----------------------------------------------------------
+  - click: {role: button, label: Bank line 1 of 28}
+  - key: Space
+  - key: J
+  - key: Space
+  - key: J
+  - key: Space
+  - assert_state: {key: screen.selected, equals: 3}
+  - assert_state: {key: screen.cursor, equals: 2}
+  - key: K
+  - assert_state: {key: screen.cursor, equals: 1}
+  - screenshot: selected
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.ready, equals: 25}
+  - assert_state: {key: screen.counts.accepted, equals: 3}
+  - assert_state: {key: screen.selected, equals: 0}
+  - key: A
+  - assert_state: {key: screen.counts.accepted, equals: 4}
+  - assert_state: {key: rail.bank_feed, equals: 33}
+
+  # --- Show Accepted, Entry voided ---------------------------------------------
+  - command: dev.demo_feed_void_entry
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label: Accepted}
+  - assert_state: {key: screen.show, equals: accepted}
+  - assert_state: {key: screen.rows, equals: 4}
+  - assert_state: {key: screen.counts.entry_voided, equals: 1}
+  - click: {role: button, label: Entry voided (1)}
+  - assert_state: {key: screen.entry_voided_only, equals: true}
+  - assert_state: {key: screen.rows, equals: 1}
+  - assert_state: {key: screen.badges.entry_voided, equals: 1}
+  - screenshot: entry-voided
