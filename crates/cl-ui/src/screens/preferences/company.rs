@@ -591,6 +591,14 @@ pub fn accounting(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits, loaded: &Load
             t("prefs.company.account_numbers"),
         );
         form::hint(ui, tokens, &t("prefs.company.account_numbers_hint"));
+        ui.add_space(6.0);
+        // Kept per company, so it lives under This company (P26 QA-17).
+        form::field(
+            ui,
+            &t("prefs.user.transfer_window"),
+            &mut edits.transfer_window,
+        );
+        form::hint(ui, tokens, &t("prefs.user.transfer_window_hint"));
     });
 }
 

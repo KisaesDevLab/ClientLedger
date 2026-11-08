@@ -108,13 +108,6 @@ pub fn reminders(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
         form::field(ui, &t("prefs.user.bills_due"), &mut edits.bills_due_days);
         form::hint(ui, tokens, &t("prefs.user.bills_due_hint"));
         ui.add_space(6.0);
-        form::field(
-            ui,
-            &t("prefs.user.transfer_window"),
-            &mut edits.transfer_window,
-        );
-        form::hint(ui, tokens, &t("prefs.user.transfer_window_hint"));
-        ui.add_space(6.0);
         ui.checkbox(&mut edits.backup_on_close, t("prefs.user.backup_on_close"));
         form::hint(ui, tokens, &t("prefs.user.backup_on_close_hint"));
     });
