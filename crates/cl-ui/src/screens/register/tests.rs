@@ -718,6 +718,93 @@ fn an_edit_starts_from_the_transaction_and_updates_it() {
     assert!(s.entry.editing.is_none());
 }
 
+/// A05 QA-3: a transaction open in the pinned row and then removed
+/// elsewhere (a Bank Feed Undo deletes it) closes the edit with a plain
+/// note, so Enter can't save its old values; one still there stays open.
+#[test]
+fn an_edit_closes_when_its_transaction_is_removed_elsewhere() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("42.10"));
+        d.memo = "old memo".into();
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    let id = s.entry.editing.as_ref().expect("editing").id;
+
+    // Something else changed the ledger, not this transaction: the edit
+    // stays as it is.
+    link.bus().publish(crate::data_bus::Change::Ledger(None));
+    s.hear_changes();
+    settle(&mut s, None);
+    assert_eq!(s.entry.editing.as_ref().map(|e| e.id), Some(id));
+    assert!(s.entry.problems.is_empty());
+
+    // The Bank Feed's Undo deletes it.
+    link.demo_state()
+        .expect("demo")
+        .ledger
+        .delete(id)
+        .expect("deleted");
+    link.bus().publish(crate::data_bus::Change::Ledger(None));
+    s.hear_changes();
+    settle(&mut s, None);
+    assert!(
+        s.entry.editing.is_none(),
+        "the edit of a removed entry closes"
+    );
+    assert_eq!(s.state()["entry"]["mode"], "new");
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.edit.removed_elsewhere")]
+    );
+    assert_ne!(s.entry.draft().memo, "old memo");
+    // Enter on the row now can't update anything.
+    let _ = s.start_record();
+    assert_ne!(s.entry.last_saved, Some("update"));
+}
+
+/// A05 QA-3: a voided transaction closes the edit too; one changed
+/// elsewhere and not touched here opens again as it is now.
+#[test]
+fn an_edit_closes_when_its_transaction_is_voided_elsewhere() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("17.00"));
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    let id = s.entry.editing.as_ref().expect("editing").id;
+    link.demo_state()
+        .expect("demo")
+        .ledger
+        .void(id)
+        .expect("voided");
+    s.ledger_changed();
+    settle(&mut s, None);
+    assert!(s.entry.editing.is_none());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.edit.removed_elsewhere")]
+    );
+}
+
 #[test]
 fn splits_record_a_check_once_the_lines_add_up() {
     let (_d, link) = link();
