@@ -33,6 +33,7 @@ mod contract_customer_statements;
 mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
+mod contract_feed_review;
 mod contract_finance_charges;
 mod contract_harness;
 mod contract_home;
@@ -1121,6 +1122,35 @@ fn main() -> std::process::ExitCode {
         (
             "bank_import::changed_rows_carry_the_earlier_values",
             contract_bank_import::changed_rows_carry_the_earlier_values,
+        ),
+        // P26 bank feed review (U-164, U-166 to U-174, U-171, U-77).
+        (
+            "feed_review::capabilities",
+            contract_feed_review::capabilities,
+        ),
+        (
+            "feed_review::rows_are_exact_and_counts_agree",
+            contract_feed_review::rows_are_exact_and_counts_agree,
+        ),
+        (
+            "feed_review::split_posts_exactly",
+            contract_feed_review::split_posts_exactly,
+        ),
+        (
+            "feed_review::decisions_need_a_key",
+            contract_feed_review::decisions_need_a_key,
+        ),
+        (
+            "feed_review::transfer_pair",
+            contract_feed_review::transfer_pair,
+        ),
+        (
+            "feed_review::account_balances",
+            contract_feed_review::account_balances,
+        ),
+        (
+            "feed_review::older_engines_refuse_locally",
+            contract_feed_review::older_engines_refuse_locally,
         ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (

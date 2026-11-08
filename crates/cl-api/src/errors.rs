@@ -217,9 +217,19 @@ pub struct ValidationError {
     issues: Vec<ValidationIssue>,
     reason: Option<ErrorCode>,
     line: Option<u64>,
+    /// Object-shaped `details` (`SPLITS_DONT_BALANCE {difference}`,
+    /// `LINE_REQUIRED {journalLineIds}`, P26); empty otherwise.
+    details: ConflictDetails,
 }
 
 impl ValidationError {
+    /// The engine's object-shaped `details` (figures the screen may show;
+    /// `Debug` names only the keys).
+    #[must_use]
+    pub fn details(&self) -> &ConflictDetails {
+        &self.details
+    }
+
     /// The first field the engine named (`lines`, `incomeAccountId`, …).
     #[must_use]
     pub fn field(&self) -> Option<&FieldPath> {
@@ -269,6 +279,7 @@ impl ValidationError {
             }],
             reason: None,
             line: None,
+            details: ConflictDetails::default(),
         }
     }
 }
@@ -1078,6 +1089,12 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
             .and_then(Value::as_str)
             .and_then(|r| ErrorCode::parse(&r.to_ascii_uppercase())),
         line: body.pointer("/error/details/line").and_then(Value::as_u64),
+        details: body
+            .pointer("/error/details")
+            .filter(|d| d.is_object())
+            .cloned()
+            .map(ConflictDetails::new)
+            .unwrap_or_default(),
     }
 }
 
@@ -1227,6 +1244,15 @@ pub(crate) enum FailureShape {
 
 /// Maps a non-2xx answer: on a Bulk Entry route, refused rows and groups
 /// first; then the §2.4 table.
+/// Tests: the error a session route's `status` and `body` map to.
+#[cfg(test)]
+pub(crate) fn from_response_for_tests(status: u16, body: &[u8]) -> ApiError {
+    match map_failure(status, body, None, RouteKind::Session, FailureShape::Plain) {
+        Mapped::Final(e) => e,
+        _ => ApiError::Internal,
+    }
+}
+
 pub(crate) fn map_failure(
     status: u16,
     body: &[u8],

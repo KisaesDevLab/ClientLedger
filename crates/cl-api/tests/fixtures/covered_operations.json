@@ -333,5 +333,21 @@
   {"method":"POST","path":"/api/v1/banking/feed/import-batch","inSpec":true,"fragmentHash":"bcdc65eff80fe17487789e9b9f7db428bd0d4a34f5455c9fc4889e283548649f"},
   {"method":"GET","path":"/api/v1/banking/feed/import-batches","inSpec":true,"fragmentHash":"fbb0cd4a31f52cb775bf4b5096d6a8f572466752cdb2d0b561a338b7cc1e87a6"},
   {"method":"DELETE","path":"/api/v1/banking/feed/import-batches/{id}","inSpec":true,"fragmentHash":"f12e69ee042e46af041383dd1646456f2d3b68b643b771a4426c239101a32110"},
-  {"method":"POST","path":"/api/v1/banking/connections/lookup","inSpec":true,"fragmentHash":"8917d2bc12b13111254b8ea1e7a194438ba32b8255ba186348c960e1ccdf1ecf"}
+  {"method":"POST","path":"/api/v1/banking/connections/lookup","inSpec":true,"fragmentHash":"8917d2bc12b13111254b8ea1e7a194438ba32b8255ba186348c960e1ccdf1ecf"},
+  {"method":"GET","path":"/api/v1/banking/feed/counts","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/feed/{id}/match-candidates","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/feed/{id}/payroll-overlap","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/feed/{id}/transfer-candidates","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/banking/feed/{id}/categorize","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/banking/feed/{id}/assign","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/{id}/approve","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/banking/feed/{id}/match","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/{id}/duplicate","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/{id}/review-again","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/banking/feed/{id}/exclude","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/banking/feed/{id}/unexclude","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/{id}/transfer","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/{id}/deposit","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/account-balances","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/connections","inSpec":true,"fragmentHash":null}
 ]

@@ -1,0 +1,5 @@
+# The engine's feed-match-post-v1 keyed route set (U-171, P26 E4): one transfer for a bank line and its
+# other side, and one deposit of waiting payments net of fees (Idempotency-Key required), x-idempotency:
+# true in its openapi.json. Append-only for this capability name: KeySet::FeedPostV1 in operations.rs.
+POST /api/v1/banking/feed/{id}/deposit
+POST /api/v1/banking/feed/{id}/transfer
