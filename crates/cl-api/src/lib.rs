@@ -217,6 +217,11 @@ pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
 };
 // P26: bank feed review.
+pub use resources::feed_accept::{
+    ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, RuleAccept,
+    UndoGroupId, UndoOutcome, UndoTarget, Undone, accept_body, accept_outcome_from, undo_body,
+    undo_outcome_from,
+};
 pub use resources::feed_review::{
     AccountBalance, BankConnection, BankConnectionId, DEPOSIT_PAYMENTS_MAX, DuplicateDecision,
     DuplicateOf, FEE_LINES_MAX, FEED_PAGE_MAX, FeeLine, FeedBucket, FeedChoice, FeedCounts,

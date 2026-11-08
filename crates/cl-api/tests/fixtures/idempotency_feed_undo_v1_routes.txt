@@ -1,0 +1,4 @@
+# The engine's feed-undo-v1 keyed route set (U-169, P26 E3): the one undo route for accepted rows or an
+# accept group (Idempotency-Key required), x-idempotency: true in its openapi.json. Append-only for this
+# capability name: KeySet::FeedUndoV1 in operations.rs.
+POST /api/v1/banking/feed/undo

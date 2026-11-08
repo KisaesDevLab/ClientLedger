@@ -33,6 +33,7 @@ mod contract_customer_statements;
 mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
+mod contract_feed_accept;
 mod contract_feed_review;
 mod contract_finance_charges;
 mod contract_harness;
@@ -1151,6 +1152,23 @@ fn main() -> std::process::ExitCode {
         (
             "feed_review::older_engines_refuse_locally",
             contract_feed_review::older_engines_refuse_locally,
+        ),
+        // P26 E3 (U-170, U-169): the one accept and undo routes.
+        (
+            "feed_accept::accept_selection_and_undo_group",
+            contract_feed_accept::accept_selection_and_undo_group,
+        ),
+        (
+            "feed_accept::undo_one_row",
+            contract_feed_accept::undo_one_row,
+        ),
+        (
+            "feed_accept::keys_required_and_rule_not_found",
+            contract_feed_accept::keys_required_and_rule_not_found,
+        ),
+        (
+            "feed_accept::locked_rows_need_the_password",
+            contract_feed_accept::locked_rows_need_the_password,
         ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (

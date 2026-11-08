@@ -495,9 +495,11 @@ impl Capabilities {
     /// U-77 (P26 E4): books balance next to the latest bank-file balance
     /// per bank and card account.
     pub const ACCOUNT_BALANCES: &'static str = "account-balances-v1";
-    /// U-170, U-169 (P26 E3, not yet advertised): one accept route and one
-    /// undo route for feed items.
+    /// U-170 (P26 E3): `POST /banking/feed/accept`, one accept route for a
+    /// selection or every row of one auto-accept rule.
     pub const FEED_ACCEPT: &'static str = "feed-accept-v1";
+    /// U-169 (P26 E3): `POST /banking/feed/undo`, rows or an accept group.
+    pub const FEED_UNDO: &'static str = "feed-undo-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

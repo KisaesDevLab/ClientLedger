@@ -167,6 +167,10 @@ impl Client {
             .set_feed_v1(info.capabilities.has(Capabilities::FEED_IDEMPOTENCY));
         self.exec()
             .set_feed_post_v1(info.capabilities.has(Capabilities::FEED_MATCH_POST));
+        self.exec().set_feed_accept_v1(
+            info.capabilities.has(Capabilities::FEED_ACCEPT),
+            info.capabilities.has(Capabilities::FEED_UNDO),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

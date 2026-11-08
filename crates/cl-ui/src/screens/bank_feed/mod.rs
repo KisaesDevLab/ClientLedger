@@ -525,7 +525,10 @@ async fn live_accept(
         How::Match => {
             let c = f.match_candidates(id).await?;
             match c.as_slice() {
-                [one] => f.match_line(id, one.transaction, Some(one.line), key).await,
+                [one] => f
+                    .match_line(id, one.transaction, Some(one.line), key)
+                    .await
+                    .map(|_| ()),
                 _ => Err(ApiError::Local(cl_api::LocalValidation::InvalidValue)),
             }
         }

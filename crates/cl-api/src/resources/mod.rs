@@ -26,6 +26,7 @@ pub mod document_assist;
 pub mod document_drafts;
 pub mod export;
 pub mod feed;
+pub mod feed_accept;
 pub mod feed_review;
 pub mod finance_charges;
 pub mod form1099;

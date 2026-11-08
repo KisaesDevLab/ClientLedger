@@ -1,0 +1,4 @@
+# The engine's feed-accept-v1 keyed route set (U-170, P26 E3): the one accept route for a selection or
+# every row one auto-accept rule staged (Idempotency-Key required), x-idempotency: true in its openapi.json.
+# Append-only for this capability name: KeySet::FeedAcceptV1 in operations.rs.
+POST /api/v1/banking/feed/accept

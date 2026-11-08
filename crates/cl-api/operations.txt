@@ -425,3 +425,6 @@ POST    /api/v1/banking/feed/{id}/transfer      keyable-feed-post
 POST    /api/v1/banking/feed/{id}/deposit       keyable-feed-post
 GET     /api/v1/dashboard/account-balances      idempotent
 GET     /api/v1/banking/connections         idempotent
+POST    /api/v1/banking/feed/accept             keyable-feed-accept
+GET     /api/v1/banking/feed/accept-groups/{id} idempotent
+POST    /api/v1/banking/feed/undo               keyable-feed-undo

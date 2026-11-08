@@ -349,5 +349,8 @@
   {"method":"POST","path":"/api/v1/banking/feed/{id}/transfer","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/banking/feed/{id}/deposit","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/dashboard/account-balances","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/banking/connections","inSpec":true,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/banking/connections","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/accept","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/feed/accept-groups/{id}","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/banking/feed/undo","inSpec":true,"fragmentHash":null}
 ]

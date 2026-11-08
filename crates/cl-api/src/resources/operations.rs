@@ -59,6 +59,8 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
             RetryClass::Keyable(KeySet::FeedV1) => "keyable-feed",
             RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
+            RetryClass::Keyable(KeySet::FeedAcceptV1) => "keyable-feed-accept",
+            RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -146,6 +148,11 @@ pub enum KeySet {
     /// `feed-match-post-v1` (U-171, P26 E4): a feed transfer and a feed
     /// deposit (key required).
     FeedPostV1,
+    /// `feed-accept-v1` (U-170, P26 E3): the one accept route (key
+    /// required).
+    FeedAcceptV1,
+    /// `feed-undo-v1` (U-169, P26 E3): the one undo route (key required).
+    FeedUndoV1,
 }
 
 impl KeySet {
@@ -176,6 +183,8 @@ impl KeySet {
             KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
             KeySet::FeedV1 => crate::wire::Capabilities::FEED_IDEMPOTENCY,
             KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
+            KeySet::FeedAcceptV1 => crate::wire::Capabilities::FEED_ACCEPT,
+            KeySet::FeedUndoV1 => crate::wire::Capabilities::FEED_UNDO,
         }
     }
 }
@@ -1564,6 +1573,22 @@ pub(crate) const FEED_DEPOSIT: Operation = keyable_in(
     Method::Post,
     "/api/v1/banking/feed/{id}/deposit",
 );
+/// Accepts a selection or every row one rule staged, in one engine
+/// transaction (`feed-accept-v1`, U-170; key required).
+pub(crate) const FEED_ACCEPT: Operation = keyable_in(
+    KeySet::FeedAcceptV1,
+    Method::Post,
+    "/api/v1/banking/feed/accept",
+);
+/// An accept's answer again (a replay over the 512 KB cap).
+pub(crate) const FEED_ACCEPT_GROUP: Operation = read("/api/v1/banking/feed/accept-groups/{id}");
+/// Takes accepted rows or an accept group back (`feed-undo-v1`, U-169;
+/// key required).
+pub(crate) const FEED_UNDO: Operation = keyable_in(
+    KeySet::FeedUndoV1,
+    Method::Post,
+    "/api/v1/banking/feed/undo",
+);
 /// The linked bank accounts (one connection per account a bank file was
 /// imported into).
 pub(crate) const BANK_CONNECTIONS: Operation = read("/api/v1/banking/connections");
@@ -1588,7 +1613,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 351] = [
+pub const OPERATIONS: [Operation; 354] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1955,6 +1980,9 @@ pub const OPERATIONS: [Operation; 351] = [
     FEED_DEPOSIT,
     DASHBOARD_ACCOUNT_BALANCES,
     BANK_CONNECTIONS,
+    FEED_ACCEPT,
+    FEED_ACCEPT_GROUP,
+    FEED_UNDO,
 ];
 
 /// Looks up a covered operation.
@@ -2024,6 +2052,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, reason = "one branch per keyed route set")]
     fn classification_rules_hold() {
         let mut seen = HashSet::new();
         for o in &OPERATIONS {
@@ -2073,6 +2102,10 @@ mod tests {
                 Some(KeySet::FeedV1)
             } else if KEYABLE_FEED_POST.contains(&route) {
                 Some(KeySet::FeedPostV1)
+            } else if route == ("POST", "/api/v1/banking/feed/accept") {
+                Some(KeySet::FeedAcceptV1)
+            } else if route == ("POST", "/api/v1/banking/feed/undo") {
+                Some(KeySet::FeedUndoV1)
             } else {
                 None
             };
@@ -2114,7 +2147,8 @@ mod tests {
                 + KEYABLE_UNIT_SETS.len()
                 + KEYABLE_BANK_IMPORT.len()
                 + KEYABLE_FEED.len()
-                + KEYABLE_FEED_POST.len(),
+                + KEYABLE_FEED_POST.len()
+                + 2,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2300,6 +2334,10 @@ mod tests {
     fn feed_key_sets_name_their_capabilities() {
         assert_eq!(KeySet::FeedV1.capability(), "feed-idempotency-v1");
         assert_eq!(KeySet::FeedPostV1.capability(), "feed-match-post-v1");
+        assert_eq!(KeySet::FeedAcceptV1.capability(), "feed-accept-v1");
+        assert_eq!(KeySet::FeedUndoV1.capability(), "feed-undo-v1");
+        assert_eq!(FEED_ACCEPT.key_set(), Some(KeySet::FeedAcceptV1));
+        assert_eq!(FEED_UNDO.key_set(), Some(KeySet::FeedUndoV1));
         assert_eq!(FEED_CATEGORIZE.key_set(), Some(KeySet::FeedV1));
         assert_eq!(FEED_DEPOSIT.key_set(), Some(KeySet::FeedPostV1));
         assert_eq!(FEED_ASSIGN.key_set(), None);

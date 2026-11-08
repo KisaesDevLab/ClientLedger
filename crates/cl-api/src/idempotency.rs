@@ -316,6 +316,8 @@ pub(crate) struct Executor {
     bank_import_v1: AtomicBool,
     feed_v1: AtomicBool,
     feed_post_v1: AtomicBool,
+    feed_accept_v1: AtomicBool,
+    feed_undo_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -385,6 +387,8 @@ impl Executor {
             bank_import_v1: AtomicBool::new(false),
             feed_v1: AtomicBool::new(false),
             feed_post_v1: AtomicBool::new(false),
+            feed_accept_v1: AtomicBool::new(false),
+            feed_undo_v1: AtomicBool::new(false),
         }
     }
 
@@ -499,6 +503,13 @@ impl Executor {
         self.feed_post_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `feed-accept-v1` and
+    /// `feed-undo-v1` (the one accept and undo routes; U-170, U-169, P26).
+    pub(crate) fn set_feed_accept_v1(&self, accept: bool, undo: bool) {
+        self.feed_accept_v1.store(accept, Ordering::Relaxed);
+        self.feed_undo_v1.store(undo, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -533,6 +544,8 @@ impl Executor {
             KeySet::BankImportV1 => self.bank_import_v1.load(Ordering::Relaxed),
             KeySet::FeedV1 => self.feed_v1.load(Ordering::Relaxed),
             KeySet::FeedPostV1 => self.feed_post_v1.load(Ordering::Relaxed),
+            KeySet::FeedAcceptV1 => self.feed_accept_v1.load(Ordering::Relaxed),
+            KeySet::FeedUndoV1 => self.feed_undo_v1.load(Ordering::Relaxed),
         }
     }
 

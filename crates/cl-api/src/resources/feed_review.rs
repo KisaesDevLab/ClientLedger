@@ -15,7 +15,9 @@
 //!   `LINE_ALREADY_MATCHED`, `FEED_ITEM_IN_USE`, …); [`feed_refusal`] names
 //!   them and the 400s for the screen. A 403 on a write is a view-only user
 //!   ([`is_view_only`]).
-//! - The one accept and one undo route (E3, U-170/U-169) are not here yet.
+//! - The one accept and one undo route (E3, U-170/U-169) are in
+//!   [`crate::resources::feed_accept`]; transfer, deposit and match answer
+//!   their accept group ([`FeedPosted::undo_group`]) for Undo.
 
 use std::fmt;
 use std::str::FromStr;
@@ -33,6 +35,7 @@ use crate::idempotency::IdempotencyKey;
 use crate::resources::bank_import::wire_decimal;
 use crate::resources::customer_payments::error_code;
 use crate::resources::feed::{Feed, FeedItemId};
+use crate::resources::feed_accept::{UndoGroupId, undo_group_of};
 use crate::resources::operations::{
     BANK_CONNECTIONS, DASHBOARD_ACCOUNT_BALANCES, FEED_APPROVE, FEED_ASSIGN, FEED_CATEGORIZE,
     FEED_COUNTS, FEED_DEPOSIT, FEED_DUPLICATE, FEED_EXCLUDE, FEED_LIST, FEED_MATCH,
@@ -615,6 +618,8 @@ pub struct FeedPosted {
     pub items: Vec<(FeedItemId, JournalLineId)>,
     /// The payments deposited and their amounts.
     pub payments: Vec<(TransactionId, Money)>,
+    /// Undo takes it back as one group (`feed-undo-v1`).
+    pub undo_group: Option<UndoGroupId>,
 }
 
 impl fmt::Debug for FeedPosted {
@@ -733,6 +738,21 @@ pub enum FeedRefusal {
     PaymentNotPendingDeposit,
     /// 409 `PAYMENT_BOUNCED`.
     PaymentBounced,
+    /// 409 `RULE_CHANGED`: the rule changed since the list was read.
+    RuleChanged {
+        /// Its change token now.
+        updated_at: Option<String>,
+    },
+    /// 409 `RULE_NOT_AUTO_ACCEPT`: the rule doesn't allow Accept all.
+    RuleNotAutoAccept,
+    /// 404 `RULE_NOT_FOUND`: the rule was deleted.
+    RuleNotFound,
+    /// 409 `FEED_UNDO_CHANGED`: these rows' entries were edited since they
+    /// were accepted (nothing undone; ask, then send with `force`).
+    UndoChanged {
+        /// The rows.
+        ids: Vec<FeedItemId>,
+    },
 }
 
 impl fmt::Debug for FeedRefusal {
@@ -760,6 +780,12 @@ impl fmt::Debug for FeedRefusal {
             FeedRefusal::FeeAccountInvalid { .. } => "FeeAccountInvalid(..)",
             FeedRefusal::PaymentNotPendingDeposit => "PaymentNotPendingDeposit",
             FeedRefusal::PaymentBounced => "PaymentBounced",
+            FeedRefusal::RuleChanged { .. } => "RuleChanged(..)",
+            FeedRefusal::RuleNotAutoAccept => "RuleNotAutoAccept",
+            FeedRefusal::RuleNotFound => "RuleNotFound",
+            FeedRefusal::UndoChanged { ids } => {
+                return write!(f, "UndoChanged({})", ids.len());
+            }
         };
         f.write_str(name)
     }
@@ -805,6 +831,14 @@ pub fn feed_refusal(e: &ApiError) -> Option<FeedRefusal> {
         },
         "PAYMENT_NOT_PENDING_DEPOSIT" => FeedRefusal::PaymentNotPendingDeposit,
         "PAYMENT_BOUNCED" => FeedRefusal::PaymentBounced,
+        "RULE_CHANGED" => FeedRefusal::RuleChanged {
+            updated_at: text("updatedAt"),
+        },
+        "RULE_NOT_AUTO_ACCEPT" => FeedRefusal::RuleNotAutoAccept,
+        "RULE_NOT_FOUND" => FeedRefusal::RuleNotFound,
+        "FEED_UNDO_CHANGED" => FeedRefusal::UndoChanged {
+            ids: details.map(|d| d.ids("ids")).unwrap_or_default(),
+        },
         _ => return None,
     })
 }
@@ -1348,6 +1382,7 @@ pub fn posted_from(body: &[u8]) -> Result<FeedPosted, ApiError> {
         transaction,
         items,
         payments,
+        undo_group: undo_group_of(body),
     })
 }
 
@@ -1550,11 +1585,11 @@ fn item_call(op: &Operation, id: FeedItemId, tail: &str) -> Call {
 }
 
 impl Feed<'_> {
-    fn has(self, cap: &str) -> bool {
+    pub(crate) fn has(self, cap: &str) -> bool {
         self.0.client().capabilities().has(cap)
     }
 
-    fn need(self, cap: &str) -> Result<(), ApiError> {
+    pub(crate) fn need(self, cap: &str) -> Result<(), ApiError> {
         if self.has(cap) {
             Ok(())
         } else {
@@ -1564,7 +1599,7 @@ impl Feed<'_> {
 
     /// The body with the closing-date password applied (feed routes take it
     /// under `feed-closing-date-v1`).
-    fn with_password(
+    pub(crate) fn with_password(
         self,
         mut body: Value,
         auth: Option<&ClosedPeriodAuthorization>,
@@ -1721,7 +1756,7 @@ impl Feed<'_> {
     }
 
     /// Matches a row to a line of a posted entry (`line` may be left out
-    /// when only one line fits).
+    /// when only one line fits). Returns its accept group (`feed-undo-v1`).
     ///
     /// # Errors
     /// `Local(Unsupported)` without `feed-match-v2`; [`feed_refusal`] cases
@@ -1733,7 +1768,7 @@ impl Feed<'_> {
         transaction: TransactionId,
         line: Option<JournalLineId>,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Option<UndoGroupId>, ApiError> {
         self.need(Capabilities::FEED_MATCH_V2)?;
         let mut body = json!({ "transactionId": transaction.to_string() });
         if let (Some(l), Value::Object(m)) = (line, &mut body) {
@@ -1741,8 +1776,8 @@ impl Feed<'_> {
         }
         let mut call = item_call(&FEED_MATCH, id, "match").json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
-        self.0.send(&FEED_MATCH, call, None).await?;
-        Ok(())
+        let reply = self.0.send(&FEED_MATCH, call, None).await?;
+        Ok(undo_group_of(&reply.body))
     }
 
     /// Keep both or remove this one, on a possible duplicate.

@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 12] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 14] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -314,6 +314,19 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 12] = [
         "keyable-feed-post",
         cl_api::KeySet::FeedPostV1,
         2,
+    ),
+    // P26 E3 (U-170, U-169): the one accept and the one undo route.
+    (
+        "idempotency_feed_accept_v1_routes.txt",
+        "keyable-feed-accept",
+        cl_api::KeySet::FeedAcceptV1,
+        1,
+    ),
+    (
+        "idempotency_feed_undo_v1_routes.txt",
+        "keyable-feed-undo",
+        cl_api::KeySet::FeedUndoV1,
+        1,
     ),
 ];
 
@@ -475,6 +488,8 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         ),
         ("idempotency_feed_v1_routes.txt", "feed-idempotency-v1"),
         ("idempotency_feed_post_v1_routes.txt", "feed-match-post-v1"),
+        ("idempotency_feed_accept_v1_routes.txt", "feed-accept-v1"),
+        ("idempotency_feed_undo_v1_routes.txt", "feed-undo-v1"),
     ]
     .iter()
     .map(|(f, cap)| {
