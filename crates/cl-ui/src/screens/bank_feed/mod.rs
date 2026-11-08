@@ -167,6 +167,9 @@ pub struct BankFeedScreen {
     pub(crate) notice: Option<(&'static str, usize)>,
     /// A05: receipts in the review queue that match waiting lines.
     pub(crate) receipts: receipts::Receipts,
+    /// The cursor goes to this line when the list is read next (a demo
+    /// receipt's line, control channel).
+    focus_next: Option<FeedItemId>,
 }
 
 impl std::fmt::Debug for BankFeedScreen {
@@ -227,6 +230,7 @@ impl BankFeedScreen {
             load_failed: false,
             notice: None,
             receipts: receipts::Receipts::default(),
+            focus_next: None,
         };
         s.read_meta();
         rules::read(&mut s);
@@ -416,6 +420,9 @@ impl BankFeedScreen {
                     self.rows = l.page.rows;
                     self.last_import = l.last_import;
                     self.list.set_rows(self.rows.iter().map(|r| r.id).collect());
+                    if let Some(id) = self.focus_next.take() {
+                        self.list.focus(id);
+                    }
                     self.receipts.take(l.drafts, &self.rows);
                     receipts::refresh(self);
                     let n = u32::try_from(l.waiting_all).unwrap_or(u32::MAX);
@@ -635,6 +642,12 @@ impl BankFeedScreen {
                     c.closed_through = CalendarDate::from_ymd(2026, 11, 1).ok();
                 }
             }
+            // A05: a receipt in the review queue that matches a waiting
+            // money-out line (its two lines add up to the bank amount).
+            "dev.demo_feed_receipt" => {
+                // The cursor goes to its line once the list is read.
+                self.focus_next = demo::seed_receipt(&mut d, true).map(|(line, _)| line);
+            }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;
             }
@@ -655,6 +668,7 @@ impl BankFeedScreen {
                 self.confirm = None;
                 self.closing.cancel();
                 self.rules = rules::RulesPanel::default();
+                self.receipts = receipts::Receipts::default();
                 if let Some(open) = d.open
                     && let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open)
                 {

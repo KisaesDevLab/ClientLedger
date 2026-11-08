@@ -306,7 +306,7 @@ fn receipt_failures_are_named() {
     assert!(o.failures.iter().all(AcceptFailure::is_receipt));
     assert_eq!(o.failures[0].code, AcceptFailure::DRAFT_CLOSED);
     assert_eq!(o.failures[1].code, AcceptFailure::DRAFT_STALE);
-    assert!(o.locked().is_empty());
+    assert_eq!(o.locked(), Vec::<FeedItemId>::new());
     let other = AcceptFailure {
         id: fid(A),
         code: AcceptFailure::PERIOD_LOCKED.into(),
@@ -332,7 +332,7 @@ fn undo_answer_reads_reopened_drafts() {
     );
     let old = json!({ "undone": [], "failures": [] });
     let o = undo_outcome_from(old.to_string().as_bytes()).expect("undo");
-    assert!(o.reopened_drafts.is_empty());
+    assert_eq!(o.reopened_drafts, Vec::<DocumentDraftId>::new());
     let bad = json!({ "undone": [], "reopenedDrafts": ["nope"] });
     assert!(undo_outcome_from(bad.to_string().as_bytes()).is_err());
 }

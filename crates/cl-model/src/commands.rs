@@ -593,6 +593,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_feed_close_books",
         "Close the Demo Books Through 11/01 (developer)",
     ),
+    dev_action(
+        "dev.demo_feed_receipt",
+        "Add a Demo Receipt for a Bank Feed Line (developer)",
+    ),
     dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
     dev_action(
         "dev.demo_feed_reset",

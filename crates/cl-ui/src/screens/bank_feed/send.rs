@@ -724,6 +724,7 @@ mod tests {
                 code: AcceptFailure::IN_USE.into(),
                 details: cl_api::ConflictDetails::default(),
             }],
+            reopened_drafts: Vec::new(),
         };
         let mut out = Outcome::default();
         out.undid(&o, &Send::Undo(UndoTarget::Items(vec![item(3)]), false));

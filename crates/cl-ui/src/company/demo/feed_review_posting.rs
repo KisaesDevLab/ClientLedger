@@ -785,15 +785,15 @@ pub fn accept(
         // U-181: the receipt is checked before the row posts; a refused
         // receipt fails the row (nothing posted).
         let draft = item.draft().cloned();
-        if let Some(link) = &draft {
-            if let Err(e) = super::super::drafts::feed_draft_ready(state, state.open, link) {
-                out.failures.push(AcceptFailure {
-                    id,
-                    code: e.code.to_string(),
-                    details: cl_api::ConflictDetails::new(e.details),
-                });
-                continue;
-            }
+        if let Some(link) = &draft
+            && let Err(e) = super::super::drafts::feed_draft_ready(state, state.open, link)
+        {
+            out.failures.push(AcceptFailure {
+                id,
+                code: e.code.to_string(),
+                details: cl_api::ConflictDetails::new(e.details),
+            });
+            continue;
         }
         let result = match item.inner() {
             AcceptItem::Receipt { .. } => Err(invalid()),
@@ -841,12 +841,12 @@ pub fn accept(
                 true
             }),
         };
-        if let (Ok(_), Some(link), Some(tenant)) = (&result, &draft, state.open) {
-            if let Some(t) = row(state, id).ok().and_then(|r| r.matched) {
-                // Checked above; the same step as the posting (one engine
-                // transaction).
-                let _ = super::super::drafts::feed_file_on(state, tenant, link.id, t);
-            }
+        if let (Ok(_), Some(link), Some(tenant)) = (&result, &draft, state.open)
+            && let Some(t) = row(state, id).ok().and_then(|r| r.matched)
+        {
+            // Checked above; the same step as the posting (one engine
+            // transaction).
+            let _ = super::super::drafts::feed_file_on(state, tenant, link.id, t);
         }
         match result {
             Ok(true) => out.posted += 1,

@@ -35,6 +35,7 @@ mod contract_deposits;
 mod contract_errors;
 mod contract_feed_accept;
 mod contract_feed_match_post;
+mod contract_feed_receipts;
 mod contract_feed_review;
 mod contract_finance_charges;
 mod contract_harness;
@@ -1180,6 +1181,19 @@ fn main() -> std::process::ExitCode {
         (
             "feed_accept::locked_rows_need_the_password",
             contract_feed_accept::locked_rows_need_the_password,
+        ),
+        // A05 (U-181 feed-accept-draft-v1, U-180 document-drafts-reopen-v1).
+        (
+            "feed_receipts::accept_files_the_receipt_and_undo_reopens_it",
+            contract_feed_receipts::accept_files_the_receipt_and_undo_reopens_it,
+        ),
+        (
+            "feed_receipts::stale_or_used_receipts_post_nothing",
+            contract_feed_receipts::stale_or_used_receipts_post_nothing,
+        ),
+        (
+            "feed_receipts::a_late_receipt_attaches_to_the_feed_entry",
+            contract_feed_receipts::a_late_receipt_attaches_to_the_feed_entry,
         ),
         // U-178 (engine PR #238, feed-accept-kind-v1).
         (

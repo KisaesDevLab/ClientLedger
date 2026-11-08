@@ -400,10 +400,10 @@ pub(crate) fn follow(s: &mut BankFeedScreen, ctx: &egui::Context) {
             Err(_) => p.failed = true,
         }
     }
-    if let Some(r) = finished(&mut p.bytes) {
-        if let (Ok(Some(src)), Some(id)) = (r, p.bytes_for.take()) {
-            p.doc = Some((id, src));
-        }
+    if let Some(r) = finished(&mut p.bytes)
+        && let (Ok(Some(src)), Some(id)) = (r, p.bytes_for.take())
+    {
+        p.doc = Some((id, src));
     }
     // The viewer follows the picked receipt while it is out.
     let wanted = p.pop || doc_viewer::is_popped(ctx);

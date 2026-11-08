@@ -171,6 +171,10 @@ pub struct DemoDrafts {
     /// A06: the vendors' statement layouts (`stmt:` keys), apart from
     /// their bill layouts (Q-299).
     pub statement_layouts: Vec<(ContactId, cl_docread::model::Template)>,
+    /// A05: the receipts the demo's Bank Feed made for its lines
+    /// (`dev.demo_feed_receipt`); a new one throws away the earlier ones
+    /// still live, so every scenario run starts with one.
+    pub feed_seeded: Vec<DocumentDraftId>,
     /// Records the converts posted (not the ones attach filed on), so the
     /// demo's inbox can void them when it lays its files out again: every
     /// scenario run starts with the books as found (A04 step 15).
