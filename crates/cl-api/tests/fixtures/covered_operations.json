@@ -350,7 +350,7 @@
   {"method":"POST","path":"/api/v1/banking/feed/{id}/deposit","inSpec":true,"fragmentHash":"efdf3450ce17799803220ccbbf6184f2f7c90546ed47559ff73852f8fdced8d2"},
   {"method":"GET","path":"/api/v1/dashboard/account-balances","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/banking/connections","inSpec":true,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/banking/feed/accept","inSpec":true,"fragmentHash":"43ec5f0bac24771c34e2e49a66d40e891c7ee6247f1ce70344455a9d77cf40b1"},
+  {"method":"POST","path":"/api/v1/banking/feed/accept","inSpec":true,"fragmentHash":"b8c27a0d80fffe1ac59cfa290494c6518877d1bcc2ea1c88c7664c537e792e46"},
   {"method":"GET","path":"/api/v1/banking/feed/accept-groups/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
   {"method":"POST","path":"/api/v1/banking/feed/undo","inSpec":true,"fragmentHash":"aa3a601d1967705d87438d10ee9aa6f0e93bc6017efb872c8128a583707b5e05"},
   {"method":"GET","path":"/api/v1/practice/conditional-rules","inSpec":true,"fragmentHash":null},
