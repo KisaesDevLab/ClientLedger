@@ -120,6 +120,8 @@ mod cloud_reading;
 mod compare;
 mod doc_form;
 mod doc_review;
+// P26.
+mod bank_feed;
 // P18.
 mod pay_bills;
 mod payment;
@@ -146,7 +148,7 @@ mod inventory;
 mod bank_import;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 48] = [
+const TABLES: [&[(&str, &str)]; 49] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -178,6 +180,7 @@ const TABLES: [&[(&str, &str)]; 48] = [
     picker::ENGLISH,
     cloud_reading::ENGLISH,
     doc_review::ENGLISH,
+    bank_feed::ENGLISH,
     doc_form::ENGLISH,
     compare::ENGLISH,
     pay_bills::ENGLISH,
@@ -255,6 +258,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("window.prompt.save", "Save"),
     ("window.prompt.discard", "Discard changes"),
     ("window.prompt.keep", "Keep editing"),
+    ("window.prompt.message_unsent", "\"{title}\" has a file that wasn't sent to the Bank Feed yet. Close it anyway?"),
+    ("window.prompt.close_anyway", "Close anyway"),
     // Status bar
     ("status.not_signed_in", "Not signed in"),
     ("status.engine.starting", "Books engine: starting"),
@@ -790,6 +795,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.user.reminders_intro", "What Home reminds you about."),
     ("prefs.user.bills_due", "Show bills due within this many days"),
     ("prefs.user.bills_due_hint", "Home lists bills that are overdue or due within this window."),
+    ("prefs.user.transfer_window", "Bank Feed: look for the other side of a transfer within this many days"),
+    ("prefs.user.transfer_window_hint", "From 1 to 10 days (3 unless you change it). The Bank Feed offers bank lines on your other accounts this close in date."),
     ("prefs.user.backup_on_close", "Back up when I close a company"),
     ("prefs.user.backup_on_close_hint", "A backup is written to your backup folder each time you close or switch companies."),
     // Company
@@ -1153,8 +1160,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.balances.account", "Account"),
     ("home.balances.books", "In your books"),
     ("home.balances.bank_file", "Bank file"),
-    ("home.balances.bank_file.tip", "Bank figures appear after you import a bank file (coming with bank file import)."),
-    ("home.balances.note", "Bank figures appear after you import a bank file (coming with bank file import)."),
+    ("home.balances.bank_file.tip", "The bank's figure appears after you import a bank file with an ending balance."),
+    ("home.balances.bank_file.as_of", "The ending balance of the bank file dated {date}."),
+    ("home.balances.note", "Bank file shows the balance in the last bank file you imported for that account (point at it to see the file's date); \u{2014} means no file yet."),
     ("home.balances.loading", "Loading balances\u{2026}"),
     ("home.balances.empty", "Add a bank account to see balances here."),
     ("home.balances.failed", "Couldn't load balances. Try again."),

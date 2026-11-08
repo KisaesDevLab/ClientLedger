@@ -45,6 +45,10 @@ pub enum Scope {
     /// on a form: J/K/Enter/Delete act on the list's rows and no form key
     /// (Alt+S, Alt+N, Esc as revert) applies there (Q-A04b, Q-A04c).
     List,
+    /// While the Bank Feed review list has focus (P26): J/K/Up/Down move,
+    /// Space selects, A/S/R act on the row and Ctrl+Enter accepts the
+    /// selection. Innermost like [`Scope::List`], on the window.
+    Feed,
 }
 
 impl Scope {
@@ -56,6 +60,7 @@ impl Scope {
         Scope::Grid,
         Scope::Viewer,
         Scope::List,
+        Scope::Feed,
     ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
@@ -68,6 +73,7 @@ impl Scope {
             Scope::Grid => "In a grid",
             Scope::Viewer => "In a document preview",
             Scope::List => "In a work list",
+            Scope::Feed => "In the Bank Feed",
         }
     }
 
@@ -78,6 +84,7 @@ impl Scope {
             Scope::Grid => &[Scope::Grid, Scope::Form, Scope::Window, Scope::Global],
             Scope::Viewer => &[Scope::Viewer, Scope::Form, Scope::Window, Scope::Global],
             Scope::List => &[Scope::List, Scope::Window, Scope::Global],
+            Scope::Feed => &[Scope::Feed, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -122,6 +129,12 @@ pub enum Key {
     Left,
     /// The right arrow (A04: Alt+Right steps to the next word).
     Right,
+    /// The up arrow (P26: the Bank Feed list only; grids keep their own).
+    Up,
+    /// The down arrow (P26: the Bank Feed list only).
+    Down,
+    /// The space bar (P26: selects a Bank Feed row).
+    Space,
 }
 
 impl fmt::Display for Key {
@@ -143,6 +156,9 @@ impl fmt::Display for Key {
             Key::Minus => f.write_str("-"),
             Key::Left => f.write_str("Left"),
             Key::Right => f.write_str("Right"),
+            Key::Up => f.write_str("Up"),
+            Key::Down => f.write_str("Down"),
+            Key::Space => f.write_str("Space"),
         }
     }
 }
@@ -460,18 +476,70 @@ pub const DATE_KEYS: &[(&str, &str)] = &[
 
 /// Bank Feed keys (DESIGN.md).
 pub const BANK_FEED_KEYS: &[(&str, &str)] = &[
-    ("J / K", "Move down / up"),
+    ("J / K, Down / Up", "Move down / up"),
     ("Space", "Select the row"),
     ("A", "Accept"),
     ("S", "Split"),
     ("R", "Make a rule"),
     ("Ctrl+Enter", "Accept selected"),
+    (
+        "Ctrl+Insert / Ctrl+Delete",
+        "Add / remove a split or fee line",
+    ),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::{ALL, COMMANDS, Menu};
+
+    #[test]
+    fn bank_feed_keys_are_the_feed_scope_commands() {
+        use super::Mods as M;
+        let km = Keymap::new(COMMANDS).expect("table");
+        let at = |m: M, k: Key| km.resolve(Scope::Feed, Shortcut::new(m, k));
+        let id = |m: M, k: Key| at(m, k).map(|c| c.as_str().to_string());
+        assert_eq!(id(M::NONE, Key::Letter('J')).as_deref(), Some("feed.next"));
+        assert_eq!(id(M::NONE, Key::Down).as_deref(), Some("feed.next_arrow"));
+        assert_eq!(id(M::NONE, Key::Letter('K')).as_deref(), Some("feed.prev"));
+        assert_eq!(id(M::NONE, Key::Up).as_deref(), Some("feed.prev_arrow"));
+        assert_eq!(id(M::NONE, Key::Space).as_deref(), Some("feed.select"));
+        assert_eq!(
+            id(M::NONE, Key::Letter('A')).as_deref(),
+            Some("feed.accept")
+        );
+        assert_eq!(id(M::NONE, Key::Letter('S')).as_deref(), Some("feed.split"));
+        assert_eq!(id(M::NONE, Key::Letter('R')).as_deref(), Some("feed.rule"));
+        assert_eq!(
+            id(M::NONE, Key::Letter('C')).as_deref(),
+            Some("feed.choose_account")
+        );
+        assert_eq!(
+            id(M::CMD, Key::Enter).as_deref(),
+            Some("feed.accept_selected")
+        );
+        // The Review Documents queue keeps its own J/K.
+        assert_eq!(
+            km.resolve(Scope::List, Shortcut::new(M::NONE, Key::Letter('J')))
+                .map(|c| c.as_str().to_string())
+                .as_deref(),
+            Some("queue.next")
+        );
+        // The overlay lists every key the scope binds.
+        let listed: String = BANK_FEED_KEYS
+            .iter()
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>()
+            .join(" ");
+        for k in ["J", "K", "Down", "Up", "Space", "A", "S", "R", "Ctrl+Enter"] {
+            assert!(listed.contains(k), "{k}");
+        }
+        assert_eq!(Scope::Feed.title(), "In the Bank Feed");
+        assert_eq!(
+            Scope::Feed.active_from(),
+            &[Scope::Feed, Scope::Window, Scope::Global]
+        );
+    }
 
     #[test]
     fn default_table_has_no_conflicts() {
@@ -539,7 +607,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 6);
+        assert_eq!(Scope::ALL.len(), 7);
     }
 
     #[test]
@@ -652,7 +720,7 @@ mod tests {
             Scope::List.active_from(),
             &[Scope::List, Scope::Window, Scope::Global]
         );
-        assert_eq!(Scope::ALL.last(), Some(&Scope::List));
+        assert_eq!(Scope::ALL.last(), Some(&Scope::Feed));
     }
 
     #[test]

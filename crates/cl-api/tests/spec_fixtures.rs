@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 10] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 14] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -300,6 +300,33 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 10] = [
         "keyable-bank-import",
         cl_api::KeySet::BankImportV1,
         2,
+    ),
+    // P26 (U-173, U-171): the bank feed's single-item routes and its
+    // transfer and deposit posts; client-declared until the pin bump.
+    (
+        "idempotency_feed_v1_routes.txt",
+        "keyable-feed",
+        cl_api::KeySet::FeedV1,
+        5,
+    ),
+    (
+        "idempotency_feed_post_v1_routes.txt",
+        "keyable-feed-post",
+        cl_api::KeySet::FeedPostV1,
+        2,
+    ),
+    // P26 E3 (U-170, U-169): the one accept and the one undo route.
+    (
+        "idempotency_feed_accept_v1_routes.txt",
+        "keyable-feed-accept",
+        cl_api::KeySet::FeedAcceptV1,
+        1,
+    ),
+    (
+        "idempotency_feed_undo_v1_routes.txt",
+        "keyable-feed-undo",
+        cl_api::KeySet::FeedUndoV1,
+        1,
     ),
 ];
 
@@ -459,6 +486,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             "idempotency_bank_import_v1_routes.txt",
             "bank-import-batch-v1",
         ),
+        ("idempotency_feed_v1_routes.txt", "feed-idempotency-v1"),
+        ("idempotency_feed_post_v1_routes.txt", "feed-match-post-v1"),
+        ("idempotency_feed_accept_v1_routes.txt", "feed-accept-v1"),
+        ("idempotency_feed_undo_v1_routes.txt", "feed-undo-v1"),
     ]
     .iter()
     .map(|(f, cap)| {

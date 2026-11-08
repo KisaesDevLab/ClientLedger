@@ -106,10 +106,9 @@ pub fn bills_due(through: CalendarDate) -> (u64, Money) {
 /// Bank-feed items waiting: the sample's (ready, to review and matches:
 /// 37) and those Import Bank File sent and not undone (UI review 11).
 #[must_use]
-pub fn feed_waiting(state: &DemoState) -> u64 {
-    let (ready, review, matched) = cl_company::Sample::load().feed_counts();
-    let imported = state.bank_feed.waiting();
-    u64::try_from(ready + review + matched + imported).unwrap_or(u64::MAX)
+pub fn feed_waiting(state: &mut DemoState) -> u64 {
+    // P26: the review's own count, so accepting a row lowers the badge.
+    super::feed_review::waiting(state)
 }
 
 /// Active clients and vendors (a contact that is both counts in each).
@@ -337,7 +336,7 @@ mod tests {
         assert_eq!(pay.due_within_days, 7);
         assert!(pay.due_soon_count > 0);
         assert_eq!(s.action_items.expect("actions").pending_feed_count, 37);
-        assert_eq!(feed_waiting(&state), 37);
+        assert_eq!(feed_waiting(&mut state), 37);
         assert_eq!(
             summary(&mut state, today, 200)
                 .payables

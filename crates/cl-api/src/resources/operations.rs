@@ -57,6 +57,10 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
             RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
+            RetryClass::Keyable(KeySet::FeedV1) => "keyable-feed",
+            RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
+            RetryClass::Keyable(KeySet::FeedAcceptV1) => "keyable-feed-accept",
+            RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -137,6 +141,18 @@ pub enum KeySet {
     /// preview on the same route takes no key, [`crate::client`] `no_key`)
     /// and undoing an import.
     BankImportV1,
+    /// `feed-idempotency-v1` (U-173, P26 E2): bank feed categorize,
+    /// approve and match (key optional) and the review decisions, duplicate
+    /// and review again (key required).
+    FeedV1,
+    /// `feed-match-post-v1` (U-171, P26 E4): a feed transfer and a feed
+    /// deposit (key required).
+    FeedPostV1,
+    /// `feed-accept-v1` (U-170, P26 E3): the one accept route (key
+    /// required).
+    FeedAcceptV1,
+    /// `feed-undo-v1` (U-169, P26 E3): the one undo route (key required).
+    FeedUndoV1,
 }
 
 impl KeySet {
@@ -165,6 +181,10 @@ impl KeySet {
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
             KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
             KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
+            KeySet::FeedV1 => crate::wire::Capabilities::FEED_IDEMPOTENCY,
+            KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
+            KeySet::FeedAcceptV1 => crate::wire::Capabilities::FEED_ACCEPT,
+            KeySet::FeedUndoV1 => crate::wire::Capabilities::FEED_UNDO,
         }
     }
 }
@@ -1490,6 +1510,114 @@ pub(crate) const FEED_IMPORT_BATCH_UNDO: Operation = op(
 /// the engine's handler ran, like any unkeyed write.
 pub(crate) const BANK_CONNECTION_LOOKUP: Operation =
     write(Method::Post, "/api/v1/banking/connections/lookup");
+/// Bank feed counts per review bucket and state (`feed-review-v1`, U-174).
+pub(crate) const FEED_COUNTS: Operation = read("/api/v1/banking/feed/counts");
+/// The journal lines a feed item may match (`feed-match-v2`, U-166).
+pub(crate) const FEED_MATCH_CANDIDATES: Operation =
+    read("/api/v1/banking/feed/{id}/match-candidates");
+/// Payroll bank lines a money-out item may already be (`feed-match-v2`).
+pub(crate) const FEED_PAYROLL_OVERLAP: Operation =
+    read("/api/v1/banking/feed/{id}/payroll-overlap");
+/// Bank lines on another account that may be a transfer's other side
+/// (`feed-match-post-v1`, U-171).
+pub(crate) const FEED_TRANSFER_CANDIDATES: Operation =
+    read("/api/v1/banking/feed/{id}/transfer-candidates");
+/// Posts a feed item (exact, optional split; `feed-exact-v1`), keyed under
+/// `feed-idempotency-v1`.
+pub(crate) const FEED_CATEGORIZE: Operation = keyable_in(
+    KeySet::FeedV1,
+    Method::Put,
+    "/api/v1/banking/feed/{id}/categorize",
+);
+/// Stages an account (and optional split) without posting.
+pub(crate) const FEED_ASSIGN: Operation = write(Method::Put, "/api/v1/banking/feed/{id}/assign");
+/// Posts what is staged on a feed item (keyed under `feed-idempotency-v1`).
+pub(crate) const FEED_APPROVE: Operation = keyable_in(
+    KeySet::FeedV1,
+    Method::Post,
+    "/api/v1/banking/feed/{id}/approve",
+);
+/// Matches a feed item to a line of a posted entry (`feed-match-v2`).
+pub(crate) const FEED_MATCH: Operation = keyable_in(
+    KeySet::FeedV1,
+    Method::Put,
+    "/api/v1/banking/feed/{id}/match",
+);
+/// Keep both or remove this one on a possible duplicate (key required).
+pub(crate) const FEED_DUPLICATE: Operation = keyable_in(
+    KeySet::FeedV1,
+    Method::Post,
+    "/api/v1/banking/feed/{id}/duplicate",
+);
+/// Puts a row whose entry was voided back to waiting (key required).
+pub(crate) const FEED_REVIEW_AGAIN: Operation = keyable_in(
+    KeySet::FeedV1,
+    Method::Post,
+    "/api/v1/banking/feed/{id}/review-again",
+);
+/// Excludes a waiting feed item.
+pub(crate) const FEED_EXCLUDE: Operation = write(Method::Put, "/api/v1/banking/feed/{id}/exclude");
+/// Restores an excluded feed item.
+pub(crate) const FEED_UNEXCLUDE: Operation =
+    write(Method::Put, "/api/v1/banking/feed/{id}/unexclude");
+/// One transfer for a bank line and its other side (key required).
+pub(crate) const FEED_TRANSFER: Operation = keyable_in(
+    KeySet::FeedPostV1,
+    Method::Post,
+    "/api/v1/banking/feed/{id}/transfer",
+);
+/// One deposit of waiting payments, net of fees, for a money-in bank line
+/// (key required).
+pub(crate) const FEED_DEPOSIT: Operation = keyable_in(
+    KeySet::FeedPostV1,
+    Method::Post,
+    "/api/v1/banking/feed/{id}/deposit",
+);
+/// Accepts a selection or every row one rule staged, in one engine
+/// transaction (`feed-accept-v1`, U-170; key required).
+pub(crate) const FEED_ACCEPT: Operation = keyable_in(
+    KeySet::FeedAcceptV1,
+    Method::Post,
+    "/api/v1/banking/feed/accept",
+);
+/// An accept's answer again (a replay over the 512 KB cap).
+pub(crate) const FEED_ACCEPT_GROUP: Operation = read("/api/v1/banking/feed/accept-groups/{id}");
+/// Takes accepted rows or an accept group back (`feed-undo-v1`, U-169;
+/// key required).
+pub(crate) const FEED_UNDO: Operation = keyable_in(
+    KeySet::FeedUndoV1,
+    Method::Post,
+    "/api/v1/banking/feed/undo",
+);
+/// The Bank Feed rules (conditional rules; P26 DI-2).
+pub(crate) const FEED_RULE_LIST: Operation = read("/api/v1/practice/conditional-rules");
+/// Creates a rule.
+pub(crate) const FEED_RULE_CREATE: Operation =
+    write(Method::Post, "/api/v1/practice/conditional-rules");
+/// Replaces a rule.
+pub(crate) const FEED_RULE_UPDATE: Operation =
+    write(Method::Put, "/api/v1/practice/conditional-rules/{id}");
+/// Deletes a rule.
+pub(crate) const FEED_RULE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/practice/conditional-rules/{id}");
+/// Rules suggested from repeated choices (Q-141, Q-P26k).
+pub(crate) const FEED_RULE_SUGGESTIONS: Operation =
+    read("/api/v1/practice/conditional-rules/suggestions");
+/// Dismisses a rule suggestion.
+pub(crate) const FEED_RULE_SUGGESTION_DISMISS: Operation = write(
+    Method::Post,
+    "/api/v1/practice/conditional-rules/suggestions/dismiss",
+);
+/// Runs the rules again over waiting bank lines (P26 QA-10: a rule saved
+/// in the Bank Feed sets up the lines already waiting). Desktop engines
+/// only stage what a rule sets (Q-P26o); nothing posts.
+pub(crate) const FEED_REPROCESS_RULES: Operation =
+    write(Method::Post, "/api/v1/banking/feed/bulk-reprocess-rules");
+/// The linked bank accounts (one connection per account a bank file was
+/// imported into).
+pub(crate) const BANK_CONNECTIONS: Operation = read("/api/v1/banking/connections");
+/// Books and latest bank-file balance per bank and card account (U-77).
+pub(crate) const DASHBOARD_ACCOUNT_BALANCES: Operation = read("/api/v1/dashboard/account-balances");
 /// One unit set.
 pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 /// Stores a unit set (`expectedUpdatedAt`).
@@ -1509,7 +1637,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 335] = [
+pub const OPERATIONS: [Operation; 360] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1860,6 +1988,31 @@ pub const OPERATIONS: [Operation; 335] = [
     FEED_IMPORT_BATCHES,
     FEED_IMPORT_BATCH_UNDO,
     BANK_CONNECTION_LOOKUP,
+    FEED_COUNTS,
+    FEED_MATCH_CANDIDATES,
+    FEED_PAYROLL_OVERLAP,
+    FEED_TRANSFER_CANDIDATES,
+    FEED_CATEGORIZE,
+    FEED_ASSIGN,
+    FEED_APPROVE,
+    FEED_MATCH,
+    FEED_DUPLICATE,
+    FEED_REVIEW_AGAIN,
+    FEED_EXCLUDE,
+    FEED_UNEXCLUDE,
+    FEED_TRANSFER,
+    FEED_DEPOSIT,
+    DASHBOARD_ACCOUNT_BALANCES,
+    BANK_CONNECTIONS,
+    FEED_ACCEPT,
+    FEED_ACCEPT_GROUP,
+    FEED_UNDO,
+    FEED_RULE_LIST,
+    FEED_RULE_CREATE,
+    FEED_RULE_UPDATE,
+    FEED_RULE_DELETE,
+    FEED_RULE_SUGGESTIONS,
+    FEED_RULE_SUGGESTION_DISMISS,
 ];
 
 /// Looks up a covered operation.
@@ -1929,6 +2082,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, reason = "one branch per keyed route set")]
     fn classification_rules_hold() {
         let mut seen = HashSet::new();
         for o in &OPERATIONS {
@@ -1974,6 +2128,14 @@ mod tests {
                 Some(KeySet::UnitSetsV1)
             } else if KEYABLE_BANK_IMPORT.contains(&route) {
                 Some(KeySet::BankImportV1)
+            } else if KEYABLE_FEED.contains(&route) {
+                Some(KeySet::FeedV1)
+            } else if KEYABLE_FEED_POST.contains(&route) {
+                Some(KeySet::FeedPostV1)
+            } else if route == ("POST", "/api/v1/banking/feed/accept") {
+                Some(KeySet::FeedAcceptV1)
+            } else if route == ("POST", "/api/v1/banking/feed/undo") {
+                Some(KeySet::FeedUndoV1)
             } else {
                 None
             };
@@ -2013,7 +2175,10 @@ mod tests {
                 + KEYABLE_RECOVERY.len()
                 + KEYABLE_INVENTORY.len()
                 + KEYABLE_UNIT_SETS.len()
-                + KEYABLE_BANK_IMPORT.len(),
+                + KEYABLE_BANK_IMPORT.len()
+                + KEYABLE_FEED.len()
+                + KEYABLE_FEED_POST.len()
+                + 2,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2179,6 +2344,35 @@ mod tests {
         ("POST", "/api/v1/banking/feed/import-batch"),
         ("DELETE", "/api/v1/banking/feed/import-batches/{id}"),
     ];
+
+    /// `feed-idempotency-v1` (U-173, P26 E2).
+    const KEYABLE_FEED: [(&str, &str); 5] = [
+        ("PUT", "/api/v1/banking/feed/{id}/categorize"),
+        ("POST", "/api/v1/banking/feed/{id}/approve"),
+        ("PUT", "/api/v1/banking/feed/{id}/match"),
+        ("POST", "/api/v1/banking/feed/{id}/duplicate"),
+        ("POST", "/api/v1/banking/feed/{id}/review-again"),
+    ];
+
+    /// `feed-match-post-v1` (U-171, P26 E4).
+    const KEYABLE_FEED_POST: [(&str, &str); 2] = [
+        ("POST", "/api/v1/banking/feed/{id}/transfer"),
+        ("POST", "/api/v1/banking/feed/{id}/deposit"),
+    ];
+
+    #[test]
+    fn feed_key_sets_name_their_capabilities() {
+        assert_eq!(KeySet::FeedV1.capability(), "feed-idempotency-v1");
+        assert_eq!(KeySet::FeedPostV1.capability(), "feed-match-post-v1");
+        assert_eq!(KeySet::FeedAcceptV1.capability(), "feed-accept-v1");
+        assert_eq!(KeySet::FeedUndoV1.capability(), "feed-undo-v1");
+        assert_eq!(FEED_ACCEPT.key_set(), Some(KeySet::FeedAcceptV1));
+        assert_eq!(FEED_UNDO.key_set(), Some(KeySet::FeedUndoV1));
+        assert_eq!(FEED_CATEGORIZE.key_set(), Some(KeySet::FeedV1));
+        assert_eq!(FEED_DEPOSIT.key_set(), Some(KeySet::FeedPostV1));
+        assert_eq!(FEED_ASSIGN.key_set(), None);
+        assert_eq!(FEED_EXCLUDE.key_set(), None);
+    }
 
     #[test]
     fn bank_import_key_set_names_its_capability() {

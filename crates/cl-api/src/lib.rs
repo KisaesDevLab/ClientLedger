@@ -207,14 +207,32 @@ pub use resources::payments::{
 
 // P14 lane A: the bank feed.
 pub use resources::bank_import::{
-    BankFileFormat, BankIdentity, BankImport, BankImportCounts, BankImportOutcome,
-    BankImportRefusal, BankImportRequest, BankImportRow, BankLookupBy, BankLookupVia,
-    ChangedAction, ConnectionMatch, ImportBalanceCheck, ImportBatchId, ImportBatchSummary,
-    ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus, ImportUndoOutcome,
-    LinkedElsewhere, bank_import_refusal, wire_decimal,
+    BANK_REGISTER_DETAIL_TYPES, BankFileFormat, BankIdentity, BankImport, BankImportCounts,
+    BankImportOutcome, BankImportRefusal, BankImportRequest, BankImportRow, BankLookupBy,
+    BankLookupVia, ChangedAction, ConnectionMatch, ImportBalanceCheck, ImportBatchId,
+    ImportBatchSummary, ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus,
+    ImportUndoOutcome, LinkedElsewhere, bank_import_refusal, takes_bank_file, wire_decimal,
 };
 pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
+};
+// P26: bank feed review.
+pub use resources::feed_accept::{
+    ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, RuleAccept,
+    UndoGroupId, UndoOutcome, UndoTarget, Undone, accept_body, accept_outcome_from, undo_body,
+    undo_outcome_from,
+};
+pub use resources::feed_review::{
+    AcceptKind, AccountBalance, BankConnection, BankConnectionId, DEPOSIT_PAYMENTS_MAX,
+    DuplicateDecision, DuplicateOf, FEE_LINES_MAX, FEED_PAGE_MAX, FeeLine, FeedBucket, FeedChoice,
+    FeedCounts, FeedPage, FeedPosted, FeedQuery, FeedRefusal, FeedRow, FeedSplitLine, FeedStatus,
+    MatchCandidate, Named, PayrollOverlap, SPLIT_LINES_MAX, SuggestedRule, TRANSFER_WINDOW_DAYS,
+    TransferCandidate, TransferHint, TransferTarget, feed_counts_from, feed_page_from,
+    feed_refusal, is_stale_row, is_view_only,
+};
+pub use resources::feed_rules::{
+    FeedRule, FeedRules, RuleSign, RuleSuggestion, RulesRerun, feed_rule_body, feed_rules_from,
+    rule_suggestions_from, rules_rerun_from,
 };
 
 // P14 lane B: daily sales.

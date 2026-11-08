@@ -1031,3 +1031,70 @@ fn after_the_wait_gives_up_the_preparation_is_still_checked() {
         assert!(crate::i18n::has(k), "{k}");
     }
 }
+
+/// U-175: checking, savings, cash and petty cash accounts are offered next
+/// to `bank` and cards; other assets are not.
+#[test]
+fn every_bank_register_type_is_offered() {
+    let f = fixture();
+    let mut s = screen(&f);
+    assert!(s.all_bank_types(), "the demo takes them all");
+    let template = crate::company::demo::chart()
+        .into_iter()
+        .find(|a| a.fields.account_type == cl_api::AccountType::Asset)
+        .expect("an asset");
+    let accounts: Vec<Account> = [
+        "bank",
+        "checking",
+        "savings",
+        "cash",
+        "petty_cash",
+        "prepaid_expenses",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, d)| {
+        let mut a = template.clone();
+        a.id = format!("3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a{i:02}")
+            .parse()
+            .expect("id");
+        a.fields.account_number = Some(format!("10{i}0"));
+        a.fields.name = d.to_string();
+        a.fields.detail_type = Some(d.to_string());
+        a.is_active = true;
+        a
+    })
+    .collect();
+    s.take_targets(accounts);
+    let names: Vec<&str> = s.targets.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names.len(), 5, "{names:?}");
+    assert!(names.iter().all(|n| !n.contains("prepaid")));
+    assert!(s.targets.iter().all(|t| !t.card));
+}
+
+/// The dark run after a light one (scenario `import_bank_file`): a reset
+/// feed reuses its row keys; the review forgets the old ones, so the rows
+/// sent next reach the Bank Feed and its badge.
+#[test]
+fn a_reset_feed_sends_its_rows_again() {
+    let f = fixture();
+    let send_prior = |f: &Fixture| {
+        let mut demo = f.link.demo_state().expect("demo");
+        let before = crate::company::demo::feed_review::waiting(&mut demo);
+        drop(demo);
+        let mut s = screen(f);
+        previewed(&mut s, f);
+        s.next();
+        assert_eq!(s.result.as_ref().expect("result").counts.inserted, 3);
+        prepared(&mut s);
+        let mut demo = f.link.demo_state().expect("demo");
+        crate::company::demo::feed_review::waiting(&mut demo) - before
+    };
+    assert_eq!(send_prior(&f), 3);
+    let mut s = screen(&f);
+    assert!(s.command(CommandId::new("dev.demo_bank_import_reset")));
+    let mut demo = f.link.demo_state().expect("demo");
+    assert_eq!(crate::company::demo::feed_review::waiting(&mut demo), 37);
+    drop(demo);
+    assert_eq!(send_prior(&f), 3, "the same keys again");
+}

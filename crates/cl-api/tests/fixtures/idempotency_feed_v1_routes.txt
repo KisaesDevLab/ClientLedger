@@ -1,0 +1,9 @@
+# The engine's feed-idempotency-v1 keyed route set (U-173, P26 E2): bank feed categorize, approve and
+# match (Idempotency-Key optional) and the review decisions duplicate and review-again (key required,
+# 400 IDEMPOTENCY_KEY_REQUIRED), x-idempotency: true in its openapi.json. Append-only for this capability
+# name: KeySet::FeedV1 in operations.rs, keyed only while the engine advertises feed-idempotency-v1.
+POST /api/v1/banking/feed/{id}/approve
+POST /api/v1/banking/feed/{id}/duplicate
+POST /api/v1/banking/feed/{id}/review-again
+PUT /api/v1/banking/feed/{id}/categorize
+PUT /api/v1/banking/feed/{id}/match

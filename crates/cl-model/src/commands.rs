@@ -338,6 +338,21 @@ pub const COMMANDS: &[Command] = &[
     cmd("queue.open", "Open the Document", None, 9, key(Mods::NONE, Key::Enter), Scope::List),
     cmd("queue.discard", "Discard the Document\u{2026}", None, 9, key(Mods::NONE, Key::Delete), Scope::List),
     cmd("queue.read_all", "Read All Documents", None, 9, None, Scope::List),
+    // P26 Bank Feed review list (DESIGN.md keyboard map): its own scope so
+    // J/K never clash with the Review Documents queue.
+    cmd("feed.next", "Next Bank Line", None, 10, key(Mods::NONE, Key::Letter('J')), Scope::Feed),
+    cmd("feed.prev", "Previous Bank Line", None, 10, key(Mods::NONE, Key::Letter('K')), Scope::Feed),
+    cmd("feed.next_arrow", "Next Bank Line", None, 10, key(Mods::NONE, Key::Down), Scope::Feed),
+    cmd("feed.prev_arrow", "Previous Bank Line", None, 10, key(Mods::NONE, Key::Up), Scope::Feed),
+    cmd("feed.select", "Select the Bank Line", None, 10, key(Mods::NONE, Key::Space), Scope::Feed),
+    cmd("feed.accept", "Accept the Bank Line", None, 10, key(Mods::NONE, Key::Letter('A')), Scope::Feed),
+    cmd("feed.split", "Split the Bank Line", None, 10, key(Mods::NONE, Key::Letter('S')), Scope::Feed),
+    cmd("feed.rule", "Make a Rule From the Bank Line", None, 10, key(Mods::NONE, Key::Letter('R')), Scope::Feed),
+    // P26 QA-18: the keyboard way into the detail panel's account box.
+    cmd("feed.choose_account", "Choose the Account for the Bank Line", None, 10, key(Mods::NONE, Key::Letter('C')), Scope::Feed),
+    cmd("feed.accept_selected", "Accept Selected Bank Lines", None, 10, key(Mods::CMD, Key::Enter), Scope::Feed),
+    cmd("feed.insert_line", "Insert a Split or Fee Line", None, 10, key(Mods::CMD, Key::Insert), Scope::Feed),
+    cmd("feed.delete_line", "Delete a Split or Fee Line", None, 10, key(Mods::CMD, Key::Delete), Scope::Feed),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -418,7 +433,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
-    screen("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None, "P26"),
+    built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
     screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
     // Reports
@@ -552,6 +567,36 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
+    ),
+    // P26: the Bank Feed's other computers, roles and AI switch in the demo.
+    dev_action(
+        "dev.demo_feed_view_only",
+        "Demo Bank Feed as View-Only (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_conflict",
+        "Demo Bank Feed Row Taken Elsewhere (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_void_entry",
+        "Void a Demo Bank Feed Entry (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_duplicate",
+        "Flag a Demo Bank Feed Duplicate (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_next_file",
+        "Bring In the Demo's Next Bank File (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_close_books",
+        "Close the Demo Books Through 11/01 (developer)",
+    ),
+    dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
+    dev_action(
+        "dev.demo_feed_reset",
+        "Reset Demo Bank Feed Review (developer)",
     ),
 ];
 
@@ -697,6 +742,8 @@ mod tests {
             "lists.unit_sets",
             // P25
             "banking.import_file",
+            // P26
+            "banking.feed",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

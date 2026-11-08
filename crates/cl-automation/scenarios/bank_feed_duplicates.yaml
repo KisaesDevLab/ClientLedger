@@ -1,0 +1,28 @@
+# Bank Feed possible duplicate (P26 DI-2, Q-P26b, Q-P26g, plan §6 "Possible
+# duplicates") against `clientledger --demo`: a line flagged on import is
+# shown beside the line it resembles with Keep both / Remove this one; it
+# stays out of Accept selected until decided. Remove excludes it with the
+# reason duplicate (it can be restored).
+name: bank_feed_duplicates
+description: A possible duplicate side by side; Accept selected leaves it; Remove this one excludes it.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - command: dev.demo_feed_duplicate
+  - click: {role: button, label: Needs review 6}
+  - click: {role: button, label: Bank line 1 of 6}
+  - assert_state: {key: screen.detail.duplicate, equals: true}
+  - assert_state: {key: screen.badges.duplicate, equals: 1}
+  - assert_exists: {role: button, label: Keep both}
+  - screenshot: duplicate
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 0}
+  - click: {role: button, label: Remove this one}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.excluded, equals: 1}
+  - assert_state: {key: screen.counts.review, equals: 5}

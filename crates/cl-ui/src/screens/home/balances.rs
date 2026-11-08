@@ -1,6 +1,7 @@
 //! Account balances (P16 step 2, D9): each active bank and card account
 //! with the balance the engine reports, "In your books", and the bank
-//! file's balance, a dash until bank-file import (U-77, P25; Q-P16d).
+//! file's balance: the latest imported file's ending balance with its date
+//! (`GET /dashboard/account-balances`, U-77, P26), a dash before one.
 //!
 //! The figure is the engine's stored balance: the cash position of
 //! `dashboard-exact-v1` (U-76) when the engine has it, else the account's
@@ -34,6 +35,52 @@ pub(crate) struct BalanceRow {
     pub label: String,
     /// The engine's balance (`None` when it sent none).
     pub books: Option<Money>,
+}
+
+/// The demo's bank-file balances: the ending balance of each account's
+/// latest imported file (Import Bank File).
+#[must_use]
+pub(crate) fn bank_files_demo(
+    s: &mut crate::company::demo::DemoState,
+) -> Vec<cl_api::AccountBalance> {
+    crate::company::demo::chart()
+        .into_iter()
+        .filter_map(|a| {
+            let (m, d) = s.bank_feed.bank_file_balance(a.id)?;
+            Some(cl_api::AccountBalance {
+                account: a.id,
+                name: a.fields.name.clone(),
+                number: a.fields.account_number.clone(),
+                is_card: a.fields.detail_type.as_deref() == Some("credit_card"),
+                books: Money::ZERO,
+                bank_file: Some(m),
+                bank_file_date: Some(d),
+                books_at_file_date: None,
+            })
+        })
+        .collect()
+}
+
+/// Accounts with a bank-file figure (the control channel; no amounts).
+#[must_use]
+pub(crate) fn bank_file_count(data: &HomeData) -> usize {
+    data.bank_files
+        .value
+        .as_ref()
+        .map_or(0, |v| v.iter().filter(|b| b.bank_file.is_some()).count())
+}
+
+/// The bank-file figure and date for `account` (engine values only).
+fn bank_file(
+    data: &HomeData,
+    account: AccountId,
+) -> Option<(Money, Option<cl_core::CalendarDate>)> {
+    data.bank_files
+        .value
+        .as_ref()?
+        .iter()
+        .find(|b| b.account == account)
+        .and_then(|b| b.bank_file.map(|m| (m, b.bank_file_date)))
 }
 
 /// "1010 · Operating Checking", or the name alone.
@@ -219,15 +266,24 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> bool {
         .map(|f| measure(f, mono.clone()))
         .fold(measure(&t("home.balances.books"), head.clone()), f32::max)
         + COLUMN_PAD;
-    let file_w =
-        measure(&t("home.balances.bank_file"), head).max(measure("\u{2014}", mono)) + COLUMN_PAD;
+    let files: Vec<Option<(Money, Option<cl_core::CalendarDate>)>> =
+        rows.iter().map(|r| bank_file(data, r.account)).collect();
+    let file_w = files
+        .iter()
+        .flatten()
+        .map(|(m, _)| measure(&m.format(style), mono.clone()))
+        .fold(
+            measure(&t("home.balances.bank_file"), head).max(measure("\u{2014}", mono.clone())),
+            f32::max,
+        )
+        + COLUMN_PAD;
     let widths = [books_w, file_w];
     table_row(ui, widths, 30.0, |ui, col| match col {
         0 => header(ui, &t("home.balances.account"), false),
         1 => header(ui, &t("home.balances.books"), true),
         _ => header(ui, &t("home.balances.bank_file"), true),
     });
-    for (row, figure) in rows.iter().zip(&figures) {
+    for ((row, figure), file) in rows.iter().zip(&figures).zip(&files) {
         rule(ui, tokens.border_row);
         table_row(ui, widths, 31.0, |ui, col| match col {
             0 => {
@@ -250,16 +306,31 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> bool {
                 });
             }
             _ => {
+                let (text, color, tip) = match file {
+                    Some((m, d)) => (
+                        m.format(style),
+                        tokens.text_primary,
+                        crate::i18n::t_with(
+                            "home.balances.bank_file.as_of",
+                            &[("date", &d.map(crate::shell::us_date).unwrap_or_default())],
+                        ),
+                    ),
+                    None => (
+                        "\u{2014}".to_string(),
+                        tokens.text_tertiary,
+                        t("home.balances.bank_file.tip"),
+                    ),
+                };
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add(
                         egui::Label::new(
-                            RichText::new("\u{2014}")
+                            RichText::new(text)
                                 .family(egui::FontFamily::Monospace)
-                                .color(tokens.text_tertiary),
+                                .color(color),
                         )
                         .selectable(false),
                     )
-                    .on_hover_text(t("home.balances.bank_file.tip"));
+                    .on_hover_text(tip);
                 });
             }
         });
@@ -293,4 +364,34 @@ fn table_row(ui: &mut Ui, figures: [f32; 2], h: f32, mut cell: impl FnMut(&mut U
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::screens::home::Slot;
+
+    #[test]
+    fn the_bank_file_column_shows_the_engines_figure_or_a_dash() {
+        let a = crate::company::demo::account_id(1010);
+        let b = crate::company::demo::account_id(1020);
+        let m = Money::parse_wire("48210.33").expect("m");
+        let d = cl_core::CalendarDate::from_ymd(2026, 11, 3).ok();
+        let data = HomeData {
+            bank_files: Slot::ready(vec![cl_api::AccountBalance {
+                account: a,
+                name: "Operating".into(),
+                number: Some("1010".into()),
+                is_card: false,
+                books: Money::ZERO,
+                bank_file: Some(m),
+                bank_file_date: d,
+                books_at_file_date: None,
+            }]),
+            ..HomeData::default()
+        };
+        assert_eq!(bank_file(&data, a), Some((m, d)));
+        assert_eq!(bank_file(&data, b), None);
+        assert_eq!(bank_file_count(&data), 1);
+    }
 }

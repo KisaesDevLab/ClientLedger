@@ -144,6 +144,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.status.imported_on", "Already imported {date}"),
     ("bankimport.status.possible", "Will be added \u{2014} looks like one already there"),
     ("bankimport.status.possible_on", "Will be added \u{2014} looks like one from {date}"),
+    ("bankimport.status.possible_dated", "Will be added \u{2014} looks like the bank line of {date}"),
     ("bankimport.status.changed", "Changed by the bank"),
     ("bankimport.status.closed", "Before closing date"),
     ("bankimport.status.closed.tip", "Dated on or before your closing date. It waits in the Bank Feed; accepting it there asks for the closing-date password."),

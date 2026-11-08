@@ -417,14 +417,26 @@ impl ImportBankFileScreen {
         self.targets_failed = self.targets_task.is_none();
     }
 
-    fn take_targets(&mut self, accounts: Vec<Account>) {
+    /// Every bank register type takes a bank file (checking, savings, cash,
+    /// petty cash; `bank-import-account-types-v1`, U-175); before it only
+    /// `bank`. The demo takes them all.
+    pub(crate) fn all_bank_types(&self) -> bool {
+        self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(Capabilities::BANK_IMPORT_ACCOUNT_TYPES)
+    }
+
+    pub(crate) fn take_targets(&mut self, accounts: Vec<Account>) {
+        let all_bank = self.all_bank_types();
         let mut v: Vec<Target> = accounts
             .into_iter()
             .filter(|a| a.is_active)
             .filter_map(|a| {
                 let detail = a.fields.detail_type.as_deref();
                 let card = match (a.fields.account_type, detail) {
-                    (AccountType::Asset, Some("bank")) => false,
+                    (AccountType::Asset, Some(d)) if cl_api::takes_bank_file(d, all_bank) => false,
                     (AccountType::Liability, Some("credit_card")) => true,
                     _ => return None,
                 };
@@ -1085,8 +1097,8 @@ impl ImportBankFileScreen {
     /// (UI review 11): Home, which reads it otherwise, is not in front.
     fn recount_feed(&mut self) {
         let link = Arc::clone(&self.link);
-        if let Some(demo) = link.demo_state() {
-            let n = crate::company::demo::home::feed_waiting(&demo);
+        if let Some(mut demo) = link.demo_state() {
+            let n = crate::company::demo::home::feed_waiting(&mut demo);
             drop(demo);
             self.feed_count_task = Some(Task::ready(n));
             return;
@@ -1372,6 +1384,12 @@ impl Screen for ImportBankFileScreen {
         self.loaded.is_some() && self.step != Step::Done
     }
 
+    /// Nothing here is saved; the prompt asks only whether to close (P26
+    /// QA-12).
+    fn can_save(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.poll();
         if self.busy() {
@@ -1433,6 +1451,7 @@ impl Screen for ImportBankFileScreen {
                     return false;
                 };
                 demo.bank_feed.reset();
+                demo.feed_review.forget_imports();
                 drop(demo);
                 self.earlier = None;
                 self.earlier_task = None;

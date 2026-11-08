@@ -163,6 +163,14 @@ impl Client {
             .set_unit_sets_v1(info.capabilities.has(Capabilities::UNITS_OF_MEASURE));
         self.exec()
             .set_bank_import_v1(info.capabilities.has(Capabilities::BANK_IMPORT_BATCH));
+        self.exec()
+            .set_feed_v1(info.capabilities.has(Capabilities::FEED_IDEMPOTENCY));
+        self.exec()
+            .set_feed_post_v1(info.capabilities.has(Capabilities::FEED_MATCH_POST));
+        self.exec().set_feed_accept_v1(
+            info.capabilities.has(Capabilities::FEED_ACCEPT),
+            info.capabilities.has(Capabilities::FEED_UNDO),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

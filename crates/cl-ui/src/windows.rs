@@ -37,6 +37,12 @@ pub trait Screen {
         false
     }
 
+    /// False when the window has nothing it could save (an import wizard):
+    /// the close prompt then offers only Close anyway and Keep editing.
+    fn can_save(&self) -> bool {
+        true
+    }
+
     /// The keymap scope while this window has focus. Forms return
     /// [`Scope::Form`] so form shortcuts (Alt+N, Esc, Ctrl+Insert) apply.
     fn scope(&self) -> Scope {
@@ -316,6 +322,13 @@ impl Window {
     #[must_use]
     pub fn save_unconfirmed(&self) -> bool {
         self.screen.save_unconfirmed()
+    }
+
+    /// The close prompt offers Save (false for a wizard with nothing to
+    /// save, P26 QA-12).
+    #[must_use]
+    pub fn can_save(&self) -> bool {
+        self.screen.can_save()
     }
 }
 

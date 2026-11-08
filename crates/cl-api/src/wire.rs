@@ -475,6 +475,39 @@ impl Capabilities {
     /// U-165 (P25, used from P26): the single-item bank feed routes take the
     /// closing-date password.
     pub const FEED_CLOSING_DATE: &'static str = "feed-closing-date-v1";
+    /// U-164 (P26 E1): categorize and approve post the feed amount exactly;
+    /// categorize and assign take `splits` (2-50 lines adding up to the
+    /// amount; 400 `SPLITS_DONT_BALANCE {difference}`, `AMOUNT_NOT_CENTS`).
+    pub const FEED_EXACT: &'static str = "feed-exact-v1";
+    /// U-166, U-172 (P26 E2): matches at the level of a bank line
+    /// (`journalLineId`), payroll overlaps per line, the "Entry voided" flag
+    /// and Review again.
+    pub const FEED_MATCH_V2: &'static str = "feed-match-v2";
+    /// U-173 (P26 E2): 409 `FEED_ITEM_NOT_PENDING`; categorize, approve and
+    /// match replay an `Idempotency-Key`; duplicate and review-again need one.
+    pub const FEED_IDEMPOTENCY: &'static str = "feed-idempotency-v1";
+    /// U-174, U-168 (P26 E2): review buckets, `/banking/feed/counts`,
+    /// possible-duplicate decisions and the rule that staged a suggestion.
+    pub const FEED_REVIEW: &'static str = "feed-review-v1";
+    /// U-171 (P26 E4): transfer candidates, one transfer for a bank line
+    /// and its other side, and deposits of waiting payments net of fees.
+    pub const FEED_MATCH_POST: &'static str = "feed-match-post-v1";
+    /// U-77 (P26 E4): books balance next to the latest bank-file balance
+    /// per bank and card account.
+    pub const ACCOUNT_BALANCES: &'static str = "account-balances-v1";
+    /// U-170 (P26 E3): `POST /banking/feed/accept`, one accept route for a
+    /// selection or every row of one auto-accept rule.
+    pub const FEED_ACCEPT: &'static str = "feed-accept-v1";
+    /// U-169 (P26 E3): `POST /banking/feed/undo`, rows or an accept group.
+    pub const FEED_UNDO: &'static str = "feed-undo-v1";
+    /// U-175 (P26 QA-6): a bank file goes into any bank register account
+    /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
+    pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";
+    /// U-177 (P26 QA-16): `transferWindowDays` (1-10) on `GET /banking/feed`
+    /// and `/banking/feed/counts`.
+    pub const FEED_TRANSFER_WINDOW: &'static str = "feed-transfer-window-v1";
+    /// U-178 (P26 QA-9): list rows carry `acceptKind`.
+    pub const FEED_ACCEPT_KIND: &'static str = "feed-accept-kind-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

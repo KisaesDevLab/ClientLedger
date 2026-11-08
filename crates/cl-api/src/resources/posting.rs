@@ -33,6 +33,11 @@ impl ClosedPeriodAuthorization {
     pub fn with_password(password: Secret) -> ClosedPeriodAuthorization {
         ClosedPeriodAuthorization { password }
     }
+
+    /// The password, for a request body only (never logged).
+    pub(crate) fn expose(&self) -> &str {
+        self.password.expose()
+    }
 }
 
 impl fmt::Debug for ClosedPeriodAuthorization {

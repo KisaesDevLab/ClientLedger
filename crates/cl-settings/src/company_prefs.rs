@@ -91,6 +91,21 @@ pub struct CompanyPrefs {
     /// The income account last chosen for a billable cost, by the cost's
     /// expense account (Q-P20p): Add Billable Costs suggests it next time.
     pub billable_income: BTreeMap<AccountId, AccountId>,
+    /// The Bank Feed's transfer window in days (Q-P26l: 3, adjustable
+    /// 1-10; the engine takes 1-10). Read through
+    /// [`CompanyPrefs::transfer_window`].
+    pub feed_transfer_window_days: u8,
+}
+
+/// The Bank Feed's transfer window by default (Q-P26l).
+pub const FEED_TRANSFER_WINDOW_DEFAULT: u8 = 3;
+
+impl CompanyPrefs {
+    /// The transfer window, kept within the engine's 1-10 days.
+    #[must_use]
+    pub fn transfer_window(&self) -> u8 {
+        self.feed_transfer_window_days.clamp(1, 10)
+    }
 }
 
 impl Default for CompanyPrefs {
@@ -109,6 +124,7 @@ impl Default for CompanyPrefs {
             hide_logo: false,
             email: EmailPrefs::default(),
             billable_income: BTreeMap::new(),
+            feed_transfer_window_days: FEED_TRANSFER_WINDOW_DEFAULT,
         }
     }
 }
@@ -216,6 +232,7 @@ impl CompanyPrefs {
             hide_logo: self.hide_logo,
             email: self.email.clone(),
             billable_income: self.billable_income.clone(),
+            feed_transfer_window_days: self.feed_transfer_window_days,
         }
     }
 
@@ -254,6 +271,7 @@ impl CompanyPrefs {
             hide_logo: archive.hide_logo,
             email: archive.email.clone(),
             billable_income: archive.billable_income.clone(),
+            feed_transfer_window_days: archive.feed_transfer_window_days,
         };
         out.normalize();
         out
@@ -262,6 +280,7 @@ impl CompanyPrefs {
     /// Snaps fields into range.
     pub fn normalize(&mut self) {
         self.bills_due_days = self.bills_due_days.clamp(1, BILLS_DUE_DAYS_MAX);
+        self.feed_transfer_window_days = self.feed_transfer_window_days.clamp(1, 10);
         self.required_tag_groups
             .retain(|_, kinds| !kinds.is_empty());
         if self

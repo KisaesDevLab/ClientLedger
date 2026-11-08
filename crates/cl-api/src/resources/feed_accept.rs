@@ -1,0 +1,592 @@
+//! The one accept route and the one undo route of the bank feed (P26 E3,
+//! U-170 / U-169).
+//!
+//! - `POST /banking/feed/accept` posts or matches a selection (1–500 rows)
+//!   or every waiting row one auto-accept rule staged ("Accept all from
+//!   this rule", 500 a call, paged with `afterId`). One database
+//!   transaction, one required `Idempotency-Key`; a replay answers the
+//!   same body. Rows the engine leaves alone come back in `skipped`, rows
+//!   that failed in `failures` (`TB_PERIOD_LOCKED`: send the password and
+//!   retry **those rows under a fresh key**).
+//! - `POST /banking/feed/undo` takes rows or a whole accept group back:
+//!   a posted entry is deleted, a match only unlinked. 409
+//!   `FEED_UNDO_CHANGED {ids}` (edited since) undoes nothing: ask the
+//!   owner, then send again with `force`.
+//!
+//! Amounts: a split travels as in [`choice_body`]; nothing here totals.
+
+use std::fmt;
+
+use cl_core::ids::{JournalLineId, TransactionId};
+use serde::Deserialize;
+use serde_json::{Map, Value, json};
+
+use crate::client::{Call, Method};
+use crate::errors::{ApiError, ConflictDetails, LocalValidation};
+use crate::idempotency::IdempotencyKey;
+use crate::resources::feed::{Feed, FeedItemId};
+use crate::resources::feed_review::{BankConnectionId, FeedChoice, choice_body};
+use crate::resources::operations::{FEED_ACCEPT, FEED_ACCEPT_GROUP, FEED_UNDO};
+use crate::resources::posting::ClosedPeriodAuthorization;
+use crate::wire::Capabilities;
+
+/// The most rows one accept or undo takes (the engine's `FEED_ACCEPT_MAX`).
+pub const ACCEPT_MAX: usize = 500;
+
+/// An accept group: what one accept (or one transfer, deposit or match)
+/// posted, undone together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct UndoGroupId(uuid::Uuid);
+
+impl UndoGroupId {
+    /// Parses a group id.
+    ///
+    /// # Errors
+    /// `Decode` when it is not a UUID.
+    pub fn parse(s: &str) -> Result<UndoGroupId, ApiError> {
+        cl_core::ids::parse_uuid(s)
+            .map(UndoGroupId)
+            .map_err(|_| ApiError::Decode {
+                what: "accept group id",
+            })
+    }
+
+    /// A random id (the demo's groups).
+    #[must_use]
+    pub fn new_random() -> UndoGroupId {
+        UndoGroupId(uuid::Uuid::new_v4())
+    }
+}
+
+impl fmt::Display for UndoGroupId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// One row of an accept.
+#[derive(Clone, PartialEq, Eq)]
+pub enum AcceptItem {
+    /// As proposed: what is staged on the row, else its suggestion.
+    AsProposed(FeedItemId),
+    /// The owner's values (account, payee, tag, memo, split).
+    Values(FeedItemId, FeedChoice),
+    /// Match it to a line of a posted entry (`line` may be left out when
+    /// only one line fits).
+    Match {
+        /// The row.
+        id: FeedItemId,
+        /// The entry.
+        transaction: TransactionId,
+        /// Its bank line.
+        line: Option<JournalLineId>,
+    },
+}
+
+impl AcceptItem {
+    /// The row.
+    #[must_use]
+    pub fn id(&self) -> FeedItemId {
+        match self {
+            AcceptItem::AsProposed(id)
+            | AcceptItem::Values(id, _)
+            | AcceptItem::Match { id, .. } => *id,
+        }
+    }
+}
+
+impl fmt::Debug for AcceptItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AcceptItem::AsProposed(id) => write!(f, "AsProposed({id})"),
+            AcceptItem::Values(id, c) => write!(f, "Values({id}, {c:?})"),
+            AcceptItem::Match {
+                id, transaction, ..
+            } => {
+                write!(f, "Match({id} -> {transaction})")
+            }
+        }
+    }
+}
+
+/// "Accept all from this rule": the rule as the list showed it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RuleAccept {
+    /// The rule's id.
+    pub rule_id: String,
+    /// `conditional` or `legacy`.
+    pub kind: String,
+    /// The rule's `updatedAt` exactly as listed (`suggestedRule.updatedAt`).
+    pub updated_at: String,
+    /// One bank account only.
+    pub connection: Option<BankConnectionId>,
+    /// The next page starts after this row (the last answer's `nextAfterId`).
+    pub after: Option<FeedItemId>,
+}
+
+impl fmt::Debug for RuleAccept {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuleAccept")
+            .field("kind", &self.kind)
+            .field("after", &self.after)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What one accept asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AcceptRequest {
+    /// The owner's selection (1–500 rows).
+    Items(Vec<AcceptItem>),
+    /// Every waiting row one rule staged.
+    Rule(RuleAccept),
+}
+
+/// Why the engine left a row alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AcceptSkip {
+    /// No such row.
+    NotFound,
+    /// Another request holds it (refresh it).
+    InUse,
+    /// Already accepted, excluded, or its entry was voided.
+    NotPending,
+    /// A possible duplicate waiting for Keep both / Remove.
+    PossibleDuplicate,
+    /// It has a match signal and no values or match were sent.
+    HasMatch,
+    /// No account.
+    Incomplete,
+    /// Rule mode: the row's suggestion isn't what the rule stages now.
+    StagingDiffers,
+    /// A reason this client doesn't know.
+    Other,
+}
+
+impl AcceptSkip {
+    fn parse(s: &str) -> AcceptSkip {
+        match s {
+            "not_found" => AcceptSkip::NotFound,
+            "in_use" => AcceptSkip::InUse,
+            "not_pending" => AcceptSkip::NotPending,
+            "possible_duplicate" => AcceptSkip::PossibleDuplicate,
+            "has_match" => AcceptSkip::HasMatch,
+            "incomplete" => AcceptSkip::Incomplete,
+            "staging_differs" => AcceptSkip::StagingDiffers,
+            _ => AcceptSkip::Other,
+        }
+    }
+
+    /// The row changed under the owner (another computer): refresh it and
+    /// drop it from the selection.
+    #[must_use]
+    pub const fn is_stale(self) -> bool {
+        matches!(
+            self,
+            AcceptSkip::NotFound
+                | AcceptSkip::InUse
+                | AcceptSkip::NotPending
+                | AcceptSkip::StagingDiffers
+        )
+    }
+}
+
+/// A row that failed (the others still posted).
+#[derive(Clone, PartialEq, Eq)]
+pub struct AcceptFailure {
+    /// The row.
+    pub id: FeedItemId,
+    /// The engine's code (`TB_PERIOD_LOCKED`, `SPLITS_DONT_BALANCE`,
+    /// `FEED_UNDO_RECONCILED`, …).
+    pub code: String,
+    /// Its details.
+    pub details: ConflictDetails,
+}
+
+impl fmt::Debug for AcceptFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AcceptFailure")
+            .field("id", &self.id)
+            .field("code", &self.code)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AcceptFailure {
+    /// `TB_PERIOD_LOCKED`: dated on or before the closing date.
+    pub const PERIOD_LOCKED: &'static str = "TB_PERIOD_LOCKED";
+    /// Undo: in a completed reconciliation.
+    pub const UNDO_RECONCILED: &'static str = "FEED_UNDO_RECONCILED";
+    /// Undo: a deposit holding a bounced payment.
+    pub const PAYMENT_BOUNCED: &'static str = "PAYMENT_BOUNCED";
+    /// Undo: the row isn't accepted (a stale Undo).
+    pub const NOT_ACCEPTED: &'static str = "FEED_ITEM_NOT_ACCEPTED";
+    /// Another request holds the row.
+    pub const IN_USE: &'static str = "FEED_ITEM_IN_USE";
+
+    /// Dated on or before the closing date: needs the password.
+    #[must_use]
+    pub fn is_locked(&self) -> bool {
+        self.code == Self::PERIOD_LOCKED
+    }
+}
+
+/// What an accept did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceptOutcome {
+    /// Undo takes this whole accept back.
+    pub undo_group: UndoGroupId,
+    /// Rows posted as new entries.
+    pub posted: u32,
+    /// Rows matched to entries in the books.
+    pub matched: u32,
+    /// Rows left alone, with why.
+    pub skipped: Vec<(FeedItemId, AcceptSkip)>,
+    /// Rows that failed.
+    pub failures: Vec<AcceptFailure>,
+    /// Rule mode: the rule's rows after this page.
+    pub remaining: u64,
+    /// Rule mode: send as `after` to go on.
+    pub next_after: Option<FeedItemId>,
+}
+
+impl AcceptOutcome {
+    /// The rows that need the closing-date password.
+    #[must_use]
+    pub fn locked(&self) -> Vec<FeedItemId> {
+        self.failures
+            .iter()
+            .filter(|f| f.is_locked())
+            .map(|f| f.id)
+            .collect()
+    }
+}
+
+/// What Undo takes back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UndoTarget {
+    /// These rows (1–500).
+    Items(Vec<FeedItemId>),
+    /// A whole accept group.
+    Group(UndoGroupId),
+}
+
+/// One row Undo took back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Undone {
+    /// The row (back to its state before the accept).
+    pub id: FeedItemId,
+    /// What the accept had done (`categorize`, `match`, `transfer`, …).
+    pub kind: String,
+    /// The entry.
+    pub transaction: TransactionId,
+    /// The entry was deleted (else only unlinked and kept).
+    pub deleted: bool,
+    /// The accept group it came from.
+    pub group: UndoGroupId,
+}
+
+/// What an undo did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UndoOutcome {
+    /// Rows taken back.
+    pub undone: Vec<Undone>,
+    /// Rows that stayed (`FEED_UNDO_RECONCILED`, `TB_PERIOD_LOCKED`, …).
+    pub failures: Vec<AcceptFailure>,
+}
+
+impl UndoOutcome {
+    /// The rows that need the closing-date password.
+    #[must_use]
+    pub fn locked(&self) -> Vec<FeedItemId> {
+        self.failures
+            .iter()
+            .filter(|f| f.is_locked())
+            .map(|f| f.id)
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------- wire
+
+#[derive(Deserialize)]
+struct WireSkip {
+    id: String,
+    reason: String,
+}
+
+#[derive(Deserialize)]
+struct WireFailure {
+    id: String,
+    code: String,
+    #[serde(default)]
+    details: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireAccept {
+    undo_group_id: String,
+    #[serde(default)]
+    posted: u32,
+    #[serde(default)]
+    matched: u32,
+    #[serde(default)]
+    skipped: Vec<WireSkip>,
+    #[serde(default)]
+    failures: Vec<WireFailure>,
+    #[serde(default)]
+    remaining: u64,
+    #[serde(default)]
+    next_after_id: Option<String>,
+}
+
+fn failures_of(w: Vec<WireFailure>) -> Result<Vec<AcceptFailure>, ApiError> {
+    w.into_iter()
+        .map(|f| {
+            Ok(AcceptFailure {
+                id: FeedItemId::parse(&f.id)?,
+                code: f.code,
+                details: f.details.map(ConflictDetails::new).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// Reads an accept answer (also `GET /banking/feed/accept-groups/:id`).
+///
+/// # Errors
+/// `Decode` for an unreadable answer.
+pub fn accept_outcome_from(body: &[u8]) -> Result<AcceptOutcome, ApiError> {
+    const WHAT: &str = "feed accept";
+    let w: WireAccept =
+        serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: WHAT })?;
+    let mut skipped = Vec::with_capacity(w.skipped.len());
+    for s in w.skipped {
+        skipped.push((FeedItemId::parse(&s.id)?, AcceptSkip::parse(&s.reason)));
+    }
+    Ok(AcceptOutcome {
+        undo_group: UndoGroupId::parse(&w.undo_group_id)?,
+        posted: w.posted,
+        matched: w.matched,
+        skipped,
+        failures: failures_of(w.failures)?,
+        remaining: w.remaining,
+        next_after: match w.next_after_id.as_deref() {
+            Some(s) => Some(FeedItemId::parse(s)?),
+            None => None,
+        },
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireUndone {
+    id: String,
+    #[serde(default)]
+    kind: Option<String>,
+    transaction_id: String,
+    entry: String,
+    undo_group_id: String,
+}
+
+#[derive(Deserialize)]
+struct WireUndo {
+    #[serde(default)]
+    undone: Vec<WireUndone>,
+    #[serde(default)]
+    failures: Vec<WireFailure>,
+}
+
+/// Reads an undo answer.
+///
+/// # Errors
+/// `Decode` for an unreadable answer.
+pub fn undo_outcome_from(body: &[u8]) -> Result<UndoOutcome, ApiError> {
+    const WHAT: &str = "feed undo";
+    let w: WireUndo = serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: WHAT })?;
+    let mut undone = Vec::with_capacity(w.undone.len());
+    for u in w.undone {
+        undone.push(Undone {
+            id: FeedItemId::parse(&u.id)?,
+            kind: u.kind.unwrap_or_default(),
+            transaction: u
+                .transaction_id
+                .parse()
+                .map_err(|_| ApiError::Decode { what: WHAT })?,
+            deleted: u.entry == "deleted",
+            group: UndoGroupId::parse(&u.undo_group_id)?,
+        });
+    }
+    Ok(UndoOutcome {
+        undone,
+        failures: failures_of(w.failures)?,
+    })
+}
+
+/// The `undoGroupId` of a transfer, deposit or match answer.
+pub(crate) fn undo_group_of(body: &[u8]) -> Option<UndoGroupId> {
+    let v: Value = serde_json::from_slice(body).ok()?;
+    UndoGroupId::parse(v.get("undoGroupId")?.as_str()?).ok()
+}
+
+// ---------------------------------------------------------------- bodies
+
+/// The JSON of an accept (without the password).
+///
+/// # Errors
+/// `Local(InvalidValue)` for no rows, more than 500, a repeated row, or an
+/// empty rule id or change token; [`choice_body`]'s checks for values.
+pub fn accept_body(req: &AcceptRequest) -> Result<Value, ApiError> {
+    let bad = || ApiError::Local(LocalValidation::InvalidValue);
+    match req {
+        AcceptRequest::Items(items) => {
+            if items.is_empty() || items.len() > ACCEPT_MAX {
+                return Err(bad());
+            }
+            let mut seen = std::collections::HashSet::new();
+            let mut out = Vec::with_capacity(items.len());
+            for i in items {
+                if !seen.insert(i.id()) {
+                    return Err(bad());
+                }
+                let mut m = match i {
+                    AcceptItem::AsProposed(_) => Map::new(),
+                    AcceptItem::Values(_, c) => match choice_body(c)? {
+                        Value::Object(m) => m,
+                        _ => return Err(bad()),
+                    },
+                    AcceptItem::Match {
+                        transaction, line, ..
+                    } => {
+                        let mut m = Map::new();
+                        m.insert("matchTransactionId".into(), json!(transaction.to_string()));
+                        if let Some(l) = line {
+                            m.insert("journalLineId".into(), json!(l.to_string()));
+                        }
+                        m
+                    }
+                };
+                m.insert("id".into(), json!(i.id().to_string()));
+                out.push(Value::Object(m));
+            }
+            Ok(json!({ "items": out }))
+        }
+        AcceptRequest::Rule(r) => {
+            if r.rule_id.trim().is_empty() || r.updated_at.trim().is_empty() {
+                return Err(bad());
+            }
+            let kind = match r.kind.as_str() {
+                "legacy" => "legacy",
+                _ => "conditional",
+            };
+            let mut m = Map::new();
+            m.insert("ruleId".into(), json!(r.rule_id));
+            m.insert("ruleKind".into(), json!(kind));
+            m.insert("ruleUpdatedAt".into(), json!(r.updated_at));
+            if let Some(c) = r.connection {
+                m.insert("bankConnectionId".into(), json!(c.to_string()));
+            }
+            if let Some(a) = r.after {
+                m.insert("afterId".into(), json!(a.to_string()));
+            }
+            Ok(Value::Object(m))
+        }
+    }
+}
+
+/// The JSON of an undo (without the password).
+///
+/// # Errors
+/// `Local(InvalidValue)` for no rows, more than 500 or a repeat.
+pub fn undo_body(target: &UndoTarget, force: bool) -> Result<Value, ApiError> {
+    let mut m = Map::new();
+    match target {
+        UndoTarget::Items(ids) => {
+            let mut seen = std::collections::HashSet::new();
+            if ids.is_empty() || ids.len() > ACCEPT_MAX || !ids.iter().all(|i| seen.insert(*i)) {
+                return Err(ApiError::Local(LocalValidation::InvalidValue));
+            }
+            m.insert(
+                "feedItemIds".into(),
+                Value::Array(ids.iter().map(|i| json!(i.to_string())).collect()),
+            );
+        }
+        UndoTarget::Group(g) => {
+            m.insert("undoGroupId".into(), json!(g.to_string()));
+        }
+    }
+    if force {
+        m.insert("force".into(), json!(true));
+    }
+    Ok(Value::Object(m))
+}
+
+// ---------------------------------------------------------------- calls
+
+impl Feed<'_> {
+    /// Accepts a selection or every row one rule staged, in one engine
+    /// transaction. A retry of the same accept reuses `key`; the password
+    /// retry of the locked rows takes a **fresh** key.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `feed-accept-v1` (nothing sent);
+    /// [`accept_body`]'s checks; 409 `RULE_CHANGED` / `RULE_NOT_AUTO_ACCEPT`
+    /// and 404 `RULE_NOT_FOUND` ([`crate::feed_refusal`]); a wrong password;
+    /// any [`ApiError`].
+    pub async fn accept(
+        &self,
+        req: &AcceptRequest,
+        auth: Option<&ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<AcceptOutcome, ApiError> {
+        self.need(Capabilities::FEED_ACCEPT)?;
+        let body = self.with_password(accept_body(req)?, auth)?;
+        let mut call = Call::at(Method::Post, FEED_ACCEPT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&FEED_ACCEPT, call, None).await?;
+        accept_outcome_from(&reply.body)
+    }
+
+    /// An accept's answer again (a replay over the 512 KB cap).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `feed-accept-v1`; `NotFound`; any
+    /// [`ApiError`].
+    pub async fn accept_group(&self, id: UndoGroupId) -> Result<AcceptOutcome, ApiError> {
+        self.need(Capabilities::FEED_ACCEPT)?;
+        let call = Call::new(
+            Method::Get,
+            FEED_ACCEPT_GROUP.route(),
+            format!("/api/v1/banking/feed/accept-groups/{id}"),
+        );
+        let reply = self.0.send(&FEED_ACCEPT_GROUP, call, None).await?;
+        accept_outcome_from(&reply.body)
+    }
+
+    /// Takes accepted rows or a whole accept group back. `force` after the
+    /// owner confirmed a `FEED_UNDO_CHANGED`.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `feed-undo-v1`; [`undo_body`]'s checks;
+    /// 409 `FEED_UNDO_CHANGED {ids}` ([`crate::FeedRefusal::UndoChanged`]);
+    /// `NotFound` for an unknown group; any [`ApiError`].
+    pub async fn undo(
+        &self,
+        target: &UndoTarget,
+        force: bool,
+        auth: Option<&ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<UndoOutcome, ApiError> {
+        self.need(Capabilities::FEED_UNDO)?;
+        let body = self.with_password(undo_body(target, force)?, auth)?;
+        let mut call = Call::at(Method::Post, FEED_UNDO.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&FEED_UNDO, call, None).await?;
+        undo_outcome_from(&reply.body)
+    }
+}
+
+#[cfg(test)]
+#[path = "feed_accept_tests.rs"]
+mod tests;

@@ -635,10 +635,9 @@ impl Shell {
         // The real register of the demo's operating account (P12).
         let register = self.make_screen(mk("banking.register"));
         self.windows.open_new(mk("banking.register"), register);
-        self.windows.open_new(
-            mk("banking.feed"),
-            Box::new(Placeholder::for_command(mk("banking.feed"))),
-        );
+        // The real Bank Feed (P26).
+        let feed = self.make_screen(mk("banking.feed"));
+        self.windows.open_new(mk("banking.feed"), feed);
         if let Some(first) = self.windows.all().first().map(|w| w.id) {
             self.windows.activate(first);
         }
@@ -1567,27 +1566,40 @@ impl Shell {
             .windows
             .get(prompt.window)
             .is_some_and(crate::windows::Window::save_unconfirmed);
+        let can_save = self
+            .windows
+            .get(prompt.window)
+            .is_none_or(crate::windows::Window::can_save);
         let mut answer: Option<PromptAnswer> = None;
         egui::Window::new(t("window.prompt.title"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(if unconfirmed {
+                ui.label(if !can_save {
+                    crate::i18n::t_with("window.prompt.message_unsent", &[("title", &title)])
+                } else if unconfirmed {
                     crate::windows::prompt_message_unconfirmed(&title)
                 } else {
                     crate::windows::prompt_message(&title)
                 });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
-                    if focus_save {
-                        save.request_focus();
+                    if can_save {
+                        let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
+                        if focus_save {
+                            save.request_focus();
+                        }
+                        if save.clicked() {
+                            answer = Some(PromptAnswer::Save);
+                        }
                     }
-                    if save.clicked() {
-                        answer = Some(PromptAnswer::Save);
-                    }
-                    if ui.button(t("window.prompt.discard")).clicked() {
+                    let discard = if can_save {
+                        "window.prompt.discard"
+                    } else {
+                        "window.prompt.close_anyway"
+                    };
+                    if ui.button(t(discard)).clicked() {
                         answer = Some(PromptAnswer::Discard);
                     }
                     if ui.button(t("window.prompt.keep")).clicked() {
@@ -1690,6 +1702,7 @@ fn make_any(
             .chain(&crate::screens::P21_SCREENS)
             .chain(&crate::screens::P22_SCREENS)
             .chain(&crate::screens::P25_SCREENS)
+            .chain(&crate::screens::P26_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
