@@ -21,6 +21,19 @@ steps:
         - {x: 212, y: 680, width: 560, height: 200}
   - screenshot: w1024
 
+  # --- A05 QA-6: a receipt section keeps Accept in the window ------------------
+  - command: dev.demo_feed_receipt
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - assert_exists: {role: radio_button, label: "Don't use this receipt"}
+  - assert_exists: {role: button, label: Accept  A}
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 680, width: 560, height: 200}
+  - screenshot: w1024-receipt
+  - command: dev.demo_feed_reset
+  - assert_state: {key: screen.counts.waiting, equals: 37}
+
   # --- QA-3: the bulk bar's combo is named --------------------------------------
   - click: {role: button, label: Bank line 1 of 37}
   - key: Space
