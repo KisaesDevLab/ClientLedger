@@ -816,12 +816,7 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
 
 /// "May already be entered: a bill of 10/02" for a duplicate match.
 fn maybe_entered(m: &DuplicateMatch) -> String {
-    let what = match m.txn_type.as_deref() {
-        Some("bill") => t("bank_feed.receipt.entry.bill"),
-        Some("expense") => t("bank_feed.receipt.entry.expense"),
-        _ => t("bank_feed.receipt.entry.other"),
-    };
-    let date = m.date.map(crate::shell::us_date).unwrap_or_default();
+    let (what, date) = entry_words(m);
     t_with(
         "bank_feed.receipt.maybe_entered",
         &[("what", &what), ("date", &date)],
@@ -830,15 +825,31 @@ fn maybe_entered(m: &DuplicateMatch) -> String {
     .to_string()
 }
 
+/// What the match is and its date, in words.
+fn entry_words(m: &DuplicateMatch) -> (String, String) {
+    let what = match m.txn_type.as_deref() {
+        Some("bill") => t("bank_feed.receipt.entry.bill"),
+        Some("expense") => t("bank_feed.receipt.entry.expense"),
+        _ => t("bank_feed.receipt.entry.other"),
+    };
+    (what, m.date.map(crate::shell::us_date).unwrap_or_default())
+}
+
 /// The picked receipt may already be entered: what it matched, and "Use
 /// it anyway" (only where the engine takes the confirmation).
 fn duplicate_warning(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, pick: DocumentDraftId) {
     let list: Vec<String> = duplicates_of(&s.detail.receipt, pick)
         .iter()
         .map(|m| {
-            let mut x = maybe_entered(m);
+            let (what, date) = entry_words(m);
+            let mut x = t_with(
+                "bank_feed.receipt.entry_of",
+                &[("what", &what), ("date", &date)],
+            )
+            .trim()
+            .to_string();
             if let Some(r) = clean(m.reference.as_deref()) {
-                x.push_str(" {b7} ");
+                x.push_str(" \u{b7} ");
                 x.push_str(&t_with("bank_feed.receipt.ref", &[("ref", &r)]));
             }
             x

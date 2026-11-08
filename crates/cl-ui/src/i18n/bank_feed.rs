@@ -280,6 +280,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // PR-A1 B1 (Q-PRA1b): a receipt that may already be entered.
     ("bank_feed.notice.receipt_duplicate", "That receipt looks like something already in your books. Nothing was recorded; check the Receipt section, then use it anyway or accept without it."),
     ("bank_feed.receipt.maybe_entered", "May already be entered: {what} of {date}"),
+    ("bank_feed.receipt.entry_of", "{what} of {date}"),
     ("bank_feed.receipt.entry.bill", "a bill"),
     ("bank_feed.receipt.entry.expense", "an expense"),
     ("bank_feed.receipt.entry.other", "an entry"),

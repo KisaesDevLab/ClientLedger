@@ -632,6 +632,12 @@ enum Work {
         task: Task<(DocumentDraft, TransactionId)>,
         tries: u8,
     },
+    /// Q-PRA1a: "Pay this bill": is the bill still owed (and whose)?
+    CheckingBill {
+        accept: Box<Accept>,
+        bill: TransactionId,
+        task: Task<(Option<cl_core::Money>, Option<cl_core::ids::ContactId>)>,
+    },
     /// Posted or attached: the draft is closed.
     Done,
 }
@@ -649,6 +655,7 @@ impl Work {
             Work::Unknown { .. } => "unknown",
             Work::Refetch { .. } => "refetch",
             Work::Attaching { .. } => "attaching",
+            Work::CheckingBill { .. } => "checking_bill",
             Work::Done => "done",
         }
     }
@@ -1710,6 +1717,17 @@ impl DraftSession {
                     return;
                 }
             },
+            Work::CheckingBill {
+                accept,
+                bill,
+                mut task,
+            } => match task.try_take() {
+                None => Work::CheckingBill { accept, bill, task },
+                Some(r) => {
+                    self.bill_checked(&accept, bill, r.ok());
+                    return;
+                }
+            },
             other => other,
         };
     }
@@ -1929,6 +1947,89 @@ impl DraftSession {
                 self.convert_after_feed(accept, ids);
             }
             DialogAnswer::Attach(target) => self.send_attach(accept, target, 0),
+            DialogAnswer::PayBill(bill) => self.check_bill(accept, bill),
+        }
+    }
+
+    /// Q-PRA1a: reads the bill (still owed, its vendor) before Pay Bills
+    /// opens on it.
+    fn check_bill(&mut self, accept: Box<Accept>, bill: TransactionId) {
+        let owed = |r: Option<cl_api::Versioned<cl_api::BillRecord>>| {
+            r.map_or((None, None), |v| {
+                (
+                    v.record
+                        .balance_due
+                        .filter(|_| v.record.txn.status == cl_api::TxnStatus::Posted),
+                    v.record.txn.contact_id,
+                )
+            })
+        };
+        if let Some(mut demo) = self.link.demo_state() {
+            let got = owed(crate::company::demo::bills::get(&mut demo, bill));
+            drop(demo);
+            self.work = Work::CheckingBill {
+                accept,
+                bill,
+                task: Task::ready(got),
+            };
+            return;
+        }
+        let task = match (self.link.session(), self.group.as_ref()) {
+            (Some(session), Some(group)) => group
+                .read(&session, move |s| async move {
+                    Ok(owed(Some(s.bills().get(bill).await?)))
+                })
+                .ok()
+                .map(Task::Pending),
+            _ => None,
+        };
+        match task {
+            Some(task) => self.work = Work::CheckingBill { accept, bill, task },
+            None => {
+                self.note = Some("doc_form.pay_bill.unknown");
+                self.events.push(DraftEvent::Cancelled);
+            }
+        }
+    }
+
+    /// Q-PRA1a: the bill is owed: Pay Bills opens on it with the receipt,
+    /// and the form closes (the receipt waits in Review Documents until
+    /// the payment takes it).
+    fn bill_checked(
+        &mut self,
+        accept: &Accept,
+        bill: TransactionId,
+        r: Option<(Option<cl_core::Money>, Option<cl_core::ids::ContactId>)>,
+    ) {
+        let Some(draft) = self.draft.as_ref() else {
+            self.events.push(DraftEvent::Cancelled);
+            return;
+        };
+        match r {
+            Some((Some(owed), vendor)) if owed.is_positive() => {
+                let prefill = crate::screens::pay_bills::receipt::PayBillPrefill {
+                    bill,
+                    vendor: vendor.or(accept.probe.contact),
+                    from: accept.probe.account,
+                    date: accept.probe.date,
+                    receipt: self.id,
+                    expected_updated_at: draft.updated_at.clone(),
+                    attachment: draft.attachment_id,
+                };
+                self.link.push(CompanyEvent::OpenWith(
+                    CommandId::new(crate::screens::pay_bills::KIND),
+                    Box::new(crate::windows::OpenPayload::PayBill(Box::new(prefill))),
+                ));
+                self.events.push(DraftEvent::Close);
+            }
+            Some(_) => {
+                self.note = Some("doc_form.pay_bill.paid");
+                self.events.push(DraftEvent::Cancelled);
+            }
+            None => {
+                self.note = Some("doc_form.pay_bill.unknown");
+                self.events.push(DraftEvent::Cancelled);
+            }
         }
     }
 

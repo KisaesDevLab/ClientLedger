@@ -1334,6 +1334,7 @@ impl Screen for EnterBillScreen {
             | OpenPayload::PrintChecks(_)
             | OpenPayload::ReceiveFrom(_)
             | OpenPayload::PaySalesTax(_)
+            | OpenPayload::PayBill(_)
             | OpenPayload::RefundFrom(..)
             | OpenPayload::ForClient(_)
             | OpenPayload::BounceCheck(_)

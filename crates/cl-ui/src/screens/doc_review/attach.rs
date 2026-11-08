@@ -19,6 +19,10 @@
 //!   until a pick and then asks once more ("This can't be undone", default
 //!   Cancel); **Enter as new** (Alt+E) posts the document acknowledging the
 //!   rows shown (`acknowledgeDuplicateOf`, audited by the engine).
+//! - **A receipt of a bill** (Q-PRA1a, replacing Q-A04d): the bill is
+//!   picked and **Pay this bill** is the main action (Pay Bills on the bill,
+//!   paid from the receipt's account, the receipt filed on the payment);
+//!   Enter as new stays, saying the bill would stay unpaid.
 //!
 //! No undo in A04 (Q-A04e) and no learning after an attach (D5). Nothing
 //! here logs; `Debug` shows counts only; the control channel gets counts,
@@ -247,9 +251,13 @@ pub(crate) struct ShownRow {
     pub kind_key: &'static str,
     /// How close (`None` for the engine's own duplicate matches).
     pub label: Option<MatchLabel>,
-    /// The document may be attached to it (an unpaid bill a receipt
-    /// matched is shown for information only, Q-A04d / P18 hold).
+    /// The document may be attached to it.
     pub attachable: bool,
+    /// A bill a receipt (paid) matched: "Pay this bill" pays it from the
+    /// receipt's account and files the receipt on the payment (Q-PRA1a,
+    /// replacing Q-A04d's information-only bill). Whether it is still
+    /// unpaid is read when the owner picks it.
+    pub pay: bool,
 }
 
 /// The document's own values, beside the rows.
@@ -268,6 +276,8 @@ pub(crate) enum DialogAnswer {
     Attach(TransactionId),
     /// Post the document as a new record, acknowledging these.
     EnterAsNew(Vec<TransactionId>),
+    /// Q-PRA1a: pay this bill in Pay Bills with the receipt.
+    PayBill(TransactionId),
     /// Back to the form; nothing sent.
     Cancel,
 }
@@ -289,6 +299,8 @@ pub(crate) struct AttachDialog {
     focus_list: bool,
     /// Give Cancel of the confirmation the keyboard next frame.
     focus_confirm_cancel: bool,
+    /// Give "Pay this bill" the keyboard next frame (Q-PRA1a).
+    focus_pay: bool,
 }
 
 impl std::fmt::Debug for AttachDialog {
@@ -364,6 +376,7 @@ impl AttachDialog {
                     kind_key: kind_key(r.kind),
                     label: Some(c.label),
                     attachable: true,
+                    pay: false,
                 })
             })
             .collect();
@@ -416,15 +429,21 @@ impl AttachDialog {
                     kind_key: kind_key(kind),
                     label: None,
                     attachable,
+                    pay: kind == RowKind::Bill && !bill_doc,
                 })
             })
-            .collect();
+            .collect::<Vec<ShownRow>>();
+        // Q-PRA1a: a bill a receipt matched is picked, and "Pay this
+        // bill" has the keyboard (Enter pays only from the button).
+        let pay_row = shown.iter().position(|r| r.pay);
         AttachDialog {
             rows: shown,
             doc: Self::summary(p),
             from_engine: true,
             attach_ok,
-            focus_list: true,
+            focus_list: pay_row.is_none(),
+            selected: pay_row,
+            focus_pay: pay_row.is_some(),
             ..AttachDialog::default()
         }
     }
@@ -433,6 +452,19 @@ impl AttachDialog {
     #[must_use]
     pub(crate) fn ids(&self) -> Vec<TransactionId> {
         self.rows.iter().map(|r| r.id).collect()
+    }
+
+    /// The picked bill "Pay this bill" pays (Q-PRA1a).
+    pub(crate) fn picked_bill(&self) -> Option<TransactionId> {
+        self.selected
+            .and_then(|i| self.rows.get(i))
+            .filter(|r| r.pay)
+            .map(|r| r.id)
+    }
+
+    /// Any row is a bill this receipt could pay.
+    fn has_bill(&self) -> bool {
+        self.rows.iter().any(|r| r.pay)
     }
 
     fn picked(&self) -> Option<&ShownRow> {
@@ -578,6 +610,7 @@ impl AttachDialog {
                 None => String::new(),
             };
             let status = match (r.attachable, r.kind_key) {
+                _ if r.pay => t("doc_review.attach.status.pay"),
                 (true, _) => t("doc_review.attach.status.posted"),
                 (false, "doc_review.attach.kind.bill") => t("doc_review.attach.status.info_only"),
                 (false, _) => t("doc_review.attach.status.info_other"),
@@ -612,7 +645,33 @@ impl AttachDialog {
                 .wrap(),
             );
         }
+        if self.has_bill() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("doc_review.attach.pay.intro")).color(tokens.text_secondary),
+                )
+                .wrap(),
+            );
+        }
         ui.horizontal_wrapped(|ui| {
+            // Q-PRA1a: the main action for a receipt of an unpaid bill.
+            if self.has_bill() {
+                let can_pay = self.picked_bill().is_some() && !self.confirming;
+                let r = if can_pay {
+                    crate::widgets::primary_button(ui, &t("doc_review.attach.pay"))
+                } else {
+                    ui.add_enabled(false, egui::Button::new(t("doc_review.attach.pay")))
+                }
+                .on_hover_text(t("doc_review.attach.pay.tip"));
+                if std::mem::take(&mut self.focus_pay) && can_pay {
+                    r.request_focus();
+                }
+                if r.clicked()
+                    && let Some(bill) = self.picked_bill()
+                {
+                    answer = Some(DialogAnswer::PayBill(bill));
+                }
+            }
             let can_attach = self.picked().is_some() && !self.confirming;
             let r = ui
                 .add_enabled(can_attach, egui::Button::new(t("doc_review.attach.attach")))
@@ -624,9 +683,13 @@ impl AttachDialog {
             if r.clicked() {
                 self.ask_attach();
             }
-            let r = ui
-                .button(t("doc_review.attach.enter_new"))
-                .on_hover_text(t("doc_review.attach.enter_new.tip"));
+            let r =
+                ui.button(t("doc_review.attach.enter_new"))
+                    .on_hover_text(t(if self.has_bill() {
+                        "doc_review.attach.enter_new.bill_tip"
+                    } else {
+                        "doc_review.attach.enter_new.tip"
+                    }));
             crate::widgets::kbd(
                 ui,
                 &crate::screens::card_charge::kit::chip("form.enter_as_new"),
@@ -635,8 +698,13 @@ impl AttachDialog {
                 answer = Some(DialogAnswer::EnterAsNew(self.ids()));
             }
             // The default button (drawn as one, UI item 8): Enter on it
-            // cancels, never attaches.
-            let cancel = crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"));
+            // cancels, never attaches. With a bill to pay, Pay this bill is
+            // drawn as the main one instead (Q-PRA1a).
+            let cancel = if self.has_bill() {
+                ui.button(t("doc_review.attach.cancel"))
+            } else {
+                crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"))
+            };
             if cancel.clicked() && !self.confirming {
                 answer = Some(DialogAnswer::Cancel);
             }
@@ -687,6 +755,8 @@ impl AttachDialog {
         json!({
             "rows": self.rows.len(),
             "attachable": self.rows.iter().filter(|r| r.attachable).count(),
+            "payable": self.rows.iter().filter(|r| r.pay).count(),
+            "pay_picked": self.picked_bill().is_some(),
             "labels": self.rows.iter().map(|r| match r.label {
                 Some(MatchLabel::Strong) => "strong",
                 Some(MatchLabel::Possible) => "possible",
@@ -805,9 +875,11 @@ mod tests {
         assert!(!s.to_string().contains("25"), "no amounts");
     }
 
-    /// A receipt matched to an unpaid bill sees it for information only.
+    /// Q-PRA1a (was Q-A04d's information only): a receipt matched to a
+    /// bill can't be attached to the bill; "Pay this bill" is picked
+    /// instead. A bill document attaches to it as before.
     #[test]
-    fn a_bill_is_information_only_for_a_receipt() {
+    fn a_bill_a_receipt_matched_offers_pay_this_bill() {
         let m = DuplicateMatch {
             source: MatchSource::Transaction(id(7)),
             reason: cl_api::MatchReason::AmountDate,
@@ -820,11 +892,20 @@ mod tests {
         let receipt =
             AttachDialog::from_duplicates(&probe(None), std::slice::from_ref(&m), false, true);
         assert!(!receipt.rows[0].attachable);
+        assert!(receipt.rows[0].pay);
+        assert_eq!(receipt.picked_bill(), Some(id(7)), "picked for Pay");
+        assert_eq!(receipt.state_json()["payable"], 1);
         let mut receipt = receipt;
-        receipt.select(0);
         assert!(!receipt.ask_attach(), "nothing to attach to");
+        // Esc still backs out; Alt+E still enters it as new.
+        assert_eq!(
+            receipt.command(CommandId::new("form.enter_as_new")),
+            Some(Some(DialogAnswer::EnterAsNew(vec![id(7)])))
+        );
         let bill = AttachDialog::from_duplicates(&probe(None), &[m], true, true);
         assert!(bill.rows[0].attachable);
+        assert!(!bill.rows[0].pay);
+        assert_eq!(bill.picked_bill(), None);
         assert!(bill.from_engine);
     }
 
