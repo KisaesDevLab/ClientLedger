@@ -120,6 +120,8 @@ mod cloud_reading;
 mod compare;
 mod doc_form;
 mod doc_review;
+// P26.
+mod bank_feed;
 // P18.
 mod pay_bills;
 mod payment;
@@ -146,7 +148,7 @@ mod inventory;
 mod bank_import;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 48] = [
+const TABLES: [&[(&str, &str)]; 49] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -178,6 +180,7 @@ const TABLES: [&[(&str, &str)]; 48] = [
     picker::ENGLISH,
     cloud_reading::ENGLISH,
     doc_review::ENGLISH,
+    bank_feed::ENGLISH,
     doc_form::ENGLISH,
     compare::ENGLISH,
     pay_bills::ENGLISH,

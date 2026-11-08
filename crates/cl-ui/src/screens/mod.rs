@@ -67,6 +67,8 @@ pub mod sales_tax;
 pub mod inventory;
 // P25: Import Bank File.
 pub mod import_bank_file;
+// P26: Bank Feed review.
+pub mod bank_feed;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -122,6 +124,9 @@ pub(crate) const P22_SCREENS: [crate::shell::MakeScreen; 5] = [
 
 /// Every P25 screen's `make` (the shell tries each after P22's).
 pub(crate) const P25_SCREENS: [crate::shell::MakeScreen; 1] = [import_bank_file::make];
+
+/// Every P26 screen's `make` (the shell tries each after P25's).
+pub(crate) const P26_SCREENS: [crate::shell::MakeScreen; 1] = [bank_feed::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];

@@ -429,7 +429,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
-    screen("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None, "P26"),
+    built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
     screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
     // Reports
@@ -563,6 +563,24 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
+    ),
+    // P26: the Bank Feed's other computers, roles and AI switch in the demo.
+    dev_action(
+        "dev.demo_feed_view_only",
+        "Demo Bank Feed as View-Only (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_conflict",
+        "Demo Bank Feed Row Taken Elsewhere (developer)",
+    ),
+    dev_action(
+        "dev.demo_feed_void_entry",
+        "Void a Demo Bank Feed Entry (developer)",
+    ),
+    dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
+    dev_action(
+        "dev.demo_feed_reset",
+        "Reset Demo Bank Feed Review (developer)",
     ),
 ];
 
@@ -708,6 +726,8 @@ mod tests {
             "lists.unit_sets",
             // P25
             "banking.import_file",
+            // P26
+            "banking.feed",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
