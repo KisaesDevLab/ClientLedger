@@ -712,6 +712,56 @@ pub fn form_key(f: DraftForm) -> &'static str {
     }
 }
 
+/// PR-A1 S2 (Q-PRA1c): after a restore, the documents entered after the
+/// backup was made: "Bring them back to Review Documents?". Nothing moves
+/// without the owner's yes.
+fn bring_back_banner(link: &CompanyLink, ui: &mut Ui, tokens: &Tokens) {
+    let Some(h) = crate::screens::receipt_inbox::intake::existing(ui.ctx()) else {
+        return;
+    };
+    let (n, busy) = {
+        let g = h.lock();
+        (g.bring_back_count(), g.after_restore_busy())
+    };
+    if busy {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    if n == 0 {
+        return;
+    }
+    let count = n.to_string();
+    form::inline_warning(
+        ui,
+        tokens,
+        &t_with(
+            if n == 1 {
+                "doc_review.bring_back.one"
+            } else {
+                "doc_review.bring_back"
+            },
+            &[("n", &count)],
+        ),
+    );
+    ui.horizontal(|ui| {
+        if ui
+            .button(t("doc_review.bring_back.yes"))
+            .on_hover_text(t("doc_review.bring_back.yes.tip"))
+            .clicked()
+        {
+            h.lock().answer_bring_back(link, true);
+        }
+        if ui
+            .button(t("doc_review.bring_back.no"))
+            .on_hover_text(t("doc_review.bring_back.no.tip"))
+            .clicked()
+        {
+            h.lock().answer_bring_back(link, false);
+        }
+    });
+    ui.add_space(6.0);
+}
+
 impl Screen for DocReviewScreen {
     fn title(&self) -> String {
         t(&format!("cmd.{KIND}"))
@@ -762,6 +812,7 @@ impl Screen for DocReviewScreen {
         if let Some(k) = self.problem {
             form::inline_warning(ui, &tokens, &t(k));
         }
+        bring_back_banner(&self.link, ui, &tokens);
         if let Some(id) = self.confirm {
             self.confirm_card(ui, &tokens, id);
         } else if let Some(id) = self.choose {

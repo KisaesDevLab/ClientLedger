@@ -64,6 +64,7 @@ use crate::company::{CompanyLink, Task};
 use crate::screens::preferences::intake_folders::{self, source};
 use writer::StateWriter;
 
+pub(crate) mod after_restore;
 pub(crate) mod drafts;
 mod writer;
 
@@ -478,6 +479,8 @@ pub(crate) struct Intake {
     pub discarded: u32,
     /// Moves that failed and wait for a retry.
     pub move_failures: u32,
+    /// PR-A1 S2 / N7: after a restore; discarded originals in `Processed/`.
+    pub(crate) after_restore: after_restore::AfterRestore,
     /// The last problem of a background step (i18n key).
     pub problem: Option<&'static str>,
     today: Option<CalendarDate>,
@@ -528,6 +531,7 @@ impl Intake {
             processed: 0,
             discarded: 0,
             move_failures: 0,
+            after_restore: after_restore::AfterRestore::default(),
             problem: None,
             today: None,
             watch_config: WatchConfig::default(),
@@ -2558,6 +2562,9 @@ pub(crate) fn tick_service(
     s.poll_follow(link, now);
     s.start_follow(link, now);
     s.drive_reads(link);
+    // PR-A1 S2 / N7.
+    s.look_after_restore(link);
+    s.poll_after_restore();
 }
 
 /// Folders that need the owner (Home's Needs attention line, A01 D6).

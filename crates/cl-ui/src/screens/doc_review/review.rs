@@ -2299,11 +2299,20 @@ impl DraftSession {
         });
     }
 
-    fn poll_discard(&mut self, _ctx: &egui::Context) {
+    fn poll_discard(&mut self, ctx: &egui::Context) {
         if let Some(r) = self.discard.as_mut().and_then(Task::try_take) {
             self.discard = None;
             match r {
                 Ok(()) => {
+                    // N7: discarded in the engine with no waiting entry
+                    // here (e.g. after a Bank Feed Undo once the original
+                    // went to Processed/): it is refiled in Discarded/.
+                    if !self.discard_local
+                        && let Some(sha) = self.draft.as_ref().map(|d| d.content_sha256.clone())
+                        && let Some(h) = crate::screens::receipt_inbox::intake::existing(ctx)
+                    {
+                        h.lock().refile_discarded(&sha);
+                    }
                     self.work = Work::Done;
                     self.closed_elsewhere = true;
                     self.link.push(CompanyEvent::Toast("doc_form.discarded"));

@@ -1567,3 +1567,182 @@ mod drafts_flow {
         assert!(text.contains("docDraft"), "{text}");
     }
 }
+
+// ------------------------------------------------- PR-A1 S2, T12, N7
+
+fn sha_of(bytes: &[u8]) -> String {
+    cl_company::intake::sha256_hex(bytes)
+}
+
+/// PR-A1 S2 / T6 (Q-PRA1c): after restoring an older backup here, the
+/// documents the replaced company copied in after the backup was made and
+/// filed in `Processed/` are listed; nothing moves until the owner says
+/// yes; then they are copied back to the folder and read again. One copied
+/// in before the backup (its draft is in the backup) is not listed.
+#[test]
+fn documents_entered_after_the_backup_are_offered_back_and_move_only_on_yes() {
+    let mut w = world_with_drafts();
+    let previous: TenantId = "7e000000-0000-4000-8000-000000000001".parse().expect("t");
+    let made = cl_core::Timestamp::from_unix_millis(1_000_000).expect("ts");
+    let (late, early) = (
+        b"%PDF-1.4\n%entered tuesday\n" as &[u8],
+        b"%PDF-1.4\n%monday\n" as &[u8],
+    );
+    InboxStateStore::in_dir(w.link.store().path().parent().expect("dir"))
+        .update(|s| {
+            let seen = s
+                .seen
+                .entry(company_key(&previous.to_string()))
+                .or_default();
+            for (bytes, at) in [(late, 2_000_000), (early, 500_000)] {
+                seen.push(cl_settings::inbox_state::SeenFile {
+                    sha256: sha_of(bytes),
+                    attachment: "00000000-0000-4000-8000-0000000000aa".into(),
+                    at,
+                });
+            }
+        })
+        .expect("state");
+    let tenant = w.tenant;
+    w.link
+        .store()
+        .update(|l| {
+            if let Some(c) = l.get_mut(tenant) {
+                c.restored = Some(cl_settings::RestoreNote {
+                    at: cl_core::Timestamp::from_unix_millis(3_000_000).expect("ts"),
+                    backup_made: Some(made),
+                    previous: Some(previous),
+                    bring_back_answered: false,
+                });
+            }
+        })
+        .expect("store");
+    let (_, bills) = w.folder("Bills", false, true);
+    let month = bills.join("Processed").join("2026-11");
+    std::fs::create_dir_all(&month).expect("dir");
+    std::fs::write(month.join("tuesday.pdf"), late).expect("w");
+    std::fs::write(month.join("monday.pdf"), early).expect("w");
+    w.until("looked", |s| {
+        s.bring_back_count() == 1 && !s.after_restore_busy()
+    });
+    assert!(
+        !bills.join("tuesday.pdf").exists(),
+        "nothing moves before yes"
+    );
+    let link = Arc::clone(&w.link);
+    w.intake.answer_bring_back(&link, true);
+    w.until("copied back", |s| s.after_restore.brought == Some(1));
+    assert!(bills.join("tuesday.pdf").exists(), "back in the folder");
+    assert!(
+        month.join("tuesday.pdf").exists(),
+        "the processed file stays"
+    );
+    assert!(!bills.join("monday.pdf").exists());
+    assert_eq!(w.intake.bring_back_count(), 0);
+    let answered = w
+        .link
+        .store()
+        .load()
+        .expect("load")
+        .get(tenant)
+        .and_then(|c| c.restored.clone())
+        .is_some_and(|r| r.bring_back_answered);
+    assert!(answered, "not asked again");
+    // The inbox reads it again.
+    w.until("arrived", |s| {
+        s.rows().iter().any(|r| r.file.name == "tuesday.pdf")
+    });
+}
+
+/// PR-A1 T12 + N7: a Bank Feed accept with the receipt moves the original
+/// to `Processed/` (the follow); an Undo before the move leaves it in the
+/// folder; an Undo after it leaves it in `Processed/`, and a Discard in
+/// Review Documents then refiles it in `Discarded/`.
+#[test]
+fn a_feed_accept_moves_the_original_and_undo_and_discard_refile_it() {
+    use crate::company::demo::{drafts as demo_drafts, feed_review};
+    use cl_api::{AcceptItem, AcceptRequest, DraftLink, FeedChoice, FeedQuery, UndoTarget};
+
+    let mut w = world_with_drafts();
+    let (_, bills) = w.folder("Bills", false, true);
+    std::fs::write(bills.join("r.pdf"), PDF).expect("w");
+    w.until("claimed", |s| {
+        s.state
+            .entries(&s.company)
+            .iter()
+            .any(|e| matches!(e.doc_draft, cl_settings::inbox_state::DraftLink::Own(_)))
+    });
+    let id = w
+        .intake
+        .state
+        .entries(&w.intake.company)
+        .iter()
+        .find_map(|e| e.doc_draft.id().map(str::to_string))
+        .and_then(|d| cl_api::DocumentDraftId::parse(&d).ok())
+        .expect("draft");
+    let tenant = w.tenant;
+    let accept = |w: &World| {
+        let mut d = w.link.demo_state().expect("demo");
+        let row = feed_review::list(
+            &mut d,
+            &FeedQuery {
+                limit: 500,
+                ..FeedQuery::default()
+            },
+        )
+        .expect("list")
+        .rows
+        .into_iter()
+        .find(|r| r.status.is_waiting() && r.is_money_out() && !r.possible_duplicate)
+        .expect("a waiting line");
+        let token = demo_drafts::get(&d, tenant, id).expect("draft").updated_at;
+        let o = feed_review::accept(
+            &mut d,
+            &AcceptRequest::Items(vec![AcceptItem::Receipt {
+                item: Box::new(AcceptItem::Values(
+                    row.id,
+                    FeedChoice {
+                        account: Some(crate::company::demo::account_id(6210)),
+                        ..FeedChoice::default()
+                    },
+                )),
+                draft: DraftLink {
+                    id,
+                    expected_updated_at: token,
+                    acknowledged_duplicates: Vec::new(),
+                },
+            }]),
+            None,
+        )
+        .expect("accept");
+        assert_eq!(o.posted, 1, "{o:?}");
+        o.undo_group
+    };
+    let undo = |w: &World, g| {
+        let mut d = w.link.demo_state().expect("demo");
+        let u = feed_review::undo(&mut d, &UndoTarget::Group(g), false, None).expect("undo");
+        assert_eq!(u.reopened_drafts, vec![id], "back in Review Documents");
+    };
+    // Undo before the move: the original stays in the folder.
+    let g = accept(&w);
+    undo(&w, g);
+    w.intake.drafts.follow_now();
+    w.tick();
+    assert!(bills.join("r.pdf").exists());
+    assert_eq!(w.intake.processed, 0);
+    // Accepted again: the follow moves it to Processed/.
+    let g = accept(&w);
+    w.intake.drafts.follow_now();
+    w.until("processed", |s| s.processed == 1);
+    let processed = bills.join("Processed").join("2026-11").join("r.pdf");
+    assert!(processed.exists());
+    // Undo after the move: the receipt is waiting again; the file stays
+    // where the owner can find it.
+    undo(&w, g);
+    assert!(processed.exists());
+    // N7: discarded in Review Documents: refiled in Discarded/.
+    w.intake.refile_discarded(&sha_of(PDF));
+    w.until("refiled", |s| s.after_restore.refiled == 1);
+    assert!(bills.join("Discarded").join("r.pdf").exists());
+    assert!(!processed.exists());
+}
