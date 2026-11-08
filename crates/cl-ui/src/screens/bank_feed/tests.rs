@@ -579,3 +579,21 @@ fn a_candidate_label_leaves_out_what_is_empty() {
         "10/02/2025 \u{b7} 1042 \u{b7} 685.55"
     );
 }
+
+/// A05 QA-9: at 200% zoom the body under the toolbars is a few points
+/// tall; the list and the panel keep a usable height (the window body
+/// scrolls to them) instead of shrinking to a sliver.
+#[test]
+fn a_short_window_keeps_the_list_and_panel_usable() {
+    for stacked in [true, false] {
+        for avail in [0.0, 40.0, 120.0] {
+            let (list, panel) = view::body_heights(avail, stacked);
+            assert!(list >= 4.0 * 46.0, "{avail} {stacked}: list {list}");
+            assert!(panel >= 300.0, "{avail} {stacked}: panel {panel}");
+        }
+    }
+    // A tall window: the panel takes what the list leaves.
+    let (list, panel) = view::body_heights(900.0, true);
+    assert!((list + panel - 892.0).abs() < 0.5);
+    assert_eq!(view::body_heights(900.0, false), (900.0, 900.0));
+}

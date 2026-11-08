@@ -172,7 +172,8 @@ fn key_chip(ui: &mut Ui, tokens: &Tokens, k: &str) {
 }
 
 /// The bar over the list.
-pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+/// `hints`: the key hints show (a short window leaves them out, QA-9).
+pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, hints_on: bool) {
     let selected = s.list.selected().len();
     let can_write = !s.view_only && s.act.is_none();
     let why_not = if s.view_only {
@@ -278,7 +279,7 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                     }
                     Show::Accepted => {}
                 }
-                if !narrow {
+                if !narrow && hints_on {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         hints(ui, tokens, true);
                     });
@@ -291,7 +292,7 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             }
             // Narrow or zoomed: the key hints get their own line instead of
             // printing over the buttons (P26 QA-1, QA-23).
-            if narrow {
+            if narrow && hints_on {
                 ui.horizontal_wrapped(|ui| hints(ui, tokens, false));
             }
         });

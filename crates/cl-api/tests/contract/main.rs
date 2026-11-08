@@ -1207,6 +1207,10 @@ fn main() -> std::process::ExitCode {
             "feed_receipts::a_late_receipts_amount_search_finds_the_feed_entry",
             contract_feed_receipts::a_late_receipts_amount_search_finds_the_feed_entry,
         ),
+        (
+            "feed_receipts::a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in",
+            contract_feed_receipts::a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in,
+        ),
         // U-178 (engine PR #238, feed-accept-kind-v1).
         (
             "feed_accept::rows_carry_their_accept_kind",

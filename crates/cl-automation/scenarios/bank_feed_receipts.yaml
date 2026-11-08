@@ -121,3 +121,11 @@ steps:
   - assert_exists: {role: radio_button, label_contains: "receipt-a.pdf"}
   - assert_exists: {role: radio_button, label_contains: "receipt-b.pdf"}
   - screenshot: receipt-two-offers
+
+  # --- 8. QA-7: a credit memo read below zero goes with money in ---------------
+  - command: dev.demo_feed_receipt_credit
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.offers, equals: 1}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - assert_exists: {role: radio_button, label_contains: "credit · Ref R-1042"}
+  - screenshot: receipt-credit

@@ -380,6 +380,7 @@ mod panel {
     fn a_credit_is_offered_on_money_in() {
         let (_d, s, r, _ctx) = opened("dev.demo_feed_receipt_credit");
         assert!(!r.is_money_out(), "a money-in line");
+        assert!(takes_receipt(s.detail.mode), "{:?}", s.detail.mode);
         let offers = s.receipts.of(r.id).to_vec();
         assert_eq!(offers.len(), 1, "the credit is offered");
         let d = s.receipts.draft(offers[0]).expect("listed");

@@ -53,7 +53,7 @@ fn pick_line(state: &DemoState, which: SeedLine) -> Option<Row> {
                 && match which {
                     SeedLine::Proposed => r.kind == "ready" && r.suggested.is_some(),
                     SeedLine::Bare => r.suggested.is_none(),
-                    SeedLine::MoneyIn => true,
+                    SeedLine::MoneyIn => r.kind != "match",
                 }
                 && !r.transfer
                 && !r.possible_duplicate

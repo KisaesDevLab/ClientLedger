@@ -185,7 +185,7 @@ pub fn stale_or_used_receipts_post_nothing(h: &Harness) {
         },
     }]);
     let o = h.run(s.feed().accept(&stale, None, key())).expect("accept");
-    assert_eq!(o.posted, 0);
+    assert_eq!((o.posted, o.failures.len()), (0, 1), "{o:?}");
     assert_eq!(o.failures[0].code, AcceptFailure::DRAFT_STALE);
     assert!(o.failures[0].is_receipt());
     assert!(status_of(h, s, rows[0].id).is_some_and(FeedStatus::is_waiting));
@@ -399,4 +399,100 @@ pub fn a_late_receipts_amount_search_finds_the_feed_entry(h: &Harness) {
         .unwrap_or_else(|e| panic!("attach: {e:?}"));
     assert_eq!(attached.transaction, t);
     assert!(filed_on(h, s, &d, t));
+}
+
+/// A05 QA-7: a credit memo read below zero. The engine keeps `docTotal`
+/// at zero or more, so the client stores none and the summary lists none;
+/// the full draft keeps the signed total in its reading. Filed on a
+/// money-in line, the deposit posts with the credit on it and the draft
+/// closes into it.
+pub fn a_credit_keeps_its_sign_in_the_reading_and_files_on_money_in(h: &Harness) {
+    if !gated(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh(h, s, AccountType::Asset, Some("bank"));
+    let supplies = fresh(h, s, AccountType::Expense, None);
+    let bytes = format!(
+        "%PDF-1.4\n% synthetic credit memo {}\n%%EOF\n",
+        key().as_header()
+    );
+    let file = h
+        .run(s.attachments().upload_draft(
+            cl_api::DraftKey::new(),
+            "credit.pdf",
+            bytes.as_bytes(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("upload: {e}"))
+        .id;
+    let d = h
+        .run(
+            s.document_drafts()
+                .create(file, DraftKind::CardCharge, key()),
+        )
+        .unwrap_or_else(|e| panic!("claim: {e:?}"));
+    let mut fields = Map::new();
+    fields.insert("total".into(), serde_json::json!({ "value": "-45.10" }));
+    let reading = DraftReading {
+        kind: DraftKind::CardCharge,
+        reader: DraftReader::TextPdf,
+        fields,
+        lines: Vec::new(),
+        checks: Vec::new(),
+        suggested_contact: None,
+        doc_reference: Some("CM-7".into()),
+        doc_total: Some(m("-45.10")),
+        doc_date: Some(date(2027, 7, 14)),
+    };
+    let d = h
+        .run(
+            s.document_drafts()
+                .store_reading(d.id, &d.updated_at, &reading),
+        )
+        .unwrap_or_else(|e| panic!("store reading: {e:?}"));
+    assert_eq!(d.doc_total, None, "no total below zero is stored");
+    let listed = h
+        .run(s.document_drafts().list(&cl_api::DraftListQuery {
+            statuses: vec![DraftStatus::Ready],
+            summary: true,
+            limit: cl_api::draft_limits::MAX_PAGE,
+            ..cl_api::DraftListQuery::default()
+        }))
+        .expect("list");
+    let summary = listed.drafts.iter().find(|x| x.id == d.id).expect("listed");
+    assert_eq!(summary.doc_total, None);
+    assert!(summary.fields.is_none(), "a summary has no reading");
+    assert!(summary.doc_date.is_some() && summary.reader.is_some());
+    let full = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert_eq!(
+        full.fields
+            .as_ref()
+            .and_then(|f| f["total"]["value"].as_str()),
+        Some("-45.10"),
+        "the reading keeps the sign"
+    );
+    // Money in (the feed's sign: below zero).
+    let rows = import(
+        h,
+        s,
+        bank,
+        &[(date(2027, 7, 15), "-45.10", "A TOOL SUPPLY REFUND")],
+    );
+    let req = AcceptRequest::Items(vec![AcceptItem::Receipt {
+        item: Box::new(AcceptItem::Values(rows[0].id, values(supplies))),
+        draft: link(&full),
+    }]);
+    let o = h
+        .run(s.feed().accept(&req, None, key()))
+        .unwrap_or_else(|e| panic!("accept: {e:?}"));
+    assert_eq!((o.posted, o.failures.len()), (1, 0), "{:?}", o.failures);
+    let t = entry_of(h, s, rows[0].id).expect("entry");
+    let closed = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert_eq!(closed.status, DraftStatus::Converted);
+    assert_eq!(closed.converted_transaction_id, Some(t));
+    assert!(
+        filed_on(h, s, &full, t),
+        "the credit is filed on the deposit"
+    );
 }
