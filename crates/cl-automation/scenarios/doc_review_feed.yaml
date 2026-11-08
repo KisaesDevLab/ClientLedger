@@ -2,7 +2,7 @@
 # Documents whose total and date fit a bank line still waiting in the Bank
 # Feed asks before it is entered. `dev.demo_feed_receipt` seeds a synthetic
 # cash-expense receipt that matches a waiting money-out line. Saving it as
-# an expense asks "This receipt matches a bank line waiting in the Bank
+# an expense asks "This document matches a bank line waiting in the Bank
 # Feed ..."; Go to Bank Feed (the default) enters nothing and brings the
 # Bank Feed to the front, the receipt still offered there; saving again asks
 # again, and Save anyway enters it once. The second run (dark) finds the
