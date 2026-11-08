@@ -156,7 +156,8 @@ pub struct BankFeedScreen {
     drawn_at: Option<u64>,
     /// What this window accepted each row as (`deposit`, `transfer`,
     /// `match`, `categorize`), so Show › Accepted says what Undo will do
-    /// (P26 QA-9, QA-15; the engine's row doesn't carry it, U-row).
+    /// (P26 QA-9, QA-15) on an engine whose rows don't carry `acceptKind`
+    /// ([`BankFeedScreen::accepted_how`]).
     pub(crate) accepted_as: std::collections::BTreeMap<FeedItemId, &'static str>,
     pub(crate) load_failed: bool,
     /// The last action's message (i18n key and its count).
@@ -232,6 +233,22 @@ impl BankFeedScreen {
         self.accounts.get(self.account)
     }
 
+    /// What a row's accept was (`categorize`, `match`, `transfer`,
+    /// `deposit`): the engine's `acceptKind` (U-178), else what this window
+    /// accepted it as, else unknown (the texts then name both outcomes).
+    pub(crate) fn accepted_how(&self, r: &FeedRow) -> Option<&'static str> {
+        r.accept_kind
+            .map(|k| match k {
+                cl_api::AcceptKind::Post => "categorize",
+                // A payment received from the feed is linked; Undo only
+                // unlinks it, as a match.
+                cl_api::AcceptKind::Match | cl_api::AcceptKind::Payment => "match",
+                cl_api::AcceptKind::Transfer => "transfer",
+                cl_api::AcceptKind::Deposit => "deposit",
+            })
+            .or_else(|| self.accepted_as.get(&r.id).copied())
+    }
+
     /// The row with `id` on the page.
     pub(crate) fn row(&self, id: FeedItemId) -> Option<&FeedRow> {
         self.rows.iter().find(|r| r.id == id)
@@ -247,6 +264,9 @@ impl BankFeedScreen {
     pub(crate) fn query(&self) -> FeedQuery {
         let mut q = FeedQuery {
             connection: self.current_account().map(|a| a.connection),
+            // The list badge and Matches follow the owner's window (P26
+            // QA-16, U-177); left out for an engine without it (`live_load`).
+            transfer_window_days: Some(self.transfer_window),
             search: Some(self.filter.clone()).filter(|f| !f.trim().is_empty()),
             limit: model::PAGE,
             offset: self.offset,
@@ -341,7 +361,7 @@ impl BankFeedScreen {
                     merge(&mut page, demo::list(d, &m)?);
                 }
                 Ok(Loaded {
-                    counts: demo::counts(d, connection),
+                    counts: demo::counts_in(d, connection, q.transfer_window_days),
                     page,
                     last_import: account.and_then(|a| demo::last_import(d, a)),
                     waiting_all: demo::waiting(d),
@@ -750,6 +770,14 @@ async fn live_load(
     accepted_too: bool,
     account: Option<AccountId>,
 ) -> Result<Loaded, ApiError> {
+    let mut q = q;
+    if !s
+        .client()
+        .capabilities()
+        .has(Capabilities::FEED_TRANSFER_WINDOW)
+    {
+        q.transfer_window_days = None;
+    }
     let f = s.feed();
     let mut page = f.list(&q).await?;
     if accepted_too {
@@ -759,7 +787,7 @@ async fn live_load(
         };
         merge(&mut page, f.list(&m).await?);
     }
-    let counts = f.counts(q.connection).await?;
+    let counts = f.counts_in(q.connection, q.transfer_window_days).await?;
     let waiting_all = f.counts(None).await?.waiting;
     let last_import = match account {
         Some(a) => s

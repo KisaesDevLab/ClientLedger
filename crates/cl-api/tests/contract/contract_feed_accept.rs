@@ -7,7 +7,7 @@
 //! Every test imports its own rows into its own fresh bank account.
 
 use cl_api::{
-    AcceptFailure, AcceptItem, AcceptRequest, AcceptSkip, AccountType, BankFileFormat,
+    AcceptFailure, AcceptItem, AcceptKind, AcceptRequest, AcceptSkip, AccountType, BankFileFormat,
     BankImportRequest, BankImportRow, Capabilities, ClosedPeriodAuthorization, FeedChoice,
     FeedQuery, FeedRefusal, FeedRow, FeedStatus, Method, RuleAccept, Session, UndoTarget,
     feed_refusal,
@@ -310,4 +310,64 @@ pub fn locked_rows_need_the_password(h: &Harness) {
     if set_here {
         settings(serde_json::Value::Null);
     }
+}
+
+/// U-178 (`feed-accept-kind-v1`): each accepted row says what its accept
+/// did: posted, a transfer on both sides; a waiting row and a row taken
+/// back by Undo say nothing.
+pub fn rows_carry_their_accept_kind(h: &Harness) {
+    if !gated(h)
+        || !h.require_cap(Capabilities::FEED_ACCEPT_KIND, "U-178")
+        || !h.require_cap(Capabilities::FEED_MATCH_POST, "U-171")
+    {
+        return;
+    }
+    let s = &h.s1;
+    let a = fresh(h, s, AccountType::Asset, Some("bank"));
+    let b = fresh(h, s, AccountType::Asset, Some("bank"));
+    let exp = fresh(h, s, AccountType::Expense, None);
+    let rows = import(
+        h,
+        s,
+        a,
+        &[
+            (date(2027, 5, 12), "23.45", "A KIND POST"),
+            (date(2027, 5, 13), "2468.10", "B KIND TRANSFER"),
+            (date(2027, 5, 14), "7.00", "C KIND WAITING"),
+        ],
+    );
+    let other = import(h, s, b, &[(date(2027, 5, 13), "-2468.10", "D KIND FROM")]);
+    let kind_of = |id: cl_api::FeedItemId| {
+        let page = h
+            .run(s.feed().list(&FeedQuery {
+                limit: 500,
+                ..FeedQuery::default()
+            }))
+            .expect("list");
+        page.rows
+            .into_iter()
+            .find(|r| r.id == id)
+            .expect("row")
+            .accept_kind
+    };
+    h.run(s.feed().categorize(rows[0].id, &values(exp), None, key()))
+        .expect("posted");
+    h.run(s.feed().transfer(
+        rows[1].id,
+        cl_api::TransferTarget::OtherItem(other[0].id),
+        None,
+        key(),
+    ))
+    .expect("transfer");
+    assert_eq!(kind_of(rows[0].id), Some(AcceptKind::Post));
+    assert_eq!(kind_of(rows[1].id), Some(AcceptKind::Transfer));
+    assert_eq!(kind_of(other[0].id), Some(AcceptKind::Transfer));
+    assert_eq!(status_of(h, s, other[0].id), Some(FeedStatus::Matched));
+    assert_eq!(kind_of(rows[2].id), None);
+    h.run(
+        s.feed()
+            .undo(&UndoTarget::Items(vec![rows[0].id]), false, None, key()),
+    )
+    .expect("undo");
+    assert_eq!(kind_of(rows[0].id), None);
 }

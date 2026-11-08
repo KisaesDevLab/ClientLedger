@@ -194,6 +194,9 @@ pub struct FeedQuery {
     pub entry_voided: Option<bool>,
     /// One bank connection (account).
     pub connection: Option<BankConnectionId>,
+    /// The transfer window in days, 1-10 (`transferWindowDays`,
+    /// `feed-transfer-window-v1`); the engine's 3 when `None`.
+    pub transfer_window_days: Option<u8>,
     /// Description or amount text (owner data: sent, never logged).
     pub search: Option<String>,
     /// Page size, 1..=500.
@@ -212,6 +215,7 @@ impl Default for FeedQuery {
             possible_duplicate: None,
             entry_voided: None,
             connection: None,
+            transfer_window_days: None,
             search: None,
             limit: 50,
             offset: 0,
@@ -223,11 +227,13 @@ impl FeedQuery {
     /// The query string, in a fixed order.
     ///
     /// # Errors
-    /// `Local(PageLimit)` for a page size outside 1..=500.
+    /// `Local(PageLimit)` for a page size outside 1..=500;
+    /// `Local(InvalidValue)` for a transfer window outside 1-10.
     pub fn to_query(&self) -> Result<Vec<(String, String)>, ApiError> {
         if self.limit == 0 || self.limit > FEED_PAGE_MAX {
             return Err(ApiError::Local(LocalValidation::PageLimit));
         }
+        let window = transfer_window_param(self.transfer_window_days)?;
         let mut q: Vec<(String, String)> = Vec::new();
         let flag = |b: bool| if b { "true" } else { "false" }.to_string();
         if let Some(s) = self.status {
@@ -249,6 +255,7 @@ impl FeedQuery {
         if let Some(c) = self.connection {
             q.push(("bankConnectionId".into(), c.to_string()));
         }
+        q.extend(window);
         if let Some(s) = self
             .search
             .as_deref()
@@ -262,6 +269,57 @@ impl FeedQuery {
         q.push(("limit".into(), self.limit.to_string()));
         q.push(("offset".into(), self.offset.to_string()));
         Ok(q)
+    }
+}
+
+/// `transferWindowDays` for a window of 1-10 days (nothing for `None`).
+fn transfer_window_param(days: Option<u8>) -> Result<Option<(String, String)>, ApiError> {
+    match days {
+        None => Ok(None),
+        Some(d) if (1..=10).contains(&d) => Ok(Some(("transferWindowDays".into(), d.to_string()))),
+        Some(_) => Err(ApiError::Local(LocalValidation::InvalidValue)),
+    }
+}
+
+/// What a row's live accept did (`acceptKind`, `feed-accept-kind-v1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AcceptKind {
+    /// Posted as a new entry.
+    Post,
+    /// Linked to an entry already in the books.
+    Match,
+    /// Posted a transfer between two accounts.
+    Transfer,
+    /// Posted a deposit of waiting payments.
+    Deposit,
+    /// Linked to a customer payment received from the feed.
+    Payment,
+}
+
+impl AcceptKind {
+    /// The wire word.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            AcceptKind::Post => "post",
+            AcceptKind::Match => "match",
+            AcceptKind::Transfer => "transfer",
+            AcceptKind::Deposit => "deposit",
+            AcceptKind::Payment => "payment",
+        }
+    }
+
+    /// Parses the wire word (`None` for anything else).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<AcceptKind> {
+        match s {
+            "post" => Some(AcceptKind::Post),
+            "match" => Some(AcceptKind::Match),
+            "transfer" => Some(AcceptKind::Transfer),
+            "deposit" => Some(AcceptKind::Deposit),
+            "payment" => Some(AcceptKind::Payment),
+            _ => None,
+        }
     }
 }
 
@@ -330,7 +388,8 @@ impl fmt::Debug for DuplicateOf {
 }
 
 /// The one transfer counterpart of a waiting row (`transferCandidate`,
-/// Q-P26y): a bank line on another account within 3 days.
+/// Q-P26y): a bank line on another account within 3 days, or the
+/// query's `transfer_window_days` (`feed-transfer-window-v1`).
 #[derive(Clone, PartialEq, Eq)]
 pub struct TransferHint {
     /// The other bank line.
@@ -412,6 +471,9 @@ pub struct FeedRow {
     pub match_candidate_count: u32,
     /// The one transfer counterpart, when exactly one exists (Q-P26y).
     pub transfer_candidate: Option<TransferHint>,
+    /// What the row's live accept did (`feed-accept-kind-v1`); `None` while
+    /// waiting, excluded, after Undo, or on an older engine.
+    pub accept_kind: Option<AcceptKind>,
     /// The row's change token.
     pub updated_at: Option<String>,
 }
@@ -1042,6 +1104,8 @@ struct WireRow {
     #[serde(default)]
     transfer_candidate: Option<WireTransferHint>,
     #[serde(default)]
+    accept_kind: Option<String>,
+    #[serde(default)]
     updated_at: Option<String>,
 }
 
@@ -1154,6 +1218,7 @@ impl WireRow {
                 }),
                 None => None,
             },
+            accept_kind: self.accept_kind.as_deref().and_then(AcceptKind::parse),
             updated_at: self.updated_at,
         }))
     }
@@ -1683,10 +1748,15 @@ impl Feed<'_> {
     ///
     /// # Errors
     /// `Local(Unsupported)` for a bucket, duplicate or voided filter without
-    /// `feed-review-v1` (nothing sent); `Local(PageLimit)`; any [`ApiError`].
+    /// `feed-review-v1`, or a transfer window without
+    /// `feed-transfer-window-v1` (nothing sent); `Local(PageLimit)`,
+    /// `Local(InvalidValue)` ([`FeedQuery::to_query`]); any [`ApiError`].
     pub async fn list(&self, q: &FeedQuery) -> Result<FeedPage, ApiError> {
         if q.bucket.is_some() || q.possible_duplicate.is_some() || q.entry_voided.is_some() {
             self.need(Capabilities::FEED_REVIEW)?;
+        }
+        if q.transfer_window_days.is_some() {
+            self.need(Capabilities::FEED_TRANSFER_WINDOW)?;
         }
         if q.accepted && q.status.is_none() {
             self.need(Capabilities::FEED_ACCEPT)?;
@@ -1705,11 +1775,31 @@ impl Feed<'_> {
         &self,
         connection: Option<BankConnectionId>,
     ) -> Result<FeedCounts, ApiError> {
+        self.counts_in(connection, None).await
+    }
+
+    /// Counts per bucket and state with the transfer window the list uses
+    /// (`transferWindowDays`; send the list's value so Matches agrees).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `feed-review-v1`, or with a window and
+    /// without `feed-transfer-window-v1`; `Local(InvalidValue)` for a
+    /// window outside 1-10; any [`ApiError`].
+    pub async fn counts_in(
+        &self,
+        connection: Option<BankConnectionId>,
+        transfer_window_days: Option<u8>,
+    ) -> Result<FeedCounts, ApiError> {
         self.need(Capabilities::FEED_REVIEW)?;
+        if transfer_window_days.is_some() {
+            self.need(Capabilities::FEED_TRANSFER_WINDOW)?;
+        }
+        let window = transfer_window_param(transfer_window_days)?;
         let mut call = Call::at(Method::Get, FEED_COUNTS.route());
         if let Some(c) = connection {
-            call.query = vec![("bankConnectionId".into(), c.to_string())];
+            call.query.push(("bankConnectionId".into(), c.to_string()));
         }
+        call.query.extend(window);
         let reply = self.0.send(&FEED_COUNTS, call, None).await?;
         feed_counts_from(&reply.body)
     }

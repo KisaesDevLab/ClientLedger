@@ -500,6 +500,14 @@ impl Capabilities {
     pub const FEED_ACCEPT: &'static str = "feed-accept-v1";
     /// U-169 (P26 E3): `POST /banking/feed/undo`, rows or an accept group.
     pub const FEED_UNDO: &'static str = "feed-undo-v1";
+    /// U-175 (P26 QA-6): a bank file goes into any bank register account
+    /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
+    pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";
+    /// U-177 (P26 QA-16): `transferWindowDays` (1-10) on `GET /banking/feed`
+    /// and `/banking/feed/counts`.
+    pub const FEED_TRANSFER_WINDOW: &'static str = "feed-transfer-window-v1";
+    /// U-178 (P26 QA-9): list rows carry `acceptKind`.
+    pub const FEED_ACCEPT_KIND: &'static str = "feed-accept-kind-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

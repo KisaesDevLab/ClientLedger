@@ -707,3 +707,96 @@ fn transfer_and_deposit_refuse_a_possible_duplicate() {
         Some(cl_api::FeedRefusal::PossibleDuplicate { .. })
     ));
 }
+
+/// U-177 parity: the other side of a transfer 5 days away is a transfer
+/// counterpart and in Matches only with a window of 5 or more; the counts
+/// follow the same window.
+#[test]
+fn the_transfer_window_moves_a_pair_into_matches() {
+    let mut s = state();
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    let mut other = s
+        .feed_review
+        .rows
+        .iter()
+        .find(|r| r.id == card.id)
+        .cloned()
+        .expect("row");
+    other.id = super::super::id("d26f9000", 7);
+    other.account = to;
+    other.amount = card.amount.checked_neg().expect("neg");
+    other.date = card.date.add_days(5).expect("date");
+    other.transfer = false;
+    other.rule = None;
+    s.feed_review.rows.push(other.clone());
+    let read = |s: &mut DemoState, days: Option<u8>| {
+        let p = list(
+            s,
+            &FeedQuery {
+                waiting_only: true,
+                transfer_window_days: days,
+                limit: 500,
+                ..FeedQuery::default()
+            },
+        )
+        .expect("list");
+        let r = p.rows.into_iter().find(|r| r.id == card.id).expect("row");
+        let c = crate::company::demo::feed_review::counts_in(s, None, days);
+        (r, c)
+    };
+    let (r3, c3) = read(&mut s, None);
+    assert!(r3.transfer_candidate.is_none());
+    assert_ne!(r3.bucket, Some(FeedBucket::Matches));
+    let (r5, c5) = read(&mut s, Some(5));
+    assert_eq!(
+        r5.transfer_candidate.as_ref().map(|t| t.feed_item),
+        Some(other.id)
+    );
+    assert_eq!(r5.bucket, Some(FeedBucket::Matches));
+    assert_eq!(c5.matches, c3.matches + 2, "both sides");
+    assert_eq!(c5.waiting, c3.waiting);
+    let matches = list(
+        &mut s,
+        &FeedQuery {
+            bucket: Some(FeedBucket::Matches),
+            transfer_window_days: Some(5),
+            limit: 500,
+            ..FeedQuery::default()
+        },
+    )
+    .expect("matches");
+    assert_eq!(matches.total, c5.matches);
+}
+
+/// U-178 parity: accepted rows say what the accept was; Undo clears it.
+#[test]
+fn accepted_rows_carry_their_accept_kind() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    assert_eq!(fuel.accept_kind, None);
+    categorize(&mut s, fuel.id, None, None).expect("posted");
+    transfer(&mut s, card.id, TransferTarget::Account(to), None).expect("transfer");
+    let accepted = list(
+        &mut s,
+        &FeedQuery {
+            accepted: true,
+            limit: 500,
+            ..FeedQuery::default()
+        },
+    )
+    .expect("accepted")
+    .rows;
+    let kind = |id| {
+        accepted
+            .iter()
+            .find(|r| r.id == id)
+            .and_then(|r| r.accept_kind)
+    };
+    assert_eq!(kind(fuel.id), Some(cl_api::AcceptKind::Post));
+    assert_eq!(kind(card.id), Some(cl_api::AcceptKind::Transfer));
+    undo(&mut s, &UndoTarget::Items(vec![fuel.id]), false, None).expect("undo");
+    assert_eq!(find(&mut s, "RIVERBEND FUEL").accept_kind, None);
+}

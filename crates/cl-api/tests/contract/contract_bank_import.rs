@@ -1040,3 +1040,30 @@ pub fn changed_rows_carry_the_earlier_values(h: &Harness) {
     assert_eq!(k.rows[0].existing_amount, Some(m("80.10")));
     assert_eq!(k.rows[0].existing_date, Some(date(2027, 9, 20)));
 }
+
+/// U-175 (`bank-import-account-types-v1`): checking, savings, cash and
+/// petty cash accounts take a bank file like a `bank` one; a prepaid asset
+/// is still refused.
+pub fn bank_register_types_take_a_file(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::BANK_IMPORT_ACCOUNT_TYPES, "U-175") {
+        return;
+    }
+    let s = &h.s1;
+    for detail in ["checking", "savings", "cash", "petty_cash"] {
+        let acct = fresh_account(h, s, AccountType::Asset, detail);
+        let req = request(acct, BankFileFormat::Qfx, ofx_rows());
+        h.run(s.bank_import().preview(&req))
+            .unwrap_or_else(|e| panic!("{detail} preview: {e}"));
+        let done = h
+            .run(s.bank_import().commit(&req, key()))
+            .unwrap_or_else(|e| panic!("{detail} commit: {e}"));
+        assert_eq!(done.inserted_items.len(), 3, "{detail}");
+    }
+    let prepaid = fresh_account(h, s, AccountType::Asset, "prepaid_expenses");
+    let req = request(prepaid, BankFileFormat::Qfx, ofx_rows());
+    let e = h.run(s.bank_import().preview(&req)).expect_err("422");
+    assert_eq!(
+        bank_import_refusal(&e),
+        Some(BankImportRefusal::NotBankOrCard)
+    );
+}

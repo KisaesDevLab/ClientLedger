@@ -595,7 +595,7 @@ fn accepted(
     can: bool,
     tip: &str,
 ) {
-    let key = accepted_text(r.status, s.accepted_as.get(&r.id).copied());
+    let key = accepted_text(r.status, s.accepted_how(r));
     form::hint(ui, tokens, &t(key));
     ui.add_space(8.0);
     if ui

@@ -17,9 +17,9 @@
 use std::collections::BTreeMap;
 
 use cl_api::{
-    ApiError, BankConnection, BankConnectionId, ConflictDetails, ConflictReason, FeedBucket,
-    FeedChoice, FeedCounts, FeedItemId, FeedPage, FeedQuery, FeedRow, FeedStatus, Named,
-    SuggestedRule, UndoGroupId,
+    AcceptKind, ApiError, BankConnection, BankConnectionId, ConflictDetails, ConflictReason,
+    FeedBucket, FeedChoice, FeedCounts, FeedItemId, FeedPage, FeedQuery, FeedRow, FeedStatus,
+    Named, SuggestedRule, TRANSFER_WINDOW_DAYS, TransferHint, UndoGroupId,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money};
@@ -148,8 +148,24 @@ impl Row {
             exclusion_reason: self.exclusion_reason.clone(),
             match_candidate_count: u32::from(self.kind == "match"),
             transfer_candidate: None,
+            accept_kind: if self.status.is_accepted() {
+                accept_kind_of(self.how)
+            } else {
+                None
+            },
             updated_at: None,
         }
+    }
+}
+
+/// The engine's `acceptKind` for what the demo accept was (U-178).
+fn accept_kind_of(how: &str) -> Option<AcceptKind> {
+    match how {
+        "categorize" => Some(AcceptKind::Post),
+        "match" => Some(AcceptKind::Match),
+        "transfer" => Some(AcceptKind::Transfer),
+        "deposit" => Some(AcceptKind::Deposit),
+        _ => None,
     }
 }
 
@@ -380,6 +396,14 @@ impl DemoFeedReview {
         }
     }
 
+    /// Forgets the rows Import Bank File added (`dev.demo_bank_import_reset`
+    /// empties the import feed, whose next batches reuse their row keys; a
+    /// key remembered from before would hide the new rows).
+    pub fn forget_imports(&mut self) {
+        self.rows.retain(|r| r.import_key.is_none());
+        self.imported.clear();
+    }
+
     fn row_mut(&mut self, id: FeedItemId) -> Result<&mut Row, ApiError> {
         self.rows
             .iter_mut()
@@ -429,7 +453,53 @@ fn ai_on(state: &DemoState) -> bool {
     state.ai.enabled && state.ai.categorization
 }
 
-fn matches_query(r: &Row, q: &FeedQuery) -> bool {
+/// The other side of a transfer per waiting row within `window` days (the
+/// engine's transfer twin, `feed-transfer-window-v1`).
+/// The same test as [`transfer_candidates`]: waiting, another account, the
+/// opposite amount, within the window.
+fn transfer_twins(state: &DemoState, window: u8) -> BTreeMap<FeedItemId, Vec<FeedItemId>> {
+    let waiting: Vec<&Row> = state
+        .feed_review
+        .rows
+        .iter()
+        .filter(|r| r.waiting())
+        .collect();
+    let mut out: BTreeMap<FeedItemId, Vec<FeedItemId>> = BTreeMap::new();
+    for r in &waiting {
+        let Ok(opposite) = r.amount.checked_neg() else {
+            continue;
+        };
+        let twins: Vec<FeedItemId> = waiting
+            .iter()
+            .filter(|o| {
+                o.account != r.account
+                    && o.amount == opposite
+                    && r.date.days_until(o.date).abs() <= i64::from(window)
+            })
+            .map(|o| o.id)
+            .collect();
+        if !twins.is_empty() {
+            out.insert(r.id, twins);
+        }
+    }
+    out
+}
+
+/// A row's bucket with the transfer twins: the other side of a transfer is
+/// a match signal (a possible duplicate stays in review).
+fn bucket_of(r: &Row, twins: &BTreeMap<FeedItemId, Vec<FeedItemId>>) -> Option<FeedBucket> {
+    match r.bucket() {
+        Some(FeedBucket::Review) if r.possible_duplicate => Some(FeedBucket::Review),
+        Some(_) if twins.contains_key(&r.id) => Some(FeedBucket::Matches),
+        b => b,
+    }
+}
+
+fn window_of(days: Option<u8>) -> u8 {
+    days.unwrap_or(TRANSFER_WINDOW_DAYS).clamp(1, 10)
+}
+
+fn matches_query(r: &Row, q: &FeedQuery, bucket: Option<FeedBucket>) -> bool {
     if q.connection.is_some_and(|c| c != connection_of(r.account)) {
         return false;
     }
@@ -445,7 +515,7 @@ fn matches_query(r: &Row, q: &FeedQuery) -> bool {
         return false;
     }
     if let Some(b) = q.bucket
-        && r.bucket() != Some(b)
+        && bucket != Some(b)
     {
         return false;
     }
@@ -490,11 +560,17 @@ pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> 
     let ai = ai_on(state);
     refresh(state);
     let signals = posting::match_signals(state);
+    let twins = transfer_twins(state, window_of(q.transfer_window_days));
     let review = &state.feed_review;
-    let mut rows: Vec<&Row> = review.rows.iter().filter(|r| matches_query(r, q)).collect();
+    let mut rows: Vec<&Row> = review
+        .rows
+        .iter()
+        .filter(|r| matches_query(r, q, bucket_of(r, &twins)))
+        .collect();
     // Newest first, then the sample's order.
     rows.sort_by(|a, b| b.date.cmp(&a.date).then(a.id.cmp(&b.id)));
     let total = rows.len() as u64;
+    let chart = std::cell::OnceCell::new();
     let page = rows
         .into_iter()
         .skip(usize::try_from(q.offset).unwrap_or(usize::MAX))
@@ -503,6 +579,20 @@ pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> 
             let mut row = r.to_row(ai);
             if let Some(n) = signals.get(&r.id) {
                 row.match_candidate_count = *n;
+            }
+            row.bucket = bucket_of(r, &twins);
+            // Exactly one other side: the list names it (Q-P26y).
+            if let Some([one]) = twins.get(&r.id).map(Vec::as_slice) {
+                let other = review.rows.iter().find(|x| x.id == *one);
+                row.transfer_candidate = other.map(|o| TransferHint {
+                    feed_item: o.id,
+                    account: Some(o.account),
+                    account_name: chart
+                        .get_or_init(super::chart)
+                        .iter()
+                        .find(|a| a.id == o.account)
+                        .map(|a| a.fields.name.clone()),
+                });
             }
             row.duplicate_of = r
                 .duplicate_of
@@ -528,7 +618,19 @@ pub fn list(state: &mut DemoState, q: &FeedQuery) -> Result<FeedPage, ApiError> 
 /// `GET /banking/feed/counts` for one connection or all.
 #[must_use]
 pub fn counts(state: &mut DemoState, connection: Option<BankConnectionId>) -> FeedCounts {
+    counts_in(state, connection, None)
+}
+
+/// `GET /banking/feed/counts?transferWindowDays` (the list's window, so
+/// Matches agrees with the list).
+#[must_use]
+pub fn counts_in(
+    state: &mut DemoState,
+    connection: Option<BankConnectionId>,
+    transfer_window_days: Option<u8>,
+) -> FeedCounts {
     refresh(state);
+    let twins = transfer_twins(state, window_of(transfer_window_days));
     let review = &state.feed_review;
     let mut c = FeedCounts::default();
     for r in review
@@ -536,7 +638,7 @@ pub fn counts(state: &mut DemoState, connection: Option<BankConnectionId>) -> Fe
         .iter()
         .filter(|r| connection.is_none_or(|x| x == connection_of(r.account)))
     {
-        match r.bucket() {
+        match bucket_of(r, &twins) {
             Some(FeedBucket::Ready) => c.ready += 1,
             Some(FeedBucket::Review) => c.review += 1,
             Some(FeedBucket::Matches) => c.matches += 1,

@@ -503,3 +503,154 @@ fn possible_duplicate_refusal_names_both_rows() {
         "the owner decides; nothing changed elsewhere"
     );
 }
+
+#[test]
+fn rows_say_what_their_accept_was() {
+    let body = format!(
+        r#"{{"data":[
+        {{"id":"{A}","feedDate":"2026-11-03","amount":"84.17","status":"categorized","acceptKind":"post"}},
+        {{"id":"{B}","feedDate":"2026-11-03","amount":"-50.00","status":"matched","acceptKind":"deposit"}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a03","feedDate":"2026-11-03","amount":"1.00","status":"matched","acceptKind":"transfer"}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a04","feedDate":"2026-11-03","amount":"1.00","status":"matched","acceptKind":"match"}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a05","feedDate":"2026-11-03","amount":"1.00","status":"matched","acceptKind":"payment"}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a06","feedDate":"2026-11-03","amount":"1.00","status":"pending","acceptKind":null}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a07","feedDate":"2026-11-03","amount":"1.00","status":"matched","acceptKind":"refund"}},
+        {{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a08","feedDate":"2026-11-03","amount":"1.00","status":"matched"}}
+    ]}}"#
+    );
+    let p = feed_page_from(body.as_bytes()).expect("page");
+    let kinds: Vec<Option<AcceptKind>> = p.rows.iter().map(|r| r.accept_kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            Some(AcceptKind::Post),
+            Some(AcceptKind::Deposit),
+            Some(AcceptKind::Transfer),
+            Some(AcceptKind::Match),
+            Some(AcceptKind::Payment),
+            None,
+            None,
+            None
+        ]
+    );
+    for k in [
+        AcceptKind::Post,
+        AcceptKind::Match,
+        AcceptKind::Transfer,
+        AcceptKind::Deposit,
+        AcceptKind::Payment,
+    ] {
+        assert_eq!(AcceptKind::parse(k.as_str()), Some(k));
+    }
+}
+
+#[test]
+fn the_transfer_window_is_one_to_ten_days() {
+    let with = |d: Option<u8>| {
+        FeedQuery {
+            transfer_window_days: d,
+            ..FeedQuery::default()
+        }
+        .to_query()
+    };
+    let q = with(Some(5)).expect("q");
+    assert!(q.contains(&("transferWindowDays".into(), "5".into())));
+    for d in [1, 10] {
+        assert!(with(Some(d)).is_ok(), "{d}");
+    }
+    assert!(
+        !with(None)
+            .expect("q")
+            .iter()
+            .any(|(k, _)| k == "transferWindowDays")
+    );
+    for d in [0, 11] {
+        assert!(matches!(
+            with(Some(d)),
+            Err(ApiError::Local(LocalValidation::InvalidValue))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn the_transfer_window_needs_its_capability() {
+    let server = MockServer::start().await;
+    let s = session_with_caps(&server, &[Capabilities::FEED_REVIEW]).await;
+    let f = s.feed();
+    let q = FeedQuery {
+        transfer_window_days: Some(5),
+        ..FeedQuery::default()
+    };
+    for r in [
+        f.list(&q).await.map(|_| ()),
+        f.counts_in(None, Some(5)).await.map(|_| ()),
+    ] {
+        assert!(matches!(
+            r,
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        ));
+    }
+    let gets = requests(&server, "GET").await;
+    assert!(
+        !gets
+            .iter()
+            .any(|r| r.url.path().starts_with("/api/v1/banking")),
+        "nothing sent"
+    );
+}
+
+#[tokio::test]
+async fn list_and_counts_send_the_same_transfer_window() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/banking/feed"))
+        .respond_with(json(200, &page_body()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/banking/feed/counts"))
+        .respond_with(json(200, r#"{"waiting":1,"matches":1}"#))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[
+            Capabilities::FEED_REVIEW,
+            Capabilities::FEED_TRANSFER_WINDOW,
+        ],
+    )
+    .await;
+    let f = s.feed();
+    let conn = BankConnectionId::parse(B).expect("conn");
+    f.list(&FeedQuery {
+        connection: Some(conn),
+        transfer_window_days: Some(7),
+        ..FeedQuery::default()
+    })
+    .await
+    .expect("page");
+    let c = f.counts_in(Some(conn), Some(7)).await.expect("counts");
+    assert_eq!(c.matches, 1);
+    f.counts_in(None, None).await.expect("counts");
+    let bad = f.counts_in(None, Some(11)).await;
+    assert!(matches!(
+        bad,
+        Err(ApiError::Local(LocalValidation::InvalidValue))
+    ));
+    let gets: Vec<String> = requests(&server, "GET")
+        .await
+        .iter()
+        .filter(|r| r.url.path().starts_with("/api/v1/banking"))
+        .map(query)
+        .collect();
+    assert_eq!(
+        gets,
+        [
+            format!(
+                "bankConnectionId={B}&transferWindowDays=7&sortBy=feedDate&sortDir=desc&limit=50&offset=0"
+            ),
+            format!("bankConnectionId={B}&transferWindowDays=7"),
+            String::new(),
+        ]
+    );
+}

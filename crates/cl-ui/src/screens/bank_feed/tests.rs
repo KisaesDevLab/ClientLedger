@@ -328,6 +328,53 @@ fn accepted_text_follows_what_was_done() {
     );
 }
 
+/// U-178: the engine's `acceptKind` says what the accept was, also for a
+/// row this window didn't accept (another window, a restart); without it
+/// the window's own memory, else both outcomes.
+#[test]
+fn the_accept_kind_names_what_undo_will_do() {
+    use cl_api::{AcceptKind as K, FeedStatus as F};
+    let (_d, mut s) = screen();
+    s.reload();
+    let mut r = s.rows[0].clone();
+    r.status = F::Matched;
+    for (k, how, key) in [
+        (K::Deposit, "deposit", "bank_feed.detail.deposited"),
+        (K::Transfer, "transfer", "bank_feed.detail.transferred"),
+        (K::Match, "match", "bank_feed.detail.matched"),
+        (K::Payment, "match", "bank_feed.detail.matched"),
+    ] {
+        r.accept_kind = Some(k);
+        assert_eq!(s.accepted_how(&r), Some(how));
+        assert_eq!(detail::accepted_text(r.status, s.accepted_how(&r)), key);
+    }
+    r.accept_kind = None;
+    assert_eq!(
+        detail::accepted_text(r.status, s.accepted_how(&r)),
+        "bank_feed.detail.linked"
+    );
+    s.accepted_as.insert(r.id, "deposit");
+    assert_eq!(s.accepted_how(&r), Some("deposit"));
+    // The engine wins over this window's memory.
+    r.accept_kind = Some(K::Match);
+    assert_eq!(s.accepted_how(&r), Some("match"));
+    r.status = F::Categorized;
+    r.accept_kind = Some(K::Post);
+    assert_eq!(
+        detail::accepted_text(r.status, s.accepted_how(&r)),
+        "bank_feed.detail.posted"
+    );
+}
+
+/// QA-16 rest (U-177): the list and the counts ask with the owner's
+/// transfer window.
+#[test]
+fn the_list_asks_with_the_owners_transfer_window() {
+    let (_d, mut s) = screen();
+    s.transfer_window = 7;
+    assert_eq!(s.query().transfer_window_days, Some(7));
+}
+
 /// P26 QA-24: a Match row opens on Match, and A on an unfinished row says
 /// what's missing instead of doing nothing.
 #[test]

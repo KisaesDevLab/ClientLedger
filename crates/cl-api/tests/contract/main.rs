@@ -1125,6 +1125,11 @@ fn main() -> std::process::ExitCode {
             "bank_import::changed_rows_carry_the_earlier_values",
             contract_bank_import::changed_rows_carry_the_earlier_values,
         ),
+        // U-175 (engine PR #238, bank-import-account-types-v1).
+        (
+            "bank_import::bank_register_types_take_a_file",
+            contract_bank_import::bank_register_types_take_a_file,
+        ),
         // P26 bank feed review (U-164, U-166 to U-174, U-171, U-77).
         (
             "feed_review::capabilities",
@@ -1154,6 +1159,11 @@ fn main() -> std::process::ExitCode {
             "feed_review::older_engines_refuse_locally",
             contract_feed_review::older_engines_refuse_locally,
         ),
+        // U-177 (engine PR #238, feed-transfer-window-v1).
+        (
+            "feed_review::transfer_window_moves_the_matches_bucket",
+            contract_feed_review::transfer_window_moves_the_matches_bucket,
+        ),
         // P26 E3 (U-170, U-169): the one accept and undo routes.
         (
             "feed_accept::accept_selection_and_undo_group",
@@ -1170,6 +1180,11 @@ fn main() -> std::process::ExitCode {
         (
             "feed_accept::locked_rows_need_the_password",
             contract_feed_accept::locked_rows_need_the_password,
+        ),
+        // U-178 (engine PR #238, feed-accept-kind-v1).
+        (
+            "feed_accept::rows_carry_their_accept_kind",
+            contract_feed_accept::rows_carry_their_accept_kind,
         ),
         // P26 E4 / E2 (U-171, U-166): deposit, match, assign and approve.
         (

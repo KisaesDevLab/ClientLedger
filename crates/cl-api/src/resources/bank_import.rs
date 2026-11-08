@@ -56,6 +56,22 @@ pub const MAX_DESCRIPTION: usize = 500;
 pub const MAX_MEMO: usize = 1_000;
 /// The largest check number sent as a number (9 digits).
 pub const MAX_CHECK_NUMBER: u32 = 999_999_999;
+/// The asset detail types a bank file goes into with
+/// `bank-import-account-types-v1` (U-175; the engine's `BANK_DETAIL_TYPES`).
+/// Without it only `bank`.
+pub const BANK_REGISTER_DETAIL_TYPES: [&str; 5] =
+    ["bank", "checking", "savings", "cash", "petty_cash"];
+
+/// Whether an asset account with `detail` takes a bank file, given whether
+/// the engine has `bank-import-account-types-v1`.
+#[must_use]
+pub fn takes_bank_file(detail: &str, all_bank_types: bool) -> bool {
+    if all_bank_types {
+        BANK_REGISTER_DETAIL_TYPES.contains(&detail)
+    } else {
+        detail == "bank"
+    }
+}
 
 /// The kind of bank file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

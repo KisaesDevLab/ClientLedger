@@ -428,7 +428,7 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
         // A look-alike reads like any row needing a choice (P26 QA-21).
         Why::Duplicate if account.is_none() => (t("bank_feed.recorded.choose"), String::new()),
         Why::Accepted => {
-            let how = s.accepted_as.get(&r.id).copied();
+            let how = s.accepted_how(r);
             let sub = match (r.status, how) {
                 (_, Some("deposit")) => t("bank_feed.recorded.deposited"),
                 (_, Some("transfer")) => t("bank_feed.recorded.transferred"),

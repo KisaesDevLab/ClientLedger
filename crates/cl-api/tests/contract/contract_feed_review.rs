@@ -277,3 +277,69 @@ pub fn older_engines_refuse_locally(h: &Harness) {
     let e = h.run(h.s1.feed().counts(None)).expect_err("local");
     assert!(matches!(e, ApiError::Local(_)));
 }
+
+/// U-177 (`feed-transfer-window-v1`): a transfer pair 5 days apart is a
+/// transfer counterpart and in Matches only with a window of 5 or more;
+/// the list and the counts agree for the same window.
+pub fn transfer_window_moves_the_matches_bucket(h: &Harness) {
+    if !review(h) || !h.require_cap(Capabilities::FEED_TRANSFER_WINDOW, "U-177") {
+        return;
+    }
+    let s = &h.s1;
+    let a = fresh_account(h, s, AccountType::Asset, Some("bank"));
+    let b = fresh_account(h, s, AccountType::Asset, Some("bank"));
+    let out = import(h, s, a, vec![row(1, 10, "3123.45", "ONLINE TRANSFER TO")]);
+    let inn = import(
+        h,
+        s,
+        b,
+        vec![row(1, 15, "-3123.45", "ONLINE TRANSFER FROM")],
+    );
+    let conn = out[0].connection.expect("connection");
+    let read = |days: u8| {
+        let p = h
+            .run(s.feed().list(&FeedQuery {
+                waiting_only: true,
+                connection: Some(conn),
+                transfer_window_days: Some(days),
+                ..FeedQuery::default()
+            }))
+            .expect("list");
+        let r = p.rows.into_iter().find(|r| r.id == out[0].id).expect("row");
+        let c = h
+            .run(s.feed().counts_in(Some(conn), Some(days)))
+            .expect("counts");
+        let matches = h
+            .run(s.feed().list(&FeedQuery {
+                bucket: Some(FeedBucket::Matches),
+                connection: Some(conn),
+                transfer_window_days: Some(days),
+                ..FeedQuery::default()
+            }))
+            .expect("matches")
+            .total;
+        (r, c, matches)
+    };
+    let (r3, c3, m3) = read(3);
+    assert!(r3.transfer_candidate.is_none());
+    assert_ne!(r3.bucket, Some(FeedBucket::Matches));
+    assert_eq!((c3.matches, m3), (0, 0));
+    let (r5, c5, m5) = read(5);
+    assert_eq!(r5.transfer_candidate.map(|t| t.feed_item), Some(inn[0].id));
+    assert_eq!(r5.bucket, Some(FeedBucket::Matches));
+    assert_eq!((c5.matches, m5), (1, 1));
+    assert_eq!(c5.waiting, c3.waiting, "the window moves rows, never adds");
+    let e = h
+        .run(s.feed().counts_in(Some(conn), Some(11)))
+        .expect_err("local");
+    assert!(matches!(e, ApiError::Local(_)));
+    let raw = h
+        .run(s.raw(
+            Method::Get,
+            "/api/v1/banking/feed/counts",
+            &[("transferWindowDays", "11")],
+            None,
+        ))
+        .expect("raw");
+    assert_eq!(raw.status, 400, "{}", raw.body);
+}
