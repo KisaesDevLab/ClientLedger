@@ -10,12 +10,11 @@ use cl_api::{
     AcceptItem, AcceptRequest, DocumentDraftId, DraftLink, DraftStatus, FeedChoice, FeedItemId,
     FeedQuery, FeedRow, UndoTarget,
 };
-use cl_core::ids::{TenantId, TransactionId};
+use cl_core::ids::TenantId;
 use cl_docread::register_match::{self, DocSide, Probe};
 
 use super::super::{accept, undo};
 use super::*;
-use crate::company::demo::register::DemoLedger;
 use crate::company::demo::{checks, drafts};
 
 fn state() -> (DemoState, TenantId) {
@@ -244,27 +243,125 @@ fn a_stale_or_used_receipt_posts_nothing() {
     assert!(feed_row(&mut s, line).status.is_waiting());
     assert_eq!(draft(&s, t, d).status, DraftStatus::Ready);
 
-    // Used elsewhere (attached by hand to another entry): closed.
+    // Used elsewhere (attached by hand to another entry the feed posted):
+    // closed.
+    let other = rows(&mut s, false)
+        .into_iter()
+        .find(|r| r.id != line && r.suggested_account.is_some() && r.is_money_out())
+        .expect("another line");
+    let o = accept(
+        &mut s,
+        &AcceptRequest::Items(vec![AcceptItem::AsProposed(other.id)]),
+        None,
+    )
+    .expect("post the other");
+    assert_eq!(o.posted, 1);
+    let elsewhere = feed_row(&mut s, other.id)
+        .matched_transaction
+        .expect("entry");
     let token = draft(&s, t, d).updated_at;
-    let other: TransactionId = DemoLedger::id_of(&s.ledger.transactions()[0]);
-    let _ = drafts::attach(&mut s, t, d, other, &token, cl_api::IdempotencyKey::new());
-    if draft(&s, t, d).status == DraftStatus::Converted {
-        let used = AcceptItem::Receipt {
-            item: Box::new(AcceptItem::Values(
-                line,
-                FeedChoice {
-                    account: feed_row(&mut s, line).suggested_account.map(|a| a.id),
-                    ..FeedChoice::default()
-                },
-            )),
-            draft: DraftLink {
-                id: d,
-                expected_updated_at: draft(&s, t, d).updated_at,
+    drafts::attach(
+        &mut s,
+        t,
+        d,
+        elsewhere,
+        &token,
+        cl_api::IdempotencyKey::new(),
+    )
+    .expect("attach");
+    assert_eq!(draft(&s, t, d).status, DraftStatus::Converted);
+    let used = AcceptItem::Receipt {
+        item: Box::new(AcceptItem::Values(
+            line,
+            FeedChoice {
+                account: feed_row(&mut s, line).suggested_account.map(|a| a.id),
+                ..FeedChoice::default()
             },
-        };
-        let o = accept(&mut s, &AcceptRequest::Items(vec![used]), None).expect("accept");
-        assert_eq!(o.posted, 0);
-        assert_eq!(o.failures[0].code, cl_api::AcceptFailure::DRAFT_CLOSED);
-        assert!(feed_row(&mut s, line).status.is_waiting());
+        )),
+        draft: DraftLink {
+            id: d,
+            expected_updated_at: draft(&s, t, d).updated_at,
+        },
+    };
+    let o = accept(&mut s, &AcceptRequest::Items(vec![used]), None).expect("accept");
+    assert_eq!(o.posted, 0);
+    assert_eq!(o.failures[0].code, cl_api::AcceptFailure::DRAFT_CLOSED);
+    assert!(feed_row(&mut s, line).status.is_waiting());
+}
+
+/// The closing date is checked before the receipt, as on the engine: a
+/// locked row asks for the password even with a stale receipt.
+#[test]
+fn the_closing_date_comes_before_the_receipt() {
+    let (mut s, t) = state();
+    let (line, d) = seed_receipt(&mut s, false).expect("seeded");
+    let on = feed_row(&mut s, line).date;
+    if let Some(c) = s.companies.iter_mut().find(|c| c.tenant_id == t) {
+        c.closed_through = Some(on);
     }
+    let stale = AcceptItem::Receipt {
+        item: Box::new(AcceptItem::AsProposed(line)),
+        draft: DraftLink {
+            id: d,
+            expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+        },
+    };
+    let o = accept(&mut s, &AcceptRequest::Items(vec![stale]), None).expect("accept");
+    assert_eq!(o.posted, 0);
+    assert_eq!(o.failures[0].code, cl_api::AcceptFailure::PERIOD_LOCKED);
+    assert_eq!(draft(&s, t, d).status, DraftStatus::Ready);
+}
+
+/// U-180 parity: deleting the feed's entry from the register puts its
+/// receipt back in the queue with its file, as Undo does.
+#[test]
+fn a_register_delete_puts_the_receipt_back() {
+    let (mut s, t) = state();
+    let (line, d) = seed_receipt(&mut s, false).expect("seeded");
+    let item = with_receipt(&mut s, t, line, d);
+    accept(&mut s, &AcceptRequest::Items(vec![item]), None).expect("accept");
+    let posted = feed_row(&mut s, line).matched_transaction.expect("entry");
+    assert_eq!(checks::files_on(&s, posted), 1);
+    let back = drafts::delete_entry(&mut s, posted).expect("delete");
+    assert_eq!(back, vec![d]);
+    let ready = draft(&s, t, d);
+    assert_eq!(ready.status, DraftStatus::Ready);
+    let file = ready.attachment_id.expect("file");
+    assert_eq!(
+        checks::find_attachment(&s, file)
+            .expect("kept")
+            .attachable_type,
+        "draft"
+    );
+    assert_eq!(checks::files_on(&s, posted), 0);
+}
+
+/// U-180 parity: a draft converted in the review queue (no feed key on
+/// record) goes back on its own id when its entry is deleted; a draft no
+/// longer converted is left alone.
+#[test]
+fn reopen_uses_the_drafts_id_and_only_converted_drafts() {
+    let (mut s, t) = state();
+    let (line, d) = seed_receipt(&mut s, false).expect("seeded");
+    let o = accept(
+        &mut s,
+        &AcceptRequest::Items(vec![AcceptItem::AsProposed(line)]),
+        None,
+    )
+    .expect("post");
+    assert_eq!(o.posted, 1);
+    let posted = feed_row(&mut s, line).matched_transaction.expect("entry");
+    let token = draft(&s, t, d).updated_at;
+    // A04's attach (not the feed): no key recorded.
+    drafts::attach(&mut s, t, d, posted, &token, cl_api::IdempotencyKey::new()).expect("attach");
+    let back = drafts::reopen_for(&mut s, posted);
+    assert_eq!(back, vec![d]);
+    let file = draft(&s, t, d).attachment_id.expect("file");
+    let a = checks::find_attachment(&s, file).expect("kept");
+    assert_eq!(
+        (a.attachable_type.as_str(), a.attachable_id),
+        ("draft", d.to_string())
+    );
+    // Ready now: a second delete reopens nothing.
+    assert_eq!(drafts::reopen_for(&mut s, posted), Vec::<DocumentDraftId>::new());
 }

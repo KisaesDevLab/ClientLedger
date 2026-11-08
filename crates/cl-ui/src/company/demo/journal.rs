@@ -241,7 +241,7 @@ pub fn save_with(
     dates.extend(reverse_on);
     check_closing(closing(state), &dates, password)?;
     if let Some(r) = old_reversal {
-        state.ledger.delete(r)?;
+        super::drafts::delete_entry(state, r)?;
         state.journal.meta.remove(&r);
     }
     let journal = DemoJournal {
@@ -423,9 +423,9 @@ pub fn delete(
     let mut dates = vec![date];
     dates.extend(reversal.map(|(_, d)| d));
     check_closing(closing(state), &dates, password)?;
-    state.ledger.delete(id)?;
+    super::drafts::delete_entry(state, id)?;
     if let Some((r, _)) = reversal {
-        state.ledger.delete(r)?;
+        super::drafts::delete_entry(state, r)?;
         state.journal.meta.remove(&r);
     }
     state.journal.meta.remove(&id);

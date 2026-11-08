@@ -1433,7 +1433,10 @@ pub(crate) fn reopen_for(
         .drafts
         .rows
         .iter()
-        .filter(|r| r.draft.converted_transaction_id == Some(transaction))
+        .filter(|r| {
+            r.draft.status == DraftStatus::Converted
+                && r.draft.converted_transaction_id == Some(transaction)
+        })
         .map(|r| r.draft.id)
         .collect();
     for id in &ids {
@@ -1446,12 +1449,28 @@ pub(crate) fn reopen_for(
         r.draft.converted_type = None;
         r.draft.updated_at = updated_at;
         let file = r.draft.attachment_id;
-        let key = r.filed_from.take();
-        if let (Some(file), Some(key)) = (file, key) {
+        // The key it was filed from, else the draft's id (the engine's
+        // `originalDraftKey ?? draft.id`).
+        let key = r.filed_from.take().unwrap_or_else(|| id.to_string());
+        if let Some(file) = file {
             super::checks::refile_as_draft(state, file, transaction, key);
         }
     }
     ids
+}
+
+/// Deletes an entry as the engine's `deleteTransactionInTx` does: the
+/// drafts entered as or attached to it go back to the review queue
+/// (U-180). Every demo delete goes through here.
+///
+/// # Errors
+/// As [`super::register::DemoLedger::delete`].
+pub(crate) fn delete_entry(
+    state: &mut DemoState,
+    transaction: TransactionId,
+) -> Result<Vec<DocumentDraftId>, ApiError> {
+    state.ledger.delete(transaction)?;
+    Ok(reopen_for(state, transaction))
 }
 
 // ---------------------------------------------------- the register search

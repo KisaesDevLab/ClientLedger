@@ -150,8 +150,8 @@ mod panel {
     /// The demo's receipt line in the panel, its receipt read in full.
     fn seeded() -> (tempfile::TempDir, BankFeedScreen, FeedRow, egui::Context) {
         let dir = tempfile::tempdir().expect("dir");
-        let link = Arc::new(CompanyLink::demo(dir.path()));
-        let mut s = BankFeedScreen::new(link, None);
+        let company = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = BankFeedScreen::new(company, None);
         assert!(s.command(CommandId::new("dev.demo_feed_receipt")));
         s.poll();
         let line = *s
