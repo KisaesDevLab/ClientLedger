@@ -180,6 +180,9 @@ impl Line {
 #[derive(Default)]
 pub(crate) struct Detail {
     pub row: Option<FeedItemId>,
+    /// What the row was when the panel opened on it (QA-8: a row that
+    /// turns into a match under the cursor opens again).
+    shape: Option<RowShape>,
     pub mode: Mode,
     pub account: Option<AccountId>,
     pub split: Vec<Line>,
@@ -202,11 +205,42 @@ pub(crate) struct Detail {
     pub receipt: super::receipts::Panel,
 }
 
+/// What the panel opens a row on: its state, review bucket and the
+/// engine's suggestions. Not the receipts (a receipt arriving keeps the
+/// owner's picks) nor the change token (staging on the row changes it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowShape {
+    status: cl_api::FeedStatus,
+    bucket: Option<cl_api::FeedBucket>,
+    candidates: u32,
+    duplicate: bool,
+    voided: bool,
+    matched: Option<TransactionId>,
+    transfer: Option<FeedItemId>,
+    account: Option<AccountId>,
+}
+
+impl RowShape {
+    pub(crate) fn of(r: &FeedRow) -> RowShape {
+        RowShape {
+            status: r.status,
+            bucket: r.bucket,
+            candidates: r.match_candidate_count,
+            duplicate: r.possible_duplicate,
+            voided: r.entry_voided,
+            matched: r.matched_transaction,
+            transfer: r.transfer_candidate.as_ref().map(|h| h.feed_item),
+            account: r.suggested_account.as_ref().map(|a| a.id),
+        }
+    }
+}
+
 impl Detail {
     /// The row moved: a fresh draft and a fresh read.
     fn reset(&mut self, r: &FeedRow, why: Why) {
         *self = Detail {
             row: Some(r.id),
+            shape: Some(RowShape::of(r)),
             mode: match why {
                 // Money in with no entry to match: waiting payments to
                 // deposit. With a candidate the row opens on Match, as the
@@ -446,12 +480,15 @@ pub(crate) fn follow(s: &mut BankFeedScreen) {
         s.detail.row = None;
         return;
     };
-    if s.detail.row == Some(id) {
-        return;
-    }
     let Some(r) = s.row(id).cloned() else {
         return;
     };
+    // The same row, as it was: the panel keeps the owner's picks. A row
+    // read again as something else (an entry saved elsewhere made it a
+    // match, QA-8) opens again on what it is now.
+    if s.detail.row == Some(id) && s.detail.shape.as_ref() == Some(&RowShape::of(&r)) {
+        return;
+    }
     let why = s.why(&r);
     s.detail.reset(&r, why);
     super::receipts::reset(s, id);
@@ -1012,6 +1049,25 @@ fn split_ui(
     ))
 }
 
+/// A match candidate's label (its AccessKit name): date, kind and number,
+/// payee, amount, each left out when empty (A05 QA: no "· ·" for a
+/// missing payee). The amount is its size: a candidate always goes the
+/// bank line's way, whose sign the panel's heading already shows.
+pub(crate) fn candidate_text(date: &str, kind: &str, c: &MatchCandidate, amount: &str) -> String {
+    let num = c.txn_number.as_deref().map(str::trim).unwrap_or_default();
+    let what = [kind.trim(), num]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let who = c.contact_name.as_deref().map(str::trim).unwrap_or_default();
+    [date, what.as_str(), who, amount]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
 fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -> Option<Send> {
     if s.detail.data.forbidden {
         form::hint(ui, tokens, &t("bank_feed.match.forbidden"));
@@ -1029,15 +1085,10 @@ fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -
             .map(|k| format!("bank_feed.txn.{k}"))
             .filter(|k| crate::i18n::has(k))
             .map_or_else(String::new, |k| t(&k));
-        let who = c.contact_name.clone().unwrap_or_default();
-        let num = c.txn_number.clone().unwrap_or_default();
         rows.push((
             c.transaction,
             Some(c.line),
-            format!(
-                "{date} \u{b7} {kind} {num} \u{b7} {who} \u{b7} {}",
-                amount_text(ui, model::display_amount(c.amount))
-            ),
+            candidate_text(&date, &kind, c, &amount_text(ui, c.amount.abs())),
         ));
     }
     for p in &s.detail.data.payroll {

@@ -594,7 +594,7 @@ impl DocReviewScreen {
                             status,
                             status_color,
                         );
-                        let amount = view.total.map(|m| m.format(style)).unwrap_or_default();
+                        let amount = view.total.map(|m| total_text(m, style)).unwrap_or_default();
                         let amount = p.layout_no_wrap(
                             amount,
                             egui::FontId::monospace(13.0),
@@ -687,6 +687,17 @@ impl DocReviewScreen {
             self.offset = o.min(cl_api::draft_limits::MAX_OFFSET);
             self.reload();
         }
+    }
+}
+
+/// A row's total: its size, and "credit" when it was read below zero (a
+/// credit memo or refund, QA-7).
+#[must_use]
+pub fn total_text(m: cl_core::Money, style: cl_core::MoneyStyle) -> String {
+    if m.is_negative() {
+        crate::i18n::t_with("doc_review.credit", &[("amount", &m.abs().format(style))])
+    } else {
+        m.format(style)
     }
 }
 

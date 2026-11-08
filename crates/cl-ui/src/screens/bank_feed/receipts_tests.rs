@@ -372,4 +372,29 @@ mod panel {
         assert_ne!(texts[0], texts[1]);
         assert!(texts[1].contains("(receipt 2)"));
     }
+    /// QA-7: a credit memo read below zero (its total stored without the
+    /// minus, as the engine stores it) is offered on the money-in line of
+    /// the same size, says "credit", and travels with the accept; it is
+    /// never offered on money out.
+    #[test]
+    fn a_credit_is_offered_on_money_in() {
+        let (_d, s, r, _ctx) = opened("dev.demo_feed_receipt_credit");
+        assert!(!r.is_money_out(), "a money-in line");
+        let offers = s.receipts.of(r.id).to_vec();
+        assert_eq!(offers.len(), 1, "the credit is offered");
+        let d = s.receipts.draft(offers[0]).expect("listed");
+        assert_eq!(d.doc_total, None, "stored without a total");
+        assert!(crate::reading::read_total(d).is_some_and(Money::is_negative));
+        let texts = offer_texts(&s, &r, &offers, cl_core::MoneyStyle::default());
+        assert!(texts[0].contains(" credit"), "{}", texts[0]);
+        assert!(!texts[0].contains("\u{b7} -"), "no minus: {}", texts[0]);
+        let full = s.detail.receipt.full.as_ref().expect("read in full");
+        assert!(fits(&r, full));
+        // The same credit on a money-out line of that size: never offered.
+        let mut out = r.clone();
+        out.amount = out.amount.checked_neg().expect("neg");
+        assert!(out.is_money_out());
+        assert!(!fits(&out, full));
+        assert!(offers_for(&[out], &s.receipts.drafts).is_empty());
+    }
 }

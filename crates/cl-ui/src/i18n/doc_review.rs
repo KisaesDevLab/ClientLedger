@@ -8,6 +8,9 @@
 pub const ENGLISH: &[(&str, &str)] = &[
     // A04 WP-M: the queue's status words (`cl_model::doc_draft::QueueStatus`).
     ("doc_review.status.waiting", "Waiting to be read"),
+    // A05 QA-7: a total read below zero is money back (a credit memo or
+    // refund); the amount shows without its minus.
+    ("doc_review.credit", "{amount} credit"),
     ("doc_review.status.ready", "Ready"),
     ("doc_review.status.check_fields", "Check these fields"),
     ("doc_review.status.possible_duplicate", "Possible duplicate"),

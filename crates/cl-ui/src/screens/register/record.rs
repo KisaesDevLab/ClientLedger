@@ -713,6 +713,10 @@ impl RegisterScreen {
         self.entry.form.load(fresh, &*lists);
         self.entry.editing = None;
         self.entry.proposed = None;
+        // What the edit was told (e.g. "Remove the extra split lines
+        // first") doesn't carry to the new-entry row (A05 QA).
+        self.entry.problems.clear();
+        self.entry.error = None;
         self.edit_lines.clear();
         self.read_only = None;
         let a = self.entry.form.adapter_mut();

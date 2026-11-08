@@ -257,6 +257,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.receipt.vendor_unknown", "Vendor not matched yet"),
     ("bank_feed.receipt.ref", "Ref {ref}"),
     ("bank_feed.receipt.nth", "{text} (receipt {n})"),
+    ("bank_feed.receipt.credit", "{amount} credit"),
     ("bank_feed.receipt.none", "Don't use this receipt"),
     ("bank_feed.receipt.none.tip", "Accept the bank line without it. The receipt stays in Review Documents, where you can attach it later."),
     ("bank_feed.receipt.show", "Show receipt"),

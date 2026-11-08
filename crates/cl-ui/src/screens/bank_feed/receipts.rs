@@ -12,8 +12,11 @@
 //!   200, newest first: in a queue of more than 2,000 receipts only the
 //!   newest 2,000 are offered (the rest still attach from the review
 //!   queue, A04).
-//! - **Which lines**: [`cl_docread::feed_match`] (exact total, money out,
-//!   ±7 days, payee first, best 3).
+//! - **Which lines**: [`cl_docread::feed_match`] (exact total, the same
+//!   direction, ±7 days, payee first, best 3). A credit (a refund read as
+//!   a negative total) is money in: the engine stores totals without a
+//!   minus, so a summary read but without a stored total is read in full
+//!   for its sign (at most [`MAX_SIGN_READS`] per list read).
 //! - **The panel** ([`section`]): the offers, the best one picked, "Don't
 //!   use this receipt", and "Show receipt" in the pop-out viewer (A02).
 //! - **Accept** ([`with_receipt`]): the line posts (or matches) as the
@@ -53,6 +56,9 @@ use crate::windows::doc_viewer::{self, DocRef, PaneRequest};
 
 /// Draft pages read at most (200 each).
 const MAX_PAGES: u32 = 10;
+/// Drafts read in full at most per list read for their total's sign
+/// ([`crate::reading::total_needs_full`]: a credit, QA-7), newest first.
+const MAX_SIGN_READS: usize = 25;
 /// A receipt larger than this isn't shown (the review form's cap).
 const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -97,7 +103,7 @@ fn payee_of(r: &FeedRow) -> Option<ContactId> {
 pub(crate) fn facts(d: &DocumentDraft) -> DraftFacts<DocumentDraftId> {
     DraftFacts {
         id: d.id,
-        total: d.doc_total,
+        total: crate::reading::read_total(d),
         date: d.doc_date,
         contact: d.suggested_contact_id,
         statement: d.kind == DraftKind::Statement
@@ -179,7 +185,28 @@ pub(crate) fn load_demo(
             break;
         }
     }
+    for i in needs_full(&all) {
+        if let Ok(full) = crate::company::demo::drafts::get(d, tenant, all[i].id) {
+            all[i] = full;
+        }
+    }
     Some(all)
+}
+
+/// The summaries read in full for their total's sign (at most
+/// [`MAX_SIGN_READS`]): a credit's total is stored without its minus, so
+/// only its reading tells it is money in (QA-7).
+fn needs_full(all: &[DocumentDraft]) -> Vec<usize> {
+    all.iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            d.attachment_id.is_some()
+                && d.kind != DraftKind::Statement
+                && crate::reading::total_needs_full(d)
+        })
+        .map(|(i, _)| i)
+        .take(MAX_SIGN_READS)
+        .collect()
 }
 
 /// The engine's live drafts (`None` when receipts are off: no
@@ -206,6 +233,12 @@ pub(crate) async fn load_live(s: &Session) -> Option<Vec<DocumentDraft>> {
         all.extend(got.drafts);
         if n < cl_api::draft_limits::MAX_PAGE as usize {
             break;
+        }
+    }
+    // A draft that can't be read in full keeps its summary (not offered).
+    for i in needs_full(&all) {
+        if let Ok(full) = s.document_drafts().get(all[i].id).await {
+            all[i] = full;
         }
     }
     Some(all)
@@ -665,7 +698,9 @@ pub(crate) fn offer_texts(
             };
             let detail = s.detail.receipt.details.get(id);
             let date = d.doc_date.map(crate::shell::us_date).unwrap_or_default();
-            let amount = d.doc_total.map(|m| m.format(style)).unwrap_or_default();
+            let amount = crate::reading::read_total(d)
+                .map(|m| total_text(m, style))
+                .unwrap_or_default();
             let who = d
                 .suggested_contact_id
                 .and_then(|c| contact_name(s, r, c))
@@ -697,6 +732,19 @@ pub(crate) fn offer_texts(
         }
     }
     out
+}
+
+/// A receipt's total as the owner reads it: its size, and "credit" for a
+/// negative total (money back, QA-7).
+pub(crate) fn total_text(m: Money, style: cl_core::MoneyStyle) -> String {
+    if m.is_negative() {
+        t_with(
+            "bank_feed.receipt.credit",
+            &[("amount", &m.abs().format(style))],
+        )
+    } else {
+        m.format(style)
+    }
 }
 
 /// The vendor's name as receipt `id` reads it (its details, or the picked

@@ -2615,3 +2615,45 @@ fn row_documents_wait_for_the_cursor_and_say_when_the_list_failed() {
     assert_eq!(s.state()["docs"]["listed"], true);
     assert_eq!(s.state()["docs"]["list_failed"], false);
 }
+
+/// A05 QA (minor): "Remove the extra split lines first" said during an
+/// edit doesn't stay on the new-entry row after Stop changing.
+#[test]
+fn stop_changing_clears_what_the_edit_was_told() {
+    let (_d, link) = link();
+    let bank = demo_account(&link, "1010");
+    let fuel = demo_account(&link, "6100");
+    let print = demo_account(&link, "6250");
+    let id = {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "check",
+            date: CalendarDate::from_ymd(2026, 11, 3).expect("date"),
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: bank,
+            own_debit: false,
+            lines: vec![(fuel, money("120.00")), (print, money("35.50"))],
+        };
+        demo.ledger.save(&chart, &p, None).expect("saved")
+    };
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let key = key_of(&mut s, id);
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_some());
+    assert!(s.splits.is_some(), "two lines open in Splits");
+    s.toggle_splits();
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.splits.close_first")]
+    );
+    s.finish_edit();
+    assert!(s.entry.editing.is_none());
+    assert_eq!(s.entry.problems, Vec::<cl_grid::TextKey>::new());
+}

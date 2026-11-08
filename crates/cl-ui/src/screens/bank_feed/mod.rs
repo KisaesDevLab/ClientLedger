@@ -670,6 +670,10 @@ impl BankFeedScreen {
             "dev.demo_feed_receipt_two" => {
                 self.focus_next = demo::seed_two_receipts(&mut d).map(|(line, _)| line);
             }
+            // A05 QA-7: a credit memo (read below zero) for a money-in line.
+            "dev.demo_feed_receipt_credit" => {
+                self.focus_next = demo::seed_credit(&mut d).map(|(line, _)| line);
+            }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;
             }

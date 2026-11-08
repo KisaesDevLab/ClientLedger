@@ -352,6 +352,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.setup.confirm", "Password again"),
     ("open.setup.password_rule", "At least 12 characters. No one can reset it for you except the recovery key you get at setup."),
     ("open.setup.password_short", "The password needs at least 12 characters."),
+    ("open.setup.name_email_missing", "Enter your name and email."),
     ("open.setup.password_mismatch", "The two passwords are not the same."),
     ("open.setup.go", "Create owner account"),
     ("open.setup.working", "Setting up\u{2026}"),

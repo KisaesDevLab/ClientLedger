@@ -35,6 +35,8 @@ pub enum SeedLine {
     /// A line nothing was suggested for (A05 QA-1: in a new company, every
     /// line).
     Bare,
+    /// A money-in line not matched to an entry (A05 QA-7: a refund).
+    MoneyIn,
 }
 
 /// A waiting money-out line of the sample, whole cents, no receipt yet,
@@ -47,10 +49,11 @@ fn pick_line(state: &DemoState, which: SeedLine) -> Option<Row> {
         .iter()
         .filter(|r| {
             r.waiting()
-                && r.amount.is_positive()
+                && (r.amount.is_positive() != (which == SeedLine::MoneyIn))
                 && match which {
                     SeedLine::Proposed => r.kind == "ready" && r.suggested.is_some(),
                     SeedLine::Bare => r.suggested.is_none(),
+                    SeedLine::MoneyIn => true,
                 }
                 && !r.transfer
                 && !r.possible_duplicate
@@ -80,6 +83,27 @@ pub fn seed_receipt_named(
     lines: bool,
     file_name: &str,
 ) -> Option<DocumentDraftId> {
+    seed_receipt_as(state, id, lines, file_name, false)
+}
+
+/// A credit memo for money-in line `id` (`dev.demo_feed_receipt_credit`,
+/// A05 QA-7): read as a card charge whose total is the bank amount below
+/// zero, as a refund reads. The total is stored without its minus as the
+/// engine does (none at all), so only the reading carries the sign.
+pub fn seed_credit(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId)> {
+    super::refresh(state);
+    discard_seeded(state);
+    let r = pick_line(state, SeedLine::MoneyIn)?;
+    seed_receipt_as(state, r.id, false, "credit.pdf", true).map(|d| (r.id, d))
+}
+
+fn seed_receipt_as(
+    state: &mut DemoState,
+    id: FeedItemId,
+    lines: bool,
+    file_name: &str,
+    credit: bool,
+) -> Option<DocumentDraftId> {
     let r = state.feed_review.rows.iter().find(|r| r.id == id)?.clone();
     let tenant = state.open?;
     // Each receipt's bytes differ (a draft claims its file's hash).
@@ -92,11 +116,23 @@ pub fn seed_receipt_named(
         state,
         tenant,
         file.id,
-        DraftKind::CashExpense,
+        if credit {
+            DraftKind::CardCharge
+        } else {
+            DraftKind::CashExpense
+        },
         IdempotencyKey::new(),
     )
     .ok()?;
-    let total = Money::parse_wire(&r.amount.abs().to_wire()).ok()?;
+    let mut total = Money::parse_wire(&r.amount.abs().to_wire()).ok()?;
+    if credit {
+        total = total.checked_neg().ok()?;
+    }
+    let kind = if credit {
+        DraftKind::CardCharge
+    } else {
+        DraftKind::CashExpense
+    };
     let mut header = Header {
         vendor: Some(found("Synthetic Hardware Co.".to_string())),
         reference: Some(found("R-1042".to_string())),
@@ -128,7 +164,7 @@ pub fn seed_receipt_named(
         return None;
     };
     let reading = DraftReading {
-        kind: DraftKind::CashExpense,
+        kind,
         reader: DraftReader::TextPdf,
         fields,
         lines: read_lines,

@@ -203,7 +203,27 @@ impl OpenCompanyScreen {
         .ok();
     }
 
+    /// What the first-run answers still need, checked here before anything
+    /// is sent (A05 QA: a blank name or email read as "A file could not be
+    /// read or written.").
+    fn first_run_problem(&self) -> Option<&'static str> {
+        if self.name.trim().is_empty() || self.email.trim().is_empty() {
+            return Some("open.setup.name_email_missing");
+        }
+        if self.password.chars().count() < cl_api::PASSWORD_MIN_CHARS {
+            return Some("open.setup.password_short");
+        }
+        (self.password != self.confirm).then_some("open.setup.password_mismatch")
+    }
+
     fn start_first_run(&mut self) {
+        if let Some(key) = self.first_run_problem() {
+            if key != "open.setup.password_mismatch" {
+                self.error = Some(CompanyError::Setup(vec![]));
+            }
+            self.notice = Some(t(key));
+            return;
+        }
         let (Some(group), Some(sup), Some(client)) = (
             self.group.as_ref(),
             self.link.supervisor().cloned(),
@@ -211,15 +231,6 @@ impl OpenCompanyScreen {
         ) else {
             return;
         };
-        if self.password.chars().count() < cl_api::PASSWORD_MIN_CHARS {
-            self.error = Some(CompanyError::Setup(vec![]));
-            self.notice = Some(t("open.setup.password_short"));
-            return;
-        }
-        if self.password != self.confirm {
-            self.notice = Some(t("open.setup.password_mismatch"));
-            return;
-        }
         let admin = AdminAccount {
             email: self.email.trim().to_string(),
             display_name: self.name.trim().to_string(),
@@ -236,10 +247,7 @@ impl OpenCompanyScreen {
                 tokio::task::spawn_blocking(move || sup.initialize_engine(&admin, seed.as_ref()))
                     .await
                     .map_err(|_| CompanyError::Metadata)?
-                    .map_err(|e| CompanyError::Io {
-                        what: "first-run setup",
-                        source: std::io::Error::other(e.to_string()),
-                    })?;
+                    .map_err(setup_error)?;
             client.desktop_info().await?;
             match client.login(&email, &password).await? {
                 LoginOutcome::Session(session) => Ok(SignedIn {
@@ -1116,6 +1124,21 @@ impl OpenCompanyScreen {
     }
 }
 
+/// A first-run refusal as the owner reads it: answers the host refused
+/// (a blank name or email, a short password) ask for a look at them, not
+/// "a file could not be read or written" (A05 QA).
+fn setup_error(e: cl_host::HostError) -> CompanyError {
+    match e {
+        cl_host::HostError::Desktop(cl_host::DesktopError::Invalid(_)) => {
+            CompanyError::Setup(vec![])
+        }
+        e => CompanyError::Io {
+            what: "first-run setup",
+            source: std::io::Error::other(e.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1148,6 +1171,33 @@ mod tests {
             );
         }
         out
+    }
+
+    /// A05 QA: a blank name or email at first run says so; the host's own
+    /// refusal of the answers reads as setup, not as a file problem.
+    #[test]
+    fn first_run_asks_for_a_name_and_email() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let mut s = OpenCompanyScreen::new(Arc::clone(&link));
+        s.password = "a long enough password".into();
+        s.confirm = s.password.clone();
+        s.start_first_run();
+        assert_eq!(s.notice.as_deref(), Some("Enter your name and email."));
+        assert!(matches!(s.error, Some(CompanyError::Setup(_))));
+        s.name = "Pat Owner".into();
+        s.email = "owner@example.com".into();
+        assert_eq!(s.first_run_problem(), None);
+        s.confirm = "something else entirely".into();
+        assert_eq!(s.first_run_problem(), Some("open.setup.password_mismatch"));
+        let refused = setup_error(cl_host::HostError::Desktop(cl_host::DesktopError::Invalid(
+            "an email address and a name are required".into(),
+        )));
+        assert!(matches!(refused, CompanyError::Setup(_)));
+        assert!(matches!(
+            setup_error(cl_host::HostError::NotRunning),
+            CompanyError::Io { .. }
+        ));
     }
 
     #[test]
