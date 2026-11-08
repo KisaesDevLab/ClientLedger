@@ -645,6 +645,33 @@ impl InboxState {
         }
     }
 
+    /// PR-A1 S2 (Q-PRA1c): the live draft `draft`, restored with the
+    /// company on this computer, holds the same bytes as its file
+    /// `file`: the arrival owns it and its current upload is that file
+    /// (its own upload is deleted next). False when it isn't an arrival
+    /// waiting for its claim.
+    pub fn adopted(
+        &mut self,
+        company: &str,
+        file: &FileIdentity,
+        draft: &str,
+        upload: &str,
+    ) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e)
+                if e.status == EntryStatus::Arrived
+                    && matches!(e.doc_draft, DraftLink::None | DraftLink::ClaimSent) =>
+            {
+                e.doc_draft = DraftLink::Own(draft.to_string());
+                if e.attachments.iter().all(|a| a != upload) {
+                    e.attachments.push(upload.to_string());
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Another computer's live draft `draft` holds the same bytes: the
     /// arrival becomes a `duplicate` that follows it (its own copy in the
     /// engine is deleted next; the entry and the seen hash stay). False
