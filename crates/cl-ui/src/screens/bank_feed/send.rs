@@ -90,6 +90,8 @@ pub(crate) struct Outcome {
     pub undone: usize,
     /// What each single-row accept was (the Accepted view's text).
     pub accepted_as: Vec<(FeedItemId, &'static str)>,
+    /// Receipts Undo put back in the review queue (A05).
+    pub reopened: usize,
 }
 
 impl Outcome {
@@ -129,6 +131,10 @@ impl Outcome {
         }
         let locked = o.locked();
         self.failed += o.failures.len() - locked.len();
+        // A05: a refused receipt says why (the row didn't post).
+        if let Some(f) = o.failures.iter().find(|f| f.is_receipt()) {
+            self.notice = Some(receipt_key(&f.code));
+        }
         if o.posted + o.matched > 0 {
             self.undo = Some((
                 UndoTarget::Group(o.undo_group),
@@ -186,9 +192,25 @@ impl Outcome {
                 Send::Undo(UndoTarget::Items(locked), *force),
             ));
         }
+        self.reopened += o.reopened_drafts.len();
         if self.done > 0 && self.notice.is_none() {
-            self.notice = Some("bank_feed.notice.undone");
+            // A05: the receipt went back to the review queue (U-180).
+            self.notice = Some(if o.reopened_drafts.is_empty() {
+                "bank_feed.notice.undone"
+            } else {
+                "bank_feed.notice.undone_receipt"
+            });
         }
+    }
+}
+
+/// The notice for a refused receipt (U-181).
+pub(crate) fn receipt_key(code: &str) -> &'static str {
+    match code {
+        AcceptFailure::DRAFT_CLOSED => "bank_feed.notice.receipt_used",
+        AcceptFailure::DRAFT_STALE => "bank_feed.notice.receipt_changed",
+        AcceptFailure::DRAFT_FILE_MISSING => "bank_feed.notice.receipt_file_missing",
+        _ => "bank_feed.notice.receipt_refused",
     }
 }
 

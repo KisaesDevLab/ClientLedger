@@ -16,6 +16,7 @@ fn input() -> WhyInput {
         transfer: false,
         has_account: true,
         entry_voided: false,
+        has_receipt: false,
     }
 }
 
@@ -65,6 +66,43 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
         ..rule
     };
     assert_eq!(why(voided, true), Why::EntryVoided);
+    // A05: a receipt shows over the proposal and over "Needs you", never
+    // over a match, a transfer, a duplicate or a voided entry.
+    let receipt = WhyInput {
+        has_receipt: true,
+        ..rule
+    };
+    assert_eq!(why(receipt, true), Why::Receipt);
+    assert_eq!(
+        why(
+            WhyInput {
+                has_account: false,
+                ..receipt
+            },
+            true
+        ),
+        Why::Receipt
+    );
+    assert_eq!(
+        why(
+            WhyInput {
+                has_receipt: true,
+                ..matched
+            },
+            true
+        ),
+        Why::Match
+    );
+    assert_eq!(
+        why(
+            WhyInput {
+                has_receipt: true,
+                ..dup
+            },
+            true
+        ),
+        Why::Duplicate
+    );
     assert_eq!(Source::parse(Some("fuzzy")), Source::History);
     assert_eq!(Source::parse(None), Source::None);
 }

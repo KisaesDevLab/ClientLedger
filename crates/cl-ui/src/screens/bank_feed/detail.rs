@@ -198,6 +198,8 @@ pub(crate) struct Detail {
     pub find: Option<String>,
     pub find_pick: usize,
     find_focus: bool,
+    /// A05: the receipt for the row.
+    pub receipt: super::receipts::Panel,
 }
 
 impl Detail {
@@ -452,6 +454,7 @@ pub(crate) fn follow(s: &mut BankFeedScreen) {
     };
     let why = s.why(&r);
     s.detail.reset(&r, why);
+    super::receipts::reset(s, id);
     if s.detail_request == Some(model::FeedAction::Split(id)) {
         enter_split(s);
     }
@@ -763,6 +766,7 @@ fn waiting(
         }
     });
     ui.add_space(6.0);
+    super::receipts::section(s, ui, tokens, r);
     let chart = s.chart.clone();
     let send = match s.detail.mode {
         Mode::Categorize => categorize_ui(s, ui, &chart, r),
@@ -771,6 +775,7 @@ fn waiting(
         Mode::Transfer => transfer_ui(s, ui, tokens, &chart, r),
         Mode::Deposit => deposit_ui(s, ui, tokens, &chart, r),
     };
+    let send = super::receipts::with_receipt(s, r, send);
     s.detail.ready.clone_from(&send);
     ui.add_space(10.0);
     ui.horizontal(|ui| {

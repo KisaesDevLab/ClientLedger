@@ -145,6 +145,9 @@ pub struct DocReviewScreen {
     problem: Option<&'static str>,
     /// Read all was running last frame.
     was_reading: bool,
+    /// A05: a Bank Feed accept or Undo files receipts or puts them back
+    /// (U-180, U-181): the queue reads its page again.
+    bus: crate::data_bus::Subscription,
 }
 
 impl std::fmt::Debug for DocReviewScreen {
@@ -164,7 +167,9 @@ impl DocReviewScreen {
         today: CalendarDate,
     ) -> DocReviewScreen {
         let group = link.group().and_then(Result::ok);
+        let bus = link.bus().subscribe();
         let mut s = DocReviewScreen {
+            bus,
             link,
             tenant,
             today,
@@ -705,6 +710,10 @@ impl Screen for DocReviewScreen {
         let tokens = Tokens::of(&ctx);
         self.poll();
         self.follow_reading(&ctx);
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.bank_feed || changes.ledger_any() {
+            self.loaded_at = None;
+        }
         if self.loaded_at.is_none_or(|at| at.elapsed() >= REFRESH) {
             self.reload();
         }

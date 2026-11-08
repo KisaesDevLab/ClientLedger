@@ -20,6 +20,7 @@
 
 pub mod bulk;
 pub mod detail;
+pub mod receipts;
 pub mod rules;
 pub mod send;
 pub mod view;
@@ -103,6 +104,8 @@ pub(crate) struct Loaded {
     last_import: Option<CalendarDate>,
     /// Waiting in every account (the rail badge).
     waiting_all: u64,
+    /// A05: live drafts to match (`None`: receipts are off).
+    drafts: Option<Vec<cl_api::DocumentDraft>>,
 }
 
 /// The Bank Feed window.
@@ -162,6 +165,8 @@ pub struct BankFeedScreen {
     pub(crate) load_failed: bool,
     /// The last action's message (i18n key and its count).
     pub(crate) notice: Option<(&'static str, usize)>,
+    /// A05: receipts in the review queue that match waiting lines.
+    pub(crate) receipts: receipts::Receipts,
 }
 
 impl std::fmt::Debug for BankFeedScreen {
@@ -221,6 +226,7 @@ impl BankFeedScreen {
             accepted_as: std::collections::BTreeMap::new(),
             load_failed: false,
             notice: None,
+            receipts: receipts::Receipts::default(),
         };
         s.read_meta();
         rules::read(&mut s);
@@ -346,6 +352,9 @@ impl BankFeedScreen {
         let account = self.current_account().and_then(|a| a.account);
         let connection = q.connection;
         let live = q.clone();
+        // Receipts are matched against waiting lines only.
+        let waiting = self.show == Show::Waiting && !self.view_only;
+        let tenant = self.tenant;
         self.loaded_at = Some(Instant::now());
         self.load = Some(run(
             &self.link,
@@ -365,9 +374,14 @@ impl BankFeedScreen {
                     page,
                     last_import: account.and_then(|a| demo::last_import(d, a)),
                     waiting_all: demo::waiting(d),
+                    drafts: if waiting {
+                        receipts::load_demo(d, tenant)
+                    } else {
+                        None
+                    },
                 })
             },
-            move |s| async move { live_load(s, live, accepted_too, account).await },
+            move |s| async move { live_load(s, live, accepted_too, account, waiting).await },
         ));
         self.poll();
     }
@@ -402,6 +416,8 @@ impl BankFeedScreen {
                     self.rows = l.page.rows;
                     self.last_import = l.last_import;
                     self.list.set_rows(self.rows.iter().map(|r| r.id).collect());
+                    self.receipts.take(l.drafts, &self.rows);
+                    receipts::refresh(self);
                     let n = u32::try_from(l.waiting_all).unwrap_or(u32::MAX);
                     self.link.push(CompanyEvent::BankFeedCount(n));
                 }
@@ -513,6 +529,7 @@ impl BankFeedScreen {
                         || r.match_type.as_deref() == Some("transfer")),
                 has_account: r.assigned_account.is_some() || r.suggested_account.is_some(),
                 entry_voided: r.entry_voided,
+                has_receipt: !self.receipts.of(r.id).is_empty(),
             },
             self.ai_on,
         )
@@ -561,7 +578,12 @@ impl BankFeedScreen {
         let why = self.why(&r);
         let has_account = r.assigned_account.is_some() || r.suggested_account.is_some();
         let x = match why {
-            Why::Match | Why::Transfer | Why::Duplicate | Why::NeedsYou | Why::EntryVoided => None,
+            Why::Match
+            | Why::Transfer
+            | Why::Duplicate
+            | Why::NeedsYou
+            | Why::EntryVoided
+            | Why::Receipt => None,
             _ if r.status == FeedStatus::Assigned => Some(send::Send::Categorize(id, None)),
             // As proposed through the one accept route, so a split a rule
             // staged posts as staged (P26 review m3).
@@ -667,6 +689,7 @@ fn incomplete_notice(why: Why) -> &'static str {
         Why::Transfer => "bank_feed.notice.pick_transfer",
         Why::Duplicate => "bank_feed.notice.pick_duplicate",
         Why::EntryVoided => "bank_feed.notice.pick_voided",
+        Why::Receipt => "bank_feed.notice.pick_receipt",
         _ => "bank_feed.notice.pick_account",
     }
 }
@@ -769,6 +792,7 @@ async fn live_load(
     q: FeedQuery,
     accepted_too: bool,
     account: Option<AccountId>,
+    waiting: bool,
 ) -> Result<Loaded, ApiError> {
     let mut q = q;
     if !s
@@ -802,11 +826,17 @@ async fn live_load(
             }),
         None => None,
     };
+    let drafts = if waiting {
+        receipts::load_live(&s).await
+    } else {
+        None
+    };
     Ok(Loaded {
         counts,
         page,
         last_import,
         waiting_all,
+        drafts,
     })
 }
 
@@ -841,6 +871,7 @@ impl Screen for BankFeedScreen {
         }
         self.act_on_keys();
         detail::follow(self);
+        receipts::follow(self, &ctx);
         if self.load.is_some() || self.meta.is_some() || self.act.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         } else {
@@ -887,6 +918,10 @@ impl Screen for BankFeedScreen {
         false
     }
 
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        receipts::document(self)
+    }
+
     fn keeps_text_key(&self, ctx: &egui::Context, s: cl_model::Shortcut) -> bool {
         // Ctrl+Insert / Ctrl+Delete reach the split and fee grids from
         // their amount and memo boxes.
@@ -907,6 +942,7 @@ impl Screen for BankFeedScreen {
             Why::Duplicate,
             Why::NeedsYou,
             Why::EntryVoided,
+            Why::Receipt,
         ] {
             badges.insert(w.as_str().into(), json!(0));
         }
@@ -947,6 +983,7 @@ impl Screen for BankFeedScreen {
             "notice": self.notice.map(|(k, _)| k),
             "detail": detail::state(self),
             "rules": rules::state(self),
+            "receipts": receipts::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),
             "undo_changed": self.confirm.as_ref().map(|c| c.1),
             "closing": self.closing.state_json(self.closing_supported),

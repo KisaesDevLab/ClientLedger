@@ -169,7 +169,8 @@ pub enum Why {
     NeedsYou,
     /// The linked entry was voided in the register (Q-P26u).
     EntryVoided,
-    /// A06/A05 hook: a receipt read for this bank line (nothing built).
+    /// A receipt in the review queue matches this bank line (A05, Q-A05a):
+    /// offered in the detail panel, never applied by itself.
     Receipt,
     /// Already accepted (Show › Accepted; P26 QA-8).
     Accepted,
@@ -277,6 +278,8 @@ pub struct WhyInput {
     pub has_account: bool,
     /// The linked entry was voided.
     pub entry_voided: bool,
+    /// A receipt in the review queue matches it (A05).
+    pub has_receipt: bool,
 }
 
 /// The badge for a row. `ai_on`: AI is set up and reachable; when it
@@ -295,6 +298,11 @@ pub fn why(i: WhyInput, ai_on: bool) -> Why {
     }
     if i.bucket == Some(Bucket::Matches) || i.match_candidates > 0 {
         return Why::Match;
+    }
+    // After Match: an entry already in the books is matched (the receipt
+    // goes with it), never posted again.
+    if i.has_receipt && i.bucket.is_some() {
+        return Why::Receipt;
     }
     if !i.has_account {
         return Why::NeedsYou;
