@@ -338,6 +338,17 @@ pub const COMMANDS: &[Command] = &[
     cmd("queue.open", "Open the Document", None, 9, key(Mods::NONE, Key::Enter), Scope::List),
     cmd("queue.discard", "Discard the Document\u{2026}", None, 9, key(Mods::NONE, Key::Delete), Scope::List),
     cmd("queue.read_all", "Read All Documents", None, 9, None, Scope::List),
+    // P26 Bank Feed review list (DESIGN.md keyboard map): its own scope so
+    // J/K never clash with the Review Documents queue.
+    cmd("feed.next", "Next Bank Line", None, 10, key(Mods::NONE, Key::Letter('J')), Scope::Feed),
+    cmd("feed.prev", "Previous Bank Line", None, 10, key(Mods::NONE, Key::Letter('K')), Scope::Feed),
+    cmd("feed.next_arrow", "Next Bank Line", None, 10, key(Mods::NONE, Key::Down), Scope::Feed),
+    cmd("feed.prev_arrow", "Previous Bank Line", None, 10, key(Mods::NONE, Key::Up), Scope::Feed),
+    cmd("feed.select", "Select the Bank Line", None, 10, key(Mods::NONE, Key::Space), Scope::Feed),
+    cmd("feed.accept", "Accept the Bank Line", None, 10, key(Mods::NONE, Key::Letter('A')), Scope::Feed),
+    cmd("feed.split", "Split the Bank Line", None, 10, key(Mods::NONE, Key::Letter('S')), Scope::Feed),
+    cmd("feed.rule", "Make a Rule From the Bank Line", None, 10, key(Mods::NONE, Key::Letter('R')), Scope::Feed),
+    cmd("feed.accept_selected", "Accept Selected Bank Lines", None, 10, key(Mods::CMD, Key::Enter), Scope::Feed),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),

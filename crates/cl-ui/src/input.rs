@@ -24,6 +24,11 @@ pub fn key_from_egui(key: egui::Key) -> Option<Key> {
         // map too but bind nothing, so grids and text fields keep them.
         E::ArrowLeft => Key::Left,
         E::ArrowRight => Key::Right,
+        // P26: only the Bank Feed list binds Up, Down and Space; grids and
+        // text fields keep them everywhere else.
+        E::ArrowUp => Key::Up,
+        E::ArrowDown => Key::Down,
+        E::Space => Key::Space,
         E::Num0 => Key::Digit(0),
         E::Num1 => Key::Digit(1),
         E::Num2 => Key::Digit(2),
@@ -107,7 +112,12 @@ pub fn reserved_by_text_fields(s: Shortcut) -> bool {
 /// typing too.
 #[must_use]
 pub fn typed_by_text_fields(s: Shortcut) -> bool {
-    !s.mods.command && !s.mods.alt && matches!(s.key, Key::Letter(_) | Key::Enter)
+    !s.mods.command
+        && !s.mods.alt
+        && matches!(
+            s.key,
+            Key::Letter(_) | Key::Enter | Key::Space | Key::Up | Key::Down
+        )
 }
 
 /// True when the platform uses Cmd and Option names.
@@ -162,10 +172,14 @@ mod tests {
     fn arrows_map_and_letters_type_in_text_fields() {
         assert_eq!(key_from_egui(egui::Key::ArrowLeft), Some(Key::Left));
         assert_eq!(key_from_egui(egui::Key::ArrowRight), Some(Key::Right));
-        // Up and Down stay with grids (no command uses them).
-        assert_eq!(key_from_egui(egui::Key::ArrowUp), None);
-        assert_eq!(key_from_egui(egui::Key::ArrowDown), None);
+        // Up, Down and Space map (the Bank Feed list binds them) and a text
+        // field keeps them.
+        assert_eq!(key_from_egui(egui::Key::ArrowUp), Some(Key::Up));
+        assert_eq!(key_from_egui(egui::Key::ArrowDown), Some(Key::Down));
+        assert_eq!(key_from_egui(egui::Key::Space), Some(Key::Space));
         for s in [
+            Shortcut::new(Mods::NONE, Key::Space),
+            Shortcut::new(Mods::NONE, Key::Down),
             Shortcut::new(Mods::NONE, Key::Letter('J')),
             Shortcut::new(Mods::SHIFT, Key::Letter('K')),
             Shortcut::new(Mods::NONE, Key::Enter),

@@ -114,6 +114,20 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Enter` | Open the Document | `queue.open` |
 | `Delete` | Discard the Document… | `queue.discard` |
 
+## In the Bank Feed
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `J` | Next Bank Line | `feed.next` |
+| `K` | Previous Bank Line | `feed.prev` |
+| `Down` | Next Bank Line | `feed.next_arrow` |
+| `Up` | Previous Bank Line | `feed.prev_arrow` |
+| `Space` | Select the Bank Line | `feed.select` |
+| `A` | Accept the Bank Line | `feed.accept` |
+| `S` | Split the Bank Line | `feed.split` |
+| `R` | Make a Rule From the Bank Line | `feed.rule` |
+| `Ctrl+Enter` | Accept Selected Bank Lines | `feed.accept_selected` |
+
 ## Always the same in forms and grids
 
 | Keys | Action |
@@ -161,7 +175,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 
 | Keys | Action |
 | --- | --- |
-| `J / K` | Move down / up |
+| `J / K, Down / Up` | Move down / up |
 | `Space` | Select the row |
 | `A` | Accept |
 | `S` | Split |
