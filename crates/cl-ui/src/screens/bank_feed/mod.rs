@@ -91,7 +91,9 @@ pub(crate) struct Meta {
 pub(crate) struct Toast {
     pub target: UndoTarget,
     pub rows: usize,
-    pub at: Instant,
+    /// How long it has been on screen (time behind another tab doesn't
+    /// count, P26 QA-4).
+    pub shown: Duration,
 }
 
 /// One read of the list.
@@ -419,7 +421,7 @@ impl BankFeedScreen {
             self.toast = Some(Toast {
                 target,
                 rows,
-                at: Instant::now(),
+                shown: Duration::ZERO,
             });
         }
         self.notice = if o.view_only {
@@ -441,6 +443,11 @@ impl BankFeedScreen {
         };
         if o.done > 0 {
             self.link.bus().publish(crate::data_bus::Change::BankFeed);
+            // Accepts and Undo post or remove entries: open registers and the
+            // Chart of Accounts read their balances again (P26 QA-5).
+            self.link
+                .bus()
+                .publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
             // The panel reads its row again (candidates, payments).
             self.detail.row = None;
         }

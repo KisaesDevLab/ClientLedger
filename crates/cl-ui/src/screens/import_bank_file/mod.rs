@@ -1372,6 +1372,12 @@ impl Screen for ImportBankFileScreen {
         self.loaded.is_some() && self.step != Step::Done
     }
 
+    /// Nothing here is saved; the prompt asks only whether to close (P26
+    /// QA-12).
+    fn can_save(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.poll();
         if self.busy() {

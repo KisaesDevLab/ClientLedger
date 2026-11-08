@@ -1533,15 +1533,20 @@ impl ImportBankFileScreen {
             // Q-P25c (owner 2026-11-07): a look-alike is added with a flag,
             // never skipped; the Bank Feed shows it as a possible duplicate.
             ImportRowStatus::PossibleDuplicate => {
-                let text = res.existing_imported_at.map_or_else(
-                    || t("bankimport.status.possible"),
-                    |at| {
-                        t_with(
-                            "bankimport.status.possible_on",
-                            &[("date", &local_date(at))],
-                        )
-                    },
-                );
+                // The look-alike's bank date, as the owner knows it (P26
+                // QA-21); the import date only when the engine sent no
+                // bank date.
+                let text = match (res.existing_date, res.existing_imported_at) {
+                    (Some(d), _) => t_with(
+                        "bankimport.status.possible_dated",
+                        &[("date", &crate::shell::us_date(d))],
+                    ),
+                    (None, Some(at)) => t_with(
+                        "bankimport.status.possible_on",
+                        &[("date", &local_date(at))],
+                    ),
+                    (None, None) => t("bankimport.status.possible"),
+                };
                 chip(ui, tokens, &text, false);
             }
             // Q-P25af, R2-2: a changed row is answered in the card above

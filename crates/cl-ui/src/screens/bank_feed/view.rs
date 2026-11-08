@@ -797,15 +797,17 @@ fn rule_banner(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     }
 }
 
-/// How long the Undo toast stays.
-const TOAST_FOR: std::time::Duration = std::time::Duration::from_secs(12);
+/// How long the Undo toast stays on screen (until the next action at most).
+const TOAST_FOR: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The Undo toast after an accept (Q-P26h): "n accepted · Undo".
 fn toast(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
-    let Some(x) = &s.toast else {
+    let dt = ui.input(|i| i.stable_dt).min(1.0);
+    let Some(x) = s.toast.as_mut() else {
         return;
     };
-    if x.at.elapsed() >= TOAST_FOR {
+    x.shown += std::time::Duration::from_secs_f32(dt.max(0.0));
+    if x.shown >= TOAST_FOR {
         s.toast = None;
         return;
     }

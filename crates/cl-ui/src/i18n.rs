@@ -258,6 +258,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("window.prompt.save", "Save"),
     ("window.prompt.discard", "Discard changes"),
     ("window.prompt.keep", "Keep editing"),
+    ("window.prompt.message_unsent", "\"{title}\" has a file that wasn't sent to the Bank Feed yet. Close it anyway?"),
+    ("window.prompt.close_anyway", "Close anyway"),
     // Status bar
     ("status.not_signed_in", "Not signed in"),
     ("status.engine.starting", "Books engine: starting"),

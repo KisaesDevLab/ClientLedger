@@ -1566,27 +1566,40 @@ impl Shell {
             .windows
             .get(prompt.window)
             .is_some_and(crate::windows::Window::save_unconfirmed);
+        let can_save = self
+            .windows
+            .get(prompt.window)
+            .is_none_or(crate::windows::Window::can_save);
         let mut answer: Option<PromptAnswer> = None;
         egui::Window::new(t("window.prompt.title"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(if unconfirmed {
+                ui.label(if !can_save {
+                    crate::i18n::t_with("window.prompt.message_unsent", &[("title", &title)])
+                } else if unconfirmed {
                     crate::windows::prompt_message_unconfirmed(&title)
                 } else {
                     crate::windows::prompt_message(&title)
                 });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
-                    if focus_save {
-                        save.request_focus();
+                    if can_save {
+                        let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
+                        if focus_save {
+                            save.request_focus();
+                        }
+                        if save.clicked() {
+                            answer = Some(PromptAnswer::Save);
+                        }
                     }
-                    if save.clicked() {
-                        answer = Some(PromptAnswer::Save);
-                    }
-                    if ui.button(t("window.prompt.discard")).clicked() {
+                    let discard = if can_save {
+                        "window.prompt.discard"
+                    } else {
+                        "window.prompt.close_anyway"
+                    };
+                    if ui.button(t(discard)).clicked() {
                         answer = Some(PromptAnswer::Discard);
                     }
                     if ui.button(t("window.prompt.keep")).clicked() {
