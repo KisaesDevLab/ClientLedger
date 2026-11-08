@@ -277,4 +277,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.notice.receipt_changed", "That receipt changed since you opened it. Nothing was recorded; look at it again, then accept."),
     ("bank_feed.notice.receipt_file_missing", "That receipt's file is missing. Nothing was recorded; accept without it or add the file again."),
     ("bank_feed.notice.receipt_refused", "That document can't be attached to a bank line. Nothing was recorded; accept without it."),
+    // PR-A1 B1 (Q-PRA1b): a receipt that may already be entered.
+    ("bank_feed.notice.receipt_duplicate", "That receipt looks like something already in your books. Nothing was recorded; check the Receipt section, then use it anyway or accept without it."),
+    ("bank_feed.receipt.maybe_entered", "May already be entered: {what} of {date}"),
+    ("bank_feed.receipt.entry.bill", "a bill"),
+    ("bank_feed.receipt.entry.expense", "an expense"),
+    ("bank_feed.receipt.entry.other", "an entry"),
+    ("bank_feed.receipt.duplicate_warning", "This receipt may already be in your books ({list}). Using it here could record the same purchase twice."),
+    ("bank_feed.receipt.use_anyway", "Use it anyway"),
+    ("bank_feed.receipt.use_anyway.tip", "Record this bank line with the receipt even though something like it is already entered. This is noted in the audit trail."),
+    ("bank_feed.receipt.used_anyway", "You chose to use this receipt anyway. Accept records the bank line with it."),
 ];

@@ -129,3 +129,31 @@ steps:
   - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
   - assert_exists: {role: radio_button, label_contains: "credit · Ref R-1042"}
   - screenshot: receipt-credit
+
+  # --- 9. PR-A1 B1: a receipt of a bill already entered ------------------------
+  # The owner entered the bill by hand; the vendor's receipt of it is waiting.
+  # It is offered unpicked with "May already be entered"; picked, Accept waits
+  # for "Use it anyway", then posts once with the receipt.
+  - command: dev.demo_feed_receipt_dup
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.receipts.offers, equals: 1}
+  - assert_state: {key: screen.receipts.flagged, equals: 1, within_ms: 5000}
+  - assert_state: {key: screen.receipts.held, equals: true}
+  - assert_state: {key: screen.receipts.picked, equals: false}
+  - assert_exists: {label_contains: "May already be entered: a bill of"}
+  - screenshot: receipt-maybe-entered
+  - click: {role: radio_button, label_contains: "Ref R-1042"}
+  - assert_state: {key: screen.receipts.picked, equals: true}
+  - assert_exists: {role: button, label: Use it anyway}
+  - assert_exists: {label_contains: "could record the same purchase twice"}
+  - screenshot: receipt-use-anyway
+  - click: {role: button, label: Use it anyway}
+  - assert_state: {key: screen.receipts.use_anyway, equals: true}
+  - assert_state: {key: screen.receipts.read, equals: true, within_ms: 5000}
+  - key: A
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 1}
+  - assert_state: {key: screen.receipts.drafts, equals: 0}
+  - click: {role: button, label: Undo}
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 0}

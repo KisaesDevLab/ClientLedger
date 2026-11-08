@@ -609,6 +609,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_feed_receipt_credit",
         "Add a Demo Credit Memo for a Money-In Bank Feed Line (developer)",
     ),
+    dev_action(
+        "dev.demo_feed_receipt_dup",
+        "Add a Demo Receipt of a Bill Already Entered for a Bank Feed Line (developer)",
+    ),
     dev_action("dev.demo_ai_off", "Turn Off Demo AI (developer)"),
     dev_action(
         "dev.demo_feed_reset",

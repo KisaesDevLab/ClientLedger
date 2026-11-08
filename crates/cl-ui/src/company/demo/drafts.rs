@@ -1383,6 +1383,55 @@ pub(crate) fn feed_draft_ready(
     Ok(())
 }
 
+/// PR-A1 B1 (`feed-accept-draft-duplicates-v1`), after the row posted
+/// `posted` and before the receipt is filed: the convert's duplicate check
+/// on the posted row (the vendor posted, else the receipt's; the
+/// receipt's reference; the bank amount and date). The matches the owner
+/// didn't acknowledge, on the wire as the engine reports them
+/// (`{transactionId, type, date, total, reference}`); empty: file it.
+pub(crate) fn feed_duplicates(
+    state: &mut DemoState,
+    tenant: TenantId,
+    link: &cl_api::DraftLink,
+    vendor: Option<ContactId>,
+    total: Money,
+    date: CalendarDate,
+    posted: Option<TransactionId>,
+) -> Vec<Value> {
+    let Some(d) = state.drafts.find(tenant, link.id).map(|r| r.draft.clone()) else {
+        return Vec::new();
+    };
+    let probe = Probe {
+        vendor: vendor.or(d.suggested_contact_id),
+        reference: d.doc_reference.clone(),
+        total: Some(total),
+        date: Some(date),
+        except_txn: posted,
+        except_draft: Some(d.id),
+    };
+    let found = transaction_matches(state, &probe);
+    let open = found.iter().any(|m| match m.source {
+        MatchSource::Transaction(t) => !link.acknowledged_duplicates.contains(&t),
+        MatchSource::Draft(_) => false,
+    });
+    if !open {
+        return Vec::new();
+    }
+    found
+        .iter()
+        .filter_map(|m| match m.source {
+            MatchSource::Transaction(t) => Some(json!({
+                "transactionId": t.to_string(),
+                "type": m.txn_type,
+                "date": m.date.map(CalendarDate::to_wire),
+                "total": m.total.map(Money::to_wire),
+                "reference": m.reference,
+            })),
+            MatchSource::Draft(_) => None,
+        })
+        .collect()
+}
+
 /// U-181, after the row posted or matched: the draft's file goes onto
 /// `transaction` and the draft closes (as an attach), in the same step.
 /// Checked first with [`feed_draft_ready`].
