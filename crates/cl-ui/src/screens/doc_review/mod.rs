@@ -711,7 +711,7 @@ impl Screen for DocReviewScreen {
         self.poll();
         self.follow_reading(&ctx);
         let changes = self.link.bus().take(&mut self.bus);
-        if changes.bank_feed || changes.ledger_any() {
+        if changes.bank_feed {
             self.loaded_at = None;
         }
         if self.loaded_at.is_none_or(|at| at.elapsed() >= REFRESH) {
