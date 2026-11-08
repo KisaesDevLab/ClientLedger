@@ -1,4 +1,4 @@
 [submodule "engine"]
 	path = engine
-	url = https://github.com/KisaesDevLab/Vibe-MyBooks.git
+	url = https://github.com/KisaesDevLab/kisaes-gl-engine.git
 	branch = main

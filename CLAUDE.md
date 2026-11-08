@@ -104,7 +104,7 @@ ClientLedger/
 ├── Cargo.toml                # workspace
 ├── deny.toml                 # cargo-deny license allowlist + advisories + bans
 ├── rust-toolchain.toml
-├── engine/                   # git submodule: public MyBooks engine repo (pinned tag); commercial license included with ClientLedger (Q-316)
+├── engine/                   # git submodule: public engine repo KisaesDevLab/kisaes-gl-engine (pinned commit; ADD-07); commercial license included with ClientLedger (Q-316)
 ├── crates/
 │   ├── cl-core/              # shared types: Money, ids, dates, fiscal calendars, errors (no I/O)
 │   ├── cl-api/               # typed client for the local engine API + contract tests
