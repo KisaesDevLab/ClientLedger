@@ -230,6 +230,10 @@ pub use resources::feed_review::{
     TransferCandidate, TransferHint, TransferTarget, feed_counts_from, feed_page_from,
     feed_refusal, is_stale_row, is_view_only,
 };
+pub use resources::feed_rules::{
+    FeedRule, FeedRules, RuleSign, RuleSuggestion, feed_rule_body, feed_rules_from,
+    rule_suggestions_from,
+};
 
 // P14 lane B: daily sales.
 pub use resources::daily_sales::{

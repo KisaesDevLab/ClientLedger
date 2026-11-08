@@ -178,7 +178,24 @@ fn post(
         own_debit: !money_out,
         lines,
     };
-    state.ledger.save(&chart, &p, None).ok_or_else(invalid)
+    let t = state.ledger.save(&chart, &p, None).ok_or_else(invalid)?;
+    if let [(account, _)] = p.lines.as_slice() {
+        let key = (pattern_of(&r.description), *account);
+        state.feed_review.learned.entry(key.clone()).or_default().0 += 1;
+        state.feed_review.taught.insert(r.id, key);
+    }
+    Ok(t)
+}
+
+/// The description words before the first one with a digit (the demo's
+/// payee pattern; owner data, never logged).
+fn pattern_of(description: &str) -> String {
+    description
+        .split_whitespace()
+        .take_while(|w| !w.chars().any(|c| c.is_ascii_digit()))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `PUT /banking/feed/:id/categorize` (and approve with `None`): posts the
@@ -850,6 +867,9 @@ pub fn undo(
             }
         }
         let group = r.group.unwrap_or_else(UndoGroupId::new_random);
+        if let Some(key) = state.feed_review.taught.remove(&r.id) {
+            state.feed_review.learned.entry(key).or_default().1 += 1;
+        }
         restore(state, r.id);
         out.undone.push(Undone {
             id: r.id,
@@ -976,6 +996,152 @@ pub fn mark_duplicate(state: &mut DemoState) -> bool {
     true
 }
 
+/// The rule list (`GET /practice/conditional-rules`): the sample's payee
+/// rules, then the owner's.
+#[must_use]
+pub fn rules(state: &mut DemoState) -> Vec<cl_api::FeedRule> {
+    super::refresh(state);
+    let review = &mut state.feed_review;
+    if review.rules.is_none() {
+        let mut out: Vec<cl_api::FeedRule> = Vec::new();
+        for r in &review.rows {
+            let (Some(rule), Some(account)) = (&r.rule, &r.suggested) else {
+                continue;
+            };
+            if out
+                .iter()
+                .any(|x| x.id.as_deref() == Some(rule.id.as_str()))
+            {
+                continue;
+            }
+            out.push(cl_api::FeedRule {
+                id: Some(rule.id.clone()),
+                name: rule.name.clone(),
+                active: true,
+                auto_accept: rule.auto_accept,
+                updated_at: rule.updated_at.clone(),
+                description: Some(pattern_of(&r.description)),
+                sign: if r.amount.is_positive() {
+                    cl_api::RuleSign::MoneyOut
+                } else {
+                    cl_api::RuleSign::MoneyIn
+                },
+                account: Some(account.id),
+                simple: true,
+                ..cl_api::FeedRule::default()
+            });
+        }
+        review.rules = Some(out);
+    }
+    review.rules.clone().unwrap_or_default()
+}
+
+#[allow(clippy::single_match_else, reason = "replace or create")]
+/// Creates or replaces a rule; a change makes a new change token, and the
+/// rows the rule staged follow (name, auto-accept, token).
+///
+/// # Errors
+/// 403 for a view-only user; the body's checks; `NotFound`.
+pub fn save_rule(state: &mut DemoState, rule: &cl_api::FeedRule) -> Result<(), ApiError> {
+    if state.feed_review.view_only {
+        return Err(ApiError::Forbidden { code: None });
+    }
+    cl_api::feed_rule_body(rule)?;
+    let _ = rules(state);
+    let review = &mut state.feed_review;
+    review.rule_edits += 1;
+    let token = format!("2026-11-04T10:{:02}:00.000Z", review.rule_edits % 60);
+    let mut saved = rule.clone();
+    saved.updated_at = Some(token);
+    saved.simple = true;
+    let list = review.rules.get_or_insert_with(Vec::new);
+    match &rule.id {
+        Some(id) => {
+            let at = list
+                .iter()
+                .position(|x| x.id.as_ref() == Some(id))
+                .ok_or(ApiError::NotFound { code: None })?;
+            list[at] = saved.clone();
+        }
+        None => {
+            saved.id = Some(format!("d26b0000-0000-4000-8000-{:012}", review.rule_edits));
+            list.push(saved.clone());
+        }
+    }
+    for r in &mut review.rows {
+        if let Some(x) = r.rule.as_mut().filter(|x| Some(&x.id) == saved.id.as_ref()) {
+            x.name.clone_from(&saved.name);
+            x.auto_accept = saved.auto_accept;
+            x.updated_at.clone_from(&saved.updated_at);
+        }
+    }
+    Ok(())
+}
+
+/// Deletes a rule (its rows keep their suggestion, without the rule).
+///
+/// # Errors
+/// 403; `NotFound`.
+pub fn delete_rule(state: &mut DemoState, id: &str) -> Result<(), ApiError> {
+    if state.feed_review.view_only {
+        return Err(ApiError::Forbidden { code: None });
+    }
+    let _ = rules(state);
+    let review = &mut state.feed_review;
+    let list = review.rules.get_or_insert_with(Vec::new);
+    let before = list.len();
+    list.retain(|x| x.id.as_deref() != Some(id));
+    if list.len() == before {
+        return Err(ApiError::NotFound { code: None });
+    }
+    for r in &mut review.rows {
+        if r.rule.as_ref().is_some_and(|x| x.id == id) {
+            r.rule = None;
+        }
+    }
+    Ok(())
+}
+
+/// Rule suggestions (Q-P26k): a description and account the owner chose
+/// at least 5 times, overridden (Undo counts) under 10% of the time, with
+/// no rule for it yet and not dismissed.
+#[must_use]
+pub fn rule_suggestions(state: &mut DemoState) -> Vec<cl_api::RuleSuggestion> {
+    let _ = rules(state);
+    let chart = super::super::chart();
+    let review = &state.feed_review;
+    review
+        .learned
+        .iter()
+        .filter(|((p, a), (yes, no))| {
+            *yes >= 5
+                && u64::from(*no) * 10 < u64::from(*yes + *no)
+                && !review.dismissed.contains(&(p.clone(), *a))
+                && !review.rules.as_ref().is_some_and(|rs| {
+                    rs.iter()
+                        .any(|x| x.description.as_deref() == Some(p.as_str()))
+                })
+        })
+        .map(|((p, a), (yes, _))| cl_api::RuleSuggestion {
+            payee_pattern: p.clone(),
+            account: *a,
+            account_name: chart
+                .iter()
+                .find(|x| x.id == *a)
+                .map(|x| x.fields.name.clone())
+                .unwrap_or_default(),
+            times_confirmed: *yes,
+        })
+        .collect()
+}
+
+/// Never suggests this one again.
+pub fn dismiss_suggestion(state: &mut DemoState, s: &cl_api::RuleSuggestion) {
+    state
+        .feed_review
+        .dismissed
+        .insert((s.payee_pattern.clone(), s.account));
+}
 /// Developer: the sample's next bank file (after 11/03) arrives in the
 /// review, as an import would bring it (its 11/04 deposit of the two
 /// waiting payments). Once.

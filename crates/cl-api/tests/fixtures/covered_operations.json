@@ -352,5 +352,11 @@
   {"method":"GET","path":"/api/v1/banking/connections","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/banking/feed/accept","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/banking/feed/accept-groups/{id}","inSpec":true,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/banking/feed/undo","inSpec":true,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/banking/feed/undo","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/practice/conditional-rules","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/practice/conditional-rules","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/practice/conditional-rules/{id}","inSpec":true,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/practice/conditional-rules/{id}","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/practice/conditional-rules/suggestions","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/practice/conditional-rules/suggestions/dismiss","inSpec":true,"fragmentHash":null}
 ]

@@ -1589,6 +1589,25 @@ pub(crate) const FEED_UNDO: Operation = keyable_in(
     Method::Post,
     "/api/v1/banking/feed/undo",
 );
+/// The Bank Feed rules (conditional rules; P26 DI-2).
+pub(crate) const FEED_RULE_LIST: Operation = read("/api/v1/practice/conditional-rules");
+/// Creates a rule.
+pub(crate) const FEED_RULE_CREATE: Operation =
+    write(Method::Post, "/api/v1/practice/conditional-rules");
+/// Replaces a rule.
+pub(crate) const FEED_RULE_UPDATE: Operation =
+    write(Method::Put, "/api/v1/practice/conditional-rules/{id}");
+/// Deletes a rule.
+pub(crate) const FEED_RULE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/practice/conditional-rules/{id}");
+/// Rules suggested from repeated choices (Q-141, Q-P26k).
+pub(crate) const FEED_RULE_SUGGESTIONS: Operation =
+    read("/api/v1/practice/conditional-rules/suggestions");
+/// Dismisses a rule suggestion.
+pub(crate) const FEED_RULE_SUGGESTION_DISMISS: Operation = write(
+    Method::Post,
+    "/api/v1/practice/conditional-rules/suggestions/dismiss",
+);
 /// The linked bank accounts (one connection per account a bank file was
 /// imported into).
 pub(crate) const BANK_CONNECTIONS: Operation = read("/api/v1/banking/connections");
@@ -1613,7 +1632,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 354] = [
+pub const OPERATIONS: [Operation; 360] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1983,6 +2002,12 @@ pub const OPERATIONS: [Operation; 354] = [
     FEED_ACCEPT,
     FEED_ACCEPT_GROUP,
     FEED_UNDO,
+    FEED_RULE_LIST,
+    FEED_RULE_CREATE,
+    FEED_RULE_UPDATE,
+    FEED_RULE_DELETE,
+    FEED_RULE_SUGGESTIONS,
+    FEED_RULE_SUGGESTION_DISMISS,
 ];
 
 /// Looks up a covered operation.

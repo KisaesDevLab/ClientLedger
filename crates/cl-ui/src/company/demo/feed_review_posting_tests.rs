@@ -221,7 +221,7 @@ fn accept_selection_skips_and_locks_then_posts_with_the_password() {
     .expect("ready")
     .rows
     .into_iter()
-    .filter(|r| r.suggested_account.is_some())
+    .filter(|r| r.suggested_account.is_some() && r.match_type.as_deref() != Some("transfer"))
     .collect();
     // Close the books through 11/01: rows of 11/01 are locked.
     s.companies[0].closed_through = CalendarDate::from_ymd(2026, 11, 1).ok();
@@ -386,4 +386,102 @@ fn duplicates_keep_both_or_remove_this_one() {
         cl_api::feed_refusal(&e),
         Some(cl_api::FeedRefusal::NotAPossibleDuplicate)
     );
+}
+
+#[test]
+fn rules_edit_and_the_rows_follow() {
+    let mut s = state();
+    let list = rules(&mut s);
+    let fuel = list
+        .iter()
+        .find(|r| r.name == "Riverbend Fuel")
+        .cloned()
+        .expect("fuel rule");
+    assert!(fuel.auto_accept && fuel.simple);
+    let off = cl_api::FeedRule {
+        auto_accept: false,
+        ..fuel.clone()
+    };
+    save_rule(&mut s, &off).expect("saved");
+    let row = find(&mut s, "RIVERBEND FUEL");
+    let staged = row.suggested_rule.expect("still staged");
+    assert!(!staged.auto_accept);
+    assert_ne!(staged.updated_at, fuel.updated_at, "a new change token");
+    // The old token is refused (409 RULE_CHANGED), as on the engine.
+    let e = accept(
+        &mut s,
+        &AcceptRequest::Rule(cl_api::RuleAccept {
+            rule_id: fuel.id.clone().expect("id"),
+            kind: "conditional".into(),
+            updated_at: fuel.updated_at.clone().expect("t"),
+            connection: None,
+            after: None,
+        }),
+        None,
+    )
+    .expect_err("not auto-accept now");
+    assert!(cl_api::feed_refusal(&e).is_some());
+    let new = cl_api::FeedRule {
+        id: None,
+        name: "Tolls".into(),
+        description: Some("TOLL".into()),
+        ..off
+    };
+    save_rule(&mut s, &new).expect("created");
+    assert_eq!(rules(&mut s).len(), list.len() + 1);
+    delete_rule(&mut s, fuel.id.as_deref().expect("id")).expect("deleted");
+    assert!(find(&mut s, "RIVERBEND FUEL").suggested_rule.is_none());
+}
+
+#[test]
+fn five_same_choices_suggest_a_rule_and_undo_counts_against() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    categorize(&mut s, fuel.id, None, None).expect("posted");
+    let key = s.feed_review.taught.get(&fuel.id).cloned().expect("taught");
+    s.feed_review.learned.insert(key.clone(), (5, 0));
+    // The fuel rule already covers it: no suggestion.
+    assert_eq!(rule_suggestions(&mut s).len(), 0);
+    let _ = rules(&mut s);
+    delete_rule(&mut s, fuel.suggested_rule.expect("rule").id.as_str()).expect("deleted");
+    let offered = rule_suggestions(&mut s);
+    assert_eq!(offered.len(), 1);
+    assert_eq!(offered[0].times_confirmed, 5);
+    // One Undo is an override: 1 in 6 is above 10%.
+    undo(&mut s, &UndoTarget::Items(vec![fuel.id]), false, None).expect("undo");
+    assert_eq!(rule_suggestions(&mut s).len(), 0);
+    s.feed_review.learned.insert(key, (12, 1));
+    let offered = rule_suggestions(&mut s);
+    dismiss_suggestion(&mut s, &offered[0]);
+    assert_eq!(rule_suggestions(&mut s).len(), 0);
+}
+
+#[test]
+fn a_transfer_posts_one_entry_and_undo_deletes_it() {
+    let mut s = state();
+    let before = entries(&s);
+    let card = find(&mut s, "BUSINESS CREDIT CARD");
+    assert_eq!(card.match_type.as_deref(), Some("transfer"));
+    let to = card.suggested_account.as_ref().expect("card account").id;
+    let p = transfer(&mut s, card.id, TransferTarget::Account(to), None).expect("transfer");
+    assert_eq!(entries(&s), before + 1);
+    let e = undo(
+        &mut s,
+        &UndoTarget::Group(p.undo_group.expect("g")),
+        false,
+        None,
+    )
+    .expect("undo");
+    assert!(e.undone[0].deleted);
+    assert_eq!(entries(&s), before);
+    let own = crate::company::demo::chart()
+        .into_iter()
+        .find(|a| a.fields.account_number.as_deref() == Some("1010"))
+        .expect("1010")
+        .id;
+    let same = transfer(&mut s, card.id, TransferTarget::Account(own), None);
+    assert!(matches!(
+        same.as_ref().map_err(cl_api::feed_refusal),
+        Err(Some(cl_api::FeedRefusal::TransferMismatch { .. }))
+    ));
 }

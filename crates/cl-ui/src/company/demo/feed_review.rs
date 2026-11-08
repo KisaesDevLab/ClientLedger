@@ -161,6 +161,17 @@ pub struct DemoFeedReview {
     pub conflict_next: bool,
     /// Accept groups: what each accept took in (Undo takes it back).
     groups: BTreeMap<UndoGroupId, Vec<FeedItemId>>,
+    /// The rules as edited in the demo (seeded from the rows' rules).
+    rules: Option<Vec<cl_api::FeedRule>>,
+    /// Rule edits so far (each makes a new change token).
+    rule_edits: u32,
+    /// What the owner chose per description and account: (accepted,
+    /// overridden) (Q-P26k; Undo counts as an override).
+    learned: BTreeMap<(String, AccountId), (u32, u32)>,
+    /// The choice each categorized row taught (for Undo).
+    taught: BTreeMap<FeedItemId, (String, AccountId)>,
+    /// Suggestions the owner dismissed.
+    dismissed: std::collections::BTreeSet<(String, AccountId)>,
 }
 
 fn id(prefix: &str, n: u64) -> FeedItemId {
@@ -195,7 +206,7 @@ fn suggestion_for(description: &str) -> Option<(&'static str, &'static str)> {
         ("BLUE EYE LUMBER", "5090", "Blue Eye Lumber"),
         ("OAK GROVE UNIFORMS", "5200", "Oak Grove Uniforms"),
         ("MOUNTAIN SOFTWARE", "6250", "Mountain Software Co"),
-        ("BUSINESS CREDIT CARD", "2100", "Business Credit Card"),
+        ("BUSINESS CREDIT CARD", "2050", "Business Credit Card"),
         ("PERSIMMON HILL", "5100", "Persimmon Hill Plants"),
         ("PMT-INV", "4000", ""),
         ("RIDGE TOOL RENTAL", "6350", "Ridge Tool Rental"),

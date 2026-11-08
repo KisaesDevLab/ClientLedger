@@ -428,3 +428,9 @@ GET     /api/v1/banking/connections         idempotent
 POST    /api/v1/banking/feed/accept             keyable-feed-accept
 GET     /api/v1/banking/feed/accept-groups/{id} idempotent
 POST    /api/v1/banking/feed/undo               keyable-feed-undo
+GET     /api/v1/practice/conditional-rules     idempotent
+POST    /api/v1/practice/conditional-rules     pre-handler-only
+PUT     /api/v1/practice/conditional-rules/{id} pre-handler-only
+DELETE  /api/v1/practice/conditional-rules/{id} pre-handler-only
+GET     /api/v1/practice/conditional-rules/suggestions idempotent
+POST    /api/v1/practice/conditional-rules/suggestions/dismiss pre-handler-only

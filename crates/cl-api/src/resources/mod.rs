@@ -28,6 +28,7 @@ pub mod export;
 pub mod feed;
 pub mod feed_accept;
 pub mod feed_review;
+pub mod feed_rules;
 pub mod finance_charges;
 pub mod form1099;
 pub mod home_queries;
