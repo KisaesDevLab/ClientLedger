@@ -238,6 +238,15 @@ impl Detail {
         {
             self.pick_transfer = None;
         }
+        // Money in that the list counted as a match but has no entry to
+        // match, only waiting payments: the panel opens on Deposit.
+        if self.mode == Mode::Match
+            && d.candidates.is_empty()
+            && d.payroll.is_empty()
+            && (!d.groupings.is_empty() || !d.payments.is_empty())
+        {
+            self.mode = Mode::Deposit;
+        }
         self.data = d;
     }
 
