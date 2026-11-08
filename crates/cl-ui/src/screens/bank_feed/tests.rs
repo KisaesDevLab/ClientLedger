@@ -240,3 +240,21 @@ fn r_makes_a_rule_from_the_line() {
     s.poll();
     assert_eq!(s.rules.rules.len(), before + 1);
 }
+
+/// P26 review m3: A on a pending row with a suggestion goes through the
+/// one accept route as proposed (a staged split posts as staged), and its
+/// Undo takes back the accept group.
+#[test]
+fn a_on_a_suggested_row_accepts_as_proposed() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    let id = s.rows[0].id;
+    assert_eq!(s.rows[0].status, FeedStatus::Pending);
+    assert!(s.rows[0].suggested_account.is_some());
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.last_send, Some("accept"));
+    assert_eq!(s.counts.accepted, 1);
+    let target = s.toast.as_ref().map(|x| x.target.clone()).expect("toast");
+    assert!(matches!(target, cl_api::UndoTarget::Group(_)), "{id}");
+}

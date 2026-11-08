@@ -506,6 +506,11 @@ impl BankFeedScreen {
         let x = match why {
             Why::Match | Why::Transfer | Why::Duplicate | Why::NeedsYou | Why::EntryVoided => None,
             _ if r.status == FeedStatus::Assigned => Some(send::Send::Categorize(id, None)),
+            // As proposed through the one accept route, so a split a rule
+            // staged posts as staged (P26 review m3).
+            _ if has_account && self.accepted_filter() => {
+                Some(send::Send::Accept(vec![cl_api::AcceptItem::AsProposed(id)]))
+            }
             _ if has_account => Some(send::Send::Categorize(
                 id,
                 Some(FeedChoice {

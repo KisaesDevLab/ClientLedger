@@ -6,10 +6,12 @@
 //! - Every run takes a **fresh** idempotency key; the client reuses it for
 //!   its own network retries. The password retry of locked rows is a new
 //!   run (plan §5; test #1: the first accept's replay stays identical).
-//! - Single-row Accept posts through categorize / approve / match (a 423
-//!   asks for the password); the selection and "Accept all from this
+//! - Single-row Accept of the owner's values, a staged row, a match, a
+//!   transfer or a deposit posts through its own route (a 423 asks for the
+//!   password); a row as proposed, the selection and "Accept all from this
 //!   rule" go through the one accept route, where locked rows come back as
-//!   `TB_PERIOD_LOCKED` failures (one prompt, then those rows again).
+//!   `TB_PERIOD_LOCKED` failures (one prompt, then those rows again as
+//!   proposed).
 
 use cl_api::{
     AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, ApiError, Capabilities,
@@ -131,15 +133,23 @@ impl Outcome {
                 (o.posted + o.matched) as usize,
             ));
         }
-        if !locked.is_empty()
-            && let Send::Accept(items) = send
-        {
-            let again = items
-                .iter()
-                .filter(|i| locked.contains(&i.id()))
-                .cloned()
-                .collect();
-            self.closed = Some((locked_error(), Send::Accept(again)));
+        if !locked.is_empty() {
+            // The locked rows again, with the password: a selection's own
+            // items; a rule's rows as proposed (what the rule staged).
+            let again = match send {
+                Send::Accept(items) => Some(
+                    items
+                        .iter()
+                        .filter(|i| locked.contains(&i.id()))
+                        .cloned()
+                        .collect(),
+                ),
+                Send::Rule(_) => Some(locked.iter().copied().map(AcceptItem::AsProposed).collect()),
+                _ => None,
+            };
+            if let Some(again) = again {
+                self.closed = Some((locked_error(), Send::Accept(again)));
+            }
         }
         if let (Some(after), Send::Rule(r)) = (o.next_after, send) {
             self.next_rule = Some(RuleAccept {
@@ -546,4 +556,52 @@ pub(crate) fn accept_selected(
         },
     ));
     s.poll();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cl_api::UndoGroupId;
+
+    fn item(n: u8) -> FeedItemId {
+        format!("d26f9100-0000-4000-8000-0000000000{n:02}")
+            .parse()
+            .expect("id")
+    }
+
+    /// P26 review m2: "Accept all from this rule" asks for the password for
+    /// its locked rows and sends them again as proposed.
+    #[test]
+    fn rule_mode_locked_rows_retry_as_proposed() {
+        let (open, locked) = (item(1), item(2));
+        let o = AcceptOutcome {
+            undo_group: UndoGroupId::new_random(),
+            posted: 1,
+            matched: 0,
+            skipped: Vec::new(),
+            failures: vec![AcceptFailure {
+                id: locked,
+                code: AcceptFailure::PERIOD_LOCKED.into(),
+                details: cl_api::ConflictDetails::default(),
+            }],
+            remaining: 0,
+            next_after: None,
+        };
+        let send = Send::Rule(RuleAccept {
+            rule_id: "r".into(),
+            kind: "conditional".into(),
+            updated_at: "t".into(),
+            connection: None,
+            after: None,
+        });
+        let mut out = Outcome::default();
+        out.accepted(&o, &send);
+        assert_eq!((out.done, out.failed), (1, 0));
+        let Some((e, Send::Accept(again))) = out.closed else {
+            panic!("the password prompt with the locked rows");
+        };
+        assert!(matches!(e, ApiError::ClosedPeriod(_)));
+        assert_eq!(again, vec![AcceptItem::AsProposed(locked)]);
+        assert!(!again.iter().any(|i| i.id() == open));
+    }
 }
