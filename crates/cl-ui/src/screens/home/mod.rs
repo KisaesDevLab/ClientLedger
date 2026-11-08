@@ -185,6 +185,9 @@ pub(crate) struct HomeData {
     /// Parts at or below their reorder point (P24, U-78); `None` while the
     /// company does not track inventory (Q-P24j).
     pub reorder: Slot<Option<u64>>,
+    /// The latest bank file's ending balance per bank and card account
+    /// (U-77, P26; the Account balances card's Bank file column).
+    pub bank_files: Slot<Vec<cl_api::AccountBalance>>,
 }
 
 impl HomeData {
@@ -422,6 +425,20 @@ impl HomeScreen {
                 attention::reorder_count,
             ));
         }
+        if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::ACCOUNT_BALANCES)
+        {
+            self.data.bank_files.start(run(
+                &self.link,
+                group,
+                None,
+                |s| Ok(balances::bank_files_demo(s)),
+                |s| async move { s.feed().account_balances().await },
+            ));
+        }
         let tenant = self.tenant.as_ref().map(|(t, _)| *t);
         self.data.documents.start(run(
             &self.link,
@@ -528,6 +545,7 @@ impl HomeScreen {
         self.data.documents.poll();
         self.data.sales_tax.poll();
         self.data.reorder.poll();
+        self.data.bank_files.poll();
         if self.data.outbox.poll()
             && let Some(n) = self.data.outbox.value
         {
@@ -796,6 +814,7 @@ impl HomeScreen {
             "backup_due": self.backup_due(),
             "balances_rows": rows.as_ref().map(Vec::len),
             "balances_source": balances::source(&self.data, self.exact),
+            "balances_bank_files": balances::bank_file_count(&self.data),
             "loading": self.data.loading(),
             "chart": charts::state(self),
             "checklist": checklist::state(self),

@@ -240,6 +240,8 @@ pub struct Edits {
     pub future_days: String,
     /// See `past_days`.
     pub bills_due_days: String,
+    /// The Bank Feed's transfer window in days, as typed (1-10, Q-P26l).
+    pub transfer_window: String,
     /// Company-local preferences.
     pub company: CompanyPrefs,
     /// Setup flags (Q-P08c).
@@ -422,6 +424,7 @@ impl PreferencesScreen {
             past_days: user.date_warnings.past_days.to_string(),
             future_days: user.date_warnings.future_days.to_string(),
             bills_due_days: company_prefs.bills_due_days.to_string(),
+            transfer_window: company_prefs.transfer_window().to_string(),
             user,
             ai: ai::AiEdits::from_local(&company_prefs),
             cloud_reading: ai_cloud_reading::CloudReadingEdits::default(),
@@ -661,6 +664,11 @@ impl PreferencesScreen {
             return Err(SaveBlock::BadNumber("bills_due_days"));
         }
         e.company.bills_due_days = bills;
+        let window = num(&e.transfer_window, "transfer_window", 10)?;
+        if window == 0 {
+            return Err(SaveBlock::BadNumber("transfer_window"));
+        }
+        e.company.feed_transfer_window_days = u8::try_from(window).unwrap_or(10);
         e.company.normalize();
         e.user.normalize();
         self.intake
@@ -1763,6 +1771,7 @@ fn write_owned_prefs(
         to.receipt_inbox_dir.clone_from(&from.receipt_inbox_dir);
     }
     to.bills_due_days = from.bills_due_days;
+    to.feed_transfer_window_days = from.feed_transfer_window_days;
     to.ai.suggest_rules = from.ai.suggest_rules;
     to.ai.monthly_token_cap = from.ai.monthly_token_cap;
     to.smtp_security = from.smtp_security;
@@ -2272,5 +2281,22 @@ mod tests {
             "nothing to revert"
         );
         assert!(!Screen::command(&mut s, CommandId::new("edit.undo")));
+    }
+
+    /// Q-P26l: the Bank Feed's transfer window is kept within 1-10 days.
+    #[test]
+    fn the_transfer_window_is_1_to_10_days() {
+        let (_d, mut s) = demo_screen(true);
+        assert_eq!(s.edits_mut().transfer_window, "3");
+        s.edits_mut().transfer_window = "11".into();
+        assert_eq!(
+            s.validate().err(),
+            Some(SaveBlock::BadNumber("transfer_window"))
+        );
+        s.edits_mut().transfer_window = "0".into();
+        assert!(s.validate().is_err());
+        s.edits_mut().transfer_window = "5".into();
+        let e = s.validate().expect("valid");
+        assert_eq!(e.company.transfer_window(), 5);
     }
 }

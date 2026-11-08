@@ -793,6 +793,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.user.reminders_intro", "What Home reminds you about."),
     ("prefs.user.bills_due", "Show bills due within this many days"),
     ("prefs.user.bills_due_hint", "Home lists bills that are overdue or due within this window."),
+    ("prefs.user.transfer_window", "Bank Feed: look for the other side of a transfer within this many days"),
+    ("prefs.user.transfer_window_hint", "From 1 to 10 days (3 unless you change it). The Bank Feed offers bank lines on your other accounts this close in date."),
     ("prefs.user.backup_on_close", "Back up when I close a company"),
     ("prefs.user.backup_on_close_hint", "A backup is written to your backup folder each time you close or switch companies."),
     // Company
@@ -1156,7 +1158,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.balances.account", "Account"),
     ("home.balances.books", "In your books"),
     ("home.balances.bank_file", "Bank file"),
-    ("home.balances.bank_file.tip", "Bank figures appear after you import a bank file (coming with bank file import)."),
+    ("home.balances.bank_file.tip", "The bank's figure appears after you import a bank file with an ending balance."),
+    ("home.balances.bank_file.as_of", "The ending balance of the bank file dated {date}."),
     ("home.balances.note", "Bank figures appear after you import a bank file (coming with bank file import)."),
     ("home.balances.loading", "Loading balances\u{2026}"),
     ("home.balances.empty", "Add a bank account to see balances here."),

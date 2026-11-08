@@ -130,6 +130,8 @@ fn descriptions_match(a: &str, b: &str) -> bool {
 /// One import.
 #[derive(Clone, Debug)]
 struct Batch {
+    /// The file's ending balance and its date (U-77).
+    ending: Option<(Money, cl_core::CalendarDate)>,
     id: ImportBatchId,
     account: AccountId,
     format: cl_api::BankFileFormat,
@@ -520,6 +522,10 @@ impl DemoBankFeed {
             }
             self.items.extend(to_insert);
             self.batches.push(Batch {
+                ending: match (req.file_ending_balance, req.file_ending_date) {
+                    (Some(b), Some(d)) => Money::try_from(b).ok().map(|m| (m, d)),
+                    _ => None,
+                },
                 id: batch,
                 account: req.account,
                 format: req.format,
@@ -645,6 +651,17 @@ impl DemoBankFeed {
             kept: 0,
             restored,
         })
+    }
+
+    /// The latest bank file's ending balance and date for `account`
+    /// (by file date, undone imports skipped; U-77).
+    #[must_use]
+    pub fn bank_file_balance(&self, account: AccountId) -> Option<(Money, cl_core::CalendarDate)> {
+        self.batches
+            .iter()
+            .filter(|b| b.account == account && !b.undone)
+            .filter_map(|b| b.ending)
+            .max_by_key(|(_, d)| *d)
     }
 
     /// The latest import of `account` in `format`: its flip and mapping.
