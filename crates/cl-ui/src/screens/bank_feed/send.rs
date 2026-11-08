@@ -145,7 +145,14 @@ impl Outcome {
         };
         if let Some(f) = o.failures.iter().find(|f| f.is_receipt() && carried(f.id)) {
             self.notice = Some(receipt_key(&f.code));
-            self.receipt_refused = true;
+            // Changed or used: read again (a fresh token, or gone from the
+            // offers). Any other refusal would repeat: no longer offered.
+            match f.code.as_str() {
+                AcceptFailure::DRAFT_STALE
+                | AcceptFailure::DRAFT_CLOSED
+                | AcceptFailure::DRAFT_FILE_MISSING => self.receipt_refused = true,
+                _ => self.receipt_forbidden = true,
+            }
         }
         if o.posted + o.matched > 0 {
             self.undo = Some((
@@ -238,6 +245,7 @@ pub(crate) fn receipt_key(code: &str) -> &'static str {
         AcceptFailure::DRAFT_CLOSED => "bank_feed.notice.receipt_used",
         AcceptFailure::DRAFT_STALE => "bank_feed.notice.receipt_changed",
         AcceptFailure::DRAFT_FILE_MISSING => "bank_feed.notice.receipt_file_missing",
+        AcceptFailure::DRAFT_DENIED => "bank_feed.notice.receipt_forbidden",
         _ => "bank_feed.notice.receipt_refused",
     }
 }
@@ -699,7 +707,8 @@ mod tests {
     }
 
     /// A05 review 4: a receipt code on a row that carried no receipt isn't
-    /// the receipt's (no re-read, no receipt notice).
+    /// the receipt's (no re-read, no receipt notice); on a row that did, a
+    /// refusal that would repeat declines the receipt.
     #[test]
     fn a_receipt_code_counts_only_on_a_row_that_carried_one() {
         let o = AcceptOutcome {
@@ -726,8 +735,26 @@ mod tests {
                 draft: receipt_link(),
             }]),
         );
-        assert!(with.receipt_refused);
+        assert!(with.receipt_forbidden && !with.receipt_refused);
         assert_eq!(with.notice, Some("bank_feed.notice.receipt_refused"));
+        // A changed receipt is read again instead.
+        let stale = AcceptOutcome {
+            failures: vec![AcceptFailure {
+                id: item(1),
+                code: AcceptFailure::DRAFT_STALE.into(),
+                details: cl_api::ConflictDetails::default(),
+            }],
+            ..o.clone()
+        };
+        let mut again = Outcome::default();
+        again.accepted(
+            &stale,
+            &Send::Accept(vec![AcceptItem::Receipt {
+                item: Box::new(AcceptItem::AsProposed(item(1))),
+                draft: receipt_link(),
+            }]),
+        );
+        assert!(again.receipt_refused && !again.receipt_forbidden);
     }
 
     /// P26 review m2: "Accept all from this rule" asks for the password for

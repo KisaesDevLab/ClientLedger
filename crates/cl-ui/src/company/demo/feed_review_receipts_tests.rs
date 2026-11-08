@@ -363,5 +363,8 @@ fn reopen_uses_the_drafts_id_and_only_converted_drafts() {
         ("draft", d.to_string())
     );
     // Ready now: a second delete reopens nothing.
-    assert_eq!(drafts::reopen_for(&mut s, posted), Vec::<DocumentDraftId>::new());
+    assert_eq!(
+        drafts::reopen_for(&mut s, posted),
+        Vec::<DocumentDraftId>::new()
+    );
 }

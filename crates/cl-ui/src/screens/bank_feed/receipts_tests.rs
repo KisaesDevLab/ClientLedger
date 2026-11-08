@@ -271,6 +271,9 @@ mod panel {
     fn a_newer_listed_token_reads_the_receipt_again() {
         let (_d, mut s, _r, ctx) = seeded();
         let pick = s.detail.receipt.pick.expect("pick");
+        // The same token as read: nothing to read again.
+        refresh(&mut s);
+        assert!(s.detail.receipt.full.is_some(), "kept");
         if let Some(d) = s.receipts.drafts.iter_mut().find(|d| d.id == pick) {
             d.updated_at = "2099-01-01T00:00:00.000Z".into();
         }
