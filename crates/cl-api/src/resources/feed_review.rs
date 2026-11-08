@@ -54,7 +54,8 @@ pub const SPLIT_LINES_MAX: usize = 50;
 pub const FEE_LINES_MAX: usize = 10;
 /// The most payments in one deposit.
 pub const DEPOSIT_PAYMENTS_MAX: usize = 100;
-/// The transfer window the screen uses (Q-P26l); the engine takes 1-10.
+/// The engine's default transfer window (Q-P26l); it takes 1-10, and the
+/// screen sends the company's own setting (`feed-transfer-window-v1`).
 pub const TRANSFER_WINDOW_DAYS: u8 = 3;
 
 /// A bank connection's id (one per linked bank account).
