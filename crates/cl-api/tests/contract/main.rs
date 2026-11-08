@@ -1195,6 +1195,18 @@ fn main() -> std::process::ExitCode {
             "feed_receipts::a_late_receipt_attaches_to_the_feed_entry",
             contract_feed_receipts::a_late_receipt_attaches_to_the_feed_entry,
         ),
+        (
+            "feed_receipts::a_match_files_the_receipt_on_the_entry_in_the_books",
+            contract_feed_receipts::a_match_files_the_receipt_on_the_entry_in_the_books,
+        ),
+        (
+            "feed_receipts::receipt_lines_post_as_two_splits",
+            contract_feed_receipts::receipt_lines_post_as_two_splits,
+        ),
+        (
+            "feed_receipts::a_late_receipts_amount_search_finds_the_feed_entry",
+            contract_feed_receipts::a_late_receipts_amount_search_finds_the_feed_entry,
+        ),
         // U-178 (engine PR #238, feed-accept-kind-v1).
         (
             "feed_accept::rows_carry_their_accept_kind",

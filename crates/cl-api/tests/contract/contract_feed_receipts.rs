@@ -8,20 +8,25 @@
 //!   `DOCUMENT_DRAFT_CLOSED {transactionId}`): nothing posts.
 //! - Undo deletes the entry and lists the draft in `reopenedDrafts`; the
 //!   draft is ready again with its file.
+//! - A match carrying a receipt files it on the entry in the books; Undo
+//!   only unlinks and the receipt stays on it (Q-A05g).
+//! - The receipt's lines post as two splits at their exact amounts.
+//! - A late receipt: A04's exact-amount search finds the feed's entry.
 //!
 //! Every test imports its own rows into its own fresh bank account and
 //! claims its own synthetic receipt.
 
 use cl_api::{
     AcceptFailure, AcceptItem, AcceptRequest, AccountType, AttachTo, Capabilities, DocumentDraft,
-    DraftKind, DraftLink, DraftReader, DraftReading, DraftStatus, FeedQuery, FeedStatus,
-    PageRequest, Session, TxnType, UndoTarget,
+    DraftKind, DraftLink, DraftReader, DraftReading, DraftStatus, FeedChoice, FeedQuery,
+    FeedSplitLine, FeedStatus, PageRequest, Session, TransactionFilter, TxnStatus, TxnType,
+    UndoTarget,
 };
 use cl_core::ids::TransactionId;
 use cl_core::{CalendarDate, Money};
 use serde_json::Map;
 
-use crate::common::{date, key};
+use crate::common::{date, je2, key, post};
 use crate::contract_feed_accept::{fresh, import, status_of, values};
 use crate::support::Harness;
 
@@ -233,4 +238,165 @@ pub fn a_late_receipt_attaches_to_the_feed_entry(h: &Harness) {
         .unwrap_or_else(|e| panic!("attach: {e:?}"));
     assert_eq!(attached.transaction, t);
     assert_eq!(files_on(h, s, t), 1);
+}
+
+/// The receipt's file is filed on `t`.
+fn filed_on(h: &Harness, s: &Session, d: &DocumentDraft, t: TransactionId) -> bool {
+    let file = d.attachment_id.expect("the receipt has a file");
+    h.run(s.attachments().get(file))
+        .is_ok_and(|a| a.attachable_type != "draft" && a.attachable_id == t.to_string())
+}
+
+/// A match carrying a receipt files it on the entry already in the books
+/// (nothing posts); Undo only unlinks: the entry and its receipt stay
+/// (Q-A05g), nothing is reopened.
+pub fn a_match_files_the_receipt_on_the_entry_in_the_books(h: &Harness) {
+    if !gated(h) || !h.require_cap(Capabilities::FEED_MATCH_V2, "U-166") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh(h, s, AccountType::Asset, Some("bank"));
+    let supplies = fresh(h, s, AccountType::Expense, None);
+    let t = post(
+        h,
+        s,
+        &je2(date(2027, 7, 2), "Receipt match", supplies, bank, "63.40"),
+    )
+    .record
+    .id;
+    let d = receipt(h, s, "63.4000", date(2027, 7, 1));
+    let rows = import(h, s, bank, &[(date(2027, 7, 3), "63.40", "A MATCH 1042")]);
+    let req = AcceptRequest::Items(vec![AcceptItem::Receipt {
+        item: Box::new(AcceptItem::Match {
+            id: rows[0].id,
+            transaction: t,
+            line: None,
+        }),
+        draft: link(&d),
+    }]);
+    let o = h
+        .run(s.feed().accept(&req, None, key()))
+        .unwrap_or_else(|e| panic!("accept: {e:?}"));
+    assert_eq!((o.matched, o.posted), (1, 0), "{:?}", o.failures);
+    assert_eq!(entry_of(h, s, rows[0].id), Some(t), "matched, not posted");
+    let closed = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert_eq!(closed.status, DraftStatus::Converted);
+    assert_eq!(closed.converted_transaction_id, Some(t));
+    assert!(filed_on(h, s, &d, t), "the receipt is on the entry");
+
+    let u = h
+        .run(
+            s.feed()
+                .undo(&UndoTarget::Group(o.undo_group), false, None, key()),
+        )
+        .expect("undo");
+    assert!(u.undone.iter().all(|x| !x.deleted), "a match only unlinks");
+    assert_eq!(u.reopened_drafts, Vec::new(), "Q-A05g: nothing reopened");
+    let kept = h.run(s.document_drafts().get(d.id)).expect("draft");
+    assert_eq!(kept.status, DraftStatus::Converted);
+    assert!(filed_on(h, s, &d, t), "the receipt stays on the kept entry");
+    assert!(status_of(h, s, rows[0].id).is_some_and(FeedStatus::is_waiting));
+}
+
+/// The receipt's lines as the panel sends them (Q-A05b: two whole-cent
+/// lines adding up to the bank amount exactly) post as two splits on the
+/// panel's account, at their exact amounts, with the receipt filed.
+pub fn receipt_lines_post_as_two_splits(h: &Harness) {
+    if !gated(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh(h, s, AccountType::Asset, Some("bank"));
+    let supplies = fresh(h, s, AccountType::Expense, None);
+    let d = receipt(h, s, "84.1700", date(2027, 7, 8));
+    let rows = import(h, s, bank, &[(date(2027, 7, 9), "84.17", "A HARDWARE TWO")]);
+    let choice = FeedChoice {
+        account: Some(supplies),
+        memo: Some("Synthetic Hardware Co. R-1042".into()),
+        splits: vec![
+            FeedSplitLine {
+                account: supplies,
+                amount: m("60.00"),
+                tag: None,
+                memo: Some("Shop supplies".into()),
+            },
+            FeedSplitLine {
+                account: supplies,
+                amount: m("24.17"),
+                tag: None,
+                memo: Some("Hardware".into()),
+            },
+        ],
+        ..FeedChoice::default()
+    };
+    let req = AcceptRequest::Items(vec![AcceptItem::Receipt {
+        item: Box::new(AcceptItem::Values(rows[0].id, choice)),
+        draft: link(&d),
+    }]);
+    let o = h
+        .run(s.feed().accept(&req, None, key()))
+        .unwrap_or_else(|e| panic!("accept: {e:?}"));
+    assert_eq!((o.posted, o.failures.len()), (1, 0), "{:?}", o.failures);
+    let t = entry_of(h, s, rows[0].id).expect("entry");
+    let tx = h.run(s.transactions().get(t)).expect("entry").record;
+    let split: Vec<Money> = tx
+        .lines
+        .iter()
+        .filter(|l| l.account_id == supplies)
+        .map(|l| l.debit)
+        .collect();
+    assert_eq!(split.len(), 2, "two splits");
+    assert!(split.contains(&m("60.00")) && split.contains(&m("24.17")));
+    assert_eq!(Money::sum(split).expect("sum"), m("84.17"));
+    let on_bank: Vec<Money> = tx
+        .lines
+        .iter()
+        .filter(|l| l.account_id == bank)
+        .map(|l| l.credit)
+        .collect();
+    assert_eq!(on_bank, vec![m("84.17")], "the bank line");
+    assert!(filed_on(h, s, &d, t));
+}
+
+/// The late receipt (A05 step 2): A04's register search (the exact
+/// `amount` filter, posted, a window around the receipt's date) finds the
+/// entry the Bank Feed posted, and attaching files the receipt on it.
+pub fn a_late_receipts_amount_search_finds_the_feed_entry(h: &Harness) {
+    if !gated(h) || !h.require_cap(Capabilities::DOCUMENT_DRAFTS_ATTACH, "U-95") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = fresh(h, s, AccountType::Asset, Some("bank"));
+    let supplies = fresh(h, s, AccountType::Expense, None);
+    let rows = import(h, s, bank, &[(date(2027, 7, 15), "37.21", "A LATE TWO")]);
+    let posted = h
+        .run(s.feed().accept(
+            &AcceptRequest::Items(vec![AcceptItem::Values(rows[0].id, values(supplies))]),
+            None,
+            key(),
+        ))
+        .expect("post");
+    assert_eq!(posted.posted, 1);
+    let t = entry_of(h, s, rows[0].id).expect("entry");
+    let d = receipt(h, s, "37.2100", date(2027, 7, 14));
+    let filter = TransactionFilter {
+        status: Some(TxnStatus::Posted),
+        start_date: Some(date(2027, 7, 7)),
+        end_date: Some(date(2027, 7, 21)),
+        amount: d.doc_total,
+        ..TransactionFilter::default()
+    };
+    let page = PageRequest::new(200, 0).expect("page");
+    let found = h
+        .run(s.transactions().list(&filter, page))
+        .unwrap_or_else(|e| panic!("search: {e:?}"));
+    assert!(
+        found.data.iter().any(|r| r.id == t),
+        "the feed's entry is found by its exact amount"
+    );
+    let attached = h
+        .run(s.document_drafts().attach(d.id, t, &d.updated_at, key()))
+        .unwrap_or_else(|e| panic!("attach: {e:?}"));
+    assert_eq!(attached.transaction, t);
+    assert!(filed_on(h, s, &d, t));
 }
