@@ -88,6 +88,8 @@ pub(crate) struct Outcome {
     pub next_rule: Option<RuleAccept>,
     /// Rows Undo took back.
     pub undone: usize,
+    /// What each single-row accept was (the Accepted view's text).
+    pub accepted_as: Vec<(FeedItemId, &'static str)>,
 }
 
 impl Outcome {
@@ -248,6 +250,22 @@ fn single(o: &mut Outcome, send: &Send, r: Result<Option<UndoTarget>, ApiError>)
         Ok(undo) => {
             o.done += 1;
             o.undo = undo.map(|u| (u, 1));
+            match send {
+                Send::Categorize(id, _) => o.accepted_as.push((*id, "categorize")),
+                Send::Match(id, ..) => o.accepted_as.push((*id, "match")),
+                Send::Transfer(id, _) => o.accepted_as.push((*id, "transfer")),
+                Send::Deposit(id, ..) => o.accepted_as.push((*id, "deposit")),
+                // Keep both / Remove this one and Review again record
+                // nothing (P26 QA-20).
+                Send::Duplicate(_, DuplicateDecision::Keep) => {
+                    o.notice = Some("bank_feed.notice.kept_both");
+                }
+                Send::Duplicate(_, DuplicateDecision::Remove) => {
+                    o.notice = Some("bank_feed.notice.removed_duplicate");
+                }
+                Send::ReviewAgain(_) => o.notice = Some("bank_feed.notice.review_again"),
+                Send::Undo(..) | Send::Accept(_) | Send::Rule(_) => {}
+            }
         }
         Err(
             e @ (ApiError::ClosedPeriod(_)
@@ -452,7 +470,11 @@ pub(crate) async fn live_detail(
 /// A waiting payment the panel may deposit, or (its amount display only)
 /// one it shows as "can't be deposited here".
 fn pay_of(p: &cl_api::PendingPayment) -> Result<Pay, Held> {
-    let label = p.received_from.clone().unwrap_or_default();
+    let label = super::detail::payer_label(
+        p.received_from.as_deref(),
+        p.ref_no.as_deref(),
+        Some(p.txn_type.as_str()),
+    );
     match p.amount.exact() {
         Some(amount) => Ok(Pay {
             id: p.source,

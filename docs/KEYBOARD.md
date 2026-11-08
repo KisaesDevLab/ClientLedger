@@ -126,6 +126,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `A` | Accept the Bank Line | `feed.accept` |
 | `S` | Split the Bank Line | `feed.split` |
 | `R` | Make a Rule From the Bank Line | `feed.rule` |
+| `C` | Choose the Account for the Bank Line | `feed.choose_account` |
 | `Ctrl+Enter` | Accept Selected Bank Lines | `feed.accept_selected` |
 | `Ctrl+Insert` | Insert a Split or Fee Line | `feed.insert_line` |
 | `Ctrl+Delete` | Delete a Split or Fee Line | `feed.delete_line` |

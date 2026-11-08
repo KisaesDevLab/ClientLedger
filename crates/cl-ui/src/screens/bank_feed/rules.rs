@@ -64,8 +64,11 @@ pub(crate) struct RulesPanel {
     pub ideas: Vec<RuleSuggestion>,
     pub draft: Option<Draft>,
     pub notice: Option<&'static str>,
+    /// Waiting lines the last saved rule set up.
+    pub applied: Option<u64>,
     load: Option<Job<(Vec<FeedRule>, Vec<RuleSuggestion>)>>,
-    act: Option<Job<()>>,
+    /// A save answers how many waiting lines the rule now sets up.
+    act: Option<Job<Option<u64>>>,
 }
 
 /// Opens the panel and reads the rules.
@@ -92,11 +95,14 @@ pub(crate) fn from_row(s: &mut BankFeedScreen, id: cl_api::FeedItemId) {
         .take_while(|w| !w.chars().any(|c| c.is_ascii_digit()))
         .take(3)
         .collect();
-    let account = r
-        .assigned_account
-        .as_ref()
-        .or(r.suggested_account.as_ref())
-        .map(|a| a.id);
+    // The account just chosen in the panel first (P26 QA-11).
+    let chosen = s.detail.account.filter(|_| s.detail.row == Some(id));
+    let account = chosen.or_else(|| {
+        r.assigned_account
+            .as_ref()
+            .or(r.suggested_account.as_ref())
+            .map(|a| a.id)
+    });
     let payee = r
         .assigned_contact
         .as_ref()
@@ -158,19 +164,28 @@ fn act(s: &mut BankFeedScreen, what: Do) {
         s.group.as_ref(),
         Some("bank_feed.orphan.rule"),
         move |d| match what {
-            Do::Save(r) => demo::save_rule(d, &r),
-            Do::Delete(id) => demo::delete_rule(d, &id),
+            // The saved rule sets up the lines already waiting (P26 QA-10).
+            Do::Save(r) => {
+                demo::save_rule(d, &r)?;
+                Ok(demo::reprocess_rules(d, None).ok().map(|x| x.matched))
+            }
+            Do::Delete(id) => demo::delete_rule(d, &id).map(|()| None),
             Do::Dismiss(x) => {
                 demo::dismiss_suggestion(d, &x);
-                Ok(())
+                Ok(None)
             }
         },
         move |sess| async move {
             let r: FeedRules<'_> = sess.feed_rules();
             match live {
-                Do::Save(x) => r.save(&x).await,
-                Do::Delete(id) => r.delete(&id).await,
-                Do::Dismiss(x) => r.dismiss(&x).await,
+                Do::Save(x) => {
+                    r.save(&x).await?;
+                    // A failed rerun doesn't undo the save: the rule still
+                    // applies to the next bank file.
+                    Ok(r.reprocess(None).await.ok().map(|x| x.matched))
+                }
+                Do::Delete(id) => r.delete(&id).await.map(|()| None),
+                Do::Dismiss(x) => r.dismiss(&x).await.map(|()| None),
             }
         },
     ));
@@ -190,9 +205,17 @@ pub(crate) fn poll(s: &mut BankFeedScreen) {
     }
     if let Some(r) = finished(&mut s.rules.act) {
         match r {
-            Ok(()) => {
+            Ok(applied) => {
                 s.rules.draft = None;
-                s.rules.notice = Some("bank_feed.rules.saved");
+                s.rules.applied = applied;
+                s.rules.notice = Some(match applied {
+                    Some(0) => "bank_feed.rules.applied.none",
+                    Some(_) => "bank_feed.rules.applied",
+                    None => "bank_feed.rules.saved",
+                });
+                // The panel reads its row again (its new suggestion).
+                s.detail.row = None;
+                s.read_meta();
                 // The rows' rules (names, auto-accept, change tokens).
                 s.reload();
             }
@@ -314,12 +337,19 @@ fn editor(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             cancel = ui.button(t("bank_feed.rules.cancel")).clicked();
         });
     });
-    if save && let Some(r) = s.rules.draft.as_ref().and_then(Draft::to_rule) {
-        act(s, Do::Save(r));
+    if save {
+        save_draft(s);
     } else if delete && let Some(id) = s.rules.draft.as_ref().and_then(|d| d.rule.id.clone()) {
         act(s, Do::Delete(id));
     } else if cancel {
         s.rules.draft = None;
+    }
+}
+
+/// Saves the rule being edited (Save rule).
+pub(crate) fn save_draft(s: &mut BankFeedScreen) {
+    if let Some(r) = s.rules.draft.as_ref().and_then(Draft::to_rule) {
+        act(s, Do::Save(r));
     }
 }
 
@@ -353,7 +383,8 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         }
     });
     if let Some(k) = s.rules.notice {
-        form::hint(ui, tokens, &t(k));
+        let n = s.rules.applied.unwrap_or(0).to_string();
+        form::hint(ui, tokens, &t_with(k, &[("n", &n)]));
     }
     egui::ScrollArea::vertical()
         .id_salt("bank_feed.rules")
@@ -466,5 +497,6 @@ pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
         "draft_ready": s.rules.draft.as_ref().and_then(Draft::to_rule).is_some(),
         "auto_accept": s.rules.rules.iter().filter(|r| r.auto_accept).count(),
         "notice": s.rules.notice,
+        "applied": s.rules.applied,
     })
 }

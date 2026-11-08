@@ -8,16 +8,103 @@
 
 use cl_api::{FeedRow, FeedStatus};
 use cl_model::bank_feed::{self as model, Segment, Show, Why};
-use eframe::egui::{self, Align2, RichText, Sense, Ui, Vec2};
+use eframe::egui::{self, RichText, Sense, Ui, Vec2};
 
 use super::{BankFeedScreen, bulk};
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
-/// The detail panel's width (mockup).
+/// The detail panel's width (mockup), narrower on a narrow window.
 const DETAIL_W: f32 = 330.0;
+const DETAIL_MIN_W: f32 = 270.0;
 const ROW_H: f32 = 46.0;
+/// Below this many points side by side, the detail panel goes under the
+/// list (P26 QA-1, QA-23: 1024 wide, 200% zoom).
+const STACK_BELOW: f32 = 900.0;
+/// Below this list width, a row puts what it will be recorded as on its
+/// second line.
+const COMPACT_BELOW: f32 = 620.0;
+/// The amount column and the Why badge column.
+const AMOUNT_W: f32 = 96.0;
+const WHY_W: f32 = 112.0;
+/// The header and toolbars wrap below this width.
+pub(crate) const WRAP_BELOW: f32 = 980.0;
+
+/// Where the list's columns go in a list `width` points wide (left and
+/// right edges from the row's left; P26 QA-1, QA-23).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Cols {
+    /// Recorded-as and Why sit on the second line.
+    pub compact: bool,
+    pub date: f32,
+    pub bank: (f32, f32),
+    pub amount_right: f32,
+    pub recorded: (f32, f32),
+    pub why: f32,
+}
+
+/// The columns for `width`.
+pub(crate) fn columns(width: f32) -> Cols {
+    if width < COMPACT_BELOW {
+        // Line 1: bank text, amount at the right. Line 2: date, what it
+        // will be recorded as, the badge at the right.
+        let why = (width - WHY_W + 8.0).max(150.0);
+        let amount_right = width - 10.0;
+        return Cols {
+            compact: true,
+            date: 44.0,
+            bank: (44.0, (amount_right - AMOUNT_W - 8.0).max(44.0)),
+            amount_right,
+            recorded: (98.0, (why - 8.0).max(98.0)),
+            why,
+        };
+    }
+    let mid = width - 106.0 - WHY_W - AMOUNT_W - 32.0;
+    let bank_w = (mid * 0.45).max(110.0);
+    let amount_right = 106.0 + bank_w + 12.0 + AMOUNT_W;
+    let why = width - WHY_W;
+    Cols {
+        compact: false,
+        date: 44.0,
+        bank: (106.0, 106.0 + bank_w),
+        amount_right,
+        recorded: (amount_right + 20.0, why - 8.0),
+        why,
+    }
+}
+
+/// `text` laid out on one line no wider than `max_w`, cut with "…".
+fn fit(
+    p: &egui::Painter,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    max_w: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(font, color),
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w.max(1.0));
+    p.layout_job(job)
+}
+
+/// Draws `text` left-aligned at `x`, centered on `y`, cut at `max_w`.
+#[allow(clippy::many_single_char_names, reason = "painter and coordinates")]
+fn put(
+    p: &egui::Painter,
+    x: f32,
+    y: f32,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    max_w: f32,
+) {
+    let g = fit(p, text, font, color, max_w);
+    let h = g.size().y;
+    p.galley(egui::pos2(x, y - h / 2.0), g, color);
+}
 
 /// Draws the whole window.
 pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
@@ -46,26 +133,48 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
         form::hint(ui, &tokens, &t_with(k, &[("n", &n.to_string())]));
     }
     let avail = ui.available_size();
-    let list_w = (avail.x - DETAIL_W - 8.0).max(320.0);
+    let side = |s: &mut BankFeedScreen, ui: &mut Ui| {
+        if s.rules.open {
+            super::rules::draw(s, ui, &tokens);
+        } else {
+            super::detail::draw(s, ui, &tokens);
+        }
+    };
+    if avail.x < STACK_BELOW {
+        // Narrow window or large zoom: the panel goes under the list.
+        let list_h = (avail.y * 0.5).max(160.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(avail.x, list_h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_max_height(list_h);
+                list(s, ui, &tokens, 44.0);
+                footnote(s, ui, &tokens);
+            },
+        );
+        ui.separator();
+        side(s, ui);
+        return;
+    }
+    let detail_w = (avail.x * 0.3).clamp(DETAIL_MIN_W, DETAIL_W);
+    let list_w = avail.x - detail_w - 12.0;
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
             Vec2::new(list_w, avail.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                list(s, ui, &tokens);
+                ui.set_max_width(list_w);
+                list(s, ui, &tokens, 28.0);
                 footnote(s, ui, &tokens);
             },
         );
         ui.separator();
         ui.allocate_ui_with_layout(
-            Vec2::new(DETAIL_W, avail.y),
+            Vec2::new(detail_w, avail.y),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                if s.rules.open {
-                    super::rules::draw(s, ui, &tokens);
-                } else {
-                    super::detail::draw(s, ui, &tokens);
-                }
+                ui.set_max_width(detail_w);
+                side(s, ui);
             },
         );
     });
@@ -73,7 +182,9 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
 
 fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
+    let narrow = ui.available_width() < WRAP_BELOW;
+    let combo_w = (ui.available_width() * 0.35).clamp(160.0, 260.0);
+    let body = |ui: &mut Ui| {
         ui.heading(RichText::new(t("cmd.banking.feed")).strong());
         ui.add_space(12.0);
         let r = ui.label(RichText::new(t("bank_feed.account")).color(tokens.text_secondary));
@@ -84,7 +195,8 @@ fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         let mut pick = None;
         egui::ComboBox::from_id_salt("bank_feed.account")
             .selected_text(shown)
-            .width(260.0)
+            .truncate()
+            .width(combo_w)
             .show_ui(ui, |ui| {
                 for (i, a) in s.accounts.iter().enumerate() {
                     if ui
@@ -115,7 +227,7 @@ fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 .color(tokens.text_secondary),
             );
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let buttons = |s: &mut BankFeedScreen, ui: &mut Ui| {
             // Rules is hidden for a view-only user (plan §5).
             if !s.view_only && ui.button(t("bank_feed.rules")).clicked() {
                 s.detail_request = None;
@@ -126,8 +238,23 @@ fn header(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                     cl_model::CommandId::new("banking.import_file"),
                 ));
             }
-        });
-    });
+        };
+        if narrow {
+            // Narrow or zoomed: the buttons wrap after the picker instead
+            // of covering it (P26 QA-23).
+            ui.add_space(12.0);
+            buttons(s, ui);
+        } else {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                buttons(s, ui);
+            });
+        }
+    };
+    if narrow {
+        ui.horizontal_wrapped(body);
+    } else {
+        ui.horizontal(body);
+    }
     ui.add_space(6.0);
 }
 
@@ -136,7 +263,9 @@ fn account_text(label: &str, waiting: u64) -> String {
 }
 
 fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
-    ui.horizontal(|ui| {
+    let narrow = ui.available_width() < WRAP_BELOW;
+    let filter_w = (ui.available_width() * 0.3).clamp(140.0, 240.0);
+    let body = |ui: &mut Ui| {
         let mut changed = false;
         if s.show == Show::Waiting {
             for seg in Segment::ALL {
@@ -194,27 +323,39 @@ fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 changed = true;
             }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let mut filter = |ui: &mut Ui| {
             let r = ui.add_sized(
-                [240.0, 24.0],
+                [filter_w, 24.0],
                 egui::TextEdit::singleline(&mut s.filter).hint_text(t("bank_feed.filter.hint")),
             );
-            let r = r.on_hover_text(t("bank_feed.filter"));
-            if r.changed() {
-                changed = true;
-            }
-        });
-        if changed {
+            r.on_hover_text(t("bank_feed.filter")).changed()
+        };
+        let edited = if narrow {
+            // The filter wraps to its own place instead of sitting on the
+            // Show list (P26 QA-23).
+            filter(ui)
+        } else {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), filter)
+                .inner
+        };
+        if changed || edited {
             s.offset = 0;
             s.list.clear_selection();
             s.reload();
         }
-    });
+    };
+    if narrow {
+        ui.horizontal_wrapped(body);
+    } else {
+        ui.horizontal(body);
+    }
 }
 
 fn badge(ui: &Ui, rect: egui::Rect, tokens: &Tokens, why: Why) {
     let (fill, color) = match why {
-        Why::Rule | Why::History => (tokens.neutral_chip, tokens.neutral_chip_text),
+        Why::Rule | Why::History | Why::Accepted | Why::Excluded => {
+            (tokens.neutral_chip, tokens.neutral_chip_text)
+        }
         Why::Match | Why::Transfer => (tokens.info_tint, tokens.info),
         Why::Ai { high: true } => (tokens.accent_tint, tokens.accent),
         Why::Ai { high: false } | Why::Duplicate | Why::EntryVoided => {
@@ -255,11 +396,44 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
             payee.unwrap_or_else(|| t("bank_feed.recorded.match")),
             t("bank_feed.recorded.match.sub"),
         ),
-        Why::Transfer => (
-            t("bank_feed.recorded.transfer"),
-            t("bank_feed.recorded.transfer.sub"),
-        ),
+        // The other side found: name its account (P26 QA-18 note, C-1).
+        Why::Transfer => match r
+            .transfer_candidate
+            .as_ref()
+            .and_then(|h| h.account_name.clone())
+        {
+            Some(other) => (
+                t_with(
+                    if r.is_money_out() {
+                        "bank_feed.recorded.transfer_to"
+                    } else {
+                        "bank_feed.recorded.transfer_from"
+                    },
+                    &[("account", &other)],
+                ),
+                t("bank_feed.recorded.transfer.found"),
+            ),
+            None => (
+                t("bank_feed.recorded.transfer"),
+                t("bank_feed.recorded.transfer.sub"),
+            ),
+        },
         Why::NeedsYou => (t("bank_feed.recorded.choose"), String::new()),
+        // A look-alike reads like any row needing a choice (P26 QA-21).
+        Why::Duplicate if account.is_none() => (t("bank_feed.recorded.choose"), String::new()),
+        Why::Accepted => {
+            let how = s.accepted_as.get(&r.id).copied();
+            let sub = match (r.status, how) {
+                (_, Some("deposit")) => t("bank_feed.recorded.deposited"),
+                (_, Some("transfer")) => t("bank_feed.recorded.transferred"),
+                (FeedStatus::Matched, _) => t("bank_feed.recorded.matched"),
+                _ => account.unwrap_or_default(),
+            };
+            (
+                payee.unwrap_or_else(|| super::bank_text(r).to_string()),
+                sub,
+            )
+        }
         Why::EntryVoided => (
             payee.unwrap_or_default(),
             t("bank_feed.recorded.entry_voided"),
@@ -275,6 +449,7 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
     }
 }
 
+#[allow(clippy::many_single_char_names, reason = "painter and coordinates")]
 fn column_headers(ui: &mut Ui, tokens: &Tokens, s: &mut BankFeedScreen) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::hover());
@@ -298,36 +473,70 @@ fn column_headers(ui: &mut Ui, tokens: &Tokens, s: &mut BankFeedScreen) {
     let p = ui.painter();
     let font = egui::FontId::proportional(13.0);
     let y = rect.center().y;
-    let amount_right = rect.left() + amount_right_x(width);
-    for (x, key) in [
-        (44.0, "bank_feed.col.date"),
-        (106.0, "bank_feed.col.bank"),
-        (amount_right - rect.left() + 20.0, "bank_feed.col.recorded"),
-        (width - 112.0, "bank_feed.col.why"),
-    ] {
-        p.text(
-            egui::pos2(rect.left() + x, y),
-            Align2::LEFT_CENTER,
-            t(key),
+    let c = columns(width);
+    let x0 = rect.left();
+    let color = tokens.text_secondary;
+    if c.compact {
+        // Line 1 holds the bank text and the amount; line 2 the date, what
+        // it will be recorded as and why.
+        put(
+            p,
+            x0 + c.bank.0,
+            y,
+            &t("bank_feed.col.bank"),
             font.clone(),
-            tokens.text_secondary,
+            color,
+            c.bank.1 - c.bank.0,
+        );
+    } else {
+        put(
+            p,
+            x0 + c.date,
+            y,
+            &t("bank_feed.col.date"),
+            font.clone(),
+            color,
+            c.bank.0 - c.date - 4.0,
+        );
+        put(
+            p,
+            x0 + c.bank.0,
+            y,
+            &t("bank_feed.col.bank"),
+            font.clone(),
+            color,
+            c.bank.1 - c.bank.0,
+        );
+        put(
+            p,
+            x0 + c.recorded.0,
+            y,
+            &t("bank_feed.col.recorded"),
+            font.clone(),
+            color,
+            c.recorded.1 - c.recorded.0,
+        );
+        put(
+            p,
+            x0 + c.why,
+            y,
+            &t("bank_feed.col.why"),
+            font.clone(),
+            color,
+            WHY_W - 4.0,
         );
     }
-    p.text(
-        egui::pos2(amount_right, y),
-        Align2::RIGHT_CENTER,
-        t("bank_feed.col.amount"),
-        font,
-        tokens.text_secondary,
+    let g = fit(p, &t("bank_feed.col.amount"), font, color, AMOUNT_W);
+    let h = g.size().y;
+    p.galley(
+        egui::pos2(x0 + c.amount_right - g.size().x, y - h / 2.0),
+        g,
+        color,
     );
     p.hline(rect.x_range(), rect.bottom(), (1.0, tokens.border_row));
 }
 
-fn amount_right_x(width: f32) -> f32 {
-    (width * 0.52).clamp(300.0, 520.0)
-}
-
-fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
+fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, reserve: f32) {
     if s.rows.is_empty() {
         ui.add_space(12.0);
         let key = match s.show {
@@ -347,7 +556,7 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     let rows = s.rows.clone();
     egui::ScrollArea::vertical()
         .auto_shrink([false, true])
-        .max_height((ui.available_height() - 28.0).max(80.0))
+        .max_height((ui.available_height() - reserve).max(80.0))
         .show(ui, |ui| {
             for (i, r) in rows.iter().enumerate() {
                 let why = s.why(r);
@@ -412,60 +621,83 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 let font = egui::FontId::proportional(14.0);
                 let small = egui::FontId::proportional(12.5);
                 let top = rect.top() + 14.0;
+                let second = top + 17.0;
+                let c = columns(width);
+                let x0 = rect.left();
                 let date = crate::shell::us_date(r.date);
-                p.text(
-                    egui::pos2(rect.left() + 44.0, top),
-                    Align2::LEFT_CENTER,
-                    date.get(..5).unwrap_or(&date),
-                    mono.clone(),
-                    tokens.text_primary,
-                );
-                let amount_right = rect.left() + amount_right_x(width);
+                let date = date.get(..5).unwrap_or(&date);
+                // The amount never shrinks: the text beside it is cut first.
                 let amount = model::display_amount(r.amount).format(style);
                 let ag = p.layout_no_wrap(amount, mono.clone(), tokens.text_primary);
-                let amount_left = amount_right - ag.size().x;
+                let amount_left = x0 + c.amount_right - ag.size().x;
                 p.galley(
                     egui::pos2(amount_left, top - ag.size().y / 2.0),
                     ag,
                     tokens.text_primary,
                 );
-                let mut bank = rect;
-                bank.set_left(rect.left() + 106.0);
-                bank.set_right(amount_left - 12.0);
-                p.with_clip_rect(bank.intersect(p.clip_rect())).text(
-                    egui::pos2(bank.left(), top),
-                    Align2::LEFT_CENTER,
-                    &r.description,
-                    mono,
+                let bank_right = (x0 + c.bank.1).min(amount_left - 10.0);
+                let bank_w = bank_right - (x0 + c.bank.0);
+                put(
+                    p,
+                    x0 + c.bank.0,
+                    top,
+                    super::bank_text(r),
+                    mono.clone(),
                     tokens.text_primary,
+                    bank_w,
                 );
                 let (line1, line2) = recorded(s, r, why);
-                let mut rec = rect;
-                rec.set_left(amount_right + 20.0);
-                rec.set_right(rect.right() - 120.0);
-                let clip = p.with_clip_rect(rec.intersect(p.clip_rect()));
                 let first_color = if why == Why::NeedsYou {
                     tokens.text_tertiary
                 } else {
                     tokens.text_primary
                 };
-                clip.text(
-                    egui::pos2(rec.left(), top),
-                    Align2::LEFT_CENTER,
-                    line1,
-                    font,
-                    first_color,
-                );
-                clip.text(
-                    egui::pos2(rec.left(), top + 17.0),
-                    Align2::LEFT_CENTER,
-                    line2,
-                    small,
-                    tokens.text_secondary,
-                );
-                let mut why_rect = rect;
-                why_rect.set_left(rect.right() - 112.0);
-                badge(ui, why_rect, tokens, why);
+                let rec_w = c.recorded.1 - c.recorded.0;
+                if c.compact {
+                    put(
+                        p,
+                        x0 + c.date,
+                        second,
+                        date,
+                        small.clone(),
+                        tokens.text_secondary,
+                        50.0,
+                    );
+                    let text = if line2.is_empty() {
+                        line1
+                    } else {
+                        format!("{line1} \u{b7} {line2}")
+                    };
+                    put(
+                        p,
+                        x0 + c.recorded.0,
+                        second,
+                        &text,
+                        small,
+                        first_color,
+                        rec_w,
+                    );
+                    let why_rect = egui::Rect::from_min_max(
+                        egui::pos2(x0 + c.why, rect.top() + 18.0),
+                        rect.max,
+                    );
+                    badge(ui, why_rect, tokens, why);
+                } else {
+                    put(p, x0 + c.date, top, date, mono, tokens.text_primary, 60.0);
+                    put(p, x0 + c.recorded.0, top, &line1, font, first_color, rec_w);
+                    put(
+                        p,
+                        x0 + c.recorded.0,
+                        second,
+                        &line2,
+                        small,
+                        tokens.text_secondary,
+                        rec_w,
+                    );
+                    let mut why_rect = rect;
+                    why_rect.set_left(x0 + c.why);
+                    badge(ui, why_rect, tokens, why);
+                }
             }
         });
     if let Some(id) = toggled {
@@ -493,7 +725,10 @@ fn footnote(s: &BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     };
     text.push_str(" \u{b7} ");
     text.push_str(&t(key));
-    ui.label(RichText::new(text).size(12.5).color(tokens.text_secondary));
+    // Where accepted lines show in the audit trail (mockup, P26 C-3).
+    text.push_str(" \u{b7} ");
+    text.push_str(&t("bank_feed.footnote.audit"));
+    ui.add(egui::Label::new(RichText::new(text).size(12.5).color(tokens.text_secondary)).wrap());
 }
 
 /// "Accept all from this rule" (Q-P26a, Q-P26n): the cursor's row was

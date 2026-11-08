@@ -180,12 +180,13 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     } else {
         None
     };
+    let narrow = ui.available_width() < super::view::WRAP_BELOW;
     egui::Frame::new()
         .fill(tokens.accent_tint)
         .inner_margin(egui::Margin::symmetric(16, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
+            let row = |ui: &mut Ui| {
                 ui.label(
                     RichText::new(t_with(
                         "bank_feed.bulk.selected",
@@ -229,8 +230,9 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                         }
                         let mut chosen = None;
                         ui.add_enabled_ui(can_write && selected > 0, |ui| {
-                            egui::ComboBox::from_id_salt("bank_feed.change_account")
-                                .selected_text(t("bank_feed.bulk.change_account"))
+                            let label = t("bank_feed.bulk.change_account");
+                            let r = egui::ComboBox::from_id_salt("bank_feed.change_account")
+                                .selected_text(&label)
                                 .show_ui(ui, |ui| {
                                     for (id, name) in &s.chart {
                                         if ui.selectable_label(false, name).clicked() {
@@ -238,8 +240,14 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                                         }
                                     }
                                 })
-                                .response
-                                .on_disabled_hover_text(why_not.clone().unwrap_or_default())
+                                .response;
+                            // Screen readers and the control channel name it
+                            // (P26 QA-3).
+                            let enabled = ui.is_enabled();
+                            r.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, &label)
+                            });
+                            r.on_disabled_hover_text(why_not.clone().unwrap_or_default())
                         });
                         if let Some(a) = chosen {
                             s.change_to = Some(a);
@@ -270,28 +278,57 @@ pub(crate) fn bar(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                     }
                     Show::Accepted => {}
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    for (k, what) in [
-                        ("R", "bank_feed.keys.rule"),
-                        ("S", "bank_feed.keys.split"),
-                        ("A", "bank_feed.keys.accept"),
-                        ("Space", "bank_feed.keys.select"),
-                    ] {
-                        ui.label(
-                            RichText::new(t(what))
-                                .size(12.0)
-                                .color(tokens.text_secondary),
-                        );
-                        key_chip(ui, tokens, k);
-                    }
-                    ui.label(
-                        RichText::new(t("bank_feed.keys.move"))
-                            .size(12.0)
-                            .color(tokens.text_secondary),
-                    );
-                    key_chip(ui, tokens, "K");
-                    key_chip(ui, tokens, "J");
-                });
-            });
+                if !narrow {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        hints(ui, tokens, true);
+                    });
+                }
+            };
+            if narrow {
+                ui.horizontal_wrapped(row);
+            } else {
+                ui.horizontal(row);
+            }
+            // Narrow or zoomed: the key hints get their own line instead of
+            // printing over the buttons (P26 QA-1, QA-23).
+            if narrow {
+                ui.horizontal_wrapped(|ui| hints(ui, tokens, false));
+            }
         });
+}
+
+/// The key hints, in reading order (`rtl`: laid out right to left).
+fn hints(ui: &mut Ui, tokens: &Tokens, rtl: bool) {
+    let mut items: Vec<(&[&str], &str)> = vec![
+        (&["J", "K"], "bank_feed.keys.move"),
+        (&["Space"], "bank_feed.keys.select"),
+        (&["A"], "bank_feed.keys.accept"),
+        (&["C"], "bank_feed.keys.account"),
+        (&["S"], "bank_feed.keys.split"),
+        (&["R"], "bank_feed.keys.rule"),
+    ];
+    if rtl {
+        items.reverse();
+    }
+    for (keys, what) in items {
+        let label = |ui: &mut Ui| {
+            ui.label(
+                RichText::new(t(what))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
+        };
+        if rtl {
+            label(ui);
+            for k in keys.iter().rev() {
+                key_chip(ui, tokens, k);
+            }
+        } else {
+            for k in keys {
+                key_chip(ui, tokens, k);
+            }
+            label(ui);
+            ui.add_space(6.0);
+        }
+    }
 }

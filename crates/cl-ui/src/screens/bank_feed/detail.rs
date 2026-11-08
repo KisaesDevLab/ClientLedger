@@ -106,6 +106,36 @@ pub(crate) struct Held {
     pub amount: String,
 }
 
+/// Who a waiting payment came from, so same-size payments can be told
+/// apart (P26 QA-7): the payer and its reference, else the reference, else
+/// the kind of entry ("Payment", "Sales receipt").
+pub(crate) fn payer_label(
+    received_from: Option<&str>,
+    ref_no: Option<&str>,
+    txn_type: Option<&str>,
+) -> String {
+    let clean = |s: Option<&str>| {
+        s.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let kind = || {
+        txn_type
+            .map(|k| format!("bank_feed.txn.{k}"))
+            .filter(|k| crate::i18n::has(k))
+            .map_or_else(|| t("bank_feed.txn.payment"), |k| t(&k))
+    };
+    match (clean(received_from), clean(ref_no)) {
+        (Some(w), Some(r)) => t_with("bank_feed.deposit.payer_ref", &[("who", &w), ("ref", &r)]),
+        (Some(w), None) => w,
+        (None, Some(r)) => t_with(
+            "bank_feed.deposit.payer_ref",
+            &[("who", &kind()), ("ref", &r)],
+        ),
+        (None, None) => kind(),
+    }
+}
+
 /// What the panel reads for a row.
 #[derive(Clone, Default)]
 pub(crate) struct DetailData {
@@ -163,6 +193,11 @@ pub(crate) struct Detail {
     load: Option<Job<DetailData>>,
     /// What Accept (A) sends now, when the panel's draft is complete.
     pub ready: Option<Send>,
+    /// C: the type-to-find account box (P26 QA-18) and its highlighted
+    /// match.
+    pub find: Option<String>,
+    pub find_pick: usize,
+    find_focus: bool,
 }
 
 impl Detail {
@@ -171,7 +206,10 @@ impl Detail {
         *self = Detail {
             row: Some(r.id),
             mode: match why {
-                Why::Match if !r.is_money_out() => Mode::Deposit,
+                // Money in with no entry to match: waiting payments to
+                // deposit. With a candidate the row opens on Match, as the
+                // list says (P26 QA-24).
+                Why::Match if !r.is_money_out() && r.match_candidate_count == 0 => Mode::Deposit,
                 Why::Match => Mode::Match,
                 Why::Transfer => Mode::Transfer,
                 _ => Mode::Categorize,
@@ -184,8 +222,23 @@ impl Detail {
             ..Detail::default()
         };
         self.transfer_to = r.suggested_account.as_ref().map(|a| a.id);
-        // The engine's one counterpart within 3 days (Q-P26y) is chosen.
-        self.pick_transfer = r.transfer_candidate.as_ref().map(|h| h.feed_item);
+        // The engine's one counterpart within 3 days (Q-P26y) is chosen,
+        // and "Transfer to" shows its account (P26 QA-14).
+        if let Some(h) = &r.transfer_candidate {
+            self.pick_transfer = Some(h.feed_item);
+            self.transfer_to = h.account.or(self.transfer_to);
+        }
+    }
+
+    /// The partners arrived: a pre-picked partner outside the owner's
+    /// transfer window (Preferences) is dropped (P26 QA-16).
+    pub(crate) fn take_data(&mut self, d: DetailData) {
+        if let Some(p) = self.pick_transfer
+            && !d.transfers.iter().any(|c| c.feed_item == p)
+        {
+            self.pick_transfer = None;
+        }
+        self.data = d;
     }
 
     /// The split draft for the row's amount (`None`: more than 2 decimals).
@@ -238,6 +291,114 @@ pub(crate) fn enter_split(s: &mut BankFeedScreen) {
     }
 }
 
+/// C: opens the account box of the cursor's row and puts the typing
+/// cursor in it (P26 QA-18). Typing narrows the chart, Up/Down move,
+/// Enter picks and gives the keys back to the list (then A accepts), Esc
+/// closes it.
+pub(crate) fn choose_account(s: &mut BankFeedScreen) -> bool {
+    let Some(id) = s.list.current() else {
+        return true;
+    };
+    let waiting = s
+        .row(id)
+        .is_some_and(|r| r.status.is_waiting() && !r.possible_duplicate);
+    if s.view_only || !waiting || s.show != Show::Waiting {
+        return true;
+    }
+    s.rules.open = false;
+    if s.detail.row != Some(id) {
+        follow(s);
+    }
+    s.detail.mode = Mode::Categorize;
+    s.detail.find = Some(String::new());
+    s.detail.find_pick = 0;
+    s.detail.find_focus = true;
+    true
+}
+
+/// The chart entries whose name holds every word typed (any case).
+pub(crate) fn find_accounts<'a>(
+    chart: &'a [(AccountId, String)],
+    typed: &str,
+) -> Vec<&'a (AccountId, String)> {
+    let words: Vec<String> = typed.split_whitespace().map(str::to_lowercase).collect();
+    chart
+        .iter()
+        .filter(|(_, n)| {
+            let n = n.to_lowercase();
+            words.iter().all(|w| n.contains(w.as_str()))
+        })
+        .collect()
+}
+
+/// The account box C opened.
+fn find_ui(s: &mut BankFeedScreen, ui: &mut Ui, chart: &[(AccountId, String)]) {
+    let Some(mut typed) = s.detail.find.take() else {
+        return;
+    };
+    let label = t("bank_feed.detail.find");
+    let id = egui::Id::unique("bank_feed.detail.account_find");
+    let r = ui.add(
+        egui::TextEdit::singleline(&mut typed)
+            .id(id)
+            .hint_text(t("bank_feed.detail.find.hint"))
+            .desired_width(ui.available_width().min(280.0)),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &label));
+    if s.detail.find_focus {
+        r.request_focus();
+        s.detail.find_focus = false;
+    }
+    if r.changed() {
+        s.detail.find_pick = 0;
+    }
+    let found = find_accounts(chart, &typed);
+    let n = found.len();
+    let focused = r.has_focus();
+    let (down, up, enter, esc) = ui.input_mut(|i| {
+        if !focused {
+            return (false, false, false, false);
+        }
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+        )
+    });
+    if down && n > 0 {
+        s.detail.find_pick = (s.detail.find_pick + 1).min(n - 1);
+    }
+    if up {
+        s.detail.find_pick = s.detail.find_pick.saturating_sub(1);
+    }
+    let mut picked = None;
+    for (i, (aid, name)) in found.iter().take(8).enumerate() {
+        if ui.selectable_label(i == s.detail.find_pick, name).clicked() {
+            picked = Some(*aid);
+        }
+    }
+    if n == 0 {
+        ui.label(RichText::new(t("bank_feed.detail.find.none")).size(12.0));
+    }
+    // Enter right after the box lost focus (egui moves focus on Enter).
+    let entered = enter || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    if entered && let Some((aid, _)) = found.get(s.detail.find_pick) {
+        picked = Some(*aid);
+    }
+    if let Some(a) = picked {
+        s.detail.account = Some(a);
+        // The keys go back to the list: A accepts now.
+        r.surrender_focus();
+        return;
+    }
+    if esc || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+        r.surrender_focus();
+        return;
+    }
+    s.detail.find = Some(typed);
+}
+
 /// Ctrl+Insert / Ctrl+Delete in the split or fee grid.
 pub(crate) fn line_command(s: &mut BankFeedScreen, id: &str) -> bool {
     let lines = match s.detail.mode {
@@ -265,7 +426,7 @@ pub(crate) fn line_command(s: &mut BankFeedScreen, id: &str) -> bool {
 pub(crate) fn follow(s: &mut BankFeedScreen) {
     if let Some(r) = finished(&mut s.detail.load) {
         match r {
-            Ok(d) if d.row == s.detail.row => s.detail.data = d,
+            Ok(d) if d.row == s.detail.row => s.detail.take_data(d),
             Ok(_) => {}
             Err(e) => s.detail.data.forbidden = cl_api::is_view_only(&e),
         }
@@ -305,7 +466,14 @@ fn read(s: &mut BankFeedScreen, r: &FeedRow) {
                 id: p.source,
                 amount: p.amount,
                 date: p.date,
-                label: p.received_from.clone().unwrap_or_default(),
+                label: payer_label(
+                    p.received_from.as_deref(),
+                    p.ref_no.as_deref(),
+                    serde_json::to_value(p.txn_type)
+                        .ok()
+                        .as_ref()
+                        .and_then(serde_json::Value::as_str),
+                ),
             };
             Ok(DetailData {
                 row: Some(id),
@@ -352,11 +520,14 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             .strong(),
         );
     });
-    ui.label(
-        RichText::new(&r.description)
-            .monospace()
-            .size(12.0)
-            .color(tokens.text_secondary),
+    ui.add(
+        egui::Label::new(
+            RichText::new(super::bank_text(&r))
+                .monospace()
+                .size(12.0)
+                .color(tokens.text_secondary),
+        )
+        .wrap(),
     );
     ui.add_space(6.0);
     let can = !s.view_only && s.act.is_none();
@@ -415,11 +586,7 @@ fn accepted(
     can: bool,
     tip: &str,
 ) {
-    let key = if r.status == cl_api::FeedStatus::Matched {
-        "bank_feed.detail.matched"
-    } else {
-        "bank_feed.detail.posted"
-    };
+    let key = accepted_text(r.status, s.accepted_as.get(&r.id).copied());
     form::hint(ui, tokens, &t(key));
     ui.add_space(8.0);
     if ui
@@ -429,6 +596,19 @@ fn accepted(
         .clicked()
     {
         send::start(s, Send::Undo(UndoTarget::Items(vec![r.id]), false), None);
+    }
+}
+
+/// What an accepted row's panel says Undo will do (P26 QA-9, QA-15): a
+/// deposit or transfer made here is removed; a match only unlinks. A
+/// matched row accepted before this window opened says both.
+pub(crate) fn accepted_text(status: cl_api::FeedStatus, how: Option<&str>) -> &'static str {
+    match (status, how) {
+        (_, Some("deposit")) => "bank_feed.detail.deposited",
+        (_, Some("transfer")) => "bank_feed.detail.transferred",
+        (cl_api::FeedStatus::Matched, Some("match")) => "bank_feed.detail.matched",
+        (cl_api::FeedStatus::Matched, _) => "bank_feed.detail.linked",
+        _ => "bank_feed.detail.posted",
     }
 }
 
@@ -450,7 +630,7 @@ fn duplicate(
             tokens,
             Some(r.date),
             Some(r.amount),
-            Some(&r.description),
+            Some(super::bank_text(r)),
         );
         cols[1].label(RichText::new(t("bank_feed.dup.other")).strong());
         match &other {
@@ -630,6 +810,15 @@ fn categorize_ui(
         &label,
         280.0,
     );
+    if s.detail.find.is_some() {
+        find_ui(s, ui, chart);
+    } else if !s.view_only {
+        ui.label(
+            RichText::new(t("bank_feed.detail.find.key"))
+                .size(12.0)
+                .weak(),
+        );
+    }
     let account = s.detail.account?;
     let proposed = r
         .assigned_account
@@ -849,11 +1038,20 @@ fn transfer_ui(
             amount_text(ui, model::display_amount(c.amount))
         );
         if ui.radio(on, text).clicked() {
-            chosen = Some(c.feed_item);
+            chosen = Some((c.feed_item, c.account));
         }
     }
-    if let Some(c) = chosen {
+    // The picked line's account shows in "Transfer to" (P26 QA-14).
+    let picked_account = s
+        .detail
+        .pick_transfer
+        .and_then(|p| s.detail.data.transfers.iter().find(|c| c.feed_item == p))
+        .map(|c| c.account);
+    if let Some((c, a)) = chosen {
         s.detail.pick_transfer = Some(c);
+        s.detail.transfer_to = Some(a);
+    } else if let Some(a) = picked_account {
+        s.detail.transfer_to = Some(a);
     }
     let label = t(if r.is_money_out() {
         "bank_feed.transfer.to"
@@ -1022,6 +1220,10 @@ pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
     let split = row.and_then(|r| s.detail.split_draft(r));
     serde_json::json!({
         "mode": s.detail.mode.as_str(),
+        "finding_account": s.detail.find.is_some(),
+        "account_chosen": s.detail.account.is_some(),
+        "transfer_to_chosen": s.detail.transfer_to.is_some(),
+        "transfer_picked": s.detail.pick_transfer.is_some(),
         "candidates": s.detail.data.candidates.len(),
         "payroll": s.detail.data.payroll.len(),
         "transfers": s.detail.data.transfers.len(),

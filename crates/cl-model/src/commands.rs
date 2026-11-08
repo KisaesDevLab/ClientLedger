@@ -348,6 +348,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("feed.accept", "Accept the Bank Line", None, 10, key(Mods::NONE, Key::Letter('A')), Scope::Feed),
     cmd("feed.split", "Split the Bank Line", None, 10, key(Mods::NONE, Key::Letter('S')), Scope::Feed),
     cmd("feed.rule", "Make a Rule From the Bank Line", None, 10, key(Mods::NONE, Key::Letter('R')), Scope::Feed),
+    // P26 QA-18: the keyboard way into the detail panel's account box.
+    cmd("feed.choose_account", "Choose the Account for the Bank Line", None, 10, key(Mods::NONE, Key::Letter('C')), Scope::Feed),
     cmd("feed.accept_selected", "Accept Selected Bank Lines", None, 10, key(Mods::CMD, Key::Enter), Scope::Feed),
     cmd("feed.insert_line", "Insert a Split or Fee Line", None, 10, key(Mods::CMD, Key::Insert), Scope::Feed),
     cmd("feed.delete_line", "Delete a Split or Fee Line", None, 10, key(Mods::CMD, Key::Delete), Scope::Feed),

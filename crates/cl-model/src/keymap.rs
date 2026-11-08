@@ -511,6 +511,10 @@ mod tests {
         assert_eq!(id(M::NONE, Key::Letter('S')).as_deref(), Some("feed.split"));
         assert_eq!(id(M::NONE, Key::Letter('R')).as_deref(), Some("feed.rule"));
         assert_eq!(
+            id(M::NONE, Key::Letter('C')).as_deref(),
+            Some("feed.choose_account")
+        );
+        assert_eq!(
             id(M::CMD, Key::Enter).as_deref(),
             Some("feed.accept_selected")
         );

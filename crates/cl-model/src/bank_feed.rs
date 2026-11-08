@@ -171,6 +171,10 @@ pub enum Why {
     EntryVoided,
     /// A06/A05 hook: a receipt read for this bank line (nothing built).
     Receipt,
+    /// Already accepted (Show › Accepted; P26 QA-8).
+    Accepted,
+    /// Excluded (Show › Excluded).
+    Excluded,
 }
 
 impl Why {
@@ -188,6 +192,8 @@ impl Why {
             Why::NeedsYou => "bank_feed.why.needs_you",
             Why::EntryVoided => "bank_feed.why.entry_voided",
             Why::Receipt => "bank_feed.why.receipt",
+            Why::Accepted => "bank_feed.why.accepted",
+            Why::Excluded => "bank_feed.why.excluded",
         }
     }
 
@@ -205,6 +211,8 @@ impl Why {
             Why::NeedsYou => "needs_you",
             Why::EntryVoided => "entry_voided",
             Why::Receipt => "receipt",
+            Why::Accepted => "accepted",
+            Why::Excluded => "excluded",
         }
     }
 

@@ -150,6 +150,12 @@ pub struct BankFeedScreen {
     /// The Rules panel.
     pub(crate) rules: rules::RulesPanel,
     loaded_at: Option<Instant>,
+    /// The last frame this window drew (a gap: it was behind another tab).
+    drawn_at: Option<u64>,
+    /// What this window accepted each row as (`deposit`, `transfer`,
+    /// `match`, `categorize`), so Show › Accepted says what Undo will do
+    /// (P26 QA-9, QA-15; the engine's row doesn't carry it, U-row).
+    pub(crate) accepted_as: std::collections::BTreeMap<FeedItemId, &'static str>,
     pub(crate) load_failed: bool,
     /// The last action's message (i18n key and its count).
     pub(crate) notice: Option<(&'static str, usize)>,
@@ -208,6 +214,8 @@ impl BankFeedScreen {
             last_send: None,
             rules: rules::RulesPanel::default(),
             loaded_at: None,
+            drawn_at: None,
+            accepted_as: std::collections::BTreeMap::new(),
             load_failed: false,
             notice: None,
         };
@@ -261,7 +269,18 @@ impl BankFeedScreen {
         q
     }
 
-    fn read_meta(&mut self) {
+    /// Follows a transfer window changed in Preferences (P26 QA-16): the
+    /// panel reads its row's partners again with the new window.
+    pub(crate) fn follow_transfer_window(&mut self) {
+        let now = transfer_window(&self.link, self.tenant);
+        if now != self.transfer_window {
+            self.transfer_window = now;
+            self.detail.row = None;
+        }
+    }
+
+    pub(crate) fn read_meta(&mut self) {
+        self.follow_transfer_window();
         let tenant = self.tenant;
         let under_cap = crate::forms::suggest::under_cap(&self.link, tenant);
         self.meta = Some(run(
@@ -392,6 +411,7 @@ impl BankFeedScreen {
             None => self.closing.saved(),
         }
         self.confirm.clone_from(&o.changed);
+        self.accepted_as.extend(o.accepted_as.iter().copied());
         if o.undone > 0 {
             self.toast = None;
         }
@@ -433,6 +453,14 @@ impl BankFeedScreen {
 
     /// The badge of `r`.
     pub(crate) fn why(&self, r: &FeedRow) -> Why {
+        // Rows no longer waiting say what they are (P26 QA-8), not "Needs
+        // you".
+        if !r.entry_voided && r.status.is_accepted() {
+            return Why::Accepted;
+        }
+        if r.status == FeedStatus::Excluded {
+            return Why::Excluded;
+        }
         let bucket = r.bucket.map(|b| match b {
             cl_api::FeedBucket::Ready => model::Bucket::Ready,
             cl_api::FeedBucket::Review => model::Bucket::Review,
@@ -524,8 +552,11 @@ impl BankFeedScreen {
         if let Some(x) = x {
             send::start(self, x, None);
         } else {
+            // A never does nothing silently (P26 QA-24, QA-18): the panel
+            // says what's missing.
             self.detail_request = Some(FeedAction::Accept(id));
             self.list.focus(id);
+            self.notice = Some((incomplete_notice(why), 0));
         }
     }
 
@@ -585,6 +616,29 @@ impl BankFeedScreen {
         self.read_meta();
         self.reload();
         true
+    }
+}
+
+/// The bank's own text for "From the bank" (P26 QA-13, QA-2): the raw
+/// description, as the import preview and the mockup show it. The engine's
+/// cleaned name cuts some to a word ("ONLINE TRANSFER TO CARD" reads
+/// "Online", "CHECK 1005" reads "Check"), so it is only the fallback.
+pub(crate) fn bank_text(r: &FeedRow) -> &str {
+    r.original_description
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .unwrap_or(&r.description)
+}
+
+/// What A says when the row isn't complete yet (P26 QA-24, QA-18).
+fn incomplete_notice(why: Why) -> &'static str {
+    match why {
+        Why::Match => "bank_feed.notice.pick_match",
+        Why::Transfer => "bank_feed.notice.pick_transfer",
+        Why::Duplicate => "bank_feed.notice.pick_duplicate",
+        Why::EntryVoided => "bank_feed.notice.pick_voided",
+        _ => "bank_feed.notice.pick_account",
     }
 }
 
@@ -726,6 +780,14 @@ impl Screen for BankFeedScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        // Back on this tab after another one (Preferences, a register):
+        // the transfer window and the list are read again (P26 QA-16).
+        let pass = ctx.cumulative_pass_nr();
+        if self.drawn_at.is_some_and(|p| pass > p + 1) {
+            self.follow_transfer_window();
+            self.reload();
+        }
+        self.drawn_at = Some(pass);
         self.poll();
         if !self.link.bus().take(&mut self.bus).is_empty() {
             self.read_meta();
@@ -764,6 +826,12 @@ impl Screen for BankFeedScreen {
         }
         if s == "form.revert" && self.confirm.take().is_some() {
             return true;
+        }
+        if s == "form.revert" && self.detail.find.take().is_some() {
+            return true;
+        }
+        if s == "feed.choose_account" {
+            return detail::choose_account(self);
         }
         if s.starts_with("feed.") {
             // Writes are refused at once for a view-only user; moving and
@@ -834,13 +902,6 @@ impl Screen for BankFeedScreen {
             "busy": self.act.is_some() || self.load.is_some(),
             "load_failed": self.load_failed,
             "notice": self.notice.map(|(k, _)| k),
-            "detail": detail::state(self),
-            "rules": rules::state(self),
-            "toast": self.toast.as_ref().map(|x| x.rows),
-            "undo_changed": self.confirm.as_ref().map(|c| c.1),
-            "closing": self.closing.state_json(self.closing_supported),
-            "last_send": self.last_send,
-            "transfer_window": self.transfer_window,
             "detail": detail::state(self),
             "rules": rules::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),

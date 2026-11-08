@@ -1210,6 +1210,78 @@ pub fn save_rule(state: &mut DemoState, rule: &cl_api::FeedRule) -> Result<(), A
     Ok(())
 }
 
+/// Runs the rules over the waiting lines of `connection` (the engine's
+/// `bulk-reprocess-rules`, P26 QA-10): a line a rule fits gets the rule's
+/// account as its suggestion and the rule's name; nothing posts. Lines the
+/// owner already staged, matches and transfers are left alone.
+///
+/// # Errors
+/// 403 for a view-only user.
+pub fn reprocess_rules(
+    state: &mut DemoState,
+    connection: Option<cl_api::BankConnectionId>,
+) -> Result<cl_api::RulesRerun, ApiError> {
+    if state.feed_review.view_only {
+        return Err(ApiError::Forbidden { code: None });
+    }
+    let chart = super::super::chart();
+    let rules: Vec<cl_api::FeedRule> = rules(state).into_iter().filter(|r| r.active).collect();
+    let review = &mut state.feed_review;
+    let mut out = cl_api::RulesRerun::default();
+    for row in &mut review.rows {
+        if !row.waiting()
+            || connection.is_some_and(|c| super::connection_of(row.account) != c)
+            || row.assigned.is_some()
+            || row.kind == "match"
+            || row.transfer
+        {
+            continue;
+        }
+        out.processed += 1;
+        let text = row.description.to_lowercase();
+        let fits = |r: &&cl_api::FeedRule| {
+            let words = r.description.as_deref().map(str::to_lowercase);
+            let sign = match r.sign {
+                cl_api::RuleSign::Either => true,
+                cl_api::RuleSign::MoneyOut => row.amount.is_positive(),
+                cl_api::RuleSign::MoneyIn => !row.amount.is_positive(),
+            };
+            words.is_some_and(|w| text.contains(&w))
+                && sign
+                && r.bank_account.is_none_or(|b| b == row.account)
+                && r.amount.is_none_or(|a| a == row.amount.abs())
+        };
+        let Some(rule) = rules.iter().find(fits) else {
+            continue;
+        };
+        let Some((rid, account)) = rule.id.clone().zip(rule.account) else {
+            continue;
+        };
+        let name = chart
+            .iter()
+            .find(|a| a.id == account)
+            .map(|a| match a.fields.account_number.as_deref() {
+                Some(n) => format!("{n} \u{b7} {}", a.fields.name),
+                None => a.fields.name.clone(),
+            })
+            .unwrap_or_default();
+        row.suggested = Some(cl_api::Named { id: account, name });
+        row.rule = Some(cl_api::SuggestedRule {
+            id: rid,
+            kind: "conditional".into(),
+            name: rule.name.clone(),
+            auto_accept: rule.auto_accept,
+            updated_at: rule.updated_at.clone(),
+        });
+        row.source = Some("rule");
+        row.confidence = None;
+        row.kind = "ready";
+        out.matched += 1;
+        out.suggestions_updated += 1;
+    }
+    Ok(out)
+}
+
 /// Deletes a rule (its rows keep their suggestion, without the rule).
 ///
 /// # Errors
