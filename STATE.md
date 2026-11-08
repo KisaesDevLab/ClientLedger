@@ -84,6 +84,7 @@
 | A10 | AI drafting of report definitions | M | After A08 |
 **ADD-04 — Distribution through winget** (`addenda/ADD-04-winget.md`; part of the beta; owner request and Q&A 2026-10-31, Q-317–Q-323). No A-phases: built inside P35/P36, switched on at P39 stage 2 (first manual submission, then `WINGET_ENABLED`). MSI per-machine only; UpgradeCode {5871208F-8AA3-4EC1-86A7-ABCF603A0765}; package `KisaesLLC.ClientLedger`.
 **ADD-05 — VibeMyFirm Community License: tiers, keys and Pro gating** (`addenda/ADD-05-community-license.md`; owner request and Q&A 2026-11-06, Q-336–Q-342). **Draft: license texts in `licensing/`; waiting on the engine addendum** (`GET /license`, host signature). Phases L1–L4 inside P35/P36, L5 with P39 (Q-339). Business needs no key (Q-337); replaces PolyForm (Q-336).
+**ADD-06 — MCP bookkeeper moves into the beta** (`addenda/ADD-06-mcp-beta.md`; owner 2026-11-07, Q-345). Phase **A11** (was post-beta P50) runs right after P34, before P35; checkpoint **PR-A3** (process review + security review) right after A11.
 
 ## Post-beta (owner may reorder, Q-39)
 
