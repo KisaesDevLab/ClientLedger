@@ -34,6 +34,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+pub mod bring_back;
 pub mod fs;
 pub mod handled;
 pub mod legacy;
@@ -43,6 +44,7 @@ pub mod probe;
 pub mod scan;
 pub mod watch;
 
+pub use bring_back::{copy_back, find_processed, refile_discarded};
 pub use fs::{EntryInfo, FakeFs, FolderFs, RawListing, RealFs};
 pub use handled::{DISCARDED_DIR, HandledDir, MoveFailed, PROCESSED_DIR, move_handled};
 pub use migrate::{
