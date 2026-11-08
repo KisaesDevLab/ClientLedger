@@ -926,3 +926,42 @@ fn pay_this_bill_on_a_paid_bill_says_so() {
             .all(|e| !matches!(e, CompanyEvent::OpenWith(..)))
     );
 }
+
+/// PR-A1 T13: the app is killed after a convert was sent and before its
+/// answer (the engine committed it). On restart the keys are gone: the
+/// draft opens as entered, the entry exists once, and accepting again
+/// posts nothing. (The original's move is the inbox follow, tested there.)
+#[test]
+fn a_convert_cut_off_by_a_crash_is_entered_once_after_restart() {
+    let w = World::new();
+    let id = w.draft("crash", "40.00", day(14));
+    let before = w.transactions();
+    {
+        let mut s = w.session(id);
+        w.demo().drafts.lose_next_reply = true;
+        assert!(s.accept(w.accept("40.00", day(14), None)));
+        assert_eq!(s.work.name(), "resend", "the answer was lost");
+        // Killed here: the session (and its key) is gone.
+    }
+    assert_eq!(w.transactions(), before + 1, "the engine committed it");
+    assert_eq!(w.status(id), DraftStatus::Converted);
+    // Restart: a fresh session on the same draft.
+    let mut s = DraftSession::new(
+        Arc::clone(&w.link),
+        Some(w.tenant),
+        DraftOpen {
+            id,
+            form: DraftForm::CardCharge,
+        },
+    );
+    let _ = tick(&w, &mut s);
+    let _ = s.accept(w.accept("40.00", day(14), None));
+    for _ in 0..3 {
+        let ev = tick(&w, &mut s);
+        assert!(
+            !ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+            "{ev:?}"
+        );
+    }
+    assert_eq!(w.transactions(), before + 1, "entered once");
+}
