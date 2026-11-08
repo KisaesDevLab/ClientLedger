@@ -105,15 +105,15 @@ pub fn rows_are_exact_and_counts_agree(h: &Harness) {
         s,
         acct,
         vec![
-            row(1, 2, "-84.17", "RIVERBEND FUEL"),
-            row(2, 3, "8450.00", "ACH CREDIT HOA"),
-            row(3, 3, "-999999999.99", "BIG ONE"),
+            row(1, 2, "84.17", "RIVERBEND FUEL"),
+            row(2, 3, "-8450.00", "ACH CREDIT HOA"),
+            row(3, 3, "999999999.99", "BIG ONE"),
         ],
     );
     assert_eq!(rows.len(), 3);
     let mut amounts: Vec<String> = rows.iter().map(|r| r.amount.to_wire()).collect();
     amounts.sort();
-    // Feed sign: money out positive.
+    // The import rows are in the feed sign already (money out positive).
     assert_eq!(amounts, ["-8450.0000", "84.1700", "999999999.9900"]);
     assert!(rows.iter().all(|r| r.bucket.is_some()));
     let conn = rows[0].connection.expect("connection");
@@ -146,7 +146,7 @@ pub fn split_posts_exactly(h: &Harness) {
     let acct = fresh_account(h, s, AccountType::Asset, Some("bank"));
     let exp1 = fresh_account(h, s, AccountType::Expense, None);
     let exp2 = fresh_account(h, s, AccountType::Expense, None);
-    let rows = import(h, s, acct, vec![row(1, 5, "-84.17", "RIVERBEND FUEL")]);
+    let rows = import(h, s, acct, vec![row(1, 5, "84.17", "RIVERBEND FUEL")]);
     let id = rows[0].id;
     let line = |a, v: &str| FeedSplitLine {
         account: a,
@@ -195,7 +195,7 @@ pub fn decisions_need_a_key(h: &Harness) {
     }
     let s = &h.s1;
     let acct = fresh_account(h, s, AccountType::Asset, Some("bank"));
-    let rows = import(h, s, acct, vec![row(1, 6, "-45.00", "SQ FARMERS MKT")]);
+    let rows = import(h, s, acct, vec![row(1, 6, "45.00", "SQ FARMERS MKT")]);
     let id = rows[0].id;
     let raw = h
         .run(s.raw(
@@ -231,8 +231,8 @@ pub fn transfer_pair(h: &Harness) {
     let s = &h.s1;
     let a = fresh_account(h, s, AccountType::Asset, Some("bank"));
     let b = fresh_account(h, s, AccountType::Asset, Some("bank"));
-    let out = import(h, s, a, vec![row(1, 8, "-3000.00", "ONLINE TRANSFER TO")]);
-    let inn = import(h, s, b, vec![row(1, 9, "3000.00", "ONLINE TRANSFER FROM")]);
+    let out = import(h, s, a, vec![row(1, 8, "3000.00", "ONLINE TRANSFER TO")]);
+    let inn = import(h, s, b, vec![row(1, 9, "-3000.00", "ONLINE TRANSFER FROM")]);
     let c = h
         .run(s.feed().transfer_candidates(out[0].id, 3))
         .expect("candidates");

@@ -186,6 +186,23 @@ struct Identity {
     account: AccountId,
 }
 
+/// A waiting imported item as the Bank Feed review reads it (P26).
+#[derive(Clone, Debug)]
+pub struct WaitingRow {
+    /// Stable while it waits.
+    pub key: String,
+    /// The bank account.
+    pub account: AccountId,
+    /// The bank's date.
+    pub date: cl_core::CalendarDate,
+    /// The amount in the feed sign (money out positive).
+    pub amount: rust_decimal::Decimal,
+    /// The bank's description.
+    pub description: String,
+    /// When it was imported.
+    pub imported_at: Timestamp,
+}
+
 /// The demo feed.
 #[derive(Clone, Debug, Default)]
 pub struct DemoBankFeed {
@@ -217,6 +234,52 @@ impl DemoBankFeed {
     #[must_use]
     pub fn waiting(&self) -> usize {
         self.items.iter().filter(|i| i.pending).count()
+    }
+
+    /// The waiting items for the Bank Feed review (P26), each under a key
+    /// that stays the same while it waits (its batch and row key).
+    #[must_use]
+    pub fn waiting_rows(&self) -> Vec<WaitingRow> {
+        self.items
+            .iter()
+            .filter(|i| i.pending)
+            .map(|i| WaitingRow {
+                key: format!("{}/{}", i.batch, i.row_key),
+                account: i.account,
+                date: i.date,
+                amount: i.amount,
+                description: i.description.clone(),
+                imported_at: i.imported_at,
+            })
+            .collect()
+    }
+
+    /// The review accepted or excluded the item under `key`: it no longer
+    /// waits, so an import Undo leaves it alone (P26 plan §5).
+    pub fn settle(&mut self, key: &str) {
+        if let Some(i) = self
+            .items
+            .iter_mut()
+            .find(|i| i.pending && format!("{}/{}", i.batch, i.row_key) == key)
+        {
+            i.pending = false;
+        }
+    }
+
+    /// The last bank date of the latest import into `account` (not
+    /// undone), when there was one.
+    #[must_use]
+    pub fn last_import(&self, account: AccountId) -> Option<cl_core::CalendarDate> {
+        let batch = self
+            .batches
+            .iter()
+            .rev()
+            .find(|b| b.account == account && !b.undone && b.inserted > 0)?;
+        self.items
+            .iter()
+            .filter(|i| i.batch == batch.id)
+            .map(|i| i.date)
+            .max()
     }
 
     /// Previews or commits `req` at `now`. A row dated on or before

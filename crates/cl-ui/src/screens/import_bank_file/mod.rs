@@ -1085,8 +1085,8 @@ impl ImportBankFileScreen {
     /// (UI review 11): Home, which reads it otherwise, is not in front.
     fn recount_feed(&mut self) {
         let link = Arc::clone(&self.link);
-        if let Some(demo) = link.demo_state() {
-            let n = crate::company::demo::home::feed_waiting(&demo);
+        if let Some(mut demo) = link.demo_state() {
+            let n = crate::company::demo::home::feed_waiting(&mut demo);
             drop(demo);
             self.feed_count_task = Some(Task::ready(n));
             return;
