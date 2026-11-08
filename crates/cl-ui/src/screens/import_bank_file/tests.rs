@@ -250,20 +250,81 @@ fn undo_takes_the_rows_out_and_they_come_back() {
     let mut s = screen(&f);
     previewed(&mut s, &f);
     s.next();
-    // Q-P25v: preparing first; Undo waits for it.
+    // Q-P25v: preparing first; once prepared, Undo takes the rows out.
     assert_eq!(s.state()["preparing"], true);
-    s.undo(false);
-    assert_eq!(s.state()["undo_trouble"], "bankimport.undo.preparing");
-    s.undo_trouble = None;
     prepared(&mut s);
     s.undo(false);
     assert_eq!(s.undone.map(|u| u.removed), Some(3));
+    assert_eq!(s.state()["result"]["post_processing"], "done");
     assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 0);
     s.undo(false);
     assert_eq!(s.state()["undo_trouble"], "bankimport.undo.already");
     s.start_over(false);
     previewed(&mut s, &f);
     assert_eq!(s.preview.as_ref().expect("preview").counts.new, 3);
+}
+
+/// PR #234 (Q-P25ad): while the suggestions are prepared the wizard
+/// counts them and Undo stays open; an undo then stops them and says so.
+#[test]
+fn undo_while_preparing_stops_the_suggestions() {
+    let f = fixture();
+    let mut s = screen(&f);
+    assert!(s.command(CommandId::new("dev.demo_bank_import_slow")));
+    previewed(&mut s, &f);
+    s.next();
+    assert_eq!(s.state()["progress_caps"], true);
+    assert_eq!(s.state()["preparing"], true);
+    // The first check reads the count.
+    s.prep_next = Some(std::time::Instant::now());
+    s.poll();
+    assert_eq!(s.state()["prep_progress"][1], 3);
+    s.undo(false);
+    assert_eq!(s.undone.map(|u| u.removed), Some(3));
+    assert_eq!(s.state()["result"]["post_processing"], "cancelled");
+    assert_eq!(s.state()["preparing"], false);
+    assert_eq!(s.state()["undo_trouble"], Value::Null);
+    assert_eq!(f.link.demo_state().expect("demo").bank_feed.waiting(), 0);
+    // Later checks never bring "preparing" back.
+    s.prep_next = Some(std::time::Instant::now());
+    s.poll();
+    assert_eq!(s.state()["result"]["post_processing"], "cancelled");
+    assert!(
+        crate::i18n::t("bankimport.done.prep_cancelled")
+            .contains("Import undone; suggestions stopped")
+    );
+}
+
+/// P25 follow-up 6: a wizard opened again sees an earlier import still
+/// being prepared, with its count, until it is undone or done.
+#[test]
+fn a_reopened_wizard_rechecks_an_earlier_import() {
+    let f = fixture();
+    let mut s = screen(&f);
+    assert_eq!(s.state()["earlier"], Value::Null);
+    assert!(s.command(CommandId::new("dev.demo_bank_import_slow")));
+    previewed(&mut s, &f);
+    s.next();
+    let batch = s.result.as_ref().and_then(|r| r.batch).expect("batch");
+    drop(s);
+    let mut again = screen(&f);
+    assert_eq!(again.state()["earlier"]["post_processing"], "scheduled");
+    assert_eq!(again.state()["earlier"]["progress"][1], 3);
+    assert!(again.earlier_next.is_some(), "checked again");
+    // Undone elsewhere: the note goes at the next check.
+    f.link
+        .demo_state()
+        .expect("demo")
+        .bank_feed
+        .undo(batch)
+        .expect("undo");
+    again.earlier_next = Some(std::time::Instant::now());
+    again.poll();
+    assert_eq!(again.state()["earlier"], Value::Null);
+    assert!(again.earlier_next.is_none());
+    // Nothing preparing: no note.
+    let fresh = screen(&f);
+    assert_eq!(fresh.state()["earlier"], Value::Null);
 }
 
 #[test]

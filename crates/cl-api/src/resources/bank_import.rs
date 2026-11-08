@@ -496,6 +496,9 @@ pub enum ImportPostProcessing {
     Done,
     /// Failed (the items are still in the feed).
     Failed,
+    /// An undo stopped it (`bank-import-progress-v1`): the batch is undone
+    /// and its suggestions were not all prepared.
+    Cancelled,
 }
 
 impl ImportPostProcessing {
@@ -504,6 +507,7 @@ impl ImportPostProcessing {
             "scheduled" => Some(ImportPostProcessing::Scheduled),
             "done" => Some(ImportPostProcessing::Done),
             "failed" => Some(ImportPostProcessing::Failed),
+            "cancelled" => Some(ImportPostProcessing::Cancelled),
             _ => None,
         }
     }
@@ -1198,11 +1202,16 @@ impl BankImport<'_> {
     }
 
     /// Undoes an import: its untouched waiting rows leave the feed. With
-    /// `pending_only`, rows already used stay and the rest go.
+    /// `pending_only`, rows already used stay and the rest go. While the
+    /// import is still being prepared, an engine with
+    /// `bank-import-progress-v1` stops the preparation after its current
+    /// chunk and then undoes (the batch then reports `Cancelled`); it waits
+    /// up to 20 s for that, so the call uses the Import time class.
     ///
     /// # Errors
     /// The 409s [`bank_import_refusal`] reads (`rows_already_used`,
-    /// `still_preparing`, `already_undone`); `NotFound`; any [`ApiError`].
+    /// `still_preparing` (could not stop within 20 s; nothing undone),
+    /// `already_undone`); `NotFound`; any [`ApiError`].
     pub async fn undo(
         &self,
         batch: ImportBatchId,

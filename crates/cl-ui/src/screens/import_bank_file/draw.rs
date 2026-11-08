@@ -424,7 +424,33 @@ impl ImportBankFileScreen {
 
     // ---- Step 1 --------------------------------------------------------------
 
+    /// P25 follow-up 6: an import sent from an earlier window that was
+    /// still being prepared when this one opened.
+    fn earlier_ui(&self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(b) = self.earlier() else {
+            return;
+        };
+        let text = match b.post_processing {
+            Some(cl_api::ImportPostProcessing::Scheduled) => match b.progress {
+                Some((done, all)) if self.progress_caps() => t_with(
+                    "bankimport.earlier.preparing_of",
+                    &[
+                        ("done", &crate::i18n::count_text(u64::from(done))),
+                        ("all", &crate::i18n::count_text(u64::from(all))),
+                    ],
+                ),
+                _ => t("bankimport.earlier.preparing"),
+            },
+            Some(cl_api::ImportPostProcessing::Done) => t("bankimport.earlier.done"),
+            Some(cl_api::ImportPostProcessing::Failed) => t("bankimport.earlier.failed"),
+            _ => return,
+        };
+        form::hint(ui, tokens, &text);
+        ui.add_space(4.0);
+    }
+
     fn choose_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        self.earlier_ui(ui, tokens);
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("bankimport.choose.heading"));
             form::hint(ui, tokens, &t("bankimport.choose.hint"));
@@ -545,6 +571,7 @@ impl ImportBankFileScreen {
         let Some(sections) = self.loaded.as_ref().map(|l| l.parsed.sections.clone()) else {
             return;
         };
+        self.earlier_ui(ui, tokens);
         if sections.len() > 1 {
             form::card(ui, tokens, |ui| {
                 form::heading(ui, tokens, &t("bankimport.section.heading"));
@@ -1597,8 +1624,10 @@ impl ImportBankFileScreen {
             }
             match r.post_processing {
                 Some(cl_api::ImportPostProcessing::Scheduled) => {
-                    // Q-P25ad: "N of M" when the engine says how far it is.
-                    let line = self.prep_progress.map_or_else(
+                    // Q-P25ad: "N of M" when the engine says how far it is
+                    // (`bank-import-progress-v1`).
+                    let progress = self.prep_progress.filter(|_| self.progress_caps());
+                    let line = progress.map_or_else(
                         || t("bankimport.done.preparing"),
                         |(done, all)| {
                             t_with(
@@ -1613,15 +1642,22 @@ impl ImportBankFileScreen {
                     form::progress_line(ui, tokens, &line);
                     // Q-P25ac: past the wait, say it goes on and that Undo
                     // opens when it is done.
-                    let key = if self.prep_gave_up {
-                        "bankimport.done.prep_slow"
-                    } else {
-                        "bankimport.done.prep_wait"
+                    // PR #234: an engine that can stop the preparation
+                    // keeps Undo open while it runs.
+                    let key = match (self.progress_caps(), self.prep_gave_up) {
+                        (true, false) => "bankimport.done.prep_wait_undo",
+                        (true, true) => "bankimport.done.prep_slow_undo",
+                        (false, false) => "bankimport.done.prep_wait",
+                        (false, true) => "bankimport.done.prep_slow",
                     };
                     form::hint(ui, tokens, &t(key));
                 }
                 Some(cl_api::ImportPostProcessing::Failed) => {
                     form::hint(ui, tokens, &t("bankimport.done.prep_failed"));
+                }
+                // PR #234: the undo stopped the preparation.
+                Some(cl_api::ImportPostProcessing::Cancelled) => {
+                    form::hint(ui, tokens, &t("bankimport.done.prep_cancelled"));
                 }
                 // QA-9: the owner sees the preparation happened.
                 Some(cl_api::ImportPostProcessing::Done)
@@ -1641,7 +1677,9 @@ impl ImportBankFileScreen {
                     && (r.counts.inserted > 0 || replaced > 0)
                     && self.undone.is_none()
                     && self.undo_task.is_none()
-                    && !self.preparing();
+                    && r.post_processing != Some(cl_api::ImportPostProcessing::Cancelled)
+                    && (!self.preparing() || self.progress_caps());
+
                 if ui
                     .add_enabled(can_undo, egui::Button::new(t("bankimport.undo")))
                     .clicked()

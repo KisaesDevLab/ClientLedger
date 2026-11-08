@@ -1473,11 +1473,16 @@ pub(crate) const FEED_IMPORT_BATCH: Operation = op(
 );
 /// Earlier bank file imports, newest first (U-06).
 pub(crate) const FEED_IMPORT_BATCHES: Operation = read("/api/v1/banking/feed/import-batches");
-/// Undoes a bank file import (U-06; keyed).
-pub(crate) const FEED_IMPORT_BATCH_UNDO: Operation = keyable_in(
-    KeySet::BankImportV1,
+/// Undoes a bank file import (U-06; keyed). The Import time class: while
+/// the import is being prepared the engine waits up to 20 s for the
+/// preparation to stop before it undoes (bank-import-progress-v1).
+pub(crate) const FEED_IMPORT_BATCH_UNDO: Operation = op(
     Method::Delete,
     "/api/v1/banking/feed/import-batches/{id}",
+    RetryClass::Keyable(KeySet::BankImportV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
 );
 /// Which bank connection a file's account belongs to (U-06). A POST so
 /// the account number travels in the body, never in a URL or a log
@@ -2181,6 +2186,8 @@ mod tests {
         assert_eq!(FEED_IMPORT_BATCH.key_set(), Some(KeySet::BankImportV1));
         assert_eq!(FEED_IMPORT_BATCH.timeout, TimeoutClass::Import);
         assert_eq!(FEED_IMPORT_BATCH_UNDO.key_set(), Some(KeySet::BankImportV1));
+        // The engine may wait 20 s for the preparation to stop.
+        assert_eq!(FEED_IMPORT_BATCH_UNDO.timeout, TimeoutClass::Import);
         assert_eq!(FEED_IMPORT_BATCHES.key_set(), None);
         assert_eq!(BANK_CONNECTION_LOOKUP.key_set(), None);
     }

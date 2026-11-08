@@ -547,6 +547,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.bank_import_forget_local",
         "Forget Local Bank CSV Layouts (developer)",
     ),
+    // U-06 follow-up (engine PR #234): the demo prepares imports slowly so
+    // Undo and Close can be tried while the suggestions are prepared.
+    dev_action(
+        "dev.demo_bank_import_slow",
+        "Slow Demo Bank Import Preparation (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

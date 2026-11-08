@@ -891,3 +891,152 @@ pub fn undo_names_the_used_lines(h: &Harness) {
     let u = undo_when_prepared(h, s, batch, true).expect("pending only");
     assert_eq!((u.removed, u.kept), (2, 1));
 }
+
+/// The U-06 follow-up (engine PR #234): progress, undo while preparing,
+/// a changed row's earlier values.
+fn progress_caps(h: &Harness) -> bool {
+    caps(h) && h.require_cap(Capabilities::BANK_IMPORT_PROGRESS, "U-06 follow-up")
+}
+
+/// `n` rows with bank ids unique to this run (several 1,000-row chunks
+/// of preparation).
+fn many_rows(n: u32) -> Vec<BankImportRow> {
+    let tag = unique("P");
+    (1..=n)
+        .map(|i| {
+            let day = date(2027, 2, 1 + (i % 28));
+            let amount = format!("{}.{:02}", 1 + i % 500, i % 100);
+            let text = format!("SHOP {tag} {i}");
+            fitid_row(i, day, &amount, &text, &format!("{tag}-{i}"))
+        })
+        .collect()
+}
+
+/// Q-P25ad: the batch list counts the items prepared of all; once done,
+/// all of them.
+pub fn batches_report_progress(h: &Harness) {
+    if !progress_caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let c = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, many_rows(1_500)), key()),
+        )
+        .expect("commit");
+    let batch = c.batch.expect("batch");
+    assert_eq!(c.counts.inserted, 1_500);
+    let mut seen = None;
+    for _ in 0..240 {
+        let listed = h
+            .run(s.bank_import().batches(Some(acct), None))
+            .expect("batches");
+        let b = listed.into_iter().find(|b| b.id == batch).expect("listed");
+        if let Some((done, all)) = b.progress {
+            assert_eq!(all, 1_500, "the total is the items added");
+            assert!(done <= all);
+        }
+        if b.post_processing != Some(cl_api::ImportPostProcessing::Scheduled) {
+            seen = Some(b);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    let b = seen.expect("prepared within a minute");
+    assert_eq!(b.post_processing, Some(cl_api::ImportPostProcessing::Done));
+    assert_eq!(b.progress, Some((1_500, 1_500)));
+}
+
+/// PR #234: an undo sent while the import is prepared stops the
+/// preparation and undoes (200, never 409 within 20 s); the batch then
+/// reports `Cancelled`. A machine fast enough to finish first reports
+/// `Done`; the undo still goes through.
+pub fn undo_while_preparing_cancels(h: &Harness) {
+    if !progress_caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let c = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, many_rows(8_000)), key()),
+        )
+        .expect("commit");
+    let batch = c.batch.expect("batch");
+    let started = std::time::Instant::now();
+    let u = h
+        .run(s.bank_import().undo(batch, false, key()))
+        .unwrap_or_else(|e| panic!("undo while preparing: {e:?}"));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "the undo answers within the Import budget"
+    );
+    assert_eq!((u.removed, u.kept), (8_000, 0));
+    let listed = h
+        .run(s.bank_import().batches(Some(acct), None))
+        .expect("batches");
+    let b = listed.into_iter().find(|b| b.id == batch).expect("listed");
+    assert!(b.undone_at.is_some());
+    let state = b.post_processing.expect("a state");
+    assert!(
+        matches!(
+            state,
+            cl_api::ImportPostProcessing::Cancelled | cl_api::ImportPostProcessing::Done
+        ),
+        "{state:?}"
+    );
+    if c.post_processing == Some(cl_api::ImportPostProcessing::Scheduled)
+        && state == cl_api::ImportPostProcessing::Cancelled
+    {
+        let (done, all) = b.progress.unwrap_or((0, 8_000));
+        assert!(done < all, "stopped before the end");
+    }
+    // Undone once only.
+    let e = h
+        .run(s.bank_import().undo(batch, false, key()))
+        .expect_err("twice");
+    assert_eq!(
+        bank_import_refusal(&e),
+        Some(BankImportRefusal::AlreadyUndone)
+    );
+}
+
+/// Q-P25af: a changed row carries the waiting item's amount and date
+/// before this batch, in the preview and the commit.
+pub fn changed_rows_carry_the_earlier_values(h: &Harness) {
+    if !progress_caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let id = unique("EX");
+    let first = fitid_row(1, date(2027, 9, 20), "80.10", "HARDWARE STORE 14", &id);
+    h.run(
+        s.bank_import()
+            .commit(&request(acct, BankFileFormat::Qfx, vec![first]), key()),
+    )
+    .expect("first");
+    let changed = fitid_row(1, date(2027, 9, 21), "85.25", "HARDWARE STORE 14", &id);
+    let p = h
+        .run(
+            s.bank_import()
+                .preview(&request(acct, BankFileFormat::Qfx, vec![changed.clone()])),
+        )
+        .expect("preview");
+    assert_eq!(p.rows[0].status, ImportRowStatus::Changed);
+    assert_eq!(p.rows[0].existing_amount, Some(m("80.10")));
+    assert_eq!(p.rows[0].existing_date, Some(date(2027, 9, 20)));
+    let mut skip = changed;
+    skip.include = Some(false);
+    let k = h
+        .run(
+            s.bank_import()
+                .commit(&request(acct, BankFileFormat::Qfx, vec![skip]), key()),
+        )
+        .expect("commit");
+    assert_eq!(k.rows[0].existing_amount, Some(m("80.10")));
+    assert_eq!(k.rows[0].existing_date, Some(date(2027, 9, 20)));
+}

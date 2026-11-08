@@ -38,9 +38,9 @@ use std::sync::mpsc::Receiver;
 
 use cl_api::{
     Account, AccountFilter, AccountType, ApiError, BankImportOutcome, BankImportRefusal,
-    BankImportRequest, BankLookupBy, BankLookupVia, ChangedAction, ConnectionMatch, IdempotencyKey,
-    ImportBatchSummary, ImportPostProcessing, ImportRowStatus, ImportUndoOutcome, OrphanLabel,
-    RequestGroup, bank_import_refusal,
+    BankImportRequest, BankLookupBy, BankLookupVia, Capabilities, ChangedAction, ConnectionMatch,
+    IdempotencyKey, ImportBatchSummary, ImportPostProcessing, ImportRowStatus, ImportUndoOutcome,
+    OrphanLabel, RequestGroup, bank_import_refusal,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
@@ -148,6 +148,8 @@ const PREPARING_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(
 /// After the budget, the preparation is still checked this often, so Undo
 /// opens when it is done (Q-P25ac).
 const PREPARING_SLOW_DELAY: std::time::Duration = std::time::Duration::from_secs(30);
+/// How often an earlier import still being prepared is checked again.
+const EARLIER_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// A bank or card account the file may go into.
 #[derive(Clone, Debug)]
@@ -236,6 +238,14 @@ pub struct ImportBankFileScreen {
     undo_key: Option<IdempotencyKey>,
     undone: Option<ImportUndoOutcome>,
     undo_trouble: Option<EngineTrouble>,
+    /// The undo was sent while the import was still being prepared: it
+    /// stops the preparation (engine PR #234).
+    undo_cancels: bool,
+    /// An import sent from an earlier window and still being prepared
+    /// when this one opened (P25 follow-up 6), checked until it is done.
+    earlier: Option<ImportBatchSummary>,
+    earlier_task: Option<Task<Vec<ImportBatchSummary>>>,
+    earlier_next: Option<std::time::Instant>,
     /// Imports sent from this window (control channel).
     sent: u32,
     /// The fixed frame's sizes last frame (control channel).
@@ -299,12 +309,91 @@ impl ImportBankFileScreen {
             undo_key: None,
             undone: None,
             undo_trouble: None,
+            undo_cancels: false,
+            earlier: None,
+            earlier_task: None,
+            earlier_next: None,
             sent: 0,
             layout: crate::layout::FrameReport::default(),
             feed_count_task: None,
         };
         s.load_targets();
+        s.check_earlier();
         s
+    }
+
+    /// Whether the engine reports the preparation's progress and lets an
+    /// import be undone while it is prepared (`bank-import-progress-v1`;
+    /// the demo does both).
+    pub(crate) fn progress_caps(&self) -> bool {
+        self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(Capabilities::BANK_IMPORT_PROGRESS)
+    }
+
+    /// Reads the imports again for an earlier one still being prepared
+    /// (P25 follow-up 6): the newest not undone that is still scheduled,
+    /// or, once one was found, that one.
+    fn check_earlier(&mut self) {
+        self.earlier_next = None;
+        let link = Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let batches = demo.bank_feed.summaries();
+            drop(demo);
+            self.take_earlier(batches);
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        self.earlier_task = group
+            .read(&session, |s| async move {
+                s.bank_import().batches(None, None).await
+            })
+            .ok()
+            .map(Task::Pending);
+    }
+
+    fn take_earlier(&mut self, batches: Vec<ImportBatchSummary>) {
+        let found = match self.earlier.as_ref() {
+            Some(e) => batches.into_iter().find(|b| b.id == e.id),
+            None => batches.into_iter().find(|b| {
+                b.undone_at.is_none() && b.post_processing == Some(ImportPostProcessing::Scheduled)
+            }),
+        };
+        // Done or failed stays on show; undone elsewhere (or gone) goes.
+        self.earlier = found.filter(|b| b.undone_at.is_none());
+        if self
+            .earlier
+            .as_ref()
+            .is_some_and(|b| b.post_processing == Some(ImportPostProcessing::Scheduled))
+        {
+            self.earlier_next = Some(std::time::Instant::now() + EARLIER_DELAY);
+        }
+    }
+
+    fn poll_earlier(&mut self) {
+        if let Some(r) = self.earlier_task.as_mut().and_then(Task::try_take) {
+            self.earlier_task = None;
+            if let Ok(batches) = r {
+                self.take_earlier(batches);
+            }
+        }
+        if self.earlier_task.is_none()
+            && self
+                .earlier_next
+                .is_some_and(|n| std::time::Instant::now() >= n)
+        {
+            self.check_earlier();
+        }
+    }
+
+    /// The earlier import still being prepared, or just prepared, for the
+    /// note on steps 1 and 2.
+    pub(crate) fn earlier(&self) -> Option<&ImportBatchSummary> {
+        self.earlier.as_ref()
     }
 
     // ---- Accounts ---------------------------------------------------------
@@ -918,9 +1007,11 @@ impl ImportBankFileScreen {
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let p = demo.bank_feed.post_processing(batch);
+            let progress = demo.bank_feed.progress(batch);
             drop(demo);
             if let (Some(p), Some(res)) = (p, self.result.as_mut()) {
                 res.post_processing = Some(p);
+                self.prep_progress = progress;
             }
             return;
         }
@@ -946,6 +1037,7 @@ impl ImportBankFileScreen {
         };
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
+            self.undo_cancels = self.preparing();
             let u = demo.bank_feed.undo(batch);
             drop(demo);
             match u {
@@ -957,6 +1049,7 @@ impl ImportBankFileScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        self.undo_cancels = self.preparing();
         let key = self
             .undo_key
             .get_or_insert_with(IdempotencyKey::new)
@@ -976,6 +1069,14 @@ impl ImportBankFileScreen {
     fn take_undo(&mut self, u: ImportUndoOutcome) {
         self.undo_key = None;
         self.undone = Some(u);
+        // PR #234: an undo while the import was prepared stopped it; the
+        // engine reports `cancelled` from now on, so the checks end here.
+        if std::mem::take(&mut self.undo_cancels)
+            && let Some(res) = self.result.as_mut()
+            && res.post_processing == Some(ImportPostProcessing::Scheduled)
+        {
+            res.post_processing = Some(ImportPostProcessing::Cancelled);
+        }
         self.link.bus().publish(crate::data_bus::Change::BankFeed);
         self.recount_feed();
     }
@@ -1012,6 +1113,7 @@ impl ImportBankFileScreen {
         self.result = None;
         self.undone = None;
         self.undo_trouble = None;
+        self.undo_cancels = false;
         self.send_trouble = None;
         self.frozen = None;
         self.prep_started = None;
@@ -1211,14 +1313,18 @@ impl ImportBankFileScreen {
         }
         if let Some(r) = self.prep_task.as_mut().and_then(Task::try_take) {
             self.prep_task = None;
+            // A check read before an undo landed never brings back
+            // "preparing".
             if let (Ok(batches), Some(res)) = (r, self.result.as_mut())
                 && let Some(b) = batches.iter().find(|b| Some(b.id) == res.batch)
+                && res.post_processing != Some(ImportPostProcessing::Cancelled)
             {
                 res.post_processing = b.post_processing;
                 self.prep_progress = b.progress;
             }
         }
         self.poll_preparing();
+        self.poll_earlier();
         if let Some(r) = self.feed_count_task.as_mut().and_then(Task::try_take) {
             self.feed_count_task = None;
             if let Ok(n) = r {
@@ -1247,6 +1353,7 @@ impl ImportBankFileScreen {
             || self.prep_task.is_some()
             || self.undo_task.is_some()
             || self.feed_count_task.is_some()
+            || self.earlier_task.is_some()
             || (self.preparing() && !self.prep_gave_up)
     }
 }
@@ -1270,7 +1377,7 @@ impl Screen for ImportBankFileScreen {
         if self.busy() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
-        } else if self.preparing() {
+        } else if self.preparing() || self.earlier_next.is_some() {
             // Q-P25ac: still checked after the wait gave up.
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_secs(1));
@@ -1305,6 +1412,16 @@ impl Screen for ImportBankFileScreen {
                 self.start_over(false);
                 true
             }
+            // PR #234: the demo prepares the next imports slowly, so Undo
+            // and Close can be tried while it runs.
+            "dev.demo_bank_import_slow" => {
+                let link = Arc::clone(&self.link);
+                let Some(mut demo) = link.demo_state() else {
+                    return false;
+                };
+                demo.bank_feed.set_slow(true);
+                true
+            }
             // Q-P25aa: a second computer has no CSV layouts of its own.
             "dev.bank_import_forget_local" => {
                 self.forget_local_layouts();
@@ -1317,6 +1434,10 @@ impl Screen for ImportBankFileScreen {
                 };
                 demo.bank_feed.reset();
                 drop(demo);
+                self.earlier = None;
+                self.earlier_task = None;
+                self.earlier_next = None;
+
                 self.link.bus().publish(crate::data_bus::Change::BankFeed);
                 self.recount_feed();
                 self.forget_local_layouts();
@@ -1346,12 +1467,19 @@ impl Screen for ImportBankFileScreen {
             .preview
             .as_ref()
             .map(|p| outcome_state(p, &self.choices));
+        let earlier = self.earlier.as_ref().map(|b| {
+            json!({
+                "post_processing": b.post_processing.map(post_processing_name),
+                "progress": b.progress.map(|(d, a)| json!([d, a])),
+            })
+        });
         let result = self
             .result
             .as_ref()
             .map(|p| outcome_state(p, &self.choices));
-        json!({
+        let mut state = json!({
             "screen": "import_bank_file",
+
             "step": self.step.as_str(),
             "can_next": self.can_next(),
             "reading": self.reading.is_some(),
@@ -1407,7 +1535,13 @@ impl Screen for ImportBankFileScreen {
             "undo_trouble": trouble_state(self.undo_trouble.as_ref()),
             "sent": self.sent,
             "layout": self.layout.json(),
-        })
+        });
+        // Added outside the macro (its recursion limit).
+        if let Some(m) = state.as_object_mut() {
+            m.insert("progress_caps".into(), json!(self.progress_caps()));
+            m.insert("earlier".into(), earlier.unwrap_or(Value::Null));
+        }
+        state
     }
 }
 
@@ -1434,13 +1568,18 @@ fn outcome_state(o: &BankImportOutcome, choices: &BTreeMap<u32, RowChoice>) -> V
         "linked_elsewhere": o.identity_linked_elsewhere.is_some(),
         "same_file_before": o.same_file_imported_at.is_some(),
         "batch": o.batch.is_some(),
-        "post_processing": o.post_processing.map(|p| match p {
-            ImportPostProcessing::Scheduled => "scheduled",
-            ImportPostProcessing::Done => "done",
-            ImportPostProcessing::Failed => "failed",
-        }),
+        "post_processing": o.post_processing.map(post_processing_name),
         "replayed": o.replayed,
     })
+}
+
+fn post_processing_name(p: ImportPostProcessing) -> &'static str {
+    match p {
+        ImportPostProcessing::Scheduled => "scheduled",
+        ImportPostProcessing::Done => "done",
+        ImportPostProcessing::Failed => "failed",
+        ImportPostProcessing::Cancelled => "cancelled",
+    }
 }
 
 fn trouble_state(t: Option<&EngineTrouble>) -> Value {

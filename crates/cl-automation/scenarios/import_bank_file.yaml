@@ -98,10 +98,11 @@ steps:
   - click: {role: button, label: Send 37 to Bank Feed}
   - assert_state: {key: screen.step, equals: done}
   - assert_state: {key: screen.result.inserted, equals: 37}
-  # Q-P25v: "Preparing suggestions…" until the batch is prepared; Undo
-  # opens then.
+  # Q-P25v, Q-P25ad: "Preparing suggestions…" until the batch is
+  # prepared; Undo stays open meanwhile (engine PR #234).
   - assert_state: {key: screen.preparing, equals: true}
-  - assert_disabled: {role: button, label: Undo this import}
+  - assert_state: {key: screen.progress_caps, equals: true}
+  - assert_enabled: {role: button, label: Undo this import}
   - screenshot: preparing
   - assert_state: {key: screen.result.post_processing, equals: done, within_ms: 6000}
   - assert_state: {key: screen.preparing, equals: false}
@@ -453,7 +454,66 @@ steps:
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
 
+  # --- 11. Undo while the suggestions are prepared (engine PR #234) -------------
+  # Q-P25ad: "Preparing suggestions… N of M" with Close and Undo open; Undo
+  # stops them and says so. A wizard opened again notes an earlier import
+  # still being prepared (P25 follow-up 6). The demo prepares slowly here.
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: dev.demo_bank_import_slow
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - assert_state: {key: screen.result.inserted, equals: 9}
+  - assert_state: {key: screen.prep_progress.1, equals: 9, within_ms: 5000}
+  - assert_exists: {role: label, label_contains: " of 9"}
+  - assert_enabled: {role: button, label: Undo this import}
+  - assert_exists: {role: button, label: Close}
+  - screenshot: preparing-count
+  - click: {role: button, label: Undo this import}
+  - assert_state: {key: screen.result.post_processing, equals: cancelled}
+  - assert_state: {key: screen.preparing, equals: false}
+  - assert_state: {key: screen.undone.removed, equals: 9}
+  - assert_exists: {role: label, label: "Import undone; suggestions stopped."}
+  - assert_disabled: {role: button, label: Undo this import}
+  - screenshot: undone-while-preparing
+  # Sent again and the window closed while it is prepared: opened again,
+  # the wizard says the last import is still being prepared.
+  - click: {role: button, label: Import another file}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/bank/operating_prior.qfx"]}
+  - click: {role: button, label: "Choose a file…"}
+  - assert_state: {key: screen.reading, equals: false}
+  - key: Alt+N
+  - click: {role: combo_box, label: Account in your books}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - assert_state: {key: screen.preparing, equals: true}
+  - click: {role: button, label: Close}
+  - assert_not_exists: {role: tab, label_contains: "Import Bank File"}
+  - command: banking.import_file
+  - assert_state: {key: screen.step, equals: choose}
+  - assert_state: {key: screen.earlier.post_processing, equals: scheduled}
+  - assert_exists: {role: label, label_contains: "Your last import is still preparing suggestions"}
+  - screenshot: earlier-preparing
+  - command: dev.demo_bank_import_reset
+  - assert_state: {key: screen.earlier, equals: null}
+  - key: Escape
+
+  - assert_not_exists: {role: tab, label_contains: "Import Bank File"}
+
 compare:
+
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: banking.import_file

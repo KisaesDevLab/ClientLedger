@@ -466,3 +466,22 @@ fn a_changed_rows_earlier_values_are_read_tolerantly() {
     );
     assert_eq!(read(""), (None, None));
 }
+
+/// PR #234: an undo that stopped the preparation reads as `Cancelled`, in
+/// the batch list and in a replayed commit.
+#[test]
+fn a_cancelled_preparation_is_read() {
+    let list = format!(
+        r#"{{"batches":[{{"id":"{BATCH}","accountId":"{ACCOUNT}","counts":{{"inserted":2}},
+        "postProcessing":"cancelled","processed":1000,"total":2000,"undoneAt":"2026-11-03T10:00:00.000Z"}}]}}"#
+    );
+    let b = &batches_from(list.as_bytes()).expect("list")[0];
+    assert_eq!(b.post_processing, Some(ImportPostProcessing::Cancelled));
+    assert_eq!(b.progress, Some((1000, 2000)));
+    let replay = format!(
+        r#"{{"batchId":"{BATCH}","insertedItemIds":[],"rows":[],"counts":{{"inFile":0}},
+        "insertedTotal":"0.00","postProcessing":"cancelled"}}"#
+    );
+    let o = outcome_from(replay.as_bytes(), true).expect("replay");
+    assert_eq!(o.post_processing, Some(ImportPostProcessing::Cancelled));
+}

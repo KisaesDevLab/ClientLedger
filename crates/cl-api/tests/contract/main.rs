@@ -1109,6 +1109,19 @@ fn main() -> std::process::ExitCode {
             "bank_import::undo_names_the_used_lines",
             contract_bank_import::undo_names_the_used_lines,
         ),
+        // U-06 follow-up (engine PR #234, bank-import-progress-v1).
+        (
+            "bank_import::batches_report_progress",
+            contract_bank_import::batches_report_progress,
+        ),
+        (
+            "bank_import::undo_while_preparing_cancels",
+            contract_bank_import::undo_while_preparing_cancels,
+        ),
+        (
+            "bank_import::changed_rows_carry_the_earlier_values",
+            contract_bank_import::changed_rows_carry_the_earlier_values,
+        ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (
             "inventory::capabilities_and_golden_bytes",
