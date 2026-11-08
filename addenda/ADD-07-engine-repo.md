@@ -1,6 +1,6 @@
 # ADD-07 — The engine moves to its own repository (kisaes-gl-engine)
 
-**Status:** Active (added 2026-11-07, during the build) · **Part of the beta** · Phase **A12** · Decisions Q-346–Q-349
+**Status:** Done 2026-11-08 (A12; added 2026-11-07, during the build) · **Part of the beta** · Phase **A12** · Decisions Q-346–Q-349
 
 Owner request, 2026-11-07: "How can we move the engine to its own repo at Kisaes Engine", answered in a Q&A the same day.
 

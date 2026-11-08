@@ -34,7 +34,7 @@ This is a plain-language summary; the license text is the controlling document.
 
 ClientLedger runs on the Kisaes GL Engine (the Vibe MyBooks engine), added to
 this repository as the `engine/` git submodule
-(<https://github.com/KisaesDevLab/Vibe-MyBooks>). The engine is copyright
+(<https://github.com/KisaesDevLab/kisaes-gl-engine>; until 2026-11-08 it lived inside <https://github.com/KisaesDevLab/Vibe-MyBooks>). The engine is copyright
 Kisaes LLC and is licensed separately: its source is under the PolyForm
 Internal Use License 1.0.0 with the Kisaes Engine Notice, and ClientLedger is a
 Grantee Product under the Kisaes Engine Product Grant
