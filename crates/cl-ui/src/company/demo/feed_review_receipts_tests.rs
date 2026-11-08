@@ -58,6 +58,7 @@ fn link(s: &DemoState, t: TenantId, id: DocumentDraftId) -> DraftLink {
     DraftLink {
         id,
         expected_updated_at: draft(s, t, id).updated_at,
+        acknowledged_duplicates: Vec::new(),
     }
 }
 
@@ -234,6 +235,7 @@ fn a_stale_or_used_receipt_posts_nothing() {
         draft: DraftLink {
             id: d,
             expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![stale]), None).expect("accept");
@@ -281,6 +283,7 @@ fn a_stale_or_used_receipt_posts_nothing() {
         draft: DraftLink {
             id: d,
             expected_updated_at: draft(&s, t, d).updated_at,
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![used]), None).expect("accept");
@@ -304,6 +307,7 @@ fn the_closing_date_comes_before_the_receipt() {
         draft: DraftLink {
             id: d,
             expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![stale]), None).expect("accept");

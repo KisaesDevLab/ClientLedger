@@ -685,6 +685,7 @@ mod tests {
         cl_api::DraftLink {
             id: "d0000000-0000-4000-8000-dd0000000001".parse().expect("d"),
             expected_updated_at: "2026-11-08T10:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         }
     }
 

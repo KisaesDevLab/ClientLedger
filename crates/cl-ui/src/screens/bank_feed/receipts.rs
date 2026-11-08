@@ -791,6 +791,7 @@ pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) 
     let draft = DraftLink {
         id: pick,
         expected_updated_at: full.updated_at.clone(),
+        acknowledged_duplicates: Vec::new(),
     };
     let coded = coding(full, r.amount);
     let item = match send? {
