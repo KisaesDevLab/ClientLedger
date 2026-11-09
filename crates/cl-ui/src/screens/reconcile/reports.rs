@@ -303,7 +303,7 @@ pub(crate) fn menu(s: &mut ReconcileScreen, _ui: &mut Ui, button: &Response) {
                 .on_disabled_hover_text(t("reconcile.undo.admin_only"));
             if undo.clicked() {
                 s.undo_mode = cl_api::UndoMode::KeepChecks;
-                s.dialog = Some(Dialog::Undo);
+                s.open_undo();
             }
         }
     });

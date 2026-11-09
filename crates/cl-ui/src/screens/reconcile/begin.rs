@@ -313,8 +313,7 @@ fn buttons(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
             };
             if undo.clicked() {
                 s.undo_mode = cl_api::UndoMode::KeepChecks;
-                s.password.clear();
-                s.dialog = Some(Dialog::Undo);
+                s.open_undo();
             }
         }
         let disc = ui.add_enabled(

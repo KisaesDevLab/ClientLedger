@@ -54,10 +54,17 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &Ui) {
                     s.dialog = Some(Dialog::Undo);
                 }
             }
-            let locked = s.notice == Some("reconcile.closing.needed");
-            if locked {
+            let tokens = crate::theme::Tokens::of(ui.ctx());
+            if s.undo_locked {
                 ui.add_space(6.0);
                 ui.add(egui::Label::new(t("reconcile.undo.closed")).wrap());
+                if s.password_rejected {
+                    crate::screens::company::form::inline_warning(
+                        ui,
+                        &tokens,
+                        &t("reconcile.closing.rejected"),
+                    );
+                }
                 crate::screens::company::form::password(
                     ui,
                     &t("reconcile.closing.password"),
@@ -67,17 +74,16 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &Ui) {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if crate::widgets::primary_button(ui, &t("reconcile.undo.confirm")).clicked() {
-                    s.notice = None;
+                    s.undo_error = None;
                     s.undo_last();
                 }
                 if ui.button(t("reconcile.cancel")).clicked() {
-                    s.password.clear();
-                    s.notice = None;
-                    s.dialog = None;
+                    s.close_undo();
                 }
             });
-            if let Some(e) = &s.error {
-                ui.add(egui::Label::new(format!("{e}")).wrap());
+            // Plain words only, never the engine's code (QA-12).
+            if let Some(e) = &s.undo_error {
+                crate::screens::company::form::inline_error(ui, &tokens, e);
             }
         });
 }

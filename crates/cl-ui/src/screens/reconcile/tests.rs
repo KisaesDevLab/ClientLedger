@@ -1150,3 +1150,56 @@ fn demo_reset_removes_the_charges_earlier_runs_posted() {
     assert_eq!(v["step"], "window", "{v}");
     assert_eq!(v["difference"], "-412.18");
 }
+
+/// P27 QA-12: Undo of a reconciliation in a closed period asks for the
+/// password in its dialog only, in plain words (no engine code); the Begin
+/// screen behind it shows no closed-period notice about its own date. A
+/// wrong password re-asks with the Finish dialog's words.
+#[test]
+fn closed_period_undo_asks_in_its_dialog_in_plain_words() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    assert!(s.command(CommandId::new("dev.demo_reconcile_close_books")));
+    s.open_undo();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "undo", "{v}");
+    assert_eq!(v["undo_locked"], true, "{v}");
+    assert!(v["notice"].is_null(), "Begin shows nothing: {v}");
+    assert!(s.error.is_none(), "{:?}", s.error);
+    // No raw refusal for the dialog to print; the password field is there.
+    assert!(s.undo_error.is_none());
+    // A wrong password: asked again with plain words.
+    s.password = "not it".into();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "undo", "{v}");
+    assert_eq!(v["password_rejected"], true, "{v}");
+    assert!(s.password.is_empty());
+    assert!(s.undo_error.is_none());
+    // The right one undoes it; nothing is left over.
+    s.password = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["last"], "undone", "{v}");
+    assert_eq!(v["undo_locked"], false);
+    assert_eq!(v["password_rejected"], false);
+    assert!(v["dialog"].is_null(), "{v}");
+}

@@ -175,6 +175,11 @@ pub struct ReconcileScreen {
     pub(crate) password: String,
     /// The engine refused the closing password Finish sent (review D1).
     pub(crate) password_rejected: bool,
+    /// Undo met a closed period: its dialog asks for the closing password
+    /// (P27 QA-12; the Begin screen behind it shows nothing about it).
+    pub(crate) undo_locked: bool,
+    /// Undo's other refusal, shown in its dialog in plain words.
+    pub(crate) undo_error: Option<ApiError>,
     /// A card's pay step, from the worksheet as it finished (review D2).
     pub(crate) card_pay: Option<CardPay>,
     /// Leave for now (or the close prompt) waits for the ticks to reach
@@ -268,6 +273,8 @@ impl ReconcileScreen {
             dialog: None,
             password: String::new(),
             password_rejected: false,
+            undo_locked: false,
+            undo_error: None,
             card_pay: None,
             leaving: false,
             undo_mode: UndoMode::KeepChecks,
@@ -722,6 +729,9 @@ impl ReconcileScreen {
                     }
                     "undone" | "canceled" => {
                         self.password.clear();
+                        self.password_rejected = false;
+                        self.undo_locked = false;
+                        self.undo_error = None;
                         self.dialog = None;
                         self.history_for = None;
                         if what == "undone" {
@@ -755,6 +765,28 @@ impl ReconcileScreen {
                     self.password_rejected = true;
                     self.dialog = Some(Dialog::ClosingPassword);
                     return;
+                }
+                if what == "undone" {
+                    // QA-12: a closed period is the Undo dialog's business,
+                    // not Begin's (whose date notice is about its own date).
+                    match e {
+                        ApiError::ClosedPeriod(_) | ApiError::ClosingPasswordRequired => {
+                            self.undo_locked = true;
+                            return;
+                        }
+                        ApiError::ClosingPasswordRejected => {
+                            self.undo_locked = true;
+                            self.password.clear();
+                            self.password_rejected = true;
+                            return;
+                        }
+                        _ => {
+                            if reconcile_refusal(&e).is_none() {
+                                self.undo_error = Some(e);
+                                return;
+                            }
+                        }
+                    }
                 }
                 if what == "finished"
                     && let Some(ReconcileRefusal::NotInProgress) = reconcile_refusal(&e)
@@ -1052,6 +1084,21 @@ impl ReconcileScreen {
     }
 
     /// Undo the last finished reconciliation.
+    /// Opens the Undo dialog with nothing left over from an earlier try.
+    pub(crate) fn open_undo(&mut self) {
+        self.close_undo();
+        self.dialog = Some(Dialog::Undo);
+    }
+
+    /// Closes the Undo dialog; its password and refusals go with it.
+    pub(crate) fn close_undo(&mut self) {
+        self.password.clear();
+        self.password_rejected = false;
+        self.undo_locked = false;
+        self.undo_error = None;
+        self.dialog = None;
+    }
+
     pub(crate) fn undo_last(&mut self) {
         let Some(id) = self.last_finished().map(|r| r.id) else {
             return;
@@ -1322,6 +1369,7 @@ impl ReconcileScreen {
             "pending": !self.queue.idle(),
             "leaving": self.leaving,
             "password_rejected": self.password_rejected,
+            "undo_locked": self.undo_locked,
             "card_pay": self.card_pay.as_ref().map(|p| cl_model::reconcile::display(p.amount)),
             "can_finish": rec.is_some_and(|r| can_finish(r.difference, &self.queue)),
             "hint": window::hint_text(self),
