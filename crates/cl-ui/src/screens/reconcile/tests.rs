@@ -768,3 +768,97 @@ fn change_info_defaults_the_charge_accounts_like_begin() {
     assert_eq!(s.form.service_charge.account, fees);
     assert_eq!(s.form.interest.account, interest);
 }
+
+/// One frame with `events`; the screen reader's focused node's label.
+fn a11y_frame(
+    s: &mut ReconcileScreen,
+    ctx: &eframe::egui::Context,
+    events: Vec<eframe::egui::Event>,
+) -> Option<String> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+    });
+    out.textures_delta.clear();
+    let u = out.platform_output.accesskit_update?;
+    u.nodes
+        .iter()
+        .find(|(id, _)| *id == u.focus)
+        .and_then(|(_, n)| n.label().map(str::to_string))
+}
+
+/// P27 QA-9: the row the screen reader announces is the cursor's row,
+/// in the pane Tab moved to; Space ticks that row; egui's own Tab and
+/// arrow moves never split the focus from the cursor.
+#[test]
+fn the_announced_row_is_the_cursor_row_in_both_panes() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let settle = |s: &mut ReconcileScreen, events: Vec<Event>| {
+        let mut f = a11y_frame(s, &ctx, events);
+        for _ in 0..3 {
+            f = a11y_frame(s, &ctx, vec![]);
+        }
+        f
+    };
+    settle(&mut s, vec![]);
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].as_str().map(str::to_string);
+    // Down: the first deposit row; focus and cursor agree.
+    assert!(s.command(CommandId::new("reconcile.next")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(cursor(&s).is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor");
+    // A raw Tab or arrow reaching egui (the shell takes them first) does
+    // not move the focus off the cursor's row.
+    let key = |k| Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    let before = cursor(&s);
+    let f = settle(&mut s, vec![key(Key::Tab), key(Key::ArrowDown)]);
+    assert_eq!(f, before, "egui kept the focus on the cursor row");
+    // Tab (the window's): the payments pane; the focus moves there too.
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(f, cursor(&s), "announced = cursor in the payments pane");
+    assert!(s.command(CommandId::new("reconcile.next")));
+    let f = settle(&mut s, vec![]);
+    let announced = f.expect("a focused row");
+    assert_eq!(Some(announced.clone()), cursor(&s));
+    // Space ticks the announced row and nothing else.
+    let id = s.cursor.expect("cursor");
+    let line = s
+        .lines
+        .iter()
+        .find(|l| l.journal_line == id)
+        .expect("line")
+        .clone();
+    let was = s.queue.ticked(id);
+    let checked_before = s.state_json()["right"]["checked"].clone();
+    let left_before = s.state_json()["left"]["checked"].clone();
+    assert!(s.command(CommandId::new("reconcile.tick")));
+    settle(&mut s, vec![]);
+    assert_eq!(s.queue.ticked(id), !was);
+    assert_eq!(window::row_label(&line), announced);
+    assert_ne!(s.state_json()["right"]["checked"], checked_before);
+    assert_eq!(
+        s.state_json()["left"]["checked"],
+        left_before,
+        "no deposit changed"
+    );
+}

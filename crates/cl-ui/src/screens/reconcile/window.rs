@@ -381,25 +381,60 @@ fn pane(
                 return;
             }
             let rows = lines.len() + pending.len();
+            // The cursor's row in this pane, when it is to take the focus.
+            let want = s
+                .focus_cursor
+                .then_some(())
+                .filter(|()| focused)
+                .and_then(|()| lines.iter().position(|l| s.cursor == Some(l.journal_line)));
             egui::ScrollArea::vertical()
                 .id_salt(("reconcile_pane", p))
                 .auto_shrink([false, false])
                 .show_rows(ui, ROW_H, rows, |ui, range| {
+                    // A cursor row out of view is scrolled to; it takes the
+                    // focus once drawn (next frame).
+                    if let Some(i) = want.filter(|i| !range.contains(i)) {
+                        let rows_f = |n: usize| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
+                        let top = ui.cursor().top() + ROW_H * (rows_f(i) - rows_f(range.start));
+                        let row = egui::Rect::from_min_size(
+                            egui::pos2(ui.min_rect().left(), top),
+                            Vec2::new(ui.available_width(), ROW_H),
+                        );
+                        ui.scroll_to_rect(row, None);
+                    }
                     for i in range {
                         if let Some(l) = lines.get(i) {
                             let on = s.queue.ticked(l.journal_line);
                             let cursor = s.cursor == Some(l.journal_line) && focused;
-                            if line_row(
+                            let row = line_row(
                                 ui,
                                 tokens,
                                 &cols,
                                 l,
-                                on,
-                                hinted == Some(l.journal_line),
-                                cursor,
-                            ) {
+                                RowLook {
+                                    on,
+                                    hinted: hinted == Some(l.journal_line),
+                                    cursor,
+                                    take_focus: cursor && want.is_some(),
+                                },
+                            );
+                            if row.took_focus {
+                                s.focus_cursor = false;
+                            }
+                            if row.clicked {
                                 s.pane = p;
                                 s.toggle(l.journal_line);
+                            } else if row.gained_focus && !cursor {
+                                // The focus came here another way (a click
+                                // that didn't tick, a screen reader): the
+                                // cursor follows it.
+                                s.pane = p;
+                                s.cursor = Some(l.journal_line);
+                            } else if row.has_focus && !cursor {
+                                // The keyboard moved the cursor elsewhere:
+                                // this box gives the focus up, so the
+                                // screen reader never names another row.
+                                ui.memory_mut(|m| m.surrender_focus(row.id));
                             }
                         } else if let Some(pr) = pending.get(i - lines.len()) {
                             pending_row(ui, tokens, &cols, pr);
@@ -442,16 +477,59 @@ fn header_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5]) {
     });
 }
 
-/// One line; true when its box was clicked.
+/// How a line is drawn.
+#[derive(Clone, Copy)]
+struct RowLook {
+    /// Checked.
+    on: bool,
+    /// The one unchecked item equal to the difference.
+    hinted: bool,
+    /// The keyboard cursor (in the active pane).
+    cursor: bool,
+    /// Its box takes the keyboard focus now (P27 QA-9).
+    take_focus: bool,
+}
+
+/// What happened to a line's box this frame.
+struct RowOutcome {
+    id: egui::Id,
+    clicked: bool,
+    took_focus: bool,
+    gained_focus: bool,
+    has_focus: bool,
+}
+
+/// While a row's box has the focus, Tab and the arrows are the window's
+/// (switch pane, next/previous line), never egui's focus moves; otherwise
+/// the focus and the cursor split apart (P27 QA-9).
+const ROW_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: true,
+    horizontal_arrows: false,
+    vertical_arrows: true,
+    escape: false,
+};
+
+/// One line.
 fn line_row(
     ui: &mut Ui,
     tokens: &Tokens,
     cols: &[f32; 5],
     l: &ReconLine,
-    on: bool,
-    hinted: bool,
-    cursor: bool,
-) -> bool {
+    look: RowLook,
+) -> RowOutcome {
+    let RowLook {
+        on,
+        hinted,
+        cursor,
+        take_focus,
+    } = look;
+    let mut out = RowOutcome {
+        id: egui::Id::NULL,
+        clicked: false,
+        took_focus: false,
+        gained_focus: false,
+        has_focus: false,
+    };
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
     let fill = if hinted {
         tokens.warn_surface
@@ -474,7 +552,6 @@ fn line_row(
             egui::StrokeKind::Inside,
         );
     }
-    let mut clicked = false;
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -503,9 +580,18 @@ fn line_row(
                     egui::StrokeKind::Outside,
                 );
             }
-            if r.clicked() {
-                clicked = true;
+            if take_focus {
+                r.request_focus();
+                r.scroll_to_me(None);
+                out.took_focus = true;
             }
+            if r.has_focus() {
+                ui.memory_mut(|m| m.set_focus_lock_filter(r.id, ROW_KEYS));
+            }
+            out.id = r.id;
+            out.clicked = r.clicked();
+            out.gained_focus = r.gained_focus();
+            out.has_focus = r.has_focus();
         },
     );
     cell(
@@ -578,7 +664,7 @@ fn line_row(
         mono(&display(l.amount.abs()), tokens.text_primary),
         true,
     );
-    clicked
+    out
 }
 
 fn pending_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5], p: &PendingRow) {

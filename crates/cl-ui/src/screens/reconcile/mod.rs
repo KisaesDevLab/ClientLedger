@@ -154,6 +154,10 @@ pub struct ReconcileScreen {
     pub(crate) hide_later: bool,
     pub(crate) pane: Pane,
     pub(crate) cursor: Option<JournalLineId>,
+    /// The keyboard moved the cursor: its row's box takes the keyboard
+    /// (and the screen reader's) focus when next drawn (P27 QA-9). The
+    /// pane and the cursor are the one truth; egui's focus follows them.
+    pub(crate) focus_cursor: bool,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) password: String,
     /// The engine refused the closing password Finish sent (review D1).
@@ -236,6 +240,7 @@ impl ReconcileScreen {
             hide_later: true,
             pane: Pane::MoneyIn,
             cursor: None,
+            focus_cursor: false,
             dialog: None,
             password: String::new(),
             password_rejected: false,
@@ -1055,6 +1060,7 @@ impl ReconcileScreen {
         if self.rec.is_some() {
             self.queue.toggle(id);
             self.cursor = Some(id);
+            self.focus_cursor = true;
         }
     }
 
@@ -1077,6 +1083,7 @@ impl ReconcileScreen {
             (Some(i), false) => ids.get(i.saturating_sub(1)),
         };
         self.cursor = next.copied();
+        self.focus_cursor = true;
     }
 
     /// Ctrl+E: the cursor's transaction in its form.
@@ -1183,6 +1190,8 @@ impl ReconcileScreen {
             "difference": rec.map(|r| money(r.difference)),
             "deposits": rec.map(|r| json!({"count": r.cleared_deposits.count, "total": cl_model::reconcile::display(r.cleared_deposits.total.abs())})),
             "payments": rec.map(|r| json!({"count": r.cleared_payments.count, "total": cl_model::reconcile::display(r.cleared_payments.total.abs())})),
+            "pane": match self.pane { Pane::MoneyIn => "in", Pane::MoneyOut => "out" },
+            "cursor": self.cursor.and_then(|c| self.lines.iter().find(|l| l.journal_line == c)).map(window::row_label),
             "left": pane(kind.left()),
             "right": pane(kind.right()),
             "hide_later": self.hide_later,
