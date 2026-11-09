@@ -581,12 +581,7 @@ fn money_at(v: &Value, key: &str, what: &'static str) -> Result<Money, ApiError>
 
 /// `exact` when the engine sends it (U-188 keeps the legacy number under
 /// `legacy` for older clients), else `legacy` as an exact string.
-fn exact_or(
-    v: &Value,
-    exact: &str,
-    legacy: &str,
-    what: &'static str,
-) -> Result<Money, ApiError> {
+fn exact_or(v: &Value, exact: &str, legacy: &str, what: &'static str) -> Result<Money, ApiError> {
     if v.get(exact).is_some_and(|x| !x.is_null()) {
         money_at(v, exact, what)
     } else {
