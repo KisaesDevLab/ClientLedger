@@ -140,6 +140,9 @@ pub enum BeginProblem {
     InterestAccount,
     /// The charge account is the account being reconciled.
     SameAccount,
+    /// The statement date is on or before the last finished
+    /// reconciliation's statement date.
+    DateNotAfterLast,
 }
 
 impl BeginProblem {
@@ -156,6 +159,7 @@ impl BeginProblem {
             BeginProblem::BadInterest => "reconcile.problem.bad_interest",
             BeginProblem::InterestAccount => "reconcile.problem.interest_account",
             BeginProblem::SameAccount => "reconcile.problem.same_account",
+            BeginProblem::DateNotAfterLast => "reconcile.problem.date_not_after_last",
         }
     }
 }
@@ -199,6 +203,9 @@ pub struct BeginForm {
     pub service_charge: ChargeInput,
     /// The interest earned (banks only).
     pub interest: ChargeInput,
+    /// The statement date of the account's last finished reconciliation:
+    /// a new statement must be dated after it.
+    pub last_reconciled: Option<CalendarDate>,
 }
 
 /// The checked Begin values.
@@ -231,6 +238,7 @@ impl BeginForm {
             ending: String::new(),
             service_charge: ChargeInput::default(),
             interest: ChargeInput::default(),
+            last_reconciled: None,
         }
     }
 
@@ -275,8 +283,10 @@ impl BeginForm {
         if self.account.is_none() {
             problems.push(BeginProblem::NoAccount);
         }
-        if self.statement_date.is_none() {
-            problems.push(BeginProblem::NoDate);
+        match (self.statement_date, self.last_reconciled) {
+            (None, _) => problems.push(BeginProblem::NoDate),
+            (Some(d), Some(last)) if d <= last => problems.push(BeginProblem::DateNotAfterLast),
+            _ => {}
         }
         let ending = if self.ending.trim().is_empty() {
             problems.push(BeginProblem::NoEnding);
@@ -513,6 +523,21 @@ mod tests {
         // A posted charge is read-only and never sent again.
         f.service_charge.posted = true;
         assert_eq!(f.validate().expect("posted").service_charge, None);
+    }
+
+    #[test]
+    fn begin_refuses_a_date_not_after_the_last_reconciliation() {
+        let mut f = BeginForm::new(day(31));
+        f.account = Some(acct(1));
+        f.ending = "10".into();
+        f.last_reconciled = Some(day(15));
+        assert!(f.validate().is_ok(), "after the last one");
+        f.statement_date = Some(day(15));
+        assert_eq!(f.validate(), Err(vec![BeginProblem::DateNotAfterLast]));
+        f.statement_date = Some(day(14));
+        assert_eq!(f.validate(), Err(vec![BeginProblem::DateNotAfterLast]));
+        f.last_reconciled = None;
+        assert!(f.validate().is_ok(), "no finished reconciliation yet");
     }
 
     #[test]

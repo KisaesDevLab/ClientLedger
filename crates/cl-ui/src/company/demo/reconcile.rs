@@ -357,6 +357,18 @@ fn coded(status: u16, code: &str, details: serde_json::Value) -> ApiError {
     )
 }
 
+/// 409 `RECONCILE_STATEMENT_DATE_ORDER` (U-193).
+fn date_order(last: &Rec) -> ApiError {
+    coded(
+        409,
+        "RECONCILE_STATEMENT_DATE_ORDER",
+        json!({
+            "latestReconciliationId": last.id.to_string(),
+            "latestStatementDate": last.statement_date.to_string(),
+        }),
+    )
+}
+
 fn not_in_progress() -> ApiError {
     coded(
         409,
@@ -529,11 +541,35 @@ fn held(c: Option<StatementCharge>) -> Option<HeldCharge> {
     })
 }
 
-fn check_charge(account: AccountId, c: Option<&StatementCharge>) -> Result<(), ApiError> {
-    if let Some(c) = c
-        && (c.account == account || !c.amount.is_positive())
-    {
+/// The company's active accounts (the charge accounts' choices).
+fn active_accounts(state: &mut DemoState) -> Vec<AccountId> {
+    super::home::accounts(state)
+        .into_iter()
+        .filter(|a| a.is_active)
+        .map(|a| a.id)
+        .collect()
+}
+
+/// A charge as the engine checks it: above zero (400 `VALIDATION_ERROR`),
+/// on an active account of the company other than the one reconciled
+/// (400 `RECONCILE_CHARGE_ACCOUNT_INVALID`).
+fn check_charge(
+    active: &[AccountId],
+    account: AccountId,
+    c: Option<&StatementCharge>,
+) -> Result<(), ApiError> {
+    let Some(c) = c else {
+        return Ok(());
+    };
+    if !c.amount.is_positive() {
         return Err(coded(400, "VALIDATION_ERROR", json!({})));
+    }
+    if c.account == account || !active.contains(&c.account) {
+        return Err(coded(
+            400,
+            "RECONCILE_CHARGE_ACCOUNT_INVALID",
+            json!({"accountId": c.account.to_string()}),
+        ));
     }
     Ok(())
 }
@@ -569,9 +605,12 @@ pub fn history(
 /// before the statement date pre-checked.
 ///
 /// # Errors
-/// 409 `RECONCILIATION_IN_PROGRESS`; a charge on the account itself.
+/// 409 `RECONCILIATION_IN_PROGRESS`; 409 `RECONCILE_STATEMENT_DATE_ORDER`
+/// for a statement date on or before the last finished one; a charge the
+/// engine refuses.
 pub fn start(state: &mut DemoState, s: &ReconStart) -> Result<Reconciliation, ApiError> {
     let locked = closed_through(state);
+    let active = active_accounts(state);
     let r = &mut state.reconcile;
     r.seed();
     if let Some(open) = r.in_progress(s.account) {
@@ -581,8 +620,13 @@ pub fn start(state: &mut DemoState, s: &ReconStart) -> Result<Reconciliation, Ap
             json!({"reconciliationId": open.id.to_string()}),
         ));
     }
-    check_charge(s.account, s.service_charge.as_ref())?;
-    check_charge(s.account, s.interest.as_ref())?;
+    if let Some(last) = r.latest_complete(s.account)
+        && s.statement_date <= last.statement_date
+    {
+        return Err(date_order(last));
+    }
+    check_charge(&active, s.account, s.service_charge.as_ref())?;
+    check_charge(&active, s.account, s.interest.as_ref())?;
     let beginning = r
         .latest_complete(s.account)
         .map_or(Money::ZERO, |x| x.ending);
@@ -650,25 +694,41 @@ pub fn tick(
 /// Change statement info.
 ///
 /// # Errors
-/// 409 `RECONCILE_CHARGE_POSTED` or `RECONCILIATION_NOT_IN_PROGRESS`.
+/// 409 `RECONCILE_CHARGE_POSTED` (a posted charge changed; the same one
+/// sent again is accepted), `RECONCILE_STATEMENT_DATE_ORDER` or
+/// `RECONCILIATION_NOT_IN_PROGRESS`; a charge the engine refuses.
 pub fn patch(
     state: &mut DemoState,
     id: ReconciliationId,
     p: &ReconPatch,
 ) -> Result<Reconciliation, ApiError> {
     let locked = closed_through(state);
+    let active = active_accounts(state);
     let r = &mut state.reconcile;
+    let account = r.get(id)?.account;
+    if let (Some(d), Some(last)) = (p.statement_date, r.latest_complete(account))
+        && d <= last.statement_date
+    {
+        return Err(date_order(last));
+    }
     let rec = r.get_mut(id)?;
     if rec.status != ReconStatus::InProgress {
         return Err(not_in_progress());
     }
+    // A posted charge sent again unchanged is no change at all.
+    let changes = |change: Option<Option<StatementCharge>>, slot: Option<HeldCharge>| {
+        change.filter(|c| *c != slot.map(|h| h.charge))
+    };
+    let svc = changes(p.service_charge, rec.service_charge);
+    let int = changes(p.interest, rec.interest);
     for (kind, change, slot) in [
-        ("service_charge", &p.service_charge, &rec.service_charge),
-        ("interest", &p.interest, &rec.interest),
+        ("service_charge", &svc, &rec.service_charge),
+        ("interest", &int, &rec.interest),
     ] {
         if change.is_some() && slot.is_some_and(|h| h.posted.is_some()) {
             return Err(coded(409, "RECONCILE_CHARGE_POSTED", json!({"kind": kind})));
         }
+        check_charge(&active, rec.account, change.flatten().as_ref())?;
     }
     if let Some(d) = p.statement_date {
         rec.statement_date = d;
@@ -676,11 +736,11 @@ pub fn patch(
     if let Some(e) = p.statement_ending_balance {
         rec.ending = books_ending(rec.account, e);
     }
-    if let Some(c) = &p.service_charge {
-        rec.service_charge = held(*c);
+    if let Some(c) = svc {
+        rec.service_charge = held(c);
     }
-    if let Some(c) = &p.interest {
-        rec.interest = held(*c);
+    if let Some(c) = int {
+        rec.interest = held(c);
     }
     let rec = r.get(id)?;
     Ok(r.view(rec, true, locked))

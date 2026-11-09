@@ -50,6 +50,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.problem.interest_account", "Choose an account for the interest."),
     ("reconcile.problem.charge_account_invalid", "Choose an active account of this company for the charge or interest."),
     ("reconcile.problem.same_account", "Choose a different account than the one you're reconciling."),
+    ("reconcile.problem.date_not_after_last", "Use a statement date after your last finished reconciliation of this account."),
+    ("reconcile.problem.date_not_after_last_on", "This account is reconciled through {date}. Use a later statement date."),
     // Window
     ("reconcile.title", "Reconcile \u{b7} {account}"),
     ("reconcile.statement_ending", "Statement ending"),
@@ -110,6 +112,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.closing.password", "Closing date password"),
     ("reconcile.closing.confirm", "Reconcile with the password"),
     ("reconcile.closing.needed", "This needs the closing date password."),
+    ("reconcile.closing.rejected", "That password isn't right. Try again, or ask the person who set the closing date."),
     ("reconcile.cancel", "Cancel"),
     ("reconcile.close", "Close"),
     ("reconcile.done.title", "Reconciliation finished"),

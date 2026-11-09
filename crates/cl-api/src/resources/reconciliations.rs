@@ -336,6 +336,9 @@ pub enum ReconcileRefusal {
     /// A charge's account can't take it (inactive, another company, or
     /// the account being reconciled).
     ChargeAccountInvalid,
+    /// The statement date is on or before the last finished
+    /// reconciliation's statement date.
+    StatementDateOrder,
 }
 
 /// Names the refusal behind `e`, if it is a reconciliation one.
@@ -363,6 +366,7 @@ pub fn reconcile_refusal(e: &ApiError) -> Option<ReconcileRefusal> {
         "RECONCILE_CHARGE_ACCOUNT_INVALID" => ReconcileRefusal::ChargeAccountInvalid,
         "RECONCILE_CHARGE_POSTED" => ReconcileRefusal::ChargePosted,
         "RECONCILE_ADMIN_REQUIRED" => ReconcileRefusal::AdminRequired,
+        "RECONCILE_STATEMENT_DATE_ORDER" => ReconcileRefusal::StatementDateOrder,
         _ => return None,
     })
 }

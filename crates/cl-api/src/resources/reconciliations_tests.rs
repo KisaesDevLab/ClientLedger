@@ -201,6 +201,10 @@ fn refusals_are_named_by_code() {
         Some(ReconcileRefusal::NotLatest)
     );
     assert_eq!(
+        reconcile_refusal(&conflict("RECONCILE_STATEMENT_DATE_ORDER", json!({}))),
+        Some(ReconcileRefusal::StatementDateOrder)
+    );
+    assert_eq!(
         reconcile_refusal(&ApiError::Forbidden {
             code: crate::errors::ErrorCode::parse("RECONCILE_ADMIN_REQUIRED")
         }),

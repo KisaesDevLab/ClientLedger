@@ -246,3 +246,101 @@ fn recategorized_reconciled_line_is_listed() {
     assert_eq!(changed.effect, Some(Money::ZERO));
     assert_eq!(changed.fields, vec!["accountId".to_string()]);
 }
+
+#[test]
+fn statement_date_must_follow_the_last_finished_one() {
+    // Review E3: 1010 is reconciled through 09/30.
+    let mut s = opened();
+    let req = statement(&mut s);
+    for d in [day(9, 30), day(9, 1)] {
+        let e = start(
+            &mut s,
+            &ReconStart {
+                statement_date: d,
+                ..req.clone()
+            },
+        )
+        .expect_err("not after 09/30");
+        assert_eq!(refusal(&e), Some(ReconcileRefusal::StatementDateOrder));
+    }
+    let r = start(
+        &mut s,
+        &ReconStart {
+            statement_date: day(10, 1),
+            ..req
+        },
+    )
+    .expect("after 09/30");
+    // Change statement info is held to the same order.
+    let e = patch(
+        &mut s,
+        r.id,
+        &ReconPatch {
+            statement_date: Some(day(9, 30)),
+            ..ReconPatch::default()
+        },
+    )
+    .expect_err("PATCH to 09/30");
+    assert_eq!(refusal(&e), Some(ReconcileRefusal::StatementDateOrder));
+}
+
+#[test]
+fn charge_account_refusals_match_the_engine() {
+    // Review m3: the engine's code, on Begin and on PATCH.
+    let mut s = opened();
+    let req = statement(&mut s);
+    let op = super::super::account_id(OPERATING);
+    let mut bad = req.clone();
+    if let Some(c) = bad.service_charge.as_mut() {
+        c.account = op;
+    }
+    let e = start(&mut s, &bad).expect_err("same account");
+    assert_eq!(refusal(&e), Some(ReconcileRefusal::ChargeAccountInvalid));
+    let r = start(&mut s, &req).expect("start");
+    let e = patch(
+        &mut s,
+        r.id,
+        &ReconPatch {
+            statement_date: None,
+            statement_ending_balance: None,
+            service_charge: Some(bad.service_charge),
+            interest: None,
+        },
+    )
+    .expect_err("same account on PATCH");
+    assert_eq!(refusal(&e), Some(ReconcileRefusal::ChargeAccountInvalid));
+}
+
+#[test]
+fn patch_accepts_a_posted_charge_sent_again_unchanged() {
+    // Review m3: only a change to a posted charge is refused.
+    let mut s = opened();
+    let req = statement(&mut s);
+    let r = start(&mut s, &req).expect("start");
+    tick(&mut s, r.id, &[(line_id(12), true)]).expect("tick");
+    complete(&mut s, r.id, None).expect("finish");
+    undo(&mut s, r.id, UndoMode::KeepChecks, None).expect("undo");
+    let same = ReconPatch {
+        statement_date: None,
+        statement_ending_balance: None,
+        service_charge: Some(req.service_charge),
+        interest: Some(req.interest),
+    };
+    let after = patch(&mut s, r.id, &same).expect("unchanged is fine");
+    assert!(
+        after.service_charge.and_then(|h| h.posted).is_some(),
+        "still posted"
+    );
+    let mut changed = same.clone();
+    if let Some(Some(c)) = changed.service_charge.as_mut() {
+        c.amount = m("49.00");
+    }
+    let e = patch(&mut s, r.id, &changed).expect_err("changed");
+    assert_eq!(refusal(&e), Some(ReconcileRefusal::ChargePosted));
+    let removed = ReconPatch {
+        service_charge: Some(None),
+        ..same
+    };
+    let e = patch(&mut s, r.id, &removed).expect_err("removed");
+    assert_eq!(refusal(&e), Some(ReconcileRefusal::ChargePosted));
+}
