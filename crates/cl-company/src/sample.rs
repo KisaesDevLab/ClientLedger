@@ -7,7 +7,9 @@
 //! "Try the practice company" loads the fixture into a new tenant: the
 //! general-service chart, every client and vendor, and each transaction
 //! as a journal entry (the invoice, bill and payment forms arrive in
-//! P17-P21 and will replace this with real documents, Q-P08h).
+//! P17-P21 and will replace this with real documents, Q-P08h), except the
+//! numbered checks, which post as real checks (Q-P27p). Last it closes the
+//! books through 09/30 with the practice password (Q-P27q).
 //!
 //! The fixture also carries the Write Check mockup story (P13 WP0): the
 //! vendor Ozark Feed & Seed with its address, default account 5110 and an
@@ -827,6 +829,22 @@ pub async fn load_into(
                 step: Some("transactions".into()),
             });
         }
+        // Q-P27p: a numbered check posts as a real check, so the engine's
+        // check counter moves past it and Write Check's next number is
+        // the demo's (4418).
+        if let Some(check) = sample_check(t, &ids, &vendors)? {
+            let made = session
+                .transactions()
+                .create_bank_posting(&check, &PostingOptions::default(), IdempotencyKey::new())
+                .await?;
+            if t.cleared
+                && t.date <= reconciled_through
+                && t.lines.iter().any(|l| l.account == "1010")
+            {
+                cleared_1010.insert(made.record.id);
+            }
+            continue;
+        }
         let mut lines = Vec::with_capacity(t.lines.len());
         for l in &t.lines {
             let account = *ids
@@ -905,6 +923,8 @@ pub async fn load_into(
         &vendors,
     )
     .await;
+    // Last: everything above is dated in the period it closes (Q-P27q).
+    close_books(session, sample.company.closing_date).await?;
     store.update(|l| {
         if let Some(r) = l.get_mut(created.tenant_id) {
             r.is_sample = true;
@@ -916,6 +936,98 @@ pub async fn load_into(
     stats.refresh().await;
     progress(Progress::Done);
     Ok(created)
+}
+
+/// The practice company's closing-date password (Q-P27q). Made-up and
+/// printed on the Open screen so anyone trying the sample can use it; it
+/// still goes only through the scrubbed [`cl_core::Secret`] path.
+pub const SAMPLE_CLOSING_PASSWORD: &str = "practice";
+
+/// A fixture check as the Write Check form posts it (Q-P27p): drawn on the
+/// account its credit line names, to the vendor, with its number, the
+/// debit lines as the split. `None` for anything but a numbered check.
+///
+/// # Errors
+/// `Unavailable` for an account the chart lacks; `Api(Local(..))` when the
+/// check would not pass the form's own rules (a fixture bug).
+fn sample_check(
+    t: &SampleTransaction,
+    ids: &HashMap<String, cl_core::ids::AccountId>,
+    vendors: &HashMap<String, cl_core::ids::ContactId>,
+) -> Result<Option<cl_api::BankPosting>, CompanyError> {
+    let (Some(number), Some(payee)) = (
+        (t.kind == "check")
+            .then(|| t.number.parse::<u32>().ok())
+            .flatten(),
+        t.contact.as_ref(),
+    ) else {
+        return Ok(None);
+    };
+    let Some(bank_line) = t.lines.iter().find(|l| l.credit.is_positive()) else {
+        return Ok(None);
+    };
+    let account = |n: &str| {
+        ids.get(n)
+            .copied()
+            .ok_or(CompanyError::Unavailable("sample account"))
+    };
+    let mut lines = Vec::with_capacity(t.lines.len());
+    for l in t.lines.iter().filter(|l| l.debit.is_positive()) {
+        lines.push(cl_api::SplitLine {
+            account: account(&l.account)?,
+            amount: l.debit,
+            memo: l.memo.clone(),
+            contact: None,
+            billable: false,
+            tag: None,
+            item: None,
+        });
+    }
+    let draft = cl_api::CheckDraft {
+        bank: account(&bank_line.account)?,
+        date: t.date,
+        payee: vendors.get(payee).copied(),
+        payee_name: payee.clone(),
+        check_number: Some(number),
+        print_later: false,
+        payee_address: None,
+        memo: Some(t.memo.clone()),
+        printed_memo: None,
+        tag_ids: Vec::new(),
+        draft_attachment: None,
+        amount: bank_line.credit,
+        lines,
+    };
+    cl_api::BankPosting::check(draft)
+        .map(Some)
+        .map_err(|e| CompanyError::Api(cl_api::ApiError::Local(e)))
+}
+
+/// Q-P27q: closes the books through the sample's closing date (09/30) with
+/// the practice password, so edits on or before it ask for it, as in the
+/// demo. Skipped on an engine without `closing-password-v1` (it would take
+/// the date with no password at all).
+///
+/// # Errors
+/// Any engine refusal.
+async fn close_books(session: &Session, through: CalendarDate) -> Result<(), CompanyError> {
+    if !session
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::CLOSING_PASSWORD)
+    {
+        return Ok(());
+    }
+    session
+        .set_closing_date(
+            &cl_api::ClosingDateChange {
+                closing_date: Some(through),
+                closing_password: Some(cl_core::Secret::new(SAMPLE_CLOSING_PASSWORD)),
+            },
+            IdempotencyKey::new(),
+        )
+        .await?;
+    Ok(())
 }
 
 /// The statement date of the sample's last finished reconciliation of 1010
@@ -1129,6 +1241,40 @@ mod tests {
     }
 
     /// The loader maps the layout to engine ids, with 4100's fallback.
+    /// Q-P27p: every fixture check becomes a numbered check posting of the
+    /// same amount on its bank; nothing else does.
+    #[test]
+    fn sample_checks_post_as_numbered_checks() {
+        let s = Sample::load();
+        let numbers: std::collections::BTreeSet<&str> = s
+            .transactions
+            .iter()
+            .flat_map(|t| t.lines.iter().map(|l| l.account.as_str()))
+            .collect();
+        let ids: HashMap<String, cl_core::ids::AccountId> = numbers
+            .into_iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), id_n(i)))
+            .collect();
+        let vendors: HashMap<String, cl_core::ids::ContactId> = HashMap::new();
+        let mut checks = 0;
+        for t in &s.transactions {
+            let made = sample_check(t, &ids, &vendors).expect("valid");
+            assert_eq!(made.is_some(), t.kind == "check", "{} {}", t.kind, t.number);
+            if let Some(p) = made {
+                checks += 1;
+                assert_eq!(p.kind(), cl_api::BankPostingKind::Check);
+                assert_eq!(p.date(), t.date);
+            }
+        }
+        assert_eq!(checks, 190);
+        assert_eq!(s.next_check_number("1010"), Some(4418));
+    }
+
+    fn id_n(n: usize) -> cl_core::ids::AccountId {
+        cl_core::ids::AccountId::parse(&format!("00000000-0000-4000-8000-{n:012}")).expect("id")
+    }
+
     #[test]
     fn layout_seed_lines_resolve_accounts() {
         let s = Sample::load();

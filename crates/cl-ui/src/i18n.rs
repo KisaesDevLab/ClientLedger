@@ -345,6 +345,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.meta.never_backed_up", "Not backed up yet"),
     ("open.meta.transactions", "{n} transactions"),
     ("open.meta.sample", "Made-up data to try things safely \u{b7} Reset any time"),
+    ("open.meta.sample_password", "Books closed through 09/30/2026; closing-date password: {password}"),
     ("open.meta.new", "Just created"),
     ("open.setup.title", "Set up ClientLedger"),
     ("open.setup.intro", "This creates the owner account for this computer. You sign in with it; nothing is sent anywhere."),
