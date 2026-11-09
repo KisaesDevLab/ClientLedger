@@ -121,13 +121,26 @@ pub fn kind_of(t: AccountType) -> AccountKind {
     }
 }
 
-/// Text for a detail type: the built-in label, or the company's own value.
+/// Text for a detail type: the built-in label, else the stored value in
+/// words (`my_own_type` → "My own type"), never the raw slug.
 #[must_use]
 pub fn detail_text(detail: Option<&str>) -> String {
     match detail {
         None | Some("") => String::new(),
-        Some(d) => detail_label(d).map_or_else(|| d.to_string(), |k| t(k.as_str())),
+        Some(d) => detail_label(d).map_or_else(|| humanize(d), |k| t(k.as_str())),
     }
+}
+
+/// A snake-case value in words: first letter upper case, `_` as spaces.
+fn humanize(slug: &str) -> String {
+    let words = slug
+        .split('_')
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut c = words.chars();
+    c.next()
+        .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
 }
 
 /// The chart as the grid shows it.
