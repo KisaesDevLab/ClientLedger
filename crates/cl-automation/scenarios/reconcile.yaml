@@ -39,7 +39,7 @@ steps:
   - assert_state: {key: screen.difference, equals: "-412.18"}
   - assert_state: {key: screen.can_finish, equals: false}
   - assert_exists: {label_contains: "check 4409 to Monett Tire"}
-  - assert_exists: {label: from bank file}
+  - assert_exists: {label: from bank file, index: 0}
   - assert_exists: {role: button, label: Reconcile now}
   - screenshot: mockup
   - command: window.theme

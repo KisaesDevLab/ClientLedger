@@ -93,7 +93,7 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &mut Ui) {
                 }
             }
             controls(s, ui);
-            let bottom = 150.0;
+            let bottom = 210.0;
             let pane_h = (ui.available_height() - bottom).max(160.0);
             ui.allocate_ui(Vec2::new(ui.available_width(), pane_h), |ui| {
                 panes(s, ui, &tokens, &rec, kind, pane_h);
@@ -244,9 +244,13 @@ fn panes(
     let w = ((ui.available_width() - gap) / 2.0).max(300.0);
     ui.horizontal_top(|ui| {
         for p in [kind.left(), kind.right()] {
-            ui.allocate_ui(Vec2::new(w, height), |ui| {
-                pane(s, ui, tokens, rec, kind, p, hinted);
-            });
+            ui.allocate_ui_with_layout(
+                Vec2::new(w, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    pane(s, ui, tokens, rec, kind, p, hinted);
+                },
+            );
             ui.add_space(gap - ui.spacing().item_spacing.x);
         }
     });
@@ -348,8 +352,8 @@ fn pane(
 
 /// Check, Date, Ref, Payee, Amount widths.
 fn column_widths(w: f32) -> [f32; 5] {
-    let fixed = 34.0 + 64.0 + 56.0 + 100.0;
-    [34.0, 64.0, 56.0, (w - fixed - 8.0).max(80.0), 100.0]
+    let fixed = 38.0 + 72.0 + 64.0 + 110.0;
+    [38.0, 72.0, 64.0, (w - fixed - 12.0).max(80.0), 110.0]
 }
 
 fn header_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5]) {
@@ -371,6 +375,7 @@ fn header_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5]) {
                 egui::Layout::left_to_right(egui::Align::Center)
             };
             ui.allocate_ui_with_layout(Vec2::new(*w, 26.0), layout, |ui| {
+                ui.set_min_size(Vec2::new(*w, 26.0));
                 ui.add_space(10.0);
                 ui.label(RichText::new(text).size(12.0).color(tokens.text_secondary));
             });
@@ -432,6 +437,7 @@ fn line_row(
         Vec2::new(cols[0], ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            ui.set_min_size(Vec2::new(cols[0], ROW_H));
             ui.add_space(10.0);
             let mut v = on;
             let r = ui.add(egui::Checkbox::without_text(&mut v));
@@ -461,6 +467,7 @@ fn line_row(
         Vec2::new(cols[3], ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            ui.set_min_size(Vec2::new(cols[3], ROW_H));
             ui.add_space(10.0);
             ui.add(egui::Label::new(RichText::new(&payee).color(tokens.text_primary)).truncate());
             if l.from_bank_feed {
@@ -519,6 +526,7 @@ fn pending_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5], p: &PendingRow) {
         Vec2::new(cols[0], ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            ui.set_min_size(Vec2::new(cols[0], ROW_H));
             ui.add_space(10.0);
             let mut v = true;
             let r = ui.add_enabled(false, egui::Checkbox::without_text(&mut v));
@@ -554,6 +562,7 @@ fn cell(ui: &mut Ui, w: f32, text: RichText, right: bool) {
         egui::Layout::left_to_right(egui::Align::Center)
     };
     ui.allocate_ui_with_layout(Vec2::new(w, ROW_H), layout, |ui| {
+        ui.set_min_size(Vec2::new(w, ROW_H));
         ui.add_space(10.0);
         ui.add(egui::Label::new(text).truncate());
     });
@@ -589,176 +598,194 @@ fn cards(
     let h = 120.0;
     ui.horizontal_top(|ui| {
         // Summary.
-        ui.allocate_ui(Vec2::new(card_w, h), |ui| {
-            egui::Frame::new()
-                .fill(tokens.surface_subtle)
-                .stroke(Stroke::new(1.0, tokens.border_default))
-                .corner_radius(6.0)
-                .inner_margin(egui::Margin::symmetric(14, 12))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.set_min_height(h - 24.0);
-                    ui.spacing_mut().item_spacing.y = 5.0;
-                    let beginning_label = match s.last_finished() {
-                        Some(r) => t_with(
-                            "reconcile.sum.beginning_on",
-                            &[("date", &short_date(r.statement_date))],
-                        ),
-                        None => t("reconcile.sum.beginning"),
-                    };
-                    sum_row(
-                        ui,
-                        tokens,
-                        &beginning_label,
-                        &display(kind.shown(rec.beginning_balance)),
-                        tokens.text_secondary,
-                        false,
-                    );
-                    let (dep_key, pay_key) = match kind {
-                        ReconKind::Bank => ("reconcile.sum.deposits", "reconcile.sum.payments"),
-                        ReconKind::Card => {
-                            ("reconcile.sum.card_payments", "reconcile.sum.card_charges")
+        ui.allocate_ui_with_layout(
+            Vec2::new(card_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_subtle)
+                    .stroke(Stroke::new(1.0, tokens.border_default))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_min_height(h - 24.0);
+                        ui.spacing_mut().item_spacing.y = 5.0;
+                        let beginning_label = match s.last_finished() {
+                            Some(r) => t_with(
+                                "reconcile.sum.beginning_on",
+                                &[("date", &short_date(r.statement_date))],
+                            ),
+                            None => t("reconcile.sum.beginning"),
+                        };
+                        sum_row(
+                            ui,
+                            tokens,
+                            &beginning_label,
+                            &display(kind.shown(rec.beginning_balance)),
+                            tokens.text_secondary,
+                            false,
+                        );
+                        let (dep_key, pay_key) = match kind {
+                            ReconKind::Bank => ("reconcile.sum.deposits", "reconcile.sum.payments"),
+                            ReconKind::Card => {
+                                ("reconcile.sum.card_payments", "reconcile.sum.card_charges")
+                            }
+                        };
+                        let dep =
+                            t_with(dep_key, &[("n", &rec.cleared_deposits.count.to_string())]);
+                        let pay =
+                            t_with(pay_key, &[("n", &rec.cleared_payments.count.to_string())]);
+                        // A side's total as it moves the shown balance.
+                        let signed = |m: cl_core::Money, out: bool| {
+                            let books = if out { m.checked_neg().unwrap_or(m) } else { m };
+                            display(kind.shown(books))
+                        };
+                        match kind {
+                            ReconKind::Bank => {
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &dep,
+                                    &signed(rec.cleared_deposits.total, false),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &pay,
+                                    &signed(rec.cleared_payments.total, true),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                            }
+                            ReconKind::Card => {
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &pay,
+                                    &signed(rec.cleared_payments.total, true),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &dep,
+                                    &signed(rec.cleared_deposits.total, false),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                            }
                         }
-                    };
-                    let dep = t_with(dep_key, &[("n", &rec.cleared_deposits.count.to_string())]);
-                    let pay = t_with(pay_key, &[("n", &rec.cleared_payments.count.to_string())]);
-                    // A side's total as it moves the shown balance.
-                    let signed = |m: cl_core::Money, out: bool| {
-                        let books = if out { m.checked_neg().unwrap_or(m) } else { m };
-                        display(kind.shown(books))
-                    };
-                    match kind {
-                        ReconKind::Bank => {
-                            sum_row(
-                                ui,
-                                tokens,
-                                &dep,
-                                &signed(rec.cleared_deposits.total, false),
-                                tokens.text_secondary,
-                                false,
-                            );
-                            sum_row(
-                                ui,
-                                tokens,
-                                &pay,
-                                &signed(rec.cleared_payments.total, true),
-                                tokens.text_secondary,
-                                false,
-                            );
-                        }
-                        ReconKind::Card => {
-                            sum_row(
-                                ui,
-                                tokens,
-                                &pay,
-                                &signed(rec.cleared_payments.total, true),
-                                tokens.text_secondary,
-                                false,
-                            );
-                            sum_row(
-                                ui,
-                                tokens,
-                                &dep,
-                                &signed(rec.cleared_deposits.total, false),
-                                tokens.text_secondary,
-                                false,
-                            );
-                        }
-                    }
-                    ui.separator();
-                    sum_row(
-                        ui,
-                        tokens,
-                        &t("reconcile.sum.cleared"),
-                        &display(kind.shown(rec.cleared_balance)),
-                        tokens.text_secondary,
-                        false,
-                    );
-                });
-        });
+                        ui.separator();
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.cleared"),
+                            &display(kind.shown(rec.cleared_balance)),
+                            tokens.text_secondary,
+                            false,
+                        );
+                    });
+            },
+        );
         // Difference.
-        ui.allocate_ui(Vec2::new(card_w, h), |ui| {
-            let zero = rec.difference.is_zero();
-            let (fill, stroke, text) = if zero {
-                (tokens.accent_tint, tokens.accent_border, tokens.accent)
-            } else {
-                (tokens.warn_surface, tokens.warn_tint, tokens.warn_text)
-            };
-            egui::Frame::new()
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke))
-                .corner_radius(6.0)
-                .inner_margin(egui::Margin::symmetric(14, 12))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.set_min_height(h - 24.0);
-                    ui.spacing_mut().item_spacing.y = 5.0;
-                    sum_row(
-                        ui,
-                        tokens,
-                        &t("reconcile.sum.statement_ending"),
-                        &display(kind.shown(rec.statement_ending_balance)),
-                        text,
-                        false,
-                    );
-                    sum_row(
-                        ui,
-                        tokens,
-                        &t("reconcile.sum.difference"),
-                        &display(kind.shown(rec.difference)),
-                        text,
-                        true,
-                    );
-                    if let Some(h) = hint_text(s) {
-                        ui.add(egui::Label::new(RichText::new(h).size(12.0).color(text)).wrap());
-                    }
-                });
-        });
-        // Actions.
-        ui.allocate_ui(Vec2::new(action_w, h), |ui| {
-            ui.vertical(|ui| {
-                ui.set_width(action_w);
-                let ready = can_finish(rec.difference, &s.queue);
-                let b = egui::Button::new(
-                    RichText::new(t("reconcile.finish"))
-                        .strong()
-                        .color(tokens.on_accent),
-                )
-                .fill(if ready {
-                    tokens.accent
+        ui.allocate_ui_with_layout(
+            Vec2::new(card_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                let zero = rec.difference.is_zero();
+                let (fill, stroke, text) = if zero {
+                    (tokens.accent_tint, tokens.accent_border, tokens.accent)
                 } else {
-                    tokens.border_strong
-                })
-                .min_size(Vec2::new(action_w, 44.0));
-                if ui.add_enabled(ready, b).clicked() {
-                    s.finish();
-                }
-                ui.horizontal(|ui| {
-                    let half = (action_w - 8.0) / 2.0;
-                    if ui
-                        .add(
-                            egui::Button::new(t("reconcile.leave")).min_size(Vec2::new(half, 44.0)),
-                        )
-                        .clicked()
-                    {
-                        s.leave();
+                    (tokens.warn_surface, tokens.warn_tint, tokens.warn_text)
+                };
+                egui::Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_min_height(h - 24.0);
+                        ui.spacing_mut().item_spacing.y = 5.0;
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.statement_ending"),
+                            &display(kind.shown(rec.statement_ending_balance)),
+                            text,
+                            false,
+                        );
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.difference"),
+                            &display(kind.shown(rec.difference)),
+                            text,
+                            true,
+                        );
+                        if let Some(h) = hint_text(s) {
+                            ui.add(
+                                egui::Label::new(RichText::new(h).size(12.0).color(text)).wrap(),
+                            );
+                        }
+                    });
+            },
+        );
+        // Actions.
+        ui.allocate_ui_with_layout(
+            Vec2::new(action_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(action_w);
+                    let ready = can_finish(rec.difference, &s.queue);
+                    let b = egui::Button::new(
+                        RichText::new(t("reconcile.finish"))
+                            .strong()
+                            .color(tokens.on_accent),
+                    )
+                    .fill(if ready {
+                        tokens.accent
+                    } else {
+                        tokens.border_strong
+                    })
+                    .min_size(Vec2::new(action_w, 44.0));
+                    if ui.add_enabled(ready, b).clicked() {
+                        s.finish();
                     }
-                    let r = ui.add(
-                        egui::Button::new(t("reconcile.reports")).min_size(Vec2::new(half, 44.0)),
-                    );
-                    super::reports::menu(s, ui, &r);
+                    ui.horizontal(|ui| {
+                        let half = (action_w - 8.0) / 2.0;
+                        if ui
+                            .add(
+                                egui::Button::new(t("reconcile.leave"))
+                                    .min_size(Vec2::new(half, 44.0)),
+                            )
+                            .clicked()
+                        {
+                            s.leave();
+                        }
+                        let r = ui.add(
+                            egui::Button::new(t("reconcile.reports"))
+                                .min_size(Vec2::new(half, 44.0)),
+                        );
+                        super::reports::menu(s, ui, &r);
+                    });
+                    if !ready {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t("reconcile.finish_help"))
+                                    .size(12.0)
+                                    .color(tokens.text_tertiary),
+                            )
+                            .wrap(),
+                        );
+                    }
                 });
-                if !ready {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(t("reconcile.finish_help"))
-                                .size(12.0)
-                                .color(tokens.text_tertiary),
-                        )
-                        .wrap(),
-                    );
-                }
-            });
-        });
+            },
+        );
     });
 }
