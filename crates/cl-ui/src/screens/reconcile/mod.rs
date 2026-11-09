@@ -142,6 +142,12 @@ pub struct ReconcileScreen {
     /// Its lines (a summary answer keeps them; only the ticks change).
     pub(crate) lines: Vec<ReconLine>,
     rec_job: Option<Job<Reconciliation>>,
+    /// The epoch `rec_job` was asked in (review D4).
+    rec_job_epoch: u64,
+    /// Moves on each tick batch sent or answered and on leaving the
+    /// worksheet: a worksheet read asked in an older epoch may predate
+    /// ticks the engine has since taken, so its answer is read again.
+    rec_epoch: u64,
     tick_job: Option<Job<Reconciliation>>,
     act_job: Option<(&'static str, Job<()>)>,
     pub(crate) queue: TickQueue,
@@ -150,6 +156,13 @@ pub struct ReconcileScreen {
     pub(crate) cursor: Option<JournalLineId>,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) password: String,
+    /// The engine refused the closing password Finish sent (review D1).
+    pub(crate) password_rejected: bool,
+    /// A card's pay step, from the worksheet as it finished (review D2).
+    pub(crate) card_pay: Option<CardPay>,
+    /// Leave for now (or the close prompt) waits for the ticks to reach
+    /// the engine, then closes (review D5).
+    pub(crate) leaving: bool,
     pub(crate) undo_mode: UndoMode,
     pub(crate) discrepancy: Option<DiscrepancyReport>,
     disc_job: Option<Job<DiscrepancyReport>>,
@@ -215,6 +228,8 @@ impl ReconcileScreen {
             rec: None,
             lines: Vec::new(),
             rec_job: None,
+            rec_job_epoch: 0,
+            rec_epoch: 0,
             tick_job: None,
             act_job: None,
             queue: TickQueue::default(),
@@ -223,6 +238,9 @@ impl ReconcileScreen {
             cursor: None,
             dialog: None,
             password: String::new(),
+            password_rejected: false,
+            card_pay: None,
+            leaving: false,
             undo_mode: UndoMode::KeepChecks,
             discrepancy: None,
             disc_job: None,
@@ -406,9 +424,17 @@ impl ReconcileScreen {
             }
         }
         if let Some(r) = engine::poll(&mut self.rec_job) {
-            match r {
-                Ok(rec) => self.took(rec),
-                Err(e) => self.refused(e),
+            if self.rec_job_epoch == self.rec_epoch {
+                match r {
+                    Ok(rec) => self.took(rec),
+                    Err(e) => self.refused(e),
+                }
+            } else if self.step == Step::Window
+                && let Some(id) = self.rec.as_ref().map(|r| r.id)
+            {
+                // Asked before ticks the engine has since taken (or while
+                // they were on their way): read the worksheet again.
+                self.read_sheet(id);
             }
         }
         // Send the next batch first: the demo answers at once.
@@ -416,6 +442,7 @@ impl ReconcileScreen {
             && let Some(id) = self.rec.as_ref().map(|r| r.id)
             && let Some(batch) = self.queue.take_batch()
         {
+            self.rec_epoch = self.rec_epoch.wrapping_add(1);
             self.tick_job = Some(engine::write(
                 &self.link,
                 self.group.as_ref(),
@@ -431,13 +458,18 @@ impl ReconcileScreen {
             ));
         }
         if let Some(r) = engine::poll(&mut self.tick_job) {
+            self.rec_epoch = self.rec_epoch.wrapping_add(1);
             match r {
                 Ok(rec) => {
                     self.queue.sent();
-                    self.took(rec);
+                    if self.rec.is_some() {
+                        self.took(rec);
+                    }
                 }
                 Err(e) => {
                     self.queue.failed();
+                    // Stay so the owner sees what failed.
+                    self.leaving = false;
                     self.refused(e);
                 }
             }
@@ -460,10 +492,19 @@ impl ReconcileScreen {
             }
         }
         self.reports.poll();
+        if self.leaving && self.queue.idle() && self.tick_job.is_none() {
+            self.leaving = false;
+            self.link
+                .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+        }
     }
 
     /// The engine's answer: totals replace ours; lines when it sent them.
     fn took(&mut self, rec: Reconciliation) {
+        if self.rec.as_ref().is_some_and(|r| r.id != rec.id) {
+            // An answer about another worksheet than the one shown.
+            return;
+        }
         if let Some(lines) = &rec.lines {
             self.lines.clone_from(lines);
             self.queue
@@ -479,6 +520,7 @@ impl ReconcileScreen {
             self.read_entry_voided();
         }
         self.step = Step::Window;
+        self.editing = false;
         self.form.statement_date = Some(rec.statement_date);
         self.rec = Some(rec);
         self.error = None;
@@ -506,6 +548,15 @@ impl ReconcileScreen {
             Some(ReconcileRefusal::ChargeAccountInvalid) => {
                 self.notice = Some("reconcile.problem.charge_account_invalid");
             }
+            Some(ReconcileRefusal::StatementDateOrder) => {
+                // The same words as Begin's own check; the history is read
+                // again so the date it names is the engine's.
+                self.problems = vec![BeginProblem::DateNotAfterLast];
+                self.history_for = None;
+                if self.rec.is_some() && self.step == Step::Begin {
+                    self.editing = true;
+                }
+            }
             _ => {
                 if matches!(
                     e,
@@ -521,6 +572,9 @@ impl ReconcileScreen {
     }
 
     pub(crate) fn back_to_begin(&mut self) {
+        // Reads still on their way are about the worksheet left behind.
+        self.rec_epoch = self.rec_epoch.wrapping_add(1);
+        self.leaving = false;
         self.step = Step::Begin;
         self.editing = false;
         self.rec = None;
@@ -537,6 +591,8 @@ impl ReconcileScreen {
                 match what {
                     "finished" => {
                         self.password.clear();
+                        self.password_rejected = false;
+                        self.card_pay = self.card_pay_due();
                         self.finished = self.rec.as_ref().map(|r| r.id);
                         self.dialog = Some(Dialog::Done);
                         if let Some(a) = self.form.account {
@@ -569,11 +625,21 @@ impl ReconcileScreen {
                     self.dialog = Some(Dialog::ClosingPassword);
                     return;
                 }
+                if what == "finished" && matches!(e, ApiError::ClosingPasswordRejected) {
+                    // Ask again in the dialog, the wrong password gone.
+                    self.password.clear();
+                    self.password_rejected = true;
+                    self.dialog = Some(Dialog::ClosingPassword);
+                    return;
+                }
                 if what == "finished"
                     && let Some(ReconcileRefusal::NotInProgress) = reconcile_refusal(&e)
                 {
                     // A retried finish whose first try went through.
                     if let Some(id) = self.rec.as_ref().map(|r| r.id) {
+                        self.password.clear();
+                        self.password_rejected = false;
+                        self.card_pay = self.card_pay_due();
                         self.finished = Some(id);
                         self.dialog = Some(Dialog::Done);
                         self.back_to_begin();
@@ -592,6 +658,7 @@ impl ReconcileScreen {
         self.form.statement_date = self.date_in.value;
         self.form.service_charge.date = self.svc_date.value;
         self.form.interest.date = self.int_date.value;
+        self.form.last_reconciled = self.last_finished().map(|r| r.statement_date);
         let v = match self.form.validate() {
             Ok(v) => v,
             Err(p) => {
@@ -618,7 +685,7 @@ impl ReconcileScreen {
                     .then(|| charge(v.service_charge)),
                 interest: (!self.form.interest.posted).then(|| charge(v.interest)),
             };
-            self.rec_job = Some(engine::write(
+            self.set_rec_job(engine::write(
                 &self.link,
                 self.group.as_ref(),
                 cl_api::OrphanLabel {
@@ -641,7 +708,7 @@ impl ReconcileScreen {
             service_charge: charge(v.service_charge),
             interest: charge(v.interest),
         };
-        self.rec_job = Some(engine::write(
+        self.set_rec_job(engine::write(
             &self.link,
             self.group.as_ref(),
             cl_api::OrphanLabel {
@@ -670,8 +737,29 @@ impl ReconcileScreen {
         }
     }
 
+    /// A worksheet read or write, stamped with the current epoch.
+    fn set_rec_job(&mut self, job: Job<Reconciliation>) {
+        self.rec_job = Some(job);
+        self.rec_job_epoch = self.rec_epoch;
+    }
+
+    /// A card's pay step for the worksheet shown: the printed statement
+    /// balance as the engine holds it, when the owner owes something.
+    fn card_pay_due(&self) -> Option<CardPay> {
+        let rec = self.rec.as_ref()?;
+        if self.kind() != ReconKind::Card {
+            return None;
+        }
+        let amount = self.kind().shown(rec.statement_ending_balance);
+        amount.is_positive().then_some(CardPay {
+            card: rec.account,
+            amount,
+            date: rec.statement_date,
+        })
+    }
+
     fn read_sheet(&mut self, id: ReconciliationId) {
-        self.rec_job = Some(engine::read(
+        self.set_rec_job(engine::read(
             &self.link,
             self.group.as_ref(),
             move |d| crate::company::demo::reconcile::get(d, id),
@@ -708,7 +796,7 @@ impl ReconcileScreen {
             self.read_sheet(id);
             return;
         }
-        self.rec_job = Some(engine::write(
+        self.set_rec_job(engine::write(
             &self.link,
             self.group.as_ref(),
             cl_api::OrphanLabel {
@@ -766,7 +854,13 @@ impl ReconcileScreen {
         let Some(rec) = &self.rec else {
             return;
         };
-        if !can_finish(rec.difference, &self.queue) || self.act_job.is_some() {
+        // Nothing on its way: a worksheet read landing after Finish would
+        // bring the finished worksheet back (review D4).
+        if !can_finish(rec.difference, &self.queue)
+            || self.act_job.is_some()
+            || self.rec_job.is_some()
+            || self.tick_job.is_some()
+        {
             return;
         }
         if rec.posting_locked && self.password.is_empty() {
@@ -848,10 +942,20 @@ impl ReconcileScreen {
         self.step = Step::Begin;
     }
 
-    /// Leave for now: the work stays in the engine.
+    /// Leave for now: the work stays in the engine. Ticks not yet there
+    /// go first; the window closes once the engine has them.
     pub(crate) fn leave(&mut self) {
-        self.link
-            .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+        if self.queue.idle() && self.tick_job.is_none() {
+            self.link
+                .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+        } else {
+            self.leaving = true;
+        }
+    }
+
+    /// Ticks the engine doesn't have yet.
+    pub(crate) fn ticks_pending(&self) -> bool {
+        self.step == Step::Window && (!self.queue.idle() || self.tick_job.is_some())
     }
 
     // ------------------------------------------------------------ panes
@@ -1007,6 +1111,9 @@ impl ReconcileScreen {
             "right": pane(kind.right()),
             "hide_later": self.hide_later,
             "pending": !self.queue.idle(),
+            "leaving": self.leaving,
+            "password_rejected": self.password_rejected,
+            "card_pay": self.card_pay.as_ref().map(|p| cl_model::reconcile::display(p.amount)),
             "can_finish": rec.is_some_and(|r| can_finish(r.difference, &self.queue)),
             "hint": window::hint_text(self),
             "posting_locked": rec.is_some_and(|r| r.posting_locked),
@@ -1053,6 +1160,23 @@ impl Screen for ReconcileScreen {
             Step::Window => window::draw(self, ui),
         }
         finish::dialogs(self, ui);
+    }
+
+    fn dirty(&self) -> bool {
+        self.ticks_pending()
+    }
+
+    fn can_save(&self) -> bool {
+        // "Save" is waiting for the ticks to reach the engine.
+        true
+    }
+
+    fn save(&mut self) -> bool {
+        if !self.ticks_pending() {
+            return true;
+        }
+        self.leaving = true;
+        false
     }
 
     fn scope(&self) -> Scope {

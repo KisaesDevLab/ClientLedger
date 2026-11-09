@@ -4,10 +4,9 @@
 //! previous reports and the discrepancy report ([`super::reports`]).
 
 use cl_model::CommandId;
-use cl_model::reconcile::ReconKind;
 use eframe::egui::{self, Ui};
 
-use super::{CardPay, Dialog, ReconcileScreen};
+use super::{Dialog, ReconcileScreen};
 use crate::company::CompanyEvent;
 use crate::i18n::t;
 use crate::windows::OpenPayload;
@@ -43,6 +42,15 @@ pub(crate) fn dialogs(s: &mut ReconcileScreen, ui: &Ui) {
 fn closing(s: &mut ReconcileScreen, ui: &Ui) {
     dialog(ui, &t("reconcile.closing.title"), |ui| {
         ui.add(egui::Label::new(t("reconcile.closing.text")).wrap());
+        if s.password_rejected {
+            ui.add_space(8.0);
+            let tokens = crate::theme::Tokens::of(ui.ctx());
+            crate::screens::company::form::inline_warning(
+                ui,
+                &tokens,
+                &t("reconcile.closing.rejected"),
+            );
+        }
         ui.add_space(8.0);
         crate::screens::company::form::password(
             ui,
@@ -58,6 +66,7 @@ fn closing(s: &mut ReconcileScreen, ui: &Ui) {
             }
             if ui.button(t("reconcile.cancel")).clicked() {
                 s.password.clear();
+                s.password_rejected = false;
                 s.dialog = None;
             }
         });
@@ -65,7 +74,8 @@ fn closing(s: &mut ReconcileScreen, ui: &Ui) {
 }
 
 fn done(s: &mut ReconcileScreen, ui: &Ui) {
-    let card = s.kind() == ReconKind::Card;
+    // Only a card with a balance owed goes on to the pay step.
+    let card = s.card_pay.is_some();
     dialog(ui, &t("reconcile.done.title"), |ui| {
         ui.add(egui::Label::new(t("reconcile.done.text")).wrap());
         ui.add_space(8.0);
@@ -98,19 +108,16 @@ fn done(s: &mut ReconcileScreen, ui: &Ui) {
     });
 }
 
-/// The card pay step's hand-off.
+/// The card pay step's hand-off: the statement balance the engine held
+/// when the reconciliation finished (never the Begin text, review D2).
 pub(crate) fn pay(s: &mut ReconcileScreen, kind: &'static str) {
-    let (Some(card), Some(amount), Some(date)) = (
-        s.form.account,
-        cl_core::Money::parse_user(&s.form.ending, cl_core::money::UserInput::CENTS).ok(),
-        s.form.statement_date,
-    ) else {
+    let Some(p) = s.card_pay.clone() else {
         s.dialog = None;
         return;
     };
     s.link.push(CompanyEvent::OpenWith(
         CommandId::new(kind),
-        Box::new(OpenPayload::CardPayment(CardPay { card, amount, date })),
+        Box::new(OpenPayload::CardPayment(p)),
     ));
     s.last = Some(match kind {
         "vendors.write_check" => "pay_check",

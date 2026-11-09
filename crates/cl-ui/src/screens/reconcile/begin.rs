@@ -2,7 +2,7 @@
 //! the discrepancy report.
 
 use cl_core::ids::AccountId;
-use cl_model::reconcile::{ReconKind, display};
+use cl_model::reconcile::{BeginProblem, ReconKind, display};
 use eframe::egui::{self, RichText, Ui};
 
 use super::{Dialog, ReconcileScreen};
@@ -222,7 +222,18 @@ fn fields(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
     }
     form::hint(ui, tokens, &t("reconcile.begin.charges_note"));
     for p in &s.problems {
-        form::inline_warning(ui, tokens, &t(p.key()));
+        form::inline_warning(ui, tokens, &problem_text(s, *p));
+    }
+}
+
+/// A Begin problem's words; the date order one names the last date.
+pub(crate) fn problem_text(s: &ReconcileScreen, p: BeginProblem) -> String {
+    match (p, s.last_finished()) {
+        (BeginProblem::DateNotAfterLast, Some(last)) => t_with(
+            "reconcile.problem.date_not_after_last_on",
+            &[("date", &crate::shell::us_date(last.statement_date))],
+        ),
+        _ => t(p.key()),
     }
 }
 

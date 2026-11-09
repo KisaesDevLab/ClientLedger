@@ -345,6 +345,7 @@ pub(crate) fn previous(s: &mut ReconcileScreen, ui: &Ui) {
 /// The discrepancy report's rows (field names only, never memo text).
 pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
     let tokens = crate::theme::Tokens::of(ui.ctx());
+    let kind = s.kind();
     egui::Window::new(t("reconcile.discrepancy.title"))
         .id(egui::Id::unique("reconcile_discrepancy"))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -352,6 +353,9 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
         .resizable(true)
         .default_width(720.0)
         .show(ui.ctx(), |ui| {
+            if let Some(text) = s.discrepancy.as_ref().and_then(|d| drift_text(d, kind)) {
+                crate::screens::company::form::inline_warning(ui, &tokens, &text);
+            }
             match &s.discrepancy {
                 None => {
                     ui.spinner();
@@ -396,14 +400,7 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
                                 ui.label(r.txn_date.map(crate::shell::us_date).unwrap_or_default());
                                 ui.label(r.payee.clone().unwrap_or_default());
                                 ui.label(r.fields.join(", "));
-                                ui.label(
-                                    egui::RichText::new(
-                                        r.effect
-                                            .map(cl_model::reconcile::display)
-                                            .unwrap_or_default(),
-                                    )
-                                    .monospace(),
-                                );
+                                ui.label(egui::RichText::new(effect_text(r, kind)).monospace());
                                 ui.label(r.changed_at.map(super::day_text).unwrap_or_default());
                                 ui.end_row();
                             }
@@ -415,7 +412,7 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
                 if ui.button(t("reconcile.discrepancy.print")).clicked()
                     && let (Some(d), Some(a)) = (&s.discrepancy, s.form.account)
                 {
-                    print_discrepancy(&s.link, d, &s.account_text(a));
+                    print_discrepancy(&s.link, &discrepancy_doc(d, &s.account_text(a), kind));
                 }
                 if ui.button(t("reconcile.close")).clicked() {
                     s.dialog = None;
@@ -424,7 +421,32 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
         });
 }
 
-fn print_discrepancy(link: &Arc<CompanyLink>, d: &cl_api::DiscrepancyReport, account: &str) {
+/// A row's effect as the owner reads the account (a card's flipped).
+pub(crate) fn effect_text(r: &cl_api::DiscrepancyRow, kind: cl_model::reconcile::ReconKind) -> String {
+    r.effect
+        .map(|m| cl_model::reconcile::display(kind.shown(m)))
+        .unwrap_or_default()
+}
+
+/// The beginning balance drift line, when the engine reports one.
+pub(crate) fn drift_text(
+    d: &cl_api::DiscrepancyReport,
+    kind: cl_model::reconcile::ReconKind,
+) -> Option<String> {
+    d.drift.map(|x| {
+        crate::i18n::t_with(
+            "reconcile.drift",
+            &[("amount", &cl_model::reconcile::display(kind.shown(x.difference)))],
+        )
+    })
+}
+
+/// The printed discrepancy report.
+pub(crate) fn discrepancy_doc(
+    d: &cl_api::DiscrepancyReport,
+    account: &str,
+    kind: cl_model::reconcile::ReconKind,
+) -> Report {
     let rows = d
         .rows
         .iter()
@@ -434,15 +456,15 @@ fn print_discrepancy(link: &Arc<CompanyLink>, d: &cl_api::DiscrepancyReport, acc
                 r.txn_date.map(crate::shell::us_date).unwrap_or_default(),
                 r.payee.clone().unwrap_or_default(),
                 r.fields.join(", "),
-                r.effect
-                    .map(cl_model::reconcile::display)
-                    .unwrap_or_default(),
+                effect_text(r, kind),
             ]
         })
         .collect();
-    let doc = Report {
+    let mut subtitle = vec![account.to_string()];
+    subtitle.extend(drift_text(d, kind));
+    Report {
         title: t("reconcile.discrepancy.title"),
-        subtitle: vec![account.to_string()],
+        subtitle,
         sections: vec![Section::Table {
             heading: String::new(),
             columns: vec![
@@ -477,8 +499,11 @@ fn print_discrepancy(link: &Arc<CompanyLink>, d: &cl_api::DiscrepancyReport, acc
         }],
         footer: t("reconcile.report.as_of_today"),
         page_label: t("reconcile.report.page"),
-    };
-    if let Ok(bytes) = cl_print::reports::render_report(&doc) {
+    }
+}
+
+fn print_discrepancy(link: &Arc<CompanyLink>, doc: &Report) {
+    if let Ok(bytes) = cl_print::reports::render_report(doc) {
         link.push(CompanyEvent::OpenWith(
             CommandId::new(crate::screens::document_view::KIND),
             Box::new(crate::windows::OpenPayload::Document(
