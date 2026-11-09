@@ -48,6 +48,8 @@ pub mod units;
 // P25: the in-memory bank feed of Import Bank File.
 pub mod bank_import;
 pub mod feed_review;
+// P27: Reconcile (the mockup's October statement).
+pub mod reconcile;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,6 +115,8 @@ pub struct DemoState {
     pub bank_feed: bank_import::DemoBankFeed,
     /// The Bank Feed review (P26).
     pub feed_review: feed_review::DemoFeedReview,
+    /// Reconciliations (P27).
+    pub reconcile: reconcile::DemoRecon,
     /// The open company's entity type (the sample's single-member LLC).
     pub entity_type: cl_api::EntityType,
     /// The demo company's AI switches (Preferences > AI).
@@ -272,6 +276,7 @@ impl DemoState {
             daily_sales: daily_sales::DemoDailySales::default(),
             bank_feed: bank_import::DemoBankFeed::default(),
             feed_review: feed_review::DemoFeedReview::default(),
+            reconcile: reconcile::DemoRecon::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,
             ai: DemoAi::default(),
             templates: Vec::new(),
@@ -563,6 +568,18 @@ pub fn chart() -> Vec<cl_api::Account> {
             tag,
         });
     }
+    // P27: where Reconcile posts the statement's interest (the sample has
+    // no interest income account).
+    rows.push(DemoRow {
+        number: "4900".into(),
+        name: "Interest Income".into(),
+        kind: AccountType::OtherRevenue,
+        detail: None,
+        parent: None,
+        active: true,
+        system: false,
+        tag: None,
+    });
     for (number, name, parent, active) in [
         ("6710", "Truck Repairs", 6700, true),
         ("6720", "Trailer Registration", 6700, true),
