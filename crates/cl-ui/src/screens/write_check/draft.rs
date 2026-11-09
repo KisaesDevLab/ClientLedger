@@ -378,6 +378,7 @@ impl WriteCheckScreen {
                 contact: Some(c.payee),
                 account: Some(c.bank),
                 account_name,
+                reference: None,
             },
             learn: Some(learn),
         };

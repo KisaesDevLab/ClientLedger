@@ -168,6 +168,7 @@ impl World {
                 contact: None,
                 account: None,
                 account_name: None,
+                reference: None,
             },
             learn: None,
         }
@@ -964,4 +965,61 @@ fn a_convert_cut_off_by_a_crash_is_entered_once_after_restart() {
         );
     }
     assert_eq!(w.transactions(), before + 1, "entered once");
+}
+
+/// PR-A1 QA-3: a card charge with no vendor on the form, dated weeks after
+/// an open bill with the same Ref no. and total, still asks "Is this
+/// already in your books?" with Pay this bill before anything posts.
+#[test]
+fn a_receipt_with_an_open_bills_reference_asks_before_posting_without_a_vendor() {
+    use crate::company::demo::bills as demo_bills;
+    let w = World::new();
+    let vendor = w
+        .demo()
+        .contacts_mut()
+        .iter()
+        .find(|c| c.fields.display_name == demo_bills::STORY_VENDOR)
+        .map(|c| c.id)
+        .expect("vendor");
+    let bill = {
+        let mut d = w.demo();
+        let draft = cl_api::BillDraft {
+            vendor,
+            date: day(1),
+            vendor_invoice_number: Some("SYN-33994105".into()),
+            terms: None,
+            due_date: None,
+            memo: None,
+            amount_due: money("685.55"),
+            lines: vec![cl_api::BillLineDraft::expense(
+                crate::company::demo::account_id(6210),
+                money("685.55"),
+            )],
+            received: true,
+            draft_attachment: None,
+        };
+        demo_bills::create_bill(&mut d, &draft, None).expect("bill")
+    };
+    let id = w.draft("ozark", "685.55", day(28));
+    let mut s = w.session(id);
+    let mut accept = w.accept("685.55", day(28), None);
+    accept.probe.reference = Some("SYN-33994105".into());
+    let before = w.transactions();
+    assert!(s.accept(accept));
+    let _ = tick(&w, &mut s);
+    let d = s
+        .attach
+        .as_ref()
+        .expect("the dialog, before anything posts");
+    assert_eq!(d.picked_bill(), Some(bill), "Pay this bill is offered");
+    assert_eq!(w.transactions(), before, "nothing posted yet");
+
+    // Without the reference the dates are too far apart for the amount
+    // search, and the draft has no vendor: it would have posted (QA-3).
+    let w2 = World::new();
+    let id2 = w2.draft("ozark", "685.55", day(28));
+    let mut s2 = w2.session(id2);
+    assert!(s2.accept(w2.accept("685.55", day(28), None)));
+    let _ = tick(&w2, &mut s2);
+    assert!(s2.attach.is_none());
 }

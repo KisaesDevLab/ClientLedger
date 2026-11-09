@@ -599,6 +599,7 @@ impl CardChargeScreen {
                 contact: c.payee,
                 account: Some(c.card),
                 account_name,
+                reference: c.ref_no.clone(),
             },
             learn: Some(learn),
         };

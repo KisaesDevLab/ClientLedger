@@ -581,7 +581,7 @@ enum Work {
     /// The register search on Accept.
     Matching {
         accept: Box<Accept>,
-        task: Task<Vec<cl_docread::register_match::RegisterRow>>,
+        task: Task<super::attach::Found>,
     },
     /// The register search failed or couldn't run (review B2): nothing
     /// posts until the owner picks Try again or Enter as new.
@@ -1607,13 +1607,29 @@ impl DraftSession {
                 Some(r) => {
                     // A failed search never posts (review B2): the
                     // engine's duplicate check skips vendor-less receipts.
-                    let rows = match r {
-                        Ok(rows) => rows,
+                    let found = match r {
+                        Ok(found) => found,
                         Err(_) => {
                             self.search_failed(accept);
                             return;
                         }
                     };
+                    // PR-A1 QA-3: an open bill with this receipt's Ref no.
+                    // and total asks first ("Pay this bill"), whatever its
+                    // date and even without a vendor on the form.
+                    if !found.bills.is_empty() && !matches!(accept.body, PostBody::Bill(_)) {
+                        let attach_ok =
+                            crate::screens::receipt_inbox::intake::drafts::attach_on(&self.link);
+                        self.attach = Some(AttachDialog::from_duplicates(
+                            &accept.probe,
+                            &found.bills,
+                            false,
+                            attach_ok,
+                        ));
+                        self.work = Work::Choosing { accept };
+                        return;
+                    }
+                    let rows = found.rows;
                     let probe = accept.probe.probe();
                     let cands = cl_docread::register_match::candidates(&probe, &rows);
                     if cands.is_empty() {

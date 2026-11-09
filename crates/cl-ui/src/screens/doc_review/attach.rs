@@ -49,6 +49,10 @@ use crate::theme::Tokens;
 /// Register search pages read at most (200 rows each): a busy register
 /// still answers, and the exact-amount filter keeps pages few.
 const MAX_PAGES: u64 = 25;
+/// Bill pages read at most for a receipt's reference.
+const BILL_PAGES: u32 = 5;
+/// Bills per page for a receipt's reference.
+const BILL_PAGE: u16 = 200;
 
 /// What the document says at Accept: the form's own values (owner data;
 /// `Debug` is redacted).
@@ -66,6 +70,10 @@ pub(crate) struct MatchProbe {
     pub account: Option<AccountId>,
     /// That account's name as shown.
     pub account_name: Option<String>,
+    /// The form's Ref. no. (a card charge or cash expense; `None` on a
+    /// bill or a check): an open bill with it is a bill this receipt may
+    /// have paid (PR-A1 QA-3).
+    pub reference: Option<String>,
 }
 
 impl std::fmt::Debug for MatchProbe {
@@ -122,6 +130,110 @@ fn mark_same(rows: &mut [RegisterRow], same: &[TransactionId]) {
     }
 }
 
+/// What the search found: the register's candidates' rows, and the open
+/// bills the receipt's reference names (PR-A1 QA-3).
+#[derive(Default)]
+pub(crate) struct Found {
+    /// Posted records of the exact total near the date.
+    pub rows: Vec<RegisterRow>,
+    /// Open bills with the receipt's reference and total, as the engine's
+    /// duplicate check would report them (the "Pay this bill" dialog).
+    pub bills: Vec<DuplicateMatch>,
+}
+
+/// One bill as the reference rule takes it (owner data, never logged).
+#[derive(Clone)]
+pub(crate) struct BillRef {
+    pub id: TransactionId,
+    pub date: CalendarDate,
+    pub total: Option<Money>,
+    pub contact: Option<ContactId>,
+    pub reference: Option<String>,
+    pub posted: bool,
+}
+
+/// A reference as compared: any case, spaces and dashes ignored.
+fn fold_reference(r: &str) -> String {
+    r.chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// PR-A1 QA-3: the open bills a receipt with Ref no. `p.reference` may
+/// have paid: posted, the same reference, exactly the same total, and not
+/// another known vendor's (the payee gate). The date doesn't count: a
+/// bill is often paid weeks after its date.
+#[must_use]
+pub(crate) fn bills_by_reference(p: &MatchProbe, bills: &[BillRef]) -> Vec<DuplicateMatch> {
+    let Some(want) = p
+        .reference
+        .as_deref()
+        .map(fold_reference)
+        .filter(|r| !r.is_empty())
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<DuplicateMatch> = Vec::new();
+    for b in bills {
+        let same_ref = b
+            .reference
+            .as_deref()
+            .is_some_and(|r| fold_reference(r) == want);
+        let other_vendor = matches!((p.contact, b.contact), (Some(a), Some(c)) if a != c);
+        if !b.posted || !same_ref || b.total != Some(p.amount) || other_vendor {
+            continue;
+        }
+        if out
+            .iter()
+            .any(|m| m.source == MatchSource::Transaction(b.id))
+        {
+            continue;
+        }
+        out.push(DuplicateMatch {
+            source: MatchSource::Transaction(b.id),
+            reason: cl_api::MatchReason::Reference,
+            txn_type: Some("bill".into()),
+            kind: None,
+            date: Some(b.date),
+            total: b.total,
+            reference: b.reference.clone(),
+        });
+    }
+    out
+}
+
+/// The demo's open bills with reference `r` (the reference rule decides).
+fn demo_bills(demo: &mut crate::company::demo::DemoState, r: &str) -> Vec<BillRef> {
+    use crate::company::demo::register::DemoLedger;
+    let want = fold_reference(r);
+    let ids: Vec<TransactionId> = demo
+        .ledger
+        .transactions()
+        .into_iter()
+        .filter(|t| t.kind == "bill")
+        .map(|t| DemoLedger::id_of(&t))
+        .filter(|id| !demo.ledger.is_void(*id))
+        .collect();
+    ids.into_iter()
+        .filter_map(|id| crate::company::demo::bills::get(demo, id).map(|v| v.record))
+        .filter(|b| {
+            b.vendor_invoice_number
+                .as_deref()
+                .is_some_and(|x| fold_reference(x) == want)
+                && b.balance_due.is_none_or(|d| d.is_positive())
+        })
+        .map(|b| BillRef {
+            id: b.txn.id,
+            date: b.txn.txn_date,
+            total: b.txn.total,
+            contact: b.txn.contact_id,
+            reference: b.vendor_invoice_number.clone(),
+            posted: b.txn.status == TxnStatus::Posted,
+        })
+        .collect()
+}
+
 /// How the register search started (review B2: only an engine without the
 /// capability posts without one; a search that couldn't run never posts).
 pub(crate) enum Search {
@@ -130,7 +242,7 @@ pub(crate) enum Search {
     /// check still runs.
     Unsupported,
     /// The search runs; its answer comes in the task.
-    Started(Task<Vec<RegisterRow>>),
+    Started(Task<Found>),
     /// The search couldn't be sent (no session, the request queue refused
     /// it, the demo failed): the owner chooses Try again or Enter as new.
     Failed,
@@ -163,8 +275,7 @@ pub(crate) fn search(
             )),
             _ => None,
         };
-        drop(demo);
-        return match (all, same) {
+        let out = match (all, same) {
             // Without drafts the demo has no exact filter.
             (Err(ApiError::Local(LocalValidation::Unsupported)), _) => Search::Unsupported,
             (Err(_), _) | (Ok(_), Some(Err(_))) => Search::Failed,
@@ -176,9 +287,16 @@ pub(crate) fn search(
                 let mut rows: Vec<RegisterRow> =
                     rows.iter().filter_map(|r| row_of(r, false)).collect();
                 mark_same(&mut rows, &same);
-                Search::Started(Task::ready(rows))
+                let bills = p
+                    .reference
+                    .as_deref()
+                    .map(|r| bills_by_reference(p, &demo_bills(&mut demo, r)))
+                    .unwrap_or_default();
+                Search::Started(Task::ready(Found { rows, bills }))
             }
         };
+        drop(demo);
+        return out;
     }
     let caps = link.capabilities();
     if !caps.has(Capabilities::DOCUMENT_DRAFTS_ATTACH) {
@@ -188,6 +306,7 @@ pub(crate) fn search(
         return Search::Failed;
     };
     let (amount, account) = (p.amount, p.account);
+    let probe = p.clone();
     let started = group
         .read(&session, move |s| async move {
             let filter = TransactionFilter {
@@ -226,7 +345,34 @@ pub(crate) fn search(
                     .collect();
                 mark_same(&mut rows, &same);
             }
-            Ok(rows)
+            let bills = match probe.reference.as_deref().filter(|r| !r.trim().is_empty()) {
+                Some(r) => {
+                    let (start, end) = cl_model::forms::bill::duplicate_window(probe.date);
+                    let q = cl_api::BillListQuery {
+                        search: Some(r.trim().to_string()),
+                        start: Some(start),
+                        end: Some(end),
+                        open_only: true,
+                        ..cl_api::BillListQuery::default()
+                    };
+                    let got = s.bills().list_capped(&q, BILL_PAGE, BILL_PAGES).await?;
+                    let found: Vec<BillRef> = got
+                        .rows
+                        .into_iter()
+                        .map(|b| BillRef {
+                            id: b.id,
+                            date: b.txn_date,
+                            total: b.total,
+                            contact: b.contact_id,
+                            reference: b.vendor_invoice_number,
+                            posted: b.status == TxnStatus::Posted,
+                        })
+                        .collect();
+                    bills_by_reference(&probe, &found)
+                }
+                None => Vec::new(),
+            };
+            Ok(Found { rows, bills })
         })
         .ok()
         .map(Task::Pending);
@@ -811,7 +957,71 @@ mod tests {
             contact,
             account: None,
             account_name: None,
+            reference: None,
         }
+    }
+
+    fn bill_ref(n: u8, reference: &str, total: &str, contact: Option<ContactId>) -> BillRef {
+        BillRef {
+            id: id(n),
+            // Weeks before the receipt: the date doesn't count.
+            date: CalendarDate::from_ymd(2025, 10, 2).expect("date"),
+            total: Some(money(total)),
+            contact,
+            reference: Some(reference.into()),
+            posted: true,
+        }
+    }
+
+    /// PR-A1 QA-3: a receipt whose Ref no. and total are an open bill's is
+    /// that bill (Pay this bill), with or without a vendor on the form and
+    /// whatever the dates; another vendor's bill, another total, another
+    /// reference or a void bill never is.
+    #[test]
+    fn an_open_bill_with_the_receipts_reference_and_total_is_found() {
+        let mut p = probe(None);
+        p.amount = money("685.55");
+        p.reference = Some(" 3399-4105 ".into());
+        let bills = [
+            bill_ref(1, "33994105", "685.55", Some(contact(1))),
+            bill_ref(2, "33994105", "685.56", None),
+            bill_ref(3, "33994106", "685.55", None),
+            BillRef {
+                posted: false,
+                ..bill_ref(4, "33994105", "685.55", None)
+            },
+            bill_ref(1, "33994105", "685.55", Some(contact(1))),
+        ];
+        let found = bills_by_reference(&p, &bills);
+        assert_eq!(found.len(), 1, "once, exact total, same ref, posted");
+        assert_eq!(found[0].source, MatchSource::Transaction(id(1)));
+        assert_eq!(found[0].txn_type.as_deref(), Some("bill"));
+        assert_eq!(found[0].total, Some(money("685.55")));
+
+        // The payee gate: another known vendor's bill is never offered.
+        p.contact = Some(contact(2));
+        assert!(bills_by_reference(&p, &bills).is_empty());
+        p.contact = Some(contact(1));
+        assert_eq!(bills_by_reference(&p, &bills).len(), 1);
+
+        // No reference on the form: nothing (the amount search decides).
+        p.reference = Some("  ".into());
+        assert!(bills_by_reference(&p, &bills).is_empty());
+        p.reference = None;
+        assert!(bills_by_reference(&p, &bills).is_empty());
+    }
+
+    /// The bill found that way opens the "Pay this bill" dialog for a
+    /// receipt (the same one the engine's duplicate check opens).
+    #[test]
+    fn a_bill_found_by_reference_offers_pay_this_bill() {
+        let mut p = probe(None);
+        p.amount = money("685.55");
+        p.reference = Some("33994105".into());
+        let found = bills_by_reference(&p, &[bill_ref(1, "33994105", "685.55", None)]);
+        let d = AttachDialog::from_duplicates(&p, &found, false, true);
+        assert_eq!(d.picked_bill(), Some(id(1)));
+        assert_eq!(d.ids(), vec![id(1)]);
     }
 
     /// T11 (M5): another known payee is never offered; a row with no payee

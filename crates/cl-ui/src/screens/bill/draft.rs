@@ -371,6 +371,7 @@ impl EnterBillScreen {
                 contact: Some(c.vendor),
                 account: None,
                 account_name: None,
+                reference: None,
             },
             learn: Some(learn),
         };
