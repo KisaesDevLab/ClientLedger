@@ -1184,6 +1184,15 @@ async fn switching_mid_load_sends_nothing_into_the_other_company() {
         )
         .mount(&server)
         .await;
+    // Q-P27p: the numbered checks post through Write Check's route.
+    Mock::given(method("POST"))
+        .and(path("/api/v1/checks"))
+        .respond_with(
+            json(201, json!({"transaction":{"id":"3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02","txnType":"expense","txnDate":"2026-01-01","status":"posted","lines":[]}}))
+                .set_delay(std::time::Duration::from_millis(15)),
+        )
+        .mount(&server)
+        .await;
 
     let loader = {
         let s = s.clone();
@@ -1319,6 +1328,11 @@ async fn the_sample_posts_waiting_payments_into_payments_clearing() {
         .respond_with(json(201, json!({"transaction":{"id":"3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"journal_entry","txnDate":"2026-01-01","status":"posted","lines":[]}})))
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/checks"))
+        .respond_with(json(201, json!({"transaction":{"id":"3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02","txnType":"expense","txnDate":"2026-01-01","status":"posted","lines":[]}})))
+        .mount(&server)
+        .await;
 
     cl_company::sample::load_into(
         &s,
@@ -1330,7 +1344,10 @@ async fn the_sample_posts_waiting_payments_into_payments_clearing() {
     .expect("loaded");
 
     let entries = posts(&server, "/api/v1/transactions").await;
-    assert_eq!(entries.len(), 1512);
+    // Every fixture transaction: 190 numbered checks as checks (Q-P27p), the
+    // rest as journal entries.
+    assert_eq!(posts(&server, "/api/v1/checks").await.len(), 190);
+    assert_eq!(entries.len(), 1512 - 190);
     let into_clearing: Vec<&Value> = entries
         .iter()
         .filter(|e| {
