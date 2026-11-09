@@ -1625,6 +1625,7 @@ fn documents_entered_after_the_backup_are_offered_back_and_move_only_on_yes() {
     w.until("looked", |s| {
         s.bring_back_count() == 1 && !s.after_restore_busy()
     });
+    assert_eq!(w.intake.bring_back_names(), ["tuesday.pdf"], "named");
     assert!(
         !bills.join("tuesday.pdf").exists(),
         "nothing moves before yes"

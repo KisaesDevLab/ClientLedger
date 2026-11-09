@@ -712,54 +712,143 @@ pub fn form_key(f: DraftForm) -> &'static str {
     }
 }
 
+/// How many file names the bring-back banner shows before "and N more".
+const BRING_BACK_SHOWN: usize = 3;
+
+/// A file name as the banner shows it: no control or bidirectional
+/// formatting characters (a name can't reorder the sentence around it).
+fn shown_file_name(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect()
+}
+
+/// The documents' names for the banner: "a, b, c", then "a, b, c and 2
+/// more".
+pub(crate) fn bring_back_names(names: &[String]) -> String {
+    let shown: Vec<String> = names
+        .iter()
+        .take(BRING_BACK_SHOWN)
+        .map(|n| shown_file_name(n))
+        .collect();
+    let list = shown.join(", ");
+    let rest = names.len().saturating_sub(BRING_BACK_SHOWN);
+    if rest == 0 {
+        list
+    } else {
+        t_with(
+            "doc_review.bring_back.more",
+            &[("names", &list), ("n", &rest.to_string())],
+        )
+    }
+}
+
+/// The banner's text and its two buttons (one document or several).
+pub(crate) fn bring_back_texts(names: &[String]) -> (String, String, String) {
+    let listed = bring_back_names(names);
+    if names.len() == 1 {
+        (
+            t_with("doc_review.bring_back.one", &[("names", &listed)]),
+            t("doc_review.bring_back.yes.one"),
+            t("doc_review.bring_back.no.one"),
+        )
+    } else {
+        (
+            t_with(
+                "doc_review.bring_back",
+                &[("n", &names.len().to_string()), ("names", &listed)],
+            ),
+            t("doc_review.bring_back.yes"),
+            t("doc_review.bring_back.no"),
+        )
+    }
+}
+
 /// PR-A1 S2 (Q-PRA1c): after a restore, the documents entered after the
-/// backup was made: "Bring them back to Review Documents?". Nothing moves
-/// without the owner's yes.
+/// backup was made, by name: "Bring them back to Review Documents?".
+/// Nothing moves without the owner's yes.
 fn bring_back_banner(link: &CompanyLink, ui: &mut Ui, tokens: &Tokens) {
     let Some(h) = crate::screens::receipt_inbox::intake::existing(ui.ctx()) else {
         return;
     };
-    let (n, busy) = {
+    let (names, busy) = {
         let g = h.lock();
-        (g.bring_back_count(), g.after_restore_busy())
+        (g.bring_back_names(), g.after_restore_busy())
     };
     if busy {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(200));
     }
-    if n == 0 {
+    if names.is_empty() {
         return;
     }
-    let count = n.to_string();
-    form::inline_warning(
-        ui,
-        tokens,
-        &t_with(
-            if n == 1 {
-                "doc_review.bring_back.one"
-            } else {
-                "doc_review.bring_back"
-            },
-            &[("n", &count)],
-        ),
-    );
+    let one = names.len() == 1;
+    let (text, yes, no) = bring_back_texts(&names);
+    form::inline_warning(ui, tokens, &text);
     ui.horizontal(|ui| {
-        if ui
-            .button(t("doc_review.bring_back.yes"))
-            .on_hover_text(t("doc_review.bring_back.yes.tip"))
-            .clicked()
-        {
+        let tip = if one {
+            "doc_review.bring_back.yes.one.tip"
+        } else {
+            "doc_review.bring_back.yes.tip"
+        };
+        if ui.button(yes).on_hover_text(t(tip)).clicked() {
             h.lock().answer_bring_back(link, true);
         }
-        if ui
-            .button(t("doc_review.bring_back.no"))
-            .on_hover_text(t("doc_review.bring_back.no.tip"))
-            .clicked()
-        {
+        let tip = if one {
+            "doc_review.bring_back.no.one.tip"
+        } else {
+            "doc_review.bring_back.no.tip"
+        };
+        if ui.button(no).on_hover_text(t(tip)).clicked() {
             h.lock().answer_bring_back(link, false);
         }
     });
     ui.add_space(6.0);
+}
+
+#[cfg(test)]
+mod bring_back_tests {
+    use super::{bring_back_names, bring_back_texts};
+
+    fn names(n: &[&str]) -> Vec<String> {
+        n.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// PR-A1 QA round 2: the banner names the documents ("and N more" past
+    /// three) and its buttons agree with it in number.
+    #[test]
+    fn the_bring_back_banner_names_the_documents_and_agrees_in_number() {
+        let (text, yes, no) = bring_back_texts(&names(&["telecom.pdf"]));
+        assert!(text.contains("telecom.pdf"), "{text}");
+        assert!(text.contains("Bring it back"), "{text}");
+        assert_eq!(
+            (yes.as_str(), no.as_str()),
+            ("Bring it back", "No, leave it")
+        );
+        let (text, yes, no) = bring_back_texts(&names(&["a.pdf", "b.pdf"]));
+        assert!(text.starts_with("2 documents"), "{text}");
+        assert!(text.contains("a.pdf, b.pdf."), "{text}");
+        assert_eq!(
+            (yes.as_str(), no.as_str()),
+            ("Bring them back", "No, leave them")
+        );
+        assert_eq!(bring_back_names(&names(&["a", "b", "c"])), "a, b, c");
+        assert_eq!(
+            bring_back_names(&names(&["a", "b", "c", "d", "e"])),
+            "a, b, c and 2 more"
+        );
+        // A name can't reorder the sentence.
+        assert_eq!(
+            bring_back_names(&names(&["inv\u{202e}fdp.exe\n"])),
+            "invfdp.exe"
+        );
+    }
 }
 
 impl Screen for DocReviewScreen {

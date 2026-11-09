@@ -192,6 +192,20 @@ impl Intake {
         self.after_restore.found.len()
     }
 
+    /// The file names of the documents offered back (the banner names
+    /// them; never logged).
+    pub(crate) fn bring_back_names(&self) -> Vec<String> {
+        self.after_restore
+            .found
+            .iter()
+            .map(|(_, path, _)| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
     /// File work in flight (tests wait for it).
     pub(crate) fn after_restore_busy(&self) -> bool {
         let a = &self.after_restore;
