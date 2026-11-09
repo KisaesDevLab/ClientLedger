@@ -218,6 +218,24 @@ pub fn seed_two_receipts(state: &mut DemoState) -> Option<(FeedItemId, [Document
 /// before the line) and the vendor's receipt of it is waiting: the line
 /// and the receipt. Synthetic only.
 pub fn seed_duplicate(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId)> {
+    seed_duplicate_as(state, true)
+}
+
+/// PR-A1 QA-1 (`dev.demo_feed_receipt_dup_no_vendor`): the same, but the
+/// receipt's vendor was not matched when it was read (the owner added the
+/// vendor afterwards): the check still finds the bill (Q-PRA1d).
+pub fn seed_duplicate_no_vendor(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId)> {
+    seed_duplicate_as(state, false)
+}
+
+fn seed_duplicate_as(
+    state: &mut DemoState,
+    with_vendor: bool,
+) -> Option<(FeedItemId, DocumentDraftId)> {
+    if !with_vendor {
+        // An engine with `document-duplicates-no-vendor-v1`.
+        state.drafts.no_vendor_check = true;
+    }
     super::refresh(state);
     discard_seeded(state);
     let r = pick_line(state, SeedLine::Proposed)?;
@@ -244,7 +262,8 @@ pub fn seed_duplicate(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraf
     };
     super::super::bills::create_bill(state, &bill, None).ok()?;
     super::refresh(state);
-    seed_receipt_as(state, r.id, false, "invoice.pdf", false, Some(vendor)).map(|d| (r.id, d))
+    let read_vendor = with_vendor.then_some(vendor);
+    seed_receipt_as(state, r.id, false, "invoice.pdf", false, read_vendor).map(|d| (r.id, d))
 }
 
 /// Throws away the receipts [`seed_receipt`] made that are still live

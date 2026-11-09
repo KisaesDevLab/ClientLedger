@@ -681,6 +681,10 @@ impl BankFeedScreen {
             "dev.demo_feed_receipt_dup" => {
                 self.focus_next = demo::seed_duplicate(&mut d).map(|(line, _)| line);
             }
+            // PR-A1 QA-1: the same receipt, its vendor not matched.
+            "dev.demo_feed_receipt_dup_no_vendor" => {
+                self.focus_next = demo::seed_duplicate_no_vendor(&mut d).map(|(line, _)| line);
+            }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;
             }

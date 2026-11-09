@@ -387,6 +387,11 @@ pub(crate) struct Panel {
     pub refused: Option<(DocumentDraftId, Vec<DuplicateMatch>)>,
     /// PR-A1 B1: the owner chose "Use it anyway" for this receipt.
     pub use_anyway: Option<DocumentDraftId>,
+    /// PR-A1 QA-1: the line's payee when the details were read; a vendor
+    /// picked for the line since reads them (and the check) again.
+    details_payee: Option<ContactId>,
+    /// The details were read at least once for this row.
+    details_read: bool,
 }
 
 /// An offer's read vendor name and file name (owner data: drawn, never
@@ -505,6 +510,8 @@ fn read_details(s: &mut BankFeedScreen, id: FeedItemId) {
     if wanted.is_empty() {
         return;
     }
+    s.detail.receipt.details_payee = s.row(id).and_then(payee_of);
+    s.detail.receipt.details_read = true;
     let tenant = s.tenant;
     let demo_wanted = wanted.clone();
     s.detail.receipt.details_load = Some(run(
@@ -584,9 +591,13 @@ pub(crate) fn refresh(s: &mut BankFeedScreen) {
     };
     let offers = s.receipts.of(id);
     let p = &s.detail.receipt;
+    // PR-A1 QA-1: a vendor picked for the line since the check ran: the
+    // receipts are checked again (a held pick stays held until then).
+    let payee = s.row(id).and_then(payee_of);
+    let moved = p.details_read && p.details_payee != payee;
     // A receipt that arrived for the open row gets its vendor and file in
     // its label too (QA-5).
-    if p.details_load.is_none() && offers.iter().any(|o| !p.details.contains_key(o)) {
+    if p.details_load.is_none() && (moved || offers.iter().any(|o| !p.details.contains_key(o))) {
         read_details(s, id);
     }
     let offers = s.receipts.of(id);

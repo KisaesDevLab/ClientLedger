@@ -860,3 +860,62 @@ fn a_new_vendor_credit_line_takes_what_is_left_of_the_amount() {
     pick_line(&mut s, 1, "6210");
     assert_eq!(s.expenses.value().lines[1].amount, Some(money("50.00")));
 }
+
+/// PR-A1 QA-2: the amount due the owner types is the amount kept: typed
+/// as plain digits or with a thousands comma, after the vendor (its
+/// defaults and last bills arrive while the owner types), it never moves
+/// by a cent. Only a third decimal rounds (Q-232, half away from zero):
+/// "1892.305" is 1,892.31, the one way typed digits become .31.
+#[test]
+fn the_typed_amount_due_is_kept_to_the_cent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let vendor = contact(&s, demo_bills::STORY_VENDOR);
+    s.pick_vendor(vendor);
+    for text in ["1892.30", "1,892.30", "$1892.3", "1892.300"] {
+        s.inputs.amount = text.into();
+        s.amount_left();
+        // The vendor's defaults and lists arrive after the typing.
+        s.poll();
+        s.poll();
+        assert_eq!(
+            s.header.current().amount_due,
+            Some(money("1892.30")),
+            "{text}"
+        );
+        assert_eq!(s.inputs.amount, "1,892.30", "{text}");
+    }
+    s.inputs.amount = "1892.305".into();
+    s.amount_left();
+    assert_eq!(s.header.current().amount_due, Some(money("1892.31")));
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// PR-A1 QA-2: any whole-cent amount typed in full, in pieces (each
+    /// piece left as the owner tabs away and back) or formatted, ends as
+    /// exactly that amount; no float anywhere on the way.
+    #[test]
+    fn any_typed_cents_are_the_amount_due(cents in 1i64..100_000_000, cut in 0usize..12) {
+        let (_d, link) = link();
+        let mut s = screen(&link);
+        let m = Money::from_cents(cents).expect("m");
+        let plain = m.to_wire();
+        let plain = plain.trim_end_matches('0').trim_end_matches('.');
+        for text in [plain.to_string(), m.format(s.money_style)] {
+            s.inputs.amount = text.clone();
+            s.amount_left();
+            proptest::prop_assert_eq!(s.header.current().amount_due, Some(m), "{}", text);
+        }
+        // Leaving the field again (its text now formatted) keeps it, and a
+        // piece typed first and left doesn't stick to the whole.
+        let cut = cut.min(plain.len());
+        s.inputs.amount = plain[..cut].to_string();
+        s.amount_left();
+        s.inputs.amount = plain.to_string();
+        s.amount_left();
+        s.amount_left();
+        proptest::prop_assert_eq!(s.header.current().amount_due, Some(m));
+    }
+}

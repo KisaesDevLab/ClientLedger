@@ -164,6 +164,10 @@ pub struct DemoDrafts {
     /// The next [`search_amount`] fails (`Timeout`, nothing read): tests
     /// that a failed register search never posts (review B2).
     pub fail_next_search: bool,
+    /// Q-PRA1d (`document-duplicates-no-vendor-v1`): a document with no
+    /// vendor is checked too. Off as on the pinned engine (the shared
+    /// case `d_convert_vendorless_unchecked`); on in the QA-1 seed.
+    pub no_vendor_check: bool,
     /// A04 WP-F2: the vendors' saved layouts (the demo's
     /// `vendor_document_templates`), learned on accept and used by the
     /// inbox's reading. No amounts.
@@ -723,6 +727,9 @@ fn normalized(r: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
+/// Q-PRA1d: the exact-total window for a document with no vendor.
+const NO_VENDOR_WINDOW_DAYS: i64 = 7;
+
 fn within_window(a: CalendarDate, b: CalendarDate) -> bool {
     a.days_until(b).abs() <= DUPLICATE_WINDOW_DAYS
 }
@@ -765,10 +772,13 @@ fn txn_reference(
 /// Posted bills and expenses of the vendor, not void, that match by
 /// normalized reference or by exact total within the window.
 fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> {
-    let Some(vendor) = p.vendor else {
+    // Q-PRA1d (engine `document-duplicates-no-vendor-v1`): a document with
+    // no vendor is checked too, against every vendor's posted records: the
+    // same reference, or the exact total within 7 days.
+    if p.vendor.is_none() && !state.drafts.no_vendor_check {
         return Vec::new();
-    };
-    let names = names_of(state, vendor);
+    }
+    let names = p.vendor.map(|v| names_of(state, v));
     let want = normalized(p.reference.as_deref());
     let mut out = Vec::new();
     for t in state.ledger.transactions() {
@@ -782,7 +792,9 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
         let id = DemoLedger::id_of(&t);
         if state.ledger.is_void(id)
             || Some(id) == p.except_txn
-            || !t.contact.as_ref().is_some_and(|c| names.contains(c))
+            || names
+                .as_ref()
+                .is_some_and(|n| !t.contact.as_ref().is_some_and(|c| n.contains(c)))
         {
             continue;
         }
@@ -791,7 +803,11 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
         let by_reference = !want.is_empty() && normalized(reference.as_deref()) == want;
         let by_amount = matches!(
             (p.total, p.date, total),
-            (Some(a), Some(d), Some(b)) if a == b && within_window(d, t.date)
+            (Some(a), Some(d), Some(b)) if a == b && if names.is_some() {
+                within_window(d, t.date)
+            } else {
+                d.days_until(t.date).abs() <= NO_VENDOR_WINDOW_DAYS
+            }
         );
         if by_reference || by_amount {
             out.push(DuplicateMatch {

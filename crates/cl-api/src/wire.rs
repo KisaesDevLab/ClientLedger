@@ -525,6 +525,11 @@ impl Capabilities {
     /// row `DOCUMENT_POSSIBLE_DUPLICATE {matches}` unless
     /// `documentDraft.acknowledgeDuplicateOf` lists every match.
     pub const FEED_ACCEPT_DRAFT_DUPLICATES: &'static str = "feed-accept-draft-duplicates-v1";
+    /// PR-A1 QA-1 (Q-PRA1d): a document with no vendor is checked too (on
+    /// convert, on a feed accept carrying it and in `/duplicates`): posted
+    /// bills, expenses, card charges and checks with the same reference,
+    /// or with the exact total dated within 7 days.
+    pub const DOCUMENT_DUPLICATES_NO_VENDOR: &'static str = "document-duplicates-no-vendor-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

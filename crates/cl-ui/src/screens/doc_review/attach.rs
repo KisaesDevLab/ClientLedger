@@ -221,7 +221,7 @@ fn demo_bills(demo: &mut crate::company::demo::DemoState, r: &str) -> Vec<BillRe
             b.vendor_invoice_number
                 .as_deref()
                 .is_some_and(|x| fold_reference(x) == want)
-                && b.balance_due.is_none_or(|d| d.is_positive())
+                && b.balance_due.is_none_or(Money::is_positive)
         })
         .map(|b| BillRef {
             id: b.txn.id,
@@ -1000,15 +1000,15 @@ mod tests {
 
         // The payee gate: another known vendor's bill is never offered.
         p.contact = Some(contact(2));
-        assert!(bills_by_reference(&p, &bills).is_empty());
+        assert_eq!(bills_by_reference(&p, &bills).len(), 0);
         p.contact = Some(contact(1));
         assert_eq!(bills_by_reference(&p, &bills).len(), 1);
 
         // No reference on the form: nothing (the amount search decides).
         p.reference = Some("  ".into());
-        assert!(bills_by_reference(&p, &bills).is_empty());
+        assert_eq!(bills_by_reference(&p, &bills).len(), 0);
         p.reference = None;
-        assert!(bills_by_reference(&p, &bills).is_empty());
+        assert_eq!(bills_by_reference(&p, &bills).len(), 0);
     }
 
     /// The bill found that way opens the "Pay this bill" dialog for a
