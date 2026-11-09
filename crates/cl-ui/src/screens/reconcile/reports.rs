@@ -422,7 +422,10 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
 }
 
 /// A row's effect as the owner reads the account (a card's flipped).
-pub(crate) fn effect_text(r: &cl_api::DiscrepancyRow, kind: cl_model::reconcile::ReconKind) -> String {
+pub(crate) fn effect_text(
+    r: &cl_api::DiscrepancyRow,
+    kind: cl_model::reconcile::ReconKind,
+) -> String {
     r.effect
         .map(|m| cl_model::reconcile::display(kind.shown(m)))
         .unwrap_or_default()
@@ -436,7 +439,10 @@ pub(crate) fn drift_text(
     d.drift.map(|x| {
         crate::i18n::t_with(
             "reconcile.drift",
-            &[("amount", &cl_model::reconcile::display(kind.shown(x.difference)))],
+            &[(
+                "amount",
+                &cl_model::reconcile::display(kind.shown(x.difference)),
+            )],
         )
     })
 }

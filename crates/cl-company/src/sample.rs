@@ -1108,7 +1108,11 @@ mod tests {
             from_bank_feed: feed,
             likely_duplicate: false,
         };
-        let lines = [line(1, false, false), line(2, false, true), line(3, true, false)];
+        let lines = [
+            line(1, false, false),
+            line(2, false, true),
+            line(3, true, false),
+        ];
         let cleared: std::collections::HashSet<_> = [lines[0].transaction, lines[2].transaction]
             .into_iter()
             .collect();

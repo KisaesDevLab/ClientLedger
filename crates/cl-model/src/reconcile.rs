@@ -600,7 +600,11 @@ mod tests {
         let twins = [(id(1), m("-5")), (id(2), m("-5"))];
         assert_eq!(hint(twins, m("-5")), None, "two candidates: no hint");
         let mixed = [(id(1), m("-5")), (id(2), m("5"))];
-        assert_eq!(hint(mixed, m("-5")), Some(id(1)), "only the same sign counts");
+        assert_eq!(
+            hint(mixed, m("-5")),
+            Some(id(1)),
+            "only the same sign counts"
+        );
     }
 
     mod props {

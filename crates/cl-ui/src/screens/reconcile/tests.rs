@@ -352,7 +352,10 @@ fn card_pay_step_after_continue_uses_the_engine_balance() {
     let OpenPayload::CardPayment(pay) = &**p else {
         panic!("card payment");
     };
-    assert_eq!(pay.amount, cl_core::Money::parse_wire("1038.82").expect("m"));
+    assert_eq!(
+        pay.amount,
+        cl_core::Money::parse_wire("1038.82").expect("m")
+    );
     assert_eq!(pay.date, CalendarDate::from_ymd(2026, 10, 31).expect("d"));
 }
 
@@ -511,7 +514,9 @@ fn discrepancy_report_shows_a_card_as_printed_with_the_drift() {
         drift: None,
     };
     assert_eq!(
-        reports::discrepancy_doc(&none, "1010", ReconKind::Bank).subtitle.len(),
+        reports::discrepancy_doc(&none, "1010", ReconKind::Bank)
+            .subtitle
+            .len(),
         1
     );
 }
