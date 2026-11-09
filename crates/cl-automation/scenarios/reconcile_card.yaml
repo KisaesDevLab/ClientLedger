@@ -35,6 +35,12 @@ steps:
   - assert_exists: {role: button, label: Transfer from a bank account}
   - assert_exists: {role: button, label: Enter a bill to pay later}
   - screenshot: pay
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: pay-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
   - click: {role: button, label: Pay now with a check}
   - assert_state: {key: screen.screen, equals: write_check}
   - screenshot: check

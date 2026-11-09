@@ -32,6 +32,12 @@ steps:
   - assert_state: {key: screen.discrepancy_rows, equals: 1}
   - assert_exists: {label: accountId}
   - screenshot: discrepancy
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: discrepancy-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
   - click: {role: button, label: Close}
   - click: {role: button, label: Undo last reconciliation}
   - assert_state: {key: screen.dialog, equals: undo}
