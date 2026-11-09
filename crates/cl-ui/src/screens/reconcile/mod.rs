@@ -406,18 +406,7 @@ impl ReconcileScreen {
                 Err(e) => self.refused(e),
             }
         }
-        if let Some(r) = engine::poll(&mut self.tick_job) {
-            match r {
-                Ok(rec) => {
-                    self.queue.sent();
-                    self.took(rec);
-                }
-                Err(e) => {
-                    self.queue.failed();
-                    self.refused(e);
-                }
-            }
-        }
+        // Send the next batch first: the demo answers at once.
         if self.tick_job.is_none()
             && let Some(id) = self.rec.as_ref().map(|r| r.id)
             && let Some(batch) = self.queue.take_batch()
@@ -435,6 +424,18 @@ impl ReconcileScreen {
                 },
                 move |s| async move { s.reconciliations().tick(id, &batch).await },
             ));
+        }
+        if let Some(r) = engine::poll(&mut self.tick_job) {
+            match r {
+                Ok(rec) => {
+                    self.queue.sent();
+                    self.took(rec);
+                }
+                Err(e) => {
+                    self.queue.failed();
+                    self.refused(e);
+                }
+            }
         }
         if let Some((what, job)) = self.act_job.as_mut()
             && let Some(r) = job.take()
