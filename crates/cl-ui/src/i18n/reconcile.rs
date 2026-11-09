@@ -104,6 +104,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.closing.title", "Closing date password"),
     ("reconcile.closing.text", "A charge or interest from the statement is dated on or before your closing date. Enter the closing date password to enter it in your books."),
     ("reconcile.closing.password", "Closing date password"),
+    ("reconcile.closing.confirm", "Reconcile with the password"),
     ("reconcile.closing.needed", "This needs the closing date password."),
     ("reconcile.cancel", "Cancel"),
     ("reconcile.close", "Close"),

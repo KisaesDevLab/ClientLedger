@@ -51,7 +51,7 @@ fn closing(s: &mut ReconcileScreen, ui: &Ui) {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if crate::widgets::primary_button(ui, &t("reconcile.finish")).clicked()
+            if crate::widgets::primary_button(ui, &t("reconcile.closing.confirm")).clicked()
                 && !s.password.is_empty()
             {
                 s.finish();

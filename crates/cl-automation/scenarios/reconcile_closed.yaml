@@ -29,7 +29,7 @@ steps:
   - screenshot: password
   - click: {role: password_input, label: Closing date password}
   - type: {text: "demo-close"}
-  - click: {role: button, label: Reconcile now}
+  - click: {role: button, label: Reconcile with the password}
   - assert_state: {key: screen.last, equals: finished}
   - command: dev.demo_reconcile_reset
   - command: file.close_window
