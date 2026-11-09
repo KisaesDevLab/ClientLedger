@@ -293,15 +293,18 @@ pub(crate) fn menu(s: &mut ReconcileScreen, _ui: &mut Ui, button: &Response) {
         if disc.clicked() {
             s.open_discrepancy();
         }
-        let undo = ui
-            .add_enabled(
-                has && !s.not_admin,
-                egui::Button::new(t("reconcile.undo.button")),
-            )
-            .on_disabled_hover_text(t("reconcile.undo.admin_only"));
-        if undo.clicked() {
-            s.undo_mode = cl_api::UndoMode::KeepChecks;
-            s.dialog = Some(Dialog::Undo);
+        // Only an Admin sees Undo (Q-P27s).
+        if s.is_admin() {
+            let undo = ui
+                .add_enabled(
+                    has && !s.not_admin,
+                    egui::Button::new(t("reconcile.undo.button")),
+                )
+                .on_disabled_hover_text(t("reconcile.undo.admin_only"));
+            if undo.clicked() {
+                s.undo_mode = cl_api::UndoMode::KeepChecks;
+                s.dialog = Some(Dialog::Undo);
+            }
         }
     });
 }

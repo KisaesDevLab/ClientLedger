@@ -1117,10 +1117,24 @@ pub fn report(
 
 /// Starts over (scenarios run light, then dark).
 pub fn reset(state: &mut DemoState) {
+    // The charges earlier runs posted go too, so Begin with the same
+    // statement doesn't find them already in the books (Q-P27u).
+    let posted: Vec<TransactionId> = state
+        .reconcile
+        .recs
+        .iter()
+        .flat_map(|r| [r.service_charge, r.interest])
+        .flatten()
+        .filter_map(|h| h.posted)
+        .collect();
     state.reconcile = DemoRecon::default();
     state
         .ledger
         .set_reconciled_through(Some(super::register::last_reconciled()));
+    for id in posted {
+        // Best effort: a dev reset, never an owner action.
+        let _ = state.ledger.delete(id);
+    }
 }
 
 #[cfg(test)]

@@ -298,21 +298,24 @@ fn buttons(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         let has_last = s.last_finished().is_some();
-        let undo = ui.add_enabled(
-            s.undo_offered(),
-            egui::Button::new(t("reconcile.undo.button")),
-        );
-        let undo = if s.not_admin {
-            undo.on_disabled_hover_text(t("reconcile.undo.admin_only"))
-        } else if has_last && s.unfinished().is_some() {
-            undo.on_disabled_hover_text(t("reconcile.undo.in_progress"))
-        } else {
-            undo
-        };
-        if undo.clicked() {
-            s.undo_mode = cl_api::UndoMode::KeepChecks;
-            s.password.clear();
-            s.dialog = Some(Dialog::Undo);
+        // Only an Admin sees Undo (Q-P27s).
+        if s.is_admin() {
+            let undo = ui.add_enabled(
+                s.undo_offered(),
+                egui::Button::new(t("reconcile.undo.button")),
+            );
+            let undo = if s.not_admin {
+                undo.on_disabled_hover_text(t("reconcile.undo.admin_only"))
+            } else if has_last && s.unfinished().is_some() {
+                undo.on_disabled_hover_text(t("reconcile.undo.in_progress"))
+            } else {
+                undo
+            };
+            if undo.clicked() {
+                s.undo_mode = cl_api::UndoMode::KeepChecks;
+                s.password.clear();
+                s.dialog = Some(Dialog::Undo);
+            }
         }
         let disc = ui.add_enabled(
             s.discrepancy_supported(),

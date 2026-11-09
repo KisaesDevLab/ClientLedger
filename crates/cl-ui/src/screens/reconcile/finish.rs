@@ -33,6 +33,7 @@ pub(crate) fn dialogs(s: &mut ReconcileScreen, ui: &Ui) {
         Dialog::Done => done(s, ui),
         Dialog::CardPay => card_pay(s, ui),
         Dialog::StartOver => start_over(s, ui),
+        Dialog::ChargeExists => charge_exists(s, ui),
         Dialog::Undo => super::undo::draw(s, ui),
         Dialog::Previous => super::reports::previous(s, ui),
         Dialog::Discrepancy => super::reports::discrepancy(s, ui),
@@ -143,6 +144,23 @@ fn card_pay(s: &mut ReconcileScreen, ui: &Ui) {
             }
             if ui.button(t("reconcile.pay.not_now")).clicked() {
                 s.last = Some("pay_later");
+                s.dialog = None;
+            }
+        });
+    });
+}
+
+/// Q-P27u: the statement's charge is already posted in the account.
+fn charge_exists(s: &mut ReconcileScreen, ui: &Ui) {
+    dialog(ui, &t("reconcile.charge_exists.title"), |ui| {
+        ui.add(egui::Label::new(t("reconcile.charge_exists.text")).wrap());
+        ui.add(egui::Label::new(t("reconcile.charge_exists.detail")).wrap());
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if crate::widgets::primary_button(ui, &t("reconcile.charge_exists.confirm")).clicked() {
+                s.add_charge_again();
+            }
+            if ui.button(t("reconcile.charge_exists.back")).clicked() {
                 s.dialog = None;
             }
         });

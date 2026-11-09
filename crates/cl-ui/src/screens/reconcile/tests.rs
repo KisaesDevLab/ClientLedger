@@ -877,3 +877,251 @@ fn the_announced_row_is_the_cursor_row_in_both_panes() {
     assert!(f.is_some());
     assert_eq!(f, cursor(&s), "announced = cursor back in deposits");
 }
+
+/// Q-P27l: the difference always shows 2 decimals; one that isn't zero
+/// but rounds to 0.00 keeps Reconcile now off and says why.
+#[test]
+fn sub_cent_difference_shows_cents_and_explains() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let v = state(&s);
+    assert_eq!(v["difference"], "-412.18");
+    assert_eq!(v["finish_help"], t("reconcile.finish_help"));
+    if let Some(r) = s.rec.as_mut() {
+        r.difference = cl_core::Money::parse_wire("-0.0049").expect("money");
+    }
+    let v = state(&s);
+    assert_eq!(v["difference"], "0.00", "{v}");
+    assert_eq!(v["can_finish"], false);
+    assert_eq!(
+        v["finish_help"],
+        "Less than a cent off: an amount has extra decimals"
+    );
+    if let Some(r) = s.rec.as_mut() {
+        r.difference = cl_core::Money::ZERO;
+    }
+    assert!(state(&s)["finish_help"].is_null());
+}
+
+/// Every AccessKit label of one Begin frame.
+fn labels(s: &mut ReconcileScreen) -> Vec<String> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..3 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(u) = out.platform_output.accesskit_update {
+            all = u
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| n.label().map(str::to_string))
+                .collect();
+        }
+    }
+    all
+}
+
+/// Q-P27s: only an Admin (engine role `owner`) sees "Undo last
+/// reconciliation"; a bookkeeper doesn't (the demo's role, as the engine's
+/// company list gives it).
+#[test]
+fn undo_is_shown_only_to_an_admin() {
+    let undo = t("reconcile.undo.button");
+    for (role, shown) in [("owner", true), ("bookkeeper", false)] {
+        let (_d, link, _) = screen();
+        if let Some(mut d) = link.demo_state() {
+            d.intake.role = Some(role.to_owned());
+        }
+        let mut s = ReconcileScreen::new(Arc::clone(&link), None, today());
+        s.poll();
+        s.pick_account(crate::company::demo::account_id(1010));
+        s.poll();
+        s.poll();
+        assert!(s.last_finished().is_some(), "1010 has a finished one");
+        assert_eq!(s.state_json()["admin"], shown, "{role}");
+        assert_eq!(s.undo_offered(), shown, "{role}");
+        let seen = labels(&mut s).contains(&undo);
+        assert_eq!(seen, shown, "{role}: Undo on Begin");
+    }
+}
+
+/// Q-P27u: after Undo › Discard the statement's service charge and
+/// interest stay in the books; Begin with the same amount and date asks
+/// "Already in your books — add it again?" before going on.
+#[test]
+fn begin_asks_before_adding_a_charge_already_in_the_books() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    assert_eq!(state(&s)["step"], "window", "no charge in the books yet");
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    s.poll();
+    assert_eq!(state(&s)["last"], "undone");
+    // The same statement again: the charges posted at Finish are there.
+    begin_october(&mut s);
+    let v = state(&s);
+    assert_eq!(v["step"], "begin", "{v}");
+    assert_eq!(v["dialog"], "chargeexists");
+    assert_eq!(
+        t("reconcile.charge_exists.text"),
+        "Already in your books \u{2014} add it again?"
+    );
+    // Go back: nothing started.
+    s.dialog = None;
+    s.poll();
+    assert_eq!(state(&s)["step"], "begin");
+    // Add it again: Begin goes on.
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["dialog"], "chargeexists");
+    s.add_charge_again();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["step"], "window", "{v}");
+    assert!(v["dialog"].is_null());
+}
+
+/// Q-P27u: another amount or another date is not the same charge.
+#[test]
+fn begin_does_not_ask_for_a_different_charge() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    s.poll();
+    s.poll();
+    let op = crate::company::demo::account_id(1010);
+    s.pick_account(op);
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "86,902.13".into();
+    s.form.service_charge.amount = "47.00".into();
+    s.begin();
+    s.poll();
+    let v = state(&s);
+    assert!(v["dialog"].is_null(), "{v}");
+    assert_eq!(v["step"], "window", "{v}");
+}
+
+/// Keyboard (NN: every action reachable by keyboard): Tab from the last
+/// pane moves on to the controls, where Tab and Space are the controls'
+/// (the window's scope follows); Shift+Tab from the first pane reaches
+/// the controls before it; Tab back into a pane puts the cursor on the
+/// row that has the focus (QA-9 kept: one truth).
+#[test]
+fn tab_leaves_the_panes_for_the_controls_and_comes_back() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let settle = |s: &mut ReconcileScreen, events: Vec<Event>| {
+        let mut f = a11y_frame(s, &ctx, events);
+        for _ in 0..3 {
+            f = a11y_frame(s, &ctx, vec![]);
+        }
+        f
+    };
+    let key = |k, modifiers| Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].as_str().map(str::to_string);
+    settle(&mut s, vec![]);
+    assert_eq!(
+        s.scope(),
+        Scope::Reconcile,
+        "nothing focused: the panes' keys"
+    );
+    // Tab: into the deposits pane, then the payments pane.
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(f, cursor(&s));
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(f, cursor(&s));
+    assert_eq!(s.scope(), Scope::Reconcile);
+    // Tab again: out of the panes onto Leave for now (Reconcile now is off).
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.leave").as_str()));
+    assert_eq!(s.scope(), Scope::Window, "Tab and Space are egui's now");
+    // egui's Tab: the next control.
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::NONE)]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.reports").as_str()));
+    // Shift+Tab twice: back over Leave for now into the payments pane; the
+    // cursor follows the row that has the focus.
+    settle(&mut s, vec![key(Key::Tab, Modifiers::SHIFT)]);
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::SHIFT)]);
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor");
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(s.scope(), Scope::Reconcile, "back in the panes");
+    // Shift+Tab (the window's): the deposits pane, then the control before
+    // the panes (Mark all).
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.mark_all").as_str()));
+    assert_eq!(s.scope(), Scope::Window);
+    // Space on it is the button's: every shown line is checked.
+    settle(&mut s, vec![key(Key::Space, Modifiers::NONE)]);
+    let v = s.state_json();
+    assert_eq!(v["left"]["checked"], v["left"]["rows"], "{v}");
+    assert_eq!(v["right"]["checked"], v["right"]["rows"], "{v}");
+    // egui's Tab from Mark all: the first deposit row, cursor and focus one.
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::NONE)]);
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s));
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(s.scope(), Scope::Reconcile);
+}

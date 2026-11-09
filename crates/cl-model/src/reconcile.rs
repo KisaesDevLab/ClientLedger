@@ -103,20 +103,25 @@ pub fn pane_of(amount: Money) -> Pane {
     }
 }
 
-/// An amount for display: 2 decimals, half away from zero, never `-0.00`;
-/// a nonzero amount smaller than a cent keeps its 4 decimals (Q-P27l), so
-/// "0.00 and still disabled" can't happen.
+/// An amount for display: always 2 decimals, half away from zero, never
+/// `-0.00` (Q-P27l). A nonzero difference that shows as 0.00 is explained
+/// by [`sub_cent`].
 #[must_use]
 pub fn display(m: Money) -> String {
     let style = MoneyStyle::default();
     let units = m.to_ten_thousandths();
-    if units != 0 && units.abs() < 100 {
-        return m.format(style);
-    }
     // Half away from zero at the cent (100 ten-thousandths).
     let cents = (units.abs() + 50) / 100 * 100;
     let rounded = if units < 0 { -cents } else { cents };
     Money::from_ten_thousandths(rounded).map_or_else(|_| m.format(style), |r| r.format(style))
+}
+
+/// Not zero, but less than half a cent: [`display`] shows 0.00 while
+/// Reconcile now stays off (finish needs exactly zero, Q-P27l).
+#[must_use]
+pub fn sub_cent(m: Money) -> bool {
+    let units = m.to_ten_thousandths();
+    units != 0 && units.abs() < 50
 }
 
 /// What is wrong with a Begin field (i18n key suffixes).
@@ -463,11 +468,14 @@ mod tests {
     }
 
     #[test]
-    fn display_rounds_and_keeps_sub_cent() {
+    fn display_rounds_to_cents_and_flags_sub_cent() {
         assert_eq!(display(m("-412.18")), "-412.18");
         assert_eq!(display(m("71436.2")), "71,436.20");
-        assert_eq!(display(m("0.005")), "0.005");
-        assert_eq!(display(m("-0.0001")), "-0.0001");
+        assert_eq!(display(m("0.005")), "0.01");
+        assert_eq!(display(m("0.0049")), "0.00");
+        assert_eq!(display(m("-0.0001")), "0.00");
+        assert!(sub_cent(m("0.0049")) && sub_cent(m("-0.0001")));
+        assert!(!sub_cent(m("0")) && !sub_cent(m("0.005")) && !sub_cent(m("1.0001")));
         assert_eq!(display(m("0")), "0.00");
         assert_eq!(display(m("1.005")), "1.01");
         assert_eq!(display(m("-1.005")), "-1.01");

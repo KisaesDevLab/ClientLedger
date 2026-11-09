@@ -39,6 +39,16 @@ pub(crate) fn hint_text(s: &ReconcileScreen) -> Option<String> {
     })
 }
 
+/// Why Reconcile now is off: a difference that rounds to 0.00 but isn't
+/// zero says so (Q-P27l); otherwise the usual help.
+pub(crate) fn finish_help_key(difference: cl_core::Money) -> &'static str {
+    if cl_model::reconcile::sub_cent(difference) {
+        "reconcile.finish_help.sub_cent"
+    } else {
+        "reconcile.finish_help"
+    }
+}
+
 /// The words in the Payee column: the payee, else the memo (a journal
 /// entry has only its memo; QA-2).
 pub(crate) fn who(l: &ReconLine) -> &str {
@@ -82,6 +92,7 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &mut Ui) {
         return;
     };
     let kind = s.kind();
+    s.row_focused = false;
     egui::Frame::new()
         .inner_margin(egui::Margin::symmetric(20, 16))
         .show(ui, |ui| {
@@ -142,6 +153,20 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &mut Ui) {
                 }
             });
         });
+    // Where the keyboard is: on a control outside the panes, Tab and Space
+    // are egui's (the window's scope follows, P27 keyboard fix).
+    let focused = ui.memory(|m| m.focused().is_some());
+    s.off_panes = focused && !s.row_focused;
+    s.leave_panes = None;
+}
+
+/// A control the keyboard lands on when Tab (`forward`) or Shift+Tab
+/// leaves the panes takes the focus.
+fn take_leaving_focus(s: &ReconcileScreen, r: &egui::Response, forward: bool) {
+    if s.leave_panes == Some(forward) {
+        r.request_focus();
+        r.scroll_to_me(None);
+    }
 }
 
 fn header(
@@ -237,7 +262,10 @@ fn controls(s: &mut ReconcileScreen, ui: &mut Ui) {
             if ui.button(t("reconcile.unmark_all")).clicked() {
                 s.mark_all(false);
             }
-            if ui.button(t("reconcile.mark_all")).clicked() {
+            let mark = ui.button(t("reconcile.mark_all"));
+            // Shift+Tab out of the first pane: the control just before it.
+            take_leaving_focus(s, &mark, false);
+            if mark.clicked() {
                 s.mark_all(true);
             }
         });
@@ -420,6 +448,9 @@ fn pane(
                             );
                             if row.took_focus {
                                 s.focus_cursor = false;
+                            }
+                            if row.has_focus || row.took_focus {
+                                s.row_focused = true;
                             }
                             if row.clicked {
                                 s.pane = p;
@@ -918,18 +949,24 @@ fn cards(
                     ))
                     .min_size(Vec2::new(action_w, 44.0));
                     ui.visuals_mut().disabled_alpha = 1.0;
-                    if ui.add_enabled(ready, b).clicked() {
+                    let finish = ui.add_enabled(ready, b);
+                    // Tab out of the last pane: Reconcile now when it is
+                    // on, else Leave for now.
+                    if ready {
+                        take_leaving_focus(s, &finish, true);
+                    }
+                    if finish.clicked() {
                         s.finish();
                     }
                     ui.horizontal(|ui| {
                         let half = (action_w - 8.0) / 2.0;
-                        if ui
-                            .add(
-                                egui::Button::new(t("reconcile.leave"))
-                                    .min_size(Vec2::new(half, 44.0)),
-                            )
-                            .clicked()
-                        {
+                        let leave = ui.add(
+                            egui::Button::new(t("reconcile.leave")).min_size(Vec2::new(half, 44.0)),
+                        );
+                        if !ready {
+                            take_leaving_focus(s, &leave, true);
+                        }
+                        if leave.clicked() {
                             s.leave();
                         }
                         let r = ui.add(
@@ -941,7 +978,7 @@ fn cards(
                     if !ready {
                         ui.add(
                             egui::Label::new(
-                                RichText::new(t("reconcile.finish_help"))
+                                RichText::new(t(finish_help_key(rec.difference)))
                                     .size(12.0)
                                     .color(tokens.text_tertiary),
                             )

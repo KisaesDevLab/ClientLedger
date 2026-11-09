@@ -38,6 +38,7 @@ use crate::company::{CompanyEvent, CompanyLink};
 use crate::i18n::t;
 use crate::screens::company::form::DateInput;
 use crate::screens::invoice::engine::{self, Job};
+use crate::screens::preferences::intake_folders::source as intake_source;
 use crate::windows::Screen;
 
 /// The command and window kind.
@@ -111,6 +112,9 @@ pub(crate) enum Dialog {
     Discrepancy,
     /// Start over: discard the reconciliation in progress.
     StartOver,
+    /// Begin: a service charge or interest like this one is already posted
+    /// in the account (Q-P27u).
+    ChargeExists,
 }
 
 /// The Reconcile window.
@@ -158,6 +162,15 @@ pub struct ReconcileScreen {
     /// (and the screen reader's) focus when next drawn (P27 QA-9). The
     /// pane and the cursor are the one truth; egui's focus follows them.
     pub(crate) focus_cursor: bool,
+    /// The keyboard is on a control outside the panes (Hide later, the
+    /// buttons): Tab, Space and the arrows are egui's there, not the
+    /// panes' (P27 keyboard fix). Read from egui's focus each frame.
+    pub(crate) off_panes: bool,
+    /// Tab past the last pane (`Some(true)`) or Shift+Tab before the first
+    /// (`Some(false)`): the next control takes the focus when drawn.
+    pub(crate) leave_panes: Option<bool>,
+    /// A row's box had the focus in the frame being drawn.
+    pub(crate) row_focused: bool,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) password: String,
     /// The engine refused the closing password Finish sent (review D1).
@@ -182,6 +195,14 @@ pub struct ReconcileScreen {
     pub(crate) last: Option<&'static str>,
     /// The engine refused Undo for this user (not an Admin).
     pub(crate) not_admin: bool,
+    /// The user's engine role in this company (`None` until read, or when
+    /// it can't be): only an Admin (`owner`) sees Undo (Q-P27s).
+    pub(crate) role: Option<String>,
+    role_job: Option<Job<Option<String>>>,
+    /// Begin's look in the register for the statement's charges (Q-P27u).
+    dup_job: Option<Job<bool>>,
+    /// The owner said "Add it again": the next Begin goes on (Q-P27u).
+    pub(crate) dup_confirmed: bool,
     pub(crate) reports: reports::Reports,
     pub(crate) bus: crate::data_bus::Subscription,
 }
@@ -241,6 +262,9 @@ impl ReconcileScreen {
             pane: Pane::MoneyIn,
             cursor: None,
             focus_cursor: false,
+            off_panes: false,
+            leave_panes: None,
+            row_focused: false,
             dialog: None,
             password: String::new(),
             password_rejected: false,
@@ -256,13 +280,40 @@ impl ReconcileScreen {
             notice: None,
             last: None,
             not_admin: false,
+            role: None,
+            role_job: None,
+            dup_job: None,
+            dup_confirmed: false,
             reports: reports::Reports::new(&link),
             bus,
             link,
         };
         s.load_accounts();
+        s.load_role();
         s.poll();
         s
+    }
+
+    /// Reads the user's role in the open company (the demo's own role).
+    fn load_role(&mut self) {
+        let tenant = self.tenant.as_ref().map(|(id, _)| *id);
+        self.role_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| Ok(Some(d.intake.role())),
+            move |s| async move {
+                Ok(match tenant {
+                    Some(t) => intake_source::engine_role(&s, t).await,
+                    None => None,
+                })
+            },
+        ));
+    }
+
+    /// The user is an Admin (engine role `owner`, Q-A01k): Undo is shown
+    /// only then (Q-P27s; the engine still refuses anyone else).
+    pub(crate) fn is_admin(&self) -> bool {
+        self.role.as_deref() == Some(intake_source::ADMIN_ROLE)
     }
 
     /// The engine has what the window needs (the demo always does).
@@ -393,6 +444,7 @@ impl ReconcileScreen {
     /// while one is, QA minor).
     pub(crate) fn undo_offered(&self) -> bool {
         self.last_finished().is_some()
+            && self.is_admin()
             && !self.not_admin
             && !self.editing
             && self.unfinished().is_none()
@@ -469,6 +521,18 @@ impl ReconcileScreen {
                 ));
             }
         }
+        // Before the worksheet's answer: going on starts it (the demo
+        // answers at once).
+        if let Some(r) = engine::poll(&mut self.dup_job) {
+            if let Ok(true) = r {
+                self.dialog = Some(Dialog::ChargeExists);
+            } else {
+                // None there, or the register couldn't be read: the
+                // warning is a courtesy, Begin goes on.
+                self.dup_confirmed = true;
+                self.begin();
+            }
+        }
         if let Some(r) = engine::poll(&mut self.rec_job) {
             if self.rec_job_epoch == self.rec_epoch {
                 match r {
@@ -526,6 +590,10 @@ impl ReconcileScreen {
             let what = *what;
             self.act_job = None;
             self.acted(what, r);
+        }
+        if let Some(r) = engine::poll(&mut self.role_job) {
+            // A failed read leaves the role unknown: no Undo shown.
+            self.role = r.ok().flatten();
         }
         if let Some(r) = engine::poll(&mut self.voided_job) {
             // Only a note: a failed read shows none.
@@ -786,6 +854,23 @@ impl ReconcileScreen {
             service_charge: charge(v.service_charge),
             interest: charge(v.interest),
         };
+        // Q-P27u: a charge already in the books (an Undo › Discard keeps it)
+        // is asked about before it is added again.
+        let charges: Vec<cl_api::StatementCharge> = [req.service_charge, req.interest]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !std::mem::take(&mut self.dup_confirmed) && !charges.is_empty() {
+            if self.dup_job.is_none() {
+                self.dup_job = Some(charges_in_books_job(
+                    &self.link,
+                    self.group.as_ref(),
+                    v.account,
+                    charges,
+                ));
+            }
+            return;
+        }
         self.set_rec_job(engine::write(
             &self.link,
             self.group.as_ref(),
@@ -805,6 +890,13 @@ impl ReconcileScreen {
             },
         ));
         self.last = Some("started");
+    }
+
+    /// "Add it again" (Q-P27u): Begin goes on with the charges as entered.
+    pub(crate) fn add_charge_again(&mut self) {
+        self.dialog = None;
+        self.dup_confirmed = true;
+        self.begin();
     }
 
     /// Continue the unfinished reconciliation.
@@ -1086,6 +1178,37 @@ impl ReconcileScreen {
         self.focus_cursor = true;
     }
 
+    /// Tab (`forward`) or Shift+Tab while the keyboard is in the panes:
+    /// into the current pane when no row has the cursor, to the other pane
+    /// (left to right forward, right to left back), else out of the panes
+    /// to the controls after (or before) them. The cursor stays one truth
+    /// with the focus (QA-9).
+    pub(crate) fn tab(&mut self, forward: bool) {
+        let kind = self.kind();
+        let in_pane = self.cursor.is_some_and(|c| {
+            self.pane_lines(self.pane)
+                .iter()
+                .any(|l| l.journal_line == c)
+        });
+        let (from, to) = if forward {
+            (kind.left(), kind.right())
+        } else {
+            (kind.right(), kind.left())
+        };
+        if forward && !in_pane && !self.pane_lines(self.pane).is_empty() {
+            self.cursor = None;
+            self.move_cursor(true);
+        } else if in_pane && self.pane == from && !self.pane_lines(to).is_empty() {
+            self.pane = to;
+            self.cursor = None;
+            self.move_cursor(true);
+        } else {
+            self.focus_cursor = false;
+            self.off_panes = true;
+            self.leave_panes = Some(forward);
+        }
+    }
+
     /// Ctrl+E: the cursor's transaction in its form.
     fn open_cursor(&mut self) {
         let Some(l) = self
@@ -1202,8 +1325,12 @@ impl ReconcileScreen {
             "card_pay": self.card_pay.as_ref().map(|p| cl_model::reconcile::display(p.amount)),
             "can_finish": rec.is_some_and(|r| can_finish(r.difference, &self.queue)),
             "hint": window::hint_text(self),
+            "finish_help": rec
+                .filter(|r| !can_finish(r.difference, &self.queue))
+                .map(|r| t(window::finish_help_key(r.difference))),
             "posting_locked": rec.is_some_and(|r| r.posting_locked),
             "entry_voided": self.entry_voided,
+            "admin": self.is_admin(),
             "dialog": self.dialog.as_ref().map(|d| format!("{d:?}").to_lowercase()),
             "discrepancy_rows": self.discrepancy.as_ref().map(|d| d.rows.len()),
             "notice": self.notice,
@@ -1212,6 +1339,63 @@ impl ReconcileScreen {
             "reports": self.reports.state(),
         })
     }
+}
+
+/// One of `charges` is already in the books (Q-P27u): a line of the
+/// account's register on its date, not void, for exactly its amount, whose
+/// other side is the charge's account. Display-only amounts never match.
+pub(crate) fn charge_in_books(
+    lines: &[cl_api::RegisterLine],
+    charge: &cl_api::StatementCharge,
+) -> bool {
+    lines.iter().any(|l| {
+        l.date == charge.date
+            && l.status != cl_api::TxnStatus::Void
+            && matches!(l.category, cl_api::Category::Account { id, .. } if id == charge.account)
+            && [l.payment.as_ref(), l.deposit.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|a| a.exact().is_some_and(|m| m.abs() == charge.amount.abs()))
+    })
+}
+
+/// Reads the account's register on each charge's date and answers whether
+/// any charge is already there.
+fn charges_in_books_job(
+    link: &Arc<CompanyLink>,
+    group: Option<&cl_api::RequestGroup>,
+    account: AccountId,
+    charges: Vec<cl_api::StatementCharge>,
+) -> Job<bool> {
+    let query = |c: &cl_api::StatementCharge| {
+        let mut q = cl_api::RegisterQuery::new(c.date, c.date);
+        q.include_void = false;
+        q
+    };
+    let demo_charges = charges.clone();
+    engine::read(
+        link,
+        group,
+        move |d| {
+            let chart = d
+                .chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .clone();
+            Ok(demo_charges.iter().any(|c| {
+                crate::company::demo::register::page(&d.ledger, &chart, account, &query(c), 1, 200)
+                    .is_some_and(|p| charge_in_books(&p.lines, c))
+            }))
+        },
+        move |s| async move {
+            for c in &charges {
+                let page = s.register().page(account, &query(c), 1, 200).await?;
+                if charge_in_books(&page.lines, c) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        },
+    )
 }
 
 impl Screen for ReconcileScreen {
@@ -1236,6 +1420,8 @@ impl Screen for ReconcileScreen {
             || self.accounts_job.is_some()
             || self.history_job.is_some()
             || self.disc_job.is_some()
+            || self.dup_job.is_some()
+            || self.role_job.is_some()
             || self.reports.busy();
         if busy {
             ui.ctx()
@@ -1267,7 +1453,9 @@ impl Screen for ReconcileScreen {
 
     fn scope(&self) -> Scope {
         match self.step {
-            Step::Window if self.dialog.is_none() => Scope::Reconcile,
+            // Off the panes Tab, Space and the arrows are the controls'
+            // (every action reachable by keyboard).
+            Step::Window if self.dialog.is_none() && !self.off_panes => Scope::Reconcile,
             _ => Scope::Window,
         }
     }
@@ -1286,12 +1474,10 @@ impl Screen for ReconcileScreen {
                     self.toggle(c);
                 }
             }
-            // Two panes: Shift+Tab goes to the other one too (QA-9).
-            "reconcile.switch_pane" | "reconcile.switch_pane_back" => {
-                self.pane = ReconKind::other(self.pane);
-                self.cursor = None;
-                self.move_cursor(true);
-            }
+            // Tab: into the panes, to the other pane, then on to the
+            // controls after them; Shift+Tab back (QA-9, keyboard fix).
+            "reconcile.switch_pane" => self.tab(true),
+            "reconcile.switch_pane_back" => self.tab(false),
             "reconcile.next" => self.move_cursor(true),
             "reconcile.prev" => self.move_cursor(false),
             "reconcile.mark_all" => self.mark_all(true),
