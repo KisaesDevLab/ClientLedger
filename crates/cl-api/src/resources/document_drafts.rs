@@ -354,6 +354,9 @@ pub struct DuplicateMatch {
     pub total: Option<Money>,
     /// Its reference as stored (owner data).
     pub reference: Option<String>,
+    /// The document has no vendor, so this is any vendor's record
+    /// (`document-duplicates-no-vendor-v1`, Q-PRA1d).
+    pub no_vendor: bool,
 }
 
 impl fmt::Debug for DuplicateMatch {
@@ -363,6 +366,7 @@ impl fmt::Debug for DuplicateMatch {
             .field("reason", &self.reason)
             .field("txn_type", &self.txn_type)
             .field("kind", &self.kind)
+            .field("no_vendor", &self.no_vendor)
             .finish_non_exhaustive()
     }
 }
@@ -384,6 +388,8 @@ struct MatchWire {
     total: Option<String>,
     #[serde(default)]
     reference: Option<String>,
+    #[serde(default)]
+    no_vendor: bool,
 }
 
 impl DuplicateMatch {
@@ -407,6 +413,7 @@ impl DuplicateMatch {
             date: w.date.and_then(|d| CalendarDate::parse_wire(&d).ok()),
             total: w.total.and_then(|t| Money::parse_wire(&t).ok()),
             reference: w.reference,
+            no_vendor: w.no_vendor,
         })
     }
 }

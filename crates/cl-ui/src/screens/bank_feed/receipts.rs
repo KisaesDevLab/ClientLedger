@@ -766,7 +766,8 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
             s.detail.receipt.chosen = true;
         }
         if let Some(first) = duplicates_of(&s.detail.receipt, *id).first() {
-            form::inline_warning(ui, tokens, &maybe_entered(first));
+            let doc_date = s.receipts.draft(*id).and_then(|d| d.doc_date);
+            form::inline_warning(ui, tokens, &maybe_entered(first, doc_date));
         }
     }
     if ui
@@ -825,15 +826,23 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
     ui.add_space(6.0);
 }
 
-/// "May already be entered: a bill of 10/02" for a duplicate match.
-fn maybe_entered(m: &DuplicateMatch) -> String {
+/// "May already be entered: a bill of 10/02" for a duplicate match; one
+/// found without a vendor (Q-PRA1d) says what it shares ("any vendor, the
+/// same amount 3 days apart").
+pub(crate) fn maybe_entered(m: &DuplicateMatch, doc_date: Option<cl_core::CalendarDate>) -> String {
     let (what, date) = entry_words(m);
-    t_with(
+    let mut x = t_with(
         "bank_feed.receipt.maybe_entered",
         &[("what", &what), ("date", &date)],
     )
     .trim()
-    .to_string()
+    .to_string();
+    if let Some(why) = crate::screens::doc_review::attach::no_vendor_words(m, doc_date) {
+        x.push_str(" (");
+        x.push_str(&why);
+        x.push(')');
+    }
+    x
 }
 
 /// What the match is and its date, in words.
@@ -859,6 +868,11 @@ fn duplicate_warning(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, pick:
             )
             .trim()
             .to_string();
+            let doc_date = s.receipts.draft(pick).and_then(|d| d.doc_date);
+            if let Some(why) = crate::screens::doc_review::attach::no_vendor_words(m, doc_date) {
+                x.push_str(", ");
+                x.push_str(&why);
+            }
             if let Some(r) = clean(m.reference.as_deref()) {
                 x.push_str(" \u{b7} ");
                 x.push_str(&t_with("bank_feed.receipt.ref", &[("ref", &r)]));

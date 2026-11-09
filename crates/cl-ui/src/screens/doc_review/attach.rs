@@ -198,6 +198,7 @@ pub(crate) fn bills_by_reference(p: &MatchProbe, bills: &[BillRef]) -> Vec<Dupli
             date: Some(b.date),
             total: b.total,
             reference: b.reference.clone(),
+            no_vendor: false,
         });
     }
     out
@@ -404,6 +405,39 @@ pub(crate) struct ShownRow {
     /// replacing Q-A04d's information-only bill). Whether it is still
     /// unpaid is read when the owner picks it.
     pub pay: bool,
+    /// Why a match of the engine's no-vendor check (Q-PRA1d) may be this
+    /// document, in words ("any vendor, the same amount 3 days apart").
+    pub why: Option<String>,
+}
+
+/// PR-A1 QA-1 (Q-PRA1d): what a match found without a vendor shares with
+/// the document, in words (`None` for a vendor's own match). `doc_date`:
+/// the document's date, for "3 days apart".
+#[must_use]
+pub(crate) fn no_vendor_words(
+    m: &DuplicateMatch,
+    doc_date: Option<CalendarDate>,
+) -> Option<String> {
+    if !m.no_vendor {
+        return None;
+    }
+    Some(match m.reason {
+        cl_api::MatchReason::Reference => t("duplicates.no_vendor.same_ref"),
+        _ => match (doc_date, m.date) {
+            (Some(a), Some(b)) => {
+                let days = a.days_until(b).unsigned_abs();
+                match days {
+                    0 => t("duplicates.no_vendor.same_amount_same_day"),
+                    1 => t("duplicates.no_vendor.same_amount_one_day"),
+                    n => t_with(
+                        "duplicates.no_vendor.same_amount_days",
+                        &[("days", &n.to_string())],
+                    ),
+                }
+            }
+            _ => t("duplicates.no_vendor.same_amount"),
+        },
+    })
 }
 
 /// The document's own values, beside the rows.
@@ -523,6 +557,7 @@ impl AttachDialog {
                     label: Some(c.label),
                     attachable: true,
                     pay: false,
+                    why: None,
                 })
             })
             .collect();
@@ -576,6 +611,7 @@ impl AttachDialog {
                     label: None,
                     attachable,
                     pay: kind == RowKind::Bill && !bill_doc,
+                    why: no_vendor_words(m, Some(p.date)),
                 })
             })
             .collect::<Vec<ShownRow>>();
@@ -770,6 +806,7 @@ impl AttachDialog {
                 r.payee.clone().unwrap_or_default(),
                 Self::money(r.amount, style),
                 format!("{status} {label}").trim().to_string(),
+                r.why.clone().unwrap_or_default(),
             ]));
             let resp = ui.selectable_label(self.selected == Some(i), text);
             if focus && i == 0 {
@@ -1098,6 +1135,7 @@ mod tests {
             date: Some(day(14)),
             total: Some(money("25.00")),
             reference: None,
+            no_vendor: false,
         };
         let receipt =
             AttachDialog::from_duplicates(&probe(None), std::slice::from_ref(&m), false, true);
@@ -1132,6 +1170,7 @@ mod tests {
             date: d.map(day),
             total: total.map(money),
             reference: None,
+            no_vendor: false,
         };
         let matches = [
             m(1, "expense", Some(14), Some("25.00")),

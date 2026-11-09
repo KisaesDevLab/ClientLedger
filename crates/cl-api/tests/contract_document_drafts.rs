@@ -755,7 +755,10 @@ fn duplicates_block_until_acknowledged(h: &Harness) {
             .all(|x| x.source != MatchSource::Transaction(far)),
         "61 days does not: {found:?}"
     );
-    // Without a vendor there is nothing to compare.
+    // Without a vendor: nothing to compare on an older engine; with
+    // document-duplicates-no-vendor-v1 (Q-PRA1d) any vendor's posted
+    // records with the same reference match, flagged noVendor, and other
+    // drafts are not listed.
     let (_, d4) = new_draft(h, s);
     store(
         h,
@@ -763,12 +766,21 @@ fn duplicates_block_until_acknowledged(h: &Harness) {
         &d4,
         &reading(None, Some("INV-00123"), Some("100.00"), Some(base)),
     );
-    assert_eq!(
-        h.run(s.document_drafts().duplicates(d4.id))
-            .expect("dupes")
-            .len(),
-        0
-    );
+    let found = h.run(s.document_drafts().duplicates(d4.id)).expect("dupes");
+    if s.client()
+        .capabilities()
+        .has(Capabilities::DOCUMENT_DUPLICATES_NO_VENDOR)
+    {
+        assert!(!found.is_empty(), "the same reference, any vendor");
+        assert!(
+            found
+                .iter()
+                .all(|x| x.no_vendor && matches!(x.source, MatchSource::Transaction(_))),
+            "{found:?}"
+        );
+    } else {
+        assert_eq!(found.len(), 0);
+    }
 }
 
 /// T5 and the top-level password: in a closed period a convert is refused

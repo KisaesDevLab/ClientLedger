@@ -438,6 +438,8 @@ struct WireFeedDuplicate {
     total: Option<String>,
     #[serde(default)]
     reference: Option<String>,
+    #[serde(default)]
+    no_vendor: bool,
 }
 
 /// The posted entries of a `DOCUMENT_POSSIBLE_DUPLICATE` (`{transactionId,
@@ -467,6 +469,7 @@ pub(crate) fn feed_duplicates_from(v: Option<&Value>) -> Vec<crate::DuplicateMat
                     .and_then(|d| cl_core::CalendarDate::parse_wire(&d).ok()),
                 total: w.total.and_then(|t| cl_core::Money::parse_wire(&t).ok()),
                 reference: w.reference,
+                no_vendor: w.no_vendor,
             })
         })
         .collect()

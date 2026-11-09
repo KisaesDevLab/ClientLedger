@@ -156,8 +156,8 @@
       {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
       {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-12-05", "amount": "88.21", "vendor": "story", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}
     ]},
-    {"name": "d_convert_vendorless_unchecked", "owner": "WP-D", "why": "without a vendor the engine checks nothing (the desktop match on Accept covers it, Q-A04d)", "steps": [
-      {"op": "post_expense", "args": {"date": "2026-11-01", "amount": "52.40", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+    {"name": "d_convert_vendorless_unchecked", "owner": "WP-D", "why": "without a vendor the same total more than 7 days apart is not a duplicate (Q-PRA1d; before document-duplicates-no-vendor-v1 nothing was checked)", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-10-01", "amount": "52.40", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
       {"op": "upload_draft_file", "args": {"content": "convert-g"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
       {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
       {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-02", "amount": "52.40", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}

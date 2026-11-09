@@ -164,9 +164,9 @@ pub struct DemoDrafts {
     /// The next [`search_amount`] fails (`Timeout`, nothing read): tests
     /// that a failed register search never posts (review B2).
     pub fail_next_search: bool,
-    /// Q-PRA1d (`document-duplicates-no-vendor-v1`): a document with no
-    /// vendor is checked too. Off as on the pinned engine (the shared
-    /// case `d_convert_vendorless_unchecked`); on in the QA-1 seed.
+    /// Q-PRA1d (`document-duplicates-no-vendor-v1`, engine #24): a document
+    /// with no vendor is checked too. On in [`DemoDrafts::on`] (the
+    /// engine's behavior); off by default for the older-engine tests.
     pub no_vendor_check: bool,
     /// A04 WP-F2: the vendors' saved layouts (the demo's
     /// `vendor_document_templates`), learned on accept and used by the
@@ -202,6 +202,7 @@ impl DemoDrafts {
     pub fn on() -> DemoDrafts {
         DemoDrafts {
             enabled: true,
+            no_vendor_check: true,
             ..DemoDrafts::default()
         }
     }
@@ -822,6 +823,7 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
                 date: Some(t.date),
                 total,
                 reference,
+                no_vendor: names.is_none(),
             });
         }
     }
@@ -876,6 +878,7 @@ fn draft_matches(state: &DemoState, tenant: TenantId, p: &Probe) -> Vec<Duplicat
                 date: d.doc_date,
                 total: d.doc_total,
                 reference: d.doc_reference.clone(),
+                no_vendor: false,
             })
         })
         .take(MAX_MATCHES)
