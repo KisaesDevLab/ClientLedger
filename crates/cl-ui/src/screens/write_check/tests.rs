@@ -2294,3 +2294,27 @@ fn a_card_payment_fill_says_nothing_about_a_vanished_line() {
     assert_eq!(s.header.current().number, NumberField::Proposed(4418));
     assert_eq!(s.bank(), Some(account(&s, "1010")));
 }
+
+/// P27 QA-10: the card pay step fills the check before the accounts
+/// arrive; the default bank that arrives later keeps the header unsaved
+/// work (it used to become the clean starting point).
+#[test]
+fn a_card_payment_fill_stays_unsaved_when_the_bank_arrives_later() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let mut f = s.header.current().clone();
+    f.bank = None;
+    s.header.load(f);
+    s.start_load();
+    let statement = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    s.fill_card_payment(&crate::screens::reconcile::CardPay {
+        card: account(&s, "2050"),
+        amount: money("2.00"),
+        date: statement,
+    });
+    s.poll();
+    assert_eq!(s.bank(), Some(account(&s, "1010")));
+    assert!(s.header.is_dirty(), "the prefilled header is unsaved");
+    assert_eq!(s.header.current().date, Some(statement));
+    assert_eq!(s.header.current().amount, Some(money("2.00")));
+}

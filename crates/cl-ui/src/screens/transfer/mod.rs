@@ -391,9 +391,18 @@ impl TransferScreen {
                         .into_iter()
                         .find(|a| crate::screens::register::class_of(a) == Some(AccountClass::Bank))
                         .map(|a| a.id);
-                    let mut f = self.form.current().clone();
-                    f.from = first;
-                    self.form.load(f);
+                    if self.form.is_dirty() {
+                        // A prefilled form (the card pay step, P27 QA-10)
+                        // stays unsaved: loading it as the clean starting
+                        // point let Save & Close close without posting.
+                        self.form.edit(field::FROM, |f| f.from = first);
+                    } else {
+                        // Not an edit: the starting account is part of the
+                        // blank form.
+                        let mut f = self.form.current().clone();
+                        f.from = first;
+                        self.form.load(f);
+                    }
                 }
                 self.fetch_balances();
             }
@@ -1571,6 +1580,9 @@ impl Screen for TransferScreen {
             return false;
         };
         self.set_account(false, p.card);
+        // Dated the statement date, like the bill and check (P27 QA minor).
+        self.form.edit(field::DATE, |f| f.date = Some(p.date));
+        self.date = DateInput::new(p.date);
         self.amount_text = p.amount.format(cl_core::MoneyStyle::default());
         self.amount_left();
         true

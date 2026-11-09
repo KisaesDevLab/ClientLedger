@@ -733,10 +733,17 @@ impl WriteCheckScreen {
                     && !self.lists_keep_inputs
                     && let Some(bank) = self.default_bank(None)
                 {
-                    // Not an edit: the starting account is part of the blank form.
-                    let mut f = self.header.current().clone();
-                    f.bank = Some(bank);
-                    self.header.load(f);
+                    if self.header.is_dirty() {
+                        // A prefilled header (card pay step) stays unsaved
+                        // work; loading it would make it the clean start
+                        // (P27 QA-10).
+                        self.header.edit_step(|h| h.bank = Some(bank));
+                    } else {
+                        // Not an edit: the starting account is part of the blank form.
+                        let mut f = self.header.current().clone();
+                        f.bank = Some(bank);
+                        self.header.load(f);
+                    }
                     self.fetch_bank_facts();
                 }
             }

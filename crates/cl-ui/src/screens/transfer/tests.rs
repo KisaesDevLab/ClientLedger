@@ -294,3 +294,42 @@ fn enter_saves_or_moves_between_fields() {
         }
     }
 }
+
+/// P27 QA-10: the card pay step opens Transfer prefilled before the
+/// accounts arrive; the default From that arrives later must not turn the
+/// prefill into the clean starting point, or Save & Close closes without
+/// posting.
+#[test]
+fn a_prefilled_card_payment_saves_and_posts_once() {
+    let (mut s, _link, _dir) = screen();
+    // As in the real app: a blank form whose accounts are still loading.
+    s.form.load(blank(None, s.today));
+    s.start_load();
+    let statement = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    assert!(s.open_with(crate::windows::OpenPayload::CardPayment(
+        crate::screens::reconcile::CardPay {
+            card: account(2050),
+            amount: money("2.00"),
+            date: statement,
+        }
+    )));
+    s.poll();
+    let f = s.form.current().clone();
+    assert_eq!(f.from, Some(account(1010)), "the first bank account");
+    assert_eq!(f.to, Some(account(2050)));
+    assert_eq!(f.amount, Some(money("2.00")));
+    assert_eq!(f.date, Some(statement), "dated the statement date");
+    assert!(s.is_dirty(), "a prefilled form is unsaved work");
+    assert!(
+        s.start_save(SaveIntent::SaveAndClose, None),
+        "{:?}",
+        s.error
+    );
+    s.poll();
+    assert_eq!(s.saved_count, 1, "posted once");
+    assert!(s.state_json()["txn_id"].is_string());
+    // A second Save & Close on the now-clean form posts nothing more.
+    s.start_save(SaveIntent::SaveAndClose, None);
+    s.poll();
+    assert_eq!(s.saved_count, 1);
+}
