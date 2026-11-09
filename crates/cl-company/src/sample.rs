@@ -932,7 +932,7 @@ pub fn last_reconciled_1010() -> CalendarDate {
 ///
 /// # Errors
 /// Any engine refusal (a difference that isn't zero is a fixture bug).
-pub async fn reconcile_sample(
+async fn reconcile_sample(
     session: &Session,
     bank: cl_core::ids::AccountId,
     statement_date: CalendarDate,
