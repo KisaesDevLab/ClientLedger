@@ -381,3 +381,31 @@ async fn history_reads_rows() {
     assert_eq!(rows[0].status, ReconStatus::Complete);
     assert_eq!(rows[0].statement_ending_balance, Some(m("71436.2")));
 }
+
+/// P27 QA-4: the latest finished statement, whatever the row order; an
+/// unfinished one doesn't count.
+#[test]
+fn last_finished_date_is_the_latest_complete_one() {
+    let row = |d: u32, status| ReconHistoryRow {
+        id: ReconciliationId::parse(REC).expect("id"),
+        status,
+        statement_date: day(d),
+        statement_ending_balance: None,
+        completed: None,
+        started: None,
+    };
+    let rows = [
+        row(1, ReconStatus::Complete),
+        row(31, ReconStatus::Complete),
+        row(15, ReconStatus::Complete),
+    ];
+    assert_eq!(last_finished_date(&rows), Some(day(31)));
+    assert_eq!(
+        last_finished_date(&[
+            row(31, ReconStatus::InProgress),
+            row(2, ReconStatus::Complete)
+        ]),
+        Some(day(2))
+    );
+    assert_eq!(last_finished_date(&[]), None);
+}

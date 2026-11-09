@@ -177,9 +177,17 @@ impl RegisterScreen {
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;
+        let history = cl_api::reconcile_screen_supported(&self.link.capabilities());
         group
             .read(&session, move |s| async move {
-                s.register().summary(account, Some(end)).await
+                let mut sum = s.register().summary(account, Some(end)).await?;
+                // The summary's date may be an older reconciliation (U-196,
+                // P27 QA-4): the history names the latest. Only a note, so a
+                // failed read keeps the summary's.
+                if history && let Ok(rows) = s.reconciliations().history(account).await {
+                    sum.last_reconciled = cl_api::last_finished_date(&rows);
+                }
+                Ok(sum)
             })
             .ok()
             .map(Task::Pending)

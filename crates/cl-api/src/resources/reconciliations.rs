@@ -944,6 +944,18 @@ fn id_call(op: &Operation, id: ReconciliationId, tail: &str) -> Call {
     Call::new(op.method(), op.route(), path)
 }
 
+/// The statement date of the latest finished reconciliation in `rows`.
+/// The register summary's `lastReconciliationDate` is the engine's first
+/// completed row in no particular order (`getRegisterSummary` `findFirst`
+/// without ORDER BY, U-196), so it may name an older one (P27 QA-4).
+#[must_use]
+pub fn last_finished_date(rows: &[ReconHistoryRow]) -> Option<CalendarDate> {
+    rows.iter()
+        .filter(|r| r.status == ReconStatus::Complete)
+        .map(|r| r.statement_date)
+        .max()
+}
+
 /// True when the engine has everything the Reconcile window needs
 /// (`reconcile-exact-v1`, `reconcile-begin-v1`, `reconcile-undo-v2`).
 #[must_use]
