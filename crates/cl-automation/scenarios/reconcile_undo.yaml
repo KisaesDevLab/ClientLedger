@@ -1,0 +1,45 @@
+# Reconcile undo and the discrepancy report (P27 phase test, AC2; Q-P27e):
+# finish October, recategorize a reconciled deposit (demo edit), the
+# Discrepancy report lists it; Undo with the checks kept reopens October
+# exactly as finished. Synthetic.
+name: reconcile_undo
+description: Finish, a reconciled deposit changed, Discrepancy report, Undo keeping the checks.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.reconcile
+  - command: dev.demo_reconcile_reset
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - click: {role: text_input, label: Ending balance}
+  - type: {text: "86902.13"}
+  - click: {role: text_input, label: Service charge}
+  - type: {text: "48"}
+  - click: {role: text_input, label: Interest earned}
+  - type: {text: "12.84"}
+  - click: {role: button, label: Continue}
+  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube"}
+  - assert_state: {key: screen.can_finish, equals: true}
+  - click: {role: button, label: Reconcile now}
+  - assert_state: {key: screen.last, equals: finished}
+  - click: {role: button, label: Close}
+  - command: dev.demo_reconcile_edit
+  - click: {role: button, label: Discrepancy report}
+  - assert_state: {key: screen.dialog, equals: discrepancy}
+  - assert_state: {key: screen.discrepancy_rows, equals: 1}
+  - assert_exists: {label: accountId}
+  - screenshot: discrepancy
+  - click: {role: button, label: Close}
+  - click: {role: button, label: Undo last reconciliation}
+  - assert_state: {key: screen.dialog, equals: undo}
+  - screenshot: undo
+  - click: {role: button, label: Undo}
+  - assert_state: {key: screen.last, equals: undone}
+  - assert_state: {key: screen.unfinished, equals: true}
+  - click: {role: button, label_contains: "Continue (started"}
+  - assert_state: {key: screen.step, equals: window}
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - command: file.close_window

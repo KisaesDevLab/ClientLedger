@@ -1,0 +1,85 @@
+# Reconcile (P27, AC1 and AC3; Q-100, Q-P27a, Q-P27f) against
+# `clientledger --demo`: Begin on 1010 Operating Checking with the October
+# statement (ending 86,902.13, service charge 48.00, interest 12.84) opens
+# the mockup: bank-file lines pre-checked, 6 of 6 · 40,107.84 and
+# 8 of 9 · 24,229.73, cleared 87,314.31, difference -412.18 with the hint
+# for check 4409. Reconcile now stays off until the engine says 0.00;
+# ticking 4409 gets there and finishes. Synthetic.
+name: reconcile
+description: Begin, the mockup's worksheet, a tick to 0.00, Reconcile now, the done dialog.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.reconcile
+  - command: dev.demo_reconcile_reset
+  - assert_state: {key: screen.screen, equals: reconcile}
+  - assert_state: {key: screen.step, equals: begin}
+  - assert_state: {key: screen.kind, equals: bank}
+  - assert_state: {key: screen.last_reconciled, equals: "09/30/2026"}
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - click: {role: text_input, label: Ending balance}
+  - type: {text: "86902.13"}
+  - click: {role: text_input, label: Service charge}
+  - type: {text: "48"}
+  - click: {role: text_input, label: Interest earned}
+  - type: {text: "12.84"}
+  - screenshot: begin
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.step, equals: window}
+  - assert_state: {key: screen.beginning, equals: "71,436.20"}
+  - assert_state: {key: screen.deposits.count, equals: 6}
+  - assert_state: {key: screen.deposits.total, equals: "40,107.84"}
+  - assert_state: {key: screen.payments.count, equals: 8}
+  - assert_state: {key: screen.payments.total, equals: "24,229.73"}
+  - assert_state: {key: screen.cleared, equals: "87,314.31"}
+  - assert_state: {key: screen.difference, equals: "-412.18"}
+  - assert_state: {key: screen.can_finish, equals: false}
+  - assert_exists: {label_contains: "check 4409 to Monett Tire"}
+  - assert_exists: {label: from bank file}
+  - assert_exists: {role: button, label: Reconcile now}
+  - screenshot: mockup
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: mockup-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  # --- Later lines ----------------------------------------------------------
+  - click: {role: check_box, label: Hide transactions after the statement date}
+  - assert_state: {key: screen.hide_later, equals: false}
+  - assert_state: {key: screen.left.rows, equals: 6}
+  - click: {role: check_box, label: Hide transactions after the statement date}
+  - assert_state: {key: screen.left.rows, equals: 5}
+  # --- Tick 4409: the engine says 0.00 --------------------------------------
+  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube"}
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - assert_state: {key: screen.can_finish, equals: true}
+  - screenshot: zero
+  - click: {role: button, label: Reconcile now}
+  - assert_state: {key: screen.last, equals: finished}
+  - assert_state: {key: screen.dialog, equals: done}
+  - screenshot: done
+  - click: {role: button, label: Close}
+  - assert_state: {key: screen.last_reconciled, equals: "10/31/2026"}
+  - command: file.close_window
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.reconcile
+  - command: dev.demo_reconcile_reset
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - click: {role: text_input, label: Ending balance}
+  - type: {text: "86902.13"}
+  - click: {role: text_input, label: Service charge}
+  - type: {text: "48"}
+  - click: {role: text_input, label: Interest earned}
+  - type: {text: "12.84"}
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.difference, equals: "-412.18"}
