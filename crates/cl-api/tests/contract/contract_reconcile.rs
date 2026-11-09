@@ -716,6 +716,165 @@ pub fn checking_account_rows_and_reconciled_refusals(h: &Harness) {
     .expect("a memo change is fine");
 }
 
+/// P27 QA-13: changing only the category of a reconciled entry, as the
+/// desktop forms send it (the full entry again, bank line unchanged).
+/// The practice company's 10/01 deposit is `Dr 1010 / Cr 10200 A/R`; moving
+/// its A/R line to an income account, and a reconciled check's owner's-draw
+/// line to an expense, changed no reconciled line. Before
+/// `reconciled-category-edit-v1` (U-198) the engine kept every balance-sheet
+/// line of a reconciled entry, so both were refused 409
+/// `RECONCILED_TRANSACTION` (root cause); with it they save and the
+/// reconciled bank line keeps its tick. An expense-to-expense change of a
+/// reconciled check saves on every engine.
+pub fn category_only_edit_of_a_reconciled_entry(h: &Harness) {
+    if !gated(h) {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let fixed = h.caps.has(Capabilities::RECONCILED_CATEGORY_EDIT);
+    let receivable = h
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts")
+        .into_iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_receivable"))
+        .expect("the A/R account")
+        .id;
+    let draw = crate::common::account(h, s, AccountType::Equity, "Recon Draw").id;
+    let other = fresh(h, s, AccountType::Expense, "office_expenses", "Recon Other");
+    let on = date(2026, 3, 2);
+    // The deposit (journal entry) and two checks, all cleared and finished.
+    // The A/R line names the customer, as the practice company's does.
+    let who = crate::contract_journal_entries::customer(h, s);
+    let deposit_to = |other: AccountId| {
+        let mut l = crate::common::line(other, cl_api::Side::Credit(m("4688.74")));
+        l.contact = Some(who);
+        cl_api::NewJournalEntry::new(
+            on,
+            Some("Payment received".into()),
+            cl_api::Basis::Both,
+            vec![
+                crate::common::line(b.bank, cl_api::Side::Debit(m("4688.74"))),
+                l,
+            ],
+        )
+        .expect("balanced")
+    };
+    let dep = post(h, s, &deposit_to(receivable));
+    let check_to = |account: AccountId, amount: &str| {
+        cl_api::BankPosting::check(cl_api::CheckDraft {
+            bank: b.bank,
+            date: on,
+            payee: None,
+            payee_name: "Recon Payee".into(),
+            check_number: None,
+            print_later: false,
+            payee_address: None,
+            memo: Some("check".into()),
+            printed_memo: None,
+            tag_ids: Vec::new(),
+            draft_attachment: None,
+            amount: m(amount),
+            lines: vec![crate::contract_bank_postings::split(account, amount, None)],
+        })
+        .expect("check")
+    };
+    let mk = |p: &cl_api::BankPosting| {
+        h.run(
+            s.transactions()
+                .create_bank_posting(p, &PostingOptions::default(), key()),
+        )
+        .expect("check")
+    };
+    let draw_check = mk(&check_to(draw, "40.00"));
+    let fee_check = mk(&check_to(b.expense, "40.00"));
+    let r = start(h, s, b.bank, date(2026, 3, 31), "4608.74").expect("start");
+    let sheet = get(h, s, r.id);
+    let ticks: Vec<_> = [dep.record.id, draw_check.record.id, fee_check.record.id]
+        .iter()
+        .map(|t| line_of(&sheet, *t))
+        .collect();
+    tick(h, s, r.id, &ticks);
+    h.run(s.reconciliations().complete(r.id, None))
+        .expect("finish");
+    let reconciled = |e: &ApiError| {
+        matches!(
+            e,
+            ApiError::Conflict {
+                reason: cl_api::ConflictReason::Reconciled,
+                ..
+            }
+        )
+    };
+    let still_ticked = |txn: TransactionId| {
+        get(h, s, r.id)
+            .lines
+            .iter()
+            .flatten()
+            .any(|l| l.transaction == txn && l.cleared)
+    };
+
+    // The deposit: A/R line -> income, bank line and date untouched.
+    let recat = deposit_to(b.income);
+    let res = h.run(s.transactions().update_journal_entry(
+        dep.record.id,
+        &dep.version,
+        &recat,
+        &PostingOptions::default(),
+        key(),
+    ));
+    if fixed {
+        res.expect("an A/R-to-income change of a reconciled deposit saves");
+        assert!(still_ticked(dep.record.id), "the bank line keeps its tick");
+    } else {
+        let e = res.expect_err("U-198 not in this engine: every balance-sheet line is kept");
+        assert!(reconciled(&e), "{e:?}");
+    }
+
+    // A check to owner's draw -> an expense.
+    let res = h.run(s.transactions().update_bank_posting(
+        draw_check.record.id,
+        &draw_check.version,
+        &check_to(other, "40.00"),
+        &PostingOptions::default(),
+        key(),
+    ));
+    if fixed {
+        res.expect("an equity-to-expense change of a reconciled check saves");
+        assert!(still_ticked(draw_check.record.id));
+    } else {
+        let e = res.expect_err("U-198 not in this engine");
+        assert!(reconciled(&e), "{e:?}");
+    }
+
+    // A check expense -> another expense: saves on every engine.
+    h.run(s.transactions().update_bank_posting(
+        fee_check.record.id,
+        &fee_check.version,
+        &check_to(other, "40.00"),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("an expense-to-expense change of a reconciled check saves");
+    assert!(still_ticked(fee_check.record.id));
+
+    // Changing the bank amount is still refused.
+    let fee_now = h
+        .run(s.transactions().get(fee_check.record.id))
+        .expect("get");
+    let more = check_to(other, "41.00");
+    let e = h
+        .run(s.transactions().update_bank_posting(
+            fee_check.record.id,
+            &fee_now.version,
+            &more,
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("the bank amount is reconciled");
+    assert!(reconciled(&e), "{e:?}");
+}
+
 /// Large data: a worksheet of many lines reads within the budget (logged).
 pub fn large_worksheet_reads_quickly(h: &Harness) {
     if !gated(h) {

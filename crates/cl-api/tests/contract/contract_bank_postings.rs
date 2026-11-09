@@ -30,7 +30,7 @@ pub fn detail_account(h: &Harness, s: &cl_api::Session, t: AccountType, detail: 
         .id
 }
 
-fn split(account: AccountId, amount: &str, memo: Option<&str>) -> SplitLine {
+pub fn split(account: AccountId, amount: &str, memo: Option<&str>) -> SplitLine {
     SplitLine {
         account,
         amount: m(amount),

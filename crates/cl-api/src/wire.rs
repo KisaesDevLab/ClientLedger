@@ -554,6 +554,10 @@ impl Capabilities {
     /// reconciled entry's edit or void is 409 `RECONCILED_TRANSACTION`, the
     /// register summary names the latest reconciliation.
     pub const RECONCILE_QA: &'static str = "reconcile-qa-v1";
+    /// U-198: a reconciled entry keeps only its reconciled lines; its other
+    /// lines (also a balance-sheet one such as A/R, owner's equity or a
+    /// loan) can be recategorized.
+    pub const RECONCILED_CATEGORY_EDIT: &'static str = "reconciled-category-edit-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

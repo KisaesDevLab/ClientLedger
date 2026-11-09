@@ -1289,6 +1289,10 @@ fn main() -> std::process::ExitCode {
             contract_reconcile::checking_account_rows_and_reconciled_refusals,
         ),
         (
+            "reconcile::category_only_edit_of_a_reconciled_entry",
+            contract_reconcile::category_only_edit_of_a_reconciled_entry,
+        ),
+        (
             "reconcile::large_worksheet_reads_quickly",
             contract_reconcile::large_worksheet_reads_quickly,
         ),
