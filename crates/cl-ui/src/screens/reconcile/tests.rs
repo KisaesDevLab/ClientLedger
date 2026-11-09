@@ -669,9 +669,9 @@ fn switching_the_account_resets_its_figures_and_notices() {
     let card = crate::company::demo::account_id(2050);
     s.pick_account(card);
     assert_eq!(s.kind(), ReconKind::Card);
-    assert!(s.form.ending.is_empty());
-    assert!(s.form.service_charge.amount.is_empty());
-    assert!(s.form.interest.amount.is_empty());
+    assert_eq!(s.form.ending, "");
+    assert_eq!(s.form.service_charge.amount, "");
+    assert_eq!(s.form.interest.amount, "");
     assert_eq!(s.date_in.value, Some(today()));
     assert!(s.notice.is_none() && s.problems.is_empty());
     // Picking the same account again keeps what was typed.

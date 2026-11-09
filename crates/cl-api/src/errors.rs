@@ -788,6 +788,10 @@ fn code_text(code: Option<&ErrorCode>) -> &str {
 
 /// Owner wording for engine codes that mean more than their status, and
 /// for the U-18 idempotency answers.
+/// The reconciled refusal's words and fix (P27 QA-5).
+const RECONCILED_MESSAGE: (&str, Option<&str>) =
+    ("error.api.conflict_reconciled", Some("fix.api.reconciled"));
+
 fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)> {
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
@@ -884,9 +888,7 @@ impl OwnerFacing for ApiError {
                 ConflictReason::AlreadyExists => ("error.api.conflict_exists", None),
                 ConflictReason::TagNumberTaken => ("error.api.tag_number_taken", None),
                 ConflictReason::Busy => ("error.api.busy", Some("fix.api.try_again_soon")),
-                ConflictReason::Reconciled => {
-                    ("error.api.conflict_reconciled", Some("fix.api.reconciled"))
-                }
+                ConflictReason::Reconciled => RECONCILED_MESSAGE,
                 ConflictReason::AlreadyDeleted => {
                     ("error.api.conflict_deleted", Some("fix.api.reload"))
                 }
@@ -1077,6 +1079,20 @@ impl EngineErrorBody {
 /// contract test pins the text until the engine sends a code (U-195).
 fn reconciled_refusal_400(body: &EngineErrorBody) -> bool {
     body.code.is_none() && body.message.contains("completed bank reconciliation")
+}
+
+/// Any other 400: validation, or the reconciled refusal it stands for.
+fn other_400(body: &EngineErrorBody) -> ApiError {
+    if !reconciled_refusal_400(body) {
+        return ApiError::Validation(validation(body));
+    }
+    ApiError::Conflict {
+        reason: ConflictReason::Reconciled,
+        current_version: None,
+        code: None,
+        message: body.text(),
+        details: ConflictDetails::default(),
+    }
 }
 
 fn validation(body: &EngineErrorBody) -> ValidationError {
@@ -1369,14 +1385,7 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
             Some(b) if route == RouteKind::Tfa && b.code.is_none() => {
                 fin(ApiError::Unauthorized(AuthFailure::TfaInvalid))
             }
-            Some(b) if reconciled_refusal_400(b) => fin(ApiError::Conflict {
-                reason: ConflictReason::Reconciled,
-                current_version: None,
-                code: None,
-                message: b.text(),
-                details: ConflictDetails::default(),
-            }),
-            Some(b) => fin(ApiError::Validation(validation(b))),
+            Some(b) => fin(other_400(b)),
             None => fin(ApiError::Protocol { status, code: None }),
         },
         401 => {
