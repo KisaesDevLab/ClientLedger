@@ -627,7 +627,7 @@ pub fn statement_date_must_follow_the_last_finished(h: &Harness) {
 /// P27 QA-1, QA-2, QA-5: a `checking` account (as the practice company's
 /// 1010) reconciles; its journal-entry rows carry the entry memo; once
 /// finished, moving the entry's date and voiding it are refused as the
-/// reconciled refusal (the engine's code-less 400s, U-195), and the memo
+/// reconciled refusal (409 `RECONCILED_TRANSACTION` with `reconcile-qa-v1`,\n/// the code-less 400s before, U-195), and the memo
 /// still changes.
 pub fn checking_account_rows_and_reconciled_refusals(h: &Harness) {
     if !gated(h) {
@@ -653,15 +653,40 @@ pub fn checking_account_rows_and_reconciled_refusals(h: &Harness) {
     tick(h, s, r.id, &[line.journal_line]);
     h.run(s.reconciliations().complete(r.id, None))
         .expect("finish");
-    let reconciled = |e: &ApiError| {
-        matches!(
-            e,
-            ApiError::Conflict {
-                reason: cl_api::ConflictReason::Reconciled,
-                ..
-            }
-        )
+    // `reconcile-qa-v1` (U-195): the engine's own 409 code; older engines'
+    // code-less 400 is read by its text.
+    let qa = h.caps.has(Capabilities::RECONCILE_QA);
+    let reconciled = |e: &ApiError| match e {
+        ApiError::Conflict {
+            reason: cl_api::ConflictReason::Reconciled,
+            code,
+            ..
+        } => {
+            !qa || code
+                .as_ref()
+                .is_some_and(|c| c.as_str() == "RECONCILED_TRANSACTION")
+        }
+        _ => false,
     };
+    if qa {
+        // U-194: a checking register takes checks; U-196: the summary names
+        // this (the latest) reconciliation.
+        let page = h
+            .run(s.register().page(
+                b.bank,
+                &cl_api::RegisterQuery::new(date(2026, 1, 1), date(2026, 12, 31)),
+                1,
+                50,
+            ))
+            .expect("register");
+        assert!(
+            page.allowed.contains(&cl_api::EntryType::Expense),
+            "{:?}",
+            page.allowed
+        );
+        let sum = h.run(s.register().summary(b.bank, None)).expect("summary");
+        assert_eq!(sum.last_reconciled, Some(date(2026, 2, 28)));
+    }
     let moved = je2(date(2026, 2, 4), words, b.expense, b.bank, "25.00");
     let err = h
         .run(s.transactions().update_journal_entry(

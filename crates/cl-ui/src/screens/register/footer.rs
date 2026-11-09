@@ -180,7 +180,10 @@ impl RegisterScreen {
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;
-        let history = cl_api::reconcile_screen_supported(&self.link.capabilities());
+        // With `reconcile-qa-v1` the summary names the latest one itself.
+        let caps = self.link.capabilities();
+        let history = cl_api::reconcile_screen_supported(&caps)
+            && !caps.has(cl_api::Capabilities::RECONCILE_QA);
         group
             .read(&session, move |s| async move {
                 let mut sum = s.register().summary(account, Some(end)).await?;
@@ -191,8 +194,8 @@ impl RegisterScreen {
                     sum.cleared_balance =
                         s.register().summary(account, None).await?.cleared_balance;
                 }
-                // The summary's date may be an older reconciliation (U-196,
-                // P27 QA-4): the history names the latest. Only a note, so a
+                // An engine before `reconcile-qa-v1` may name an older
+                // reconciliation (U-196, P27 QA-4): the history names the latest. Only a note, so a
                 // failed read keeps the summary's.
                 if history && let Ok(rows) = s.reconciliations().history(account).await {
                     sum.last_reconciled = cl_api::last_finished_date(&rows);

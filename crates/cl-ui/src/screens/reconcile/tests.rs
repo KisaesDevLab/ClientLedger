@@ -1125,3 +1125,28 @@ fn tab_leaves_the_panes_for_the_controls_and_comes_back() {
     assert_eq!(s.state_json()["pane"], "in");
     assert_eq!(s.scope(), Scope::Reconcile);
 }
+
+/// The scenarios' reset starts the story over: the charges a finished run
+/// posted go too, so the same statement begins without the Q-P27u question.
+#[test]
+fn demo_reset_removes_the_charges_earlier_runs_posted() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    assert!(s.command(CommandId::new("dev.demo_reconcile_reset")));
+    begin_october(&mut s);
+    let v = state(&s);
+    assert!(v["dialog"].is_null(), "{v}");
+    assert_eq!(v["step"], "window", "{v}");
+    assert_eq!(v["difference"], "-412.18");
+}

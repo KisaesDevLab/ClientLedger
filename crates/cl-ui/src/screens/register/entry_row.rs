@@ -378,7 +378,8 @@ pub fn allowed_tags(allowed: &[EntryType]) -> Vec<EntryKindTag> {
 /// `cash` / `petty_cash` account gets the plain asset list), yet posts
 /// checks, deposits and transfers on every bank detail type (QA-1, P27;
 /// UPSTREAM U-194). A bank register therefore takes the engine's `bank`
-/// list whatever its detail type.
+/// list whatever its detail type. An engine with `reconcile-qa-v1` already
+/// sends that list (it has Expense), which is then used as sent.
 #[must_use]
 pub fn register_entry_types(class: AccountClass, engine: &[EntryType]) -> Vec<EntryType> {
     if class != AccountClass::Bank || engine.is_empty() || engine.contains(&EntryType::Expense) {

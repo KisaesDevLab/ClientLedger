@@ -550,6 +550,10 @@ impl Capabilities {
     /// dates in order (409 `RECONCILE_STATEMENT_DATE_ORDER`), a voided
     /// posted charge can be entered again.
     pub const RECONCILE_HARDENING: &'static str = "reconcile-hardening-v1";
+    /// U-194–U-196: every bank detail type gets the bank entry types, a
+    /// reconciled entry's edit or void is 409 `RECONCILED_TRANSACTION`, the
+    /// register summary names the latest reconciliation.
+    pub const RECONCILE_QA: &'static str = "reconcile-qa-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

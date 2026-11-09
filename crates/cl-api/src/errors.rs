@@ -1068,15 +1068,16 @@ impl EngineErrorBody {
     }
 }
 
-/// The engine refuses a date or bank-line change, and a void, of an entry
-/// cleared in a finished reconciliation with a 400 that has no code (only
-/// its delete has 409 `RECONCILED_TRANSACTION`): `ledger.service.ts`
+/// With `reconcile-qa-v1` (U-195) the engine refuses a date or bank-line
+/// change, and a void, of an entry cleared in a finished reconciliation
+/// with 409 `RECONCILED_TRANSACTION` (read by its code). Older engines send
+/// a 400 that has no code (only their delete has the 409): `ledger.service.ts`
 /// `updateTransaction` ("…part of a completed bank reconciliation, so its
 /// reconciled (balance-sheet) line and date can't change…"),
 /// `voidTransactionInTx` and the bill payment void ("…cleared in a
 /// completed bank reconciliation…"). Read as the same refusal so owners
 /// see why (P27 QA-5) instead of "check the highlighted fields"; the
-/// contract test pins the text until the engine sends a code (U-195).
+/// text match stays as the fallback for those engines.
 fn reconciled_refusal_400(body: &EngineErrorBody) -> bool {
     body.code.is_none() && body.message.contains("completed bank reconciliation")
 }
