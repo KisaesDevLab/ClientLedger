@@ -56,11 +56,23 @@ fn money_text(ui: &mut Ui, label: &str, text: &mut String, enabled: bool) {
             )
             .labelled_by(l.id);
         if r.lost_focus()
-            && let Some(settled) = form::settled_money_text(text, cl_core::MoneyStyle::default())
+            && let Some(settled) = settled_cents(text)
         {
             *text = settled;
         }
     });
+}
+
+/// The text a statement amount shows once the owner leaves it: cents only,
+/// never rounded. A third decimal stays as typed so Begin refuses it with
+/// its message (QA-3); the shared money field would round it.
+pub(crate) fn settled_cents(text: &str) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    cl_core::Money::parse_user(text, cl_core::UserInput::CENTS)
+        .ok()
+        .map(|m| m.format(cl_core::MoneyStyle::default()))
 }
 
 /// Draws Begin.
@@ -287,11 +299,13 @@ fn buttons(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
     ui.horizontal(|ui| {
         let has_last = s.last_finished().is_some();
         let undo = ui.add_enabled(
-            has_last && !s.not_admin && !s.editing,
+            s.undo_offered(),
             egui::Button::new(t("reconcile.undo.button")),
         );
         let undo = if s.not_admin {
             undo.on_disabled_hover_text(t("reconcile.undo.admin_only"))
+        } else if has_last && s.unfinished().is_some() {
+            undo.on_disabled_hover_text(t("reconcile.undo.in_progress"))
         } else {
             undo
         };

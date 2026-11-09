@@ -558,7 +558,14 @@ fn change_info_sends_a_posted_charge_only_when_changed() {
     s.form.service_charge.amount = "49.00".into();
     s.begin();
     s.poll();
-    assert_eq!(state(&s)["notice"], "reconcile.begin.charge_posted");
+    let v = state(&s);
+    assert_eq!(v["notice"], "reconcile.notice.charge_posted");
+    // Q-P27o minor: still "Change statement info" (Back to the
+    // reconciliation), not Begin's "already started".
+    assert_eq!(v["step"], "begin");
+    assert_eq!(v["editing"], true, "{v}");
+    // Undo is not offered while a reconciliation is started.
+    assert!(!s.undo_offered());
 }
 
 /// QA-1 (P27): the sample's 1010 `checking` and 1020 `savings` are bank
@@ -598,4 +605,102 @@ fn checking_and_savings_accounts_are_reconcilable_banks() {
     s.poll();
     assert_eq!(s.form.account, Some(crate::company::demo::account_id(1010)));
     assert_eq!(s.kind(), ReconKind::Bank);
+}
+
+/// QA-6: after Finish, and after Undo › Discard, Begin starts a new
+/// statement: no ending balance, service charge or interest carried over.
+#[test]
+fn begin_clears_the_statement_after_finish_and_undo() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    let empty = |s: &ReconcileScreen| {
+        s.form.ending.is_empty()
+            && s.form.service_charge.amount.is_empty()
+            && s.form.interest.amount.is_empty()
+            && !s.form.service_charge.posted
+            && !s.form.interest.posted
+            && s.svc_date.value.is_none()
+            && s.int_date.value.is_none()
+            && s.date_in.value == Some(today())
+    };
+    assert!(empty(&s), "after Finish: {:?}", s.form);
+    assert_eq!(s.form.account, Some(crate::company::demo::account_id(1010)));
+    assert!(
+        s.form.service_charge.account.is_some(),
+        "default account kept"
+    );
+    // Undo › Discard: the same.
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.form.ending = "1.00".into();
+    s.form.service_charge.amount = "48.00".into();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    assert_eq!(state(&s)["last"], "undone");
+    assert!(empty(&s), "after Undo: {:?}", s.form);
+}
+
+/// QA-7: picking another account clears the statement fields and the
+/// other account's notices.
+#[test]
+fn switching_the_account_resets_its_figures_and_notices() {
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "88,309.39".into();
+    s.form.service_charge.amount = "50.00".into();
+    s.form.interest.amount = "12.84".into();
+    s.notice = Some("reconcile.notice.charge_posted");
+    s.problems = vec![BeginProblem::BadEnding];
+    let card = crate::company::demo::account_id(2050);
+    s.pick_account(card);
+    assert_eq!(s.kind(), ReconKind::Card);
+    assert!(s.form.ending.is_empty());
+    assert!(s.form.service_charge.amount.is_empty());
+    assert!(s.form.interest.amount.is_empty());
+    assert_eq!(s.date_in.value, Some(today()));
+    assert!(s.notice.is_none() && s.problems.is_empty());
+    // Picking the same account again keeps what was typed.
+    s.form.ending = "400.00".into();
+    s.pick_account(card);
+    assert_eq!(s.form.ending, "400.00");
+}
+
+/// QA-3: a third decimal is refused with Begin's message, never rounded.
+#[test]
+fn a_third_decimal_is_refused_not_rounded() {
+    assert_eq!(begin::settled_cents("88309.395"), None);
+    assert_eq!(
+        begin::settled_cents("88309.39").as_deref(),
+        Some("88,309.39")
+    );
+    assert_eq!(begin::settled_cents("  "), None);
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "88309.395".into();
+    s.form.service_charge.amount = "48.005".into();
+    s.begin();
+    assert!(
+        s.problems.contains(&BeginProblem::BadEnding),
+        "{:?}",
+        s.problems
+    );
+    assert!(s.problems.contains(&BeginProblem::BadServiceCharge));
+    assert_eq!(state(&s)["step"], "begin");
 }

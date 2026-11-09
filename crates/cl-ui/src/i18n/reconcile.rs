@@ -33,7 +33,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.begin.interest_date", "Interest date"),
     ("reconcile.begin.interest_account", "Interest account"),
     ("reconcile.begin.charges_note", "Charges and interest from the statement count right away and are entered in your books when you finish."),
-    ("reconcile.begin.charge_posted", "Already in your books \u{2014} change it in the register. If you voided or deleted that entry, you can enter it again here."),
+    ("reconcile.begin.charge_posted", "Already in your books."),
     ("reconcile.begin.unfinished", "You started reconciling the {date} statement and didn't finish."),
     ("reconcile.begin.continue", "Continue (started {date})"),
     ("reconcile.begin.start_over", "Start over"),
@@ -105,6 +105,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.keys.pane", "switch pane"),
     ("reconcile.keys.open", "open transaction"),
     ("reconcile.notice.finished_elsewhere", "This reconciliation was finished or discarded somewhere else. Here is where things stand now."),
+    ("reconcile.notice.charge_posted", "That change wasn't saved: the charge or interest is already in your books. Change it in the register. If you voided or deleted that entry, you can enter it again here."),
     ("reconcile.notice.in_progress", "A reconciliation of this account is already started. Continue it or start over."),
     // Finish
     ("reconcile.closing.title", "Closing date password"),

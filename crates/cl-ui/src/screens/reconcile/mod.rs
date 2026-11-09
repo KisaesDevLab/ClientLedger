@@ -333,8 +333,39 @@ impl ReconcileScreen {
         }
     }
 
-    /// Picks the account (Begin).
+    /// A new statement: the ending balance, the charges and their dates
+    /// cleared, the date back on today (QA-6, QA-7). A finished or undone
+    /// statement's charge would otherwise be posted again next month, or
+    /// on another account. The charge accounts go back to the defaults.
+    pub(crate) fn reset_statement(&mut self) {
+        let account = self.form.account;
+        let kind = self.form.kind;
+        self.form = BeginForm::new(self.today);
+        self.form.account = account;
+        self.form.kind = kind;
+        self.date_in = DateInput::new(self.today);
+        self.svc_date = DateInput {
+            text: String::new(),
+            value: None,
+        };
+        self.int_date = DateInput {
+            text: String::new(),
+            value: None,
+        };
+        self.problems.clear();
+        self.default_charge_accounts();
+    }
+
+    /// Picks the account (Begin): another account starts from its own
+    /// figures and notices (QA-7).
     pub(crate) fn pick_account(&mut self, id: AccountId) {
+        if self.form.account != Some(id) {
+            self.form.account = Some(id);
+            self.reset_statement();
+            self.notice = None;
+            self.error = None;
+            self.not_admin = false;
+        }
         self.form.account = Some(id);
         self.form.kind = self
             .account(id)
@@ -350,6 +381,16 @@ impl ReconcileScreen {
         self.history
             .iter()
             .find(|r| r.status == ReconStatus::InProgress)
+    }
+
+    /// "Undo last reconciliation" is on: a finished one, an Admin, not in
+    /// "Change statement info", and none started (the engine refuses Undo
+    /// while one is, QA minor).
+    pub(crate) fn undo_offered(&self) -> bool {
+        self.last_finished().is_some()
+            && !self.not_admin
+            && !self.editing
+            && self.unfinished().is_none()
     }
 
     /// The finished reconciliation with the latest statement date.
@@ -543,7 +584,10 @@ impl ReconcileScreen {
                 self.notice = Some("reconcile.undo.admin_only");
             }
             Some(ReconcileRefusal::ChargePosted) => {
-                self.notice = Some("reconcile.begin.charge_posted");
+                // Stays on "Change statement info" (editing is kept until
+                // the engine takes the patch), with Back to the
+                // reconciliation (Q-P27o minor).
+                self.notice = Some("reconcile.notice.charge_posted");
             }
             Some(ReconcileRefusal::ChargeAccountInvalid) => {
                 self.notice = Some("reconcile.problem.charge_account_invalid");
@@ -601,11 +645,18 @@ impl ReconcileScreen {
                                 .publish(crate::data_bus::Change::ledger([a]));
                         }
                         self.back_to_begin();
+                        self.reset_statement();
                     }
                     "undone" | "canceled" => {
                         self.password.clear();
                         self.dialog = None;
                         self.history_for = None;
+                        if what == "undone" {
+                            // Undo keeps the reconciliation's figures in the
+                            // engine; Begin starts a new statement (QA-6).
+                            self.reset_statement();
+                            self.notice = None;
+                        }
                         if let Some(a) = self.form.account {
                             self.link
                                 .bus()
@@ -643,6 +694,7 @@ impl ReconcileScreen {
                         self.finished = Some(id);
                         self.dialog = Some(Dialog::Done);
                         self.back_to_begin();
+                        self.reset_statement();
                         return;
                     }
                 }
@@ -719,7 +771,7 @@ impl ReconcileScreen {
                 },
                 move |s| async move { s.reconciliations().patch(id, &p).await },
             ));
-            self.editing = false;
+            // `took` leaves "Change statement info"; a refusal stays in it.
             return;
         }
         let req = ReconStart {
