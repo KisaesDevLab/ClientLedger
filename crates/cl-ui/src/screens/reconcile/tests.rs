@@ -831,6 +831,15 @@ fn the_announced_row_is_the_cursor_row_in_both_panes() {
     let before = cursor(&s);
     let f = settle(&mut s, vec![key(Key::Tab), key(Key::ArrowDown)]);
     assert_eq!(f, before, "egui kept the focus on the cursor row");
+    let shift_tab = Event::Key {
+        key: Key::Tab,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::SHIFT,
+    };
+    let f = settle(&mut s, vec![shift_tab]);
+    assert_eq!(f, before, "nor on a raw Shift+Tab");
     // Tab (the window's): the payments pane; the focus moves there too.
     assert!(s.command(CommandId::new("reconcile.switch_pane")));
     let f = settle(&mut s, vec![]);
@@ -861,4 +870,10 @@ fn the_announced_row_is_the_cursor_row_in_both_panes() {
         left_before,
         "no deposit changed"
     );
+    // Shift+Tab (the window's): back to the deposits pane, focus too.
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor back in deposits");
 }

@@ -357,6 +357,7 @@ pub const COMMANDS: &[Command] = &[
     // is Edit Transaction, which the window answers by opening the line).
     cmd("reconcile.tick", "Check or Uncheck the Line", None, 11, key(Mods::NONE, Key::Space), Scope::Reconcile),
     cmd("reconcile.switch_pane", "Switch Pane", None, 11, key(Mods::NONE, Key::Tab), Scope::Reconcile),
+    cmd("reconcile.switch_pane_back", "Switch Pane Back", None, 11, key(Mods::SHIFT, Key::Tab), Scope::Reconcile),
     cmd("reconcile.next", "Next Line", None, 11, key(Mods::NONE, Key::Down), Scope::Reconcile),
     cmd("reconcile.prev", "Previous Line", None, 11, key(Mods::NONE, Key::Up), Scope::Reconcile),
     cmd("reconcile.mark_all", "Mark All", None, 11, ctrl_shift('A'), Scope::Reconcile),

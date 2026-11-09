@@ -1286,7 +1286,8 @@ impl Screen for ReconcileScreen {
                     self.toggle(c);
                 }
             }
-            "reconcile.switch_pane" => {
+            // Two panes: Shift+Tab goes to the other one too (QA-9).
+            "reconcile.switch_pane" | "reconcile.switch_pane_back" => {
                 self.pane = ReconKind::other(self.pane);
                 self.cursor = None;
                 self.move_cursor(true);

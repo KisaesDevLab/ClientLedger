@@ -137,6 +137,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | --- | --- | --- |
 | `Space` | Check or Uncheck the Line | `reconcile.tick` |
 | `Tab` | Switch Pane | `reconcile.switch_pane` |
+| `Shift+Tab` | Switch Pane Back | `reconcile.switch_pane_back` |
 | `Down` | Next Line | `reconcile.next` |
 | `Up` | Previous Line | `reconcile.prev` |
 | `Ctrl+Shift+A` | Mark All | `reconcile.mark_all` |
