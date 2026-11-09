@@ -334,7 +334,7 @@ fn card_pay_step_after_continue_uses_the_engine_balance() {
     s.continue_open();
     s.poll();
     assert_eq!(state(&s)["step"], "window");
-    assert!(s.form.ending.is_empty());
+    assert_eq!(s.form.ending, "", "Continue fills no ending text");
     s.mark_all(true);
     s.poll();
     s.finish();
