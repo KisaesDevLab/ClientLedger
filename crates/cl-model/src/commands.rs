@@ -790,6 +790,8 @@ mod tests {
             "banking.import_file",
             // P26
             "banking.feed",
+            // P27
+            "banking.reconcile",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

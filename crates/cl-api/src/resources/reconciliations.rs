@@ -579,6 +579,21 @@ fn money_at(v: &Value, key: &str, what: &'static str) -> Result<Money, ApiError>
     }
 }
 
+/// `exact` when the engine sends it (U-188 keeps the legacy number under
+/// `legacy` for older clients), else `legacy` as an exact string.
+fn exact_or(
+    v: &Value,
+    exact: &str,
+    legacy: &str,
+    what: &'static str,
+) -> Result<Money, ApiError> {
+    if v.get(exact).is_some_and(|x| !x.is_null()) {
+        money_at(v, exact, what)
+    } else {
+        money_at(v, legacy, what)
+    }
+}
+
 fn money_opt(v: &Value, key: &str, what: &'static str) -> Result<Option<Money>, ApiError> {
     match v.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -659,15 +674,16 @@ fn drift_of(v: Option<&Value>) -> Result<Option<BeginningDrift>, ApiError> {
     }
 }
 
-fn continuity_of(v: Option<&Value>) -> Result<Option<Continuity>, ApiError> {
-    match v {
-        None | Some(Value::Null) => Ok(None),
-        Some(d) => Ok(Some(Continuity {
-            expected: money_at(d, "expected", "continuity warning")?,
-            actual: money_at(d, "actual", "continuity warning")?,
-            delta: money_at(d, "delta", "continuity warning")?,
-        })),
-    }
+/// The continuity warning. Its figures are exact strings only when the
+/// engine sends them so; a warning in JSON numbers (it may have been
+/// rounded) is left out rather than shown inexactly.
+fn continuity_of(v: Option<&Value>) -> Option<Continuity> {
+    let d = v.filter(|d| !d.is_null())?;
+    Some(Continuity {
+        expected: money_at(d, "expected", "continuity warning").ok()?,
+        actual: money_at(d, "actual", "continuity warning").ok()?,
+        delta: money_at(d, "delta", "continuity warning").ok()?,
+    })
 }
 
 fn line_of(v: &Value) -> Result<ReconLine, ApiError> {
@@ -726,15 +742,15 @@ pub fn reconciliation_from_value(r: &Value) -> Result<Reconciliation, ApiError> 
         statement_date: date_at(r, "statementDate").ok_or_else(|| decode(what))?,
         beginning_balance: money_at(r, "beginningBalance", what)?,
         statement_ending_balance: money_at(r, "statementEndingBalance", what)?,
-        cleared_balance: money_at(r, "clearedBalance", what)?,
-        difference: money_at(r, "difference", what)?,
+        cleared_balance: exact_or(r, "clearedBalanceExact", "clearedBalance", what)?,
+        difference: exact_or(r, "differenceExact", "difference", what)?,
         cleared_deposits: side(r.get("clearedDeposits"), what)?,
         cleared_payments: side(r.get("clearedPayments"), what)?,
         service_charge: held(r, "serviceCharge", what)?,
         interest: held(r, "interest", what)?,
         include_later_lines: bool_at(r, "includeLaterLines"),
         drift: drift_of(r.get("beginningBalanceDrift"))?,
-        continuity: continuity_of(r.get("continuityWarning"))?,
+        continuity: continuity_of(r.get("continuityWarning")),
         posting_locked: bool_at(r, "postingLocked"),
         started: stamp_at(r, "createdAt"),
         lines,

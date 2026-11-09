@@ -89,6 +89,29 @@ fn a_json_number_amount_is_a_decode_error() {
 }
 
 #[test]
+fn exact_fields_win_over_legacy_numbers() {
+    // The engine keeps JSON numbers under the old names for older clients
+    // and sends the exact figures as `*Exact` strings (U-188, R2).
+    let body = header("")
+        .replace(
+            "\"clearedBalance\":\"87314.3100\"",
+            "\"clearedBalance\":87314.31,\"clearedBalanceExact\":\"87314.3100\"",
+        )
+        .replace(
+            "\"difference\":\"-412.1800\"",
+            "\"difference\":-412.18,\"differenceExact\":\"-412.1800\"",
+        )
+        .replace(
+            "\"continuityWarning\":null",
+            "\"continuityWarning\":{\"expected\":1.5,\"actual\":2,\"delta\":0.5}",
+        );
+    let r = reconciliation_from(body.as_bytes()).expect("parsed");
+    assert_eq!(r.difference, m("-412.18"));
+    assert_eq!(r.cleared_balance, m("87314.31"));
+    assert_eq!(r.continuity, None, "an inexact warning is left out");
+}
+
+#[test]
 fn a_summary_answer_has_no_lines() {
     let r = reconciliation_from(header("").as_bytes()).expect("parsed");
     assert!(r.lines.is_none());
