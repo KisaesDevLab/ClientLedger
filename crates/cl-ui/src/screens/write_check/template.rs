@@ -66,6 +66,9 @@ impl WriteCheckScreen {
             h.amount_from_lines = false;
         });
         self.lines.form_mut().edit_step(|v| *v = lines);
+        // New line keys: the grid keeps its cursor without a "line is no
+        // longer here" note for the blank line replaced (P27 QA minor).
+        self.lines.lines_replaced();
         self.sync_inputs();
         self.fetch_bank_facts();
     }
@@ -86,6 +89,7 @@ impl WriteCheckScreen {
             h.header_tags.clone_from(&d.tag_ids);
         });
         self.lines.form_mut().edit_step(|v| *v = lines);
+        self.lines.lines_replaced();
         self.sync_inputs();
         // The bank's balance and next number (a template keeps none).
         self.fetch_bank_facts();
