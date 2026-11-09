@@ -365,6 +365,8 @@ pub fn bank_feed_lines_are_prechecked(h: &Harness) {
         found
     };
     assert_eq!(rows.len(), 3, "the three bank lines wait");
+    let mut rows = rows;
+    rows.sort_by_key(|r| r.date);
     for r in &rows[..2] {
         let choice = FeedChoice {
             account: Some(if r.amount.is_negative() {
