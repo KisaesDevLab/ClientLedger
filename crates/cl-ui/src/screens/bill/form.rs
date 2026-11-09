@@ -284,15 +284,28 @@ impl EnterBillScreen {
             tenant: self.tenant.as_ref().map(|(t, _)| *t),
             money_style: self.money_style,
         };
+        self.read.vendor_picked = self.header.current().vendor.is_some();
         match super::doc_read::banner(ui, &mut self.read, &input, tokens) {
             super::doc_read::BannerEvent::None => {}
             super::doc_read::BannerEvent::Accepted => self.accept_read(),
             super::doc_read::BannerEvent::Cleared => self.clear_read(),
             super::doc_read::BannerEvent::AskAi => self.start_assist(),
-            super::doc_read::BannerEvent::AddVendor => {
-                self.link
-                    .push(CompanyEvent::OpenWindow(CommandId::new("vendors.center")));
-            }
+            // The new-vendor form opens with the name as read (PR-A1 QA
+            // minor), as Set Up from a name field does (Q-PR4d).
+            super::doc_read::BannerEvent::AddVendor => match self.read.unknown_vendor_name() {
+                Some(name) => self.link.push(CompanyEvent::OpenWith(
+                    CommandId::new(crate::screens::lists::center::VENDORS_KIND),
+                    Box::new(crate::windows::OpenPayload::SetUpName(
+                        crate::windows::SetUpName {
+                            name,
+                            kind: cl_model::quick_add::NameKind::Vendor,
+                        },
+                    )),
+                )),
+                None => self
+                    .link
+                    .push(CompanyEvent::OpenWindow(CommandId::new("vendors.center"))),
+            },
         }
         self.nav_prompt_ui(ui);
     }

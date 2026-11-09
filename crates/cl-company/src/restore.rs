@@ -278,7 +278,8 @@ pub async fn restore(
     let mut names_swapped = false;
     let mut final_name = imported.name.clone();
     if let (Some(prev_id), Some(prev)) = (previous, previous_rec.as_ref()) {
-        let stamp = cl_settings::recent::now().as_utc().format("%m/%d/%Y");
+        // The owner's own calendar day, not UTC (PR-A1 QA-4 minor).
+        let stamp = chrono::Local::now().format("%m/%d/%Y");
         let old_name = format!("{} (before restore {stamp})", prev.name);
         names_swapped = swap_names(
             session,

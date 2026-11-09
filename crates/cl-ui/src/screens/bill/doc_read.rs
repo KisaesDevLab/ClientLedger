@@ -346,6 +346,9 @@ pub(crate) struct GhostState {
 /// The reading's state.
 #[derive(Default)]
 pub struct ReadState {
+    /// The form has a vendor now: "isn't one of your vendors" is no longer
+    /// shown (PR-A1 QA minor; set by the form each frame).
+    pub vendor_picked: bool,
     /// The switches as last known (the demo reads them every frame).
     switches: Option<ReadSwitches>,
     switches_task: Option<Task<ReadSwitches>>,
@@ -618,6 +621,12 @@ pub(crate) fn demo_reading(
 }
 
 impl ReadState {
+    /// The vendor's name as read when it matched none of the vendors (owner
+    /// data: handed to the new-vendor form, never logged).
+    pub(crate) fn unknown_vendor_name(&self) -> Option<String> {
+        self.filled.as_ref().and_then(|f| f.unknown_vendor.clone())
+    }
+
     /// The switches: the demo's now, an engine's once read.
     fn switches(&mut self, link: &Arc<CompanyLink>) -> Option<ReadSwitches> {
         if link.is_demo() {
@@ -1156,7 +1165,11 @@ pub fn banner(
             }
         });
     }
-    if let Some(name) = &filled.unknown_vendor {
+    if let Some(name) = filled
+        .unknown_vendor
+        .as_ref()
+        .filter(|_| !state.vendor_picked)
+    {
         banner_frame(ui, tokens, tokens.info_tint, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
