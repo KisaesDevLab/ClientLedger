@@ -884,7 +884,9 @@ impl OwnerFacing for ApiError {
                 ConflictReason::AlreadyExists => ("error.api.conflict_exists", None),
                 ConflictReason::TagNumberTaken => ("error.api.tag_number_taken", None),
                 ConflictReason::Busy => ("error.api.busy", Some("fix.api.try_again_soon")),
-                ConflictReason::Reconciled => ("error.api.conflict_reconciled", None),
+                ConflictReason::Reconciled => {
+                    ("error.api.conflict_reconciled", Some("fix.api.reconciled"))
+                }
                 ConflictReason::AlreadyDeleted => {
                     ("error.api.conflict_deleted", Some("fix.api.reload"))
                 }
@@ -1062,6 +1064,19 @@ impl EngineErrorBody {
     fn text(&self) -> UserText {
         UserText::new(self.message.clone())
     }
+}
+
+/// The engine refuses a date or bank-line change, and a void, of an entry
+/// cleared in a finished reconciliation with a 400 that has no code (only
+/// its delete has 409 `RECONCILED_TRANSACTION`): `ledger.service.ts`
+/// `updateTransaction` ("…part of a completed bank reconciliation, so its
+/// reconciled (balance-sheet) line and date can't change…"),
+/// `voidTransactionInTx` and the bill payment void ("…cleared in a
+/// completed bank reconciliation…"). Read as the same refusal so owners
+/// see why (P27 QA-5) instead of "check the highlighted fields"; the
+/// contract test pins the text until the engine sends a code (U-195).
+fn reconciled_refusal_400(body: &EngineErrorBody) -> bool {
+    body.code.is_none() && body.message.contains("completed bank reconciliation")
 }
 
 fn validation(body: &EngineErrorBody) -> ValidationError {
@@ -1354,6 +1369,13 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
             Some(b) if route == RouteKind::Tfa && b.code.is_none() => {
                 fin(ApiError::Unauthorized(AuthFailure::TfaInvalid))
             }
+            Some(b) if reconciled_refusal_400(b) => fin(ApiError::Conflict {
+                reason: ConflictReason::Reconciled,
+                current_version: None,
+                code: None,
+                message: b.text(),
+                details: ConflictDetails::default(),
+            }),
             Some(b) => fin(ApiError::Validation(validation(b))),
             None => fin(ApiError::Protocol { status, code: None }),
         },
@@ -2136,6 +2158,40 @@ mod tests {
                     | "error.api.closing_password_owner"
             ));
         }
+    }
+
+    /// P27 QA-5: the engine's code-less 400s for a reconciled entry's date
+    /// or bank-line change and void read as the reconciled refusal, with
+    /// the plain message and its fix; other code-less 400s stay validation.
+    #[test]
+    fn reconciled_entry_400s_read_as_the_reconciled_refusal() {
+        for text in [
+            "This transaction is part of a completed bank reconciliation, so its reconciled (balance-sheet) line and date can\u{2019}t change. You can still recategorize or re-tag the income/expense lines.",
+            "Cannot void a transaction whose lines are cleared in a completed bank reconciliation. Undo the reconciliation first, then void and post a correcting entry.",
+            "Cannot void a bill payment whose lines are cleared in a completed bank reconciliation. Undo the reconciliation first, then void and post a correcting entry.",
+        ] {
+            let body = serde_json::json!({ "error": { "message": text } }).to_string();
+            let e = err(400, &body, S);
+            assert!(
+                matches!(
+                    e,
+                    ApiError::Conflict {
+                        reason: ConflictReason::Reconciled,
+                        ..
+                    }
+                ),
+                "{e:?}"
+            );
+            let m = e.owner_message();
+            assert_eq!(m.key, "error.api.conflict_reconciled");
+            assert_eq!(m.suggestion_key, Some("fix.api.reconciled"));
+        }
+        let other = r#"{"error":{"message":"Debits must equal credits"}}"#;
+        assert!(matches!(err(400, other, S), ApiError::Validation(_)));
+        // A coded 400 that happens to mention it stays what its code says.
+        let coded =
+            r#"{"error":{"message":"completed bank reconciliation","code":"VALIDATION_ERROR"}}"#;
+        assert!(matches!(err(400, coded, S), ApiError::Validation(_)));
     }
 
     #[test]

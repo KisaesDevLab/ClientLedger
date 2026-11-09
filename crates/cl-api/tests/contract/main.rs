@@ -1285,6 +1285,10 @@ fn main() -> std::process::ExitCode {
             contract_reconcile::statement_date_must_follow_the_last_finished,
         ),
         (
+            "reconcile::checking_account_rows_and_reconciled_refusals",
+            contract_reconcile::checking_account_rows_and_reconciled_refusals,
+        ),
+        (
             "reconcile::large_worksheet_reads_quickly",
             contract_reconcile::large_worksheet_reads_quickly,
         ),

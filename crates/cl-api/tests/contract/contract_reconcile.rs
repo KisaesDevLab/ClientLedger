@@ -624,6 +624,73 @@ pub fn statement_date_must_follow_the_last_finished(h: &Harness) {
     );
 }
 
+/// P27 QA-1, QA-2, QA-5: a `checking` account (as the practice company's
+/// 1010) reconciles; its journal-entry rows carry the entry memo; once
+/// finished, moving the entry's date and voiding it are refused as the
+/// reconciled refusal (the engine's code-less 400s, U-195), and the memo
+/// still changes.
+pub fn checking_account_rows_and_reconciled_refusals(h: &Harness) {
+    if !gated(h) {
+        return;
+    }
+    let s = &h.s1;
+    let mut b = books(h, s);
+    b.bank = fresh(h, s, AccountType::Asset, "checking", "Recon Checking");
+    let words = "check 4417 \u{b7} Elm Street Accountants";
+    let e = je2(date(2026, 2, 3), words, b.expense, b.bank, "25.00");
+    let made = post(h, s, &e);
+    let r = start(h, s, b.bank, date(2026, 2, 28), "-25.00").expect("start");
+    let sheet = get(h, s, r.id);
+    let line = sheet
+        .lines
+        .iter()
+        .flatten()
+        .find(|l| l.transaction == made.record.id)
+        .expect("on the sheet")
+        .clone();
+    assert_eq!(line.payee, None, "{line:?}");
+    assert_eq!(line.memo.as_deref(), Some(words), "{line:?}");
+    tick(h, s, r.id, &[line.journal_line]);
+    h.run(s.reconciliations().complete(r.id, None))
+        .expect("finish");
+    let reconciled = |e: &ApiError| {
+        matches!(
+            e,
+            ApiError::Conflict {
+                reason: cl_api::ConflictReason::Reconciled,
+                ..
+            }
+        )
+    };
+    let moved = je2(date(2026, 2, 4), words, b.expense, b.bank, "25.00");
+    let err = h
+        .run(s.transactions().update_journal_entry(
+            made.record.id,
+            &made.version,
+            &moved,
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("the date is reconciled");
+    assert!(reconciled(&err), "{err:?}");
+    let err = h
+        .run(
+            s.transactions()
+                .void(made.record.id, "qa", &PostingOptions::default(), key()),
+        )
+        .expect_err("void is reconciled");
+    assert!(reconciled(&err), "{err:?}");
+    let memo = je2(date(2026, 2, 3), "memo only", b.expense, b.bank, "25.00");
+    h.run(s.transactions().update_journal_entry(
+        made.record.id,
+        &made.version,
+        &memo,
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("a memo change is fine");
+}
+
 /// Large data: a worksheet of many lines reads within the budget (logged).
 pub fn large_worksheet_reads_quickly(h: &Harness) {
     if !gated(h) {
