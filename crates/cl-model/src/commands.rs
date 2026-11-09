@@ -353,6 +353,16 @@ pub const COMMANDS: &[Command] = &[
     cmd("feed.accept_selected", "Accept Selected Bank Lines", None, 10, key(Mods::CMD, Key::Enter), Scope::Feed),
     cmd("feed.insert_line", "Insert a Split or Fee Line", None, 10, key(Mods::CMD, Key::Insert), Scope::Feed),
     cmd("feed.delete_line", "Delete a Split or Fee Line", None, 10, key(Mods::CMD, Key::Delete), Scope::Feed),
+    // P27 Reconcile panes (mockup status bar: Space, Tab, Ctrl+E; Ctrl+E
+    // is Edit Transaction, which the window answers by opening the line).
+    cmd("reconcile.tick", "Check or Uncheck the Line", None, 11, key(Mods::NONE, Key::Space), Scope::Reconcile),
+    cmd("reconcile.switch_pane", "Switch Pane", None, 11, key(Mods::NONE, Key::Tab), Scope::Reconcile),
+    cmd("reconcile.next", "Next Line", None, 11, key(Mods::NONE, Key::Down), Scope::Reconcile),
+    cmd("reconcile.prev", "Previous Line", None, 11, key(Mods::NONE, Key::Up), Scope::Reconcile),
+    cmd("reconcile.mark_all", "Mark All", None, 11, ctrl_shift('A'), Scope::Reconcile),
+    cmd("reconcile.unmark_all", "Unmark All", None, 11, ctrl_shift('U'), Scope::Reconcile),
+    cmd("reconcile.finish", "Reconcile Now", None, 11, key(Mods::CMD, Key::Enter), Scope::Reconcile),
+    cmd("reconcile.leave", "Leave for Now", None, 11, None, Scope::Reconcile),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),

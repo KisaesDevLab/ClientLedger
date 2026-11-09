@@ -49,6 +49,9 @@ pub enum Scope {
     /// Space selects, A/S/R act on the row and Ctrl+Enter accepts the
     /// selection. Innermost like [`Scope::List`], on the window.
     Feed,
+    /// While the Reconcile window's panes have focus (P27): Space ticks,
+    /// Tab switches pane, Up/Down move. Innermost, on the window.
+    Reconcile,
 }
 
 impl Scope {
@@ -61,6 +64,7 @@ impl Scope {
         Scope::Viewer,
         Scope::List,
         Scope::Feed,
+        Scope::Reconcile,
     ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
@@ -74,6 +78,7 @@ impl Scope {
             Scope::Viewer => "In a document preview",
             Scope::List => "In a work list",
             Scope::Feed => "In the Bank Feed",
+            Scope::Reconcile => "In Reconcile",
         }
     }
 
@@ -85,6 +90,7 @@ impl Scope {
             Scope::Viewer => &[Scope::Viewer, Scope::Form, Scope::Window, Scope::Global],
             Scope::List => &[Scope::List, Scope::Window, Scope::Global],
             Scope::Feed => &[Scope::Feed, Scope::Window, Scope::Global],
+            Scope::Reconcile => &[Scope::Reconcile, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -607,7 +613,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 7);
+        assert_eq!(Scope::ALL.len(), 8);
     }
 
     #[test]
@@ -720,7 +726,7 @@ mod tests {
             Scope::List.active_from(),
             &[Scope::List, Scope::Window, Scope::Global]
         );
-        assert_eq!(Scope::ALL.last(), Some(&Scope::Feed));
+        assert_eq!(Scope::ALL.last(), Some(&Scope::Reconcile));
     }
 
     #[test]

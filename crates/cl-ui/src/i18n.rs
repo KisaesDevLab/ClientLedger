@@ -146,9 +146,10 @@ mod statements;
 mod inventory;
 // P25: Import Bank File.
 mod bank_import;
+mod reconcile;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 49] = [
+const TABLES: [&[(&str, &str)]; 50] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -198,6 +199,7 @@ const TABLES: [&[(&str, &str)]; 49] = [
     finance_charges::ENGLISH,
     inventory::ENGLISH,
     bank_import::ENGLISH,
+    reconcile::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

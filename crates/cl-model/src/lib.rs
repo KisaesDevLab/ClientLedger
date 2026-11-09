@@ -32,6 +32,8 @@ pub mod lists;
 pub mod lookup;
 pub mod numbering;
 pub mod quick_add;
+// P27: Reconcile (begin form, panes, tick queue).
+pub mod reconcile;
 pub mod register;
 pub mod rowkey;
 pub mod statement_match;
