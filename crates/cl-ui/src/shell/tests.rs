@@ -1607,3 +1607,78 @@ mod list_keys {
         assert_eq!(s.filter, "jk", "nothing typed while the row has focus");
     }
 }
+
+/// PR-A1 QA-4: File › Close Company reaches the engine even though its
+/// request group goes away at once (it ran as a read on a dropped group
+/// before and was cancelled: the session stayed in the company, so
+/// Restore said "Close the open company first"). The close is a write:
+/// the switch back to the workspace is sent and the scope moves.
+#[test]
+fn close_company_switches_back_even_when_its_group_is_dropped() {
+    use std::sync::Arc;
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    const WS: &str = "2b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let server = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                format!(r#"{{"workspaceTenantId":"{WS}","capabilities":[]}}"#),
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/auth/switch-tenant"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(200))
+                    .insert_header(
+                        "set-cookie",
+                        format!("kb_refresh={}; HttpOnly", "s".repeat(32)),
+                    )
+                    .set_body_raw(
+                        r#"{"tokens":{"accessToken":"switched"}}"#,
+                        "application/json",
+                    ),
+            )
+            .mount(&server)
+            .await;
+        server
+    });
+    let q =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
+    let session = cl_api::testing::stub_session(server.address().port());
+    assert_ne!(
+        session.scope(),
+        cl_api::Scope::Workspace,
+        "a company is open"
+    );
+    let g = q.group().expect("group");
+    let mut p = super::send_close(&g, session.client(), session.clone()).expect("sent");
+    drop(g);
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    let r = loop {
+        if let Some(r) = p.try_take() {
+            break r;
+        }
+        assert!(std::time::Instant::now() < end, "the close never ended");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let switches = rt
+        .block_on(server.received_requests())
+        .expect("recorded")
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/auth/switch-tenant")
+        .count();
+    assert_eq!(switches, 1, "the switch went out: {r:?}");
+    assert!(matches!(r, Ok(Ok(()))), "{r:?}");
+    assert_eq!(session.scope(), cl_api::Scope::Workspace);
+    let _ = q.shutdown(Duration::from_secs(1), None);
+}

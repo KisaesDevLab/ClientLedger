@@ -172,6 +172,11 @@ pub struct Shell {
     return_after_prompt: Option<WindowId>,
     /// File > Close Company is waiting for a close prompt to be answered.
     close_company_after_prompt: bool,
+    /// File > Close Company is switching the session back to the
+    /// workspace (PR-A1 QA-4): the windows close once it has.
+    /// The group is kept while it runs (a dropped group would leave the
+    /// close's answer to the orphans).
+    closing: Option<Closing>,
     /// Remembered grid column widths (`grid-widths.json`), shared with the
     /// grid screens through the egui context.
     widths: crate::grid_env::WidthsHandle,
@@ -273,6 +278,7 @@ impl Shell {
             open_tenant: None,
             return_after_prompt: None,
             close_company_after_prompt: false,
+            closing: None,
             runner: crate::templates_runner::TemplatesRunner::default(),
         };
         shell.palette.include_dev = options.demo;
@@ -411,6 +417,7 @@ impl Shell {
             return;
         };
         link.set_dirty_windows(self.windows.dirty_ids().len());
+        self.poll_closing(&link, ctx);
         for event in link.drain() {
             match event {
                 CompanyEvent::SignedIn { user } => {
@@ -565,17 +572,45 @@ impl Shell {
             }
             return;
         }
-        if link.pending_writes() > 0 {
+        if link.pending_writes() > 0 || self.closing.is_some() {
             return;
         }
         if let Some(mut demo) = link.demo_state() {
             demo.open = None;
-        } else if let Some(session) = link.session()
-            && let Some(Ok(group)) = link.group()
-        {
-            let _ = group.read(&session, |s| async move { s.close_company().await });
+            drop(demo);
+            link.push(CompanyEvent::Closed);
+            return;
         }
-        link.push(CompanyEvent::Closed);
+        match start_close(&link) {
+            Some(task) => self.closing = Some(task),
+            // No session or queue: nothing to switch back on the engine.
+            None => link.push(CompanyEvent::Closed),
+        }
+    }
+
+    /// The close finished (PR-A1 QA-4): the windows close and the Open
+    /// Company window comes up with the session back in the workspace, so
+    /// Restore is offered.
+    fn poll_closing(&mut self, link: &Arc<CompanyLink>, ctx: Option<&Context>) {
+        let Some((_, task)) = self.closing.as_mut() else {
+            return;
+        };
+        match task.poll_result() {
+            None => {
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint_after(Duration::from_millis(30));
+                }
+            }
+            Some(r) => {
+                self.closing = None;
+                if r.is_err() {
+                    // The Open Company window says to close first if the
+                    // engine is still in the company.
+                    tracing::warn!("closing the company did not switch back to the workspace");
+                }
+                link.push(CompanyEvent::Closed);
+            }
+        }
     }
 
     /// Keep theme and zoom changes for this run only: nothing is written to
@@ -1756,6 +1791,40 @@ fn draw_screen(ui: &mut egui::Ui, screen: &mut dyn crate::windows::Screen) {
                 crate::layout::keep_focus_in_view(ui);
             });
     }
+}
+
+/// File > Close Company in flight: its request group and the switch.
+type Closing = (
+    cl_api::RequestGroup,
+    crate::company::Task<Result<(), cl_company::CompanyError>>,
+);
+
+/// Switches the session back to the workspace on the write lane, with its
+/// group kept by the caller (PR-A1 QA-4: a read on a group dropped at once
+/// was cancelled before the switch, the session stayed in the company and
+/// Restore said to close the company first). `None` without a session or
+/// a queue.
+fn start_close(link: &Arc<CompanyLink>) -> Option<Closing> {
+    let session = link.session()?;
+    let client = link.client()?.clone();
+    let group = link.group()?.ok()?;
+    let pending = send_close(&group, &client, session).ok()?;
+    Some((group, crate::company::Task::Pending(pending)))
+}
+
+/// The close itself: a write (never aborted with its group).
+fn send_close(
+    group: &cl_api::RequestGroup,
+    client: &cl_api::Client,
+    session: cl_api::Session,
+) -> Result<cl_api::Pending<Result<(), cl_company::CompanyError>>, cl_api::QueueError> {
+    let label = cl_api::OrphanLabel {
+        what: "orphan.lifecycle",
+        key: None,
+    };
+    group.write(client, label, move |_c| async move {
+        Ok(cl_company::close_company(&session).await)
+    })
 }
 
 #[cfg(test)]
