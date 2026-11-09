@@ -584,7 +584,7 @@ fn sum_row(ui: &mut Ui, tokens: &Tokens, label: &str, amount: &str, color: Color
     });
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)]
 fn cards(
     s: &mut ReconcileScreen,
     ui: &mut Ui,

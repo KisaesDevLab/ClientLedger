@@ -346,6 +346,7 @@ fn is_card(account: AccountId) -> bool {
     account == super::account_id(CARD)
 }
 
+#[allow(clippy::needless_pass_by_value)] // built inline at each call
 fn coded(status: u16, code: &str, details: serde_json::Value) -> ApiError {
     cl_api::engine_refusal(
         status,
@@ -421,6 +422,7 @@ impl DemoRecon {
     }
 
     /// The engine's answer for `r` (with or without its lines).
+    #[allow(clippy::unused_self)] // reads like the engine's own lookup
     fn view(&self, r: &Rec, with_lines: bool, locked: Option<CalendarDate>) -> Reconciliation {
         let mut deposits = (0u32, Money::ZERO);
         let mut payments = (0u32, Money::ZERO);
@@ -556,7 +558,7 @@ pub fn history(
             started: Some(x.started),
         })
         .collect();
-    rows.sort_by(|a, b| b.statement_date.cmp(&a.statement_date));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.statement_date));
     Ok(rows)
 }
 

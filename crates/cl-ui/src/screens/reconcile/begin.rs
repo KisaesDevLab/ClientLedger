@@ -23,8 +23,7 @@ fn account_box(
         let l = ui.add(egui::Label::new(label).selectable(false));
         let shown = value
             .and_then(|v| choices.iter().find(|(id, _)| *id == v))
-            .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| t("reconcile.begin.pick"));
+            .map_or_else(|| t("reconcile.begin.pick"), |(_, n)| n.clone());
         ui.add_enabled_ui(enabled, |ui| {
             egui::ComboBox::from_id_salt(label)
                 .selected_text(shown)
@@ -240,10 +239,7 @@ fn buttons(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
             ),
         );
         ui.horizontal(|ui| {
-            let started = open
-                .started
-                .map(|ts| super::day_text(ts))
-                .unwrap_or_default();
+            let started = open.started.map(super::day_text).unwrap_or_default();
             if ui
                 .button(t_with("reconcile.begin.continue", &[("date", &started)]))
                 .clicked()

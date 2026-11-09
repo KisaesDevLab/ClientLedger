@@ -404,11 +404,7 @@ pub(crate) fn discrepancy(s: &mut ReconcileScreen, ui: &Ui) {
                                     )
                                     .monospace(),
                                 );
-                                ui.label(
-                                    r.changed_at
-                                        .map(|ts| super::day_text(ts))
-                                        .unwrap_or_default(),
-                                );
+                                ui.label(r.changed_at.map(super::day_text).unwrap_or_default());
                                 ui.end_row();
                             }
                         });
