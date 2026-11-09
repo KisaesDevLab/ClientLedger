@@ -390,9 +390,11 @@ pub struct DemoLedger {
     /// P24: the item fields of a posting's lines other than its own
     /// account's (a check's or card charge's Items lines), in line order.
     items: std::collections::BTreeMap<u32, (String, Vec<Option<cl_api::SplitItem>>)>,
-    /// P27: the last finished reconciliation's statement date once the demo
-    /// Reconcile finished or undid one (`None`: the sample's 09/30).
-    reconciled_through: Option<Option<CalendarDate>>,
+    /// P27: the demo Reconcile finished or undid one, so R follows
+    /// `reconciled_date` instead of the sample's 09/30.
+    reconciled_set: bool,
+    /// The last finished reconciliation's statement date (when set).
+    reconciled_date: Option<CalendarDate>,
 }
 
 /// The demo company's closing-date password (synthetic; the demo plays an
@@ -524,13 +526,17 @@ impl DemoLedger {
     /// Cleared lines on or before this date show as reconciled (R).
     #[must_use]
     pub fn reconciled_through(&self) -> Option<CalendarDate> {
-        self.reconciled_through
-            .unwrap_or_else(|| Some(last_reconciled()))
+        if self.reconciled_set {
+            self.reconciled_date
+        } else {
+            Some(last_reconciled())
+        }
     }
 
     /// The demo Reconcile finished (or undid) one: R follows it.
     pub fn set_reconciled_through(&mut self, date: Option<CalendarDate>) {
-        self.reconciled_through = Some(date);
+        self.reconciled_set = true;
+        self.reconciled_date = date;
     }
 
     /// The sample's transactions with the demo's changes, then the ones
