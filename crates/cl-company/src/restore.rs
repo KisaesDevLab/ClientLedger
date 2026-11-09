@@ -204,7 +204,10 @@ pub async fn restore(
                 .find(|c| c.backup_by_archive_id(&info.archive_id).is_some())
                 .map(|c| c.tenant_id)
         })
-        .filter(|id| *id != imported.tenant_id && list.get(*id).is_some());
+        .filter(|id| *id != imported.tenant_id && list.get(*id).is_some())
+        // The same backup restored again: the company that replaced it
+        // since is the one in its place now (PR-A1 QA round 2).
+        .map(|id| in_place_of(&list, id, imported.tenant_id));
     let previous_rec = previous.and_then(|id| list.get(id).cloned());
     // Read what the exporting app wrote, field by field (another version
     // may have written more or less than today's `HostMetadata`).
@@ -226,7 +229,7 @@ pub async fn restore(
         .and_then(|f| serde_json::from_value(f.clone()).ok());
     let original_name = previous_rec
         .as_ref()
-        .map_or_else(|| imported.name.clone(), |r| r.name.clone());
+        .map_or_else(|| imported.name.clone(), |r| base_name(&r.name).to_string());
 
     // Local record first, so a failed name swap still leaves a company
     // the window can list and open.
@@ -279,8 +282,8 @@ pub async fn restore(
     let mut final_name = imported.name.clone();
     if let (Some(prev_id), Some(prev)) = (previous, previous_rec.as_ref()) {
         // The owner's own calendar day, not UTC (PR-A1 QA-4 minor).
-        let stamp = chrono::Local::now().format("%m/%d/%Y");
-        let old_name = format!("{} (before restore {stamp})", prev.name);
+        let stamp = chrono::Local::now().format("%m/%d/%Y").to_string();
+        let old_name = kept_name(&list, prev_id, &prev.name, &stamp);
         names_swapped = swap_names(
             session,
             prev_id,
@@ -312,6 +315,62 @@ pub async fn restore(
         file_known: info.known.is_some(),
         names_swapped,
     })
+}
+
+/// The words the kept company's name ends with.
+const BEFORE_RESTORE: &str = " (before restore ";
+
+/// `name` without its " (before restore …)" endings, however many an
+/// earlier restore stacked (PR-A1 QA round 2).
+pub(crate) fn base_name(name: &str) -> &str {
+    let mut base = name.trim_end();
+    while base.ends_with(')')
+        && let Some(at) = base.rfind(BEFORE_RESTORE)
+        && !base[at + BEFORE_RESTORE.len()..base.len() - 1].contains(['(', ')'])
+    {
+        base = base[..at].trim_end();
+    }
+    if base.is_empty() { name } else { base }
+}
+
+/// The kept company's new name: its base name, "(before restore
+/// <date>)", and a number when another company already has that name.
+pub(crate) fn kept_name(list: &RecentCompanies, kept: TenantId, name: &str, date: &str) -> String {
+    let base = base_name(name);
+    let taken = |n: &str| {
+        list.companies
+            .iter()
+            .any(|c| c.tenant_id != kept && c.name == n)
+    };
+    let first = format!("{base}{BEFORE_RESTORE}{date})");
+    if !taken(&first) {
+        return first;
+    }
+    (2u32..)
+        .map(|k| format!("{base}{BEFORE_RESTORE}{date} {k})"))
+        .find(|n| !taken(n))
+        .unwrap_or(first)
+}
+
+/// The company now in `id`'s place: a later restore of `id`'s backup
+/// replaced it (newest first), and so on. Never `restored` itself.
+fn in_place_of(list: &RecentCompanies, id: TenantId, restored: TenantId) -> TenantId {
+    let mut now = id;
+    let mut seen = vec![id];
+    while let Some(next) = list
+        .companies
+        .iter()
+        .filter(|c| {
+            c.tenant_id != restored
+                && !seen.contains(&c.tenant_id)
+                && c.restored.as_ref().and_then(|r| r.previous) == Some(now)
+        })
+        .max_by_key(|c| c.restored.as_ref().map(|r| r.at.unix_millis()))
+    {
+        now = next.tenant_id;
+        seen.push(now);
+    }
+    now
 }
 
 /// Renames the previous company out of the way, then the restored one to
@@ -444,6 +503,64 @@ mod tests {
             .insert(folder, restored.intake_here[&folder].clone());
         move_confirmations(&mut l, Some(id(2)), &cl_settings::CompanyPrefs::default());
         assert_eq!(l.get(id(2)).expect("other").prefs.intake_here.len(), 1);
+    }
+
+    #[test]
+    fn a_name_loses_every_before_restore_ending_and_nothing_else() {
+        assert_eq!(base_name("Ozark Ridge (sample)"), "Ozark Ridge (sample)");
+        assert_eq!(
+            base_name("Ozark Ridge (sample) (before restore 11/08/2026)"),
+            "Ozark Ridge (sample)"
+        );
+        assert_eq!(
+            base_name(
+                "Ozark Ridge (sample) (before restore 11/08/2026) (before restore 11/08/2026 2)"
+            ),
+            "Ozark Ridge (sample)"
+        );
+        assert_eq!(
+            base_name("Smith (before restore 1) Hauling"),
+            "Smith (before restore 1) Hauling"
+        );
+        assert_eq!(
+            base_name(" (before restore 11/08/2026)"),
+            " (before restore 11/08/2026)"
+        );
+    }
+
+    /// PR-A1 QA round 2: a second restore of the same backup never stacks
+    /// "(before restore …)" and every name stays different.
+    #[test]
+    fn a_second_restore_replaces_the_company_in_its_place_with_a_unique_name() {
+        let mut l = RecentCompanies::default();
+        l.upsert(id(1), "Ozark (sample) (before restore 11/08/2026)");
+        l.upsert(id(2), "Ozark (sample)").restored = Some(cl_settings::RestoreNote {
+            at: Timestamp::from_unix_millis(10).expect("ts"),
+            backup_made: None,
+            previous: Some(id(1)),
+            bring_back_answered: false,
+        });
+        // The backup came from 1; 2 replaced it, so 2 is replaced now.
+        assert_eq!(in_place_of(&l, id(1), id(3)), id(2));
+        assert_eq!(
+            in_place_of(&l, id(1), id(2)),
+            id(1),
+            "never the restored one"
+        );
+        assert_eq!(in_place_of(&l, id(4), id(3)), id(4));
+        let kept = kept_name(&l, id(2), "Ozark (sample)", "11/08/2026");
+        assert_eq!(kept, "Ozark (sample) (before restore 11/08/2026 2)");
+        assert_eq!(base_name(&kept), "Ozark (sample)");
+        // Its own name is no clash; a stacked name comes back to one ending.
+        assert_eq!(
+            kept_name(
+                &l,
+                id(1),
+                "Ozark (sample) (before restore 11/08/2026)",
+                "11/08/2026"
+            ),
+            "Ozark (sample) (before restore 11/08/2026)"
+        );
     }
 
     #[test]

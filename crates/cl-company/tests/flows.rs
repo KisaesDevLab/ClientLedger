@@ -498,6 +498,104 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
     assert_eq!(new.source.as_deref(), Some("restore"));
 }
 
+/// PR-A1 QA round 2: the same backup restored a second time replaces the
+/// company the first restore made (it holds the name now), and no name
+/// stacks "(before restore …)" twice.
+#[tokio::test]
+async fn a_second_restore_of_the_same_backup_names_each_company_once() {
+    const T3: &str = "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a03";
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1"]).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let file = write_archive(dir.path(), "arch-9");
+    let sha = cl_company::backup::sha256_file(&file).expect("sha");
+    let first = "Ozark Ridge Landscaping LLC (before restore 01/02/2020)";
+    store
+        .update(|l| {
+            l.upsert(t(T1), first);
+            l.record_backup(
+                t(T1),
+                BackupRecord {
+                    path: file.clone(),
+                    sha256: sha.clone(),
+                    archive_id: "arch-9".into(),
+                    created_at: cl_settings::recent::now(),
+                    kind: BackupKind::Backup,
+                },
+            );
+            l.upsert(t(T3), "Ozark Ridge Landscaping LLC").restored =
+                Some(cl_settings::RestoreNote {
+                    at: cl_settings::recent::now(),
+                    backup_made: None,
+                    previous: Some(t(T1)),
+                    bring_back_answered: true,
+                });
+        })
+        .expect("store");
+    mount_import(&server, T2, "Ozark Ridge Landscaping LLC", None).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenants"))
+        .respond_with(json(
+            200,
+            json!([
+                {"id":T1,"name":first,"role":"owner","createdAt":null,"updatedAt":"2026-11-01T08:00:00.000Z"},
+                {"id":T3,"name":"Ozark Ridge Landscaping LLC","role":"owner","createdAt":null,"updatedAt":"2026-11-02T08:00:00.000Z"},
+                {"id":T2,"name":"Ozark Ridge Landscaping LLC","role":"owner","createdAt":null,"updatedAt":"2026-11-04T08:12:00.000Z"}
+            ]),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
+        .respond_with(json(
+            200,
+            json!({"id":T2,"name":"x","updatedAt":"2026-11-04T08:12:00.000Z"}),
+        ))
+        .mount(&server)
+        .await;
+    let (_runs, stats) = counting_stats();
+    let out = restore(
+        &s,
+        &store,
+        &secrets,
+        &RestoreRequest {
+            path: file.clone(),
+            passphrase: None,
+        },
+        &cl_company::backup::silent(),
+        &stats,
+    )
+    .await
+    .expect("restore");
+    assert_eq!(out.kept_previous, Some(t(T3)), "the company in its place");
+    assert!(out.names_swapped);
+    assert_eq!(out.name, "Ozark Ridge Landscaping LLC");
+    assert_eq!(
+        count(&server, "PATCH", &format!("/api/v1/tenants/{T1}")).await,
+        0,
+        "the first kept company keeps its name"
+    );
+    let list = store.load().expect("load");
+    let names: Vec<&str> = [T1, T2, T3]
+        .iter()
+        .map(|id| list.get(t(id)).expect("listed").name.as_str())
+        .collect();
+    assert_eq!(names[0], first);
+    assert_eq!(names[1], "Ozark Ridge Landscaping LLC");
+    assert!(names[2].starts_with("Ozark Ridge Landscaping LLC (before restore "));
+    for n in &names {
+        assert!(n.matches("before restore").count() <= 1, "{n}");
+    }
+    assert_ne!(names[0], names[2]);
+    assert_eq!(
+        list.get(t(T2))
+            .and_then(|c| c.restored.as_ref())
+            .and_then(|r| r.previous),
+        Some(t(T3))
+    );
+}
+
 /// Q-268: a `.clbackup` made by the removed "Make Portable Copy" (host
 /// kind `portable`, history entry of the old kind) still restores.
 #[tokio::test]
