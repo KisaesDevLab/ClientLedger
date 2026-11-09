@@ -23,6 +23,9 @@ steps:
   - click: {role: button, label: Continue}
   - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube"}
   - assert_state: {key: screen.can_finish, equals: true}
+  # The checks at Finish; Undo keeping the checks must bring back these.
+  - assert_state: {key: screen.left.checked, equals: 5}
+  - assert_state: {key: screen.right.checked, equals: 8}
   - click: {role: button, label: Reconcile now}
   - assert_state: {key: screen.last, equals: finished}
   - click: {role: button, label: Close}
@@ -48,4 +51,6 @@ steps:
   - click: {role: button, label_contains: "Continue (started"}
   - assert_state: {key: screen.step, equals: window}
   - assert_state: {key: screen.difference, equals: "0.00"}
+  - assert_state: {key: screen.left.checked, equals: 5}
+  - assert_state: {key: screen.right.checked, equals: 8}
   - command: file.close_window
