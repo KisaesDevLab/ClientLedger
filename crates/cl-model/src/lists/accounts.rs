@@ -188,10 +188,7 @@ pub fn detail_label(detail: &str) -> Option<TextKey> {
 /// accounts and credit cards.
 #[must_use]
 pub fn holds_bank_or_card_number(kind: AccountKind, detail: Option<&str>) -> bool {
-    matches!(
-        (kind, detail),
-        (AccountKind::Asset, Some("bank")) | (AccountKind::Liability, Some("credit_card"))
-    )
+    crate::register::AccountClass::of(kind, detail).is_money_account()
 }
 
 /// The detail type of a credit card account: the only accounts that take

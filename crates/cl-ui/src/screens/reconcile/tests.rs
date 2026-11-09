@@ -560,3 +560,42 @@ fn change_info_sends_a_posted_charge_only_when_changed() {
     s.poll();
     assert_eq!(state(&s)["notice"], "reconcile.begin.charge_posted");
 }
+
+/// QA-1 (P27): the sample's 1010 `checking` and 1020 `savings` are bank
+/// accounts as the engine keeps them (no demo rewrite), so Begin offers
+/// and preselects 1010; cl-model's bank set is the engine's.
+#[test]
+fn checking_and_savings_accounts_are_reconcilable_banks() {
+    assert_eq!(
+        cl_model::register::BANK_DETAIL_TYPES,
+        cl_api::BANK_REGISTER_DETAIL_TYPES
+    );
+    let chart = crate::company::demo::chart();
+    let of = |n: &str| {
+        chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some(n))
+            .expect("account")
+    };
+    assert_eq!(of("1010").fields.detail_type.as_deref(), Some("checking"));
+    assert_eq!(of("1020").fields.detail_type.as_deref(), Some("savings"));
+    assert_eq!(ReconcileScreen::kind_of(of("1010")), Some(ReconKind::Bank));
+    assert_eq!(ReconcileScreen::kind_of(of("1020")), Some(ReconKind::Bank));
+    assert_eq!(ReconcileScreen::kind_of(of("2050")), Some(ReconKind::Card));
+    assert_eq!(ReconcileScreen::kind_of(of("1500")), None);
+    // Real-engine shaped accounts: the sample's own detail types.
+    let sample = cl_company::Sample::load();
+    for (number, detail) in [("1010", "checking"), ("1020", "savings")] {
+        let a = sample
+            .company
+            .accounts
+            .iter()
+            .find(|a| a.number == number)
+            .expect("sample account");
+        assert_eq!(a.detail.as_deref(), Some(detail));
+    }
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    assert_eq!(s.form.account, Some(crate::company::demo::account_id(1010)));
+    assert_eq!(s.kind(), ReconKind::Bank);
+}

@@ -609,7 +609,7 @@ impl RegisterScreen {
             match result {
                 Ok(page) => {
                     if self.model.is_current(&req) {
-                        self.allowed.clone_from(&page.allowed);
+                        self.allowed = entry_row::register_entry_types(self.class, &page.allowed);
                         self.footer.page_arrived(&page);
                         self.load_error = None;
                     }

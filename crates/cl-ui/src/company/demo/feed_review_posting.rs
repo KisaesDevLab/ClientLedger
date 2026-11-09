@@ -553,10 +553,11 @@ fn fee_account_ok(chart: &[cl_api::Account], account: AccountId) -> bool {
         return false;
     };
     let (ar, ap) = journal::ar_ap(chart);
-    let banky = matches!(
-        a.fields.detail_type.as_deref(),
-        Some("bank" | "cash" | "credit_card")
-    );
+    let banky = a
+        .fields
+        .detail_type
+        .as_deref()
+        .is_some_and(|d| d == "credit_card" || cl_model::register::is_bank_detail(d));
     let system = matches!(
         a.system_tag.as_deref(),
         Some("payments_clearing" | "accounts_receivable" | "accounts_payable")

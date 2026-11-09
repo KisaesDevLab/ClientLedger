@@ -491,10 +491,9 @@ pub fn chart() -> Vec<cl_api::Account> {
         .accounts
         .iter()
         .map(|a| {
-            let detail = match a.detail.as_deref() {
-                Some("checking" | "savings") => Some("bank".to_string()),
-                other => other.map(str::to_string),
-            };
+            // The sample's own detail types, as the engine keeps them
+            // (1010 `checking`, 1020 `savings`; QA-1, P27).
+            let detail = a.detail.clone();
             DemoRow {
                 number: a.number.clone(),
                 name: a.name.clone(),

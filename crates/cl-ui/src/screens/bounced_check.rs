@@ -236,7 +236,12 @@ pub(crate) fn draw(s: &mut ReceivePaymentScreen, ui: &mut Ui, tokens: &Tokens) {
     let banks: Vec<(cl_core::ids::AccountId, String)> = s
         .deposit_accounts()
         .iter()
-        .filter(|a| a.fields.detail_type.as_deref() == Some("bank"))
+        .filter(|a| {
+            a.fields
+                .detail_type
+                .as_deref()
+                .is_some_and(cl_model::register::is_bank_detail)
+        })
         .map(|a| (a.id, crate::screens::register::account_text(a)))
         .collect();
     let held_name = match rec.deposited_in {

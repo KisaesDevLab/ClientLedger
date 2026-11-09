@@ -372,6 +372,32 @@ pub fn allowed_tags(allowed: &[EntryType]) -> Vec<EntryKindTag> {
         .collect()
 }
 
+/// The entry types a register of `class` takes, from the engine's list.
+/// The engine reports its full bank list only for detail type `bank`
+/// (`getAllowedEntryTypes` switches on `'bank'`; a `checking` / `savings` /
+/// `cash` / `petty_cash` account gets the plain asset list), yet posts
+/// checks, deposits and transfers on every bank detail type (QA-1, P27;
+/// UPSTREAM U-194). A bank register therefore takes the engine's `bank`
+/// list whatever its detail type.
+#[must_use]
+pub fn register_entry_types(class: AccountClass, engine: &[EntryType]) -> Vec<EntryType> {
+    if class != AccountClass::Bank || engine.is_empty() || engine.contains(&EntryType::Expense) {
+        return engine.to_vec();
+    }
+    let mut v = engine.to_vec();
+    for e in [
+        EntryType::Expense,
+        EntryType::Deposit,
+        EntryType::Transfer,
+        EntryType::JournalEntry,
+    ] {
+        if !v.contains(&e) {
+            v.push(e);
+        }
+    }
+    v
+}
+
 /// The control-channel name of a kind.
 #[must_use]
 pub fn kind_name(k: EntryKind) -> &'static str {
@@ -778,5 +804,40 @@ mod tests {
         let demo = prepared(EntryKind::Deposit, Side::Deposit).demo();
         assert!(demo.own_debit);
         assert_eq!(demo.kind, "deposit");
+    }
+}
+
+#[cfg(test)]
+mod bank_entry_type_tests {
+    use super::*;
+
+    /// QA-1 (P27): the engine lists expense/transfer only for detail type
+    /// `bank`; a checking register takes them too. Others keep the list.
+    #[test]
+    fn a_bank_register_takes_the_bank_list_whatever_its_detail_type() {
+        let asset = [EntryType::JournalEntry, EntryType::Deposit];
+        let v = register_entry_types(AccountClass::Bank, &asset);
+        for e in [
+            EntryType::Expense,
+            EntryType::Deposit,
+            EntryType::Transfer,
+            EntryType::JournalEntry,
+        ] {
+            assert!(v.contains(&e), "{e:?}");
+        }
+        assert_eq!(v.len(), 4);
+        assert_eq!(
+            register_entry_types(AccountClass::OtherAsset, &asset),
+            asset.to_vec()
+        );
+        assert!(
+            register_entry_types(AccountClass::Bank, &[]).is_empty(),
+            "view-only stays view-only"
+        );
+        let card = [EntryType::Expense, EntryType::JournalEntry];
+        assert_eq!(
+            register_entry_types(AccountClass::CreditCard, &card),
+            card.to_vec()
+        );
     }
 }

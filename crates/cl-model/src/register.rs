@@ -486,11 +486,23 @@ impl BalanceMode {
     }
 }
 
+/// The asset detail types that are bank registers: the engine's umbrella
+/// `bank` and the more specific `checking` / `savings` (the sample company
+/// and charts from other apps use them), plus cash on hand and petty cash.
+/// The engine's `BANK_DETAIL_TYPES` (`bank-account-types.ts`, U-175).
+pub const BANK_DETAIL_TYPES: [&str; 5] = ["bank", "checking", "savings", "cash", "petty_cash"];
+
+/// True when an asset account of detail type `detail` is a bank register.
+#[must_use]
+pub fn is_bank_detail(detail: &str) -> bool {
+    BANK_DETAIL_TYPES.contains(&detail)
+}
+
 /// What kind of register an account has. The chart's eight types are not
 /// enough: a bank and a credit card are both told apart by detail type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccountClass {
-    /// Asset with detail type `bank`.
+    /// Asset with a bank detail type ([`BANK_DETAIL_TYPES`]).
     Bank,
     /// Liability with detail type `credit_card`.
     CreditCard,
@@ -513,7 +525,7 @@ impl AccountClass {
     #[must_use]
     pub fn of(kind: AccountKind, detail: Option<&str>) -> AccountClass {
         match (kind, detail) {
-            (AccountKind::Asset, Some("bank")) => AccountClass::Bank,
+            (AccountKind::Asset, Some(d)) if is_bank_detail(d) => AccountClass::Bank,
             (AccountKind::Asset, Some("accounts_receivable")) => AccountClass::Receivable,
             (AccountKind::Asset, _) => AccountClass::OtherAsset,
             (AccountKind::Liability, Some("credit_card")) => AccountClass::CreditCard,

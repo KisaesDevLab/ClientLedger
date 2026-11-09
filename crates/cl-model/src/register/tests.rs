@@ -315,6 +315,13 @@ fn account_classes() {
     use AccountClass as C;
     let cases = [
         (AccountKind::Asset, Some("bank"), C::Bank),
+        // QA-1 (P27): the engine keeps `checking` / `savings` (the sample
+        // company's 1010 and 1020) and treats cash and petty cash as banks.
+        (AccountKind::Asset, Some("checking"), C::Bank),
+        (AccountKind::Asset, Some("savings"), C::Bank),
+        (AccountKind::Asset, Some("cash"), C::Bank),
+        (AccountKind::Asset, Some("petty_cash"), C::Bank),
+        (AccountKind::Liability, Some("checking"), C::OtherLiability),
         (
             AccountKind::Asset,
             Some("accounts_receivable"),

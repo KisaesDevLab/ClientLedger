@@ -911,10 +911,10 @@ impl DemoLedger {
                 .iter()
                 .find(|a| number_of(a) == Some(l.account.as_str()));
             let own_side = a.is_some_and(|a| {
-                matches!(
-                    a.fields.detail_type.as_deref(),
-                    Some("bank" | "credit_card")
-                )
+                a.fields
+                    .detail_type
+                    .as_deref()
+                    .is_some_and(|d| d == "credit_card" || cl_model::register::is_bank_detail(d))
             });
             lines.push(cl_api::TransactionLine {
                 id: line_id(&t, i),
