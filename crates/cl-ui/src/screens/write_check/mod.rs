@@ -316,9 +316,13 @@ pub struct WriteCheckScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     /// Q-PR4d: Quick Add / Set Up / Cancel for a payee not on the list.
     pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
-    /// The names, accounts or tags changed elsewhere while the form had
-    /// unsaved edits: read them again once it is clean.
+    /// The names, accounts or tags changed elsewhere: read them again once
+    /// no read is in flight.
     pub(crate) lists_stale: bool,
+    /// The lists are being read again while the form has unsaved edits:
+    /// they arrive without touching the typed header texts (PR-A1 QA round
+    /// 2: a vendor added elsewhere shows in an open form).
+    pub(crate) lists_keep_inputs: bool,
     /// Save as Template and the template this check came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
@@ -443,6 +447,7 @@ impl WriteCheckScreen {
             bus: crate::data_bus::Subscription::detached(),
             quick_add,
             lists_stale: false,
+            lists_keep_inputs: false,
             template: crate::screens::templates::SaveFlow::default(),
             draft: draft::CheckDraftMode::default(),
         };
@@ -725,6 +730,7 @@ impl WriteCheckScreen {
                 self.accounts = a;
                 lists_changed = true;
                 if self.bank().is_none()
+                    && !self.lists_keep_inputs
                     && let Some(bank) = self.default_bank(None)
                 {
                     // Not an edit: the starting account is part of the blank form.
@@ -751,7 +757,18 @@ impl WriteCheckScreen {
         }
         lists_changed |= self.items.poll();
         if lists_changed {
+            let rev = self.inputs.rev;
             self.apply_lists();
+            if self.lists_keep_inputs {
+                self.inputs.rev = rev;
+            }
+        }
+        if self.accounts_task.is_none()
+            && self.contacts_task.is_none()
+            && self.tags_task.is_none()
+            && !self.items.loading()
+        {
+            self.lists_keep_inputs = false;
         }
         if let Some(r) = self.settings_task.as_mut().and_then(Task::try_take) {
             self.settings_task = None;
@@ -798,13 +815,13 @@ impl WriteCheckScreen {
             self.items.start_load(&self.link, self.group.as_ref());
         }
         if self.lists_stale
-            && (!self.is_dirty() || self.quick_add.waiting())
             && self.accounts_task.is_none()
             && self.contacts_task.is_none()
             && self.tags_task.is_none()
             && !self.items.loading()
         {
             self.lists_stale = false;
+            self.lists_keep_inputs = self.is_dirty() && !self.quick_add.waiting();
             self.start_load();
         }
         if let Some(bank) = self.bank()

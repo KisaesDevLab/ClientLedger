@@ -250,7 +250,15 @@ impl EnterBillScreen {
         let Some(r) = task.try_take() else { return };
         self.prefill.task = None;
         let Ok(data) = r else { return };
-        if self.editing.is_some() || self.vendor() != Some(id) || !self.compose().can_prefill() {
+        // The owner already typing into a line keeps it: prefill landing a
+        // moment after the vendor pick would replace the lines under the
+        // open cell and drop the keystrokes (PR-A1 QA round 2).
+        if self.editing.is_some()
+            || self.vendor() != Some(id)
+            || !self.compose().can_prefill()
+            || self.expenses.typing()
+            || self.items.typing()
+        {
             return;
         }
         if let Some(bill) = data.bill.filter(|b| !b.lines.is_empty()) {

@@ -346,7 +346,7 @@ pub(crate) fn kept_name(list: &RecentCompanies, kept: TenantId, name: &str, date
     if !taken(&first) {
         return first;
     }
-    (2u32..)
+    (2..=u32::MAX)
         .map(|k| format!("{base}{BEFORE_RESTORE}{date} {k})"))
         .find(|n| !taken(n))
         .unwrap_or(first)

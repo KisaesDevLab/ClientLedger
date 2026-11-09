@@ -188,6 +188,7 @@ impl Intake {
     }
 
     /// The bring-back question is up (Review Documents' banner).
+    #[cfg(test)]
     pub(crate) fn bring_back_count(&self) -> usize {
         self.after_restore.found.len()
     }

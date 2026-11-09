@@ -393,9 +393,13 @@ pub struct EnterBillScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     /// Q-PR4d: Quick Add / Set Up / Cancel for a vendor not on the list.
     pub(crate) quick_add: crate::widgets::quick_add::QuickAdd,
-    /// The names, accounts, tags or items changed elsewhere while the form
-    /// had unsaved edits: read them again once it is clean.
+    /// The names, accounts, tags or items changed elsewhere: read them
+    /// again once no read is in flight.
     pub(crate) lists_stale: bool,
+    /// The lists are being read again while the form has unsaved edits:
+    /// they arrive without touching the typed header texts (PR-A1 QA round
+    /// 2: a vendor added elsewhere shows in an open form).
+    pub(crate) lists_keep_inputs: bool,
     /// A04 draft mode: the document draft this form enters (Accept is
     /// Save & Close / Save & New, sent to `convert`; `draft.rs`).
     pub(crate) draft: Option<crate::screens::doc_review::review::DraftSession>,
@@ -503,6 +507,7 @@ impl EnterBillScreen {
             bus: crate::data_bus::Subscription::detached(),
             quick_add,
             lists_stale: false,
+            lists_keep_inputs: false,
             draft: None,
         };
         s.bus = s.link.bus().subscribe();
@@ -781,7 +786,18 @@ impl EnterBillScreen {
             }
         }
         if lists_changed {
+            let rev = self.inputs.rev;
             self.apply_lists();
+            if self.lists_keep_inputs {
+                self.inputs.rev = rev;
+            }
+        }
+        if self.accounts_task.is_none()
+            && self.contacts_task.is_none()
+            && self.tags_task.is_none()
+            && self.items_task.is_none()
+        {
+            self.lists_keep_inputs = false;
         }
         if let Some(r) = self.settings_task.as_mut().and_then(Task::try_take) {
             self.settings_task = None;
@@ -804,21 +820,21 @@ impl EnterBillScreen {
     }
 
     /// Saves in other windows of this app (Q-262). The name, account, tag
-    /// and item lists are read again only while the form has no unsaved
-    /// edits; the vendor panel hears its vendor's bills.
+    /// and item lists are read again (a dirty form keeps its typed texts);
+    /// the vendor panel hears its vendor's bills.
     pub(crate) fn hear_changes(&mut self) {
         let changes = self.link.bus().take(&mut self.bus);
         if changes.lists() || changes.items {
             self.lists_stale = true;
         }
         if self.lists_stale
-            && (!self.is_dirty() || self.quick_add.waiting())
             && self.accounts_task.is_none()
             && self.contacts_task.is_none()
             && self.tags_task.is_none()
             && self.items_task.is_none()
         {
             self.lists_stale = false;
+            self.lists_keep_inputs = self.is_dirty() && !self.quick_add.waiting();
             self.start_load();
         }
         if !changes.is_empty() {

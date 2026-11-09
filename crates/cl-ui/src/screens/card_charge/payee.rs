@@ -167,9 +167,12 @@ impl CardChargeScreen {
         let Some(r) = task.try_take() else { return };
         self.payee.prefill = None;
         let Ok(data) = r else { return };
+        // Typing into a line keeps it (PR-A1 QA round 2).
         if self.flow.editing.is_some()
             || self.header.current().payee != Some(id)
             || !self.compose().can_prefill()
+            || self.lines.typing()
+            || self.items.grid.typing()
         {
             return;
         }

@@ -919,3 +919,83 @@ proptest::proptest! {
         proptest::prop_assert_eq!(s.header.current().amount_due, Some(m));
     }
 }
+
+/// PR-A1 QA round 2: a vendor added in another window while this bill has
+/// unsaved edits joins the vendor list (autofill and Ctrl+L) without
+/// touching what was typed.
+#[test]
+fn a_vendor_added_elsewhere_shows_in_an_open_dirty_bill() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.header.edit_step(|h| h.memo = "January".into());
+    s.sync_inputs();
+    // Typed, not left yet (the field parses on leaving).
+    s.inputs.amount = "1892.3".into();
+    assert!(s.is_dirty());
+    let new_id = crate::company::demo::contacts::contact_id(919_001);
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let list = demo.contacts_mut();
+        let mut c = list
+            .iter()
+            .find(|c| c.fields.display_name == demo_bills::STORY_VENDOR)
+            .cloned()
+            .expect("a vendor");
+        c.id = new_id;
+        c.fields.display_name = "Whitfield Supply Co".into();
+        list.push(c);
+    }
+    link.bus().publish(crate::data_bus::Change::Contacts);
+    s.hear_changes();
+    s.poll();
+    assert!(s.contacts.iter().any(|c| c.id == new_id), "Ctrl+L list");
+    assert_eq!(
+        s.lists.name_text(new_id),
+        Some("Whitfield Supply Co"),
+        "autofill"
+    );
+    assert_eq!(s.inputs.rev, s.header.revision(), "no resync of the texts");
+    frames(&mut s, 1440.0, 3);
+    assert_eq!(s.inputs.amount, "1892.3", "typed text kept");
+    assert_eq!(s.header.current().memo, "January");
+    assert!(!s.lists_keep_inputs);
+}
+
+/// PR-A1 QA round 2: the vendor's prefill arriving while the owner is
+/// already typing into Account, line 1 leaves the lines alone, so no
+/// keystroke is lost.
+#[test]
+fn prefill_arriving_while_a_line_is_typed_keeps_the_keystrokes() {
+    use eframe::egui::{Event, Pos2, RawInput, Rect, vec2};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let v = contact(&s, demo_bills::STORY_VENDOR);
+    // The vendor is picked; its prefill is still on the way (live engine).
+    s.header.edit(field::VENDOR, |h| h.vendor = Some(v));
+    s.sync_inputs();
+    s.expenses.focus_first();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |s: &mut EnterBillScreen, events: Vec<Event>| {
+        for e in [events, Vec::new(), Vec::new()] {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+                events: e,
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+            });
+            out.textures_delta.clear();
+        }
+    };
+    frame(&mut s, Vec::new());
+    frame(&mut s, vec![Event::Text("62".into())]);
+    assert!(s.expenses.typing(), "the cell holds the typed text");
+    s.prefill.task = Some((v, Task::ready(prefill::PrefillData::default())));
+    s.poll_prefill();
+    assert!(!s.prefill.applied, "prefill waits for no one typing");
+    assert!(s.expenses.typing(), "the keystrokes are still there");
+    assert_eq!(s.expenses.value().lines[0].account, None);
+}
