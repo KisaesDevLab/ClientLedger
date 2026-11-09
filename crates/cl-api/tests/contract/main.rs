@@ -57,6 +57,7 @@ mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
 mod contract_receive_payment;
+mod contract_reconcile;
 mod contract_refunds;
 mod contract_register;
 mod contract_register_property;
@@ -1233,6 +1234,55 @@ fn main() -> std::process::ExitCode {
         (
             "feed_match_post::assign_approve_then_undo_restores_the_staging",
             contract_feed_match_post::assign_approve_then_undo_restores_the_staging,
+        ),
+        // P27 reconcile (U-188 to U-192): fresh accounts per test.
+        (
+            "reconcile::finish_needs_exact_zero",
+            contract_reconcile::finish_needs_exact_zero,
+        ),
+        (
+            "reconcile::second_start_and_ticks_after_finish_are_409",
+            contract_reconcile::second_start_and_ticks_after_finish_are_409,
+        ),
+        (
+            "reconcile::parallel_starts_one_wins",
+            contract_reconcile::parallel_starts_one_wins,
+        ),
+        (
+            "reconcile::charges_count_before_and_post_once_on_finish",
+            contract_reconcile::charges_count_before_and_post_once_on_finish,
+        ),
+        (
+            "reconcile::closed_period_charge_needs_password",
+            contract_reconcile::closed_period_charge_needs_password,
+        ),
+        (
+            "reconcile::bank_feed_lines_are_prechecked",
+            contract_reconcile::bank_feed_lines_are_prechecked,
+        ),
+        (
+            "reconcile::card_printed_balance_ties_out_on_start_and_patch",
+            contract_reconcile::card_printed_balance_ties_out_on_start_and_patch,
+        ),
+        (
+            "reconcile::undo_keep_and_discard_restore_exact_states",
+            contract_reconcile::undo_keep_and_discard_restore_exact_states,
+        ),
+        (
+            "reconcile::undo_admin_only",
+            contract_reconcile::undo_admin_only,
+        ),
+        (
+            "reconcile::discrepancy_lists_changed_and_backdated_entries",
+            contract_reconcile::discrepancy_lists_changed_and_backdated_entries,
+        ),
+        (
+            "reconcile::editing_a_ticked_entry_keeps_its_tick",
+            contract_reconcile::editing_a_ticked_entry_keeps_its_tick,
+        ),
+        (
+            "reconcile::large_worksheet_reads_quickly",
+            contract_reconcile::large_worksheet_reads_quickly,
         ),
         // P24 inventory (U-157 to U-161): fresh companies on S3.
         (

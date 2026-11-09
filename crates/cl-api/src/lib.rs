@@ -103,6 +103,13 @@ pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, Cont
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::reconcile::Recheck;
+pub use resources::reconciliations::{
+    BeginningDrift, ClearedSide, Continuity, DiscrepancyReport, DiscrepancyRow, HeldCharge,
+    LINES_MAX, ReconHistoryRow, ReconLine, ReconPatch, ReconReport, ReconStart, ReconStatus,
+    ReconcileRefusal, Reconciliation, ReconciliationId, Reconciliations, ReportLine,
+    StatementCharge, UndoMode, reconcile_refusal, reconciliation_from,
+    screen_supported as reconcile_screen_supported,
+};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::register::{
     Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,

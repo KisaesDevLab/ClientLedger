@@ -44,6 +44,8 @@ pub mod payments;
 pub mod posting;
 pub mod printing;
 pub(crate) mod reconcile;
+// P27: Reconcile (U-188 to U-191).
+pub mod reconciliations;
 pub mod recoveries;
 pub mod recovery;
 pub mod recurring;

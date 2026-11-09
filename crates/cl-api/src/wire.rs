@@ -531,6 +531,19 @@ impl Capabilities {
     /// or with the exact total dated within 7 days.
     pub const DOCUMENT_DUPLICATES_NO_VENDOR: &'static str = "document-duplicates-no-vendor-v1";
 
+    // ---- P27: Reconcile (engine U-188 to U-191)
+    /// U-188: reconciliation amounts as exact strings, the cleared totals,
+    /// a strict zero finish, 409s for status, one in progress per account
+    /// and batched ticks with `?view=summary`.
+    pub const RECONCILE_EXACT: &'static str = "reconcile-exact-v1";
+    /// U-189: service charge and interest at Begin (posted at Finish),
+    /// bank-file pre-check, later lines, drift and `postingLocked`.
+    pub const RECONCILE_BEGIN: &'static str = "reconcile-begin-v1";
+    /// U-190: undo modes (keep checks, discard), Admin only, closing date.
+    pub const RECONCILE_UNDO: &'static str = "reconcile-undo-v2";
+    /// U-191: `GET /reports/reconciliation-discrepancy`.
+    pub const RECONCILE_DISCREPANCY: &'static str = "reconcile-discrepancy-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
