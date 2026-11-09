@@ -860,3 +860,142 @@ fn a_new_vendor_credit_line_takes_what_is_left_of_the_amount() {
     pick_line(&mut s, 1, "6210");
     assert_eq!(s.expenses.value().lines[1].amount, Some(money("50.00")));
 }
+
+/// PR-A1 QA-2: the amount due the owner types is the amount kept: typed
+/// as plain digits or with a thousands comma, after the vendor (its
+/// defaults and last bills arrive while the owner types), it never moves
+/// by a cent. Only a third decimal rounds (Q-232, half away from zero):
+/// "1892.305" is 1,892.31, the one way typed digits become .31.
+#[test]
+fn the_typed_amount_due_is_kept_to_the_cent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let vendor = contact(&s, demo_bills::STORY_VENDOR);
+    s.pick_vendor(vendor);
+    for text in ["1892.30", "1,892.30", "$1892.3", "1892.300"] {
+        s.inputs.amount = text.into();
+        s.amount_left();
+        // The vendor's defaults and lists arrive after the typing.
+        s.poll();
+        s.poll();
+        assert_eq!(
+            s.header.current().amount_due,
+            Some(money("1892.30")),
+            "{text}"
+        );
+        assert_eq!(s.inputs.amount, "1,892.30", "{text}");
+    }
+    s.inputs.amount = "1892.305".into();
+    s.amount_left();
+    assert_eq!(s.header.current().amount_due, Some(money("1892.31")));
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// PR-A1 QA-2: any whole-cent amount typed in full, in pieces (each
+    /// piece left as the owner tabs away and back) or formatted, ends as
+    /// exactly that amount; no float anywhere on the way.
+    #[test]
+    fn any_typed_cents_are_the_amount_due(cents in 1i64..100_000_000, cut in 0usize..12) {
+        let (_d, link) = link();
+        let mut s = screen(&link);
+        let m = Money::from_cents(cents).expect("m");
+        let plain = m.to_wire();
+        let plain = plain.trim_end_matches('0').trim_end_matches('.');
+        for text in [plain.to_string(), m.format(s.money_style)] {
+            s.inputs.amount = text.clone();
+            s.amount_left();
+            proptest::prop_assert_eq!(s.header.current().amount_due, Some(m), "{}", text);
+        }
+        // Leaving the field again (its text now formatted) keeps it, and a
+        // piece typed first and left doesn't stick to the whole.
+        let cut = cut.min(plain.len());
+        s.inputs.amount = plain[..cut].to_string();
+        s.amount_left();
+        s.inputs.amount = plain.to_string();
+        s.amount_left();
+        s.amount_left();
+        proptest::prop_assert_eq!(s.header.current().amount_due, Some(m));
+    }
+}
+
+/// PR-A1 QA round 2: a vendor added in another window while this bill has
+/// unsaved edits joins the vendor list (autofill and Ctrl+L) without
+/// touching what was typed.
+#[test]
+fn a_vendor_added_elsewhere_shows_in_an_open_dirty_bill() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.header.edit_step(|h| h.memo = "January".into());
+    s.sync_inputs();
+    // Typed, not left yet (the field parses on leaving).
+    s.inputs.amount = "1892.3".into();
+    assert!(s.is_dirty());
+    let new_id = crate::company::demo::contacts::contact_id(919_001);
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let list = demo.contacts_mut();
+        let mut c = list
+            .iter()
+            .find(|c| c.fields.display_name == demo_bills::STORY_VENDOR)
+            .cloned()
+            .expect("a vendor");
+        c.id = new_id;
+        c.fields.display_name = "Whitfield Supply Co".into();
+        list.push(c);
+    }
+    link.bus().publish(crate::data_bus::Change::Contacts);
+    s.hear_changes();
+    s.poll();
+    assert!(s.contacts.iter().any(|c| c.id == new_id), "Ctrl+L list");
+    assert_eq!(
+        s.lists.name_text(new_id),
+        Some("Whitfield Supply Co"),
+        "autofill"
+    );
+    assert_eq!(s.inputs.rev, s.header.revision(), "no resync of the texts");
+    frames(&mut s, 1440.0, 3);
+    assert_eq!(s.inputs.amount, "1892.3", "typed text kept");
+    assert_eq!(s.header.current().memo, "January");
+    assert!(!s.lists_keep_inputs);
+}
+
+/// PR-A1 QA round 2: the vendor's prefill arriving while the owner is
+/// already typing into Account, line 1 leaves the lines alone, so no
+/// keystroke is lost.
+#[test]
+fn prefill_arriving_while_a_line_is_typed_keeps_the_keystrokes() {
+    use eframe::egui::{Event, Pos2, RawInput, Rect, vec2};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let v = contact(&s, demo_bills::STORY_VENDOR);
+    // The vendor is picked; its prefill is still on the way (live engine).
+    s.header.edit(field::VENDOR, |h| h.vendor = Some(v));
+    s.sync_inputs();
+    s.expenses.focus_first();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |s: &mut EnterBillScreen, events: Vec<Event>| {
+        for e in [events, Vec::new(), Vec::new()] {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+                events: e,
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+            });
+            out.textures_delta.clear();
+        }
+    };
+    frame(&mut s, Vec::new());
+    frame(&mut s, vec![Event::Text("62".into())]);
+    assert!(s.expenses.typing(), "the cell holds the typed text");
+    s.prefill.task = Some((v, Task::ready(prefill::PrefillData::default())));
+    s.poll_prefill();
+    assert!(!s.prefill.applied, "prefill waits for no one typing");
+    assert!(s.expenses.typing(), "the keystrokes are still there");
+    assert_eq!(s.expenses.value().lines[0].account, None);
+}

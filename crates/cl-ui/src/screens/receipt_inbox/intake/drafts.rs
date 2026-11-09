@@ -72,6 +72,16 @@ const READ_ALL_MAX: usize = 2000;
 /// Resends of an attach whose answer was lost (same key).
 const ATTACH_RESENDS: u8 = 3;
 
+/// PR-A1 S2 (Q-PRA1c): when the open company was restored on this
+/// computer (its drafts made before then came with the backup).
+fn restored_at(
+    link: &CompanyLink,
+    tenant: Option<cl_core::ids::TenantId>,
+) -> Option<cl_core::Timestamp> {
+    let list = link.store().load().ok()?;
+    list.get(tenant?)?.restored.as_ref().map(|r| r.at)
+}
+
 // ---------------------------------------------------------------------------
 // The claim's answer (pure, so every row of the D1 table is tested).
 
@@ -81,6 +91,10 @@ pub(crate) enum ClaimAnswer {
     /// 201, or 409 naming a draft that reads one of this entry's own
     /// uploads (an earlier claim whose reply was lost): `own`.
     Own(DocumentDraftId),
+    /// PR-A1 S2 (Q-PRA1c): 409 naming a live draft that came with a
+    /// restore on this computer (made before it): this computer's own; the
+    /// entry reads its file and this upload is deleted.
+    Adopted(DocumentDraftId, AttachmentId),
     /// 409 naming another computer's live draft of the same bytes:
     /// `duplicate` + `follows`, the extra copy deleted.
     Elsewhere(DocumentDraftId),
@@ -108,6 +122,7 @@ impl ClaimAnswer {
     pub(crate) fn class(self) -> &'static str {
         match self {
             ClaimAnswer::Own(_) => "own",
+            ClaimAnswer::Adopted(..) => "adopted",
             ClaimAnswer::Elsewhere(_) => "elsewhere",
             ClaimAnswer::Entered => "entered",
             ClaimAnswer::EnteredElsewhere(_) => "entered_elsewhere",
@@ -146,6 +161,7 @@ pub(crate) fn first_answer(r: &Result<DocumentDraft, cl_api::ApiError>) -> First
 pub(crate) fn winner_answer(
     r: &Result<DocumentDraft, cl_api::ApiError>,
     ours: &[String],
+    restored_at: Option<cl_core::Timestamp>,
 ) -> ClaimAnswer {
     match r {
         Ok(d)
@@ -162,6 +178,17 @@ pub(crate) fn winner_answer(
             }
         }
         Ok(d) if d.status == DraftStatus::Converted => ClaimAnswer::EnteredElsewhere(d.id),
+        // PR-A1 S2: made before this company was restored here: it came
+        // with the backup, so no other computer is entering it.
+        Ok(DocumentDraft {
+            id,
+            status,
+            created_at: Some(made),
+            attachment_id: Some(file),
+            ..
+        }) if status.is_live() && restored_at.is_some_and(|r| *made <= r) => {
+            ClaimAnswer::Adopted(*id, *file)
+        }
         Ok(d) if d.status.is_live() => ClaimAnswer::Elsewhere(d.id),
         Err(cl_api::ApiError::Forbidden { .. }) => ClaimAnswer::Refused,
         // Discarded or gone since the 409, or no answer: claim again.
@@ -628,6 +655,7 @@ impl Intake {
             .entry(&self.company, &identity)
             .map(|e| e.attachments.clone())
             .unwrap_or_default();
+        let restored_at = restored_at(link, self.tenant);
         // The same claim sent again this session keeps its key.
         let key = match self.drafts.keys.get(&identity.path_hash) {
             Some((same, k)) if *same == identity => k.clone(),
@@ -641,7 +669,9 @@ impl Intake {
             let first = d::create(&mut demo, tenant, attachment, hint, key);
             let answer = match first_answer(&first) {
                 FirstAnswer::Done(a) => a,
-                FirstAnswer::Winner(id) => winner_answer(&d::get(&demo, tenant, id), &ours),
+                FirstAnswer::Winner(id) => {
+                    winner_answer(&d::get(&demo, tenant, id), &ours, restored_at)
+                }
             };
             drop(demo);
             self.drafts.claim = Some(ClaimStep::Sending {
@@ -665,7 +695,7 @@ impl Intake {
             let first = drafts.create(attachment, hint, key).await;
             Ok(match first_answer(&first) {
                 FirstAnswer::Done(a) => a,
-                FirstAnswer::Winner(id) => winner_answer(&drafts.get(id).await, &ours),
+                FirstAnswer::Winner(id) => winner_answer(&drafts.get(id).await, &ours, restored_at),
             })
         }) {
             Ok(p) => {
@@ -743,6 +773,23 @@ impl Intake {
                     self.save_state();
                     if auto_read || self.drafts.read_all {
                         self.queue_read(id, self.folder_kind_of(identity));
+                    }
+                }
+            }
+            ClaimAnswer::Adopted(id, file) => {
+                self.drafts.keys.remove(&identity.path_hash);
+                let extra = self
+                    .state
+                    .entry(&c, identity)
+                    .and_then(|e| e.attachment().and_then(|a| AttachmentId::parse(a).ok()));
+                if self
+                    .state
+                    .adopted(&c, identity, &id.to_string(), &file.to_string())
+                {
+                    self.save_state();
+                    // This upload is an extra copy of the restored file.
+                    if let Some(a) = extra.filter(|a| *a != file) {
+                        self.start_delete_copy(link, identity.clone(), a);
                     }
                 }
             }
@@ -1706,11 +1753,14 @@ mod unit {
         let ours = vec![OURS.to_string()];
         // Adopted only from this entry's own uploads.
         let mine = Ok(draft(D1, DraftStatus::Ready, OURS));
-        assert_eq!(winner_answer(&mine, &ours), ClaimAnswer::Own(id()));
+        assert_eq!(winner_answer(&mine, &ours, None), ClaimAnswer::Own(id()));
         let theirs = Ok(draft(D1, DraftStatus::New, THEIRS));
-        assert_eq!(winner_answer(&theirs, &ours), ClaimAnswer::Elsewhere(id()));
         assert_eq!(
-            winner_answer(&theirs, &[]),
+            winner_answer(&theirs, &ours, None),
+            ClaimAnswer::Elsewhere(id())
+        );
+        assert_eq!(
+            winner_answer(&theirs, &[], None),
             ClaimAnswer::Elsewhere(id()),
             "no uploads: never adopted"
         );
@@ -1718,18 +1768,58 @@ mod unit {
         // delete (review L1); our own entered draft is plainly handled.
         let entered = Ok(draft(D1, DraftStatus::Converted, THEIRS));
         assert_eq!(
-            winner_answer(&entered, &ours),
+            winner_answer(&entered, &ours, None),
             ClaimAnswer::EnteredElsewhere(id())
         );
         let ours_entered = Ok(draft(D1, DraftStatus::Converted, OURS));
-        assert_eq!(winner_answer(&ours_entered, &ours), ClaimAnswer::Entered);
-        let discarded = Ok(draft(D1, DraftStatus::Discarded, THEIRS));
-        assert_eq!(winner_answer(&discarded, &ours), ClaimAnswer::Retry);
         assert_eq!(
-            winner_answer(&Err(ApiError::NotFound { code: None }), &ours),
+            winner_answer(&ours_entered, &ours, None),
+            ClaimAnswer::Entered
+        );
+        let discarded = Ok(draft(D1, DraftStatus::Discarded, THEIRS));
+        assert_eq!(winner_answer(&discarded, &ours, None), ClaimAnswer::Retry);
+        assert_eq!(
+            winner_answer(&Err(ApiError::NotFound { code: None }), &ours, None),
             ClaimAnswer::Retry
         );
         assert_eq!(ClaimAnswer::Own(id()).class(), "own");
+    }
+
+    /// PR-A1 S2 / T5 (Q-PRA1c): after a restore on this computer, a live
+    /// draft made before the restore is adopted as this computer's own,
+    /// never "another computer"; one made after the restore still is
+    /// another computer's (LAN), and an entered one is handled as before.
+    #[test]
+    fn a_restored_draft_is_adopted_not_another_computers() {
+        let ours = vec![OURS.to_string()];
+        let mut restored = draft(D1, DraftStatus::Ready, THEIRS);
+        restored.created_at = cl_core::Timestamp::parse_wire("2026-11-02T09:00:00Z").ok();
+        let at = cl_core::Timestamp::parse_wire("2026-11-03T09:00:00Z").ok();
+        assert!(at.is_some() && restored.created_at.is_some());
+        let file = restored.attachment_id.expect("file");
+        assert_eq!(
+            winner_answer(&Ok(restored.clone()), &ours, at),
+            ClaimAnswer::Adopted(id(), file)
+        );
+        assert_eq!(ClaimAnswer::Adopted(id(), file).class(), "adopted");
+        // Not restored here: another computer's, as before.
+        assert_eq!(
+            winner_answer(&Ok(restored.clone()), &ours, None),
+            ClaimAnswer::Elsewhere(id())
+        );
+        // Made after the restore: another computer's.
+        let mut later = restored.clone();
+        later.created_at = cl_core::Timestamp::parse_wire("2026-11-04T09:00:00Z").ok();
+        assert_eq!(
+            winner_answer(&Ok(later), &ours, at),
+            ClaimAnswer::Elsewhere(id())
+        );
+        let mut entered = restored;
+        entered.status = DraftStatus::Converted;
+        assert_eq!(
+            winner_answer(&Ok(entered), &ours, at),
+            ClaimAnswer::EnteredElsewhere(id())
+        );
     }
 
     #[test]

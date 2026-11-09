@@ -59,7 +59,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.intake.keep_originals", "Leave originals where they are"),
     ("prefs.intake.keep_originals.tip", "Don't move handled files into Processed or Discarded"),
     ("prefs.intake.auto_read", "Read new documents automatically"),
-    ("prefs.intake.auto_read.hint", "Reading arrives in a coming update; until then new documents wait in the inbox."),
+    ("prefs.intake.auto_read.hint", "New documents are read as soon as they come in. Turn this off to read each one yourself."),
     ("prefs.intake.status.new", "New: save to add"),
     ("prefs.intake.status.ready", "Ready on this computer: save to start"),
     ("prefs.intake.status.here", "Set up on this computer"),

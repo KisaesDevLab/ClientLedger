@@ -696,6 +696,7 @@ mod tests {
             date: None,
             total: None,
             reference: None,
+            no_vendor: false,
         }]);
         assert_eq!(duplicate_of(&possible), DuplicateCheck::Possible);
         let draft_only = Ok(vec![DuplicateMatch {
@@ -706,6 +707,7 @@ mod tests {
             date: None,
             total: None,
             reference: None,
+            no_vendor: false,
         }]);
         assert_eq!(duplicate_of(&draft_only), DuplicateCheck::Clear);
         assert_eq!(

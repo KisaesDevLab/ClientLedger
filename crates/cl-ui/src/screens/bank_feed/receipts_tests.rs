@@ -398,4 +398,171 @@ mod panel {
         assert!(!fits(&out, full));
         assert!(offers_for(&[out], &s.receipts.drafts).is_empty());
     }
+
+    /// PR-A1 B1 / T2: the vendor's receipt of a bill the owner already
+    /// entered is offered unpicked with "may already be entered"; A then
+    /// posts the line alone and the receipt stays in Review Documents.
+    #[test]
+    fn a_receipt_of_a_bill_already_entered_is_offered_unpicked() {
+        let (_d, s, r, _ctx) = opened("dev.demo_feed_receipt_dup");
+        let offers = s.receipts.of(r.id).to_vec();
+        assert_eq!(offers.len(), 1, "still offered");
+        let dups = duplicates_of(&s.detail.receipt, offers[0]);
+        assert_eq!(dups.len(), 1, "the bill");
+        assert_eq!(dups[0].txn_type.as_deref(), Some("bill"));
+        assert!(s.detail.receipt.pick.is_none(), "not picked for the owner");
+        assert!(s.detail.receipt.held && !s.detail.receipt.declined);
+        let st = state(&s);
+        assert_eq!(st["flagged"], 1);
+        assert_eq!(st["held"], true);
+        assert!(matches!(
+            with_receipt(&s, &r, Some(values(&s, &r))),
+            Some(Send::Categorize(..))
+        ));
+        // A list read again doesn't pick it either.
+        let mut s = s;
+        refresh(&mut s);
+        assert!(s.detail.receipt.pick.is_none());
+    }
+
+    /// PR-A1 QA-1: the receipt's vendor wasn't matched when it was read
+    /// (the owner added the vendor afterwards): it is still checked
+    /// (Q-PRA1d), offered unpicked and flagged, and A posts the line alone;
+    /// picked by hand it waits for "Use it anyway".
+    #[test]
+    fn a_receipt_without_a_vendor_of_a_bill_already_entered_is_flagged() {
+        let (_d, mut s, r, ctx) = opened("dev.demo_feed_receipt_dup_no_vendor");
+        let offers = s.receipts.of(r.id).to_vec();
+        assert_eq!(offers.len(), 1, "still offered");
+        let d = s.receipts.draft(offers[0]).expect("listed");
+        assert_eq!(d.suggested_contact_id, None, "no vendor on the receipt");
+        let dups = duplicates_of(&s.detail.receipt, offers[0]);
+        assert_eq!(dups.len(), 1, "the bill");
+        assert_eq!(dups[0].txn_type.as_deref(), Some("bill"));
+        assert!(s.detail.receipt.pick.is_none() && s.detail.receipt.held);
+        assert_eq!(state(&s)["flagged"], 1);
+        assert!(matches!(
+            with_receipt(&s, &r, Some(values(&s, &r))),
+            Some(Send::Categorize(..))
+        ));
+        s.detail.receipt.chosen = true;
+        choose(&mut s, Some(offers[0]));
+        follow(&mut s, &ctx);
+        assert!(
+            with_receipt(&s, &r, Some(values(&s, &r))).is_none(),
+            "waits"
+        );
+        s.detail.receipt.use_anyway = Some(offers[0]);
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 1, "posted once");
+    }
+
+    /// PR-A1 QA-1: the engine's refusal needs no vendor on the receipt or
+    /// the line: it shows what matched and asks.
+    #[test]
+    fn the_refusal_without_a_vendor_asks_before_using_the_receipt() {
+        let (_d, mut s, r, ctx) = opened("dev.demo_feed_receipt_dup_no_vendor");
+        let offer = s.receipts.of(r.id)[0];
+        s.detail.receipt.details.clear();
+        s.detail.receipt.chosen = true;
+        choose(&mut s, Some(offer));
+        follow(&mut s, &ctx);
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 0, "nothing posted");
+        assert_eq!(duplicates_of(&s.detail.receipt, offer).len(), 1);
+        assert!(with_receipt(&s, &r, Some(values(&s, &r))).is_none());
+    }
+
+    /// PR-A1 QA-1: a vendor picked for the line since the check ran: the
+    /// receipts are checked again.
+    #[test]
+    fn a_vendor_picked_for_the_line_checks_the_receipts_again() {
+        let (_d, mut s, r, ctx) = opened("dev.demo_feed_receipt_dup_no_vendor");
+        refresh(&mut s);
+        follow(&mut s, &ctx);
+        assert!(!s.detail.receipt.details.is_empty(), "checked once");
+        // Nothing changed: not read again.
+        refresh(&mut s);
+        assert!(s.detail.receipt.details_load.is_none());
+        let vendor = cl_api::Named {
+            id: ContactId::parse("00000000-0000-4000-8000-000000000177").expect("id"),
+            name: "Synthetic Vendor".into(),
+        };
+        if let Some(row) = s.rows.iter_mut().find(|x| x.id == r.id) {
+            row.assigned_contact = Some(vendor);
+        }
+        refresh(&mut s);
+        assert!(s.detail.receipt.details_load.is_some(), "checked again");
+        follow(&mut s, &ctx);
+        assert_eq!(
+            duplicates_of(&s.detail.receipt, s.receipts.of(r.id)[0]).len(),
+            1
+        );
+    }
+
+    /// PR-A1 B1 / T2: picked by hand, Accept waits for "Use it anyway";
+    /// then the receipt goes with the line acknowledging the bill, and
+    /// posts once.
+    #[test]
+    fn use_it_anyway_sends_the_acknowledged_bill_and_posts_once() {
+        let (_d, mut s, r, ctx) = opened("dev.demo_feed_receipt_dup");
+        let offer = s.receipts.of(r.id)[0];
+        s.detail.receipt.chosen = true;
+        choose(&mut s, Some(offer));
+        follow(&mut s, &ctx);
+        assert!(s.detail.receipt.full.is_some());
+        assert!(
+            with_receipt(&s, &r, Some(values(&s, &r))).is_none(),
+            "waits"
+        );
+        s.detail.receipt.use_anyway = Some(offer);
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        let bill = match duplicates_of(&s.detail.receipt, offer)[0].source {
+            MatchSource::Transaction(t) => t,
+            MatchSource::Draft(_) => panic!("a bill"),
+        };
+        let item = carried(Some(&x)).expect("carried");
+        assert_eq!(
+            item.draft().expect("draft").acknowledged_duplicates,
+            vec![bill]
+        );
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 1, "posted once");
+    }
+
+    /// PR-A1 B1: the engine's refusal (the check before didn't see it)
+    /// shows the match and asks; nothing posted; "Use it anyway" posts.
+    #[test]
+    fn the_engines_refusal_asks_before_using_the_receipt() {
+        let (_d, mut s, r, ctx) = opened("dev.demo_feed_receipt_dup");
+        let offer = s.receipts.of(r.id)[0];
+        // As if the check before had found nothing.
+        s.detail.receipt.details.clear();
+        s.detail.receipt.chosen = true;
+        choose(&mut s, Some(offer));
+        follow(&mut s, &ctx);
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        assert!(carried(Some(&x)).is_some());
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 0, "nothing posted");
+        assert_eq!(
+            s.notice.map(|n| n.0),
+            Some("bank_feed.notice.receipt_duplicate")
+        );
+        assert_eq!(s.detail.receipt.pick, Some(offer), "still picked");
+        assert!(!s.detail.receipt.declined);
+        assert_eq!(duplicates_of(&s.detail.receipt, offer).len(), 1);
+        assert!(with_receipt(&s, &r, Some(values(&s, &r))).is_none());
+        s.detail.receipt.use_anyway = Some(offer);
+        let x = with_receipt(&s, &r, Some(values(&s, &r))).expect("send");
+        send::start(&mut s, x, None);
+        s.poll();
+        assert_eq!(s.counts.accepted, 1);
+    }
 }

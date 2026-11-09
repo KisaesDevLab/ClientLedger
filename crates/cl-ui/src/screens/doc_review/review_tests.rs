@@ -168,6 +168,7 @@ impl World {
                 contact: None,
                 account: None,
                 account_name: None,
+                reference: None,
             },
             learn: None,
         }
@@ -782,4 +783,243 @@ fn a_receipt_unlike_any_waiting_line_is_entered_without_asking() {
         ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
         "{ev:?}"
     );
+}
+
+/// PR-A1 S1 / T4 (Q-PRA1a): a card receipt of an unpaid bill offers
+/// "Pay this bill" (picked, the main action); it opens Pay Bills on the
+/// bill, paid from the receipt's card on its date; paying posts one bill
+/// payment, the bill closes, the receipt is filed on the payment, and A/P
+/// drops by the exact amount. Nothing is entered as a new expense.
+#[test]
+fn a_receipt_of_an_unpaid_bill_pays_it_in_pay_bills() {
+    use crate::company::demo::bills as demo_bills;
+    use crate::windows::{OpenPayload, Screen};
+
+    let w = World::new();
+    let vendor = w
+        .demo()
+        .contacts_mut()
+        .iter()
+        .find(|c| c.fields.display_name == demo_bills::STORY_VENDOR)
+        .map(|c| c.id)
+        .expect("vendor");
+    let bill = {
+        let mut d = w.demo();
+        let draft = cl_api::BillDraft {
+            vendor,
+            date: day(10),
+            vendor_invoice_number: Some("SYN-4598943".into()),
+            terms: None,
+            due_date: None,
+            memo: None,
+            amount_due: money("2197.97"),
+            lines: vec![cl_api::BillLineDraft::expense(
+                crate::company::demo::account_id(6210),
+                money("2197.97"),
+            )],
+            received: true,
+            draft_attachment: None,
+        };
+        demo_bills::create_bill(&mut d, &draft, None).expect("bill")
+    };
+    let owed = |w: &World| {
+        demo_bills::get(&mut w.demo(), bill)
+            .and_then(|v| v.record.balance_due)
+            .expect("balance")
+    };
+    assert_eq!(owed(&w), money("2197.97"));
+    let id = w.draft("pay", "2197.97", day(14));
+    let mut s = w.session(id);
+    let card = w.account("2050");
+    let mut form = w.checked("2197.97", day(14));
+    form.payee = Some(vendor);
+    let mut accept = World::accept_with(
+        &form,
+        crate::screens::card_charge::CardChargeScreen::charge_draft(&form),
+        None,
+    );
+    accept.probe.contact = Some(vendor);
+    accept.probe.account = Some(card);
+    let before = w.transactions();
+    assert!(s.accept(accept));
+    let _ = tick(&w, &mut s);
+    let d = s.attach.as_ref().expect("the dialog");
+    assert_eq!(d.picked_bill(), Some(bill), "the bill is picked");
+    assert_eq!(d.state_json()["payable"], 1);
+    s.dialog_answer(DialogAnswer::PayBill(bill));
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(e, DraftEvent::Close)), "{ev:?}");
+    assert_eq!(w.transactions(), before, "nothing entered as new");
+    let payload = w
+        .link
+        .drain()
+        .into_iter()
+        .find_map(|e| match e {
+            CompanyEvent::OpenWith(kind, p) if kind.as_str() == crate::screens::pay_bills::KIND => {
+                Some(*p)
+            }
+            _ => None,
+        })
+        .expect("Pay Bills opens");
+    let OpenPayload::PayBill(p) = &payload else {
+        panic!("a bill to pay: {payload:?}");
+    };
+    assert_eq!((p.bill, p.from, p.date), (bill, Some(card), day(14)));
+
+    // Pay Bills: ticked, by card from the receipt's card, then paid.
+    let mut pay =
+        crate::screens::pay_bills::PayBillsScreen::new(Arc::clone(&w.link), None, day(20));
+    assert!(pay.open_with(payload));
+    pay.poll();
+    let st = pay.state();
+    assert_eq!(st["selected"], 1, "{st}");
+    assert_eq!(st["method"], "card");
+    assert_eq!(st["pay_from"], card.to_string());
+    assert_eq!(st["date"], day(14).to_wire());
+    let row = pay
+        .form
+        .all_rows()
+        .iter()
+        .find(|r| r.bill == bill)
+        .map(|r| r.balance_due);
+    assert_eq!(row, Some(money("2197.97")), "owed in full");
+    assert!(pay.save(), "paid");
+    pay.poll();
+    let st = pay.state();
+    assert_eq!(st["receipt"]["filed"], true, "{st}");
+    assert_eq!(w.transactions(), before + 1, "one bill payment");
+    // A/P drops by exactly the bill: it leaves the payable list (the
+    // demo's aging report reads only the sample).
+    pay.poll();
+    assert!(
+        !pay.form.all_rows().iter().any(|r| r.bill == bill),
+        "the bill is paid"
+    );
+    assert_eq!(st["last_bills"], 1, "one bill paid");
+    let d = demo_drafts::get(&w.demo(), w.tenant, id).expect("draft");
+    assert_eq!(d.status, DraftStatus::Converted);
+    assert_eq!(d.converted_type.as_deref(), Some("bill_payment"));
+}
+
+/// Q-PRA1a: a bill already paid when "Pay this bill" is picked opens
+/// nothing and says so; nothing posts.
+#[test]
+fn pay_this_bill_on_a_paid_bill_says_so() {
+    let w = World::new();
+    let id = w.draft("paid", "25.00", day(14));
+    let mut s = w.session(id);
+    let target = w.post_expense("25.00", day(13));
+    // A bill id the demo doesn't know reads as nothing owed.
+    s.work = Work::Choosing {
+        accept: Box::new(w.accept("25.00", day(14), None)),
+    };
+    s.dialog_answer(DialogAnswer::PayBill(target));
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Cancelled)),
+        "{ev:?}"
+    );
+    assert_eq!(s.note, Some("doc_form.pay_bill.paid"));
+    assert!(
+        w.link
+            .drain()
+            .iter()
+            .all(|e| !matches!(e, CompanyEvent::OpenWith(..)))
+    );
+}
+
+/// PR-A1 T13: the app is killed after a convert was sent and before its
+/// answer (the engine committed it). On restart the keys are gone: the
+/// draft opens as entered, the entry exists once, and accepting again
+/// posts nothing. (The original's move is the inbox follow, tested there.)
+#[test]
+fn a_convert_cut_off_by_a_crash_is_entered_once_after_restart() {
+    let w = World::new();
+    let id = w.draft("crash", "40.00", day(14));
+    let before = w.transactions();
+    {
+        let mut s = w.session(id);
+        w.demo().drafts.lose_next_reply = true;
+        assert!(s.accept(w.accept("40.00", day(14), None)));
+        assert_eq!(s.work.name(), "resend", "the answer was lost");
+        // Killed here: the session (and its key) is gone.
+    }
+    assert_eq!(w.transactions(), before + 1, "the engine committed it");
+    assert_eq!(w.status(id), DraftStatus::Converted);
+    // Restart: a fresh session on the same draft.
+    let mut s = DraftSession::new(
+        Arc::clone(&w.link),
+        Some(w.tenant),
+        DraftOpen {
+            id,
+            form: DraftForm::CardCharge,
+        },
+    );
+    let _ = tick(&w, &mut s);
+    let _ = s.accept(w.accept("40.00", day(14), None));
+    for _ in 0..3 {
+        let ev = tick(&w, &mut s);
+        assert!(
+            !ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+            "{ev:?}"
+        );
+    }
+    assert_eq!(w.transactions(), before + 1, "entered once");
+}
+
+/// PR-A1 QA-3: a card charge with no vendor on the form, dated weeks after
+/// an open bill with the same Ref no. and total, still asks "Is this
+/// already in your books?" with Pay this bill before anything posts.
+#[test]
+fn a_receipt_with_an_open_bills_reference_asks_before_posting_without_a_vendor() {
+    use crate::company::demo::bills as demo_bills;
+    let w = World::new();
+    let vendor = w
+        .demo()
+        .contacts_mut()
+        .iter()
+        .find(|c| c.fields.display_name == demo_bills::STORY_VENDOR)
+        .map(|c| c.id)
+        .expect("vendor");
+    let bill = {
+        let mut d = w.demo();
+        let draft = cl_api::BillDraft {
+            vendor,
+            date: day(1),
+            vendor_invoice_number: Some("SYN-33994105".into()),
+            terms: None,
+            due_date: None,
+            memo: None,
+            amount_due: money("685.55"),
+            lines: vec![cl_api::BillLineDraft::expense(
+                crate::company::demo::account_id(6210),
+                money("685.55"),
+            )],
+            received: true,
+            draft_attachment: None,
+        };
+        demo_bills::create_bill(&mut d, &draft, None).expect("bill")
+    };
+    let id = w.draft("ozark", "685.55", day(28));
+    let mut s = w.session(id);
+    let mut accept = w.accept("685.55", day(28), None);
+    accept.probe.reference = Some("SYN-33994105".into());
+    let before = w.transactions();
+    assert!(s.accept(accept));
+    let _ = tick(&w, &mut s);
+    let d = s
+        .attach
+        .as_ref()
+        .expect("the dialog, before anything posts");
+    assert_eq!(d.picked_bill(), Some(bill), "Pay this bill is offered");
+    assert_eq!(w.transactions(), before, "nothing posted yet");
+
+    // Without the reference the dates are too far apart for the amount
+    // search, and the draft has no vendor: it would have posted (QA-3).
+    let w2 = World::new();
+    let id2 = w2.draft("ozark", "685.55", day(28));
+    let mut s2 = w2.session(id2);
+    assert!(s2.accept(w2.accept("685.55", day(28), None)));
+    let _ = tick(&w2, &mut s2);
+    assert!(s2.attach.is_none());
 }

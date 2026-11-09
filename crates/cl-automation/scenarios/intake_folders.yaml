@@ -83,7 +83,7 @@ steps:
   - click: {role: check_box, label: Leave originals where they are (Receipts)}
   - assert_state: {key: screen.intake.folders.1.keep_originals, equals: true}
   - assert_exists: {role: check_box, label: Read new documents automatically (Bills)}
-  - assert_exists: {label: "Reading arrives in a coming update; until then new documents wait in the inbox.", index: 0}
+  - assert_exists: {label: "New documents are read as soon as they come in. Turn this off to read each one yourself.", index: 0}
 
   # --- Save: the engine takes the list, this computer its confirmations ----------
   - click: {role: button, label: Save}

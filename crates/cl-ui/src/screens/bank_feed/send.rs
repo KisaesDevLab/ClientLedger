@@ -98,6 +98,10 @@ pub(crate) struct Outcome {
     /// A05: 403 for a request carrying a receipt (the receipt's or the
     /// entry's permission): not view-only; the panel stops offering it.
     pub receipt_forbidden: bool,
+    /// PR-A1 B1: the receipt looks like an entry already in the books
+    /// (`DOCUMENT_POSSIBLE_DUPLICATE`): the row didn't post; the panel
+    /// shows these and asks before using the receipt anyway.
+    pub receipt_duplicates: Option<Vec<cl_api::DuplicateMatch>>,
 }
 
 impl Outcome {
@@ -151,6 +155,9 @@ impl Outcome {
                 AcceptFailure::DRAFT_STALE
                 | AcceptFailure::DRAFT_CLOSED
                 | AcceptFailure::DRAFT_FILE_MISSING => self.receipt_refused = true,
+                AcceptFailure::DRAFT_POSSIBLE_DUPLICATE => {
+                    self.receipt_duplicates = Some(f.duplicates());
+                }
                 _ => self.receipt_forbidden = true,
             }
         }
@@ -246,6 +253,7 @@ pub(crate) fn receipt_key(code: &str) -> &'static str {
         AcceptFailure::DRAFT_STALE => "bank_feed.notice.receipt_changed",
         AcceptFailure::DRAFT_FILE_MISSING => "bank_feed.notice.receipt_file_missing",
         AcceptFailure::DRAFT_DENIED => "bank_feed.notice.receipt_forbidden",
+        AcceptFailure::DRAFT_POSSIBLE_DUPLICATE => "bank_feed.notice.receipt_duplicate",
         _ => "bank_feed.notice.receipt_refused",
     }
 }
@@ -685,6 +693,7 @@ mod tests {
         cl_api::DraftLink {
             id: "d0000000-0000-4000-8000-dd0000000001".parse().expect("d"),
             expected_updated_at: "2026-11-08T10:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         }
     }
 
@@ -755,6 +764,44 @@ mod tests {
             }]),
         );
         assert!(again.receipt_refused && !again.receipt_forbidden);
+    }
+
+    /// PR-A1 B1: a receipt that looks like an entry in the books neither
+    /// declines it nor reads it again: the panel gets the matches and asks.
+    #[test]
+    fn a_document_duplicate_asks_instead_of_declining() {
+        let t: cl_core::ids::TransactionId =
+            "33333333-3333-4333-8333-333333333333".parse().expect("t");
+        let o = AcceptOutcome {
+            undo_group: UndoGroupId::new_random(),
+            posted: 0,
+            matched: 0,
+            skipped: Vec::new(),
+            failures: vec![AcceptFailure {
+                id: item(1),
+                code: AcceptFailure::DRAFT_POSSIBLE_DUPLICATE.into(),
+                details: cl_api::ConflictDetails::new(serde_json::json!({ "matches": [
+                    { "transactionId": t.to_string(), "type": "bill", "date": "2026-10-02",
+                      "total": "685.55" }
+                ] })),
+            }],
+            remaining: 0,
+            next_after: None,
+        };
+        let mut out = Outcome::default();
+        out.accepted(
+            &o,
+            &Send::Accept(vec![AcceptItem::Receipt {
+                item: Box::new(AcceptItem::AsProposed(item(1))),
+                draft: receipt_link(),
+            }]),
+        );
+        assert!(!out.receipt_forbidden && !out.receipt_refused);
+        let dups = out.receipt_duplicates.expect("matches");
+        assert_eq!(dups.len(), 1);
+        assert_eq!(dups[0].source, cl_api::MatchSource::Transaction(t));
+        assert_eq!(out.notice, Some("bank_feed.notice.receipt_duplicate"));
+        assert!(out.undo.is_none(), "nothing posted");
     }
 
     /// P26 review m2: "Accept all from this rule" asks for the password for

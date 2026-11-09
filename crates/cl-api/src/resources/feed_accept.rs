@@ -79,6 +79,10 @@ pub struct DraftLink {
     pub id: DocumentDraftId,
     /// Its change token exactly as read (`updatedAt`), never reformatted.
     pub expected_updated_at: String,
+    /// PR-A1 B1 (Q-PRA1b): the posted entries the owner confirmed this
+    /// receipt is not (after a `DOCUMENT_POSSIBLE_DUPLICATE`, "Use it
+    /// anyway"). Empty: the engine's duplicate check refuses any match.
+    pub acknowledged_duplicates: Vec<TransactionId>,
 }
 
 impl fmt::Debug for DraftLink {
@@ -299,11 +303,28 @@ impl AcceptFailure {
     /// U-181: not this company's draft. (A row that isn't found is
     /// skipped, never a failure, so on an accept this is the receipt.)
     pub const DRAFT_NOT_FOUND: &'static str = "NOT_FOUND";
+    /// PR-A1 B1 (`feed-accept-draft-duplicates-v1`): the receipt looks
+    /// like an entry already in the books (`details.matches`, as
+    /// [`crate::DuplicateMatch`]). The row didn't post; send it again with
+    /// the matches in [`DraftLink::acknowledged_duplicates`] after the
+    /// owner confirms. Distinct from the bank line's own duplicate.
+    pub const DRAFT_POSSIBLE_DUPLICATE: &'static str = "DOCUMENT_POSSIBLE_DUPLICATE";
 
     /// Dated on or before the closing date: needs the password.
     #[must_use]
     pub fn is_locked(&self) -> bool {
         self.code == Self::PERIOD_LOCKED
+    }
+
+    /// The entries a `DOCUMENT_POSSIBLE_DUPLICATE` names (posted records
+    /// only; anything this version can't read is left out). Empty for
+    /// any other failure.
+    #[must_use]
+    pub fn duplicates(&self) -> Vec<crate::DuplicateMatch> {
+        if self.code != Self::DRAFT_POSSIBLE_DUPLICATE {
+            return Vec::new();
+        }
+        feed_duplicates_from(self.details.raw("matches"))
     }
 
     /// A refusal of the row's receipt (U-181); the row didn't post.
@@ -319,6 +340,7 @@ impl AcceptFailure {
                 | Self::DRAFT_TARGET
                 | Self::DRAFT_DENIED
                 | Self::DRAFT_NOT_FOUND
+                | Self::DRAFT_POSSIBLE_DUPLICATE
         )
     }
 }
@@ -403,6 +425,55 @@ impl UndoOutcome {
 }
 
 // ---------------------------------------------------------------- wire
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireFeedDuplicate {
+    transaction_id: String,
+    #[serde(default, rename = "type")]
+    txn_type: Option<String>,
+    #[serde(default)]
+    date: Option<String>,
+    #[serde(default)]
+    total: Option<String>,
+    #[serde(default)]
+    reference: Option<String>,
+    #[serde(default)]
+    no_vendor: bool,
+}
+
+/// The posted entries of a `DOCUMENT_POSSIBLE_DUPLICATE` (`{transactionId,
+/// type, date, total, reference}` each; the convert's own `{source, id,
+/// …}` shape is read too). Entries this version can't read are left out;
+/// draft matches never block and are dropped.
+pub(crate) fn feed_duplicates_from(v: Option<&Value>) -> Vec<crate::DuplicateMatch> {
+    use crate::{MatchReason, MatchSource};
+    let Some(list) = v.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|m| {
+            if m.get("transactionId").is_none() {
+                return crate::resources::document_drafts::matches_from(Some(&json!([m])))
+                    .into_iter()
+                    .find(|d| matches!(d.source, MatchSource::Transaction(_)));
+            }
+            let w: WireFeedDuplicate = serde_json::from_value(m.clone()).ok()?;
+            Some(crate::DuplicateMatch {
+                source: MatchSource::Transaction(TransactionId::parse(&w.transaction_id).ok()?),
+                reason: MatchReason::Other,
+                txn_type: w.txn_type,
+                kind: None,
+                date: w
+                    .date
+                    .and_then(|d| cl_core::CalendarDate::parse_wire(&d).ok()),
+                total: w.total.and_then(|t| cl_core::Money::parse_wire(&t).ok()),
+                reference: w.reference,
+                no_vendor: w.no_vendor,
+            })
+        })
+        .collect()
+}
 
 #[derive(Deserialize)]
 struct WireSkip {
@@ -578,13 +649,21 @@ pub fn accept_body(req: &AcceptRequest) -> Result<Value, ApiError> {
                     if d.expected_updated_at.trim().is_empty() {
                         return Err(bad());
                     }
-                    m.insert(
-                        "documentDraft".into(),
-                        json!({
-                            "id": d.id.to_string(),
-                            "expectedUpdatedAt": d.expected_updated_at,
-                        }),
-                    );
+                    let mut dm = Map::new();
+                    dm.insert("id".into(), json!(d.id.to_string()));
+                    dm.insert("expectedUpdatedAt".into(), json!(d.expected_updated_at));
+                    if !d.acknowledged_duplicates.is_empty() {
+                        dm.insert(
+                            "acknowledgeDuplicateOf".into(),
+                            Value::Array(
+                                d.acknowledged_duplicates
+                                    .iter()
+                                    .map(|t| json!(t.to_string()))
+                                    .collect(),
+                            ),
+                        );
+                    }
+                    m.insert("documentDraft".into(), Value::Object(dm));
                 }
                 m.insert("id".into(), json!(i.id().to_string()));
                 out.push(Value::Object(m));
@@ -665,6 +744,12 @@ impl Feed<'_> {
             && items.iter().any(|i| i.draft().is_some())
         {
             self.need(Capabilities::FEED_ACCEPT_DRAFT)?;
+            if items.iter().any(|i| {
+                i.draft()
+                    .is_some_and(|d| !d.acknowledged_duplicates.is_empty())
+            }) {
+                self.need(Capabilities::FEED_ACCEPT_DRAFT_DUPLICATES)?;
+            }
         }
         let body = self.with_password(accept_body(req)?, auth)?;
         let mut call = Call::at(Method::Post, FEED_ACCEPT.route()).json_body(body);

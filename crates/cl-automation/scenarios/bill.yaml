@@ -435,6 +435,9 @@ steps:
   - assert_state: {key: screen.last_action, equals: void}
   - focus: {role: button, label: Clear}
   - key: Space
+  # The void's toast (10 s) sits over Clear, which section 11 clicks: once
+  # the worker is warm the section runs inside 10 s, so wait it out.
+  - assert_state: {key: toast, equals: null, within_ms: 12000}
 
   # --- 11. Read document (A03, Q-A03l): the document is read on this
   # computer by the sandboxed worker, with AI reading still off. Values are

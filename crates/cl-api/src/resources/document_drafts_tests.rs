@@ -1115,3 +1115,23 @@ async fn a_file_links_onto_a_fresh_draft_key() {
         json!({"attachableType": "draft", "attachableId": k.to_string()})
     );
 }
+
+/// PR-A1 QA-1 (Q-PRA1d, `document-duplicates-no-vendor-v1`): a match of
+/// the vendor-less check says so; an older engine's match reads as a
+/// vendor's own.
+#[test]
+fn a_no_vendor_match_is_read_as_such() {
+    let v = serde_json::json!([
+        {"source": "transaction", "id": "00000000-0000-4000-8000-0000000000aa",
+         "reason": "amount_date", "noVendor": true, "txnType": "bill",
+         "kind": null, "date": "2026-11-02", "total": "685.5500", "reference": null},
+        {"source": "transaction", "id": "00000000-0000-4000-8000-0000000000ab",
+         "reason": "reference", "txnType": "expense", "kind": null,
+         "date": "2026-11-03", "total": "10.00", "reference": "A-1"}
+    ]);
+    let m = super::matches_from(Some(&v));
+    assert_eq!(m.len(), 2);
+    assert!(m[0].no_vendor);
+    assert_eq!(m[0].reason, super::MatchReason::AmountDate);
+    assert!(!m[1].no_vendor, "older engines send no flag");
+}

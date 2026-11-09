@@ -581,7 +581,7 @@ enum Work {
     /// The register search on Accept.
     Matching {
         accept: Box<Accept>,
-        task: Task<Vec<cl_docread::register_match::RegisterRow>>,
+        task: Task<super::attach::Found>,
     },
     /// The register search failed or couldn't run (review B2): nothing
     /// posts until the owner picks Try again or Enter as new.
@@ -632,6 +632,12 @@ enum Work {
         task: Task<(DocumentDraft, TransactionId)>,
         tries: u8,
     },
+    /// Q-PRA1a: "Pay this bill": is the bill still owed (and whose)?
+    CheckingBill {
+        accept: Box<Accept>,
+        bill: TransactionId,
+        task: Task<(Option<cl_core::Money>, Option<cl_core::ids::ContactId>)>,
+    },
     /// Posted or attached: the draft is closed.
     Done,
 }
@@ -649,6 +655,7 @@ impl Work {
             Work::Unknown { .. } => "unknown",
             Work::Refetch { .. } => "refetch",
             Work::Attaching { .. } => "attaching",
+            Work::CheckingBill { .. } => "checking_bill",
             Work::Done => "done",
         }
     }
@@ -1600,13 +1607,29 @@ impl DraftSession {
                 Some(r) => {
                     // A failed search never posts (review B2): the
                     // engine's duplicate check skips vendor-less receipts.
-                    let rows = match r {
-                        Ok(rows) => rows,
+                    let found = match r {
+                        Ok(found) => found,
                         Err(_) => {
                             self.search_failed(accept);
                             return;
                         }
                     };
+                    // PR-A1 QA-3: an open bill with this receipt's Ref no.
+                    // and total asks first ("Pay this bill"), whatever its
+                    // date and even without a vendor on the form.
+                    if !found.bills.is_empty() && !matches!(accept.body, PostBody::Bill(_)) {
+                        let attach_ok =
+                            crate::screens::receipt_inbox::intake::drafts::attach_on(&self.link);
+                        self.attach = Some(AttachDialog::from_duplicates(
+                            &accept.probe,
+                            &found.bills,
+                            false,
+                            attach_ok,
+                        ));
+                        self.work = Work::Choosing { accept };
+                        return;
+                    }
+                    let rows = found.rows;
                     let probe = accept.probe.probe();
                     let cands = cl_docread::register_match::candidates(&probe, &rows);
                     if cands.is_empty() {
@@ -1707,6 +1730,17 @@ impl DraftSession {
                 },
                 Some(r) => {
                     self.attach_answer(accept, target, tries, r);
+                    return;
+                }
+            },
+            Work::CheckingBill {
+                accept,
+                bill,
+                mut task,
+            } => match task.try_take() {
+                None => Work::CheckingBill { accept, bill, task },
+                Some(r) => {
+                    self.bill_checked(&accept, bill, r.ok());
                     return;
                 }
             },
@@ -1929,6 +1963,89 @@ impl DraftSession {
                 self.convert_after_feed(accept, ids);
             }
             DialogAnswer::Attach(target) => self.send_attach(accept, target, 0),
+            DialogAnswer::PayBill(bill) => self.check_bill(accept, bill),
+        }
+    }
+
+    /// Q-PRA1a: reads the bill (still owed, its vendor) before Pay Bills
+    /// opens on it.
+    fn check_bill(&mut self, accept: Box<Accept>, bill: TransactionId) {
+        let owed = |r: Option<cl_api::Versioned<cl_api::BillRecord>>| {
+            r.map_or((None, None), |v| {
+                (
+                    v.record
+                        .balance_due
+                        .filter(|_| v.record.txn.status == cl_api::TxnStatus::Posted),
+                    v.record.txn.contact_id,
+                )
+            })
+        };
+        if let Some(mut demo) = self.link.demo_state() {
+            let got = owed(crate::company::demo::bills::get(&mut demo, bill));
+            drop(demo);
+            self.work = Work::CheckingBill {
+                accept,
+                bill,
+                task: Task::ready(got),
+            };
+            return;
+        }
+        let task = match (self.link.session(), self.group.as_ref()) {
+            (Some(session), Some(group)) => group
+                .read(&session, move |s| async move {
+                    Ok(owed(Some(s.bills().get(bill).await?)))
+                })
+                .ok()
+                .map(Task::Pending),
+            _ => None,
+        };
+        match task {
+            Some(task) => self.work = Work::CheckingBill { accept, bill, task },
+            None => {
+                self.note = Some("doc_form.pay_bill.unknown");
+                self.events.push(DraftEvent::Cancelled);
+            }
+        }
+    }
+
+    /// Q-PRA1a: the bill is owed: Pay Bills opens on it with the receipt,
+    /// and the form closes (the receipt waits in Review Documents until
+    /// the payment takes it).
+    fn bill_checked(
+        &mut self,
+        accept: &Accept,
+        bill: TransactionId,
+        r: Option<(Option<cl_core::Money>, Option<cl_core::ids::ContactId>)>,
+    ) {
+        let Some(draft) = self.draft.as_ref() else {
+            self.events.push(DraftEvent::Cancelled);
+            return;
+        };
+        match r {
+            Some((Some(owed), vendor)) if owed.is_positive() => {
+                let prefill = crate::screens::pay_bills::receipt::PayBillPrefill {
+                    bill,
+                    vendor: vendor.or(accept.probe.contact),
+                    from: accept.probe.account,
+                    date: accept.probe.date,
+                    receipt: self.id,
+                    expected_updated_at: draft.updated_at.clone(),
+                    attachment: draft.attachment_id,
+                };
+                self.link.push(CompanyEvent::OpenWith(
+                    CommandId::new(crate::screens::pay_bills::KIND),
+                    Box::new(crate::windows::OpenPayload::PayBill(Box::new(prefill))),
+                ));
+                self.events.push(DraftEvent::Close);
+            }
+            Some(_) => {
+                self.note = Some("doc_form.pay_bill.paid");
+                self.events.push(DraftEvent::Cancelled);
+            }
+            None => {
+                self.note = Some("doc_form.pay_bill.unknown");
+                self.events.push(DraftEvent::Cancelled);
+            }
         }
     }
 
@@ -2198,11 +2315,20 @@ impl DraftSession {
         });
     }
 
-    fn poll_discard(&mut self, _ctx: &egui::Context) {
+    fn poll_discard(&mut self, ctx: &egui::Context) {
         if let Some(r) = self.discard.as_mut().and_then(Task::try_take) {
             self.discard = None;
             match r {
                 Ok(()) => {
+                    // N7: discarded in the engine with no waiting entry
+                    // here (e.g. after a Bank Feed Undo once the original
+                    // went to Processed/): it is refiled in Discarded/.
+                    if !self.discard_local
+                        && let Some(sha) = self.draft.as_ref().map(|d| d.content_sha256.clone())
+                        && let Some(h) = crate::screens::receipt_inbox::intake::existing(ctx)
+                    {
+                        h.lock().refile_discarded(&sha);
+                    }
                     self.work = Work::Done;
                     self.closed_elsewhere = true;
                     self.link.push(CompanyEvent::Toast("doc_form.discarded"));

@@ -140,6 +140,8 @@ impl EnterBillScreen {
             paid_from: None,
             lines: f.expenses.lines,
             marks: f.read,
+            reference: Some(f.reference),
+            memo: f.memo,
         }
     }
 
@@ -180,6 +182,10 @@ impl EnterBillScreen {
         f.amount_due = v.total;
         f.read = v.marks;
         f.expenses.lines = v.lines;
+        if let Some(r) = v.reference {
+            f.reference = r;
+        }
+        f.memo = v.memo;
         self.take_form(f);
         self.refresh_terms_dates();
         self.track_read();
@@ -365,6 +371,7 @@ impl EnterBillScreen {
                 contact: Some(c.vendor),
                 account: None,
                 account_name: None,
+                reference: None,
             },
             learn: Some(learn),
         };

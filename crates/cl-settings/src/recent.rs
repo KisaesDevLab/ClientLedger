@@ -165,6 +165,28 @@ pub struct CompanyRecord {
     /// The engine's delete receipt (ids and times only).
     #[serde(default)]
     pub delete_receipt: Option<serde_json::Value>,
+    /// PR-A1 S2 (Q-PRA1c): restored from a backup on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored: Option<RestoreNote>,
+}
+
+/// A restore on this computer (PR-A1 S2, Q-PRA1c): its drafts made before
+/// it are this computer's own; documents handled after the backup was
+/// made are offered back once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreNote {
+    /// When the restore ran.
+    pub at: Timestamp,
+    /// When the backup was made (the archive's `createdAt`).
+    #[serde(default)]
+    pub backup_made: Option<Timestamp>,
+    /// The company it replaced on this computer (its intake history).
+    #[serde(default)]
+    pub previous: Option<TenantId>,
+    /// The owner answered "Bring them back to Review Documents?".
+    #[serde(default)]
+    pub bring_back_answered: bool,
 }
 
 /// Backups remembered per company.
@@ -188,6 +210,7 @@ impl CompanyRecord {
             is_sample: false,
             deleted_at: None,
             delete_receipt: None,
+            restored: None,
         }
     }
 

@@ -35,10 +35,11 @@ use std::sync::Arc;
 
 use cl_api::{
     AcceptItem, ApiError, AttachmentId, Capabilities, DocumentDraft, DocumentDraftId, DraftKind,
-    DraftLink, DraftListQuery, DraftStatus, FeedChoice, FeedItemId, FeedRow, FeedSplitLine,
-    Session,
+    DraftLink, DraftListQuery, DraftStatus, DuplicateMatch, FeedChoice, FeedItemId, FeedRow,
+    FeedSplitLine, MatchSource, Session,
 };
 use cl_core::Money;
+use cl_core::ids::TransactionId;
 use cl_core::ids::{AccountId, ContactId};
 use cl_docread::feed_match::{self, BankLine, DraftFacts};
 use eframe::egui::{self, RichText, Ui};
@@ -375,6 +376,22 @@ pub(crate) struct Panel {
     /// and file name, read once per row.
     pub details: BTreeMap<DocumentDraftId, OfferDetail>,
     details_load: Option<Job<Vec<(DocumentDraftId, OfferDetail)>>>,
+    /// The owner picked an offer (or none) by hand: nothing is unpicked
+    /// for them any more.
+    pub chosen: bool,
+    /// PR-A1 B1: the best offer may already be entered, so nothing was
+    /// picked for the owner (not a decline: they may still pick it).
+    pub held: bool,
+    /// PR-A1 B1: the engine refused the picked receipt as a possible
+    /// duplicate (`DOCUMENT_POSSIBLE_DUPLICATE`), with what it matched.
+    pub refused: Option<(DocumentDraftId, Vec<DuplicateMatch>)>,
+    /// PR-A1 B1: the owner chose "Use it anyway" for this receipt.
+    pub use_anyway: Option<DocumentDraftId>,
+    /// PR-A1 QA-1: the line's payee when the details were read; a vendor
+    /// picked for the line since reads them (and the check) again.
+    details_payee: Option<ContactId>,
+    /// The details were read at least once for this row.
+    details_read: bool,
 }
 
 /// An offer's read vendor name and file name (owner data: drawn, never
@@ -383,6 +400,89 @@ pub(crate) struct Panel {
 pub(crate) struct OfferDetail {
     pub vendor: Option<String>,
     pub file: Option<String>,
+    /// PR-A1 B1: entries in the books it may already be
+    /// (`GET /document-drafts/{id}/duplicates`, posted records only).
+    pub duplicates: Vec<DuplicateMatch>,
+}
+
+/// The posted records among `all` (other drafts never block).
+fn posted_only(all: Vec<DuplicateMatch>) -> Vec<DuplicateMatch> {
+    all.into_iter()
+        .filter(|m| matches!(m.source, MatchSource::Transaction(_)))
+        .collect()
+}
+
+/// PR-A1 B1: what receipt `id` may already be in the books: the engine's
+/// refusal for it, else its duplicate check. The check knows only the
+/// receipt's own vendor (the engine also checks the line's payee at
+/// Accept), so an empty list is no promise; the refusal is the gate.
+pub(crate) fn duplicates_of(p: &Panel, id: DocumentDraftId) -> &[DuplicateMatch] {
+    match &p.refused {
+        Some((r, m)) if *r == id => m,
+        _ => p.details.get(&id).map_or(&[], |d| d.duplicates.as_slice()),
+    }
+}
+
+/// The ids of the entries a receipt was confirmed against.
+fn acknowledged(p: &Panel, id: DocumentDraftId) -> Vec<TransactionId> {
+    duplicates_of(p, id)
+        .iter()
+        .filter_map(|m| match m.source {
+            MatchSource::Transaction(t) => Some(t),
+            MatchSource::Draft(_) => None,
+        })
+        .collect()
+}
+
+/// The engine takes "Use it anyway" (an engine without the check never
+/// refuses, and would turn the acknowledged list away).
+fn acks_ok(s: &BankFeedScreen) -> bool {
+    s.link.is_demo()
+        || s.link
+            .capabilities()
+            .has(Capabilities::FEED_ACCEPT_DRAFT_DUPLICATES)
+}
+
+/// PR-A1 B1: the engine refused the picked receipt as a possible
+/// duplicate: the panel shows what it matched and asks.
+pub(crate) fn duplicate_refused(s: &mut BankFeedScreen, matches: Vec<DuplicateMatch>) {
+    let p = &mut s.detail.receipt;
+    if let Some(pick) = p.pick {
+        p.refused = Some((pick, posted_only(matches)));
+        if p.use_anyway == Some(pick) {
+            // Something new matched since the owner confirmed: ask again.
+            p.use_anyway = None;
+        }
+    }
+}
+
+/// Details arrived: a best offer that may already be entered is not
+/// picked for the owner (the next offer that isn't, else none), unless
+/// they picked by hand.
+fn hold_duplicates(s: &mut BankFeedScreen) {
+    let Some(row) = s.detail.row else {
+        return;
+    };
+    let p = &s.detail.receipt;
+    if p.chosen || p.declined {
+        return;
+    }
+    let Some(pick) = p.pick else {
+        return;
+    };
+    if duplicates_of(p, pick).is_empty() {
+        return;
+    }
+    let next = s
+        .receipts
+        .of(row)
+        .iter()
+        .copied()
+        .find(|o| duplicates_of(p, *o).is_empty());
+    s.detail.receipt.held = true;
+    s.detail.receipt.pick = None;
+    s.detail.receipt.full = None;
+    choose(s, next);
 }
 
 /// The row moved: its best receipt is picked.
@@ -410,6 +510,8 @@ fn read_details(s: &mut BankFeedScreen, id: FeedItemId) {
     if wanted.is_empty() {
         return;
     }
+    s.detail.receipt.details_payee = s.row(id).and_then(payee_of);
+    s.detail.receipt.details_read = true;
     let tenant = s.tenant;
     let demo_wanted = wanted.clone();
     s.detail.receipt.details_load = Some(run(
@@ -428,7 +530,17 @@ fn read_details(s: &mut BankFeedScreen, id: FeedItemId) {
                     let file = file
                         .and_then(|f| crate::company::demo::checks::find_attachment(d, f))
                         .map(|m| m.file_name);
-                    (*id, OfferDetail { vendor, file })
+                    let duplicates = posted_only(
+                        crate::company::demo::drafts::duplicates(d, t, *id).unwrap_or_default(),
+                    );
+                    (
+                        *id,
+                        OfferDetail {
+                            vendor,
+                            file,
+                            duplicates,
+                        },
+                    )
                 })
                 .collect())
         },
@@ -447,7 +559,22 @@ fn read_details(s: &mut BankFeedScreen, id: FeedItemId) {
                     Some(f) => sess.attachments().get(f).await.ok().map(|m| m.file_name),
                     None => None,
                 };
-                out.push((id, OfferDetail { vendor, file }));
+                // A check that can't run flags nothing; the accept's own
+                // check still refuses a duplicate.
+                let duplicates = posted_only(
+                    sess.document_drafts()
+                        .duplicates(id)
+                        .await
+                        .unwrap_or_default(),
+                );
+                out.push((
+                    id,
+                    OfferDetail {
+                        vendor,
+                        file,
+                        duplicates,
+                    },
+                ));
             }
             Ok(out)
         },
@@ -464,14 +591,18 @@ pub(crate) fn refresh(s: &mut BankFeedScreen) {
     };
     let offers = s.receipts.of(id);
     let p = &s.detail.receipt;
+    // PR-A1 QA-1: a vendor picked for the line since the check ran: the
+    // receipts are checked again (a held pick stays held until then).
+    let payee = s.row(id).and_then(payee_of);
+    let moved = p.details_read && p.details_payee != payee;
     // A receipt that arrived for the open row gets its vendor and file in
     // its label too (QA-5).
-    if p.details_load.is_none() && offers.iter().any(|o| !p.details.contains_key(o)) {
+    if p.details_load.is_none() && (moved || offers.iter().any(|o| !p.details.contains_key(o))) {
         read_details(s, id);
     }
     let offers = s.receipts.of(id);
     let p = &s.detail.receipt;
-    if p.declined {
+    if p.declined || (p.held && p.pick.is_none()) {
         return;
     }
     if let Some(x) = p.pick.filter(|x| offers.contains(x)) {
@@ -569,7 +700,9 @@ pub(crate) fn follow(s: &mut BankFeedScreen, ctx: &egui::Context) {
     }
     if let Some(Ok(got)) = finished(&mut p.details_load) {
         p.details = got.into_iter().collect();
+        hold_duplicates(s);
     }
+    let p = &mut s.detail.receipt;
     if let Some(r) = finished(&mut p.bytes)
         && let (Ok(Some(src)), Some(id)) = (r, p.bytes_for.take())
     {
@@ -630,6 +763,11 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
     for (id, text) in offers.iter().zip(texts) {
         if ui.radio(pick == Some(*id), text).clicked() {
             pick = Some(*id);
+            s.detail.receipt.chosen = true;
+        }
+        if let Some(first) = duplicates_of(&s.detail.receipt, *id).first() {
+            let doc_date = s.receipts.draft(*id).and_then(|d| d.doc_date);
+            form::inline_warning(ui, tokens, &maybe_entered(first, doc_date));
         }
     }
     if ui
@@ -639,6 +777,7 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
     {
         pick = None;
         s.detail.receipt.declined = true;
+        s.detail.receipt.chosen = true;
     }
     if pick.is_some() {
         s.detail.receipt.declined = false;
@@ -667,8 +806,15 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
             {
                 read_again(s);
             }
+        } else if let Some(pick) = s.detail.receipt.pick
+            && !duplicates_of(&s.detail.receipt, pick).is_empty()
+            && s.detail.receipt.use_anyway != Some(pick)
+        {
+            duplicate_warning(s, ui, tokens, pick);
         } else if let Some(full) = &s.detail.receipt.full {
-            if fits(r, full) {
+            if s.detail.receipt.use_anyway == Some(full.id) && fits(r, full) {
+                form::hint(ui, tokens, &t("bank_feed.receipt.used_anyway"));
+            } else if fits(r, full) {
                 form::hint(ui, tokens, &t("bank_feed.receipt.goes_with"));
             } else {
                 form::inline_warning(ui, tokens, &t("bank_feed.receipt.no_longer_fits"));
@@ -678,6 +824,78 @@ pub(crate) fn section(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &
         }
     }
     ui.add_space(6.0);
+}
+
+/// "May already be entered: a bill of 10/02" for a duplicate match; one
+/// found without a vendor (Q-PRA1d) says what it shares ("any vendor, the
+/// same amount 3 days apart").
+pub(crate) fn maybe_entered(m: &DuplicateMatch, doc_date: Option<cl_core::CalendarDate>) -> String {
+    let (what, date) = entry_words(m);
+    let mut x = t_with(
+        "bank_feed.receipt.maybe_entered",
+        &[("what", &what), ("date", &date)],
+    )
+    .trim()
+    .to_string();
+    if let Some(why) = crate::screens::doc_review::attach::no_vendor_words(m, doc_date) {
+        x.push_str(" (");
+        x.push_str(&why);
+        x.push(')');
+    }
+    x
+}
+
+/// What the match is and its date, in words.
+fn entry_words(m: &DuplicateMatch) -> (String, String) {
+    let what = match m.txn_type.as_deref() {
+        Some("bill") => t("bank_feed.receipt.entry.bill"),
+        Some("expense") => t("bank_feed.receipt.entry.expense"),
+        _ => t("bank_feed.receipt.entry.other"),
+    };
+    (what, m.date.map(crate::shell::us_date).unwrap_or_default())
+}
+
+/// The picked receipt may already be entered: what it matched, and "Use
+/// it anyway" (only where the engine takes the confirmation).
+fn duplicate_warning(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, pick: DocumentDraftId) {
+    let list: Vec<String> = duplicates_of(&s.detail.receipt, pick)
+        .iter()
+        .map(|m| {
+            let (what, date) = entry_words(m);
+            let mut x = t_with(
+                "bank_feed.receipt.entry_of",
+                &[("what", &what), ("date", &date)],
+            )
+            .trim()
+            .to_string();
+            let doc_date = s.receipts.draft(pick).and_then(|d| d.doc_date);
+            if let Some(why) = crate::screens::doc_review::attach::no_vendor_words(m, doc_date) {
+                x.push_str(", ");
+                x.push_str(&why);
+            }
+            if let Some(r) = clean(m.reference.as_deref()) {
+                x.push_str(" \u{b7} ");
+                x.push_str(&t_with("bank_feed.receipt.ref", &[("ref", &r)]));
+            }
+            x
+        })
+        .collect();
+    form::inline_warning(
+        ui,
+        tokens,
+        &t_with(
+            "bank_feed.receipt.duplicate_warning",
+            &[("list", &list.join("; "))],
+        ),
+    );
+    if acks_ok(s)
+        && ui
+            .button(t("bank_feed.receipt.use_anyway"))
+            .on_hover_text(t("bank_feed.receipt.use_anyway.tip"))
+            .clicked()
+    {
+        s.detail.receipt.use_anyway = Some(pick);
+    }
 }
 
 /// The offers' labels (also their AccessKit names), told apart (QA-5):
@@ -784,6 +1002,12 @@ pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) 
     if p.failed {
         return None;
     }
+    // PR-A1 B1: a receipt that may already be entered waits for "Use it
+    // anyway" (or another pick, or none).
+    let flagged = !duplicates_of(p, pick).is_empty();
+    if flagged && p.use_anyway != Some(pick) {
+        return None;
+    }
     let full = p.full.as_ref().filter(|d| d.id == pick)?;
     if !fits(r, full) {
         return send;
@@ -791,6 +1015,11 @@ pub(crate) fn with_receipt(s: &BankFeedScreen, r: &FeedRow, send: Option<Send>) 
     let draft = DraftLink {
         id: pick,
         expected_updated_at: full.updated_at.clone(),
+        acknowledged_duplicates: if flagged && acks_ok(s) {
+            acknowledged(p, pick)
+        } else {
+            Vec::new()
+        },
     };
     let coded = coding(full, r.amount);
     let item = match send? {
@@ -839,6 +1068,9 @@ pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
         "best_picked": row.is_some_and(|id| p.pick.is_some() && s.receipts.of(id).first() == p.pick.as_ref()),
         "read": p.full.is_some(),
         "shown": document(s).is_some(),
+        "flagged": row.map_or(0, |id| s.receipts.of(id).iter().filter(|o| !duplicates_of(p, **o).is_empty()).count()),
+        "held": p.held,
+        "use_anyway": p.use_anyway.is_some() && p.use_anyway == p.pick,
     })
 }
 

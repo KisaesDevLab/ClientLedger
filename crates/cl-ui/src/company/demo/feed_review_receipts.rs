@@ -83,7 +83,7 @@ pub fn seed_receipt_named(
     lines: bool,
     file_name: &str,
 ) -> Option<DocumentDraftId> {
-    seed_receipt_as(state, id, lines, file_name, false)
+    seed_receipt_as(state, id, lines, file_name, false, None)
 }
 
 /// A credit memo for money-in line `id` (`dev.demo_feed_receipt_credit`,
@@ -94,7 +94,7 @@ pub fn seed_credit(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId
     super::refresh(state);
     discard_seeded(state);
     let r = pick_line(state, SeedLine::MoneyIn)?;
-    seed_receipt_as(state, r.id, false, "credit.pdf", true).map(|d| (r.id, d))
+    seed_receipt_as(state, r.id, false, "credit.pdf", true, None).map(|d| (r.id, d))
 }
 
 fn seed_receipt_as(
@@ -103,6 +103,7 @@ fn seed_receipt_as(
     lines: bool,
     file_name: &str,
     credit: bool,
+    vendor: Option<cl_core::ids::ContactId>,
 ) -> Option<DocumentDraftId> {
     let r = state.feed_review.rows.iter().find(|r| r.id == id)?.clone();
     let tenant = state.open?;
@@ -169,7 +170,7 @@ fn seed_receipt_as(
         fields,
         lines: read_lines,
         checks: Vec::new(),
-        suggested_contact: None,
+        suggested_contact: vendor,
         doc_reference: Some("R-1042".into()),
         doc_total: Some(total),
         doc_date: r.date.add_days(-2).ok(),
@@ -212,7 +213,62 @@ pub fn seed_two_receipts(state: &mut DemoState) -> Option<(FeedItemId, [Document
     Some((r.id, [a, b]))
 }
 
-/// Throws away the receipts [`seed_receipt`] made that are still live
+/// PR-A1 B1 (`dev.demo_feed_receipt_dup`): the owner entered the bill by
+/// hand (the story vendor, reference R-1042, the bank amount, three days
+/// before the line) and the vendor's receipt of it is waiting: the line
+/// and the receipt. Synthetic only.
+pub fn seed_duplicate(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId)> {
+    seed_duplicate_as(state, true)
+}
+
+/// PR-A1 QA-1 (`dev.demo_feed_receipt_dup_no_vendor`): the same, but the
+/// receipt's vendor was not matched when it was read (the owner added the
+/// vendor afterwards): the check still finds the bill (Q-PRA1d).
+pub fn seed_duplicate_no_vendor(state: &mut DemoState) -> Option<(FeedItemId, DocumentDraftId)> {
+    seed_duplicate_as(state, false)
+}
+
+fn seed_duplicate_as(
+    state: &mut DemoState,
+    with_vendor: bool,
+) -> Option<(FeedItemId, DocumentDraftId)> {
+    if !with_vendor {
+        // An engine with `document-duplicates-no-vendor-v1`.
+        state.drafts.no_vendor_check = true;
+    }
+    super::refresh(state);
+    discard_seeded(state);
+    let r = pick_line(state, SeedLine::Proposed)?;
+    let vendor = state
+        .contacts_mut()
+        .iter()
+        .find(|c| c.fields.display_name == super::super::bills::STORY_VENDOR)
+        .map(|c| c.id)?;
+    let total = r.amount.abs();
+    let bill = cl_api::BillDraft {
+        vendor,
+        date: r.date.add_days(-3).ok()?,
+        vendor_invoice_number: Some("R-1042".into()),
+        terms: None,
+        due_date: None,
+        memo: None,
+        amount_due: total,
+        lines: vec![cl_api::BillLineDraft::expense(
+            super::super::account_id(6210),
+            total,
+        )],
+        received: true,
+        draft_attachment: None,
+    };
+    let id = super::super::bills::create_bill(state, &bill, None).ok()?;
+    state.drafts.feed_seeded_bills.push(id);
+    super::refresh(state);
+    let read_vendor = with_vendor.then_some(vendor);
+    seed_receipt_as(state, r.id, false, "invoice.pdf", false, read_vendor).map(|d| (r.id, d))
+}
+
+/// Throws away the receipts [`seed_receipt`] made that are still live,
+/// and voids the bills [`seed_duplicate`] entered for them
 /// (`dev.demo_feed_reset`: every scenario run starts without them).
 pub fn discard_seeded(state: &mut DemoState) {
     let Some(tenant) = state.open else {
@@ -220,6 +276,10 @@ pub fn discard_seeded(state: &mut DemoState) {
     };
     for old in std::mem::take(&mut state.drafts.feed_seeded) {
         let _ = super::super::drafts::discard(state, tenant, old);
+    }
+    // A bill already void (or paid since) is left as it is.
+    for bill in std::mem::take(&mut state.drafts.feed_seeded_bills) {
+        let _ = super::super::bills::void(state, bill, None);
     }
 }
 

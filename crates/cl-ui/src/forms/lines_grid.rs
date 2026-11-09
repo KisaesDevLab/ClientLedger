@@ -763,6 +763,13 @@ impl<L: LineLists + 'static> LinesGrid<L> {
         self.form.grid().has_focus()
     }
 
+    /// The open cell has typed text not in the lines yet (the owner is
+    /// typing: nothing may replace the lines under it).
+    #[must_use]
+    pub fn typing(&self) -> bool {
+        self.form.grid().has_uncommitted_edit()
+    }
+
     /// The lines.
     #[must_use]
     pub fn value(&self) -> &FormLines {

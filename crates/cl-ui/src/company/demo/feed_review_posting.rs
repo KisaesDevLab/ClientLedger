@@ -855,6 +855,42 @@ pub fn accept(
         };
         if let (Ok(_), Some(link)) = (&result, &draft) {
             let entry = row(state, id).ok().and_then(|r| r.matched);
+            // PR-A1 B1: a posted row whose receipt looks like an entry
+            // already in the books fails (the posting taken back) unless
+            // the owner acknowledged every match. A match files the
+            // receipt on the entry it is, so it isn't checked.
+            let vendor = match item.inner() {
+                AcceptItem::Values(_, c) => c.contact,
+                _ => None,
+            };
+            let dups = match (state.open, item.inner()) {
+                // Money in posts no bill or expense: not checked (as the engine).
+                (Some(tenant), AcceptItem::AsProposed(_) | AcceptItem::Values(..))
+                    if r.amount.is_positive() =>
+                {
+                    super::super::drafts::feed_duplicates(
+                        state,
+                        tenant,
+                        link,
+                        vendor,
+                        r.amount.abs(),
+                        r.date,
+                        entry,
+                    )
+                }
+                _ => Vec::new(),
+            };
+            if !dups.is_empty() {
+                if let Some(before) = savepoint {
+                    *state = before;
+                }
+                out.failures.push(AcceptFailure {
+                    id,
+                    code: AcceptFailure::DRAFT_POSSIBLE_DUPLICATE.to_string(),
+                    details: cl_api::ConflictDetails::new(json!({ "matches": dups })),
+                });
+                continue;
+            }
             let filed = match (state.open, entry) {
                 (Some(tenant), Some(t)) => {
                     super::super::drafts::feed_file_on(state, tenant, link.id, t)

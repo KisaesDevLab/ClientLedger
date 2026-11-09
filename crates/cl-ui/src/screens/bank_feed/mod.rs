@@ -448,7 +448,10 @@ impl BankFeedScreen {
         // A05: a refused receipt is read again (a fresh change token, or
         // gone from the offers once the list is read); one the user may not
         // file is no longer offered on this line.
-        if o.receipt_forbidden {
+        if let Some(m) = o.receipt_duplicates.clone() {
+            // PR-A1 B1: may already be entered: shown, then asked.
+            receipts::duplicate_refused(self, m);
+        } else if o.receipt_forbidden {
             receipts::forbidden(self);
         } else if o.receipt_refused {
             receipts::read_again(self);
@@ -673,6 +676,14 @@ impl BankFeedScreen {
             // A05 QA-7: a credit memo (read below zero) for a money-in line.
             "dev.demo_feed_receipt_credit" => {
                 self.focus_next = demo::seed_credit(&mut d).map(|(line, _)| line);
+            }
+            // PR-A1 B1: a receipt of a bill the owner already entered.
+            "dev.demo_feed_receipt_dup" => {
+                self.focus_next = demo::seed_duplicate(&mut d).map(|(line, _)| line);
+            }
+            // PR-A1 QA-1: the same receipt, its vendor not matched.
+            "dev.demo_feed_receipt_dup_no_vendor" => {
+                self.focus_next = demo::seed_duplicate_no_vendor(&mut d).map(|(line, _)| line);
             }
             "dev.demo_ai_off" => {
                 d.ai.enabled = false;

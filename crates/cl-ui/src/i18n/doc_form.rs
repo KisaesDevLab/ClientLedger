@@ -52,7 +52,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("doc_form.leave.body", "Your changes to this document aren't saved. The document stays in Review Documents."),
     ("doc_form.leave.yes", "Discard my changes"),
     ("doc_form.feed_line.title", "Waiting in the Bank Feed"),
-    ("doc_form.feed_line.body", "This receipt matches a bank line waiting in the Bank Feed ({date}, {amount}). Accept it there to avoid entering it twice."),
+    ("doc_form.feed_line.body", "This document matches a bank line waiting in the Bank Feed ({date}, {amount}). Accept it there to avoid entering it twice."),
     ("doc_form.feed_line.go", "Go to Bank Feed"),
     ("doc_form.feed_line.save", "Save anyway"),
     ("doc_form.close", "Close"),

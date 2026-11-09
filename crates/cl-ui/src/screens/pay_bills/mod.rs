@@ -28,6 +28,7 @@
 mod draw;
 pub(crate) mod engine;
 mod grid;
+pub mod receipt;
 pub mod view;
 
 use std::sync::Arc;
@@ -269,6 +270,8 @@ pub struct PayBillsScreen {
     published: Vec<AccountId>,
     /// The fixed bars' sizes last frame (Q-265).
     pub(crate) layout: crate::layout::FrameReport,
+    /// PR-A1 S1 (Q-PRA1a): opened from a receipt's "Pay this bill".
+    pub(crate) receipt: receipt::ReceiptPay,
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -361,6 +364,7 @@ impl PayBillsScreen {
             money_style: cl_core::MoneyStyle::default(),
             published: Vec::new(),
             layout: crate::layout::FrameReport::default(),
+            receipt: receipt::ReceiptPay::default(),
         };
         s.start_setup();
         s.load_list();
@@ -570,6 +574,8 @@ impl PayBillsScreen {
                 Err(e) => self.pay_failed(e),
             }
         }
+        self.apply_receipt();
+        self.poll_receipt();
     }
 
     /// The engine's list as the form keeps it. After a pay whose outcome
@@ -864,6 +870,15 @@ impl PayBillsScreen {
     }
 
     fn paid(&mut self, payments: &[CreatedPayment]) {
+        // Q-PRA1a: the receipt goes on the payment of its bill.
+        let paid_bills: Vec<TransactionId> = self
+            .sent
+            .as_ref()
+            .map(|(b, _)| b.clone())
+            .unwrap_or_default();
+        let before = self.notice;
+        self.file_receipt(&paid_bills, payments);
+        let receipt_notice = self.notice.filter(|n| Some(*n) != before);
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         self.closing_prompt.saved();
         self.key = None;
@@ -893,6 +908,9 @@ impl PayBillsScreen {
         self.link.push(CompanyEvent::Toast("paybills.paid.toast"));
         self.load_list();
         self.fetch_account_facts();
+        if receipt_notice.is_some() {
+            self.notice = receipt_notice;
+        }
     }
 
     pub(crate) fn pay_failed(&mut self, e: ApiError) {
@@ -1211,6 +1229,11 @@ impl PayBillsScreen {
             "to_pay_shown": self.grid.column_shown(grid::TO_PAY),
             "focused": self.snap.focused,
             "published": self.published.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "receipt": {
+                "waiting": self.receipt.waiting.is_some(),
+                "armed": self.receipt.armed.is_some(),
+                "filed": self.receipt.filed.is_some(),
+            },
         });
         if let (Value::Object(m), Value::Object(c)) =
             (&mut v, self.closing_prompt.state_json(self.caps().closing))
@@ -1247,12 +1270,19 @@ impl Screen for PayBillsScreen {
         self.money_style = self.parts.frame.money_style;
         self.poll();
         self.hear_changes();
+        if let Some(a) = self.receipt.handled.take()
+            && let Some(h) = crate::screens::receipt_inbox::intake::existing(ui.ctx())
+        {
+            // The receipt's original moves to Processed/ (as an attach).
+            let _ = h.lock().handled_by_attachment(a);
+        }
         self.draw(ui);
         let busy = self.setup_task.is_some()
             || self.list_task.is_some()
             || self.balance_task.is_some()
             || self.numbers_task.is_some()
             || self.pay_task.is_some()
+            || self.receipt_busy()
             || self.save_default_task.is_some();
         if busy {
             ui.ctx()
@@ -1353,6 +1383,16 @@ impl Screen for PayBillsScreen {
 
     fn fixed_layout(&self) -> bool {
         true
+    }
+
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::PayBill(p) => {
+                self.open_from_receipt(*p);
+                true
+            }
+            _ => false,
+        }
     }
 }
 

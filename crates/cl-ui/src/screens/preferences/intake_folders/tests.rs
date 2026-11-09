@@ -736,7 +736,7 @@ fn the_switches_round_trip_and_the_auto_read_hint_shows() {
     assert!(all.contains("Read new documents automatically"), "{all}");
     assert!(
         all.contains(
-            "Reading arrives in a coming update; until then new documents wait in the inbox."
+            "New documents are read as soon as they come in. Turn this off to read each one yourself."
         ),
         "{all}"
     );

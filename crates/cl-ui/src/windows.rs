@@ -165,6 +165,10 @@ pub enum OpenPayload {
         cl_core::ids::TransactionId,
         Box<cl_model::forms::deposit::DepositSummary>,
     ),
+    /// PR-A1 S1 (Q-PRA1a): Pay Bills on this bill, paid from a receipt's
+    /// account, the receipt filed on the payment (Review Documents' "Pay
+    /// this bill").
+    PayBill(Box<crate::screens::pay_bills::receipt::PayBillPrefill>),
     /// P23: Pay Sales Tax on this agency (Sales Tax Owed's "Pay").
     PaySalesTax(cl_core::ids::SalesTaxAgencyId),
     /// P23: Receive Payment from this client (Client Center's action).

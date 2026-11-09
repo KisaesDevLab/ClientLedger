@@ -109,6 +109,10 @@ pub struct CardChargeScreen {
     pub(crate) problems: Vec<CardProblem>,
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
+    /// The lists are being read again while the form has unsaved edits:
+    /// they arrive without touching the typed header texts (PR-A1 QA round
+    /// 2: a vendor added elsewhere shows in an open form).
+    lists_keep_inputs: bool,
     in_grid: bool,
     after_frame: Option<CommandId>,
     /// The fixed bars' sizes last frame (Q-265).
@@ -167,6 +171,7 @@ impl CardChargeScreen {
             problems: Vec::new(),
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
+            lists_keep_inputs: false,
             in_grid: false,
             after_frame: None,
             layout: crate::layout::FrameReport::default(),
@@ -219,8 +224,11 @@ impl CardChargeScreen {
             self.lines.set_lists(Arc::clone(&self.books.lists));
             self.items.set_base(&self.books.lists);
             self.lock_columns();
-            self.inputs.rev = u64::MAX;
+            if !self.lists_keep_inputs {
+                self.inputs.rev = u64::MAX;
+            }
             if self.card().is_none()
+                && !self.lists_keep_inputs
                 && let Some((card, _)) = self.cards().first().cloned()
             {
                 // Not an edit: the starting account is part of the blank form.
@@ -285,12 +293,12 @@ impl CardChargeScreen {
         if changes.items && !self.items.loading() {
             self.items.start_load(&self.link, self.group.as_ref());
         }
-        if self.lists_stale
-            && (!self.is_dirty() || self.quick_add.waiting())
-            && !self.books.busy()
-            && !self.items.loading()
-        {
+        if !self.books.busy() && !self.items.loading() {
+            self.lists_keep_inputs = false;
+        }
+        if self.lists_stale && !self.books.busy() && !self.items.loading() {
             self.lists_stale = false;
+            self.lists_keep_inputs = self.is_dirty() && !self.quick_add.waiting();
             self.books.start(&self.link, self.group.as_ref());
             self.items.start_load(&self.link, self.group.as_ref());
         }

@@ -58,6 +58,7 @@ fn link(s: &DemoState, t: TenantId, id: DocumentDraftId) -> DraftLink {
     DraftLink {
         id,
         expected_updated_at: draft(s, t, id).updated_at,
+        acknowledged_duplicates: Vec::new(),
     }
 }
 
@@ -234,6 +235,7 @@ fn a_stale_or_used_receipt_posts_nothing() {
         draft: DraftLink {
             id: d,
             expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![stale]), None).expect("accept");
@@ -281,6 +283,7 @@ fn a_stale_or_used_receipt_posts_nothing() {
         draft: DraftLink {
             id: d,
             expected_updated_at: draft(&s, t, d).updated_at,
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![used]), None).expect("accept");
@@ -304,6 +307,7 @@ fn the_closing_date_comes_before_the_receipt() {
         draft: DraftLink {
             id: d,
             expected_updated_at: "2020-01-01T00:00:00.000Z".into(),
+            acknowledged_duplicates: Vec::new(),
         },
     };
     let o = accept(&mut s, &AcceptRequest::Items(vec![stale]), None).expect("accept");
@@ -366,5 +370,25 @@ fn reopen_uses_the_drafts_id_and_only_converted_drafts() {
     assert_eq!(
         drafts::reopen_for(&mut s, posted),
         Vec::<DocumentDraftId>::new()
+    );
+}
+
+/// PR-A1: the bill `dev.demo_feed_receipt_dup` entered "by hand" goes with
+/// its receipt, so the next run's plain receipt (Q-PRA1d: checked against
+/// every vendor) is not taken for it.
+#[test]
+fn a_new_seed_voids_the_bill_entered_for_a_duplicate() {
+    let (mut s, t) = state();
+    let (_, dup) = seed_duplicate(&mut s).expect("dup");
+    let first = drafts::duplicates(&mut s, t, dup).expect("dups");
+    assert_ne!(first.len(), 0, "the hand-entered bill matches");
+    let (_, plain) = seed_receipt(&mut s, true).expect("seed");
+    assert_eq!(s.drafts.feed_seeded_bills.len(), 0);
+    let found = drafts::duplicates(&mut s, t, plain).expect("dups");
+    assert!(
+        found
+            .iter()
+            .all(|m| !matches!(m.source, cl_api::MatchSource::Transaction(_))),
+        "a posted record still matches the new receipt"
     );
 }

@@ -1010,6 +1010,13 @@ impl ItemsGrid {
         &mut self.form
     }
 
+    /// The open cell has typed text not in the lines yet (the owner is
+    /// typing: nothing may replace the lines under it).
+    #[must_use]
+    pub fn typing(&self) -> bool {
+        self.form.grid().has_uncommitted_edit()
+    }
+
     /// The grid has the keyboard.
     #[must_use]
     pub fn has_focus(&self) -> bool {

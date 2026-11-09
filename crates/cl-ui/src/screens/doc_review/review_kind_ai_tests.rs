@@ -262,6 +262,7 @@ fn values(marks: &[(ReadTarget, ReadField)], lines: Vec<FormLine>) -> FormValues
         paid_from: Some(AccountId::parse("00000000-0000-0000-0000-000000000009").expect("id")),
         lines,
         marks: m,
+        ..FormValues::default()
     }
 }
 
@@ -287,7 +288,8 @@ fn enter_as_carries_accepted_and_changed_values_with_their_marks() {
     );
     assert!(s.enter_as(DraftForm::CardCharge, &v).is_none(), "same form");
     let c = s.enter_as(DraftForm::EnterBill, &v).expect("carry");
-    assert_eq!(c.kept(), 2);
+    // Total, date, and the card the owner picked (not read: theirs).
+    assert_eq!(c.kept(), 3);
     assert!(c.payee.is_none(), "a value still read isn't carried");
     assert!(!format!("{c:?}").contains("25"), "Debug shows no values");
 
@@ -307,6 +309,7 @@ fn enter_as_carries_accepted_and_changed_values_with_their_marks() {
         paid_from: None,
         lines: Vec::new(),
         marks,
+        ..FormValues::default()
     };
     c.apply_to(DraftForm::EnterBill, &mut bill, |_| None, |_| true);
     assert_eq!(
@@ -395,7 +398,9 @@ fn a_carry_reaches_only_its_form_once_with_the_sessions_values() {
     assert_eq!(other.state_json()["carried"], serde_json::Value::Null);
 
     let mut check = w.session(id, DraftForm::WriteCheck);
-    assert_eq!(check.state_json()["carried"], 1);
+    // The accepted total, and the payee, date and account the owner set
+    // without a reading (PR-A1 QA-3).
+    assert_eq!(check.state_json()["carried"], 4);
     let fill = check.take_fill().expect("values");
     assert_eq!(
         fill.reading.header.total.as_ref().map(|f| f.value),
@@ -420,4 +425,99 @@ fn enter_as_is_refused_while_the_draft_is_closed() {
     assert!(s.enter_as(DraftForm::EnterBill, &v).is_none());
     assert_eq!(kind_of(DraftForm::CashExpense), DraftKind::CashExpense);
     assert_eq!(kind_of(DraftForm::WriteCheck), DraftKind::Check);
+}
+
+/// PR-A1 QA-3: a vendor the owner picked because the read name matched
+/// none (no read mark), the reference and the memo go with the draft to
+/// the card form; a value still read and not accepted still doesn't.
+#[test]
+fn enter_as_keeps_a_picked_vendor_the_reference_and_the_memo() {
+    let w = World::new();
+    let id = w.draft(Some("685.55"));
+    let s = w.session(id, DraftForm::EnterBill);
+    let read = ReadField::Read {
+        level: Confidence::High,
+    };
+    let vendor = ContactId::parse("00000000-0000-0000-0000-000000000007").expect("id");
+    let mut v = values(
+        &[
+            (ReadTarget::BillDate, read),
+            (ReadTarget::AmountDue, read),
+            (ReadTarget::Reference, ReadField::Accepted),
+        ],
+        Vec::new(),
+    );
+    v.paid_from = None;
+    v.reference = Some(" 33994105 ".into());
+    v.memo = "October service".into();
+    let c = s.enter_as(DraftForm::CardCharge, &v).expect("carry");
+    assert_eq!(c.payee.map(|k| k.value), Some(vendor), "the picked vendor");
+    assert_eq!(c.payee.map(|k| k.state), Some(ReadField::Edited));
+    assert!(
+        c.date.is_none() && c.total.is_none(),
+        "still read: read again"
+    );
+    assert!(!format!("{c:?}").contains("3399"), "Debug shows no values");
+
+    // The card form's fill: no payee (the read name matched none), no
+    // reference (a card charge doesn't read one).
+    let mut card = FormValues {
+        reference: Some(String::new()),
+        ..FormValues::default()
+    };
+    c.apply_to(DraftForm::CardCharge, &mut card, |_| None, |_| true);
+    assert_eq!(card.payee, Some(vendor));
+    assert_eq!(card.marks.state(ReadTarget::Payee), Some(ReadField::Edited));
+    assert_eq!(card.reference.as_deref(), Some("33994105"));
+    assert_eq!(card.memo, "October service");
+
+    // Back to a bill that read the reference: the owner's one wins.
+    let mut marks = ReadMarks::default();
+    marks.mark_read(ReadTarget::Reference, Confidence::High);
+    let mut bill = FormValues {
+        reference: Some("33994I05".into()),
+        marks,
+        ..FormValues::default()
+    };
+    let back = w.session(id, DraftForm::CardCharge);
+    let mut cv = card.clone();
+    cv.marks = ReadMarks::default();
+    let c2 = back.enter_as(DraftForm::EnterBill, &cv).expect("carry");
+    c2.apply_to(DraftForm::EnterBill, &mut bill, |_| None, |_| true);
+    assert_eq!(bill.reference.as_deref(), Some("33994105"));
+    assert_eq!(
+        bill.marks.state(ReadTarget::Reference),
+        Some(ReadField::Edited)
+    );
+}
+
+/// A reference read and not accepted on the bill fills an empty Ref no.
+/// on the card form, but never replaces what the bill reads again.
+#[test]
+fn an_unaccepted_reference_only_fills_an_empty_field() {
+    let w = World::new();
+    let id = w.draft(Some("10.00"));
+    let s = w.session(id, DraftForm::EnterBill);
+    let read = ReadField::Read {
+        level: Confidence::High,
+    };
+    let mut v = values(&[(ReadTarget::Reference, read)], Vec::new());
+    v.reference = Some("A-1".into());
+    let c = s.enter_as(DraftForm::CardCharge, &v).expect("carry");
+    assert!(!c.reference_owned);
+    let mut empty = FormValues {
+        reference: Some(String::new()),
+        ..FormValues::default()
+    };
+    c.apply_to(DraftForm::CardCharge, &mut empty, |_| None, |_| true);
+    assert_eq!(empty.reference.as_deref(), Some("A-1"));
+    let mut filled = FormValues {
+        reference: Some("B-2".into()),
+        ..FormValues::default()
+    };
+    c.apply_to(DraftForm::EnterBill, &mut filled, |_| None, |_| true);
+    assert_eq!(filled.reference.as_deref(), Some("B-2"));
+    let mut check = FormValues::default();
+    c.apply_to(DraftForm::WriteCheck, &mut check, |_| None, |_| true);
+    assert_eq!(check.reference, None, "a check has no Ref no.");
 }

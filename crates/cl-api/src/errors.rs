@@ -112,6 +112,11 @@ impl ConflictDetails {
         cl_core::Money::parse_wire(self.text(key)?).ok()
     }
 
+    /// A field as sent (crate parsers only).
+    pub(crate) fn raw(&self, key: &str) -> Option<&Value> {
+        self.0.as_deref()?.get(key)
+    }
+
     /// An id field (`contactId`, `sourceId`, ...).
     #[must_use]
     pub fn id<T: std::str::FromStr>(&self, key: &str) -> Option<T> {

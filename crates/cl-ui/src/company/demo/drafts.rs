@@ -164,6 +164,10 @@ pub struct DemoDrafts {
     /// The next [`search_amount`] fails (`Timeout`, nothing read): tests
     /// that a failed register search never posts (review B2).
     pub fail_next_search: bool,
+    /// Q-PRA1d (`document-duplicates-no-vendor-v1`, engine #24): a document
+    /// with no vendor is checked too. On in [`DemoDrafts::on`] (the
+    /// engine's behavior); off by default for the older-engine tests.
+    pub no_vendor_check: bool,
     /// A04 WP-F2: the vendors' saved layouts (the demo's
     /// `vendor_document_templates`), learned on accept and used by the
     /// inbox's reading. No amounts.
@@ -175,6 +179,10 @@ pub struct DemoDrafts {
     /// (`dev.demo_feed_receipt`); a new one throws away the earlier ones
     /// still live, so every scenario run starts with one.
     pub feed_seeded: Vec<DocumentDraftId>,
+    /// PR-A1 B1: the bills "entered by hand" for those receipts
+    /// (`dev.demo_feed_receipt_dup`), voided with them: a bill left over
+    /// would match the next run's receipt (Q-PRA1d checks every vendor).
+    pub feed_seeded_bills: Vec<TransactionId>,
     /// Records the converts posted (not the ones attach filed on), so the
     /// demo's inbox can void them when it lays its files out again: every
     /// scenario run starts with the books as found (A04 step 15).
@@ -198,6 +206,7 @@ impl DemoDrafts {
     pub fn on() -> DemoDrafts {
         DemoDrafts {
             enabled: true,
+            no_vendor_check: true,
             ..DemoDrafts::default()
         }
     }
@@ -723,6 +732,9 @@ fn normalized(r: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
+/// Q-PRA1d: the exact-total window for a document with no vendor.
+const NO_VENDOR_WINDOW_DAYS: i64 = 7;
+
 fn within_window(a: CalendarDate, b: CalendarDate) -> bool {
     a.days_until(b).abs() <= DUPLICATE_WINDOW_DAYS
 }
@@ -750,13 +762,12 @@ fn engine_type(kind: &str) -> TxnType {
 
 /// The reference a posted record carries: a bill's vendor invoice number,
 /// an expense's own number (not a check number).
-fn txn_reference(
-    state: &mut DemoState,
-    t: &cl_company::sample::SampleTransaction,
-) -> Option<String> {
+fn txn_reference(state: &DemoState, t: &cl_company::sample::SampleTransaction) -> Option<String> {
     match t.kind.as_str() {
-        "bill" => super::bills::get(state, DemoLedger::id_of(t))
-            .and_then(|v| v.record.vendor_invoice_number),
+        // Read without rebuilding the bill: a document with no vendor
+        // (Q-PRA1d) is checked against every bill, and `bills::get` reads
+        // the whole ledger each time (seconds per check).
+        "bill" => super::bills::reference_of(state, DemoLedger::id_of(t)),
         "check" => None,
         _ => Some(t.number.clone()).filter(|n| !n.is_empty()),
     }
@@ -765,10 +776,13 @@ fn txn_reference(
 /// Posted bills and expenses of the vendor, not void, that match by
 /// normalized reference or by exact total within the window.
 fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> {
-    let Some(vendor) = p.vendor else {
+    // Q-PRA1d (engine `document-duplicates-no-vendor-v1`): a document with
+    // no vendor is checked too, against every vendor's posted records: the
+    // same reference, or the exact total within 7 days.
+    if p.vendor.is_none() && !state.drafts.no_vendor_check {
         return Vec::new();
-    };
-    let names = names_of(state, vendor);
+    }
+    let names = p.vendor.map(|v| names_of(state, v));
     let want = normalized(p.reference.as_deref());
     let mut out = Vec::new();
     for t in state.ledger.transactions() {
@@ -782,7 +796,9 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
         let id = DemoLedger::id_of(&t);
         if state.ledger.is_void(id)
             || Some(id) == p.except_txn
-            || !t.contact.as_ref().is_some_and(|c| names.contains(c))
+            || names
+                .as_ref()
+                .is_some_and(|n| !t.contact.as_ref().is_some_and(|c| n.contains(c)))
         {
             continue;
         }
@@ -791,7 +807,11 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
         let by_reference = !want.is_empty() && normalized(reference.as_deref()) == want;
         let by_amount = matches!(
             (p.total, p.date, total),
-            (Some(a), Some(d), Some(b)) if a == b && within_window(d, t.date)
+            (Some(a), Some(d), Some(b)) if a == b && if names.is_some() {
+                within_window(d, t.date)
+            } else {
+                d.days_until(t.date).abs() <= NO_VENDOR_WINDOW_DAYS
+            }
         );
         if by_reference || by_amount {
             out.push(DuplicateMatch {
@@ -806,6 +826,7 @@ fn transaction_matches(state: &mut DemoState, p: &Probe) -> Vec<DuplicateMatch> 
                 date: Some(t.date),
                 total,
                 reference,
+                no_vendor: names.is_none(),
             });
         }
     }
@@ -860,6 +881,7 @@ fn draft_matches(state: &DemoState, tenant: TenantId, p: &Probe) -> Vec<Duplicat
                 date: d.doc_date,
                 total: d.doc_total,
                 reference: d.doc_reference.clone(),
+                no_vendor: false,
             })
         })
         .take(MAX_MATCHES)
@@ -1381,6 +1403,55 @@ pub(crate) fn feed_draft_ready(
         return refuse(cl_api::AcceptFailure::DRAFT_FILE_MISSING, Value::Null);
     }
     Ok(())
+}
+
+/// PR-A1 B1 (`feed-accept-draft-duplicates-v1`), after the row posted
+/// `posted` and before the receipt is filed: the convert's duplicate check
+/// on the posted row (the vendor posted, else the receipt's; the
+/// receipt's reference; the bank amount and date). The matches the owner
+/// didn't acknowledge, on the wire as the engine reports them
+/// (`{transactionId, type, date, total, reference}`); empty: file it.
+pub(crate) fn feed_duplicates(
+    state: &mut DemoState,
+    tenant: TenantId,
+    link: &cl_api::DraftLink,
+    vendor: Option<ContactId>,
+    total: Money,
+    date: CalendarDate,
+    posted: Option<TransactionId>,
+) -> Vec<Value> {
+    let Some(d) = state.drafts.find(tenant, link.id).map(|r| r.draft.clone()) else {
+        return Vec::new();
+    };
+    let probe = Probe {
+        vendor: vendor.or(d.suggested_contact_id),
+        reference: d.doc_reference.clone(),
+        total: Some(total),
+        date: Some(date),
+        except_txn: posted,
+        except_draft: Some(d.id),
+    };
+    let found = transaction_matches(state, &probe);
+    let open = found.iter().any(|m| match m.source {
+        MatchSource::Transaction(t) => !link.acknowledged_duplicates.contains(&t),
+        MatchSource::Draft(_) => false,
+    });
+    if !open {
+        return Vec::new();
+    }
+    found
+        .iter()
+        .filter_map(|m| match m.source {
+            MatchSource::Transaction(t) => Some(json!({
+                "transactionId": t.to_string(),
+                "type": m.txn_type,
+                "date": m.date.map(CalendarDate::to_wire),
+                "total": m.total.map(Money::to_wire),
+                "reference": m.reference,
+            })),
+            MatchSource::Draft(_) => None,
+        })
+        .collect()
 }
 
 /// U-181, after the row posted or matched: the draft's file goes onto

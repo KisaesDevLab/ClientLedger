@@ -755,7 +755,10 @@ fn duplicates_block_until_acknowledged(h: &Harness) {
             .all(|x| x.source != MatchSource::Transaction(far)),
         "61 days does not: {found:?}"
     );
-    // Without a vendor there is nothing to compare.
+    // Without a vendor: nothing to compare on an older engine; with
+    // document-duplicates-no-vendor-v1 (Q-PRA1d) any vendor's posted
+    // records with the same reference match, flagged noVendor, and other
+    // drafts are not listed.
     let (_, d4) = new_draft(h, s);
     store(
         h,
@@ -763,12 +766,21 @@ fn duplicates_block_until_acknowledged(h: &Harness) {
         &d4,
         &reading(None, Some("INV-00123"), Some("100.00"), Some(base)),
     );
-    assert_eq!(
-        h.run(s.document_drafts().duplicates(d4.id))
-            .expect("dupes")
-            .len(),
-        0
-    );
+    let found = h.run(s.document_drafts().duplicates(d4.id)).expect("dupes");
+    if s.client()
+        .capabilities()
+        .has(Capabilities::DOCUMENT_DUPLICATES_NO_VENDOR)
+    {
+        assert!(!found.is_empty(), "the same reference, any vendor");
+        assert!(
+            found
+                .iter()
+                .all(|x| x.no_vendor && matches!(x.source, MatchSource::Transaction(_))),
+            "{found:?}"
+        );
+    } else {
+        assert_eq!(found.len(), 0);
+    }
 }
 
 /// T5 and the top-level password: in a closed period a convert is refused
@@ -2480,6 +2492,64 @@ fn statement_drafts(h: &Harness) {
     assert_eq!(on_vendor.data[0].id, kept.id);
 }
 
+/// PR-A1 S1 (Q-PRA1a): a receipt of an unpaid bill pays it. The bill is
+/// paid in Pay Bills from the receipt's account (one bill payment), then
+/// the receipt is attached to that payment (`bill_payment` takes files):
+/// the bill is paid, the draft closes into the payment, its file is on the
+/// payment, and nothing else posts.
+fn a_receipt_pays_its_bill_and_files_on_the_payment(h: &Harness) {
+    let s = &h.s1;
+    if !live_attach(h, s) {
+        return;
+    }
+    let v = vendor(h, s);
+    let exp = account(h, s, AccountType::Expense, None);
+    let bank = account(h, s, AccountType::Asset, Some("bank"));
+    let b = h
+        .run(s.bills().create(
+            &bill(v, exp, date(2026, 11, 2), "SYN-4598943", "2197.97"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("bill")
+        .record
+        .txn
+        .id;
+    let (file, d) = new_draft(h, s);
+    let paid = h
+        .run(s.bill_payments().pay(
+            &cl_api::PayBillsRequest {
+                bank_account: bank,
+                date: date(2026, 11, 14),
+                bills: vec![cl_api::BillToPay {
+                    bill: b,
+                    cash: m("2197.97"),
+                    discount: Money::ZERO,
+                }],
+                credits: Vec::new(),
+                discount_account: None,
+                method: cl_api::PayMethod::Check(cl_api::CheckNumbering::PrintLater),
+                memo: None,
+            },
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(paid.len(), 1, "one payment");
+    assert_eq!(paid[0].contact_id, Some(v));
+    let bill_now = h.run(s.bills().get(b)).expect("bill").record;
+    assert_eq!(bill_now.balance_due, Some(Money::ZERO), "the bill is paid");
+    let a = attach(h, s, &d, paid[0].id).unwrap_or_else(|e| panic!("attach: {e:?}"));
+    assert_eq!(a.transaction, paid[0].id);
+    assert_eq!(a.draft.status, DraftStatus::Converted);
+    assert_eq!(a.draft.converted_type.as_deref(), Some("bill_payment"));
+    assert_eq!(
+        file_type(h, s, file),
+        ("bill_payment".to_string(), paid[0].id.to_string()),
+        "the receipt is on the payment"
+    );
+}
+
 fn main() -> std::process::ExitCode {
     let tests: &[(&str, TestFn)] = &[
         ("drafts::claims", claims),
@@ -2522,6 +2592,11 @@ fn main() -> std::process::ExitCode {
         // A04 (U-95).
         ("drafts::attach_matrix", attach_matrix),
         ("drafts::amount_filter_is_exact", amount_filter_is_exact),
+        // PR-A1 S1 (Q-PRA1a).
+        (
+            "drafts::a_receipt_pays_its_bill_and_files_on_the_payment",
+            a_receipt_pays_its_bill_and_files_on_the_payment,
+        ),
         // A06 (U-94).
         ("drafts::statement_drafts", statement_drafts),
         // Last: it opens a fresh company per case on the switcher session.
