@@ -21,6 +21,8 @@ pub mod image;
 pub mod layout;
 pub mod pdf;
 pub mod print_queue;
+// P27: report pages (reconciliation summary, detail, discrepancy).
+pub mod reports;
 
 pub use amount::{amount_in_words, check_figures, format_amount, format_quantity};
 pub use checks::{
