@@ -953,18 +953,28 @@ async fn reconcile_sample(
         })
         .await?;
     let sheet = r.get(started.id).await?;
-    let ticks: Vec<(cl_core::ids::JournalLineId, bool)> = sheet
-        .lines
-        .unwrap_or_default()
-        .iter()
-        .filter(|l| !l.after_statement_date && cleared.contains(&l.transaction))
-        .map(|l| (l.journal_line, true))
-        .collect();
+    let ticks = sample_ticks(&sheet.lines.unwrap_or_default(), cleared);
     for chunk in ticks.chunks(cl_api::LINES_MAX) {
         r.tick(started.id, chunk).await?;
     }
     r.complete(started.id, None).await?;
     Ok(())
+}
+
+/// Every line of the sample's reconciliation, ticked exactly when the
+/// sample marks its transaction cleared: Begin pre-checks bank-file lines,
+/// so the others are sent unticked explicitly (review m6).
+fn sample_ticks(
+    lines: &[cl_api::ReconLine],
+    cleared: &std::collections::HashSet<cl_core::ids::TransactionId>,
+) -> Vec<(cl_core::ids::JournalLineId, bool)> {
+    lines
+        .iter()
+        .map(|l| {
+            let on = !l.after_statement_date && cleared.contains(&l.transaction);
+            (l.journal_line, on)
+        })
+        .collect()
 }
 
 /// The lines the engine gets for a sample layout: each line's own account,
@@ -1079,6 +1089,39 @@ async fn seed_templates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review m6: every line is sent, the sample's cleared ones on and the
+    /// rest (a pre-checked bank-file line among them) off.
+    #[test]
+    fn sample_ticks_send_every_line_explicitly() {
+        let id = |n: u32| format!("00000000-0000-4000-8000-{n:012}");
+        let line = |n: u32, after: bool, feed: bool| cl_api::ReconLine {
+            journal_line: cl_core::ids::JournalLineId::parse(&id(n)).expect("id"),
+            transaction: cl_core::ids::TransactionId::parse(&id(n + 100)).expect("id"),
+            cleared: feed,
+            date: CalendarDate::from_ymd(2026, 9, 1).expect("date"),
+            txn_type: "check".into(),
+            number: None,
+            payee: None,
+            amount: Money::ZERO,
+            after_statement_date: after,
+            from_bank_feed: feed,
+            likely_duplicate: false,
+        };
+        let lines = [line(1, false, false), line(2, false, true), line(3, true, false)];
+        let cleared: std::collections::HashSet<_> = [lines[0].transaction, lines[2].transaction]
+            .into_iter()
+            .collect();
+        let ticks = sample_ticks(&lines, &cleared);
+        assert_eq!(
+            ticks,
+            vec![
+                (lines[0].journal_line, true),
+                (lines[1].journal_line, false),
+                (lines[2].journal_line, false),
+            ]
+        );
+    }
 
     /// The loader maps the layout to engine ids, with 4100's fallback.
     #[test]
