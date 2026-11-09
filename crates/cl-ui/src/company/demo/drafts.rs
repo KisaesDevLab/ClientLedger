@@ -179,6 +179,10 @@ pub struct DemoDrafts {
     /// (`dev.demo_feed_receipt`); a new one throws away the earlier ones
     /// still live, so every scenario run starts with one.
     pub feed_seeded: Vec<DocumentDraftId>,
+    /// PR-A1 B1: the bills "entered by hand" for those receipts
+    /// (`dev.demo_feed_receipt_dup`), voided with them: a bill left over
+    /// would match the next run's receipt (Q-PRA1d checks every vendor).
+    pub feed_seeded_bills: Vec<TransactionId>,
     /// Records the converts posted (not the ones attach filed on), so the
     /// demo's inbox can void them when it lays its files out again: every
     /// scenario run starts with the books as found (A04 step 15).
@@ -758,13 +762,12 @@ fn engine_type(kind: &str) -> TxnType {
 
 /// The reference a posted record carries: a bill's vendor invoice number,
 /// an expense's own number (not a check number).
-fn txn_reference(
-    state: &mut DemoState,
-    t: &cl_company::sample::SampleTransaction,
-) -> Option<String> {
+fn txn_reference(state: &DemoState, t: &cl_company::sample::SampleTransaction) -> Option<String> {
     match t.kind.as_str() {
-        "bill" => super::bills::get(state, DemoLedger::id_of(t))
-            .and_then(|v| v.record.vendor_invoice_number),
+        // Read without rebuilding the bill: a document with no vendor
+        // (Q-PRA1d) is checked against every bill, and `bills::get` reads
+        // the whole ledger each time (seconds per check).
+        "bill" => super::bills::reference_of(state, DemoLedger::id_of(t)),
         "check" => None,
         _ => Some(t.number.clone()).filter(|n| !n.is_empty()),
     }

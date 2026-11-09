@@ -260,13 +260,15 @@ fn seed_duplicate_as(
         received: true,
         draft_attachment: None,
     };
-    super::super::bills::create_bill(state, &bill, None).ok()?;
+    let id = super::super::bills::create_bill(state, &bill, None).ok()?;
+    state.drafts.feed_seeded_bills.push(id);
     super::refresh(state);
     let read_vendor = with_vendor.then_some(vendor);
     seed_receipt_as(state, r.id, false, "invoice.pdf", false, read_vendor).map(|d| (r.id, d))
 }
 
-/// Throws away the receipts [`seed_receipt`] made that are still live
+/// Throws away the receipts [`seed_receipt`] made that are still live,
+/// and voids the bills [`seed_duplicate`] entered for them
 /// (`dev.demo_feed_reset`: every scenario run starts without them).
 pub fn discard_seeded(state: &mut DemoState) {
     let Some(tenant) = state.open else {
@@ -274,6 +276,10 @@ pub fn discard_seeded(state: &mut DemoState) {
     };
     for old in std::mem::take(&mut state.drafts.feed_seeded) {
         let _ = super::super::drafts::discard(state, tenant, old);
+    }
+    // A bill already void (or paid since) is left as it is.
+    for bill in std::mem::take(&mut state.drafts.feed_seeded_bills) {
+        let _ = super::super::bills::void(state, bill, None);
     }
 }
 

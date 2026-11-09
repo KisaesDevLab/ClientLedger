@@ -372,3 +372,23 @@ fn reopen_uses_the_drafts_id_and_only_converted_drafts() {
         Vec::<DocumentDraftId>::new()
     );
 }
+
+/// PR-A1: the bill `dev.demo_feed_receipt_dup` entered "by hand" goes with
+/// its receipt, so the next run's plain receipt (Q-PRA1d: checked against
+/// every vendor) is not taken for it.
+#[test]
+fn a_new_seed_voids_the_bill_entered_for_a_duplicate() {
+    let (mut s, t) = state();
+    let (_, dup) = seed_duplicate(&mut s).expect("dup");
+    let first = drafts::duplicates(&mut s, t, dup).expect("dups");
+    assert_ne!(first.len(), 0, "the hand-entered bill matches");
+    let (_, plain) = seed_receipt(&mut s, true).expect("seed");
+    assert_eq!(s.drafts.feed_seeded_bills.len(), 0);
+    let found = drafts::duplicates(&mut s, t, plain).expect("dups");
+    assert!(
+        found
+            .iter()
+            .all(|m| !matches!(m.source, cl_api::MatchSource::Transaction(_))),
+        "a posted record still matches the new receipt"
+    );
+}

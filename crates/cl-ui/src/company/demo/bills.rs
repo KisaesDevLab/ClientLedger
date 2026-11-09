@@ -739,6 +739,13 @@ fn sample_paid(
     }
 }
 
+/// Bill `id`'s vendor invoice number, as [`get`] reports it, without
+/// rebuilding the bill (the duplicate check reads it for every bill).
+#[must_use]
+pub(crate) fn reference_of(state: &DemoState, id: TransactionId) -> Option<String> {
+    state.bills.info.get(&id).and_then(|i| i.reference.clone())
+}
+
 /// One bill or vendor credit as `GET /bills/{id}` (or `/vendor-credits`)
 /// answers it, and its version.
 #[must_use]
@@ -1078,6 +1085,8 @@ mod tests {
         assert_eq!(v.record.txn.total, Some(money("1480.00")));
         assert_eq!(v.record.lines.len(), 2);
         assert_eq!(v.record.vendor_invoice_number.as_deref(), Some("INV-55871"));
+        // The duplicate check's quick read says the same.
+        assert_eq!(reference_of(&s, id).as_deref(), Some("INV-55871"));
         // 11/03 + Net 15.
         assert_eq!(v.record.due_date, CalendarDate::from_ymd(2026, 11, 18).ok());
         assert_eq!(v.record.bill_status, Some(BillStatus::Unpaid));
