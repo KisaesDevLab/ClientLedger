@@ -2657,3 +2657,51 @@ fn stop_changing_clears_what_the_edit_was_told() {
     assert!(s.entry.editing.is_none());
     assert_eq!(s.entry.problems, Vec::<cl_grid::TextKey>::new());
 }
+
+/// P27 QA-11 (owner): the footer's cleared balance is the engine's for all
+/// dates, as Reconcile counts it, whatever the range shown; the ending
+/// balance stays the range's.
+#[test]
+fn the_footer_cleared_balance_is_for_all_dates() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let end = CalendarDate::from_ymd(2026, 10, 1).expect("date");
+    if let Some(q) = s.query.as_mut() {
+        q.end = end;
+    }
+    s.footer.invalidate();
+    s.footer_load();
+    let chart = link
+        .demo_state()
+        .and_then(|d| d.chart.clone())
+        .expect("chart");
+    let ledger = crate::company::demo::register::DemoLedger::default();
+    let sum = |e| {
+        crate::company::demo::register::summary(&ledger, &chart, operating(&link), e)
+            .expect("summary")
+    };
+    let (all, ranged) = (sum(None), sum(Some(end)));
+    let exact = |x: &cl_api::RegisterSummary| x.cleared_balance.as_ref().and_then(|a| a.exact());
+    assert_ne!(
+        exact(&all),
+        exact(&ranged),
+        "the sample clears lines after 10/01"
+    );
+    let text = |a: &cl_api::RegisterAmount| {
+        crate::screens::lists::center::model::layout_plain(
+            &a.display(false).expect("display"),
+            s.model.style,
+        )
+    };
+    let shown = s.footer_shown();
+    assert_eq!(
+        shown.cleared.as_deref(),
+        Some(text(all.cleared_balance.as_ref().expect("R4")).as_str())
+    );
+    assert_eq!(
+        shown.ending,
+        text(ranged.ending_balance.as_ref().expect("R4")),
+        "the ending balance is the range's"
+    );
+}

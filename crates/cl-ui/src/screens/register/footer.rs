@@ -6,7 +6,9 @@
 //! from `GET /accounts/{id}/register/summary` (R4), else the unfiltered
 //! `endingBalance` of a register page, else (an engine without either) the
 //! account's stored balance when the range is "All dates" (the stored
-//! balance counts every posted line, future-dated ones too). When a filter is
+//! balance counts every posted line, future-dated ones too). The cleared
+//! balance is the engine's for all dates whatever the range shown, so it
+//! agrees with Reconcile (owner, P27 QA-11). When a filter is
 //! on before R1 a companion one-line page without filters supplies the
 //! ending balance. Nothing here is ever added up (non-negotiable 7); a
 //! figure that is missing shows "—". The register figures are shown as
@@ -167,13 +169,14 @@ impl RegisterScreen {
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            return crate::company::demo::register::summary(
-                &demo.ledger,
-                &chart,
-                account,
-                Some(end),
-            )
-            .map(Task::ready);
+            let mut sum =
+                crate::company::demo::register::summary(&demo.ledger, &chart, account, Some(end))?;
+            if end < CalendarDate::max() {
+                sum.cleared_balance =
+                    crate::company::demo::register::summary(&demo.ledger, &chart, account, None)?
+                        .cleared_balance;
+            }
+            return Some(Task::ready(sum));
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;
@@ -181,6 +184,13 @@ impl RegisterScreen {
         group
             .read(&session, move |s| async move {
                 let mut sum = s.register().summary(account, Some(end)).await?;
+                // The cleared balance is for all dates, as Reconcile counts
+                // it (owner, P27 QA-11): a reconciled item dated after the
+                // range's end still counts.
+                if end < CalendarDate::max() {
+                    sum.cleared_balance =
+                        s.register().summary(account, None).await?.cleared_balance;
+                }
                 // The summary's date may be an older reconciliation (U-196,
                 // P27 QA-4): the history names the latest. Only a note, so a
                 // failed read keeps the summary's.
