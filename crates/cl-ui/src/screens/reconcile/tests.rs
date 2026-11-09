@@ -746,3 +746,25 @@ fn bank_file_banner_only_with_bank_file_lines() {
     }
     assert_eq!(state(&s)["banner"], false);
 }
+
+/// P27 QA-8: "Change statement info" on a statement begun with no charge
+/// offers the same default charge accounts as Begin.
+#[test]
+fn change_info_defaults_the_charge_accounts_like_begin() {
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    let op = crate::company::demo::account_id(1010);
+    s.pick_account(op);
+    s.poll();
+    let (fees, interest) = (s.form.service_charge.account, s.form.interest.account);
+    assert!(fees.is_some() && interest.is_some(), "Begin's defaults");
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "86,902.13".into();
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["step"], "window");
+    s.change_info();
+    assert_eq!(s.form.service_charge.account, fees);
+    assert_eq!(s.form.interest.account, interest);
+}

@@ -1011,6 +1011,9 @@ impl ReconcileScreen {
                 date.set(h.charge.date);
             }
         }
+        // A charge not held yet gets the same default account as on
+        // Begin (P27 QA-8).
+        self.default_charge_accounts();
         self.editing = true;
         self.step = Step::Begin;
     }
