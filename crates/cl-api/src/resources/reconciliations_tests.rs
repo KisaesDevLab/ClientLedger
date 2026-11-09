@@ -79,6 +79,36 @@ fn parses_exact_strings_and_lines() {
     assert!(r.started.is_some());
 }
 
+/// QA-2 (P27): a journal entry row as the engine sends it (no contact,
+/// no check number, the payee text in the entry's memo, the line's
+/// description null) keeps its words; blank text is none.
+#[test]
+fn a_journal_entry_row_keeps_its_memo_and_number() {
+    let row = format!(
+        r#","lines":[{{"id":"x","journal_line_id":"{JL}","transaction_id":"{TXN}",
+        "is_cleared":false,"txn_date":"2026-10-27","txn_type":"journal_entry",
+        "check_number":null,"txn_number":"JE-12","contact_name":null,
+        "payee_name_on_check":"  ","description":null,
+        "memo":"check 4417 · Elm Street Accountants · Check",
+        "amount":"-412.1800","afterStatementDate":false,"from_bank_feed":false,
+        "fromBankFeed":false,"likely_duplicate":false}}]"#
+    );
+    let r = reconciliation_from(header(&row).as_bytes()).expect("parsed");
+    let l = &r.lines.expect("lines")[0];
+    assert_eq!(l.payee, None);
+    assert_eq!(
+        l.memo.as_deref(),
+        Some("check 4417 \u{b7} Elm Street Accountants \u{b7} Check")
+    );
+    assert_eq!(l.number.as_deref(), Some("JE-12"));
+    assert_eq!(l.txn_type, "journal_entry");
+    // A check: contact first, the line description as its memo.
+    let r = reconciliation_from(header(&line_json("\"-412.1800\"")).as_bytes()).expect("parsed");
+    let l = &r.lines.expect("lines")[0];
+    assert_eq!(l.payee.as_deref(), Some("Monett Tire & Lube"));
+    assert_eq!(l.memo, None);
+}
+
 #[test]
 fn a_json_number_amount_is_a_decode_error() {
     let e = reconciliation_from(header(&line_json("-412.18")).as_bytes()).expect_err("number");

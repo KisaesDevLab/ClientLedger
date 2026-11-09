@@ -23,7 +23,7 @@ steps:
   - type: {text: "12.84"}
   - click: {role: button, label: Continue}
   - assert_state: {key: screen.posting_locked, equals: true}
-  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube"}
+  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube 412.18"}
   - click: {role: button, label: Reconcile now}
   - assert_state: {key: screen.dialog, equals: closingpassword}
   - screenshot: password

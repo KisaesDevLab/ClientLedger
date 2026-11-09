@@ -704,3 +704,45 @@ fn a_third_decimal_is_refused_not_rounded() {
     assert!(s.problems.contains(&BeginProblem::BadServiceCharge));
     assert_eq!(state(&s)["step"], "begin");
 }
+
+/// QA-2: rows name their payee (or a journal entry's memo), ref and amount
+/// on screen and in the AccessKit label.
+#[test]
+fn rows_show_ref_payee_or_memo_and_amount() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let mut l = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .cloned()
+        .expect("4409");
+    assert_eq!(
+        window::row_label(&l),
+        "Cleared: 10/27 4409 Monett Tire & Lube 412.18"
+    );
+    // A journal entry: no contact, no number, the payee in its memo.
+    l.payee = None;
+    l.number = None;
+    l.memo = Some("check 4417 \u{b7} Elm Street Accountants \u{b7} Check".into());
+    assert_eq!(
+        window::who(&l),
+        "check 4417 \u{b7} Elm Street Accountants \u{b7} Check"
+    );
+    assert_eq!(
+        window::row_label(&l),
+        "Cleared: 10/27 check 4417 \u{b7} Elm Street Accountants \u{b7} Check 412.18"
+    );
+}
+
+/// QA minor: the bank-file banner shows only with a line from a bank file.
+#[test]
+fn bank_file_banner_only_with_bank_file_lines() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    assert_eq!(state(&s)["banner"], true, "the demo has accepted lines");
+    for l in &mut s.lines {
+        l.from_bank_feed = false;
+    }
+    assert_eq!(state(&s)["banner"], false);
+}

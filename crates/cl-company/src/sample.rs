@@ -1103,6 +1103,7 @@ mod tests {
             txn_type: "check".into(),
             number: None,
             payee: None,
+            memo: None,
             amount: Money::ZERO,
             after_statement_date: after,
             from_bank_feed: feed,

@@ -55,7 +55,7 @@ steps:
   - click: {role: check_box, label: Hide transactions after the statement date}
   - assert_state: {key: screen.left.rows, equals: 5}
   # --- Tick 4409: the engine says 0.00 --------------------------------------
-  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube"}
+  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube 412.18"}
   - assert_state: {key: screen.difference, equals: "0.00"}
   - assert_state: {key: screen.can_finish, equals: true}
   - screenshot: zero

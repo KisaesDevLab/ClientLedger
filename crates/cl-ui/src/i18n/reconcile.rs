@@ -81,7 +81,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.pending.interest", "Interest (from statement info)"),
     ("reconcile.pending.service", "Service charge (from statement info)"),
     ("reconcile.pending.finance", "Finance charge (from statement info)"),
-    ("reconcile.a11y.cleared", "Cleared: {date} {ref} {payee}"),
+    ("reconcile.a11y.cleared", "Cleared: {date} {ref} {payee} {amount}"),
     ("reconcile.a11y.pending", "Cleared: {what}"),
     ("reconcile.a11y.from_bank_file", "from bank file"),
     ("reconcile.likely_duplicate", "This may be a duplicate of a line you already checked. Void it in the register if it is."),

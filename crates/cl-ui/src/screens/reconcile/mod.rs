@@ -1183,6 +1183,7 @@ impl ReconcileScreen {
             "left": pane(kind.left()),
             "right": pane(kind.right()),
             "hide_later": self.hide_later,
+            "banner": window::banner_shown(self).0,
             "pending": !self.queue.idle(),
             "leaving": self.leaving,
             "password_rejected": self.password_rejected,

@@ -465,6 +465,7 @@ impl DemoRecon {
                 txn_type: p.kind.to_string(),
                 number: p.number.map(str::to_string),
                 payee: Some(p.payee.to_string()),
+                memo: None,
                 amount: p.amount,
                 after_statement_date: p.date > r.statement_date,
                 from_bank_feed: p.from_feed,

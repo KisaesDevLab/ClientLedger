@@ -29,7 +29,7 @@ pub(crate) fn hint_text(s: &ReconcileScreen) -> Option<String> {
         rec.difference,
     )?;
     let l = unchecked.iter().find(|l| l.journal_line == id)?;
-    let payee = l.payee.clone().unwrap_or_default();
+    let payee = who(l).to_string();
     Some(match (&l.number, l.txn_type.as_str()) {
         (Some(n), "check") => t_with("reconcile.hint.check", &[("number", n), ("payee", &payee)]),
         _ => t_with(
@@ -37,6 +37,33 @@ pub(crate) fn hint_text(s: &ReconcileScreen) -> Option<String> {
             &[("payee", &payee), ("date", &short_date(l.date))],
         ),
     })
+}
+
+/// The words in the Payee column: the payee, else the memo (a journal
+/// entry has only its memo; QA-2).
+pub(crate) fn who(l: &ReconLine) -> &str {
+    l.payee.as_deref().or(l.memo.as_deref()).unwrap_or_default()
+}
+
+/// The memo shown after the payee, when there is a payee and a memo.
+fn memo_after(l: &ReconLine) -> Option<&str> {
+    l.payee.as_ref()?;
+    l.memo.as_deref().filter(|m| Some(*m) != l.payee.as_deref())
+}
+
+/// A row's AccessKit label: date, ref, payee (or memo) and amount, so
+/// rows can be told apart without seeing them (QA-2).
+pub(crate) fn row_label(l: &ReconLine) -> String {
+    let label = t_with(
+        "reconcile.a11y.cleared",
+        &[
+            ("date", &short_date(l.date)),
+            ("ref", l.number.as_deref().unwrap_or_default()),
+            ("payee", who(l)),
+            ("amount", &display(l.amount.abs())),
+        ],
+    );
+    label.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn short_date(d: cl_core::CalendarDate) -> String {
@@ -151,18 +178,33 @@ fn header(
     });
 }
 
+/// The bank-file banner shows only when a line came from a bank file or a
+/// bank-file entry was voided (QA minor: it showed with nothing imported).
+pub(crate) fn banner_shown(s: &ReconcileScreen) -> (bool, bool) {
+    (
+        s.lines.iter().any(|l| l.from_bank_feed),
+        s.entry_voided.is_some(),
+    )
+}
+
 fn banner(s: &ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
+    let (from_file, voided) = banner_shown(s);
+    if !from_file && !voided {
+        return;
+    }
     egui::Frame::new()
         .fill(tokens.info_tint)
         .corner_radius(6.0)
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 3.5, tokens.info);
-                ui.label(RichText::new(t("reconcile.banner")).color(tokens.info));
-            });
+            if from_file {
+                ui.horizontal_wrapped(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 3.5, tokens.info);
+                    ui.label(RichText::new(t("reconcile.banner")).color(tokens.info));
+                });
+            }
             if let Some(n) = s.entry_voided {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
@@ -440,16 +482,9 @@ fn line_row(
     );
     let ui = &mut child;
     ui.spacing_mut().item_spacing.x = 0.0;
-    let payee = l.payee.clone().unwrap_or_default();
+    let payee = who(l).to_string();
     let number = l.number.clone().unwrap_or_default();
-    let label = t_with(
-        "reconcile.a11y.cleared",
-        &[
-            ("date", &short_date(l.date)),
-            ("ref", &number),
-            ("payee", &payee),
-        ],
-    );
+    let label = row_label(l);
     ui.allocate_ui_with_layout(
         Vec2::new(cols[0], ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -486,7 +521,29 @@ fn line_row(
         |ui| {
             ui.set_min_size(Vec2::new(cols[3], ROW_H));
             ui.add_space(10.0);
-            ui.add(egui::Label::new(RichText::new(&payee).color(tokens.text_primary)).truncate());
+            match memo_after(l) {
+                Some(memo) => {
+                    let mut job = egui::text::LayoutJob::default();
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    job.append(
+                        &payee,
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), tokens.text_primary),
+                    );
+                    job.append(
+                        memo,
+                        8.0,
+                        egui::TextFormat::simple(font, tokens.text_secondary),
+                    );
+                    ui.add(egui::Label::new(job).truncate());
+                }
+                None => {
+                    ui.add(
+                        egui::Label::new(RichText::new(&payee).color(tokens.text_primary))
+                            .truncate(),
+                    );
+                }
+            }
             if l.from_bank_feed {
                 ui.add_space(6.0);
                 let (r, resp) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());

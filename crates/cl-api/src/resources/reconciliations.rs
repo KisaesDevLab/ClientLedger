@@ -171,8 +171,11 @@ pub struct ReconLine {
     pub txn_type: String,
     /// The check or reference number.
     pub number: Option<String>,
-    /// The payee or a short description.
+    /// The payee: the contact, else the name printed on the check.
     pub payee: Option<String>,
+    /// The line's description, else the entry's memo (a journal entry's
+    /// only words; the practice company names the payee there, QA-2).
+    pub memo: Option<String>,
     /// Debit − credit, in the books sign (positive = money in for a bank).
     pub amount: Money,
     /// Dated after the statement date (shown only with the toggle off).
@@ -703,18 +706,33 @@ fn line_of(v: &Value) -> Result<ReconLine, ApiError> {
     let date = date_at(v, "txn_date")
         .or_else(|| date_at(v, "txnDate"))
         .ok_or_else(|| decode(what))?;
-    let payee = str_at(v, "contact_name")
-        .or_else(|| str_at(v, "payee_name_on_check"))
-        .or_else(|| str_at(v, "description"))
-        .map(str::to_string);
+    // Snake case as the engine's worksheet rows come (the camel-case names
+    // are read too, as for the ids and the date). Blank text is none.
+    let text = |snake: &str, camel: &str| {
+        str_at(v, snake)
+            .or_else(|| str_at(v, camel))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let payee = text("contact_name", "contactName")
+        .or_else(|| text("payee_name_on_check", "payeeNameOnCheck"));
+    let memo = text("description", "lineDescription").or_else(|| text("memo", "txnMemo"));
     Ok(ReconLine {
         journal_line,
         transaction,
         cleared: bool_at(v, "is_cleared") || bool_at(v, "isCleared"),
         date,
-        txn_type: str_at(v, "txn_type").unwrap_or_default().to_string(),
-        number: number_text(v, "check_number").or_else(|| number_text(v, "txn_number")),
+        txn_type: str_at(v, "txn_type")
+            .or_else(|| str_at(v, "txnType"))
+            .unwrap_or_default()
+            .to_string(),
+        number: number_text(v, "check_number")
+            .or_else(|| number_text(v, "checkNumber"))
+            .or_else(|| number_text(v, "txn_number"))
+            .or_else(|| number_text(v, "txnNumber")),
         payee,
+        memo,
         amount: money_at(v, "amount", what)?,
         after_statement_date: bool_at(v, "afterStatementDate"),
         from_bank_feed: bool_at(v, "fromBankFeed"),
