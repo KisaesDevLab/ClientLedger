@@ -126,6 +126,10 @@ pub(crate) struct FormValues {
     pub lines: Vec<FormLine>,
     /// The form's read marks.
     pub marks: ReadMarks,
+    /// Ref. no. (`None`: the form has none, a check).
+    pub reference: Option<String>,
+    /// The memo.
+    pub memo: String,
 }
 
 /// The owner's work on a draft, carried to another form. Owner data:
@@ -152,6 +156,13 @@ pub(crate) struct Carry {
     pub paid_from: Option<Kept<AccountId>>,
     /// The read lines, by their order in the reading.
     pub lines: Vec<Option<KeptLine>>,
+    /// Ref. no. as the form had it (PR-A1 QA-3; not an amount).
+    pub reference: Option<String>,
+    /// The owner accepted, changed or typed the reference (not only read
+    /// and left unaccepted).
+    pub reference_owned: bool,
+    /// The memo as the form had it.
+    pub memo: Option<String>,
 }
 
 impl std::fmt::Debug for Carry {
@@ -162,11 +173,23 @@ impl std::fmt::Debug for Carry {
     }
 }
 
-/// The owner's own state of a field, when there is one to carry.
-fn owners(marks: &ReadMarks, target: Option<ReadTarget>) -> Option<ReadField> {
-    marks
-        .state(target?)
-        .filter(|s| matches!(s, ReadField::Accepted | ReadField::Edited))
+/// The owner's own state of a field, when there is one to carry: accepted
+/// or changed, or (PR-A1 QA-3) not from the reading at all but holding a
+/// value (`has`), which the owner put there (a vendor picked when the read
+/// name matched none): that counts as changed. A value read and not
+/// accepted is never carried (it fills again from the reading).
+fn owners(marks: &ReadMarks, target: Option<ReadTarget>, has: bool) -> Option<ReadField> {
+    match marks.state(target?) {
+        Some(ReadField::Read { .. }) => None,
+        Some(s) => Some(s),
+        None => has.then_some(ReadField::Edited),
+    }
+}
+
+/// Text that says something (trimmed, not empty).
+fn some_text(s: &str) -> Option<String> {
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_string())
 }
 
 impl Carry {
@@ -226,6 +249,25 @@ impl Carry {
             &mut v.paid_from,
             &mut v.marks,
         );
+        // PR-A1 QA-3: the reference and the memo go with it too (the card
+        // and check forms don't read a reference: a bill's read one fills
+        // an empty field there; on a bill an unaccepted one gives way to
+        // the bill's own reading).
+        if let (Some(r), Some(slot)) = (&self.reference, v.reference.as_mut()) {
+            if self.reference_owned {
+                slot.clone_from(r);
+                if form == DraftForm::EnterBill {
+                    v.marks.restore(ReadTarget::Reference, ReadField::Edited);
+                }
+            } else if slot.trim().is_empty() {
+                slot.clone_from(r);
+            }
+        }
+        if let Some(m) = &self.memo
+            && v.memo.trim().is_empty()
+        {
+            v.memo.clone_from(m);
+        }
         for (i, kept) in self.lines.iter().enumerate() {
             let (Some(k), Some(key)) = (kept, line(i)) else {
                 continue;
@@ -560,12 +602,12 @@ impl DraftSession {
         if to == self.form || self.locked() || self.closed() || self.draft.is_none() {
             return None;
         }
-        let kept = |shared: Shared| owners(&v.marks, shared.target(self.form));
+        let kept = |shared: Shared, has: bool| owners(&v.marks, shared.target(self.form), has);
         let lines = self
             .line_rows
             .iter()
             .map(|key| {
-                let state = owners(&v.marks, Some(ReadTarget::Line(*key)))?;
+                let state = owners(&v.marks, Some(ReadTarget::Line(*key)), false)?;
                 let l = v.lines.iter().find(|l| l.key == *key)?;
                 Some(KeptLine {
                     account: l.account,
@@ -581,19 +623,23 @@ impl DraftSession {
             updated_at: self.draft.as_ref().map(|d| d.updated_at.clone()),
             reading: self.values().map(|r| Box::new(r.clone())),
             helped: self.assist.helped,
-            payee: kept(Shared::Payee)
+            payee: kept(Shared::Payee, v.payee.is_some())
                 .zip(v.payee)
                 .map(|(state, value)| Kept { value, state }),
-            date: kept(Shared::Date)
+            date: kept(Shared::Date, v.date.is_some())
                 .zip(v.date)
                 .map(|(state, value)| Kept { value, state }),
-            total: kept(Shared::Total)
+            total: kept(Shared::Total, v.total.is_some())
                 .zip(v.total)
                 .map(|(state, value)| Kept { value, state }),
-            paid_from: kept(Shared::PaidFrom)
+            paid_from: kept(Shared::PaidFrom, v.paid_from.is_some())
                 .zip(v.paid_from)
                 .map(|(state, value)| Kept { value, state }),
             lines,
+            reference: v.reference.as_deref().and_then(some_text),
+            // Only a bill reads the reference; elsewhere it is the owner's.
+            reference_owned: !v.marks.is_unaccepted(ReadTarget::Reference),
+            memo: some_text(&v.memo),
         })
     }
 

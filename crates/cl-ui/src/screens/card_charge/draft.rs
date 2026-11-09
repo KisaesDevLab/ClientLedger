@@ -230,6 +230,8 @@ impl CardChargeScreen {
             paid_from: f.card,
             lines: f.lines.lines,
             marks: f.read,
+            reference: Some(f.ref_no),
+            memo: f.memo,
         }
     }
 
@@ -285,6 +287,10 @@ impl CardChargeScreen {
         f.card = v.paid_from;
         f.read = v.marks;
         f.lines.lines = v.lines;
+        if let Some(r) = v.reference {
+            f.ref_no = r;
+        }
+        f.memo = v.memo;
         let lines = std::mem::take(&mut f.lines);
         self.header.load(f);
         let lists = Arc::clone(&self.books.lists);

@@ -488,6 +488,8 @@ impl WriteCheckScreen {
             paid_from: f.bank,
             lines: f.lines.lines,
             marks: f.read,
+            reference: None,
+            memo: f.memo,
         }
     }
 
@@ -535,6 +537,7 @@ impl WriteCheckScreen {
         f.bank = v.paid_from;
         f.read = v.marks;
         f.lines.lines = v.lines;
+        f.memo = v.memo;
         let lines = std::mem::take(&mut f.lines);
         self.header.load(f);
         let lists = Arc::clone(&self.lists);
