@@ -2682,7 +2682,11 @@ fn the_footer_cleared_balance_is_for_all_dates() {
             .expect("summary")
     };
     let (all, ranged) = (sum(None), sum(Some(end)));
-    let exact = |x: &cl_api::RegisterSummary| x.cleared_balance.as_ref().and_then(|a| a.exact());
+    let exact = |x: &cl_api::RegisterSummary| {
+        x.cleared_balance
+            .as_ref()
+            .and_then(cl_api::RegisterAmount::exact)
+    };
     assert_ne!(
         exact(&all),
         exact(&ranged),
