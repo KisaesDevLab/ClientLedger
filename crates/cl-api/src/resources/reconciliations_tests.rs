@@ -38,7 +38,7 @@ fn header(lines: &str) -> String {
         "statementEndingBalance":"86902.1300","clearedBalance":"87314.3100",
         "difference":"-412.1800",
         "clearedDeposits":{{"count":6,"total":"40107.8400"}},
-        "clearedPayments":{{"count":8,"total":"24229.7300"}},
+        "clearedPayments":{{"count":8,"total":"-24229.7300"}},
         "serviceChargeAmount":"48.0000","serviceChargeDate":"2026-10-31",
         "serviceChargeAccountId":"{EXP}","serviceChargeTxnId":null,
         "interestAmount":"12.8400","interestDate":"2026-10-31",
@@ -65,7 +65,7 @@ fn parses_exact_strings_and_lines() {
     assert_eq!(r.difference, m("-412.18"));
     assert_eq!(r.cleared_balance, m("87314.31"));
     assert_eq!(r.cleared_deposits.count, 6);
-    assert_eq!(r.cleared_payments.total, m("24229.73"));
+    assert_eq!(r.cleared_payments.total, m("-24229.73"));
     assert!(!r.ties_out());
     let svc = r.service_charge.expect("charge");
     assert_eq!(svc.charge.amount, m("48"));

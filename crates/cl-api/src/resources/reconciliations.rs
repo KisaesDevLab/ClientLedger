@@ -120,12 +120,13 @@ pub struct HeldCharge {
     pub posted: Option<TransactionId>,
 }
 
-/// A count and the engine's total of the cleared lines on one side.
+/// A count and the engine's total of the cleared lines on one side, in the
+/// account's books sign (money in positive, money out negative; U-188).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ClearedSide {
     /// Lines ticked (pending charges included).
     pub count: u32,
-    /// Their total as the engine sums it (positive).
+    /// Their total as the engine sums it (books sign).
     pub total: Money,
 }
 
@@ -332,6 +333,9 @@ pub enum ReconcileRefusal {
     ChargePosted,
     /// Undo needs an Admin.
     AdminRequired,
+    /// A charge's account can't take it (inactive, another company, or
+    /// the account being reconciled).
+    ChargeAccountInvalid,
 }
 
 /// Names the refusal behind `e`, if it is a reconciliation one.
@@ -355,7 +359,8 @@ pub fn reconcile_refusal(e: &ApiError) -> Option<ReconcileRefusal> {
             reconciliation: text("reconciliationId").and_then(|s| ReconciliationId::parse(&s).ok()),
         },
         "RECONCILIATION_NOT_IN_PROGRESS" => ReconcileRefusal::NotInProgress,
-        "RECONCILIATION_NOT_LATEST" => ReconcileRefusal::NotLatest,
+        "RECONCILIATION_NOT_LATEST" | "RECONCILIATION_NOT_COMPLETE" => ReconcileRefusal::NotLatest,
+        "RECONCILE_CHARGE_ACCOUNT_INVALID" => ReconcileRefusal::ChargeAccountInvalid,
         "RECONCILE_CHARGE_POSTED" => ReconcileRefusal::ChargePosted,
         "RECONCILE_ADMIN_REQUIRED" => ReconcileRefusal::AdminRequired,
         _ => return None,
@@ -957,7 +962,8 @@ impl Reconciliations<'_> {
     }
 
     /// Begin: starts the worksheet (bank-file items pre-checked, later
-    /// lines included).
+    /// lines included). The engine answers the summary view (U-188); the
+    /// lines come from [`Reconciliations::get`].
     ///
     /// # Errors
     /// `Local(Unsupported)` without the reconcile capabilities; the body's

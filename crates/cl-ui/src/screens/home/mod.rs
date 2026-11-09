@@ -506,7 +506,7 @@ impl HomeScreen {
             &self.link,
             self.group.as_ref(),
             None,
-            move |_| Ok(demo::reconcile(&demo_ids)),
+            move |d| Ok(crate::company::demo::reconcile::home_state(d, &demo_ids)),
             move |s| async move {
                 let mut state = ReconcileState::default();
                 for batch in ids.chunks(RECONCILE_ACCOUNTS_MAX) {

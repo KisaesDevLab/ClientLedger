@@ -81,6 +81,9 @@ pub struct DemoRecon {
     discrepancies: Vec<(AccountId, DiscrepancyRow)>,
     next: u32,
     seeded: bool,
+    /// The demo Reconcile was used (Home then reads this state, not the
+    /// mockup's fixed "not finished" line).
+    touched: bool,
 }
 
 fn m(s: &str) -> Money {
@@ -440,7 +443,7 @@ impl DemoRecon {
                     &mut payments
                 };
                 side.0 += 1;
-                side.1 = side.1.checked_add(p.amount.abs()).unwrap_or(side.1);
+                side.1 = side.1.checked_add(p.amount).unwrap_or(side.1);
             }
             lines.push(ReconLine {
                 journal_line: *id,
@@ -471,7 +474,7 @@ impl DemoRecon {
                 } else {
                     cleared = cleared.checked_sub(a).unwrap_or(cleared);
                     payments.0 += 1;
-                    payments.1 = payments.1.checked_add(a).unwrap_or(payments.1);
+                    payments.1 = payments.1.checked_sub(a).unwrap_or(payments.1);
                 }
             }
         }
@@ -604,6 +607,7 @@ pub fn start(state: &mut DemoState, s: &ReconStart) -> Result<Reconciliation, Ap
     };
     let out = r.view(&rec, true, locked);
     r.recs.push(rec);
+    r.touched = true;
     Ok(out)
 }
 
@@ -802,7 +806,46 @@ pub fn complete(
         .map(|(id, _)| *id)
         .collect();
     r.reconciled.extend(cleared);
+    r.touched = true;
+    sync_register(state);
     Ok(())
+}
+
+/// The register's R marks follow 1010's latest finished reconciliation.
+fn sync_register(state: &mut DemoState) {
+    let op = super::account_id(OPERATING);
+    let through = state
+        .reconcile
+        .latest_complete(op)
+        .map(|x| x.statement_date);
+    state.ledger.set_reconciled_through(through);
+}
+
+/// Home's reconcile facts: the mockup's (an unfinished one, last
+/// reconciled 09/30) until the demo Reconcile is used, then its own.
+#[must_use]
+pub fn home_state(state: &mut DemoState, accounts: &[AccountId]) -> cl_api::ReconcileState {
+    if !state.reconcile.touched {
+        return super::home::reconcile(accounts);
+    }
+    let r = &mut state.reconcile;
+    let in_progress = accounts
+        .iter()
+        .copied()
+        .filter(|a| r.in_progress(*a).is_some())
+        .collect();
+    let last_completed = accounts
+        .iter()
+        .filter_map(|a| r.latest_complete(*a))
+        .max_by_key(|x| x.statement_date)
+        .map(|x| cl_api::LastReconciled {
+            account: x.account,
+            statement_date: x.statement_date,
+        });
+    cl_api::ReconcileState {
+        in_progress,
+        last_completed,
+    }
 }
 
 /// Undo the latest finished reconciliation (U-190).
@@ -863,6 +906,8 @@ pub fn undo(
         }
         UndoMode::Discard => r.recs.retain(|x| x.id != id),
     }
+    r.touched = true;
+    sync_register(state);
     Ok(())
 }
 
@@ -876,6 +921,7 @@ pub fn cancel(state: &mut DemoState, id: ReconciliationId) -> Result<(), ApiErro
         return Err(not_in_progress());
     }
     r.recs.retain(|x| x.id != id);
+    r.touched = true;
     Ok(())
 }
 
@@ -995,7 +1041,7 @@ pub fn report(
         "cleared": cleared,
         "uncleared": uncleared,
         "totals": {
-            "clearedPayments": view.cleared_payments.total.to_wire(),
+            "clearedPayments": view.cleared_payments.total.abs().to_wire(),
             "clearedDeposits": view.cleared_deposits.total.to_wire(),
         },
     });
@@ -1006,6 +1052,9 @@ pub fn report(
 /// Starts over (scenarios run light, then dark).
 pub fn reset(state: &mut DemoState) {
     state.reconcile = DemoRecon::default();
+    state
+        .ledger
+        .set_reconciled_through(Some(super::register::last_reconciled()));
 }
 
 #[cfg(test)]

@@ -149,6 +149,29 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
     // load_into leaves the new company open in the session.
     let _ = created;
 
+    // P27: 1010 is reconciled through 09/30 at the sample's cleared balance,
+    // so the next Begin starts at 71,436.20.
+    if cl_api::reconcile_screen_supported(&client.capabilities()) {
+        let op = account(&s, "1010").await;
+        let history = s.reconciliations().history(op).await.expect("history");
+        assert_eq!(history.len(), 1, "one finished reconciliation");
+        assert_eq!(history[0].status, cl_api::ReconStatus::Complete);
+        assert_eq!(history[0].statement_date, d(2026, 9, 30));
+        let next = s
+            .reconciliations()
+            .start(&cl_api::ReconStart {
+                account: op,
+                statement_date: d(2026, 10, 31),
+                statement_ending_balance: m("0"),
+                service_charge: None,
+                interest: None,
+            })
+            .await
+            .expect("begin October");
+        assert_eq!(next.beginning_balance, m("71436.20"));
+        s.reconciliations().cancel(next.id).await.expect("cancel");
+    }
+
     // The templates and their group, as templates.json has them.
     let mut templates = s.templates().list_all().await.expect("templates");
     templates.sort_by(|a, b| a.name.cmp(&b.name));

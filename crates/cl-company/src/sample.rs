@@ -815,6 +815,11 @@ pub async fn load_into(
     }
 
     let total = sample.transactions.len().max(1);
+    // P27: the entries the sample marks cleared on 1010 through the last
+    // reconciliation (09/30), ticked on that reconciliation below.
+    let reconciled_through = last_reconciled_1010();
+    let mut cleared_1010: std::collections::HashSet<cl_core::ids::TransactionId> =
+        std::collections::HashSet::new();
     for (i, t) in sample.transactions.iter().enumerate() {
         if i % 50 == 0 {
             progress(Progress::Working {
@@ -868,10 +873,28 @@ pub async fn load_into(
         };
         let entry = NewJournalEntry::new(t.date, Some(memo), Basis::Both, lines)
             .map_err(|e| CompanyError::Api(cl_api::ApiError::Local(e)))?;
-        session
+        let made = session
             .transactions()
             .create_journal_entry(&entry, &PostingOptions::default(), IdempotencyKey::new())
             .await?;
+        if t.cleared && t.date <= reconciled_through && t.lines.iter().any(|l| l.account == "1010")
+        {
+            cleared_1010.insert(made.record.id);
+        }
+    }
+    if let Some(&bank) = ids.get("1010") {
+        progress(Progress::Working {
+            percent: Some(99),
+            step: Some("reconciliation".into()),
+        });
+        reconcile_sample(
+            session,
+            bank,
+            reconciled_through,
+            sample.cleared_balance("1010", reconciled_through),
+            &cleared_1010,
+        )
+        .await?;
     }
     seed_layouts(session, &sample.company.daily_sales_layouts, &ids).await;
     seed_templates(
@@ -893,6 +916,55 @@ pub async fn load_into(
     stats.refresh().await;
     progress(Progress::Done);
     Ok(created)
+}
+
+/// The statement date of the sample's last finished reconciliation of 1010
+/// (the mockups' "Last reconciled 09/30/2026").
+#[must_use]
+pub fn last_reconciled_1010() -> CalendarDate {
+    CalendarDate::from_ymd(2026, 9, 30).unwrap_or_else(|_| unreachable!("a valid date"))
+}
+
+/// P27: reconciles 1010 through 09/30 on the real engine, so Begin starts
+/// at the sample's cleared balance (71,436.20) and Home shows "last
+/// reconciled": Begin, tick the lines the sample marks cleared, finish.
+/// Skipped on an engine without the reconcile capabilities.
+///
+/// # Errors
+/// Any engine refusal (a difference that isn't zero is a fixture bug).
+pub async fn reconcile_sample(
+    session: &Session,
+    bank: cl_core::ids::AccountId,
+    statement_date: CalendarDate,
+    ending: Money,
+    cleared: &std::collections::HashSet<cl_core::ids::TransactionId>,
+) -> Result<(), CompanyError> {
+    if !cl_api::reconcile_screen_supported(&session.client().capabilities()) {
+        return Ok(());
+    }
+    let r = session.reconciliations();
+    let started = r
+        .start(&cl_api::ReconStart {
+            account: bank,
+            statement_date,
+            statement_ending_balance: ending,
+            service_charge: None,
+            interest: None,
+        })
+        .await?;
+    let sheet = r.get(started.id).await?;
+    let ticks: Vec<(cl_core::ids::JournalLineId, bool)> = sheet
+        .lines
+        .unwrap_or_default()
+        .iter()
+        .filter(|l| !l.after_statement_date && cleared.contains(&l.transaction))
+        .map(|l| (l.journal_line, true))
+        .collect();
+    for chunk in ticks.chunks(cl_api::LINES_MAX) {
+        r.tick(started.id, chunk).await?;
+    }
+    r.complete(started.id, None).await?;
+    Ok(())
 }
 
 /// The lines the engine gets for a sample layout: each line's own account,

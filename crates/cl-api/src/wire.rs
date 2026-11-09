@@ -543,6 +543,9 @@ impl Capabilities {
     pub const RECONCILE_UNDO: &'static str = "reconcile-undo-v2";
     /// U-191: `GET /reports/reconciliation-discrepancy`.
     pub const RECONCILE_DISCREPANCY: &'static str = "reconcile-discrepancy-v1";
+    /// U-192: editing an entry keeps its in-progress reconciliation tick
+    /// and its same-amount bank-file link.
+    pub const LINE_IDENTITY: &'static str = "line-identity-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

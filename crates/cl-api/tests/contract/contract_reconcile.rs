@@ -132,7 +132,8 @@ pub fn finish_needs_exact_zero(h: &Harness) {
     let r = tick(h, s, r.id, &[line_of(&get(h, s, r.id), fee)]);
     assert!(r.ties_out());
     assert_eq!(r.cleared_deposits.count, 1);
-    assert_eq!(r.cleared_payments.total, m("0.01"));
+    // Totals are in the books sign: payments are negative (U-188).
+    assert_eq!(r.cleared_payments.total, m("-0.01"));
     h.run(s.reconciliations().complete(r.id, None))
         .expect("finish");
     assert_eq!(get(h, s, r.id).status, ReconStatus::Complete);
@@ -330,16 +331,40 @@ pub fn bank_feed_lines_are_prechecked(h: &Harness) {
     }
     let s = &h.s1;
     let b = books(h, s);
+    // Unique texts: the shared helper reads one page of every waiting
+    // row, which earlier tests may have filled; find ours by search.
+    let tag = crate::support::unique("RECON");
+    let texts = [
+        format!("{tag} DEPOSIT ONE"),
+        format!("{tag} FEE TWO"),
+        format!("{tag} CHECK 101"),
+    ];
     let rows = import(
         h,
         s,
         b.bank,
         &[
-            (date(2026, 7, 3), "-500.00", "DEPOSIT ONE"),
-            (date(2026, 7, 9), "25.00", "FEE TWO"),
-            (date(2026, 8, 2), "75.00", "CHECK 101"),
+            (date(2026, 7, 3), "-500.00", texts[0].as_str()),
+            (date(2026, 7, 9), "25.00", texts[1].as_str()),
+            (date(2026, 8, 2), "75.00", texts[2].as_str()),
         ],
     );
+    let rows = if rows.len() == 3 {
+        rows
+    } else {
+        let mut found = h
+            .run(s.feed().list(&cl_api::FeedQuery {
+                waiting_only: true,
+                search: Some(tag.clone()),
+                limit: 500,
+                ..cl_api::FeedQuery::default()
+            }))
+            .expect("list")
+            .rows;
+        found.sort_by_key(|r| r.date);
+        found
+    };
+    assert_eq!(rows.len(), 3, "the three bank lines wait");
     for r in &rows[..2] {
         let choice = FeedChoice {
             account: Some(if r.amount.is_negative() {
@@ -360,7 +385,8 @@ pub fn bank_feed_lines_are_prechecked(h: &Harness) {
     }
     let r = start(h, s, b.bank, date(2026, 7, 31), "475.00").expect("start");
     assert!(r.ties_out());
-    let lines = r.lines.expect("lines");
+    assert!(r.lines.is_none(), "start answers the summary view");
+    let lines = get(h, s, r.id).lines.expect("lines");
     let ticked: Vec<_> = lines.iter().filter(|l| l.cleared).collect();
     assert_eq!(ticked.len(), 2, "only the two accepted lines");
     assert!(ticked.iter().all(|l| l.from_bank_feed));
@@ -454,7 +480,9 @@ pub fn undo_keep_and_discard_restore_exact_states(h: &Harness) {
     // Begin again: the October lines are all uncleared, as before Begin.
     let r3 = start(h, s, b.bank, date(2026, 10, 31), "47.00").expect("start 3");
     assert_eq!(r3.beginning_balance, m("40.00"));
-    assert!(r3.lines.iter().flatten().all(|l| !l.cleared));
+    let sheet = get(h, s, r3.id);
+    assert_eq!(sheet.lines.iter().flatten().count(), 3);
+    assert!(sheet.lines.iter().flatten().all(|l| !l.cleared));
 }
 
 /// Undo is Admin only: a bookkeeper with banking write gets 403
@@ -527,7 +555,7 @@ pub fn discrepancy_lists_changed_and_backdated_entries(h: &Harness) {
 
 /// U-192: editing a ticked entry's memo keeps its tick.
 pub fn editing_a_ticked_entry_keeps_its_tick(h: &Harness) {
-    if !gated(h) {
+    if !gated(h) || !h.require_cap(Capabilities::LINE_IDENTITY, "U-192") {
         return;
     }
     let s = &h.s1;

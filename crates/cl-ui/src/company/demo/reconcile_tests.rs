@@ -43,7 +43,7 @@ fn begin_reproduces_the_mockup() {
     assert_eq!(r.cleared_deposits.count, 6);
     assert_eq!(r.cleared_deposits.total, m("40107.84"));
     assert_eq!(r.cleared_payments.count, 8);
-    assert_eq!(r.cleared_payments.total, m("24229.73"));
+    assert_eq!(r.cleared_payments.total, m("-24229.73"));
     assert_eq!(r.cleared_balance, m("87314.31"));
     assert_eq!(r.difference, m("-412.18"));
     let lines = r.lines.expect("lines");

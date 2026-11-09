@@ -60,7 +60,7 @@ pub(crate) fn draw(s: &mut ReconcileScreen, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 12.0;
             header(s, ui, &tokens, &rec, kind);
-            banner(ui, &tokens);
+            banner(s, ui, &tokens);
             if let Some(d) = rec.drift {
                 form::inline_warning(
                     ui,
@@ -151,7 +151,7 @@ fn header(
     });
 }
 
-fn banner(ui: &mut Ui, tokens: &Tokens) {
+fn banner(s: &ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
     egui::Frame::new()
         .fill(tokens.info_tint)
         .corner_radius(6.0)
@@ -163,6 +163,23 @@ fn banner(ui: &mut Ui, tokens: &Tokens) {
                 ui.painter().circle_filled(r.center(), 3.5, tokens.info);
                 ui.label(RichText::new(t("reconcile.banner")).color(tokens.info));
             });
+            if let Some(n) = s.entry_voided {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(crate::i18n::t_count(
+                            "reconcile.banner.entry_voided",
+                            usize::try_from(n).unwrap_or(usize::MAX),
+                            &[],
+                        ))
+                        .color(tokens.info),
+                    );
+                    if ui.link(t("reconcile.banner.open_feed")).clicked() {
+                        s.link.push(crate::company::CompanyEvent::OpenWindow(
+                            cl_model::CommandId::new("banking.feed"),
+                        ));
+                    }
+                });
+            }
         });
 }
 
@@ -303,7 +320,7 @@ fn pane(
                                     &[
                                         ("n", &side.count.to_string()),
                                         ("m", &n.to_string()),
-                                        ("total", &display(side.total)),
+                                        ("total", &display(side.total.abs())),
                                     ],
                                 ),
                                 tokens.text_primary,
@@ -636,11 +653,9 @@ fn cards(
                             t_with(dep_key, &[("n", &rec.cleared_deposits.count.to_string())]);
                         let pay =
                             t_with(pay_key, &[("n", &rec.cleared_payments.count.to_string())]);
-                        // A side's total as it moves the shown balance.
-                        let signed = |m: cl_core::Money, out: bool| {
-                            let books = if out { m.checked_neg().unwrap_or(m) } else { m };
-                            display(kind.shown(books))
-                        };
+                        // A side's total as it moves the shown balance (the
+                        // engine's totals are in the books sign).
+                        let signed = |m: cl_core::Money, _out: bool| display(kind.shown(m));
                         match kind {
                             ReconKind::Bank => {
                                 sum_row(
@@ -743,17 +758,23 @@ fn cards(
                 ui.vertical(|ui| {
                     ui.set_width(action_w);
                     let ready = can_finish(rec.difference, &s.queue);
-                    let b = egui::Button::new(
-                        RichText::new(t("reconcile.finish"))
-                            .strong()
-                            .color(tokens.on_accent),
-                    )
-                    .fill(if ready {
-                        tokens.accent
+                    // Off: the locked tokens at full strength (contrast
+                    // >= 4.5:1, DESIGN.md), not egui's faded look.
+                    let (fill, text) = if ready {
+                        (tokens.accent, tokens.on_accent)
                     } else {
-                        tokens.border_strong
-                    })
+                        (tokens.locked_row, tokens.locked_text)
+                    };
+                    let b = egui::Button::new(
+                        RichText::new(t("reconcile.finish")).strong().color(text),
+                    )
+                    .fill(fill)
+                    .stroke(Stroke::new(
+                        1.0,
+                        if ready { fill } else { tokens.border_default },
+                    ))
                     .min_size(Vec2::new(action_w, 44.0));
+                    ui.visuals_mut().disabled_alpha = 1.0;
                     if ui.add_enabled(ready, b).clicked() {
                         s.finish();
                     }

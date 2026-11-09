@@ -48,6 +48,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.problem.service_charge_account", "Choose an account for the charge."),
     ("reconcile.problem.bad_interest", "Interest must be more than 0.00, with at most 2 decimals."),
     ("reconcile.problem.interest_account", "Choose an account for the interest."),
+    ("reconcile.problem.charge_account_invalid", "Choose an active account of this company for the charge or interest."),
     ("reconcile.problem.same_account", "Choose a different account than the one you're reconciling."),
     // Window
     ("reconcile.title", "Reconcile \u{b7} {account}"),
@@ -55,6 +56,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.ending_balance", "Ending balance"),
     ("reconcile.change_info", "Change statement info"),
     ("reconcile.banner", "Items you accepted from bank files are already checked. Look them over, then check anything else that's on the statement."),
+    ("reconcile.banner.entry_voided", "{n} bank lines you accepted had their entry voided since; they are not on this list."),
+    ("reconcile.banner.entry_voided.one", "1 bank line you accepted had its entry voided since; it is not on this list."),
+    ("reconcile.banner.open_feed", "Review them in the Bank Feed"),
     ("reconcile.drift", "Your beginning balance changed by {amount} since your last reconciliation. The Discrepancy report shows what changed."),
     ("reconcile.continuity", "This statement's opening balance is {amount} off from your last reconciliation's ending balance."),
     ("reconcile.hide_later", "Hide transactions after the statement date"),

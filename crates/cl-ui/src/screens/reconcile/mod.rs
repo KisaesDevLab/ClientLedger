@@ -153,6 +153,9 @@ pub struct ReconcileScreen {
     pub(crate) undo_mode: UndoMode,
     pub(crate) discrepancy: Option<DiscrepancyReport>,
     disc_job: Option<Job<DiscrepancyReport>>,
+    /// Accepted bank lines whose entry was voided (Q-P27j; P26 counts).
+    pub(crate) entry_voided: Option<u64>,
+    voided_job: Option<Job<u64>>,
     /// The reconciliation the done dialog and the reports are about.
     pub(crate) finished: Option<ReconciliationId>,
     pub(crate) error: Option<ApiError>,
@@ -223,6 +226,8 @@ impl ReconcileScreen {
             undo_mode: UndoMode::KeepChecks,
             discrepancy: None,
             disc_job: None,
+            entry_voided: None,
+            voided_job: None,
             finished: None,
             error: None,
             notice: None,
@@ -444,6 +449,10 @@ impl ReconcileScreen {
             self.act_job = None;
             self.acted(what, r);
         }
+        if let Some(r) = engine::poll(&mut self.voided_job) {
+            // Only a note: a failed read shows none.
+            self.entry_voided = r.ok().filter(|n| *n > 0);
+        }
         if let Some(r) = engine::poll(&mut self.disc_job) {
             match r {
                 Ok(d) => self.discrepancy = Some(d),
@@ -465,6 +474,9 @@ impl ReconcileScreen {
             self.notice = Some("reconcile.notice.finished_elsewhere");
             self.back_to_begin();
             return;
+        }
+        if self.step != Step::Window {
+            self.read_entry_voided();
         }
         self.step = Step::Window;
         self.form.statement_date = Some(rec.statement_date);
@@ -490,6 +502,9 @@ impl ReconcileScreen {
             }
             Some(ReconcileRefusal::ChargePosted) => {
                 self.notice = Some("reconcile.begin.charge_posted");
+            }
+            Some(ReconcileRefusal::ChargeAccountInvalid) => {
+                self.notice = Some("reconcile.problem.charge_account_invalid");
             }
             _ => {
                 if matches!(
@@ -637,7 +652,12 @@ impl ReconcileScreen {
                 let r = req.clone();
                 move |d| crate::company::demo::reconcile::start(d, &r)
             },
-            move |s| async move { s.reconciliations().start(&req).await },
+            move |s| async move {
+                // Start answers the summary view (U-188): read the lines.
+                let r = s.reconciliations();
+                let started = r.start(&req).await?;
+                r.get(started.id).await
+            },
         ));
         self.last = Some("started");
     }
@@ -656,6 +676,24 @@ impl ReconcileScreen {
             self.group.as_ref(),
             move |d| crate::company::demo::reconcile::get(d, id),
             move |s| async move { s.reconciliations().get(id).await },
+        ));
+    }
+
+    /// The Bank Feed's count of accepted lines whose entry was voided.
+    fn read_entry_voided(&mut self) {
+        if !self.link.is_demo()
+            && !self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::FEED_REVIEW)
+        {
+            return;
+        }
+        self.voided_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |d| Ok(crate::company::demo::feed_review::counts(d, None).entry_voided),
+            |s| async move { Ok(s.feed().counts(None).await?.entry_voided) },
         ));
     }
 
@@ -963,8 +1001,8 @@ impl ReconcileScreen {
             "ending": rec.map(|r| money(r.statement_ending_balance)),
             "cleared": rec.map(|r| money(r.cleared_balance)),
             "difference": rec.map(|r| money(r.difference)),
-            "deposits": rec.map(|r| json!({"count": r.cleared_deposits.count, "total": cl_model::reconcile::display(r.cleared_deposits.total)})),
-            "payments": rec.map(|r| json!({"count": r.cleared_payments.count, "total": cl_model::reconcile::display(r.cleared_payments.total)})),
+            "deposits": rec.map(|r| json!({"count": r.cleared_deposits.count, "total": cl_model::reconcile::display(r.cleared_deposits.total.abs())})),
+            "payments": rec.map(|r| json!({"count": r.cleared_payments.count, "total": cl_model::reconcile::display(r.cleared_payments.total.abs())})),
             "left": pane(kind.left()),
             "right": pane(kind.right()),
             "hide_later": self.hide_later,
@@ -972,6 +1010,7 @@ impl ReconcileScreen {
             "can_finish": rec.is_some_and(|r| can_finish(r.difference, &self.queue)),
             "hint": window::hint_text(self),
             "posting_locked": rec.is_some_and(|r| r.posting_locked),
+            "entry_voided": self.entry_voided,
             "dialog": self.dialog.as_ref().map(|d| format!("{d:?}").to_lowercase()),
             "discrepancy_rows": self.discrepancy.as_ref().map(|d| d.rows.len()),
             "notice": self.notice,
