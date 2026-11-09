@@ -1337,6 +1337,10 @@ impl Screen for EnterBillScreen {
                 self.fill_prefill(&p);
                 true
             }
+            OpenPayload::CardPayment(p) => {
+                self.fill_card_payment(&p);
+                true
+            }
             OpenPayload::InboxDraft(d) => {
                 self.take_inbox_draft(d);
                 true
@@ -1376,6 +1380,29 @@ impl EnterBillScreen {
     /// A fresh bill or credit from a statement line (WP6): vendor, date,
     /// ref and the statement amount, typed by the owner there. Prefill and
     /// the vendor default still run; nothing is saved.
+    /// P27 (Q-60): a bill to pay a reconciled card's statement later: one
+    /// expense line on the card account for the printed balance, the vendor
+    /// left empty for the owner.
+    pub(crate) fn fill_card_payment(&mut self, p: &crate::screens::reconcile::CardPay) {
+        let (date, amount) = (p.date, p.amount);
+        self.header.edit_step(|h| {
+            h.date = Some(date);
+            h.set_amount_due(Some(amount));
+        });
+        let keys = &mut self.expenses.form_mut().adapter_mut().keys;
+        let seeded = vec![
+            cl_model::forms::lines::FormLine {
+                account: Some(p.card),
+                amount: Some(amount),
+                ..cl_model::forms::lines::FormLine::blank(keys.next_key())
+            },
+            cl_model::forms::lines::FormLine::blank(keys.next_key()),
+        ];
+        self.expenses.form_mut().edit_step(|v| v.lines = seeded);
+        self.refresh_terms_dates();
+        self.sync_inputs();
+    }
+
     pub(crate) fn fill_prefill(&mut self, p: &BillPrefill) {
         self.set_kind(p.kind);
         self.pick_vendor(p.vendor);

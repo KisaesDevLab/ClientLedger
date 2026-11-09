@@ -1564,6 +1564,18 @@ impl Screen for TransferScreen {
         self.fill_template(&t)
     }
 
+    /// P27 (Q-P27g): pay a reconciled card from a bank account: To is the
+    /// card, the amount its printed balance; the owner picks From.
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        let crate::windows::OpenPayload::CardPayment(p) = payload else {
+            return false;
+        };
+        self.set_account(false, p.card);
+        self.amount_text = p.amount.format(cl_core::MoneyStyle::default());
+        self.amount_left();
+        true
+    }
+
     fn open_record(&mut self, txn: TransactionId) -> bool {
         self.load(txn);
         self.editing.as_ref().is_some_and(|e| e.id == txn) || self.load_task.is_some()

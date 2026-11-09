@@ -441,7 +441,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.loan_payment", "Loan Payment", Some(Menu::Banking), 0, None),
     // Bulk Entry (P15A): no global shortcut (Q-P15Ah)
     built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
-    screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
+    built("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E')),
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
     built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
@@ -631,6 +631,18 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.demo_feed_reset",
         "Reset Demo Bank Feed Review (developer)",
+    ),
+    dev_action(
+        "dev.demo_reconcile_reset",
+        "Reset Demo Reconciliations (developer)",
+    ),
+    dev_action(
+        "dev.demo_reconcile_edit",
+        "Recategorize a Reconciled Demo Deposit (developer)",
+    ),
+    dev_action(
+        "dev.demo_reconcile_close_books",
+        "Close the Demo Books Through 11/01 for Reconcile (developer)",
     ),
 ];
 

@@ -1187,6 +1187,10 @@ impl Screen for WriteCheckScreen {
     fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
         match payload {
             crate::windows::OpenPayload::InboxDraft(d) => self.accept_inbox_draft(d),
+            crate::windows::OpenPayload::CardPayment(p) => {
+                self.fill_card_payment(&p);
+                true
+            }
             crate::windows::OpenPayload::DocumentDraft(o)
                 if o.form == cl_model::doc_draft::DraftForm::WriteCheck =>
             {

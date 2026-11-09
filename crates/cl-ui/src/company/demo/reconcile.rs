@@ -943,6 +943,64 @@ pub fn last_completed(
     r.latest_complete(account).map(|x| (x.id, x.statement_date))
 }
 
+/// The detail report of a reconciliation, as the engine's JSON reads
+/// (amounts as numbers there, display text here).
+///
+/// # Errors
+/// 404 for an unknown id.
+pub fn report(
+    state: &mut DemoState,
+    id: ReconciliationId,
+) -> Result<cl_api::ReconReport, ApiError> {
+    let locked = closed_through(state);
+    let chart = super::home::accounts(state);
+    let r = &mut state.reconcile;
+    r.seed();
+    let rec = r.get(id)?;
+    let view = r.view(rec, true, locked);
+    let account = chart.iter().find(|a| a.id == rec.account);
+    let line = |l: &ReconLine| {
+        let out = !l.amount.is_positive();
+        json!({
+            "txnDate": l.date.to_string(),
+            "txnType": l.txn_type,
+            "txnNumber": l.number,
+            "description": l.payee,
+            "payment": if out { Some(l.amount.abs().to_wire()) } else { None },
+            "deposit": if out { None } else { Some(l.amount.to_wire()) },
+        })
+    };
+    let lines = view.lines.clone().unwrap_or_default();
+    let cleared: Vec<_> = lines.iter().filter(|l| l.cleared).map(line).collect();
+    let uncleared: Vec<_> = lines
+        .iter()
+        .filter(|l| !l.cleared && !l.after_statement_date)
+        .map(line)
+        .collect();
+    let body = json!({
+        "title": "Reconciliation Detail",
+        "reconciliation": {
+            "id": rec.id.to_string(),
+            "accountName": account.map(|a| a.fields.name.clone()).unwrap_or_default(),
+            "accountNumber": account.and_then(|a| a.fields.account_number.clone()),
+            "statementDate": rec.statement_date.to_string(),
+            "beginningBalance": view.beginning_balance.to_wire(),
+            "statementEndingBalance": view.statement_ending_balance.to_wire(),
+            "clearedBalance": view.cleared_balance.to_wire(),
+            "difference": view.difference.to_wire(),
+            "completedBy": "Kurt",
+        },
+        "cleared": cleared,
+        "uncleared": uncleared,
+        "totals": {
+            "clearedPayments": view.cleared_payments.total.to_wire(),
+            "clearedDeposits": view.cleared_deposits.total.to_wire(),
+        },
+    });
+    let bytes = serde_json::to_vec(&body).map_err(|_| ApiError::Internal)?;
+    cl_api::reconciliation_report_from(&bytes)
+}
+
 /// Starts over (scenarios run light, then dark).
 pub fn reset(state: &mut DemoState) {
     state.reconcile = DemoRecon::default();

@@ -108,7 +108,7 @@ pub use resources::reconciliations::{
     LINES_MAX, ReconHistoryRow, ReconLine, ReconPatch, ReconReport, ReconStart, ReconStatus,
     ReconcileRefusal, Reconciliation, ReconciliationId, Reconciliations, ReportLine,
     StatementCharge, UndoMode, reconcile_refusal, reconciliation_from,
-    screen_supported as reconcile_screen_supported,
+    report_from as reconciliation_report_from, screen_supported as reconcile_screen_supported,
 };
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::register::{

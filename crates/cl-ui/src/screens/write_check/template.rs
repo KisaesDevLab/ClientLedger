@@ -48,6 +48,28 @@ impl TemplateSource for WriteCheckScreen {
 }
 
 impl WriteCheckScreen {
+    /// P27 (Q-60): pay a reconciled card's statement now: one line on the
+    /// card account for the printed balance, the payee left empty.
+    pub(crate) fn fill_card_payment(&mut self, p: &crate::screens::reconcile::CardPay) {
+        self.new_check(false);
+        let keys = &mut self.lines.form_mut().adapter_mut().keys;
+        let line = cl_model::forms::lines::FormLine {
+            account: Some(p.card),
+            amount: Some(p.amount),
+            ..cl_model::forms::lines::FormLine::blank(keys.next_key())
+        };
+        let lines = cl_model::forms::lines::FormLines::from_lines(vec![line], keys);
+        let (date, amount) = (p.date, p.amount);
+        self.header.edit_step(|h| {
+            h.date = Some(date);
+            h.amount = Some(amount);
+            h.amount_from_lines = false;
+        });
+        self.lines.form_mut().edit_step(|v| *v = lines);
+        self.sync_inputs();
+        self.fetch_bank_facts();
+    }
+
     fn fill_check(&mut self, d: &CheckDraft) {
         let lines = form_lines(&d.lines, &mut self.lines.form_mut().adapter_mut().keys);
         let bank = real_account(d.bank).or(self.bank());
