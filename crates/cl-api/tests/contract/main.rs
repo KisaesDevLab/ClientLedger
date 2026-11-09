@@ -1281,6 +1281,10 @@ fn main() -> std::process::ExitCode {
             contract_reconcile::editing_a_ticked_entry_keeps_its_tick,
         ),
         (
+            "reconcile::statement_date_must_follow_the_last_finished",
+            contract_reconcile::statement_date_must_follow_the_last_finished,
+        ),
+        (
             "reconcile::large_worksheet_reads_quickly",
             contract_reconcile::large_worksheet_reads_quickly,
         ),

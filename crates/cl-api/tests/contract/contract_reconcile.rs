@@ -586,6 +586,44 @@ pub fn editing_a_ticked_entry_keeps_its_tick(h: &Harness) {
     assert!(after.ties_out());
 }
 
+/// U-193 (review E3): a statement dated on or before the latest finished
+/// one is 409 `RECONCILE_STATEMENT_DATE_ORDER`, on Begin and on PATCH.
+pub fn statement_date_must_follow_the_last_finished(h: &Harness) {
+    if !gated(h) || !h.require_cap(Capabilities::RECONCILE_HARDENING, "U-193") {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let dep = entry(h, s, &b, date(2026, 5, 4), "20.00");
+    let first = start(h, s, b.bank, date(2026, 5, 31), "20.00").expect("start");
+    tick(h, s, first.id, &[line_of(&get(h, s, first.id), dep)]);
+    h.run(s.reconciliations().complete(first.id, None))
+        .expect("finish");
+    for on in [date(2026, 5, 31), date(2026, 5, 1)] {
+        let e = start(h, s, b.bank, on, "20.00").expect_err("not after 05/31");
+        assert_eq!(
+            refusal(&e),
+            Some(ReconcileRefusal::StatementDateOrder),
+            "{e:?}"
+        );
+    }
+    let next = start(h, s, b.bank, date(2026, 6, 30), "20.00").expect("after 05/31");
+    let e = h
+        .run(s.reconciliations().patch(
+            next.id,
+            &ReconPatch {
+                statement_date: Some(date(2026, 5, 31)),
+                ..ReconPatch::default()
+            },
+        ))
+        .expect_err("PATCH to 05/31");
+    assert_eq!(
+        refusal(&e),
+        Some(ReconcileRefusal::StatementDateOrder),
+        "{e:?}"
+    );
+}
+
 /// Large data: a worksheet of many lines reads within the budget (logged).
 pub fn large_worksheet_reads_quickly(h: &Harness) {
     if !gated(h) {

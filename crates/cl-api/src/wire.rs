@@ -546,6 +546,10 @@ impl Capabilities {
     /// U-192: editing an entry keeps its in-progress reconciliation tick
     /// and its same-amount bank-file link.
     pub const LINE_IDENTITY: &'static str = "line-identity-v1";
+    /// U-193: Finish drops voided rows, edits wait for Finish, statement
+    /// dates in order (409 `RECONCILE_STATEMENT_DATE_ORDER`), a voided
+    /// posted charge can be entered again.
+    pub const RECONCILE_HARDENING: &'static str = "reconcile-hardening-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
