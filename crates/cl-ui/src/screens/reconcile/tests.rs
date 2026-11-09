@@ -1191,7 +1191,7 @@ fn closed_period_undo_asks_in_its_dialog_in_plain_words() {
     let v = state(&s);
     assert_eq!(v["dialog"], "undo", "{v}");
     assert_eq!(v["password_rejected"], true, "{v}");
-    assert!(s.password.is_empty());
+    assert_eq!(s.password, "");
     assert!(s.undo_error.is_none());
     // The right one undoes it; nothing is left over.
     s.password = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
