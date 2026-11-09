@@ -318,8 +318,8 @@ fn a_prefilled_card_payment_saves_and_posts_once() {
     assert_eq!(f.from, Some(account(1010)), "the first bank account");
     assert_eq!(f.to, Some(account(2050)));
     assert_eq!(f.amount, Some(money("2.00")));
-    assert_eq!(f.date, Some(statement), "dated the statement date");
     assert!(s.is_dirty(), "a prefilled form is unsaved work");
+    assert_eq!(f.date, Some(statement), "dated the statement date");
     assert!(
         s.start_save(SaveIntent::SaveAndClose, None),
         "{:?}",
