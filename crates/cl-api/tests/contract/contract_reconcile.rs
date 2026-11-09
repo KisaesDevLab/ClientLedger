@@ -286,12 +286,17 @@ pub fn closed_period_charge_needs_password(h: &Harness) {
             interest: None,
         }))
         .expect("start");
+    // The closing date first, then the password (the contract_batch
+    // precedent): once a password is set, changing the date needs it too.
     h.run(s.raw_mapped(
         Method::Put,
         "/api/v1/company/settings",
-        Some(&json!({"lockDate": "2025-12-31", "closingPassword": "recon-close"})),
+        Some(&json!({"lockDate": "2025-12-31"})),
     ))
     .expect("set the closing date");
+    let pw = Secret::new(crate::support::unique("recon-close"));
+    h.run(s.set_closing_password(None, Some(&pw), key()))
+        .expect("password");
     assert!(get(h, &s, r.id).posting_locked);
     let e = h
         .run(s.reconciliations().complete(r.id, None))
@@ -303,8 +308,10 @@ pub fn closed_period_charge_needs_password(h: &Harness) {
         ),
         "{e:?}"
     );
-    let auth = ClosedPeriodAuthorization::with_password(Secret::new("recon-close"));
+    let auth = ClosedPeriodAuthorization::with_password(pw.clone());
     let done = h.run(s.reconciliations().complete(r.id, Some(&auth)));
+    h.run(s.set_closing_password(Some(&pw), None, key()))
+        .expect("clear password");
     h.run(s.raw_mapped(
         Method::Put,
         "/api/v1/company/settings",
@@ -463,7 +470,17 @@ pub fn undo_admin_only(h: &Harness) {
     tick(h, s, r.id, &[line_of(&get(h, s, r.id), a)]);
     h.run(s.reconciliations().complete(r.id, None))
         .expect("finish");
-    let (_, bk) = h.bookkeeper();
+    // A bookkeeper with full banking rights is still not an Admin.
+    let (user, bk) = h.bookkeeper();
+    let r2 = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&json!({ "overrides": { "banking": "full" } })),
+        ))
+        .expect("permissions");
+    assert_eq!(r2.status, 200, "{}", r2.body);
     let e = h
         .run(bk.reconciliations().undo(r.id, UndoMode::KeepChecks, None))
         .expect_err("not an admin");
