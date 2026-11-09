@@ -14,7 +14,7 @@
 //! - [`can_finish`]: Reconcile now waits for the engine's difference to be
 //!   exactly zero with nothing in flight or waiting.
 //! - [`hint`]: "one unchecked item equals the difference", an exact
-//!   equality test, never a sum.
+//!   signed equality test, never a sum.
 //!
 //! Nothing here adds amounts: every balance is the engine's.
 
@@ -408,7 +408,9 @@ pub fn can_finish(engine_difference: Money, queue: &TickQueue) -> bool {
 }
 
 /// The single unchecked line whose amount equals the difference, if there
-/// is exactly one (exact equality of absolute values, no arithmetic).
+/// is exactly one: exact signed equality, no arithmetic. The difference is
+/// ending − cleared and ticking a line adds its amount (debit − credit) to
+/// cleared, so only a line of the same sign brings it to zero.
 #[must_use]
 pub fn hint<I>(unchecked: I, difference: Money) -> Option<JournalLineId>
 where
@@ -417,10 +419,9 @@ where
     if difference.is_zero() {
         return None;
     }
-    let want = difference.abs();
     let mut found = unchecked
         .into_iter()
-        .filter(|(_, a)| a.abs() == want)
+        .filter(|(_, a)| *a == difference)
         .map(|(id, _)| id);
     let first = found.next()?;
     found.next().is_none().then_some(first)
@@ -565,11 +566,16 @@ mod tests {
     fn hint_is_exact_and_single() {
         let lines = [(id(1), m("-412.18")), (id(2), m("12.00"))];
         assert_eq!(hint(lines, m("-412.18")), Some(id(1)));
-        assert_eq!(hint(lines, m("412.18")), Some(id(1)));
-        assert_eq!(hint(lines, m("412.17")), None);
+        // Ticking a -412.18 line moves a +412.18 difference to +824.36.
+        assert_eq!(hint(lines, m("412.18")), None, "opposite sign: no hint");
+        assert_eq!(hint(lines, m("-412.17")), None);
+        assert_eq!(hint(lines, m("12")), Some(id(2)));
+        assert_eq!(hint(lines, m("-12")), None);
         assert_eq!(hint(lines, m("0")), None);
         let twins = [(id(1), m("-5")), (id(2), m("-5"))];
-        assert_eq!(hint(twins, m("5")), None, "two candidates: no hint");
+        assert_eq!(hint(twins, m("-5")), None, "two candidates: no hint");
+        let mixed = [(id(1), m("-5")), (id(2), m("5"))];
+        assert_eq!(hint(mixed, m("-5")), Some(id(1)), "only the same sign counts");
     }
 
     mod props {
