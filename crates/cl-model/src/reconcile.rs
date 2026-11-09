@@ -173,7 +173,9 @@ pub struct ChargeInput {
     pub date: Option<CalendarDate>,
     /// Its account.
     pub account: Option<AccountId>,
-    /// Already posted (after a reopen): read-only.
+    /// Already posted (after a reopen). Still editable: the engine takes a
+    /// change only once that entry was voided or deleted (U-193), and the
+    /// screen sends a charge only when it differs from the one held.
     pub posted: bool,
 }
 
@@ -249,7 +251,7 @@ impl BeginForm {
         no_account: BeginProblem,
         problems: &mut Vec<BeginProblem>,
     ) -> Option<ChargeValue> {
-        if c.posted || c.amount.trim().is_empty() {
+        if c.amount.trim().is_empty() {
             return None;
         }
         let amount = match cents(&c.amount) {
@@ -345,9 +347,12 @@ impl TickQueue {
     /// or in flight is kept.
     pub fn load(&mut self, lines: impl IntoIterator<Item = (JournalLineId, bool)>) {
         self.base = lines.into_iter().collect();
-        // A waiting tick that now matches the engine is done.
+        // A waiting tick that now matches the engine is done; one for a
+        // line no longer on the worksheet (its entry voided, U-193) is
+        // dropped rather than sent.
         let base = &self.base;
-        self.waiting.retain(|id, on| base.get(id) != Some(on));
+        self.waiting
+            .retain(|id, on| base.get(id).is_some_and(|b| b != on));
     }
 
     /// The state shown for `id`: waiting, else in flight, else the engine's.
@@ -520,9 +525,16 @@ mod tests {
         // A card has no interest field: it is never sent.
         f.kind = ReconKind::Card;
         assert_eq!(f.validate().expect("card").interest, None);
-        // A posted charge is read-only and never sent again.
+        // A posted charge is checked like any other (the screen sends it
+        // only when changed; the engine refuses it while still posted).
         f.service_charge.posted = true;
-        assert_eq!(f.validate().expect("posted").service_charge, None);
+        assert_eq!(
+            f.validate()
+                .expect("posted")
+                .service_charge
+                .map(|c| c.amount),
+            Some(m("48"))
+        );
     }
 
     #[test]
@@ -570,6 +582,11 @@ mod tests {
         q.set([id(1)], true);
         q.load([(id(1), true), (id(2), false), (id(3), false)]);
         assert!(q.idle());
+        // A line gone from the worksheet (entry voided): its tick is dropped.
+        q.toggle(id(3));
+        q.load([(id(1), true), (id(2), false)]);
+        assert!(q.idle(), "nothing sent for a line the engine dropped");
+        assert!(!q.ticked(id(3)));
     }
 
     #[test]

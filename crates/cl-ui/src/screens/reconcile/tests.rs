@@ -520,3 +520,43 @@ fn discrepancy_report_shows_a_card_as_printed_with_the_drift() {
         1
     );
 }
+
+#[test]
+fn change_info_sends_a_posted_charge_only_when_changed() {
+    // U-193: posted charges stay editable; unchanged they aren't sent,
+    // changed the engine decides (still posted here: refused).
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_last();
+    s.poll();
+    s.poll();
+    s.poll();
+    s.continue_open();
+    s.poll();
+    assert_eq!(state(&s)["step"], "window");
+    s.change_info();
+    assert!(s.form.service_charge.posted);
+    s.begin();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["step"], "window", "{v}");
+    assert!(v["notice"].is_null(), "{v}");
+    s.change_info();
+    s.form.service_charge.amount = "49.00".into();
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["notice"], "reconcile.begin.charge_posted");
+}

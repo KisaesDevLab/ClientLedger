@@ -705,8 +705,13 @@ pub fn patch(
     let locked = closed_through(state);
     let active = active_accounts(state);
     let r = &mut state.reconcile;
-    let account = r.get(id)?.account;
+    let (account, current) = {
+        let x = r.get(id)?;
+        (x.account, x.statement_date)
+    };
+    // The worksheet's own date sent again is never refused.
     if let (Some(d), Some(last)) = (p.statement_date, r.latest_complete(account))
+        && d != current
         && d <= last.statement_date
     {
         return Err(date_order(last));

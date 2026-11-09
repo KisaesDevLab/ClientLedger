@@ -175,7 +175,7 @@ fn fields(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
     };
     let posted = s.form.service_charge.posted;
     ui.horizontal_wrapped(|ui| {
-        money_text(ui, &svc_label, &mut s.form.service_charge.amount, !posted);
+        money_text(ui, &svc_label, &mut s.form.service_charge.amount, true);
         form::date_field(
             ui,
             &t("reconcile.begin.service_date"),
@@ -187,7 +187,7 @@ fn fields(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
             &svc_acct,
             &charges,
             &mut s.form.service_charge.account,
-            !posted,
+            true,
         );
     });
     if posted {
@@ -200,7 +200,7 @@ fn fields(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
                 ui,
                 &t("reconcile.begin.interest"),
                 &mut s.form.interest.amount,
-                !posted,
+                true,
             );
             form::date_field(
                 ui,
@@ -213,7 +213,7 @@ fn fields(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
                 &t("reconcile.begin.interest_account"),
                 &charges,
                 &mut s.form.interest.account,
-                !posted,
+                true,
             );
         });
         if posted {

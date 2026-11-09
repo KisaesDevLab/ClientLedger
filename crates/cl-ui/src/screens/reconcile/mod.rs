@@ -658,7 +658,15 @@ impl ReconcileScreen {
         self.form.statement_date = self.date_in.value;
         self.form.service_charge.date = self.svc_date.value;
         self.form.interest.date = self.int_date.value;
-        self.form.last_reconciled = self.last_finished().map(|r| r.statement_date);
+        // The engine never refuses the worksheet's own date sent again
+        // (one started before the order rule may be out of order).
+        let own_date =
+            self.editing && self.rec.as_ref().map(|r| r.statement_date) == self.form.statement_date;
+        self.form.last_reconciled = if own_date {
+            None
+        } else {
+            self.last_finished().map(|r| r.statement_date)
+        };
         let v = match self.form.validate() {
             Ok(v) => v,
             Err(p) => {
@@ -676,14 +684,27 @@ impl ReconcileScreen {
             })
         };
         if self.editing
-            && let Some(id) = self.rec.as_ref().map(|r| r.id)
+            && let Some((id, held_svc, held_int)) = self
+                .rec
+                .as_ref()
+                .map(|r| (r.id, r.service_charge, r.interest))
         {
+            // A charge goes only when it differs from the one held: a
+            // posted one unchanged is never sent; changed, the engine takes
+            // it once its entry was voided or deleted (U-193).
+            let changed = |next: Option<cl_api::StatementCharge>,
+                           held: Option<cl_api::HeldCharge>| {
+                (next != held.map(|h| h.charge)).then_some(next)
+            };
             let p = cl_api::ReconPatch {
                 statement_date: Some(v.statement_date),
                 statement_ending_balance: Some(v.ending),
-                service_charge: (!self.form.service_charge.posted)
-                    .then(|| charge(v.service_charge)),
-                interest: (!self.form.interest.posted).then(|| charge(v.interest)),
+                service_charge: changed(charge(v.service_charge), held_svc),
+                interest: if self.kind() == ReconKind::Card {
+                    None
+                } else {
+                    changed(charge(v.interest), held_int)
+                },
             };
             self.set_rec_job(engine::write(
                 &self.link,
