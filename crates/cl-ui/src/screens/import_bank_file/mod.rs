@@ -198,7 +198,11 @@ pub struct ImportBankFileScreen {
     account: Option<AccountId>,
     linked: LinkedHow,
     lookup_task: Option<Task<Vec<ConnectionMatch>>>,
-    history_task: Option<Task<Vec<ImportBatchSummary>>>,
+    /// The account's batches of this file's format, then of every format.
+    history_task: Option<Task<(Vec<ImportBatchSummary>, Vec<ImportBatchSummary>)>>,
+    /// Q-PR5c: the sign answer used for this account's latest import in
+    /// another format (shown with the sign question).
+    pub(crate) other_flip: Option<(cl_api::BankFileFormat, bool)>,
     /// The account's last import of this format: its flip (Q-P25w).
     remembered_flip: Option<bool>,
     /// The sign checks for the chosen account (the card rule for a card).
@@ -214,11 +218,21 @@ pub struct ImportBankFileScreen {
     layout_changed: bool,
     // Step 3.
     choices: BTreeMap<u32, RowChoice>,
+    /// PR-5 S1: the changed row whose "Add it again" waits for a yes (its
+    /// earlier item is already in the books).
+    pub(crate) confirm_add: Option<u32>,
+    /// Q-PR5b: the date and amount of every row already imported into the
+    /// account (read once per account and preview).
+    existing: Option<(AccountId, DatedAmounts)>,
+    existing_task: Option<(AccountId, Task<DatedAmounts>)>,
     relink: bool,
     preview_task: Option<Task<BankImportOutcome>>,
     preview: Option<BankImportOutcome>,
     preview_trouble: Option<EngineTrouble>,
     only_skipped: bool,
+    /// PR-5 QA-1: the cards and choices' height last frame; taller than
+    /// their share of the step, the whole step scrolls as one.
+    pub(crate) check_top_height: f32,
     // Step 4.
     frozen: Option<Frozen>,
     send_task: Option<Task<BankImportOutcome>>,
@@ -282,6 +296,7 @@ impl ImportBankFileScreen {
             lookup_task: None,
             history_task: None,
             remembered_flip: None,
+            other_flip: None,
             sign: SignCheck::default(),
             flipped: false,
             sign_confirmed: false,
@@ -290,11 +305,15 @@ impl ImportBankFileScreen {
             reparse_as: None,
             layout_changed: false,
             choices: BTreeMap::new(),
+            confirm_add: None,
+            existing: None,
+            existing_task: None,
             relink: false,
             preview_task: None,
             preview: None,
             preview_trouble: None,
             only_skipped: false,
+            check_top_height: 0.0,
             frozen: None,
             send_task: None,
             send_trouble: None,
@@ -568,6 +587,7 @@ impl ImportBankFileScreen {
         self.account = None;
         self.linked = LinkedHow::None;
         self.remembered_flip = None;
+        self.other_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
         self.refresh_sign();
@@ -607,6 +627,103 @@ impl ImportBankFileScreen {
         self.preview_task = None;
         self.preview_trouble = None;
         self.choices.clear();
+        self.confirm_add = None;
+        self.existing = None;
+        self.existing_task = None;
+    }
+
+    /// Q-PR5b: reads the rows already imported into the account (once per
+    /// preview of a file with new rows): the demo's store, or the engine's
+    /// Bank Feed list newest first back to the file's first date (at most
+    /// 2,000 rows; an error leaves the line out).
+    fn read_existing(&mut self) {
+        let Some(account) = self.account else {
+            return;
+        };
+        let has_new = self.preview.as_ref().is_some_and(|p| p.counts.new > 0);
+        if !has_new
+            || self.existing.as_ref().is_some_and(|(a, _)| *a == account)
+            || self
+                .existing_task
+                .as_ref()
+                .is_some_and(|(a, _)| *a == account)
+        {
+            return;
+        }
+        let since = self
+            .current_section()
+            .and_then(|s| s.rows.iter().map(|r| r.date).min());
+        if let Some(demo) = self.link.demo_state() {
+            let rows = demo.bank_feed.dated_amounts(account);
+            self.existing = Some((account, rows));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        let task = group
+            .read(&session, move |s| async move {
+                let f = s.feed();
+                let conns = f.connections().await?;
+                let Some(c) = conns
+                    .iter()
+                    .find(|c| c.account == Some(account))
+                    .map(|c| c.id)
+                else {
+                    return Ok(Vec::new());
+                };
+                let mut out = Vec::new();
+                for page in 0..4u32 {
+                    let q = cl_api::FeedQuery {
+                        connection: Some(c),
+                        limit: 500,
+                        offset: page * 500,
+                        ..cl_api::FeedQuery::default()
+                    };
+                    let p = f.list(&q).await?;
+                    let full = p.rows.len() == 500;
+                    let oldest = p.rows.last().map(|r| r.date);
+                    out.extend(p.rows.iter().map(|r| (r.date, r.amount.as_decimal())));
+                    if !full || oldest.zip(since).is_some_and(|(o, s)| o < s) {
+                        break;
+                    }
+                }
+                Ok(out)
+            })
+            .ok();
+        self.existing_task = task.map(|t| (account, Task::Pending(t)));
+    }
+
+    /// Q-PR5b: new rows with the same date and amount as rows already
+    /// imported (the preview's information line).
+    pub(crate) fn look_alikes(&self) -> usize {
+        let (Some(p), Some((a, existing)), Some(req)) = (
+            self.preview.as_ref(),
+            self.existing.as_ref(),
+            self.request(),
+        ) else {
+            return 0;
+        };
+        if *a != req.account {
+            return 0;
+        }
+        flow::same_day_amount(p, &req.rows, existing)
+    }
+
+    /// Q-PR5c (PR-5 QA-6): new rows that are rows already imported with
+    /// the opposite sign (the sign answer is likely wrong for this file).
+    pub(crate) fn opposite_look_alikes(&self) -> usize {
+        let (Some(p), Some((a, existing)), Some(req)) = (
+            self.preview.as_ref(),
+            self.existing.as_ref(),
+            self.request(),
+        ) else {
+            return 0;
+        };
+        if *a != req.account {
+            return 0;
+        }
+        flow::opposite_sign_day_amount(p, &req.rows, existing)
     }
 
     pub(crate) fn current_section(&self) -> Option<&cl_import::Section> {
@@ -683,6 +800,7 @@ impl ImportBankFileScreen {
         self.linked = LinkedHow::Owner;
         self.layout_changed = false;
         self.remembered_flip = None;
+        self.other_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
         self.forget_preview();
@@ -700,6 +818,7 @@ impl ImportBankFileScreen {
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let latest = demo.bank_feed.latest(account, format);
+            self.other_flip = demo.bank_feed.latest_other(account, format);
             drop(demo);
             match latest {
                 Some((flip, mapping)) => self.remember(flip, mapping),
@@ -712,7 +831,11 @@ impl ImportBankFileScreen {
         };
         self.history_task = group
             .read(&session, move |s| async move {
-                s.bank_import().batches(Some(account), Some(format)).await
+                let b = s.bank_import();
+                let same = b.batches(Some(account), Some(format)).await?;
+                // Q-PR5c: the other formats' answer (none when unreadable).
+                let all = b.batches(Some(account), None).await.unwrap_or_default();
+                Ok((same, all))
             })
             .ok()
             .map(Task::Pending);
@@ -772,6 +895,61 @@ impl ImportBankFileScreen {
     pub(crate) fn sign_differs(&self) -> bool {
         self.remembered_flip
             .is_some_and(|f| flow::sign_disagrees(&self.sign, f))
+    }
+
+    /// "Open Bank Feed" after a send: the lines waiting in the account the
+    /// file went into (PR-5 QA).
+    pub(crate) fn open_feed(&self) {
+        let kind = CommandId::new(crate::screens::bank_feed::KIND);
+        match self.account {
+            Some(account) => self.link.push(crate::company::CompanyEvent::OpenWith(
+                kind,
+                Box::new(crate::windows::OpenPayload::FeedAt(
+                    crate::screens::bank_feed::FeedTarget {
+                        account,
+                        entry: None,
+                    },
+                )),
+            )),
+            None => self
+                .link
+                .push(crate::company::CompanyEvent::OpenWindow(kind)),
+        }
+    }
+
+    /// The sign question's first line:a file that looked reversed says
+    /// whether the flip is applied (PR-5 QA: the text follows the box).
+    pub(crate) fn sign_hint_key(&self) -> &'static str {
+        if self.sign.suggest_flip && self.flipped {
+            "bankimport.sign.suggest_applied"
+        } else if self.sign.suggest_flip {
+            "bankimport.sign.suggest"
+        } else if self.card_target()
+            || self
+                .current_section()
+                .is_some_and(|s| s.kind == cl_import::AccountKind::CreditCard)
+        {
+            "bankimport.sign.card"
+        } else {
+            "bankimport.sign.plain"
+        }
+    }
+
+    /// Q-PR5c (PR-5 QA-6): how this file's amounts come in, with the
+    /// owner's current answer, against the account's other format. What
+    /// must agree is the result (money out negative in both), not the
+    /// checkbox: a card's QFX keeps its signs while its CSV needs a flip.
+    /// The other format's import was confirmed by the owner, so its money
+    /// out came in negative; this file's evidence says whether the current
+    /// answer does the same (`None` with no evidence either way).
+    pub(crate) fn sign_against_other(&self) -> Option<(cl_api::BankFileFormat, Option<bool>)> {
+        let (format, _) = self.other_flip?;
+        let same = self
+            .sign
+            .reason
+            .is_some()
+            .then_some(self.flipped == self.sign.suggest_flip);
+        Some((format, same))
     }
 
     /// The file's account kind and the chosen account's differ (QA-5).
@@ -1190,6 +1368,38 @@ impl ImportBankFileScreen {
         })
     }
 
+    /// PR-5 S1: "Add it again" on changed row `line` asks first: its
+    /// earlier item is already in the books (not waiting), and Add isn't
+    /// chosen yet.
+    pub(crate) fn add_needs_ask(&self, line: u32) -> bool {
+        let in_books = self.preview.as_ref().is_some_and(|p| {
+            p.rows.iter().any(|r| {
+                r.line == line
+                    && r.status == ImportRowStatus::Changed
+                    && r.existing_pending == Some(false)
+            })
+        });
+        in_books && self.choices.get(&line).and_then(|c| c.changed) != Some(ChangedAction::Add)
+    }
+
+    /// PR-5 S1: lines the owner set to Replace that the import didn't
+    /// replace (the earlier item was accepted or staged meanwhile).
+    pub(crate) fn not_replaced(&self) -> Vec<u32> {
+        let Some(r) = self.result.as_ref() else {
+            return Vec::new();
+        };
+        r.rows
+            .iter()
+            .filter(|x| {
+                !x.replaced
+                    && (x.replace_refused.is_some()
+                        || self.choices.get(&x.line).and_then(|c| c.changed)
+                            == Some(ChangedAction::Replace))
+            })
+            .map(|x| x.line)
+            .collect()
+    }
+
     /// Changed rows set to replace their waiting item (the dry run says
     /// the item is still waiting).
     pub(crate) fn replacing(&self) -> usize {
@@ -1200,7 +1410,7 @@ impl ImportBankFileScreen {
             .iter()
             .filter(|r| {
                 r.status == ImportRowStatus::Changed
-                    && r.existing_pending == Some(true)
+                    && replaceable(r)
                     && self.choices.get(&r.line).and_then(|c| c.changed)
                         == Some(ChangedAction::Replace)
             })
@@ -1299,11 +1509,19 @@ impl ImportBankFileScreen {
                 .loaded
                 .as_ref()
                 .map(|l| flow::wire_format(l.parsed.format));
-            let latest = r.ok().and_then(|batches| {
-                batches
-                    .into_iter()
-                    .find(|b| b.undone_at.is_none() && b.format == format && b.inserted > 0)
-            });
+            let (same, all) = r.unwrap_or_default();
+            self.other_flip = all
+                .iter()
+                .find(|b| {
+                    b.undone_at.is_none()
+                        && b.format.is_some()
+                        && b.format != format
+                        && b.inserted > 0
+                })
+                .and_then(|b| Some((b.format?, b.amounts_flipped)));
+            let latest = same
+                .into_iter()
+                .find(|b| b.undone_at.is_none() && b.format == format && b.inserted > 0);
             match latest {
                 Some(b) => self.remember(b.amounts_flipped, b.csv_mapping),
                 None => self.apply_local_profile(),
@@ -1312,8 +1530,21 @@ impl ImportBankFileScreen {
         if let Some(r) = self.preview_task.as_mut().and_then(Task::try_take) {
             self.preview_task = None;
             match r {
-                Ok(o) => self.preview = Some(o),
+                Ok(o) => {
+                    self.preview = Some(o);
+                    self.read_existing();
+                }
                 Err(e) => self.preview_trouble = Some(Self::trouble(&e)),
+            }
+        }
+        if let Some(r) = self
+            .existing_task
+            .as_mut()
+            .and_then(|(_, t)| Task::try_take(t))
+        {
+            let account = self.existing_task.take().map(|(a, _)| a);
+            if let (Ok(rows), Some(a)) = (r, account) {
+                self.existing = Some((a, rows));
             }
         }
         if let Some(r) = self.send_task.as_mut().and_then(Task::try_take) {
@@ -1543,6 +1774,7 @@ impl Screen for ImportBankFileScreen {
             "only_skipped": self.only_skipped,
             "to_send": self.preview.as_ref().map(|p| flow::rows_to_send(p, &self.choices)),
             "changed_unanswered": self.unanswered_changed(),
+
             "sending": self.send_task.is_some(),
             "send_trouble": trouble_state(self.send_trouble.as_ref()),
             "has_key": self.frozen.is_some(),
@@ -1559,6 +1791,24 @@ impl Screen for ImportBankFileScreen {
         if let Some(m) = state.as_object_mut() {
             m.insert("progress_caps".into(), json!(self.progress_caps()));
             m.insert("earlier".into(), earlier.unwrap_or(Value::Null));
+            m.insert("confirm_add".into(), json!(self.confirm_add));
+            m.insert("not_replaced".into(), json!(self.not_replaced()));
+            m.insert("look_alikes".into(), json!(self.look_alikes()));
+            m.insert(
+                "other_flip".into(),
+                json!(self.other_flip.map(|(f, flip)| json!([f.as_wire(), flip]))),
+            );
+            // Q-PR5c: true = this file comes in the same way as the other
+            // format, false = the opposite, null = no evidence.
+            m.insert(
+                "sign_against_other".into(),
+                json!(self.sign_against_other().map(|(_, same)| same)),
+            );
+            m.insert("sign_hint".into(), json!(self.sign_hint_key()));
+            m.insert(
+                "opposite_look_alikes".into(),
+                json!(self.opposite_look_alikes()),
+            );
         }
         state
     }
@@ -1608,6 +1858,17 @@ fn trouble_state(t: Option<&EngineTrouble>) -> Value {
         Some(EngineTrouble::Other(k)) => json!(k),
         Some(EngineTrouble::Refused(r)) => json!(flow::refusal_key(r)),
     }
+}
+
+/// The date and amount (feed sign) of rows already imported (Q-PR5b).
+type DatedAmounts = Vec<(CalendarDate, rust_decimal::Decimal)>;
+
+/// A changed row's Replace would be done: the engine's
+/// `existingReplaceable` (U-200), else (an older engine) the matched item
+/// still waits.
+pub(crate) fn replaceable(r: &cl_api::ImportRowResult) -> bool {
+    r.existing_replaceable
+        .unwrap_or(r.existing_pending == Some(true))
 }
 
 /// `ChangedAction` as the owner's two buttons.

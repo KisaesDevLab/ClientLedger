@@ -597,3 +597,338 @@ fn a_short_window_keeps_the_list_and_panel_usable() {
     assert!((list + panel - 892.0).abs() < 0.5);
     assert_eq!(view::body_heights(900.0, false), (900.0, 900.0));
 }
+
+/// PR-5 S3 (T7): a line that matches an entry in the books, sent as a new
+/// entry or a transfer, asks first; Go back sends nothing and goes to
+/// Match; Record it again posts it.
+#[test]
+fn a_line_with_a_match_asks_before_it_is_recorded_again() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Matches;
+    s.reload();
+    let r = s
+        .rows
+        .iter()
+        .find(|r| r.match_candidate_count > 0)
+        .cloned()
+        .expect("a line with a match");
+    let expense = s.chart.first().map(|(a, _)| *a).expect("chart");
+    let before = s.counts.accepted;
+    let as_new = send::Send::Categorize(
+        r.id,
+        Some(cl_api::FeedChoice {
+            account: Some(expense),
+            ..cl_api::FeedChoice::default()
+        }),
+    );
+    send::start(&mut s, as_new.clone(), None);
+    s.poll();
+    assert_eq!(s.state()["ask"], "record_again");
+    assert_eq!(s.counts.accepted, before, "nothing sent");
+    assert_eq!(s.last_send, None);
+    // Go back to Match: nothing sent, the question gone.
+    ask::answer(&mut s, false);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.counts.accepted, before);
+    // A transfer to an account asks the same.
+    send::start(
+        &mut s,
+        send::Send::Transfer(r.id, cl_api::TransferTarget::Account(expense)),
+        None,
+    );
+    assert_eq!(s.state()["ask"], "record_again");
+    ask::answer(&mut s, false);
+    // Record it again: posted once.
+    send::start(&mut s, as_new, None);
+    assert_eq!(s.state()["ask"], "record_again");
+    ask::answer(&mut s, true);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.last_send, Some("categorize"));
+    assert_eq!(s.counts.accepted, before + 1);
+    // A match of the same kind of line never asks.
+    let other = s
+        .rows
+        .iter()
+        .find(|x| x.match_candidate_count > 0 && x.id != r.id)
+        .map(|x| x.id);
+    if let Some(o) = other {
+        let t = "d0000000-0000-4000-8000-0000000000ff"
+            .parse::<cl_core::ids::TransactionId>()
+            .expect("id");
+        assert!(!ask::holds_record_again(
+            &mut s,
+            &send::Send::Match(o, t, None)
+        ));
+    }
+}
+
+/// PR-5 S3: an engine that refuses the transfer (409
+/// `FEED_ITEM_HAS_MATCH`) asks the same question.
+#[test]
+fn an_engine_has_match_refusal_asks_to_record_again() {
+    let (_d, mut s) = screen();
+    let id = s.rows.first().map(|r| r.id).expect("row");
+    let again = send::Send::Transfer(
+        id,
+        cl_api::TransferTarget::Account(
+            "d0000000-0000-4000-8000-0000000000fe"
+                .parse::<cl_core::ids::AccountId>()
+                .expect("id"),
+        ),
+    );
+    let refusal = cl_api::engine_refusal(
+        409,
+        &serde_json::json!({"error": {"message": "m", "code": "FEED_ITEM_HAS_MATCH",
+            "details": {"candidates": [{"transactionId": "x"}]}}}),
+    );
+    let mut o = send::Outcome::default();
+    send::fold_single_for_tests(&mut o, &again, Err(refusal));
+    assert!(o.has_match.is_some());
+    assert_eq!(o.failed, 0, "a question, not a failure");
+    s.take_outcome(o);
+    assert_eq!(s.state()["ask"], "record_again");
+}
+
+/// PR-5 N7 (T8, desktop side): Undo of an entry ticked in the account's
+/// reconciliation in progress asks first; Keep it sends nothing.
+#[test]
+fn undo_of_a_ticked_entry_asks_first() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.counts.accepted, 1);
+    s.show = Show::Accepted;
+    s.reload();
+    let r = s.rows.first().cloned().expect("accepted row");
+    let undo = send::Send::Undo(cl_api::UndoTarget::Items(vec![r.id]), false);
+    // Not ticked anywhere: Undo goes at once.
+    send::start(&mut s, undo.clone(), None);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.counts.accepted, 0);
+    // Ticked: the read says so (the demo's worksheet is the statement's own
+    // lines, so the answer is played here) and the owner is asked.
+    s.asks.check_send = Some(undo.clone());
+    s.asks.check = Some(crate::screens::templates::engine::Job::Done(Some(Ok(true))));
+    ask::poll(&mut s);
+    assert_eq!(s.state()["ask"], "undo_ticked");
+    ask::answer(&mut s, false);
+    assert!(s.asks.ask.is_none());
+}
+
+/// PR-5 N7: a worksheet line is "ticked" for its entry only while cleared
+/// in a reconciliation in progress.
+#[test]
+fn ticked_reads_the_worksheet() {
+    let mut d = crate::company::demo::DemoState::new();
+    d.open = d.companies.first().map(|c| c.tenant_id);
+    let start = cl_api::ReconStart {
+        account: crate::company::demo::account_id(1010),
+        statement_date: cl_core::CalendarDate::from_ymd(2026, 10, 31).expect("date"),
+        statement_ending_balance: cl_core::Money::parse_wire("86902.13").expect("money"),
+        service_charge: None,
+        interest: None,
+    };
+    let begun = crate::company::demo::reconcile::start(&mut d, &start).expect("begin");
+    let rec = crate::company::demo::reconcile::get(&mut d, begun.id).expect("worksheet");
+    let lines = rec.lines.clone().expect("lines");
+    let on = lines
+        .iter()
+        .find(|l| l.cleared)
+        .expect("a pre-checked line");
+    let off = lines.iter().find(|l| !l.cleared).expect("an unticked line");
+    assert!(ask::ticked(&rec, on.transaction));
+    assert!(!ask::ticked(&rec, off.transaction));
+    assert!(!ask::ticked(
+        &rec,
+        "d0000000-0000-4000-8000-0000000000ff"
+            .parse::<cl_core::ids::TransactionId>()
+            .expect("id")
+    ));
+}
+
+/// Q-PR5a (PR-5 B1): a line whose posted entry was edited since shows
+/// "Entry changed", is counted, and offers Undo (not Review again, which
+/// would leave the edited entry and let the line be recorded twice).
+#[test]
+fn an_edited_entry_shows_entry_changed() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.counts.accepted, 1);
+    {
+        let mut demo = s.link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            accepted: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut demo, &q)
+            .expect("list")
+            .rows
+            .remove(0);
+        let entry = row.matched_transaction.expect("entry");
+        let posted = demo
+            .ledger
+            .transactions()
+            .into_iter()
+            .find(|x| crate::company::demo::register::DemoLedger::id_of(x) == entry)
+            .expect("posted");
+        let other: u32 = posted
+            .lines
+            .iter()
+            .find(|l| l.account != "1010")
+            .and_then(|l| l.account.parse().ok())
+            .expect("other line");
+        let posting = crate::company::demo::register::DemoPosting {
+            kind: "check",
+            date: posted.date,
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: crate::company::demo::account_id(1010),
+            own_debit: false,
+            lines: vec![(
+                crate::company::demo::account_id(other),
+                row.amount
+                    .abs()
+                    .checked_add(cl_core::Money::parse_wire("1.00").expect("m"))
+                    .expect("sum"),
+            )],
+        };
+        let chart = crate::company::demo::chart();
+        assert!(demo.ledger.save(&chart, &posting, Some(entry)).is_some());
+    }
+    s.show = Show::Accepted;
+    s.reload();
+    assert_eq!(s.state()["counts"]["entry_changed"], 1);
+    assert_eq!(s.state()["badges"]["entry_changed"], 1);
+    let row = s.rows.first().cloned().expect("row");
+    assert_eq!(s.why(&row), Why::EntryChanged);
+    assert!(
+        !detail::changed_offers_review_again(&s, &row),
+        "posted here: Undo"
+    );
+    s.changed_only = true;
+    s.reload();
+    assert_eq!(s.rows.len(), 1);
+}
+
+/// PR-5 QA-4: Go to Bank Feed (a register's matched entry) shows the
+/// account's accepted lines with the cursor on that entry's line, whatever
+/// view and filter were on; after an import, the account's waiting lines.
+#[test]
+fn go_to_lands_on_the_matched_line() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    let id = s.rows[0].id;
+    let account = s
+        .current_account()
+        .and_then(|a| a.account)
+        .expect("account");
+    cmd(&mut s, "feed.accept");
+    let entry = {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::feed_review::list(
+            &mut d,
+            &FeedQuery {
+                accepted: true,
+                ..FeedQuery::default()
+            },
+        )
+        .expect("list")
+        .rows
+        .iter()
+        .find(|r| r.id == id)
+        .and_then(|r| r.matched_transaction)
+        .expect("posted")
+    };
+    // Whatever the window showed before.
+    s.show = Show::Excluded;
+    s.filter = "nothing like it".into();
+    s.changed_only = true;
+    s.reload();
+    assert!(s.open_with(crate::windows::OpenPayload::FeedAt(FeedTarget {
+        account,
+        entry: Some(entry),
+    })));
+    s.poll();
+    assert_eq!(s.show, Show::Accepted);
+    assert!(s.filter.is_empty() && !s.changed_only && !s.voided_only);
+    assert_eq!(s.current_account().and_then(|a| a.account), Some(account));
+    let at = s.list.cursor().expect("a cursor");
+    assert_eq!(s.rows[at].matched_transaction, Some(entry));
+    // After an import: the waiting lines of the account.
+    s.go_to(FeedTarget {
+        account,
+        entry: None,
+    });
+    s.poll();
+    assert_eq!(s.show, Show::Waiting);
+    assert_ne!(s.rows.len(), 0);
+}
+
+/// A target given before the accounts are read waits for them.
+#[test]
+fn go_to_waits_for_the_accounts() {
+    let dir = tempfile::tempdir().expect("dir");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = BankFeedScreen::new(Arc::clone(&link), None);
+    let account = s.accounts.last().and_then(|a| a.account).expect("account");
+    s.accounts.clear();
+    s.go_to(FeedTarget {
+        account,
+        entry: None,
+    });
+    s.read_meta();
+    s.poll();
+    assert_eq!(s.current_account().and_then(|a| a.account), Some(account));
+}
+
+/// PR-5 QA: a row's accessible name has its date, description and amount.
+#[test]
+fn a_rows_accessible_name_says_what_it_is() {
+    let (_d, s) = screen();
+    let r = &s.rows[0];
+    let label = view::row_label(r, 0, s.rows.len(), cl_core::MoneyStyle::default());
+    assert!(
+        label.starts_with(&format!("Bank line 1 of {}:", s.rows.len())),
+        "{label}"
+    );
+    assert!(label.contains(&r.description), "{label}");
+    assert!(label.contains(&crate::shell::us_date(r.date)), "{label}");
+    let amount = model::display_amount(r.amount).format(cl_core::MoneyStyle::default());
+    assert!(label.ends_with(&amount), "{label}");
+}
+
+/// PR-5 QA-4: an empty list hidden by a search, a bucket or a chip says
+/// so rather than "Nothing waiting".
+#[test]
+fn an_empty_filtered_list_says_it_is_filtered() {
+    let (_d, mut s) = screen();
+    assert_eq!(view::empty_key(&s), "bank_feed.empty");
+    s.filter = "zzz".into();
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    s.filter.clear();
+    s.segment = Segment::Matches;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    s.show = Show::Accepted;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.accepted");
+    s.changed_only = true;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    assert!(crate::i18n::has("bank_feed.empty.filtered"));
+}
+
+/// PR-5 QA-5: the engine doesn't mark a matched entry cleared (the line is
+/// pre-checked when you reconcile, `bankFeedPrecheckIds`), so the matched
+/// row doesn't promise a cleared mark.
+#[test]
+fn a_match_promises_the_reconcile_check_not_a_cleared_mark() {
+    let sub = crate::i18n::t("bank_feed.recorded.match.sub");
+    assert!(!sub.contains("cleared"), "{sub}");
+    assert!(sub.contains("reconcile"), "{sub}");
+}

@@ -654,3 +654,26 @@ async fn list_and_counts_send_the_same_transfer_window() {
         ]
     );
 }
+
+/// PR-5 S3: an engine that guards a transfer of a line already in the
+/// books answers 409 `FEED_ITEM_HAS_MATCH {candidates}`.
+#[test]
+fn has_match_refusal_counts_the_candidates() {
+    let e = crate::errors::from_response_for_tests(
+        409,
+        br#"{"error":{"message":"m","code":"FEED_ITEM_HAS_MATCH","details":{"candidates":[{"transactionId":"x"},{"transactionId":"y"}]}}}"#,
+    );
+    let Some(FeedRefusal::HasMatch { candidates }) = feed_refusal(&e) else {
+        panic!("refusal {e:?}");
+    };
+    assert_eq!(candidates, 2);
+    assert!(!is_stale_row(&e));
+    let bare = crate::errors::from_response_for_tests(
+        409,
+        br#"{"error":{"message":"m","code":"FEED_ITEM_HAS_MATCH"}}"#,
+    );
+    assert!(matches!(
+        feed_refusal(&bare),
+        Some(FeedRefusal::HasMatch { candidates: 0 })
+    ));
+}

@@ -34,6 +34,7 @@ mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
 mod contract_feed_accept;
+mod contract_feed_lifecycle;
 mod contract_feed_match_post;
 mod contract_feed_receipts;
 mod contract_feed_review;
@@ -1051,6 +1052,10 @@ fn main() -> std::process::ExitCode {
             contract_bank_import::reimport_adds_nothing,
         ),
         (
+            "bank_import::partial_overlap_keeps_each_identical_row_once",
+            contract_bank_import::partial_overlap_keeps_each_identical_row_once,
+        ),
+        (
             "bank_import::commit_replays_its_key",
             contract_bank_import::commit_replays_its_key,
         ),
@@ -1234,6 +1239,23 @@ fn main() -> std::process::ExitCode {
         (
             "feed_match_post::assign_approve_then_undo_restores_the_staging",
             contract_feed_match_post::assign_approve_then_undo_restores_the_staging,
+        ),
+        // PR-5 (U-199, U-200): the bank lifecycle guards.
+        (
+            "feed_lifecycle::an_amount_edit_flags_the_matched_line",
+            contract_feed_lifecycle::an_amount_edit_flags_the_matched_line,
+        ),
+        (
+            "feed_lifecycle::a_transfer_of_a_line_in_the_books_asks",
+            contract_feed_lifecycle::a_transfer_of_a_line_in_the_books_asks,
+        ),
+        (
+            "feed_lifecycle::a_replace_of_a_staged_item_is_refused_and_said",
+            contract_feed_lifecycle::a_replace_of_a_staged_item_is_refused_and_said,
+        ),
+        (
+            "feed_lifecycle::accept_takes_the_owners_transfer_window",
+            contract_feed_lifecycle::accept_takes_the_owners_transfer_window,
         ),
         // P27 reconcile (U-188 to U-192): fresh accounts per test.
         (

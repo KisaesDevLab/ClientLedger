@@ -16,6 +16,7 @@ fn input() -> WhyInput {
         transfer: false,
         has_account: true,
         entry_voided: false,
+        entry_changed: false,
         has_receipt: false,
     }
 }
@@ -66,6 +67,23 @@ fn badges_follow_the_engine_and_ai_hides_when_off() {
         ..rule
     };
     assert_eq!(why(voided, true), Why::EntryVoided);
+    // Q-PR5a: an edited entry; a voided one says voided first.
+    let changed = WhyInput {
+        entry_changed: true,
+        ..input()
+    };
+    assert_eq!(why(changed, true), Why::EntryChanged);
+    assert_eq!(Why::EntryChanged.as_str(), "entry_changed");
+    assert_eq!(
+        why(
+            WhyInput {
+                entry_voided: true,
+                ..changed
+            },
+            true
+        ),
+        Why::EntryVoided
+    );
     // A05: a receipt shows over the proposal and over "Needs you" (QA-1:
     // a line without a suggestion, so no bucket and no account, still says
     // it has a receipt), never over a match, a transfer, a duplicate or a

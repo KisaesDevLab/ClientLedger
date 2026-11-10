@@ -17,6 +17,15 @@ use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
+/// What the owner clicked on a changed row (PR-5 S1).
+enum ChangedClick {
+    /// Replace, add or skip.
+    Choose(u32, RowChoice),
+    /// "Add it again" on a row whose earlier item is in the books: ask.
+    AskAdd(u32),
+    /// The answer to that question was no.
+    CancelAdd,
+}
 /// Rows drawn at once in the check table (the rest are counted).
 const SHOWN_ROWS: usize = 200;
 
@@ -125,18 +134,53 @@ fn chip_sensing(
 }
 
 /// A label and a value on one line, the value right-aligned.
-fn pair(ui: &mut Ui, tokens: &Tokens, label: &str, value: &str, mono: bool) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(label).color(tokens.text_secondary));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let v = RichText::new(value).color(tokens.text_primary);
-            ui.label(if mono {
-                v.text_style(egui::TextStyle::Monospace)
-            } else {
-                v
-            });
-        });
-    });
+/// PR-5 QA: a label too long for the line wraps beside the value instead
+/// of running into it.
+pub(super) fn pair(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    label: &str,
+    value: &str,
+    mono: bool,
+) -> (egui::Rect, egui::Rect) {
+    let v = RichText::new(value).color(tokens.text_primary);
+    let v = if mono {
+        v.text_style(egui::TextStyle::Monospace)
+    } else {
+        v
+    };
+    let value_width = egui::WidgetText::from(v.clone())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x;
+    ui.horizontal_top(|ui| {
+        let label_width = (ui.available_width() - value_width - 12.0).max(48.0);
+        let l = ui
+            .allocate_ui_with_layout(
+                egui::vec2(label_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_max_width(label_width);
+                    ui.add(
+                        egui::Label::new(RichText::new(label).color(tokens.text_secondary)).wrap(),
+                    )
+                    .rect
+                },
+            )
+            .inner;
+        let r = ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                ui.label(v).rect
+            })
+            .inner;
+        (l, r)
+    })
+    .inner
 }
 
 /// A titled card of the mockup (white body, a heading bar).
@@ -198,6 +242,16 @@ pub(super) fn balance_keys(
     (bank, books)
 }
 
+/// PR-5 QA: the engine counts the new rows of this file and the rows
+/// already waiting in the Bank Feed that look entered (account-wide), so
+/// the line says so rather than "of them".
+pub(super) fn likely_text(b: &cl_api::ImportBalanceCheck, style: MoneyStyle) -> String {
+    t_count(
+        "bankimport.balance.likely",
+        usize::try_from(b.likely_in_books_count).unwrap_or(usize::MAX),
+        &[("total", &b.likely_in_books_total.format(style))],
+    )
+}
 fn trouble_text(trouble: &EngineTrouble) -> String {
     match trouble {
         EngineTrouble::Unknown => t("bankimport.lost"),
@@ -837,14 +891,7 @@ impl ImportBankFileScreen {
         let card = s.kind == AccountKind::CreditCard || self.card_target();
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("bankimport.sign.heading"));
-            let key = if self.sign.suggest_flip {
-                "bankimport.sign.suggest"
-            } else if card {
-                "bankimport.sign.card"
-            } else {
-                "bankimport.sign.plain"
-            };
-            form::hint(ui, tokens, &t(key));
+            form::hint(ui, tokens, &t(self.sign_hint_key()));
             if self.sign_differs() {
                 form::inline_warning(ui, tokens, &t("bankimport.sign.remembered_differs"));
             } else if self.remembered_flip.is_some() {
@@ -883,6 +930,29 @@ impl ImportBankFileScreen {
             }
             if needs && ui.button(t("bankimport.sign.looks_right")).clicked() {
                 self.set_flipped(self.flipped);
+            }
+            // Q-PR5c (PR-5 QA-6): the result compared with the account's
+            // other format, never the checkbox answer.
+            if let Some((format, same)) = self.sign_against_other() {
+                let format = format.as_wire().to_uppercase();
+                let vars = [("format", format.as_str())];
+                let (said, opposite) = if card {
+                    (
+                        "bankimport.sign.other_format_card",
+                        "bankimport.sign.other_opposite_card",
+                    )
+                } else {
+                    (
+                        "bankimport.sign.other_format",
+                        "bankimport.sign.other_opposite",
+                    )
+                };
+                form::hint(ui, tokens, &t_with(said, &vars));
+                match same {
+                    Some(true) => form::hint(ui, tokens, &t("bankimport.sign.other_same")),
+                    Some(false) => form::inline_warning(ui, tokens, &t_with(opposite, &vars)),
+                    None => form::hint(ui, tokens, &t("bankimport.sign.other_unknown")),
+                }
             }
         });
     }
@@ -971,16 +1041,7 @@ impl ImportBankFileScreen {
                     pair(
                         ui,
                         tokens,
-                        &t_with(
-                            books_key,
-                            &[(
-                                "n",
-                                &crate::i18n::count_text(
-                                    u64::try_from(flow::rows_to_send(p, &self.choices))
-                                        .unwrap_or(u64::MAX),
-                                ),
-                            )],
-                        ),
+                        &t_count(books_key, flow::rows_to_send(p, &self.choices), &[]),
                         &fig.books.format(style),
                         true,
                     );
@@ -1006,22 +1067,7 @@ impl ImportBankFileScreen {
                         });
                     });
                     if b.likely_in_books_count > 0 {
-                        form::hint(
-                            ui,
-                            tokens,
-                            &t_with(
-                                "bankimport.balance.likely",
-                                &[
-                                    (
-                                        "n",
-                                        &crate::i18n::count_text(u64::from(
-                                            b.likely_in_books_count,
-                                        )),
-                                    ),
-                                    ("total", &b.likely_in_books_total.format(style)),
-                                ],
-                            ),
-                        );
+                        form::hint(ui, tokens, &likely_text(b, style));
                     }
                 }
                 None if self.link.is_demo() => {
@@ -1036,17 +1082,6 @@ impl ImportBankFileScreen {
     /// height; the list takes the rest. A short window scrolls it all.
     fn check_ui(&mut self, ui: &mut Ui, tokens: &Tokens, style: MoneyStyle) {
         let height = ui.available_height();
-        if height < CHECK_SPLIT_HEIGHT {
-            egui::ScrollArea::vertical()
-                .id_salt("bankimport/check/all")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    self.check_top(ui, tokens, style);
-                    self.check_list(ui, tokens, style, None);
-                });
-            return;
-        }
         // A short list leaves the cards (and a changed row's choices) all
         // the room they need; a long one keeps at least 55% for itself.
         let rows = self
@@ -1056,7 +1091,23 @@ impl ImportBankFileScreen {
         #[allow(clippy::cast_precision_loss)] // at most SHOWN_ROWS
         let list_needs = rows as f32 * 30.0 + 170.0;
         let top = (height - list_needs).max(height * 0.45).max(120.0);
-        egui::ScrollArea::vertical()
+        // PR-5 QA-1: cards and choices taller than their share (a changed
+        // row's card at 1440x900, any short window, 200% zoom) scroll with
+        // the list as one page, so nothing is cut off under the chips.
+        if height < CHECK_SPLIT_HEIGHT || self.check_top_height > top {
+            egui::ScrollArea::vertical()
+                .id_salt("bankimport/check/all")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let start = ui.cursor().top();
+                    self.check_top(ui, tokens, style);
+                    self.check_top_height = ui.cursor().top() - start;
+                    self.check_list(ui, tokens, style, None);
+                });
+            return;
+        }
+        let out = egui::ScrollArea::vertical()
             .id_salt("bankimport/check/top")
             .max_height(top)
             .auto_shrink([false, true])
@@ -1064,6 +1115,11 @@ impl ImportBankFileScreen {
                 ui.set_width(ui.available_width());
                 self.check_top(ui, tokens, style);
             });
+        self.check_top_height = out.content_size.y;
+        if out.content_size.y > top {
+            // Laid out as one page from the next frame.
+            ui.ctx().request_repaint();
+        }
         // The footnotes and a send problem keep their lines under it.
         let list = (ui.available_height() - 88.0).max(90.0);
         self.check_list(ui, tokens, style, Some(list));
@@ -1118,8 +1174,33 @@ impl ImportBankFileScreen {
             );
         }
         self.problems_ui(ui, tokens);
-        if let Some((line, c)) = self.changed_ui(ui, tokens, style, &p) {
-            self.choose(line, c);
+        // Q-PR5b: new rows that share a date and amount with rows already
+        // imported (an edited re-import shows before it is sent).
+        let same = self.look_alikes();
+        if same > 0 {
+            form::hint(
+                ui,
+                tokens,
+                &t_count("bankimport.preview.same_day_amount", same, &[]),
+            );
+        }
+        // Q-PR5c (PR-5 QA-6): the same rows with the other sign.
+        let opposite = self.opposite_look_alikes();
+        if opposite > 0 {
+            form::inline_warning(
+                ui,
+                tokens,
+                &t_count("bankimport.preview.opposite_sign", opposite, &[]),
+            );
+        }
+        match self.changed_ui(ui, tokens, style, &p) {
+            Some(ChangedClick::Choose(line, c)) => {
+                self.confirm_add = None;
+                self.choose(line, c);
+            }
+            Some(ChangedClick::AskAdd(line)) => self.confirm_add = Some(line),
+            Some(ChangedClick::CancelAdd) => self.confirm_add = None,
+            None => {}
         }
     }
 
@@ -1132,7 +1213,7 @@ impl ImportBankFileScreen {
         tokens: &Tokens,
         style: MoneyStyle,
         p: &BankImportOutcome,
-    ) -> Option<(u32, RowChoice)> {
+    ) -> Option<ChangedClick> {
         let section = self.current_section()?;
         let changed: Vec<&ImportRowResult> = p
             .rows
@@ -1205,7 +1286,9 @@ impl ImportBankFileScreen {
                 });
                 let current = self.choices.get(&res.line).copied().unwrap_or_default();
                 ui.horizontal_wrapped(|ui| {
-                    let can_replace = res.existing_pending == Some(true);
+                    // U-200: `existingReplaceable` (an older engine: still
+                    // waiting).
+                    let can_replace = super::replaceable(res);
                     let replace = ui
                         .add_enabled(
                             can_replace,
@@ -1214,16 +1297,34 @@ impl ImportBankFileScreen {
                         )
                         .on_disabled_hover_text(t("bankimport.changed.replace_off"));
                     if replace.clicked() {
-                        out = Some((res.line, super::changed_choice(ChangedAction::Replace)));
+                        out = Some(ChangedClick::Choose(
+                            res.line,
+                            super::changed_choice(ChangedAction::Replace),
+                        ));
                     }
+                    // PR-5 S1: the earlier one is already in the books; adding
+                    // it again asks first.
+                    let in_books = res.existing_pending == Some(false);
+                    let add_label = if in_books {
+                        "bankimport.add_again"
+                    } else {
+                        "bankimport.add_as_new"
+                    };
                     if ui
                         .add(
-                            egui::Button::new(t("bankimport.add_as_new"))
+                            egui::Button::new(t(add_label))
                                 .selected(current.changed == Some(ChangedAction::Add)),
                         )
                         .clicked()
                     {
-                        out = Some((res.line, super::changed_choice(ChangedAction::Add)));
+                        out = Some(if self.add_needs_ask(res.line) {
+                            ChangedClick::AskAdd(res.line)
+                        } else {
+                            ChangedClick::Choose(
+                                res.line,
+                                super::changed_choice(ChangedAction::Add),
+                            )
+                        });
                     }
                     if ui
                         .add(
@@ -1232,9 +1333,23 @@ impl ImportBankFileScreen {
                         )
                         .clicked()
                     {
-                        out = Some((res.line, super::changed_skip()));
+                        out = Some(ChangedClick::Choose(res.line, super::changed_skip()));
                     }
                 });
+                if self.confirm_add == Some(res.line) {
+                    form::inline_warning(ui, tokens, &t("bankimport.changed.add_again_ask"));
+                    ui.horizontal(|ui| {
+                        if ui.button(t("bankimport.changed.add_again_no")).clicked() {
+                            out = Some(ChangedClick::CancelAdd);
+                        }
+                        if ui.button(t("bankimport.changed.add_again_yes")).clicked() {
+                            out = Some(ChangedClick::Choose(
+                                res.line,
+                                super::changed_choice(ChangedAction::Add),
+                            ));
+                        }
+                    });
+                }
             }
             let left = self.unanswered_changed();
             if left > 0 {
@@ -1624,6 +1739,16 @@ impl ImportBankFileScreen {
                 )
             };
             form::heading(ui, tokens, &text);
+            // PR-5 S1: a Replace the engine didn't do (the earlier one was
+            // accepted or staged meanwhile).
+            let refused = self.not_replaced().len();
+            if refused > 0 {
+                form::inline_warning(
+                    ui,
+                    tokens,
+                    &t_count("bankimport.done.not_replaced", refused, &[]),
+                );
+            }
             if r.replayed {
                 form::hint(ui, tokens, &t("bankimport.done.replayed"));
             }
@@ -1675,8 +1800,7 @@ impl ImportBankFileScreen {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 if crate::widgets::primary_button(ui, &t("bankimport.open_feed")).clicked() {
-                    self.link
-                        .push(CompanyEvent::OpenWindow(CommandId::new("banking.feed")));
+                    self.open_feed();
                 }
                 let can_undo = r.batch.is_some()
                     && (r.counts.inserted > 0 || replaced > 0)

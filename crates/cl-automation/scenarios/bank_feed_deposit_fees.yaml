@@ -15,7 +15,7 @@ steps:
   - command: banking.feed
   - command: dev.demo_feed_reset
   - click: {role: button, label: Needs review 6}
-  - click: {role: button, label: Bank line 3 of 6}
+  - click: {role: button, label_contains: "Bank line 3 of 6:"}
   - click: {role: button, label: Deposit}
   - assert_state: {key: screen.detail.mode, equals: deposit}
   - assert_state: {key: screen.detail.payments, equals: 2}
@@ -41,7 +41,7 @@ steps:
   - click: {role: button, label: Accepted}
   - assert_state: {key: screen.counts.entry_voided, equals: 1}
   - click: {role: button, label: Entry voided (1)}
-  - click: {role: button, label: Bank line 1 of 1}
+  - click: {role: button, label_contains: "Bank line 1 of 1:"}
   - assert_state: {key: screen.detail.entry_voided, equals: true}
   - screenshot: entry-voided
   - click: {role: button, label: Review again}

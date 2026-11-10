@@ -20,6 +20,7 @@ pub mod company;
 pub mod data_bus;
 pub mod engine_link;
 pub mod errors;
+pub mod feed_link;
 pub mod fonts;
 pub mod forms;
 pub mod grid_env;

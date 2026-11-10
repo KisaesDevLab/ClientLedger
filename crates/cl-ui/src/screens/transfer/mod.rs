@@ -134,6 +134,8 @@ pub struct TransferScreen {
     pub(crate) balances: [Option<Money>; 2],
     balance_tasks: [Option<Task<Option<Money>>>; 2],
     pub(crate) editing: Option<Editing>,
+    /// PR-5 QA-2: the bank line of the transfer being edited.
+    pub(crate) feed_watch: crate::feed_link::Watch,
     load_task: Option<Task<Versioned<Transaction>>>,
     save_task: Option<Task<(TransactionId, RecordVersion)>>,
     intent: Option<SaveIntent>,
@@ -253,6 +255,7 @@ impl TransferScreen {
             balances: [None, None],
             balance_tasks: [None, None],
             editing: None,
+            feed_watch: crate::feed_link::Watch::default(),
             load_task: None,
             save_task: None,
             intent: None,
@@ -1022,6 +1025,19 @@ impl TransferScreen {
         }
     }
 
+    /// PR-5 QA-2: both sides' accounts and the amount, as compared for the
+    /// Bank Feed notice.
+    pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
+        let f = self.form.current();
+        vec![(f.from, f.amount), (f.to, f.amount)]
+    }
+
+    /// The edit changes the amount or an account of a transfer a bank line
+    /// holds.
+    pub(crate) fn feed_notice(&self) -> bool {
+        self.editing.is_some() && self.feed_watch.notice(&self.feed_shape()).is_some()
+    }
+
     fn show(&mut self, v: &Versioned<Transaction>) {
         let (form, exact) = form_of(&v.record);
         self.form.load(form);
@@ -1036,6 +1052,11 @@ impl TransferScreen {
             read_only: !exact || v.record.status == TxnStatus::Void,
             accounts,
         });
+        // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
+        let shape = self.feed_shape();
+        let banks: Vec<AccountId> = shape.iter().filter_map(|(a, _)| *a).collect();
+        self.feed_watch
+            .start(&self.link, self.group.as_ref(), v.record.id, banks, shape);
         self.focused = None;
         self.last_action = Some("load");
         self.problems.clear();
@@ -1245,6 +1266,13 @@ impl TransferScreen {
         {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
+        // PR-5 QA-2: an amount or account change of a transfer a bank line
+        // holds.
+        if self.editing.is_some() {
+            let now = self.feed_shape();
+            let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
+            self.feed_watch.ui(ui, tokens, &now, style);
+        }
         let enabled = !working && !self.closing_prompt.dialog_open() && !read_only;
         // Enter in Date, Amount or Memo: Save & New, or the next field when
         // Enter moves between fields (Q-264).
@@ -1424,6 +1452,7 @@ impl TransferScreen {
         let f = self.form.current();
         let mut v = json!({
             "screen": "transfer",
+            "feed": {"linked": self.editing.is_some() && self.feed_watch.linked(), "notice": self.feed_notice()},
             "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.loaded,

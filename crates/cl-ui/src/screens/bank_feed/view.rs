@@ -125,6 +125,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     bulk::bar(s, ui, &tokens, !short);
     toast(s, ui, &tokens);
     undo_changed(s, ui, &tokens);
+    super::ask::ui(s, ui, &tokens);
     closing(s, ui, &tokens);
     if s.load_failed {
         form::inline_warning(ui, &tokens, &t("bank_feed.load_failed"));
@@ -349,6 +350,7 @@ fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         if show != s.show {
             s.show = show;
             s.voided_only = false;
+            s.changed_only = false;
             changed = true;
         }
         if s.show == Show::Accepted {
@@ -362,7 +364,25 @@ fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 .clicked()
             {
                 s.voided_only = !s.voided_only;
+                s.changed_only = false;
                 changed = true;
+            }
+            // Q-PR5a: rows whose entry was edited since (an engine with
+            // `feed-entry-changed-v1` counts them).
+            if s.counts.entry_changed > 0 || s.changed_only {
+                let text = t_with(
+                    "bank_feed.chip.entry_changed",
+                    &[("n", &s.counts.entry_changed.to_string())],
+                );
+                if ui
+                    .add(egui::Button::new(text).selected(s.changed_only))
+                    .on_hover_text(t("bank_feed.chip.entry_changed.tip"))
+                    .clicked()
+                {
+                    s.changed_only = !s.changed_only;
+                    s.voided_only = false;
+                    changed = true;
+                }
             }
         }
         let mut filter = |ui: &mut Ui| {
@@ -400,7 +420,7 @@ fn badge(ui: &Ui, rect: egui::Rect, tokens: &Tokens, why: Why) {
         }
         Why::Match | Why::Transfer => (tokens.info_tint, tokens.info),
         Why::Ai { high: true } => (tokens.accent_tint, tokens.accent),
-        Why::Ai { high: false } | Why::Duplicate | Why::EntryVoided => {
+        Why::Ai { high: false } | Why::Duplicate | Why::EntryVoided | Why::EntryChanged => {
             (tokens.warn_tint, tokens.warn_text)
         }
         _ => (tokens.warn_surface, tokens.warn_text),
@@ -519,6 +539,10 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
             payee.unwrap_or_default(),
             t("bank_feed.recorded.entry_voided"),
         ),
+        Why::EntryChanged => (
+            payee.unwrap_or_default(),
+            t("bank_feed.recorded.entry_changed"),
+        ),
         _ => {
             let mut sub = account.unwrap_or_default();
             if why == (Why::Ai { high: false }) {
@@ -617,15 +641,44 @@ fn column_headers(ui: &mut Ui, tokens: &Tokens, s: &mut BankFeedScreen) {
     p.hline(rect.x_range(), rect.bottom(), (1.0, tokens.border_row));
 }
 
+/// A row's accessible name: its place, then its date, description and
+/// amount as drawn, so a screen reader tells the rows apart (PR-5 QA).
+pub(crate) fn row_label(
+    r: &cl_api::FeedRow,
+    i: usize,
+    total: usize,
+    style: cl_core::MoneyStyle,
+) -> String {
+    t_with(
+        "bank_feed.row",
+        &[
+            ("n", &(i + 1).to_string()),
+            ("total", &total.to_string()),
+            ("date", &crate::shell::us_date(r.date)),
+            ("description", &r.description),
+            ("amount", &model::display_amount(r.amount).format(style)),
+        ],
+    )
+}
+
+/// The empty list's line.PR-5 QA-4: when a search, a bucket or a chip
+/// hides rows, it says so rather than "Nothing waiting".
+pub(crate) fn empty_key(s: &BankFeedScreen) -> &'static str {
+    let filtered = !s.filter.trim().is_empty()
+        || (s.show == Show::Waiting && s.segment != cl_model::bank_feed::Segment::All)
+        || (s.show == Show::Accepted && (s.voided_only || s.changed_only));
+    match s.show {
+        _ if filtered => "bank_feed.empty.filtered",
+        Show::Waiting => "bank_feed.empty",
+        Show::Accepted => "bank_feed.empty.accepted",
+        Show::Excluded => "bank_feed.empty.excluded",
+    }
+}
+
 fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, reserve: f32) {
     if s.rows.is_empty() {
         ui.add_space(12.0);
-        let key = match s.show {
-            Show::Waiting => "bank_feed.empty",
-            Show::Accepted => "bank_feed.empty.accepted",
-            Show::Excluded => "bank_feed.empty.excluded",
-        };
-        form::hint(ui, tokens, &t(key));
+        form::hint(ui, tokens, &t(empty_key(s)));
         return;
     }
     column_headers(ui, tokens, s);
@@ -643,10 +696,7 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, reserve: f32) {
                 let why = s.why(r);
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
-                let label = t_with(
-                    "bank_feed.row",
-                    &[("n", &(i + 1).to_string()), ("total", &total.to_string())],
-                );
+                let label = row_label(r, i, total, style);
                 let is_cur = cursor == Some(r.id);
                 resp.widget_info(|| {
                     egui::WidgetInfo::selected(egui::Role::Button, true, is_cur, &label)

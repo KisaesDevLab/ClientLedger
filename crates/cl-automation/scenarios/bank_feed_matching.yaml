@@ -17,7 +17,7 @@ steps:
   - command: dev.demo_feed_next_file
   - assert_state: {key: screen.counts.waiting, equals: 38}
   - click: {role: button, label: Needs review 7}
-  - click: {role: button, label: Bank line 1 of 7}
+  - click: {role: button, label_contains: "Bank line 1 of 7:"}
   - assert_state: {key: screen.detail.mode, equals: deposit}
   - assert_state: {key: screen.detail.groupings, equals: 1}
   - click: {role: radio_button, label_contains: "842.50"}
@@ -37,7 +37,7 @@ steps:
 
   # --- A bank line matches a bill payment already in the books --------------
   - click: {role: button, label: Matches 3}
-  - click: {role: button, label: Bank line 2 of 3}
+  - click: {role: button, label_contains: "Bank line 2 of 3:"}
   - assert_state: {key: screen.detail.mode, equals: match}
   - assert_state: {key: screen.detail.candidates, equals: 1}
   - screenshot: match

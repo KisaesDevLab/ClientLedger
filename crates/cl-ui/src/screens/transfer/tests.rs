@@ -333,3 +333,43 @@ fn a_prefilled_card_payment_saves_and_posts_once() {
     s.poll();
     assert_eq!(s.saved_count, 1);
 }
+
+/// PR-5 QA-2: editing a transfer a bank line is matched to says, before
+/// Save, that the line will wait in the Bank Feed again when its amount or
+/// an account changes.
+#[test]
+fn a_matched_transfers_change_says_the_line_waits() {
+    let (mut s, link, _dir) = screen();
+    fill(&mut s, 1010, 1020, "500.00");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.error);
+    let id = s.last_saved.expect("saved");
+    {
+        let mut d = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .remove(0);
+        crate::company::demo::feed_review::match_for_tests(&mut d, row.id, id);
+    }
+    s.clear();
+    assert!(s.open_record(id));
+    s.feed_watch.poll();
+    assert_eq!(s.state_json()["feed"]["linked"], true);
+    assert_eq!(
+        s.state_json()["feed"]["notice"],
+        false,
+        "nothing changed yet"
+    );
+    s.amount_text = "550.00".into();
+    assert!(s.amount_left());
+    assert_eq!(s.state_json()["feed"]["notice"], true);
+    s.amount_text = "500.00".into();
+    assert!(s.amount_left());
+    assert_eq!(s.state_json()["feed"]["notice"], false);
+    s.set_account(false, account(2050));
+    assert_eq!(s.state_json()["feed"]["notice"], true, "another account");
+}

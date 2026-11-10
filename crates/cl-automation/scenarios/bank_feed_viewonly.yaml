@@ -13,7 +13,7 @@ steps:
   - assert_state: {key: screen.view_only, equals: true}
   - assert_state: {key: screen.counts.waiting, equals: 37}
   - assert_not_exists: {role: button, label: Rules}
-  - click: {role: button, label: Bank line 1 of 37}
+  - click: {role: button, label_contains: "Bank line 1 of 37:"}
   - key: J
   - assert_state: {key: screen.cursor, equals: 1}
   - key: Space

@@ -1098,3 +1098,398 @@ fn a_reset_feed_sends_its_rows_again() {
     drop(demo);
     assert_eq!(send_prior(&f), 3, "the same keys again");
 }
+
+/// PR-5 S1 (T4): a Replace the import didn't do (the earlier item was
+/// accepted between the preview and Send) is listed on the done screen;
+/// the next import offers "Add it again", which asks first.
+#[test]
+fn a_refused_replace_is_listed_and_add_again_asks() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let changed = OFX.replace(
+        "<DTPOSTED>20261031<TRNAMT>-186.40<FITID>A1",
+        "<DTPOSTED>20261101<TRNAMT>-196.40<FITID>A1",
+    );
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.next();
+    s.poll();
+    let line = s
+        .preview
+        .as_ref()
+        .expect("preview")
+        .rows
+        .iter()
+        .find(|r| r.status == ImportRowStatus::Changed)
+        .expect("changed")
+        .line;
+    assert!(
+        !s.add_needs_ask(line),
+        "still waiting: Add as new asks nothing"
+    );
+    s.choose(line, changed_choice(ChangedAction::Replace));
+    s.poll();
+    assert_eq!(s.replacing(), 1);
+    // Another window accepts the earlier item before Send.
+    {
+        let mut d = f.link.demo_state().expect("demo");
+        let key = d
+            .bank_feed
+            .waiting_rows()
+            .into_iter()
+            .find(|w| w.amount.abs() == rust_decimal::Decimal::new(18640, 2))
+            .expect("the earlier item")
+            .key;
+        d.bank_feed.settle(&key);
+    }
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    assert!(
+        !s.result
+            .as_ref()
+            .expect("result")
+            .rows
+            .iter()
+            .any(|r| r.replaced)
+    );
+    assert_eq!(s.not_replaced(), vec![line]);
+    assert_eq!(s.state()["not_replaced"], serde_json::json!([line]));
+    assert!(crate::i18n::has("bankimport.done.not_replaced.one"));
+    // The same file again: the earlier one is in the books; Add asks.
+    prepared(&mut s);
+    s.start_over(false);
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.next();
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    let row = p.rows.iter().find(|r| r.line == line).expect("row");
+    assert_eq!(row.status, ImportRowStatus::Changed);
+    assert_eq!(row.existing_pending, Some(false));
+    assert!(s.add_needs_ask(line));
+    s.choose(line, changed_choice(ChangedAction::Add));
+    assert!(!s.add_needs_ask(line), "asked once");
+    assert!(s.not_replaced().is_empty() || s.result.is_none());
+}
+
+/// Q-PR5b (PR-5 N3): an edited re-import whose descriptions changed comes
+/// in as new rows; the preview says how many share a date and amount with
+/// rows already imported.
+#[test]
+fn an_edited_reimport_says_how_many_new_rows_look_alike() {
+    let f = fixture();
+    let mut s = screen(&f);
+    csv_previewed(&mut s, &f, "first.csv", CSV);
+    assert_eq!(s.look_alikes(), 0, "nothing imported yet");
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let edited = CSV
+        .replace("COFFEE ROASTERS", "Coffee - team meeting")
+        .replace("DEPOSIT", "Customer payment");
+    csv_previewed(&mut s, &f, "edited.csv", &edited);
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!(p.counts.new, 2, "{:?}", p.counts);
+    assert_eq!(s.look_alikes(), 2);
+    assert_eq!(s.state()["look_alikes"], 2);
+    assert!(crate::i18n::has("bankimport.preview.same_day_amount.one"));
+}
+
+/// Steps 1 to 3 for a CSV file into the first bank account.
+fn csv_previewed(s: &mut ImportBankFileScreen, f: &Fixture, name: &str, text: &str) {
+    read(s, f, name, text);
+    assert!(s.can_next(), "{:?}", s.read_error);
+    s.next();
+    s.pick_account(bank_account(s));
+    if s.sign_needs_confirm() {
+        s.set_flipped(s.flipped);
+    }
+    s.next();
+    assert_eq!(s.step, Step::Check);
+    s.poll();
+}
+
+/// Q-PR5c (PR-5 N4, T10 desktop part): the sign question shows the
+/// answer used for the account's other format; a wrong answer brings the
+/// same rows in as new money the other way (nothing looks alike), the
+/// right one finds them.
+#[test]
+fn the_sign_question_shows_the_other_formats_answer() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    assert!(s.other_flip.is_none(), "no other format yet");
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let same_rows = "Date,Description,Amount\n10/31/2026,MONETT TIRE AND LUBE,-186.40\n\
+11/01/2026,ACH CREDIT HOA,8450.00\n11/02/2026,CHECK,-925.00\n";
+    read(&mut s, &f, "operating.csv", same_rows);
+    s.next();
+    s.pick_account(bank_account(&s));
+    let (format, flip) = s.other_flip.expect("the QFX answer");
+    assert_ne!(format, flow::wire_format(cl_import::FileFormat::Csv));
+    assert!(!flip);
+    assert_eq!(s.state()["other_flip"][1], false);
+    assert!(crate::i18n::has("bankimport.sign.other_format"));
+    // PR-5 QA-6: a bank CSV gives no sign evidence; the hint says what
+    // the other format did and asks to check, with no verdict.
+    assert_eq!(s.sign_against_other().map(|(_, same)| same), Some(None));
+    // The wrong answer: every row is new, none looks like the QFX rows;
+    // the preview says they are the QFX rows with the other sign.
+    s.set_flipped(true);
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    assert_eq!(p.counts.new, 3, "{:?}", p.counts);
+    assert_eq!(s.look_alikes(), 0);
+    assert_eq!(s.opposite_look_alikes(), 3);
+    assert_eq!(s.state()["opposite_look_alikes"], 3);
+    assert!(crate::i18n::has("bankimport.preview.opposite_sign.one"));
+    // The right answer: the same rows are found.
+    s.back();
+    s.set_flipped(false);
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    let found = p.counts.duplicate + p.counts.possible_duplicate;
+    let new = usize::try_from(p.counts.new).expect("n");
+    assert_eq!(found as usize + s.look_alikes(), 3, "{:?}", p.counts);
+    assert!(new == 0 || s.look_alikes() == new);
+    assert_eq!(s.opposite_look_alikes(), 0);
+}
+
+/// PR-5 QA-6 (Q-PR5c): a card's QFX keeps its signs (charges negative)
+/// while its CSV (charges positive) needs a flip. The hint compares the
+/// result, so the right answer for the CSV (flip) reads "the same way" and
+/// unticking it warns, though the QFX's checkbox answer was "keep".
+#[test]
+fn the_sign_hint_compares_the_result_not_the_checkbox() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let card = card_account(&s);
+    into_account(&mut s, bank_fixture("card_ccstmt.qfx"), card);
+    if s.sign_needs_confirm() {
+        s.set_flipped(s.flipped);
+    }
+    assert!(!s.flipped, "a card QFX keeps its signs");
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    prepared(&mut s);
+    s.start_over(false);
+    let csv = "Date,Description,Amount\n10/05/2026,OFFICE DEPOT #221,45.67\n\
+10/07/2026,PARKING GARAGE,12.00\n10/12/2026,PAYMENT THANK YOU,-500.00\n";
+    read(&mut s, &f, "card.csv", csv);
+    s.next();
+    s.pick_account(card);
+    let (_, kept) = s.other_flip.expect("the QFX answer");
+    assert!(!kept, "the QFX's checkbox answer was keep");
+    assert!(s.flipped, "charges positive: the flip is suggested");
+    assert_eq!(s.sign_hint_key(), "bankimport.sign.suggest_applied");
+    assert_eq!(
+        s.sign_against_other().map(|(_, same)| same),
+        Some(Some(true))
+    );
+    assert_eq!(s.state()["sign_against_other"], true);
+    // Unticking it "like the QFX" would bring the charges in as payments.
+    s.set_flipped(false);
+    assert_eq!(s.sign_hint_key(), "bankimport.sign.suggest");
+    assert_eq!(
+        s.sign_against_other().map(|(_, same)| same),
+        Some(Some(false))
+    );
+    assert!(s.can_next(), "one answer is enough");
+    s.next();
+    s.poll();
+    assert_eq!(s.opposite_look_alikes(), 3, "the QFX rows, other sign");
+    // Ticked again (one click, no second confirmation): found as imported.
+    s.back();
+    s.set_flipped(true);
+    assert!(s.can_next(), "the box is the answer");
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    assert_eq!(p.counts.new, 0, "{:?}", p.counts);
+    assert_eq!(s.opposite_look_alikes(), 0);
+}
+
+/// One frame of the wizard in a `w` x `h` window (points); the AccessKit
+/// nodes with their labels and bounds.
+fn render(
+    s: &mut ImportBankFileScreen,
+    ctx: &eframe::egui::Context,
+    size: (f32, f32),
+    events: Vec<eframe::egui::Event>,
+) -> Vec<(String, eframe::egui::accesskit::Rect)> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(size.0, size.1))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.draw(ui));
+    });
+    out.textures_delta.clear();
+    let Some(u) = out.platform_output.accesskit_update else {
+        return Vec::new();
+    };
+    u.nodes
+        .iter()
+        .filter_map(|(_, n)| Some((n.label()?.to_string(), n.bounds()?)))
+        .collect()
+}
+
+/// PR-5 QA-1: a changed row's card (Was/Now and its three choices) is never
+/// drawn under the counts row, at the smallest usual window and at 200%
+/// zoom; its buttons answer a click.
+#[test]
+fn a_changed_rows_choices_are_never_under_the_counts() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let changed = OFX.replace(
+        "<DTPOSTED>20261031<TRNAMT>-186.40<FITID>A1",
+        "<DTPOSTED>20261101<TRNAMT>-196.40<FITID>A1",
+    );
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.next();
+    s.poll();
+    let line = s
+        .preview
+        .as_ref()
+        .expect("preview")
+        .rows
+        .iter()
+        .find(|r| r.status == ImportRowStatus::Changed)
+        .expect("changed")
+        .line;
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let add = t("bankimport.add_as_new");
+    // The counts row's checkbox (its labels are values, not names).
+    let in_file = t("bankimport.only_skipped");
+    // The shell's body at 1440x900, then the same window at 200% zoom.
+    for size in [(1200.0, 640.0), (1240.0, 760.0), (620.0, 380.0)] {
+        s.check_top_height = 0.0;
+        let mut nodes = Vec::new();
+        for _ in 0..4 {
+            nodes = render(&mut s, &ctx, size, vec![]);
+        }
+        let find = |label: &str| {
+            nodes
+                .iter()
+                .find(|(l, _)| l == label)
+                .map_or_else(|| panic!("{label} at {size:?}"), |(_, r)| *r)
+        };
+        let button = find(&add);
+        let counts = find(&in_file);
+        assert!(
+            button.y1 <= counts.y0 + 0.5,
+            "{size:?}: Add as new {button:?} is under the counts {counts:?}"
+        );
+    }
+    // A click on Add as new (on screen at the usual size) records it.
+    let size = (1240.0, 760.0);
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = render(&mut s, &ctx, size, vec![]);
+    }
+    let r = nodes
+        .iter()
+        .find(|(l, _)| *l == add)
+        .map(|(_, r)| *r)
+        .expect("Add as new");
+    #[allow(clippy::cast_possible_truncation)]
+    let at = eframe::egui::pos2(
+        f64::midpoint(r.x0, r.x1) as f32,
+        f64::midpoint(r.y0, r.y1) as f32,
+    );
+    assert!(at.y < size.1, "on screen: {r:?}");
+    let press = |pressed| eframe::egui::Event::PointerButton {
+        pos: at,
+        button: eframe::egui::PointerButton::Primary,
+        pressed,
+        modifiers: eframe::egui::Modifiers::NONE,
+    };
+    render(
+        &mut s,
+        &ctx,
+        size,
+        vec![eframe::egui::Event::PointerMoved(at)],
+    );
+    render(&mut s, &ctx, size, vec![press(true)]);
+    render(&mut s, &ctx, size, vec![press(false)]);
+    render(&mut s, &ctx, size, vec![]);
+    assert_eq!(
+        s.choices.get(&line).and_then(|c| c.changed),
+        Some(ChangedAction::Add)
+    );
+}
+/// PR-5 QA: the balance check's long label wraps beside its value instead
+/// of running into it.
+#[test]
+fn a_long_balance_label_never_runs_into_its_value() {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let mut got = None;
+    for _ in 0..2 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(320.0, 400.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let tokens = crate::theme::Tokens::of(ui.ctx());
+                got = Some(super::draw::pair(
+                    ui,
+                    &tokens,
+                    "Your books will say, with the rows already in the Bank Feed",
+                    "84,659.51",
+                    true,
+                ));
+            });
+        });
+        out.textures_delta.clear();
+    }
+    let (label, value) = got.expect("drawn");
+    assert!(
+        label.right() <= value.left(),
+        "label {label:?} runs into value {value:?}"
+    );
+    assert!(label.height() > value.height(), "the label wrapped");
+}
+
+/// PR-5 QA: the balance lines read right for one and for two rows, and the
+/// "look already entered" count says it includes rows already waiting.
+#[test]
+fn the_balance_lines_count_in_plain_words() {
+    let two = crate::i18n::t_count("bankimport.balance.books_will", 2, &[]);
+    assert!(!two.contains("all 2"), "{two}");
+    assert!(two.contains("these 2 rows"), "{two}");
+    let one = crate::i18n::t_count("bankimport.balance.books_will_owe", 1, &[]);
+    assert!(one.contains("this 1 row"), "{one}");
+    let likely = crate::i18n::t_count("bankimport.balance.likely", 2, &[("total", "132.65")]);
+    assert!(!likely.contains("of them"), "{likely}");
+    assert!(
+        likely.contains("already waiting in the Bank Feed"),
+        "{likely}"
+    );
+    assert!(crate::i18n::has("bankimport.balance.likely.one"));
+}

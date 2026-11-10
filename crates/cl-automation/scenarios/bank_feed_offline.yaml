@@ -18,7 +18,7 @@ steps:
   - assert_state: {key: screen.counts.waiting, equals: 37}
   - assert_not_exists: {role: label, label: "AI · high"}
   - click: {role: button, label: Ready 28}
-  - click: {role: button, label: Bank line 1 of 28}
+  - click: {role: button, label_contains: "Bank line 1 of 28:"}
   - key: A
   - assert_state: {key: screen.counts.accepted, equals: 1}
   - assert_state: {key: screen.notice, equals: bank_feed.notice.done}

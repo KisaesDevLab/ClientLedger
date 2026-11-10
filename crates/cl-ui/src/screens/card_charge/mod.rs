@@ -131,6 +131,8 @@ pub struct CardChargeScreen {
     pub(crate) attach: attach::CardAttach,
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
     pub(crate) draft: draft::CardDraft,
+    /// PR-5 QA-2: the bank line of the charge being edited.
+    pub(crate) feed_watch: crate::feed_link::Watch,
 }
 
 /// The kinds of record this form shows: charges (expenses paid from the
@@ -183,6 +185,7 @@ impl CardChargeScreen {
             template: crate::screens::templates::SaveFlow::default(),
             attach: attach::CardAttach::default(),
             draft: draft::CardDraft::default(),
+            feed_watch: crate::feed_link::Watch::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -193,6 +196,19 @@ impl CardChargeScreen {
 
     /// The whole form: the header with the grid's lines.
     #[must_use]
+    /// PR-5 QA-2: the charge's account and amount, as compared for the
+    /// Bank Feed notice.
+    pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
+        let f = self.compose();
+        let amount = f.amount.or_else(|| f.lines_total());
+        vec![(f.card, amount.map(cl_core::Money::abs))]
+    }
+
+    /// The edit changes the amount or account of a charge a bank line holds.
+    pub(crate) fn feed_notice(&self) -> bool {
+        self.flow.editing.is_some() && self.feed_watch.notice(&self.feed_shape()).is_some()
+    }
+
     pub(crate) fn compose(&self) -> CardForm {
         let mut f = self.header.current().clone();
         f.lines = self.lines.value().clone();
@@ -1053,6 +1069,16 @@ impl CardChargeScreen {
         self.inventory = None;
         self.template.forget();
         self.flow.opened_txn(v, fits);
+        // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
+        let shape = self.feed_shape();
+        let card = self.card();
+        self.feed_watch.start(
+            &self.link,
+            self.group.as_ref(),
+            v.record.id,
+            card.into_iter().collect(),
+            shape,
+        );
 
         self.problems.clear();
         self.payee.prefill = None;
@@ -1160,6 +1186,12 @@ impl CardChargeScreen {
                 self.toolbar(ui, &tokens);
                 if self.draft.on() {
                     self.draft_banner(ui, &tokens);
+                }
+                if self.flow.editing.is_some() {
+                    // PR-5 QA-2: an amount or account change of a charge a
+                    // bank line holds.
+                    let now = self.feed_shape();
+                    self.feed_watch.ui(ui, &tokens, &now, self.money_style);
                 }
                 match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
                     MessageClick::SubmitClosing => self.submit_closing(),
@@ -1600,6 +1632,7 @@ impl CardChargeScreen {
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "mode": match f.mode { CardMode::Charge => "charge", CardMode::Credit => "credit" },
+            "feed": {"linked": self.flow.editing.is_some() && self.feed_watch.linked(), "notice": self.feed_notice()},
             "card_id": f.card.map(|c| c.to_string()),
             "balance_owed_shown": f.card.is_some_and(|c| self.balances.known.contains_key(&c)),
             "has_payee": f.payee.is_some(),

@@ -59,6 +59,8 @@ struct Row {
     assigned: Option<Named<AccountId>>,
     transfer: bool,
     entry_voided: bool,
+    /// The entry's bank line was edited since the accept (Q-PR5a).
+    entry_changed: bool,
     exclusion_reason: Option<String>,
     matched: Option<TransactionId>,
     /// The import feed's key of an imported row.
@@ -152,6 +154,8 @@ impl Row {
             matched_line: None,
             entry_voided: self.entry_voided,
             entry_voided_at: None,
+            entry_changed: self.entry_changed,
+            entry_changed_at: None,
             exclusion_reason: self.exclusion_reason.clone(),
             match_candidate_count: u32::from(self.kind == "match"),
             transfer_candidate: None,
@@ -339,6 +343,7 @@ impl DemoFeedReview {
                 assigned: None,
                 transfer,
                 entry_voided: false,
+                entry_changed: false,
                 exclusion_reason: None,
                 matched: None,
                 import_key: None,
@@ -389,6 +394,7 @@ impl DemoFeedReview {
                 assigned: None,
                 transfer: false,
                 entry_voided: false,
+                entry_changed: false,
                 exclusion_reason: None,
                 matched: None,
                 import_key: Some(w.key),
@@ -534,6 +540,11 @@ fn matches_query(r: &Row, q: &FeedQuery, bucket: Option<FeedBucket>) -> bool {
     {
         return false;
     }
+    if let Some(v) = q.entry_changed
+        && r.entry_changed != v
+    {
+        return false;
+    }
     if let Some(text) = q.search.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         let t = text.to_lowercase();
         let amount = r.amount.abs().as_decimal().normalize().to_string();
@@ -545,15 +556,32 @@ fn matches_query(r: &Row, q: &FeedQuery, bucket: Option<FeedBucket>) -> bool {
 }
 
 /// Mirrors the import feed and flags rows whose entry was voided in the
-/// register (Q-P26u: they stay accepted, marked).
+/// register (Q-P26u: they stay accepted, marked) or whose entry's bank
+/// line was edited since (Q-PR5a, engine U-199: flagged and kept).
 fn refresh(state: &mut DemoState) {
     let feed = state.bank_feed.clone();
     state.feed_review.sync(&feed);
     let ledger = &state.ledger;
+    let txns = std::cell::OnceCell::new();
+    let chart = std::cell::OnceCell::new();
     for r in &mut state.feed_review.rows {
         if r.status.is_accepted() && !r.entry_voided && r.matched.is_some_and(|t| ledger.is_void(t))
         {
             r.entry_voided = true;
+        }
+        if r.status.is_accepted()
+            && !r.entry_voided
+            && !r.entry_changed
+            && let Some(t) = r.matched
+            && !posting::entry_agrees(
+                txns.get_or_init(|| ledger.transactions()),
+                chart.get_or_init(super::chart),
+                r.account,
+                r.amount,
+                t,
+            )
+        {
+            r.entry_changed = true;
         }
     }
 }
@@ -660,6 +688,9 @@ pub fn counts_in(
         if r.entry_voided {
             c.entry_voided += 1;
         }
+        if r.entry_changed {
+            c.entry_changed += 1;
+        }
     }
     c.waiting = c.ready + c.review + c.matches;
     c
@@ -669,6 +700,37 @@ pub fn counts_in(
 #[must_use]
 pub fn waiting(state: &mut DemoState) -> u64 {
     counts(state, None).waiting
+}
+
+/// The bank lines matched to (or posted as) `transaction`: (row, feed
+/// amount). The engine's `findDeleteBlockingLinks` `bank_feed_match`
+/// (PR-5 S2) and the register's edit notice (PR-5 B1) read it.
+#[must_use]
+pub fn lines_on(state: &mut DemoState, transaction: TransactionId) -> Vec<(FeedItemId, Money)> {
+    let feed = state.bank_feed.clone();
+    state.feed_review.sync(&feed);
+    state
+        .feed_review
+        .rows
+        .iter()
+        .filter(|r| r.matched == Some(transaction))
+        .map(|r| (r.id, r.amount))
+        .collect()
+}
+
+/// The bank lines accepted onto `transaction` as the engine lists them
+/// (PR-5 QA-2, QA-3: the forms' notice and the delete refusal's wording).
+#[must_use]
+pub fn rows_on(state: &mut DemoState, transaction: TransactionId) -> Vec<FeedRow> {
+    let feed = state.bank_feed.clone();
+    state.feed_review.sync(&feed);
+    state
+        .feed_review
+        .rows
+        .iter()
+        .filter(|r| r.matched == Some(transaction) && r.status.is_accepted())
+        .map(|r| r.to_row(false))
+        .collect()
 }
 
 /// The bank accounts with rows (`GET /banking/connections`).

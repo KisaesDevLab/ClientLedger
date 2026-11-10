@@ -18,6 +18,7 @@
 //! accept route (`feed-accept-v1`, E3); until the engine has it the button
 //! is disabled with a tooltip on a live engine (the demo accepts).
 
+pub mod ask;
 pub mod bulk;
 pub mod detail;
 pub mod receipts;
@@ -48,6 +49,17 @@ use crate::windows::Screen;
 
 /// The command and window kind.
 pub const KIND: &str = "banking.feed";
+
+/// PR-5 QA-4: where another window sends the Bank Feed: an account's
+/// lines and, for a matched entry, the accepted line that holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeedTarget {
+    /// The bank or card account.
+    pub account: AccountId,
+    /// The entry a line was matched to or posted (the Accepted view), or
+    /// `None` for the lines waiting (after an import).
+    pub entry: Option<cl_core::ids::TransactionId>,
+}
 
 /// How often an open window reads the feed again (other computers).
 const REFRESH: Duration = Duration::from_secs(15);
@@ -120,6 +132,8 @@ pub struct BankFeedScreen {
     pub(crate) segment: Segment,
     pub(crate) show: Show,
     pub(crate) voided_only: bool,
+    /// Accepted rows whose entry was edited since (Q-PR5a) only.
+    pub(crate) changed_only: bool,
     pub(crate) filter: String,
     pub(crate) offset: u32,
     pub(crate) counts: FeedCounts,
@@ -170,6 +184,12 @@ pub struct BankFeedScreen {
     /// The cursor goes to this line when the list is read next (a demo
     /// receipt's line, control channel).
     focus_next: Option<FeedItemId>,
+    /// PR-5: "Record it again?" and "ticked in your reconciliation".
+    pub(crate) asks: ask::Asks,
+    /// PR-5 QA-4: a target waiting for the accounts to be read.
+    target: Option<FeedTarget>,
+    /// The entry whose line the next list read puts the cursor on.
+    seek_entry: Option<cl_core::ids::TransactionId>,
 }
 
 impl std::fmt::Debug for BankFeedScreen {
@@ -200,6 +220,7 @@ impl BankFeedScreen {
             segment: Segment::All,
             show: Show::Waiting,
             voided_only: false,
+            changed_only: false,
             filter: String::new(),
             offset: 0,
             counts: FeedCounts::default(),
@@ -231,11 +252,46 @@ impl BankFeedScreen {
             notice: None,
             receipts: receipts::Receipts::default(),
             focus_next: None,
+            asks: ask::Asks::default(),
+            target: None,
+            seek_entry: None,
         };
         s.read_meta();
         rules::read(&mut s);
         s.poll();
         s
+    }
+
+    /// PR-5 QA-4: shows `target`'s account with no filter hiding its line:
+    /// the Accepted view on the matched entry's line, or the lines waiting.
+    /// Before the accounts are read it waits for them.
+    pub fn go_to(&mut self, target: FeedTarget) {
+        let Some(i) = self
+            .accounts
+            .iter()
+            .position(|a| a.account == Some(target.account))
+        else {
+            self.target = Some(target);
+            return;
+        };
+        self.target = None;
+        self.account = i;
+        self.segment = Segment::All;
+        self.show = if target.entry.is_some() {
+            Show::Accepted
+        } else {
+            Show::Waiting
+        };
+        self.voided_only = false;
+        self.changed_only = false;
+        self.filter.clear();
+        self.offset = 0;
+        self.notice = None;
+        self.detail.row = None;
+        self.seek_entry = target.entry;
+        // A read under way was asked with the old choices.
+        self.load = None;
+        self.reload();
     }
 
     /// The account the list shows.
@@ -292,6 +348,7 @@ impl BankFeedScreen {
                 });
             }
             Show::Accepted if self.voided_only => q.entry_voided = Some(true),
+            Show::Accepted if self.changed_only => q.entry_changed = Some(true),
             // Accepted: one read with `status=accepted` (Q-P26y); an engine
             // without it: posted and matched rows, two reads (`reload`).
             Show::Accepted if self.accepted_filter() => q.accepted = true,
@@ -351,8 +408,10 @@ impl BankFeedScreen {
             return;
         }
         let q = self.query();
-        let accepted_too =
-            self.show == Show::Accepted && !self.voided_only && !self.accepted_filter();
+        let accepted_too = self.show == Show::Accepted
+            && !self.voided_only
+            && !self.changed_only
+            && !self.accepted_filter();
         let account = self.current_account().and_then(|a| a.account);
         let connection = q.connection;
         let live = q.clone();
@@ -406,6 +465,11 @@ impl BankFeedScreen {
                     self.accept_route = m.accept_route;
                     self.supported = m.supported;
                     self.closing_supported = m.closing_supported;
+                    if let Some(t) = self.target.take() {
+                        self.go_to(t);
+                        // An account with no bank lines: the list as it was.
+                        self.target = None;
+                    }
                     self.reload();
                 }
                 Err(_) => self.load_failed = true,
@@ -423,6 +487,15 @@ impl BankFeedScreen {
                     if let Some(id) = self.focus_next.take() {
                         self.list.focus(id);
                     }
+                    // PR-5 QA-4: the cursor on the matched entry's line.
+                    if let Some(entry) = self.seek_entry.take()
+                        && let Some(r) = self
+                            .rows
+                            .iter()
+                            .find(|r| r.matched_transaction == Some(entry))
+                    {
+                        self.list.focus(r.id);
+                    }
                     self.receipts.take(l.drafts, &self.rows);
                     receipts::refresh(self);
                     let n = u32::try_from(l.waiting_all).unwrap_or(u32::MAX);
@@ -432,6 +505,7 @@ impl BankFeedScreen {
             }
         }
         rules::poll(self);
+        ask::poll(self);
         if let Some(r) = finished(&mut self.act) {
             let o = r.unwrap_or_else(|_| send::Outcome {
                 failed: 1,
@@ -467,6 +541,9 @@ impl BankFeedScreen {
             None => self.closing.saved(),
         }
         self.confirm.clone_from(&o.changed);
+        if let Some(again) = o.has_match.clone() {
+            self.asks.ask = Some(ask::Ask::RecordAgain(again));
+        }
         self.accepted_as.extend(o.accepted_as.iter().copied());
         if o.undone > 0 {
             self.toast = None;
@@ -518,7 +595,7 @@ impl BankFeedScreen {
     pub(crate) fn why(&self, r: &FeedRow) -> Why {
         // Rows no longer waiting say what they are (P26 QA-8), not "Needs
         // you".
-        if !r.entry_voided && r.status.is_accepted() {
+        if !r.entry_voided && !r.entry_changed && r.status.is_accepted() {
             return Why::Accepted;
         }
         if r.status == FeedStatus::Excluded {
@@ -547,6 +624,7 @@ impl BankFeedScreen {
                         || r.match_type.as_deref() == Some("transfer")),
                 has_account: r.assigned_account.is_some() || r.suggested_account.is_some(),
                 entry_voided: r.entry_voided,
+                entry_changed: r.entry_changed && r.status.is_accepted(),
                 has_receipt: !self.receipts.of(r.id).is_empty(),
             },
             self.ai_on,
@@ -601,6 +679,7 @@ impl BankFeedScreen {
             | Why::Duplicate
             | Why::NeedsYou
             | Why::EntryVoided
+            | Why::EntryChanged
             | Why::Receipt => None,
             _ if r.status == FeedStatus::Assigned => Some(send::Send::Categorize(id, None)),
             // As proposed through the one accept route, so a split a rule
@@ -643,6 +722,9 @@ impl BankFeedScreen {
             "dev.demo_feed_conflict" => d.feed_review.conflict_next = true,
             "dev.demo_feed_void_entry" => {
                 demo::void_first_accepted(&mut d);
+            }
+            "dev.demo_feed_change_entry" => {
+                demo::change_first_accepted(&mut d);
             }
             "dev.demo_feed_duplicate" => {
                 demo::mark_duplicate(&mut d);
@@ -695,6 +777,7 @@ impl BankFeedScreen {
                 self.segment = Segment::All;
                 self.show = Show::Waiting;
                 self.voided_only = false;
+                self.changed_only = false;
                 self.filter.clear();
                 self.offset = 0;
                 self.view_only = false;
@@ -704,6 +787,7 @@ impl BankFeedScreen {
                 self.detail = detail::Detail::default();
                 self.toast = None;
                 self.confirm = None;
+                self.asks = ask::Asks::default();
                 self.closing.cancel();
                 self.rules = rules::RulesPanel::default();
                 self.receipts = receipts::Receipts::default();
@@ -740,7 +824,7 @@ fn incomplete_notice(why: Why) -> &'static str {
         Why::Match => "bank_feed.notice.pick_match",
         Why::Transfer => "bank_feed.notice.pick_transfer",
         Why::Duplicate => "bank_feed.notice.pick_duplicate",
-        Why::EntryVoided => "bank_feed.notice.pick_voided",
+        Why::EntryVoided | Why::EntryChanged => "bank_feed.notice.pick_voided",
         Why::Receipt => "bank_feed.notice.pick_receipt",
         _ => "bank_feed.notice.pick_account",
     }
@@ -936,6 +1020,16 @@ impl Screen for BankFeedScreen {
         Scope::Feed
     }
 
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::FeedAt(t) => {
+                self.go_to(t);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn command(&mut self, id: CommandId) -> bool {
         let s = id.as_str();
         if s.starts_with("dev.") {
@@ -994,6 +1088,7 @@ impl Screen for BankFeedScreen {
             Why::Duplicate,
             Why::NeedsYou,
             Why::EntryVoided,
+            Why::EntryChanged,
             Why::Receipt,
         ] {
             badges.insert(w.as_str().into(), json!(0));
@@ -1012,6 +1107,7 @@ impl Screen for BankFeedScreen {
             "segment": self.segment.as_str(),
             "show": self.show.as_str(),
             "entry_voided_only": self.voided_only,
+            "entry_changed_only": self.changed_only,
             "counts": {
                 "waiting": self.counts.waiting,
                 "ready": self.counts.ready,
@@ -1019,6 +1115,7 @@ impl Screen for BankFeedScreen {
                 "matches": self.counts.matches,
                 "accepted": self.counts.accepted,
                 "entry_voided": self.counts.entry_voided,
+                "entry_changed": self.counts.entry_changed,
                 "excluded": self.counts.excluded,
             },
             "rows": self.rows.len(),
@@ -1038,6 +1135,7 @@ impl Screen for BankFeedScreen {
             "receipts": receipts::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),
             "undo_changed": self.confirm.as_ref().map(|c| c.1),
+            "ask": self.asks.ask.as_ref().map(ask::Ask::as_str),
             "closing": self.closing.state_json(self.closing_supported),
             "last_send": self.last_send,
             "transfer_window": self.transfer_window,

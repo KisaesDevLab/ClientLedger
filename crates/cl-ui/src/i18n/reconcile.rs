@@ -59,6 +59,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reconcile.change_info", "Change statement info"),
     ("reconcile.banner", "Items you accepted from bank files are already checked. Look them over, then check anything else that's on the statement."),
     ("reconcile.banner.entry_voided", "{n} bank lines you accepted in your Bank Feed had their entry voided since."),
+    ("reconcile.banner.entry_changed", "{n} bank lines you accepted in your Bank Feed had their entry changed since, so they aren't pre-checked here."),
+    ("reconcile.banner.entry_changed.one", "1 bank line you accepted in your Bank Feed had its entry changed since, so it isn't pre-checked here."),
     ("reconcile.banner.entry_voided.one", "1 bank line you accepted in your Bank Feed had its entry voided since."),
     ("reconcile.banner.open_feed", "Review them in the Bank Feed"),
     ("reconcile.drift", "Your beginning balance changed by {amount} since your last reconciliation. The Discrepancy report shows what changed."),

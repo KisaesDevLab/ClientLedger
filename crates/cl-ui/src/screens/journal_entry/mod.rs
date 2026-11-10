@@ -161,6 +161,8 @@ pub struct JournalScreen {
     /// The Name column is shown (`je-names-v1`).
     pub(crate) names_column: bool,
     pub(crate) editing: Option<Editing>,
+    /// PR-5 QA-2: the bank line of the entry being edited.
+    pub(crate) feed_watch: crate::feed_link::Watch,
     pub(crate) load_task: Option<Task<Versioned<Transaction>>>,
     pub(crate) save_task: Option<Task<(TransactionId, RecordVersion)>>,
     pub(crate) action_task: Option<(Pending, Task<()>)>,
@@ -262,6 +264,7 @@ impl JournalScreen {
             },
             names_column,
             editing: None,
+            feed_watch: crate::feed_link::Watch::default(),
             load_task: None,
             save_task: None,
             action_task: None,
@@ -371,6 +374,42 @@ impl JournalScreen {
 
     /// The whole form: the header with the grid's lines.
     #[must_use]
+    /// PR-5 QA-2: the entry's lines on bank and card accounts (the lines
+    /// a bank line can be matched to), as compared for the Bank Feed notice.
+    pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
+        let banks = self.bank_accounts();
+        let mut shape: crate::feed_link::Shape = self
+            .lines
+            .value()
+            .used()
+            .filter(|l| l.account.is_some_and(|a| banks.contains(&a)))
+            .map(|l| (l.account, l.amount))
+            .collect();
+        shape.sort();
+        shape
+    }
+
+    /// The company's bank and card accounts.
+    fn bank_accounts(&self) -> Vec<AccountId> {
+        use cl_model::register::AccountClass;
+        self.books
+            .accounts
+            .iter()
+            .filter(|a| {
+                matches!(
+                    crate::screens::register::class_of(a),
+                    Some(AccountClass::Bank | AccountClass::CreditCard)
+                )
+            })
+            .map(|a| a.id)
+            .collect()
+    }
+
+    /// The edit changes a bank-side line of an entry a bank line holds.
+    pub(crate) fn feed_notice(&self) -> bool {
+        self.editing.is_some() && self.feed_watch.notice(&self.feed_shape()).is_some()
+    }
+
     pub(crate) fn compose(&self) -> JournalForm {
         let mut f = self.header.current().clone();
         f.lines = self.lines.value().clone();
@@ -577,6 +616,11 @@ impl JournalScreen {
             reversal: v.record.reversal_transaction_id.zip(v.record.reverse_on),
             reverses: v.record.reverses_transaction_id,
         });
+        // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
+        let shape = self.feed_shape();
+        let banks: Vec<AccountId> = shape.iter().filter_map(|(a, _)| *a).collect();
+        self.feed_watch
+            .start(&self.link, self.group.as_ref(), v.record.id, banks, shape);
         self.focused = None;
         self.stale = false;
         self.key = None;
@@ -741,6 +785,7 @@ impl JournalScreen {
         let blocker = cl_model::forms::journal::save_blocker(&f);
         let mut v = json!({
             "screen": "journal_entry",
+            "feed": {"linked": self.editing.is_some() && self.feed_watch.linked(), "notice": self.feed_notice()},
             "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,

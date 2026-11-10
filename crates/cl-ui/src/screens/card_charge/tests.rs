@@ -885,3 +885,38 @@ fn a_new_card_credit_line_takes_what_is_left_of_the_amount() {
     pick_line(&mut s, 1, "6400");
     assert_eq!(s.lines.value().lines[1].amount, Some(money("4.99")));
 }
+
+/// PR-5 QA-2: editing a charge a bank line is matched to says, before
+/// Save, that the line will wait in the Bank Feed again when its amount
+/// changes; nothing while it is unchanged.
+#[test]
+fn a_matched_charges_amount_change_says_the_line_waits() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let id = save_charge(&mut s, "40.00");
+    {
+        let mut d = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .remove(0);
+        crate::company::demo::feed_review::match_for_tests(&mut d, row.id, id);
+    }
+    let mut other = screen(&link);
+    assert!(Screen::open_record(&mut other, id));
+    other.feed_watch.poll();
+    assert_eq!(other.state()["feed"]["linked"], true);
+    assert_eq!(
+        other.state()["feed"]["notice"],
+        false,
+        "nothing changed yet"
+    );
+    fill(&mut other, "41.10", &[("6250", "41.10")]);
+    assert_eq!(other.state()["feed"]["notice"], true);
+    fill(&mut other, "40.00", &[("6250", "40.00")]);
+    assert_eq!(other.state()["feed"]["notice"], false);
+}

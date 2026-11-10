@@ -196,6 +196,10 @@ pub enum OpenPayload {
     /// new-name form prefilled with the typed name; when it is saved the
     /// window closes and the form comes back to the front.
     SetUpName(SetUpName),
+    /// PR-5 QA-4: the Bank Feed on this account's lines (a register's "Go
+    /// to Bank Feed" on a matched entry, Import Bank File's "Open Bank
+    /// Feed"). An open Bank Feed window takes it rather than a new one.
+    FeedAt(crate::screens::bank_feed::FeedTarget),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

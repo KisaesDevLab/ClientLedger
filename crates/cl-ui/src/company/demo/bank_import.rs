@@ -232,6 +232,20 @@ impl DemoBankFeed {
         self.slow = slow;
     }
 
+    /// The date and amount (feed sign) of every item imported into
+    /// `account`, waiting or not (Q-PR5b's information line).
+    #[must_use]
+    pub fn dated_amounts(
+        &self,
+        account: AccountId,
+    ) -> Vec<(cl_core::CalendarDate, rust_decimal::Decimal)> {
+        self.items
+            .iter()
+            .filter(|i| i.account == account)
+            .map(|i| (i.date, i.amount))
+            .collect()
+    }
+
     /// Items waiting in the feed (all accounts).
     #[must_use]
     pub fn waiting(&self) -> usize {
@@ -485,6 +499,16 @@ impl DemoBankFeed {
                 closed_period,
                 inserted: insert && commit,
                 replaced: replace && commit,
+                // U-200: Replace is offered only for an item that waits
+                // untouched; a chosen one that couldn't be done says why.
+                existing_replaceable: existing_item
+                    .filter(|_| status == ImportRowStatus::Changed)
+                    .map(|i| i.pending),
+                replace_refused: (commit
+                    && status == ImportRowStatus::Changed
+                    && r.changed_action == Some(ChangedAction::Replace)
+                    && !replace)
+                    .then(|| "not_waiting".to_string()),
                 // Q-P25af: what a changed row was (the engine's follow-up).
                 existing_amount: existing_item
                     .filter(|_| status == ImportRowStatus::Changed)
@@ -676,6 +700,21 @@ impl DemoBankFeed {
             .rev()
             .find(|b| b.account == account && b.format == format && !b.undone && b.inserted > 0)
             .map(|b| (b.flipped, b.mapping.clone()))
+    }
+
+    /// Q-PR5c: the sign answer of the account's latest import in another
+    /// format (the newest one).
+    #[must_use]
+    pub fn latest_other(
+        &self,
+        account: AccountId,
+        format: cl_api::BankFileFormat,
+    ) -> Option<(cl_api::BankFileFormat, bool)> {
+        self.batches
+            .iter()
+            .rev()
+            .find(|b| b.account == account && b.format != format && !b.undone && b.inserted > 0)
+            .map(|b| (b.format, b.flipped))
     }
 
     /// The accounts a file identity was linked to: by the account

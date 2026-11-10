@@ -824,6 +824,11 @@ impl DepositScreen {
             read_only: note.is_some(),
             note: note.unwrap_or("deposit.read_only.void"),
         });
+        // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
+        let shape = self.feed_shape();
+        let (id, account) = (r.txn.id, r.account);
+        self.feed_watch
+            .start(&self.link, self.group.as_ref(), id, vec![account], shape);
         self.record = Some(r);
         self.save.problems.clear();
         self.save.error = None;

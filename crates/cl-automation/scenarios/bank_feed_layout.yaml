@@ -35,7 +35,7 @@ steps:
   - assert_state: {key: screen.counts.waiting, equals: 37}
 
   # --- QA-3: the bulk bar's combo is named --------------------------------------
-  - click: {role: button, label: Bank line 1 of 37}
+  - click: {role: button, label_contains: "Bank line 1 of 37:"}
   - key: Space
   - assert_state: {key: screen.selected, equals: 1}
   - assert_exists: {role: combo_box, label: Change account}
@@ -43,12 +43,12 @@ steps:
 
   # --- QA-24: a Match row opens on Match ------------------------------------------
   - click: {role: button, label: Matches 3}
-  - click: {role: button, label: Bank line 1 of 3}
+  - click: {role: button, label_contains: "Bank line 1 of 3:"}
   - assert_state: {key: screen.detail.mode, equals: match}
 
   # --- QA-18: keyboard-only accept of a "Needs you" line ---------------------------
   - click: {role: button, label: Needs review 6}
-  - click: {role: button, label: Bank line 1 of 6}
+  - click: {role: button, label_contains: "Bank line 1 of 6:"}
   - key: C
   - assert_state: {key: screen.detail.finding_account, equals: true}
   - type: {text: "bank fees"}

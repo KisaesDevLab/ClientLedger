@@ -800,3 +800,58 @@ fn accepted_rows_carry_their_accept_kind() {
     undo(&mut s, &UndoTarget::Items(vec![fuel.id]), false, None).expect("undo");
     assert_eq!(find(&mut s, "RIVERBEND FUEL").accept_kind, None);
 }
+
+/// Q-PR5a (PR-5 B1, U-199 parity): an amount edit of an entry accepted from
+/// a bank line flags the line "Entry changed" (kept accepted, counted);
+/// Review again puts it back to waiting.
+#[test]
+fn an_edited_entry_flags_its_bank_line_until_review_again() {
+    let mut s = state();
+    let fuel = find(&mut s, "RIVERBEND FUEL");
+    let t = categorize(&mut s, fuel.id, None, None)
+        .expect("posted")
+        .expect("entry");
+    assert_eq!(counts(&mut s, None).entry_changed, 0, "agrees as posted");
+    let posted = s
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|x| DemoLedger::id_of(x) == t)
+        .expect("in the ledger");
+    let other: u32 = posted
+        .lines
+        .iter()
+        .find(|l| l.account != "1010")
+        .and_then(|l| l.account.parse().ok())
+        .expect("the expense line");
+    let edited = DemoPosting {
+        kind: "check",
+        date: posted.date,
+        number: String::new(),
+        contact: None,
+        memo: String::new(),
+        own: account(1010),
+        own_debit: false,
+        lines: vec![(
+            account(other),
+            fuel.amount.abs().checked_add(m("9.00")).expect("sum"),
+        )],
+    };
+    let chart = crate::company::demo::chart();
+    assert_eq!(s.ledger.save(&chart, &edited, Some(t)), Some(t));
+    let c = counts(&mut s, None);
+    assert_eq!((c.accepted, c.entry_changed, c.entry_voided), (1, 1, 0));
+    let changed = list(
+        &mut s,
+        &FeedQuery {
+            entry_changed: Some(true),
+            ..FeedQuery::default()
+        },
+    )
+    .expect("list");
+    assert_eq!(changed.rows.len(), 1);
+    assert!(changed.rows[0].entry_changed && changed.rows[0].status.is_accepted());
+    review_again(&mut s, fuel.id).expect("review again");
+    let c = counts(&mut s, None);
+    assert_eq!((c.entry_changed, c.waiting), (0, 37));
+}

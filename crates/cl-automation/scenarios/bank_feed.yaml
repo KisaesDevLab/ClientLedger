@@ -37,7 +37,7 @@ steps:
   - click: {role: button, label: Ready 28}
 
   # --- Keyboard triage ----------------------------------------------------------
-  - click: {role: button, label: Bank line 1 of 28}
+  - click: {role: button, label_contains: "Bank line 1 of 28:"}
   - key: Space
   - key: J
   - key: Space
@@ -69,3 +69,12 @@ steps:
   - assert_state: {key: screen.rows, equals: 1}
   - assert_state: {key: screen.badges.entry_voided, equals: 1}
   - screenshot: entry-voided
+  # --- Entry changed (Q-PR5a): an amount edit in a register ----------------
+  - click: {role: button, label: Entry voided (1)}
+  - command: dev.demo_feed_change_entry
+  - assert_state: {key: screen.counts.entry_changed, equals: 1}
+  - click: {role: button, label: Entry changed (1)}
+  - assert_state: {key: screen.entry_changed_only, equals: true}
+  - assert_state: {key: screen.rows, equals: 1}
+  - assert_state: {key: screen.badges.entry_changed, equals: 1}
+  - screenshot: entry-changed

@@ -402,6 +402,21 @@ pub fn match_line(
     Ok(Some(g))
 }
 
+/// Tests: matches the waiting row to `transaction` whatever its lines (a
+/// form's saved record the demo ledger doesn't list as a candidate).
+#[cfg(test)]
+pub fn match_for_tests(state: &mut DemoState, id: FeedItemId, transaction: TransactionId) {
+    accept_row(
+        state,
+        id,
+        FeedStatus::Matched,
+        Some(transaction),
+        false,
+        "match",
+        UndoGroupId::new_random(),
+    );
+}
+
 /// Matches the row to its one candidate.
 ///
 /// # Errors
@@ -1121,6 +1136,7 @@ fn restore(state: &mut DemoState, id: FeedItemId) {
         r.how = "";
         r.fingerprint = None;
         r.entry_voided = false;
+        r.entry_changed = false;
         group = r.group.take();
     }
     if let Some(g) = group
@@ -1156,8 +1172,36 @@ pub fn decide_duplicate(
     Ok(())
 }
 
-/// `POST /banking/feed/:id/review-again`: a row whose entry was voided goes
-/// back to waiting with the state it had before (Q-P26u).
+/// Q-PR5a (engine U-199): the accepted row's entry still has its bank
+/// line: on the row's account, on its side, for its amount. An entry the
+/// demo no longer has agrees (a delete takes the row back elsewhere).
+pub(super) fn entry_agrees(
+    txns: &[cl_company::sample::SampleTransaction],
+    chart: &[cl_api::Account],
+    account: AccountId,
+    amount: Money,
+    t: TransactionId,
+) -> bool {
+    let Some(bank) = number_of(chart, account) else {
+        return true;
+    };
+    let Some(tx) = txns.iter().find(|x| DemoLedger::id_of(x) == t) else {
+        return true;
+    };
+    let want = amount.abs();
+    tx.lines.iter().any(|l| {
+        let side = if amount.is_positive() {
+            l.credit
+        } else {
+            l.debit
+        };
+        l.account == bank && side == want
+    })
+}
+
+/// `POST /banking/feed/:id/review-again`: a row whose entry was voided
+/// (Q-P26u) or changed since (Q-PR5a, U-199) goes back to waiting with the
+/// state it had before.
 ///
 /// # Errors
 /// 403; 409 `ENTRY_NOT_VOIDED`; `NotFound`.
@@ -1165,7 +1209,7 @@ pub fn review_again(state: &mut DemoState, id: FeedItemId) -> Result<(), ApiErro
     super::refresh(state);
     state.feed_review.write_check(id)?;
     let r = state.feed_review.row_mut(id)?;
-    if !r.entry_voided {
+    if !r.entry_voided && !r.entry_changed {
         return Err(conflict("ENTRY_NOT_VOIDED", json!({})));
     }
     restore(state, id);
@@ -1196,6 +1240,77 @@ pub fn void_first_accepted(state: &mut DemoState) -> bool {
         }
         None => false,
     }
+}
+
+/// Developer (Q-PR5a): the entry of the first accepted, not voided row
+/// gets 1.00 more on its other side, as an owner's register edit would;
+/// the row is flagged "Entry changed" on the next read.
+pub fn change_first_accepted(state: &mut DemoState) -> bool {
+    super::refresh(state);
+    let Some((account, t)) = state
+        .feed_review
+        .rows
+        .iter()
+        .find(|r| r.status.is_accepted() && !r.entry_voided && !r.entry_changed && r.posted)
+        .and_then(|r| Some((r.account, r.matched?)))
+    else {
+        return false;
+    };
+    let chart = super::super::chart();
+    let Some(bank) = number_of(&chart, account) else {
+        return false;
+    };
+    let Some(tx) = state
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|x| DemoLedger::id_of(x) == t)
+    else {
+        return false;
+    };
+    let by_number = |n: &str| {
+        chart
+            .iter()
+            .find(|a| number_of(&chart, a.id).as_deref() == Some(n))
+            .map(|a| a.id)
+    };
+    let Some(own_line) = tx.lines.iter().find(|l| l.account == bank) else {
+        return false;
+    };
+    let own_debit = !own_line.debit.is_zero();
+    let one = Money::parse_wire("1.00").unwrap_or(Money::ZERO);
+    let lines: Option<Vec<(AccountId, Money)>> = tx
+        .lines
+        .iter()
+        .filter(|l| l.account != bank)
+        .enumerate()
+        .map(|(i, l)| {
+            let a = by_number(&l.account)?;
+            let side = if own_debit { l.credit } else { l.debit };
+            let side = if i == 0 {
+                side.checked_add(one).ok()?
+            } else {
+                side
+            };
+            Some((a, side))
+        })
+        .collect();
+    let Some(lines) = lines.filter(|l| !l.is_empty()) else {
+        return false;
+    };
+    let p = DemoPosting {
+        kind: "check",
+        date: tx.date,
+        number: tx.number.clone(),
+        contact: tx.contact.clone(),
+        memo: tx.memo.clone(),
+        own: account,
+        own_debit,
+        lines,
+    };
+    let done = state.ledger.save(&chart, &p, Some(t)).is_some();
+    super::refresh(state);
+    done
 }
 
 /// Developer: the first review row is flagged a possible duplicate of the
@@ -1476,6 +1591,7 @@ pub fn add_next_file(state: &mut DemoState) -> usize {
             assigned: None,
             transfer: false,
             entry_voided: false,
+            entry_changed: false,
             exclusion_reason: None,
             matched: None,
             import_key: None,

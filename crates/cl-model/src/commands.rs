@@ -593,6 +593,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Void a Demo Bank Feed Entry (developer)",
     ),
     dev_action(
+        "dev.demo_feed_change_entry",
+        "Change a Demo Bank Feed Entry's Amount (developer)",
+    ),
+    dev_action(
         "dev.demo_feed_duplicate",
         "Flag a Demo Bank Feed Duplicate (developer)",
     ),

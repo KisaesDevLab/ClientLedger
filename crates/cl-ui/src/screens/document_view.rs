@@ -198,7 +198,8 @@ impl Screen for DocumentViewScreen {
             | OpenPayload::ReprintCheck(..)
             | OpenPayload::PrintDeposit(..)
             | OpenPayload::SetUpName(_)
-            | OpenPayload::CardPayment(_) => false,
+            | OpenPayload::CardPayment(_)
+            | OpenPayload::FeedAt(_) => false,
         }
     }
 

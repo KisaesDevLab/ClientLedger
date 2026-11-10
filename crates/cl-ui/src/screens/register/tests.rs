@@ -1358,6 +1358,100 @@ fn delete_asks_says_what_happens_and_removes_the_row() {
     assert_eq!(s.model.total(), Some(total - 1));
 }
 
+/// PR-5 S2 (T6): deleting an entry a bank line is matched to says to Undo
+/// it in the Bank Feed (not to void it) and offers Go to Bank Feed.
+#[test]
+fn delete_of_a_bank_feed_entry_points_to_the_bank_feed() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let (t, date) = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let row = page
+            .rows
+            .iter()
+            .find(|r| r.assigned_account.is_some() || r.suggested_account.is_some())
+            .cloned()
+            .expect("a row to accept");
+        let t = crate::company::demo::feed_review::categorize(&mut demo, row.id, None, None)
+            .expect("accepted")
+            .expect("posted");
+        (t, demo.ledger.date_of(t).expect("dated"))
+    };
+    s.open_confirm(dialogs::ActionKind::Delete, t, date);
+    settle(&mut s, None);
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_delete");
+    s.confirm();
+    settle(&mut s, None);
+    let st = s.state();
+    assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
+    assert_eq!(st["row_action"]["error"], false, "no void advice");
+    assert!(
+        link.demo_state().expect("demo").ledger.date_of(t).is_some(),
+        "kept"
+    );
+    // PR-5 QA-3: the Bank Feed recorded it: Undo removes the entry.
+    assert_eq!(
+        st["row_action"]["notice"],
+        "register.delete.feed_posted_fix"
+    );
+    let _ = link.drain();
+    s.open_bank_feed();
+    assert_eq!(s.state()["row_action"]["panel"], "none");
+    // QA-4: Go to Bank Feed names the account and the entry.
+    let account = s.account.expect("a register account");
+    assert!(link.drain().iter().any(|e| matches!(
+        e,
+        crate::company::CompanyEvent::OpenWith(_, p)
+            if **p == crate::windows::OpenPayload::FeedAt(crate::screens::bank_feed::FeedTarget {
+                account,
+                entry: Some(t),
+            })
+    )));
+}
+
+/// PR-5 QA-3: a bank line *matched* to an entry the owner made: Undo only
+/// unlinks it, so the refusal says the entry stays.
+#[test]
+fn delete_of_a_matched_entry_says_undo_keeps_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let (t, date) = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let (row, t) = page
+            .rows
+            .iter()
+            .find_map(|r| {
+                match crate::company::demo::feed_review::match_candidates(&demo, r.id).as_slice() {
+                    [one] => Some((r.id, one.transaction)),
+                    _ => None,
+                }
+            })
+            .expect("a row with one match");
+        crate::company::demo::feed_review::match_line(&mut demo, row, t).expect("matched");
+        (t, demo.ledger.date_of(t).expect("dated"))
+    };
+    s.open_confirm(dialogs::ActionKind::Delete, t, date);
+    settle(&mut s, None);
+    s.confirm();
+    settle(&mut s, None);
+    let st = s.state();
+    assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
+    assert_eq!(st["row_action"]["notice"], "register.delete.feed_match_fix");
+    assert!(crate::i18n::has("register.delete.feed_match_fix"));
+}
+
 #[test]
 fn delete_offers_void_without_the_capability_or_for_other_kinds() {
     let (_d, link) = link();
@@ -2767,4 +2861,40 @@ fn reconciled_rows_are_not_voided_and_the_refusal_clears() {
     assert!(s.actions.error.is_some());
     s.command(CommandId::new("register.one_line"));
     assert!(s.actions.error.is_none(), "the next action clears it");
+}
+
+/// Q-PR5a (PR-5 B1): editing the amount of an entry matched to a bank line
+/// says the line goes back to the Bank Feed (a notice, not a block).
+#[test]
+fn an_amount_edit_of_a_bank_feed_entry_warns() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let t = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let row = page
+            .rows
+            .iter()
+            .find(|r| r.is_money_out() && r.suggested_account.is_some())
+            .cloned()
+            .expect("a row to accept");
+        crate::company::demo::feed_review::categorize(&mut demo, row.id, None, None)
+            .expect("accepted")
+            .expect("posted")
+    };
+    s.load_edit(t, false);
+    settle(&mut s, None);
+    assert_eq!(s.entry.editing.as_ref().map(|e| e.id), Some(t));
+    assert!(s.feed_link.is_some(), "the bank line was found");
+    assert_eq!(s.feed_link_notice(), None, "nothing changed yet");
+    s.entry.form.edit_step(|d| {
+        d.payment = d.payment.and_then(|p| p.checked_add(money("9.00")).ok());
+    });
+    assert!(s.feed_link_notice().is_some());
+    assert!(crate::i18n::has("register.edit.feed_linked"));
 }

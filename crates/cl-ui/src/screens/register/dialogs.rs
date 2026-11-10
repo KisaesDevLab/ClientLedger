@@ -253,6 +253,27 @@ pub(super) enum Panel {
     },
     /// A plain message with OK.
     Notice(&'static str),
+    /// Delete was refused because a bank feed line is matched to the entry
+    /// (PR-5 S2): Undo it in the Bank Feed rather than void it (a voided
+    /// entry's bank line stays out of review, Q-P26u). PR-5 QA-3: the
+    /// wording follows the link (a match is only unlinked; a line the Bank
+    /// Feed recorded takes its entry with it), read from the Bank Feed.
+    BankFeedLinked {
+        id: TransactionId,
+        link: Option<crate::feed_link::FeedLink>,
+        read: Option<FeedLinkJob>,
+    },
+}
+
+type FeedLinkJob = crate::screens::templates::engine::Job<Option<crate::feed_link::FeedLink>>;
+
+/// PR-5 QA-3: what Undo in the Bank Feed does to this entry.
+pub(super) fn undo_fix_key(link: Option<crate::feed_link::FeedLink>) -> &'static str {
+    match link.and_then(|l| l.posted) {
+        Some(true) => "register.delete.feed_posted_fix",
+        Some(false) => "register.delete.feed_match_fix",
+        None => "fix.api.undo_in_bank_feed",
+    }
 }
 
 /// What a row action's key belongs to: void or delete, the row, the
@@ -714,6 +735,17 @@ impl RegisterScreen {
             ActionKind::Void => demo.ledger.void(id),
             // U-180: its documents go back to the review queue.
             ActionKind::Delete => {
+                // The engine's `findDeleteBlockingLinks` (`bank_feed_match`).
+                if !crate::company::demo::feed_review::lines_on(&mut demo, id).is_empty() {
+                    return Err(cl_api::engine_refusal(
+                        409,
+                        &serde_json::json!({"error": {
+                            "message": "Other records point at this transaction.",
+                            "code": "TXN_DELETE_LINKED",
+                            "details": {"links": [cl_api::BANK_FEED_MATCH_LINK]},
+                        }}),
+                    ));
+                }
                 crate::company::demo::drafts::delete_entry(&mut demo, id).map(|_| ())
             }
         }
@@ -763,6 +795,32 @@ impl RegisterScreen {
                 self.actions.panel = Panel::Notice(key);
                 return;
             }
+        }
+        if matches!(
+            pending,
+            Pending::Row {
+                kind: ActionKind::Delete,
+                ..
+            }
+        ) && cl_api::delete_linked_to_bank_feed(&e)
+        {
+            self.actions.error = None;
+            self.actions.reload = None;
+            if let Pending::Row { id, .. } = pending {
+                let read = crate::feed_link::read(
+                    &self.link,
+                    self.group.as_ref(),
+                    self.account.into_iter().collect(),
+                    *id,
+                );
+                self.actions.panel = Panel::BankFeedLinked {
+                    id: *id,
+                    link: None,
+                    read,
+                };
+                self.poll_feed_kind();
+            }
+            return;
         }
         if self.closing_failed(&e, pending.clone()) {
             return;
@@ -878,8 +936,10 @@ impl RegisterScreen {
             Close,
             Confirm,
             Void(TransactionId, CalendarDate),
+            OpenFeed,
         }
         let mut click = Click::None;
+        self.poll_feed_kind();
         match &mut self.actions.panel {
             Panel::None => return,
             Panel::Notice(key) => {
@@ -889,6 +949,21 @@ impl RegisterScreen {
                     if ui.button(t("register.row_action.ok")).clicked() {
                         click = Click::Close;
                     }
+                });
+            }
+            Panel::BankFeedLinked { link, .. } => {
+                let fix = undo_fix_key(*link);
+                form::card(ui, tokens, |ui| {
+                    ui.add(egui::Label::new(t("error.api.delete_linked_bank_feed")).wrap());
+                    ui.add(egui::Label::new(t(fix)).wrap());
+                    ui.horizontal(|ui| {
+                        if ui.button(t("register.delete.open_feed")).clicked() {
+                            click = Click::OpenFeed;
+                        }
+                        if ui.button(t("register.row_action.cancel")).clicked() {
+                            click = Click::Close;
+                        }
+                    });
                 });
             }
             Panel::OfferVoid { id, date, why } => {
@@ -954,6 +1029,38 @@ impl RegisterScreen {
             Click::Close => self.actions.panel = Panel::None,
             Click::Confirm => self.confirm(),
             Click::Void(id, date) => self.open_confirm(ActionKind::Void, id, date),
+            Click::OpenFeed => self.open_bank_feed(),
+        }
+    }
+
+    /// Go to Bank Feed from the refused delete of a matched entry (PR-5 S2).
+    /// PR-5 QA-4: the account's accepted lines, the cursor on this entry's.
+    pub(super) fn open_bank_feed(&mut self) {
+        let entry = match &self.actions.panel {
+            Panel::BankFeedLinked { id, .. } => Some(*id),
+            _ => None,
+        };
+        self.actions.panel = Panel::None;
+        let kind = cl_model::CommandId::new(crate::screens::bank_feed::KIND);
+        match self.account {
+            Some(account) => self.link.push(crate::company::CompanyEvent::OpenWith(
+                kind,
+                Box::new(crate::windows::OpenPayload::FeedAt(
+                    crate::screens::bank_feed::FeedTarget { account, entry },
+                )),
+            )),
+            None => self
+                .link
+                .push(crate::company::CompanyEvent::OpenWindow(kind)),
+        }
+    }
+
+    /// Takes the Bank Feed read for the delete refusal's wording (QA-3).
+    pub(super) fn poll_feed_kind(&mut self) {
+        if let Panel::BankFeedLinked { link, read, .. } = &mut self.actions.panel
+            && let Some(r) = crate::screens::templates::engine::finished(read)
+        {
+            *link = r.ok().flatten();
         }
     }
 
@@ -967,9 +1074,12 @@ impl RegisterScreen {
             Panel::Confirm(_) => "confirm_delete",
             Panel::OfferVoid { .. } => "offer_void",
             Panel::Notice(_) => "notice",
+            Panel::BankFeedLinked { .. } => "bank_feed_linked",
         };
         let notice = match &a.panel {
             Panel::Notice(k) | Panel::OfferVoid { why: k, .. } => Some(*k),
+            // PR-5 QA-3: which Undo wording the refusal shows.
+            Panel::BankFeedLinked { link, .. } => Some(undo_fix_key(*link)),
             _ => None,
         };
         serde_json::json!({

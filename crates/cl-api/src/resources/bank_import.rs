@@ -443,6 +443,13 @@ pub struct ImportRowResult {
     pub inserted: bool,
     /// Replaced the waiting item (a changed row with "replace").
     pub replaced: bool,
+    /// The commit would replace the matched item (`existingReplaceable`,
+    /// `feed-guards-v1`, U-200): it waits untouched, not staged. `None`
+    /// from an older engine (then `existing_pending` decides).
+    pub existing_replaceable: Option<bool>,
+    /// Why a chosen Replace wasn't done (`replaceRefused`: `not_waiting`
+    /// or `staged`, U-200); `None` when it was, or from an older engine.
+    pub replace_refused: Option<String>,
     /// The matched item's amount in the feed sign (money out positive) and
     /// its date, for a changed row's "was / now" (Q-P25af). Read when the
     /// engine sends `existingAmount`/`existingDate`; an engine that doesn't
@@ -624,6 +631,10 @@ struct WireRow {
     #[serde(default)]
     replaced: Option<bool>,
     #[serde(default)]
+    existing_replaceable: Option<bool>,
+    #[serde(default)]
+    replace_refused: Option<String>,
+    #[serde(default)]
     existing_amount: Option<Value>,
     #[serde(default)]
     existing_date: Option<Value>,
@@ -766,6 +777,11 @@ pub fn outcome_from(body: &[u8], replayed: bool) -> Result<BankImportOutcome, Ap
             closed_period: r.closed_period,
             inserted: r.inserted,
             replaced: r.replaced.unwrap_or(false),
+            existing_replaceable: r.existing_replaceable,
+            // A short engine word only (never owner data).
+            replace_refused: r.replace_refused.filter(|w| {
+                w.len() <= 32 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+            }),
             existing_amount: r
                 .existing_amount
                 .as_ref()
