@@ -136,9 +136,14 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             let today = w.today;
             if spec.dates == DateMode::AsOf {
                 let r = form::date_field(ui, &t("reports.filter.as_of"), &mut w.dates.to, today);
+                // Leaving the field unchanged keeps the preset.
+                let shown = match next.dates {
+                    DateChoice::Preset(p) => p.range(&w.fiscal, w.today).ok().map(|r| r.to),
+                    other => other.as_of_hint(),
+                };
                 if r.lost_focus()
                     && let Some(d) = w.dates.to.value
-                    && next.dates.as_of_hint() != Some(d)
+                    && shown != Some(d)
                 {
                     next.dates = DateChoice::AsOf(d);
                 }

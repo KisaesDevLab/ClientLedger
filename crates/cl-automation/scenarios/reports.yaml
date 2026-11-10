@@ -34,6 +34,7 @@ steps:
   - command: reports.collapse
   - screenshot: sales-tax-collapsed
   - command: reports.collapse
-  - command: reports.refresh
+  - key: F5
+  - wait: {ms: 200}
   - assert_state: {key: screen.state, equals: shown}
   - screenshot: sales-tax

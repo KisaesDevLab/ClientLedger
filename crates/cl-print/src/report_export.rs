@@ -164,7 +164,11 @@ pub fn to_xlsx(
                     ws.write_string(r, col, d.to_wire())?;
                 }
                 Cell::Count(n) => {
-                    ws.write_string(r, col, n.to_string())?;
+                    // A count up to u32::MAX is exact in an f64; larger as text.
+                    match u32::try_from(*n) {
+                        Ok(v) => ws.write_number(r, col, f64::from(v))?,
+                        Err(_) => ws.write_string(r, col, n.to_string())?,
+                    };
                 }
                 Cell::Amount(d) | Cell::Percent(Some(d)) | Cell::Quantity(d) => {
                     let fmt = match (cell, kind) {

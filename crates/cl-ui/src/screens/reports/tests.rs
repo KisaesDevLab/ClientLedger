@@ -74,8 +74,11 @@ fn the_exact_reports_run_on_the_demo() {
         assert!(available(&link, spec), "{key}");
         w.show_report(spec, ReportOptions::for_spec(spec));
         w.poll();
-        // The demo may switch a feature off (inventory): a refusal is a
-        // shown error, never a hang.
+        // The demo may switch inventory off: a refusal is a shown error,
+        // never a hang. A/R aging and sales tax always run.
+        if matches!(key, "ar_aging_summary" | "sales_tax_liability") {
+            assert_eq!(w.state, RunState::Shown, "{key}");
+        }
         assert!(
             matches!(w.state, RunState::Shown | RunState::Failed),
             "{key}: {:?}",
@@ -133,9 +136,11 @@ fn exports_read_the_rows_on_screen() {
     let spec = find("ar_aging_summary").expect("spec");
     w.show_report(spec, ReportOptions::for_spec(spec));
     w.poll();
-    if w.state != RunState::Shown {
-        return;
-    }
+    assert_eq!(w.state, RunState::Shown);
+    // A/R Aging Detail isn't read by this build yet: its cells draw no link.
+    let t = w.table.as_ref().expect("table");
+    let d = t.rows[0].drill.as_ref().expect("drill").at(&t.columns[0]);
+    assert!(!super::drill::live(&link, Source::ArAgingSummary, &d));
     let csv = String::from_utf8(super::export::bytes(&w, super::export::Kind::Csv).expect("csv"))
         .expect("utf8");
     assert!(csv.starts_with(",Current,"), "{csv}");

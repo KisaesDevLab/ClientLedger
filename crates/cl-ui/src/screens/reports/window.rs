@@ -59,8 +59,8 @@ impl RunState {
 }
 
 const ROW_H: f32 = 22.0;
-const CAPTION_W: f32 = 300.0;
-const CELL_W: f32 = 118.0;
+const CAPTION_W: f32 = 230.0;
+const CELL_W: f32 = 96.0;
 
 /// A report window.
 pub struct ReportWindow {
@@ -514,15 +514,20 @@ impl ReportWindow {
                             cell_box(ui, col.kind.is_numeric(), |ui| {
                                 let rich = RichText::new(&text).family(egui::FontFamily::Monospace);
                                 let rich = if strong { rich.strong() } else { rich };
-                                let drill = r.drill.as_ref().filter(|_| {
-                                    matches!(cell, Cell::Amount(_)) && !text.is_empty()
-                                });
+                                let drill = r
+                                    .drill
+                                    .as_ref()
+                                    .filter(|_| matches!(cell, Cell::Amount(_)) && !text.is_empty())
+                                    .map(|d| d.at(col))
+                                    .filter(|d| {
+                                        super::drill::live(&self.link, self.spec.source, d)
+                                    });
                                 match drill {
                                     Some(d) => {
                                         let resp =
                                             ui.link(rich).on_hover_text(t("reports.drill.hint"));
                                         if resp.clicked() {
-                                            action = Some(GridAction::Drill(d.at(col)));
+                                            action = Some(GridAction::Drill(d));
                                         }
                                     }
                                     None => {

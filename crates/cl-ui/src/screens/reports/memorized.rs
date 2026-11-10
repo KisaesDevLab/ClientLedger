@@ -104,7 +104,9 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 load(w);
             }
             Err(e) => {
-                w.memo.reloading = false;
+                if std::mem::take(&mut w.memo.reloading) && w.memo.dialog.is_none() {
+                    w.notice = Some(t("reports.memorize.failed"));
+                }
                 if let Some(d) = w.memo.dialog.as_mut() {
                     match definition_refusal(&e) {
                         Some(DefinitionRefusal::Stale) => d.conflict = true,
