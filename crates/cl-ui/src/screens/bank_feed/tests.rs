@@ -888,3 +888,37 @@ fn go_to_waits_for_the_accounts() {
     s.poll();
     assert_eq!(s.current_account().and_then(|a| a.account), Some(account));
 }
+
+/// PR-5 QA: a row's accessible name has its date, description and amount.
+#[test]
+fn a_rows_accessible_name_says_what_it_is() {
+    let (_d, s) = screen();
+    let r = &s.rows[0];
+    let label = view::row_label(r, 0, s.rows.len(), cl_core::MoneyStyle::default());
+    assert!(
+        label.starts_with(&format!("Bank line 1 of {}:", s.rows.len())),
+        "{label}"
+    );
+    assert!(label.contains(&r.description), "{label}");
+    assert!(label.contains(&crate::shell::us_date(r.date)), "{label}");
+    let amount = model::display_amount(r.amount).format(cl_core::MoneyStyle::default());
+    assert!(label.ends_with(&amount), "{label}");
+}
+
+/// PR-5 QA-4: an empty list hidden by a search, a bucket or a chip says
+/// so rather than "Nothing waiting".
+#[test]
+fn an_empty_filtered_list_says_it_is_filtered() {
+    let (_d, mut s) = screen();
+    assert_eq!(view::empty_key(&s), "bank_feed.empty");
+    s.filter = "zzz".into();
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    s.filter.clear();
+    s.segment = Segment::Matches;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    s.show = Show::Accepted;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.accepted");
+    s.changed_only = true;
+    assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
+    assert!(crate::i18n::has("bank_feed.empty.filtered"));
+}

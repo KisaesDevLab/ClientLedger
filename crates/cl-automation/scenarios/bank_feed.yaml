@@ -37,7 +37,7 @@ steps:
   - click: {role: button, label: Ready 28}
 
   # --- Keyboard triage ----------------------------------------------------------
-  - click: {role: button, label: Bank line 1 of 28}
+  - click: {role: button, label_contains: "Bank line 1 of 28:"}
   - key: Space
   - key: J
   - key: Space

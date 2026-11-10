@@ -12,7 +12,7 @@ steps:
   - command: banking.feed
   - command: dev.demo_feed_reset
   - click: {role: button, label: Ready 28}
-  - click: {role: button, label: Bank line 1 of 28}
+  - click: {role: button, label_contains: "Bank line 1 of 28:"}
   - key: R
   - assert_state: {key: screen.rules.open, equals: true}
   - assert_state: {key: screen.rules.editing, equals: true}

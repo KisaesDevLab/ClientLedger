@@ -641,15 +641,44 @@ fn column_headers(ui: &mut Ui, tokens: &Tokens, s: &mut BankFeedScreen) {
     p.hline(rect.x_range(), rect.bottom(), (1.0, tokens.border_row));
 }
 
+/// A row's accessible name: its place, then its date, description and
+/// amount as drawn, so a screen reader tells the rows apart (PR-5 QA).
+pub(crate) fn row_label(
+    r: &cl_api::FeedRow,
+    i: usize,
+    total: usize,
+    style: cl_core::MoneyStyle,
+) -> String {
+    t_with(
+        "bank_feed.row",
+        &[
+            ("n", &(i + 1).to_string()),
+            ("total", &total.to_string()),
+            ("date", &crate::shell::us_date(r.date)),
+            ("description", &r.description),
+            ("amount", &model::display_amount(r.amount).format(style)),
+        ],
+    )
+}
+
+/// The empty list's line.PR-5 QA-4: when a search, a bucket or a chip
+/// hides rows, it says so rather than "Nothing waiting".
+pub(crate) fn empty_key(s: &BankFeedScreen) -> &'static str {
+    let filtered = !s.filter.trim().is_empty()
+        || (s.show == Show::Waiting && s.segment != cl_model::bank_feed::Segment::All)
+        || (s.show == Show::Accepted && (s.voided_only || s.changed_only));
+    match s.show {
+        _ if filtered => "bank_feed.empty.filtered",
+        Show::Waiting => "bank_feed.empty",
+        Show::Accepted => "bank_feed.empty.accepted",
+        Show::Excluded => "bank_feed.empty.excluded",
+    }
+}
+
 fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, reserve: f32) {
     if s.rows.is_empty() {
         ui.add_space(12.0);
-        let key = match s.show {
-            Show::Waiting => "bank_feed.empty",
-            Show::Accepted => "bank_feed.empty.accepted",
-            Show::Excluded => "bank_feed.empty.excluded",
-        };
-        form::hint(ui, tokens, &t(key));
+        form::hint(ui, tokens, &t(empty_key(s)));
         return;
     }
     column_headers(ui, tokens, s);
@@ -667,10 +696,7 @@ fn list(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, reserve: f32) {
                 let why = s.why(r);
                 let width = ui.available_width();
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
-                let label = t_with(
-                    "bank_feed.row",
-                    &[("n", &(i + 1).to_string()), ("total", &total.to_string())],
-                );
+                let label = row_label(r, i, total, style);
                 let is_cur = cursor == Some(r.id);
                 resp.widget_info(|| {
                     egui::WidgetInfo::selected(egui::Role::Button, true, is_cur, &label)

@@ -14,7 +14,7 @@ steps:
   - command: dev.demo_feed_reset
   - command: dev.demo_feed_duplicate
   - click: {role: button, label: Needs review 6}
-  - click: {role: button, label: Bank line 1 of 6}
+  - click: {role: button, label_contains: "Bank line 1 of 6:"}
   - assert_state: {key: screen.detail.duplicate, equals: true}
   - assert_state: {key: screen.badges.duplicate, equals: 1}
   - assert_exists: {role: button, label: Keep both}
