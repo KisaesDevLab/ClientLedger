@@ -570,7 +570,7 @@ impl WriteCheckScreen {
         let f = self.compose();
         // A loaded check shows its amount from its lines until one is typed.
         let amount = f.amount.or_else(|| f.lines_total());
-        vec![(f.bank, amount.map(|m| m.abs()))]
+        vec![(f.bank, amount.map(cl_core::Money::abs))]
     }
 
     /// The edit changes the amount or bank of a check a bank line holds.

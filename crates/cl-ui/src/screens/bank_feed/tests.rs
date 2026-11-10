@@ -869,7 +869,7 @@ fn go_to_lands_on_the_matched_line() {
     });
     s.poll();
     assert_eq!(s.show, Show::Waiting);
-    assert!(!s.rows.is_empty());
+    assert_ne!(s.rows.len(), 0);
 }
 
 /// A target given before the accounts are read waits for them.

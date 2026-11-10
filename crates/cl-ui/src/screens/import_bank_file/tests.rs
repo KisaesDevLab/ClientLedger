@@ -1394,8 +1394,7 @@ fn a_changed_rows_choices_are_never_under_the_counts() {
             nodes
                 .iter()
                 .find(|(l, _)| l == label)
-                .map(|(_, r)| *r)
-                .unwrap_or_else(|| panic!("{label} at {size:?}"))
+                .map_or_else(|| panic!("{label} at {size:?}"), |(_, r)| *r)
         };
         let button = find(&add);
         let counts = find(&in_file);
@@ -1416,7 +1415,10 @@ fn a_changed_rows_choices_are_never_under_the_counts() {
         .map(|(_, r)| *r)
         .expect("Add as new");
     #[allow(clippy::cast_possible_truncation)]
-    let at = eframe::egui::pos2(((r.x0 + r.x1) / 2.0) as f32, ((r.y0 + r.y1) / 2.0) as f32);
+    let at = eframe::egui::pos2(
+        f64::midpoint(r.x0, r.x1) as f32,
+        f64::midpoint(r.y0, r.y1) as f32,
+    );
     assert!(at.y < size.1, "on screen: {r:?}");
     let press = |pressed| eframe::egui::Event::PointerButton {
         pos: at,

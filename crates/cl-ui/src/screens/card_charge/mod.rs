@@ -201,7 +201,7 @@ impl CardChargeScreen {
     pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
         let f = self.compose();
         let amount = f.amount.or_else(|| f.lines_total());
-        vec![(f.card, amount.map(|m| m.abs()))]
+        vec![(f.card, amount.map(cl_core::Money::abs))]
     }
 
     /// The edit changes the amount or account of a charge a bank line holds.
