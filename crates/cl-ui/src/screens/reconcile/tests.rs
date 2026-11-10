@@ -1232,3 +1232,53 @@ fn coming_back_into_a_pane_lands_on_its_last_row() {
     cmd(&mut s, "reconcile.switch_pane");
     assert_eq!(cursor(&s), used_out, "back on the payment last used");
 }
+
+/// PR-5 QA: Begin's statement date, on today, follows a last
+/// reconciliation dated today or later (a month-end gives the next
+/// month-end); a later today, or a date the owner typed, stays.
+#[test]
+fn begin_date_is_after_the_last_reconciliation() {
+    let (_d, link, mut s) = screen();
+    let card = crate::company::demo::account_id(2050);
+    s.poll();
+    s.pick_account(card);
+    s.poll();
+    let oct31 = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    s.date_in.set(oct31);
+    s.form.ending = "1,038.82".into();
+    s.form.service_charge.amount = "18.25".into();
+    s.begin();
+    s.poll();
+    s.mark_all(true);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["dialog"], "done");
+    let open = |today: CalendarDate| {
+        let mut s = ReconcileScreen::new(Arc::clone(&link), None, today);
+        s.poll();
+        s.pick_account(card);
+        s.poll();
+        s.poll();
+        s
+    };
+    let early = CalendarDate::from_ymd(2026, 10, 25).expect("date");
+    let s = open(early);
+    assert_eq!(
+        s.date_in.value,
+        CalendarDate::from_ymd(2026, 11, 30).ok(),
+        "a month after the 10/31 statement"
+    );
+    // Today after the last one: today stays.
+    let late = CalendarDate::from_ymd(2026, 11, 10).expect("date");
+    assert_eq!(open(late).date_in.value, Some(late));
+    // A typed date stays.
+    let mut s = ReconcileScreen::new(Arc::clone(&link), None, early);
+    s.poll();
+    s.pick_account(card);
+    let typed = CalendarDate::from_ymd(2026, 11, 15).expect("date");
+    s.date_in.set(typed);
+    s.poll();
+    s.poll();
+    assert_eq!(s.date_in.value, Some(typed));
+}

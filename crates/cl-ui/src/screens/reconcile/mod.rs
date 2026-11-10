@@ -464,6 +464,36 @@ impl ReconcileScreen {
             && self.unfinished().is_none()
     }
 
+    /// PR-5 QA: Begin's statement date, still on today as it opened, moves
+    /// to a month after the last reconciliation when that one is today or
+    /// later (Begin refuses a date on or before it). A month-end statement
+    /// gives the next month's end. A date the owner typed stays.
+    pub(crate) fn follow_last_statement(&mut self) {
+        if self.step != Step::Begin
+            || self.editing
+            || self.unfinished().is_some()
+            || self.date_in.value != Some(self.today)
+        {
+            return;
+        }
+        let Some(last) = self.last_finished().map(|r| r.statement_date) else {
+            return;
+        };
+        if last < self.today {
+            return;
+        }
+        let Ok(next) = last.add_months(1) else {
+            return;
+        };
+        let next = if last == last.end_of_month() {
+            next.end_of_month()
+        } else {
+            next
+        };
+        self.date_in.set(next);
+        self.form.statement_date = Some(next);
+    }
+
     /// The finished reconciliation with the latest statement date.
     pub(crate) fn last_finished(&self) -> Option<&ReconHistoryRow> {
         self.history
@@ -515,7 +545,10 @@ impl ReconcileScreen {
         }
         if let Some(r) = engine::poll(&mut self.history_job) {
             match r {
-                Ok(h) => self.history = h,
+                Ok(h) => {
+                    self.history = h;
+                    self.follow_last_statement();
+                }
                 Err(e) => self.error = Some(e),
             }
         }

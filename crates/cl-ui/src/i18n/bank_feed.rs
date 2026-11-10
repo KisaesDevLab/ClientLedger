@@ -71,7 +71,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.ask.undo_ticked.yes", "Undo anyway"),
     ("bank_feed.why.receipt", "Receipt"),
     ("bank_feed.recorded.match", "An entry already in your books"),
-    ("bank_feed.recorded.match.sub", "Already in your register \u{b7} will be marked cleared"),
+    ("bank_feed.recorded.match.sub", "Already in your register \u{b7} checked for you when you reconcile"),
     ("bank_feed.recorded.transfer", "Transfer between your accounts"),
     ("bank_feed.recorded.transfer.sub", "Open it to pick the other account"),
     ("bank_feed.recorded.choose", "Choose a payee and account"),

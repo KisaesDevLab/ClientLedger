@@ -922,3 +922,13 @@ fn an_empty_filtered_list_says_it_is_filtered() {
     assert_eq!(view::empty_key(&s), "bank_feed.empty.filtered");
     assert!(crate::i18n::has("bank_feed.empty.filtered"));
 }
+
+/// PR-5 QA-5: the engine doesn't mark a matched entry cleared (the line is
+/// pre-checked when you reconcile, `bankFeedPrecheckIds`), so the matched
+/// row doesn't promise a cleared mark.
+#[test]
+fn a_match_promises_the_reconcile_check_not_a_cleared_mark() {
+    let sub = crate::i18n::t("bank_feed.recorded.match.sub");
+    assert!(!sub.contains("cleared"), "{sub}");
+    assert!(sub.contains("reconcile"), "{sub}");
+}
