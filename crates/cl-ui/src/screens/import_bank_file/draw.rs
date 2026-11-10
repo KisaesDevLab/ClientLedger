@@ -859,19 +859,6 @@ impl ImportBankFileScreen {
             } else if self.remembered_flip.is_some() {
                 form::hint(ui, tokens, &t("bankimport.sign.remembered"));
             }
-            // Q-PR5c: the answer used for this account's other format.
-            if let Some((format, flip)) = self.other_flip {
-                let key = if flip {
-                    "bankimport.sign.other_format_flipped"
-                } else {
-                    "bankimport.sign.other_format_kept"
-                };
-                form::hint(
-                    ui,
-                    tokens,
-                    &t_with(key, &[("format", &format.as_wire().to_uppercase())]),
-                );
-            }
             egui::Grid::new("bankimport/sign/sample")
                 .spacing([16.0, 4.0])
                 .show(ui, |ui| {
@@ -905,6 +892,18 @@ impl ImportBankFileScreen {
             }
             if needs && ui.button(t("bankimport.sign.looks_right")).clicked() {
                 self.set_flipped(self.flipped);
+            } // Q-PR5c: the answer used for this account's other format.
+            if let Some((format, flip)) = self.other_flip {
+                let key = if flip {
+                    "bankimport.sign.other_format_flipped"
+                } else {
+                    "bankimport.sign.other_format_kept"
+                };
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_with(key, &[("format", &format.as_wire().to_uppercase())]),
+                );
             }
         });
     }
