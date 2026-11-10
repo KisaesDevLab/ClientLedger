@@ -1385,11 +1385,14 @@ fn delete_of_a_bank_feed_entry_points_to_the_bank_feed() {
     };
     s.open_confirm(dialogs::ActionKind::Delete, t, date);
     settle(&mut s, None);
-    assert_eq!(s.state()["row_action"]["panel"], "confirm_delete");
+    // Q-PR5d: the refusal comes at once; "Delete this transaction?" is
+    // never asked, and nothing is sent.
+    assert_eq!(s.state()["row_action"]["panel"], "bank_feed_linked");
     s.confirm();
     settle(&mut s, None);
     let st = s.state();
     assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
+    assert_ne!(st["row_action"]["last"], "delete", "nothing was sent");
     assert_eq!(st["row_action"]["error"], false, "no void advice");
     assert!(
         link.demo_state().expect("demo").ledger.date_of(t).is_some(),
@@ -1444,12 +1447,50 @@ fn delete_of_a_matched_entry_says_undo_keeps_it() {
     };
     s.open_confirm(dialogs::ActionKind::Delete, t, date);
     settle(&mut s, None);
-    s.confirm();
-    settle(&mut s, None);
+    // Q-PR5d: refused before the question.
     let st = s.state();
     assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
     assert_eq!(st["row_action"]["notice"], "register.delete.feed_match_fix");
     assert!(crate::i18n::has("register.delete.feed_match_fix"));
+}
+
+/// Q-PR5d: when the bank line can't be read first (no account here, or an
+/// engine without `feed-entry-changed-v1`), Delete asks as before and the
+/// engine's refusal on send still points to the Bank Feed.
+#[test]
+fn delete_without_the_line_read_first_is_still_refused_on_send() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let (t, date) = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let row = page
+            .rows
+            .iter()
+            .find(|r| r.assigned_account.is_some() || r.suggested_account.is_some())
+            .cloned()
+            .expect("a row to accept");
+        let t = crate::company::demo::feed_review::categorize(&mut demo, row.id, None, None)
+            .expect("accepted")
+            .expect("posted");
+        (t, demo.ledger.date_of(t).expect("dated"))
+    };
+    s.account = None;
+    s.open_confirm(dialogs::ActionKind::Delete, t, date);
+    settle(&mut s, None);
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_delete");
+    s.confirm();
+    settle(&mut s, None);
+    assert_eq!(s.state()["row_action"]["panel"], "bank_feed_linked");
+    assert!(
+        link.demo_state().expect("demo").ledger.date_of(t).is_some(),
+        "kept"
+    );
 }
 
 #[test]

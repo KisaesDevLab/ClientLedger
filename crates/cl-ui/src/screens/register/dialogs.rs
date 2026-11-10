@@ -238,6 +238,9 @@ pub(super) struct Target {
     /// Its version and kind once read.
     record: Option<(RecordVersion, TxnType, TxnStatus)>,
     reason: String,
+    /// Q-PR5d: a Delete reads the entry's bank line before it asks; a
+    /// linked entry gets the Bank Feed refusal instead of the question.
+    feed: Option<FeedLinkJob>,
 }
 
 /// What the row-action panel shows.
@@ -533,6 +536,19 @@ impl RegisterScreen {
                 _ => None,
             }
         };
+        // Q-PR5d: before "Delete this transaction?", the bank line. `None`
+        // (an engine without `feed-entry-changed-v1`, or no account) leaves
+        // the engine's refusal on send as the guard.
+        let feed = if kind == ActionKind::Delete {
+            crate::feed_link::read(
+                &self.link,
+                self.group.as_ref(),
+                self.account.into_iter().collect(),
+                id,
+            )
+        } else {
+            None
+        };
         self.actions.panel = Panel::Confirm(Box::new(Target {
             kind,
             id,
@@ -540,12 +556,33 @@ impl RegisterScreen {
             read,
             record: None,
             reason: String::new(),
+            feed,
         }));
         self.poll_actions();
     }
 
+    /// Q-PR5d: takes the bank-line read of a Delete waiting to ask; a
+    /// linked entry turns the question into the Bank Feed refusal.
+    fn poll_delete_feed(&mut self) {
+        let Panel::Confirm(target) = &mut self.actions.panel else {
+            return;
+        };
+        let Some(r) = crate::screens::templates::engine::finished(&mut target.feed) else {
+            return;
+        };
+        // A failed read asks as before; the engine still refuses on send.
+        if let Ok(Some(link)) = r {
+            self.actions.panel = Panel::BankFeedLinked {
+                id: target.id,
+                link: Some(link),
+                read: None,
+            };
+        }
+    }
+
     /// Takes finished reads and writes.
     pub(super) fn poll_actions(&mut self) {
+        self.poll_delete_feed();
         if let Panel::Confirm(target) = &mut self.actions.panel
             && let Some(task) = target.read.as_mut()
             && let Some(result) = task.try_take()
@@ -609,6 +646,10 @@ impl RegisterScreen {
         let Some((version, txn_type, _)) = target.record else {
             return;
         };
+        if target.feed.is_some() {
+            // Q-PR5d: the bank line is still being read.
+            return;
+        }
         let reason = Some(target.reason.trim().to_string()).filter(|r| !r.is_empty());
         let (kind, id, date) = (target.kind, target.id, target.date);
         self.actions.panel = Panel::None;
@@ -995,7 +1036,7 @@ impl RegisterScreen {
                         "register.delete.confirm",
                     ),
                 };
-                let ready = target.record.is_some();
+                let ready = target.record.is_some() && target.feed.is_none();
                 // A bill payment's void also reopens the bills it paid.
                 let body = match target.record {
                     Some((_, TxnType::BillPayment, _)) if target.kind == ActionKind::Void => {
