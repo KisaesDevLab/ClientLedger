@@ -1255,3 +1255,157 @@ fn the_sign_question_shows_the_other_formats_answer() {
     assert_eq!(found as usize + s.look_alikes(), 3, "{:?}", p.counts);
     assert!(new == 0 || s.look_alikes() == new);
 }
+
+/// One frame of the wizard in a `w` x `h` window (points); the AccessKit
+/// nodes with their labels and bounds.
+fn render(
+    s: &mut ImportBankFileScreen,
+    ctx: &eframe::egui::Context,
+    size: (f32, f32),
+    events: Vec<eframe::egui::Event>,
+) -> Vec<(String, eframe::egui::accesskit::Rect)> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(size.0, size.1))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.draw(ui));
+    });
+    out.textures_delta.clear();
+    let Some(u) = out.platform_output.accesskit_update else {
+        return Vec::new();
+    };
+    u.nodes
+        .iter()
+        .filter_map(|(_, n)| Some((n.label()?.to_string(), n.bounds()?)))
+        .collect()
+}
+
+/// PR-5 QA-1: a changed row's card (Was/Now and its three choices) is never
+/// drawn under the counts row, at the smallest usual window and at 200%
+/// zoom; its buttons answer a click.
+#[test]
+fn a_changed_rows_choices_are_never_under_the_counts() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let changed = OFX.replace(
+        "<DTPOSTED>20261031<TRNAMT>-186.40<FITID>A1",
+        "<DTPOSTED>20261101<TRNAMT>-196.40<FITID>A1",
+    );
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.next();
+    s.poll();
+    let line = s
+        .preview
+        .as_ref()
+        .expect("preview")
+        .rows
+        .iter()
+        .find(|r| r.status == ImportRowStatus::Changed)
+        .expect("changed")
+        .line;
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let add = t("bankimport.add_as_new");
+    // The counts row's checkbox (its labels are values, not names).
+    let in_file = t("bankimport.only_skipped");
+    // The shell's body at 1440x900, then the same window at 200% zoom.
+    for size in [(1200.0, 640.0), (1240.0, 760.0), (620.0, 380.0)] {
+        s.check_top_height = 0.0;
+        let mut nodes = Vec::new();
+        for _ in 0..4 {
+            nodes = render(&mut s, &ctx, size, vec![]);
+        }
+        let find = |label: &str| {
+            nodes
+                .iter()
+                .find(|(l, _)| l == label)
+                .map(|(_, r)| *r)
+                .unwrap_or_else(|| panic!("{label} at {size:?}"))
+        };
+        let button = find(&add);
+        let counts = find(&in_file);
+        assert!(
+            button.y1 <= counts.y0 + 0.5,
+            "{size:?}: Add as new {button:?} is under the counts {counts:?}"
+        );
+    }
+    // A click on Add as new (on screen at the usual size) records it.
+    let size = (1240.0, 760.0);
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = render(&mut s, &ctx, size, vec![]);
+    }
+    let r = nodes
+        .iter()
+        .find(|(l, _)| *l == add)
+        .map(|(_, r)| *r)
+        .expect("Add as new");
+    #[allow(clippy::cast_possible_truncation)]
+    let at = eframe::egui::pos2(((r.x0 + r.x1) / 2.0) as f32, ((r.y0 + r.y1) / 2.0) as f32);
+    assert!(at.y < size.1, "on screen: {r:?}");
+    let press = |pressed| eframe::egui::Event::PointerButton {
+        pos: at,
+        button: eframe::egui::PointerButton::Primary,
+        pressed,
+        modifiers: eframe::egui::Modifiers::NONE,
+    };
+    render(
+        &mut s,
+        &ctx,
+        size,
+        vec![eframe::egui::Event::PointerMoved(at)],
+    );
+    render(&mut s, &ctx, size, vec![press(true)]);
+    render(&mut s, &ctx, size, vec![press(false)]);
+    render(&mut s, &ctx, size, vec![]);
+    assert_eq!(
+        s.choices.get(&line).and_then(|c| c.changed),
+        Some(ChangedAction::Add)
+    );
+}
+/// PR-5 QA: the balance check's long label wraps beside its value instead
+/// of running into it.
+#[test]
+fn a_long_balance_label_never_runs_into_its_value() {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let mut got = None;
+    for _ in 0..2 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(320.0, 400.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let tokens = crate::theme::Tokens::of(ui.ctx());
+                got = Some(super::draw::pair(
+                    ui,
+                    &tokens,
+                    "Your books will say, with the rows already in the Bank Feed",
+                    "84,659.51",
+                    true,
+                ));
+            });
+        });
+        out.textures_delta.clear();
+    }
+    let (label, value) = got.expect("drawn");
+    assert!(
+        label.right() <= value.left(),
+        "label {label:?} runs into value {value:?}"
+    );
+    assert!(label.height() > value.height(), "the label wrapped");
+}

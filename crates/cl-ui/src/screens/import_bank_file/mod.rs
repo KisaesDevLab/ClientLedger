@@ -230,6 +230,9 @@ pub struct ImportBankFileScreen {
     preview: Option<BankImportOutcome>,
     preview_trouble: Option<EngineTrouble>,
     only_skipped: bool,
+    /// PR-5 QA-1: the cards and choices' height last frame; taller than
+    /// their share of the step, the whole step scrolls as one.
+    pub(crate) check_top_height: f32,
     // Step 4.
     frozen: Option<Frozen>,
     send_task: Option<Task<BankImportOutcome>>,
@@ -310,6 +313,7 @@ impl ImportBankFileScreen {
             preview: None,
             preview_trouble: None,
             only_skipped: false,
+            check_top_height: 0.0,
             frozen: None,
             send_task: None,
             send_trouble: None,

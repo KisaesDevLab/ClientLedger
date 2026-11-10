@@ -134,18 +134,53 @@ fn chip_sensing(
 }
 
 /// A label and a value on one line, the value right-aligned.
-fn pair(ui: &mut Ui, tokens: &Tokens, label: &str, value: &str, mono: bool) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(label).color(tokens.text_secondary));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let v = RichText::new(value).color(tokens.text_primary);
-            ui.label(if mono {
-                v.text_style(egui::TextStyle::Monospace)
-            } else {
-                v
-            });
-        });
-    });
+/// PR-5 QA: a label too long for the line wraps beside the value instead
+/// of running into it.
+pub(super) fn pair(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    label: &str,
+    value: &str,
+    mono: bool,
+) -> (egui::Rect, egui::Rect) {
+    let v = RichText::new(value).color(tokens.text_primary);
+    let v = if mono {
+        v.text_style(egui::TextStyle::Monospace)
+    } else {
+        v
+    };
+    let value_width = egui::WidgetText::from(v.clone())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x;
+    ui.horizontal_top(|ui| {
+        let label_width = (ui.available_width() - value_width - 12.0).max(48.0);
+        let l = ui
+            .allocate_ui_with_layout(
+                egui::vec2(label_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_max_width(label_width);
+                    ui.add(
+                        egui::Label::new(RichText::new(label).color(tokens.text_secondary)).wrap(),
+                    )
+                    .rect
+                },
+            )
+            .inner;
+        let r = ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                ui.label(v).rect
+            })
+            .inner;
+        (l, r)
+    })
+    .inner
 }
 
 /// A titled card of the mockup (white body, a heading bar).
@@ -1057,17 +1092,6 @@ impl ImportBankFileScreen {
     /// height; the list takes the rest. A short window scrolls it all.
     fn check_ui(&mut self, ui: &mut Ui, tokens: &Tokens, style: MoneyStyle) {
         let height = ui.available_height();
-        if height < CHECK_SPLIT_HEIGHT {
-            egui::ScrollArea::vertical()
-                .id_salt("bankimport/check/all")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    self.check_top(ui, tokens, style);
-                    self.check_list(ui, tokens, style, None);
-                });
-            return;
-        }
         // A short list leaves the cards (and a changed row's choices) all
         // the room they need; a long one keeps at least 55% for itself.
         let rows = self
@@ -1077,7 +1101,23 @@ impl ImportBankFileScreen {
         #[allow(clippy::cast_precision_loss)] // at most SHOWN_ROWS
         let list_needs = rows as f32 * 30.0 + 170.0;
         let top = (height - list_needs).max(height * 0.45).max(120.0);
-        egui::ScrollArea::vertical()
+        // PR-5 QA-1: cards and choices taller than their share (a changed
+        // row's card at 1440x900, any short window, 200% zoom) scroll with
+        // the list as one page, so nothing is cut off under the chips.
+        if height < CHECK_SPLIT_HEIGHT || self.check_top_height > top {
+            egui::ScrollArea::vertical()
+                .id_salt("bankimport/check/all")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let start = ui.cursor().top();
+                    self.check_top(ui, tokens, style);
+                    self.check_top_height = ui.cursor().top() - start;
+                    self.check_list(ui, tokens, style, None);
+                });
+            return;
+        }
+        let out = egui::ScrollArea::vertical()
             .id_salt("bankimport/check/top")
             .max_height(top)
             .auto_shrink([false, true])
@@ -1085,6 +1125,11 @@ impl ImportBankFileScreen {
                 ui.set_width(ui.available_width());
                 self.check_top(ui, tokens, style);
             });
+        self.check_top_height = out.content_size.y;
+        if out.content_size.y > top {
+            // Laid out as one page from the next frame.
+            ui.ctx().request_repaint();
+        }
         // The footnotes and a send problem keep their lines under it.
         let list = (ui.available_height() - 88.0).max(90.0);
         self.check_list(ui, tokens, style, Some(list));
