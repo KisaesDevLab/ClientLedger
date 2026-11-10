@@ -1176,3 +1176,40 @@ fn a_refused_replace_is_listed_and_add_again_asks() {
     assert!(!s.add_needs_ask(line), "asked once");
     assert!(s.not_replaced().is_empty() || s.result.is_none());
 }
+
+/// Q-PR5b (PR-5 N3): an edited re-import whose descriptions changed comes
+/// in as new rows; the preview says how many share a date and amount with
+/// rows already imported.
+#[test]
+fn an_edited_reimport_says_how_many_new_rows_look_alike() {
+    let f = fixture();
+    let mut s = screen(&f);
+    csv_previewed(&mut s, &f, "first.csv", CSV);
+    assert_eq!(s.look_alikes(), 0, "nothing imported yet");
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let edited = CSV
+        .replace("COFFEE ROASTERS", "Coffee - team meeting")
+        .replace("DEPOSIT", "Customer payment");
+    csv_previewed(&mut s, &f, "edited.csv", &edited);
+    let p = s.preview.as_ref().expect("preview");
+    assert_eq!(p.counts.new, 2, "{:?}", p.counts);
+    assert_eq!(s.look_alikes(), 2);
+    assert_eq!(s.state()["look_alikes"], 2);
+    assert!(crate::i18n::has("bankimport.preview.same_day_amount.one"));
+}
+
+/// Steps 1 to 3 for a CSV file into the first bank account.
+fn csv_previewed(s: &mut ImportBankFileScreen, f: &Fixture, name: &str, text: &str) {
+    read(s, f, name, text);
+    assert!(s.can_next(), "{:?}", s.read_error);
+    s.next();
+    s.pick_account(bank_account(s));
+    if s.sign_needs_confirm() {
+        s.set_flipped(s.flipped);
+    }
+    s.next();
+    assert_eq!(s.step, Step::Check);
+    s.poll();
+}

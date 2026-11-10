@@ -217,6 +217,10 @@ pub struct ImportBankFileScreen {
     /// PR-5 S1: the changed row whose "Add it again" waits for a yes (its
     /// earlier item is already in the books).
     pub(crate) confirm_add: Option<u32>,
+    /// Q-PR5b: the date and amount of every row already imported into the
+    /// account (read once per account and preview).
+    existing: Option<(AccountId, Vec<(CalendarDate, rust_decimal::Decimal)>)>,
+    existing_task: Option<(AccountId, Task<Vec<(CalendarDate, rust_decimal::Decimal)>>)>,
     relink: bool,
     preview_task: Option<Task<BankImportOutcome>>,
     preview: Option<BankImportOutcome>,
@@ -294,6 +298,8 @@ impl ImportBankFileScreen {
             layout_changed: false,
             choices: BTreeMap::new(),
             confirm_add: None,
+            existing: None,
+            existing_task: None,
             relink: false,
             preview_task: None,
             preview: None,
@@ -612,6 +618,86 @@ impl ImportBankFileScreen {
         self.preview_trouble = None;
         self.choices.clear();
         self.confirm_add = None;
+        self.existing = None;
+        self.existing_task = None;
+    }
+
+    /// Q-PR5b: reads the rows already imported into the account (once per
+    /// preview of a file with new rows): the demo's store, or the engine's
+    /// Bank Feed list newest first back to the file's first date (at most
+    /// 2,000 rows; an error leaves the line out).
+    fn read_existing(&mut self) {
+        let Some(account) = self.account else {
+            return;
+        };
+        let has_new = self.preview.as_ref().is_some_and(|p| p.counts.new > 0);
+        if !has_new
+            || self.existing.as_ref().is_some_and(|(a, _)| *a == account)
+            || self
+                .existing_task
+                .as_ref()
+                .is_some_and(|(a, _)| *a == account)
+        {
+            return;
+        }
+        let since = self
+            .current_section()
+            .and_then(|s| s.rows.iter().map(|r| r.date).min());
+        if let Some(demo) = self.link.demo_state() {
+            let rows = demo.bank_feed.dated_amounts(account);
+            self.existing = Some((account, rows));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        let task = group
+            .read(&session, move |s| async move {
+                let f = s.feed();
+                let conns = f.connections().await?;
+                let Some(c) = conns
+                    .iter()
+                    .find(|c| c.account == Some(account))
+                    .map(|c| c.id)
+                else {
+                    return Ok(Vec::new());
+                };
+                let mut out = Vec::new();
+                for page in 0..4u32 {
+                    let q = cl_api::FeedQuery {
+                        connection: Some(c),
+                        limit: 500,
+                        offset: page * 500,
+                        ..cl_api::FeedQuery::default()
+                    };
+                    let p = f.list(&q).await?;
+                    let full = p.rows.len() == 500;
+                    let oldest = p.rows.last().map(|r| r.date);
+                    out.extend(p.rows.iter().map(|r| (r.date, r.amount.as_decimal())));
+                    if !full || oldest.zip(since).is_some_and(|(o, s)| o < s) {
+                        break;
+                    }
+                }
+                Ok(out)
+            })
+            .ok();
+        self.existing_task = task.map(|t| (account, Task::Pending(t)));
+    }
+
+    /// Q-PR5b: new rows with the same date and amount as rows already
+    /// imported (the preview's information line).
+    pub(crate) fn look_alikes(&self) -> usize {
+        let (Some(p), Some((a, existing)), Some(req)) = (
+            self.preview.as_ref(),
+            self.existing.as_ref(),
+            self.request(),
+        ) else {
+            return 0;
+        };
+        if *a != req.account {
+            return 0;
+        }
+        flow::same_day_amount(p, &req.rows, existing)
     }
 
     pub(crate) fn current_section(&self) -> Option<&cl_import::Section> {
@@ -1348,8 +1434,21 @@ impl ImportBankFileScreen {
         if let Some(r) = self.preview_task.as_mut().and_then(Task::try_take) {
             self.preview_task = None;
             match r {
-                Ok(o) => self.preview = Some(o),
+                Ok(o) => {
+                    self.preview = Some(o);
+                    self.read_existing();
+                }
                 Err(e) => self.preview_trouble = Some(Self::trouble(&e)),
+            }
+        }
+        if let Some(r) = self
+            .existing_task
+            .as_mut()
+            .and_then(|(_, t)| Task::try_take(t))
+        {
+            let account = self.existing_task.take().map(|(a, _)| a);
+            if let (Ok(rows), Some(a)) = (r, account) {
+                self.existing = Some((a, rows));
             }
         }
         if let Some(r) = self.send_task.as_mut().and_then(Task::try_take) {
@@ -1598,6 +1697,7 @@ impl Screen for ImportBankFileScreen {
             m.insert("earlier".into(), earlier.unwrap_or(Value::Null));
             m.insert("confirm_add".into(), json!(self.confirm_add));
             m.insert("not_replaced".into(), json!(self.not_replaced()));
+            m.insert("look_alikes".into(), json!(self.look_alikes()));
         }
         state
     }

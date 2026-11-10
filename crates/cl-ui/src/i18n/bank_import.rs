@@ -152,6 +152,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bankimport.replace", "Replace waiting item"),
     ("bankimport.add_as_new", "Add as new"),
     ("bankimport.add_again", "Add it again"),
+    ("bankimport.preview.same_day_amount", "{n} new rows have the same date and amount as rows already imported. If you changed the file, check them before you send."),
+    ("bankimport.preview.same_day_amount.one", "1 new row has the same date and amount as a row already imported. If you changed the file, check it before you send."),
     ("bankimport.changed.add_again_ask", "The earlier one is already in your books. Adding this one too records the transaction twice. Add it again?"),
     ("bankimport.changed.add_again_no", "Cancel"),
     ("bankimport.changed.add_again_yes", "Add it again"),

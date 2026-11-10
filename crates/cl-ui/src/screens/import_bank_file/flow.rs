@@ -356,6 +356,25 @@ pub fn build_request(
     }
 }
 
+/// Q-PR5b: the new rows of a preview with the same date and amount (feed
+/// sign) as a row already imported into the account. An edited re-import
+/// (descriptions changed in a spreadsheet) or a "pending then posted"
+/// download shows here before it is sent; nothing is flagged by it.
+#[must_use]
+pub fn same_day_amount(
+    outcome: &BankImportOutcome,
+    rows: &[cl_api::BankImportRow],
+    existing: &[(CalendarDate, Decimal)],
+) -> usize {
+    outcome
+        .rows
+        .iter()
+        .filter(|r| r.status == ImportRowStatus::New)
+        .filter_map(|r| rows.iter().find(|x| x.line == r.line))
+        .filter(|x| existing.iter().any(|(d, a)| *d == x.date && *a == x.amount))
+        .count()
+}
+
 /// The rows a commit adds, given the owner's choices.
 #[must_use]
 pub fn rows_to_send(outcome: &BankImportOutcome, choices: &BTreeMap<u32, RowChoice>) -> usize {

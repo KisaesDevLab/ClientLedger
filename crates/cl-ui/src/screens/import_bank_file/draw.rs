@@ -1127,6 +1127,16 @@ impl ImportBankFileScreen {
             );
         }
         self.problems_ui(ui, tokens);
+        // Q-PR5b: new rows that share a date and amount with rows already
+        // imported (an edited re-import shows before it is sent).
+        let same = self.look_alikes();
+        if same > 0 {
+            form::hint(
+                ui,
+                tokens,
+                &t_count("bankimport.preview.same_day_amount", same, &[]),
+            );
+        }
         match self.changed_ui(ui, tokens, style, &p) {
             Some(ChangedClick::Choose(line, c)) => {
                 self.confirm_add = None;

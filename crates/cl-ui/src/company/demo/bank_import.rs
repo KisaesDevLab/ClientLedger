@@ -232,6 +232,20 @@ impl DemoBankFeed {
         self.slow = slow;
     }
 
+    /// The date and amount (feed sign) of every item imported into
+    /// `account`, waiting or not (Q-PR5b's information line).
+    #[must_use]
+    pub fn dated_amounts(
+        &self,
+        account: AccountId,
+    ) -> Vec<(cl_core::CalendarDate, rust_decimal::Decimal)> {
+        self.items
+            .iter()
+            .filter(|i| i.account == account)
+            .map(|i| (i.date, i.amount))
+            .collect()
+    }
+
     /// Items waiting in the feed (all accounts).
     #[must_use]
     pub fn waiting(&self) -> usize {
