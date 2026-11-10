@@ -416,6 +416,10 @@ pub struct LinesState<L> {
     /// Q-PR4d: the last name typed in the name column that isn't on the
     /// list (its line and text), for the screen's Quick Add prompt.
     unknown_name: Option<(RowKey, String)>,
+    /// Bumped when the lists arrive or change, so the open cell shows the
+    /// names they give (P27 QA-14: a line filled before the accounts came
+    /// kept an empty Account cell).
+    lists_gen: u64,
 }
 
 struct View<'a, L> {
@@ -464,7 +468,10 @@ fn picked<L: LineLists>(lists: &L, list: ListId, id: Option<u64>) -> CellValue<'
 
 impl<L: LineLists> RowModel for View<'_, L> {
     fn revision(&self) -> u64 {
-        self.form.revision()
+        // The open cell's text comes from the lines and the lists.
+        self.form
+            .revision()
+            .wrapping_add(self.a.lists_gen.wrapping_shl(32))
     }
     fn row_count(&self) -> usize {
         self.lines().len()
@@ -738,6 +745,7 @@ impl<L: LineLists + 'static> LinesGrid<L> {
                     suggested: std::collections::BTreeMap::new(),
                     accepted: Vec::new(),
                     unknown_name: None,
+                    lists_gen: 0,
                 },
                 grid,
                 t(spec.label),
@@ -797,6 +805,14 @@ impl<L: LineLists + 'static> LinesGrid<L> {
     /// The pickers changed.
     pub fn set_lists(&mut self, lists: Arc<L>) {
         self.form.adapter_mut().lists = lists;
+        // A cell being typed in keeps its text; else it shows the names
+        // the new lists give (P27 QA-14).
+        if !self.form.grid().has_uncommitted_edit() {
+            let a = self.form.adapter_mut();
+            a.lists_gen = a.lists_gen.wrapping_add(1);
+            let lists = Arc::clone(&self.form.adapter().lists);
+            self.form.rebind_view(&*lists);
+        }
     }
 
     /// Makes `cols` read-only (all others editable).
@@ -1146,6 +1162,42 @@ mod tests {
         assert_eq!(model.cell(0, L_CREDIT), CellValue::Empty);
         drop(model);
         assert_eq!(form.current().lines[0].amount, Some(money("40.00")));
+    }
+
+    /// P27 QA-14: lists that arrive after the lines were filled change the
+    /// grid's revision, so the open cell takes the account's name (a card
+    /// pay check showed an empty Account cell); a cell being typed in is
+    /// left alone.
+    #[test]
+    fn lists_arriving_later_refresh_the_open_cell() {
+        let chart = crate::company::demo::chart();
+        let card = chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some("2050"))
+            .map(|a| a.id)
+            .expect("2050");
+        let seed = FormLine {
+            account: Some(card),
+            amount: Some(money("8.00")),
+            ..FormLine::blank(RowKeyGen::new().next_key())
+        };
+        let mut g = LinesGrid::new(
+            &crate::screens::write_check::LINES,
+            Arc::new(RegisterLists::default()),
+            vec![seed],
+        );
+        let mut form = FormState::new(g.value().clone());
+        let before = g.form_mut().adapter_mut().model(&mut form).revision();
+        let mut lists = RegisterLists::default();
+        lists.set_accounts(&chart);
+        g.set_lists(Arc::new(lists));
+        let model = g.form_mut().adapter_mut().model(&mut form);
+        assert_ne!(model.revision(), before, "the open cell is resynced");
+        assert!(
+            matches!(model.cell(0, L_ACCOUNT), CellValue::Ref { ref display, .. } if display.contains("2050")),
+            "{:?}",
+            model.cell(0, L_ACCOUNT)
+        );
     }
 
     #[test]

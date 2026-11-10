@@ -2318,3 +2318,35 @@ fn a_card_payment_fill_stays_unsaved_when_the_bank_arrives_later() {
     assert_eq!(s.header.current().date, Some(statement));
     assert_eq!(s.header.current().amount, Some(money("2.00")));
 }
+
+/// P27 QA-14: the card pay step's check, filled before the accounts
+/// arrive, shows the card account on its line once they do.
+#[test]
+fn a_card_payment_line_shows_its_account_when_the_accounts_arrive_later() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let card = account(&s, "2050");
+    let mut f = s.header.current().clone();
+    f.bank = None;
+    s.header.load(f);
+    s.start_load();
+    s.fill_card_payment(&crate::screens::reconcile::CardPay {
+        card,
+        amount: money("8.00"),
+        date: today(),
+    });
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..4 {
+        nodes = frame_with(&mut s, &ctx, vec![]);
+    }
+    let cell = nodes
+        .iter()
+        .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Account, line 1")))
+        .map(|(_, n)| n.value().unwrap_or_default().to_string())
+        .expect("the line's Account cell");
+    assert!(cell.contains("2050"), "Account cell: {cell:?}");
+}
