@@ -188,6 +188,10 @@ pub enum OpenPayload {
     /// P22: Assess Finance Charges on this date (Statements' "Assess
     /// finance charges first?").
     OnDate(cl_core::CalendarDate),
+    /// P27 (Q-60, Q-P27g): pay a reconciled card's statement balance
+    /// (Write Check, Enter Bill or Transfer Funds), prefilled with the
+    /// printed balance and the card account; the payee is left empty.
+    CardPayment(crate::screens::reconcile::CardPay),
     /// Q-PR4d: Set Up from a name field's Quick Add prompt: the center's
     /// new-name form prefilled with the typed name; when it is saved the
     /// window closes and the form comes back to the front.

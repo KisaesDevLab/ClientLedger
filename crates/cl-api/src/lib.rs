@@ -43,7 +43,7 @@ pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint,
 pub use errors::{
     ApiError, AuthFailure, ClosedPeriod, ConflictDetails, ConflictReason, DEPOSIT_LINKS_DROPPED,
     ErrorCode, FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
-    is_deposit_links_dropped,
+    is_deposit_links_dropped, reconciled_statement_date,
 };
 // A04 WP-D: the demo engine's refusals read as the engine's.
 pub use errors::engine_refusal;
@@ -103,6 +103,13 @@ pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, Cont
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::reconcile::Recheck;
+pub use resources::reconciliations::{
+    BeginningDrift, ClearedSide, Continuity, DiscrepancyReport, DiscrepancyRow, HeldCharge,
+    LINES_MAX, ReconHistoryRow, ReconLine, ReconPatch, ReconReport, ReconStart, ReconStatus,
+    ReconcileRefusal, Reconciliation, ReconciliationId, Reconciliations, ReportLine,
+    StatementCharge, UndoMode, last_finished_date, reconcile_refusal, reconciliation_from,
+    report_from as reconciliation_report_from, screen_supported as reconcile_screen_supported,
+};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::register::{
     Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,

@@ -146,9 +146,10 @@ mod statements;
 mod inventory;
 // P25: Import Bank File.
 mod bank_import;
+mod reconcile;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 49] = [
+const TABLES: [&[(&str, &str)]; 50] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -198,6 +199,7 @@ const TABLES: [&[(&str, &str)]; 49] = [
     finance_charges::ENGLISH,
     inventory::ENGLISH,
     bank_import::ENGLISH,
+    reconcile::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -343,6 +345,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.meta.never_backed_up", "Not backed up yet"),
     ("open.meta.transactions", "{n} transactions"),
     ("open.meta.sample", "Made-up data to try things safely \u{b7} Reset any time"),
+    ("open.meta.sample_password", "Books closed through 09/30/2026; closing-date password: {password}"),
     ("open.meta.new", "Just created"),
     ("open.setup.title", "Set up ClientLedger"),
     ("open.setup.intro", "This creates the owner account for this computer. You sign in with it; nothing is sent anywhere."),
@@ -671,7 +674,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.ask_owner", "Ask the owner to set it."),
     ("error.api.closing_password_attempts", "Too many wrong closing-date passwords."),
     ("error.api.account_password_wrong", "That sign-in password isn't right."),
-    ("error.api.conflict_reconciled", "This transaction is part of a finished reconciliation, so it can't be changed that way."),
+    ("error.api.conflict_reconciled", "This transaction is part of a finished bank reconciliation, so its date and its bank or card amount can't change, and it can't be voided or deleted."),
+    ("error.api.conflict_reconciled_dated", "This transaction is part of your finished bank reconciliation for the statement dated {date}, so its date and its bank or card amount can't change, and it can't be voided or deleted."),
+    ("fix.api.reconciled", "You can still change the category, memo or tags. To change the rest, use Undo last reconciliation in Banking \u{203a} Reconcile for that account, then reconcile again."),
     ("error.api.conflict_deleted", "This transaction was already deleted."),
     ("error.api.delete_unsupported", "This kind of transaction can't be deleted."),
     ("error.api.delete_linked", "Other transactions depend on this one, so it can't be deleted."),

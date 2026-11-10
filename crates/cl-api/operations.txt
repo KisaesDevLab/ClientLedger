@@ -434,3 +434,14 @@ PUT     /api/v1/practice/conditional-rules/{id} pre-handler-only
 DELETE  /api/v1/practice/conditional-rules/{id} pre-handler-only
 GET     /api/v1/practice/conditional-rules/suggestions idempotent
 POST    /api/v1/practice/conditional-rules/suggestions/dismiss pre-handler-only
+# P27: Reconcile (U-188 to U-191; not keyed, a retried complete or undo gets a 409)
+POST    /api/v1/banking/reconciliations         pre-handler-only
+GET     /api/v1/banking/reconciliations/{id}    idempotent
+PUT     /api/v1/banking/reconciliations/{id}/lines pre-handler-only
+PATCH   /api/v1/banking/reconciliations/{id}    pre-handler-only
+POST    /api/v1/banking/reconciliations/{id}/refresh pre-handler-only
+POST    /api/v1/banking/reconciliations/{id}/complete pre-handler-only
+POST    /api/v1/banking/reconciliations/{id}/undo pre-handler-only
+POST    /api/v1/banking/reconciliations/{id}/cancel pre-handler-only
+GET     /api/v1/reports/reconciliation-detail   idempotent
+GET     /api/v1/reports/reconciliation-discrepancy idempotent

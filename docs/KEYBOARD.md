@@ -131,6 +131,19 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Insert` | Insert a Split or Fee Line | `feed.insert_line` |
 | `Ctrl+Delete` | Delete a Split or Fee Line | `feed.delete_line` |
 
+## In Reconcile
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `Space` | Check or Uncheck the Line | `reconcile.tick` |
+| `Tab` | Switch Pane | `reconcile.switch_pane` |
+| `Shift+Tab` | Switch Pane Back | `reconcile.switch_pane_back` |
+| `Down` | Next Line | `reconcile.next` |
+| `Up` | Previous Line | `reconcile.prev` |
+| `Ctrl+Shift+A` | Mark All | `reconcile.mark_all` |
+| `Ctrl+Shift+U` | Unmark All | `reconcile.unmark_all` |
+| `Ctrl+Enter` | Reconcile Now | `reconcile.finish` |
+
 ## Always the same in forms and grids
 
 | Keys | Action |

@@ -353,6 +353,17 @@ pub const COMMANDS: &[Command] = &[
     cmd("feed.accept_selected", "Accept Selected Bank Lines", None, 10, key(Mods::CMD, Key::Enter), Scope::Feed),
     cmd("feed.insert_line", "Insert a Split or Fee Line", None, 10, key(Mods::CMD, Key::Insert), Scope::Feed),
     cmd("feed.delete_line", "Delete a Split or Fee Line", None, 10, key(Mods::CMD, Key::Delete), Scope::Feed),
+    // P27 Reconcile panes (mockup status bar: Space, Tab, Ctrl+E; Ctrl+E
+    // is Edit Transaction, which the window answers by opening the line).
+    cmd("reconcile.tick", "Check or Uncheck the Line", None, 11, key(Mods::NONE, Key::Space), Scope::Reconcile),
+    cmd("reconcile.switch_pane", "Switch Pane", None, 11, key(Mods::NONE, Key::Tab), Scope::Reconcile),
+    cmd("reconcile.switch_pane_back", "Switch Pane Back", None, 11, key(Mods::SHIFT, Key::Tab), Scope::Reconcile),
+    cmd("reconcile.next", "Next Line", None, 11, key(Mods::NONE, Key::Down), Scope::Reconcile),
+    cmd("reconcile.prev", "Previous Line", None, 11, key(Mods::NONE, Key::Up), Scope::Reconcile),
+    cmd("reconcile.mark_all", "Mark All", None, 11, ctrl_shift('A'), Scope::Reconcile),
+    cmd("reconcile.unmark_all", "Unmark All", None, 11, ctrl_shift('U'), Scope::Reconcile),
+    cmd("reconcile.finish", "Reconcile Now", None, 11, key(Mods::CMD, Key::Enter), Scope::Reconcile),
+    cmd("reconcile.leave", "Leave for Now", None, 11, None, Scope::Reconcile),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -431,7 +442,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.loan_payment", "Loan Payment", Some(Menu::Banking), 0, None),
     // Bulk Entry (P15A): no global shortcut (Q-P15Ah)
     built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
-    screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
+    built("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E')),
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
     built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
@@ -622,6 +633,18 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_feed_reset",
         "Reset Demo Bank Feed Review (developer)",
     ),
+    dev_action(
+        "dev.demo_reconcile_reset",
+        "Reset Demo Reconciliations (developer)",
+    ),
+    dev_action(
+        "dev.demo_reconcile_edit",
+        "Recategorize a Reconciled Demo Deposit (developer)",
+    ),
+    dev_action(
+        "dev.demo_reconcile_close_books",
+        "Close the Demo Books Through 11/01 for Reconcile (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -768,6 +791,8 @@ mod tests {
             "banking.import_file",
             // P26
             "banking.feed",
+            // P27
+            "banking.reconcile",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

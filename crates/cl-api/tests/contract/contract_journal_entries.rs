@@ -50,7 +50,7 @@ fn je_line(account: AccountId, debit: &str, credit: &str, contact: Option<Contac
     json!({ "accountId": account, "debit": debit, "credit": credit, "contactId": contact })
 }
 
-fn customer(h: &Harness, s: &Session) -> ContactId {
+pub fn customer(h: &Harness, s: &Session) -> ContactId {
     h.run(s.contacts().create(
         &NewContact {
             fields: ContactFields::named(ContactType::Customer, unique("Synthetic Customer")),

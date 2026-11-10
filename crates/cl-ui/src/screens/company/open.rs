@@ -806,7 +806,15 @@ fn row_from_entry(e: CompanyEntry) -> Row {
         parts.push(t_with("open.meta.transactions", &[("n", &group_digits(n))]));
     }
     if e.is_sample {
-        parts = vec![t("open.meta.sample")];
+        // Q-P27q: the practice company's closing-date password, shown
+        // where the company is offered (made-up, as its data is).
+        parts = vec![
+            t("open.meta.sample"),
+            t_with(
+                "open.meta.sample_password",
+                &[("password", cl_company::sample::SAMPLE_CLOSING_PASSWORD)],
+            ),
+        ];
     }
     Row {
         tenant_id: e.tenant_id,

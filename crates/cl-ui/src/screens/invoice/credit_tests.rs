@@ -391,7 +391,13 @@ fn a_new_receipt_remembers_the_last_deposit_to() {
         .books
         .accounts
         .iter()
-        .find(|a| a.is_active && a.fields.detail_type.as_deref() == Some("bank"))
+        .find(|a| {
+            a.is_active
+                && a.fields
+                    .detail_type
+                    .as_deref()
+                    .is_some_and(cl_model::register::is_bank_detail)
+        })
         .map(|a| a.id)
         .expect("a bank");
     ctx.data_mut(|d| d.insert_temp(super::credit::last_deposit_id(), Some(bank)));

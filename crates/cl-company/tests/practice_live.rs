@@ -149,6 +149,52 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
     // load_into leaves the new company open in the session.
     let _ = created;
 
+    // P27: 1010 is reconciled through 09/30 at the sample's cleared balance,
+    // so the next Begin starts at 71,436.20.
+    if cl_api::reconcile_screen_supported(&client.capabilities()) {
+        let op = account(&s, "1010").await;
+        let history = s.reconciliations().history(op).await.expect("history");
+        assert_eq!(history.len(), 1, "one finished reconciliation");
+        assert_eq!(history[0].status, cl_api::ReconStatus::Complete);
+        assert_eq!(history[0].statement_date, d(2026, 9, 30));
+        let next = s
+            .reconciliations()
+            .start(&cl_api::ReconStart {
+                account: op,
+                statement_date: d(2026, 10, 31),
+                statement_ending_balance: m("0"),
+                service_charge: None,
+                interest: None,
+            })
+            .await
+            .expect("begin October");
+        assert_eq!(next.beginning_balance, m("71436.20"));
+        s.reconciliations().cancel(next.id).await.expect("cancel");
+    }
+
+    // Q-P27p: the sample's checks are real numbered checks, so Write Check's
+    // next number on 1010 is the demo's 4418 (not the engine's 1001).
+    let op = account(&s, "1010").await;
+    let settings = s.checks().settings().await.expect("check settings");
+    assert_eq!(settings.next_for(op), Some(4418), "next check number");
+    let checks = s
+        .checks()
+        .list(Some(op), None, None, cl_api::PageRequest::first_max())
+        .await
+        .expect("checks");
+    assert!(
+        checks.iter().any(|c| c.number == Some(4417)),
+        "check 4417 is a check"
+    );
+
+    // Q-P27q: the books are closed through 09/30 with a password.
+    let closed = cl_api::Capabilities::CLOSING_PASSWORD;
+    if client.capabilities().has(closed) {
+        let st = s.closing_password_status().await.expect("closing status");
+        assert_eq!(st.closing_date, Some(d(2026, 9, 30)));
+        assert!(st.password_set, "the practice password is set");
+    }
+
     // The templates and their group, as templates.json has them.
     let mut templates = s.templates().list_all().await.expect("templates");
     templates.sort_by(|a, b| a.name.cmp(&b.name));
@@ -194,7 +240,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
     assert!(je_t.schedule.is_none(), "Don't remind me");
 
     // The first catch-up, as the app runs it on open: the clock is today,
-    // or the story date once that has passed (both give 09/15 and 10/15).
+    // or the story date once that has passed (both reach 10/15).
     let story = d(2026, 11, 4);
     let as_of = today().min(story);
     assert!(
@@ -212,19 +258,31 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
         .map(|p| p.date)
         .collect();
     posted.sort();
-    assert_eq!(
-        posted,
-        [d(2026, 9, 15), d(2026, 10, 15)],
-        "both missed dates"
-    );
+    // Q-P27q: 09/15 is in the closed period, so it is skipped and only
+    // 10/15 posts (as in the demo); without closing-password-v1 there is no
+    // closing date and both post.
+    let locked = client.capabilities().has(closed);
+    let (want, total): (&[CalendarDate], &str) = if locked {
+        (&[d(2026, 10, 15)], "49.00")
+    } else {
+        (&[d(2026, 9, 15), d(2026, 10, 15)], "98.00")
+    };
+    assert_eq!(posted, want, "the missed dates after the closing date");
     assert!(
         first.posted.iter().all(|p| p.template == software_t.id),
         "only the automatic template posts"
     );
-    assert!(
-        !first.skipped.iter().any(|k| k.template == software_t.id),
-        "no closing date: nothing skipped"
-    );
+    let skipped: Vec<CalendarDate> = first
+        .skipped
+        .iter()
+        .filter(|k| k.template == software_t.id)
+        .map(|k| k.date)
+        .collect();
+    if locked {
+        assert_eq!(skipped, [d(2026, 9, 15)], "the closed date is skipped");
+    } else {
+        assert!(skipped.is_empty(), "no closing date: nothing skipped");
+    }
     assert!(
         first.reminders.iter().all(|r| r.template != software_t.id),
         "an automatic template is not a reminder"
@@ -232,13 +290,13 @@ async fn scenario(client: &Client, password: &Secret, scratch: &std::path::Path)
     let after = (balance(&s, card).await, balance(&s, software).await);
     assert_eq!(
         after.1.checked_sub(before.1),
-        Ok(m("98.00")),
-        "software +98.00 exactly"
+        Ok(m(total)),
+        "software up by exactly the posted dates"
     );
     assert_eq!(
         before.0.checked_sub(after.0).map(Money::abs),
-        Ok(m("98.00")),
-        "the card moves by 98.00 exactly"
+        Ok(m(total)),
+        "the card moves by exactly the posted dates"
     );
     // Again (a second open): nothing more.
     let again = run_due(&s, as_of).await;

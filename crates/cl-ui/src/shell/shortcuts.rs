@@ -87,6 +87,7 @@ fn scope_key(s: Scope) -> &'static str {
         Scope::Viewer => "viewer",
         Scope::List => "list",
         Scope::Feed => "feed",
+        Scope::Reconcile => "reconcile",
     }
 }
 

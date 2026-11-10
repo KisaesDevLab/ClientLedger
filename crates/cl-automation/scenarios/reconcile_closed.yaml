@@ -1,0 +1,41 @@
+# Reconcile in a closed period (Q-P27d; Q-334 "entries count as Create"):
+# the demo books closed through 11/01, the 10/31 service charge and
+# interest are locked, so Reconcile now asks for the closing date password
+# (demo: demo-close) before it posts them. Synthetic.
+name: reconcile_closed
+description: Finish with charges in a closed period needs the closing password.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.reconcile
+  - command: dev.demo_reconcile_reset
+  - command: dev.demo_reconcile_close_books
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - click: {role: text_input, label: Ending balance}
+  - type: {text: "86902.13"}
+  - click: {role: text_input, label: Service charge}
+  - type: {text: "48"}
+  - click: {role: text_input, label: Interest earned}
+  - type: {text: "12.84"}
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.posting_locked, equals: true}
+  - click: {role: check_box, label: "Cleared: 10/27 4409 Monett Tire & Lube 412.18"}
+  - click: {role: button, label: Reconcile now}
+  - assert_state: {key: screen.dialog, equals: closingpassword}
+  - screenshot: password
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: password-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  - click: {role: password_input, label: Closing date password}
+  - type: {text: "demo-close"}
+  - click: {role: button, label: Reconcile with the password}
+  - assert_state: {key: screen.last, equals: finished}
+  - command: dev.demo_reconcile_reset
+  - command: file.close_window

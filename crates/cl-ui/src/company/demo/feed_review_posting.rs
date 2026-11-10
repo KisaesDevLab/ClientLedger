@@ -27,7 +27,7 @@ use cl_core::{CalendarDate, Money, Secret};
 use serde_json::json;
 
 use super::{DemoState, Prior, Row, conflict, not_pending, settle};
-use crate::company::demo::register::{DemoLedger, DemoPosting, check_closing, last_reconciled};
+use crate::company::demo::register::{DemoLedger, DemoPosting, check_closing};
 use crate::company::demo::{deposits, journal};
 
 /// How far a demo match candidate may be from the bank date (days).
@@ -553,10 +553,11 @@ fn fee_account_ok(chart: &[cl_api::Account], account: AccountId) -> bool {
         return false;
     };
     let (ar, ap) = journal::ar_ap(chart);
-    let banky = matches!(
-        a.fields.detail_type.as_deref(),
-        Some("bank" | "cash" | "credit_card")
-    );
+    let banky = a
+        .fields
+        .detail_type
+        .as_deref()
+        .is_some_and(|d| d == "credit_card" || cl_model::register::is_bank_detail(d));
     let system = matches!(
         a.system_tag.as_deref(),
         Some("payments_clearing" | "accounts_receivable" | "accounts_payable")
@@ -1009,10 +1010,13 @@ pub fn undo(
             code: code.into(),
             details: cl_api::ConflictDetails::default(),
         };
-        if entry
-            .as_ref()
-            .is_some_and(|e| e.cleared && e.date <= last_reconciled())
-        {
+        if entry.as_ref().is_some_and(|e| {
+            e.cleared
+                && state
+                    .ledger
+                    .reconciled_through()
+                    .is_some_and(|r| e.date <= r)
+        }) {
             out.failures.push(fail(AcceptFailure::UNDO_RECONCILED));
             continue;
         }

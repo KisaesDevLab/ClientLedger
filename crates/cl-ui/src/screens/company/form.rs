@@ -495,7 +495,7 @@ pub fn actions(ui: &mut Ui, primary: &str, others: &[&str]) -> Option<usize> {
 /// Shows an owner-facing error inline (message plus fix).
 pub fn inline_error(ui: &mut Ui, tokens: &Tokens, error: &dyn cl_core::OwnerFacing) {
     let m = error.owner_message();
-    let mut text = t(m.key);
+    let mut text = crate::errors::owner_text(m.key, error.owner_date());
     if let Some(fix) = m.suggestion_key {
         text.push(' ');
         text.push_str(&t(fix));

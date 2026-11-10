@@ -1,0 +1,1007 @@
+//! The Reconcile window (step 2), per the `Reconcile` mockup: header,
+//! the bank-file banner (Q-100), "Hide transactions after the statement
+//! date" (Q-P27c), two panes, the summary and difference cards, Reconcile
+//! now only at 0.00.
+//!
+//! Every figure is the engine's; the panes count rows but never add.
+
+use cl_api::{HeldCharge, ReconLine};
+use cl_core::ids::JournalLineId;
+use cl_model::reconcile::{Pane, ReconKind, can_finish, display, hint};
+use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui, Vec2};
+
+use super::ReconcileScreen;
+use crate::i18n::{t, t_with};
+use crate::screens::company::form;
+use crate::theme::Tokens;
+
+const ROW_H: f32 = 32.0;
+
+/// The hint under the difference ("One unchecked item equals …"), if any.
+pub(crate) fn hint_text(s: &ReconcileScreen) -> Option<String> {
+    let rec = s.rec.as_ref()?;
+    let unchecked: Vec<&ReconLine> = s
+        .shown()
+        .filter(|l| !s.queue.ticked(l.journal_line))
+        .collect();
+    let id = hint(
+        unchecked.iter().map(|l| (l.journal_line, l.amount)),
+        rec.difference,
+    )?;
+    let l = unchecked.iter().find(|l| l.journal_line == id)?;
+    let payee = who(l).to_string();
+    Some(match (&l.number, l.txn_type.as_str()) {
+        (Some(n), "check") => t_with("reconcile.hint.check", &[("number", n), ("payee", &payee)]),
+        _ => t_with(
+            "reconcile.hint.other",
+            &[("payee", &payee), ("date", &short_date(l.date))],
+        ),
+    })
+}
+
+/// Why Reconcile now is off: a difference that rounds to 0.00 but isn't
+/// zero says so (Q-P27l); otherwise the usual help.
+pub(crate) fn finish_help_key(difference: cl_core::Money) -> &'static str {
+    if cl_model::reconcile::sub_cent(difference) {
+        "reconcile.finish_help.sub_cent"
+    } else {
+        "reconcile.finish_help"
+    }
+}
+
+/// The words in the Payee column: the payee, else the memo (a journal
+/// entry has only its memo; QA-2).
+pub(crate) fn who(l: &ReconLine) -> &str {
+    l.payee.as_deref().or(l.memo.as_deref()).unwrap_or_default()
+}
+
+/// The memo shown after the payee, when there is a payee and a memo.
+fn memo_after(l: &ReconLine) -> Option<&str> {
+    l.payee.as_ref()?;
+    l.memo.as_deref().filter(|m| Some(*m) != l.payee.as_deref())
+}
+
+/// A row's AccessKit label: date, ref, payee (or memo) and amount, so
+/// rows can be told apart without seeing them (QA-2).
+pub(crate) fn row_label(l: &ReconLine) -> String {
+    let label = t_with(
+        "reconcile.a11y.cleared",
+        &[
+            ("date", &short_date(l.date)),
+            ("ref", l.number.as_deref().unwrap_or_default()),
+            ("payee", who(l)),
+            ("amount", &display(l.amount.abs())),
+        ],
+    );
+    label.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn short_date(d: cl_core::CalendarDate) -> String {
+    let full = crate::shell::us_date(d);
+    full.get(..5).unwrap_or(&full).to_string()
+}
+
+fn mono(text: &str, color: Color32) -> RichText {
+    RichText::new(text).monospace().color(color)
+}
+
+/// Draws the window.
+pub(crate) fn draw(s: &mut ReconcileScreen, ui: &mut Ui) {
+    let tokens = Tokens::of(ui.ctx());
+    let Some(rec) = s.rec.clone() else {
+        return;
+    };
+    let kind = s.kind();
+    s.row_focused = false;
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(20, 16))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 12.0;
+            header(s, ui, &tokens, &rec, kind);
+            banner(s, ui, &tokens);
+            if let Some(d) = rec.drift {
+                form::inline_warning(
+                    ui,
+                    &tokens,
+                    &t_with(
+                        "reconcile.drift",
+                        &[("amount", &display(kind.shown(d.difference)))],
+                    ),
+                );
+            }
+            if let Some(c) = rec.continuity {
+                form::inline_warning(
+                    ui,
+                    &tokens,
+                    &t_with(
+                        "reconcile.continuity",
+                        &[("amount", &display(kind.shown(c.delta)))],
+                    ),
+                );
+            }
+            if let Some(n) = s.notice {
+                form::hint(ui, &tokens, &t(n));
+            }
+            if let Some(e) = &s.error {
+                form::inline_error(ui, &tokens, e);
+                if ui.button(t("reconcile.retry")).clicked() {
+                    s.error = None;
+                    let id = rec.id;
+                    s.refresh_after_error(id);
+                }
+            }
+            controls(s, ui);
+            let bottom = 210.0;
+            let pane_h = (ui.available_height() - bottom).max(160.0);
+            ui.allocate_ui(Vec2::new(ui.available_width(), pane_h), |ui| {
+                panes(s, ui, &tokens, &rec, kind, pane_h);
+            });
+            cards(s, ui, &tokens, &rec, kind);
+            ui.horizontal(|ui| {
+                for (k, what) in [
+                    ("Space", "reconcile.keys.check"),
+                    ("Tab", "reconcile.keys.pane"),
+                    ("Ctrl+E", "reconcile.keys.open"),
+                ] {
+                    ui.label(mono(k, tokens.text_secondary).size(11.0));
+                    ui.label(
+                        RichText::new(t(what))
+                            .size(12.0)
+                            .color(tokens.text_secondary),
+                    );
+                    ui.add_space(10.0);
+                }
+            });
+        });
+    // Where the keyboard is: on a control outside the panes, Tab and Space
+    // are egui's (the window's scope follows, P27 keyboard fix).
+    let focused = ui.memory(|m| m.focused().is_some());
+    s.off_panes = focused && !s.row_focused;
+    s.leave_panes = None;
+}
+
+/// A control the keyboard lands on when Tab (`forward`) or Shift+Tab
+/// leaves the panes takes the focus.
+fn take_leaving_focus(s: &ReconcileScreen, r: &egui::Response, forward: bool) {
+    if s.leave_panes == Some(forward) {
+        r.request_focus();
+        r.scroll_to_me(None);
+    }
+}
+
+fn header(
+    s: &mut ReconcileScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    rec: &cl_api::Reconciliation,
+    kind: ReconKind,
+) {
+    ui.horizontal_wrapped(|ui| {
+        let acct = s.account_text(rec.account);
+        ui.label(
+            RichText::new(t_with("reconcile.title", &[("account", &acct)]))
+                .size(22.0)
+                .strong(),
+        );
+        ui.add_space(12.0);
+        ui.label(RichText::new(t("reconcile.statement_ending")).color(tokens.text_secondary));
+        ui.label(mono(
+            &crate::shell::us_date(rec.statement_date),
+            tokens.text_primary,
+        ));
+        ui.add_space(8.0);
+        ui.label(RichText::new(t("reconcile.ending_balance")).color(tokens.text_secondary));
+        ui.label(mono(
+            &display(kind.shown(rec.statement_ending_balance)),
+            tokens.text_primary,
+        ));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(t("reconcile.change_info")).clicked() {
+                s.change_info();
+            }
+        });
+    });
+}
+
+/// The bank-file banner shows only when a line came from a bank file or a
+/// bank-file entry was voided (QA minor: it showed with nothing imported).
+pub(crate) fn banner_shown(s: &ReconcileScreen) -> (bool, bool) {
+    (
+        s.lines.iter().any(|l| l.from_bank_feed),
+        s.entry_voided.is_some(),
+    )
+}
+
+fn banner(s: &ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
+    let (from_file, voided) = banner_shown(s);
+    if !from_file && !voided {
+        return;
+    }
+    egui::Frame::new()
+        .fill(tokens.info_tint)
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if from_file {
+                ui.horizontal_wrapped(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 3.5, tokens.info);
+                    ui.label(RichText::new(t("reconcile.banner")).color(tokens.info));
+                });
+            }
+            if let Some(n) = s.entry_voided {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(crate::i18n::t_count(
+                            "reconcile.banner.entry_voided",
+                            usize::try_from(n).unwrap_or(usize::MAX),
+                            &[],
+                        ))
+                        .color(tokens.info),
+                    );
+                    if ui.link(t("reconcile.banner.open_feed")).clicked() {
+                        s.link.push(crate::company::CompanyEvent::OpenWindow(
+                            cl_model::CommandId::new("banking.feed"),
+                        ));
+                    }
+                });
+            }
+        });
+}
+
+fn controls(s: &mut ReconcileScreen, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut s.hide_later, t("reconcile.hide_later"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(t("reconcile.goto")).clicked()
+                && let Some(a) = s.form.account
+            {
+                s.link.push(crate::company::CompanyEvent::OpenRegister(a));
+            }
+            if ui.button(t("reconcile.unmark_all")).clicked() {
+                s.mark_all(false);
+            }
+            let mark = ui.button(t("reconcile.mark_all"));
+            // Shift+Tab out of the first pane: the control just before it.
+            take_leaving_focus(s, &mark, false);
+            if mark.clicked() {
+                s.mark_all(true);
+            }
+        });
+    });
+}
+
+/// A pending charge row in a pane ("INT/SVC … (from statement info)").
+struct PendingRow {
+    code: &'static str,
+    label: String,
+    held: HeldCharge,
+}
+
+fn pending_rows(rec: &cl_api::Reconciliation, kind: ReconKind, p: Pane) -> Vec<PendingRow> {
+    let mut out = Vec::new();
+    if p == Pane::MoneyIn
+        && let Some(h) = rec.interest.filter(|h| h.posted.is_none())
+    {
+        out.push(PendingRow {
+            code: "INT",
+            label: t("reconcile.pending.interest"),
+            held: h,
+        });
+    }
+    if p == Pane::MoneyOut
+        && let Some(h) = rec.service_charge.filter(|h| h.posted.is_none())
+    {
+        let label = if kind == ReconKind::Card {
+            t("reconcile.pending.finance")
+        } else {
+            t("reconcile.pending.service")
+        };
+        out.push(PendingRow {
+            code: if kind == ReconKind::Card {
+                "FIN"
+            } else {
+                "SVC"
+            },
+            label,
+            held: h,
+        });
+    }
+    out
+}
+
+fn panes(
+    s: &mut ReconcileScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    rec: &cl_api::Reconciliation,
+    kind: ReconKind,
+    height: f32,
+) {
+    let hinted = {
+        let unchecked: Vec<(JournalLineId, cl_core::Money)> = s
+            .shown()
+            .filter(|l| !s.queue.ticked(l.journal_line))
+            .map(|l| (l.journal_line, l.amount))
+            .collect();
+        hint(unchecked, rec.difference)
+    };
+    let gap = 14.0;
+    let w = ((ui.available_width() - gap) / 2.0).max(300.0);
+    ui.horizontal_top(|ui| {
+        for p in [kind.left(), kind.right()] {
+            ui.allocate_ui_with_layout(
+                Vec2::new(w, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    pane(s, ui, tokens, rec, kind, p, hinted);
+                },
+            );
+            ui.add_space(gap - ui.spacing().item_spacing.x);
+        }
+    });
+}
+
+#[allow(clippy::too_many_lines)]
+fn pane(
+    s: &mut ReconcileScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    rec: &cl_api::Reconciliation,
+    kind: ReconKind,
+    p: Pane,
+    hinted: Option<JournalLineId>,
+) {
+    let lines: Vec<ReconLine> = s.pane_lines(p).into_iter().cloned().collect();
+    let pending = pending_rows(rec, kind, p);
+    let side = match p {
+        Pane::MoneyIn => rec.cleared_deposits,
+        Pane::MoneyOut => rec.cleared_payments,
+    };
+    let focused = s.pane == p;
+    egui::Frame::new()
+        .stroke(Stroke::new(
+            1.0,
+            if focused {
+                tokens.accent_border
+            } else {
+                tokens.border_default
+            },
+        ))
+        .corner_radius(6.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_min_height(ui.available_height());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            // Pane header: title and "n of m · total" from the engine.
+            egui::Frame::new()
+                .fill(tokens.surface_subtle)
+                .inner_margin(egui::Margin::symmetric(12, 9))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t(kind.pane_title(p))).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let n = lines.len() + pending.len();
+                            ui.label(mono(
+                                &t_with(
+                                    "reconcile.pane.count",
+                                    &[
+                                        ("n", &side.count.to_string()),
+                                        ("m", &n.to_string()),
+                                        ("total", &display(side.total.abs())),
+                                    ],
+                                ),
+                                tokens.text_primary,
+                            ));
+                        });
+                    });
+                });
+            ui.separator();
+            let cols = column_widths(ui.available_width());
+            header_row(ui, tokens, &cols);
+            if lines.is_empty() && pending.is_empty() {
+                ui.add_space(12.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new(t("reconcile.pane.empty")).color(tokens.text_secondary));
+                });
+                return;
+            }
+            let rows = lines.len() + pending.len();
+            // The cursor's row in this pane, when it is to take the focus.
+            let want = s
+                .focus_cursor
+                .then_some(())
+                .filter(|()| focused)
+                .and_then(|()| lines.iter().position(|l| s.cursor == Some(l.journal_line)));
+            egui::ScrollArea::vertical()
+                .id_salt(("reconcile_pane", p))
+                .auto_shrink([false, false])
+                .show_rows(ui, ROW_H, rows, |ui, range| {
+                    // A cursor row out of view is scrolled to; it takes the
+                    // focus once drawn (next frame).
+                    if let Some(i) = want.filter(|i| !range.contains(i)) {
+                        let rows_f = |n: usize| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
+                        let top = ui.cursor().top() + ROW_H * (rows_f(i) - rows_f(range.start));
+                        let row = egui::Rect::from_min_size(
+                            egui::pos2(ui.min_rect().left(), top),
+                            Vec2::new(ui.available_width(), ROW_H),
+                        );
+                        ui.scroll_to_rect(row, None);
+                    }
+                    for i in range {
+                        if let Some(l) = lines.get(i) {
+                            let on = s.queue.ticked(l.journal_line);
+                            let cursor = s.cursor == Some(l.journal_line) && focused;
+                            let row = line_row(
+                                ui,
+                                tokens,
+                                &cols,
+                                l,
+                                RowLook {
+                                    on,
+                                    hinted: hinted == Some(l.journal_line),
+                                    cursor,
+                                    take_focus: cursor && want.is_some(),
+                                },
+                            );
+                            if row.took_focus {
+                                s.focus_cursor = false;
+                            }
+                            if row.has_focus || row.took_focus {
+                                s.row_focused = true;
+                            }
+                            if row.clicked {
+                                s.pane = p;
+                                s.toggle(l.journal_line);
+                            } else if row.gained_focus && !cursor {
+                                s.pane = p;
+                                match s
+                                    .last_row_in(p)
+                                    .filter(|r| s.off_panes && s.cursor.is_none_or(|c| c != *r))
+                                {
+                                    // Tab or Shift+Tab from a control back
+                                    // into the pane: its last-used row
+                                    // takes the focus (P27 QA minor).
+                                    Some(last) if last != l.journal_line => {
+                                        s.cursor = Some(last);
+                                        s.focus_cursor = true;
+                                    }
+                                    // The focus came here another way (a
+                                    // click that didn't tick, a screen
+                                    // reader): the cursor follows it.
+                                    _ => {
+                                        s.cursor = Some(l.journal_line);
+                                        s.remember_row();
+                                    }
+                                }
+                            } else if row.has_focus && !cursor {
+                                // The keyboard moved the cursor elsewhere:
+                                // this box gives the focus up, so the
+                                // screen reader never names another row.
+                                ui.memory_mut(|m| m.surrender_focus(row.id));
+                            }
+                        } else if let Some(pr) = pending.get(i - lines.len()) {
+                            pending_row(ui, tokens, &cols, pr);
+                        }
+                    }
+                });
+        });
+}
+
+/// Check, Date, Ref, Payee, Amount widths.
+fn column_widths(w: f32) -> [f32; 5] {
+    let fixed = 38.0 + 72.0 + 64.0 + 110.0;
+    [38.0, 72.0, 64.0, (w - fixed - 12.0).max(80.0), 110.0]
+}
+
+fn header_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5]) {
+    ui.horizontal(|ui| {
+        ui.set_height(26.0);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let texts = [
+            "\u{2713}",
+            "reconcile.col.date",
+            "reconcile.col.ref",
+            "reconcile.col.payee",
+            "reconcile.col.amount",
+        ];
+        for (i, (w, key)) in cols.iter().zip(texts).enumerate() {
+            let text = if i == 0 { key.to_string() } else { t(key) };
+            let layout = if i == 4 {
+                egui::Layout::right_to_left(egui::Align::Center)
+            } else {
+                egui::Layout::left_to_right(egui::Align::Center)
+            };
+            ui.allocate_ui_with_layout(Vec2::new(*w, 26.0), layout, |ui| {
+                ui.set_min_size(Vec2::new(*w, 26.0));
+                ui.add_space(10.0);
+                ui.label(RichText::new(text).size(12.0).color(tokens.text_secondary));
+            });
+        }
+    });
+}
+
+/// How a line is drawn.
+#[derive(Clone, Copy)]
+struct RowLook {
+    /// Checked.
+    on: bool,
+    /// The one unchecked item equal to the difference.
+    hinted: bool,
+    /// The keyboard cursor (in the active pane).
+    cursor: bool,
+    /// Its box takes the keyboard focus now (P27 QA-9).
+    take_focus: bool,
+}
+
+/// What happened to a line's box this frame.
+struct RowOutcome {
+    id: egui::Id,
+    clicked: bool,
+    took_focus: bool,
+    gained_focus: bool,
+    has_focus: bool,
+}
+
+/// While a row's box has the focus, Tab and the arrows are the window's
+/// (switch pane, next/previous line), never egui's focus moves; otherwise
+/// the focus and the cursor split apart (P27 QA-9).
+const ROW_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: true,
+    horizontal_arrows: false,
+    vertical_arrows: true,
+    escape: false,
+};
+
+/// One line.
+fn line_row(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    cols: &[f32; 5],
+    l: &ReconLine,
+    look: RowLook,
+) -> RowOutcome {
+    let RowLook {
+        on,
+        hinted,
+        cursor,
+        take_focus,
+    } = look;
+    let mut out = RowOutcome {
+        id: egui::Id::NULL,
+        clicked: false,
+        took_focus: false,
+        gained_focus: false,
+        has_focus: false,
+    };
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+    let fill = if hinted {
+        tokens.warn_surface
+    } else if on {
+        tokens.surface_form
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 0.0, fill);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, tokens.border_row),
+    );
+    if cursor {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            2.0,
+            Stroke::new(1.5, tokens.accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let ui = &mut child;
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let payee = who(l).to_string();
+    let number = l.number.clone().unwrap_or_default();
+    let label = row_label(l);
+    ui.allocate_ui_with_layout(
+        Vec2::new(cols[0], ROW_H),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(Vec2::new(cols[0], ROW_H));
+            ui.add_space(10.0);
+            let mut v = on;
+            let r = ui.add(egui::Checkbox::without_text(&mut v));
+            let r = r.on_hover_text(&label);
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, &label));
+            if hinted {
+                ui.painter().rect_stroke(
+                    r.rect.expand(1.0),
+                    2.0,
+                    Stroke::new(2.0, tokens.warn),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            if take_focus {
+                r.request_focus();
+                r.scroll_to_me(None);
+                out.took_focus = true;
+            }
+            if r.has_focus() {
+                ui.memory_mut(|m| m.set_focus_lock_filter(r.id, ROW_KEYS));
+            }
+            out.id = r.id;
+            out.clicked = r.clicked();
+            out.gained_focus = r.gained_focus();
+            out.has_focus = r.has_focus();
+        },
+    );
+    cell(
+        ui,
+        cols[1],
+        mono(&short_date(l.date), tokens.text_primary),
+        false,
+    );
+    cell(ui, cols[2], mono(&number, tokens.text_primary), false);
+    ui.allocate_ui_with_layout(
+        Vec2::new(cols[3], ROW_H),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(Vec2::new(cols[3], ROW_H));
+            ui.add_space(10.0);
+            match memo_after(l) {
+                Some(memo) => {
+                    let mut job = egui::text::LayoutJob::default();
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    job.append(
+                        &payee,
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), tokens.text_primary),
+                    );
+                    job.append(
+                        memo,
+                        8.0,
+                        egui::TextFormat::simple(font, tokens.text_secondary),
+                    );
+                    ui.add(egui::Label::new(job).truncate());
+                }
+                None => {
+                    ui.add(
+                        egui::Label::new(RichText::new(&payee).color(tokens.text_primary))
+                            .truncate(),
+                    );
+                }
+            }
+            if l.from_bank_feed {
+                ui.add_space(6.0);
+                let (r, resp) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                ui.painter().circle_filled(r.center(), 3.5, tokens.info);
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Label,
+                        true,
+                        t("reconcile.a11y.from_bank_file"),
+                    )
+                });
+                resp.on_hover_text(t("reconcile.a11y.from_bank_file"));
+            }
+            if l.likely_duplicate {
+                ui.add_space(6.0);
+                ui.label(RichText::new("!").strong().color(tokens.warn))
+                    .on_hover_text(t("reconcile.likely_duplicate"));
+            }
+            if l.after_statement_date {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(t("reconcile.after_date"))
+                        .size(11.0)
+                        .color(tokens.text_secondary),
+                );
+            }
+        },
+    );
+    cell(
+        ui,
+        cols[4],
+        mono(&display(l.amount.abs()), tokens.text_primary),
+        true,
+    );
+    out
+}
+
+fn pending_row(ui: &mut Ui, tokens: &Tokens, cols: &[f32; 5], p: &PendingRow) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, tokens.surface_form);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, tokens.border_row),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let ui = &mut child;
+    ui.spacing_mut().item_spacing.x = 0.0;
+    ui.allocate_ui_with_layout(
+        Vec2::new(cols[0], ROW_H),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(Vec2::new(cols[0], ROW_H));
+            ui.add_space(10.0);
+            let mut v = true;
+            let r = ui.add_enabled(false, egui::Checkbox::without_text(&mut v));
+            let label = t_with("reconcile.a11y.pending", &[("what", &p.label)]);
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, false, true, &label));
+        },
+    );
+    cell(
+        ui,
+        cols[1],
+        mono(&short_date(p.held.charge.date), tokens.text_primary),
+        false,
+    );
+    cell(ui, cols[2], mono(p.code, tokens.text_primary), false);
+    cell(
+        ui,
+        cols[3],
+        RichText::new(&p.label).color(tokens.text_primary),
+        false,
+    );
+    cell(
+        ui,
+        cols[4],
+        mono(&display(p.held.charge.amount), tokens.text_primary),
+        true,
+    );
+}
+
+fn cell(ui: &mut Ui, w: f32, text: RichText, right: bool) {
+    let layout = if right {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(Vec2::new(w, ROW_H), layout, |ui| {
+        ui.set_min_size(Vec2::new(w, ROW_H));
+        ui.add_space(10.0);
+        ui.add(egui::Label::new(text).truncate());
+    });
+}
+
+fn sum_row(ui: &mut Ui, tokens: &Tokens, label: &str, amount: &str, color: Color32, big: bool) {
+    ui.horizontal(|ui| {
+        let size = if big { 16.0 } else { 13.0 };
+        let mut l = RichText::new(label).size(size).color(color);
+        let mut a = mono(amount, if big { color } else { tokens.text_primary }).size(size);
+        if big {
+            l = l.strong();
+            a = a.strong();
+        }
+        ui.label(l);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(a);
+        });
+    });
+}
+
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)]
+fn cards(
+    s: &mut ReconcileScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    rec: &cl_api::Reconciliation,
+    kind: ReconKind,
+) {
+    let w = ui.available_width();
+    let action_w = 260.0;
+    let card_w = ((w - action_w - 28.0) / 2.0).max(240.0);
+    let h = 120.0;
+    ui.horizontal_top(|ui| {
+        // Summary.
+        ui.allocate_ui_with_layout(
+            Vec2::new(card_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_subtle)
+                    .stroke(Stroke::new(1.0, tokens.border_default))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_min_height(h - 24.0);
+                        ui.spacing_mut().item_spacing.y = 5.0;
+                        let beginning_label = match s.last_finished() {
+                            Some(r) => t_with(
+                                "reconcile.sum.beginning_on",
+                                &[("date", &short_date(r.statement_date))],
+                            ),
+                            None => t("reconcile.sum.beginning"),
+                        };
+                        sum_row(
+                            ui,
+                            tokens,
+                            &beginning_label,
+                            &display(kind.shown(rec.beginning_balance)),
+                            tokens.text_secondary,
+                            false,
+                        );
+                        let (dep_key, pay_key) = match kind {
+                            ReconKind::Bank => ("reconcile.sum.deposits", "reconcile.sum.payments"),
+                            ReconKind::Card => {
+                                ("reconcile.sum.card_payments", "reconcile.sum.card_charges")
+                            }
+                        };
+                        let dep =
+                            t_with(dep_key, &[("n", &rec.cleared_deposits.count.to_string())]);
+                        let pay =
+                            t_with(pay_key, &[("n", &rec.cleared_payments.count.to_string())]);
+                        // A side's total as it moves the shown balance (the
+                        // engine's totals are in the books sign).
+                        let signed = |m: cl_core::Money, _out: bool| display(kind.shown(m));
+                        match kind {
+                            ReconKind::Bank => {
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &dep,
+                                    &signed(rec.cleared_deposits.total, false),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &pay,
+                                    &signed(rec.cleared_payments.total, true),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                            }
+                            ReconKind::Card => {
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &pay,
+                                    &signed(rec.cleared_payments.total, true),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                                sum_row(
+                                    ui,
+                                    tokens,
+                                    &dep,
+                                    &signed(rec.cleared_deposits.total, false),
+                                    tokens.text_secondary,
+                                    false,
+                                );
+                            }
+                        }
+                        ui.separator();
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.cleared"),
+                            &display(kind.shown(rec.cleared_balance)),
+                            tokens.text_secondary,
+                            false,
+                        );
+                    });
+            },
+        );
+        // Difference.
+        ui.allocate_ui_with_layout(
+            Vec2::new(card_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                let zero = rec.difference.is_zero();
+                let (fill, stroke, text) = if zero {
+                    (tokens.accent_tint, tokens.accent_border, tokens.accent)
+                } else {
+                    (tokens.warn_surface, tokens.warn_tint, tokens.warn_text)
+                };
+                egui::Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_min_height(h - 24.0);
+                        ui.spacing_mut().item_spacing.y = 5.0;
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.statement_ending"),
+                            &display(kind.shown(rec.statement_ending_balance)),
+                            text,
+                            false,
+                        );
+                        sum_row(
+                            ui,
+                            tokens,
+                            &t("reconcile.sum.difference"),
+                            &display(kind.shown(rec.difference)),
+                            text,
+                            true,
+                        );
+                        if let Some(h) = hint_text(s) {
+                            ui.add(
+                                egui::Label::new(RichText::new(h).size(12.0).color(text)).wrap(),
+                            );
+                        }
+                    });
+            },
+        );
+        // Actions.
+        ui.allocate_ui_with_layout(
+            Vec2::new(action_w, h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(action_w);
+                    let ready = can_finish(rec.difference, &s.queue);
+                    // Off: the locked tokens at full strength (contrast
+                    // >= 4.5:1, DESIGN.md), not egui's faded look.
+                    let (fill, text) = if ready {
+                        (tokens.accent, tokens.on_accent)
+                    } else {
+                        (tokens.locked_row, tokens.locked_text)
+                    };
+                    let b = egui::Button::new(
+                        RichText::new(t("reconcile.finish")).strong().color(text),
+                    )
+                    .fill(fill)
+                    .stroke(Stroke::new(
+                        1.0,
+                        if ready { fill } else { tokens.border_default },
+                    ))
+                    .min_size(Vec2::new(action_w, 44.0));
+                    ui.visuals_mut().disabled_alpha = 1.0;
+                    let finish = ui.add_enabled(ready, b);
+                    // Tab out of the last pane: Reconcile now when it is
+                    // on, else Leave for now.
+                    if ready {
+                        take_leaving_focus(s, &finish, true);
+                    }
+                    if finish.clicked() {
+                        s.finish();
+                    }
+                    ui.horizontal(|ui| {
+                        let half = (action_w - 8.0) / 2.0;
+                        let leave = ui.add(
+                            egui::Button::new(t("reconcile.leave")).min_size(Vec2::new(half, 44.0)),
+                        );
+                        if !ready {
+                            take_leaving_focus(s, &leave, true);
+                        }
+                        if leave.clicked() {
+                            s.leave();
+                        }
+                        let r = ui.add(
+                            egui::Button::new(t("reconcile.reports"))
+                                .min_size(Vec2::new(half, 44.0)),
+                        );
+                        super::reports::menu(s, ui, &r);
+                    });
+                    if !ready {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t(finish_help_key(rec.difference)))
+                                    .size(12.0)
+                                    .color(tokens.text_tertiary),
+                            )
+                            .wrap(),
+                        );
+                    }
+                });
+            },
+        );
+    });
+}

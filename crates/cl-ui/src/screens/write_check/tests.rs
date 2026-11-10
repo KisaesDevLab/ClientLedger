@@ -2259,3 +2259,94 @@ fn qa4_items_only_purchase_saves_over_prefilled_expense_lines() {
     // The last check had item lines only: the vendor default fills in.
     assert_eq!(s.prefill.source, Some("default"));
 }
+
+/// P27 QA minor: the reconcile card pay step fills the check without a
+/// stray "That line is no longer here." under the card line.
+#[test]
+fn a_card_payment_fill_says_nothing_about_a_vanished_line() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    for _ in 0..3 {
+        frame_with(&mut s, &ctx, vec![]);
+    }
+    s.fill_card_payment(&crate::screens::reconcile::CardPay {
+        card: account(&s, "2050"),
+        amount: money("102.17"),
+        date: today(),
+    });
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes.extend(frame_with(&mut s, &ctx, vec![]));
+    }
+    let gone = crate::i18n::t("grid.row.gone");
+    assert!(
+        !nodes.iter().any(|(_, n)| {
+            n.label().is_some_and(|l| l.contains(&gone))
+                || n.value().is_some_and(|v| v.contains(&gone))
+        }),
+        "stray row-gone notice"
+    );
+    // The number is the bank account's next one, as on a fresh check.
+    assert_eq!(s.header.current().number, NumberField::Proposed(4418));
+    assert_eq!(s.bank(), Some(account(&s, "1010")));
+}
+
+/// P27 QA-10: the card pay step fills the check before the accounts
+/// arrive; the default bank that arrives later keeps the header unsaved
+/// work (it used to become the clean starting point).
+#[test]
+fn a_card_payment_fill_stays_unsaved_when_the_bank_arrives_later() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let mut f = s.header.current().clone();
+    f.bank = None;
+    s.header.load(f);
+    s.start_load();
+    let statement = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    s.fill_card_payment(&crate::screens::reconcile::CardPay {
+        card: account(&s, "2050"),
+        amount: money("2.00"),
+        date: statement,
+    });
+    s.poll();
+    assert_eq!(s.bank(), Some(account(&s, "1010")));
+    assert!(s.header.is_dirty(), "the prefilled header is unsaved");
+    assert_eq!(s.header.current().date, Some(statement));
+    assert_eq!(s.header.current().amount, Some(money("2.00")));
+}
+
+/// P27 QA-14: the card pay step's check, filled before the accounts
+/// arrive, shows the card account on its line once they do.
+#[test]
+fn a_card_payment_line_shows_its_account_when_the_accounts_arrive_later() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let card = account(&s, "2050");
+    let mut f = s.header.current().clone();
+    f.bank = None;
+    s.header.load(f);
+    s.start_load();
+    s.fill_card_payment(&crate::screens::reconcile::CardPay {
+        card,
+        amount: money("8.00"),
+        date: today(),
+    });
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..4 {
+        nodes = frame_with(&mut s, &ctx, vec![]);
+    }
+    let cell = nodes
+        .iter()
+        .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Account, line 1")))
+        .map(|(_, n)| n.value().unwrap_or_default().to_string())
+        .expect("the line's Account cell");
+    assert!(cell.contains("2050"), "Account cell: {cell:?}");
+}

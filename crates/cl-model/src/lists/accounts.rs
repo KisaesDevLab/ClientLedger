@@ -148,6 +148,14 @@ impl AccountKind {
 pub fn detail_label(detail: &str) -> Option<TextKey> {
     Some(TextKey(match detail {
         "bank" => "lists.accounts.detail.bank",
+        // Not in the engine's built-in list, but in charts it keeps (the
+        // sample company, imports from other apps; P27 QA minor).
+        "checking" => "lists.accounts.detail.checking",
+        "savings" => "lists.accounts.detail.savings",
+        "cash" => "lists.accounts.detail.cash",
+        "petty_cash" => "lists.accounts.detail.petty_cash",
+        "accumulated_depreciation" => "lists.accounts.detail.accumulated_depreciation",
+        "line_of_credit" => "lists.accounts.detail.line_of_credit",
         "accounts_receivable" => "lists.accounts.detail.accounts_receivable",
         "other_current_asset" => "lists.accounts.detail.other_current_asset",
         "fixed_asset" => "lists.accounts.detail.fixed_asset",
@@ -188,10 +196,7 @@ pub fn detail_label(detail: &str) -> Option<TextKey> {
 /// accounts and credit cards.
 #[must_use]
 pub fn holds_bank_or_card_number(kind: AccountKind, detail: Option<&str>) -> bool {
-    matches!(
-        (kind, detail),
-        (AccountKind::Asset, Some("bank")) | (AccountKind::Liability, Some("credit_card"))
-    )
+    crate::register::AccountClass::of(kind, detail).is_money_account()
 }
 
 /// The detail type of a credit card account: the only accounts that take

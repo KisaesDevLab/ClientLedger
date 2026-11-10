@@ -252,7 +252,13 @@ impl RefundScreen {
         self.books
             .accounts
             .iter()
-            .filter(|a| a.is_active && a.fields.detail_type.as_deref() == Some("bank"))
+            .filter(|a| {
+                a.is_active
+                    && a.fields
+                        .detail_type
+                        .as_deref()
+                        .is_some_and(cl_model::register::is_bank_detail)
+            })
             .map(|a| (a.id, crate::screens::register::account_text(a)))
             .collect()
     }

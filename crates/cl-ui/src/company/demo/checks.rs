@@ -816,7 +816,10 @@ pub fn contact_transactions(
                 && t.lines.iter().any(|l| {
                     chart.iter().any(|a| {
                         a.fields.account_number.as_deref() == Some(l.account.as_str())
-                            && a.fields.detail_type.as_deref() == Some("bank")
+                            && a.fields
+                                .detail_type
+                                .as_deref()
+                                .is_some_and(cl_model::register::is_bank_detail)
                     })
                 });
             cl_api::TransactionSummary {

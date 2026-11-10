@@ -1,0 +1,1234 @@
+//! The Reconcile screen on the demo engine: Begin to the mockup's figures,
+//! a tick to 0.00, Reconcile now, the reports, Undo, the card pay step.
+
+use std::sync::Arc;
+
+use cl_api::UndoMode;
+use cl_core::CalendarDate;
+use cl_model::CommandId;
+
+use super::*;
+use crate::company::{CompanyEvent, CompanyLink};
+use crate::windows::OpenPayload;
+
+fn today() -> CalendarDate {
+    CalendarDate::from_ymd(2026, 11, 4).expect("date")
+}
+
+fn screen() -> (tempfile::TempDir, Arc<CompanyLink>, ReconcileScreen) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    if let Some(mut s) = link.demo_state() {
+        s.open = s.companies.first().map(|c| c.tenant_id);
+    }
+    let s = ReconcileScreen::new(Arc::clone(&link), None, today());
+    (dir, link, s)
+}
+
+fn begin_october(s: &mut ReconcileScreen) {
+    s.poll();
+    let op = crate::company::demo::account_id(1010);
+    s.pick_account(op);
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "86,902.13".into();
+    s.form.service_charge.amount = "48.00".into();
+    s.form.interest.amount = "12.84".into();
+    s.begin();
+    s.poll();
+}
+
+fn state(s: &ReconcileScreen) -> serde_json::Value {
+    s.state_json()
+}
+
+#[test]
+fn make_opens_only_its_kind() {
+    let (_d, link, _) = screen();
+    let cmd = cl_model::commands::find(KIND).expect("command");
+    assert!(cmd.opens && cmd.arrives.is_none(), "built");
+    let s = make(cmd.id, &link, None, today()).expect("screen");
+    assert_eq!(s.title(), t("cmd.banking.reconcile"));
+    assert!(!s.state().is_null());
+    let other = CommandId::new("vendors.write_check");
+    assert!(make(other, &link, None, today()).is_none());
+}
+
+#[test]
+fn begin_shows_the_mockup_and_finishes_at_zero() {
+    let (_d, link, mut s) = screen();
+    begin_october(&mut s);
+    let v = state(&s);
+    assert_eq!(v["step"], "window", "{v}");
+    assert_eq!(v["beginning"], "71,436.20");
+    assert_eq!(v["ending"], "86,902.13");
+    assert_eq!(v["cleared"], "87,314.31");
+    assert_eq!(v["difference"], "-412.18");
+    assert_eq!(v["deposits"]["count"], 6);
+    assert_eq!(v["deposits"]["total"], "40,107.84");
+    assert_eq!(v["payments"]["total"], "24,229.73");
+    assert_eq!(v["left"]["rows"], 5);
+    assert_eq!(v["right"]["rows"], 8);
+    assert_eq!(v["right"]["checked"], 7);
+    assert_eq!(v["can_finish"], false);
+    assert_eq!(
+        v["hint"],
+        "One unchecked item equals the difference: check 4409 to Monett Tire & Lube."
+    );
+    // Later lines show with the box off; Mark all leaves hidden ones alone.
+    s.hide_later = false;
+    assert_eq!(state(&s)["left"]["rows"], 6);
+    s.hide_later = true;
+    // Tick 4409: the engine answers 0.00.
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    assert_eq!(state(&s)["pending"], true);
+    assert_eq!(state(&s)["can_finish"], false, "a tick waits");
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["difference"], "0.00");
+    assert_eq!(v["can_finish"], true);
+    let at_finish = (v["left"]["checked"].clone(), v["right"]["checked"].clone());
+    assert_eq!(at_finish, (serde_json::json!(5), serde_json::json!(8)));
+    assert!(s.command(CommandId::new("reconcile.finish")));
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["last"], "finished");
+    assert_eq!(v["dialog"], "done");
+    assert_eq!(v["step"], "begin");
+    // The reports open as PDFs in the document tab.
+    let target = s.report_target();
+    assert!(target.is_some());
+    let rep = link
+        .demo_state()
+        .map(|mut d| crate::company::demo::reconcile::report(&mut d, target.expect("id")))
+        .expect("demo");
+    let rep = rep.expect("report");
+    cl_print::reports::render_report(&reports::report(&rep, reports::Kind::Detail)).expect("pdf");
+    s.reports
+        .open(&s.link, s.group.as_ref(), target, reports::Kind::Detail);
+    s.poll();
+    assert_eq!(
+        s.reports.state()["opened"],
+        "detail",
+        "{}",
+        s.reports.state()
+    );
+    assert!(link.drain().iter().any(|e| matches!(
+        e,
+        CompanyEvent::OpenWith(k, p)
+            if k.as_str() == crate::screens::document_view::KIND
+                && matches!(**p, OpenPayload::Document(_))
+    )));
+    // Undo, keeping the checks: back in progress.
+    s.dialog = None;
+    s.poll();
+    assert!(s.last_finished().is_some());
+    s.undo_mode = UndoMode::KeepChecks;
+    s.undo_last();
+    s.poll();
+    assert_eq!(state(&s)["last"], "undone");
+    // The history is read again (one frame to ask, one to take).
+    s.poll();
+    s.poll();
+    assert!(s.unfinished().is_some());
+    // Review m5: Continue shows the checks exactly as at Finish.
+    s.continue_open();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["step"], "window");
+    assert_eq!(
+        (v["left"]["checked"].clone(), v["right"]["checked"].clone()),
+        at_finish
+    );
+    s.back_to_begin();
+    s.poll();
+    // The discrepancy report lists the undo.
+    s.open_discrepancy();
+    s.poll();
+    assert_eq!(state(&s)["discrepancy_rows"], 1);
+}
+
+#[test]
+fn mark_all_and_unmark_all_act_on_shown_lines() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    s.mark_all(false);
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["left"]["checked"], 0);
+    assert_eq!(v["right"]["checked"], 0);
+    s.mark_all(true);
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["right"]["checked"], 8);
+    // Later lines stay unchecked (hidden).
+    assert!(
+        s.lines
+            .iter()
+            .filter(|l| l.after_statement_date)
+            .all(|l| !s.queue.ticked(l.journal_line))
+    );
+}
+
+#[test]
+fn begin_problems_and_unfinished_continue() {
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.pick_account(crate::company::demo::account_id(1010));
+    s.poll();
+    s.begin();
+    assert_eq!(state(&s)["problems"][0], "reconcile.problem.no_ending");
+    begin_october(&mut s);
+    assert_eq!(s.step, Step::Window);
+    // A new window: the unfinished one is offered.
+    let mut again = ReconcileScreen::new(Arc::clone(&s.link), None, today());
+    again.poll();
+    again.poll();
+    assert_eq!(state(&again)["unfinished"], true);
+    again.continue_open();
+    again.poll();
+    assert_eq!(state(&again)["step"], "window");
+    assert_eq!(state(&again)["difference"], "-412.18");
+}
+
+#[test]
+fn card_pay_step_hands_off_three_ways() {
+    let (_d, link, mut s) = screen();
+    s.poll();
+    s.pick_account(crate::company::demo::account_id(2050));
+    s.poll();
+    assert_eq!(state(&s)["kind"], "card");
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "1,038.82".into();
+    s.form.service_charge.amount = "18.25".into();
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["ending"], "1,038.82", "shown as printed");
+    s.mark_all(true);
+    s.poll();
+    assert_eq!(state(&s)["difference"], "0.00");
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["dialog"], "done");
+    for (kind, last) in [
+        ("vendors.write_check", "pay_check"),
+        ("vendors.enter_bill", "pay_bill"),
+        ("banking.transfer", "pay_transfer"),
+    ] {
+        let _ = link.drain();
+        s.dialog = Some(Dialog::CardPay);
+        finish::pay(&mut s, kind);
+        assert_eq!(s.last, Some(last));
+        let events = link.drain();
+        let Some(CompanyEvent::OpenWith(k, p)) = events.first() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(k.as_str(), kind);
+        let OpenPayload::CardPayment(pay) = &**p else {
+            panic!("card payment");
+        };
+        assert_eq!(pay.card, crate::company::demo::account_id(2050));
+        assert_eq!(
+            pay.amount,
+            cl_core::Money::parse_wire("1038.82").expect("m")
+        );
+    }
+}
+
+#[test]
+fn closed_period_asks_for_the_password() {
+    let (_d, _link, mut s) = screen();
+    assert!(s.command(CommandId::new("dev.demo_reconcile_close_books")));
+    begin_october(&mut s);
+    assert_eq!(state(&s)["posting_locked"], true);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    assert_eq!(state(&s)["dialog"], "closingpassword");
+    // Review D1: a wrong password asks again, in the dialog, cleared.
+    s.password = "not it".into();
+    s.finish();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "closingpassword", "{v}");
+    assert_eq!(v["password_rejected"], true);
+    assert!(s.password.is_empty(), "the wrong password is gone");
+    assert_eq!(v["step"], "window");
+    s.password = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    assert_eq!(state(&s)["password_rejected"], false);
+}
+
+#[test]
+fn statement_date_on_or_before_the_last_one_is_refused() {
+    // Review E3: Begin's own check, then the engine's refusal (a history
+    // not read yet) shows the same words.
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.pick_account(crate::company::demo::account_id(1010));
+    s.poll();
+    s.poll();
+    assert!(s.last_finished().is_some(), "reconciled through 09/30");
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 9, 30).expect("date"));
+    s.form.ending = "71436.20".into();
+    s.begin();
+    assert_eq!(
+        state(&s)["problems"],
+        serde_json::json!(["reconcile.problem.date_not_after_last"])
+    );
+    assert_eq!(
+        begin::problem_text(&s, BeginProblem::DateNotAfterLast),
+        "This account is reconciled through 09/30/2026. Use a later statement date."
+    );
+    s.history.clear();
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["step"], "begin");
+    assert_eq!(
+        state(&s)["problems"],
+        serde_json::json!(["reconcile.problem.date_not_after_last"])
+    );
+    assert!(s.error.is_none(), "a Begin problem, not an error");
+}
+
+fn card_begin(s: &mut ReconcileScreen) {
+    s.poll();
+    s.pick_account(crate::company::demo::account_id(2050));
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "1,038.82".into();
+    s.form.service_charge.amount = "18.25".into();
+    s.begin();
+    s.poll();
+}
+
+#[test]
+fn card_pay_step_after_continue_uses_the_engine_balance() {
+    // Review D2: Continue leaves Begin's ending text empty; the pay step
+    // still offers the statement balance the engine held.
+    let (_d, link, mut first) = screen();
+    card_begin(&mut first);
+    let mut s = ReconcileScreen::new(Arc::clone(&link), None, today());
+    s.poll();
+    s.pick_account(crate::company::demo::account_id(2050));
+    s.poll();
+    s.poll();
+    s.continue_open();
+    s.poll();
+    assert_eq!(state(&s)["step"], "window");
+    assert_eq!(s.form.ending, "", "Continue fills no ending text");
+    s.mark_all(true);
+    s.poll();
+    s.finish();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "done");
+    assert_eq!(v["card_pay"], "1,038.82");
+    let _ = link.drain();
+    s.dialog = Some(Dialog::CardPay);
+    finish::pay(&mut s, "vendors.write_check");
+    let events = link.drain();
+    let Some(CompanyEvent::OpenWith(_, p)) = events.first() else {
+        panic!("{events:?}");
+    };
+    let OpenPayload::CardPayment(pay) = &**p else {
+        panic!("card payment");
+    };
+    assert_eq!(
+        pay.amount,
+        cl_core::Money::parse_wire("1038.82").expect("m")
+    );
+    assert_eq!(pay.date, CalendarDate::from_ymd(2026, 10, 31).expect("d"));
+}
+
+#[test]
+fn no_pay_step_when_nothing_is_owed() {
+    // Review D2: a zero or credit balance skips the pay step.
+    let (_d, _link, mut s) = screen();
+    card_begin(&mut s);
+    assert!(s.card_pay_due().is_some());
+    for books in ["0", "25.00"] {
+        if let Some(r) = s.rec.as_mut() {
+            r.statement_ending_balance = cl_core::Money::parse_wire(books).expect("m");
+        }
+        assert!(s.card_pay_due().is_none(), "{books}");
+    }
+    // A bank account never has one.
+    let (_d2, _l2, mut b) = screen();
+    begin_october(&mut b);
+    assert!(b.card_pay_due().is_none());
+}
+
+#[test]
+fn answers_about_another_worksheet_are_ignored() {
+    // Review D4.
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let shown = s.rec.clone().expect("rec");
+    let mut other = shown.clone();
+    other.id = s.last_finished().expect("09/30").id;
+    other.statement_ending_balance = cl_core::Money::parse_wire("1").expect("m");
+    s.took(other);
+    let now = s.rec.as_ref().expect("rec");
+    assert_eq!(now.id, shown.id);
+    assert_eq!(now.statement_ending_balance, shown.statement_ending_balance);
+}
+
+#[test]
+fn a_read_from_before_finish_does_not_bring_the_worksheet_back() {
+    // Review D4: a refresh landing after Finish is dropped.
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let id = s.rec.as_ref().map(|r| r.id).expect("id");
+    s.refresh_after_error(id);
+    s.back_to_begin();
+    s.poll();
+    assert_eq!(state(&s)["step"], "begin");
+    assert!(s.rec.is_none());
+}
+
+#[test]
+fn a_read_asked_before_a_tick_batch_is_read_again() {
+    // Review D4: the epoch moved (a batch sent): the answer may predate
+    // it, so it's read again rather than replacing the ticks.
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let id = s.rec.as_ref().map(|r| r.id).expect("id");
+    s.refresh_after_error(id);
+    s.rec_epoch = s.rec_epoch.wrapping_add(1);
+    s.poll();
+    assert!(s.rec_job.is_some(), "asked again");
+    s.poll();
+    assert!(s.rec_job.is_none());
+    assert_eq!(state(&s)["step"], "window");
+}
+
+#[test]
+fn finish_waits_for_a_worksheet_read() {
+    // Review D4.
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    let id = s.rec.as_ref().map(|r| r.id).expect("id");
+    s.refresh_after_error(id);
+    s.finish();
+    assert!(s.act_job.is_none(), "a read is on its way");
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+}
+
+#[test]
+fn leave_for_now_waits_for_the_ticks() {
+    // Review D5: ticks not yet at the engine keep the window open (and
+    // dirty) until they arrive.
+    let (_d, link, mut s) = screen();
+    begin_october(&mut s);
+    let _ = link.drain();
+    let first = s.lines.first().map(|l| l.journal_line).expect("line");
+    s.toggle(first);
+    assert!(s.dirty());
+    s.leave();
+    let closes = |l: &Arc<CompanyLink>| {
+        l.drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::CloseWindow(k) if k.as_str() == KIND))
+    };
+    assert!(!closes(&link), "not before the ticks are in");
+    assert_eq!(state(&s)["leaving"], true);
+    s.poll();
+    assert!(closes(&link));
+    assert!(!s.dirty());
+    // The close prompt's Save waits the same way.
+    s.toggle(first);
+    assert!(!s.save());
+    s.poll();
+    assert!(closes(&link));
+    assert!(s.save(), "nothing pending");
+}
+
+#[test]
+fn discrepancy_report_shows_a_card_as_printed_with_the_drift() {
+    // Review m4: the effect column and the drift in the owner's sign.
+    let m = |s: &str| cl_core::Money::parse_wire(s).expect("m");
+    let row = cl_api::DiscrepancyRow {
+        kind: "changed".into(),
+        statement_date: None,
+        txn_date: None,
+        txn_type: None,
+        number: None,
+        payee: None,
+        reconciled_amount: Some(m("-40")),
+        effect: Some(m("-12.5")),
+        changed_at: None,
+        changed_by: None,
+        fields: vec!["amount".into()],
+        transaction: None,
+    };
+    let d = cl_api::DiscrepancyReport {
+        rows: vec![row.clone()],
+        drift: Some(cl_api::BeginningDrift {
+            expected: m("-100"),
+            actual: m("-112.5"),
+            difference: m("-12.5"),
+        }),
+    };
+    assert_eq!(reports::effect_text(&row, ReconKind::Card), "12.50");
+    assert_eq!(reports::effect_text(&row, ReconKind::Bank), "-12.50");
+    let doc = reports::discrepancy_doc(&d, "2050 Card", ReconKind::Card);
+    assert_eq!(doc.subtitle.len(), 2, "{:?}", doc.subtitle);
+    assert!(doc.subtitle[1].contains("12.50") && !doc.subtitle[1].contains("-12.50"));
+    let cl_print::reports::Section::Table { rows, .. } = &doc.sections[0] else {
+        panic!("a table");
+    };
+    assert_eq!(rows[0].last().map(String::as_str), Some("12.50"));
+    cl_print::reports::render_report(&doc).expect("pdf");
+    let none = cl_api::DiscrepancyReport {
+        rows: Vec::new(),
+        drift: None,
+    };
+    assert_eq!(
+        reports::discrepancy_doc(&none, "1010", ReconKind::Bank)
+            .subtitle
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn change_info_sends_a_posted_charge_only_when_changed() {
+    // U-193: posted charges stay editable; unchanged they aren't sent,
+    // changed the engine decides (still posted here: refused).
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_last();
+    s.poll();
+    s.poll();
+    s.poll();
+    s.continue_open();
+    s.poll();
+    assert_eq!(state(&s)["step"], "window");
+    s.change_info();
+    assert!(s.form.service_charge.posted);
+    s.begin();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["step"], "window", "{v}");
+    assert!(v["notice"].is_null(), "{v}");
+    s.change_info();
+    s.form.service_charge.amount = "49.00".into();
+    s.begin();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["notice"], "reconcile.notice.charge_posted");
+    // Q-P27o minor: still "Change statement info" (Back to the
+    // reconciliation), not Begin's "already started".
+    assert_eq!(v["step"], "begin");
+    assert_eq!(v["editing"], true, "{v}");
+    // Undo is not offered while a reconciliation is started.
+    assert!(!s.undo_offered());
+}
+
+/// QA-1 (P27): the sample's 1010 `checking` and 1020 `savings` are bank
+/// accounts as the engine keeps them (no demo rewrite), so Begin offers
+/// and preselects 1010; cl-model's bank set is the engine's.
+#[test]
+fn checking_and_savings_accounts_are_reconcilable_banks() {
+    assert_eq!(
+        cl_model::register::BANK_DETAIL_TYPES,
+        cl_api::BANK_REGISTER_DETAIL_TYPES
+    );
+    let chart = crate::company::demo::chart();
+    let of = |n: &str| {
+        chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some(n))
+            .expect("account")
+    };
+    assert_eq!(of("1010").fields.detail_type.as_deref(), Some("checking"));
+    assert_eq!(of("1020").fields.detail_type.as_deref(), Some("savings"));
+    assert_eq!(ReconcileScreen::kind_of(of("1010")), Some(ReconKind::Bank));
+    assert_eq!(ReconcileScreen::kind_of(of("1020")), Some(ReconKind::Bank));
+    assert_eq!(ReconcileScreen::kind_of(of("2050")), Some(ReconKind::Card));
+    assert_eq!(ReconcileScreen::kind_of(of("1500")), None);
+    // Real-engine shaped accounts: the sample's own detail types.
+    let sample = cl_company::Sample::load();
+    for (number, detail) in [("1010", "checking"), ("1020", "savings")] {
+        let a = sample
+            .company
+            .accounts
+            .iter()
+            .find(|a| a.number == number)
+            .expect("sample account");
+        assert_eq!(a.detail.as_deref(), Some(detail));
+    }
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    assert_eq!(s.form.account, Some(crate::company::demo::account_id(1010)));
+    assert_eq!(s.kind(), ReconKind::Bank);
+}
+
+/// QA-6: after Finish, and after Undo › Discard, Begin starts a new
+/// statement: no ending balance, service charge or interest carried over.
+#[test]
+fn begin_clears_the_statement_after_finish_and_undo() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    let empty = |s: &ReconcileScreen| {
+        s.form.ending.is_empty()
+            && s.form.service_charge.amount.is_empty()
+            && s.form.interest.amount.is_empty()
+            && !s.form.service_charge.posted
+            && !s.form.interest.posted
+            && s.svc_date.value.is_none()
+            && s.int_date.value.is_none()
+            && s.date_in.value == Some(today())
+    };
+    assert!(empty(&s), "after Finish: {:?}", s.form);
+    assert_eq!(s.form.account, Some(crate::company::demo::account_id(1010)));
+    assert!(
+        s.form.service_charge.account.is_some(),
+        "default account kept"
+    );
+    // Undo › Discard: the same.
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.form.ending = "1.00".into();
+    s.form.service_charge.amount = "48.00".into();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    assert_eq!(state(&s)["last"], "undone");
+    assert!(empty(&s), "after Undo: {:?}", s.form);
+}
+
+/// QA-7: picking another account clears the statement fields and the
+/// other account's notices.
+#[test]
+fn switching_the_account_resets_its_figures_and_notices() {
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "88,309.39".into();
+    s.form.service_charge.amount = "50.00".into();
+    s.form.interest.amount = "12.84".into();
+    s.notice = Some("reconcile.notice.charge_posted");
+    s.problems = vec![BeginProblem::BadEnding];
+    let card = crate::company::demo::account_id(2050);
+    s.pick_account(card);
+    assert_eq!(s.kind(), ReconKind::Card);
+    assert_eq!(s.form.ending, "");
+    assert_eq!(s.form.service_charge.amount, "");
+    assert_eq!(s.form.interest.amount, "");
+    assert_eq!(s.date_in.value, Some(today()));
+    assert!(s.notice.is_none() && s.problems.is_empty());
+    // Picking the same account again keeps what was typed.
+    s.form.ending = "400.00".into();
+    s.pick_account(card);
+    assert_eq!(s.form.ending, "400.00");
+}
+
+/// QA-3: a third decimal is refused with Begin's message, never rounded.
+#[test]
+fn a_third_decimal_is_refused_not_rounded() {
+    assert_eq!(begin::settled_cents("88309.395"), None);
+    assert_eq!(
+        begin::settled_cents("88309.39").as_deref(),
+        Some("88,309.39")
+    );
+    assert_eq!(begin::settled_cents("  "), None);
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "88309.395".into();
+    s.form.service_charge.amount = "48.005".into();
+    s.begin();
+    assert!(
+        s.problems.contains(&BeginProblem::BadEnding),
+        "{:?}",
+        s.problems
+    );
+    assert!(s.problems.contains(&BeginProblem::BadServiceCharge));
+    assert_eq!(state(&s)["step"], "begin");
+}
+
+/// QA-2: rows name their payee (or a journal entry's memo), ref and amount
+/// on screen and in the AccessKit label.
+#[test]
+fn rows_show_ref_payee_or_memo_and_amount() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let mut l = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .cloned()
+        .expect("4409");
+    assert_eq!(
+        window::row_label(&l),
+        "Cleared: 10/27 4409 Monett Tire & Lube 412.18"
+    );
+    // A journal entry: no contact, no number, the payee in its memo.
+    l.payee = None;
+    l.number = None;
+    l.memo = Some("check 4417 \u{b7} Elm Street Accountants \u{b7} Check".into());
+    assert_eq!(
+        window::who(&l),
+        "check 4417 \u{b7} Elm Street Accountants \u{b7} Check"
+    );
+    assert_eq!(
+        window::row_label(&l),
+        "Cleared: 10/27 check 4417 \u{b7} Elm Street Accountants \u{b7} Check 412.18"
+    );
+}
+
+/// QA minor: the bank-file banner shows only with a line from a bank file.
+#[test]
+fn bank_file_banner_only_with_bank_file_lines() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    assert_eq!(state(&s)["banner"], true, "the demo has accepted lines");
+    for l in &mut s.lines {
+        l.from_bank_feed = false;
+    }
+    assert_eq!(state(&s)["banner"], false);
+}
+
+/// P27 QA-8: "Change statement info" on a statement begun with no charge
+/// offers the same default charge accounts as Begin.
+#[test]
+fn change_info_defaults_the_charge_accounts_like_begin() {
+    let (_d, _link, mut s) = screen();
+    s.poll();
+    let op = crate::company::demo::account_id(1010);
+    s.pick_account(op);
+    s.poll();
+    let (fees, interest) = (s.form.service_charge.account, s.form.interest.account);
+    assert!(fees.is_some() && interest.is_some(), "Begin's defaults");
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "86,902.13".into();
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["step"], "window");
+    s.change_info();
+    assert_eq!(s.form.service_charge.account, fees);
+    assert_eq!(s.form.interest.account, interest);
+}
+
+/// One frame with `events`; the screen reader's focused node's label.
+fn a11y_frame(
+    s: &mut ReconcileScreen,
+    ctx: &eframe::egui::Context,
+    events: Vec<eframe::egui::Event>,
+) -> Option<String> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+    });
+    out.textures_delta.clear();
+    let u = out.platform_output.accesskit_update?;
+    u.nodes
+        .iter()
+        .find(|(id, _)| *id == u.focus)
+        .and_then(|(_, n)| n.label().map(str::to_string))
+}
+
+/// P27 QA-9: the row the screen reader announces is the cursor's row,
+/// in the pane Tab moved to; Space ticks that row; egui's own Tab and
+/// arrow moves never split the focus from the cursor.
+#[test]
+fn the_announced_row_is_the_cursor_row_in_both_panes() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let settle = |s: &mut ReconcileScreen, events: Vec<Event>| {
+        let mut f = a11y_frame(s, &ctx, events);
+        for _ in 0..3 {
+            f = a11y_frame(s, &ctx, vec![]);
+        }
+        f
+    };
+    settle(&mut s, vec![]);
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].as_str().map(str::to_string);
+    // Down: the first deposit row; focus and cursor agree.
+    assert!(s.command(CommandId::new("reconcile.next")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(cursor(&s).is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor");
+    // A raw Tab or arrow reaching egui (the shell takes them first) does
+    // not move the focus off the cursor's row.
+    let key = |k| Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    let before = cursor(&s);
+    let f = settle(&mut s, vec![key(Key::Tab), key(Key::ArrowDown)]);
+    assert_eq!(f, before, "egui kept the focus on the cursor row");
+    let shift_tab = Event::Key {
+        key: Key::Tab,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::SHIFT,
+    };
+    let f = settle(&mut s, vec![shift_tab]);
+    assert_eq!(f, before, "nor on a raw Shift+Tab");
+    // Tab (the window's): the payments pane; the focus moves there too.
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(f, cursor(&s), "announced = cursor in the payments pane");
+    assert!(s.command(CommandId::new("reconcile.next")));
+    let f = settle(&mut s, vec![]);
+    let announced = f.expect("a focused row");
+    assert_eq!(Some(announced.clone()), cursor(&s));
+    // Space ticks the announced row and nothing else.
+    let id = s.cursor.expect("cursor");
+    let line = s
+        .lines
+        .iter()
+        .find(|l| l.journal_line == id)
+        .expect("line")
+        .clone();
+    let was = s.queue.ticked(id);
+    let checked_before = s.state_json()["right"]["checked"].clone();
+    let left_before = s.state_json()["left"]["checked"].clone();
+    assert!(s.command(CommandId::new("reconcile.tick")));
+    settle(&mut s, vec![]);
+    assert_eq!(s.queue.ticked(id), !was);
+    assert_eq!(window::row_label(&line), announced);
+    assert_ne!(s.state_json()["right"]["checked"], checked_before);
+    assert_eq!(
+        s.state_json()["left"]["checked"],
+        left_before,
+        "no deposit changed"
+    );
+    // Shift+Tab (the window's): back to the deposits pane, focus too.
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor back in deposits");
+}
+
+/// Q-P27l: the difference always shows 2 decimals; one that isn't zero
+/// but rounds to 0.00 keeps Reconcile now off and says why.
+#[test]
+fn sub_cent_difference_shows_cents_and_explains() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let v = state(&s);
+    assert_eq!(v["difference"], "-412.18");
+    assert_eq!(v["finish_help"], t("reconcile.finish_help"));
+    if let Some(r) = s.rec.as_mut() {
+        r.difference = cl_core::Money::parse_wire("-0.0049").expect("money");
+    }
+    let v = state(&s);
+    assert_eq!(v["difference"], "0.00", "{v}");
+    assert_eq!(v["can_finish"], false);
+    assert_eq!(
+        v["finish_help"],
+        "Less than a cent off: an amount has extra decimals"
+    );
+    if let Some(r) = s.rec.as_mut() {
+        r.difference = cl_core::Money::ZERO;
+    }
+    assert!(state(&s)["finish_help"].is_null());
+}
+
+/// Every AccessKit label of one Begin frame.
+fn labels(s: &mut ReconcileScreen) -> Vec<String> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..3 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(u) = out.platform_output.accesskit_update {
+            all = u
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| n.label().map(str::to_string))
+                .collect();
+        }
+    }
+    all
+}
+
+/// Q-P27s: only an Admin (engine role `owner`) sees "Undo last
+/// reconciliation"; a bookkeeper doesn't (the demo's role, as the engine's
+/// company list gives it).
+#[test]
+fn undo_is_shown_only_to_an_admin() {
+    let undo = t("reconcile.undo.button");
+    for (role, shown) in [("owner", true), ("bookkeeper", false)] {
+        let (_d, link, _) = screen();
+        if let Some(mut d) = link.demo_state() {
+            d.intake.role = Some(role.to_owned());
+        }
+        let mut s = ReconcileScreen::new(Arc::clone(&link), None, today());
+        s.poll();
+        s.pick_account(crate::company::demo::account_id(1010));
+        s.poll();
+        s.poll();
+        assert!(s.last_finished().is_some(), "1010 has a finished one");
+        assert_eq!(s.state_json()["admin"], shown, "{role}");
+        assert_eq!(s.undo_offered(), shown, "{role}");
+        let seen = labels(&mut s).contains(&undo);
+        assert_eq!(seen, shown, "{role}: Undo on Begin");
+    }
+}
+
+/// Q-P27u: after Undo › Discard the statement's service charge and
+/// interest stay in the books; Begin with the same amount and date asks
+/// "Already in your books — add it again?" before going on.
+#[test]
+fn begin_asks_before_adding_a_charge_already_in_the_books() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    assert_eq!(state(&s)["step"], "window", "no charge in the books yet");
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    s.poll();
+    assert_eq!(state(&s)["last"], "undone");
+    // The same statement again: the charges posted at Finish are there.
+    begin_october(&mut s);
+    let v = state(&s);
+    assert_eq!(v["step"], "begin", "{v}");
+    assert_eq!(v["dialog"], "chargeexists");
+    assert_eq!(
+        t("reconcile.charge_exists.text"),
+        "Already in your books \u{2014} add it again?"
+    );
+    // Go back: nothing started.
+    s.dialog = None;
+    s.poll();
+    assert_eq!(state(&s)["step"], "begin");
+    // Add it again: Begin goes on.
+    s.begin();
+    s.poll();
+    assert_eq!(state(&s)["dialog"], "chargeexists");
+    s.add_charge_again();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["step"], "window", "{v}");
+    assert!(v["dialog"].is_null());
+}
+
+/// Q-P27u: another amount or another date is not the same charge.
+#[test]
+fn begin_does_not_ask_for_a_different_charge() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    s.undo_mode = UndoMode::Discard;
+    s.undo_last();
+    s.poll();
+    s.poll();
+    s.poll();
+    let op = crate::company::demo::account_id(1010);
+    s.pick_account(op);
+    s.poll();
+    s.date_in
+        .set(CalendarDate::from_ymd(2026, 10, 31).expect("date"));
+    s.form.ending = "86,902.13".into();
+    s.form.service_charge.amount = "47.00".into();
+    s.begin();
+    s.poll();
+    let v = state(&s);
+    assert!(v["dialog"].is_null(), "{v}");
+    assert_eq!(v["step"], "window", "{v}");
+}
+
+/// Keyboard (NN: every action reachable by keyboard): Tab from the last
+/// pane moves on to the controls, where Tab and Space are the controls'
+/// (the window's scope follows); Shift+Tab from the first pane reaches
+/// the controls before it; Tab back into a pane puts the cursor on the
+/// row that has the focus (QA-9 kept: one truth).
+#[test]
+fn tab_leaves_the_panes_for_the_controls_and_comes_back() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let settle = |s: &mut ReconcileScreen, events: Vec<Event>| {
+        let mut f = a11y_frame(s, &ctx, events);
+        for _ in 0..3 {
+            f = a11y_frame(s, &ctx, vec![]);
+        }
+        f
+    };
+    let key = |k, modifiers| Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].as_str().map(str::to_string);
+    settle(&mut s, vec![]);
+    assert_eq!(
+        s.scope(),
+        Scope::Reconcile,
+        "nothing focused: the panes' keys"
+    );
+    // Tab: into the deposits pane, then the payments pane.
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(f, cursor(&s));
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(f, cursor(&s));
+    assert_eq!(s.scope(), Scope::Reconcile);
+    // Tab again: out of the panes onto Leave for now (Reconcile now is off).
+    assert!(s.command(CommandId::new("reconcile.switch_pane")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.leave").as_str()));
+    assert_eq!(s.scope(), Scope::Window, "Tab and Space are egui's now");
+    // egui's Tab: the next control.
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::NONE)]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.reports").as_str()));
+    // Shift+Tab twice: back over Leave for now into the payments pane; the
+    // cursor follows the row that has the focus.
+    settle(&mut s, vec![key(Key::Tab, Modifiers::SHIFT)]);
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::SHIFT)]);
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s), "announced = cursor");
+    assert_eq!(s.state_json()["pane"], "out");
+    assert_eq!(s.scope(), Scope::Reconcile, "back in the panes");
+    // Shift+Tab (the window's): the deposits pane, then the control before
+    // the panes (Mark all).
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    settle(&mut s, vec![]);
+    assert_eq!(s.state_json()["pane"], "in");
+    assert!(s.command(CommandId::new("reconcile.switch_pane_back")));
+    let f = settle(&mut s, vec![]);
+    assert_eq!(f.as_deref(), Some(t("reconcile.mark_all").as_str()));
+    assert_eq!(s.scope(), Scope::Window);
+    // Space on it is the button's: every shown line is checked.
+    settle(&mut s, vec![key(Key::Space, Modifiers::NONE)]);
+    let v = s.state_json();
+    assert_eq!(v["left"]["checked"], v["left"]["rows"], "{v}");
+    assert_eq!(v["right"]["checked"], v["right"]["rows"], "{v}");
+    // egui's Tab from Mark all: the first deposit row, cursor and focus one.
+    let f = settle(&mut s, vec![key(Key::Tab, Modifiers::NONE)]);
+    assert!(f.is_some());
+    assert_eq!(f, cursor(&s));
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(s.scope(), Scope::Reconcile);
+}
+
+/// The scenarios' reset starts the story over: the charges a finished run
+/// posted go too, so the same statement begins without the Q-P27u question.
+#[test]
+fn demo_reset_removes_the_charges_earlier_runs_posted() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    assert!(s.command(CommandId::new("dev.demo_reconcile_reset")));
+    begin_october(&mut s);
+    let v = state(&s);
+    assert!(v["dialog"].is_null(), "{v}");
+    assert_eq!(v["step"], "window", "{v}");
+    assert_eq!(v["difference"], "-412.18");
+}
+
+/// P27 QA-12: Undo of a reconciliation in a closed period asks for the
+/// password in its dialog only, in plain words (no engine code); the Begin
+/// screen behind it shows no closed-period notice about its own date. A
+/// wrong password re-asks with the Finish dialog's words.
+#[test]
+fn closed_period_undo_asks_in_its_dialog_in_plain_words() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let check = s
+        .lines
+        .iter()
+        .find(|l| l.number.as_deref() == Some("4409"))
+        .map(|l| l.journal_line)
+        .expect("4409");
+    s.toggle(check);
+    s.poll();
+    s.finish();
+    s.poll();
+    assert_eq!(state(&s)["last"], "finished");
+    s.dialog = None;
+    s.poll();
+    s.poll();
+    assert!(s.command(CommandId::new("dev.demo_reconcile_close_books")));
+    s.open_undo();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "undo", "{v}");
+    assert_eq!(v["undo_locked"], true, "{v}");
+    assert!(v["notice"].is_null(), "Begin shows nothing: {v}");
+    assert!(s.error.is_none(), "{:?}", s.error);
+    // No raw refusal for the dialog to print; the password field is there.
+    assert!(s.undo_error.is_none());
+    // A wrong password: asked again with plain words.
+    s.password = "not it".into();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["dialog"], "undo", "{v}");
+    assert_eq!(v["password_rejected"], true, "{v}");
+    assert_eq!(s.password, "");
+    assert!(s.undo_error.is_none());
+    // The right one undoes it; nothing is left over.
+    s.password = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.undo_last();
+    s.poll();
+    let v = state(&s);
+    assert_eq!(v["last"], "undone", "{v}");
+    assert_eq!(v["undo_locked"], false);
+    assert_eq!(v["password_rejected"], false);
+    assert!(v["dialog"].is_null(), "{v}");
+}
+
+/// P27 QA minor: moving back into a pane lands on the row last used there,
+/// not its first row.
+#[test]
+fn coming_back_into_a_pane_lands_on_its_last_row() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let cmd =
+        |s: &mut ReconcileScreen, c: &'static str| assert!(s.command(CommandId::new(c)), "{c}");
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].clone();
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(s.state_json()["pane"], "in");
+    let first_in = cursor(&s);
+    cmd(&mut s, "reconcile.next");
+    cmd(&mut s, "reconcile.next");
+    let used_in = cursor(&s);
+    assert_ne!(used_in, first_in);
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(s.state_json()["pane"], "out");
+    let first_out = cursor(&s);
+    cmd(&mut s, "reconcile.next");
+    let used_out = cursor(&s);
+    assert_ne!(used_out, first_out);
+    cmd(&mut s, "reconcile.switch_pane_back");
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(cursor(&s), used_in, "back on the deposit last used");
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(cursor(&s), used_out, "back on the payment last used");
+}

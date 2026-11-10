@@ -212,6 +212,15 @@ pub struct ErrorDialog {
     pub copied: bool,
 }
 
+/// An owner message's words, its `{date}` filled in when it names one.
+#[must_use]
+pub fn owner_text(key: &str, date: Option<cl_core::CalendarDate>) -> String {
+    match date {
+        Some(d) => crate::i18n::t_with(key, &[("date", &crate::shell::us_date(d))]),
+        None => t(key),
+    }
+}
+
 impl ErrorDialog {
     /// Build the dialog for any owner-facing error. `log` is the file whose
     /// tail is attached; `None` attaches no log.
@@ -226,7 +235,7 @@ impl ErrorDialog {
         tracing::error!(error_id = %id, key = m.key, "error shown to the owner");
         ErrorDialog {
             id,
-            message: t(m.key),
+            message: owner_text(m.key, error.owner_date()),
             fix: m.suggestion_key.map(t),
             details: details_text(id, m.key, &detail, &excerpt),
             copied: false,

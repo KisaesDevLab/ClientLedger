@@ -358,5 +358,15 @@
   {"method":"PUT","path":"/api/v1/practice/conditional-rules/{id}","inSpec":true,"fragmentHash":"3568a9a411ef6d8ade2ecd6ed2c1cd38f9db2618620276962b11ddece3aa879c"},
   {"method":"DELETE","path":"/api/v1/practice/conditional-rules/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/practice/conditional-rules/suggestions","inSpec":true,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/practice/conditional-rules/suggestions/dismiss","inSpec":true,"fragmentHash":"a607b8e366bec9ee126926b3a6d0dbc3715bd566029889473702e1c2d9105214"}
+  {"method":"POST","path":"/api/v1/practice/conditional-rules/suggestions/dismiss","inSpec":true,"fragmentHash":"a607b8e366bec9ee126926b3a6d0dbc3715bd566029889473702e1c2d9105214"},
+  {"method":"POST","path":"/api/v1/banking/reconciliations","inSpec":true,"fragmentHash":"78528714d1354e02c7f574401576d8fede30a25207ace22162b1bf48d6369139"},
+  {"method":"GET","path":"/api/v1/banking/reconciliations/{id}","inSpec":true,"fragmentHash":"aa0bf710b0593cad51234046b70674354482dcd81854b81839342c5c55c828af"},
+  {"method":"PUT","path":"/api/v1/banking/reconciliations/{id}/lines","inSpec":true,"fragmentHash":"6080e2091b4e57f3607e4a7c86d6f52a4c9576c4438497d7e0e106bae9c20bbe"},
+  {"method":"PATCH","path":"/api/v1/banking/reconciliations/{id}","inSpec":true,"fragmentHash":"f3cfac1b349f27ef468247a70c820d46d6d0b4ec6b0152551f2e16930ae1a84b"},
+  {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/refresh","inSpec":true,"fragmentHash":"e5c93b4896e5e9fb97e6381a6bf9e8a4de0f8da3d3909203ddc9ec2115aa36db"},
+  {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/complete","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/undo","inSpec":true,"fragmentHash":"5c71072adfc29d06f2b6ca09f78918a89a1acb09e8a97c718c642120425908f2"},
+  {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/cancel","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"GET","path":"/api/v1/reports/reconciliation-detail","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/reconciliation-discrepancy","inSpec":true,"fragmentHash":"eeb1734297825e81940a31da8603fbd2dcf7b06f89624f6591bca24497931446"}
 ]

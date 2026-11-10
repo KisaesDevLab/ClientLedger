@@ -1608,6 +1608,36 @@ pub(crate) const FEED_RULE_SUGGESTION_DISMISS: Operation = write(
     Method::Post,
     "/api/v1/practice/conditional-rules/suggestions/dismiss",
 );
+// ---- P27: Reconcile (U-188 to U-191). Not keyed: a retried complete or
+// undo gets a 409 and the screen reads the reconciliation again.
+/// Begin a reconciliation (charges, pre-check, later lines; U-188/U-189).
+pub(crate) const RECON_START: Operation = write(Method::Post, "/api/v1/banking/reconciliations");
+/// One reconciliation with its lines and the engine's totals.
+pub(crate) const RECON_GET: Operation = read("/api/v1/banking/reconciliations/{id}");
+/// Ticks in one batch (`?view=summary`: totals only).
+pub(crate) const RECON_LINES: Operation =
+    write(Method::Put, "/api/v1/banking/reconciliations/{id}/lines");
+/// Change statement info (date, ending balance, charges).
+pub(crate) const RECON_PATCH: Operation =
+    write(Method::Patch, "/api/v1/banking/reconciliations/{id}");
+/// Pull in new lines (pre-checked) and drop orphans.
+pub(crate) const RECON_REFRESH: Operation =
+    write(Method::Post, "/api/v1/banking/reconciliations/{id}/refresh");
+/// Finish: posts the charges, marks the lines reconciled.
+pub(crate) const RECON_COMPLETE: Operation = write(
+    Method::Post,
+    "/api/v1/banking/reconciliations/{id}/complete",
+);
+/// Undo the latest finished reconciliation (U-190 modes, Admin only).
+pub(crate) const RECON_UNDO: Operation =
+    write(Method::Post, "/api/v1/banking/reconciliations/{id}/undo");
+/// Discard one in progress ("Start over").
+pub(crate) const RECON_CANCEL: Operation =
+    write(Method::Post, "/api/v1/banking/reconciliations/{id}/cancel");
+/// The detail report (the summary PDF reads it too).
+pub(crate) const RECON_DETAIL_REPORT: Operation = read("/api/v1/reports/reconciliation-detail");
+/// The discrepancy report (U-191).
+pub(crate) const RECON_DISCREPANCY: Operation = read("/api/v1/reports/reconciliation-discrepancy");
 /// Runs the rules again over waiting bank lines (P26 QA-10: a rule saved
 /// in the Bank Feed sets up the lines already waiting). Desktop engines
 /// only stage what a rule sets (Q-P26o); nothing posts.
@@ -1637,7 +1667,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 360] = [
+pub const OPERATIONS: [Operation; 370] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2013,6 +2043,17 @@ pub const OPERATIONS: [Operation; 360] = [
     FEED_RULE_DELETE,
     FEED_RULE_SUGGESTIONS,
     FEED_RULE_SUGGESTION_DISMISS,
+    // P27
+    RECON_START,
+    RECON_GET,
+    RECON_LINES,
+    RECON_PATCH,
+    RECON_REFRESH,
+    RECON_COMPLETE,
+    RECON_UNDO,
+    RECON_CANCEL,
+    RECON_DETAIL_REPORT,
+    RECON_DISCREPANCY,
 ];
 
 /// Looks up a covered operation.

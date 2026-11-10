@@ -394,7 +394,18 @@ impl RegisterScreen {
             {
                 self.command_from_toolbar("edit.edit_transaction");
             }
-            if b(ui, "register.void.open", "edit.void_transaction", false).clicked() {
+            // A reconciled row can't be voided: the button says why (P27 QA).
+            let reconciled = self.cursor_reconciled();
+            let void_tip = format!(
+                "{} ({})",
+                t("register.void.open"),
+                shortcut_hint("edit.void_transaction")
+            );
+            let void = ui
+                .add_enabled(!reconciled, egui::Button::new(t("register.void.open")))
+                .on_hover_text(void_tip)
+                .on_disabled_hover_text(t("register.void.reconciled"));
+            if void.clicked() {
                 self.command_from_toolbar("edit.void_transaction");
             }
             // Delete needs the engine's soft delete (R7, `txn-delete-v1`).

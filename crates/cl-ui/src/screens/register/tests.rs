@@ -1376,9 +1376,11 @@ fn delete_offers_void_without_the_capability_or_for_other_kinds() {
     // reconciled rows.
     s.actions.caps = None;
     s.set_range(cl_model::register::RangePreset::AllDates);
-    settle(&mut s, Some(&(0..200)));
+    settle(&mut s, None);
+    let total = usize::try_from(s.model.total().expect("total")).expect("rows");
+    settle(&mut s, Some(&(0..total as u64)));
     let mut seen = (false, false);
-    for i in 0..200 {
+    for i in 0..total {
         let Some(r) = s.model.row_at(i).cloned() else {
             continue;
         };
@@ -1386,7 +1388,11 @@ fn delete_offers_void_without_the_capability_or_for_other_kinds() {
         s.actions.cursor = Some(k);
         s.actions.panel = dialogs::Panel::None;
         // A/P documents have their own refusal (P17 WP2b).
-        if !r.txn_type.is_deletable() && !dialogs::VoidRoute::of(r.txn_type).is_ap() && !seen.0 {
+        if !r.txn_type.is_deletable()
+            && !dialogs::VoidRoute::of(r.txn_type).is_ap()
+            && r.cleared != cl_api::ClearState::Reconciled
+            && !seen.0
+        {
             assert!(s.start_delete());
             assert_eq!(
                 s.state()["row_action"]["notice"],
@@ -2267,7 +2273,9 @@ fn a_closed_period_ap_row_is_explained_and_nothing_is_sent() {
     let mut s = screen(&link);
     let (key, row) = ap_row(&mut s, cl_api::TxnType::BillPayment, true);
     s.actions.cursor = Some(key);
-    assert!(s.command(CommandId::new("edit.void_transaction")));
+    // The demo's closed period is all reconciled, so Void is not offered on
+    // the row (P27 QA); the AP route's own refusal is checked as sent.
+    s.open_confirm(dialogs::ActionKind::Void, row.txn_id, row.date);
     s.confirm();
     let st = s.state()["row_action"].clone();
     assert_eq!(st["panel"], "notice");
@@ -2656,4 +2664,107 @@ fn stop_changing_clears_what_the_edit_was_told() {
     s.finish_edit();
     assert!(s.entry.editing.is_none());
     assert_eq!(s.entry.problems, Vec::<cl_grid::TextKey>::new());
+}
+
+/// P27 QA-11 (owner): the footer's cleared balance is the engine's for all
+/// dates, as Reconcile counts it, whatever the range shown; the ending
+/// balance stays the range's.
+#[test]
+fn the_footer_cleared_balance_is_for_all_dates() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let end = CalendarDate::from_ymd(2026, 10, 1).expect("date");
+    if let Some(q) = s.query.as_mut() {
+        q.end = end;
+    }
+    s.footer.invalidate();
+    s.footer_load();
+    let chart = link
+        .demo_state()
+        .and_then(|d| d.chart.clone())
+        .expect("chart");
+    let ledger = crate::company::demo::register::DemoLedger::default();
+    let sum = |e| {
+        crate::company::demo::register::summary(&ledger, &chart, operating(&link), e)
+            .expect("summary")
+    };
+    let (all, ranged) = (sum(None), sum(Some(end)));
+    let exact = |x: &cl_api::RegisterSummary| {
+        x.cleared_balance
+            .as_ref()
+            .and_then(cl_api::RegisterAmount::exact)
+    };
+    assert_ne!(
+        exact(&all),
+        exact(&ranged),
+        "the sample clears lines after 10/01"
+    );
+    let text = |a: &cl_api::RegisterAmount| {
+        crate::screens::lists::center::model::layout_plain(
+            &a.display(false).expect("display"),
+            s.model.style,
+        )
+    };
+    let shown = s.footer_shown();
+    assert_eq!(
+        shown.cleared.as_deref(),
+        Some(text(all.cleared_balance.as_ref().expect("R4")).as_str())
+    );
+    assert_eq!(
+        shown.ending,
+        text(ranged.ending_balance.as_ref().expect("R4")),
+        "the ending balance is the range's"
+    );
+}
+
+/// P27 QA: Void is not offered on a reconciled row (the toolbar button is
+/// off, Ctrl+Shift+V says why); a void the engine still refuses names the
+/// statement and its message goes with OK, Esc or the next action.
+#[test]
+fn reconciled_rows_are_not_voided_and_the_refusal_clears() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(&mut s, Some(&(0..200)));
+    let (key, row) = (0..200)
+        .find_map(|i| {
+            let r = s.model.row_at(i).cloned()?;
+            (r.cleared == cl_api::ClearState::Reconciled
+                && !r.void
+                && !dialogs::VoidRoute::of(r.txn_type).is_ap())
+            .then(|| (s.model.row_key(i).expect("key"), r))
+        })
+        .expect("a reconciled row");
+    s.actions.cursor = Some(key);
+    assert!(s.cursor_reconciled());
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["notice"], "register.void.reconciled", "{st}");
+    // The engine's refusal (as from a void sent anyway): dated, then gone
+    // with the next action.
+    s.actions.panel = dialogs::Panel::None;
+    let send = |s: &mut RegisterScreen| {
+        s.open_confirm(dialogs::ActionKind::Void, row.txn_id, row.date);
+        s.confirm();
+        // The demo's closed period is all reconciled: the password first.
+        if s.state()["row_action"]["closing"] == "asking" {
+            s.actions.closing.password = crate::screens::company::form::SecretText::from(
+                crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+            );
+            s.submit_closing();
+        }
+    };
+    send(&mut s);
+    let e = s.actions.error.clone().expect("refused");
+    let date = cl_api::reconciled_statement_date(&e).expect("names the statement");
+    let m = cl_core::OwnerFacing::owner_message(&e);
+    let text = crate::errors::owner_text(m.key, cl_core::OwnerFacing::owner_date(&e));
+    assert!(text.contains(&crate::shell::us_date(date)), "{text}");
+    assert!(s.command(CommandId::new("form.revert")), "Esc dismisses it");
+    assert!(s.actions.error.is_none());
+    send(&mut s);
+    assert!(s.actions.error.is_some());
+    s.command(CommandId::new("register.one_line"));
+    assert!(s.actions.error.is_none(), "the next action clears it");
 }

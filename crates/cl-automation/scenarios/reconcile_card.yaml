@@ -1,0 +1,48 @@
+# Reconcile a card (Q-60, Q-P27g, Q-P27m): 2050 Business Credit Card, the
+# printed balance 1,038.82 with an 18.25 finance charge; Mark all ties out;
+# after the finish the pay step offers a check, a bill or a transfer, and
+# "Pay now with a check" opens Write Check. Synthetic.
+name: reconcile_card
+description: A card statement, Mark all, Reconcile now, pay with a check.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.reconcile
+  - command: dev.demo_reconcile_reset
+  - click: {role: combo_box, label: Account}
+  - click: {role: button, label_contains: "Business Credit Card"}
+  - assert_state: {key: screen.kind, equals: card}
+  - click: {role: text_input, label: Statement date}
+  - key: Ctrl+A
+  - type: {text: "10/31/2026"}
+  - key: Tab
+  - click: {role: text_input, label: "Statement balance (amount you owe)"}
+  - type: {text: "1038.82"}
+  - click: {role: text_input, label: Finance charge}
+  - type: {text: "18.25"}
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.step, equals: window}
+  - assert_state: {key: screen.ending, equals: "1,038.82"}
+  - assert_exists: {label: Charges and cash advances}
+  - assert_exists: {label: Payments and credits}
+  - click: {role: button, label: Mark all}
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - screenshot: card
+  - click: {role: button, label: Reconcile now}
+  - click: {role: button, label: "Next: pay the card"}
+  - assert_state: {key: screen.dialog, equals: cardpay}
+  - assert_exists: {role: button, label: Transfer from a bank account}
+  - assert_exists: {role: button, label: Enter a bill to pay later}
+  - screenshot: pay
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: pay-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  - click: {role: button, label: Pay now with a check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - screenshot: check
+  - command: file.close_window
+  - command: file.close_window

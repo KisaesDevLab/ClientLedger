@@ -788,7 +788,35 @@ fn code_text(code: Option<&ErrorCode>) -> &str {
 
 /// Owner wording for engine codes that mean more than their status, and
 /// for the U-18 idempotency answers.
+/// The reconciled refusal's words and fix (P27 QA-5).
+const RECONCILED_MESSAGE: (&str, Option<&str>) =
+    ("error.api.conflict_reconciled", Some("fix.api.reconciled"));
+/// The same, naming the statement (`{date}`, the engine's `statementDate`).
+const RECONCILED_DATED_MESSAGE: (&str, Option<&str>) = (
+    "error.api.conflict_reconciled_dated",
+    Some("fix.api.reconciled"),
+);
+
+/// The statement date of the finished reconciliation a 409
+/// `RECONCILED_TRANSACTION` names (`reconcile-qa-v1` details
+/// `statementDate`, a plain `YYYY-MM-DD`); `None` for any other error or
+/// an older engine's refusal.
+#[must_use]
+pub fn reconciled_statement_date(e: &ApiError) -> Option<CalendarDate> {
+    match e {
+        ApiError::Conflict {
+            reason: ConflictReason::Reconciled,
+            details,
+            ..
+        } => CalendarDate::parse_wire(details.text("statementDate")?).ok(),
+        _ => None,
+    }
+}
+
 fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)> {
+    if reconciled_statement_date(e).is_some() {
+        return Some(RECONCILED_DATED_MESSAGE);
+    }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
             return Some((
@@ -884,7 +912,7 @@ impl OwnerFacing for ApiError {
                 ConflictReason::AlreadyExists => ("error.api.conflict_exists", None),
                 ConflictReason::TagNumberTaken => ("error.api.tag_number_taken", None),
                 ConflictReason::Busy => ("error.api.busy", Some("fix.api.try_again_soon")),
-                ConflictReason::Reconciled => ("error.api.conflict_reconciled", None),
+                ConflictReason::Reconciled => RECONCILED_MESSAGE,
                 ConflictReason::AlreadyDeleted => {
                     ("error.api.conflict_deleted", Some("fix.api.reload"))
                 }
@@ -962,6 +990,10 @@ impl OwnerFacing for ApiError {
 
     fn scrubbed_detail(&self) -> String {
         self.to_string()
+    }
+
+    fn owner_date(&self) -> Option<CalendarDate> {
+        reconciled_statement_date(self)
     }
 }
 
@@ -1061,6 +1093,34 @@ impl EngineErrorBody {
 
     fn text(&self) -> UserText {
         UserText::new(self.message.clone())
+    }
+}
+
+/// With `reconcile-qa-v1` (U-195) the engine refuses a date or bank-line
+/// change, and a void, of an entry cleared in a finished reconciliation
+/// with 409 `RECONCILED_TRANSACTION` (read by its code). Older engines send
+/// a 400 that has no code (only their delete has the 409): `ledger.service.ts`
+/// `updateTransaction` ("…part of a completed bank reconciliation, so its
+/// reconciled (balance-sheet) line and date can't change…"),
+/// `voidTransactionInTx` and the bill payment void ("…cleared in a
+/// completed bank reconciliation…"). Read as the same refusal so owners
+/// see why (P27 QA-5) instead of "check the highlighted fields"; the
+/// text match stays as the fallback for those engines.
+fn reconciled_refusal_400(body: &EngineErrorBody) -> bool {
+    body.code.is_none() && body.message.contains("completed bank reconciliation")
+}
+
+/// Any other 400: validation, or the reconciled refusal it stands for.
+fn other_400(body: &EngineErrorBody) -> ApiError {
+    if !reconciled_refusal_400(body) {
+        return ApiError::Validation(validation(body));
+    }
+    ApiError::Conflict {
+        reason: ConflictReason::Reconciled,
+        current_version: None,
+        code: None,
+        message: body.text(),
+        details: ConflictDetails::default(),
     }
 }
 
@@ -1354,7 +1414,7 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
             Some(b) if route == RouteKind::Tfa && b.code.is_none() => {
                 fin(ApiError::Unauthorized(AuthFailure::TfaInvalid))
             }
-            Some(b) => fin(ApiError::Validation(validation(b))),
+            Some(b) => fin(other_400(b)),
             None => fin(ApiError::Protocol { status, code: None }),
         },
         401 => {
@@ -2136,6 +2196,66 @@ mod tests {
                     | "error.api.closing_password_owner"
             ));
         }
+    }
+
+    /// P27 QA-5: the engine's code-less 400s for a reconciled entry's date
+    /// or bank-line change and void read as the reconciled refusal, with
+    /// the plain message and its fix; other code-less 400s stay validation.
+    #[test]
+    fn reconciled_entry_400s_read_as_the_reconciled_refusal() {
+        for text in [
+            "This transaction is part of a completed bank reconciliation, so its reconciled (balance-sheet) line and date can\u{2019}t change. You can still recategorize or re-tag the income/expense lines.",
+            "Cannot void a transaction whose lines are cleared in a completed bank reconciliation. Undo the reconciliation first, then void and post a correcting entry.",
+            "Cannot void a bill payment whose lines are cleared in a completed bank reconciliation. Undo the reconciliation first, then void and post a correcting entry.",
+        ] {
+            let body = serde_json::json!({ "error": { "message": text } }).to_string();
+            let e = err(400, &body, S);
+            assert!(
+                matches!(
+                    e,
+                    ApiError::Conflict {
+                        reason: ConflictReason::Reconciled,
+                        ..
+                    }
+                ),
+                "{e:?}"
+            );
+            let m = e.owner_message();
+            assert_eq!(m.key, "error.api.conflict_reconciled");
+            assert_eq!(m.suggestion_key, Some("fix.api.reconciled"));
+        }
+        let other = r#"{"error":{"message":"Debits must equal credits"}}"#;
+        assert!(matches!(err(400, other, S), ApiError::Validation(_)));
+        // A coded 400 that happens to mention it stays what its code says.
+        let coded =
+            r#"{"error":{"message":"completed bank reconciliation","code":"VALIDATION_ERROR"}}"#;
+        assert!(matches!(err(400, coded, S), ApiError::Validation(_)));
+    }
+
+    /// P27 QA: the reconciled refusal names its statement when the engine
+    /// sends `statementDate` (`reconcile-qa-v1`); a timestamp or no date
+    /// keeps the undated words.
+    #[test]
+    fn reconciled_refusal_names_the_statement_date() {
+        let body = |d: &str| {
+            format!(
+                r#"{{"error":{{"message":"x","code":"RECONCILED_TRANSACTION","details":{{"action":"void","reconciliationId":"r","statementDate":"{d}"}}}}}}"#
+            )
+        };
+        let e = err(409, &body("2026-10-31"), S);
+        assert_eq!(
+            reconciled_statement_date(&e),
+            CalendarDate::from_ymd(2026, 10, 31).ok()
+        );
+        assert_eq!(e.owner_date(), CalendarDate::from_ymd(2026, 10, 31).ok());
+        assert_eq!(e.owner_message().key, "error.api.conflict_reconciled_dated");
+        assert_eq!(e.owner_message().suggestion_key, Some("fix.api.reconciled"));
+        for odd in ["2026-10-31T05:00:00Z", ""] {
+            let e = err(409, &body(odd), S);
+            assert_eq!(reconciled_statement_date(&e), None, "{odd}");
+            assert_eq!(e.owner_message().key, "error.api.conflict_reconciled");
+        }
+        assert_eq!(reconciled_statement_date(&ApiError::Cancelled), None);
     }
 
     #[test]

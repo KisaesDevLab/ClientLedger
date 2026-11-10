@@ -87,7 +87,7 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Option<Ve
     };
     let debit_normal = debit_normal(account.fields.account_type);
     let all = ledger.transactions();
-    let reconciled_through = last_reconciled();
+    let reconciled_through = ledger.reconciled_through().unwrap_or(CalendarDate::min());
     let mut txns: Vec<&SampleTransaction> = all
         .iter()
         .filter(|t| t.lines.iter().any(|l| l.account == number))
@@ -357,7 +357,8 @@ pub fn summary(
     let reconciled = all
         .iter()
         .any(|b| b.line.cleared == ClearState::Reconciled)
-        .then(last_reconciled);
+        .then(|| ledger.reconciled_through())
+        .flatten();
     Some(RegisterSummary {
         exact: true,
         current_balance: RegisterAmount::Exact(current),
@@ -389,6 +390,11 @@ pub struct DemoLedger {
     /// P24: the item fields of a posting's lines other than its own
     /// account's (a check's or card charge's Items lines), in line order.
     items: std::collections::BTreeMap<u32, (String, Vec<Option<cl_api::SplitItem>>)>,
+    /// P27: the demo Reconcile finished or undid one, so R follows
+    /// `reconciled_date` instead of the sample's 09/30.
+    reconciled_set: bool,
+    /// The last finished reconciliation's statement date (when set).
+    reconciled_date: Option<CalendarDate>,
 }
 
 /// The demo company's closing-date password (synthetic; the demo plays an
@@ -418,6 +424,21 @@ pub fn check_closing(
         })),
         Some(p) if p.expose() == DEMO_CLOSING_PASSWORD => Ok(()),
         Some(_) => Err(cl_api::ApiError::ClosingPasswordRejected),
+    }
+}
+
+/// The engine's 409 `RECONCILED_TRANSACTION` with its `reconcile-qa-v1`
+/// details: the action and the statement date.
+fn reconciled_refusal(action: &str, statement: CalendarDate) -> cl_api::ApiError {
+    cl_api::ApiError::Conflict {
+        reason: cl_api::ConflictReason::Reconciled,
+        current_version: None,
+        code: cl_api::ErrorCode::parse("RECONCILED_TRANSACTION"),
+        message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::new(serde_json::json!({
+            "action": action,
+            "statementDate": statement.to_wire(),
+        })),
     }
 }
 
@@ -517,6 +538,22 @@ fn sample_id(id: TransactionId) -> Option<u32> {
 }
 
 impl DemoLedger {
+    /// Cleared lines on or before this date show as reconciled (R).
+    #[must_use]
+    pub fn reconciled_through(&self) -> Option<CalendarDate> {
+        if self.reconciled_set {
+            self.reconciled_date
+        } else {
+            Some(last_reconciled())
+        }
+    }
+
+    /// The demo Reconcile finished (or undid) one: R follows it.
+    pub fn set_reconciled_through(&mut self, date: Option<CalendarDate>) {
+        self.reconciled_set = true;
+        self.reconciled_date = date;
+    }
+
     /// The sample's transactions with the demo's changes, then the ones
     /// recorded in the demo.
     #[must_use]
@@ -560,9 +597,18 @@ impl DemoLedger {
     /// # Errors
     /// `NotFound`; `Validation`-like refusal when it is already void.
     pub fn void(&mut self, id: TransactionId) -> Result<(), cl_api::ApiError> {
-        let n = sample_id(id)
-            .filter(|n| self.find(*n).is_some())
+        let t = sample_id(id)
+            .and_then(|n| self.find(n))
             .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        let n = t.id;
+        // A finished reconciliation keeps it (409 `RECONCILED_TRANSACTION`
+        // naming the statement, as `reconcile-qa-v1`).
+        if let Some(r) = self
+            .reconciled_through()
+            .filter(|r| t.cleared && t.date <= *r)
+        {
+            return Err(reconciled_refusal("void", r));
+        }
         // A deposited payment (or a refunded vendor credit) stays until its
         // deposit is voided (409 `TXN_DEPOSITED`).
         if self.deposited_in(id).is_some() {
@@ -589,8 +635,11 @@ impl DemoLedger {
         if !txn_type(&t.kind).is_deletable() {
             return Err(refused(cl_api::ConflictReason::DeleteUnsupported));
         }
-        if t.cleared && t.date <= last_reconciled() {
-            return Err(refused(cl_api::ConflictReason::Reconciled));
+        if let Some(r) = self
+            .reconciled_through()
+            .filter(|r| t.cleared && t.date <= *r)
+        {
+            return Err(reconciled_refusal("delete", r));
         }
         if self.deposited_in(id).is_some() {
             return Err(conflict_code(
@@ -889,10 +938,10 @@ impl DemoLedger {
                 .iter()
                 .find(|a| number_of(a) == Some(l.account.as_str()));
             let own_side = a.is_some_and(|a| {
-                matches!(
-                    a.fields.detail_type.as_deref(),
-                    Some("bank" | "credit_card")
-                )
+                a.fields
+                    .detail_type
+                    .as_deref()
+                    .is_some_and(|d| d == "credit_card" || cl_model::register::is_bank_detail(d))
             });
             lines.push(cl_api::TransactionLine {
                 id: line_id(&t, i),

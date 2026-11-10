@@ -623,3 +623,22 @@ fn without_the_capability_card_digits_are_not_saved() {
     assert_eq!(card_of(&r, id), None);
     assert_eq!(r.s.state()["selected_card_set"], false);
 }
+
+/// P27 QA minor: the chart and the detail list show detail types in
+/// words, never the engine's raw values.
+#[test]
+fn detail_types_read_in_plain_words() {
+    use super::detail_text;
+    assert_eq!(detail_text(Some("checking")), "Checking");
+    assert_eq!(detail_text(Some("savings")), "Savings");
+    assert_eq!(detail_text(Some("cash")), "Cash on hand");
+    assert_eq!(detail_text(Some("petty_cash")), "Petty cash");
+    assert_eq!(
+        detail_text(Some("accumulated_depreciation")),
+        "Accumulated depreciation"
+    );
+    assert_eq!(detail_text(Some("line_of_credit")), "Line of credit");
+    assert_eq!(detail_text(Some("my_own_type")), "My own type");
+    assert_eq!(detail_text(Some("bank")), "Bank");
+    assert_eq!(detail_text(None), "");
+}

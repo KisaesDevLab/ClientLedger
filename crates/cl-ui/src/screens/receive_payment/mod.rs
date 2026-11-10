@@ -328,7 +328,10 @@ impl ReceivePaymentScreen {
             .filter(|a| {
                 a.is_active
                     && (a.system_tag.as_deref() == Some("payments_clearing")
-                        || a.fields.detail_type.as_deref() == Some("bank"))
+                        || a.fields
+                            .detail_type
+                            .as_deref()
+                            .is_some_and(cl_model::register::is_bank_detail))
             })
             .collect();
         v.sort_by_key(|a| a.system_tag.as_deref() != Some("payments_clearing"));

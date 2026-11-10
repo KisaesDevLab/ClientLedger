@@ -141,7 +141,7 @@ fn entry(
         _ => None,
     };
     if id == "banking.feed" {
-        if let Some(n) = counts.bank_feed {
+        if let Some(n) = feed_badge(counts.bank_feed) {
             badge(&mut child, n);
         }
     } else if let Some(n) = count {
@@ -160,5 +160,21 @@ fn entry(
     }
     if resp.clicked() {
         queued.push(cmd.id);
+    }
+}
+
+/// The Bank Feed's orange badge: only when something is waiting (a zero
+/// count is not an alert; P27 QA minor).
+fn feed_badge(count: Option<u32>) -> Option<u32> {
+    count.filter(|n| *n > 0)
+}
+
+#[cfg(test)]
+mod feed_badge_tests {
+    #[test]
+    fn no_badge_for_nothing_waiting() {
+        assert_eq!(super::feed_badge(Some(0)), None);
+        assert_eq!(super::feed_badge(None), None);
+        assert_eq!(super::feed_badge(Some(3)), Some(3));
     }
 }

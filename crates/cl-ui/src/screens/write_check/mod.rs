@@ -733,10 +733,17 @@ impl WriteCheckScreen {
                     && !self.lists_keep_inputs
                     && let Some(bank) = self.default_bank(None)
                 {
-                    // Not an edit: the starting account is part of the blank form.
-                    let mut f = self.header.current().clone();
-                    f.bank = Some(bank);
-                    self.header.load(f);
+                    if self.header.is_dirty() {
+                        // A prefilled header (card pay step) stays unsaved
+                        // work; loading it would make it the clean start
+                        // (P27 QA-10).
+                        self.header.edit_step(|h| h.bank = Some(bank));
+                    } else {
+                        // Not an edit: the starting account is part of the blank form.
+                        let mut f = self.header.current().clone();
+                        f.bank = Some(bank);
+                        self.header.load(f);
+                    }
                     self.fetch_bank_facts();
                 }
             }
@@ -1187,6 +1194,10 @@ impl Screen for WriteCheckScreen {
     fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
         match payload {
             crate::windows::OpenPayload::InboxDraft(d) => self.accept_inbox_draft(d),
+            crate::windows::OpenPayload::CardPayment(p) => {
+                self.fill_card_payment(&p);
+                true
+            }
             crate::windows::OpenPayload::DocumentDraft(o)
                 if o.form == cl_model::doc_draft::DraftForm::WriteCheck =>
             {
