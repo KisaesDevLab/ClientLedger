@@ -456,11 +456,26 @@ fn pane(
                                 s.pane = p;
                                 s.toggle(l.journal_line);
                             } else if row.gained_focus && !cursor {
-                                // The focus came here another way (a click
-                                // that didn't tick, a screen reader): the
-                                // cursor follows it.
                                 s.pane = p;
-                                s.cursor = Some(l.journal_line);
+                                match s
+                                    .last_row_in(p)
+                                    .filter(|r| s.off_panes && s.cursor.is_none_or(|c| c != *r))
+                                {
+                                    // Tab or Shift+Tab from a control back
+                                    // into the pane: its last-used row
+                                    // takes the focus (P27 QA minor).
+                                    Some(last) if last != l.journal_line => {
+                                        s.cursor = Some(last);
+                                        s.focus_cursor = true;
+                                    }
+                                    // The focus came here another way (a
+                                    // click that didn't tick, a screen
+                                    // reader): the cursor follows it.
+                                    _ => {
+                                        s.cursor = Some(l.journal_line);
+                                        s.remember_row();
+                                    }
+                                }
                             } else if row.has_focus && !cursor {
                                 // The keyboard moved the cursor elsewhere:
                                 // this box gives the focus up, so the

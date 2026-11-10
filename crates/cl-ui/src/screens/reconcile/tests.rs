@@ -1203,3 +1203,32 @@ fn closed_period_undo_asks_in_its_dialog_in_plain_words() {
     assert_eq!(v["password_rejected"], false);
     assert!(v["dialog"].is_null(), "{v}");
 }
+
+/// P27 QA minor: moving back into a pane lands on the row last used there,
+/// not its first row.
+#[test]
+fn coming_back_into_a_pane_lands_on_its_last_row() {
+    let (_d, _link, mut s) = screen();
+    begin_october(&mut s);
+    let cmd =
+        |s: &mut ReconcileScreen, c: &'static str| assert!(s.command(CommandId::new(c)), "{c}");
+    let cursor = |s: &ReconcileScreen| s.state_json()["cursor"].clone();
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(s.state_json()["pane"], "in");
+    let first_in = cursor(&s);
+    cmd(&mut s, "reconcile.next");
+    cmd(&mut s, "reconcile.next");
+    let used_in = cursor(&s);
+    assert_ne!(used_in, first_in);
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(s.state_json()["pane"], "out");
+    let first_out = cursor(&s);
+    cmd(&mut s, "reconcile.next");
+    let used_out = cursor(&s);
+    assert_ne!(used_out, first_out);
+    cmd(&mut s, "reconcile.switch_pane_back");
+    assert_eq!(s.state_json()["pane"], "in");
+    assert_eq!(cursor(&s), used_in, "back on the deposit last used");
+    cmd(&mut s, "reconcile.switch_pane");
+    assert_eq!(cursor(&s), used_out, "back on the payment last used");
+}

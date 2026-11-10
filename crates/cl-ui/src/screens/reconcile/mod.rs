@@ -166,6 +166,9 @@ pub struct ReconcileScreen {
     /// buttons): Tab, Space and the arrows are egui's there, not the
     /// panes' (P27 keyboard fix). Read from egui's focus each frame.
     pub(crate) off_panes: bool,
+    /// The row last used in each pane (money in, money out): coming back
+    /// into a pane lands there (P27 QA minor).
+    pub(crate) pane_rows: [Option<JournalLineId>; 2],
     /// Tab past the last pane (`Some(true)`) or Shift+Tab before the first
     /// (`Some(false)`): the next control takes the focus when drawn.
     pub(crate) leave_panes: Option<bool>,
@@ -268,6 +271,7 @@ impl ReconcileScreen {
             cursor: None,
             focus_cursor: false,
             off_panes: false,
+            pane_rows: [None, None],
             leave_panes: None,
             row_focused: false,
             dialog: None,
@@ -705,6 +709,7 @@ impl ReconcileScreen {
         self.lines.clear();
         self.queue = TickQueue::default();
         self.history_for = None;
+        self.pane_rows = [None, None];
     }
 
     fn acted(&mut self, what: &'static str, r: Result<(), ApiError>) {
@@ -1200,6 +1205,41 @@ impl ReconcileScreen {
             self.queue.toggle(id);
             self.cursor = Some(id);
             self.focus_cursor = true;
+            self.remember_row();
+        }
+    }
+
+    fn pane_slot(p: Pane) -> usize {
+        match p {
+            Pane::MoneyIn => 0,
+            Pane::MoneyOut => 1,
+        }
+    }
+
+    /// The cursor's row is the one last used in the current pane.
+    pub(crate) fn remember_row(&mut self) {
+        if let Some(c) = self.cursor {
+            self.pane_rows[Self::pane_slot(self.pane)] = Some(c);
+        }
+    }
+
+    /// The row last used in pane `p`, while it is still shown there.
+    pub(crate) fn last_row_in(&self, p: Pane) -> Option<JournalLineId> {
+        let id = self.pane_rows[Self::pane_slot(p)]?;
+        self.pane_lines(p)
+            .iter()
+            .any(|l| l.journal_line == id)
+            .then_some(id)
+    }
+
+    /// Into pane `p`: its last-used row, else its first.
+    fn enter_pane(&mut self, p: Pane) {
+        self.pane = p;
+        self.cursor = self.last_row_in(p);
+        if self.cursor.is_some() {
+            self.focus_cursor = true;
+        } else {
+            self.move_cursor(true);
         }
     }
 
@@ -1223,6 +1263,7 @@ impl ReconcileScreen {
         };
         self.cursor = next.copied();
         self.focus_cursor = true;
+        self.remember_row();
     }
 
     /// Tab (`forward`) or Shift+Tab while the keyboard is in the panes:
@@ -1243,12 +1284,9 @@ impl ReconcileScreen {
             (kind.right(), kind.left())
         };
         if forward && !in_pane && !self.pane_lines(self.pane).is_empty() {
-            self.cursor = None;
-            self.move_cursor(true);
+            self.enter_pane(self.pane);
         } else if in_pane && self.pane == from && !self.pane_lines(to).is_empty() {
-            self.pane = to;
-            self.cursor = None;
-            self.move_cursor(true);
+            self.enter_pane(to);
         } else {
             self.focus_cursor = false;
             self.off_panes = true;
