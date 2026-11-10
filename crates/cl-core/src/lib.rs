@@ -21,6 +21,7 @@ pub mod fiscal;
 pub mod ids;
 pub mod intake;
 pub mod money;
+pub mod report;
 pub mod secret;
 pub mod tax_rate;
 pub mod unit_cost;
