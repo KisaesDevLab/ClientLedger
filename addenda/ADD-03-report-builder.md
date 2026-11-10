@@ -2,6 +2,8 @@
 
 **Status:** Active (added 2026-10-30, during the build) · **Part of the beta** · Phases **A07–A10** · Checkpoint **PR-A2** · Decisions Q-305–Q-315 · Engine U-118–U-121
 
+**Note (2026-11-10):** U-118 (standard kind, migration 0274) and the U-121 A/P half are built in P28 (Q-P28d); A07 only adds `kind:'builder'`.
+
 Owner request, 2026-10-30: "a report builder… simple, similar to the financial builder in MyBooks… either summary, detailed or a combination of both", working with transactions — sales, A/R, A/P and the rest. The owner answered a Q&A the same day; the answers are Q-305–Q-315.
 
 This addendum adds work to a plan that is already being built. It never rewrites completed phases; where it changes planned or shipped behavior (P28 memorized reports, the Reports mockup's Customize button, the M5 transfer file), it says so below.
