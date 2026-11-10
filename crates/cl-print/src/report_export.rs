@@ -1,0 +1,423 @@
+//! Report exports (P28 plan §6): the owner's CSV, the Excel workbook and
+//! the PDF/print layout of any [`ReportTable`].
+//!
+//! - **CSV**: the engine's exact figures (`-1234.56`, at least 2 places,
+//!   no thousands separator), percents as `63.7`.
+//! - **xlsx** (Q-P28f): the only place money becomes `f64`, at the file
+//!   format's boundary. Each value is checked by printing the `f64` back at
+//!   the value's own scale; one that doesn't come back exactly is written as
+//!   text and counted in a note. Amounts use `#,##0.00;-#,##0.00`, percents
+//!   are numbers with a literal `%` (`0.0"%"`), totals are values (no
+//!   formulas).
+//! - **PDF**: the same display formatting as the screen (2 places, half
+//!   away from zero), captions indented by level.
+//!
+//! Captions starting with `@` are translated by the caller's `tr`.
+
+use std::io::Write as _;
+use std::path::Path;
+
+use cl_core::MoneyStyle;
+use cl_core::report::{Cell, ColumnKind, ReportTable, RowKind, canonical_decimal, push_csv_line};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use rust_xlsxwriter::{Format, Workbook, XlsxError};
+
+use crate::reports::{Column, Report, Section};
+
+/// Why an export failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ExportError {
+    /// The workbook writer refused.
+    #[error("the workbook could not be written")]
+    Xlsx(#[from] XlsxError),
+    /// The file could not be written.
+    #[error("the file could not be written")]
+    Io(#[from] std::io::Error),
+}
+
+/// The amount format of the workbook.
+pub const AMOUNT_FORMAT: &str = "#,##0.00;-#,##0.00";
+/// The percent format of the workbook.
+pub const PERCENT_FORMAT: &str = "0.0\"%\"";
+
+fn label(tr: &dyn Fn(&str) -> String, s: &str) -> String {
+    match s.strip_prefix('@') {
+        Some(key) => tr(key),
+        None => s.to_string(),
+    }
+}
+
+/// An exact amount with at least 2 places and no separators.
+fn exact(d: Decimal) -> String {
+    let mut n = d.normalize();
+    if n.is_zero() {
+        n = Decimal::ZERO;
+    }
+    if n.scale() < 2 {
+        n.rescale(2);
+    }
+    n.to_string()
+}
+
+fn csv_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {
+    match c {
+        Cell::Empty | Cell::Percent(None) => String::new(),
+        Cell::Text(s) => label(tr, s),
+        Cell::Amount(d) => exact(*d),
+        Cell::Percent(Some(d)) | Cell::Quantity(d) => canonical_decimal(*d),
+        Cell::Date(d) => d.to_wire(),
+        Cell::Count(n) => n.to_string(),
+    }
+}
+
+/// The owner's CSV: a heading line, then one line per row with the caption
+/// indented two spaces per level and the exact figures.
+#[must_use]
+pub fn to_csv(t: &ReportTable, rows: &[usize], tr: &dyn Fn(&str) -> String) -> String {
+    let mut out = String::new();
+    let mut head = vec![String::new()];
+    head.extend(t.columns.iter().map(|c| label(tr, &c.caption)));
+    push_csv_line(&mut out, &head);
+    for &i in rows {
+        let Some(r) = t.rows.get(i) else { continue };
+        let mut line = vec![format!(
+            "{}{}",
+            "  ".repeat(usize::from(r.level)),
+            label(tr, &r.caption)
+        )];
+        line.extend(r.cells.iter().map(|c| csv_cell(c, tr)));
+        push_csv_line(&mut out, &line);
+    }
+    out
+}
+
+/// The single `Decimal → f64` conversion (Q-P28f): `Some` only when the
+/// `f64` prints back as exactly the value at its own scale.
+#[must_use]
+pub fn xlsx_number(d: Decimal) -> Option<f64> {
+    let n = d.normalize();
+    let f = n.to_f64()?;
+    let scale = usize::try_from(n.scale()).ok()?;
+    let back = format!("{f:.scale$}");
+    let want = if n.is_zero() {
+        format!("{:.scale$}", 0)
+    } else {
+        n.to_string()
+    };
+    (back == want || (n.is_zero() && back.trim_start_matches('-') == want)).then_some(f)
+}
+
+/// The workbook: `title` lines on top, the heading row, then the rows.
+/// Returns the bytes and how many values had to be written as text.
+///
+/// # Errors
+/// [`ExportError::Xlsx`] when the writer refuses.
+pub fn to_xlsx(
+    t: &ReportTable,
+    rows: &[usize],
+    title: &[String],
+    tr: &dyn Fn(&str) -> String,
+) -> Result<(Vec<u8>, u32), ExportError> {
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    let bold = Format::new().set_bold();
+    let money = Format::new().set_num_format(AMOUNT_FORMAT);
+    let money_bold = Format::new().set_num_format(AMOUNT_FORMAT).set_bold();
+    let pct = Format::new().set_num_format(PERCENT_FORMAT);
+    let mut r: u32 = 0;
+    for line in title {
+        ws.write_string_with_format(r, 0, line, &bold)?;
+        r += 1;
+    }
+    if !title.is_empty() {
+        r += 1;
+    }
+    for (ci, c) in t.columns.iter().enumerate() {
+        let col = u16::try_from(ci + 1).unwrap_or(u16::MAX);
+        ws.write_string_with_format(r, col, label(tr, &c.caption), &bold)?;
+    }
+    r += 1;
+    let mut text_fallbacks = 0u32;
+    for &i in rows {
+        let Some(row) = t.rows.get(i) else { continue };
+        let strong = matches!(row.kind, RowKind::Total | RowKind::Grand | RowKind::Header);
+        let caption = format!(
+            "{}{}",
+            "  ".repeat(usize::from(row.level)),
+            label(tr, &row.caption)
+        );
+        if strong {
+            ws.write_string_with_format(r, 0, caption, &bold)?;
+        } else {
+            ws.write_string(r, 0, caption)?;
+        }
+        for (ci, cell) in row.cells.iter().enumerate() {
+            let col = u16::try_from(ci + 1).unwrap_or(u16::MAX);
+            let kind = t.columns.get(ci).map_or(ColumnKind::Text, |c| c.kind);
+            match cell {
+                Cell::Empty | Cell::Percent(None) => {}
+                Cell::Text(s) => {
+                    ws.write_string(r, col, label(tr, s))?;
+                }
+                Cell::Date(d) => {
+                    ws.write_string(r, col, d.to_wire())?;
+                }
+                Cell::Count(n) => {
+                    ws.write_string(r, col, n.to_string())?;
+                }
+                Cell::Amount(d) | Cell::Percent(Some(d)) | Cell::Quantity(d) => {
+                    let fmt = match (cell, kind) {
+                        (Cell::Percent(_), _) | (_, ColumnKind::Percent) => &pct,
+                        (Cell::Amount(_), _) if strong => &money_bold,
+                        (Cell::Amount(_), _) => &money,
+                        _ => &Format::new(),
+                    };
+                    if let Some(f) = xlsx_number(*d) {
+                        ws.write_number_with_format(r, col, f, fmt)?;
+                    } else {
+                        text_fallbacks += 1;
+                        ws.write_string(r, col, canonical_decimal(*d))?;
+                    }
+                }
+            }
+        }
+        r += 1;
+    }
+    if text_fallbacks > 0 {
+        r += 1;
+        let note = tr("reports.export.text_fallback").replace("{n}", &text_fallbacks.to_string());
+        ws.write_string(r, 0, note)?;
+    }
+    ws.set_column_width(0, 40)?;
+    Ok((wb.save_to_buffer()?, text_fallbacks))
+}
+
+fn display_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {
+    match c {
+        Cell::Empty => String::new(),
+        Cell::Text(s) => label(tr, s),
+        Cell::Amount(d) => cl_core::report::display_amount(*d, MoneyStyle::default()),
+        Cell::Percent(p) => cl_core::report::display_percent(*p),
+        Cell::Quantity(d) => crate::format_quantity(*d),
+        Cell::Date(d) => format!("{:02}/{:02}/{}", d.month(), d.day(), d.year()),
+        Cell::Count(n) => n.to_string(),
+    }
+}
+
+/// The PDF/print layout: one table, captions indented by level.
+#[must_use]
+pub fn to_report(
+    t: &ReportTable,
+    rows: &[usize],
+    title: &str,
+    subtitle: Vec<String>,
+    tr: &dyn Fn(&str) -> String,
+) -> Report {
+    let mut columns = vec![Column {
+        heading: String::new(),
+        share: 3.0,
+        right: false,
+    }];
+    columns.extend(t.columns.iter().map(|c| Column {
+        heading: label(tr, &c.caption),
+        share: 1.2,
+        right: c.kind.is_numeric(),
+    }));
+    let body = rows
+        .iter()
+        .filter_map(|&i| t.rows.get(i))
+        .map(|r| {
+            let mut line = vec![format!(
+                "{}{}",
+                "   ".repeat(usize::from(r.level)),
+                label(tr, &r.caption)
+            )];
+            line.extend(r.cells.iter().map(|c| display_cell(c, tr)));
+            line
+        })
+        .collect();
+    Report {
+        title: title.to_string(),
+        subtitle,
+        sections: vec![Section::Table {
+            heading: String::new(),
+            columns,
+            rows: body,
+            empty: tr("reports.empty"),
+        }],
+        footer: String::new(),
+        page_label: tr("reports.page_label"),
+    }
+}
+
+/// Writes `bytes` to `path` through a temporary file in the same folder and
+/// a rename, so a failed export never leaves a partial file.
+///
+/// # Errors
+/// Any I/O error; the temporary file is removed.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
+    let tmp = dir.join(format!(".{name}.partial"));
+    let result = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    Ok(result?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cl_core::report::{ColumnHead, ReportMeta, ReportRow, RowPath};
+    use std::io::Read as _;
+    use std::str::FromStr;
+
+    fn d(s: &str) -> Decimal {
+        Decimal::from_str(s).expect("decimal")
+    }
+
+    fn tr(k: &str) -> String {
+        match k {
+            "reports.col.total" => "Total".into(),
+            "reports.export.text_fallback" => "{n} values were too long for Excel numbers".into(),
+            other => other.to_string(),
+        }
+    }
+
+    fn table() -> ReportTable {
+        let head = |key: &str, kind| ColumnHead {
+            key: key.into(),
+            caption: format!("@reports.col.{key}"),
+            kind,
+            range: None,
+        };
+        let r = |kind, level, caption: &str, cells| ReportRow {
+            kind,
+            level,
+            path: RowPath::of([caption]),
+            caption: caption.into(),
+            cells,
+            drill: None,
+            expandable: false,
+        };
+        ReportTable {
+            columns: vec![
+                head("total", ColumnKind::Amount),
+                head("pct", ColumnKind::Percent),
+            ],
+            rows: vec![
+                r(
+                    RowKind::Account,
+                    1,
+                    "4000 · Installation",
+                    vec![Cell::Amount(d("38420.5")), Cell::Percent(Some(d("63.7")))],
+                ),
+                r(
+                    RowKind::Account,
+                    1,
+                    "Huge",
+                    vec![Cell::Amount(d("123456789012345.6789")), Cell::Percent(None)],
+                ),
+                r(
+                    RowKind::Grand,
+                    0,
+                    "Net income",
+                    vec![Cell::Amount(d("-0.1")), Cell::Percent(Some(d("0.0")))],
+                ),
+            ],
+            meta: ReportMeta::default(),
+        }
+    }
+
+    #[test]
+    fn csv_has_exact_figures_and_no_separators() {
+        let t = table();
+        let csv = to_csv(&t, &[0, 2], &tr);
+        assert_eq!(
+            csv,
+            ",Total,reports.col.pct\n  4000 · Installation,38420.50,63.7\nNet income,-0.10,0\n"
+        );
+    }
+
+    #[test]
+    fn the_float_boundary_round_trips_or_falls_back() {
+        assert_eq!(xlsx_number(d("38420.50")), Some(38420.5));
+        assert_eq!(xlsx_number(d("-0.10")), Some(-0.1));
+        assert_eq!(xlsx_number(d("0.00")), Some(0.0));
+        assert_eq!(xlsx_number(d("63.7")), Some(63.7));
+        // More than 15 significant digits don't survive an f64.
+        assert_eq!(xlsx_number(d("123456789012345.6789")), None);
+    }
+
+    /// AC3: the workbook keeps numbers numeric with the amount and percent
+    /// formats, and the text fallback is counted.
+    #[test]
+    fn xlsx_numbers_stay_numeric() {
+        let t = table();
+        let (bytes, fallbacks) =
+            to_xlsx(&t, &[0, 1, 2], &["Profit & Loss".into()], &tr).expect("xlsx");
+        assert_eq!(fallbacks, 1);
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut sheet = String::new();
+        zip.by_name("xl/worksheets/sheet1.xml")
+            .expect("sheet")
+            .read_to_string(&mut sheet)
+            .expect("read");
+        let mut styles = String::new();
+        zip.by_name("xl/styles.xml")
+            .expect("styles")
+            .read_to_string(&mut styles)
+            .expect("read");
+        // Numeric cells carry the value (no t="s"/t="str").
+        assert!(sheet.contains("<v>38420.5</v>"), "{sheet}");
+        assert!(sheet.contains("<v>63.7</v>"));
+        assert!(sheet.contains("<v>-0.1</v>"));
+        assert!(styles.contains("#,##0.00;-#,##0.00"), "{styles}");
+        assert!(styles.contains("0.0&quot;%&quot;"), "{styles}");
+        // The 19-digit value went in as text.
+        let mut strings = String::new();
+        zip.by_name("xl/sharedStrings.xml")
+            .expect("strings")
+            .read_to_string(&mut strings)
+            .expect("read");
+        assert!(strings.contains("123456789012345.6789"));
+        assert!(strings.contains("1 values were too long"));
+    }
+
+    #[test]
+    fn the_pdf_layout_uses_display_formatting() {
+        let r = to_report(&table(), &[0, 2], "Profit & Loss", vec![], &tr);
+        let Section::Table { rows, columns, .. } = &r.sections[0] else {
+            panic!("table")
+        };
+        assert_eq!(columns[1].heading, "Total");
+        assert!(columns[1].right);
+        assert_eq!(
+            rows[0],
+            vec!["   4000 · Installation", "38,420.50", "63.7%"]
+        );
+        assert_eq!(rows[1], vec!["Net income", "-0.10", "0.0%"]);
+    }
+
+    #[test]
+    fn an_atomic_write_leaves_no_partial_file() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("report.csv");
+        write_atomic(&path, b"a,b\n").expect("write");
+        assert_eq!(std::fs::read(&path).expect("read"), b"a,b\n");
+        assert!(!dir.path().join(".report.csv.partial").exists());
+        // Into a folder that doesn't exist: an error, nothing left behind.
+        let bad = dir.path().join("missing").join("x.csv");
+        assert!(write_atomic(&bad, b"x").is_err());
+    }
+}
