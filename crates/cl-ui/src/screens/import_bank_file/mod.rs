@@ -710,6 +710,22 @@ impl ImportBankFileScreen {
         flow::same_day_amount(p, &req.rows, existing)
     }
 
+    /// Q-PR5c (PR-5 QA-6): new rows that are rows already imported with
+    /// the opposite sign (the sign answer is likely wrong for this file).
+    pub(crate) fn opposite_look_alikes(&self) -> usize {
+        let (Some(p), Some((a, existing)), Some(req)) = (
+            self.preview.as_ref(),
+            self.existing.as_ref(),
+            self.request(),
+        ) else {
+            return 0;
+        };
+        if *a != req.account {
+            return 0;
+        }
+        flow::opposite_sign_day_amount(p, &req.rows, existing)
+    }
+
     pub(crate) fn current_section(&self) -> Option<&cl_import::Section> {
         self.loaded.as_ref()?.parsed.sections.get(self.section)
     }
@@ -879,6 +895,41 @@ impl ImportBankFileScreen {
     pub(crate) fn sign_differs(&self) -> bool {
         self.remembered_flip
             .is_some_and(|f| flow::sign_disagrees(&self.sign, f))
+    }
+
+    /// The sign question's first line: a file that looked reversed says
+    /// whether the flip is applied (PR-5 QA: the text follows the box).
+    pub(crate) fn sign_hint_key(&self) -> &'static str {
+        if self.sign.suggest_flip && self.flipped {
+            "bankimport.sign.suggest_applied"
+        } else if self.sign.suggest_flip {
+            "bankimport.sign.suggest"
+        } else if self.card_target()
+            || self
+                .current_section()
+                .is_some_and(|s| s.kind == cl_import::AccountKind::CreditCard)
+        {
+            "bankimport.sign.card"
+        } else {
+            "bankimport.sign.plain"
+        }
+    }
+
+    /// Q-PR5c (PR-5 QA-6): how this file's amounts come in, with the
+    /// owner's current answer, against the account's other format. What
+    /// must agree is the result (money out negative in both), not the
+    /// checkbox: a card's QFX keeps its signs while its CSV needs a flip.
+    /// The other format's import was confirmed by the owner, so its money
+    /// out came in negative; this file's evidence says whether the current
+    /// answer does the same (`None` with no evidence either way).
+    pub(crate) fn sign_against_other(&self) -> Option<(cl_api::BankFileFormat, Option<bool>)> {
+        let (format, _) = self.other_flip?;
+        let same = self
+            .sign
+            .reason
+            .is_some()
+            .then_some(self.flipped == self.sign.suggest_flip);
+        Some((format, same))
     }
 
     /// The file's account kind and the chosen account's differ (QA-5).
@@ -1726,6 +1777,17 @@ impl Screen for ImportBankFileScreen {
             m.insert(
                 "other_flip".into(),
                 json!(self.other_flip.map(|(f, flip)| json!([f.as_wire(), flip]))),
+            );
+            // Q-PR5c: true = this file comes in the same way as the other
+            // format, false = the opposite, null = no evidence.
+            m.insert(
+                "sign_against_other".into(),
+                json!(self.sign_against_other().map(|(_, same)| same)),
+            );
+            m.insert("sign_hint".into(), json!(self.sign_hint_key()));
+            m.insert(
+                "opposite_look_alikes".into(),
+                json!(self.opposite_look_alikes()),
             );
         }
         state

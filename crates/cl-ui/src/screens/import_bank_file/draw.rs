@@ -881,14 +881,7 @@ impl ImportBankFileScreen {
         let card = s.kind == AccountKind::CreditCard || self.card_target();
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("bankimport.sign.heading"));
-            let key = if self.sign.suggest_flip {
-                "bankimport.sign.suggest"
-            } else if card {
-                "bankimport.sign.card"
-            } else {
-                "bankimport.sign.plain"
-            };
-            form::hint(ui, tokens, &t(key));
+            form::hint(ui, tokens, &t(self.sign_hint_key()));
             if self.sign_differs() {
                 form::inline_warning(ui, tokens, &t("bankimport.sign.remembered_differs"));
             } else if self.remembered_flip.is_some() {
@@ -927,18 +920,29 @@ impl ImportBankFileScreen {
             }
             if needs && ui.button(t("bankimport.sign.looks_right")).clicked() {
                 self.set_flipped(self.flipped);
-            } // Q-PR5c: the answer used for this account's other format.
-            if let Some((format, flip)) = self.other_flip {
-                let key = if flip {
-                    "bankimport.sign.other_format_flipped"
+            }
+            // Q-PR5c (PR-5 QA-6): the result compared with the account's
+            // other format, never the checkbox answer.
+            if let Some((format, same)) = self.sign_against_other() {
+                let format = format.as_wire().to_uppercase();
+                let vars = [("format", format.as_str())];
+                let (said, opposite) = if card {
+                    (
+                        "bankimport.sign.other_format_card",
+                        "bankimport.sign.other_opposite_card",
+                    )
                 } else {
-                    "bankimport.sign.other_format_kept"
+                    (
+                        "bankimport.sign.other_format",
+                        "bankimport.sign.other_opposite",
+                    )
                 };
-                form::hint(
-                    ui,
-                    tokens,
-                    &t_with(key, &[("format", &format.as_wire().to_uppercase())]),
-                );
+                form::hint(ui, tokens, &t_with(said, &vars));
+                match same {
+                    Some(true) => form::hint(ui, tokens, &t("bankimport.sign.other_same")),
+                    Some(false) => form::inline_warning(ui, tokens, &t_with(opposite, &vars)),
+                    None => form::hint(ui, tokens, &t("bankimport.sign.other_unknown")),
+                }
             }
         });
     }
@@ -1192,6 +1196,15 @@ impl ImportBankFileScreen {
                 ui,
                 tokens,
                 &t_count("bankimport.preview.same_day_amount", same, &[]),
+            );
+        }
+        // Q-PR5c (PR-5 QA-6): the same rows with the other sign.
+        let opposite = self.opposite_look_alikes();
+        if opposite > 0 {
+            form::inline_warning(
+                ui,
+                tokens,
+                &t_count("bankimport.preview.opposite_sign", opposite, &[]),
             );
         }
         match self.changed_ui(ui, tokens, style, &p) {

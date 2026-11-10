@@ -1236,14 +1236,21 @@ fn the_sign_question_shows_the_other_formats_answer() {
     assert_ne!(format, flow::wire_format(cl_import::FileFormat::Csv));
     assert!(!flip);
     assert_eq!(s.state()["other_flip"][1], false);
-    assert!(crate::i18n::has("bankimport.sign.other_format_kept"));
-    // The wrong answer: every row is new, none looks like the QFX rows.
+    assert!(crate::i18n::has("bankimport.sign.other_format"));
+    // PR-5 QA-6: a bank CSV gives no sign evidence; the hint says what
+    // the other format did and asks to check, with no verdict.
+    assert_eq!(s.sign_against_other().map(|(_, same)| same), Some(None));
+    // The wrong answer: every row is new, none looks like the QFX rows;
+    // the preview says they are the QFX rows with the other sign.
     s.set_flipped(true);
     s.next();
     s.poll();
     let p = s.preview.clone().expect("preview");
     assert_eq!(p.counts.new, 3, "{:?}", p.counts);
     assert_eq!(s.look_alikes(), 0);
+    assert_eq!(s.opposite_look_alikes(), 3);
+    assert_eq!(s.state()["opposite_look_alikes"], 3);
+    assert!(crate::i18n::has("bankimport.preview.opposite_sign.one"));
     // The right answer: the same rows are found.
     s.back();
     s.set_flipped(false);
@@ -1254,6 +1261,63 @@ fn the_sign_question_shows_the_other_formats_answer() {
     let new = usize::try_from(p.counts.new).expect("n");
     assert_eq!(found as usize + s.look_alikes(), 3, "{:?}", p.counts);
     assert!(new == 0 || s.look_alikes() == new);
+    assert_eq!(s.opposite_look_alikes(), 0);
+}
+
+/// PR-5 QA-6 (Q-PR5c): a card's QFX keeps its signs (charges negative)
+/// while its CSV (charges positive) needs a flip. The hint compares the
+/// result, so the right answer for the CSV (flip) reads "the same way" and
+/// unticking it warns, though the QFX's checkbox answer was "keep".
+#[test]
+fn the_sign_hint_compares_the_result_not_the_checkbox() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let card = card_account(&s);
+    into_account(&mut s, bank_fixture("card_ccstmt.qfx"), card);
+    if s.sign_needs_confirm() {
+        s.set_flipped(s.flipped);
+    }
+    assert!(!s.flipped, "a card QFX keeps its signs");
+    s.next();
+    s.poll();
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    prepared(&mut s);
+    s.start_over(false);
+    let csv = "Date,Description,Amount\n10/05/2026,OFFICE DEPOT #221,45.67\n\
+10/07/2026,PARKING GARAGE,12.00\n10/12/2026,PAYMENT THANK YOU,-500.00\n";
+    read(&mut s, &f, "card.csv", csv);
+    s.next();
+    s.pick_account(card);
+    let (_, kept) = s.other_flip.expect("the QFX answer");
+    assert!(!kept, "the QFX's checkbox answer was keep");
+    assert!(s.flipped, "charges positive: the flip is suggested");
+    assert_eq!(s.sign_hint_key(), "bankimport.sign.suggest_applied");
+    assert_eq!(
+        s.sign_against_other().map(|(_, same)| same),
+        Some(Some(true))
+    );
+    assert_eq!(s.state()["sign_against_other"], true);
+    // Unticking it "like the QFX" would bring the charges in as payments.
+    s.set_flipped(false);
+    assert_eq!(s.sign_hint_key(), "bankimport.sign.suggest");
+    assert_eq!(
+        s.sign_against_other().map(|(_, same)| same),
+        Some(Some(false))
+    );
+    assert!(s.can_next(), "one answer is enough");
+    s.next();
+    s.poll();
+    assert_eq!(s.opposite_look_alikes(), 3, "the QFX rows, other sign");
+    // Ticked again (one click, no second confirmation): found as imported.
+    s.back();
+    s.set_flipped(true);
+    assert!(s.can_next(), "the box is the answer");
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    assert_eq!(p.counts.new, 0, "{:?}", p.counts);
+    assert_eq!(s.opposite_look_alikes(), 0);
 }
 
 /// One frame of the wizard in a `w` x `h` window (points); the AccessKit

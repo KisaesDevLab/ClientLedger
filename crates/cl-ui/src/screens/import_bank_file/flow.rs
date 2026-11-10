@@ -375,6 +375,30 @@ pub fn same_day_amount(
         .count()
 }
 
+/// Q-PR5c (PR-5 QA-6): the new rows of a preview whose date matches a row
+/// already imported and whose amount is that row's with the opposite sign
+/// (not zero): the sign answer is likely the wrong way round for this
+/// file, and sending would bring those transactions in a second time.
+#[must_use]
+pub fn opposite_sign_day_amount(
+    outcome: &BankImportOutcome,
+    rows: &[cl_api::BankImportRow],
+    existing: &[(CalendarDate, Decimal)],
+) -> usize {
+    outcome
+        .rows
+        .iter()
+        .filter(|r| r.status == ImportRowStatus::New)
+        .filter_map(|r| rows.iter().find(|x| x.line == r.line))
+        .filter(|x| {
+            !x.amount.is_zero()
+                && existing
+                    .iter()
+                    .any(|(d, a)| *d == x.date && *a == -x.amount)
+        })
+        .count()
+}
+
 /// The rows a commit adds, given the owner's choices.
 #[must_use]
 pub fn rows_to_send(outcome: &BankImportOutcome, choices: &BTreeMap<u32, RowChoice>) -> usize {
