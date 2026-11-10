@@ -50,9 +50,19 @@ fn entry(on: (u32, u32), lines: Vec<JeLine>) -> NewJournalEntry {
 fn get(h: &Harness, s: &Session, name: &str, path: &str, q: &[(&str, &str)]) -> Value {
     let mut query = q.to_vec();
     query.push(("exact", "1"));
-    let r = h
+    let mut r = h
         .run(s.raw(Method::Get, path, &query, None))
         .unwrap_or_else(|e| panic!("{path}: {e}"));
+    // The suite shares the engine's 30-a-minute report limit.
+    for _ in 0..10 {
+        if r.status != 429 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        r = h
+            .run(s.raw(Method::Get, path, &query, None))
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+    }
     assert_eq!(r.status, 200, "{path}: {}", r.body);
     if let Ok(dir) = std::env::var("CL_REPORTS_RECORD") {
         let p = std::path::Path::new(&dir).join(format!("{name}.json"));
@@ -277,9 +287,19 @@ fn dec(c: &Cell) -> Decimal {
     }
 }
 
+/// Runs `r`, waiting out the engine's 30-a-minute report limit
+/// (`expensiveOpLimiter`), which the whole suite shares.
 fn run(h: &Harness, s: &Session, r: &ReportRequest) -> ReportTable {
-    h.run(s.reports().run(r))
-        .unwrap_or_else(|e| panic!("{:?}: {e}", r.source))
+    for _ in 0..10 {
+        match h.run(s.reports().run(r)) {
+            Ok(t) => return t,
+            Err(ApiError::RateLimited { retry_after }) => {
+                std::thread::sleep(retry_after.unwrap_or(std::time::Duration::from_secs(15)));
+            }
+            Err(e) => panic!("{:?}: {e}", r.source),
+        }
+    }
+    panic!("{:?}: still rate limited", r.source)
 }
 
 /// The ledger's net (debits - credits) over a drill's lines.

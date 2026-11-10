@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn exact_strings_parse_at_full_scale() {
-        let v = json!({"a": "0.3000", "b": "12.345678901234", "n": null, "x": 1.5});
+        let v = json!({"a": "0.3000", "b": "12.345678901234", "n": null, "x": 15});
         assert_eq!(amount(&v, "a").expect("a").to_string(), "0.3000");
         assert_eq!(amount(&v, "b").expect("b").to_string(), "12.345678901234");
         assert_eq!(amount_or_null(&v, "n").expect("n"), None);
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn a_missing_or_number_field_is_a_shape_error_never_a_fallback() {
-        let v = json!({"x": 1.5, "n": null});
+        let v = json!({"x": 15, "n": null});
         for (k, r) in [
             ("x", amount(&v, "x")),
             ("missing", amount(&v, "missing")),
