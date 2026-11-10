@@ -1227,6 +1227,77 @@ pub fn void_first_accepted(state: &mut DemoState) -> bool {
     }
 }
 
+/// Developer (Q-PR5a): the entry of the first accepted, not voided row
+/// gets 1.00 more on its other side, as an owner's register edit would;
+/// the row is flagged "Entry changed" on the next read.
+pub fn change_first_accepted(state: &mut DemoState) -> bool {
+    super::refresh(state);
+    let Some((account, t)) = state
+        .feed_review
+        .rows
+        .iter()
+        .find(|r| r.status.is_accepted() && !r.entry_voided && !r.entry_changed && r.posted)
+        .and_then(|r| Some((r.account, r.matched?)))
+    else {
+        return false;
+    };
+    let chart = super::super::chart();
+    let Some(bank) = number_of(&chart, account) else {
+        return false;
+    };
+    let Some(tx) = state
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|x| DemoLedger::id_of(x) == t)
+    else {
+        return false;
+    };
+    let by_number = |n: &str| {
+        chart
+            .iter()
+            .find(|a| number_of(&chart, a.id).as_deref() == Some(n))
+            .map(|a| a.id)
+    };
+    let Some(own_line) = tx.lines.iter().find(|l| l.account == bank) else {
+        return false;
+    };
+    let own_debit = !own_line.debit.is_zero();
+    let one = Money::parse_wire("1.00").unwrap_or(Money::ZERO);
+    let lines: Option<Vec<(AccountId, Money)>> = tx
+        .lines
+        .iter()
+        .filter(|l| l.account != bank)
+        .enumerate()
+        .map(|(i, l)| {
+            let a = by_number(&l.account)?;
+            let side = if own_debit { l.credit } else { l.debit };
+            let side = if i == 0 {
+                side.checked_add(one).ok()?
+            } else {
+                side
+            };
+            Some((a, side))
+        })
+        .collect();
+    let Some(lines) = lines.filter(|l| !l.is_empty()) else {
+        return false;
+    };
+    let p = DemoPosting {
+        kind: "check",
+        date: tx.date,
+        number: tx.number.clone(),
+        contact: tx.contact.clone(),
+        memo: tx.memo.clone(),
+        own: account,
+        own_debit,
+        lines,
+    };
+    let done = state.ledger.save(&chart, &p, Some(t)).is_some();
+    super::refresh(state);
+    done
+}
+
 /// Developer: the first review row is flagged a possible duplicate of the
 /// first other row with the nearest date (Q-P26b compare).
 pub fn mark_duplicate(state: &mut DemoState) -> bool {

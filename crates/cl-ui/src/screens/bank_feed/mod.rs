@@ -660,6 +660,9 @@ impl BankFeedScreen {
             "dev.demo_feed_void_entry" => {
                 demo::void_first_accepted(&mut d);
             }
+            "dev.demo_feed_change_entry" => {
+                demo::change_first_accepted(&mut d);
+            }
             "dev.demo_feed_duplicate" => {
                 demo::mark_duplicate(&mut d);
             }
