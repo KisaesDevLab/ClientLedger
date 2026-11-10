@@ -10,6 +10,10 @@
 //! matters (restore verification, acceptance tests) the CSV form is used:
 //! `format=csv` keeps the engine's decimal strings.
 
+pub mod adapters;
+pub mod definitions;
+pub mod run;
+
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Timestamp};
 use serde::{Deserialize, Deserializer};

@@ -445,3 +445,13 @@ POST    /api/v1/banking/reconciliations/{id}/undo pre-handler-only
 POST    /api/v1/banking/reconciliations/{id}/cancel pre-handler-only
 GET     /api/v1/reports/reconciliation-detail   idempotent
 GET     /api/v1/reports/reconciliation-discrepancy idempotent
+# P28: memorized reports (U-118, report-defs-v1; not keyed, 409 NAME_TAKEN / STALE_VERSION guard a retry)
+GET     /api/v1/report-builder/definitions      idempotent
+POST    /api/v1/report-builder/definitions      pre-handler-only
+GET     /api/v1/report-builder/definitions/{id} idempotent
+PUT     /api/v1/report-builder/definitions/{id} pre-handler-only
+DELETE  /api/v1/report-builder/definitions/{id} pre-handler-only
+GET     /api/v1/report-builder/definition-groups idempotent
+POST    /api/v1/report-builder/definition-groups pre-handler-only
+PUT     /api/v1/report-builder/definition-groups/{id} pre-handler-only
+DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only

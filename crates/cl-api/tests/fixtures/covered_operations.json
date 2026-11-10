@@ -368,5 +368,14 @@
   {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/undo","inSpec":true,"fragmentHash":"5c71072adfc29d06f2b6ca09f78918a89a1acb09e8a97c718c642120425908f2"},
   {"method":"POST","path":"/api/v1/banking/reconciliations/{id}/cancel","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/reports/reconciliation-detail","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/reports/reconciliation-discrepancy","inSpec":true,"fragmentHash":"eeb1734297825e81940a31da8603fbd2dcf7b06f89624f6591bca24497931446"}
+  {"method":"GET","path":"/api/v1/reports/reconciliation-discrepancy","inSpec":true,"fragmentHash":"eeb1734297825e81940a31da8603fbd2dcf7b06f89624f6591bca24497931446"},
+  {"method":"GET","path":"/api/v1/report-builder/definitions","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/report-builder/definitions","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/report-builder/definitions/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/report-builder/definitions/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/report-builder/definitions/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/report-builder/definition-groups","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/report-builder/definition-groups","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":false,"fragmentHash":null}
 ]

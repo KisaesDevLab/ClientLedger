@@ -572,6 +572,13 @@ impl Capabilities {
     /// `replaceRefused`.
     pub const FEED_GUARDS: &'static str = "feed-guards-v1";
 
+    // ---- P28: reports (engine PR-A to PR-G; Q-220 until they merge)
+    /// U-14 (PR-A): `exact=1` adds `*Exact` decimal strings on every
+    /// catalog report route.
+    pub const REPORTS_EXACT: &'static str = "reports-exact-v1";
+    /// U-118 (PR-F): memorized reports, `kind:'standard'`.
+    pub const REPORT_DEFS: &'static str = "report-defs-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

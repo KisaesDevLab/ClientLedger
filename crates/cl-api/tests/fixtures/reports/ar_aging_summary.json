@@ -1,0 +1,21 @@
+{
+  "asOfDate": "2026-10-31",
+  "buckets": {"current": 1200.1, "days1to30": 0.2, "days31to60": 350.5, "days61to90": 0, "over90": 0},
+  "bucketsExact": {"current": "1200.10", "days1to30": "0.20", "days31to60": "350.50", "days61to90": "0.00", "over90": "0.00"},
+  "total": 1550.8,
+  "totalExact": "1550.80",
+  "customers": [
+    {
+      "contactId": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60",
+      "name": "Harbor Dental",
+      "buckets": {"current": "1200.00", "days1to30": "0.00", "days31to60": "350.50", "days61to90": "0.00", "over90": "0.00"},
+      "total": "1550.50"
+    },
+    {
+      "contactId": null,
+      "name": null,
+      "buckets": {"current": "0.10", "days1to30": "0.20", "days31to60": "0.00", "days61to90": "0.00", "over90": "0.00"},
+      "total": "0.30"
+    }
+  ]
+}

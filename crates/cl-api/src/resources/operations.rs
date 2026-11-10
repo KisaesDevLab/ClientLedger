@@ -1654,6 +1654,36 @@ pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 pub(crate) const UNIT_SET_PUT: Operation = write(Method::Put, "/api/v1/unit-sets/{id}");
 /// Deletes a unit set no item or line names.
 pub(crate) const UNIT_SET_DELETE: Operation = write(Method::Delete, "/api/v1/unit-sets/{id}");
+// P28: memorized reports (U-118, `report-defs-v1`). Not keyed yet: a
+// retried save is caught by the name rule (409 `NAME_TAKEN`) or the version
+// (409 `STALE_VERSION`).
+/// Memorized reports.
+pub(crate) const REPORT_DEFS_LIST: Operation = read("/api/v1/report-builder/definitions");
+/// Memorizes a report.
+pub(crate) const REPORT_DEFS_CREATE: Operation =
+    write(Method::Post, "/api/v1/report-builder/definitions");
+/// One memorized report.
+pub(crate) const REPORT_DEF_GET: Operation = read("/api/v1/report-builder/definitions/{id}");
+/// Saves changes to a memorized report (`version`).
+pub(crate) const REPORT_DEF_PUT: Operation =
+    write(Method::Put, "/api/v1/report-builder/definitions/{id}");
+/// Deletes a memorized report (`version`).
+pub(crate) const REPORT_DEF_DELETE: Operation =
+    write(Method::Delete, "/api/v1/report-builder/definitions/{id}");
+/// Memorized report groups.
+pub(crate) const REPORT_DEF_GROUPS_LIST: Operation =
+    read("/api/v1/report-builder/definition-groups");
+/// Adds a group.
+pub(crate) const REPORT_DEF_GROUPS_CREATE: Operation =
+    write(Method::Post, "/api/v1/report-builder/definition-groups");
+/// Renames or moves a group (`version`).
+pub(crate) const REPORT_DEF_GROUP_PUT: Operation =
+    write(Method::Put, "/api/v1/report-builder/definition-groups/{id}");
+/// Deletes a group; its reports move to no group (`version`).
+pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
+    Method::Delete,
+    "/api/v1/report-builder/definition-groups/{id}",
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1667,7 +1697,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 370] = [
+pub const OPERATIONS: [Operation; 379] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2054,6 +2084,16 @@ pub const OPERATIONS: [Operation; 370] = [
     RECON_CANCEL,
     RECON_DETAIL_REPORT,
     RECON_DISCREPANCY,
+    // P28
+    REPORT_DEFS_LIST,
+    REPORT_DEFS_CREATE,
+    REPORT_DEF_GET,
+    REPORT_DEF_PUT,
+    REPORT_DEF_DELETE,
+    REPORT_DEF_GROUPS_LIST,
+    REPORT_DEF_GROUPS_CREATE,
+    REPORT_DEF_GROUP_PUT,
+    REPORT_DEF_GROUP_DELETE,
 ];
 
 /// Looks up a covered operation.

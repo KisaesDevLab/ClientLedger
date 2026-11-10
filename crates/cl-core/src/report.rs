@@ -47,7 +47,10 @@ impl Basis {
 /// The engine routes the report window reads (plan §5), one per family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(missing_docs, reason = "one variant per engine report route, named after it")]
+#[allow(
+    missing_docs,
+    reason = "one variant per engine report route, named after it"
+)]
 pub enum Source {
     ProfitLoss,
     BalanceSheet,
@@ -647,8 +650,42 @@ impl Drill {
                 basis: *basis,
                 adjusting: *adjusting,
             },
+            (Drill::Aging { contact, as_of, .. }, _) => match AgingBucket::of_column(&column.key) {
+                Some(bucket) => Drill::Aging {
+                    contact: *contact,
+                    bucket,
+                    as_of: *as_of,
+                },
+                None => self.clone(),
+            },
             _ => self.clone(),
         }
+    }
+}
+
+impl AgingBucket {
+    /// The aging columns' keys, in order.
+    pub const KEYS: [&'static str; 6] = [
+        "current",
+        "days_1_30",
+        "days_31_60",
+        "days_61_90",
+        "over_90",
+        "total",
+    ];
+
+    /// The bucket of an aging column key.
+    #[must_use]
+    pub fn of_column(key: &str) -> Option<AgingBucket> {
+        Some(match key {
+            "current" => AgingBucket::Current,
+            "days_1_30" => AgingBucket::Days1To30,
+            "days_31_60" => AgingBucket::Days31To60,
+            "days_61_90" => AgingBucket::Days61To90,
+            "over_90" => AgingBucket::Over90,
+            "total" => AgingBucket::Total,
+            _ => return None,
+        })
     }
 }
 
@@ -661,7 +698,9 @@ pub struct ReportRow {
     pub level: u8,
     /// Its place in the tree.
     pub path: RowPath,
-    /// The first column's text.
+    /// The first column's text. A caption starting with `@` is an i18n key
+    /// the window translates (fixed labels such as "Total"); anything else
+    /// is owner data shown as is.
     pub caption: String,
     /// One cell per [`ReportTable::columns`] entry.
     pub cells: Vec<Cell>,
@@ -724,7 +763,7 @@ impl ReportTable {
     /// The canonical CSV of the golden files (plan §6): a header line of
     /// `kind,level,path,caption` and the column keys, then one line per
     /// row with the engine's exact strings (amounts unrounded, percents at
-    /// 1 dp, null percents empty, dates `YYYY-MM-DD`). No run time, no
+    /// 1 dp, null percents empty, dates `YYYY-MM-DD`; trailing zeros dropped). No run time, no
     /// formatting: equal tables give equal text.
     #[must_use]
     pub fn to_canonical_csv(&self) -> String {
@@ -757,10 +796,20 @@ pub fn canonical_cell(c: &Cell) -> String {
     match c {
         Cell::Empty | Cell::Percent(None) => String::new(),
         Cell::Text(s) => s.clone(),
-        Cell::Amount(d) | Cell::Quantity(d) | Cell::Percent(Some(d)) => d.to_string(),
+        Cell::Amount(d) | Cell::Quantity(d) | Cell::Percent(Some(d)) => canonical_decimal(*d),
         Cell::Date(d) => d.to_wire(),
         Cell::Count(n) => n.to_string(),
     }
+}
+
+/// A decimal's canonical text: no trailing zeros, no negative zero, so an
+/// engine string and the same value read through `Money` agree.
+#[must_use]
+pub fn canonical_decimal(d: Decimal) -> String {
+    if d.is_zero() {
+        return "0".to_string();
+    }
+    d.normalize().to_string()
 }
 
 /// Appends one CSV line (RFC 4180 quoting) ending in `\n`.
@@ -869,7 +918,10 @@ mod tests {
                     level: 1,
                     path: income.child("4000"),
                     caption: "4000 · Landscape, \"installation\"".into(),
-                    cells: vec![Cell::Amount(d("38420.0000")), Cell::Percent(Some(d("63.7")))],
+                    cells: vec![
+                        Cell::Amount(d("38420.0000")),
+                        Cell::Percent(Some(d("63.7"))),
+                    ],
                     drill: None,
                     expandable: false,
                 },
@@ -894,8 +946,8 @@ mod tests {
             csv,
             "kind,level,path,caption,total,pct_total\n\
              header,0,income,Income,,\n\
-             account,1,income/4000,\"4000 · Landscape, \"\"installation\"\"\",38420.0000,63.7\n\
-             total,0,income_total,Total income,60280.00,\n"
+             account,1,income/4000,\"4000 · Landscape, \"\"installation\"\"\",38420,63.7\n\
+             total,0,income_total,Total income,60280,\n"
         );
     }
 
