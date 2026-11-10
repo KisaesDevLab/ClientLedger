@@ -1153,6 +1153,14 @@ struct WireTransferHint {
     account_name: Option<String>,
 }
 
+/// A check number sent as text or a number (`None` when empty).
+fn check_number_text(v: Option<Value>) -> Option<String> {
+    match v {
+        Some(Value::String(s)) if !s.is_empty() => Some(s),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
 impl WireRow {
     fn into_row(self) -> Result<Option<FeedRow>, ApiError> {
         const WHAT: &str = "bank feed row";
@@ -1160,11 +1168,7 @@ impl WireRow {
             return Ok(None);
         };
         let date = opt_date(Some(&self.feed_date)).ok_or(ApiError::Decode { what: WHAT })?;
-        let check_number = match self.check_number {
-            Some(Value::String(s)) if !s.is_empty() => Some(s),
-            Some(Value::Number(n)) => Some(n.to_string()),
-            _ => None,
-        };
+        let check_number = check_number_text(self.check_number);
         let duplicate_of = match self.duplicate_of {
             Some(d) => Some(DuplicateOf {
                 id: FeedItemId::parse(&d.id)?,

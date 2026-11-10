@@ -2384,7 +2384,7 @@ mod tests {
             Some("fix.api.void_instead")
         );
         let odd = linked(r#"["bank feed match!", 3]"#);
-        assert!(super::delete_links(&odd).is_empty());
+        assert_eq!(super::delete_links(&odd), Vec::<String>::new());
         let e = err(403, &body("ACCOUNT_PASSWORD_INVALID"), S);
         assert_eq!(e, ApiError::AccountPasswordRejected);
         assert!(!format!("{e} | {e:?}").contains("hunter2"));

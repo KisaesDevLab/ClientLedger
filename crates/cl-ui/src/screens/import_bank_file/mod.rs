@@ -223,8 +223,8 @@ pub struct ImportBankFileScreen {
     pub(crate) confirm_add: Option<u32>,
     /// Q-PR5b: the date and amount of every row already imported into the
     /// account (read once per account and preview).
-    existing: Option<(AccountId, Vec<(CalendarDate, rust_decimal::Decimal)>)>,
-    existing_task: Option<(AccountId, Task<Vec<(CalendarDate, rust_decimal::Decimal)>>)>,
+    existing: Option<(AccountId, DatedAmounts)>,
+    existing_task: Option<(AccountId, Task<DatedAmounts>)>,
     relink: bool,
     preview_task: Option<Task<BankImportOutcome>>,
     preview: Option<BankImportOutcome>,
@@ -1773,6 +1773,9 @@ fn trouble_state(t: Option<&EngineTrouble>) -> Value {
         Some(EngineTrouble::Refused(r)) => json!(flow::refusal_key(r)),
     }
 }
+
+/// The date and amount (feed sign) of rows already imported (Q-PR5b).
+type DatedAmounts = Vec<(CalendarDate, rust_decimal::Decimal)>;
 
 /// A changed row's Replace would be done: the engine's
 /// `existingReplaceable` (U-200), else (an older engine) the matched item

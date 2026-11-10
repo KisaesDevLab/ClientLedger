@@ -761,21 +761,21 @@ fn an_edited_entry_shows_entry_changed() {
     cmd(&mut s, "feed.accept");
     assert_eq!(s.counts.accepted, 1);
     {
-        let mut d = s.link.demo_state().expect("demo");
+        let mut demo = s.link.demo_state().expect("demo");
         let q = cl_api::FeedQuery {
             accepted: true,
             ..cl_api::FeedQuery::default()
         };
-        let row = crate::company::demo::feed_review::list(&mut d, &q)
+        let row = crate::company::demo::feed_review::list(&mut demo, &q)
             .expect("list")
             .rows
             .remove(0);
-        let t = row.matched_transaction.expect("entry");
-        let posted = d
+        let entry = row.matched_transaction.expect("entry");
+        let posted = demo
             .ledger
             .transactions()
             .into_iter()
-            .find(|x| crate::company::demo::register::DemoLedger::id_of(x) == t)
+            .find(|x| crate::company::demo::register::DemoLedger::id_of(x) == entry)
             .expect("posted");
         let other: u32 = posted
             .lines
@@ -783,7 +783,7 @@ fn an_edited_entry_shows_entry_changed() {
             .find(|l| l.account != "1010")
             .and_then(|l| l.account.parse().ok())
             .expect("other line");
-        let p = crate::company::demo::register::DemoPosting {
+        let posting = crate::company::demo::register::DemoPosting {
             kind: "check",
             date: posted.date,
             number: String::new(),
@@ -800,16 +800,16 @@ fn an_edited_entry_shows_entry_changed() {
             )],
         };
         let chart = crate::company::demo::chart();
-        assert!(d.ledger.save(&chart, &p, Some(t)).is_some());
+        assert!(demo.ledger.save(&chart, &posting, Some(entry)).is_some());
     }
     s.show = Show::Accepted;
     s.reload();
     assert_eq!(s.state()["counts"]["entry_changed"], 1);
     assert_eq!(s.state()["badges"]["entry_changed"], 1);
-    let r = s.rows.first().cloned().expect("row");
-    assert_eq!(s.why(&r), Why::EntryChanged);
+    let row = s.rows.first().cloned().expect("row");
+    assert_eq!(s.why(&row), Why::EntryChanged);
     assert!(
-        !detail::changed_offers_review_again(&s, &r),
+        !detail::changed_offers_review_again(&s, &row),
         "posted here: Undo"
     );
     s.changed_only = true;
