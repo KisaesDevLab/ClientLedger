@@ -228,6 +228,8 @@ pub struct DepositScreen {
     pub(crate) inputs: Inputs,
     pub(crate) panel: Panel,
     pub(crate) editing: Option<Editing>,
+    /// PR-5 QA-2: the bank line of the deposit being edited.
+    pub(crate) feed_watch: crate::feed_link::Watch,
     /// The saved deposit being shown (Summary).
     pub(crate) record: Option<DepositRecord>,
     pub(crate) load_task: Option<Task<cl_api::Versioned<cl_api::Transaction>>>,
@@ -317,6 +319,7 @@ impl DepositScreen {
             },
             panel: Panel::default(),
             editing: None,
+            feed_watch: crate::feed_link::Watch::default(),
             record: None,
             load_task: None,
             save: SaveState::default(),
@@ -375,6 +378,18 @@ impl DepositScreen {
     /// The engine takes the closing-date password.
     pub(crate) fn closing_supported(&self) -> bool {
         self.local.is_some() || self.link.capabilities().has(Capabilities::CLOSING_PASSWORD)
+    }
+
+    /// PR-5 QA-2: the deposit's account and total, as compared for the
+    /// Bank Feed notice.
+    pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
+        let f = self.compose();
+        vec![(f.account, f.totals().map(|t| t.total))]
+    }
+
+    /// The edit changes the total or account of a deposit a bank line holds.
+    pub(crate) fn feed_notice(&self) -> bool {
+        self.editing.is_some() && self.feed_watch.notice(&self.feed_shape()).is_some()
     }
 
     /// The account shown.
@@ -635,7 +650,12 @@ impl DepositScreen {
         let form = self.compose();
         let totals = form.totals();
         let pending = self.panel.pending.as_ref();
+        let feed = json!({
+            "linked": self.editing.is_some() && self.feed_watch.linked(),
+            "notice": self.feed_notice(),
+        });
         let mut v = json!({
+            "feed": feed,
             "screen": "deposit",
             "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),

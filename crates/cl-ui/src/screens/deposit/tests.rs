@@ -726,3 +726,51 @@ fn print_saves_a_new_deposit_then_opens_its_summary_preview() {
     assert!(s.print_summary());
     assert_eq!(s.save.count, 1, "no second save");
 }
+
+/// PR-5 QA-2: editing a deposit a bank line is matched to says, before
+/// Save, that the line will wait in the Bank Feed again when its total or
+/// account changes.
+#[test]
+fn a_matched_deposits_total_or_account_change_says_the_line_waits() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    set_lines(&mut s, &[(4000, "300.00")]);
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
+    let id = DemoDeposits
+        .list(&link, account(1010))
+        .first()
+        .expect("saved")
+        .id;
+    {
+        let mut d = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .into_iter()
+            .find(|r| r.amount.is_negative())
+            .expect("a money-in row");
+        crate::company::demo::feed_review::match_for_tests(&mut d, row.id, id);
+    }
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    assert!(s.open_record(id));
+    s.poll();
+    s.feed_watch.poll();
+    assert_eq!(s.state_json()["mode"], "edit");
+    assert_eq!(s.state_json()["feed"]["linked"], true);
+    assert_eq!(
+        s.state_json()["feed"]["notice"],
+        false,
+        "nothing changed yet"
+    );
+    set_lines(&mut s, &[(4000, "310.00")]);
+    assert_eq!(s.state_json()["feed"]["notice"], true);
+    set_lines(&mut s, &[(4000, "300.00")]);
+    assert_eq!(s.state_json()["feed"]["notice"], false);
+    s.header.edit_step(|h| h.account = Some(account(1020)));
+    assert_eq!(s.state_json()["feed"]["notice"], true, "another account");
+}
