@@ -681,6 +681,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.delete_unsupported", "This kind of transaction can't be deleted."),
     ("error.api.delete_linked", "Other transactions depend on this one, so it can't be deleted."),
     ("fix.api.void_instead", "Void it instead. It stays in your records and in the audit trail."),
+    ("error.api.delete_linked_bank_feed", "This entry is matched to a bank line in your Bank Feed, so it can't be deleted here."),
+    ("fix.api.undo_in_bank_feed", "Undo it in the Bank Feed: the entry is removed and the bank line waits for you again."),
     ("error.api.sales_tax_linked", "This check or entry is matched to a sales tax payment, so its amount and date can't change."),
     ("fix.api.unlink_sales_tax", "Unlink it from the sales tax payment first: in Vendors \u{203a} Pay Sales Tax, click Unmatch on it. Then edit it."),
     ("error.api.inexact_money", "The books engine sent amounts ClientLedger can't show exactly, so they aren't shown."),

@@ -671,6 +671,22 @@ pub fn waiting(state: &mut DemoState) -> u64 {
     counts(state, None).waiting
 }
 
+/// The bank lines matched to (or posted as) `transaction`: (row, feed
+/// amount). The engine's `findDeleteBlockingLinks` `bank_feed_match`
+/// (PR-5 S2) and the register's edit notice (PR-5 B1) read it.
+#[must_use]
+pub fn lines_on(state: &mut DemoState, transaction: TransactionId) -> Vec<(FeedItemId, Money)> {
+    let feed = state.bank_feed.clone();
+    state.feed_review.sync(&feed);
+    state
+        .feed_review
+        .rows
+        .iter()
+        .filter(|r| r.matched == Some(transaction))
+        .map(|r| (r.id, r.amount))
+        .collect()
+}
+
 /// The bank accounts with rows (`GET /banking/connections`).
 #[must_use]
 pub fn connections(state: &mut DemoState) -> Vec<BankConnection> {

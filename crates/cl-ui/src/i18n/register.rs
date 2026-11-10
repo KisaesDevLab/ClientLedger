@@ -246,6 +246,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.delete.unavailable", "Deleting isn't available yet. You can void the transaction instead; it stays in the audit trail."),
     ("register.delete.unavailable_tip", "Deleting isn't available with this version of your books engine yet. Void the transaction instead."),
     ("register.delete.unsupported", "This kind of transaction can't be deleted. You can void it instead; it stays in the audit trail."),
+    ("register.delete.open_feed", "Go to Bank Feed"),
     ("register.delete.reconciled", "This transaction is part of a finished reconciliation, so it can't be deleted."),
     ("register.row_action.cancel", "Cancel"),
     ("register.row_action.ok", "OK"),

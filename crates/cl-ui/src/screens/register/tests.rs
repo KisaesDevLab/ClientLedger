@@ -1358,6 +1358,47 @@ fn delete_asks_says_what_happens_and_removes_the_row() {
     assert_eq!(s.model.total(), Some(total - 1));
 }
 
+/// PR-5 S2 (T6): deleting an entry a bank line is matched to says to Undo
+/// it in the Bank Feed (not to void it) and offers Go to Bank Feed.
+#[test]
+fn delete_of_a_bank_feed_entry_points_to_the_bank_feed() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let (t, date) = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let row = page
+            .rows
+            .iter()
+            .find(|r| r.assigned_account.is_some() || r.suggested_account.is_some())
+            .cloned()
+            .expect("a row to accept");
+        let t = crate::company::demo::feed_review::categorize(&mut demo, row.id, None, None)
+            .expect("accepted")
+            .expect("posted");
+        (t, demo.ledger.date_of(t).expect("dated"))
+    };
+    s.open_confirm(dialogs::ActionKind::Delete, t, date);
+    settle(&mut s, None);
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_delete");
+    s.confirm();
+    settle(&mut s, None);
+    let st = s.state();
+    assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
+    assert_eq!(st["row_action"]["error"], false, "no void advice");
+    assert!(
+        link.demo_state().expect("demo").ledger.date_of(t).is_some(),
+        "kept"
+    );
+    s.open_bank_feed();
+    assert_eq!(s.state()["row_action"]["panel"], "none");
+}
+
 #[test]
 fn delete_offers_void_without_the_capability_or_for_other_kinds() {
     let (_d, link) = link();

@@ -253,6 +253,10 @@ pub(super) enum Panel {
     },
     /// A plain message with OK.
     Notice(&'static str),
+    /// Delete was refused because a bank feed line is matched to the entry
+    /// (PR-5 S2): Undo it in the Bank Feed rather than void it (a voided
+    /// entry's bank line stays out of review, Q-P26u).
+    BankFeedLinked,
 }
 
 /// What a row action's key belongs to: void or delete, the row, the
@@ -714,6 +718,17 @@ impl RegisterScreen {
             ActionKind::Void => demo.ledger.void(id),
             // U-180: its documents go back to the review queue.
             ActionKind::Delete => {
+                // The engine's `findDeleteBlockingLinks` (`bank_feed_match`).
+                if !crate::company::demo::feed_review::lines_on(&mut demo, id).is_empty() {
+                    return Err(cl_api::engine_refusal(
+                        409,
+                        &serde_json::json!({"error": {
+                            "message": "Other records point at this transaction.",
+                            "code": "TXN_DELETE_LINKED",
+                            "details": {"links": [cl_api::BANK_FEED_MATCH_LINK]},
+                        }}),
+                    ));
+                }
                 crate::company::demo::drafts::delete_entry(&mut demo, id).map(|_| ())
             }
         }
@@ -763,6 +778,19 @@ impl RegisterScreen {
                 self.actions.panel = Panel::Notice(key);
                 return;
             }
+        }
+        if matches!(
+            pending,
+            Pending::Row {
+                kind: ActionKind::Delete,
+                ..
+            }
+        ) && cl_api::delete_linked_to_bank_feed(&e)
+        {
+            self.actions.error = None;
+            self.actions.reload = None;
+            self.actions.panel = Panel::BankFeedLinked;
+            return;
         }
         if self.closing_failed(&e, pending.clone()) {
             return;
@@ -878,6 +906,7 @@ impl RegisterScreen {
             Close,
             Confirm,
             Void(TransactionId, CalendarDate),
+            OpenFeed,
         }
         let mut click = Click::None;
         match &mut self.actions.panel {
@@ -889,6 +918,20 @@ impl RegisterScreen {
                     if ui.button(t("register.row_action.ok")).clicked() {
                         click = Click::Close;
                     }
+                });
+            }
+            Panel::BankFeedLinked => {
+                form::card(ui, tokens, |ui| {
+                    ui.add(egui::Label::new(t("error.api.delete_linked_bank_feed")).wrap());
+                    ui.add(egui::Label::new(t("fix.api.undo_in_bank_feed")).wrap());
+                    ui.horizontal(|ui| {
+                        if ui.button(t("register.delete.open_feed")).clicked() {
+                            click = Click::OpenFeed;
+                        }
+                        if ui.button(t("register.row_action.cancel")).clicked() {
+                            click = Click::Close;
+                        }
+                    });
                 });
             }
             Panel::OfferVoid { id, date, why } => {
@@ -954,7 +997,16 @@ impl RegisterScreen {
             Click::Close => self.actions.panel = Panel::None,
             Click::Confirm => self.confirm(),
             Click::Void(id, date) => self.open_confirm(ActionKind::Void, id, date),
+            Click::OpenFeed => self.open_bank_feed(),
         }
+    }
+
+    /// Go to Bank Feed from the refused delete of a matched entry (PR-5 S2).
+    pub(super) fn open_bank_feed(&mut self) {
+        self.actions.panel = Panel::None;
+        self.link.push(crate::company::CompanyEvent::OpenWindow(
+            cl_model::CommandId::new("banking.feed"),
+        ));
     }
 
     /// The control-channel state (flags only; never the password, reasons,
@@ -967,6 +1019,7 @@ impl RegisterScreen {
             Panel::Confirm(_) => "confirm_delete",
             Panel::OfferVoid { .. } => "offer_void",
             Panel::Notice(_) => "notice",
+            Panel::BankFeedLinked => "bank_feed_linked",
         };
         let notice = match &a.panel {
             Panel::Notice(k) | Panel::OfferVoid { why: k, .. } => Some(*k),

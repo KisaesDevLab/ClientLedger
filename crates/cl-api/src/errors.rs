@@ -813,9 +813,55 @@ pub fn reconciled_statement_date(e: &ApiError) -> Option<CalendarDate> {
     }
 }
 
+/// The `details.links` kind of a 409 `TXN_DELETE_LINKED` naming a bank feed
+/// line matched to the entry (PR-5 S2).
+pub const BANK_FEED_MATCH_LINK: &str = "bank_feed_match";
+
+/// The kinds of record a 409 `TXN_DELETE_LINKED` says point at the entry
+/// (`details.links`: `bank_feed_match`, `deposit`, `accrual`, ...); empty
+/// for any other error or an engine that sent none. Short ASCII words only.
+#[must_use]
+pub fn delete_links(e: &ApiError) -> Vec<String> {
+    match e {
+        ApiError::Conflict {
+            reason: ConflictReason::DeleteLinked,
+            details,
+            ..
+        } => details
+            .raw("links")
+            .and_then(Value::as_array)
+            .map(|l| {
+                l.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| {
+                        s.len() <= 64 && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+                    })
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// True when a delete was refused because a bank feed line is matched to
+/// the entry (`TXN_DELETE_LINKED {links: ['bank_feed_match', ...]}`): the
+/// owner should Undo it in the Bank Feed, not void it (Q-P26u keeps a
+/// voided entry's bank line out of review).
+#[must_use]
+pub fn delete_linked_to_bank_feed(e: &ApiError) -> bool {
+    delete_links(e).iter().any(|l| l == BANK_FEED_MATCH_LINK)
+}
+
 fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)> {
     if reconciled_statement_date(e).is_some() {
         return Some(RECONCILED_DATED_MESSAGE);
+    }
+    if delete_linked_to_bank_feed(e) {
+        return Some((
+            "error.api.delete_linked_bank_feed",
+            Some("fix.api.undo_in_bank_feed"),
+        ));
     }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
@@ -2299,6 +2345,40 @@ mod tests {
             let shown = format!("{e} | {}", e.scrubbed_detail());
             assert!(!shown.contains("Acme"), "{shown}");
         }
+        // PR-5 S2 (T6): a bank feed match says Undo it in the Bank Feed;
+        // other links keep "Void it instead".
+        let linked = |links: &str| {
+            err(
+                409,
+                &format!(
+                    r#"{{"error":{{"message":"Acme","code":"TXN_DELETE_LINKED","details":{{"links":{links}}}}}}}"#
+                ),
+                S,
+            )
+        };
+        let feed = linked(r#"["accrual","bank_feed_match"]"#);
+        assert!(super::delete_linked_to_bank_feed(&feed));
+        assert_eq!(
+            super::delete_links(&feed),
+            vec!["accrual".to_string(), "bank_feed_match".to_string()]
+        );
+        assert_eq!(
+            feed.owner_message().key,
+            "error.api.delete_linked_bank_feed"
+        );
+        assert_eq!(
+            feed.owner_message().suggestion_key,
+            Some("fix.api.undo_in_bank_feed")
+        );
+        let deposit = linked(r#"["deposit"]"#);
+        assert!(!super::delete_linked_to_bank_feed(&deposit));
+        assert_eq!(deposit.owner_message().key, "error.api.delete_linked");
+        assert_eq!(
+            deposit.owner_message().suggestion_key,
+            Some("fix.api.void_instead")
+        );
+        let odd = linked(r#"["bank feed match!", 3]"#);
+        assert!(super::delete_links(&odd).is_empty());
         let e = err(403, &body("ACCOUNT_PASSWORD_INVALID"), S);
         assert_eq!(e, ApiError::AccountPasswordRejected);
         assert!(!format!("{e} | {e:?}").contains("hunter2"));
