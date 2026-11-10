@@ -23,6 +23,7 @@ pub mod error;
 pub mod export_all;
 pub mod intake;
 pub mod lifecycle;
+pub mod report_story;
 pub mod restore;
 pub mod retention;
 pub mod sample;

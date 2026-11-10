@@ -1,0 +1,101 @@
+{
+  "_comment": "P28 golden company (Q-P28m): real documents posted on top of the practice company in a test tenant only, dated 11/01-12/31/2026 so October still matches the mockup. Synthetic. Accounts by number, clients and vendors by name, tags by name.",
+  "tagGroups": [
+    {
+      "name": "Job site",
+      "tags": [
+        { "name": "North lawn", "number": "101" },
+        { "name": "Courtyard", "number": "102" }
+      ]
+    },
+    {
+      "name": "Season",
+      "tags": [{ "name": "Fall cleanup", "number": "201" }]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "bill", "id": "B1", "date": "2026-11-03", "due": "2026-12-03", "vendor": "Ozark Mulch Supply",
+      "number": "OMS-1182",
+      "lines": [{ "account": "5110", "amount": "1180.40", "tag": "North lawn" }]
+    },
+    {
+      "kind": "invoice", "id": "I1", "date": "2026-11-05", "client": "Riverbend HOA",
+      "lines": [
+        { "account": "4000", "amount": "2400.00", "tag": "North lawn" },
+        { "account": "4000", "amount": "633.33" }
+      ]
+    },
+    {
+      "kind": "invoice", "id": "I2", "date": "2026-11-12", "client": "Table Rock Dental",
+      "lines": [
+        { "account": "4000", "amount": "1250.00", "tag": "Courtyard" },
+        { "account": "4000", "amount": "340.25", "tag": "Fall cleanup" }
+      ]
+    },
+    {
+      "kind": "bill", "id": "B2", "date": "2026-11-18", "due": "2026-12-18", "vendor": "Table Rock Nursery",
+      "number": "TRN-5521",
+      "lines": [
+        { "account": "5100", "amount": "2215.60", "tag": "Courtyard" },
+        { "account": "6350", "amount": "85.00" }
+      ]
+    },
+    {
+      "kind": "payment", "id": "P1", "date": "2026-11-20", "client": "Riverbend HOA", "amount": "1000.00",
+      "apply": [{ "invoice": "I1", "amount": "1000.00" }]
+    },
+    {
+      "kind": "vendor_credit", "id": "VC1", "date": "2026-11-22", "vendor": "Table Rock Nursery",
+      "number": "TRN-CR-77",
+      "lines": [{ "account": "5100", "amount": "115.60", "tag": "Courtyard" }]
+    },
+    {
+      "kind": "credit_memo", "id": "CM1", "date": "2026-11-25", "client": "Riverbend HOA",
+      "lines": [{ "account": "4000", "amount": "150.00", "tag": "North lawn" }]
+    },
+    {
+      "kind": "deposit_held", "id": "D1", "date": "2026-11-28", "client": "Hollister Family Trust", "amount": "500.00"
+    },
+    {
+      "kind": "pay_bills", "id": "BP1", "date": "2026-12-02",
+      "bills": [
+        { "bill": "B1", "cash": "1180.40" },
+        { "bill": "B2", "cash": "1000.00" }
+      ],
+      "credits": [{ "credit": "VC1", "bill": "B2", "amount": "115.60" }]
+    },
+    {
+      "kind": "journal_entry", "id": "DUP1", "date": "2026-12-05", "memo": "Fuel card",
+      "lines": [
+        { "account": "6100", "debit": "64.18" },
+        { "account": "2050", "credit": "64.18" }
+      ]
+    },
+    {
+      "kind": "journal_entry", "id": "DUP2", "date": "2026-12-05", "memo": "Fuel card",
+      "lines": [
+        { "account": "6100", "debit": "64.18" },
+        { "account": "2050", "credit": "64.18" }
+      ]
+    },
+    {
+      "kind": "payment", "id": "P2", "date": "2026-12-15", "client": "Table Rock Dental", "amount": "1590.25",
+      "apply": [{ "invoice": "I2", "amount": "1590.25" }]
+    },
+    {
+      "kind": "journal_entry", "id": "AJE1", "date": "2026-12-31", "memo": "Year-end insurance accrual", "adjusting": true,
+      "lines": [
+        { "account": "6150", "debit": "1200.00", "tag": "North lawn" },
+        { "account": "2050", "credit": "1200.00" }
+      ]
+    },
+    {
+      "kind": "journal_entry", "id": "CLOSED1", "date": "2026-09-15", "memo": "Reclass found after closing", "closedPeriod": true,
+      "lines": [
+        { "account": "1510", "debit": "12.34" },
+        { "account": "1500", "credit": "12.34" }
+      ]
+    }
+  ]
+}
