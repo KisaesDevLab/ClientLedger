@@ -153,7 +153,9 @@ steps:
   - assert_state: {key: screen.changed_unanswered, equals: 0}
   - assert_state: {key: screen.to_send, equals: 1}
   - assert_state: {key: screen.can_next, equals: true}
+  # PR-5 S1: the earlier one still waits, so Add as new asks nothing.
   - click: {label: Add as new}
+  - assert_state: {key: screen.confirm_add, equals: null}
   - assert_state: {key: screen.preview.chosen, equals: 1}
   - assert_state: {key: screen.to_send, equals: 2}
   - assert_exists: {role: button, label: Send 2 to Bank Feed}
@@ -163,6 +165,8 @@ steps:
   - click: {role: button, label: Send 1 to Bank Feed}
   - assert_state: {key: screen.step, equals: done}
   - assert_state: {key: screen.result.inserted, equals: 1}
+  # PR-5 S1: the Replace was done (nothing listed as not replaced).
+  - assert_state: {key: screen.not_replaced, equals: []}
   - assert_state: {key: screen.result.post_processing, equals: done, within_ms: 6000}
   # Undo takes the new row out and puts the replaced item back.
   - click: {role: button, label: Undo this import}
