@@ -214,6 +214,9 @@ pub struct ImportBankFileScreen {
     layout_changed: bool,
     // Step 3.
     choices: BTreeMap<u32, RowChoice>,
+    /// PR-5 S1: the changed row whose "Add it again" waits for a yes (its
+    /// earlier item is already in the books).
+    pub(crate) confirm_add: Option<u32>,
     relink: bool,
     preview_task: Option<Task<BankImportOutcome>>,
     preview: Option<BankImportOutcome>,
@@ -290,6 +293,7 @@ impl ImportBankFileScreen {
             reparse_as: None,
             layout_changed: false,
             choices: BTreeMap::new(),
+            confirm_add: None,
             relink: false,
             preview_task: None,
             preview: None,
@@ -607,6 +611,7 @@ impl ImportBankFileScreen {
         self.preview_task = None;
         self.preview_trouble = None;
         self.choices.clear();
+        self.confirm_add = None;
     }
 
     pub(crate) fn current_section(&self) -> Option<&cl_import::Section> {
@@ -1190,6 +1195,37 @@ impl ImportBankFileScreen {
         })
     }
 
+    /// PR-5 S1: "Add it again" on changed row `line` asks first: its
+    /// earlier item is already in the books (not waiting), and Add isn't
+    /// chosen yet.
+    pub(crate) fn add_needs_ask(&self, line: u32) -> bool {
+        let in_books = self.preview.as_ref().is_some_and(|p| {
+            p.rows.iter().any(|r| {
+                r.line == line
+                    && r.status == ImportRowStatus::Changed
+                    && r.existing_pending == Some(false)
+            })
+        });
+        in_books && self.choices.get(&line).and_then(|c| c.changed) != Some(ChangedAction::Add)
+    }
+
+    /// PR-5 S1: lines the owner set to Replace that the import didn't
+    /// replace (the earlier item was accepted or staged meanwhile).
+    pub(crate) fn not_replaced(&self) -> Vec<u32> {
+        let Some(r) = self.result.as_ref() else {
+            return Vec::new();
+        };
+        r.rows
+            .iter()
+            .filter(|x| {
+                !x.replaced
+                    && self.choices.get(&x.line).and_then(|c| c.changed)
+                        == Some(ChangedAction::Replace)
+            })
+            .map(|x| x.line)
+            .collect()
+    }
+
     /// Changed rows set to replace their waiting item (the dry run says
     /// the item is still waiting).
     pub(crate) fn replacing(&self) -> usize {
@@ -1543,6 +1579,7 @@ impl Screen for ImportBankFileScreen {
             "only_skipped": self.only_skipped,
             "to_send": self.preview.as_ref().map(|p| flow::rows_to_send(p, &self.choices)),
             "changed_unanswered": self.unanswered_changed(),
+
             "sending": self.send_task.is_some(),
             "send_trouble": trouble_state(self.send_trouble.as_ref()),
             "has_key": self.frozen.is_some(),
@@ -1559,6 +1596,8 @@ impl Screen for ImportBankFileScreen {
         if let Some(m) = state.as_object_mut() {
             m.insert("progress_caps".into(), json!(self.progress_caps()));
             m.insert("earlier".into(), earlier.unwrap_or(Value::Null));
+            m.insert("confirm_add".into(), json!(self.confirm_add));
+            m.insert("not_replaced".into(), json!(self.not_replaced()));
         }
         state
     }

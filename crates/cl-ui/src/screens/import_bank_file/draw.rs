@@ -17,6 +17,15 @@ use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
+/// What the owner clicked on a changed row (PR-5 S1).
+enum ChangedClick {
+    /// Replace, add or skip.
+    Choose(u32, RowChoice),
+    /// "Add it again" on a row whose earlier item is in the books: ask.
+    AskAdd(u32),
+    /// The answer to that question was no.
+    CancelAdd,
+}
 /// Rows drawn at once in the check table (the rest are counted).
 const SHOWN_ROWS: usize = 200;
 
@@ -1118,8 +1127,14 @@ impl ImportBankFileScreen {
             );
         }
         self.problems_ui(ui, tokens);
-        if let Some((line, c)) = self.changed_ui(ui, tokens, style, &p) {
-            self.choose(line, c);
+        match self.changed_ui(ui, tokens, style, &p) {
+            Some(ChangedClick::Choose(line, c)) => {
+                self.confirm_add = None;
+                self.choose(line, c);
+            }
+            Some(ChangedClick::AskAdd(line)) => self.confirm_add = Some(line),
+            Some(ChangedClick::CancelAdd) => self.confirm_add = None,
+            None => {}
         }
     }
 
@@ -1132,7 +1147,7 @@ impl ImportBankFileScreen {
         tokens: &Tokens,
         style: MoneyStyle,
         p: &BankImportOutcome,
-    ) -> Option<(u32, RowChoice)> {
+    ) -> Option<ChangedClick> {
         let section = self.current_section()?;
         let changed: Vec<&ImportRowResult> = p
             .rows
@@ -1214,16 +1229,34 @@ impl ImportBankFileScreen {
                         )
                         .on_disabled_hover_text(t("bankimport.changed.replace_off"));
                     if replace.clicked() {
-                        out = Some((res.line, super::changed_choice(ChangedAction::Replace)));
+                        out = Some(ChangedClick::Choose(
+                            res.line,
+                            super::changed_choice(ChangedAction::Replace),
+                        ));
                     }
+                    // PR-5 S1: the earlier one is already in the books; adding
+                    // it again asks first.
+                    let in_books = res.existing_pending == Some(false);
+                    let add_label = if in_books {
+                        "bankimport.add_again"
+                    } else {
+                        "bankimport.add_as_new"
+                    };
                     if ui
                         .add(
-                            egui::Button::new(t("bankimport.add_as_new"))
+                            egui::Button::new(t(add_label))
                                 .selected(current.changed == Some(ChangedAction::Add)),
                         )
                         .clicked()
                     {
-                        out = Some((res.line, super::changed_choice(ChangedAction::Add)));
+                        out = Some(if self.add_needs_ask(res.line) {
+                            ChangedClick::AskAdd(res.line)
+                        } else {
+                            ChangedClick::Choose(
+                                res.line,
+                                super::changed_choice(ChangedAction::Add),
+                            )
+                        });
                     }
                     if ui
                         .add(
@@ -1232,9 +1265,23 @@ impl ImportBankFileScreen {
                         )
                         .clicked()
                     {
-                        out = Some((res.line, super::changed_skip()));
+                        out = Some(ChangedClick::Choose(res.line, super::changed_skip()));
                     }
                 });
+                if self.confirm_add == Some(res.line) {
+                    form::inline_warning(ui, tokens, &t("bankimport.changed.add_again_ask"));
+                    ui.horizontal(|ui| {
+                        if ui.button(t("bankimport.changed.add_again_no")).clicked() {
+                            out = Some(ChangedClick::CancelAdd);
+                        }
+                        if ui.button(t("bankimport.changed.add_again_yes")).clicked() {
+                            out = Some(ChangedClick::Choose(
+                                res.line,
+                                super::changed_choice(ChangedAction::Add),
+                            ));
+                        }
+                    });
+                }
             }
             let left = self.unanswered_changed();
             if left > 0 {
@@ -1624,6 +1671,16 @@ impl ImportBankFileScreen {
                 )
             };
             form::heading(ui, tokens, &text);
+            // PR-5 S1: a Replace the engine didn't do (the earlier one was
+            // accepted or staged meanwhile).
+            let refused = self.not_replaced().len();
+            if refused > 0 {
+                form::inline_warning(
+                    ui,
+                    tokens,
+                    &t_count("bankimport.done.not_replaced", refused, &[]),
+                );
+            }
             if r.replayed {
                 form::hint(ui, tokens, &t("bankimport.done.replayed"));
             }

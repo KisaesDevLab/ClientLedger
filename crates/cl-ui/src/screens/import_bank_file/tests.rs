@@ -1098,3 +1098,81 @@ fn a_reset_feed_sends_its_rows_again() {
     drop(demo);
     assert_eq!(send_prior(&f), 3, "the same keys again");
 }
+
+/// PR-5 S1 (T4): a Replace the import didn't do (the earlier item was
+/// accepted between the preview and Send) is listed on the done screen;
+/// the next import offers "Add it again", which asks first.
+#[test]
+fn a_refused_replace_is_listed_and_add_again_asks() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let changed = OFX.replace(
+        "<DTPOSTED>20261031<TRNAMT>-186.40<FITID>A1",
+        "<DTPOSTED>20261101<TRNAMT>-196.40<FITID>A1",
+    );
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.pick_account(bank_account(&s));
+    s.next();
+    s.poll();
+    let line = s
+        .preview
+        .as_ref()
+        .expect("preview")
+        .rows
+        .iter()
+        .find(|r| r.status == ImportRowStatus::Changed)
+        .expect("changed")
+        .line;
+    assert!(
+        !s.add_needs_ask(line),
+        "still waiting: Add as new asks nothing"
+    );
+    s.choose(line, changed_choice(ChangedAction::Replace));
+    s.poll();
+    assert_eq!(s.replacing(), 1);
+    // Another window accepts the earlier item before Send.
+    {
+        let mut d = f.link.demo_state().expect("demo");
+        let key = d
+            .bank_feed
+            .waiting_rows()
+            .into_iter()
+            .find(|w| w.amount.abs() == rust_decimal::Decimal::new(18640, 2))
+            .expect("the earlier item")
+            .key;
+        d.bank_feed.settle(&key);
+    }
+    s.next();
+    assert_eq!(s.step, Step::Done);
+    assert!(
+        !s.result
+            .as_ref()
+            .expect("result")
+            .rows
+            .iter()
+            .any(|r| r.replaced)
+    );
+    assert_eq!(s.not_replaced(), vec![line]);
+    assert_eq!(s.state()["not_replaced"], serde_json::json!([line]));
+    assert!(crate::i18n::has("bankimport.done.not_replaced.one"));
+    // The same file again: the earlier one is in the books; Add asks.
+    prepared(&mut s);
+    s.start_over(false);
+    read(&mut s, &f, "operating2.qfx", &changed);
+    s.next();
+    s.next();
+    s.poll();
+    let p = s.preview.as_ref().expect("preview");
+    let row = p.rows.iter().find(|r| r.line == line).expect("row");
+    assert_eq!(row.status, ImportRowStatus::Changed);
+    assert_eq!(row.existing_pending, Some(false));
+    assert!(s.add_needs_ask(line));
+    s.choose(line, changed_choice(ChangedAction::Add));
+    assert!(!s.add_needs_ask(line), "asked once");
+    assert!(s.not_replaced().is_empty() || s.result.is_none());
+}
