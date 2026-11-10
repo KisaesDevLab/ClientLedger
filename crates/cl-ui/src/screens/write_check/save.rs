@@ -1331,6 +1331,10 @@ impl WriteCheckScreen {
             read_only: read_only_note.is_some(),
             read_only_note: read_only_note.unwrap_or("check.read_only"),
         });
+        // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
+        let shape = self.feed_shape();
+        self.feed_watch
+            .start(&self.link, self.group.as_ref(), r.txn.id, Some(bank), shape);
         self.save.problems.clear();
         self.save.error = None;
         self.save.notice = None;

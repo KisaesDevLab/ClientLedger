@@ -2350,3 +2350,51 @@ fn a_card_payment_line_shows_its_account_when_the_accounts_arrive_later() {
         .expect("the line's Account cell");
     assert!(cell.contains("2050"), "Account cell: {cell:?}");
 }
+
+/// PR-5 QA-2: editing a check a bank line is matched to: before Save the
+/// form says the bank line will wait in the Bank Feed again, for an
+/// amount change and for a bank-account change; nothing when unchanged.
+#[test]
+fn a_matched_checks_amount_or_bank_change_says_the_line_waits() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let op = account(&s, "1010");
+    let row = {
+        let mut d = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            connection: Some(crate::company::demo::feed_review::connection_of(op)),
+            ..cl_api::FeedQuery::default()
+        };
+        crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .into_iter()
+            .find(|r| r.amount.is_positive())
+            .expect("a money-out row")
+    };
+    // The latest saved check (Prev from a new one).
+    s.navigate(true);
+    s.poll();
+    let id = s.editing.as_ref().map(|e| e.id).expect("a saved check");
+    crate::company::demo::feed_review::match_for_tests(
+        &mut link.demo_state().expect("demo"),
+        row.id,
+        id,
+    );
+    let mut s = screen(&link);
+    assert!(s.open_record(id));
+    s.poll();
+    s.feed_watch.poll();
+    assert_eq!(s.state()["feed_linked"], true);
+    assert_eq!(s.state()["feed_notice"], false, "nothing changed yet");
+    let opened = s.feed_shape()[0].1.expect("an amount");
+    let more = opened.checked_add(money("1.00")).expect("sum");
+    s.amount_typed(Some(more));
+    assert_eq!(s.state()["feed_notice"], true);
+    s.amount_typed(Some(opened));
+    assert_eq!(s.state()["feed_notice"], false);
+    let savings = account(&s, "1020");
+    s.header.edit_step(|h| h.bank = Some(savings));
+    assert_eq!(s.state()["feed_notice"], true, "another bank account");
+}

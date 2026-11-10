@@ -272,6 +272,8 @@ pub struct WriteCheckScreen {
     balance_task: Option<Task<Option<Money>>>,
     pub(crate) balance: Option<Money>,
     pub(crate) editing: Option<Editing>,
+    /// PR-5 QA-2: the bank line of the check being edited.
+    pub(crate) feed_watch: crate::feed_link::Watch,
     pub(crate) load_task: Option<Task<cl_api::Versioned<cl_api::CheckRecord>>>,
     /// The bank account the check being read is drawn on.
     pub(crate) load_bank: Option<AccountId>,
@@ -422,6 +424,7 @@ impl WriteCheckScreen {
             balance_task: None,
             balance: None,
             editing: None,
+            feed_watch: crate::feed_link::Watch::default(),
             load_task: None,
             load_bank: None,
             save: SaveState::default(),
@@ -561,6 +564,20 @@ impl WriteCheckScreen {
     }
 
     /// The bank account shown.
+    /// PR-5 QA-2: the check's bank account and amount, as compared for the
+    /// Bank Feed notice.
+    pub(crate) fn feed_shape(&self) -> crate::feed_link::Shape {
+        let f = self.compose();
+        // A loaded check shows its amount from its lines until one is typed.
+        let amount = f.amount.or_else(|| f.lines_total());
+        vec![(f.bank, amount.map(|m| m.abs()))]
+    }
+
+    /// The edit changes the amount or bank of a check a bank line holds.
+    pub(crate) fn feed_notice(&self) -> bool {
+        self.editing.is_some() && self.feed_watch.notice(&self.feed_shape()).is_some()
+    }
+
     pub(crate) fn bank(&self) -> Option<AccountId> {
         self.header.current().bank
     }
@@ -1323,6 +1340,14 @@ impl WriteCheckScreen {
             "layout": self.layout.json(),
             "draft": self.draft_state(),
         });
+        if let Some(m) = v.as_object_mut() {
+            // PR-5 QA-2.
+            m.insert(
+                "feed_linked".into(),
+                json!(self.editing.is_some() && self.feed_watch.linked()),
+            );
+            m.insert("feed_notice".into(), json!(self.feed_notice()));
+        }
         let wp7 = json!({
             "prefill": {
                 "applied": self.prefill.applied,

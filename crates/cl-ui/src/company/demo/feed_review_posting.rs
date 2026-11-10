@@ -402,6 +402,21 @@ pub fn match_line(
     Ok(Some(g))
 }
 
+/// Tests: matches the waiting row to `transaction` whatever its lines (a
+/// form's saved record the demo ledger doesn't list as a candidate).
+#[cfg(test)]
+pub fn match_for_tests(state: &mut DemoState, id: FeedItemId, transaction: TransactionId) {
+    accept_row(
+        state,
+        id,
+        FeedStatus::Matched,
+        Some(transaction),
+        false,
+        "match",
+        UndoGroupId::new_random(),
+    );
+}
+
 /// Matches the row to its one candidate.
 ///
 /// # Errors

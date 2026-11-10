@@ -423,6 +423,12 @@ impl WriteCheckScreen {
         } else if self.editing_locked() {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
+        // PR-5 QA-2: an amount or bank change of a check a bank line holds.
+        if self.editing.is_some() {
+            let now = self.feed_shape();
+            let style = self.style(ui);
+            self.feed_watch.ui(ui, tokens, &now, style);
+        }
         header::locked_scope(ui, enabled, read_only, |ui| self.card_ui(ui, tokens));
         ui.add_space(12.0);
         header::locked_scope(ui, true, read_only, |ui| self.lines_ui(ui, tokens, enabled));

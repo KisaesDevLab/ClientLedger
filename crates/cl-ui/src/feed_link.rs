@@ -106,6 +106,86 @@ pub(crate) fn read(
     ))
 }
 
+/// What a form's edit is compared on: each bank-side line's account and
+/// amount (a check's or a deposit's one bank line; a journal entry's lines).
+pub type Shape = Vec<(Option<AccountId>, Option<Money>)>;
+
+/// PR-5 QA-2: a form editing a saved entry watches for a change of the
+/// amount or bank account of an entry a bank line is matched to (or was
+/// recorded from), and says before Save that the line will wait in the
+/// Bank Feed again (Q-PR5a: the engine flags it on save).
+#[derive(Default)]
+pub(crate) struct Watch {
+    read: Option<Job<Option<FeedLink>>>,
+    link: Option<FeedLink>,
+    opened: Shape,
+}
+
+impl std::fmt::Debug for Watch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watch")
+            .field("linked", &self.link.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Watch {
+    /// The entry `entry` was loaded with `opened` (its bank account
+    /// `account`): reads its bank line.
+    pub(crate) fn start(
+        &mut self,
+        link: &CompanyLink,
+        group: Option<&RequestGroup>,
+        entry: TransactionId,
+        account: Option<AccountId>,
+        opened: Shape,
+    ) {
+        *self = Watch {
+            read: read(link, group, account, entry),
+            link: None,
+            opened,
+        };
+        self.poll();
+    }
+
+    /// Takes the read's answer.
+    pub(crate) fn poll(&mut self) {
+        if let Some(r) = crate::screens::templates::engine::finished(&mut self.read) {
+            self.link = r.ok().flatten();
+        }
+    }
+
+    /// The entry has a bank line.
+    pub(crate) fn linked(&self) -> bool {
+        self.link.is_some()
+    }
+
+    /// The bank line to name, when `now` differs from the entry as opened.
+    pub(crate) fn notice(&self, now: &Shape) -> Option<FeedLink> {
+        self.link.filter(|_| *now != self.opened)
+    }
+
+    /// Draws the notice (polling first); true when shown.
+    pub(crate) fn ui(
+        &mut self,
+        ui: &mut eframe::egui::Ui,
+        tokens: &crate::theme::Tokens,
+        now: &Shape,
+        style: cl_core::MoneyStyle,
+    ) -> bool {
+        self.poll();
+        let Some(l) = self.notice(now) else {
+            return false;
+        };
+        crate::screens::company::form::inline_warning(
+            ui,
+            tokens,
+            &crate::i18n::t_with("register.edit.feed_linked", &[("amount", &l.shown(style))]),
+        );
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
