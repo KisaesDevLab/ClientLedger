@@ -1072,8 +1072,13 @@ impl CardChargeScreen {
         // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
         let shape = self.feed_shape();
         let card = self.card();
-        self.feed_watch
-            .start(&self.link, self.group.as_ref(), v.record.id, card, shape);
+        self.feed_watch.start(
+            &self.link,
+            self.group.as_ref(),
+            v.record.id,
+            card.into_iter().collect(),
+            shape,
+        );
 
         self.problems.clear();
         self.payee.prefill = None;

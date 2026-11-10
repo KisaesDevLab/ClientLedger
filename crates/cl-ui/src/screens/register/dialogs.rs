@@ -807,8 +807,12 @@ impl RegisterScreen {
             self.actions.error = None;
             self.actions.reload = None;
             if let Pending::Row { id, .. } = pending {
-                let read =
-                    crate::feed_link::read(&self.link, self.group.as_ref(), self.account, *id);
+                let read = crate::feed_link::read(
+                    &self.link,
+                    self.group.as_ref(),
+                    self.account.into_iter().collect(),
+                    *id,
+                );
                 self.actions.panel = Panel::BankFeedLinked {
                     id: *id,
                     link: None,

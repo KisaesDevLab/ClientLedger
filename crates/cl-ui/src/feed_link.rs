@@ -48,14 +48,14 @@ impl FeedLink {
     }
 }
 
-/// Reads the line on `entry` in `account`'s Bank Feed: the demo's store at
-/// once; an engine with `feed-entry-changed-v1`, its accepted lines on the
+/// Reads the line on `entry` in the Bank Feed of the first of `accounts`
+/// that has one: the demo's store at once; an engine with `feed-entry-changed-v1`, its accepted lines on the
 /// account, newest first, at most 1,000. `None` (no job) on an older engine,
 /// which doesn't flag a changed line.
 pub(crate) fn read(
     link: &CompanyLink,
     group: Option<&RequestGroup>,
-    account: Option<AccountId>,
+    accounts: Vec<AccountId>,
     entry: TransactionId,
 ) -> Option<Job<Option<FeedLink>>> {
     if !link.is_demo()
@@ -65,7 +65,9 @@ pub(crate) fn read(
     {
         return None;
     }
-    let account = account?;
+    if accounts.is_empty() {
+        return None;
+    }
     Some(run(
         link,
         group,
@@ -80,7 +82,7 @@ pub(crate) fn read(
             let conns = f.connections().await?;
             let Some(c) = conns
                 .iter()
-                .find(|c| c.account == Some(account))
+                .find(|c| c.account.is_some_and(|a| accounts.contains(&a)))
                 .map(|c| c.id)
             else {
                 return Ok(None);
@@ -130,18 +132,18 @@ impl std::fmt::Debug for Watch {
 }
 
 impl Watch {
-    /// The entry `entry` was loaded with `opened` (its bank account
-    /// `account`): reads its bank line.
+    /// The entry `entry` was loaded with `opened` (on the bank or card
+    /// `accounts`): reads its bank line.
     pub(crate) fn start(
         &mut self,
         link: &CompanyLink,
         group: Option<&RequestGroup>,
         entry: TransactionId,
-        account: Option<AccountId>,
+        accounts: Vec<AccountId>,
         opened: Shape,
     ) {
         *self = Watch {
-            read: read(link, group, account, entry),
+            read: read(link, group, accounts, entry),
             link: None,
             opened,
         };

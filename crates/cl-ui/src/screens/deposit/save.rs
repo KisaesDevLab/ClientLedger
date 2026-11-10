@@ -828,7 +828,7 @@ impl DepositScreen {
         let shape = self.feed_shape();
         let (id, account) = (r.txn.id, r.account);
         self.feed_watch
-            .start(&self.link, self.group.as_ref(), id, Some(account), shape);
+            .start(&self.link, self.group.as_ref(), id, vec![account], shape);
         self.record = Some(r);
         self.save.problems.clear();
         self.save.error = None;

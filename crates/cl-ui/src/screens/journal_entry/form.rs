@@ -127,6 +127,12 @@ impl JournalScreen {
         {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
+        // PR-5 QA-2: a bank-side change of an entry a bank line holds.
+        if self.editing.is_some() {
+            let now = self.feed_shape();
+            let style = self.money_style;
+            self.feed_watch.ui(ui, tokens, &now, style);
+        }
         if self.stale {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(t("journal.changed_elsewhere")).color(tokens.warn_text));

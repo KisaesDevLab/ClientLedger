@@ -770,3 +770,61 @@ fn b2_the_owner_override_needs_the_dialog() {
     s.start_save(SaveIntent::Save, None);
     assert_eq!(sent.lock().expect("l").len(), 2);
 }
+
+/// PR-5 QA-2: editing a journal entry a bank line is matched to says,
+/// before Save, that the line will wait in the Bank Feed again when a bank
+/// line's amount or account changes; another line's change says nothing.
+#[test]
+fn a_matched_entrys_bank_line_change_says_the_line_waits() {
+    let (mut s, link, _dir) = screen();
+    set_lines(
+        &mut s,
+        &[(6100, "1200.00", "", None), (1010, "", "1200.00", None)],
+    );
+    assert!(
+        s.start_save(SaveIntent::SaveAndNew, None),
+        "{:?}",
+        s.problems
+    );
+    let id = s.last_saved.expect("saved");
+    {
+        let mut d = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .remove(0);
+        crate::company::demo::feed_review::match_for_tests(&mut d, row.id, id);
+    }
+    assert!(s.open_record(id));
+    s.feed_watch.poll();
+    assert_eq!(s.state_json()["feed"]["linked"], true);
+    assert_eq!(
+        s.state_json()["feed"]["notice"],
+        false,
+        "nothing changed yet"
+    );
+    // The expense side moves to another account: the bank line is the same.
+    set_lines(
+        &mut s,
+        &[(6250, "1200.00", "", None), (1010, "", "1200.00", None)],
+    );
+    assert_eq!(s.state_json()["feed"]["notice"], false);
+    set_lines(
+        &mut s,
+        &[(6100, "1250.00", "", None), (1010, "", "1250.00", None)],
+    );
+    assert_eq!(s.state_json()["feed"]["notice"], true);
+    set_lines(
+        &mut s,
+        &[(6100, "1200.00", "", None), (1020, "", "1200.00", None)],
+    );
+    assert_eq!(
+        s.state_json()["feed"]["notice"],
+        true,
+        "another bank account"
+    );
+}
