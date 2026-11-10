@@ -423,6 +423,8 @@ pub static CATALOG: &[ReportSpec] = &[
         title: "reports.title.sales_tax_liability",
         source: Source::SalesTaxLiability,
         default_dates: DatePreset::LastQuarter,
+        // The company's sales tax basis decides (P23).
+        basis: BasisMode::NotApplicable,
         sort: SortMode::None,
         drill: DrillRule::None,
         capabilities: &[caps::SALES_TAX],

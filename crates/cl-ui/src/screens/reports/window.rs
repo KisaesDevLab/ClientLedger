@@ -441,7 +441,7 @@ impl ReportWindow {
         let mut action: Option<GridAction> = None;
         // The heading row.
         ui.horizontal(|ui| {
-            ui.add_sized([CAPTION_W, ROW_H], egui::Label::new(""));
+            ui.allocate_exact_size(Vec2::new(CAPTION_W, ROW_H), egui::Sense::hover());
             for (ci, c) in table.columns.iter().enumerate() {
                 cell_box(ui, c.kind.is_numeric(), |ui| {
                     let text = RichText::new(label(&c.caption)).strong().size(12.0);
@@ -474,7 +474,8 @@ impl ReportWindow {
                             r.kind,
                             RowKind::Header | RowKind::Total | RowKind::Grand | RowKind::Subtotal
                         );
-                        ui.allocate_ui_with_layout(
+                        fixed_box(
+                            ui,
                             Vec2::new(CAPTION_W, ROW_H),
                             Layout::left_to_right(Align::Center),
                             |ui| {
@@ -482,7 +483,7 @@ impl ReportWindow {
                                 let caption = label(&r.caption);
                                 if r.expandable {
                                     let open = !collapsed.contains(&r.path);
-                                    let arrow = if open { "\u{25be}" } else { "\u{25b8}" };
+                                    let arrow = if open { "\u{2212}" } else { "+" };
                                     let key = if open {
                                         "reports.collapse_row"
                                     } else {
@@ -630,7 +631,14 @@ fn cell_box(ui: &mut Ui, right: bool, add: impl FnOnce(&mut Ui)) {
     } else {
         Layout::left_to_right(Align::Center)
     };
-    ui.allocate_ui_with_layout(Vec2::new(CELL_W, ROW_H), layout, add);
+    fixed_box(ui, Vec2::new(CELL_W, ROW_H), layout, add);
+}
+
+/// Exactly `size`, whatever the content (columns line up row to row).
+fn fixed_box(ui: &mut Ui, size: Vec2, layout: Layout, add: impl FnOnce(&mut Ui)) {
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
+    add(&mut child);
 }
 
 /// A cell as shown (display formatting only, plan §6).
