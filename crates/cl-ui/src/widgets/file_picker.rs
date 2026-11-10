@@ -43,6 +43,8 @@ pub enum PickUse {
     Logo,
     /// A bank file to import (P25).
     BankFile,
+    /// Where to save a report export (P28: CSV, Excel, PDF).
+    SaveReport,
 }
 
 impl PickUse {
@@ -54,6 +56,7 @@ impl PickUse {
             PickUse::SavePdf => "picker.title.save_pdf",
             PickUse::Logo => "picker.title.logo",
             PickUse::BankFile => "picker.title.bank_file",
+            PickUse::SaveReport => "picker.title.save_report",
         }
     }
 }
@@ -315,6 +318,18 @@ pub fn save_file(
     start: Option<&Path>,
     file_name: &str,
 ) -> Receiver<Option<PathBuf>> {
+    save_file_as(ctx, use_, start, file_name, ("picker.filter.pdf", "pdf"))
+}
+
+/// [`save_file`] for a file of type `(filter name key, extension)`.
+#[must_use]
+pub fn save_file_as(
+    ctx: &Context,
+    use_: PickUse,
+    start: Option<&Path>,
+    file_name: &str,
+    kind: (&'static str, &'static str),
+) -> Receiver<Option<PathBuf>> {
     let (tx, rx) = channel();
     let last = last_folders(ctx);
     if let Some(hook) = active_hook(ctx) {
@@ -328,7 +343,8 @@ pub fn save_file(
     }
     let start = last_folder(ctx, use_).or_else(|| start.map(Path::to_path_buf));
     let title = crate::i18n::t(use_.title_key());
-    let filter = crate::i18n::t("picker.filter.pdf");
+    let filter = crate::i18n::t(kind.0);
+    let ext = kind.1;
     let name = file_name.to_string();
     let repaint = ctx.clone();
     let spawned = std::thread::Builder::new()
@@ -336,7 +352,7 @@ pub fn save_file(
         .spawn(move || {
             let mut d = rfd::AsyncFileDialog::new()
                 .set_title(title)
-                .add_filter(filter.as_str(), &["pdf"])
+                .add_filter(filter.as_str(), &[ext])
                 .set_file_name(name);
             if let Some(dir) = start {
                 d = d.set_directory(dir);

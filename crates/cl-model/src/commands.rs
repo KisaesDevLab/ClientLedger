@@ -448,10 +448,14 @@ pub const COMMANDS: &[Command] = &[
     // Payroll
     screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
     // Reports
-    screen("reports.center", "Reports", Some(Menu::Reports), 0, None, "P28"),
-    screen("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None, "P28"),
-    screen("reports.balance_sheet", "Balance Sheet", Some(Menu::Reports), 1, None, "P28"),
-    screen("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T'), "P28"),
+    built("reports.center", "Reports", Some(Menu::Reports), 0, None),
+    built("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None),
+    built("reports.balance_sheet", "Balance Sheet", Some(Menu::Reports), 1, None),
+    built("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T')),
+    // P28: the report window's own commands (plan WP1 step 5).
+    cmd("reports.refresh", "Refresh Report", None, 3, key(Mods::NONE, Key::F(5)), Scope::Window),
+    cmd("reports.memorize", "Memorize Report", None, 3, ctrl('M'), Scope::Window),
+    cmd("reports.collapse", "Collapse or Expand Rows", None, 3, None, Scope::Window),
     // P24 (Q-P24n): the inventory reports; print and export come with P28.
     built("reports.inventory_value", "Inventory Value", Some(Menu::Reports), 2, None),
     built("reports.inventory_value_detail", "Inventory Value Detail", Some(Menu::Reports), 2, None),
@@ -797,6 +801,11 @@ mod tests {
             "banking.feed",
             // P27
             "banking.reconcile",
+            // P28
+            "reports.center",
+            "reports.profit_loss",
+            "reports.balance_sheet",
+            "reports.trial_balance",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

@@ -558,7 +558,19 @@ impl HomeScreen {
     /// which takes the range; STATE tracks it).
     pub(crate) fn drill(&mut self, month: charts::Month) {
         self.chart_drill = Some(month);
-        self.open("reports.profit_loss");
+        // Q-P16h: the P&L of that fiscal period.
+        let Some(cmd) = cl_model::commands::find("reports.profit_loss") else {
+            return;
+        };
+        self.last_opened = Some(cmd.id);
+        let open = crate::screens::reports::profit_loss_for(cl_core::report::DateRange {
+            from: month.start,
+            to: month.end,
+        });
+        self.link.push(CompanyEvent::OpenWith(
+            cmd.id,
+            Box::new(crate::windows::OpenPayload::Report(Box::new(open))),
+        ));
     }
 
     /// Opens a command's window (its screen, or the placeholder that says

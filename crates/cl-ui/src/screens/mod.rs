@@ -71,6 +71,8 @@ pub mod import_bank_file;
 pub mod bank_feed;
 // P27: Reconcile.
 pub mod reconcile;
+// P28: the report window.
+pub mod reports;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -132,6 +134,9 @@ pub(crate) const P26_SCREENS: [crate::shell::MakeScreen; 1] = [bank_feed::make];
 
 /// Every P27 screen's `make` (the shell tries each after P26's).
 pub(crate) const P27_SCREENS: [crate::shell::MakeScreen; 1] = [reconcile::make];
+
+/// Every P28 screen's `make` (the shell tries each after P27's).
+pub(crate) const P28_SCREENS: [crate::shell::MakeScreen; 1] = [reports::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
