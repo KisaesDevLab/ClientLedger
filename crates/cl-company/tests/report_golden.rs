@@ -263,7 +263,8 @@ fn stable_ids(text: &str, names: &HashMap<String, String>) -> String {
             } else {
                 let next = others.len() + 1;
                 let k = *others.entry(id.to_string()).or_insert(next);
-                out.push_str(&format!("#{k}"));
+                out.push('#');
+                out.push_str(&k.to_string());
             }
             i += 36;
         } else {
@@ -553,8 +554,8 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     )
     .await
     .expect("the practice company loads");
-    let story = ReportStory::load();
-    let posted = cl_company::report_story::post(&s, &story)
+    let fixture = ReportStory::load();
+    let posted = cl_company::report_story::post(&s, &fixture)
         .await
         .unwrap_or_else(|e| panic!("the report story posts: {e}"));
     let sample = Sample::load();
