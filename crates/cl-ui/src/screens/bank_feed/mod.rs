@@ -50,6 +50,17 @@ use crate::windows::Screen;
 /// The command and window kind.
 pub const KIND: &str = "banking.feed";
 
+/// PR-5 QA-4: where another window sends the Bank Feed: an account's
+/// lines and, for a matched entry, the accepted line that holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeedTarget {
+    /// The bank or card account.
+    pub account: AccountId,
+    /// The entry a line was matched to or posted (the Accepted view), or
+    /// `None` for the lines waiting (after an import).
+    pub entry: Option<cl_core::ids::TransactionId>,
+}
+
 /// How often an open window reads the feed again (other computers).
 const REFRESH: Duration = Duration::from_secs(15);
 
@@ -175,6 +186,10 @@ pub struct BankFeedScreen {
     focus_next: Option<FeedItemId>,
     /// PR-5: "Record it again?" and "ticked in your reconciliation".
     pub(crate) asks: ask::Asks,
+    /// PR-5 QA-4: a target waiting for the accounts to be read.
+    target: Option<FeedTarget>,
+    /// The entry whose line the next list read puts the cursor on.
+    seek_entry: Option<cl_core::ids::TransactionId>,
 }
 
 impl std::fmt::Debug for BankFeedScreen {
@@ -238,11 +253,45 @@ impl BankFeedScreen {
             receipts: receipts::Receipts::default(),
             focus_next: None,
             asks: ask::Asks::default(),
+            target: None,
+            seek_entry: None,
         };
         s.read_meta();
         rules::read(&mut s);
         s.poll();
         s
+    }
+
+    /// PR-5 QA-4: shows `target`'s account with no filter hiding its line:
+    /// the Accepted view on the matched entry's line, or the lines waiting.
+    /// Before the accounts are read it waits for them.
+    pub fn go_to(&mut self, target: FeedTarget) {
+        let Some(i) = self
+            .accounts
+            .iter()
+            .position(|a| a.account == Some(target.account))
+        else {
+            self.target = Some(target);
+            return;
+        };
+        self.target = None;
+        self.account = i;
+        self.segment = Segment::All;
+        self.show = if target.entry.is_some() {
+            Show::Accepted
+        } else {
+            Show::Waiting
+        };
+        self.voided_only = false;
+        self.changed_only = false;
+        self.filter.clear();
+        self.offset = 0;
+        self.notice = None;
+        self.detail.row = None;
+        self.seek_entry = target.entry;
+        // A read under way was asked with the old choices.
+        self.load = None;
+        self.reload();
     }
 
     /// The account the list shows.
@@ -416,6 +465,11 @@ impl BankFeedScreen {
                     self.accept_route = m.accept_route;
                     self.supported = m.supported;
                     self.closing_supported = m.closing_supported;
+                    if let Some(t) = self.target.take() {
+                        self.go_to(t);
+                        // An account with no bank lines: the list as it was.
+                        self.target = None;
+                    }
                     self.reload();
                 }
                 Err(_) => self.load_failed = true,
@@ -432,6 +486,15 @@ impl BankFeedScreen {
                     self.list.set_rows(self.rows.iter().map(|r| r.id).collect());
                     if let Some(id) = self.focus_next.take() {
                         self.list.focus(id);
+                    }
+                    // PR-5 QA-4: the cursor on the matched entry's line.
+                    if let Some(entry) = self.seek_entry.take()
+                        && let Some(r) = self
+                            .rows
+                            .iter()
+                            .find(|r| r.matched_transaction == Some(entry))
+                    {
+                        self.list.focus(r.id);
                     }
                     self.receipts.take(l.drafts, &self.rows);
                     receipts::refresh(self);
@@ -955,6 +1018,16 @@ impl Screen for BankFeedScreen {
 
     fn scope(&self) -> Scope {
         Scope::Feed
+    }
+
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::FeedAt(t) => {
+                self.go_to(t);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn command(&mut self, id: CommandId) -> bool {

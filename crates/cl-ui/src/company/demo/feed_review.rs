@@ -718,6 +718,21 @@ pub fn lines_on(state: &mut DemoState, transaction: TransactionId) -> Vec<(FeedI
         .collect()
 }
 
+/// The bank lines accepted onto `transaction` as the engine lists them
+/// (PR-5 QA-2, QA-3: the forms' notice and the delete refusal's wording).
+#[must_use]
+pub fn rows_on(state: &mut DemoState, transaction: TransactionId) -> Vec<FeedRow> {
+    let feed = state.bank_feed.clone();
+    state.feed_review.sync(&feed);
+    state
+        .feed_review
+        .rows
+        .iter()
+        .filter(|r| r.matched == Some(transaction) && r.status.is_accepted())
+        .map(|r| r.to_row(false))
+        .collect()
+}
+
 /// The bank accounts with rows (`GET /banking/connections`).
 #[must_use]
 pub fn connections(state: &mut DemoState) -> Vec<BankConnection> {

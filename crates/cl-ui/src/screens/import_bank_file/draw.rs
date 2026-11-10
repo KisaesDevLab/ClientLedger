@@ -1800,8 +1800,7 @@ impl ImportBankFileScreen {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 if crate::widgets::primary_button(ui, &t("bankimport.open_feed")).clicked() {
-                    self.link
-                        .push(CompanyEvent::OpenWindow(CommandId::new("banking.feed")));
+                    self.open_feed();
                 }
                 let can_undo = r.batch.is_some()
                     && (r.counts.inserted > 0 || replaced > 0)

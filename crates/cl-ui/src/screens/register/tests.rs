@@ -1395,8 +1395,61 @@ fn delete_of_a_bank_feed_entry_points_to_the_bank_feed() {
         link.demo_state().expect("demo").ledger.date_of(t).is_some(),
         "kept"
     );
+    // PR-5 QA-3: the Bank Feed recorded it: Undo removes the entry.
+    assert_eq!(
+        st["row_action"]["notice"],
+        "register.delete.feed_posted_fix"
+    );
+    let _ = link.drain();
     s.open_bank_feed();
     assert_eq!(s.state()["row_action"]["panel"], "none");
+    // QA-4: Go to Bank Feed names the account and the entry.
+    let account = s.account.expect("a register account");
+    assert!(link.drain().iter().any(|e| matches!(
+        e,
+        crate::company::CompanyEvent::OpenWith(_, p)
+            if **p == crate::windows::OpenPayload::FeedAt(crate::screens::bank_feed::FeedTarget {
+                account,
+                entry: Some(t),
+            })
+    )));
+}
+
+/// PR-5 QA-3: a bank line *matched* to an entry the owner made: Undo only
+/// unlinks it, so the refusal says the entry stays.
+#[test]
+fn delete_of_a_matched_entry_says_undo_keeps_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let (t, date) = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let (row, t) = page
+            .rows
+            .iter()
+            .find_map(|r| {
+                match crate::company::demo::feed_review::match_candidates(&demo, r.id).as_slice() {
+                    [one] => Some((r.id, one.transaction)),
+                    _ => None,
+                }
+            })
+            .expect("a row with one match");
+        crate::company::demo::feed_review::match_line(&mut demo, row, t).expect("matched");
+        (t, demo.ledger.date_of(t).expect("dated"))
+    };
+    s.open_confirm(dialogs::ActionKind::Delete, t, date);
+    settle(&mut s, None);
+    s.confirm();
+    settle(&mut s, None);
+    let st = s.state();
+    assert_eq!(st["row_action"]["panel"], "bank_feed_linked");
+    assert_eq!(st["row_action"]["notice"], "register.delete.feed_match_fix");
+    assert!(crate::i18n::has("register.delete.feed_match_fix"));
 }
 
 #[test]

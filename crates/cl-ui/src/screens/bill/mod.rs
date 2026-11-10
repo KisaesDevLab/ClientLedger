@@ -1361,7 +1361,8 @@ impl Screen for EnterBillScreen {
             | OpenPayload::OnDate(_)
             | OpenPayload::ReprintCheck(..)
             | OpenPayload::PrintDeposit(..)
-            | OpenPayload::SetUpName(_) => false,
+            | OpenPayload::SetUpName(_)
+            | OpenPayload::FeedAt(_) => false,
         }
     }
 

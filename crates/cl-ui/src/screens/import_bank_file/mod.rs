@@ -897,7 +897,27 @@ impl ImportBankFileScreen {
             .is_some_and(|f| flow::sign_disagrees(&self.sign, f))
     }
 
-    /// The sign question's first line: a file that looked reversed says
+    /// "Open Bank Feed" after a send: the lines waiting in the account the
+    /// file went into (PR-5 QA).
+    pub(crate) fn open_feed(&self) {
+        let kind = CommandId::new(crate::screens::bank_feed::KIND);
+        match self.account {
+            Some(account) => self.link.push(crate::company::CompanyEvent::OpenWith(
+                kind,
+                Box::new(crate::windows::OpenPayload::FeedAt(
+                    crate::screens::bank_feed::FeedTarget {
+                        account,
+                        entry: None,
+                    },
+                )),
+            )),
+            None => self
+                .link
+                .push(crate::company::CompanyEvent::OpenWindow(kind)),
+        }
+    }
+
+    /// The sign question's first line:a file that looked reversed says
     /// whether the flip is applied (PR-5 QA: the text follows the box).
     pub(crate) fn sign_hint_key(&self) -> &'static str {
         if self.sign.suggest_flip && self.flipped {

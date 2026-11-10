@@ -816,3 +816,75 @@ fn an_edited_entry_shows_entry_changed() {
     s.reload();
     assert_eq!(s.rows.len(), 1);
 }
+
+/// PR-5 QA-4: Go to Bank Feed (a register's matched entry) shows the
+/// account's accepted lines with the cursor on that entry's line, whatever
+/// view and filter were on; after an import, the account's waiting lines.
+#[test]
+fn go_to_lands_on_the_matched_line() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    let id = s.rows[0].id;
+    let account = s
+        .current_account()
+        .and_then(|a| a.account)
+        .expect("account");
+    cmd(&mut s, "feed.accept");
+    let entry = {
+        let mut d = s.link.demo_state().expect("demo");
+        crate::company::demo::feed_review::list(
+            &mut d,
+            &FeedQuery {
+                accepted: true,
+                ..FeedQuery::default()
+            },
+        )
+        .expect("list")
+        .rows
+        .iter()
+        .find(|r| r.id == id)
+        .and_then(|r| r.matched_transaction)
+        .expect("posted")
+    };
+    // Whatever the window showed before.
+    s.show = Show::Excluded;
+    s.filter = "nothing like it".into();
+    s.changed_only = true;
+    s.reload();
+    assert!(s.open_with(crate::windows::OpenPayload::FeedAt(FeedTarget {
+        account,
+        entry: Some(entry),
+    })));
+    s.poll();
+    assert_eq!(s.show, Show::Accepted);
+    assert!(s.filter.is_empty() && !s.changed_only && !s.voided_only);
+    assert_eq!(s.current_account().and_then(|a| a.account), Some(account));
+    let at = s.list.cursor().expect("a cursor");
+    assert_eq!(s.rows[at].matched_transaction, Some(entry));
+    // After an import: the waiting lines of the account.
+    s.go_to(FeedTarget {
+        account,
+        entry: None,
+    });
+    s.poll();
+    assert_eq!(s.show, Show::Waiting);
+    assert!(!s.rows.is_empty());
+}
+
+/// A target given before the accounts are read waits for them.
+#[test]
+fn go_to_waits_for_the_accounts() {
+    let dir = tempfile::tempdir().expect("dir");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = BankFeedScreen::new(Arc::clone(&link), None);
+    let account = s.accounts.last().and_then(|a| a.account).expect("account");
+    s.accounts.clear();
+    s.go_to(FeedTarget {
+        account,
+        entry: None,
+    });
+    s.read_meta();
+    s.poll();
+    assert_eq!(s.current_account().and_then(|a| a.account), Some(account));
+}

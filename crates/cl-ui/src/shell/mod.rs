@@ -371,6 +371,21 @@ impl Shell {
     /// other kind just opens (or comes to the front) as usual.
     fn open_with(&mut self, kind: CommandId, payload: crate::windows::OpenPayload) {
         let set_up = matches!(payload, crate::windows::OpenPayload::SetUpName(_));
+        // PR-5 QA-4: an open Bank Feed goes to the line asked for.
+        if matches!(payload, crate::windows::OpenPayload::FeedAt(_))
+            && let Some(id) = self.windows.find_kind(kind)
+        {
+            let taken = self
+                .windows
+                .all_mut()
+                .iter_mut()
+                .find(|w| w.id == id)
+                .is_some_and(|w| w.screen.open_with(payload.clone()));
+            if taken {
+                self.windows.activate(id);
+                return;
+            }
+        }
         let back = self.windows.active().map(|w| w.id);
         let mut screen = self.make_screen(kind);
         if screen.open_with(payload) {
