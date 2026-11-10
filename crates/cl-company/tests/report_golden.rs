@@ -68,11 +68,16 @@ fn engine_exe() -> Option<PathBuf> {
     if let Some(p) = cl_host::find_engine_exe(None) {
         return Some(p);
     }
+    // The test binary's own `target`, else the workspace's (a separate
+    // build directory keeps test binaries outside it).
     let exe = std::env::current_exe().ok()?;
     let target = exe
         .ancestors()
-        .find(|d| d.file_name().is_some_and(|n| n == "target"))?
-        .to_path_buf();
+        .find(|d| d.file_name().is_some_and(|n| n == "target"))
+        .map_or_else(
+            || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"),
+            Path::to_path_buf,
+        );
     std::fs::read_dir(target.join("engine"))
         .ok()?
         .flatten()
