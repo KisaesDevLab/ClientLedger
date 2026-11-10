@@ -1473,3 +1473,21 @@ fn a_long_balance_label_never_runs_into_its_value() {
     );
     assert!(label.height() > value.height(), "the label wrapped");
 }
+
+/// PR-5 QA: the balance lines read right for one and for two rows, and the
+/// "look already entered" count says it includes rows already waiting.
+#[test]
+fn the_balance_lines_count_in_plain_words() {
+    let two = crate::i18n::t_count("bankimport.balance.books_will", 2, &[]);
+    assert!(!two.contains("all 2"), "{two}");
+    assert!(two.contains("these 2 rows"), "{two}");
+    let one = crate::i18n::t_count("bankimport.balance.books_will_owe", 1, &[]);
+    assert!(one.contains("this 1 row"), "{one}");
+    let likely = crate::i18n::t_count("bankimport.balance.likely", 2, &[("total", "132.65")]);
+    assert!(!likely.contains("of them"), "{likely}");
+    assert!(
+        likely.contains("already waiting in the Bank Feed"),
+        "{likely}"
+    );
+    assert!(crate::i18n::has("bankimport.balance.likely.one"));
+}

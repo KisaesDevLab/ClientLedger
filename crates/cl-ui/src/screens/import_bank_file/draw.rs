@@ -242,6 +242,16 @@ pub(super) fn balance_keys(
     (bank, books)
 }
 
+/// PR-5 QA: the engine counts the new rows of this file and the rows
+/// already waiting in the Bank Feed that look entered (account-wide), so
+/// the line says so rather than "of them".
+pub(super) fn likely_text(b: &cl_api::ImportBalanceCheck, style: MoneyStyle) -> String {
+    t_count(
+        "bankimport.balance.likely",
+        usize::try_from(b.likely_in_books_count).unwrap_or(usize::MAX),
+        &[("total", &b.likely_in_books_total.format(style))],
+    )
+}
 fn trouble_text(trouble: &EngineTrouble) -> String {
     match trouble {
         EngineTrouble::Unknown => t("bankimport.lost"),
@@ -1031,16 +1041,7 @@ impl ImportBankFileScreen {
                     pair(
                         ui,
                         tokens,
-                        &t_with(
-                            books_key,
-                            &[(
-                                "n",
-                                &crate::i18n::count_text(
-                                    u64::try_from(flow::rows_to_send(p, &self.choices))
-                                        .unwrap_or(u64::MAX),
-                                ),
-                            )],
-                        ),
+                        &t_count(books_key, flow::rows_to_send(p, &self.choices), &[]),
                         &fig.books.format(style),
                         true,
                     );
@@ -1066,22 +1067,7 @@ impl ImportBankFileScreen {
                         });
                     });
                     if b.likely_in_books_count > 0 {
-                        form::hint(
-                            ui,
-                            tokens,
-                            &t_with(
-                                "bankimport.balance.likely",
-                                &[
-                                    (
-                                        "n",
-                                        &crate::i18n::count_text(u64::from(
-                                            b.likely_in_books_count,
-                                        )),
-                                    ),
-                                    ("total", &b.likely_in_books_total.format(style)),
-                                ],
-                            ),
-                        );
+                        form::hint(ui, tokens, &likely_text(b, style));
                     }
                 }
                 None if self.link.is_demo() => {
