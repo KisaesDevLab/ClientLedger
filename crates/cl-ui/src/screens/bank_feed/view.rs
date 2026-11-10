@@ -125,6 +125,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     bulk::bar(s, ui, &tokens, !short);
     toast(s, ui, &tokens);
     undo_changed(s, ui, &tokens);
+    super::ask::ui(s, ui, &tokens);
     closing(s, ui, &tokens);
     if s.load_failed {
         form::inline_warning(ui, &tokens, &t("bank_feed.load_failed"));

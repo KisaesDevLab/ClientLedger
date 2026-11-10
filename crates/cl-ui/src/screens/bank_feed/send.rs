@@ -102,6 +102,9 @@ pub(crate) struct Outcome {
     /// (`DOCUMENT_POSSIBLE_DUPLICATE`): the row didn't post; the panel
     /// shows these and asks before using the receipt anyway.
     pub receipt_duplicates: Option<Vec<cl_api::DuplicateMatch>>,
+    /// PR-5 S3: the engine refused to record a line that matches an entry
+    /// in the books (409 `FEED_ITEM_HAS_MATCH`): ask, then send it again.
+    pub has_match: Option<Send>,
 }
 
 impl Outcome {
@@ -340,6 +343,7 @@ fn single(o: &mut Outcome, send: &Send, r: Result<Option<UndoTarget>, ApiError>)
         ) => {
             o.closed = Some((e, send.clone()));
         }
+        Err(e) if super::ask::is_has_match(&e) => o.has_match = Some(send.clone()),
         Err(e) if matches!(feed_refusal(&e), Some(FeedRefusal::UndoChanged { .. })) => {
             if let Send::Undo(target, _) = send {
                 let n = match feed_refusal(&e) {
@@ -362,6 +366,18 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
     if s.view_only || s.act.is_some() {
         return;
     }
+    // PR-5: a line already in the books, or an Undo of a ticked entry,
+    // asks first (a password retry was already asked about).
+    if password.is_none()
+        && (super::ask::holds_record_again(s, &send) || super::ask::holds_undo(s, &send))
+    {
+        return;
+    }
+    let force = s
+        .asks
+        .confirmed
+        .take()
+        .is_some_and(|c| Some(c) == row_of(&send));
     s.last_send = Some(send.as_str());
     let demo_send = send.clone();
     let demo_pw = password.clone();
@@ -419,7 +435,7 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
                     Err(e) => single(&mut o, &send, Err(e)),
                 },
                 other => {
-                    let r = live_single(&sess, other, auth, key).await;
+                    let r = live_single(&sess, other, force, auth, key).await;
                     single(&mut o, &send, r);
                 }
             }
@@ -461,6 +477,7 @@ fn demo_single(
 async fn live_single(
     s: &Session,
     send: &Send,
+    force: bool,
     auth: Option<&ClosedPeriodAuthorization>,
     key: IdempotencyKey,
 ) -> Result<Option<UndoTarget>, ApiError> {
@@ -475,7 +492,7 @@ async fn live_single(
             .await
             .map(|g| g.map(UndoTarget::Group).or_else(|| row(*id))),
         Send::Transfer(id, target) => f
-            .transfer(*id, *target, auth, key)
+            .transfer_with(*id, *target, force, auth, key)
             .await
             .map(|p| p.undo_group.map(UndoTarget::Group).or_else(|| row(*id))),
         Send::Deposit(id, pays, fees) => f

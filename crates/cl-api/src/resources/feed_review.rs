@@ -853,6 +853,13 @@ pub enum FeedRefusal {
         /// The rows.
         ids: Vec<FeedItemId>,
     },
+    /// 409 `FEED_ITEM_HAS_MATCH` (PR-5 S3, an engine that guards it): the
+    /// line matches an entry already in the books; ask, then send again
+    /// with `force`.
+    HasMatch {
+        /// How many entries it matches (`details.candidates`).
+        candidates: usize,
+    },
 }
 
 impl fmt::Debug for FeedRefusal {
@@ -886,6 +893,9 @@ impl fmt::Debug for FeedRefusal {
             FeedRefusal::RuleNotFound => "RuleNotFound",
             FeedRefusal::UndoChanged { ids } => {
                 return write!(f, "UndoChanged({})", ids.len());
+            }
+            FeedRefusal::HasMatch { candidates } => {
+                return write!(f, "HasMatch({candidates})");
             }
         };
         f.write_str(name)
@@ -943,6 +953,9 @@ pub fn feed_refusal(e: &ApiError) -> Option<FeedRefusal> {
         "RULE_NOT_FOUND" => FeedRefusal::RuleNotFound,
         "FEED_UNDO_CHANGED" => FeedRefusal::UndoChanged {
             ids: details.map(|d| d.ids("ids")).unwrap_or_default(),
+        },
+        "FEED_ITEM_HAS_MATCH" => FeedRefusal::HasMatch {
+            candidates: details.map_or(0, |d| d.list_len("candidates")),
         },
         _ => return None,
     })
@@ -1997,7 +2010,8 @@ impl Feed<'_> {
     ///
     /// # Errors
     /// `Local(Unsupported)` without `feed-match-post-v1`; `TransferMismatch`,
-    /// `NotPending`, `InUse`; the closed period; any [`ApiError`].
+    /// `NotPending`, `InUse`, `HasMatch` (an engine that guards it); the
+    /// closed period; any [`ApiError`].
     pub async fn transfer(
         &self,
         id: FeedItemId,
@@ -2005,11 +2019,31 @@ impl Feed<'_> {
         auth: Option<&ClosedPeriodAuthorization>,
         key: IdempotencyKey,
     ) -> Result<FeedPosted, ApiError> {
+        self.transfer_with(id, target, false, auth, key).await
+    }
+
+    /// [`Feed::transfer`]; `force` after the owner said "Record it again"
+    /// to a 409 `FEED_ITEM_HAS_MATCH` (PR-5 S3; sent only then, so an
+    /// engine without the guard never sees it).
+    ///
+    /// # Errors
+    /// As [`Feed::transfer`].
+    pub async fn transfer_with(
+        &self,
+        id: FeedItemId,
+        target: TransferTarget,
+        force: bool,
+        auth: Option<&ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<FeedPosted, ApiError> {
         self.need(Capabilities::FEED_MATCH_POST)?;
-        let body = match target {
+        let mut body = match target {
             TransferTarget::OtherItem(o) => json!({ "otherFeedItemId": o.to_string() }),
             TransferTarget::Account(a) => json!({ "toAccountId": a.to_string() }),
         };
+        if force && let Value::Object(m) = &mut body {
+            m.insert("force".into(), json!(true));
+        }
         let body = self.with_password(body, auth)?;
         let mut call = item_call(&FEED_TRANSFER, id, "transfer").json_body(body);
         call.idempotency_key = Some(key);

@@ -18,6 +18,7 @@
 //! accept route (`feed-accept-v1`, E3); until the engine has it the button
 //! is disabled with a tooltip on a live engine (the demo accepts).
 
+pub mod ask;
 pub mod bulk;
 pub mod detail;
 pub mod receipts;
@@ -170,6 +171,8 @@ pub struct BankFeedScreen {
     /// The cursor goes to this line when the list is read next (a demo
     /// receipt's line, control channel).
     focus_next: Option<FeedItemId>,
+    /// PR-5: "Record it again?" and "ticked in your reconciliation".
+    pub(crate) asks: ask::Asks,
 }
 
 impl std::fmt::Debug for BankFeedScreen {
@@ -231,6 +234,7 @@ impl BankFeedScreen {
             notice: None,
             receipts: receipts::Receipts::default(),
             focus_next: None,
+            asks: ask::Asks::default(),
         };
         s.read_meta();
         rules::read(&mut s);
@@ -432,6 +436,7 @@ impl BankFeedScreen {
             }
         }
         rules::poll(self);
+        ask::poll(self);
         if let Some(r) = finished(&mut self.act) {
             let o = r.unwrap_or_else(|_| send::Outcome {
                 failed: 1,
@@ -467,6 +472,9 @@ impl BankFeedScreen {
             None => self.closing.saved(),
         }
         self.confirm.clone_from(&o.changed);
+        if let Some(again) = o.has_match.clone() {
+            self.asks.ask = Some(ask::Ask::RecordAgain(again));
+        }
         self.accepted_as.extend(o.accepted_as.iter().copied());
         if o.undone > 0 {
             self.toast = None;
@@ -704,6 +712,7 @@ impl BankFeedScreen {
                 self.detail = detail::Detail::default();
                 self.toast = None;
                 self.confirm = None;
+                self.asks = ask::Asks::default();
                 self.closing.cancel();
                 self.rules = rules::RulesPanel::default();
                 self.receipts = receipts::Receipts::default();
@@ -1038,6 +1047,7 @@ impl Screen for BankFeedScreen {
             "receipts": receipts::state(self),
             "toast": self.toast.as_ref().map(|x| x.rows),
             "undo_changed": self.confirm.as_ref().map(|c| c.1),
+            "ask": self.asks.ask.as_ref().map(ask::Ask::as_str),
             "closing": self.closing.state_json(self.closing_supported),
             "last_send": self.last_send,
             "transfer_window": self.transfer_window,

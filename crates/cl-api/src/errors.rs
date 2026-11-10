@@ -159,6 +159,12 @@ impl ConflictDetails {
             .unwrap_or_default()
     }
 
+    /// How many entries the list under `key` has (0 when it isn't a list).
+    #[must_use]
+    pub fn list_len(&self, key: &str) -> usize {
+        self.raw(key).and_then(Value::as_array).map_or(0, Vec::len)
+    }
+
     /// True when the engine sent no details.
     #[must_use]
     pub fn is_empty(&self) -> bool {
