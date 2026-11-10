@@ -1,0 +1,39 @@
+# Report window (P28 WP1) against `clientledger --demo`: the Reports menu
+# opens the window on Profit & Loss, which says it needs an engine update
+# until engine PR-A (`reports-exact-v1`, Q-220); the catalog's A/R Aging and
+# Sales Tax Liability run on the demo's exact routes. WP5 extends this with
+# the mockup P&L, drill, memorize and export. Synthetic.
+name: reports
+description: The report window, a greyed report, A/R Aging and Sales Tax Liability, light and dark.
+themes: [light]
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - assert_state: {key: screen.screen, equals: reports}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  - assert_state: {key: screen.state, equals: unavailable}
+  - assert_exists: {role: text_input, label: Find a report}
+  - screenshot: needs-update
+  - click: {label: A/R Aging, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: ar_aging_summary}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_exists: {role: button, label: Export Excel}
+  - screenshot: ar-aging
+  - command: window.theme
+  - wait: {ms: 300}
+  - screenshot: ar-aging-dark
+  - command: window.theme
+  - command: window.theme
+  - wait: {ms: 300}
+  - click: {label: Sales Tax Liability, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: sales_tax_liability}
+  - assert_state: {key: screen.state, equals: shown}
+  - command: reports.collapse
+  - screenshot: sales-tax-collapsed
+  - command: reports.collapse
+  - command: reports.refresh
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: sales-tax

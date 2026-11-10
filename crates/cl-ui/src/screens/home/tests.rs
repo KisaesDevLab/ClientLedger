@@ -1097,11 +1097,17 @@ fn the_demo_chart_shows_the_mockup_and_drills_into_the_report() {
         end: date(2026, 10, 31),
     };
     h.drill(oct);
+    // Q-P16h: the P&L opens on that fiscal period.
+    let want = crate::screens::reports::profit_loss_for(cl_core::report::DateRange {
+        from: date(2026, 10, 1),
+        to: date(2026, 10, 31),
+    });
     assert_eq!(
         link.drain(),
-        vec![CompanyEvent::OpenWindow(CommandId::new(
-            "reports.profit_loss"
-        ))]
+        vec![CompanyEvent::OpenWith(
+            CommandId::new("reports.profit_loss"),
+            Box::new(crate::windows::OpenPayload::Report(Box::new(want)))
+        )]
     );
     assert_eq!(h.state()["chart"]["drill"], "2026-10-01..2026-10-31");
 }

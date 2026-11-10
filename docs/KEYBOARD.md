@@ -52,6 +52,8 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Shift+H` | Include Inactive Entries | `list.show_inactive` |
 | `Ctrl+Shift+Q` | Account or Transaction Report | `list.quick_report` |
 | `Delete` | Delete List Entry | `list.delete` |
+| `F5` | Refresh Report | `reports.refresh` |
+| `Ctrl+M` | Memorize Report | `reports.memorize` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
 | `F9` | Show or Hide Details | `window.toggle_details` |
 | `F6` | Move Between the Form and Its Document | `view.focus_doc` |

@@ -16,6 +16,9 @@ mod filters;
 mod memorized;
 mod window;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use cl_api::ApiError;

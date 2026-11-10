@@ -585,6 +585,11 @@ impl ReportWindow {
         self.set_options(next);
     }
 
+    #[cfg(test)]
+    pub(crate) fn state_json_for_test(&self) -> Value {
+        self.state_json()
+    }
+
     fn state_json(&self) -> Value {
         let rows = self.shown_rows();
         json!({

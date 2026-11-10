@@ -98,6 +98,8 @@
 - `Ctrl+Shift+H` Include Inactive Entries
 - `Ctrl+Shift+Q` Account or Transaction Report
 - `Delete` Delete List Entry
+- `F5` Refresh Report
+- `Ctrl+M` Memorize Report
 
 **In a grid**
 
