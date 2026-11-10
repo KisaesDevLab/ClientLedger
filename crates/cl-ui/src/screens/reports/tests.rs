@@ -19,13 +19,7 @@ fn today() -> CalendarDate {
 
 fn window(link: &Arc<CompanyLink>) -> ReportWindow {
     let spec = find("profit_loss").expect("p&l");
-    ReportWindow::new(
-        Arc::clone(link),
-        CommandId::new(KIND),
-        None,
-        spec,
-        today(),
-    )
+    ReportWindow::new(Arc::clone(link), CommandId::new(KIND), None, spec, today())
 }
 
 fn demo() -> (tempfile::TempDir, Arc<CompanyLink>) {
@@ -48,7 +42,9 @@ fn every_reports_command_opens_the_window() {
         let s = make(cmd.id, &link, None, today()).expect("window");
         assert_eq!(s.state()["screen"], "reports");
     }
-    let other = cl_model::commands::find("vendors.write_check").expect("cmd").id;
+    let other = cl_model::commands::find("vendors.write_check")
+        .expect("cmd")
+        .id;
     assert!(make(other, &link, None, today()).is_none());
 }
 
@@ -88,7 +84,9 @@ fn the_exact_reports_run_on_the_demo() {
         if w.state == RunState::Shown {
             let t = w.table.as_ref().expect("table");
             assert!(!t.columns.is_empty(), "{key}");
-            assert!(t.rows.iter().any(|r| r.kind == RowKind::Grand) || key == "inventory_stock_status");
+            assert!(
+                t.rows.iter().any(|r| r.kind == RowKind::Grand) || key == "inventory_stock_status"
+            );
         }
     }
 }
@@ -105,7 +103,13 @@ fn collapse_and_options_change_without_running_again() {
     let expandable: Vec<_> = w
         .table
         .as_ref()
-        .map(|t| t.rows.iter().filter(|r| r.expandable).map(|r| r.path.clone()).collect())
+        .map(|t| {
+            t.rows
+                .iter()
+                .filter(|r| r.expandable)
+                .map(|r| r.path.clone())
+                .collect()
+        })
         .unwrap_or_default();
     if let Some(p) = expandable.first() {
         w.toggle_collapse(p);
@@ -144,7 +148,8 @@ fn exports_read_the_rows_on_screen() {
 
 #[test]
 fn drills_open_forms_and_report_tabs() {
-    let id: cl_core::ids::TransactionId = "11111111-1111-4111-8111-111111111111".parse().expect("id");
+    let id: cl_core::ids::TransactionId =
+        "11111111-1111-4111-8111-111111111111".parse().expect("id");
     assert_eq!(
         target(
             Source::InventoryValuationDetail,
@@ -183,7 +188,11 @@ fn drills_open_forms_and_report_tabs() {
     );
     let lines = |n: usize, tag| Drill::Lines {
         account_ids: (0..n)
-            .map(|i| format!("00000000-0000-4000-8000-{i:012}").parse().expect("id"))
+            .map(|i| {
+                format!("00000000-0000-4000-8000-{i:012}")
+                    .parse()
+                    .expect("id")
+            })
             .collect(),
         from: Some(as_of),
         to: as_of,
