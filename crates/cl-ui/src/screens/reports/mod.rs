@@ -5,9 +5,11 @@
 //! figures below. Collapse, sort and every export read the neutral
 //! [`cl_core::report::ReportTable`]; nothing here adds up money.
 //!
-//! WP1 runs the reports the engine reports exactly today (A/R aging, sales
-//! tax liability, inventory); the rest of the catalog shows greyed with
-//! "Needs an engine update" until their engine PRs merge (Q-220).
+//! WP1 runs the reports that were exact before P28 (A/R aging, sales tax
+//! liability, inventory) and WP2 the `reports-exact-v1` statements and
+//! ledgers; the rest of the catalog, and options an engine update brings
+//! (period columns, tag split, the ledger's drill filters), show greyed
+//! with "Needs an engine update" until their engine PRs merge (Q-220).
 
 mod catalog;
 mod drill;
@@ -76,22 +78,51 @@ pub fn make(
     )))
 }
 
-/// True when this build runs `spec` on the open company: the engine has
-/// every capability it needs, and this build reads its route family (the
-/// demo plays the routes WP1 reads).
+/// The route families the demo plays (WP5 adds the statements).
+const fn demo_plays(source: Source) -> bool {
+    matches!(
+        source,
+        Source::ArAgingSummary
+            | Source::SalesTaxLiability
+            | Source::InventoryValuation
+            | Source::InventoryValuationDetail
+            | Source::InventoryStockStatus
+    )
+}
+
+/// True when this build runs `spec` on the open company: this build reads
+/// its route family, and the engine has every capability it needs (the
+/// demo: plays that family).
 #[must_use]
 pub(crate) fn available(link: &CompanyLink, spec: &ReportSpec) -> bool {
     if !cl_api::resources::reports::run::supported(spec.source) {
         return false;
     }
-    link.is_demo() || spec.available(|c| link.capabilities().has(c))
+    if link.is_demo() {
+        return demo_plays(spec.source);
+    }
+    spec.available(|c| link.capabilities().has(c))
 }
 
-/// Text for a caption: `@key` is an i18n key, anything else owner data.
+/// True when the engine can answer `req` as asked (Q-220): an option an
+/// engine update brings (period columns, tag split, the ledger's drill
+/// filters) waits for it rather than being sent and ignored.
+#[must_use]
+pub(crate) fn request_runs(link: &CompanyLink, req: &ReportRequest) -> bool {
+    link.is_demo()
+        || cl_api::resources::reports::run::missing_capability(req, |c| link.capabilities().has(c))
+            .is_none()
+}
+
+/// Text for a caption: `@key` is an i18n key, `@key name` one that names
+/// an account (`Total {name}`), anything else owner data.
 #[must_use]
 pub(crate) fn label(s: &str) -> String {
     match s.strip_prefix('@') {
-        Some(key) => crate::i18n::t(key),
+        Some(rest) => match rest.split_once(' ') {
+            Some((key, name)) => crate::i18n::t(key).replace("{name}", name),
+            None => crate::i18n::t(rest),
+        },
         None => s.to_string(),
     }
 }

@@ -1,0 +1,185 @@
+{
+  "accountFilter": {
+    "accounts": [
+      {
+        "accountNumber": null,
+        "id": "47bcc627-0b34-44a0-8a41-fd1c8c468bc1",
+        "name": "ExactBank 008461ce7f"
+      },
+      {
+        "accountNumber": null,
+        "id": "45b4961f-afe4-4090-8e1b-42ba3bee151d",
+        "name": "ExactExp 2cdf9c854b"
+      },
+      {
+        "accountNumber": null,
+        "id": "5eb33891-8110-4dd6-bd10-4d0a23737f3d",
+        "name": "ExactSub 701d71f9a9"
+      }
+    ]
+  },
+  "accounts": [
+    {
+      "accountId": "47bcc627-0b34-44a0-8a41-fd1c8c468bc1",
+      "accountNumber": null,
+      "accountType": "asset",
+      "beginningBalance": 0,
+      "beginningBalanceExact": "0.0000",
+      "endingBalance": -49.7,
+      "endingBalanceExact": "-49.7000",
+      "id": "47bcc627-0b34-44a0-8a41-fd1c8c468bc1",
+      "lines": [
+        {
+          "contactName": null,
+          "credit": 0,
+          "creditExact": "0.0000",
+          "date": "2033-03-05",
+          "debit": 0.1,
+          "debitExact": "0.1000",
+          "description": "exact 08ac0d9f10",
+          "lineId": "ca361386-9e0e-46e5-bc9d-27a323d186df",
+          "runningBalance": 0.1,
+          "runningBalanceExact": "0.1000",
+          "tagId": "232a46f2-ddb1-4e0c-93bc-37fae91ec7cd",
+          "tagLabel": "Exact 54f98876dc",
+          "tagName": "Exact 54f98876dc",
+          "transactionId": "2d77c67e-62f6-4f03-a5ff-420d79102a27",
+          "txnNumber": null,
+          "txnType": "journal_entry"
+        },
+        {
+          "contactName": null,
+          "credit": 0,
+          "creditExact": "0.0000",
+          "date": "2033-03-06",
+          "debit": 0.2,
+          "debitExact": "0.2000",
+          "description": "exact cf799e541b",
+          "lineId": "4117c665-191d-49bc-9750-67bf2b151fe6",
+          "runningBalance": 0.3,
+          "runningBalanceExact": "0.3000",
+          "tagId": "232a46f2-ddb1-4e0c-93bc-37fae91ec7cd",
+          "tagLabel": "Exact 54f98876dc",
+          "tagName": "Exact 54f98876dc",
+          "transactionId": "d9c8842b-8275-4553-a81d-2342bf50e85b",
+          "txnNumber": null,
+          "txnType": "journal_entry"
+        },
+        {
+          "contactName": null,
+          "credit": 50,
+          "creditExact": "50.0000",
+          "date": "2033-03-10",
+          "debit": 0,
+          "debitExact": "0.0000",
+          "description": "exact 6f2c1f7a27",
+          "lineId": "2767e125-0a85-45b2-b859-b47036e28561",
+          "runningBalance": -49.7,
+          "runningBalanceExact": "-49.7000",
+          "tagId": "232a46f2-ddb1-4e0c-93bc-37fae91ec7cd",
+          "tagLabel": "Exact 54f98876dc",
+          "tagName": "Exact 54f98876dc",
+          "transactionId": "ee447f0c-587c-4e47-bf3c-c2d34f2d3035",
+          "txnNumber": null,
+          "txnType": "journal_entry"
+        }
+      ],
+      "name": "ExactBank 008461ce7f",
+      "normalBalance": "debit",
+      "periodCredits": 50,
+      "periodCreditsExact": "50.0000",
+      "periodDebits": 0.3,
+      "periodDebitsExact": "0.3000"
+    },
+    {
+      "accountId": "45b4961f-afe4-4090-8e1b-42ba3bee151d",
+      "accountNumber": null,
+      "accountType": "expense",
+      "beginningBalance": 0,
+      "beginningBalanceExact": "0.0000",
+      "endingBalance": 25,
+      "endingBalanceExact": "25.0000",
+      "id": "45b4961f-afe4-4090-8e1b-42ba3bee151d",
+      "lines": [
+        {
+          "contactName": null,
+          "credit": 0,
+          "creditExact": "0.0000",
+          "date": "2033-03-12",
+          "debit": 25,
+          "debitExact": "25.0000",
+          "description": "exact b0d98d4980",
+          "lineId": "8adb8e6d-076c-4b3b-a04c-933524dea5ee",
+          "runningBalance": 25,
+          "runningBalanceExact": "25.0000",
+          "tagId": "232a46f2-ddb1-4e0c-93bc-37fae91ec7cd",
+          "tagLabel": "Exact 54f98876dc",
+          "tagName": "Exact 54f98876dc",
+          "transactionId": "9b6a6563-8324-4c48-b075-e1aa080b6778",
+          "txnNumber": null,
+          "txnType": "journal_entry"
+        }
+      ],
+      "name": "ExactExp 2cdf9c854b",
+      "normalBalance": "debit",
+      "periodCredits": 0,
+      "periodCreditsExact": "0.0000",
+      "periodDebits": 25,
+      "periodDebitsExact": "25.0000"
+    },
+    {
+      "accountId": "5eb33891-8110-4dd6-bd10-4d0a23737f3d",
+      "accountNumber": null,
+      "accountType": "expense",
+      "beginningBalance": 0,
+      "beginningBalanceExact": "0.0000",
+      "endingBalance": 50,
+      "endingBalanceExact": "50.0000",
+      "id": "5eb33891-8110-4dd6-bd10-4d0a23737f3d",
+      "lines": [
+        {
+          "contactName": null,
+          "credit": 0,
+          "creditExact": "0.0000",
+          "date": "2033-03-10",
+          "debit": 50,
+          "debitExact": "50.0000",
+          "description": "exact 6f2c1f7a27",
+          "lineId": "105a75f1-f9a2-4b97-8b4b-07525f267eb5",
+          "runningBalance": 50,
+          "runningBalanceExact": "50.0000",
+          "tagId": "232a46f2-ddb1-4e0c-93bc-37fae91ec7cd",
+          "tagLabel": "Exact 54f98876dc",
+          "tagName": "Exact 54f98876dc",
+          "transactionId": "ee447f0c-587c-4e47-bf3c-c2d34f2d3035",
+          "txnNumber": null,
+          "txnType": "journal_entry"
+        }
+      ],
+      "name": "ExactSub 701d71f9a9",
+      "normalBalance": "debit",
+      "periodCredits": 0,
+      "periodCreditsExact": "0.0000",
+      "periodDebits": 50,
+      "periodDebitsExact": "50.0000"
+    }
+  ],
+  "endDate": "2033-03-31",
+  "fiscalYearStart": "2033-01-01",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2033-03-01",
+    "reportSchemaVersion": "2",
+    "to": "2033-03-31"
+  },
+  "rowCount": 5,
+  "startDate": "2033-03-01",
+  "title": "General Ledger",
+  "totalCredits": 50,
+  "totalCreditsExact": "50.0000",
+  "totalDebits": 75.3,
+  "totalDebitsExact": "75.3000",
+  "truncated": false
+}

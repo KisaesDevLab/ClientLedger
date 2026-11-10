@@ -86,6 +86,16 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
                 options: Some(o),
             }))
         }
+        Drill::ProfitLoss { from, to, basis } => {
+            let mut open = profit_loss_for(DateRange {
+                from: *from,
+                to: *to,
+            });
+            if let Some(o) = open.options.as_mut() {
+                o.basis = basis.or(o.basis);
+            }
+            Target::Report(Box::new(open))
+        }
         Drill::Aging { contact, as_of, .. } => {
             let key = if source == Source::ApAgingSummary {
                 "ap_aging_detail"

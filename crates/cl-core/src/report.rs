@@ -622,6 +622,16 @@ pub enum Drill {
         /// As of.
         as_of: CalendarDate,
     },
+    /// The Profit & Loss over a period: the Balance Sheet's current-year
+    /// net income opens the fiscal year to date (plan §4).
+    ProfitLoss {
+        /// First day (the fiscal year's).
+        from: CalendarDate,
+        /// Last day (the balance date).
+        to: CalendarDate,
+        /// The basis the sheet ran on.
+        basis: Option<Basis>,
+    },
 }
 
 impl Drill {

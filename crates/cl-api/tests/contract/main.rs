@@ -62,6 +62,7 @@ mod contract_reconcile;
 mod contract_refunds;
 mod contract_register;
 mod contract_register_property;
+mod contract_reports_exact;
 mod contract_resources;
 mod contract_run_due;
 mod contract_sales_receipts;
@@ -1342,6 +1343,14 @@ fn main() -> std::process::ExitCode {
         (
             "inventory::closed_period_refuses_inventory",
             contract_inventory::closed_period_refuses_inventory,
+        ),
+        (
+            "reports_exact::record_statements",
+            contract_reports_exact::record_statements,
+        ),
+        (
+            "reports_exact::statements_drill_and_tie",
+            contract_reports_exact::statements_drill_and_tie,
         ),
         (
             "session::logout_ends_the_session",

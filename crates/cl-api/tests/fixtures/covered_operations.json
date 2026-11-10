@@ -377,5 +377,8 @@
   {"method":"GET","path":"/api/v1/report-builder/definition-groups","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/report-builder/definition-groups","inSpec":false,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":false,"fragmentHash":null},
-  {"method":"DELETE","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":false,"fragmentHash":null}
+  {"method":"DELETE","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/general-ledger","inSpec":true,"fragmentHash":"202ed8cdb04aa85edfd40aa4229c518855aca4a5a2e518a5faa843ae11b73361"},
+  {"method":"GET","path":"/api/v1/reports/revenue-by-category","inSpec":true,"fragmentHash":"2f563008b02ccecdd2ea161fefe8a6aeebe04fc9d72d28bb52fe7a8c14bb7717"},
+  {"method":"GET","path":"/api/v1/reports/expense-by-category","inSpec":true,"fragmentHash":"2f563008b02ccecdd2ea161fefe8a6aeebe04fc9d72d28bb52fe7a8c14bb7717"}
 ]

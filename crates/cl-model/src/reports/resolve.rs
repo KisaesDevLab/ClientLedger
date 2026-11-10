@@ -115,7 +115,13 @@ pub fn resolve(
         .copied()
         .filter(|e| spec.extras.contains(e))
         .collect();
-    let fiscal_year_start = if extras.contains(&cl_core::report::Extra::Ytd) {
+    // YTD columns start the fiscal year; so does a balance report's net
+    // income drill and the Trial Balance's income and expense lines.
+    let fiscal_year_start = if extras.contains(&cl_core::report::Extra::Ytd)
+        || matches!(
+            spec.source,
+            cl_core::report::Source::BalanceSheet | cl_core::report::Source::TrialBalance
+        ) {
         Some(fiscal.year_containing(span.to)?.start)
     } else {
         None

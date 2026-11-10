@@ -9,8 +9,12 @@
 //! WP2 and WP3.
 
 pub mod ar_aging;
+pub mod categories;
+pub(crate) mod exact;
 pub mod inventory;
+pub mod ledger;
 pub mod sales_tax;
+pub mod statements;
 
 use cl_core::report::{Cell, ColumnHead, ColumnKind, ReportRow, RowKind, RowPath};
 

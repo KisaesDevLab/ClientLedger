@@ -1684,6 +1684,14 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
     Method::Delete,
     "/api/v1/report-builder/definition-groups/{id}",
 );
+/// The General Ledger and Transaction Detail by Account (U-14 exact).
+pub(crate) const REPORT_GENERAL_LEDGER: Operation = read("/api/v1/reports/general-ledger");
+/// Revenue by Category (U-14 exact).
+pub(crate) const REPORT_REVENUE_BY_CATEGORY: Operation =
+    read("/api/v1/reports/revenue-by-category");
+/// Expenses by Category (U-14 exact).
+pub(crate) const REPORT_EXPENSE_BY_CATEGORY: Operation =
+    read("/api/v1/reports/expense-by-category");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1697,7 +1705,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 379] = [
+pub const OPERATIONS: [Operation; 382] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2094,6 +2102,9 @@ pub const OPERATIONS: [Operation; 379] = [
     REPORT_DEF_GROUPS_CREATE,
     REPORT_DEF_GROUP_PUT,
     REPORT_DEF_GROUP_DELETE,
+    REPORT_GENERAL_LEDGER,
+    REPORT_REVENUE_BY_CATEGORY,
+    REPORT_EXPENSE_BY_CATEGORY,
 ];
 
 /// Looks up a covered operation.

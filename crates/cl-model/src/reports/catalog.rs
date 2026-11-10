@@ -233,7 +233,10 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "trial_balance",
         title: "reports.title.trial_balance",
         source: Source::TrialBalance,
-        default_dates: DatePreset::ThisYear,
+        // The engine's Trial Balance is a balance at a date (income and
+        // expenses from the fiscal year's start).
+        dates: DateMode::AsOf,
+        default_dates: DatePreset::EndOfLastMonth,
         columns: &[ColumnBy::Total],
         extras: &[],
         drill: DrillRule::Balance,

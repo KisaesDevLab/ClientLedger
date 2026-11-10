@@ -214,6 +214,11 @@ impl ReportWindow {
                 return;
             }
         };
+        if !super::request_runs(&self.link, &req) {
+            self.state = RunState::Unavailable;
+            self.table = None;
+            return;
+        }
         self.generation += 1;
         let live = req.clone();
         let job = engine::read(

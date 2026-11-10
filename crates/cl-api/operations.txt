@@ -455,3 +455,7 @@ GET     /api/v1/report-builder/definition-groups idempotent
 POST    /api/v1/report-builder/definition-groups pre-handler-only
 PUT     /api/v1/report-builder/definition-groups/{id} pre-handler-only
 DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only
+# P28 WP2: exact statements and ledgers (U-14, reports-exact-v1)
+GET     /api/v1/reports/general-ledger          idempotent
+GET     /api/v1/reports/revenue-by-category     idempotent
+GET     /api/v1/reports/expense-by-category     idempotent
