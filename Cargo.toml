@@ -37,3 +37,9 @@ debug-assertions = true
 [profile.docread-bench]
 inherits = "release"
 debug-assertions = true
+
+# cl-ui's library archive passed the 4 GB limit of the Windows (COFF) archive
+# format with full debug info, and rustc panicked writing it on CI (P27,
+# ar_archive_writer). Line tables keep file:line backtraces.
+[profile.dev.package.cl-ui]
+debug = "line-tables-only"
