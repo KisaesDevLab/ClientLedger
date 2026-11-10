@@ -1052,6 +1052,10 @@ fn main() -> std::process::ExitCode {
             contract_bank_import::reimport_adds_nothing,
         ),
         (
+            "bank_import::partial_overlap_keeps_each_identical_row_once",
+            contract_bank_import::partial_overlap_keeps_each_identical_row_once,
+        ),
+        (
             "bank_import::commit_replays_its_key",
             contract_bank_import::commit_replays_its_key,
         ),

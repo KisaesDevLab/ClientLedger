@@ -220,6 +220,61 @@ pub fn reimport_adds_nothing(h: &Harness) {
     );
 }
 
+/// PR-5 T5: overlapping CSV downloads. File 1 has one 12.34 row on day D;
+/// file 2 (an overlapping range) has two identical 12.34 rows on D: one is
+/// the row already imported, the other is new (ordinals by date, amount and
+/// description). File 1 again adds nothing.
+pub fn partial_overlap_keeps_each_identical_row_once(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let acct = fresh_account(h, s, AccountType::Asset, "bank");
+    let tag = unique("OVERLAP");
+    let d = date(2027, 5, 12);
+    let file1 = request(
+        acct,
+        BankFileFormat::Csv,
+        vec![
+            row(2, date(2027, 5, 10), "3.10", &format!("{tag} A"), None),
+            row(3, d, "12.34", &tag, None),
+        ],
+    );
+    let first = h
+        .run(s.bank_import().commit(&file1, key()))
+        .expect("file 1");
+    assert_eq!(first.counts.inserted, 2);
+    let file2 = request(
+        acct,
+        BankFileFormat::Csv,
+        vec![
+            row(2, d, "12.34", &tag, None),
+            row(3, d, "12.34", &tag, None),
+            row(4, date(2027, 5, 14), "7.00", &format!("{tag} B"), None),
+        ],
+    );
+    let p = h.run(s.bank_import().preview(&file2)).expect("preview 2");
+    assert_eq!(
+        (p.counts.duplicate, p.counts.new),
+        (1, 2),
+        "one of the two identical rows was imported; the other and B are new"
+    );
+    let second = h
+        .run(s.bank_import().commit(&file2, key()))
+        .expect("file 2");
+    assert_eq!(second.counts.inserted, 2);
+    assert_eq!(second.counts.duplicate, 1);
+    let again = h
+        .run(s.bank_import().commit(&file1, key()))
+        .expect("file 1 again");
+    assert_eq!(again.counts.inserted, 0, "file 1 again adds nothing");
+    assert_eq!(again.counts.duplicate, 2);
+    let both = h
+        .run(s.bank_import().commit(&file2, key()))
+        .expect("file 2 again");
+    assert_eq!(both.counts.inserted, 0, "file 2 again adds nothing");
+}
+
 /// A lost answer: the same key replays the first commit, marked replayed,
 /// and adds nothing more.
 pub fn commit_replays_its_key(h: &Harness) {
