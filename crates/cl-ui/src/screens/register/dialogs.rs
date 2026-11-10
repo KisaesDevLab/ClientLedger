@@ -348,6 +348,12 @@ impl RegisterScreen {
     }
 
     /// The register row under the cursor.
+    /// The row under the cursor is in a finished reconciliation.
+    pub(super) fn cursor_reconciled(&self) -> bool {
+        self.cursor_row()
+            .is_some_and(|r| r.cleared == ClearState::Reconciled)
+    }
+
     pub(super) fn cursor_row(&self) -> Option<super::view::RegRow> {
         #[cfg(test)]
         if let Some(key) = self.actions.cursor {
@@ -438,6 +444,12 @@ impl RegisterScreen {
             self.actions.panel = Panel::Notice("register.void.already");
             return true;
         }
+        if row.cleared == ClearState::Reconciled {
+            // Never offered: the engine would refuse it (P27 QA).
+            self.actions.error = None;
+            self.actions.panel = Panel::Notice("register.void.reconciled");
+            return true;
+        }
         self.open_confirm(ActionKind::Void, row.txn_id, row.date);
         true
     }
@@ -449,7 +461,10 @@ impl RegisterScreen {
             return true;
         };
         let (id, date) = (row.txn_id, row.date);
-        self.actions.panel = if let Some(why) = VoidRoute::of(row.txn_type).delete_refused() {
+        self.actions.panel = if row.cleared == ClearState::Reconciled {
+            // Neither delete nor the void offered instead (P27 QA).
+            Panel::Notice("register.delete.reconciled")
+        } else if let Some(why) = VoidRoute::of(row.txn_type).delete_refused() {
             // A bill, vendor credit or bill payment is never deleted here
             // (P17 WP2b): offer its own void.
             Panel::OfferVoid { id, date, why }
@@ -465,8 +480,6 @@ impl RegisterScreen {
                 date,
                 why: "register.delete.unsupported",
             }
-        } else if row.cleared == ClearState::Reconciled {
-            Panel::Notice("register.delete.reconciled")
         } else {
             self.open_confirm(ActionKind::Delete, id, date);
             return true;
@@ -792,6 +805,14 @@ impl RegisterScreen {
             self.actions.panel = Panel::None;
             return Some(true);
         }
+        // A refused void or delete's message goes with the next action (P27
+        // QA); Esc dismisses it. One that offers Reload stays until then.
+        if self.actions.error.is_some() && self.actions.reload.is_none() {
+            self.actions.error = None;
+            if id.as_str() == "form.revert" {
+                return Some(true);
+            }
+        }
         None
     }
 
@@ -807,7 +828,12 @@ impl RegisterScreen {
         self.panel_ui(ui, tokens);
         if let Some(e) = &self.actions.error {
             form::inline_error(ui, tokens, e);
-            if self.actions.reload.is_some() {
+            if self.actions.reload.is_none() {
+                // A refusal is dismissed with OK (or Esc, or the next action).
+                if ui.button(t("register.row_action.ok")).clicked() {
+                    self.actions.error = None;
+                }
+            } else {
                 let mut reload = false;
                 ui.horizontal(|ui| {
                     ui.label(

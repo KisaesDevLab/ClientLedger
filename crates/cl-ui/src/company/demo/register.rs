@@ -427,6 +427,21 @@ pub fn check_closing(
     }
 }
 
+/// The engine's 409 `RECONCILED_TRANSACTION` with its `reconcile-qa-v1`
+/// details: the action and the statement date.
+fn reconciled_refusal(action: &str, statement: CalendarDate) -> cl_api::ApiError {
+    cl_api::ApiError::Conflict {
+        reason: cl_api::ConflictReason::Reconciled,
+        current_version: None,
+        code: cl_api::ErrorCode::parse("RECONCILED_TRANSACTION"),
+        message: cl_api::UserText::default(),
+        details: cl_api::ConflictDetails::new(serde_json::json!({
+            "action": action,
+            "statementDate": statement.to_wire(),
+        })),
+    }
+}
+
 fn refused(reason: cl_api::ConflictReason) -> cl_api::ApiError {
     cl_api::ApiError::Conflict {
         reason,
@@ -582,9 +597,18 @@ impl DemoLedger {
     /// # Errors
     /// `NotFound`; `Validation`-like refusal when it is already void.
     pub fn void(&mut self, id: TransactionId) -> Result<(), cl_api::ApiError> {
-        let n = sample_id(id)
-            .filter(|n| self.find(*n).is_some())
+        let t = sample_id(id)
+            .and_then(|n| self.find(n))
             .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        let n = t.id;
+        // A finished reconciliation keeps it (409 `RECONCILED_TRANSACTION`
+        // naming the statement, as `reconcile-qa-v1`).
+        if let Some(r) = self
+            .reconciled_through()
+            .filter(|r| t.cleared && t.date <= *r)
+        {
+            return Err(reconciled_refusal("void", r));
+        }
         // A deposited payment (or a refunded vendor credit) stays until its
         // deposit is voided (409 `TXN_DEPOSITED`).
         if self.deposited_in(id).is_some() {
@@ -611,8 +635,11 @@ impl DemoLedger {
         if !txn_type(&t.kind).is_deletable() {
             return Err(refused(cl_api::ConflictReason::DeleteUnsupported));
         }
-        if t.cleared && self.reconciled_through().is_some_and(|r| t.date <= r) {
-            return Err(refused(cl_api::ConflictReason::Reconciled));
+        if let Some(r) = self
+            .reconciled_through()
+            .filter(|r| t.cleared && t.date <= *r)
+        {
+            return Err(reconciled_refusal("delete", r));
         }
         if self.deposited_in(id).is_some() {
             return Err(conflict_code(

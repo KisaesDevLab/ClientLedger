@@ -43,7 +43,7 @@ pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint,
 pub use errors::{
     ApiError, AuthFailure, ClosedPeriod, ConflictDetails, ConflictReason, DEPOSIT_LINKS_DROPPED,
     ErrorCode, FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
-    is_deposit_links_dropped,
+    is_deposit_links_dropped, reconciled_statement_date,
 };
 // A04 WP-D: the demo engine's refusals read as the engine's.
 pub use errors::engine_refusal;

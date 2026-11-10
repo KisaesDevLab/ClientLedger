@@ -235,6 +235,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.void.confirm", "Void"),
     ("register.void.default_reason", "Voided in the register"),
     ("register.void.already", "This transaction is already void."),
+    ("register.void.reconciled", "This transaction is part of a finished reconciliation, so it can't be voided. To change it, use Undo last reconciliation in Banking \u{203a} Reconcile."),
     ("register.void.done", "Transaction voided."),
     ("register.delete.open", "Delete\u{2026}"),
     ("register.delete.title", "Delete this transaction?"),

@@ -675,6 +675,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.closing_password_attempts", "Too many wrong closing-date passwords."),
     ("error.api.account_password_wrong", "That sign-in password isn't right."),
     ("error.api.conflict_reconciled", "This transaction is part of a finished bank reconciliation, so its date and its bank or card amount can't change, and it can't be voided or deleted."),
+    ("error.api.conflict_reconciled_dated", "This transaction is part of your finished bank reconciliation for the statement dated {date}, so its date and its bank or card amount can't change, and it can't be voided or deleted."),
     ("fix.api.reconciled", "You can still change the category, memo or tags. To change the rest, use Undo last reconciliation in Banking \u{203a} Reconcile for that account, then reconcile again."),
     ("error.api.conflict_deleted", "This transaction was already deleted."),
     ("error.api.delete_unsupported", "This kind of transaction can't be deleted."),

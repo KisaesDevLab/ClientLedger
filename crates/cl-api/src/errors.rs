@@ -791,8 +791,32 @@ fn code_text(code: Option<&ErrorCode>) -> &str {
 /// The reconciled refusal's words and fix (P27 QA-5).
 const RECONCILED_MESSAGE: (&str, Option<&str>) =
     ("error.api.conflict_reconciled", Some("fix.api.reconciled"));
+/// The same, naming the statement (`{date}`, the engine's `statementDate`).
+const RECONCILED_DATED_MESSAGE: (&str, Option<&str>) = (
+    "error.api.conflict_reconciled_dated",
+    Some("fix.api.reconciled"),
+);
+
+/// The statement date of the finished reconciliation a 409
+/// `RECONCILED_TRANSACTION` names (`reconcile-qa-v1` details
+/// `statementDate`, a plain `YYYY-MM-DD`); `None` for any other error or
+/// an older engine's refusal.
+#[must_use]
+pub fn reconciled_statement_date(e: &ApiError) -> Option<CalendarDate> {
+    match e {
+        ApiError::Conflict {
+            reason: ConflictReason::Reconciled,
+            details,
+            ..
+        } => CalendarDate::parse_wire(details.text("statementDate")?).ok(),
+        _ => None,
+    }
+}
 
 fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)> {
+    if reconciled_statement_date(e).is_some() {
+        return Some(RECONCILED_DATED_MESSAGE);
+    }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
             return Some((
@@ -966,6 +990,10 @@ impl OwnerFacing for ApiError {
 
     fn scrubbed_detail(&self) -> String {
         self.to_string()
+    }
+
+    fn owner_date(&self) -> Option<CalendarDate> {
+        reconciled_statement_date(self)
     }
 }
 
@@ -2202,6 +2230,32 @@ mod tests {
         let coded =
             r#"{"error":{"message":"completed bank reconciliation","code":"VALIDATION_ERROR"}}"#;
         assert!(matches!(err(400, coded, S), ApiError::Validation(_)));
+    }
+
+    /// P27 QA: the reconciled refusal names its statement when the engine
+    /// sends `statementDate` (`reconcile-qa-v1`); a timestamp or no date
+    /// keeps the undated words.
+    #[test]
+    fn reconciled_refusal_names_the_statement_date() {
+        let body = |d: &str| {
+            format!(
+                r#"{{"error":{{"message":"x","code":"RECONCILED_TRANSACTION","details":{{"action":"void","reconciliationId":"r","statementDate":"{d}"}}}}}}"#
+            )
+        };
+        let e = err(409, &body("2026-10-31"), S);
+        assert_eq!(
+            reconciled_statement_date(&e),
+            CalendarDate::from_ymd(2026, 10, 31).ok()
+        );
+        assert_eq!(e.owner_date(), CalendarDate::from_ymd(2026, 10, 31).ok());
+        assert_eq!(e.owner_message().key, "error.api.conflict_reconciled_dated");
+        assert_eq!(e.owner_message().suggestion_key, Some("fix.api.reconciled"));
+        for odd in ["2026-10-31T05:00:00Z", ""] {
+            let e = err(409, &body(odd), S);
+            assert_eq!(reconciled_statement_date(&e), None, "{odd}");
+            assert_eq!(e.owner_message().key, "error.api.conflict_reconciled");
+        }
+        assert_eq!(reconciled_statement_date(&ApiError::Cancelled), None);
     }
 
     #[test]

@@ -56,6 +56,12 @@ pub trait OwnerFacing {
     /// Technical detail for "Copy details": codes, statuses and ids only.
     /// Must never contain amounts, names, memo text, emails or secrets.
     fn scrubbed_detail(&self) -> String;
+
+    /// A date the message names as `{date}` (a reconciliation's statement
+    /// date, P27 QA); `None` for most errors.
+    fn owner_date(&self) -> Option<crate::CalendarDate> {
+        None
+    }
 }
 
 /// A short opaque id that ties an owner-visible error to its log line.
