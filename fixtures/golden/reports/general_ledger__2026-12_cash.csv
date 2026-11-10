@@ -1,0 +1,78 @@
+kind,level,path,caption,date,number,name,memo,tag,debit,credit,balance
+header,0,acct:1010,1010 · Operating Checking,,,,@reports.row.beginning_balance,,,,85710.55
+detail,1,acct:1010/0:3,@reports.txn.bill_payment,2026-12-02,,Table Rock Nursery,Cash paid,,0,1000,84710.55
+detail,1,acct:1010/1:4,@reports.txn.bill_payment,2026-12-02,,Ozark Mulch Supply,Cash paid,,0,1180.4,83530.15
+detail,1,acct:1010/2:5,@reports.txn.customer_payment,2026-12-15,,Table Rock Dental,,,1590.25,0,85120.4
+account_total,0,acct:1010~total,@reports.row.total_of 1010 · Operating Checking,,,,,,1590.25,2180.4,85120.4
+header,0,acct:10150,10150 · Payments Clearing,,,,@reports.row.beginning_balance,,,,2092.5
+account_total,0,acct:10150~total,@reports.row.total_of 10150 · Payments Clearing,,,,,,0,0,2092.5
+header,0,acct:1020,1020 · Savings,,,,@reports.row.beginning_balance,,,,15450
+account_total,0,acct:1020~total,@reports.row.total_of 1020 · Savings,,,,,,0,0,15450
+header,0,acct:10200,10200 · Accounts Receivable,,,,@reports.row.beginning_balance,,,,48912.4
+account_total,0,acct:10200~total,@reports.row.total_of 10200 · Accounts Receivable,,,,,,0,0,48912.4
+header,0,acct:1500,1500 · Equipment,,,,@reports.row.beginning_balance,,,,47987.66
+account_total,0,acct:1500~total,@reports.row.total_of 1500 · Equipment,,,,,,0,0,47987.66
+header,0,acct:1510,1510 · Vehicles,,,,@reports.row.beginning_balance,,,,62012.34
+account_total,0,acct:1510~total,@reports.row.total_of 1510 · Vehicles,,,,,,0,0,62012.34
+header,0,acct:20100,20100 · Accounts Payable,,,,@reports.row.beginning_balance,,,,15806.53
+detail,1,acct:20100/0:10,@reports.txn.bill_payment,2026-12-02,,Table Rock Nursery,Bill payment,,115.6,0,15690.93
+detail,1,acct:20100/1:11,@reports.txn.bill_payment,2026-12-02,,Table Rock Nursery,Vendor credit applied,,0,115.6,15806.53
+account_total,0,acct:20100~total,@reports.row.total_of 20100 · Accounts Payable,,,,,,115.6,115.6,15806.53
+header,0,acct:2050,2050 · Business Credit Card,,,,@reports.row.beginning_balance,,,,289.63
+detail,1,acct:2050/0:12,@reports.txn.journal_entry,2026-12-05,,,Fuel card,,0,64.18,353.81
+detail,1,acct:2050/1:13,@reports.txn.journal_entry,2026-12-05,,,Fuel card,,0,64.18,417.99
+detail,1,acct:2050/2:14,@reports.txn.journal_entry,2026-12-31,,,Year-end insurance accrual,,0,1200,1617.99
+account_total,0,acct:2050~total,@reports.row.total_of 2050 · Business Credit Card,,,,,,0,1328.36,1617.99
+header,0,acct:2200,2200 · Vehicle and Equipment Loans,,,,@reports.row.beginning_balance,,,,31200
+account_total,0,acct:2200~total,@reports.row.total_of 2200 · Vehicle and Equipment Loans,,,,,,0,0,31200
+header,0,acct:30000,30000 · Opening Balances,,,,@reports.row.beginning_balance,,,,139000
+account_total,0,acct:30000~total,@reports.row.total_of 30000 · Opening Balances,,,,,,0,0,139000
+header,0,acct:30160,30160 · Owner's Contribution,,,,@reports.row.beginning_balance,,,,3450
+account_total,0,acct:30160~total,@reports.row.total_of 30160 · Owner's Contribution,,,,,,0,0,3450
+header,0,acct:30170,30170 · Owner's Draw,,,,@reports.row.beginning_balance,,,,-353267.44
+account_total,0,acct:30170~total,@reports.row.total_of 30170 · Owner's Draw,,,,,,0,0,-353267.44
+header,0,acct:4000,4000 · Service Income,,,,@reports.row.beginning_balance,,,,1137358.81
+detail,1,acct:4000/0:1,@reports.txn.customer_payment,2026-12-15,,Table Rock Dental,,Courtyard,0,1250,1138608.81
+detail,1,acct:4000/1:2,@reports.txn.customer_payment,2026-12-15,,Table Rock Dental,,Fall cleanup,0,340.25,1138949.06
+account_total,0,acct:4000~total,@reports.row.total_of 4000 · Service Income,,,,,,0,1590.25,1138949.06
+header,0,acct:49900,49900 · Unapplied receipts,,,,@reports.row.beginning_balance,,,,500
+account_total,0,acct:49900~total,@reports.row.total_of 49900 · Unapplied receipts,,,,,,0,0,500
+header,0,acct:5000,5000 · Subcontractors,,,,@reports.row.beginning_balance,,,,50850.56
+account_total,0,acct:5000~total,@reports.row.total_of 5000 · Subcontractors,,,,,,0,0,50850.56
+header,0,acct:5100,5100 · Plants,,,,@reports.row.beginning_balance,,,,7972.96
+detail,1,acct:5100/0:9,@reports.txn.bill_payment,2026-12-02,,Table Rock Nursery,Payment to vendor,Courtyard,963.0531165782839259,0,8936.0131165782839259
+account_total,0,acct:5100~total,@reports.row.total_of 5100 · Plants,,,,,,963.0531165782839259,0,8936.0131165782839259
+header,0,acct:5110,5110 · Mulch & stone,,,,@reports.row.beginning_balance,,,,2207.45
+detail,1,acct:5110/0:16,@reports.txn.bill_payment,2026-12-02,,Ozark Mulch Supply,Payment to vendor,North lawn,1180.4,0,3387.85
+account_total,0,acct:5110~total,@reports.row.total_of 5110 · Mulch & stone,,,,,,1180.4,0,3387.85
+header,0,acct:5200,5200 · Project Supplies and Materials,,,,@reports.row.beginning_balance,,,,356388.84
+account_total,0,acct:5200~total,@reports.row.total_of 5200 · Project Supplies and Materials,,,,,,0,0,356388.84
+header,0,acct:6000,6000 · Advertising and Marketing,,,,@reports.row.beginning_balance,,,,10936.61
+account_total,0,acct:6000~total,@reports.row.total_of 6000 · Advertising and Marketing,,,,,,0,0,10936.61
+header,0,acct:6100,6100 · Fuel,,,,@reports.row.beginning_balance,,,,8844.47
+detail,1,acct:6100/0:6,@reports.txn.journal_entry,2026-12-05,,,Fuel card,,64.18,0,8908.65
+detail,1,acct:6100/1:7,@reports.txn.journal_entry,2026-12-05,,,Fuel card,,64.18,0,8972.83
+account_total,0,acct:6100~total,@reports.row.total_of 6100 · Fuel,,,,,,128.36,0,8972.83
+header,0,acct:6150,6150 · Insurance,,,,@reports.row.beginning_balance,,,,15589.13
+detail,1,acct:6150/0:8,@reports.txn.journal_entry,2026-12-31,,,Year-end insurance accrual,North lawn,1200,0,16789.13
+account_total,0,acct:6150~total,@reports.row.total_of 6150 · Insurance,,,,,,1200,0,16789.13
+header,0,acct:6250,6250 · Office Supplies and Software,,,,@reports.row.beginning_balance,,,,8024.17
+account_total,0,acct:6250~total,@reports.row.total_of 6250 · Office Supplies and Software,,,,,,0,0,8024.17
+header,0,acct:6300,6300 · Rent,,,,@reports.row.beginning_balance,,,,44950
+account_total,0,acct:6300~total,@reports.row.total_of 6300 · Rent,,,,,,0,0,44950
+header,0,acct:6350,6350 · Repairs and Maintenance,,,,@reports.row.beginning_balance,,,,40957.86
+detail,1,acct:6350/0:15,@reports.txn.bill_payment,2026-12-02,,Table Rock Nursery,Payment to vendor,,36.9468834217160741,0,40994.8068834217160741
+account_total,0,acct:6350~total,@reports.row.total_of 6350 · Repairs and Maintenance,,,,,,36.9468834217160741,0,40994.8068834217160741
+header,0,acct:6400,6400 · Telephone and Internet,,,,@reports.row.beginning_balance,,,,4100.37
+account_total,0,acct:6400~total,@reports.row.total_of 6400 · Telephone and Internet,,,,,,0,0,4100.37
+header,0,acct:6500,6500 · Utilities,,,,@reports.row.beginning_balance,,,,8338.23
+account_total,0,acct:6500~total,@reports.row.total_of 6500 · Utilities,,,,,,0,0,8338.23
+header,0,acct:6550,6550 · Wages,,,,@reports.row.beginning_balance,,,,123930.56
+account_total,0,acct:6550~total,@reports.row.total_of 6550 · Wages,,,,,,0,0,123930.56
+header,0,acct:6560,6560 · Payroll Taxes,,,,@reports.row.beginning_balance,,,,11153.65
+account_total,0,acct:6560~total,@reports.row.total_of 6560 · Payroll Taxes,,,,,,0,0,11153.65
+header,0,acct:6700,6700 · Vehicle Expenses,,,,@reports.row.beginning_balance,,,,15807.22
+account_total,0,acct:6700~total,@reports.row.total_of 6700 · Vehicle Expenses,,,,,,0,0,15807.22
+header,0,acct:8000,8000 · Interest Expense,,,,@reports.row.beginning_balance,,,,2120
+account_total,0,acct:8000~total,@reports.row.total_of 8000 · Interest Expense,,,,,,0,0,2120
+grand,0,total,@reports.row.total,,,,,,5214.61,5214.61,

@@ -239,12 +239,18 @@ fn goldens(posted: &Posted) -> Vec<Golden> {
 async fn run(s: &Session, key: &str, options: &ReportOptions) -> (ReportRequest, ReportTable) {
     let spec = find(key).unwrap_or_else(|| panic!("catalog has {key}"));
     let req = resolve(spec, options, &FISCAL, today()).expect("resolve");
-    let table = s
-        .reports()
-        .run(&req)
-        .await
-        .unwrap_or_else(|e| panic!("{key}: {e}"));
-    (req, table)
+    // The engine allows 30 report reads a minute (`expensiveOpLimiter`);
+    // the harness waits out the window rather than failing.
+    for _ in 0..10 {
+        match s.reports().run(&req).await {
+            Ok(table) => return (req, table),
+            Err(cl_api::ApiError::RateLimited { retry_after }) => {
+                tokio::time::sleep(retry_after.unwrap_or(Duration::from_secs(15))).await;
+            }
+            Err(e) => panic!("{key}: {e}"),
+        }
+    }
+    panic!("{key}: still rate limited")
 }
 
 /// Every id in `text` named stably: accounts by number, contacts and tags
@@ -255,8 +261,7 @@ fn stable_ids(text: &str, names: &HashMap<String, String>) -> String {
     let mut others: HashMap<String, usize> = HashMap::new();
     let mut i = 0;
     while i < bytes.len() {
-        if i + 36 <= bytes.len() && is_uuid(&text[i..i + 36]) {
-            let id = &text[i..i + 36];
+        if let Some(id) = text.get(i..i + 36).filter(|c| is_uuid(c)) {
             if let Some(n) = names.get(id) {
                 out.push_str(n);
             } else {
@@ -299,26 +304,53 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
     else {
         panic!("not a lines drill: {drill:?}")
     };
-    let spec = find("transaction_detail_by_account").expect("tdba");
+    // One ledger of every account per dates, basis, lens and tag (the
+    // engine rate-limits a run of hundreds of drills); its per-account
+    // totals cover every line even past the screen limit. The drill's own
+    // account filter is what the window sends; here the same accounts'
+    // totals are read from the whole ledger.
+    let spec = find("general_ledger").expect("gl");
     let mut o = ReportOptions::for_spec(spec);
     o.dates = DateChoice::Fixed {
         from: from.unwrap_or_else(|| d(1900, 1, 1)),
         to: *to,
     };
     o.basis = *basis;
-    o.filters.account_ids.clone_from(account_ids);
     o.filters.adjusting = *adjusting;
     if let TagScope::Tag(t) = tag {
         o.filters.tag_ids = vec![*t];
     }
-    let (_, gl) = run(s, spec.key, &o).await;
-    assert!(gl.meta.truncated.is_none(), "drill under the limit");
-    gl.rows
+    let key = format!(
+        "{:?}",
+        (o.dates, o.basis, o.filters.adjusting, &o.filters.tag_ids)
+    );
+    let cached = LEDGERS.lock().expect("cache").get(&key).cloned();
+    let nets = if let Some(n) = cached {
+        n
+    } else {
+        let (_, gl) = run(s, spec.key, &o).await;
+        let n: HashMap<String, Decimal> = gl
+            .rows
+            .iter()
+            .filter(|r| r.kind == RowKind::AccountTotal)
+            .filter_map(|r| {
+                let id = r.path.0.first()?.strip_suffix("~total")?.to_string();
+                Some((id, dec(&r.cells[5]) - dec(&r.cells[6])))
+            })
+            .collect();
+        LEDGERS.lock().expect("cache").insert(key, n.clone());
+        n
+    };
+    account_ids
         .iter()
-        .filter(|r| r.kind == RowKind::AccountTotal)
-        .map(|r| dec(&r.cells[5]) - dec(&r.cells[6]))
+        .map(|a| nets.get(&a.to_string()).copied().unwrap_or_default())
         .sum()
 }
+
+/// Whole ledgers already read, by their options.
+#[allow(clippy::type_complexity, reason = "a test cache")]
+static LEDGERS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, HashMap<String, Decimal>>>> =
+    std::sync::LazyLock::new(Default::default);
 
 /// Each account row's first amount by account number (`4000 · Name`).
 fn by_number(t: &ReportTable, col: usize) -> BTreeMap<String, Decimal> {

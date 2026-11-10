@@ -1,0 +1,5 @@
+kind,level,path,caption,total
+header,0,expenses,@reports.pl.expenses,
+account,1,expenses/acct:6100,6100 · Fuel,128.36
+subtotal,0,expenses~total,@reports.pl.total_expenses,128.36
+grand,0,net_income,@reports.pl.net_income,-128.36
