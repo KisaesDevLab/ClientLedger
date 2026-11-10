@@ -859,6 +859,19 @@ impl ImportBankFileScreen {
             } else if self.remembered_flip.is_some() {
                 form::hint(ui, tokens, &t("bankimport.sign.remembered"));
             }
+            // Q-PR5c: the answer used for this account's other format.
+            if let Some((format, flip)) = self.other_flip {
+                let key = if flip {
+                    "bankimport.sign.other_format_flipped"
+                } else {
+                    "bankimport.sign.other_format_kept"
+                };
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_with(key, &[("format", &format.as_wire().to_uppercase())]),
+                );
+            }
             egui::Grid::new("bankimport/sign/sample")
                 .spacing([16.0, 4.0])
                 .show(ui, |ui| {
@@ -1230,7 +1243,9 @@ impl ImportBankFileScreen {
                 });
                 let current = self.choices.get(&res.line).copied().unwrap_or_default();
                 ui.horizontal_wrapped(|ui| {
-                    let can_replace = res.existing_pending == Some(true);
+                    // U-200: `existingReplaceable` (an older engine: still
+                    // waiting).
+                    let can_replace = super::replaceable(res);
                     let replace = ui
                         .add_enabled(
                             can_replace,

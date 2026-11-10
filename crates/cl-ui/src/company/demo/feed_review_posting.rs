@@ -1121,6 +1121,7 @@ fn restore(state: &mut DemoState, id: FeedItemId) {
         r.how = "";
         r.fingerprint = None;
         r.entry_voided = false;
+        r.entry_changed = false;
         group = r.group.take();
     }
     if let Some(g) = group
@@ -1156,8 +1157,36 @@ pub fn decide_duplicate(
     Ok(())
 }
 
-/// `POST /banking/feed/:id/review-again`: a row whose entry was voided goes
-/// back to waiting with the state it had before (Q-P26u).
+/// Q-PR5a (engine U-199): the accepted row's entry still has its bank
+/// line: on the row's account, on its side, for its amount. An entry the
+/// demo no longer has agrees (a delete takes the row back elsewhere).
+pub(super) fn entry_agrees(
+    txns: &[cl_company::sample::SampleTransaction],
+    chart: &[cl_api::Account],
+    account: AccountId,
+    amount: Money,
+    t: TransactionId,
+) -> bool {
+    let Some(bank) = number_of(chart, account) else {
+        return true;
+    };
+    let Some(tx) = txns.iter().find(|x| DemoLedger::id_of(x) == t) else {
+        return true;
+    };
+    let want = amount.abs();
+    tx.lines.iter().any(|l| {
+        let side = if amount.is_positive() {
+            l.credit
+        } else {
+            l.debit
+        };
+        l.account == bank && side == want
+    })
+}
+
+/// `POST /banking/feed/:id/review-again`: a row whose entry was voided
+/// (Q-P26u) or changed since (Q-PR5a, U-199) goes back to waiting with the
+/// state it had before.
 ///
 /// # Errors
 /// 403; 409 `ENTRY_NOT_VOIDED`; `NotFound`.
@@ -1165,7 +1194,7 @@ pub fn review_again(state: &mut DemoState, id: FeedItemId) -> Result<(), ApiErro
     super::refresh(state);
     state.feed_review.write_check(id)?;
     let r = state.feed_review.row_mut(id)?;
-    if !r.entry_voided {
+    if !r.entry_voided && !r.entry_changed {
         return Err(conflict("ENTRY_NOT_VOIDED", json!({})));
     }
     restore(state, id);
@@ -1476,6 +1505,7 @@ pub fn add_next_file(state: &mut DemoState) -> usize {
             assigned: None,
             transfer: false,
             entry_voided: false,
+            entry_changed: false,
             exclusion_reason: None,
             matched: None,
             import_key: None,

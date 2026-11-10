@@ -169,6 +169,9 @@ pub enum Why {
     NeedsYou,
     /// The linked entry was voided in the register (Q-P26u).
     EntryVoided,
+    /// The linked entry's amount or bank account was edited since it was
+    /// accepted (Q-PR5a): out of matching until reviewed again.
+    EntryChanged,
     /// A receipt in the review queue matches this bank line (A05, Q-A05a):
     /// offered in the detail panel, never applied by itself.
     Receipt,
@@ -192,6 +195,7 @@ impl Why {
             Why::Duplicate => "bank_feed.why.duplicate",
             Why::NeedsYou => "bank_feed.why.needs_you",
             Why::EntryVoided => "bank_feed.why.entry_voided",
+            Why::EntryChanged => "bank_feed.why.entry_changed",
             Why::Receipt => "bank_feed.why.receipt",
             Why::Accepted => "bank_feed.why.accepted",
             Why::Excluded => "bank_feed.why.excluded",
@@ -211,6 +215,7 @@ impl Why {
             Why::Duplicate => "duplicate",
             Why::NeedsYou => "needs_you",
             Why::EntryVoided => "entry_voided",
+            Why::EntryChanged => "entry_changed",
             Why::Receipt => "receipt",
             Why::Accepted => "accepted",
             Why::Excluded => "excluded",
@@ -278,6 +283,8 @@ pub struct WhyInput {
     pub has_account: bool,
     /// The linked entry was voided.
     pub entry_voided: bool,
+    /// The linked entry was edited since it was accepted (Q-PR5a).
+    pub entry_changed: bool,
     /// A receipt in the review queue matches it (A05).
     pub has_receipt: bool,
 }
@@ -289,6 +296,9 @@ pub struct WhyInput {
 pub fn why(i: WhyInput, ai_on: bool) -> Why {
     if i.entry_voided {
         return Why::EntryVoided;
+    }
+    if i.entry_changed {
+        return Why::EntryChanged;
     }
     if i.possible_duplicate && i.bucket.is_some() {
         return Why::Duplicate;

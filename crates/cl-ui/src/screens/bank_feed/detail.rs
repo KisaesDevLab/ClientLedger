@@ -215,6 +215,7 @@ pub(crate) struct RowShape {
     candidates: u32,
     duplicate: bool,
     voided: bool,
+    changed: bool,
     matched: Option<TransactionId>,
     transfer: Option<FeedItemId>,
     account: Option<AccountId>,
@@ -228,6 +229,7 @@ impl RowShape {
             candidates: r.match_candidate_count,
             duplicate: r.possible_duplicate,
             voided: r.entry_voided,
+            changed: r.entry_changed,
             matched: r.matched_transaction,
             transfer: r.transfer_candidate.as_ref().map(|h| h.feed_item),
             account: r.suggested_account.as_ref().map(|a| a.id),
@@ -587,6 +589,7 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     };
     // A waiting line's Accept and Exclude stay below the scrolling part.
     let pinned = !r.entry_voided
+        && !r.entry_changed
         && !r.possible_duplicate
         && r.status.is_waiting()
         && s.show == Show::Waiting;
@@ -599,6 +602,8 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
             ui.set_max_width(ui.available_width());
             if r.entry_voided {
                 voided(s, ui, tokens, &r, can, &tip);
+            } else if r.entry_changed && r.status.is_accepted() {
+                entry_changed(s, ui, tokens, &r, can, &tip);
             } else if r.status.is_accepted() {
                 accepted(s, ui, tokens, &r, can, &tip);
             } else if r.possible_duplicate && r.status.is_waiting() {
@@ -632,6 +637,60 @@ fn voided(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow, can
         if ui
             .add_enabled(can, egui::Button::new(t("bank_feed.detail.undo")))
             .on_hover_text(t("bank_feed.detail.undo.voided_tip"))
+            .on_disabled_hover_text(tip)
+            .clicked()
+        {
+            send::start(s, Send::Undo(UndoTarget::Items(vec![r.id]), false), None);
+        }
+    });
+}
+
+/// Q-PR5a: the entry was edited since the line was accepted. A matched
+/// line goes back to the list with Review again (the edited entry stays and
+/// can be matched again); a line that posted its own entry is taken back
+/// with Undo (it asks, the entry having changed): Review again would leave
+/// the edited entry in the books and recording the line again would count
+/// it twice (engine U-199).
+pub(crate) fn changed_offers_review_again(s: &BankFeedScreen, r: &FeedRow) -> bool {
+    match s.accepted_how(r) {
+        Some(how) => how == "match",
+        None => r.status == cl_api::FeedStatus::Matched,
+    }
+}
+
+fn entry_changed(
+    s: &mut BankFeedScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    r: &FeedRow,
+    can: bool,
+    tip: &str,
+) {
+    let matched = changed_offers_review_again(s, r);
+    let key = if matched {
+        "bank_feed.detail.entry_changed"
+    } else {
+        "bank_feed.detail.entry_changed_posted"
+    };
+    form::inline_warning(ui, tokens, &t(key));
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        if matched
+            && ui
+                .add_enabled(can, egui::Button::new(t("bank_feed.detail.review_again")))
+                .on_hover_text(t("bank_feed.detail.review_again.changed_tip"))
+                .on_disabled_hover_text(tip)
+                .clicked()
+        {
+            send::start(s, Send::ReviewAgain(r.id), None);
+        }
+        if ui
+            .add_enabled(can, egui::Button::new(t("bank_feed.detail.undo")))
+            .on_hover_text(t(if matched {
+                "bank_feed.detail.undo.tip"
+            } else {
+                "bank_feed.detail.undo.changed_tip"
+            }))
             .on_disabled_hover_text(tip)
             .clicked()
         {
@@ -1348,5 +1407,8 @@ pub(crate) fn state(s: &BankFeedScreen) -> serde_json::Value {
         "forbidden": s.detail.data.forbidden,
         "duplicate": row.is_some_and(|r| r.possible_duplicate),
         "entry_voided": row.is_some_and(|r| r.entry_voided),
+        "entry_changed": row.is_some_and(|r| r.entry_changed),
+        "review_again_offered": row.is_some_and(|r| r.entry_voided
+            || (r.entry_changed && changed_offers_review_again(s, r))),
     })
 }

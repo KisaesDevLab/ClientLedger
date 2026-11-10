@@ -198,7 +198,11 @@ pub struct ImportBankFileScreen {
     account: Option<AccountId>,
     linked: LinkedHow,
     lookup_task: Option<Task<Vec<ConnectionMatch>>>,
-    history_task: Option<Task<Vec<ImportBatchSummary>>>,
+    /// The account's batches of this file's format, then of every format.
+    history_task: Option<Task<(Vec<ImportBatchSummary>, Vec<ImportBatchSummary>)>>,
+    /// Q-PR5c: the sign answer used for this account's latest import in
+    /// another format (shown with the sign question).
+    pub(crate) other_flip: Option<(cl_api::BankFileFormat, bool)>,
     /// The account's last import of this format: its flip (Q-P25w).
     remembered_flip: Option<bool>,
     /// The sign checks for the chosen account (the card rule for a card).
@@ -289,6 +293,7 @@ impl ImportBankFileScreen {
             lookup_task: None,
             history_task: None,
             remembered_flip: None,
+            other_flip: None,
             sign: SignCheck::default(),
             flipped: false,
             sign_confirmed: false,
@@ -578,6 +583,7 @@ impl ImportBankFileScreen {
         self.account = None;
         self.linked = LinkedHow::None;
         self.remembered_flip = None;
+        self.other_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
         self.refresh_sign();
@@ -774,6 +780,7 @@ impl ImportBankFileScreen {
         self.linked = LinkedHow::Owner;
         self.layout_changed = false;
         self.remembered_flip = None;
+        self.other_flip = None;
         self.sign_confirmed = false;
         self.relink = false;
         self.forget_preview();
@@ -791,6 +798,7 @@ impl ImportBankFileScreen {
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let latest = demo.bank_feed.latest(account, format);
+            self.other_flip = demo.bank_feed.latest_other(account, format);
             drop(demo);
             match latest {
                 Some((flip, mapping)) => self.remember(flip, mapping),
@@ -803,7 +811,11 @@ impl ImportBankFileScreen {
         };
         self.history_task = group
             .read(&session, move |s| async move {
-                s.bank_import().batches(Some(account), Some(format)).await
+                let b = s.bank_import();
+                let same = b.batches(Some(account), Some(format)).await?;
+                // Q-PR5c: the other formats' answer (none when unreadable).
+                let all = b.batches(Some(account), None).await.unwrap_or_default();
+                Ok((same, all))
             })
             .ok()
             .map(Task::Pending);
@@ -1305,8 +1317,9 @@ impl ImportBankFileScreen {
             .iter()
             .filter(|x| {
                 !x.replaced
-                    && self.choices.get(&x.line).and_then(|c| c.changed)
-                        == Some(ChangedAction::Replace)
+                    && (x.replace_refused.is_some()
+                        || self.choices.get(&x.line).and_then(|c| c.changed)
+                            == Some(ChangedAction::Replace))
             })
             .map(|x| x.line)
             .collect()
@@ -1322,7 +1335,7 @@ impl ImportBankFileScreen {
             .iter()
             .filter(|r| {
                 r.status == ImportRowStatus::Changed
-                    && r.existing_pending == Some(true)
+                    && replaceable(r)
                     && self.choices.get(&r.line).and_then(|c| c.changed)
                         == Some(ChangedAction::Replace)
             })
@@ -1421,11 +1434,19 @@ impl ImportBankFileScreen {
                 .loaded
                 .as_ref()
                 .map(|l| flow::wire_format(l.parsed.format));
-            let latest = r.ok().and_then(|batches| {
-                batches
-                    .into_iter()
-                    .find(|b| b.undone_at.is_none() && b.format == format && b.inserted > 0)
-            });
+            let (same, all) = r.unwrap_or_default();
+            self.other_flip = all
+                .iter()
+                .find(|b| {
+                    b.undone_at.is_none()
+                        && b.format.is_some()
+                        && b.format != format
+                        && b.inserted > 0
+                })
+                .and_then(|b| Some((b.format?, b.amounts_flipped)));
+            let latest = same
+                .into_iter()
+                .find(|b| b.undone_at.is_none() && b.format == format && b.inserted > 0);
             match latest {
                 Some(b) => self.remember(b.amounts_flipped, b.csv_mapping),
                 None => self.apply_local_profile(),
@@ -1698,6 +1719,10 @@ impl Screen for ImportBankFileScreen {
             m.insert("confirm_add".into(), json!(self.confirm_add));
             m.insert("not_replaced".into(), json!(self.not_replaced()));
             m.insert("look_alikes".into(), json!(self.look_alikes()));
+            m.insert(
+                "other_flip".into(),
+                json!(self.other_flip.map(|(f, flip)| json!([f.as_wire(), flip]))),
+            );
         }
         state
     }
@@ -1747,6 +1772,14 @@ fn trouble_state(t: Option<&EngineTrouble>) -> Value {
         Some(EngineTrouble::Other(k)) => json!(k),
         Some(EngineTrouble::Refused(r)) => json!(flow::refusal_key(r)),
     }
+}
+
+/// A changed row's Replace would be done: the engine's
+/// `existingReplaceable` (U-200), else (an older engine) the matched item
+/// still waits.
+pub(crate) fn replaceable(r: &cl_api::ImportRowResult) -> bool {
+    r.existing_replaceable
+        .unwrap_or(r.existing_pending == Some(true))
 }
 
 /// `ChangedAction` as the owner's two buttons.

@@ -193,6 +193,9 @@ pub struct FeedQuery {
     pub possible_duplicate: Option<bool>,
     /// Rows whose entry was voided (true) or the others.
     pub entry_voided: Option<bool>,
+    /// Rows whose matched entry was edited since (true) or the others
+    /// (`entryChanged`, `feed-entry-changed-v1`, Q-PR5a).
+    pub entry_changed: Option<bool>,
     /// One bank connection (account).
     pub connection: Option<BankConnectionId>,
     /// The transfer window in days, 1-10 (`transferWindowDays`,
@@ -215,6 +218,7 @@ impl Default for FeedQuery {
             bucket: None,
             possible_duplicate: None,
             entry_voided: None,
+            entry_changed: None,
             connection: None,
             transfer_window_days: None,
             search: None,
@@ -252,6 +256,9 @@ impl FeedQuery {
         }
         if let Some(b) = self.entry_voided {
             q.push(("entryVoided".into(), flag(b)));
+        }
+        if let Some(b) = self.entry_changed {
+            q.push(("entryChanged".into(), flag(b)));
         }
         if let Some(c) = self.connection {
             q.push(("bankConnectionId".into(), c.to_string()));
@@ -466,6 +473,12 @@ pub struct FeedRow {
     pub entry_voided: bool,
     /// When it was voided (engine timestamp text).
     pub entry_voided_at: Option<String>,
+    /// The linked entry's amount or bank account was edited since it was
+    /// accepted (Q-PR5a, `feed-entry-changed-v1`): the row is left out of
+    /// matching and the reconcile pre-check until reviewed again.
+    pub entry_changed: bool,
+    /// When that edit was noticed (engine timestamp text).
+    pub entry_changed_at: Option<String>,
     /// Why an excluded row was excluded (`duplicate`, …).
     pub exclusion_reason: Option<String>,
     /// Journal lines it may match.
@@ -532,6 +545,9 @@ pub struct FeedCounts {
     pub accepted: u64,
     /// Accepted rows whose entry was voided.
     pub entry_voided: u64,
+    /// Accepted rows whose entry was edited since (Q-PR5a; 0 from an
+    /// engine without `feed-entry-changed-v1`).
+    pub entry_changed: u64,
     /// Excluded.
     pub excluded: u64,
     /// Being posted.
@@ -1112,6 +1128,10 @@ struct WireRow {
     #[serde(default)]
     entry_voided_at: Option<String>,
     #[serde(default)]
+    entry_changed: Option<bool>,
+    #[serde(default)]
+    entry_changed_at: Option<String>,
+    #[serde(default)]
     exclusion_reason: Option<String>,
     #[serde(default)]
     match_candidate_count: Option<u64>,
@@ -1219,6 +1239,8 @@ impl WireRow {
                 .and_then(|t| t.parse().ok()),
             entry_voided: self.entry_voided.unwrap_or(false),
             entry_voided_at: self.entry_voided_at,
+            entry_changed: self.entry_changed.unwrap_or(false),
+            entry_changed_at: self.entry_changed_at,
             exclusion_reason: self.exclusion_reason,
             match_candidate_count: self
                 .match_candidate_count
@@ -1286,6 +1308,8 @@ struct WireCounts {
     #[serde(default)]
     entry_voided: u64,
     #[serde(default)]
+    entry_changed: u64,
+    #[serde(default)]
     excluded: u64,
     #[serde(default)]
     in_progress: u64,
@@ -1307,6 +1331,7 @@ pub fn feed_counts_from(body: &[u8]) -> Result<FeedCounts, ApiError> {
         possible_duplicate: w.possible_duplicate,
         accepted: w.accepted,
         entry_voided: w.entry_voided,
+        entry_changed: w.entry_changed,
         excluded: w.excluded,
         in_progress: w.in_progress,
     })
@@ -1774,6 +1799,9 @@ impl Feed<'_> {
         }
         if q.accepted && q.status.is_none() {
             self.need(Capabilities::FEED_ACCEPT)?;
+        }
+        if q.entry_changed.is_some() {
+            self.need(Capabilities::FEED_ENTRY_CHANGED)?;
         }
         let mut call = Call::at(Method::Get, FEED_LIST.route());
         call.query = q.to_query()?;

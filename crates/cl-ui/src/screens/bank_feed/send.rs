@@ -144,6 +144,14 @@ impl Outcome {
         }
         let locked = o.locked();
         self.failed += o.failures.len() - locked.len();
+        // U-200 (PR-5 N2): a row that turned out a possible duplicate is
+        // held for Keep both / Remove (the list shows it flagged).
+        if o.failures
+            .iter()
+            .any(|f| f.code.as_str() == "FEED_ITEM_POSSIBLE_DUPLICATE")
+        {
+            self.notice = Some("bank_feed.notice.possible_duplicate");
+        }
         // A05: a refused receipt says why (the row didn't post). Only rows
         // that carried one: another row's code never reads as a receipt's.
         let carried = |id: FeedItemId| match send {
@@ -387,6 +395,8 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
         .confirmed
         .take()
         .is_some_and(|c| Some(c) == row_of(&send));
+    // U-200: the engine holds transfer twins by the owner's window.
+    let window = s.transfer_window;
     s.last_send = Some(send.as_str());
     let demo_send = send.clone();
     let demo_pw = password.clone();
@@ -428,14 +438,22 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
             match &send {
                 Send::Accept(items) => {
                     match f
-                        .accept(&AcceptRequest::Items(items.clone()), auth, key)
+                        .accept_in(
+                            &AcceptRequest::Items(items.clone()),
+                            Some(window),
+                            auth,
+                            key,
+                        )
                         .await
                     {
                         Ok(a) => o.accepted(&a, &send),
                         Err(e) => accept_failed(&mut o, &send, e),
                     }
                 }
-                Send::Rule(r) => match f.accept(&AcceptRequest::Rule(r.clone()), auth, key).await {
+                Send::Rule(r) => match f
+                    .accept_in(&AcceptRequest::Rule(r.clone()), Some(window), auth, key)
+                    .await
+                {
                     Ok(a) => o.accepted(&a, &send),
                     Err(e) => o.error(None, &e),
                 },

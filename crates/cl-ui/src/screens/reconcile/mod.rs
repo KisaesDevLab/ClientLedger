@@ -193,7 +193,9 @@ pub struct ReconcileScreen {
     disc_job: Option<Job<DiscrepancyReport>>,
     /// Accepted bank lines whose entry was voided (Q-P27j; P26 counts).
     pub(crate) entry_voided: Option<u64>,
-    voided_job: Option<Job<u64>>,
+    /// Accepted bank lines whose entry was changed since (Q-PR5a, U-199).
+    pub(crate) entry_changed: Option<u64>,
+    voided_job: Option<Job<(u64, u64)>>,
     /// The reconciliation the done dialog and the reports are about.
     pub(crate) finished: Option<ReconciliationId>,
     pub(crate) error: Option<ApiError>,
@@ -285,6 +287,7 @@ impl ReconcileScreen {
             discrepancy: None,
             disc_job: None,
             entry_voided: None,
+            entry_changed: None,
             voided_job: None,
             finished: None,
             error: None,
@@ -608,7 +611,9 @@ impl ReconcileScreen {
         }
         if let Some(r) = engine::poll(&mut self.voided_job) {
             // Only a note: a failed read shows none.
-            self.entry_voided = r.ok().filter(|n| *n > 0);
+            let r = r.ok();
+            self.entry_voided = r.map(|x| x.0).filter(|n| *n > 0);
+            self.entry_changed = r.map(|x| x.1).filter(|n| *n > 0);
         }
         if let Some(r) = engine::poll(&mut self.disc_job) {
             match r {
@@ -987,8 +992,14 @@ impl ReconcileScreen {
         self.voided_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            |d| Ok(crate::company::demo::feed_review::counts(d, None).entry_voided),
-            |s| async move { Ok(s.feed().counts(None).await?.entry_voided) },
+            |d| {
+                let c = crate::company::demo::feed_review::counts(d, None);
+                Ok((c.entry_voided, c.entry_changed))
+            },
+            |s| async move {
+                let c = s.feed().counts(None).await?;
+                Ok((c.entry_voided, c.entry_changed))
+            },
         ));
     }
 
@@ -1416,6 +1427,7 @@ impl ReconcileScreen {
                 .map(|r| t(window::finish_help_key(r.difference))),
             "posting_locked": rec.is_some_and(|r| r.posting_locked),
             "entry_voided": self.entry_voided,
+            "entry_changed": self.entry_changed,
             "admin": self.is_admin(),
             "dialog": self.dialog.as_ref().map(|d| format!("{d:?}").to_lowercase()),
             "discrepancy_rows": self.discrepancy.as_ref().map(|d| d.rows.len()),

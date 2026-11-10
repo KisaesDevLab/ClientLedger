@@ -350,6 +350,7 @@ fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
         if show != s.show {
             s.show = show;
             s.voided_only = false;
+            s.changed_only = false;
             changed = true;
         }
         if s.show == Show::Accepted {
@@ -363,7 +364,25 @@ fn controls(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
                 .clicked()
             {
                 s.voided_only = !s.voided_only;
+                s.changed_only = false;
                 changed = true;
+            }
+            // Q-PR5a: rows whose entry was edited since (an engine with
+            // `feed-entry-changed-v1` counts them).
+            if s.counts.entry_changed > 0 || s.changed_only {
+                let text = t_with(
+                    "bank_feed.chip.entry_changed",
+                    &[("n", &s.counts.entry_changed.to_string())],
+                );
+                if ui
+                    .add(egui::Button::new(text).selected(s.changed_only))
+                    .on_hover_text(t("bank_feed.chip.entry_changed.tip"))
+                    .clicked()
+                {
+                    s.changed_only = !s.changed_only;
+                    s.voided_only = false;
+                    changed = true;
+                }
             }
         }
         let mut filter = |ui: &mut Ui| {
@@ -401,7 +420,7 @@ fn badge(ui: &Ui, rect: egui::Rect, tokens: &Tokens, why: Why) {
         }
         Why::Match | Why::Transfer => (tokens.info_tint, tokens.info),
         Why::Ai { high: true } => (tokens.accent_tint, tokens.accent),
-        Why::Ai { high: false } | Why::Duplicate | Why::EntryVoided => {
+        Why::Ai { high: false } | Why::Duplicate | Why::EntryVoided | Why::EntryChanged => {
             (tokens.warn_tint, tokens.warn_text)
         }
         _ => (tokens.warn_surface, tokens.warn_text),
@@ -519,6 +538,10 @@ fn recorded(s: &BankFeedScreen, r: &FeedRow, why: Why) -> (String, String) {
         Why::EntryVoided => (
             payee.unwrap_or_default(),
             t("bank_feed.recorded.entry_voided"),
+        ),
+        Why::EntryChanged => (
+            payee.unwrap_or_default(),
+            t("bank_feed.recorded.entry_changed"),
         ),
         _ => {
             let mut sub = account.unwrap_or_default();

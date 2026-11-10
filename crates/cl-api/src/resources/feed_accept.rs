@@ -739,7 +739,27 @@ impl Feed<'_> {
         auth: Option<&ClosedPeriodAuthorization>,
         key: IdempotencyKey,
     ) -> Result<AcceptOutcome, ApiError> {
+        self.accept_in(req, None, auth, key).await
+    }
+
+    /// [`Feed::accept`] with the owner's transfer window (1-10 days) for
+    /// the engine's transfer-twin hold (`transferWindowDays`,
+    /// `feed-guards-v1`, U-200); left out on an engine without it.
+    ///
+    /// # Errors
+    /// As [`Feed::accept`]; `Local(InvalidValue)` for a window outside 1-10.
+    pub async fn accept_in(
+        &self,
+        req: &AcceptRequest,
+        transfer_window_days: Option<u8>,
+        auth: Option<&ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<AcceptOutcome, ApiError> {
         self.need(Capabilities::FEED_ACCEPT)?;
+        if transfer_window_days.is_some_and(|d| !(1..=10).contains(&d)) {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let window = transfer_window_days.filter(|_| self.has(Capabilities::FEED_GUARDS));
         if let AcceptRequest::Items(items) = req
             && items.iter().any(|i| i.draft().is_some())
         {
@@ -751,7 +771,11 @@ impl Feed<'_> {
                 self.need(Capabilities::FEED_ACCEPT_DRAFT_DUPLICATES)?;
             }
         }
-        let body = self.with_password(accept_body(req)?, auth)?;
+        let mut body = accept_body(req)?;
+        if let (Some(d), Value::Object(m)) = (window, &mut body) {
+            m.insert("transferWindowDays".into(), json!(d));
+        }
+        let body = self.with_password(body, auth)?;
         let mut call = Call::at(Method::Post, FEED_ACCEPT.route()).json_body(body);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&FEED_ACCEPT, call, None).await?;

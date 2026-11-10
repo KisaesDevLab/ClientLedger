@@ -481,6 +481,7 @@ impl RegisterScreen {
         a.label = t("register.entry.row_edit");
         let side = editing.side;
         let kind = editing.kind;
+        self.read_feed_link(editing.id);
         self.entry.editing = Some(editing);
         self.edit_lines = lines
             .iter()
@@ -603,8 +604,113 @@ impl RegisterScreen {
         )
     }
 
+    /// Q-PR5a: reads the bank line matched to `id` (the demo's Bank Feed;
+    /// an engine with `feed-entry-changed-v1`: its accepted lines on this
+    /// account, newest first, at most 1,000). Nothing on an older engine
+    /// (it doesn't flag the line) or when the read fails.
+    fn read_feed_link(&mut self, id: TransactionId) {
+        self.feed_link = None;
+        let opened = self.entry_amount();
+        if self.link.is_demo() {
+            if let Some(mut d) = self.link.demo_state() {
+                let line = crate::company::demo::feed_review::lines_on(&mut d, id)
+                    .first()
+                    .map(|(_, a)| *a);
+                self.feed_link = line.map(|a| (id, a, opened));
+            }
+            return;
+        }
+        if !self
+            .link
+            .capabilities()
+            .has(cl_api::Capabilities::FEED_ENTRY_CHANGED)
+        {
+            return;
+        }
+        let Some(account) = self.account else {
+            return;
+        };
+        let job = crate::screens::templates::engine::run(
+            &self.link,
+            self.group.as_ref(),
+            None,
+            |_| Ok(None),
+            move |s| async move {
+                let f = s.feed();
+                let conns = f.connections().await?;
+                let Some(c) = conns
+                    .iter()
+                    .find(|c| c.account == Some(account))
+                    .map(|c| c.id)
+                else {
+                    return Ok(None);
+                };
+                for page in 0..2u32 {
+                    let q = cl_api::FeedQuery {
+                        connection: Some(c),
+                        accepted: true,
+                        limit: 500,
+                        offset: page * 500,
+                        ..cl_api::FeedQuery::default()
+                    };
+                    let p = f.list(&q).await?;
+                    if let Some(r) = p.rows.iter().find(|r| r.matched_transaction == Some(id)) {
+                        return Ok(Some(r.amount));
+                    }
+                    if p.rows.len() < 500 {
+                        break;
+                    }
+                }
+                Ok(None)
+            },
+        );
+        self.feed_link_job = Some(job);
+        self.feed_link_for = Some((id, opened));
+        self.poll_feed_link();
+    }
+
+    /// Takes the bank-line read for the edit (one for another edit is
+    /// dropped).
+    pub(super) fn poll_feed_link(&mut self) {
+        let Some(r) = crate::screens::templates::engine::finished(&mut self.feed_link_job) else {
+            return;
+        };
+        let Some((id, opened)) = self.feed_link_for.take() else {
+            return;
+        };
+        if self.entry.editing.as_ref().map(|e| e.id) == Some(id)
+            && let Ok(Some(a)) = r
+        {
+            self.feed_link = Some((id, a, opened));
+        }
+    }
+
+    /// The pinned row's amount (payment or deposit).
+    fn entry_amount(&self) -> Option<Money> {
+        let d = self.entry.draft();
+        d.payment.or(d.deposit)
+    }
+
+    /// Q-PR5a: the edit changes the amount of an entry matched to a bank
+    /// line: the bank amount to name in the notice.
+    pub(super) fn feed_link_notice(&self) -> Option<Money> {
+        let (id, bank, opened) = self.feed_link?;
+        let editing = self.entry.editing.as_ref()?;
+        (editing.id == id && self.entry_amount() != opened).then_some(bank)
+    }
+
     /// The edit's extra lines: the read-only view, the stale-save offer.
     pub(super) fn edit_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        self.poll_feed_link();
+        if let Some(bank) = self.feed_link_notice() {
+            let style = self.parts.frame.money_style;
+            let shown = bank.checked_neg().unwrap_or(bank).abs().format(style);
+            crate::screens::company::form::inline_warning(
+                ui,
+                tokens,
+                &crate::i18n::t_with("register.edit.feed_linked", &[("amount", &shown)]),
+            );
+        }
         if self.stale() && self.entry.editing.is_some() {
             ui.horizontal(|ui| {
                 ui.label(

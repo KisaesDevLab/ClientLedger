@@ -2809,3 +2809,39 @@ fn reconciled_rows_are_not_voided_and_the_refusal_clears() {
     s.command(CommandId::new("register.one_line"));
     assert!(s.actions.error.is_none(), "the next action clears it");
 }
+
+/// Q-PR5a (PR-5 B1): editing the amount of an entry matched to a bank line
+/// says the line goes back to the Bank Feed (a notice, not a block).
+#[test]
+fn an_amount_edit_of_a_bank_feed_entry_warns() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let t = {
+        let mut demo = link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            waiting_only: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let page = crate::company::demo::feed_review::list(&mut demo, &q).expect("list");
+        let row = page
+            .rows
+            .iter()
+            .find(|r| r.is_money_out() && r.suggested_account.is_some())
+            .cloned()
+            .expect("a row to accept");
+        crate::company::demo::feed_review::categorize(&mut demo, row.id, None, None)
+            .expect("accepted")
+            .expect("posted")
+    };
+    s.load_edit(t, false);
+    settle(&mut s, None);
+    assert_eq!(s.entry.editing.as_ref().map(|e| e.id), Some(t));
+    assert!(s.feed_link.is_some(), "the bank line was found");
+    assert_eq!(s.feed_link_notice(), None, "nothing changed yet");
+    s.entry.form.edit_step(|d| {
+        d.payment = d.payment.and_then(|p| p.checked_add(money("9.00")).ok());
+    });
+    assert!(s.feed_link_notice().is_some());
+    assert!(crate::i18n::has("register.edit.feed_linked"));
+}

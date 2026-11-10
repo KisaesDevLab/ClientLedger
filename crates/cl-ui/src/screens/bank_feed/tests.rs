@@ -749,3 +749,70 @@ fn ticked_reads_the_worksheet() {
             .expect("id")
     ));
 }
+
+/// Q-PR5a (PR-5 B1): a line whose posted entry was edited since shows
+/// "Entry changed", is counted, and offers Undo (not Review again, which
+/// would leave the edited entry and let the line be recorded twice).
+#[test]
+fn an_edited_entry_shows_entry_changed() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.counts.accepted, 1);
+    {
+        let mut d = s.link.demo_state().expect("demo");
+        let q = cl_api::FeedQuery {
+            accepted: true,
+            ..cl_api::FeedQuery::default()
+        };
+        let row = crate::company::demo::feed_review::list(&mut d, &q)
+            .expect("list")
+            .rows
+            .remove(0);
+        let t = row.matched_transaction.expect("entry");
+        let posted = d
+            .ledger
+            .transactions()
+            .into_iter()
+            .find(|x| crate::company::demo::register::DemoLedger::id_of(x) == t)
+            .expect("posted");
+        let other: u32 = posted
+            .lines
+            .iter()
+            .find(|l| l.account != "1010")
+            .and_then(|l| l.account.parse().ok())
+            .expect("other line");
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "check",
+            date: posted.date,
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: crate::company::demo::account_id(1010),
+            own_debit: false,
+            lines: vec![(
+                crate::company::demo::account_id(other),
+                row.amount
+                    .abs()
+                    .checked_add(cl_core::Money::parse_wire("1.00").expect("m"))
+                    .expect("sum"),
+            )],
+        };
+        let chart = crate::company::demo::chart();
+        assert!(d.ledger.save(&chart, &p, Some(t)).is_some());
+    }
+    s.show = Show::Accepted;
+    s.reload();
+    assert_eq!(s.state()["counts"]["entry_changed"], 1);
+    assert_eq!(s.state()["badges"]["entry_changed"], 1);
+    let r = s.rows.first().cloned().expect("row");
+    assert_eq!(s.why(&r), Why::EntryChanged);
+    assert!(
+        !detail::changed_offers_review_again(&s, &r),
+        "posted here: Undo"
+    );
+    s.changed_only = true;
+    s.reload();
+    assert_eq!(s.rows.len(), 1);
+}

@@ -182,6 +182,17 @@ pub struct RegisterScreen {
     edit_lines: Vec<splits::SplitRow>,
     /// A transaction being read for an edit.
     edit_load: Option<edit::EditLoad>,
+    /// Q-PR5a: the bank line (feed sign) matched to the transaction being
+    /// edited, and the edit's amount when it opened; an amount change
+    /// warns that the line goes back to the Bank Feed.
+    pub(super) feed_link: Option<(
+        cl_core::ids::TransactionId,
+        cl_core::Money,
+        Option<cl_core::Money>,
+    )>,
+    /// The read of that bank line, and what it is for.
+    feed_link_job: Option<crate::screens::templates::engine::Job<Option<cl_core::Money>>>,
+    feed_link_for: Option<(cl_core::ids::TransactionId, Option<cl_core::Money>)>,
     /// The edited transaction read again after a change elsewhere.
     edit_check: Option<edit::EditCheck>,
     /// A transaction the register can't change, shown read-only.
@@ -294,6 +305,9 @@ impl RegisterScreen {
             splits: None,
             edit_lines: Vec::new(),
             edit_load: None,
+            feed_link: None,
+            feed_link_job: None,
+            feed_link_for: None,
             edit_check: None,
             read_only: None,
             quick: filters::QuickInput::default(),

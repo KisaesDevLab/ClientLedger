@@ -208,7 +208,7 @@ fn header(
 pub(crate) fn banner_shown(s: &ReconcileScreen) -> (bool, bool) {
     (
         s.lines.iter().any(|l| l.from_bank_feed),
-        s.entry_voided.is_some(),
+        s.entry_voided.is_some() || s.entry_changed.is_some(),
     )
 }
 
@@ -228,6 +228,25 @@ fn banner(s: &ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                     ui.painter().circle_filled(r.center(), 3.5, tokens.info);
                     ui.label(RichText::new(t("reconcile.banner")).color(tokens.info));
+                });
+            }
+            // Q-PR5a: lines whose entry was changed since (left out of the
+            // bank-file pre-check until reviewed again).
+            if let Some(n) = s.entry_changed {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(crate::i18n::t_count(
+                            "reconcile.banner.entry_changed",
+                            usize::try_from(n).unwrap_or(usize::MAX),
+                            &[],
+                        ))
+                        .color(tokens.info),
+                    );
+                    if ui.link(t("reconcile.banner.open_feed")).clicked() {
+                        s.link.push(crate::company::CompanyEvent::OpenWindow(
+                            cl_model::CommandId::new("banking.feed"),
+                        ));
+                    }
                 });
             }
             if let Some(n) = s.entry_voided {

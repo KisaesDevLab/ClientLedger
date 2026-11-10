@@ -121,6 +121,8 @@ pub struct BankFeedScreen {
     pub(crate) segment: Segment,
     pub(crate) show: Show,
     pub(crate) voided_only: bool,
+    /// Accepted rows whose entry was edited since (Q-PR5a) only.
+    pub(crate) changed_only: bool,
     pub(crate) filter: String,
     pub(crate) offset: u32,
     pub(crate) counts: FeedCounts,
@@ -203,6 +205,7 @@ impl BankFeedScreen {
             segment: Segment::All,
             show: Show::Waiting,
             voided_only: false,
+            changed_only: false,
             filter: String::new(),
             offset: 0,
             counts: FeedCounts::default(),
@@ -296,6 +299,7 @@ impl BankFeedScreen {
                 });
             }
             Show::Accepted if self.voided_only => q.entry_voided = Some(true),
+            Show::Accepted if self.changed_only => q.entry_changed = Some(true),
             // Accepted: one read with `status=accepted` (Q-P26y); an engine
             // without it: posted and matched rows, two reads (`reload`).
             Show::Accepted if self.accepted_filter() => q.accepted = true,
@@ -355,8 +359,10 @@ impl BankFeedScreen {
             return;
         }
         let q = self.query();
-        let accepted_too =
-            self.show == Show::Accepted && !self.voided_only && !self.accepted_filter();
+        let accepted_too = self.show == Show::Accepted
+            && !self.voided_only
+            && !self.changed_only
+            && !self.accepted_filter();
         let account = self.current_account().and_then(|a| a.account);
         let connection = q.connection;
         let live = q.clone();
@@ -526,7 +532,7 @@ impl BankFeedScreen {
     pub(crate) fn why(&self, r: &FeedRow) -> Why {
         // Rows no longer waiting say what they are (P26 QA-8), not "Needs
         // you".
-        if !r.entry_voided && r.status.is_accepted() {
+        if !r.entry_voided && !r.entry_changed && r.status.is_accepted() {
             return Why::Accepted;
         }
         if r.status == FeedStatus::Excluded {
@@ -555,6 +561,7 @@ impl BankFeedScreen {
                         || r.match_type.as_deref() == Some("transfer")),
                 has_account: r.assigned_account.is_some() || r.suggested_account.is_some(),
                 entry_voided: r.entry_voided,
+                entry_changed: r.entry_changed && r.status.is_accepted(),
                 has_receipt: !self.receipts.of(r.id).is_empty(),
             },
             self.ai_on,
@@ -609,6 +616,7 @@ impl BankFeedScreen {
             | Why::Duplicate
             | Why::NeedsYou
             | Why::EntryVoided
+            | Why::EntryChanged
             | Why::Receipt => None,
             _ if r.status == FeedStatus::Assigned => Some(send::Send::Categorize(id, None)),
             // As proposed through the one accept route, so a split a rule
@@ -703,6 +711,7 @@ impl BankFeedScreen {
                 self.segment = Segment::All;
                 self.show = Show::Waiting;
                 self.voided_only = false;
+                self.changed_only = false;
                 self.filter.clear();
                 self.offset = 0;
                 self.view_only = false;
@@ -749,7 +758,7 @@ fn incomplete_notice(why: Why) -> &'static str {
         Why::Match => "bank_feed.notice.pick_match",
         Why::Transfer => "bank_feed.notice.pick_transfer",
         Why::Duplicate => "bank_feed.notice.pick_duplicate",
-        Why::EntryVoided => "bank_feed.notice.pick_voided",
+        Why::EntryVoided | Why::EntryChanged => "bank_feed.notice.pick_voided",
         Why::Receipt => "bank_feed.notice.pick_receipt",
         _ => "bank_feed.notice.pick_account",
     }
@@ -1003,6 +1012,7 @@ impl Screen for BankFeedScreen {
             Why::Duplicate,
             Why::NeedsYou,
             Why::EntryVoided,
+            Why::EntryChanged,
             Why::Receipt,
         ] {
             badges.insert(w.as_str().into(), json!(0));
@@ -1021,6 +1031,7 @@ impl Screen for BankFeedScreen {
             "segment": self.segment.as_str(),
             "show": self.show.as_str(),
             "entry_voided_only": self.voided_only,
+            "entry_changed_only": self.changed_only,
             "counts": {
                 "waiting": self.counts.waiting,
                 "ready": self.counts.ready,
@@ -1028,6 +1039,7 @@ impl Screen for BankFeedScreen {
                 "matches": self.counts.matches,
                 "accepted": self.counts.accepted,
                 "entry_voided": self.counts.entry_voided,
+                "entry_changed": self.counts.entry_changed,
                 "excluded": self.counts.excluded,
             },
             "rows": self.rows.len(),

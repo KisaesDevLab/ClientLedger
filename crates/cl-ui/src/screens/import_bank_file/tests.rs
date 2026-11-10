@@ -1213,3 +1213,45 @@ fn csv_previewed(s: &mut ImportBankFileScreen, f: &Fixture, name: &str, text: &s
     assert_eq!(s.step, Step::Check);
     s.poll();
 }
+
+/// Q-PR5c (PR-5 N4, T10 desktop part): the sign question shows the
+/// answer used for the account's other format; a wrong answer brings the
+/// same rows in as new money the other way (nothing looks alike), the
+/// right one finds them.
+#[test]
+fn the_sign_question_shows_the_other_formats_answer() {
+    let f = fixture();
+    let mut s = screen(&f);
+    previewed(&mut s, &f);
+    assert!(s.other_flip.is_none(), "no other format yet");
+    s.next();
+    prepared(&mut s);
+    s.start_over(false);
+    let same_rows = "Date,Description,Amount\n10/31/2026,MONETT TIRE AND LUBE,-186.40\n\
+11/01/2026,ACH CREDIT HOA,8450.00\n11/02/2026,CHECK,-925.00\n";
+    read(&mut s, &f, "operating.csv", same_rows);
+    s.next();
+    s.pick_account(bank_account(&s));
+    let (format, flip) = s.other_flip.expect("the QFX answer");
+    assert_ne!(format, flow::wire_format(cl_import::FileFormat::Csv));
+    assert!(!flip);
+    assert_eq!(s.state()["other_flip"][1], false);
+    assert!(crate::i18n::has("bankimport.sign.other_format_kept"));
+    // The wrong answer: every row is new, none looks like the QFX rows.
+    s.set_flipped(true);
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    assert_eq!(p.counts.new, 3, "{:?}", p.counts);
+    assert_eq!(s.look_alikes(), 0);
+    // The right answer: the same rows are found.
+    s.back();
+    s.set_flipped(false);
+    s.next();
+    s.poll();
+    let p = s.preview.clone().expect("preview");
+    let found = p.counts.duplicate + p.counts.possible_duplicate;
+    let new = usize::try_from(p.counts.new).expect("n");
+    assert_eq!(found as usize + s.look_alikes(), 3, "{:?}", p.counts);
+    assert!(new == 0 || s.look_alikes() == new);
+}

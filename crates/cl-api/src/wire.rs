@@ -559,6 +559,19 @@ impl Capabilities {
     /// loan) can be recategorized.
     pub const RECONCILED_CATEGORY_EDIT: &'static str = "reconciled-category-edit-v1";
 
+    // ---- PR-5: the bank lifecycle (engine U-199, U-200)
+    /// U-199 (Q-PR5a): an amount or bank-account edit of an entry matched
+    /// to a bank line flags the row `entryChanged`/`entryChangedAt` (list
+    /// filter `entryChanged`, `/feed/counts` `entryChanged`); Review again
+    /// takes such rows; Undo's reconciled check reads the current lines.
+    pub const FEED_ENTRY_CHANGED: &'static str = "feed-entry-changed-v1";
+    /// U-200: `transferWindowDays` on `POST /feed/accept`; 409
+    /// `FEED_ITEM_POSSIBLE_DUPLICATE` on the single-row routes; 409
+    /// `FEED_ITEM_HAS_MATCH` on a transfer (again with `force` and a new
+    /// key); import preview rows' `existingReplaceable` and commit rows'
+    /// `replaceRefused`.
+    pub const FEED_GUARDS: &'static str = "feed-guards-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
