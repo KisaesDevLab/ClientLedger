@@ -597,3 +597,155 @@ fn a_short_window_keeps_the_list_and_panel_usable() {
     assert!((list + panel - 892.0).abs() < 0.5);
     assert_eq!(view::body_heights(900.0, false), (900.0, 900.0));
 }
+
+/// PR-5 S3 (T7): a line that matches an entry in the books, sent as a new
+/// entry or a transfer, asks first; Go back sends nothing and goes to
+/// Match; Record it again posts it.
+#[test]
+fn a_line_with_a_match_asks_before_it_is_recorded_again() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Matches;
+    s.reload();
+    let r = s
+        .rows
+        .iter()
+        .find(|r| r.match_candidate_count > 0)
+        .cloned()
+        .expect("a line with a match");
+    let expense = s.chart.first().map(|(a, _)| *a).expect("chart");
+    let before = s.counts.accepted;
+    let as_new = send::Send::Categorize(
+        r.id,
+        Some(cl_api::FeedChoice {
+            account: Some(expense),
+            ..cl_api::FeedChoice::default()
+        }),
+    );
+    send::start(&mut s, as_new.clone(), None);
+    s.poll();
+    assert_eq!(s.state()["ask"], "record_again");
+    assert_eq!(s.counts.accepted, before, "nothing sent");
+    assert_eq!(s.last_send, None);
+    // Go back to Match: nothing sent, the question gone.
+    ask::answer(&mut s, false);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.counts.accepted, before);
+    // A transfer to an account asks the same.
+    send::start(
+        &mut s,
+        send::Send::Transfer(r.id, cl_api::TransferTarget::Account(expense)),
+        None,
+    );
+    assert_eq!(s.state()["ask"], "record_again");
+    ask::answer(&mut s, false);
+    // Record it again: posted once.
+    send::start(&mut s, as_new, None);
+    assert_eq!(s.state()["ask"], "record_again");
+    ask::answer(&mut s, true);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.last_send, Some("categorize"));
+    assert_eq!(s.counts.accepted, before + 1);
+    // A match of the same kind of line never asks.
+    let other = s
+        .rows
+        .iter()
+        .find(|x| x.match_candidate_count > 0 && x.id != r.id)
+        .map(|x| x.id);
+    if let Some(o) = other {
+        let t = "d0000000-0000-4000-8000-0000000000ff"
+            .parse::<cl_core::ids::TransactionId>()
+            .expect("id");
+        assert!(!ask::holds_record_again(
+            &mut s,
+            &send::Send::Match(o, t, None)
+        ));
+    }
+}
+
+/// PR-5 S3: an engine that refuses the transfer (409
+/// `FEED_ITEM_HAS_MATCH`) asks the same question.
+#[test]
+fn an_engine_has_match_refusal_asks_to_record_again() {
+    let (_d, mut s) = screen();
+    let id = s.rows.first().map(|r| r.id).expect("row");
+    let again = send::Send::Transfer(
+        id,
+        cl_api::TransferTarget::Account(
+            "d0000000-0000-4000-8000-0000000000fe"
+                .parse::<cl_core::ids::AccountId>()
+                .expect("id"),
+        ),
+    );
+    let refusal = cl_api::engine_refusal(
+        409,
+        &serde_json::json!({"error": {"message": "m", "code": "FEED_ITEM_HAS_MATCH",
+            "details": {"candidates": [{"transactionId": "x"}]}}}),
+    );
+    let mut o = send::Outcome::default();
+    send::fold_single_for_tests(&mut o, &again, Err(refusal));
+    assert!(o.has_match.is_some());
+    assert_eq!(o.failed, 0, "a question, not a failure");
+    s.take_outcome(o);
+    assert_eq!(s.state()["ask"], "record_again");
+}
+
+/// PR-5 N7 (T8, desktop side): Undo of an entry ticked in the account's
+/// reconciliation in progress asks first; Keep it sends nothing.
+#[test]
+fn undo_of_a_ticked_entry_asks_first() {
+    let (_d, mut s) = screen();
+    s.segment = Segment::Ready;
+    s.reload();
+    cmd(&mut s, "feed.accept");
+    assert_eq!(s.counts.accepted, 1);
+    s.show = Show::Accepted;
+    s.reload();
+    let r = s.rows.first().cloned().expect("accepted row");
+    let undo = send::Send::Undo(cl_api::UndoTarget::Items(vec![r.id]), false);
+    // Not ticked anywhere: Undo goes at once.
+    send::start(&mut s, undo.clone(), None);
+    s.poll();
+    assert!(s.asks.ask.is_none());
+    assert_eq!(s.counts.accepted, 0);
+    // Ticked: the read says so (the demo's worksheet is the statement's own
+    // lines, so the answer is played here) and the owner is asked.
+    s.asks.check_send = Some(undo.clone());
+    s.asks.check = Some(crate::screens::templates::engine::Job::Done(Some(Ok(true))));
+    ask::poll(&mut s);
+    assert_eq!(s.state()["ask"], "undo_ticked");
+    ask::answer(&mut s, false);
+    assert!(s.asks.ask.is_none());
+}
+
+/// PR-5 N7: a worksheet line is "ticked" for its entry only while cleared
+/// in a reconciliation in progress.
+#[test]
+fn ticked_reads_the_worksheet() {
+    let mut d = crate::company::demo::DemoState::new();
+    d.open = d.companies.first().map(|c| c.tenant_id);
+    let start = cl_api::ReconStart {
+        account: crate::company::demo::account_id(1010),
+        statement_date: cl_core::CalendarDate::from_ymd(2026, 10, 31).expect("date"),
+        statement_ending_balance: cl_core::Money::parse_wire("86902.13").expect("money"),
+        service_charge: None,
+        interest: None,
+    };
+    let begun = crate::company::demo::reconcile::start(&mut d, &start).expect("begin");
+    let rec = crate::company::demo::reconcile::get(&mut d, begun.id).expect("worksheet");
+    let lines = rec.lines.clone().expect("lines");
+    let on = lines
+        .iter()
+        .find(|l| l.cleared)
+        .expect("a pre-checked line");
+    let off = lines.iter().find(|l| !l.cleared).expect("an unticked line");
+    assert!(ask::ticked(&rec, on.transaction));
+    assert!(!ask::ticked(&rec, off.transaction));
+    assert!(!ask::ticked(
+        &rec,
+        "d0000000-0000-4000-8000-0000000000ff"
+            .parse::<cl_core::ids::TransactionId>()
+            .expect("id")
+    ));
+}

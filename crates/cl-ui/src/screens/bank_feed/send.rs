@@ -357,6 +357,15 @@ fn single(o: &mut Outcome, send: &Send, r: Result<Option<UndoTarget>, ApiError>)
     }
 }
 
+/// [`single`] for the window's tests.
+#[cfg(test)]
+pub(crate) fn fold_single_for_tests(
+    o: &mut Outcome,
+    send: &Send,
+    r: Result<Option<UndoTarget>, ApiError>,
+) {
+    single(o, send, r);
+}
 /// Runs `send` (with the password when the owner typed it).
 #[allow(
     clippy::many_single_char_names,
