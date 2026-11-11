@@ -119,22 +119,6 @@ fn audit_record_filter(h: &Harness, s: &Session) {
     assert!(pa.is_disjoint(&pb), "A's trail has none of B's changes");
 }
 
-/// True when a POST under `/reports` met the router-level `reports`
-/// create check of the GET-only routers mounted ahead of it (403
-/// `PERMISSION_DENIED`; engine fix `clientledger/reports-post-permission`):
-/// PENDING until the pin has it.
-fn post_shadowed(h: &Harness, e: &ApiError) -> bool {
-    let shadowed =
-        matches!(e, ApiError::Forbidden { code: Some(c) } if c.as_str() == "PERMISSION_DENIED");
-    if shadowed {
-        h.pending(
-            "POST /reports/*",
-            "the pinned engine 403s POSTs under /reports (engine branch clientledger/reports-post-permission)",
-        );
-    }
-    shadowed
-}
-
 fn ask_req(question: &str) -> AskRequest {
     AskRequest {
         question: question.into(),
@@ -178,9 +162,6 @@ pub fn ask_off_then_ollama(h: &Harness) {
     let off = h
         .run(s.ask_report(&ask_req("What did we make last month on cash basis?")))
         .expect_err("AI off");
-    if post_shadowed(h, &off) {
-        return;
-    }
     assert_eq!(ask_refusal(&off), Some(AskRefusal::ConsentRequired));
     assert_eq!(
         stub.chat_bodies(h).len(),
@@ -263,9 +244,6 @@ pub fn email_without_smtp(h: &Harness) {
     let e = h
         .run(s.email_report(&mail, key()))
         .expect_err("no mail server");
-    if post_shadowed(h, &e) {
-        return;
-    }
     assert!(
         matches!(
             email_refusal(&e),
