@@ -82,7 +82,8 @@ pub fn make(
     )))
 }
 
-/// The route families the demo plays (WP5 adds the statements).
+/// The route families the demo plays (P28 WP5: the statements and the
+/// ledger from the sample's postings, plus canned lists).
 const fn demo_plays(source: Source) -> bool {
     matches!(
         source,
@@ -91,6 +92,11 @@ const fn demo_plays(source: Source) -> bool {
             | Source::InventoryValuation
             | Source::InventoryValuationDetail
             | Source::InventoryStockStatus
+            | Source::ProfitLoss
+            | Source::BalanceSheet
+            | Source::TrialBalance
+            | Source::GeneralLedger
+            | Source::BudgetVsActual
     )
 }
 
@@ -174,6 +180,20 @@ pub(crate) fn demo_run(d: &mut DemoState, req: &ReportRequest) -> Result<ReportT
             let rows = crate::company::demo::stock::stock_status(d, span.to)?;
             Ok(adapters::inventory::stock_status(&rows, span.to))
         }
+        Source::ProfitLoss
+        | Source::BalanceSheet
+        | Source::TrialBalance
+        | Source::GeneralLedger => crate::company::demo::reports::statement(d, req),
+        Source::BudgetVsActual => crate::company::demo::report_store::budget_vs_actual(d, req),
         _ => Err(ApiError::Local(cl_api::LocalValidation::Unsupported)),
     }
+}
+
+/// The ask request for `question` over the whole catalog (demo tests).
+#[cfg(test)]
+pub(crate) fn ask_request_for_test(
+    question: &str,
+    today: CalendarDate,
+) -> cl_api::resources::reports::ask::AskRequest {
+    ask::request(question, |_| true, today)
 }

@@ -172,7 +172,7 @@ pub(super) fn load(w: &mut ReportWindow) {
         p.list_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
-            |_| Ok(Vec::new()),
+            |d| Ok(crate::company::demo::report_store::budgets(d)),
             |s| async move { s.budgets().list().await },
         ));
     }
@@ -180,40 +180,49 @@ pub(super) fn load(w: &mut ReportWindow) {
         p.accounts_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
-            |_| Ok(Vec::new()),
+            |d| {
+                Ok(budget_accounts(
+                    d.chart.clone().unwrap_or_else(crate::company::demo::chart),
+                ))
+            },
             |s| async move {
                 let all = s
                     .accounts()
                     .list_all(&cl_api::AccountFilter::default())
                     .await?;
-                let mut rows: Vec<(usize, String, BudgetAccount)> = all
-                    .into_iter()
-                    .filter(|a| a.is_active)
-                    .filter_map(|a| {
-                        let kind = a.fields.account_type.as_str();
-                        let order = PL_TYPES.iter().position(|k| *k == kind)?;
-                        let number = a.fields.account_number.clone().unwrap_or_default();
-                        let caption = if number.is_empty() {
-                            a.fields.name.clone()
-                        } else {
-                            format!("{number} \u{b7} {}", a.fields.name)
-                        };
-                        Some((
-                            order,
-                            caption.to_lowercase(),
-                            BudgetAccount {
-                                id: a.id,
-                                caption,
-                                kind: kind.to_string(),
-                            },
-                        ))
-                    })
-                    .collect();
-                rows.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-                Ok(rows.into_iter().map(|r| r.2).collect())
+                Ok(budget_accounts(all))
             },
         ));
     }
+}
+
+/// The active P&L accounts a budget has rows for, in the P&L's order.
+fn budget_accounts(all: Vec<cl_api::Account>) -> Vec<BudgetAccount> {
+    let mut rows: Vec<(usize, String, BudgetAccount)> = all
+        .into_iter()
+        .filter(|a| a.is_active)
+        .filter_map(|a| {
+            let kind = a.fields.account_type.as_str();
+            let order = PL_TYPES.iter().position(|k| *k == kind)?;
+            let number = a.fields.account_number.clone().unwrap_or_default();
+            let caption = if number.is_empty() {
+                a.fields.name.clone()
+            } else {
+                format!("{number} \u{b7} {}", a.fields.name)
+            };
+            Some((
+                order,
+                caption.to_lowercase(),
+                BudgetAccount {
+                    id: a.id,
+                    caption,
+                    kind: kind.to_string(),
+                },
+            ))
+        })
+        .collect();
+    rows.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    rows.into_iter().map(|r| r.2).collect()
 }
 
 /// Opens budget `id` in the editor.
@@ -229,7 +238,10 @@ pub(super) fn select(w: &mut ReportWindow, id: String) {
     p.lines_job = Some(engine::read(
         &w.link,
         w.group.as_ref(),
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let id = id.clone();
+            move |d| crate::company::demo::report_store::budget_lines(d, &id)
+        },
         move |s| async move { s.budgets().lines(&id).await },
     ));
 }
@@ -282,13 +294,17 @@ fn start_save(w: &mut ReportWindow) {
         &w.link,
         w.group.as_ref(),
         orphan("orphan.budget_save"),
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let (id, writes) = (id.clone(), writes.clone());
+            move |d| crate::company::demo::report_store::save_budget_lines(d, &id, version, &writes)
+        },
         move |s| async move { s.budgets().save_lines(&id, version, &writes, key).await },
     );
     p.save = Some((sent, job));
 }
 
 /// What a toolbar click asks the engine to do to the whole budget.
+#[derive(Clone)]
 enum Whole {
     Fill,
     Adjust(Decimal),
@@ -315,7 +331,18 @@ fn start_whole(w: &mut ReportWindow, what: Whole) {
         &w.link,
         w.group.as_ref(),
         orphan("orphan.budget_change"),
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let (id, what) = (id.clone(), what.clone());
+            move |d| {
+                use crate::company::demo::report_store::{WholeBudget, whole_budget};
+                let w = match &what {
+                    Whole::Fill => WholeBudget::Fill,
+                    Whole::Adjust(p) => WholeBudget::Adjust(*p),
+                    Whole::Copy(from) => WholeBudget::Copy(from),
+                };
+                whole_budget(d, &id, version, &w)
+            }
+        },
         move |s| async move {
             let b = s.budgets();
             match what {
@@ -356,7 +383,13 @@ fn start_create(w: &mut ReportWindow) {
         &w.link,
         w.group.as_ref(),
         orphan("orphan.budget_create"),
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let n = NewBudget {
+                name: name.clone(),
+                fiscal_year: year,
+            };
+            move |d| crate::company::demo::report_store::create_budget(d, &n)
+        },
         move |s| async move {
             s.budgets()
                 .create(

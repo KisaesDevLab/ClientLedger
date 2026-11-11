@@ -248,6 +248,20 @@ fn a_tin_shows_its_last_four_digits_only() {
     assert!(!t.to_canonical_csv().contains("123-45"));
 }
 
+/// The engine's `check_number` is a pg integer: the Check Register shows
+/// its digits (the P28 golden's check 5001 was blank).
+#[test]
+fn an_integer_check_number_shows_its_digits() {
+    let mut v = fixture("check_register");
+    v["data"][0]["check_number"] = serde_json::json!(5001);
+    v["data"][1]["check_number"] = serde_json::json!("5002");
+    let t = list_run::adapt(&q4(Source::CheckRegister), &v).expect("register");
+    let c = col(&t, "check_number");
+    let numbers: Vec<&Cell> = t.rows.iter().filter_map(|r| r.cells.get(c)).collect();
+    assert!(numbers.contains(&&Cell::Text("5001".into())));
+    assert!(numbers.contains(&&Cell::Text("5002".into())));
+}
+
 #[test]
 fn a_number_where_exact_text_belongs_is_refused() {
     let v = serde_json::json!({

@@ -608,7 +608,13 @@ fn exact_at(v: &Value, key: &'static str) -> Result<Cell, ApiError> {
 }
 
 fn opt_text(v: &Value, key: &str) -> Cell {
-    text(v, key).map_or(Cell::Empty, |s| Cell::Text(s.to_string()))
+    match v.get(key) {
+        // A whole number in a text column (the engine's integer
+        // `check_number`) shows as its digits; never a fraction, so no
+        // amount can arrive here as text.
+        Some(Value::Number(n)) if n.is_u64() || n.is_i64() => Cell::Text(n.to_string()),
+        _ => text(v, key).map_or(Cell::Empty, |s| Cell::Text(s.to_string())),
+    }
 }
 
 /// The cell `f` reads from `v`.

@@ -64,8 +64,8 @@ impl Mailer {
 
 /// True when the engine sends report email (the Email button shows).
 pub(crate) fn available(w: &ReportWindow) -> bool {
-    !w.link.is_demo()
-        && w.link
+    w.link.is_demo()
+        || w.link
             .capabilities()
             .has(cl_api::Capabilities::REPORTS_EMAIL)
 }
@@ -121,7 +121,10 @@ fn send(w: &mut ReportWindow) {
             what: "orphan.report_email",
             key: None,
         },
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let mail = mail.clone();
+            move |d| crate::company::demo::report_store::email(d, &mail)
+        },
         move |s| async move { s.email_report(&mail, key).await },
     ));
 }

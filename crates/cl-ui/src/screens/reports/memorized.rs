@@ -63,9 +63,9 @@ impl Memo {
     }
 }
 
-/// The engine stores memorized reports (never the demo, WP1).
+/// The engine stores memorized reports (the demo keeps its own, WP5).
 pub(crate) fn available(link: &CompanyLink) -> bool {
-    !link.is_demo() && link.capabilities().has(Capabilities::REPORT_DEFS)
+    link.is_demo() || link.capabilities().has(Capabilities::REPORT_DEFS)
 }
 
 /// Reads the memorized reports and groups.
@@ -76,7 +76,7 @@ pub(super) fn load(w: &mut ReportWindow) {
     w.memo.load = Some(engine::read(
         &w.link,
         w.group.as_ref(),
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        |d| Ok(crate::company::demo::report_store::definitions(d)),
         |s| async move {
             let d = s.report_definitions();
             Ok((d.list().await?, d.groups().await?))
@@ -181,7 +181,10 @@ fn save(w: &mut ReportWindow, how: SaveAs) {
             what: "orphan.report_memorize",
             key: None,
         },
-        |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+        {
+            let (target, write) = (target.clone(), write.clone());
+            move |d| crate::company::demo::report_store::save_definition(d, target, &write)
+        },
         move |s| async move {
             let d = s.report_definitions();
             match target {
@@ -329,7 +332,10 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 w.memo.save = Some(engine::read(
                     &w.link,
                     w.group.as_ref(),
-                    |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+                    {
+                        let id = id.clone();
+                        move |d| crate::company::demo::report_store::definition(d, &id)
+                    },
                     move |s| async move { s.report_definitions().get(&id).await },
                 ));
             }

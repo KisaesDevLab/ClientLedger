@@ -68,7 +68,7 @@ impl AskBar {
 
 /// True when the engine maps questions (the bar shows).
 fn shown(w: &ReportWindow) -> bool {
-    !w.link.is_demo() && w.link.capabilities().has(Capabilities::REPORTS_ASK)
+    w.link.is_demo() || w.link.capabilities().has(Capabilities::REPORTS_ASK)
 }
 
 fn api_param(p: AskParam) -> ApiParam {
@@ -141,7 +141,8 @@ fn start(w: &mut ReportWindow) {
                 a.gate_job = Some(engine::read(
                     &w.link,
                     w.group.as_ref(),
-                    |_| Ok(false),
+                    // The demo company's AI switch (its report task is on).
+                    |d| Ok(d.ai.enabled),
                     |s| async move {
                         let c = s.company_ai_disclosure().await?;
                         Ok(c.ai_enabled
@@ -157,7 +158,10 @@ fn start(w: &mut ReportWindow) {
             a.job = Some(engine::read(
                 &w.link,
                 w.group.as_ref(),
-                |_| Err(ApiError::Local(LocalValidation::Unsupported)),
+                {
+                    let req = req.clone();
+                    move |_| crate::company::demo::report_store::ask(&req)
+                },
                 move |s| async move { s.ask_report(&req).await },
             ));
         }

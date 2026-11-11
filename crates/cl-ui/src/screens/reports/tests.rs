@@ -49,12 +49,16 @@ fn every_reports_command_opens_the_window() {
     assert!(make(other, &link, None, today()).is_none());
 }
 
-/// Q-220: the P&L needs `reports-exact-v1`; the window says so and runs
-/// nothing.
+/// Q-220: a report this engine can't run says so and runs nothing (the
+/// demo plays the P&L since WP5, not the Journal).
 #[test]
 fn a_report_the_engine_cant_run_yet_says_so() {
     let (_d, link) = demo();
-    let w = window(&link);
+    let mut w = window(&link);
+    w.poll();
+    assert_eq!(w.state, RunState::Shown, "the demo P&L runs");
+    let spec = find("journal").expect("spec");
+    w.show_report(spec, ReportOptions::for_spec(spec));
     assert_eq!(w.state, RunState::Unavailable);
     let st = w.state_json_for_test();
     assert_eq!(st["available"], false);
