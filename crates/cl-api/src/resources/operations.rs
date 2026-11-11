@@ -1716,6 +1716,33 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
     Method::Delete,
     "/api/v1/report-builder/definition-groups/{id}",
 );
+// A07: Report Builder runs (U-119, `report-builder-v1`). Read-only POSTs,
+// never blind-retried (a 503 `REPORT_TIMEOUT` already took 30 s), with the
+// long timeout. Not in `OPERATIONS` or `operations.txt` until the engine pin
+// that serves them (PR-C, PR-D): the spec fixtures list only routes the
+// pinned `openapi.json` documents.
+/// Runs a builder definition.
+pub(crate) const REPORT_BUILDER_RUN: Operation = op(
+    Method::Post,
+    "/api/v1/report-builder/run",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// One page of a path's detail.
+pub(crate) const REPORT_BUILDER_DETAIL: Operation = op(
+    Method::Post,
+    "/api/v1/report-builder/run/detail",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// The field catalogue.
+pub(crate) const REPORT_BUILDER_FIELDS: Operation = read("/api/v1/report-builder/fields");
+/// The starters.
+pub(crate) const REPORT_BUILDER_STARTERS: Operation = read("/api/v1/report-builder/starters");
 /// The General Ledger and Transaction Detail by Account (U-14 exact).
 pub(crate) const REPORT_GENERAL_LEDGER: Operation = read("/api/v1/reports/general-ledger");
 /// Revenue by Category (U-14 exact).

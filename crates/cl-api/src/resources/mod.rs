@@ -50,6 +50,7 @@ pub mod recoveries;
 pub mod recovery;
 pub mod recurring;
 pub mod register;
+pub mod report_builder;
 pub mod reports;
 pub mod rules;
 pub mod sales;

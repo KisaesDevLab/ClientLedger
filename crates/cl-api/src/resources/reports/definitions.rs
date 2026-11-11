@@ -21,8 +21,20 @@ use crate::resources::operations::{
 use crate::session::Session;
 use crate::wire::Capabilities;
 
-/// The engine's cap on a definition body.
+/// The engine's cap on a standard definition body.
 pub const MAX_DEFINITION_BYTES: usize = 64 * 1024;
+/// The engine's cap on a Report Builder definition body (A07, PR-A).
+pub const MAX_BUILDER_DEFINITION_BYTES: usize = 256 * 1024;
+
+/// The cap for a body of `kind` (`builder` or `standard`).
+#[must_use]
+pub fn max_bytes(kind: &str) -> usize {
+    if kind == "builder" {
+        MAX_BUILDER_DEFINITION_BYTES
+    } else {
+        MAX_DEFINITION_BYTES
+    }
+}
 
 /// One memorized report.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -147,9 +159,9 @@ fn one<T: for<'de> Deserialize<'de>>(body: &[u8], what: &'static str) -> Result<
     serde_json::from_value(v).map_err(|_| ApiError::Decode { what })
 }
 
-fn body(v: &impl Serialize) -> Result<Vec<u8>, ApiError> {
+fn body(v: &impl Serialize, cap: usize) -> Result<Vec<u8>, ApiError> {
     let b = serde_json::to_vec(v).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
-    if b.len() > MAX_DEFINITION_BYTES {
+    if b.len() > cap {
         return Err(ApiError::PayloadTooLarge);
     }
     Ok(b)
@@ -215,7 +227,7 @@ impl ReportDefinitions<'_> {
     pub async fn create(&self, w: &DefinitionWrite) -> Result<DefinitionRow, ApiError> {
         self.require()?;
         let mut call = Call::at(Method::Post, REPORT_DEFS_CREATE.route());
-        call = call.json_body(body(w)?);
+        call = call.json_body(body(w, max_bytes(&w.kind))?);
         let reply = self.0.send(&REPORT_DEFS_CREATE, call, None).await?;
         one(&reply.body, "memorized report")
     }
@@ -241,7 +253,7 @@ impl ReportDefinitions<'_> {
             REPORT_DEF_PUT.route(),
             REPORT_DEF_PUT.route().replace("{id}", id),
         );
-        call = call.json_body(body(&v)?);
+        call = call.json_body(body(&v, max_bytes(&w.kind))?);
         let reply = self.0.send(&REPORT_DEF_PUT, call, None).await?;
         one(&reply.body, "memorized report")
     }
@@ -280,7 +292,10 @@ impl ReportDefinitions<'_> {
     pub async fn create_group(&self, name: &str) -> Result<DefinitionGroup, ApiError> {
         self.require()?;
         let mut call = Call::at(Method::Post, REPORT_DEF_GROUPS_CREATE.route());
-        call = call.json_body(body(&serde_json::json!({"name": name}))?);
+        call = call.json_body(body(
+            &serde_json::json!({"name": name}),
+            MAX_DEFINITION_BYTES,
+        )?);
         let reply = self.0.send(&REPORT_DEF_GROUPS_CREATE, call, None).await?;
         one(&reply.body, "memorized report group")
     }
@@ -304,6 +319,7 @@ impl ReportDefinitions<'_> {
         );
         call = call.json_body(body(
             &serde_json::json!({"name": name, "sort": sort, "version": version}),
+            MAX_DEFINITION_BYTES,
         )?);
         let reply = self.0.send(&REPORT_DEF_GROUP_PUT, call, None).await?;
         one(&reply.body, "memorized report group")
@@ -387,6 +403,25 @@ mod tests {
             kind: "standard".into(),
             definition: Value::String("x".repeat(MAX_DEFINITION_BYTES)),
         };
-        assert!(matches!(body(&w), Err(ApiError::PayloadTooLarge)));
+        assert!(matches!(
+            body(&w, max_bytes(&w.kind)),
+            Err(ApiError::PayloadTooLarge)
+        ));
+    }
+
+    #[test]
+    fn a_builder_body_may_be_four_times_larger() {
+        let mut w = DefinitionWrite {
+            name: "big".into(),
+            group_id: None,
+            kind: "builder".into(),
+            definition: Value::String("x".repeat(MAX_DEFINITION_BYTES)),
+        };
+        assert!(body(&w, max_bytes(&w.kind)).is_ok());
+        w.definition = Value::String("x".repeat(MAX_BUILDER_DEFINITION_BYTES));
+        assert!(matches!(
+            body(&w, max_bytes(&w.kind)),
+            Err(ApiError::PayloadTooLarge)
+        ));
     }
 }
