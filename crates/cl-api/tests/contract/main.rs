@@ -19,6 +19,7 @@ mod contract_batch;
 mod contract_billable;
 mod contract_bills;
 mod contract_bounced_check;
+mod contract_budgets;
 mod contract_capabilities;
 mod contract_cash_basis_spf;
 mod contract_census;
@@ -1348,6 +1349,10 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs::crud_conflicts_and_groups",
             contract_report_defs::crud_conflicts_and_groups,
+        ),
+        (
+            "budgets::hand_fixture_and_writes",
+            contract_budgets::hand_fixture_and_writes,
         ),
         (
             "reports_exact::record_statements",
