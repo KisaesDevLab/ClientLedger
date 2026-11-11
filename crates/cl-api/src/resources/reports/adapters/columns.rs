@@ -15,9 +15,7 @@ use cl_core::report::{
 use rust_decimal::Decimal;
 use serde_json::Value;
 
-use super::exact::{
-    account_caption, date, decimal, list, meta_basis, meta_cash_rules, require_exact, shape, text,
-};
+use super::exact::{account_caption, date, decimal, list, meta_basis, require_exact, shape, text};
 use super::row;
 use super::statements::{MAX_DRILL_ACCOUNTS, drill_tag};
 use crate::errors::ApiError;
@@ -30,6 +28,8 @@ pub fn is_columns(v: &Value) -> bool {
 
 /// One engine column and where its values sit in the table's cells.
 struct Col {
+    /// Left out of the table (the YTD column's day-count prior, Q-PR6a).
+    skip: bool,
     percent: bool,
     /// The % of income column after it.
     with_pct: bool,
@@ -75,13 +75,35 @@ fn column_drill(d: &Value) -> Result<Option<ColumnDrill>, ApiError> {
     Ok(tag_scope(d)?.map(ColumnDrill::Tag))
 }
 
-fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<Col>), ApiError> {
+fn columns(
+    v: &Value,
+    req: &ReportRequest,
+    balance: bool,
+    pct: bool,
+) -> Result<(Vec<ColumnHead>, Vec<Col>), ApiError> {
+    use cl_core::report::Extra;
+    // The pinned engine compares the YTD column with the same number of
+    // days before it, whatever prior ranges the periods send: on "Prior
+    // period" the YTD column stands alone (Q-PR6a).
+    let ytd_prior_is_days =
+        req.extras.contains(&Extra::PriorPeriod) && !req.extras.contains(&Extra::PriorYear);
     let mut heads = Vec::new();
     let mut cols = Vec::new();
     for c in list(v, "columns")? {
         let key = text(c, "key").ok_or(shape("columns.key"))?.to_string();
         let percent = text(c, "valueType") == Some("percent");
         let kind = text(c, "kind").unwrap_or("");
+        if ytd_prior_is_days
+            && text(c, "baseKey") == Some("ytd")
+            && matches!(kind, "prior" | "change" | "pct_change")
+        {
+            cols.push(Col {
+                skip: true,
+                percent,
+                with_pct: false,
+            });
+            continue;
+        }
         let range = if balance {
             match c
                 .get("asOf")
@@ -123,7 +145,11 @@ fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<
                 drill: Some(ColumnDrill::None),
             });
         }
-        cols.push(Col { percent, with_pct });
+        cols.push(Col {
+            skip: false,
+            percent,
+            with_pct,
+        });
     }
     Ok((heads, cols))
 }
@@ -141,6 +167,9 @@ fn cells(cols: &[Col], values: &Value, pct: Option<&Value>) -> Result<Vec<Cell>,
     };
     let mut out = Vec::new();
     for (i, c) in cols.iter().enumerate() {
+        if c.skip {
+            continue;
+        }
         let x = opt_dec(&values[i], "valuesExact")?;
         out.push(match (c.percent, x) {
             (true, x) => Cell::Percent(x),
@@ -347,7 +376,7 @@ fn header(key: &str, caption: &str, width: usize) -> ReportRow {
 pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTable, ApiError> {
     require_exact(v)?;
     let pct_totals = v.get("pctOfIncomeTotalsExact").filter(|p| p.is_object());
-    let (heads, cols) = columns(v, balance, pct_totals.is_some())?;
+    let (heads, cols) = columns(v, req, balance, pct_totals.is_some())?;
     let span = req.dates.span().ok_or(shape("dates"))?;
     let b = Builder {
         req,
@@ -510,7 +539,6 @@ pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTabl
         meta: ReportMeta {
             basis: meta_basis(v).or(req.basis),
             dates: Some(req.dates.clone()),
-            cash_basis_rules: meta_cash_rules(v),
             ..ReportMeta::default()
         },
     })
@@ -591,6 +619,39 @@ mod tests {
         let d = acct.drill.as_ref().expect("drill");
         assert!(d.for_cell(change).is_none());
         assert!(d.for_cell(&t.columns[0]).is_some());
+        // "Prior year" keeps the YTD comparison.
+        let mut py = r.clone();
+        py.extras.insert(cl_core::report::Extra::PriorYear);
+        let t = table(&v, &py, false).expect("table");
+        assert!(t.columns.iter().any(|c| c.key == "ytd_prior"));
+    }
+
+    /// Q-PR6a: on "Prior period" the engine compares the YTD column with
+    /// the same number of days before it, so the YTD column stands alone.
+    #[test]
+    fn prior_period_leaves_out_the_ytd_day_count_comparison() {
+        let v = fixture("columns_profit_loss_periods");
+        let mut r = req(
+            Source::ProfitLoss,
+            ReportDates::Ranges(vec![
+                DateRange {
+                    from: d(2033, 3, 1),
+                    to: d(2033, 3, 15),
+                },
+                DateRange {
+                    from: d(2033, 3, 16),
+                    to: d(2033, 3, 31),
+                },
+            ]),
+        );
+        r.extras.insert(cl_core::report::Extra::PriorPeriod);
+        let t = table(&v, &r, false).expect("table");
+        assert!(t.columns.iter().any(|c| c.key == "ytd"));
+        assert!(t.columns.iter().any(|c| c.key == "p0_prior"));
+        assert!(!t.columns.iter().any(|c| c.key.starts_with("ytd_prior")
+            || c.key.starts_with("ytd_change")
+            || c.key.starts_with("ytd_pct_change")));
+        assert!(t.rows.iter().all(|r| r.cells.len() == t.columns.len()));
     }
 
     #[test]

@@ -373,6 +373,18 @@ fn columns_query(req: &ReportRequest, push: &mut impl FnMut(&str, String)) {
         push("prior", "year".into());
     } else if req.extras.contains(&Extra::PriorPeriod) {
         push("prior", "period".into());
+        // The previous month / fiscal period / quarter / year of each
+        // column (B3); one per period range, or one for the single range
+        // or as-of date (the engine's count rule, 400 otherwise).
+        if let Some(p) = &req.prior_ranges {
+            let want = match &req.dates {
+                ReportDates::Ranges(v) => v.len(),
+                _ => 1,
+            };
+            if p.len() == want {
+                push("prior_ranges", ranges_param(p));
+            }
+        }
     }
     if req.extras.contains(&Extra::PctOfIncome) {
         push("pct_of_income", "1".into());
@@ -672,6 +684,26 @@ mod tests {
         assert!(gq.contains(&"limit=50000".to_string()));
         assert!(gq.contains(&"cleared=reconciled".to_string()));
         assert!(gq.contains(&"txn_types=bill,expense".to_string()));
+        // B3: "Prior period" sends the previous period of each column; a
+        // one-date Balance Sheet its prior as-of (no 400).
+        let mut p = ReportRequest::new(Source::ProfitLoss, ReportDates::Range(oct()));
+        p.extras.insert(cl_core::report::Extra::PriorPeriod);
+        p.prior_ranges = Some(vec![DateRange {
+            from: d(2026, 9, 1),
+            to: d(2026, 9, 30),
+        }]);
+        let pq = q(&p);
+        assert!(pq.contains(&"prior=period".to_string()));
+        assert!(pq.contains(&"prior_ranges=2026-09-01..2026-09-30".to_string()));
+        let mut b = ReportRequest::new(Source::BalanceSheet, ReportDates::AsOf(d(2026, 11, 15)));
+        b.extras.insert(cl_core::report::Extra::PriorPeriod);
+        b.prior_ranges.clone_from(&p.prior_ranges);
+        let bq = q(&b);
+        assert!(bq.contains(&"as_of_date=2026-11-15".to_string()));
+        assert!(bq.contains(&"prior_ranges=2026-09-01..2026-09-30".to_string()));
+        // A count that doesn't match the columns is not sent.
+        p.dates = ReportDates::Ranges(vec![oct(), oct()]);
+        assert!(!q(&p).iter().any(|s| s.starts_with("prior_ranges")));
         // A balance date the P&L doesn't take.
         let bad = ReportRequest::new(Source::ProfitLoss, ReportDates::AsOf(d(2026, 10, 31)));
         assert!(exact_query(&bad).is_err());

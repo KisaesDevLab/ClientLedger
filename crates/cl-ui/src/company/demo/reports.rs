@@ -574,9 +574,18 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             "from": r.map(|r| r.from.to_wire()), "to": r.map(|r| r.to.to_wire()), "drill": d})
     };
     let mut cols: Vec<Col> = Vec::new();
-    let add_prior = |cols: &mut Vec<Col>, base: usize, r: DateRange| -> Option<()> {
+    // The engine's rule: a period's prior is its `prior_ranges` entry when
+    // sent (B3), else the day count; the YTD column always the day count.
+    let add_prior = |cols: &mut Vec<Col>,
+                     base: usize,
+                     r: DateRange,
+                     explicit: Option<DateRange>|
+     -> Option<()> {
         let year = prior?;
-        let pr = prior_range(r, year)?;
+        let pr = match explicit {
+            Some(e) if !year => e,
+            _ => prior_range(r, year)?,
+        };
         let key = cols.get(base)?.head.get("key")?.as_str()?.to_string();
         let mut h = head(
             &format!("{key}_prior"),
@@ -670,7 +679,8 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             head: head(&key, &caption, kind, Some(*r), drill(*r)),
             src: Src::Sums(*r),
         });
-        add_prior(&mut cols, idx, *r);
+        let explicit = req.prior_ranges.as_ref().and_then(|p| p.get(i)).copied();
+        add_prior(&mut cols, idx, *r, explicit);
     }
     if period_columns && rs.len() > 1 {
         cols.push(Col {
@@ -688,7 +698,7 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             head: head("ytd", "YTD", "ytd", Some(r), drill(r)),
             src: Src::Sums(r),
         });
-        add_prior(&mut cols, idx, r);
+        add_prior(&mut cols, idx, r, None);
     }
     Some(cols)
 }
