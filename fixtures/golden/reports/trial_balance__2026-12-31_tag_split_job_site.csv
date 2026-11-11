@@ -1,6 +1,6 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,85120.4,0
-account_total,1,accounts/acct:1010~split,@reports.row.total_of 1010 · Operating Checking,85120.4,0
+account,1,accounts/acct:1010,1010 · Operating Checking,84695.42,0
+account_total,1,accounts/acct:1010~split,@reports.row.total_of 1010 · Operating Checking,84695.42,0
 account,1,accounts/acct:1020,1020 · Savings,15450,0
 account_total,1,accounts/acct:1020~split,@reports.row.total_of 1020 · Savings,15450,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
@@ -33,13 +33,14 @@ account,1,accounts/acct:6100,6100 · Fuel,8972.83,0
 account_total,1,accounts/acct:6100~split,@reports.row.total_of 6100 · Fuel,8972.83,0
 account,1,accounts/acct:6150,6150 · Insurance,15589.13,0
 tag,2,accounts/acct:6150/t:tag:North lawn,6150-101 Insurance - North lawn,1200,0
-account_total,1,accounts/acct:6150~split,@reports.row.total_of 6150 · Insurance,16789.13,0
+tag,2,accounts/acct:6150/t:tag:Courtyard,6150-102 Insurance - Courtyard,245,0
+account_total,1,accounts/acct:6150~split,@reports.row.total_of 6150 · Insurance,17034.13,0
 account,1,accounts/acct:6250,6250 · Office Supplies and Software,8024.17,0
 account_total,1,accounts/acct:6250~split,@reports.row.total_of 6250 · Office Supplies and Software,8024.17,0
 account,1,accounts/acct:6300,6300 · Rent,44950,0
 account_total,1,accounts/acct:6300~split,@reports.row.total_of 6300 · Rent,44950,0
-account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41042.86,0
-account_total,1,accounts/acct:6350~split,@reports.row.total_of 6350 · Repairs and Maintenance,41042.86,0
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41222.84,0
+account_total,1,accounts/acct:6350~split,@reports.row.total_of 6350 · Repairs and Maintenance,41222.84,0
 account,1,accounts/acct:6400,6400 · Telephone and Internet,4100.37,0
 account_total,1,accounts/acct:6400~split,@reports.row.total_of 6400 · Telephone and Internet,4100.37,0
 account,1,accounts/acct:6500,6500 · Utilities,8338.23,0

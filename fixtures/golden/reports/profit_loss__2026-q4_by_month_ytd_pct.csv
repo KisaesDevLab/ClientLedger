@@ -12,18 +12,18 @@ total,0,gross_profit,@reports.pl.gross_profit,44926.38,50.8,300208.66,98.1,0,,34
 header,0,expenses,@reports.pl.expenses,,,,,,,,,,
 account,1,expenses/acct:6000,6000 · Advertising and Marketing,701.56,0.8,0,0,0,,701.56,0.2,10936.61,1
 account,1,expenses/acct:6100,6100 · Fuel,2241.84,2.5,289.63,0.1,128.36,,2659.83,0.7,8972.83,0.8
-account,1,expenses/acct:6150,6150 · Insurance,0,0,0,0,1200,,1200,0.3,16789.13,1.5
+account,1,expenses/acct:6150,6150 · Insurance,0,0,0,0,1445,,1445,0.4,17034.13,1.5
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,937.75,1.1,0,0,0,,937.75,0.2,8024.17,0.7
 account,1,expenses/acct:6300,6300 · Rent,4350,4.9,0,0,0,,4350,1.1,44950,3.9
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5101.23,5.8,214.91,0.1,0,,5316.14,1.3,41042.86,3.6
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5101.23,5.8,214.91,0.1,179.98,,5496.12,1.4,41222.84,3.6
 account,1,expenses/acct:6400,6400 · Telephone and Internet,617.98,0.7,0,0,0,,617.98,0.2,4100.37,0.4
 account,1,expenses/acct:6500,6500 · Utilities,917.74,1,394.21,0.1,0,,1311.95,0.3,8338.23,0.7
 account,1,expenses/acct:6550,6550 · Wages,12091.3,13.7,0,0,0,,12091.3,3.1,123930.56,10.9
 account,1,expenses/acct:6560,6560 · Payroll Taxes,1088.21,1.2,0,0,0,,1088.21,0.3,11153.65,1
 account,1,expenses/acct:6700,6700 · Vehicle Expenses,2801.63,3.2,0,0,0,,2801.63,0.7,15807.22,1.4
-subtotal,0,expenses~total,@reports.pl.total_expenses,30849.24,34.9,898.75,0.3,1328.36,,33076.35,8.4,294045.63,25.8
-total,0,operating_income,@reports.pl.operating_income,14077.14,15.9,299309.91,97.8,-1328.36,,312058.69,79.1,426086.55,37.3
+subtotal,0,expenses~total,@reports.pl.total_expenses,30849.24,34.9,898.75,0.3,1753.34,,33501.33,8.5,294470.61,25.8
+total,0,operating_income,@reports.pl.operating_income,14077.14,15.9,299309.91,97.8,-1753.34,,311633.71,79,425661.57,37.3
 header,0,other_expenses,@reports.pl.other_expenses,,,,,,,,,,
 account,1,other_expenses/acct:8000,8000 · Interest Expense,212,0.2,0,0,0,,212,0.1,2120,0.2
 subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,212,0.2,0,0,0,,212,0.1,2120,0.2
-grand,0,net_income,@reports.pl.net_income,13865.14,15.7,299309.91,97.8,-1328.36,,311846.69,79.1,423966.55,37.2
+grand,0,net_income,@reports.pl.net_income,13865.14,15.7,299309.91,97.8,-1753.34,,311421.71,78.9,423541.57,37.1

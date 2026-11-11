@@ -25,13 +25,14 @@ account,1,expenses/acct:6100,6100 · Fuel,2659.83
 account_total,1,expenses/acct:6100~split,@reports.row.total_of 6100 · Fuel,2659.83
 account,1,expenses/acct:6150,6150 · Insurance,0
 tag,2,expenses/acct:6150/t:tag:North lawn,6150-101 Insurance - North lawn,1200
-account_total,1,expenses/acct:6150~split,@reports.row.total_of 6150 · Insurance,1200
+tag,2,expenses/acct:6150/t:tag:Courtyard,6150-102 Insurance - Courtyard,245
+account_total,1,expenses/acct:6150~split,@reports.row.total_of 6150 · Insurance,1445
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,937.75
 account_total,1,expenses/acct:6250~split,@reports.row.total_of 6250 · Office Supplies and Software,937.75
 account,1,expenses/acct:6300,6300 · Rent,4350
 account_total,1,expenses/acct:6300~split,@reports.row.total_of 6300 · Rent,4350
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5316.14
-account_total,1,expenses/acct:6350~split,@reports.row.total_of 6350 · Repairs and Maintenance,5316.14
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5496.12
+account_total,1,expenses/acct:6350~split,@reports.row.total_of 6350 · Repairs and Maintenance,5496.12
 account,1,expenses/acct:6400,6400 · Telephone and Internet,617.98
 account_total,1,expenses/acct:6400~split,@reports.row.total_of 6400 · Telephone and Internet,617.98
 account,1,expenses/acct:6500,6500 · Utilities,1311.95
@@ -42,10 +43,10 @@ account,1,expenses/acct:6560,6560 · Payroll Taxes,1088.21
 account_total,1,expenses/acct:6560~split,@reports.row.total_of 6560 · Payroll Taxes,1088.21
 account,1,expenses/acct:6700,6700 · Vehicle Expenses,2801.63
 account_total,1,expenses/acct:6700~split,@reports.row.total_of 6700 · Vehicle Expenses,2801.63
-subtotal,0,expenses~total,@reports.pl.total_expenses,33076.35
-total,0,operating_income,@reports.pl.operating_income,312058.69
+subtotal,0,expenses~total,@reports.pl.total_expenses,33501.33
+total,0,operating_income,@reports.pl.operating_income,311633.71
 header,0,other_expenses,@reports.pl.other_expenses,
 account,1,other_expenses/acct:8000,8000 · Interest Expense,212
 account_total,1,other_expenses/acct:8000~split,@reports.row.total_of 8000 · Interest Expense,212
 subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,212
-grand,0,net_income,@reports.pl.net_income,311846.69
+grand,0,net_income,@reports.pl.net_income,311421.71

@@ -1,5 +1,5 @@
 kind,level,path,caption,balance
-detail,1,rows/0,1010 · Operating Checking,85120.4
+detail,1,rows/0,1010 · Operating Checking,84695.42
 detail,1,rows/1,10100 · Cash,0
 detail,1,rows/2,1020 · Savings,15450
-grand,0,total,@reports.row.total,100570.4
+grand,0,total,@reports.row.total,100145.42

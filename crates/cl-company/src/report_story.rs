@@ -512,6 +512,46 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                     .record
                     .id
             }
+            "check" => {
+                let vendor = names.contact(s.vendor.as_deref())?;
+                let mut lines = Vec::new();
+                let mut total = Money::ZERO;
+                for l in &s.lines {
+                    let a = amount(l.amount, &s.id)?;
+                    total = total.checked_add(a).map_err(|_| missing(&s.id))?;
+                    lines.push(cl_api::SplitLine {
+                        account: names.account(&l.account)?,
+                        amount: a,
+                        memo: None,
+                        contact: None,
+                        billable: false,
+                        tag: tag(l)?,
+                        item: None,
+                    });
+                }
+                let draft = cl_api::CheckDraft {
+                    bank: names.account("1010")?,
+                    date: s.date,
+                    payee: Some(vendor),
+                    payee_name: s.vendor.clone().unwrap_or_default(),
+                    check_number: s.number.as_deref().and_then(|n| n.parse().ok()),
+                    print_later: s.number.is_none(),
+                    payee_address: None,
+                    memo: s.memo.clone(),
+                    printed_memo: s.memo.clone(),
+                    tag_ids: Vec::new(),
+                    draft_attachment: None,
+                    amount: total,
+                    lines,
+                };
+                let p = cl_api::BankPosting::check(draft).map_err(|_| missing(&s.id))?;
+                session
+                    .transactions()
+                    .create_bank_posting(&p, &plain, IdempotencyKey::new())
+                    .await?
+                    .record
+                    .id
+            }
             other => return Err(missing(other)),
         };
         posted.transactions.insert(s.id.clone(), id);

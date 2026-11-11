@@ -91,6 +91,18 @@
       ]
     },
     {
+      "kind": "check", "id": "CHK1", "date": "2026-12-08", "vendor": "Ozark Mulch Supply", "number": "5001",
+      "memo": "Mulch delivery",
+      "lines": [{ "account": "6150", "amount": "245.00", "tag": "Courtyard" }]
+    },
+    {
+      "kind": "check", "id": "DUPC1", "date": "2026-12-15", "vendor": "Table Rock Nursery", "memo": "Shrubs",
+      "lines": [{ "account": "6350", "amount": "89.99" }]
+    },
+    {
+      "kind": "check", "id": "DUPC2", "date": "2026-12-15", "vendor": "Table Rock Nursery", "memo": "Shrubs",
+      "lines": [{ "account": "6350", "amount": "89.99" }]
+    },    {
       "kind": "journal_entry", "id": "CLOSED1", "date": "2026-09-15", "memo": "Reclass found after closing", "closedPeriod": true,
       "lines": [
         { "account": "1510", "debit": "12.34" },

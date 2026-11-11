@@ -12,18 +12,18 @@ total,0,gross_profit,@reports.pl.gross_profit,720132.18
 header,0,expenses,@reports.pl.expenses,
 account,1,expenses/acct:6000,6000 · Advertising and Marketing,10936.61
 account,1,expenses/acct:6100,6100 · Fuel,8972.83
-account,1,expenses/acct:6150,6150 · Insurance,16789.13
+account,1,expenses/acct:6150,6150 · Insurance,17034.13
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,8024.17
 account,1,expenses/acct:6300,6300 · Rent,44950
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,41042.86
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,41222.84
 account,1,expenses/acct:6400,6400 · Telephone and Internet,4100.37
 account,1,expenses/acct:6500,6500 · Utilities,8338.23
 account,1,expenses/acct:6550,6550 · Wages,123930.56
 account,1,expenses/acct:6560,6560 · Payroll Taxes,11153.65
 account,1,expenses/acct:6700,6700 · Vehicle Expenses,15807.22
-subtotal,0,expenses~total,@reports.pl.total_expenses,294045.63
-total,0,operating_income,@reports.pl.operating_income,426086.55
+subtotal,0,expenses~total,@reports.pl.total_expenses,294470.61
+total,0,operating_income,@reports.pl.operating_income,425661.57
 header,0,other_expenses,@reports.pl.other_expenses,
 account,1,other_expenses/acct:8000,8000 · Interest Expense,2120
 subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,2120
-grand,0,net_income,@reports.pl.net_income,423966.55
+grand,0,net_income,@reports.pl.net_income,423541.57

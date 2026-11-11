@@ -870,7 +870,10 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             t
         };
         let mut csv = stable_ids(&t.to_canonical_csv(), &names);
-        if g.key == "ar_aging_detail" || g.key == "ap_aging_detail" {
+        if matches!(
+            g.key,
+            "ar_aging_detail" | "ap_aging_detail" | "check_register"
+        ) {
             csv = stable_order(&csv);
         }
         let path = dir.join(format!("{}.csv", g.file));
