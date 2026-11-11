@@ -185,6 +185,10 @@ pub(crate) struct HomeData {
     /// Parts at or below their reorder point (P24, U-78); `None` while the
     /// company does not track inventory (Q-P24j).
     pub reorder: Slot<Option<u64>>,
+    /// Invoices more than 60 days past due (Q-P16g, Q-P28r): A/R Aging
+    /// Detail rows in the 61-90 and 91+ buckets, as of today. Read with
+    /// `ar-aging-exact-v1`; without it Home keeps "N invoices past due".
+    pub past_60: Slot<u64>,
     /// The latest bank file's ending balance per bank and card account
     /// (U-77, P26; the Account balances card's Bank file column).
     pub bank_files: Slot<Vec<cl_api::AccountBalance>>,
@@ -411,6 +415,15 @@ impl HomeScreen {
             |_| Ok(demo::checklist_facts()),
             |s| async move { checklist::read(&s).await },
         ));
+        if !self.link.is_demo() && self.link.capabilities().has("ar-aging-exact-v1") {
+            self.data.past_60.start(run(
+                &self.link,
+                group,
+                None,
+                |_| Ok(0),
+                move |s| async move { s.reports().invoices_past_60(today).await },
+            ));
+        }
         if self.link.is_demo()
             || self
                 .link

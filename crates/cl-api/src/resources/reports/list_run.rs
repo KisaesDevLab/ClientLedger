@@ -192,3 +192,60 @@ pub fn adapt(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, 
         },
     }
 }
+
+/// The invoices more than 60 days past due in an A/R aging detail answer
+/// (Q-P16g, Q-P28r): its rows in the 61-90 and 91+ buckets that are
+/// invoices or charges (open credits there are not invoices). A count, no
+/// money arithmetic.
+#[must_use]
+pub fn past_60_count(v: &serde_json::Value) -> u64 {
+    v.get("details")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, |rows| {
+            rows.iter()
+                .filter(|r| {
+                    matches!(
+                        r.get("bucket").and_then(serde_json::Value::as_str),
+                        Some("61-90" | "90+")
+                    ) && matches!(
+                        r.get("kind").and_then(serde_json::Value::as_str),
+                        Some("invoice" | "charge")
+                    )
+                })
+                .count() as u64
+        })
+}
+
+impl super::Reports<'_> {
+    /// Home's "N invoices more than 60 days past due" (Q-P16g): the A/R
+    /// aging detail as of `today`, counted by [`past_60_count`].
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn invoices_past_60(&self, today: CalendarDate) -> Result<u64, ApiError> {
+        let op = &REPORT_AR_AGING_DETAIL;
+        let mut call = crate::client::Call::at(crate::client::Method::Get, op.route());
+        call.query = vec![("as_of_date".into(), today.to_wire())];
+        let reply = self.0.send(op, call, None).await?;
+        let v: serde_json::Value = crate::session::decode(&reply, "report")?;
+        Ok(past_60_count(&v))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn past_60_counts_invoices_and_charges_in_the_two_oldest_buckets() {
+        let v = serde_json::json!({"details": [
+            {"bucket": "61-90", "kind": "invoice"},
+            {"bucket": "90+", "kind": "charge"},
+            {"bucket": "90+", "kind": "credit"},
+            {"bucket": "31-60", "kind": "invoice"},
+            {"bucket": "90+", "kind": "other"}
+        ]});
+        assert_eq!(past_60_count(&v), 2);
+        assert_eq!(past_60_count(&serde_json::json!({})), 0);
+    }
+}

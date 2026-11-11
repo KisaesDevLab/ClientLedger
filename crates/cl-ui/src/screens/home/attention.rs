@@ -85,6 +85,11 @@ pub(crate) fn items(
                 None => AttentionItem::unknown(kind, true),
             },
             AttentionKind::InvoicesOverdue => {
+                // Q-P16g: the aging's count of invoices more than 60 days
+                // past due, when it was read.
+                if let Some(n) = data.past_60.value {
+                    return AttentionItem::counted(kind, n);
+                }
                 if !exact {
                     return AttentionItem::unknown(kind, false);
                 }
@@ -331,7 +336,15 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                 out.push(Line::task(text, "home.attention.resume", opens));
             }
             AttentionKind::InvoicesOverdue => out.push(Line::task(
-                t_count("home.attention.invoices", shown, &[]),
+                t_count(
+                    if home.data.past_60.value.is_some() {
+                        "home.attention.invoices_60"
+                    } else {
+                        "home.attention.invoices"
+                    },
+                    shown,
+                    &[],
+                ),
                 "home.attention.open_aging",
                 opens,
             )),

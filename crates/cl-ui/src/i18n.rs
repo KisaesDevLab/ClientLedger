@@ -1193,6 +1193,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.attention.resume", "Resume"),
     ("home.attention.invoices", "{n} invoices past due"),
     ("home.attention.invoices.one", "1 invoice past due"),
+    ("home.attention.invoices_60", "{n} invoices more than 60 days past due"),
+    ("home.attention.invoices_60.one", "1 invoice more than 60 days past due"),
     ("home.attention.open_aging", "Open aging"),
     ("home.attention.bills", "{n} bills overdue or due within {within}"),
     ("home.attention.bills.one", "1 bill overdue or due within {within}"),

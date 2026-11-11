@@ -1292,3 +1292,22 @@ fn the_kofi_button_opens_the_page_only_when_clicked() {
     frame(&mut h, Vec::new());
     assert_eq!(sink.opened(), [support::KOFI_URL], "exactly one");
 }
+
+/// Q-P16g / Q-P28r: with the aging read, Home counts invoices more than 60
+/// days past due; without it the shared overdue rule stays.
+#[test]
+fn invoices_more_than_60_days_past_due_come_from_the_aging() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    h.data.summary = Slot::ready(demo::summary(&mut DemoState::new(), DemoState::today(), 7));
+    h.data.past_60 = Slot::ready(2);
+    let items = attention::items(&h.data, 14, false, false);
+    assert_eq!(counted(&items, "invoices_overdue"), Some(2));
+    let lines = attention::lines(&h, &h.attention());
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.text == "2 invoices more than 60 days past due"),
+        "{lines:#?}"
+    );
+}
