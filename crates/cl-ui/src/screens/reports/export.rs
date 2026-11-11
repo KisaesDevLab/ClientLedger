@@ -134,9 +134,10 @@ pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
     head.push(title.clone());
     head.push(w.subtitle());
     // A file says what the screen says about its figures (S1): the
-    // cash-basis rules and a capped ledger.
-    if let Some(note) = &source.meta.cash_basis_rules {
-        head.push(note.clone());
+    // report's note and a capped ledger (no general cash-basis sentence,
+    // Q-P28ai).
+    if let Some(note) = &source.meta.note {
+        head.push(super::label(note));
     }
     if let Some(n) = source.meta.truncated {
         head.push(t_with(

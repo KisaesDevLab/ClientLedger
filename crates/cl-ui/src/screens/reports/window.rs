@@ -774,9 +774,13 @@ impl ReportWindow {
             if let Some(note) = self
                 .table
                 .as_ref()
-                .and_then(|t| t.meta.cash_basis_rules.as_ref())
+                .and_then(|t| t.meta.note.as_ref())
             {
-                ui.label(RichText::new(note).size(12.0).color(tokens.text_secondary));
+                ui.label(
+                    RichText::new(super::label(note))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                );
             }
         });
         ui.add_space(10.0);

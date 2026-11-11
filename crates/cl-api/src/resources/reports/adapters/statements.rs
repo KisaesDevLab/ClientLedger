@@ -15,8 +15,8 @@ use cl_core::report::{
 use serde_json::Value;
 
 use super::exact::{
-    account_caption, amount, amount_opt, amount_or_null, cell, id, list, meta_basis,
-    meta_cash_rules, require_exact, text,
+    account_caption, amount, amount_opt, amount_or_null, cell, id, list, meta_basis, require_exact,
+    text,
 };
 use super::row;
 use crate::errors::ApiError;
@@ -320,7 +320,6 @@ fn meta(v: &Value, req: &ReportRequest) -> ReportMeta {
     ReportMeta {
         basis: meta_basis(v).or(req.basis),
         dates: Some(req.dates.clone()),
-        cash_basis_rules: meta_cash_rules(v),
         ..ReportMeta::default()
     }
 }
@@ -639,12 +638,14 @@ mod tests {
     }
 
     #[test]
-    fn cash_basis_carries_the_rules_note() {
+    fn cash_basis_shows_no_rules_note() {
+        // Q-P28ai: the basis stays in the subtitle; the engine's general
+        // cash-basis sentence is not shown or exported.
         let mut r = req(Source::ProfitLoss, ReportDates::Range(march()));
         r.basis = Some(Basis::Cash);
         let t = profit_loss(&fixture("exact_profit_loss_cash"), &r, march()).expect("p&l");
         assert_eq!(t.meta.basis, Some(Basis::Cash));
-        assert!(t.meta.cash_basis_rules.is_some());
+        assert!(t.meta.note.is_none());
     }
 
     #[test]

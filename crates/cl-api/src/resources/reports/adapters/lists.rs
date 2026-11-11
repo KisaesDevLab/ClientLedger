@@ -18,7 +18,7 @@ use cl_core::report::{
 };
 use serde_json::Value;
 
-use super::exact::{decimal, meta_basis, meta_cash_rules, require_exact, shape, text};
+use super::exact::{decimal, meta_basis, require_exact, shape, text};
 use super::ledger::type_label;
 use super::{col, row};
 use crate::errors::{ApiError, LocalValidation};
@@ -718,7 +718,6 @@ fn meta(v: &Value, req: &ReportRequest) -> ReportMeta {
     ReportMeta {
         basis: meta_basis(v).or(req.basis),
         dates: Some(req.dates.clone()),
-        cash_basis_rules: meta_cash_rules(v),
         ..ReportMeta::default()
     }
 }

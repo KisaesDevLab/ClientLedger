@@ -357,6 +357,11 @@ pub struct ReportRequest {
     /// ranges are whole fiscal periods of the budget's year (Q-P28n).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_period: Option<u8>,
+    /// "Prior period": the previous period of each period range (or of
+    /// the single range), from the fiscal calendar (PR-6 B3). A balance
+    /// sheet compares with each range's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_ranges: Option<Vec<DateRange>>,
 }
 
 impl ReportRequest {
@@ -374,6 +379,7 @@ impl ReportRequest {
             fiscal_year_start: None,
             budget_id: None,
             first_period: None,
+            prior_ranges: None,
         }
     }
 }
@@ -796,8 +802,12 @@ pub struct ReportMeta {
     pub basis: Option<Basis>,
     /// The dates it ran on.
     pub dates: Option<ReportDates>,
-    /// The engine's cash-basis rules note (Q-P23z).
-    pub cash_basis_rules: Option<String>,
+    /// A plain note shown under the title and in file headers: an
+    /// `@key` the window translates (S5's cash-basis A/R and A/P line), or
+    /// a sentence the engine wrote for one report (Q-P24m's inventory
+    /// note). Never the engine's general cash-basis rules sentence, which
+    /// the owner dropped (Q-P28ai).
+    pub note: Option<String>,
     /// Rows were capped.
     pub truncated: Option<Truncated>,
     /// Rows of accounts the user can't see were left out (Q-157 hook).

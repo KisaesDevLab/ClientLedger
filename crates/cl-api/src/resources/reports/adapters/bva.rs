@@ -416,8 +416,8 @@ pub fn table(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiError> {
         meta: ReportMeta {
             basis: meta_basis(v),
             dates: Some(ReportDates::Ranges(ranges)),
-            cash_basis_rules: super::exact::meta_cash_rules(v),
             truncated: None,
+            note: None,
             hidden_notice: false,
         },
     })

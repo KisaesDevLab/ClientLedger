@@ -113,13 +113,6 @@ pub(crate) fn meta_basis(v: &Value) -> Option<Basis> {
     }
 }
 
-/// The plain-language cash-basis rules note (Q-P23z), on cash basis only.
-pub(crate) fn meta_cash_rules(v: &Value) -> Option<String> {
-    v.pointer("/meta/cashBasisRules")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
 /// `number · name`, or the name alone (the mockup's account caption).
 pub(crate) fn account_caption(number: Option<&str>, name: Option<&str>) -> String {
     let name = name.unwrap_or("");

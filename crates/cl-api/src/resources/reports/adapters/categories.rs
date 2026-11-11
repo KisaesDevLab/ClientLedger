@@ -9,9 +9,7 @@ use cl_core::report::{
 };
 use serde_json::Value;
 
-use super::exact::{
-    account_caption, amount, cell, id, list, meta_basis, meta_cash_rules, require_exact, text,
-};
+use super::exact::{account_caption, amount, cell, id, list, meta_basis, require_exact, text};
 use super::row;
 use super::statements::lines;
 use crate::errors::ApiError;
@@ -62,7 +60,6 @@ pub fn by_category(
         meta: ReportMeta {
             basis: meta_basis(v).or(req.basis),
             dates: Some(req.dates.clone()),
-            cash_basis_rules: meta_cash_rules(v),
             ..ReportMeta::default()
         },
     })
