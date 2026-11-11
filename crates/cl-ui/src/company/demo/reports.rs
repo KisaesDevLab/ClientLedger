@@ -298,25 +298,6 @@ impl Books {
             .filter(|a| a.fields.parent_id.is_none_or(|p| !keep.contains(&p)))
             .collect();
         roots.sort_by_key(|a| key(a));
-        fn walk<'a>(
-            b: &'a Books,
-            keep: &BTreeSet<AccountId>,
-            a: &'a Account,
-            depth: usize,
-            key: &dyn Fn(&Account) -> (String, String),
-            out: &mut Vec<(&'a Account, usize, bool)>,
-        ) {
-            let mut kids: Vec<&Account> = b
-                .chart
-                .iter()
-                .filter(|c| c.fields.parent_id == Some(a.id) && keep.contains(&c.id))
-                .collect();
-            kids.sort_by_key(|c| key(c));
-            out.push((a, depth, !kids.is_empty()));
-            for k in kids {
-                walk(b, keep, k, depth + 1, key, out);
-            }
-        }
         for r in roots {
             walk(self, &keep, r, 0, &key, &mut placed);
         }
@@ -337,6 +318,27 @@ impl Books {
             i += 1;
         }
         out
+    }
+}
+
+/// Places `a` and its kept children, depth first in number order.
+fn walk<'a>(
+    b: &'a Books,
+    keep: &BTreeSet<AccountId>,
+    a: &'a Account,
+    depth: usize,
+    key: &dyn Fn(&Account) -> (String, String),
+    out: &mut Vec<(&'a Account, usize, bool)>,
+) {
+    let mut kids: Vec<&Account> = b
+        .chart
+        .iter()
+        .filter(|c| c.fields.parent_id == Some(a.id) && keep.contains(&c.id))
+        .collect();
+    kids.sort_by_key(|c| key(c));
+    out.push((a, depth, !kids.is_empty()));
+    for k in kids {
+        walk(b, keep, k, depth + 1, key, out);
     }
 }
 
@@ -756,6 +758,7 @@ fn any_non_zero(cols: &[Col], v: &[Option<Decimal>]) -> bool {
 
 /// `/reports/profit-loss?exact=1` in the column layout (U-201).
 fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<Value> {
+    type Rows = Vec<(serde_json::Map<String, Value>, Vec<Option<Decimal>>)>;
     let (rs, _) = ranges(req)?;
     let main = DateRange {
         from: rs.first()?.from,
@@ -790,7 +793,6 @@ fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<V
         })
     };
     let zero: Vec<Option<Decimal>> = add(cols, &[], &[]);
-    type Rows = Vec<(serde_json::Map<String, Value>, Vec<Option<Decimal>>)>;
     let mut sections: Vec<(&str, Rows, Vec<Option<Decimal>>)> = Vec::new();
     for (key, types) in PL_SECTIONS {
         let own: BTreeMap<AccountId, Vec<Option<Decimal>>> = b
@@ -895,7 +897,7 @@ fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<V
         v
     };
     let at = |v: &[Option<Decimal>], i: usize| v.get(i).copied().flatten().unwrap_or_default();
-    let (rev, cogs, exp, orev, oexp) = (
+    let (income, cost, spent, other_rev, other_exp) = (
         total_of("revenue"),
         total_of("cogs"),
         total_of("expenses"),
@@ -905,19 +907,21 @@ fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<V
     let has = |k: &str| sections.iter().any(|s| s.0 == k && !s.1.is_empty());
     let has_cogs = has("cogs");
     let has_other = has("otherRevenue") || has("otherExpenses");
-    let gross = combine(&|i| at(&rev, i) - at(&cogs, i));
+    let gross = combine(&|i| at(&income, i) - at(&cost, i));
     let operating = if has_cogs {
-        combine(&|i| at(&gross, i) - at(&exp, i))
+        combine(&|i| at(&gross, i) - at(&spent, i))
     } else {
-        combine(&|i| at(&rev, i) - at(&exp, i))
+        combine(&|i| at(&income, i) - at(&spent, i))
     };
-    let net = combine(&|i| at(&rev, i) + at(&orev, i) - at(&cogs, i) - at(&exp, i) - at(&oexp, i));
+    let net = combine(&|i| {
+        at(&income, i) + at(&other_rev, i) - at(&cost, i) - at(&spent, i) - at(&other_exp, i)
+    });
     let total_rows: [(&str, Option<&Vec<Option<Decimal>>>); 8] = [
-        ("totalRevenue", Some(&rev)),
-        ("totalCogs", Some(&cogs)),
-        ("totalExpenses", Some(&exp)),
-        ("totalOtherRevenue", Some(&orev)),
-        ("totalOtherExpenses", Some(&oexp)),
+        ("totalRevenue", Some(&income)),
+        ("totalCogs", Some(&cost)),
+        ("totalExpenses", Some(&spent)),
+        ("totalOtherRevenue", Some(&other_rev)),
+        ("totalOtherExpenses", Some(&other_exp)),
         ("grossProfit", has_cogs.then_some(&gross)),
         (
             "operatingIncome",
@@ -936,7 +940,7 @@ fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<V
             .into_iter()
             .map(|(mut e, v)| {
                 if pct {
-                    e.insert("pctOfIncomeExact".into(), pct_of_income(cols, &v, &rev));
+                    e.insert("pctOfIncomeExact".into(), pct_of_income(cols, &v, &income));
                 }
                 Value::Object(e)
             })
@@ -947,7 +951,7 @@ fn profit_loss_columns(b: &Books, req: &ReportRequest, cols: &[Col]) -> Option<V
         let p: serde_json::Map<String, Value> = total_rows
             .iter()
             .map(|(k, v)| {
-                let p = v.map_or(Value::Null, |v| pct_of_income(cols, v, &rev));
+                let p = v.map_or(Value::Null, |v| pct_of_income(cols, v, &income));
                 ((*k).to_string(), p)
             })
             .collect();

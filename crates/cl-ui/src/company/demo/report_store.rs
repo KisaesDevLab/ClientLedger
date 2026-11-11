@@ -206,39 +206,36 @@ pub fn save_definition(
     if taken {
         return Err(refusal(409, "NAME_TAKEN"));
     }
-    match target {
-        Some((id, version)) => {
-            let r = s
-                .definitions
-                .iter_mut()
-                .find(|r| r.id == id)
-                .ok_or_else(not_found)?;
-            if r.version != version {
-                return Err(refusal(409, "STALE_VERSION"));
-            }
-            r.name = name.to_string();
-            r.group_id.clone_from(&w.group_id);
-            r.definition = w.definition.clone();
-            r.version += 1;
-            r.updated_at = Some(DemoState::now());
-            Ok(r.clone())
+    if let Some((id, version)) = target {
+        let r = s
+            .definitions
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or_else(not_found)?;
+        if r.version != version {
+            return Err(refusal(409, "STALE_VERSION"));
         }
-        None => {
-            let id = s.id("report");
-            let row = DefinitionRow {
-                id,
-                group_id: w.group_id.clone(),
-                name: name.to_string(),
-                kind: w.kind.clone(),
-                definition: w.definition.clone(),
-                version: 1,
-                created_by: None,
-                created_by_name: Some("Kurt".into()),
-                updated_at: Some(DemoState::now()),
-            };
-            s.definitions.push(row.clone());
-            Ok(row)
-        }
+        r.name = name.to_string();
+        r.group_id.clone_from(&w.group_id);
+        r.definition = w.definition.clone();
+        r.version += 1;
+        r.updated_at = Some(DemoState::now());
+        Ok(r.clone())
+    } else {
+        let id = s.id("report");
+        let row = DefinitionRow {
+            id,
+            group_id: w.group_id.clone(),
+            name: name.to_string(),
+            kind: w.kind.clone(),
+            definition: w.definition.clone(),
+            version: 1,
+            created_by: None,
+            created_by_name: Some("Kurt".into()),
+            updated_at: Some(DemoState::now()),
+        };
+        s.definitions.push(row.clone());
+        Ok(row)
     }
 }
 
@@ -409,6 +406,10 @@ pub enum WholeBudget<'a> {
 ///
 /// # Errors
 /// `Conflict(Stale)`; `Unsupported` for an unknown budget.
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the demo engine's short names: d state, s store, b budget, a account, i period"
+)]
 pub fn whole_budget(
     d: &mut DemoState,
     id: &str,
@@ -477,6 +478,10 @@ pub fn whole_budget(
 /// # Errors
 /// `InvalidValue` without a budget or period ranges; `Unsupported` for the
 /// tag split (the demo doesn't play it).
+#[allow(
+    clippy::many_single_char_names,
+    reason = "the demo engine's short names: d state, s store, b budget, a account, i period"
+)]
 pub fn budget_vs_actual(d: &mut DemoState, req: &ReportRequest) -> Result<ReportTable, ApiError> {
     let id = req.budget_id.clone().ok_or_else(invalid)?;
     if req.tag_split.is_some() {

@@ -94,29 +94,63 @@ fn audit_record_filter(h: &Harness, s: &Session) {
         h.pending("audit record filter", "audit-filters-v1 is missing");
         return;
     }
-    let a = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor A");
-    let b = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor B");
-    let today = ReportDates::Range(DateRange {
+    let vendor = |name: &str| {
+        let name = crate::support::unique(name);
+        let id = h
+            .run(s.contacts().create(
+                &cl_api::NewContact {
+                    fields: cl_api::ContactFields::named(cl_api::ContactType::Vendor, name.clone()),
+                    opening_balance: cl_core::Money::ZERO,
+                    opening_balance_date: None,
+                },
+                key(),
+            ))
+            .unwrap_or_else(|e| panic!("vendor: {e}"))
+            .record
+            .id;
+        (id, name)
+    };
+    let (a, name_a) = vendor("Audit filter vendor A");
+    let (b, name_b) = vendor("Audit filter vendor B");
+    let all = ReportDates::Range(DateRange {
         from: date(2000, 1, 1),
         to: date(2099, 12, 31),
     });
-    let of = |c: cl_core::ids::ContactId| {
-        let mut r = ReportRequest::new(Source::AuditLog, today.clone());
+    // Each detail row's text, cell by cell.
+    let rows_of = |c: cl_core::ids::ContactId| -> Vec<String> {
+        let mut r = ReportRequest::new(Source::AuditLog, all.clone());
         r.filters.contact_ids = vec![c];
         run(h, s, &r)
-    };
-    let paths = |t: &ReportTable| -> std::collections::BTreeSet<String> {
-        t.rows
+            .rows
             .iter()
-            .filter(|r| r.path.0.first().is_some_and(|p| p == "rows"))
-            .map(|r| format!("{:?}", r.path))
+            .filter(|row| row.kind == cl_core::report::RowKind::Detail)
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|cell| match cell {
+                        cl_core::report::Cell::Text(t) => t.clone(),
+                        _ => String::new(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .collect()
     };
-    let (ta, tb) = (of(a), of(b));
-    let (pa, pb) = (paths(&ta), paths(&tb));
-    assert!(!pa.is_empty(), "vendor A's creation is in its trail");
-    assert!(!pb.is_empty(), "vendor B's creation is in its trail");
-    assert!(pa.is_disjoint(&pb), "A's trail has none of B's changes");
+    let (ra, rb) = (rows_of(a), rows_of(b));
+    assert!(!ra.is_empty(), "vendor A's creation is in its trail");
+    assert!(!rb.is_empty(), "vendor B's creation is in its trail");
+    assert!(
+        ra.iter().any(|t| t.contains(&name_a)),
+        "A's trail names A: {ra:?}"
+    );
+    assert!(
+        ra.iter().all(|t| !t.contains(&name_b)),
+        "A's trail has none of B's changes"
+    );
+    assert!(
+        rb.iter().all(|t| !t.contains(&name_a)),
+        "B's trail has none of A's changes"
+    );
 }
 
 fn ask_req(question: &str) -> AskRequest {

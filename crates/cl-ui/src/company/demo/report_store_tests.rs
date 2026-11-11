@@ -52,7 +52,7 @@ fn budget_lines_save_adjust_copy_fill_and_refuse_a_stale_version() {
     let mut d = DemoState::new();
     let id = budgets(&mut d)[0].id.clone();
     let lines = budget_lines(&mut d, &id).expect("lines");
-    assert!(!lines.lines.is_empty());
+    assert_ne!(lines.lines.len(), 0, "the seeded lines");
     let v = lines.budget.version;
     let a = lines.lines[0].account_id;
     let saved = save_budget_lines(
@@ -109,6 +109,7 @@ fn budget_lines_save_adjust_copy_fill_and_refuse_a_stale_version() {
 }
 
 #[test]
+#[allow(clippy::many_single_char_names, reason = "a actual, b budget, o over")]
 fn budget_vs_actual_runs_through_the_live_adapter() {
     let mut d = DemoState::new();
     let id = budgets(&mut d)[0].id.clone();
