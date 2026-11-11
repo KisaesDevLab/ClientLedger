@@ -122,6 +122,40 @@ pub struct Filters {
     /// Only rows without a contact (the aging's "(no client)" row).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_contact: bool,
+    /// Lines of every client but these (a client column's "All others"
+    /// cell, S6; the ledgers' `contact_id=others`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_contacts_than: Option<Vec<ContactId>>,
+    /// Lines with no tag at all (an untagged column's cell, S6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub untagged: bool,
+}
+
+impl Filters {
+    /// Narrows to a drill's clients (one, none, or all but some; S6).
+    pub fn set_contact_scope(&mut self, scope: &cl_core::report::ContactScope) {
+        use cl_core::report::ContactScope;
+        self.contact_ids.clear();
+        self.no_contact = false;
+        self.other_contacts_than = None;
+        match scope {
+            ContactScope::Any => {}
+            ContactScope::One(c) => self.contact_ids = vec![*c],
+            ContactScope::NoContact => self.no_contact = true,
+            ContactScope::Others(shown) => self.other_contacts_than = Some(shown.clone()),
+        }
+    }
+
+    /// Narrows to a drill's tag scope (S6: lines with no tag at all too).
+    pub fn set_tag_scope(&mut self, scope: cl_core::report::TagScope) {
+        use cl_core::report::TagScope;
+        match scope {
+            TagScope::Any => {}
+            TagScope::Tag(t) => self.tag_ids = vec![t],
+            TagScope::UntaggedInGroup(g) => self.untagged_in_group = Some(g),
+            TagScope::Untagged => self.untagged = true,
+        }
+    }
 }
 
 /// How a tag row's caption is written (formatting only).

@@ -1,18 +1,20 @@
 kind,level,path,caption,balance
 header,0,assets,@reports.bs.assets,
-account,1,assets/acct:1010,1010 · Operating Checking,86902.13
+account,1,assets/acct:1010,1010 · Operating Checking,87752.13
 account,1,assets/acct:1020,1020 · Savings,12000
 account,1,assets/acct:10200,10200 · Accounts Receivable,-227849.78
 account,1,assets/acct:1500,1500 · Equipment,47987.66
 account,1,assets/acct:1510,1510 · Vehicles,62012.34
-total,0,assets~total,@reports.bs.total_assets,-18947.65
+total,0,assets~total,@reports.bs.total_assets,-18097.65
 header,0,liabilities,@reports.bs.liabilities,
 account,1,liabilities/acct:20100,20100 · Accounts Payable,13406.23
 account,1,liabilities/acct:2200,2200 · Vehicle and Equipment Loans,31200
 subtotal,0,liabilities~total,@reports.bs.total_liabilities,44606.23
 header,0,equity,@reports.bs.equity,
 account,1,equity/acct:30000,30000 · Opening Balances,139000
+account,1,equity/acct:30120,30120 · Retained Earnings,350
+account,1,equity/acct:30160,30160 · Owner's Contribution,-100
 account,1,equity/acct:30170,30170 · Owner's Draw,-328538.88
-account,1,equity/row2,@reports.bs.net_income,125985
-subtotal,0,equity~total,@reports.bs.total_equity,-63553.88
-grand,0,liabilities_and_equity,@reports.bs.total_liabilities_and_equity,-18947.65
+account,1,equity/row4,@reports.bs.net_income,126585
+subtotal,0,equity~total,@reports.bs.total_equity,-62703.88
+grand,0,liabilities_and_equity,@reports.bs.total_liabilities_and_equity,-18097.65

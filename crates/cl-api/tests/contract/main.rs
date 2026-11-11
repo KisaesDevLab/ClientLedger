@@ -1368,6 +1368,10 @@ fn main() -> std::process::ExitCode {
             contract_reports_exact::columns_drill_and_tag_split,
         ),
         (
+            "reports_exact::report_fixes_v2",
+            contract_reports_exact::report_fixes_v2,
+        ),
+        (
             "reports_p28::who_owes_what_lists_and_controls",
             contract_reports_p28::who_owes_what_lists_and_controls,
         ),

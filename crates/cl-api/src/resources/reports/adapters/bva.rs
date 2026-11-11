@@ -166,7 +166,7 @@ impl Builder<'_> {
             account_ids: ids,
             from: Some(self.from),
             to: self.to,
-            contact: None,
+            contact: cl_core::report::ContactScope::Any,
             tag,
             basis: self.req.basis,
             adjusting: self.req.filters.adjusting,
@@ -416,8 +416,9 @@ pub fn table(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiError> {
         meta: ReportMeta {
             basis: meta_basis(v),
             dates: Some(ReportDates::Ranges(ranges)),
-            cash_basis_rules: super::exact::meta_cash_rules(v),
             truncated: None,
+            note: None,
+            note_drill: None,
             hidden_notice: false,
         },
     })

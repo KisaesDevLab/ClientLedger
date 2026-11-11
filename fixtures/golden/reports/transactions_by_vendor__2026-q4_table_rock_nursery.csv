@@ -2,7 +2,7 @@ kind,level,path,caption,date,type,number,memo,amount
 detail,1,rows/0,,2026-12-15,@reports.txn.expense,,Shrubs,89.99
 detail,1,rows/1,,2026-12-15,@reports.txn.expense,,Shrubs,89.99
 detail,1,rows/2,,2026-12-02,@reports.txn.bill_payment,,Payment to vendor,1000
-detail,1,rows/3,,2026-11-26,@reports.txn.bill,BILL-00003,,370
+detail,1,rows/3,,2026-11-26,@reports.txn.bill,BILL-00004,,370
 detail,1,rows/4,,2026-11-22,@reports.txn.vendor_credit,VC-00001,,115.6
-detail,1,rows/5,,2026-11-18,@reports.txn.bill,BILL-00002,,2300.6
+detail,1,rows/5,,2026-11-18,@reports.txn.bill,BILL-00003,,2300.6
 grand,0,total,@reports.row.total,,,,,3966.18

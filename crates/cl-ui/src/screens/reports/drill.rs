@@ -3,7 +3,7 @@
 //! amount opens the lines behind it, and an aging cell the detail for that
 //! contact and bucket, each in a new report tab.
 
-use cl_core::report::{DateRange, Drill, Source, TagScope};
+use cl_core::report::{DateRange, Drill, Source};
 use cl_model::CommandId;
 use cl_model::reports::{DateChoice, ReportOptions};
 
@@ -77,29 +77,54 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             o.dates = DateChoice::Fixed { from, to: *to };
             o.basis = basis.or(o.basis);
             o.filters.account_ids.clone_from(account_ids);
-            o.filters.contact_ids = contact.iter().copied().collect();
+            o.filters.set_contact_scope(contact);
             o.filters.adjusting = *adjusting;
-            match tag {
-                TagScope::Any => {}
-                TagScope::Tag(t) => o.filters.tag_ids = vec![*t],
-                TagScope::UntaggedInGroup(g) => o.filters.untagged_in_group = Some(*g),
-                // Lines with no tag at all: no catalog filter names them.
-                TagScope::Untagged => return Target::Nothing("reports.drill.untagged_later"),
-            }
+            o.filters.set_tag_scope(*tag);
             Target::Report(Box::new(ReportOpen {
                 key: spec.key.to_string(),
                 options: Some(o),
             }))
         }
-        Drill::ProfitLoss { from, to, basis } => {
+        Drill::ProfitLoss {
+            from,
+            to,
+            basis,
+            adjusting,
+            tag_ids,
+        } => {
             let mut open = profit_loss_for(DateRange {
                 from: *from,
                 to: *to,
             });
+            // The sheet's basis, adjusting lens and tags (S3).
             if let Some(o) = open.options.as_mut() {
                 o.basis = basis.or(o.basis);
+                o.filters.adjusting = *adjusting;
+                o.filters.tag_ids.clone_from(tag_ids);
             }
             Target::Report(Box::new(open))
+        }
+        Drill::EntriesOfTypes {
+            account_ids,
+            txn_types,
+            to,
+            basis,
+        } => {
+            let Some(spec) = cl_model::reports::find("transaction_detail_by_account") else {
+                return Target::Nothing("reports.drill.no_form");
+            };
+            let mut o = ReportOptions::for_spec(spec);
+            o.dates = DateChoice::Fixed {
+                from: cl_core::CalendarDate::min(),
+                to: *to,
+            };
+            o.basis = basis.or(o.basis);
+            o.filters.account_ids.clone_from(account_ids);
+            o.filters.txn_types.clone_from(txn_types);
+            Target::Report(Box::new(ReportOpen {
+                key: spec.key.to_string(),
+                options: Some(o),
+            }))
         }
         Drill::Aging {
             contact,

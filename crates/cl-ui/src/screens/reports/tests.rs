@@ -165,6 +165,40 @@ fn exports_read_the_rows_on_screen() {
     assert!(pdf.starts_with(b"%PDF"));
 }
 
+/// Q-P28ai and S5 (Q-PR6d): no general cash-basis sentence anywhere; a
+/// cash-basis sheet with an A/R or A/P balance carries its one-line note
+/// on screen and in the file header, translated.
+#[test]
+fn cash_balance_reports_carry_only_the_ar_ap_note() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    let spec = find("balance_sheet").expect("bs");
+    let mut o = ReportOptions::for_spec(spec);
+    o.basis = Some(cl_core::report::Basis::Cash);
+    w.show_report(spec, o.clone());
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let note = w.table.as_ref().and_then(|t| t.meta.note.clone());
+    assert_eq!(
+        note.as_deref(),
+        Some(cl_api::resources::reports::adapters::statements::CASH_AR_AP_NOTE),
+        "the demo's cash sheet shows A/R"
+    );
+    let csv = String::from_utf8(super::export::bytes(&w, super::export::Kind::Csv).expect("csv"))
+        .expect("utf8");
+    let head: String = csv.lines().take(5).collect::<Vec<_>>().join(
+        "
+",
+    );
+    assert!(head.contains("On cash basis, A/R and A/P"), "{head}");
+    assert!(!csv.contains("@reports.note"), "translated");
+    assert!(!csv.contains("income counts when payment is received"));
+    o.basis = Some(cl_core::report::Basis::Accrual);
+    w.show_report(spec, o);
+    w.poll();
+    assert_eq!(w.table.as_ref().and_then(|t| t.meta.note.clone()), None);
+}
+
 #[test]
 fn drills_open_forms_and_report_tabs() {
     let id: cl_core::ids::TransactionId =
@@ -215,7 +249,7 @@ fn drills_open_forms_and_report_tabs() {
             .collect(),
         from: Some(as_of),
         to: as_of,
-        contact: None,
+        contact: cl_core::report::ContactScope::Any,
         tag,
         basis: None,
         adjusting: None,
@@ -229,6 +263,58 @@ fn drills_open_forms_and_report_tabs() {
         target(Source::ProfitLoss, &lines(501, TagScope::Any)),
         Target::Nothing("reports.drill.narrow")
     );
+    // S6: an untagged cell and the "No client" / "All others" cells open
+    // the ledger with the engine's selectors.
+    let Target::Report(open) = target(Source::ProfitLoss, &lines(1, TagScope::Untagged)) else {
+        panic!("untagged lines open the ledger")
+    };
+    assert!(open.options.expect("o").filters.untagged);
+    let shown: cl_core::ids::ContactId =
+        "22222222-2222-4222-8222-222222222222".parse().expect("id");
+    for (scope, check) in [
+        (
+            cl_core::report::ContactScope::NoContact,
+            Box::new(|f: &cl_model::reports::options::Filters| f.no_contact)
+                as Box<dyn Fn(&cl_model::reports::options::Filters) -> bool>,
+        ),
+        (
+            cl_core::report::ContactScope::Others(vec![shown]),
+            Box::new(move |f: &cl_model::reports::options::Filters| {
+                f.other_contacts_than == Some(vec![shown]) && f.contact_ids.is_empty()
+            }),
+        ),
+    ] {
+        let mut d = lines(1, TagScope::Any);
+        if let Drill::Lines { contact, .. } = &mut d {
+            *contact = scope;
+        }
+        let Target::Report(open) = target(Source::ProfitLoss, &d) else {
+            panic!("a client column opens the ledger")
+        };
+        assert!(check(&open.options.expect("o").filters));
+    }
+    // S3/T7: a Balance Sheet's net income opens the P&L with the sheet's
+    // adjusting lens and tags.
+    let tag: cl_core::ids::TagId = "33333333-3333-4333-8333-333333333333".parse().expect("t");
+    let Target::Report(open) = target(
+        Source::BalanceSheet,
+        &Drill::ProfitLoss {
+            from: CalendarDate::from_ymd(2026, 1, 1).expect("d"),
+            to: as_of,
+            basis: Some(cl_core::report::Basis::Cash),
+            adjusting: Some(cl_core::report::Adjusting::Exclude),
+            tag_ids: vec![tag],
+        },
+    ) else {
+        panic!("the P&L")
+    };
+    let o = open.options.expect("o");
+    assert_eq!(o.basis, Some(cl_core::report::Basis::Cash));
+    assert_eq!(
+        o.filters.adjusting,
+        Some(cl_core::report::Adjusting::Exclude)
+    );
+    assert_eq!(o.filters.tag_ids, vec![tag]);
 }
 
 #[test]
@@ -464,6 +550,256 @@ fn owner_text_starting_with_at_is_not_a_key() {
     assert_eq!(label("@home"), "@home");
     assert_eq!(label("Plain"), "Plain");
     assert_ne!(label("@reports.empty"), "@reports.empty");
+}
+
+/// PR6-QA-1: turning Prior period on adds columns while the row count
+/// stays; every amount, the prior column's negative six-digit figures
+/// included, is laid out whole inside its cell (no minus sign or leading
+/// digit cut off).
+#[test]
+fn wide_prior_amounts_fit_their_cells() {
+    use cl_core::report::{ColumnHead, ColumnKind, ReportMeta, ReportRow, ReportTable, RowPath};
+    let dec = |s: &str| s.parse::<rust_decimal::Decimal>().expect("decimal");
+    let col = |key: &str, kind| ColumnHead {
+        key: key.into(),
+        caption: format!("@reports.col.{key}"),
+        kind,
+        range: None,
+        drill: None,
+    };
+    let row = |kind, caption: &str, cells: Vec<Cell>| ReportRow {
+        kind,
+        level: 1,
+        path: RowPath::of([caption]),
+        caption: caption.into(),
+        cells,
+        drill: None,
+        expandable: false,
+    };
+    // Prior period off: one column, figures that fit 72 points.
+    let narrow = ReportTable {
+        columns: vec![col("balance", ColumnKind::Amount)],
+        rows: vec![
+            row(RowKind::Account, "A/R", vec![Cell::Amount(dec("52385.98"))]),
+            row(
+                RowKind::Total,
+                "Total assets",
+                vec![Cell::Amount(dec("2609.03"))],
+            ),
+        ],
+        meta: ReportMeta::default(),
+    };
+    // Prior period on: the same rows, three more columns.
+    let wide = ReportTable {
+        columns: vec![
+            col("balance", ColumnKind::Amount),
+            col("prior", ColumnKind::Amount),
+            col("change", ColumnKind::Amount),
+            col("pct_change", ColumnKind::Percent),
+        ],
+        rows: vec![
+            row(
+                RowKind::Account,
+                "A/R",
+                vec![
+                    Cell::Amount(dec("52385.98")),
+                    Cell::Amount(dec("-227849.78")),
+                    Cell::Amount(dec("280235.76")),
+                    Cell::Percent(Some(dec("123.0"))),
+                ],
+            ),
+            row(
+                RowKind::Total,
+                "Total assets",
+                vec![
+                    Cell::Amount(dec("266609.03")),
+                    Cell::Amount(dec("-18347.65")),
+                    Cell::Amount(dec("284956.68")),
+                    Cell::Percent(Some(dec("1553.1"))),
+                ],
+            ),
+        ],
+        meta: ReportMeta::default(),
+    };
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |w: &mut ReportWindow| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 940.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| crate::windows::Screen::ui(w, ui));
+        });
+        out.textures_delta.clear();
+    };
+    w.set_table(narrow);
+    w.state = RunState::Shown;
+    frame(&mut w);
+    frame(&mut w);
+    // The new table arrives for the run already asked (same generation).
+    w.set_table(wide.clone());
+    frame(&mut w);
+    frame(&mut w);
+    let (_, cells) = w.widths_for_test().expect("measured");
+    assert_eq!(cells.len(), 4, "every column measured");
+    let style = crate::grid_env::shell_frame(&ctx).money_style;
+    let mut checked = 0;
+    let input = egui::RawInput::default();
+    let _ = ctx.run_ui(input, |ui| {
+        for r in &wide.rows {
+            for (ci, c) in r.cells.iter().enumerate() {
+                let text = super::window::cell_text(c, style);
+                let galley = egui::WidgetText::from(
+                    egui::RichText::new(&text)
+                        .family(egui::FontFamily::Monospace)
+                        .strong(),
+                )
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Body,
+                );
+                assert!(
+                    galley.size().x < cells[ci],
+                    "{text:?} ({}) fits column {ci} ({})",
+                    galley.size().x,
+                    cells[ci]
+                );
+                checked += 1;
+            }
+        }
+    });
+    assert_eq!(checked, 8);
+}
+
+/// PR6-QA-3: every drill out of a cash-basis P&L, Balance Sheet, Trial
+/// Balance or General Ledger (classic and column layouts, the A/R-A/P
+/// note's link too) opens its report on cash basis, through the window.
+#[test]
+fn cash_drills_open_on_cash() {
+    use cl_core::report::{Basis, DateRange, ReportDates, ReportRequest};
+    let fixture = |name: &str| -> serde_json::Value {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../cl-api/tests/fixtures/reports")
+            .join(format!("{name}.json"));
+        serde_json::from_str(&std::fs::read_to_string(p).expect("fixture")).expect("json")
+    };
+    let day = |m, d| CalendarDate::from_ymd(2033, m, d).expect("date");
+    let march = ReportDates::Range(DateRange {
+        from: day(3, 1),
+        to: day(3, 31),
+    });
+    let two_months = ReportDates::Ranges(vec![
+        DateRange {
+            from: day(2, 1),
+            to: day(2, 28),
+        },
+        DateRange {
+            from: day(3, 1),
+            to: day(3, 31),
+        },
+    ]);
+    let mut residue = fixture("exact_trial_balance_accrual");
+    residue["meta"]["cashArApResidue"] = serde_json::json!({
+        "accountsReceivableExact": "40.0000",
+        "accountsPayableExact": "0.0000",
+        "accountIds": ["00000000-0000-4000-8000-000000000001"],
+        "txnTypes": ["journal_entry"],
+    });
+    let cases = [
+        (Source::ProfitLoss, "exact_profit_loss_cash", march.clone()),
+        (
+            Source::BalanceSheet,
+            "exact_balance_sheet_accrual",
+            ReportDates::AsOf(day(3, 31)),
+        ),
+        (
+            Source::TrialBalance,
+            "exact_trial_balance_accrual",
+            ReportDates::AsOf(day(3, 31)),
+        ),
+        (Source::GeneralLedger, "exact_general_ledger_accrual", march),
+        (
+            Source::ProfitLoss,
+            "columns_profit_loss_periods",
+            two_months.clone(),
+        ),
+        (
+            Source::BalanceSheet,
+            "columns_balance_sheet_periods",
+            two_months,
+        ),
+    ];
+    let (_d, link) = demo();
+    let mut opened = 0;
+    let mut check = |source: Source, d: &Drill, what: &str| {
+        let Target::Report(open) = target(source, d) else {
+            return;
+        };
+        let o = open.options.clone().expect("options");
+        assert_eq!(o.basis, Some(Basis::Cash), "{what}: {d:?}");
+        // Through the window: the drilled tab runs on cash.
+        let mut w = window(&link);
+        assert!(crate::windows::Screen::open_with(
+            &mut w,
+            crate::windows::OpenPayload::Report(open)
+        ));
+        w.poll();
+        assert_eq!(w.options.basis, Some(Basis::Cash), "{what}");
+        assert_eq!(
+            w.state_json_for_test()["basis"],
+            "cash",
+            "{what}: the drilled tab says cash"
+        );
+        opened += 1;
+    };
+    for (source, name, dates) in cases {
+        let v = if source == Source::TrialBalance {
+            residue.clone()
+        } else {
+            fixture(name)
+        };
+        let mut req = ReportRequest::new(source, dates);
+        req.basis = Some(Basis::Cash);
+        let mut t = cl_api::resources::reports::run::adapt_exact(&req, &v).expect(name);
+        cl_api::resources::reports::adapters::statements::finish_balances(&req, &v, &mut t, None);
+        let mut drills = 0;
+        for r in &t.rows {
+            let Some(d) = &r.drill else { continue };
+            for c in &t.columns {
+                if let Some(d) = d.for_cell(c)
+                    && !matches!(d, Drill::Transaction { .. })
+                {
+                    check(source, &d, name);
+                    drills += 1;
+                }
+            }
+        }
+        // The ledger's own lines open their forms (no basis).
+        assert!(
+            drills > 0 || source == Source::GeneralLedger,
+            "{name} has drills"
+        );
+        if source == Source::TrialBalance {
+            assert!(t.meta.note.is_some(), "the A/R-A/P note");
+            let d = t
+                .meta
+                .note_drill
+                .clone()
+                .expect("the note links its entries");
+            check(source, &d, "note");
+        }
+    }
+    assert!(opened > 6);
 }
 
 /// QA-7: an aging hides a name whose every column is zero (a test, not a

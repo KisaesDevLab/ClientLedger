@@ -74,7 +74,7 @@ pub fn valuation(v: &ValuationSummary) -> ReportTable {
         rows,
         meta: ReportMeta {
             dates: Some(ReportDates::AsOf(v.as_of)),
-            cash_basis_rules: v.basis_note.clone(),
+            note: v.basis_note.clone(),
             ..ReportMeta::default()
         },
     }

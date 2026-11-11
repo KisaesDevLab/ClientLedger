@@ -109,6 +109,12 @@ pub const CLOSING: &str = "closing-exceptions-v1";
 /// U-209: the P28 QA report fixes (1099 amount by box, cents on cash basis,
 /// check numbers on report rows).
 pub const REPORT_FIXES: &str = "report-fixes-v1";
+/// U-213: the PR-6 report fixes (cash prior years' retained earnings, the
+/// sheet's equity flags, `fiscal_year_start`, no tag on balance reports,
+/// the cash A/R and A/P residue).
+pub const REPORT_FIXES_2: &str = "report-fixes-v2";
+/// U-212: 1099 amounts are cash paid in the year; thresholds by year.
+pub const REPORT_1099_PAID: &str = "report-1099-paid-v1";
 /// U-204 (PR-E): the audit-log company, user and record filters.
 pub const AUDIT: &str = "audit-filters-v1";
 
@@ -213,7 +219,10 @@ pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Op
         || f.amount_max.is_some()
         || f.cleared.is_some()
         || !f.txn_types.is_empty()
-        || f.untagged_in_group.is_some();
+        || f.untagged_in_group.is_some()
+        || f.no_contact
+        || f.other_contacts_than.is_some()
+        || f.untagged;
     match req.source {
         Source::GeneralLedger if drill_filters && !has(DRILL) => Some(DRILL),
         // The Journal is U-202's.
@@ -248,6 +257,10 @@ fn join<T: std::fmt::Display>(ids: &[T]) -> String {
 ///
 /// # Errors
 /// `Local(BadRange)` for dates the route doesn't take.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one pass over the request's options, in route order"
+)]
 pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiError> {
     let mut q: Vec<(String, String)> = vec![("exact".into(), "1".into())];
     let mut push = |k: &str, v: String| q.push((k.to_string(), v));
@@ -297,7 +310,10 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     {
         push("adjusting", a.as_str().to_string());
     }
-    if !f.tag_ids.is_empty() {
+    if f.untagged && matches!(req.source, Source::GeneralLedger | Source::Journal) {
+        // Lines with no tag at all (an untagged column's cell, S6).
+        push("tag_id", "untagged".into());
+    } else if !f.tag_ids.is_empty() {
         push("tag_id", join(&f.tag_ids));
     }
     if matches!(
@@ -325,10 +341,36 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     if req.source == Source::Journal {
         push("group_by", "transaction".to_string());
     }
+    // S1 (U-213): a retail calendar's year starts, so the engine splits
+    // the year where the desktop does.
+    if let Some(starts) = &req.fiscal_year_starts
+        && matches!(
+            req.source,
+            Source::BalanceSheet | Source::TrialBalance | Source::GeneralLedger
+        )
+    {
+        push(
+            "fiscal_year_start",
+            starts
+                .iter()
+                .map(|d| d.to_wire())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
     if matches!(req.source, Source::GeneralLedger | Source::Journal) {
         push("limit", adapters::ledger::SCREEN_LIMIT.to_string());
-        if let Some(c) = f.contact_ids.first() {
-            push("contact_id", c.to_string());
+        // Every client chosen (S4: Ask can name several), or the "No
+        // client" / "All others" cells' selectors (S6).
+        if f.no_contact {
+            push("contact_id", "none".into());
+        } else if let Some(shown) = &f.other_contacts_than {
+            push("contact_id", "others".into());
+            if !shown.is_empty() {
+                push("exclude_contact_ids", join(shown));
+            }
+        } else if !f.contact_ids.is_empty() {
+            push("contact_id", join(&f.contact_ids));
         }
         if let Some(a) = f.amount_min {
             push("amount_min", a.to_string());
@@ -373,6 +415,18 @@ fn columns_query(req: &ReportRequest, push: &mut impl FnMut(&str, String)) {
         push("prior", "year".into());
     } else if req.extras.contains(&Extra::PriorPeriod) {
         push("prior", "period".into());
+        // The previous month / fiscal period / quarter / year of each
+        // column (B3); one per period range, or one for the single range
+        // or as-of date (the engine's count rule, 400 otherwise).
+        if let Some(p) = &req.prior_ranges {
+            let want = match &req.dates {
+                ReportDates::Ranges(v) => v.len(),
+                _ => 1,
+            };
+            if p.len() == want {
+                push("prior_ranges", ranges_param(p));
+            }
+        }
     }
     if req.extras.contains(&Extra::PctOfIncome) {
         push("pct_of_income", "1".into());
@@ -459,6 +513,7 @@ impl Reports<'_> {
     /// or an engine without its capability; `Local(BadRange)` for dates the
     /// route doesn't take; [`ApiError::ReportShape`] when the answer lacks
     /// its exact fields; any [`ApiError`].
+    #[allow(clippy::too_many_lines, reason = "one dispatch per route family")]
     pub async fn run(&self, req: &ReportRequest) -> Result<ReportTable, ApiError> {
         if req.source == Source::BudgetVsActual {
             let id = req
@@ -473,11 +528,41 @@ impl Reports<'_> {
             if missing_capability(req, |c| caps.has(c)).is_some() {
                 return Err(ApiError::Local(LocalValidation::Unsupported));
             }
+            // An engine before U-213 refuses `fiscal_year_start`: the
+            // adapters then drill from its own month split (S1).
+            let mut sent = req.clone();
+            if !caps.has(REPORT_FIXES_2) {
+                sent.fiscal_year_starts = None;
+            }
             let mut call = Call::at(Method::Get, op.route());
-            call.query = exact_query(req)?;
+            call.query = exact_query(&sent)?;
             let reply = self.0.send(op, call, None).await?;
             let v: serde_json::Value = crate::session::decode(&reply, "report")?;
-            return adapt_exact(req, &v);
+            let mut table = adapt_exact(req, &v)?;
+            if matches!(req.source, Source::BalanceSheet | Source::TrialBalance) {
+                // One chart read (balance accounts only); a failed read
+                // leaves the equity rows without drills and no note.
+                let filter = crate::resources::accounts::AccountFilter {
+                    types: vec![
+                        crate::resources::accounts::AccountType::Asset,
+                        crate::resources::accounts::AccountType::Liability,
+                        crate::resources::accounts::AccountType::Equity,
+                    ],
+                    ..Default::default()
+                };
+                let roles = if adapters::statements::wants_roles(req, &v) {
+                    self.0
+                        .accounts()
+                        .list_all(&filter)
+                        .await
+                        .ok()
+                        .map(|a| adapters::statements::AccountRoles::of(&a))
+                } else {
+                    None
+                };
+                adapters::statements::finish_balances(req, &v, &mut table, roles.as_ref());
+            }
+            return Ok(table);
         }
         if let Some(op) = super::list_run::operation(req.source) {
             let caps = self.0.client().capabilities();
@@ -672,6 +757,47 @@ mod tests {
         assert!(gq.contains(&"limit=50000".to_string()));
         assert!(gq.contains(&"cleared=reconciled".to_string()));
         assert!(gq.contains(&"txn_types=bill,expense".to_string()));
+        // B3: "Prior period" sends the previous period of each column; a
+        // one-date Balance Sheet its prior as-of (no 400).
+        let mut p = ReportRequest::new(Source::ProfitLoss, ReportDates::Range(oct()));
+        p.extras.insert(cl_core::report::Extra::PriorPeriod);
+        p.prior_ranges = Some(vec![DateRange {
+            from: d(2026, 9, 1),
+            to: d(2026, 9, 30),
+        }]);
+        let pq = q(&p);
+        assert!(pq.contains(&"prior=period".to_string()));
+        assert!(pq.contains(&"prior_ranges=2026-09-01..2026-09-30".to_string()));
+        let mut b = ReportRequest::new(Source::BalanceSheet, ReportDates::AsOf(d(2026, 11, 15)));
+        b.extras.insert(cl_core::report::Extra::PriorPeriod);
+        b.prior_ranges.clone_from(&p.prior_ranges);
+        let bq = q(&b);
+        assert!(bq.contains(&"as_of_date=2026-11-15".to_string()));
+        assert!(bq.contains(&"prior_ranges=2026-09-01..2026-09-30".to_string()));
+        // S4/T8: every client Ask chose; S6: "No client", "All others"
+        // and untagged cells use the engine's selectors.
+        let c1: cl_core::ids::ContactId =
+            "11111111-1111-4111-8111-111111111111".parse().expect("id");
+        let c2: cl_core::ids::ContactId =
+            "22222222-2222-4222-8222-222222222222".parse().expect("id");
+        let mut gl = ReportRequest::new(Source::GeneralLedger, ReportDates::Range(oct()));
+        gl.filters.contact_ids = vec![c1, c2];
+        assert!(q(&gl).contains(&format!("contact_id={c1},{c2}")));
+        gl.filters.contact_ids.clear();
+        gl.filters.no_contact = true;
+        assert!(q(&gl).contains(&"contact_id=none".to_string()));
+        assert_eq!(missing_capability(&gl, |c| c == EXACT), Some(DRILL));
+        gl.filters.no_contact = false;
+        gl.filters.other_contacts_than = Some(vec![c1]);
+        let oq = q(&gl);
+        assert!(oq.contains(&"contact_id=others".to_string()));
+        assert!(oq.contains(&format!("exclude_contact_ids={c1}")));
+        gl.filters.other_contacts_than = None;
+        gl.filters.untagged = true;
+        assert!(q(&gl).contains(&"tag_id=untagged".to_string()));
+        // A count that doesn't match the columns is not sent.
+        p.dates = ReportDates::Ranges(vec![oct(), oct()]);
+        assert!(!q(&p).iter().any(|s| s.starts_with("prior_ranges")));
         // A balance date the P&L doesn't take.
         let bad = ReportRequest::new(Source::ProfitLoss, ReportDates::AsOf(d(2026, 10, 31)));
         assert!(exact_query(&bad).is_err());

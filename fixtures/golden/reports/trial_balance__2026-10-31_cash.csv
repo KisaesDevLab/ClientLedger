@@ -1,13 +1,13 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,86902.13,0
+account,1,accounts/acct:1010,1010 · Operating Checking,87752.13,0
 account,1,accounts/acct:1020,1020 · Savings,12000,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
 account,1,accounts/acct:1510,1510 · Vehicles,62012.34,0
 account,1,accounts/acct:2200,2200 · Vehicle and Equipment Loans,0,31200
-account,1,accounts/acct:4000,4000 · Service Income,0,834844.09
+account,1,accounts/acct:4000,4000 · Service Income,0,835844.09
 account,1,accounts/acct:5000,5000 · Subcontractors,50850.56,0
 account,1,accounts/acct:5100,5100 · Plants,7972.96,0
-account,1,accounts/acct:5110,5110 · Mulch & stone,2207.45,0
+account,1,accounts/acct:5110,5110 · Mulch & stone,2607.45,0
 account,1,accounts/acct:5200,5200 · Project Supplies and Materials,353889.6,0
 account,1,accounts/acct:6000,6000 · Advertising and Marketing,10936.61,0
 account,1,accounts/acct:6100,6100 · Fuel,8554.84,0
@@ -24,5 +24,8 @@ account,1,accounts/acct:8000,8000 · Interest Expense,2120,0
 account,1,accounts/acct:10200,10200 · Accounts Receivable,0,227849.78
 account,1,accounts/acct:20100,20100 · Accounts Payable,0,13406.23
 account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
+account,1,accounts/acct:30120,30120 · Retained Earnings,0,100
+account,1,accounts/row26,30120 · Retained Earnings (Prior Years),0,250
+account,1,accounts/acct:30160,30160 · Owner's Contribution,100,0
 account,1,accounts/acct:30170,30170 · Owner's Draw,328538.88,0
-grand,0,total,@reports.row.total,1246300.1,1246300.1
+grand,0,total,@reports.row.total,1247650.1,1247650.1

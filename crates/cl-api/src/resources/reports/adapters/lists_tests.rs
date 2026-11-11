@@ -254,6 +254,68 @@ fn a_tin_shows_its_last_four_digits_only() {
     assert!(!csv.contains("700"), "{csv}");
 }
 
+/// PR6-QA-4: a vendor below the year's 1099 threshold stays listed and is
+/// marked, on the Summary with the threshold its boxes share (from the
+/// engine's catalog), on Preparation without an amount (its engine flag
+/// names none); totals are the engine's either way.
+#[test]
+fn vendors_below_the_1099_threshold_are_marked_not_hidden() {
+    let mut s = fixture("vendor_1099_summary");
+    s["boxCatalog"][0]["thresholdExact"] = Value::String("2000.0000".into());
+    s["rows"] = serde_json::json!([
+        {"contactId": null, "name": "Below", "tinLast4": null,
+         "boxes": {"NEC-1": "750.0000"}, "totalExact": "750.0000", "meetsThreshold": false},
+        {"contactId": null, "name": "Above", "tinLast4": "6789",
+         "boxes": {"NEC-1": "2500.0000"}, "totalExact": "2500.0000", "meetsThreshold": true},
+        {"contactId": null, "name": "Mixed", "tinLast4": null,
+         "boxes": {"NEC-1": "100.0000", "MISC-2": "5.0000"}, "totalExact": "105.0000",
+         "meetsThreshold": false},
+        {"contactId": null, "name": "Older engine", "tinLast4": null,
+         "boxes": {"NEC-1": "10.0000"}, "totalExact": "10.0000"}
+    ]);
+    s["totalsExact"] =
+        serde_json::json!({"NEC-1": "3360.0000", "MISC-2": "5.0000", "total": "3365.0000"});
+    let t = list_run::adapt(&q4(Source::Vendor1099Summary), &s).expect("summary");
+    let th = col(&t, "threshold");
+    let by = |name: &str| {
+        t.rows
+            .iter()
+            .find(|r| r.caption == name)
+            .map_or_else(|| panic!("{name} listed"), |r| r.cells[th].clone())
+    };
+    assert_eq!(
+        by("Below"),
+        Cell::Text("@reports.1099.below_threshold_of $2,000".into())
+    );
+    assert_eq!(by("Above"), Cell::Empty);
+    assert_eq!(by("Mixed"), Cell::Text(BELOW_THRESHOLD.into()));
+    assert_eq!(by("Older engine"), Cell::Empty);
+    let last = t.rows.last().expect("total");
+    assert_eq!(last.cells[col(&t, "total")], dec("3365"));
+    assert_eq!(last.cells[th], Cell::Empty);
+    let p = serde_json::json!({
+        "meta": {"exact": true},
+        "data": [
+            {"vendor_name": "Below", "tax_id": null, "address": "", "total_paidExact": "750.0000",
+             "reportable_totalExact": "750.0000", "reportable_meets_threshold": false},
+            {"vendor_name": "Above", "tax_id": null, "address": "", "total_paidExact": "2500.0000",
+             "reportable_totalExact": "2500.0000", "reportable_meets_threshold": true}
+        ],
+        "totalPaidExact": "3250.0000",
+        "totalReportableExact": "3250.0000"
+    });
+    let t = list_run::adapt(&q4(Source::Ap1099Prep), &p).expect("prep");
+    let th = col(&t, "threshold");
+    assert_eq!(t.rows[0].cells[th], Cell::Text(BELOW_THRESHOLD.into()));
+    assert_eq!(t.rows[1].cells[th], Cell::Empty);
+    assert_eq!(t.rows.len(), 3, "both vendors and the total");
+    assert_eq!(
+        t.rows[2].cells[col(&t, "reportable")],
+        dec("3250"),
+        "the engine's total"
+    );
+}
+
 /// The engine's `check_number` is a pg integer: the Check Register shows
 /// its digits (the P28 golden's check 5001 was blank).
 #[test]

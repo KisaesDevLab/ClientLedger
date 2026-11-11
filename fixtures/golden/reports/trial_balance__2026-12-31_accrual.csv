@@ -1,5 +1,5 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,86445.42,0
+account,1,accounts/acct:1010,1010 · Operating Checking,87045.42,0
 account,1,accounts/acct:1020,1020 · Savings,15450,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
 account,1,accounts/acct:1510,1510 · Vehicles,62012.34,0
@@ -28,6 +28,8 @@ account,1,accounts/acct:10150,10150 · Payments Clearing,2092.5,0
 account,1,accounts/acct:10200,10200 · Accounts Receivable,51065.73,0
 account,1,accounts/acct:20100,20100 · Accounts Payable,0,17361.53
 account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
-account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5950
+account,1,accounts/acct:30120,30120 · Retained Earnings,0,100
+account,1,accounts/row30,30120 · Retained Earnings (Prior Years),0,600
+account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5850
 account,1,accounts/acct:30170,30170 · Owner's Draw,353267.44,0
-grand,0,total,@reports.row.total,1336731.91,1336731.91
+grand,0,total,@reports.row.total,1337331.91,1337331.91

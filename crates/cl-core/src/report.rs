@@ -329,6 +329,13 @@ pub struct ReportFilters {
     /// Only rows without a contact (the aging's "(no client)" row).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_contact: bool,
+    /// Lines of every client but these (a client column's "All others"
+    /// cell, S6; the ledgers' `contact_id=others`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_contacts_than: Option<Vec<ContactId>>,
+    /// Lines with no tag at all (an untagged column's cell, S6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub untagged: bool,
 }
 
 /// What one report run asks of the engine: the resolved, concrete form of
@@ -357,6 +364,16 @@ pub struct ReportRequest {
     /// ranges are whole fiscal periods of the budget's year (Q-P28n).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_period: Option<u8>,
+    /// "Prior period": the previous period of each period range (or of
+    /// the single range), from the fiscal calendar (PR-6 B3). A balance
+    /// sheet compares with each range's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_ranges: Option<Vec<DateRange>>,
+    /// A 4-4-5 or 52-53 week calendar's fiscal year starts covering the
+    /// report's dates (U-213 `fiscal_year_start`, S1); `None` on a
+    /// calendar-month year, where the engine's start month agrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fiscal_year_starts: Option<Vec<CalendarDate>>,
 }
 
 impl ReportRequest {
@@ -374,6 +391,8 @@ impl ReportRequest {
             fiscal_year_start: None,
             budget_id: None,
             first_period: None,
+            prior_ranges: None,
+            fiscal_year_starts: None,
         }
     }
 }
@@ -475,14 +494,34 @@ pub struct ColumnHead {
     pub drill: Option<ColumnDrill>,
 }
 
+/// Which clients' lines a drill opens (S6: the engine's `contact_id`
+/// selectors).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContactScope {
+    /// Any client or none.
+    #[default]
+    Any,
+    /// One client's lines.
+    One(ContactId),
+    /// Lines with no client ("No client").
+    NoContact,
+    /// Lines of every client but these ("All others").
+    Others(Vec<ContactId>),
+}
+
 /// A column's part of a cell's drill.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnDrill {
-    /// The lines of one client.
-    Contact(ContactId),
+    /// The lines of a client column ("No client" and "All others" too).
+    Contact(ContactScope),
     /// The lines of one tag, or without a tag of a group.
     Tag(TagScope),
+    /// A balance column: the first day of the fiscal year its as-of date
+    /// falls in, where its net income's Profit & Loss starts (PR6-QA-2,
+    /// the engine's column `fiscalYearStart`).
+    IncomeFrom(CalendarDate),
     /// The column's cells have no lines behind them (a change, "All
     /// others", lines without a client).
     None,
@@ -635,8 +674,9 @@ pub enum Drill {
         from: Option<CalendarDate>,
         /// Last day.
         to: CalendarDate,
-        /// One client (a client column).
-        contact: Option<ContactId>,
+        /// The client column's clients.
+        #[serde(default)]
+        contact: ContactScope,
         /// The tag scope (tag split rows).
         tag: TagScope,
         /// The report's basis.
@@ -669,6 +709,24 @@ pub enum Drill {
         to: CalendarDate,
         /// The basis the sheet ran on.
         basis: Option<Basis>,
+        /// The sheet's adjusting lens (S3).
+        #[serde(default)]
+        adjusting: Option<Adjusting>,
+        /// The sheet's tag filter (S3).
+        #[serde(default)]
+        tag_ids: Vec<TagId>,
+    },
+    /// The lines of some transaction types on some accounts through a date
+    /// (S5: the entries that keep A/R and A/P on cash basis).
+    EntriesOfTypes {
+        /// Accounts.
+        account_ids: Vec<AccountId>,
+        /// The engine's transaction type names.
+        txn_types: Vec<String>,
+        /// Last day.
+        to: CalendarDate,
+        /// The report's basis.
+        basis: Option<Basis>,
     },
 }
 
@@ -679,16 +737,17 @@ impl Drill {
     #[must_use]
     pub fn for_cell(&self, column: &ColumnHead) -> Option<Drill> {
         let mut d = self.at(column);
-        match (column.drill, &mut d) {
+        match (&column.drill, &mut d) {
             (Some(ColumnDrill::None), _) => return None,
-            (Some(ColumnDrill::Contact(c)), Drill::Lines { contact, .. }) => *contact = Some(c),
+            (Some(ColumnDrill::Contact(c)), Drill::Lines { contact, .. }) => *contact = c.clone(),
             (Some(ColumnDrill::Tag(t)), Drill::Lines { tag, .. }) => {
                 // A row already scoped to a tag can't take a second one.
                 if *tag != TagScope::Any {
                     return None;
                 }
-                *tag = t;
+                *tag = *t;
             }
+            (Some(ColumnDrill::IncomeFrom(fy)), Drill::ProfitLoss { from, .. }) => *from = *fy,
             _ => {}
         }
         Some(d)
@@ -714,10 +773,27 @@ impl Drill {
                 account_ids: account_ids.clone(),
                 from: from.map(|_| r.from),
                 to: r.to,
-                contact: *contact,
+                contact: contact.clone(),
                 tag: *tag,
                 basis: *basis,
                 adjusting: *adjusting,
+            },
+            // A balance column's net income runs to its own as-of date.
+            (
+                Drill::ProfitLoss {
+                    from,
+                    basis,
+                    adjusting,
+                    tag_ids,
+                    ..
+                },
+                Some(r),
+            ) => Drill::ProfitLoss {
+                from: *from,
+                to: r.to,
+                basis: *basis,
+                adjusting: *adjusting,
+                tag_ids: tag_ids.clone(),
             },
             (Drill::Aging { contact, as_of, .. }, _) => match AgingBucket::of_column(&column.key) {
                 Some(bucket) => Drill::Aging {
@@ -796,8 +872,16 @@ pub struct ReportMeta {
     pub basis: Option<Basis>,
     /// The dates it ran on.
     pub dates: Option<ReportDates>,
-    /// The engine's cash-basis rules note (Q-P23z).
-    pub cash_basis_rules: Option<String>,
+    /// A plain note shown under the title and in file headers: an
+    /// `@key` the window translates (S5's cash-basis A/R and A/P line), or
+    /// a sentence the engine wrote for one report (Q-P24m's inventory
+    /// note). Never the engine's general cash-basis rules sentence, which
+    /// the owner dropped (Q-P28ai).
+    pub note: Option<String>,
+    /// What the note's link opens (S5: the entries that keep A/R and A/P
+    /// on cash basis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_drill: Option<Drill>,
     /// Rows were capped.
     pub truncated: Option<Truncated>,
     /// Rows of accounts the user can't see were left out (Q-157 hook).
@@ -1059,7 +1143,7 @@ mod tests {
             account_ids: vec![],
             from: Some(day(2026, 1, 1)),
             to: day(2026, 10, 31),
-            contact: None,
+            contact: ContactScope::Any,
             tag: TagScope::Any,
             basis: Some(Basis::Accrual),
             adjusting: None,
@@ -1077,7 +1161,7 @@ mod tests {
             account_ids: vec![],
             from: None,
             to: day(2026, 10, 31),
-            contact: None,
+            contact: ContactScope::Any,
             tag: TagScope::Any,
             basis: None,
             adjusting: None,

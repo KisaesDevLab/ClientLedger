@@ -143,6 +143,10 @@ pub struct StoryStep {
     /// Posted in the closed period with the practice password.
     #[serde(default)]
     pub closed_period: bool,
+    /// A journal entry's report basis (`cash` / `accrual`; both when
+    /// absent): the year-boundary slice's cash-only entry.
+    #[serde(default)]
+    pub basis: Option<String>,
 }
 
 /// The story fixture.
@@ -335,8 +339,18 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
         }
     };
     let one = Quantity::parse_wire("1").map_err(|_| missing("quantity"))?;
-    let plain = PostingOptions::default();
     for s in &story.steps {
+        // The closed period (the reclass, the year-boundary slice) posts
+        // with the practice password.
+        let plain = if s.closed_period {
+            PostingOptions {
+                closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
+                    crate::sample::SAMPLE_CLOSING_PASSWORD,
+                ))),
+            }
+        } else {
+            PostingOptions::default()
+        };
         let id = match s.kind.as_str() {
             "invoice" | "credit_memo" => {
                 let mut lines = Vec::new();
@@ -554,10 +568,16 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                         contact: None,
                     });
                 }
+                let basis = match s.basis.as_deref() {
+                    Some("cash") => Basis::Cash,
+                    Some("accrual") => Basis::Accrual,
+                    None => Basis::Both,
+                    Some(_) => return Err(missing(&s.id)),
+                };
                 let entry = NewJournalEntry::new_with(
                     s.date,
                     s.memo.clone(),
-                    Basis::Both,
+                    basis,
                     lines,
                     JeOptions {
                         number: None,
@@ -567,18 +587,9 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                     &cl_api::AccountRoles::default(),
                 )
                 .map_err(|_| missing(&s.id))?;
-                let opts = if s.closed_period {
-                    PostingOptions {
-                        closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
-                            crate::sample::SAMPLE_CLOSING_PASSWORD,
-                        ))),
-                    }
-                } else {
-                    PostingOptions::default()
-                };
                 session
                     .transactions()
-                    .create_journal_entry(&entry, &opts, IdempotencyKey::new())
+                    .create_journal_entry(&entry, &plain, IdempotencyKey::new())
                     .await?
                     .record
                     .id
@@ -811,12 +822,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_story_is_dated_after_october_except_the_closed_period_reclass() {
+    fn the_story_is_dated_after_october_except_the_closed_period_steps() {
         let s = ReportStory::load();
         let nov = CalendarDate::from_ymd(2026, 11, 1).expect("d");
         let dec31 = CalendarDate::from_ymd(2026, 12, 31).expect("d");
+        let fy = CalendarDate::from_ymd(2026, 1, 1).expect("d");
+        let jan31 = CalendarDate::from_ymd(2026, 1, 31).expect("d");
         for step in &s.steps {
-            if step.closed_period {
+            if step.closed_period && step.date <= jan31 {
+                // The year-boundary slice (PR-6 T2): documents and entries
+                // in December 2025, settled in January 2026 with no lines
+                // of their own, so no 2026 accrual figure moves.
+                assert!(
+                    step.date < fy || step.lines.is_empty(),
+                    "{} has 2026 lines",
+                    step.id
+                );
+            } else if step.closed_period {
                 // The reclass moves a balance between two asset accounts:
                 // no income or expense, so every mockup figure holds.
                 assert!(step.date <= CalendarDate::from_ymd(2026, 9, 30).expect("d"));

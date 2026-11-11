@@ -9,15 +9,13 @@
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ContactId, TagGroupId, TagId};
 use cl_core::report::{
-    Cell, ColumnDrill, ColumnHead, ColumnKind, DateRange, Drill, ReportMeta, ReportRequest,
-    ReportRow, ReportTable, RowKind, RowPath, TagScope,
+    Cell, ColumnDrill, ColumnHead, ColumnKind, ContactScope, DateRange, Drill, ReportMeta,
+    ReportRequest, ReportRow, ReportTable, RowKind, RowPath, TagScope,
 };
 use rust_decimal::Decimal;
 use serde_json::Value;
 
-use super::exact::{
-    account_caption, date, decimal, list, meta_basis, meta_cash_rules, require_exact, shape, text,
-};
+use super::exact::{account_caption, date, decimal, list, meta_basis, require_exact, shape, text};
 use super::row;
 use super::statements::{MAX_DRILL_ACCOUNTS, drill_tag};
 use crate::errors::ApiError;
@@ -30,6 +28,8 @@ pub fn is_columns(v: &Value) -> bool {
 
 /// One engine column and where its values sit in the table's cells.
 struct Col {
+    /// Left out of the table (the YTD column's day-count prior, Q-PR6a).
+    skip: bool,
     percent: bool,
     /// The % of income column after it.
     with_pct: bool,
@@ -67,21 +67,53 @@ fn column_drill(d: &Value) -> Result<Option<ColumnDrill>, ApiError> {
         return Ok(Some(ColumnDrill::None));
     }
     if let Some(c) = text(d, "contact_id") {
-        // "No client" and "All others" select lines a drill can't name yet.
-        return Ok(Some(
-            ContactId::parse(c).map_or(ColumnDrill::None, ColumnDrill::Contact),
-        ));
+        // One client, "No client", or "All others" but the named ones (S6).
+        let scope = match c {
+            "none" => ContactScope::NoContact,
+            "others" => ContactScope::Others(
+                text(d, "exclude_contact_ids")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| ContactId::parse(s).map_err(|_| shape("drill.exclude_contact_ids")))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            _ => ContactScope::One(ContactId::parse(c).map_err(|_| shape("drill.contact_id"))?),
+        };
+        return Ok(Some(ColumnDrill::Contact(scope)));
     }
     Ok(tag_scope(d)?.map(ColumnDrill::Tag))
 }
 
-fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<Col>), ApiError> {
+fn columns(
+    v: &Value,
+    req: &ReportRequest,
+    balance: bool,
+    pct: bool,
+) -> Result<(Vec<ColumnHead>, Vec<Col>), ApiError> {
+    use cl_core::report::Extra;
+    // The pinned engine compares the YTD column with the same number of
+    // days before it, whatever prior ranges the periods send: on "Prior
+    // period" the YTD column stands alone (Q-PR6a).
+    let ytd_prior_is_days =
+        req.extras.contains(&Extra::PriorPeriod) && !req.extras.contains(&Extra::PriorYear);
     let mut heads = Vec::new();
     let mut cols = Vec::new();
     for c in list(v, "columns")? {
         let key = text(c, "key").ok_or(shape("columns.key"))?.to_string();
         let percent = text(c, "valueType") == Some("percent");
         let kind = text(c, "kind").unwrap_or("");
+        if ytd_prior_is_days
+            && text(c, "baseKey") == Some("ytd")
+            && matches!(kind, "prior" | "change" | "pct_change")
+        {
+            cols.push(Col {
+                skip: true,
+                percent,
+                with_pct: false,
+            });
+            continue;
+        }
         let range = if balance {
             match c
                 .get("asOf")
@@ -102,6 +134,16 @@ fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<
                 _ => None,
             }
         };
+        let mut drill = column_drill(c.get("drill").unwrap_or(&Value::Null))?;
+        // An as-of column says where its net income's year starts
+        // (PR6-QA-2); a change column has no drill at all.
+        if balance
+            && drill.is_none()
+            && let Some(fy) =
+                text(c, "fiscalYearStart").and_then(|s| CalendarDate::parse_wire(s).ok())
+        {
+            drill = Some(ColumnDrill::IncomeFrom(fy));
+        }
         heads.push(ColumnHead {
             key: key.clone(),
             caption: text(c, "caption").unwrap_or("").to_string(),
@@ -111,7 +153,7 @@ fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<
                 ColumnKind::Amount
             },
             range,
-            drill: column_drill(c.get("drill").unwrap_or(&Value::Null))?,
+            drill,
         });
         let with_pct = pct && !percent && kind != "change";
         if with_pct {
@@ -123,7 +165,11 @@ fn columns(v: &Value, balance: bool, pct: bool) -> Result<(Vec<ColumnHead>, Vec<
                 drill: Some(ColumnDrill::None),
             });
         }
-        cols.push(Col { percent, with_pct });
+        cols.push(Col {
+            skip: false,
+            percent,
+            with_pct,
+        });
     }
     Ok((heads, cols))
 }
@@ -141,6 +187,9 @@ fn cells(cols: &[Col], values: &Value, pct: Option<&Value>) -> Result<Vec<Cell>,
     };
     let mut out = Vec::new();
     for (i, c) in cols.iter().enumerate() {
+        if c.skip {
+            continue;
+        }
         let x = opt_dec(&values[i], "valuesExact")?;
         out.push(match (c.percent, x) {
             (true, x) => Cell::Percent(x),
@@ -161,6 +210,9 @@ struct Builder<'r> {
     balance: bool,
     to: CalendarDate,
     from: Option<CalendarDate>,
+    /// A sheet whose every as-of column says where its year starts: the
+    /// first one (each column puts in its own, [`ColumnDrill::IncomeFrom`]).
+    income_from: Option<CalendarDate>,
 }
 
 /// One open parent: depth, path key, caption, its roll-up and its ids.
@@ -185,7 +237,7 @@ impl Builder<'_> {
             account_ids: ids,
             from: if self.balance { None } else { self.from },
             to: self.to,
-            contact: None,
+            contact: ContactScope::Any,
             tag,
             basis: self.req.basis,
             adjusting: self.req.filters.adjusting,
@@ -295,7 +347,22 @@ impl Builder<'_> {
                     );
                     r.expandable = rollup.is_some() || split;
                     let calculated = e.get("calculated") == Some(&Value::Bool(true));
-                    r.drill = if calculated { None } else { self.row_drill(e)? };
+                    r.drill = if calculated {
+                        // The current year's net income opens the P&L of
+                        // each column's fiscal year to its date (PR6-QA-2);
+                        // the prior years' row has none.
+                        self.income_from
+                            .filter(|_| r.caption == "@reports.bs.net_income")
+                            .map(|from| Drill::ProfitLoss {
+                                from,
+                                to: self.to,
+                                basis: self.req.basis,
+                                adjusting: self.req.filters.adjusting,
+                                tag_ids: self.req.filters.tag_ids.clone(),
+                            })
+                    } else {
+                        self.row_drill(e)?
+                    };
                     rows.push(r);
                     let own: Vec<AccountId> = account.into_iter().collect();
                     ids.extend(own.iter().copied());
@@ -347,14 +414,34 @@ fn header(key: &str, caption: &str, width: usize) -> ReportRow {
 pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTable, ApiError> {
     require_exact(v)?;
     let pct_totals = v.get("pctOfIncomeTotalsExact").filter(|p| p.is_object());
-    let (heads, cols) = columns(v, balance, pct_totals.is_some())?;
+    let (heads, cols) = columns(v, req, balance, pct_totals.is_some())?;
     let span = req.dates.span().ok_or(shape("dates"))?;
+    // Every drilling column must know its year start, or no column's net
+    // income drills (a missing one would open the wrong year).
+    let income_from = if balance {
+        let starts: Vec<Option<CalendarDate>> = heads
+            .iter()
+            .filter(|h| h.kind == ColumnKind::Amount && h.drill != Some(ColumnDrill::None))
+            .map(|h| match h.drill {
+                Some(ColumnDrill::IncomeFrom(fy)) => Some(fy),
+                _ => None,
+            })
+            .collect();
+        if starts.iter().all(Option::is_some) {
+            starts.first().copied().flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let b = Builder {
         req,
         cols: &cols,
         balance,
         to: span.to,
         from: Some(span.from),
+        income_from,
     };
     let totals = v.get("totalsExact").ok_or(shape("totalsExact"))?;
     let total_cells = |key: &'static str| -> Result<Option<Vec<Cell>>, ApiError> {
@@ -459,7 +546,14 @@ pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTabl
                 (*total_title).to_string(),
                 section_total,
             );
-            t.drill = b.lines(ids, None);
+            // B2: a total with a calculated row (net income, prior years)
+            // or a Retained Earnings line carrying prior income has no
+            // ledger that sums to it.
+            let unledgered = entries.iter().any(|e| {
+                e.get("calculated") == Some(&Value::Bool(true))
+                    || e.get(super::statements::PRIOR_INCOME_FLAG) == Some(&Value::Bool(true))
+            });
+            t.drill = if unledgered { None } else { b.lines(ids, None) };
             rows.push(t);
         }
         if !balance
@@ -510,7 +604,6 @@ pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTabl
         meta: ReportMeta {
             basis: meta_basis(v).or(req.basis),
             dates: Some(req.dates.clone()),
-            cash_basis_rules: meta_cash_rules(v),
             ..ReportMeta::default()
         },
     })
@@ -591,6 +684,39 @@ mod tests {
         let d = acct.drill.as_ref().expect("drill");
         assert!(d.for_cell(change).is_none());
         assert!(d.for_cell(&t.columns[0]).is_some());
+        // "Prior year" keeps the YTD comparison.
+        let mut py = r.clone();
+        py.extras.insert(cl_core::report::Extra::PriorYear);
+        let t = table(&v, &py, false).expect("table");
+        assert!(t.columns.iter().any(|c| c.key == "ytd_prior"));
+    }
+
+    /// Q-PR6a: on "Prior period" the engine compares the YTD column with
+    /// the same number of days before it, so the YTD column stands alone.
+    #[test]
+    fn prior_period_leaves_out_the_ytd_day_count_comparison() {
+        let v = fixture("columns_profit_loss_periods");
+        let mut r = req(
+            Source::ProfitLoss,
+            ReportDates::Ranges(vec![
+                DateRange {
+                    from: d(2033, 3, 1),
+                    to: d(2033, 3, 15),
+                },
+                DateRange {
+                    from: d(2033, 3, 16),
+                    to: d(2033, 3, 31),
+                },
+            ]),
+        );
+        r.extras.insert(cl_core::report::Extra::PriorPeriod);
+        let t = table(&v, &r, false).expect("table");
+        assert!(t.columns.iter().any(|c| c.key == "ytd"));
+        assert!(t.columns.iter().any(|c| c.key == "p0_prior"));
+        assert!(!t.columns.iter().any(|c| c.key.starts_with("ytd_prior")
+            || c.key.starts_with("ytd_change")
+            || c.key.starts_with("ytd_pct_change")));
+        assert!(t.rows.iter().all(|r| r.cells.len() == t.columns.len()));
     }
 
     #[test]
@@ -666,11 +792,98 @@ mod tests {
             .iter()
             .find(|r| r.caption == "@reports.bs.net_income")
             .expect("ni");
-        assert!(ni.drill.is_none(), "calculated rows have no drill");
+        assert!(
+            ni.drill.is_none(),
+            "an engine that doesn't say where each column's year starts: no drill"
+        );
+    }
+
+    /// PR6-QA-2: with Prior period on, each as-of column's net income
+    /// opens the P&L of its own fiscal year to its own date (the engine's
+    /// column `fiscalYearStart`); $ and % change and the prior years' row
+    /// stay without a drill.
+    #[test]
+    fn each_balance_column_s_net_income_opens_its_own_year() {
+        let mut v = fixture("columns_balance_sheet_periods");
+        for (i, fy) in [
+            (0, "2033-01-01"),
+            (1, "2032-01-01"),
+            (4, "2033-01-01"),
+            (5, "2032-01-01"),
+        ] {
+            v["columns"][i]["fiscalYearStart"] = Value::String(fy.into());
+        }
+        let mut r = req(
+            Source::BalanceSheet,
+            ReportDates::Ranges(vec![
+                DateRange {
+                    from: d(2033, 2, 1),
+                    to: d(2033, 2, 28),
+                },
+                DateRange {
+                    from: d(2033, 3, 1),
+                    to: d(2033, 3, 31),
+                },
+            ]),
+        );
+        r.basis = Some(Basis::Cash);
+        let t = table(&v, &r, true).expect("table");
+        let ni = t
+            .rows
+            .iter()
+            .find(|r| r.caption == "@reports.bs.net_income")
+            .expect("ni");
+        let d0 = ni.drill.as_ref().expect("net income drills");
+        let at = |key: &str| {
+            let c = t.columns.iter().find(|c| c.key == key).expect("column");
+            d0.for_cell(c)
+        };
+        let pl = |from, to| Drill::ProfitLoss {
+            from,
+            to,
+            basis: Some(Basis::Cash),
+            adjusting: None,
+            tag_ids: Vec::new(),
+        };
+        assert_eq!(at("p0"), Some(pl(d(2033, 1, 1), d(2033, 2, 28))));
+        assert_eq!(at("p0_prior"), Some(pl(d(2032, 1, 1), d(2032, 2, 28))));
+        assert_eq!(at("p1"), Some(pl(d(2033, 1, 1), d(2033, 3, 31))));
+        assert_eq!(at("p1_prior"), Some(pl(d(2032, 1, 1), d(2032, 3, 31))));
+        assert_eq!(at("p0_change"), None);
+        assert_eq!(at("p0_pct_change"), None);
+        let prior_years = t
+            .rows
+            .iter()
+            .find(|r| r.caption == "@reports.bs.retained_prior");
+        assert!(prior_years.is_none_or(|r| r.drill.is_none()));
+        // Account rows still open their lines on the sheet's basis.
+        let acct = t
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Account && r.drill.is_some())
+            .expect("account");
+        let Some(Drill::Lines { basis, to, .. }) =
+            acct.drill.as_ref().and_then(|x| x.for_cell(&t.columns[1]))
+        else {
+            panic!("lines")
+        };
+        assert_eq!((basis, to), (Some(Basis::Cash), d(2032, 2, 28)));
+        // One column without a year start: no column's net income drills.
+        v["columns"][5]
+            .as_object_mut()
+            .expect("column")
+            .remove("fiscalYearStart");
+        let t = table(&v, &r, true).expect("table");
+        assert!(
+            t.rows
+                .iter()
+                .find(|r| r.caption == "@reports.bs.net_income")
+                .is_some_and(|r| r.drill.is_none())
+        );
     }
 
     #[test]
-    fn client_columns_without_a_client_have_no_drill() {
+    fn client_columns_without_a_client_drill_with_the_engine_s_selector() {
         let v = fixture("columns_profit_loss_by_contact");
         let r = req(
             Source::ProfitLoss,
@@ -680,7 +893,22 @@ mod tests {
             }),
         );
         let t = table(&v, &r, false).expect("table");
-        assert_eq!(t.columns[0].drill, Some(ColumnDrill::None));
+        // S6: "No client" opens the lines without one.
+        assert_eq!(
+            t.columns[0].drill,
+            Some(ColumnDrill::Contact(ContactScope::NoContact))
+        );
         assert_eq!(t.columns[1].drill, None);
+        // "All others" opens every client's lines but the named columns'.
+        let mut v = v;
+        v["columns"][0]["drill"] = serde_json::json!({"contact_id": "others",
+            "exclude_contact_ids": "11111111-1111-4111-8111-111111111111"});
+        let t = table(&v, &r, false).expect("table");
+        assert_eq!(
+            t.columns[0].drill,
+            Some(ColumnDrill::Contact(ContactScope::Others(vec![
+                ContactId::parse("11111111-1111-4111-8111-111111111111").expect("id")
+            ])))
+        );
     }
 }

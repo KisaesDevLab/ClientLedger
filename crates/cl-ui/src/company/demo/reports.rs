@@ -121,6 +121,8 @@ pub(crate) fn percent1(part: Decimal, base: Decimal) -> Option<String> {
 struct Lens {
     tags: Vec<TagId>,
     untagged_in: Option<BTreeSet<TagId>>,
+    /// Lines with no tag at all (an untagged cell's drill, S6).
+    untagged: bool,
     /// The ledger's transaction types (the engine's names).
     types: Vec<String>,
     /// Line sizes |debit - credit| at least / at most (the demo's stand-in
@@ -134,6 +136,7 @@ impl Lens {
         Lens {
             tags: req.filters.tag_ids.clone(),
             untagged_in: req.filters.untagged_in_group.map(group_tags),
+            untagged: req.filters.untagged,
             types: req.filters.txn_types.clone(),
             amount_min: req.filters.amount_min,
             amount_max: req.filters.amount_max,
@@ -142,6 +145,9 @@ impl Lens {
 
     fn keeps(&self, p: &Post) -> bool {
         if !self.tags.is_empty() && !p.tag.is_some_and(|t| self.tags.contains(&t)) {
+            return false;
+        }
+        if self.untagged && p.tag.is_some() {
             return false;
         }
         if !self.types.is_empty() && !self.types.contains(&p.txn_type) {
@@ -574,9 +580,18 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             "from": r.map(|r| r.from.to_wire()), "to": r.map(|r| r.to.to_wire()), "drill": d})
     };
     let mut cols: Vec<Col> = Vec::new();
-    let add_prior = |cols: &mut Vec<Col>, base: usize, r: DateRange| -> Option<()> {
+    // The engine's rule: a period's prior is its `prior_ranges` entry when
+    // sent (B3), else the day count; the YTD column always the day count.
+    let add_prior = |cols: &mut Vec<Col>,
+                     base: usize,
+                     r: DateRange,
+                     explicit: Option<DateRange>|
+     -> Option<()> {
         let year = prior?;
-        let pr = prior_range(r, year)?;
+        let pr = match explicit {
+            Some(e) if !year => e,
+            _ => prior_range(r, year)?,
+        };
         let key = cols.get(base)?.head.get("key")?.as_str()?.to_string();
         let mut h = head(
             &format!("{key}_prior"),
@@ -670,7 +685,8 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             head: head(&key, &caption, kind, Some(*r), drill(*r)),
             src: Src::Sums(*r),
         });
-        add_prior(&mut cols, idx, *r);
+        let explicit = req.prior_ranges.as_ref().and_then(|p| p.get(i)).copied();
+        add_prior(&mut cols, idx, *r, explicit);
     }
     if period_columns && rs.len() > 1 {
         cols.push(Col {
@@ -688,7 +704,7 @@ fn pl_columns(req: &ReportRequest) -> Option<Vec<Col>> {
             head: head("ytd", "YTD", "ytd", Some(r), drill(r)),
             src: Src::Sums(r),
         });
-        add_prior(&mut cols, idx, r);
+        add_prior(&mut cols, idx, r, None);
     }
     Some(cols)
 }
@@ -1213,6 +1229,11 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
         .dates
         .span()
         .ok_or(ApiError::Local(LocalValidation::BadRange))?;
+    // The demo's lines carry no client: it can't play the "No client" or
+    // "All others" ledgers (S6), so those cells draw no link.
+    if req.filters.no_contact || req.filters.other_contacts_than.is_some() {
+        return Err(unsupported);
+    }
     let b = Books::load(d);
     let columns = matches!(req.dates, ReportDates::Ranges(_))
         || !req.extras.is_empty()
@@ -1229,7 +1250,18 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
         Source::GeneralLedger if !columns => general_ledger(&b, req, span),
         _ => return Err(unsupported),
     };
-    adapt_exact(req, &v)
+    let mut table = adapt_exact(req, &v)?;
+    // What `Reports::run` adds from the chart's roles (B2, S5).
+    if cl_api::resources::reports::adapters::statements::wants_roles(req, &v) {
+        let roles = cl_api::resources::reports::adapters::statements::AccountRoles::of(&b.chart);
+        cl_api::resources::reports::adapters::statements::finish_balances(
+            req,
+            &v,
+            &mut table,
+            Some(&roles),
+        );
+    }
+    Ok(table)
 }
 
 #[cfg(test)]

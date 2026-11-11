@@ -1,5 +1,5 @@
 {
-  "_comment": "P28 golden company (Q-P28m): real documents posted on top of the practice company in a test tenant only, dated 11/01-12/31/2026 so October still matches the mockup. Synthetic. Accounts by number, clients and vendors by name, tags by name.",
+  "_comment": "P28 golden company (Q-P28m): real documents posted on top of the practice company in a test tenant only, dated 11/01-12/31/2026 so October still matches the mockup, plus a year-boundary slice (PR-6 T2: December 2025 documents and entries settled in January 2026, posted with the closing password; no 2026 accrual income or expense). Synthetic. Accounts by number, clients and vendors by name, tags by name.",
   "tagGroups": [
     {
       "name": "Job site",
@@ -14,6 +14,38 @@
     }
   ],
   "steps": [
+    {
+      "kind": "invoice", "id": "Y1", "date": "2025-12-15", "client": "Riverbend HOA", "closedPeriod": true,
+      "lines": [{ "account": "4000", "amount": "1000.00" }]
+    },
+    {
+      "kind": "bill", "id": "Y2", "date": "2025-12-20", "due": "2026-01-19", "vendor": "Ozark Mulch Supply",
+      "number": "OMS-0997", "closedPeriod": true,
+      "lines": [{ "account": "5110", "amount": "400.00" }]
+    },
+    {
+      "kind": "journal_entry", "id": "Y3", "date": "2025-12-22", "memo": "Cash sale kept on cash basis only", "basis": "cash",
+      "closedPeriod": true,
+      "lines": [
+        { "account": "1010", "debit": "250.00" },
+        { "account": "4000", "credit": "250.00" }
+      ]
+    },
+    {
+      "kind": "journal_entry", "id": "Y4", "date": "2025-12-31", "memo": "Owner equity moved to retained earnings", "closedPeriod": true,
+      "lines": [
+        { "account": "30160", "debit": "100.00" },
+        { "account": "30120", "credit": "100.00" }
+      ]
+    },
+    {
+      "kind": "pay_bills", "id": "Y5", "date": "2026-01-05", "closedPeriod": true,
+      "bills": [{ "bill": "Y2", "cash": "400.00" }]
+    },
+    {
+      "kind": "payment", "id": "Y6", "date": "2026-01-10", "client": "Riverbend HOA", "amount": "1000.00", "closedPeriod": true,
+      "apply": [{ "invoice": "Y1", "amount": "1000.00" }]
+    },
     {
       "kind": "bill", "id": "B1", "date": "2026-11-03", "due": "2026-12-03", "vendor": "Ozark Mulch Supply",
       "number": "OMS-1182",

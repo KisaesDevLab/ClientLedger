@@ -18,7 +18,7 @@ use cl_core::report::{
 };
 use serde_json::Value;
 
-use super::exact::{decimal, meta_basis, meta_cash_rules, require_exact, shape, text};
+use super::exact::{decimal, meta_basis, require_exact, shape, text};
 use super::ledger::type_label;
 use super::{col, row};
 use crate::errors::{ApiError, LocalValidation};
@@ -52,6 +52,29 @@ pub(crate) enum F {
     Code(&'static str, &'static str),
     /// A taxpayer id: the last four digits only (Q-P28p).
     Last4(&'static str),
+    /// The engine's "meets the year's 1099 threshold" flag: `false` says
+    /// the vendor is below it (PR6-QA-4); `true` or no flag is blank.
+    BelowThreshold(&'static str),
+}
+
+/// The words for a vendor below the 1099 filing threshold, without the
+/// amount (the 1099 Preparation's engine flag doesn't say which).
+pub const BELOW_THRESHOLD: &str = "@reports.1099.below_threshold";
+
+/// The words for a vendor below a known threshold: `@key $2,000`.
+fn below_threshold_of(threshold: rust_decimal::Decimal) -> String {
+    let style = cl_core::MoneyStyle {
+        symbol: true,
+        ..cl_core::MoneyStyle::default()
+    };
+    let shown = cl_core::report::display_amount(threshold, style);
+    // Whole dollars read "$2,000", not "$2,000.00".
+    let shown = if threshold.fract().is_zero() {
+        shown.trim_end_matches(".00").to_string()
+    } else {
+        shown
+    };
+    format!("@reports.1099.below_threshold_of {shown}")
 }
 
 /// One column.
@@ -570,6 +593,13 @@ const PREP_1099: Layout = Layout {
             ),
             "/totalReportableExact",
         ),
+        // PR6-QA-4: listed, but marked when below the year's threshold.
+        c(
+            "threshold",
+            "@reports.col.threshold_1099",
+            ColumnKind::Text,
+            F::BelowThreshold("reportable_meets_threshold"),
+        ),
     ],
     drill: RowDrill::None,
     narrow: None,
@@ -664,6 +694,10 @@ pub(crate) fn read(v: &Value, f: F) -> Result<Cell, ApiError> {
             text(v, k).map_or(Cell::Empty, |code| Cell::Text(code_label(prefix, code)))
         }
         F::Last4(k) => text(v, k).map_or(Cell::Empty, |t| Cell::Text(last4(t))),
+        F::BelowThreshold(k) => match v.get(k) {
+            Some(Value::Bool(false)) => Cell::Text(BELOW_THRESHOLD.into()),
+            _ => Cell::Empty,
+        },
     })
 }
 
@@ -718,7 +752,6 @@ fn meta(v: &Value, req: &ReportRequest) -> ReportMeta {
     ReportMeta {
         basis: meta_basis(v).or(req.basis),
         dates: Some(req.dates.clone()),
-        cash_basis_rules: meta_cash_rules(v),
         ..ReportMeta::default()
     }
 }
@@ -1027,8 +1060,13 @@ pub fn vendor_1099_summary(v: &Value, req: &ReportRequest) -> Result<ReportTable
     let catalog = super::exact::list(v, "boxCatalog")?;
     let mut columns = vec![col("tin", "@reports.col.tin", ColumnKind::Text)];
     let mut boxes = Vec::new();
+    // Each box's threshold for the year (PR6-QA-4).
+    let mut thresholds = std::collections::HashMap::new();
     for b in catalog {
         let code = text(b, "box").ok_or(shape("boxCatalog.box"))?;
+        if let Some(t) = text(b, "thresholdExact") {
+            thresholds.insert(code.to_string(), decimal(t, "boxCatalog.thresholdExact")?);
+        }
         // `1099-NEC 1 · Nonemployee compensation`: owner-facing, from the
         // engine's catalog.
         let caption = format!(
@@ -1040,6 +1078,11 @@ pub fn vendor_1099_summary(v: &Value, req: &ReportRequest) -> Result<ReportTable
         boxes.push(code.to_string());
     }
     columns.push(col("total", "@reports.col.total", ColumnKind::Amount));
+    columns.push(col(
+        "threshold",
+        "@reports.col.threshold_1099",
+        ColumnKind::Text,
+    ));
     let box_cell = |m: Option<&Value>, code: &str| -> Result<Cell, ApiError> {
         match m.and_then(|m| m.get(code)) {
             None | Some(Value::Null) => Ok(Cell::Empty),
@@ -1054,6 +1097,26 @@ pub fn vendor_1099_summary(v: &Value, req: &ReportRequest) -> Result<ReportTable
             cells.push(box_cell(e.get("boxes"), b)?);
         }
         cells.push(exact_at(e, "totalExact")?);
+        // Below the threshold: the engine's flag says so; the amount is
+        // named when every box the vendor has shares one threshold.
+        cells.push(match e.get("meetsThreshold") {
+            Some(Value::Bool(false)) => {
+                let mut of = boxes
+                    .iter()
+                    .filter(|b| {
+                        e.get("boxes")
+                            .and_then(|m| m.get(b.as_str()))
+                            .is_some_and(|x| !x.is_null())
+                    })
+                    .map(|b| thresholds.get(b).copied());
+                let first = of.next().flatten();
+                match first {
+                    Some(t) if of.all(|x| x == Some(t)) => Cell::Text(below_threshold_of(t)),
+                    _ => Cell::Text(BELOW_THRESHOLD.into()),
+                }
+            }
+            _ => Cell::Empty,
+        });
         rows.push(row(
             RowKind::Detail,
             1,
@@ -1071,6 +1134,7 @@ pub fn vendor_1099_summary(v: &Value, req: &ReportRequest) -> Result<ReportTable
         Some(Value::String(s)) => Cell::Amount(decimal(s, "totalsExact.total")?),
         _ => return Err(shape("totalsExact.total")),
     });
+    cells.push(Cell::Empty);
     rows.push(row(
         RowKind::Grand,
         0,

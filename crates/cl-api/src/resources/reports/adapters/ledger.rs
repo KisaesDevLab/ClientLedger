@@ -13,7 +13,7 @@ use cl_core::report::{
 use serde_json::Value;
 
 use super::exact::{
-    account_caption, amount, cell, date, id, list, meta_basis, meta_cash_rules, require_exact, text,
+    account_caption, amount, cell, date, id, list, meta_basis, require_exact, text,
 };
 use super::{col, row};
 use crate::errors::ApiError;
@@ -189,8 +189,9 @@ pub fn general_ledger(
         meta: ReportMeta {
             basis: meta_basis(v).or(req.basis),
             dates: Some(req.dates.clone()),
-            cash_basis_rules: meta_cash_rules(v),
             truncated,
+            note: None,
+            note_drill: None,
             hidden_notice: false,
         },
     })
@@ -218,7 +219,7 @@ fn split_rows(
             account_ids: vec![acc],
             from: Some(range.from),
             to: range.to,
-            contact: None,
+            contact: cl_core::report::ContactScope::Any,
             tag,
             basis: req.basis,
             adjusting: req.filters.adjusting,

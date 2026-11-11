@@ -143,6 +143,13 @@ pub fn resolve(
         None
     };
     let f = &opts.filters;
+    // A memorized report from before Q-PR6b may carry a tag on the Balance
+    // Sheet or Trial Balance: the report doesn't take one any more.
+    let tags = spec.filters.contains(&super::spec::FilterKind::Tags)
+        || !matches!(
+            spec.source,
+            cl_core::report::Source::BalanceSheet | cl_core::report::Source::TrialBalance
+        );
     let amount = |s: &Option<String>| -> Result<_, ResolveError> {
         s.as_deref()
             .map(|s| {
@@ -166,7 +173,7 @@ pub fn resolve(
     req.filters = ReportFilters {
         account_ids: f.account_ids.clone(),
         contact_ids: f.contact_ids.clone(),
-        tag_ids: f.tag_ids.clone(),
+        tag_ids: if tags { f.tag_ids.clone() } else { Vec::new() },
         item_ids: f.item_ids.clone(),
         amount_min,
         amount_max,
@@ -178,12 +185,226 @@ pub fn resolve(
             .bucket
             .filter(|b| *b != cl_core::report::AgingBucket::Total),
         no_contact: f.no_contact,
+        other_contacts_than: f.other_contacts_than.clone(),
+        untagged: f.untagged,
     };
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;
     req.budget_id.clone_from(&opts.budget_id);
     req.first_period = first_period;
+    // "Prior period" is the previous month, fiscal period, quarter or year
+    // (B3), not the engine's default of the same number of days before.
+    if req.extras.contains(&cl_core::report::Extra::PriorPeriod)
+        && !req.extras.contains(&cl_core::report::Extra::PriorYear)
+    {
+        let balance = spec.dates == DateMode::AsOf;
+        req.prior_ranges = prior_ranges(&req.dates, columns, span, *fiscal, balance);
+    }
+    req.fiscal_year_starts = retail_year_starts(&req, *fiscal);
     Ok(req)
+}
+
+/// The fiscal year starts covering a balance report's or ledger's dates
+/// on a 4-4-5 or 52-53 week calendar (S1, U-213 `fiscal_year_start`): the
+/// engine otherwise splits the year at the first of its start month.
+/// `None` on a calendar-month year or for other reports.
+fn retail_year_starts(req: &ReportRequest, fiscal: FiscalYearSpec) -> Option<Vec<CalendarDate>> {
+    use cl_core::report::Source;
+    if !matches!(fiscal, FiscalYearSpec::Retail { .. })
+        || !matches!(
+            req.source,
+            Source::BalanceSheet | Source::TrialBalance | Source::GeneralLedger
+        )
+    {
+        return None;
+    }
+    let mut days: Vec<CalendarDate> = Vec::new();
+    let mut add = |r: &DateRange| {
+        days.push(r.from);
+        days.push(r.to);
+    };
+    match &req.dates {
+        ReportDates::Range(r) => add(r),
+        ReportDates::Ranges(v) => v.iter().for_each(&mut add),
+        ReportDates::AsOf(d) => days.push(*d),
+        ReportDates::None => {}
+    }
+    if let Some(p) = &req.prior_ranges {
+        for r in p {
+            days.push(r.from);
+            days.push(r.to);
+        }
+    }
+    let mut starts: Vec<CalendarDate> = days
+        .into_iter()
+        .filter_map(|d| fiscal.year_containing(d).ok().map(|y| y.start))
+        .collect();
+    starts.sort();
+    starts.dedup();
+    (!starts.is_empty() && starts.len() <= 50).then_some(starts)
+}
+
+/// A calendar unit a span or column can be a whole (or a part) of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unit {
+    /// A calendar month (columns by month).
+    Month,
+    /// A fiscal period (a "month" on the fiscal calendar, 4-4-5 aware).
+    FiscalPeriod,
+    /// A fiscal quarter.
+    Quarter,
+    /// A fiscal year.
+    Year,
+}
+
+impl Unit {
+    /// The unit's period containing `at`.
+    fn around(self, at: CalendarDate, fiscal: FiscalYearSpec) -> Result<DateRange, FiscalError> {
+        Ok(match self {
+            Unit::Month => DateRange {
+                from: at.start_of_month(),
+                to: at.end_of_month(),
+            },
+            Unit::FiscalPeriod => {
+                let p = fiscal.period_containing(at)?;
+                DateRange {
+                    from: p.start,
+                    to: p.end,
+                }
+            }
+            Unit::Quarter => {
+                let fy = fiscal.year_containing(at)?;
+                let q = fiscal
+                    .quarters(&fy)?
+                    .into_iter()
+                    .find(|q| q.contains(at))
+                    .ok_or(FiscalError::OutOfRange)?;
+                DateRange {
+                    from: q.start,
+                    to: q.end,
+                }
+            }
+            Unit::Year => {
+                let fy = fiscal.year_containing(at)?;
+                DateRange {
+                    from: fy.start,
+                    to: fy.end,
+                }
+            }
+        })
+    }
+
+    /// The unit's period before the one containing `at`.
+    fn before(self, at: CalendarDate, fiscal: FiscalYearSpec) -> Result<DateRange, FiscalError> {
+        let this = self.around(at, fiscal)?;
+        let prev_day = this
+            .from
+            .add_days(-1)
+            .map_err(|_| FiscalError::OutOfRange)?;
+        self.around(prev_day, fiscal)
+    }
+
+    /// The unit of a column cut by `by`.
+    const fn of_columns(by: ColumnBy) -> Option<Unit> {
+        match by {
+            ColumnBy::Month => Some(Unit::Month),
+            ColumnBy::FiscalPeriod => Some(Unit::FiscalPeriod),
+            ColumnBy::Quarter => Some(Unit::Quarter),
+            ColumnBy::Year => Some(Unit::Year),
+            _ => None,
+        }
+    }
+
+    /// The smallest unit `span` starts and stays inside of (a whole month,
+    /// "month to date", a whole quarter, year to date, ...), or `None` for
+    /// custom dates.
+    fn of_span(span: DateRange, fiscal: FiscalYearSpec) -> Option<Unit> {
+        [Unit::FiscalPeriod, Unit::Month, Unit::Quarter, Unit::Year]
+            .into_iter()
+            .find(|u| {
+                u.around(span.from, fiscal)
+                    .is_ok_and(|p| p.from == span.from && span.to <= p.to)
+            })
+    }
+}
+
+/// The same days `r` covers in its unit's period, one period back:
+/// a whole period gives the whole previous period; a part (the first
+/// column of custom dates, "month to date") gives the same part, cut at
+/// the previous period's end.
+fn shifted(unit: Unit, r: DateRange, fiscal: FiscalYearSpec) -> Result<DateRange, FiscalError> {
+    let this = unit.around(r.from, fiscal)?;
+    if r.to > this.to {
+        return Err(FiscalError::OutOfRange);
+    }
+    let prev = unit.before(r.from, fiscal)?;
+    let at = |offset: i64| -> Result<CalendarDate, FiscalError> {
+        Ok(prev
+            .from
+            .add_days(offset)
+            .map_err(|_| FiscalError::OutOfRange)?
+            .min(prev.to))
+    };
+    let from = at(this.from.days_until(r.from))?;
+    let to = if r.to == this.to {
+        prev.to
+    } else {
+        at(this.from.days_until(r.to))?
+    };
+    Ok(DateRange { from, to })
+}
+
+/// The same number of days just before `r` (custom dates: the engine's
+/// own rule, sent explicitly).
+fn days_before(r: DateRange) -> Option<DateRange> {
+    let len = r.from.days_until(r.to) + 1;
+    Some(DateRange {
+        from: r.from.add_days(-len).ok()?,
+        to: r.from.add_days(-1).ok()?,
+    })
+}
+
+/// "Prior period" ranges for `dates` (Q-PR6a): each period column
+/// compares with its unit's previous period (the same part of it when the
+/// column is cut by the dates); a single range with the previous instance
+/// of the month, fiscal period, quarter or year it is (or is the start
+/// of), else the same number of days before. A balance sheet compares each
+/// date with the end of the previous whole period. `None` when a date
+/// falls outside the calendar: the engine's own rule then applies.
+fn prior_ranges(
+    dates: &ReportDates,
+    columns: ColumnBy,
+    span: DateRange,
+    fiscal: FiscalYearSpec,
+    balance: bool,
+) -> Option<Vec<DateRange>> {
+    match dates {
+        ReportDates::Ranges(v) => {
+            let unit = Unit::of_columns(columns)?;
+            v.iter()
+                .map(|r| {
+                    if balance {
+                        unit.before(r.from, fiscal).ok()
+                    } else {
+                        shifted(unit, *r, fiscal).ok()
+                    }
+                })
+                .collect()
+        }
+        ReportDates::Range(r) => Some(vec![match Unit::of_span(*r, fiscal) {
+            Some(u) => shifted(u, *r, fiscal).ok()?,
+            None => days_before(*r)?,
+        }]),
+        ReportDates::AsOf(at) => {
+            // The dates' unit when they were a whole period (a preset),
+            // else the fiscal period the date falls in.
+            let unit = Unit::of_span(span, fiscal)
+                .filter(|_| span.from != span.to)
+                .unwrap_or(Unit::FiscalPeriod);
+            Some(vec![unit.before(*at, fiscal).ok()?])
+        }
+        ReportDates::None => None,
+    }
 }
 
 /// The fiscal periods span touches, within the fiscal year of its first
@@ -514,5 +735,243 @@ mod tests {
         };
         assert_eq!(v.len(), 12);
         assert_eq!(v[0].from.days_until(v[0].to) + 1, 28, "four weeks");
+    }
+
+    fn r(from: CalendarDate, to: CalendarDate) -> DateRange {
+        DateRange { from, to }
+    }
+
+    fn prior_of(
+        key: &str,
+        f: impl FnOnce(&mut ReportOptions),
+        fiscal: FiscalYearSpec,
+    ) -> ReportRequest {
+        let spec = find(key).expect("spec");
+        let mut o = ReportOptions::for_spec(spec);
+        o.extras.insert(Extra::PriorPeriod);
+        f(&mut o);
+        resolve(spec, &o, &fiscal, d(2026, 12, 4)).expect("resolve")
+    }
+
+    /// B3/T4: "Prior period" is the previous period on the calendar, not
+    /// the same number of days before.
+    #[test]
+    fn prior_period_is_the_previous_month_quarter_or_year() {
+        // Last month (November) compares with all of October, Oct 1 too.
+        let req = prior_of(
+            "profit_loss",
+            |o| o.dates = DateChoice::Preset(DatePreset::LastMonth),
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![r(d(2026, 10, 1), d(2026, 10, 31))])
+        );
+        // December (31 days) with November (30).
+        let req = prior_of(
+            "profit_loss",
+            |o| o.dates = DateChoice::Preset(DatePreset::ThisMonth),
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![r(d(2026, 11, 1), d(2026, 11, 30))])
+        );
+        // A quarter with the quarter before; year to date with the same
+        // days last year.
+        let req = prior_of(
+            "profit_loss",
+            |o| {
+                o.dates = DateChoice::Fixed {
+                    from: d(2026, 10, 1),
+                    to: d(2026, 12, 31),
+                }
+            },
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![r(d(2026, 7, 1), d(2026, 9, 30))])
+        );
+        let req = prior_of(
+            "profit_loss",
+            |o| {
+                o.dates = DateChoice::Fixed {
+                    from: d(2026, 1, 1),
+                    to: d(2026, 11, 30),
+                }
+            },
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![r(d(2025, 1, 1), d(2025, 11, 30))])
+        );
+        // Custom dates keep the day count, sent explicitly.
+        let req = prior_of(
+            "profit_loss",
+            |o| {
+                o.dates = DateChoice::Fixed {
+                    from: d(2026, 10, 2),
+                    to: d(2026, 10, 31),
+                }
+            },
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![r(d(2026, 9, 2), d(2026, 10, 1))])
+        );
+        // The prior year wins: no prior ranges.
+        let req = prior_of(
+            "profit_loss",
+            |o| {
+                o.extras.insert(Extra::PriorYear);
+            },
+            CAL,
+        );
+        assert_eq!(req.prior_ranges, None);
+    }
+
+    #[test]
+    fn prior_period_columns_compare_with_their_own_previous_period() {
+        let req = prior_of(
+            "profit_loss_by_month",
+            |o| {
+                o.columns = ColumnBy::Month;
+                o.dates = DateChoice::Fixed {
+                    from: d(2026, 1, 15),
+                    to: d(2026, 3, 31),
+                };
+            },
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges,
+            Some(vec![
+                r(d(2025, 12, 15), d(2025, 12, 31)),
+                r(d(2026, 1, 1), d(2026, 1, 31)),
+                r(d(2026, 2, 1), d(2026, 2, 28)),
+            ])
+        );
+        // 4-4-5: each fiscal period with the one before (a 5-week period's
+        // prior is the 4-week period before it, not 35 days).
+        let f = FiscalYearSpec::Retail {
+            pattern: RetailPattern::P445,
+            year_end_month: 12,
+            end_rule: YearEndRule::LastWeekday(Weekday::Sat),
+        };
+        let req = prior_of(
+            "profit_loss_by_fiscal_period",
+            |o| o.columns = ColumnBy::FiscalPeriod,
+            f,
+        );
+        let ReportDates::Ranges(cols) = &req.dates else {
+            panic!("ranges")
+        };
+        let prior = req.prior_ranges.expect("prior");
+        assert_eq!(prior.len(), cols.len());
+        for (i, p) in prior.iter().enumerate().skip(1) {
+            assert_eq!(*p, cols[i - 1], "period {i}");
+        }
+        assert_eq!(prior[2].from.days_until(prior[2].to) + 1, 28);
+    }
+
+    #[test]
+    fn a_balance_sheet_compares_with_the_previous_period_end() {
+        // One date: the end of the fiscal period before it.
+        let req = prior_of(
+            "balance_sheet",
+            |o| o.dates = DateChoice::AsOf(d(2026, 11, 15)),
+            CAL,
+        );
+        assert_eq!(req.dates, ReportDates::AsOf(d(2026, 11, 15)));
+        assert_eq!(
+            req.prior_ranges
+                .as_ref()
+                .and_then(|p| p.first())
+                .map(|p| p.to),
+            Some(d(2026, 10, 31))
+        );
+        // A quarter preset: the quarter before.
+        let req = prior_of(
+            "balance_sheet",
+            |o| o.dates = DateChoice::Preset(DatePreset::LastQuarter),
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges
+                .as_ref()
+                .and_then(|p| p.first())
+                .map(|p| p.to),
+            Some(d(2026, 6, 30))
+        );
+        // By month: each month end with the month end before.
+        let req = prior_of(
+            "balance_sheet",
+            |o| {
+                o.columns = ColumnBy::Month;
+                o.dates = DateChoice::AsOf(d(2026, 3, 15));
+            },
+            CAL,
+        );
+        assert_eq!(
+            req.prior_ranges
+                .expect("prior")
+                .iter()
+                .map(|p| p.to)
+                .collect::<Vec<_>>(),
+            vec![d(2025, 12, 31), d(2026, 1, 31), d(2026, 2, 28)]
+        );
+    }
+
+    /// PR-6 S2 (Q-PR6b): the Balance Sheet and Trial Balance take no tag
+    /// filter, even from a memorized report saved before.
+    #[test]
+    fn balance_reports_take_no_tag() {
+        let tag: cl_core::ids::TagId = "33333333-3333-4333-8333-333333333333".parse().expect("t");
+        for key in [
+            "balance_sheet",
+            "balance_sheet_comparative",
+            "trial_balance",
+        ] {
+            let spec = find(key).expect("spec");
+            assert!(
+                !spec.filters.contains(&crate::reports::FilterKind::Tags),
+                "{key}"
+            );
+            let mut o = ReportOptions::for_spec(spec);
+            o.filters.tag_ids = vec![tag];
+            let r = resolve(spec, &o, &CAL, d(2026, 11, 4)).expect("resolve");
+            assert!(r.filters.tag_ids.is_empty(), "{key}");
+        }
+        let pl = find("profit_loss").expect("p&l");
+        let mut o = ReportOptions::for_spec(pl);
+        o.filters.tag_ids = vec![tag];
+        let r = resolve(pl, &o, &CAL, d(2026, 11, 4)).expect("resolve");
+        assert_eq!(r.filters.tag_ids, vec![tag]);
+    }
+
+    /// S1 (U-213): a retail calendar sends its year starts on balance
+    /// reports and the ledger; a calendar-month year sends none.
+    #[test]
+    fn retail_calendars_send_their_year_starts() {
+        let f = FiscalYearSpec::Retail {
+            pattern: RetailPattern::P445,
+            year_end_month: 12,
+            end_rule: YearEndRule::LastWeekday(Weekday::Sat),
+        };
+        let tb = find("trial_balance").expect("tb");
+        let mut o = ReportOptions::for_spec(tb);
+        o.dates = DateChoice::AsOf(d(2026, 1, 10));
+        let r = resolve(tb, &o, &f, d(2026, 3, 1)).expect("tb");
+        let fy = f.year_containing(d(2026, 1, 10)).expect("fy").start;
+        assert_eq!(r.fiscal_year_starts, Some(vec![fy]));
+        assert_ne!(fy.day(), 1, "a retail start");
+        let r = resolve(tb, &o, &CAL, d(2026, 3, 1)).expect("tb");
+        assert_eq!(r.fiscal_year_starts, None);
+        let pl = find("profit_loss").expect("p&l");
+        let r = resolve(pl, &ReportOptions::for_spec(pl), &f, d(2026, 3, 1)).expect("p&l");
+        assert_eq!(r.fiscal_year_starts, None);
     }
 }

@@ -21,7 +21,7 @@ use cl_core::MoneyStyle;
 use cl_core::report::{Cell, ColumnKind, ReportTable, RowKind, canonical_decimal, push_csv_line};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use rust_xlsxwriter::{Format, Workbook, XlsxError};
+use rust_xlsxwriter::{ExcelDateTime, Format, Workbook, XlsxError};
 
 use crate::reports::{Column, Report, Section};
 
@@ -165,6 +165,7 @@ pub fn to_xlsx(
     let money = Format::new().set_num_format(AMOUNT_FORMAT);
     let money_bold = Format::new().set_num_format(AMOUNT_FORMAT).set_bold();
     let pct = Format::new().set_num_format(PERCENT_FORMAT);
+    let day = Format::new().set_num_format("mm/dd/yyyy");
     let mut r: u32 = 0;
     for line in title {
         ws.write_string_with_format(r, 0, line, &bold)?;
@@ -181,7 +182,10 @@ pub fn to_xlsx(
     let mut text_fallbacks = 0u32;
     for &i in rows {
         let Some(row) = t.rows.get(i) else { continue };
-        let strong = matches!(row.kind, RowKind::Total | RowKind::Grand | RowKind::Header);
+        let strong = matches!(
+            row.kind,
+            RowKind::Total | RowKind::Grand | RowKind::Header | RowKind::Subtotal
+        );
         let caption = format!(
             "{}{}",
             "  ".repeat(usize::from(row.level)),
@@ -201,7 +205,20 @@ pub fn to_xlsx(
                     ws.write_string(r, col, label(tr, s))?;
                 }
                 Cell::Date(d) => {
-                    ws.write_string(r, col, us_date(*d))?;
+                    // A real date, so owners can sort and filter by it (N3);
+                    // text only outside Excel's calendar.
+                    let x = u16::try_from(d.year()).ok().and_then(|y| {
+                        ExcelDateTime::from_ymd(
+                            y,
+                            u8::try_from(d.month()).ok()?,
+                            u8::try_from(d.day()).ok()?,
+                        )
+                        .ok()
+                    });
+                    match x {
+                        Some(x) => ws.write_datetime_with_format(r, col, &x, &day)?,
+                        None => ws.write_string(r, col, us_date(*d))?,
+                    };
                 }
                 Cell::Count(n) => {
                     // A count up to u32::MAX is exact in an f64; larger as text.
@@ -438,6 +455,15 @@ mod tests {
             }],
             meta: ReportMeta::default(),
         };
+        // N3: xlsx writes the date as a date (Excel serial, date format).
+        let (bytes, _) = to_xlsx(&t, &[0], &[], &tr).expect("xlsx");
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut sheet = String::new();
+        zip.by_name("xl/worksheets/sheet1.xml")
+            .expect("sheet")
+            .read_to_string(&mut sheet)
+            .expect("read");
+        assert!(sheet.contains("<v>46361</v>"), "{sheet}");
         let csv = to_csv(&t, &[0], &["Acme".into(), "Duplicates".into()], &tr);
         assert_eq!(
             csv,
