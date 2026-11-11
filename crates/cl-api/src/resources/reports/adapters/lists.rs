@@ -884,7 +884,6 @@ pub fn ap_aging_summary(
     req: &ReportRequest,
     as_of: cl_core::CalendarDate,
 ) -> Result<ReportTable, ApiError> {
-    require_exact(v)?;
     const KEYS: [&str; 6] = [
         "currentExact",
         "bucket1to30Exact",
@@ -901,6 +900,7 @@ pub fn ap_aging_summary(
         "bucketOver90",
         "total",
     ];
+    require_exact(v)?;
     let columns = AgingBucket::KEYS
         .iter()
         .zip(super::ar_aging::CAPTIONS)

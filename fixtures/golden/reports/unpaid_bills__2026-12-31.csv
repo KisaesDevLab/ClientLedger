@@ -1,0 +1,3 @@
+kind,level,path,caption,date,number,vendor_number,due,days,amount,paid,discount,credits,open
+detail,1,rows/0,Table Rock Nursery,2026-11-18,BILL-00002,TRN-5521,2026-12-18,13,2300.6,1000,0,115.6,1185
+grand,0,total,@reports.row.total,,,,,,2300.6,1000,0,115.6,1185

@@ -1,0 +1,17 @@
+kind,level,path,caption,balance
+detail,1,rows/0,Bear Creek Campground,720.31
+detail,1,rows/1,Copper Kettle Coffee,7362.74
+detail,1,rows/2,Forsyth Public Library,1612.22
+detail,1,rows/3,Hollister Family Trust,2757.28
+detail,1,rows/4,Indian Point Resort,5035.49
+detail,1,rows/5,Mincy Hollow Ranch,3159.59
+detail,1,rows/6,Northfork Veterinary,3946.03
+detail,1,rows/7,Ridgedale Chapel,1331.75
+detail,1,rows/8,Riverbend HOA,8975.94
+detail,1,rows/9,Rockaway Beach Diner,4089.59
+detail,1,rows/10,Stone Mill Bistro,4759.66
+detail,1,rows/11,Table Rock Dental,1590.25
+detail,1,rows/12,Thunder Ridge Stables,2100.19
+detail,1,rows/13,White River Lumber,942.11
+detail,1,rows/14,Wildwood Pediatrics,4002.83
+grand,0,total,@reports.row.total,52385.98

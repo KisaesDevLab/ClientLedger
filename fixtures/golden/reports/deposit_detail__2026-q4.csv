@@ -1,0 +1,2 @@
+kind,level,path,caption,date,number,memo,amount
+grand,0,total,@reports.row.total,,,,0

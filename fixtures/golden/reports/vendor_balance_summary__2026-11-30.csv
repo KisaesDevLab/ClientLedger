@@ -1,0 +1,17 @@
+kind,level,path,caption,balance
+detail,1,rows/0,Bluff View Trucking,2290.83
+detail,1,rows/1,Cedar Hollow Signs,449.01
+detail,1,rows/2,Crane Creek Tree Service,984.69
+detail,1,rows/3,Midwest Irrigation Parts,263.74
+detail,1,rows/4,Monett Tire & Lube,640
+detail,1,rows/5,Ozark Feed & Seed,1286.4
+detail,1,rows/6,Ozark Mulch Supply,1180.4
+detail,1,rows/7,Ozark Office Supply,218.44
+detail,1,rows/8,Persimmon Hill Plants,1450
+detail,1,rows/9,Pine Ridge Storage Units,394.21
+detail,1,rows/10,Riverbend Fuel,1644.76
+detail,1,rows/11,Sycamore Fence Co,237.01
+detail,1,rows/12,Table Rock Nursery,7060.52
+detail,1,rows/13,Taney County Landfill,975.48
+detail,1,rows/14,White River Stone Yard,96.44
+grand,0,total,@reports.row.total,19171.93

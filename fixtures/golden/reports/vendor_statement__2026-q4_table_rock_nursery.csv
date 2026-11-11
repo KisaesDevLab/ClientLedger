@@ -1,0 +1,6 @@
+kind,level,path,caption,date,type,number,vendor_number,memo,charge,payment,balance
+header,0,opening,@reports.row.opening_balance,,,,,,,,0
+detail,1,lines/0,,2026-11-18,@reports.txn.bill,BILL-00002,TRN-5521,,2300.6,0,2300.6
+detail,1,lines/1,,2026-11-22,@reports.txn.vendor_credit,VC-00001,TRN-CR-77,,0,115.6,2185
+detail,1,lines/2,,2026-12-02,@reports.txn.bill_payment,,,Payment to vendor,0,1000,1185
+grand,0,total,@reports.row.closing_balance,,,,,,2300.6,1115.6,1185

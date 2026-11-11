@@ -55,6 +55,7 @@ fn col(t: &ReportTable, key: &str) -> usize {
 
 /// Every recorded list reads, and its total line is the engine's.
 #[test]
+#[allow(clippy::too_many_lines, reason = "one row per recorded route")]
 fn every_recorded_list_reads_with_the_engine_s_total() {
     for (req, name, key, total) in [
         (
@@ -201,7 +202,7 @@ fn an_aging_drill_narrows_by_contact_and_the_engine_s_bucket() {
     assert_eq!(t.rows.len(), 2);
     assert!(t.rows.iter().all(|x| x.kind == RowKind::Detail));
     r.filters.bucket = Some(AgingBucket::Over90);
-    assert!(run(&r, "ap_aging_summary").rows.is_empty());
+    assert_eq!(run(&r, "ap_aging_summary").rows, Vec::new());
     let mut ar = at(Source::ArAgingDetail);
     ar.filters.bucket = Some(AgingBucket::Over90);
     let t = run(&ar, "ar_aging_detail");

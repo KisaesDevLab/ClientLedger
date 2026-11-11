@@ -1,0 +1,40 @@
+kind,level,path,caption,current,days_1_30,days_31_60,days_61_90,over_90,total
+detail,1,vendors/contact:Bear Creek Hauling/0,Bear Creek Hauling,0,0,0,0,0,0
+detail,1,vendors/contact:Blue Eye Lumber/1,Blue Eye Lumber,0,0,0,0,0,0
+detail,1,vendors/contact:Bluff View Trucking/2,Bluff View Trucking,0,2006.09,284.74,-1870.69,1870.69,2290.83
+detail,1,vendors/contact:Branson Equipment Rental/3,Branson Equipment Rental,0,0,-431.11,431.11,0,0
+detail,1,vendors/contact:Cedar Hollow Signs/4,Cedar Hollow Signs,0,0,449.01,0,0,449.01
+detail,1,vendors/contact:City of Hollister Water/5,City of Hollister Water,0,0,0,0,0,0
+detail,1,vendors/contact:Copper Kettle Catering/6,Copper Kettle Catering,0,0,-495.97,377.38,118.59,0
+detail,1,vendors/contact:Crane Creek Tree Service/7,Crane Creek Tree Service,0,0,984.69,0,0,984.69
+detail,1,vendors/contact:Elm Street Accountants/8,Elm Street Accountants,0,0,0,-550.6,550.6,0
+detail,1,vendors/contact:Empire Electric Cooperative/9,Empire Electric Cooperative,0,0,0,-1450,1450,0
+detail,1,vendors/contact:Galena Gravel/10,Galena Gravel,0,0,0,0,0,0
+detail,1,vendors/contact:Hollister Fuel Stop/11,Hollister Fuel Stop,0,0,0,0,0,0
+detail,1,vendors/contact:Kimberling Fertilizer/12,Kimberling Fertilizer,0,0,0,-2768.82,2768.82,0
+detail,1,vendors/contact:Lakeside Insurance Agency/13,Lakeside Insurance Agency,0,0,0,-1450,1450,0
+detail,1,vendors/contact:Lampe Seed & Feed/14,Lampe Seed & Feed,0,0,0,-288.5,288.5,0
+detail,1,vendors/contact:Midwest Irrigation Parts/15,Midwest Irrigation Parts,0,0,263.74,0,0,263.74
+detail,1,vendors/contact:Monett Tire & Lube/16,Monett Tire & Lube,0,0,228.84,-2045.63,2456.79,640
+detail,1,vendors/contact:Mountain Software Co/17,Mountain Software Co,0,0,0,0,0,0
+detail,1,vendors/contact:Oak Grove Uniforms/18,Oak Grove Uniforms,0,0,-318.41,173.85,144.56,0
+detail,1,vendors/contact:Ozark Cellular/19,Ozark Cellular,0,0,0,0,0,0
+detail,1,vendors/contact:Ozark Feed & Seed/20,Ozark Feed & Seed,0,0,1286.4,0,0,1286.4
+detail,1,vendors/contact:Ozark Mulch Supply/21,Ozark Mulch Supply,1180.4,0,-100.09,100.09,0,1180.4
+detail,1,vendors/contact:Ozark Office Supply/22,Ozark Office Supply,0,0,218.44,-561.95,561.95,218.44
+detail,1,vendors/contact:Persimmon Hill Plants/23,Persimmon Hill Plants,0,1450,0,0,0,1450
+detail,1,vendors/contact:Pine Ridge Storage Units/24,Pine Ridge Storage Units,0,394.21,0,0,0,394.21
+detail,1,vendors/contact:Powersite Trailer Sales/25,Powersite Trailer Sales,0,0,-1450,593.73,856.27,0
+detail,1,vendors/contact:Reeds Spring Welding/26,Reeds Spring Welding,0,0,0,0,0,0
+detail,1,vendors/contact:Riverbend Fuel/27,Riverbend Fuel,0,0,1644.76,0,0,1644.76
+detail,1,vendors/contact:Riverbend Hardware/28,Riverbend Hardware,0,0,-577.55,577.55,0,0
+detail,1,vendors/contact:Rockaway Auto Glass/29,Rockaway Auto Glass,0,0,0,0,0,0
+detail,1,vendors/contact:Shepherd Hills Office Supply/30,Shepherd Hills Office Supply,0,0,-390.81,263.68,127.13,0
+detail,1,vendors/contact:Stone County Permits/31,Stone County Permits,0,0,-1442.42,-7.58,1450,0
+detail,1,vendors/contact:Sycamore Fence Co/32,Sycamore Fence Co,0,0,237.01,-811.29,811.29,237.01
+detail,1,vendors/contact:Table Rock Nursery/33,Table Rock Nursery,2300.6,844.92,3915,0,0,7060.52
+detail,1,vendors/contact:Table Rock Small Engine/34,Table Rock Small Engine,0,0,0,0,0,0
+detail,1,vendors/contact:Taney County Landfill/35,Taney County Landfill,0,0,975.48,-572.62,572.62,975.48
+detail,1,vendors/contact:Thunder Ridge Subcontracting/36,Thunder Ridge Subcontracting,0,0,-1813.37,1813.37,0,0
+detail,1,vendors/contact:White River Stone Yard/37,White River Stone Yard,0,0,-1353.56,1450,0,96.44
+grand,0,total,@reports.row.total,3481,4695.22,2114.82,-6596.92,15477.81,19171.93

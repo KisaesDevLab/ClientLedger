@@ -641,9 +641,6 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         .await
         .unwrap_or_else(|e| panic!("the report story posts: {e}"));
     let sample = Sample::load();
-    if let Ok(dir) = std::env::var("CL_REPORT_DUMP") {
-        return dump_raw(&s, Path::new(&dir)).await;
-    }
 
     // ---------------------------------------------------- cross-checks
     october_matches_the_practice_company(&s, &sample).await;
@@ -757,6 +754,32 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let dir = golden_dir();
     let mut mismatched = Vec::new();
     let mut all = goldens(&posted);
+    let id_named = |want: &str| {
+        names
+            .iter()
+            .find(|(_, n)| n.as_str() == want)
+            .map(|(id, _)| id.clone())
+    };
+    let vendor = id_named("contact:Table Rock Nursery")
+        .and_then(|i| cl_core::ids::ContactId::parse(&i).ok())
+        .expect("vendor");
+    let bank = id_named("acct:1010")
+        .and_then(|i| cl_core::ids::AccountId::parse(&i).ok())
+        .expect("bank");
+    if caps.has("open-balances-asof-v1") && caps.has("ap-aging-exact-v1") {
+        who_owes_what_ties(&s).await;
+        all.extend(list_goldens(vendor, bank));
+    } else {
+        pending(
+            "U-121",
+            "A/P aging, Unpaid Bills, open balances and Open Invoices as of a date",
+        );
+    }
+    if caps.has("closing-exceptions-v1") {
+        closing_exceptions_list_the_closed_period_entry(&s).await;
+    } else {
+        pending("U-204", "Closing Date Exceptions");
+    }
     if caps.has("reports-columns-v1") {
         all.extend(
             column_options(&posted)
@@ -766,7 +789,10 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     }
     for g in all {
         let (_, t) = run(&s, g.key, &g.options).await;
-        let csv = stable_ids(&t.to_canonical_csv(), &names);
+        let mut csv = stable_ids(&t.to_canonical_csv(), &names);
+        if g.key == "ar_aging_detail" || g.key == "ap_aging_detail" {
+            csv = stable_order(&csv);
+        }
         let path = dir.join(format!("{}.csv", g.file));
         if bless() {
             std::fs::create_dir_all(&dir).expect("golden dir");
@@ -793,128 +819,182 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let _ = s.logout().await;
 }
 
-/// A developer aid (`CL_REPORT_DUMP=<dir>`): the raw answers of the list
-/// routes on the golden company, for recording adapter samples in
-/// `crates/cl-api/tests/fixtures/reports/`. Ids are named stably.
-async fn dump_raw(s: &Session, dir: &Path) {
-    std::fs::create_dir_all(dir).expect("dump dir");
-    let contacts = s
-        .contacts()
-        .list_all(&ContactFilter::default())
-        .await
-        .expect("contacts");
-    let id_of = |n: &str| {
-        contacts
-            .iter()
-            .find(|c| c.fields.display_name == n)
-            .map(|c| c.id.to_string())
-            .unwrap_or_default()
-    };
-    let vendor = id_of("Table Rock Nursery");
-    let bank = s
-        .accounts()
-        .list_all(&AccountFilter::default())
-        .await
-        .expect("accounts")
-        .into_iter()
-        .find(|a| a.fields.account_number.as_deref() == Some("1010"))
-        .map(|a| a.id.to_string())
-        .unwrap_or_default();
-    let q4: &[(&str, &str)] = &[
-        ("exact", "1"),
-        ("start_date", "2026-10-01"),
-        ("end_date", "2026-12-31"),
-    ];
-    let at = |d: &'static str| -> Vec<(&'static str, &'static str)> {
-        vec![("exact", "1"), ("as_of_date", d)]
-    };
-    let mut calls: Vec<(String, String, Vec<(String, String)>)> = Vec::new();
-    let mut add = |name: &str, route: &str, q: &[(&str, &str)]| {
-        calls.push((
-            name.to_string(),
-            route.to_string(),
-            q.iter()
-                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                .collect(),
-        ));
-    };
-    for (name, route) in [
-        ("ar_aging_detail", "ar-aging-detail"),
-        ("ap_aging_summary", "ap-aging-summary"),
-        ("ap_aging_detail", "ap-aging-detail"),
-        ("unpaid_bills", "unpaid-bills"),
-        ("customer_balance_summary", "customer-balance-summary"),
-        ("customer_balance_detail", "customer-balance-detail"),
-        ("vendor_balance_summary", "vendor-balance-summary"),
-        ("vendor_balance_detail", "vendor-balance-detail"),
-        ("bank_balances", "bank-balances"),
-    ] {
-        add(name, route, &at("2026-11-30"));
-    }
-    let mut open = at("2026-11-30");
-    open.push(("open", "1"));
-    add("open_invoices", "invoice-list", &open);
-    for (name, route) in [
-        ("invoice_list", "invoice-list"),
-        ("sales_by_customer", "sales-by-customer"),
-        ("sales_by_item", "sales-by-item"),
-        ("expense_by_vendor", "expense-by-vendor"),
-        ("bill_payment_history", "bill-payment-history"),
-        ("deposit_detail", "deposit-detail"),
-        ("account_activity_summary", "account-activity-summary"),
-    ] {
-        add(name, route, q4);
-    }
-    let mut v = q4.to_vec();
-    v.push(("vendor_id", vendor.as_str()));
-    add("transactions_by_vendor", "transaction-list-by-vendor", &v);
-    add("vendor_statement", "vendor-statement", &v);
-    let mut c = q4.to_vec();
-    c.push(("account_id", bank.as_str()));
-    add("check_register", "check-register", &c);
-    add(
-        "vendor_1099_summary",
-        "vendor-1099-summary",
-        &[("exact", "1"), ("year", "2026")],
-    );
-    add(
-        "ap_1099_prep",
-        "ap-1099-prep",
-        &[("exact", "1"), ("tax_year", "2026")],
-    );
-    for (name, route, q) in calls {
-        let path = if route.starts_with('/') {
-            route
+/// The aging details' lines in a stable order: the engine breaks
+/// same-day ties by transaction id, which differs from run to run
+/// (Q-P28x), so the lines are sorted and their paths dropped. The balance
+/// details carry a running balance through those ties and have no golden;
+/// their totals are tied by [`who_owes_what_ties`].
+fn stable_order(csv: &str) -> String {
+    let mut lines = csv.lines();
+    let head = lines.next().unwrap_or("").to_string();
+    let mut detail: Vec<String> = Vec::new();
+    let mut rest: Vec<String> = Vec::new();
+    for l in lines {
+        let mut parts: Vec<&str> = l.splitn(4, ',').collect();
+        if parts.first() == Some(&"detail") && parts.len() == 4 {
+            parts[2] = "";
+            detail.push(parts.join(","));
         } else {
-            format!("/api/v1/reports/{route}")
-        };
-        let q: Vec<(&str, &str)> = q.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let body = loop {
-            let r = s
-                .raw(cl_api::Method::Get, &path, &q, None)
-                .await
-                .expect("raw");
-            if r.status == 429 {
-                tokio::time::sleep(Duration::from_secs(20)).await;
-                continue;
-            }
-            assert!(r.status < 300, "{name}: {} {}", r.status, r.body);
-            break r.body;
-        };
-        let text = serde_json::to_string_pretty(&body).expect("json");
-        std::fs::write(dir.join(format!("{name}.json")), text).expect("write");
+            rest.push(l.to_string());
+        }
     }
-    let r = s
-        .raw(
-            cl_api::Method::Get,
-            "/api/v1/duplicates",
-            &[("start_date", "2026-10-01"), ("end_date", "2026-12-31")],
-            None,
-        )
-        .await
-        .expect("raw");
-    let text = serde_json::to_string_pretty(&r.body).expect("json");
-    std::fs::write(dir.join("duplicates.json"), text).expect("write");
+    detail.sort();
+    let mut out = head;
+    out.push('\n');
+    for l in detail.iter().chain(rest.iter()) {
+        out.push_str(l);
+        out.push('\n');
+    }
+    out
+}
+
+/// The WP3 goldens (U-121, U-14 lists): agings, open items and balances
+/// as of 11/30 (P2 is dated after it, VC1 still open) and 12/31, and the
+/// Q4 lists. The audit trail and Closing Date Exceptions carry the run's
+/// own time, so they are cross-checked, not pinned.
+fn list_goldens(vendor: cl_core::ids::ContactId, bank: cl_core::ids::AccountId) -> Vec<Golden> {
+    let mut v = Vec::new();
+    for (name, at) in [
+        ("2026-11-30", d(2026, 11, 30)),
+        ("2026-12-31", d(2026, 12, 31)),
+    ] {
+        for key in [
+            "ar_aging_summary",
+            "ar_aging_detail",
+            "ap_aging_summary",
+            "ap_aging_detail",
+            "open_invoices",
+            "unpaid_bills",
+            "customer_balance_summary",
+            "vendor_balance_summary",
+            "bank_balances",
+        ] {
+            v.push(golden(&format!("{key}__{name}"), key, |o| {
+                o.dates = DateChoice::AsOf(at);
+            }));
+        }
+    }
+    let q4 = |o: &mut ReportOptions| range(o, d(2026, 10, 1), d(2026, 12, 31));
+    for key in [
+        "invoice_list",
+        "sales_by_client",
+        "sales_by_item",
+        "expenses_by_vendor",
+        "bill_payment_history",
+        "deposit_detail",
+        "account_activity_summary",
+        "duplicate_finder",
+    ] {
+        v.push(golden(&format!("{key}__2026-q4"), key, q4));
+    }
+    for key in ["transactions_by_vendor", "vendor_statement"] {
+        v.push(golden(
+            &format!("{key}__2026-q4_table_rock_nursery"),
+            key,
+            |o| {
+                q4(o);
+                o.filters.contact_ids = vec![vendor];
+            },
+        ));
+    }
+    v.push(golden(
+        "check_register__2026-q4_1010",
+        "check_register",
+        |o| {
+            q4(o);
+            o.filters.account_ids = vec![bank];
+        },
+    ));
+    for key in ["vendor_1099_summary", "ap_1099_prep"] {
+        v.push(golden(&format!("{key}__2026"), key, |o| {
+            range(o, d(2026, 1, 1), d(2026, 12, 31));
+        }));
+    }
+    v
+}
+
+/// The grand line's cell in column `key`.
+fn grand(t: &ReportTable, key: &str) -> Decimal {
+    let i = t
+        .columns
+        .iter()
+        .position(|c| c.key == key)
+        .unwrap_or_else(|| panic!("column {key}"));
+    dec(&t.rows.last().expect("grand").cells[i])
+}
+
+/// Who owes what ties (U-121): on each date the A/R aging, its detail and
+/// the client balances give the same A/R balance, and the A/P aging, its
+/// detail and the vendor balances the same A/P balance; at 11/30 the open
+/// vendor credit VC1 is a negative row.
+async fn who_owes_what_ties(s: &Session) {
+    for at in [d(2026, 11, 30), d(2026, 12, 31)] {
+        let as_of = |key: &'static str| {
+            let mut o = ReportOptions::for_spec(find(key).expect("spec"));
+            o.dates = DateChoice::AsOf(at);
+            (key, o)
+        };
+        let (k, o) = as_of("ar_aging_summary");
+        let ar = grand(&run(s, k, &o).await.1, "total");
+        let (k, o) = as_of("ar_aging_detail");
+        assert_eq!(grand(&run(s, k, &o).await.1, "open"), ar, "{at} A/R detail");
+        let (k, o) = as_of("customer_balance_summary");
+        assert_eq!(
+            grand(&run(s, k, &o).await.1, "balance"),
+            ar,
+            "{at} client balances"
+        );
+        let (k, o) = as_of("ap_aging_summary");
+        let ap = grand(&run(s, k, &o).await.1, "total");
+        let (k, o) = as_of("ap_aging_detail");
+        let (_, detail) = run(s, k, &o).await;
+        assert_eq!(grand(&detail, "open"), ap, "{at} A/P detail");
+        let (k, o) = as_of("vendor_balance_summary");
+        assert_eq!(
+            grand(&run(s, k, &o).await.1, "balance"),
+            ap,
+            "{at} vendor balances"
+        );
+        if at == d(2026, 11, 30) {
+            let open = detail
+                .columns
+                .iter()
+                .position(|c| c.key == "open")
+                .expect("open");
+            let ty = detail
+                .columns
+                .iter()
+                .position(|c| c.key == "type")
+                .expect("type");
+            assert!(
+                detail.rows.iter().any(|r| {
+                    r.cells[ty] == Cell::Text("@reports.txn.vendor_credit".into())
+                        && r.cells[open] == Cell::Amount(Decimal::new(-11_560, 2))
+                }),
+                "VC1 is an open credit on 11/30"
+            );
+        }
+    }
+}
+
+/// Closing Date Exceptions (U-204) lists the reclass posted in the closed
+/// period with the practice password.
+async fn closing_exceptions_list_the_closed_period_entry(s: &Session) {
+    let mut o = ReportOptions::for_spec(find("closing_date_exceptions").expect("spec"));
+    range(&mut o, d(2000, 1, 1), d(2099, 12, 31));
+    let (_, t) = run(s, "closing_date_exceptions", &o).await;
+    let after = t
+        .columns
+        .iter()
+        .position(|c| c.key == "date_after")
+        .expect("after");
+    assert!(
+        t.rows
+            .iter()
+            .any(|r| r.cells[after] == Cell::Date(d(2026, 9, 15))),
+        "the closed-period reclass is listed: {:?}",
+        t.rows
+    );
 }
 
 #[test]

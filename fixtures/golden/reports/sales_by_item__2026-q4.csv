@@ -1,0 +1,3 @@
+kind,level,path,caption,sku,count,total
+detail,1,rows/0,@reports.row.no_item,,3,4473.58
+grand,0,total,@reports.row.total,,,4473.58

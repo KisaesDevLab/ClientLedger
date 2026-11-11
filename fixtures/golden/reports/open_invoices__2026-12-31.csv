@@ -1,0 +1,3 @@
+kind,level,path,caption,date,number,due,days,amount,paid,open
+detail,1,rows/0,Riverbend HOA,2026-11-05,INV-1001,2026-12-05,26,3033.33,1000,2033.33
+grand,0,total,@reports.row.total,,,,,3033.33,1000,2033.33

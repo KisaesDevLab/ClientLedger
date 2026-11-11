@@ -1,0 +1,691 @@
+kind,level,path,caption,date,type,number,due,days,bucket,open
+detail,1,,Barn Owl Books,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,2144.88
+detail,1,,Barn Owl Books,2026-04-04,@reports.txn.journal_entry,,,240,@reports.bucket.90_up,-2144.88
+detail,1,,Barn Owl Books,2026-05-10,@reports.txn.journal_entry,,,204,@reports.bucket.90_up,3642.96
+detail,1,,Barn Owl Books,2026-05-31,@reports.txn.journal_entry,,,183,@reports.bucket.90_up,-3642.96
+detail,1,,Barn Owl Books,2026-06-14,@reports.txn.journal_entry,,,169,@reports.bucket.90_up,4221.09
+detail,1,,Barn Owl Books,2026-07-15,@reports.txn.journal_entry,,,138,@reports.bucket.90_up,-4221.09
+detail,1,,Barn Owl Books,2026-09-23,@reports.txn.journal_entry,,,68,@reports.bucket.61_90,1958
+detail,1,,Barn Owl Books,2026-09-30,@reports.txn.journal_entry,,,61,@reports.bucket.61_90,3720.27
+detail,1,,Barn Owl Books,2026-10-13,@reports.txn.journal_entry,,,48,@reports.bucket.31_60,-1958
+detail,1,,Barn Owl Books,2026-10-15,@reports.txn.journal_entry,,,46,@reports.bucket.31_60,-3720.27
+detail,1,,Bear Creek Campground,2026-07-23,@reports.txn.journal_entry,,,130,@reports.bucket.90_up,505.44
+detail,1,,Bear Creek Campground,2026-07-27,@reports.txn.journal_entry,,,126,@reports.bucket.90_up,4339.83
+detail,1,,Bear Creek Campground,2026-08-17,@reports.txn.journal_entry,,,105,@reports.bucket.90_up,-505.44
+detail,1,,Bear Creek Campground,2026-08-17,@reports.txn.journal_entry,,,105,@reports.bucket.90_up,1468.99
+detail,1,,Bear Creek Campground,2026-08-22,@reports.txn.journal_entry,,,100,@reports.bucket.90_up,-4339.83
+detail,1,,Bear Creek Campground,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,2025.68
+detail,1,,Bear Creek Campground,2026-09-18,@reports.txn.journal_entry,,,73,@reports.bucket.61_90,-1468.99
+detail,1,,Bear Creek Campground,2026-10-10,@reports.txn.journal_entry,,,51,@reports.bucket.31_60,-2025.68
+detail,1,,Bear Creek Campground,2026-10-31,@reports.txn.journal_entry,,,30,@reports.bucket.1_30,720.31
+detail,1,,Blue Eye Feed Co,2026-01-08,@reports.txn.journal_entry,,,326,@reports.bucket.90_up,634.5
+detail,1,,Blue Eye Feed Co,2026-01-13,@reports.txn.journal_entry,,,321,@reports.bucket.90_up,4327.53
+detail,1,,Blue Eye Feed Co,2026-01-31,@reports.txn.journal_entry,,,303,@reports.bucket.90_up,-4327.53
+detail,1,,Blue Eye Feed Co,2026-01-31,@reports.txn.journal_entry,,,303,@reports.bucket.90_up,1891.71
+detail,1,,Blue Eye Feed Co,2026-02-03,@reports.txn.journal_entry,,,300,@reports.bucket.90_up,-634.5
+detail,1,,Blue Eye Feed Co,2026-02-08,@reports.txn.journal_entry,,,295,@reports.bucket.90_up,4059.57
+detail,1,,Blue Eye Feed Co,2026-03-06,@reports.txn.journal_entry,,,269,@reports.bucket.90_up,4045.71
+detail,1,,Blue Eye Feed Co,2026-03-10,@reports.txn.journal_entry,,,265,@reports.bucket.90_up,-1891.71
+detail,1,,Blue Eye Feed Co,2026-03-13,@reports.txn.journal_entry,,,262,@reports.bucket.90_up,327.03
+detail,1,,Blue Eye Feed Co,2026-03-16,@reports.txn.journal_entry,,,259,@reports.bucket.90_up,-4059.57
+detail,1,,Blue Eye Feed Co,2026-03-22,@reports.txn.journal_entry,,,253,@reports.bucket.90_up,-4045.71
+detail,1,,Blue Eye Feed Co,2026-04-17,@reports.txn.journal_entry,,,227,@reports.bucket.90_up,-327.03
+detail,1,,Blue Eye Feed Co,2026-06-25,@reports.txn.journal_entry,,,158,@reports.bucket.90_up,2925.33
+detail,1,,Blue Eye Feed Co,2026-06-27,@reports.txn.journal_entry,,,156,@reports.bucket.90_up,3521.78
+detail,1,,Blue Eye Feed Co,2026-07-01,@reports.txn.journal_entry,,,152,@reports.bucket.90_up,2646.05
+detail,1,,Blue Eye Feed Co,2026-07-12,@reports.txn.journal_entry,,,141,@reports.bucket.90_up,-2925.33
+detail,1,,Blue Eye Feed Co,2026-07-19,@reports.txn.journal_entry,,,134,@reports.bucket.90_up,-2646.05
+detail,1,,Blue Eye Feed Co,2026-08-04,@reports.txn.journal_entry,,,118,@reports.bucket.90_up,-3521.78
+detail,1,,Blue Eye Feed Co,2026-08-06,@reports.txn.journal_entry,,,116,@reports.bucket.90_up,2921.12
+detail,1,,Blue Eye Feed Co,2026-09-08,@reports.txn.journal_entry,,,83,@reports.bucket.61_90,-2921.12
+detail,1,,Bluff View Estates,2026-01-26,@reports.txn.journal_entry,,,308,@reports.bucket.90_up,3460.16
+detail,1,,Bluff View Estates,2026-02-08,@reports.txn.journal_entry,,,295,@reports.bucket.90_up,-3460.16
+detail,1,,Bluff View Estates,2026-03-24,@reports.txn.journal_entry,,,251,@reports.bucket.90_up,4349.37
+detail,1,,Bluff View Estates,2026-04-05,@reports.txn.journal_entry,,,239,@reports.bucket.90_up,-4349.37
+detail,1,,Bluff View Estates,2026-05-16,@reports.txn.journal_entry,,,198,@reports.bucket.90_up,1498.36
+detail,1,,Bluff View Estates,2026-06-17,@reports.txn.journal_entry,,,166,@reports.bucket.90_up,-1498.36
+detail,1,,Bluff View Estates,2026-08-14,@reports.txn.journal_entry,,,108,@reports.bucket.90_up,2000.82
+detail,1,,Bluff View Estates,2026-08-29,@reports.txn.journal_entry,,,93,@reports.bucket.90_up,-2000.82
+detail,1,,Bluff View Estates,2026-09-11,@reports.txn.journal_entry,,,80,@reports.bucket.61_90,4713.19
+detail,1,,Bluff View Estates,2026-10-08,@reports.txn.journal_entry,,,53,@reports.bucket.31_60,-4713.19
+detail,1,,Branson Hills Inn,2026-05-25,@reports.txn.journal_entry,,,189,@reports.bucket.90_up,2210.21
+detail,1,,Branson Hills Inn,2026-06-07,@reports.txn.journal_entry,,,176,@reports.bucket.90_up,-2210.21
+detail,1,,Branson Hills Inn,2026-07-08,@reports.txn.journal_entry,,,145,@reports.bucket.90_up,1029.2
+detail,1,,Branson Hills Inn,2026-07-09,@reports.txn.journal_entry,,,144,@reports.bucket.90_up,484.7
+detail,1,,Branson Hills Inn,2026-07-29,@reports.txn.journal_entry,,,124,@reports.bucket.90_up,2000.29
+detail,1,,Branson Hills Inn,2026-08-04,@reports.txn.journal_entry,,,118,@reports.bucket.90_up,-484.7
+detail,1,,Branson Hills Inn,2026-08-05,@reports.txn.journal_entry,,,117,@reports.bucket.90_up,-1029.2
+detail,1,,Branson Hills Inn,2026-08-23,@reports.txn.journal_entry,,,99,@reports.bucket.90_up,-2000.29
+detail,1,,Brightwater Apartments,2026-01-24,@reports.txn.journal_entry,,,310,@reports.bucket.90_up,2642.05
+detail,1,,Brightwater Apartments,2026-02-13,@reports.txn.journal_entry,,,290,@reports.bucket.90_up,1915.46
+detail,1,,Brightwater Apartments,2026-02-19,@reports.txn.journal_entry,,,284,@reports.bucket.90_up,819.84
+detail,1,,Brightwater Apartments,2026-02-23,@reports.txn.journal_entry,,,280,@reports.bucket.90_up,-2642.05
+detail,1,,Brightwater Apartments,2026-03-01,@reports.txn.journal_entry,,,274,@reports.bucket.90_up,-1915.46
+detail,1,,Brightwater Apartments,2026-03-19,@reports.txn.journal_entry,,,256,@reports.bucket.90_up,-819.84
+detail,1,,Bull Shoals Cabins,2026-01-14,@reports.txn.journal_entry,,,320,@reports.bucket.90_up,1487.15
+detail,1,,Bull Shoals Cabins,2026-02-02,@reports.txn.journal_entry,,,301,@reports.bucket.90_up,-1487.15
+detail,1,,Bull Shoals Cabins,2026-07-21,@reports.txn.journal_entry,,,132,@reports.bucket.90_up,1028.98
+detail,1,,Bull Shoals Cabins,2026-08-03,@reports.txn.journal_entry,,,119,@reports.bucket.90_up,-1028.98
+detail,1,,Bull Shoals Cabins,2026-09-20,@reports.txn.journal_entry,,,71,@reports.bucket.61_90,4421.27
+detail,1,,Bull Shoals Cabins,2026-10-24,@reports.txn.journal_entry,,,37,@reports.bucket.31_60,-4421.27
+detail,1,,Cardinal Hill Daycare,2026-01-05,@reports.txn.journal_entry,,,329,@reports.bucket.90_up,208.64
+detail,1,,Cardinal Hill Daycare,2026-01-18,@reports.txn.journal_entry,,,316,@reports.bucket.90_up,-208.64
+detail,1,,Cardinal Hill Daycare,2026-05-02,@reports.txn.journal_entry,,,212,@reports.bucket.90_up,2011.3
+detail,1,,Cardinal Hill Daycare,2026-05-30,@reports.txn.journal_entry,,,184,@reports.bucket.90_up,-2011.3
+detail,1,,Cardinal Hill Daycare,2026-09-13,@reports.txn.journal_entry,,,78,@reports.bucket.61_90,301.06
+detail,1,,Cardinal Hill Daycare,2026-09-17,@reports.txn.journal_entry,,,74,@reports.bucket.61_90,2793.55
+detail,1,,Cardinal Hill Daycare,2026-10-11,@reports.txn.journal_entry,,,50,@reports.bucket.31_60,-301.06
+detail,1,,Cardinal Hill Daycare,2026-10-19,@reports.txn.journal_entry,,,42,@reports.bucket.31_60,-2793.55
+detail,1,,Cedar Creek Winery,2026-02-14,@reports.txn.journal_entry,,,289,@reports.bucket.90_up,1335.88
+detail,1,,Cedar Creek Winery,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,3035.29
+detail,1,,Cedar Creek Winery,2026-03-10,@reports.txn.journal_entry,,,265,@reports.bucket.90_up,-3035.29
+detail,1,,Cedar Creek Winery,2026-03-19,@reports.txn.journal_entry,,,256,@reports.bucket.90_up,-1335.88
+detail,1,,Cedar Creek Winery,2026-04-12,@reports.txn.journal_entry,,,232,@reports.bucket.90_up,3410.81
+detail,1,,Cedar Creek Winery,2026-04-30,@reports.txn.journal_entry,,,214,@reports.bucket.90_up,2787.13
+detail,1,,Cedar Creek Winery,2026-05-10,@reports.txn.journal_entry,,,204,@reports.bucket.90_up,-3410.81
+detail,1,,Cedar Creek Winery,2026-05-23,@reports.txn.journal_entry,,,191,@reports.bucket.90_up,-2787.13
+detail,1,,Cedar Creek Winery,2026-08-25,@reports.txn.journal_entry,,,97,@reports.bucket.90_up,4134.99
+detail,1,,Cedar Creek Winery,2026-09-14,@reports.txn.journal_entry,,,77,@reports.bucket.61_90,-4134.99
+detail,1,,Cedar Creek Winery,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,1689.56
+detail,1,,Cedar Creek Winery,2026-09-30,@reports.txn.journal_entry,,,61,@reports.bucket.61_90,1227.65
+detail,1,,Cedar Creek Winery,2026-10-11,@reports.txn.journal_entry,,,50,@reports.bucket.31_60,-1689.56
+detail,1,,Cedar Creek Winery,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-1227.65
+detail,1,,Cedar Hollow Church,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,711.67
+detail,1,,Cedar Hollow Church,2026-03-02,@reports.txn.journal_entry,,,273,@reports.bucket.90_up,-711.67
+detail,1,,Cedar Hollow Church,2026-05-10,@reports.txn.journal_entry,,,204,@reports.bucket.90_up,4384.58
+detail,1,,Cedar Hollow Church,2026-05-23,@reports.txn.journal_entry,,,191,@reports.bucket.90_up,-4384.58
+detail,1,,Cedar Hollow Church,2026-08-26,@reports.txn.journal_entry,,,96,@reports.bucket.90_up,2415.85
+detail,1,,Cedar Hollow Church,2026-09-10,@reports.txn.journal_entry,,,81,@reports.bucket.61_90,-2415.85
+detail,1,,Cedar Hollow Church,2026-10-05,@reports.txn.journal_entry,,,56,@reports.bucket.31_60,2032.91
+detail,1,,Cedar Hollow Church,2026-11-03,@reports.txn.journal_entry,,,27,@reports.bucket.1_30,-2032.91
+detail,1,,Compton Ridge Church,2026-01-06,@reports.txn.journal_entry,,,328,@reports.bucket.90_up,3180.93
+detail,1,,Compton Ridge Church,2026-01-09,@reports.txn.journal_entry,,,325,@reports.bucket.90_up,3998.36
+detail,1,,Compton Ridge Church,2026-01-24,@reports.txn.journal_entry,,,310,@reports.bucket.90_up,-3180.93
+detail,1,,Compton Ridge Church,2026-01-28,@reports.txn.journal_entry,,,306,@reports.bucket.90_up,-3998.36
+detail,1,,Compton Ridge Church,2026-03-01,@reports.txn.journal_entry,,,274,@reports.bucket.90_up,2262.69
+detail,1,,Compton Ridge Church,2026-03-31,@reports.txn.journal_entry,,,244,@reports.bucket.90_up,-2262.69
+detail,1,,Compton Ridge Church,2026-04-26,@reports.txn.journal_entry,,,218,@reports.bucket.90_up,4298.81
+detail,1,,Compton Ridge Church,2026-05-12,@reports.txn.journal_entry,,,202,@reports.bucket.90_up,1280.87
+detail,1,,Compton Ridge Church,2026-05-14,@reports.txn.journal_entry,,,200,@reports.bucket.90_up,-4298.81
+detail,1,,Compton Ridge Church,2026-05-23,@reports.txn.journal_entry,,,191,@reports.bucket.90_up,2572.36
+detail,1,,Compton Ridge Church,2026-06-08,@reports.txn.journal_entry,,,175,@reports.bucket.90_up,-1280.87
+detail,1,,Compton Ridge Church,2026-06-11,@reports.txn.journal_entry,,,172,@reports.bucket.90_up,4160.24
+detail,1,,Compton Ridge Church,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,-2572.36
+detail,1,,Compton Ridge Church,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,-4160.24
+detail,1,,Compton Ridge Church,2026-07-04,@reports.txn.journal_entry,,,149,@reports.bucket.90_up,3506.11
+detail,1,,Compton Ridge Church,2026-07-29,@reports.txn.journal_entry,,,124,@reports.bucket.90_up,-3506.11
+detail,1,,Compton Ridge Church,2026-09-12,@reports.txn.journal_entry,,,79,@reports.bucket.61_90,3461.75
+detail,1,,Compton Ridge Church,2026-10-15,@reports.txn.journal_entry,,,46,@reports.bucket.31_60,-3461.75
+detail,1,,Copper Kettle Coffee,2026-01-02,@reports.txn.journal_entry,,,332,@reports.bucket.90_up,2298.4
+detail,1,,Copper Kettle Coffee,2026-01-09,@reports.txn.journal_entry,,,325,@reports.bucket.90_up,3772.09
+detail,1,,Copper Kettle Coffee,2026-01-19,@reports.txn.journal_entry,,,315,@reports.bucket.90_up,-2298.4
+detail,1,,Copper Kettle Coffee,2026-01-22,@reports.txn.journal_entry,,,312,@reports.bucket.90_up,-3772.09
+detail,1,,Copper Kettle Coffee,2026-03-15,@reports.txn.journal_entry,,,260,@reports.bucket.90_up,1609.99
+detail,1,,Copper Kettle Coffee,2026-03-23,@reports.txn.journal_entry,,,252,@reports.bucket.90_up,3557.52
+detail,1,,Copper Kettle Coffee,2026-04-07,@reports.txn.journal_entry,,,237,@reports.bucket.90_up,-3557.52
+detail,1,,Copper Kettle Coffee,2026-04-22,@reports.txn.journal_entry,,,222,@reports.bucket.90_up,-1609.99
+detail,1,,Copper Kettle Coffee,2026-05-08,@reports.txn.journal_entry,,,206,@reports.bucket.90_up,2158.59
+detail,1,,Copper Kettle Coffee,2026-05-30,@reports.txn.journal_entry,,,184,@reports.bucket.90_up,-2158.59
+detail,1,,Copper Kettle Coffee,2026-08-23,@reports.txn.journal_entry,,,99,@reports.bucket.90_up,4324.86
+detail,1,,Copper Kettle Coffee,2026-09-11,@reports.txn.journal_entry,,,80,@reports.bucket.61_90,-4324.86
+detail,1,,Copper Kettle Coffee,2026-10-28,@reports.txn.journal_entry,,,33,@reports.bucket.31_60,1002.55
+detail,1,,Copper Kettle Coffee,2026-10-28,@reports.txn.journal_entry,,,33,@reports.bucket.31_60,4398.34
+detail,1,,Copper Kettle Coffee,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,1961.85
+detail,1,,Crane Creek Nursery,2026-01-21,@reports.txn.journal_entry,,,313,@reports.bucket.90_up,3936.76
+detail,1,,Crane Creek Nursery,2026-02-07,@reports.txn.journal_entry,,,296,@reports.bucket.90_up,-3936.76
+detail,1,,Crane Creek Nursery,2026-07-08,@reports.txn.journal_entry,,,145,@reports.bucket.90_up,709.38
+detail,1,,Crane Creek Nursery,2026-07-18,@reports.txn.journal_entry,,,135,@reports.bucket.90_up,4052.91
+detail,1,,Crane Creek Nursery,2026-07-22,@reports.txn.journal_entry,,,131,@reports.bucket.90_up,1239.15
+detail,1,,Crane Creek Nursery,2026-07-25,@reports.txn.journal_entry,,,128,@reports.bucket.90_up,-709.38
+detail,1,,Crane Creek Nursery,2026-08-01,@reports.txn.journal_entry,,,121,@reports.bucket.90_up,-4052.91
+detail,1,,Crane Creek Nursery,2026-08-21,@reports.txn.journal_entry,,,101,@reports.bucket.90_up,-1239.15
+detail,1,,Dogwood Canyon Rentals,2026-01-04,@reports.txn.journal_entry,,,330,@reports.bucket.90_up,3275.72
+detail,1,,Dogwood Canyon Rentals,2026-01-20,@reports.txn.journal_entry,,,314,@reports.bucket.90_up,2683.8
+detail,1,,Dogwood Canyon Rentals,2026-01-22,@reports.txn.journal_entry,,,312,@reports.bucket.90_up,-3275.72
+detail,1,,Dogwood Canyon Rentals,2026-02-19,@reports.txn.journal_entry,,,284,@reports.bucket.90_up,-2683.8
+detail,1,,Dogwood Canyon Rentals,2026-02-20,@reports.txn.journal_entry,,,283,@reports.bucket.90_up,4275.9
+detail,1,,Dogwood Canyon Rentals,2026-02-23,@reports.txn.journal_entry,,,280,@reports.bucket.90_up,1046.57
+detail,1,,Dogwood Canyon Rentals,2026-03-15,@reports.txn.journal_entry,,,260,@reports.bucket.90_up,-4275.9
+detail,1,,Dogwood Canyon Rentals,2026-03-17,@reports.txn.journal_entry,,,258,@reports.bucket.90_up,-1046.57
+detail,1,,Dogwood Canyon Rentals,2026-03-28,@reports.txn.journal_entry,,,247,@reports.bucket.90_up,4466.56
+detail,1,,Dogwood Canyon Rentals,2026-04-13,@reports.txn.journal_entry,,,231,@reports.bucket.90_up,4515.18
+detail,1,,Dogwood Canyon Rentals,2026-05-04,@reports.txn.journal_entry,,,210,@reports.bucket.90_up,-4466.56
+detail,1,,Dogwood Canyon Rentals,2026-05-17,@reports.txn.journal_entry,,,197,@reports.bucket.90_up,-4515.18
+detail,1,,Dogwood Canyon Rentals,2026-05-19,@reports.txn.journal_entry,,,195,@reports.bucket.90_up,3821.67
+detail,1,,Dogwood Canyon Rentals,2026-06-05,@reports.txn.journal_entry,,,178,@reports.bucket.90_up,2194.99
+detail,1,,Dogwood Canyon Rentals,2026-06-06,@reports.txn.journal_entry,,,177,@reports.bucket.90_up,-3821.67
+detail,1,,Dogwood Canyon Rentals,2026-06-16,@reports.txn.journal_entry,,,167,@reports.bucket.90_up,733.08
+detail,1,,Dogwood Canyon Rentals,2026-07-03,@reports.txn.journal_entry,,,150,@reports.bucket.90_up,-733.08
+detail,1,,Dogwood Canyon Rentals,2026-07-12,@reports.txn.journal_entry,,,141,@reports.bucket.90_up,-2194.99
+detail,1,,Dogwood Canyon Rentals,2026-08-31,@reports.txn.journal_entry,,,91,@reports.bucket.90_up,1775.12
+detail,1,,Dogwood Canyon Rentals,2026-09-25,@reports.txn.journal_entry,,,66,@reports.bucket.61_90,4642.36
+detail,1,,Dogwood Canyon Rentals,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,-1775.12
+detail,1,,Dogwood Canyon Rentals,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-4642.36
+detail,1,,Elm Street Flats,2026-02-02,@reports.txn.journal_entry,,,301,@reports.bucket.90_up,4732.03
+detail,1,,Elm Street Flats,2026-03-04,@reports.txn.journal_entry,,,271,@reports.bucket.90_up,-4732.03
+detail,1,,Elm Street Flats,2026-03-25,@reports.txn.journal_entry,,,250,@reports.bucket.90_up,2221.63
+detail,1,,Elm Street Flats,2026-04-02,@reports.txn.journal_entry,,,242,@reports.bucket.90_up,2828.38
+detail,1,,Elm Street Flats,2026-04-17,@reports.txn.journal_entry,,,227,@reports.bucket.90_up,-2221.63
+detail,1,,Elm Street Flats,2026-04-17,@reports.txn.journal_entry,,,227,@reports.bucket.90_up,-2828.38
+detail,1,,Elm Street Flats,2026-06-26,@reports.txn.journal_entry,,,157,@reports.bucket.90_up,4220.86
+detail,1,,Elm Street Flats,2026-07-20,@reports.txn.journal_entry,,,133,@reports.bucket.90_up,3988.49
+detail,1,,Elm Street Flats,2026-07-31,@reports.txn.journal_entry,,,122,@reports.bucket.90_up,-4220.86
+detail,1,,Elm Street Flats,2026-08-25,@reports.txn.journal_entry,,,97,@reports.bucket.90_up,-3988.49
+detail,1,,Elm Street Flats,2026-09-26,@reports.txn.journal_entry,,,65,@reports.bucket.61_90,998.43
+detail,1,,Elm Street Flats,2026-10-26,@reports.txn.journal_entry,,,35,@reports.bucket.31_60,-998.43
+detail,1,,Forsyth Public Library,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,276.71
+detail,1,,Forsyth Public Library,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,1877.49
+detail,1,,Forsyth Public Library,2026-10-10,@reports.txn.journal_entry,,,51,@reports.bucket.31_60,-276.71
+detail,1,,Forsyth Public Library,2026-10-26,@reports.txn.journal_entry,,,35,@reports.bucket.31_60,1612.22
+detail,1,,Forsyth Public Library,2026-10-27,@reports.txn.journal_entry,,,34,@reports.bucket.31_60,-1877.49
+detail,1,,Galena Gun Club,2026-05-18,@reports.txn.journal_entry,,,196,@reports.bucket.90_up,3723.49
+detail,1,,Galena Gun Club,2026-06-05,@reports.txn.journal_entry,,,178,@reports.bucket.90_up,-3723.49
+detail,1,,Galena Gun Club,2026-07-22,@reports.txn.journal_entry,,,131,@reports.bucket.90_up,3912.04
+detail,1,,Galena Gun Club,2026-08-21,@reports.txn.journal_entry,,,101,@reports.bucket.90_up,-3912.04
+detail,1,,Greenway Fitness,2026-01-07,@reports.txn.journal_entry,,,327,@reports.bucket.90_up,2329.43
+detail,1,,Greenway Fitness,2026-02-08,@reports.txn.journal_entry,,,295,@reports.bucket.90_up,-2329.43
+detail,1,,Greenway Fitness,2026-04-24,@reports.txn.journal_entry,,,220,@reports.bucket.90_up,4544.9
+detail,1,,Greenway Fitness,2026-05-25,@reports.txn.journal_entry,,,189,@reports.bucket.90_up,-4544.9
+detail,1,,Greenway Fitness,2026-05-28,@reports.txn.journal_entry,,,186,@reports.bucket.90_up,4068.97
+detail,1,,Greenway Fitness,2026-07-02,@reports.txn.journal_entry,,,151,@reports.bucket.90_up,-4068.97
+detail,1,,Greenway Fitness,2026-07-29,@reports.txn.journal_entry,,,124,@reports.bucket.90_up,1246.81
+detail,1,,Greenway Fitness,2026-08-06,@reports.txn.journal_entry,,,116,@reports.bucket.90_up,3689.67
+detail,1,,Greenway Fitness,2026-08-29,@reports.txn.journal_entry,,,93,@reports.bucket.90_up,-1246.81
+detail,1,,Greenway Fitness,2026-08-29,@reports.txn.journal_entry,,,93,@reports.bucket.90_up,2262.57
+detail,1,,Greenway Fitness,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,-3689.67
+detail,1,,Greenway Fitness,2026-09-17,@reports.txn.journal_entry,,,74,@reports.bucket.61_90,-2262.57
+detail,1,,Hickory Ridge Apartments,2026-02-13,@reports.txn.journal_entry,,,290,@reports.bucket.90_up,2981.31
+detail,1,,Hickory Ridge Apartments,2026-02-24,@reports.txn.journal_entry,,,279,@reports.bucket.90_up,2017.29
+detail,1,,Hickory Ridge Apartments,2026-02-28,@reports.txn.journal_entry,,,275,@reports.bucket.90_up,2369.9
+detail,1,,Hickory Ridge Apartments,2026-03-04,@reports.txn.journal_entry,,,271,@reports.bucket.90_up,-2981.31
+detail,1,,Hickory Ridge Apartments,2026-03-07,@reports.txn.journal_entry,,,268,@reports.bucket.90_up,1294.92
+detail,1,,Hickory Ridge Apartments,2026-03-08,@reports.txn.journal_entry,,,267,@reports.bucket.90_up,3339.42
+detail,1,,Hickory Ridge Apartments,2026-03-23,@reports.txn.journal_entry,,,252,@reports.bucket.90_up,-1294.92
+detail,1,,Hickory Ridge Apartments,2026-03-24,@reports.txn.journal_entry,,,251,@reports.bucket.90_up,-2369.9
+detail,1,,Hickory Ridge Apartments,2026-03-29,@reports.txn.journal_entry,,,246,@reports.bucket.90_up,-2017.29
+detail,1,,Hickory Ridge Apartments,2026-04-02,@reports.txn.journal_entry,,,242,@reports.bucket.90_up,-3339.42
+detail,1,,Hickory Ridge Apartments,2026-05-24,@reports.txn.journal_entry,,,190,@reports.bucket.90_up,2730.49
+detail,1,,Hickory Ridge Apartments,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,1747.9
+detail,1,,Hickory Ridge Apartments,2026-06-16,@reports.txn.journal_entry,,,167,@reports.bucket.90_up,-2730.49
+detail,1,,Hickory Ridge Apartments,2026-07-15,@reports.txn.journal_entry,,,138,@reports.bucket.90_up,-1747.9
+detail,1,,Hickory Ridge Apartments,2026-09-10,@reports.txn.journal_entry,,,81,@reports.bucket.61_90,2845.38
+detail,1,,Hickory Ridge Apartments,2026-10-04,@reports.txn.journal_entry,,,57,@reports.bucket.31_60,4008.35
+detail,1,,Hickory Ridge Apartments,2026-10-10,@reports.txn.journal_entry,,,51,@reports.bucket.31_60,-2845.38
+detail,1,,Hickory Ridge Apartments,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-4008.35
+detail,1,,Highway 65 Auto,2026-01-04,@reports.txn.journal_entry,,,330,@reports.bucket.90_up,2179.45
+detail,1,,Highway 65 Auto,2026-02-02,@reports.txn.journal_entry,,,301,@reports.bucket.90_up,-2179.45
+detail,1,,Highway 65 Auto,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,980.06
+detail,1,,Highway 65 Auto,2026-03-03,@reports.txn.journal_entry,,,272,@reports.bucket.90_up,-980.06
+detail,1,,Highway 65 Auto,2026-04-15,@reports.txn.journal_entry,,,229,@reports.bucket.90_up,3161.31
+detail,1,,Highway 65 Auto,2026-05-09,@reports.txn.journal_entry,,,205,@reports.bucket.90_up,-3161.31
+detail,1,,Highway 65 Auto,2026-08-26,@reports.txn.journal_entry,,,96,@reports.bucket.90_up,2212.62
+detail,1,,Highway 65 Auto,2026-09-25,@reports.txn.journal_entry,,,66,@reports.bucket.61_90,-2212.62
+detail,1,,Hilltop Veterinary,2026-04-27,@reports.txn.journal_entry,,,217,@reports.bucket.90_up,1133.32
+detail,1,,Hilltop Veterinary,2026-05-20,@reports.txn.journal_entry,,,194,@reports.bucket.90_up,-1133.32
+detail,1,,Hollister Family Trust,2026-01-03,@reports.txn.journal_entry,,,331,@reports.bucket.90_up,1075.68
+detail,1,,Hollister Family Trust,2026-01-31,@reports.txn.journal_entry,,,303,@reports.bucket.90_up,-1075.68
+detail,1,,Hollister Family Trust,2026-03-29,@reports.txn.journal_entry,,,246,@reports.bucket.90_up,792.5
+detail,1,,Hollister Family Trust,2026-04-12,@reports.txn.journal_entry,,,232,@reports.bucket.90_up,-792.5
+detail,1,,Hollister Family Trust,2026-06-05,@reports.txn.journal_entry,,,178,@reports.bucket.90_up,466.5
+detail,1,,Hollister Family Trust,2026-06-18,@reports.txn.journal_entry,,,165,@reports.bucket.90_up,-466.5
+detail,1,,Hollister Family Trust,2026-07-10,@reports.txn.journal_entry,,,143,@reports.bucket.90_up,1985.67
+detail,1,,Hollister Family Trust,2026-07-26,@reports.txn.journal_entry,,,127,@reports.bucket.90_up,-1985.67
+detail,1,,Hollister Family Trust,2026-10-03,@reports.txn.journal_entry,,,58,@reports.bucket.31_60,3108.92
+detail,1,,Hollister Family Trust,2026-10-26,@reports.txn.journal_entry,,,35,@reports.bucket.31_60,2757.28
+detail,1,,Hollister Family Trust,2026-10-27,@reports.txn.journal_entry,,,34,@reports.bucket.31_60,-3108.92
+detail,1,,Hollister Family Trust,2026-11-01,@reports.txn.journal_entry,,,29,@reports.bucket.1_30,1250
+detail,1,,Hollister Family Trust,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,-1250
+detail,1,,Indian Point Resort,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,3078.14
+detail,1,,Indian Point Resort,2026-03-24,@reports.txn.journal_entry,,,251,@reports.bucket.90_up,-3078.14
+detail,1,,Indian Point Resort,2026-04-03,@reports.txn.journal_entry,,,241,@reports.bucket.90_up,4015.41
+detail,1,,Indian Point Resort,2026-04-20,@reports.txn.journal_entry,,,224,@reports.bucket.90_up,-4015.41
+detail,1,,Indian Point Resort,2026-06-07,@reports.txn.journal_entry,,,176,@reports.bucket.90_up,2129.91
+detail,1,,Indian Point Resort,2026-07-05,@reports.txn.journal_entry,,,148,@reports.bucket.90_up,-2129.91
+detail,1,,Indian Point Resort,2026-09-06,@reports.txn.journal_entry,,,85,@reports.bucket.61_90,3817.05
+detail,1,,Indian Point Resort,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,248.66
+detail,1,,Indian Point Resort,2026-09-10,@reports.txn.journal_entry,,,81,@reports.bucket.61_90,4458.51
+detail,1,,Indian Point Resort,2026-09-23,@reports.txn.journal_entry,,,68,@reports.bucket.61_90,-4458.51
+detail,1,,Indian Point Resort,2026-10-04,@reports.txn.journal_entry,,,57,@reports.bucket.31_60,-248.66
+detail,1,,Indian Point Resort,2026-10-13,@reports.txn.journal_entry,,,48,@reports.bucket.31_60,-3817.05
+detail,1,,Indian Point Resort,2026-10-19,@reports.txn.journal_entry,,,42,@reports.bucket.31_60,2954.63
+detail,1,,Indian Point Resort,2026-10-23,@reports.txn.journal_entry,,,38,@reports.bucket.31_60,2080.86
+detail,1,,Juniper Court Condos,2026-01-28,@reports.txn.journal_entry,,,306,@reports.bucket.90_up,1117.64
+detail,1,,Juniper Court Condos,2026-02-25,@reports.txn.journal_entry,,,278,@reports.bucket.90_up,-1117.64
+detail,1,,Juniper Court Condos,2026-03-05,@reports.txn.journal_entry,,,270,@reports.bucket.90_up,2718.65
+detail,1,,Juniper Court Condos,2026-03-19,@reports.txn.journal_entry,,,256,@reports.bucket.90_up,-2718.65
+detail,1,,Juniper Court Condos,2026-04-23,@reports.txn.journal_entry,,,221,@reports.bucket.90_up,2313.29
+detail,1,,Juniper Court Condos,2026-05-14,@reports.txn.journal_entry,,,200,@reports.bucket.90_up,-2313.29
+detail,1,,Juniper Court Condos,2026-05-16,@reports.txn.journal_entry,,,198,@reports.bucket.90_up,4206.77
+detail,1,,Juniper Court Condos,2026-06-05,@reports.txn.journal_entry,,,178,@reports.bucket.90_up,-4206.77
+detail,1,,Juniper Court Condos,2026-09-11,@reports.txn.journal_entry,,,80,@reports.bucket.61_90,1140.51
+detail,1,,Juniper Court Condos,2026-10-14,@reports.txn.journal_entry,,,47,@reports.bucket.31_60,-1140.51
+detail,1,,Kimberling Marina,2026-07-24,@reports.txn.journal_entry,,,129,@reports.bucket.90_up,877.73
+detail,1,,Kimberling Marina,2026-08-05,@reports.txn.journal_entry,,,117,@reports.bucket.90_up,1305.02
+detail,1,,Kimberling Marina,2026-08-20,@reports.txn.journal_entry,,,102,@reports.bucket.90_up,-1305.02
+detail,1,,Kimberling Marina,2026-08-30,@reports.txn.journal_entry,,,92,@reports.bucket.90_up,2183.07
+detail,1,,Kimberling Marina,2026-08-31,@reports.txn.journal_entry,,,91,@reports.bucket.90_up,-877.73
+detail,1,,Kimberling Marina,2026-09-26,@reports.txn.journal_entry,,,65,@reports.bucket.61_90,4219.64
+detail,1,,Kimberling Marina,2026-09-29,@reports.txn.journal_entry,,,62,@reports.bucket.61_90,2744.67
+detail,1,,Kimberling Marina,2026-10-05,@reports.txn.journal_entry,,,56,@reports.bucket.31_60,-2183.07
+detail,1,,Kimberling Marina,2026-11-01,@reports.txn.journal_entry,,,29,@reports.bucket.1_30,-2744.67
+detail,1,,Kimberling Marina,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,-4219.64
+detail,1,,Lakeview Credit Union,2026-05-08,@reports.txn.journal_entry,,,206,@reports.bucket.90_up,3172.36
+detail,1,,Lakeview Credit Union,2026-05-22,@reports.txn.journal_entry,,,192,@reports.bucket.90_up,3124.85
+detail,1,,Lakeview Credit Union,2026-05-28,@reports.txn.journal_entry,,,186,@reports.bucket.90_up,1110.19
+detail,1,,Lakeview Credit Union,2026-06-06,@reports.txn.journal_entry,,,177,@reports.bucket.90_up,640.26
+detail,1,,Lakeview Credit Union,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,-3172.36
+detail,1,,Lakeview Credit Union,2026-06-15,@reports.txn.journal_entry,,,168,@reports.bucket.90_up,-3124.85
+detail,1,,Lakeview Credit Union,2026-06-21,@reports.txn.journal_entry,,,162,@reports.bucket.90_up,-1110.19
+detail,1,,Lakeview Credit Union,2026-07-09,@reports.txn.journal_entry,,,144,@reports.bucket.90_up,-640.26
+detail,1,,Lampe Country Store,2026-01-11,@reports.txn.journal_entry,,,323,@reports.bucket.90_up,3424.18
+detail,1,,Lampe Country Store,2026-01-22,@reports.txn.journal_entry,,,312,@reports.bucket.90_up,4025.67
+detail,1,,Lampe Country Store,2026-02-17,@reports.txn.journal_entry,,,286,@reports.bucket.90_up,-3424.18
+detail,1,,Lampe Country Store,2026-02-28,@reports.txn.journal_entry,,,275,@reports.bucket.90_up,-4025.67
+detail,1,,Lampe Country Store,2026-04-04,@reports.txn.journal_entry,,,240,@reports.bucket.90_up,629.79
+detail,1,,Lampe Country Store,2026-04-30,@reports.txn.journal_entry,,,214,@reports.bucket.90_up,-629.79
+detail,1,,Lampe Country Store,2026-07-25,@reports.txn.journal_entry,,,128,@reports.bucket.90_up,638.21
+detail,1,,Lampe Country Store,2026-08-18,@reports.txn.journal_entry,,,104,@reports.bucket.90_up,-638.21
+detail,1,,Lampe Country Store,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,1956.61
+detail,1,,Lampe Country Store,2026-10-03,@reports.txn.journal_entry,,,58,@reports.bucket.31_60,4553.45
+detail,1,,Lampe Country Store,2026-10-26,@reports.txn.journal_entry,,,35,@reports.bucket.31_60,-4553.45
+detail,1,,Lampe Country Store,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,-1956.61
+detail,1,,Long Creek Marina,2026-01-14,@reports.txn.journal_entry,,,320,@reports.bucket.90_up,642.25
+detail,1,,Long Creek Marina,2026-02-11,@reports.txn.journal_entry,,,292,@reports.bucket.90_up,-642.25
+detail,1,,Long Creek Marina,2026-02-19,@reports.txn.journal_entry,,,284,@reports.bucket.90_up,2589.14
+detail,1,,Long Creek Marina,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,-2589.14
+detail,1,,Long Creek Marina,2026-03-25,@reports.txn.journal_entry,,,250,@reports.bucket.90_up,2511.01
+detail,1,,Long Creek Marina,2026-03-28,@reports.txn.journal_entry,,,247,@reports.bucket.90_up,3644.86
+detail,1,,Long Creek Marina,2026-04-09,@reports.txn.journal_entry,,,235,@reports.bucket.90_up,-3644.86
+detail,1,,Long Creek Marina,2026-04-17,@reports.txn.journal_entry,,,227,@reports.bucket.90_up,-2511.01
+detail,1,,Lost Canyon Golf,2026-05-04,@reports.txn.journal_entry,,,210,@reports.bucket.90_up,3589.43
+detail,1,,Lost Canyon Golf,2026-06-06,@reports.txn.journal_entry,,,177,@reports.bucket.90_up,-3589.43
+detail,1,,Lost Canyon Golf,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,2443.44
+detail,1,,Lost Canyon Golf,2026-09-19,@reports.txn.journal_entry,,,72,@reports.bucket.61_90,-2443.44
+detail,1,,Maple Street Bakery,2026-01-06,@reports.txn.journal_entry,,,328,@reports.bucket.90_up,1158.09
+detail,1,,Maple Street Bakery,2026-01-23,@reports.txn.journal_entry,,,311,@reports.bucket.90_up,-1158.09
+detail,1,,Maple Street Bakery,2026-06-17,@reports.txn.journal_entry,,,166,@reports.bucket.90_up,1558.01
+detail,1,,Maple Street Bakery,2026-06-23,@reports.txn.journal_entry,,,160,@reports.bucket.90_up,3873.95
+detail,1,,Maple Street Bakery,2026-06-26,@reports.txn.journal_entry,,,157,@reports.bucket.90_up,2773.88
+detail,1,,Maple Street Bakery,2026-07-08,@reports.txn.journal_entry,,,145,@reports.bucket.90_up,-3873.95
+detail,1,,Maple Street Bakery,2026-07-09,@reports.txn.journal_entry,,,144,@reports.bucket.90_up,-1558.01
+detail,1,,Maple Street Bakery,2026-07-11,@reports.txn.journal_entry,,,142,@reports.bucket.90_up,4792.45
+detail,1,,Maple Street Bakery,2026-07-27,@reports.txn.journal_entry,,,126,@reports.bucket.90_up,-2773.88
+detail,1,,Maple Street Bakery,2026-08-06,@reports.txn.journal_entry,,,116,@reports.bucket.90_up,-4792.45
+detail,1,,Maple Street Bakery,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,4738.47
+detail,1,,Maple Street Bakery,2026-10-17,@reports.txn.journal_entry,,,44,@reports.bucket.31_60,2610.02
+detail,1,,Maple Street Bakery,2026-10-28,@reports.txn.journal_entry,,,33,@reports.bucket.31_60,-4738.47
+detail,1,,Maple Street Bakery,2026-10-31,@reports.txn.journal_entry,,,30,@reports.bucket.1_30,-2610.02
+detail,1,,Maple Street Bakery,2026-11-01,@reports.txn.journal_entry,,,29,@reports.bucket.1_30,842.5
+detail,1,,Maple Street Bakery,2026-11-03,@reports.txn.journal_entry,,,27,@reports.bucket.1_30,-842.5
+detail,1,,Mill Creek Pottery,2026-01-14,@reports.txn.journal_entry,,,320,@reports.bucket.90_up,4440.91
+detail,1,,Mill Creek Pottery,2026-02-10,@reports.txn.journal_entry,,,293,@reports.bucket.90_up,-4440.91
+detail,1,,Mill Creek Pottery,2026-04-22,@reports.txn.journal_entry,,,222,@reports.bucket.90_up,3042.88
+detail,1,,Mill Creek Pottery,2026-05-29,@reports.txn.journal_entry,,,185,@reports.bucket.90_up,-3042.88
+detail,1,,Mill Creek Pottery,2026-07-05,@reports.txn.journal_entry,,,148,@reports.bucket.90_up,3702.19
+detail,1,,Mill Creek Pottery,2026-07-28,@reports.txn.journal_entry,,,125,@reports.bucket.90_up,-3702.19
+detail,1,,Mill Creek Pottery,2026-08-02,@reports.txn.journal_entry,,,120,@reports.bucket.90_up,2665.59
+detail,1,,Mill Creek Pottery,2026-08-18,@reports.txn.journal_entry,,,104,@reports.bucket.90_up,-2665.59
+detail,1,,Mill Creek Pottery,2026-08-30,@reports.txn.journal_entry,,,92,@reports.bucket.90_up,4655.94
+detail,1,,Mill Creek Pottery,2026-09-08,@reports.txn.journal_entry,,,83,@reports.bucket.61_90,4468.05
+detail,1,,Mill Creek Pottery,2026-09-18,@reports.txn.journal_entry,,,73,@reports.bucket.61_90,-4655.94
+detail,1,,Mill Creek Pottery,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,-4468.05
+detail,1,,Mincy Hollow Ranch,2026-04-04,@reports.txn.journal_entry,,,240,@reports.bucket.90_up,4587.78
+detail,1,,Mincy Hollow Ranch,2026-04-12,@reports.txn.journal_entry,,,232,@reports.bucket.90_up,1239.26
+detail,1,,Mincy Hollow Ranch,2026-04-24,@reports.txn.journal_entry,,,220,@reports.bucket.90_up,-4587.78
+detail,1,,Mincy Hollow Ranch,2026-04-24,@reports.txn.journal_entry,,,220,@reports.bucket.90_up,1065.53
+detail,1,,Mincy Hollow Ranch,2026-04-28,@reports.txn.journal_entry,,,216,@reports.bucket.90_up,-1239.26
+detail,1,,Mincy Hollow Ranch,2026-05-27,@reports.txn.journal_entry,,,187,@reports.bucket.90_up,-1065.53
+detail,1,,Mincy Hollow Ranch,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,555.07
+detail,1,,Mincy Hollow Ranch,2026-07-13,@reports.txn.journal_entry,,,140,@reports.bucket.90_up,1351.1
+detail,1,,Mincy Hollow Ranch,2026-07-17,@reports.txn.journal_entry,,,136,@reports.bucket.90_up,-555.07
+detail,1,,Mincy Hollow Ranch,2026-08-03,@reports.txn.journal_entry,,,119,@reports.bucket.90_up,-1351.1
+detail,1,,Mincy Hollow Ranch,2026-08-06,@reports.txn.journal_entry,,,116,@reports.bucket.90_up,2534.39
+detail,1,,Mincy Hollow Ranch,2026-08-26,@reports.txn.journal_entry,,,96,@reports.bucket.90_up,-2534.39
+detail,1,,Mincy Hollow Ranch,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,225.75
+detail,1,,Mincy Hollow Ranch,2026-10-10,@reports.txn.journal_entry,,,51,@reports.bucket.31_60,-225.75
+detail,1,,Mincy Hollow Ranch,2026-11-04,@reports.txn.journal_entry,,,26,@reports.bucket.1_30,3159.59
+detail,1,,Mountain Grove Antiques,2026-01-15,@reports.txn.journal_entry,,,319,@reports.bucket.90_up,1003.09
+detail,1,,Mountain Grove Antiques,2026-02-19,@reports.txn.journal_entry,,,284,@reports.bucket.90_up,-1003.09
+detail,1,,Mountain Grove Antiques,2026-03-13,@reports.txn.journal_entry,,,262,@reports.bucket.90_up,3232.76
+detail,1,,Mountain Grove Antiques,2026-03-24,@reports.txn.journal_entry,,,251,@reports.bucket.90_up,3932.98
+detail,1,,Mountain Grove Antiques,2026-04-13,@reports.txn.journal_entry,,,231,@reports.bucket.90_up,-3232.76
+detail,1,,Mountain Grove Antiques,2026-04-15,@reports.txn.journal_entry,,,229,@reports.bucket.90_up,-3932.98
+detail,1,,Mountain Grove Antiques,2026-07-07,@reports.txn.journal_entry,,,146,@reports.bucket.90_up,1170.9
+detail,1,,Mountain Grove Antiques,2026-07-12,@reports.txn.journal_entry,,,141,@reports.bucket.90_up,308.88
+detail,1,,Mountain Grove Antiques,2026-08-10,@reports.txn.journal_entry,,,112,@reports.bucket.90_up,-1170.9
+detail,1,,Mountain Grove Antiques,2026-08-10,@reports.txn.journal_entry,,,112,@reports.bucket.90_up,-308.88
+detail,1,,Mountain Grove Antiques,2026-08-10,@reports.txn.journal_entry,,,112,@reports.bucket.90_up,4382.3
+detail,1,,Mountain Grove Antiques,2026-09-01,@reports.txn.journal_entry,,,90,@reports.bucket.61_90,-4382.3
+detail,1,,Northfork Veterinary,2026-02-04,@reports.txn.journal_entry,,,299,@reports.bucket.90_up,4236.89
+detail,1,,Northfork Veterinary,2026-02-28,@reports.txn.journal_entry,,,275,@reports.bucket.90_up,-4236.89
+detail,1,,Northfork Veterinary,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,3808.84
+detail,1,,Northfork Veterinary,2026-04-05,@reports.txn.journal_entry,,,239,@reports.bucket.90_up,-3808.84
+detail,1,,Northfork Veterinary,2026-05-04,@reports.txn.journal_entry,,,210,@reports.bucket.90_up,4483.33
+detail,1,,Northfork Veterinary,2026-05-28,@reports.txn.journal_entry,,,186,@reports.bucket.90_up,-4483.33
+detail,1,,Northfork Veterinary,2026-08-05,@reports.txn.journal_entry,,,117,@reports.bucket.90_up,2825.45
+detail,1,,Northfork Veterinary,2026-08-22,@reports.txn.journal_entry,,,100,@reports.bucket.90_up,-2825.45
+detail,1,,Northfork Veterinary,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,3946.03
+detail,1,,Oak Grove Orchard,2026-03-26,@reports.txn.journal_entry,,,249,@reports.bucket.90_up,3851.21
+detail,1,,Oak Grove Orchard,2026-04-26,@reports.txn.journal_entry,,,218,@reports.bucket.90_up,-3851.21
+detail,1,,Oak Grove Orchard,2026-05-05,@reports.txn.journal_entry,,,209,@reports.bucket.90_up,3872.94
+detail,1,,Oak Grove Orchard,2026-05-10,@reports.txn.journal_entry,,,204,@reports.bucket.90_up,785.3
+detail,1,,Oak Grove Orchard,2026-06-03,@reports.txn.journal_entry,,,180,@reports.bucket.90_up,-3872.94
+detail,1,,Oak Grove Orchard,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,-785.3
+detail,1,,Oak Grove Orchard,2026-09-17,@reports.txn.journal_entry,,,74,@reports.bucket.61_90,1103.69
+detail,1,,Oak Grove Orchard,2026-10-23,@reports.txn.journal_entry,,,38,@reports.bucket.31_60,-1103.69
+detail,1,,Ozark Mountain Daycare,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,667.6
+detail,1,,Ozark Mountain Daycare,2026-09-18,@reports.txn.journal_entry,,,73,@reports.bucket.61_90,-667.6
+detail,1,,Ozark Mountain Daycare,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,1692.64
+detail,1,,Ozark Mountain Daycare,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-1692.64
+detail,1,,Persimmon Hill Farm,2026-01-04,@reports.txn.journal_entry,,,330,@reports.bucket.90_up,2753.19
+detail,1,,Persimmon Hill Farm,2026-01-06,@reports.txn.journal_entry,,,328,@reports.bucket.90_up,1640.1
+detail,1,,Persimmon Hill Farm,2026-02-06,@reports.txn.journal_entry,,,297,@reports.bucket.90_up,-2753.19
+detail,1,,Persimmon Hill Farm,2026-02-09,@reports.txn.journal_entry,,,294,@reports.bucket.90_up,-1640.1
+detail,1,,Persimmon Hill Farm,2026-03-02,@reports.txn.journal_entry,,,273,@reports.bucket.90_up,1666.31
+detail,1,,Persimmon Hill Farm,2026-04-03,@reports.txn.journal_entry,,,241,@reports.bucket.90_up,-1666.31
+detail,1,,Persimmon Hill Farm,2026-06-01,@reports.txn.journal_entry,,,182,@reports.bucket.90_up,1065.58
+detail,1,,Persimmon Hill Farm,2026-06-08,@reports.txn.journal_entry,,,175,@reports.bucket.90_up,4017.85
+detail,1,,Persimmon Hill Farm,2026-06-17,@reports.txn.journal_entry,,,166,@reports.bucket.90_up,-1065.58
+detail,1,,Persimmon Hill Farm,2026-07-03,@reports.txn.journal_entry,,,150,@reports.bucket.90_up,677.04
+detail,1,,Persimmon Hill Farm,2026-07-07,@reports.txn.journal_entry,,,146,@reports.bucket.90_up,-4017.85
+detail,1,,Persimmon Hill Farm,2026-08-10,@reports.txn.journal_entry,,,112,@reports.bucket.90_up,-677.04
+detail,1,,Pine Ridge Storage,2026-04-02,@reports.txn.journal_entry,,,242,@reports.bucket.90_up,1488.36
+detail,1,,Pine Ridge Storage,2026-04-16,@reports.txn.journal_entry,,,228,@reports.bucket.90_up,4769.72
+detail,1,,Pine Ridge Storage,2026-05-02,@reports.txn.journal_entry,,,212,@reports.bucket.90_up,-1488.36
+detail,1,,Pine Ridge Storage,2026-05-12,@reports.txn.journal_entry,,,202,@reports.bucket.90_up,-4769.72
+detail,1,,Pine Ridge Storage,2026-10-03,@reports.txn.journal_entry,,,58,@reports.bucket.31_60,3660.71
+detail,1,,Pine Ridge Storage,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,4081.59
+detail,1,,Pine Ridge Storage,2026-10-14,@reports.txn.journal_entry,,,47,@reports.bucket.31_60,539.56
+detail,1,,Pine Ridge Storage,2026-10-28,@reports.txn.journal_entry,,,33,@reports.bucket.31_60,-539.56
+detail,1,,Pine Ridge Storage,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-3660.71
+detail,1,,Pine Ridge Storage,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,-4081.59
+detail,1,,Powersite Dam Tours,2026-02-03,@reports.txn.journal_entry,,,300,@reports.bucket.90_up,2870.86
+detail,1,,Powersite Dam Tours,2026-02-26,@reports.txn.journal_entry,,,277,@reports.bucket.90_up,-2870.86
+detail,1,,Powersite Dam Tours,2026-04-30,@reports.txn.journal_entry,,,214,@reports.bucket.90_up,1569.33
+detail,1,,Powersite Dam Tours,2026-05-02,@reports.txn.journal_entry,,,212,@reports.bucket.90_up,342.4
+detail,1,,Powersite Dam Tours,2026-05-20,@reports.txn.journal_entry,,,194,@reports.bucket.90_up,1730.06
+detail,1,,Powersite Dam Tours,2026-05-22,@reports.txn.journal_entry,,,192,@reports.bucket.90_up,-342.4
+detail,1,,Powersite Dam Tours,2026-05-24,@reports.txn.journal_entry,,,190,@reports.bucket.90_up,-1569.33
+detail,1,,Powersite Dam Tours,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,-1730.06
+detail,1,,Protem Lakeside HOA,2026-04-25,@reports.txn.journal_entry,,,219,@reports.bucket.90_up,1098.23
+detail,1,,Protem Lakeside HOA,2026-06-01,@reports.txn.journal_entry,,,182,@reports.bucket.90_up,-1098.23
+detail,1,,Protem Lakeside HOA,2026-06-09,@reports.txn.journal_entry,,,174,@reports.bucket.90_up,4304.15
+detail,1,,Protem Lakeside HOA,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,-4304.15
+detail,1,,Protem Lakeside HOA,2026-07-06,@reports.txn.journal_entry,,,147,@reports.bucket.90_up,1042.01
+detail,1,,Protem Lakeside HOA,2026-07-20,@reports.txn.journal_entry,,,133,@reports.bucket.90_up,326.39
+detail,1,,Protem Lakeside HOA,2026-08-01,@reports.txn.journal_entry,,,121,@reports.bucket.90_up,-326.39
+detail,1,,Protem Lakeside HOA,2026-08-11,@reports.txn.journal_entry,,,111,@reports.bucket.90_up,-1042.01
+detail,1,,Protem Lakeside HOA,2026-08-28,@reports.txn.journal_entry,,,94,@reports.bucket.90_up,2741.79
+detail,1,,Protem Lakeside HOA,2026-09-22,@reports.txn.journal_entry,,,69,@reports.bucket.61_90,-2741.79
+detail,1,,Reeds Spring Hardware,2026-02-18,@reports.txn.journal_entry,,,285,@reports.bucket.90_up,2988.73
+detail,1,,Reeds Spring Hardware,2026-03-06,@reports.txn.journal_entry,,,269,@reports.bucket.90_up,-2988.73
+detail,1,,Reeds Spring Hardware,2026-03-30,@reports.txn.journal_entry,,,245,@reports.bucket.90_up,1067
+detail,1,,Reeds Spring Hardware,2026-04-30,@reports.txn.journal_entry,,,214,@reports.bucket.90_up,-1067
+detail,1,,Reeds Spring Hardware,2026-05-26,@reports.txn.journal_entry,,,188,@reports.bucket.90_up,1259.45
+detail,1,,Reeds Spring Hardware,2026-06-16,@reports.txn.journal_entry,,,167,@reports.bucket.90_up,-1259.45
+detail,1,,Reeds Spring Hardware,2026-07-16,@reports.txn.journal_entry,,,137,@reports.bucket.90_up,1871.41
+detail,1,,Reeds Spring Hardware,2026-08-02,@reports.txn.journal_entry,,,120,@reports.bucket.90_up,-1871.41
+detail,1,,Reeds Spring Hardware,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,1894.46
+detail,1,,Reeds Spring Hardware,2026-10-14,@reports.txn.journal_entry,,,47,@reports.bucket.31_60,902.56
+detail,1,,Reeds Spring Hardware,2026-10-26,@reports.txn.journal_entry,,,35,@reports.bucket.31_60,-1894.46
+detail,1,,Reeds Spring Hardware,2026-10-27,@reports.txn.journal_entry,,,34,@reports.bucket.31_60,-902.56
+detail,1,,Ridgedale Chapel,2026-03-08,@reports.txn.journal_entry,,,267,@reports.bucket.90_up,980.79
+detail,1,,Ridgedale Chapel,2026-04-02,@reports.txn.journal_entry,,,242,@reports.bucket.90_up,3603.02
+detail,1,,Ridgedale Chapel,2026-04-08,@reports.txn.journal_entry,,,236,@reports.bucket.90_up,4783.7
+detail,1,,Ridgedale Chapel,2026-04-13,@reports.txn.journal_entry,,,231,@reports.bucket.90_up,-980.79
+detail,1,,Ridgedale Chapel,2026-05-09,@reports.txn.journal_entry,,,205,@reports.bucket.90_up,-3603.02
+detail,1,,Ridgedale Chapel,2026-05-10,@reports.txn.journal_entry,,,204,@reports.bucket.90_up,940.97
+detail,1,,Ridgedale Chapel,2026-05-13,@reports.txn.journal_entry,,,201,@reports.bucket.90_up,-4783.7
+detail,1,,Ridgedale Chapel,2026-05-22,@reports.txn.journal_entry,,,192,@reports.bucket.90_up,-940.97
+detail,1,,Ridgedale Chapel,2026-06-06,@reports.txn.journal_entry,,,177,@reports.bucket.90_up,3545.12
+detail,1,,Ridgedale Chapel,2026-06-18,@reports.txn.journal_entry,,,165,@reports.bucket.90_up,-3545.12
+detail,1,,Ridgedale Chapel,2026-10-07,@reports.txn.journal_entry,,,54,@reports.bucket.31_60,4188.16
+detail,1,,Ridgedale Chapel,2026-10-19,@reports.txn.journal_entry,,,42,@reports.bucket.31_60,-4188.16
+detail,1,,Ridgedale Chapel,2026-10-31,@reports.txn.journal_entry,,,30,@reports.bucket.1_30,1331.75
+detail,1,,Riverbend HOA,2026-01-28,@reports.txn.journal_entry,,,306,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-02-23,@reports.txn.journal_entry,,,280,@reports.bucket.90_up,851.63
+detail,1,,Riverbend HOA,2026-02-25,@reports.txn.journal_entry,,,278,@reports.bucket.90_up,469.17
+detail,1,,Riverbend HOA,2026-02-28,@reports.txn.journal_entry,,,275,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-03-28,@reports.txn.journal_entry,,,247,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-03-28,@reports.txn.journal_entry,,,247,@reports.bucket.90_up,-469.17
+detail,1,,Riverbend HOA,2026-04-01,@reports.txn.journal_entry,,,243,@reports.bucket.90_up,-851.63
+detail,1,,Riverbend HOA,2026-04-21,@reports.txn.journal_entry,,,223,@reports.bucket.90_up,3719.59
+detail,1,,Riverbend HOA,2026-04-26,@reports.txn.journal_entry,,,218,@reports.bucket.90_up,1044.46
+detail,1,,Riverbend HOA,2026-04-28,@reports.txn.journal_entry,,,216,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-05-14,@reports.txn.journal_entry,,,200,@reports.bucket.90_up,-3719.59
+detail,1,,Riverbend HOA,2026-05-26,@reports.txn.journal_entry,,,188,@reports.bucket.90_up,-1044.46
+detail,1,,Riverbend HOA,2026-05-28,@reports.txn.journal_entry,,,186,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-06-18,@reports.txn.journal_entry,,,165,@reports.bucket.90_up,1338.28
+detail,1,,Riverbend HOA,2026-06-28,@reports.txn.journal_entry,,,155,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-07-20,@reports.txn.journal_entry,,,133,@reports.bucket.90_up,-1338.28
+detail,1,,Riverbend HOA,2026-07-28,@reports.txn.journal_entry,,,125,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-08-06,@reports.txn.journal_entry,,,116,@reports.bucket.90_up,4303.24
+detail,1,,Riverbend HOA,2026-08-22,@reports.txn.journal_entry,,,100,@reports.bucket.90_up,3133.47
+detail,1,,Riverbend HOA,2026-08-28,@reports.txn.journal_entry,,,94,@reports.bucket.90_up,-28626.02
+detail,1,,Riverbend HOA,2026-08-29,@reports.txn.journal_entry,,,93,@reports.bucket.90_up,-4303.24
+detail,1,,Riverbend HOA,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,622.41
+detail,1,,Riverbend HOA,2026-09-13,@reports.txn.journal_entry,,,78,@reports.bucket.61_90,-3133.47
+detail,1,,Riverbend HOA,2026-09-27,@reports.txn.journal_entry,,,64,@reports.bucket.61_90,-622.41
+detail,1,,Riverbend HOA,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,-28626.03
+detail,1,,Riverbend HOA,2026-10-21,@reports.txn.journal_entry,,,40,@reports.bucket.31_60,2950.74
+detail,1,,Riverbend HOA,2026-10-30,@reports.txn.journal_entry,,,31,@reports.bucket.31_60,-26531.68
+detail,1,,Riverbend HOA,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,291258.48
+detail,1,,Riverbend HOA,2026-11-03,@reports.txn.journal_entry,,,27,@reports.bucket.1_30,-2950.74
+detail,1,,Riverbend HOA,2026-11-05,@reports.txn.invoice,INV-1001,2026-12-05,-5,@reports.bucket.current,2033.33
+detail,1,,Riverbend HOA,2026-11-25,@reports.txn.credit_memo,1001,,5,@reports.bucket.1_30,-150
+detail,1,,Roark Creek Dentistry,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,206.82
+detail,1,,Roark Creek Dentistry,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,635.39
+detail,1,,Roark Creek Dentistry,2026-03-18,@reports.txn.journal_entry,,,257,@reports.bucket.90_up,-206.82
+detail,1,,Roark Creek Dentistry,2026-03-23,@reports.txn.journal_entry,,,252,@reports.bucket.90_up,-635.39
+detail,1,,Roark Creek Dentistry,2026-05-24,@reports.txn.journal_entry,,,190,@reports.bucket.90_up,371.63
+detail,1,,Roark Creek Dentistry,2026-06-30,@reports.txn.journal_entry,,,153,@reports.bucket.90_up,-371.63
+detail,1,,Roark Creek Dentistry,2026-07-09,@reports.txn.journal_entry,,,144,@reports.bucket.90_up,4398.45
+detail,1,,Roark Creek Dentistry,2026-08-16,@reports.txn.journal_entry,,,106,@reports.bucket.90_up,-4398.45
+detail,1,,Roark Creek Dentistry,2026-08-20,@reports.txn.journal_entry,,,102,@reports.bucket.90_up,3173.05
+detail,1,,Roark Creek Dentistry,2026-09-26,@reports.txn.journal_entry,,,65,@reports.bucket.61_90,-3173.05
+detail,1,,Roark Creek Dentistry,2026-10-08,@reports.txn.journal_entry,,,53,@reports.bucket.31_60,3117.5
+detail,1,,Roark Creek Dentistry,2026-11-03,@reports.txn.journal_entry,,,27,@reports.bucket.1_30,-3117.5
+detail,1,,Rockaway Beach Diner,2026-01-08,@reports.txn.journal_entry,,,326,@reports.bucket.90_up,1723.26
+detail,1,,Rockaway Beach Diner,2026-02-01,@reports.txn.journal_entry,,,302,@reports.bucket.90_up,-1723.26
+detail,1,,Rockaway Beach Diner,2026-02-07,@reports.txn.journal_entry,,,296,@reports.bucket.90_up,353.31
+detail,1,,Rockaway Beach Diner,2026-03-07,@reports.txn.journal_entry,,,268,@reports.bucket.90_up,-353.31
+detail,1,,Rockaway Beach Diner,2026-04-07,@reports.txn.journal_entry,,,237,@reports.bucket.90_up,2823.91
+detail,1,,Rockaway Beach Diner,2026-04-21,@reports.txn.journal_entry,,,223,@reports.bucket.90_up,2983.13
+detail,1,,Rockaway Beach Diner,2026-05-12,@reports.txn.journal_entry,,,202,@reports.bucket.90_up,-2823.91
+detail,1,,Rockaway Beach Diner,2026-05-19,@reports.txn.journal_entry,,,195,@reports.bucket.90_up,-2983.13
+detail,1,,Rockaway Beach Diner,2026-06-05,@reports.txn.journal_entry,,,178,@reports.bucket.90_up,585.96
+detail,1,,Rockaway Beach Diner,2026-06-22,@reports.txn.journal_entry,,,161,@reports.bucket.90_up,-585.96
+detail,1,,Rockaway Beach Diner,2026-07-24,@reports.txn.journal_entry,,,129,@reports.bucket.90_up,702.12
+detail,1,,Rockaway Beach Diner,2026-08-18,@reports.txn.journal_entry,,,104,@reports.bucket.90_up,-702.12
+detail,1,,Rockaway Beach Diner,2026-09-10,@reports.txn.journal_entry,,,81,@reports.bucket.61_90,2001.43
+detail,1,,Rockaway Beach Diner,2026-09-27,@reports.txn.journal_entry,,,64,@reports.bucket.61_90,-2001.43
+detail,1,,Rockaway Beach Diner,2026-10-12,@reports.txn.journal_entry,,,49,@reports.bucket.31_60,4089.59
+detail,1,,Shepherd Hills Clinic,2026-04-03,@reports.txn.journal_entry,,,241,@reports.bucket.90_up,455.49
+detail,1,,Shepherd Hills Clinic,2026-04-24,@reports.txn.journal_entry,,,220,@reports.bucket.90_up,-455.49
+detail,1,,Shepherd Hills Clinic,2026-04-25,@reports.txn.journal_entry,,,219,@reports.bucket.90_up,219.28
+detail,1,,Shepherd Hills Clinic,2026-05-21,@reports.txn.journal_entry,,,193,@reports.bucket.90_up,-219.28
+detail,1,,Shepherd Hills Clinic,2026-06-24,@reports.txn.journal_entry,,,159,@reports.bucket.90_up,2753.12
+detail,1,,Shepherd Hills Clinic,2026-07-11,@reports.txn.journal_entry,,,142,@reports.bucket.90_up,4754.49
+detail,1,,Shepherd Hills Clinic,2026-07-28,@reports.txn.journal_entry,,,125,@reports.bucket.90_up,-4754.49
+detail,1,,Shepherd Hills Clinic,2026-07-31,@reports.txn.journal_entry,,,122,@reports.bucket.90_up,-2753.12
+detail,1,,Shepherd Hills Clinic,2026-08-20,@reports.txn.journal_entry,,,102,@reports.bucket.90_up,4552.03
+detail,1,,Shepherd Hills Clinic,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,-4552.03
+detail,1,,Shepherd Hills Clinic,2026-10-04,@reports.txn.journal_entry,,,57,@reports.bucket.31_60,669.38
+detail,1,,Shepherd Hills Clinic,2026-10-22,@reports.txn.journal_entry,,,39,@reports.bucket.31_60,-669.38
+detail,1,,Silver Dollar Rentals,2026-01-20,@reports.txn.journal_entry,,,314,@reports.bucket.90_up,3056.93
+detail,1,,Silver Dollar Rentals,2026-02-01,@reports.txn.journal_entry,,,302,@reports.bucket.90_up,-3056.93
+detail,1,,Silver Dollar Rentals,2026-03-21,@reports.txn.journal_entry,,,254,@reports.bucket.90_up,1015.01
+detail,1,,Silver Dollar Rentals,2026-03-22,@reports.txn.journal_entry,,,253,@reports.bucket.90_up,4038.28
+detail,1,,Silver Dollar Rentals,2026-04-16,@reports.txn.journal_entry,,,228,@reports.bucket.90_up,-1015.01
+detail,1,,Silver Dollar Rentals,2026-04-23,@reports.txn.journal_entry,,,221,@reports.bucket.90_up,-4038.28
+detail,1,,Silver Dollar Rentals,2026-05-03,@reports.txn.journal_entry,,,211,@reports.bucket.90_up,1878.81
+detail,1,,Silver Dollar Rentals,2026-05-23,@reports.txn.journal_entry,,,191,@reports.bucket.90_up,-1878.81
+detail,1,,Silver Dollar Rentals,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,4504.18
+detail,1,,Silver Dollar Rentals,2026-07-23,@reports.txn.journal_entry,,,130,@reports.bucket.90_up,-4504.18
+detail,1,,Silver Dollar Rentals,2026-09-16,@reports.txn.journal_entry,,,75,@reports.bucket.61_90,967.44
+detail,1,,Silver Dollar Rentals,2026-10-10,@reports.txn.journal_entry,,,51,@reports.bucket.31_60,-967.44
+detail,1,,Spring Branch Law,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,3649.78
+detail,1,,Spring Branch Law,2026-02-24,@reports.txn.journal_entry,,,279,@reports.bucket.90_up,1987.78
+detail,1,,Spring Branch Law,2026-03-13,@reports.txn.journal_entry,,,262,@reports.bucket.90_up,-1987.78
+detail,1,,Spring Branch Law,2026-03-13,@reports.txn.journal_entry,,,262,@reports.bucket.90_up,-3649.78
+detail,1,,Spring Branch Law,2026-04-12,@reports.txn.journal_entry,,,232,@reports.bucket.90_up,1754.27
+detail,1,,Spring Branch Law,2026-05-04,@reports.txn.journal_entry,,,210,@reports.bucket.90_up,-1754.27
+detail,1,,Spring Branch Law,2026-06-20,@reports.txn.journal_entry,,,163,@reports.bucket.90_up,1124.43
+detail,1,,Spring Branch Law,2026-07-08,@reports.txn.journal_entry,,,145,@reports.bucket.90_up,-1124.43
+detail,1,,Stone Mill Bistro,2026-01-28,@reports.txn.journal_entry,,,306,@reports.bucket.90_up,2435.22
+detail,1,,Stone Mill Bistro,2026-03-06,@reports.txn.journal_entry,,,269,@reports.bucket.90_up,-2435.22
+detail,1,,Stone Mill Bistro,2026-07-10,@reports.txn.journal_entry,,,143,@reports.bucket.90_up,1883.6
+detail,1,,Stone Mill Bistro,2026-07-26,@reports.txn.journal_entry,,,127,@reports.bucket.90_up,-1883.6
+detail,1,,Stone Mill Bistro,2026-10-23,@reports.txn.journal_entry,,,38,@reports.bucket.31_60,4759.66
+detail,1,,Sugar Creek Bakery,2026-02-15,@reports.txn.journal_entry,,,288,@reports.bucket.90_up,1834.03
+detail,1,,Sugar Creek Bakery,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,-1834.03
+detail,1,,Sugar Creek Bakery,2026-08-03,@reports.txn.journal_entry,,,119,@reports.bucket.90_up,285.8
+detail,1,,Sugar Creek Bakery,2026-09-03,@reports.txn.journal_entry,,,88,@reports.bucket.61_90,-285.8
+detail,1,,Sugar Creek Bakery,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,2501.05
+detail,1,,Sugar Creek Bakery,2026-10-29,@reports.txn.journal_entry,,,32,@reports.bucket.31_60,-2501.05
+detail,1,,Sunset Trail Realty,2026-01-06,@reports.txn.journal_entry,,,328,@reports.bucket.90_up,4601.93
+detail,1,,Sunset Trail Realty,2026-01-27,@reports.txn.journal_entry,,,307,@reports.bucket.90_up,-4601.93
+detail,1,,Sunset Trail Realty,2026-02-07,@reports.txn.journal_entry,,,296,@reports.bucket.90_up,3228.18
+detail,1,,Sunset Trail Realty,2026-02-25,@reports.txn.journal_entry,,,278,@reports.bucket.90_up,-3228.18
+detail,1,,Sunset Trail Realty,2026-05-29,@reports.txn.journal_entry,,,185,@reports.bucket.90_up,1863.49
+detail,1,,Sunset Trail Realty,2026-06-30,@reports.txn.journal_entry,,,153,@reports.bucket.90_up,-1863.49
+detail,1,,Sunset Trail Realty,2026-07-26,@reports.txn.journal_entry,,,127,@reports.bucket.90_up,805.24
+detail,1,,Sunset Trail Realty,2026-08-13,@reports.txn.journal_entry,,,109,@reports.bucket.90_up,1566.02
+detail,1,,Sunset Trail Realty,2026-08-14,@reports.txn.journal_entry,,,108,@reports.bucket.90_up,-805.24
+detail,1,,Sunset Trail Realty,2026-09-11,@reports.txn.journal_entry,,,80,@reports.bucket.61_90,-1566.02
+detail,1,,Swan Creek Outfitters,2026-01-05,@reports.txn.journal_entry,,,329,@reports.bucket.90_up,608.45
+detail,1,,Swan Creek Outfitters,2026-01-21,@reports.txn.journal_entry,,,313,@reports.bucket.90_up,-608.45
+detail,1,,Swan Creek Outfitters,2026-01-25,@reports.txn.journal_entry,,,309,@reports.bucket.90_up,2229.54
+detail,1,,Swan Creek Outfitters,2026-02-09,@reports.txn.journal_entry,,,294,@reports.bucket.90_up,-2229.54
+detail,1,,Swan Creek Outfitters,2026-02-16,@reports.txn.journal_entry,,,287,@reports.bucket.90_up,2431.16
+detail,1,,Swan Creek Outfitters,2026-03-05,@reports.txn.journal_entry,,,270,@reports.bucket.90_up,-2431.16
+detail,1,,Swan Creek Outfitters,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,3590.23
+detail,1,,Swan Creek Outfitters,2026-04-14,@reports.txn.journal_entry,,,230,@reports.bucket.90_up,4151.4
+detail,1,,Swan Creek Outfitters,2026-04-22,@reports.txn.journal_entry,,,222,@reports.bucket.90_up,-3590.23
+detail,1,,Swan Creek Outfitters,2026-04-30,@reports.txn.journal_entry,,,214,@reports.bucket.90_up,-4151.4
+detail,1,,Swan Creek Outfitters,2026-05-13,@reports.txn.journal_entry,,,201,@reports.bucket.90_up,2832.47
+detail,1,,Swan Creek Outfitters,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,-2832.47
+detail,1,,Swan Creek Outfitters,2026-06-24,@reports.txn.journal_entry,,,159,@reports.bucket.90_up,375.41
+detail,1,,Swan Creek Outfitters,2026-06-29,@reports.txn.journal_entry,,,154,@reports.bucket.90_up,1307.07
+detail,1,,Swan Creek Outfitters,2026-07-21,@reports.txn.journal_entry,,,132,@reports.bucket.90_up,-1307.07
+detail,1,,Swan Creek Outfitters,2026-07-29,@reports.txn.journal_entry,,,124,@reports.bucket.90_up,-375.41
+detail,1,,Swan Creek Outfitters,2026-08-11,@reports.txn.journal_entry,,,111,@reports.bucket.90_up,3520.14
+detail,1,,Swan Creek Outfitters,2026-08-13,@reports.txn.journal_entry,,,109,@reports.bucket.90_up,1405.8
+detail,1,,Swan Creek Outfitters,2026-09-13,@reports.txn.journal_entry,,,78,@reports.bucket.61_90,-3520.14
+detail,1,,Swan Creek Outfitters,2026-09-15,@reports.txn.journal_entry,,,76,@reports.bucket.61_90,-1405.8
+detail,1,,Sycamore Log Homes,2026-01-31,@reports.txn.journal_entry,,,303,@reports.bucket.90_up,4735.94
+detail,1,,Sycamore Log Homes,2026-02-04,@reports.txn.journal_entry,,,299,@reports.bucket.90_up,528.22
+detail,1,,Sycamore Log Homes,2026-02-12,@reports.txn.journal_entry,,,291,@reports.bucket.90_up,-4735.94
+detail,1,,Sycamore Log Homes,2026-03-14,@reports.txn.journal_entry,,,261,@reports.bucket.90_up,-528.22
+detail,1,,Sycamore Log Homes,2026-03-14,@reports.txn.journal_entry,,,261,@reports.bucket.90_up,3336.64
+detail,1,,Sycamore Log Homes,2026-04-06,@reports.txn.journal_entry,,,238,@reports.bucket.90_up,-3336.64
+detail,1,,Sycamore Log Homes,2026-06-13,@reports.txn.journal_entry,,,170,@reports.bucket.90_up,4007.4
+detail,1,,Sycamore Log Homes,2026-07-14,@reports.txn.journal_entry,,,139,@reports.bucket.90_up,-4007.4
+detail,1,,Table Rock Dental,2026-03-13,@reports.txn.journal_entry,,,262,@reports.bucket.90_up,3704.64
+detail,1,,Table Rock Dental,2026-03-26,@reports.txn.journal_entry,,,249,@reports.bucket.90_up,-3704.64
+detail,1,,Table Rock Dental,2026-05-11,@reports.txn.journal_entry,,,203,@reports.bucket.90_up,2219.42
+detail,1,,Table Rock Dental,2026-05-22,@reports.txn.journal_entry,,,192,@reports.bucket.90_up,4166.68
+detail,1,,Table Rock Dental,2026-06-07,@reports.txn.journal_entry,,,176,@reports.bucket.90_up,-2219.42
+detail,1,,Table Rock Dental,2026-06-13,@reports.txn.journal_entry,,,170,@reports.bucket.90_up,1745.33
+detail,1,,Table Rock Dental,2026-06-24,@reports.txn.journal_entry,,,159,@reports.bucket.90_up,-4166.68
+detail,1,,Table Rock Dental,2026-06-24,@reports.txn.journal_entry,,,159,@reports.bucket.90_up,872.96
+detail,1,,Table Rock Dental,2026-07-17,@reports.txn.journal_entry,,,136,@reports.bucket.90_up,-872.96
+detail,1,,Table Rock Dental,2026-07-21,@reports.txn.journal_entry,,,132,@reports.bucket.90_up,-1745.33
+detail,1,,Table Rock Dental,2026-11-12,@reports.txn.invoice,INV-1002,2026-12-12,-12,@reports.bucket.current,1590.25
+detail,1,,Taney County Title,2026-02-20,@reports.txn.journal_entry,,,283,@reports.bucket.90_up,3297.14
+detail,1,,Taney County Title,2026-02-20,@reports.txn.journal_entry,,,283,@reports.bucket.90_up,3993.84
+detail,1,,Taney County Title,2026-03-11,@reports.txn.journal_entry,,,264,@reports.bucket.90_up,-3297.14
+detail,1,,Taney County Title,2026-03-14,@reports.txn.journal_entry,,,261,@reports.bucket.90_up,1461.38
+detail,1,,Taney County Title,2026-03-16,@reports.txn.journal_entry,,,259,@reports.bucket.90_up,-3993.84
+detail,1,,Taney County Title,2026-04-14,@reports.txn.journal_entry,,,230,@reports.bucket.90_up,-1461.38
+detail,1,,Taney County Title,2026-05-27,@reports.txn.journal_entry,,,187,@reports.bucket.90_up,2295.5
+detail,1,,Taney County Title,2026-06-08,@reports.txn.journal_entry,,,175,@reports.bucket.90_up,-2295.5
+detail,1,,Taney County Title,2026-06-14,@reports.txn.journal_entry,,,169,@reports.bucket.90_up,2596.73
+detail,1,,Taney County Title,2026-06-26,@reports.txn.journal_entry,,,157,@reports.bucket.90_up,-2596.73
+detail,1,,Taney County Title,2026-08-31,@reports.txn.journal_entry,,,91,@reports.bucket.90_up,3349.64
+detail,1,,Taney County Title,2026-10-03,@reports.txn.journal_entry,,,58,@reports.bucket.31_60,-3349.64
+detail,1,,Thunder Ridge Stables,2026-02-15,@reports.txn.journal_entry,,,288,@reports.bucket.90_up,2947.5
+detail,1,,Thunder Ridge Stables,2026-03-15,@reports.txn.journal_entry,,,260,@reports.bucket.90_up,-2947.5
+detail,1,,Thunder Ridge Stables,2026-06-03,@reports.txn.journal_entry,,,180,@reports.bucket.90_up,4117.99
+detail,1,,Thunder Ridge Stables,2026-06-26,@reports.txn.journal_entry,,,157,@reports.bucket.90_up,-4117.99
+detail,1,,Thunder Ridge Stables,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,1184.45
+detail,1,,Thunder Ridge Stables,2026-10-05,@reports.txn.journal_entry,,,56,@reports.bucket.31_60,-1184.45
+detail,1,,Thunder Ridge Stables,2026-11-04,@reports.txn.journal_entry,,,26,@reports.bucket.1_30,2100.19
+detail,1,,Timber Lake Lodge,2026-02-25,@reports.txn.journal_entry,,,278,@reports.bucket.90_up,2423.73
+detail,1,,Timber Lake Lodge,2026-03-11,@reports.txn.journal_entry,,,264,@reports.bucket.90_up,-2423.73
+detail,1,,Timber Lake Lodge,2026-08-12,@reports.txn.journal_entry,,,110,@reports.bucket.90_up,2903.69
+detail,1,,Timber Lake Lodge,2026-09-06,@reports.txn.journal_entry,,,85,@reports.bucket.61_90,-2903.69
+detail,1,,Timber Lake Lodge,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,500.7
+detail,1,,Timber Lake Lodge,2026-10-18,@reports.txn.journal_entry,,,43,@reports.bucket.31_60,-500.7
+detail,1,,Tri-Lakes Insurance,2026-03-19,@reports.txn.journal_entry,,,256,@reports.bucket.90_up,2561.37
+detail,1,,Tri-Lakes Insurance,2026-03-20,@reports.txn.journal_entry,,,255,@reports.bucket.90_up,2386.77
+detail,1,,Tri-Lakes Insurance,2026-04-09,@reports.txn.journal_entry,,,235,@reports.bucket.90_up,-2386.77
+detail,1,,Tri-Lakes Insurance,2026-04-15,@reports.txn.journal_entry,,,229,@reports.bucket.90_up,-2561.37
+detail,1,,Tri-Lakes Insurance,2026-04-25,@reports.txn.journal_entry,,,219,@reports.bucket.90_up,1821.31
+detail,1,,Tri-Lakes Insurance,2026-05-12,@reports.txn.journal_entry,,,202,@reports.bucket.90_up,1167.12
+detail,1,,Tri-Lakes Insurance,2026-05-17,@reports.txn.journal_entry,,,197,@reports.bucket.90_up,-1821.31
+detail,1,,Tri-Lakes Insurance,2026-06-12,@reports.txn.journal_entry,,,171,@reports.bucket.90_up,-1167.12
+detail,1,,Tri-Lakes Insurance,2026-08-04,@reports.txn.journal_entry,,,118,@reports.bucket.90_up,4751.18
+detail,1,,Tri-Lakes Insurance,2026-08-20,@reports.txn.journal_entry,,,102,@reports.bucket.90_up,-4751.18
+detail,1,,Tri-Lakes Insurance,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,3382.61
+detail,1,,Tri-Lakes Insurance,2026-10-22,@reports.txn.journal_entry,,,39,@reports.bucket.31_60,-3382.61
+detail,1,,Valley View Assisted Living,2026-03-10,@reports.txn.journal_entry,,,265,@reports.bucket.90_up,4108.05
+detail,1,,Valley View Assisted Living,2026-03-25,@reports.txn.journal_entry,,,250,@reports.bucket.90_up,1191.81
+detail,1,,Valley View Assisted Living,2026-04-03,@reports.txn.journal_entry,,,241,@reports.bucket.90_up,-4108.05
+detail,1,,Valley View Assisted Living,2026-04-14,@reports.txn.journal_entry,,,230,@reports.bucket.90_up,-1191.81
+detail,1,,Valley View Assisted Living,2026-04-16,@reports.txn.journal_entry,,,228,@reports.bucket.90_up,398.56
+detail,1,,Valley View Assisted Living,2026-05-15,@reports.txn.journal_entry,,,199,@reports.bucket.90_up,-398.56
+detail,1,,Valley View Assisted Living,2026-05-20,@reports.txn.journal_entry,,,194,@reports.bucket.90_up,1311.84
+detail,1,,Valley View Assisted Living,2026-06-18,@reports.txn.journal_entry,,,165,@reports.bucket.90_up,-1311.84
+detail,1,,Valley View Assisted Living,2026-07-12,@reports.txn.journal_entry,,,141,@reports.bucket.90_up,4047.41
+detail,1,,Valley View Assisted Living,2026-08-01,@reports.txn.journal_entry,,,121,@reports.bucket.90_up,-4047.41
+detail,1,,Valley View Assisted Living,2026-09-22,@reports.txn.journal_entry,,,69,@reports.bucket.61_90,1640.78
+detail,1,,Valley View Assisted Living,2026-10-25,@reports.txn.journal_entry,,,36,@reports.bucket.31_60,-1640.78
+detail,1,,Walnut Shade Farmhouse,2026-04-20,@reports.txn.journal_entry,,,224,@reports.bucket.90_up,2117.22
+detail,1,,Walnut Shade Farmhouse,2026-05-08,@reports.txn.journal_entry,,,206,@reports.bucket.90_up,-2117.22
+detail,1,,Walnut Shade Farmhouse,2026-06-16,@reports.txn.journal_entry,,,167,@reports.bucket.90_up,789.35
+detail,1,,Walnut Shade Farmhouse,2026-07-15,@reports.txn.journal_entry,,,138,@reports.bucket.90_up,-789.35
+detail,1,,Walnut Shade Farmhouse,2026-08-30,@reports.txn.journal_entry,,,92,@reports.bucket.90_up,3299.8
+detail,1,,Walnut Shade Farmhouse,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,-3299.8
+detail,1,,Walnut Shade Farmhouse,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,1556.38
+detail,1,,Walnut Shade Farmhouse,2026-11-03,@reports.txn.journal_entry,,,27,@reports.bucket.1_30,-1556.38
+detail,1,,White River Lumber,2026-01-01,@reports.txn.journal_entry,,,333,@reports.bucket.90_up,2492.74
+detail,1,,White River Lumber,2026-01-24,@reports.txn.journal_entry,,,310,@reports.bucket.90_up,-2492.74
+detail,1,,White River Lumber,2026-04-13,@reports.txn.journal_entry,,,231,@reports.bucket.90_up,2666.89
+detail,1,,White River Lumber,2026-04-19,@reports.txn.journal_entry,,,225,@reports.bucket.90_up,1954.53
+detail,1,,White River Lumber,2026-04-29,@reports.txn.journal_entry,,,215,@reports.bucket.90_up,-2666.89
+detail,1,,White River Lumber,2026-05-13,@reports.txn.journal_entry,,,201,@reports.bucket.90_up,-1954.53
+detail,1,,White River Lumber,2026-07-19,@reports.txn.journal_entry,,,134,@reports.bucket.90_up,3276.71
+detail,1,,White River Lumber,2026-08-11,@reports.txn.journal_entry,,,111,@reports.bucket.90_up,3527.56
+detail,1,,White River Lumber,2026-08-17,@reports.txn.journal_entry,,,105,@reports.bucket.90_up,-3276.71
+detail,1,,White River Lumber,2026-08-18,@reports.txn.journal_entry,,,104,@reports.bucket.90_up,1792.2
+detail,1,,White River Lumber,2026-09-02,@reports.txn.journal_entry,,,89,@reports.bucket.61_90,-3527.56
+detail,1,,White River Lumber,2026-09-23,@reports.txn.journal_entry,,,68,@reports.bucket.61_90,-1792.2
+detail,1,,White River Lumber,2026-11-02,@reports.txn.journal_entry,,,28,@reports.bucket.1_30,942.11
+detail,1,,Whitetail Hunting Lodge,2026-02-05,@reports.txn.journal_entry,,,298,@reports.bucket.90_up,3647.81
+detail,1,,Whitetail Hunting Lodge,2026-02-20,@reports.txn.journal_entry,,,283,@reports.bucket.90_up,-3647.81
+detail,1,,Whitetail Hunting Lodge,2026-03-08,@reports.txn.journal_entry,,,267,@reports.bucket.90_up,3159.07
+detail,1,,Whitetail Hunting Lodge,2026-04-10,@reports.txn.journal_entry,,,234,@reports.bucket.90_up,-3159.07
+detail,1,,Whitetail Hunting Lodge,2026-07-22,@reports.txn.journal_entry,,,131,@reports.bucket.90_up,4419.99
+detail,1,,Whitetail Hunting Lodge,2026-08-16,@reports.txn.journal_entry,,,106,@reports.bucket.90_up,-4419.99
+detail,1,,Whitetail Hunting Lodge,2026-08-26,@reports.txn.journal_entry,,,96,@reports.bucket.90_up,4688.74
+detail,1,,Whitetail Hunting Lodge,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,-4688.74
+detail,1,,Wildwood Pediatrics,2026-03-04,@reports.txn.journal_entry,,,271,@reports.bucket.90_up,1175.62
+detail,1,,Wildwood Pediatrics,2026-03-28,@reports.txn.journal_entry,,,247,@reports.bucket.90_up,-1175.62
+detail,1,,Wildwood Pediatrics,2026-05-05,@reports.txn.journal_entry,,,209,@reports.bucket.90_up,2364.22
+detail,1,,Wildwood Pediatrics,2026-05-17,@reports.txn.journal_entry,,,197,@reports.bucket.90_up,-2364.22
+detail,1,,Wildwood Pediatrics,2026-06-02,@reports.txn.journal_entry,,,181,@reports.bucket.90_up,756.1
+detail,1,,Wildwood Pediatrics,2026-06-06,@reports.txn.journal_entry,,,177,@reports.bucket.90_up,925.57
+detail,1,,Wildwood Pediatrics,2026-06-19,@reports.txn.journal_entry,,,164,@reports.bucket.90_up,-925.57
+detail,1,,Wildwood Pediatrics,2026-06-20,@reports.txn.journal_entry,,,163,@reports.bucket.90_up,-756.1
+detail,1,,Wildwood Pediatrics,2026-08-21,@reports.txn.journal_entry,,,101,@reports.bucket.90_up,1977.67
+detail,1,,Wildwood Pediatrics,2026-09-06,@reports.txn.journal_entry,,,85,@reports.bucket.61_90,-1977.67
+detail,1,,Wildwood Pediatrics,2026-09-07,@reports.txn.journal_entry,,,84,@reports.bucket.61_90,4261.08
+detail,1,,Wildwood Pediatrics,2026-09-16,@reports.txn.journal_entry,,,75,@reports.bucket.61_90,191.29
+detail,1,,Wildwood Pediatrics,2026-09-28,@reports.txn.journal_entry,,,63,@reports.bucket.61_90,529.21
+detail,1,,Wildwood Pediatrics,2026-10-01,@reports.txn.journal_entry,,,60,@reports.bucket.31_60,-191.29
+detail,1,,Wildwood Pediatrics,2026-10-04,@reports.txn.journal_entry,,,57,@reports.bucket.31_60,-4261.08
+detail,1,,Wildwood Pediatrics,2026-10-06,@reports.txn.journal_entry,,,55,@reports.bucket.31_60,928.88
+detail,1,,Wildwood Pediatrics,2026-10-24,@reports.txn.journal_entry,,,37,@reports.bucket.31_60,3073.95
+detail,1,,Wildwood Pediatrics,2026-10-31,@reports.txn.journal_entry,,,30,@reports.bucket.1_30,-529.21
+grand,0,total,@reports.row.total,,,,,,,52385.98
