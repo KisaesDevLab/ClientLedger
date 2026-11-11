@@ -147,6 +147,22 @@ pub struct ReportStory {
     /// the engine has `budgets-exact-v1`.
     #[serde(default)]
     pub budget: Option<StoryBudget>,
+    /// 1099 setup made before the steps (the 1099 goldens' vendors).
+    #[serde(default)]
+    pub form1099: Option<Story1099>,
+}
+
+/// 1099 setup: accounts mapped to one form box and the vendors marked
+/// 1099-eligible.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Story1099 {
+    /// The engine's form box (`NEC-1`).
+    pub form_box: String,
+    /// Account numbers mapped to it.
+    pub accounts: Vec<String>,
+    /// Vendor names marked eligible.
+    pub vendors: Vec<String>,
 }
 
 /// A budget: per account number, twelve fiscal-period cells.
@@ -274,6 +290,9 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
             .map(|n| posted.tags.get(n).copied().ok_or_else(|| missing(n)))
             .transpose()
     };
+    if let Some(f) = &story.form1099 {
+        post_1099(session, &names, f).await?;
+    }
     let one = Quantity::parse_wire("1").map_err(|_| missing("quantity"))?;
     let plain = PostingOptions::default();
     for s in &story.steps {
@@ -552,6 +571,33 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                     .record
                     .id
             }
+            "deposit" => {
+                let mut lines = Vec::new();
+                for l in &s.lines {
+                    lines.push(cl_api::SplitLine {
+                        account: names.account(&l.account)?,
+                        amount: amount(l.amount, &s.id)?,
+                        memo: None,
+                        contact: None,
+                        billable: false,
+                        tag: tag(l)?,
+                        item: None,
+                    });
+                }
+                let d = cl_api::DepositDraft::plain(
+                    names.account("1010")?,
+                    s.date,
+                    s.memo.clone(),
+                    lines,
+                );
+                let p = cl_api::BankPosting::deposit(d).map_err(|_| missing(&s.id))?;
+                session
+                    .transactions()
+                    .create_bank_posting(&p, &plain, IdempotencyKey::new())
+                    .await?
+                    .record
+                    .id
+            }
             other => return Err(missing(other)),
         };
         posted.transactions.insert(s.id.clone(), id);
@@ -565,6 +611,34 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
         posted.budget_id = Some(post_budget(session, &names, b).await?);
     }
     Ok(posted)
+}
+
+/// Maps the 1099 accounts to their box and marks the vendors eligible
+/// (the engine's 1099 Center routes).
+async fn post_1099(session: &Session, names: &Names, f: &Story1099) -> Result<(), CompanyError> {
+    let accounts = f
+        .accounts
+        .iter()
+        .map(|n| names.account(n).map(|a| a.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    session
+        .raw_mapped(
+            cl_api::Method::Put,
+            &format!("/api/v1/practice/1099/account-mappings/{}", f.form_box),
+            Some(&serde_json::json!({ "accountIds": accounts })),
+        )
+        .await?;
+    for v in &f.vendors {
+        let id = names.contact(Some(v))?;
+        session
+            .raw_mapped(
+                cl_api::Method::Put,
+                &format!("/api/v1/practice/1099/vendors/{id}/profile"),
+                Some(&serde_json::json!({ "is1099Eligible": true })),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 async fn post_budget(

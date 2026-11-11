@@ -102,7 +102,17 @@
     {
       "kind": "check", "id": "DUPC2", "date": "2026-12-15", "vendor": "Table Rock Nursery", "memo": "Shrubs",
       "lines": [{ "account": "6350", "amount": "89.99" }]
-    },    {
+    },
+    {
+      "kind": "check", "id": "CHK2", "date": "2026-12-10", "vendor": "Thunder Ridge Subcontracting", "number": "5002",
+      "memo": "Retaining wall labor",
+      "lines": [{ "account": "5000", "amount": "750.00" }]
+    },
+    {
+      "kind": "deposit", "id": "DEP1", "date": "2026-12-11", "memo": "Owner contribution",
+      "lines": [{ "account": "30160", "amount": "2500.00" }]
+    },
+    {
       "kind": "journal_entry", "id": "CLOSED1", "date": "2026-09-15", "memo": "Reclass found after closing", "closedPeriod": true,
       "lines": [
         { "account": "1510", "debit": "12.34" },
@@ -110,6 +120,7 @@
       ]
     }
   ],
+  "form1099": { "formBox": "NEC-1", "accounts": ["5000"], "vendors": ["Thunder Ridge Subcontracting"] },
   "budget": {
     "name": "2026 plan",
     "fiscalYear": 2026,
