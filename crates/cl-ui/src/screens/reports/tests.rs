@@ -165,6 +165,40 @@ fn exports_read_the_rows_on_screen() {
     assert!(pdf.starts_with(b"%PDF"));
 }
 
+/// Q-P28ai and S5 (Q-PR6d): no general cash-basis sentence anywhere; a
+/// cash-basis sheet with an A/R or A/P balance carries its one-line note
+/// on screen and in the file header, translated.
+#[test]
+fn cash_balance_reports_carry_only_the_ar_ap_note() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    let spec = find("balance_sheet").expect("bs");
+    let mut o = ReportOptions::for_spec(spec);
+    o.basis = Some(cl_core::report::Basis::Cash);
+    w.show_report(spec, o.clone());
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let note = w.table.as_ref().and_then(|t| t.meta.note.clone());
+    assert_eq!(
+        note.as_deref(),
+        Some(cl_api::resources::reports::adapters::statements::CASH_AR_AP_NOTE),
+        "the demo's cash sheet shows A/R"
+    );
+    let csv = String::from_utf8(super::export::bytes(&w, super::export::Kind::Csv).expect("csv"))
+        .expect("utf8");
+    let head: String = csv.lines().take(5).collect::<Vec<_>>().join(
+        "
+",
+    );
+    assert!(head.contains("On cash basis, A/R and A/P"), "{head}");
+    assert!(!csv.contains("@reports.note"), "translated");
+    assert!(!csv.contains("income counts when payment is received"));
+    o.basis = Some(cl_core::report::Basis::Accrual);
+    w.show_report(spec, o);
+    w.poll();
+    assert_eq!(w.table.as_ref().and_then(|t| t.meta.note.clone()), None);
+}
+
 #[test]
 fn drills_open_forms_and_report_tabs() {
     let id: cl_core::ids::TransactionId =

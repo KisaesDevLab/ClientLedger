@@ -121,6 +121,8 @@ pub(crate) fn percent1(part: Decimal, base: Decimal) -> Option<String> {
 struct Lens {
     tags: Vec<TagId>,
     untagged_in: Option<BTreeSet<TagId>>,
+    /// Lines with no tag at all (an untagged cell's drill, S6).
+    untagged: bool,
     /// The ledger's transaction types (the engine's names).
     types: Vec<String>,
     /// Line sizes |debit - credit| at least / at most (the demo's stand-in
@@ -134,6 +136,7 @@ impl Lens {
         Lens {
             tags: req.filters.tag_ids.clone(),
             untagged_in: req.filters.untagged_in_group.map(group_tags),
+            untagged: req.filters.untagged,
             types: req.filters.txn_types.clone(),
             amount_min: req.filters.amount_min,
             amount_max: req.filters.amount_max,
@@ -142,6 +145,9 @@ impl Lens {
 
     fn keeps(&self, p: &Post) -> bool {
         if !self.tags.is_empty() && !p.tag.is_some_and(|t| self.tags.contains(&t)) {
+            return false;
+        }
+        if self.untagged && p.tag.is_some() {
             return false;
         }
         if !self.types.is_empty() && !self.types.contains(&p.txn_type) {
@@ -1223,6 +1229,11 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
         .dates
         .span()
         .ok_or(ApiError::Local(LocalValidation::BadRange))?;
+    // The demo's lines carry no client: it can't play the "No client" or
+    // "All others" ledgers (S6), so those cells draw no link.
+    if req.filters.no_contact || req.filters.other_contacts_than.is_some() {
+        return Err(unsupported);
+    }
     let b = Books::load(d);
     let columns = matches!(req.dates, ReportDates::Ranges(_))
         || !req.extras.is_empty()
@@ -1239,7 +1250,14 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
         Source::GeneralLedger if !columns => general_ledger(&b, req, span),
         _ => return Err(unsupported),
     };
-    adapt_exact(req, &v)
+    let mut table = adapt_exact(req, &v)?;
+    // What `Reports::run` adds from the chart's roles (B2, S5).
+    use cl_api::resources::reports::adapters::statements;
+    if statements::wants_roles(req, &v) {
+        let roles = statements::AccountRoles::of(&b.chart);
+        statements::finish_balances(req, &v, &mut table, Some(&roles));
+    }
+    Ok(table)
 }
 
 #[cfg(test)]

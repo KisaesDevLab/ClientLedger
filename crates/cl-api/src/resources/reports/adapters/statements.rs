@@ -334,19 +334,29 @@ const BS_RETAINED: &str = "Retained Earnings (Prior Years)";
 /// years' income (the column layout's; the classic layout's with U-213).
 pub const PRIOR_INCOME_FLAG: &str = "includesPriorYearsIncome";
 
-/// The day the engine starts the fiscal year containing `to`: the request's
-/// start on a calendar-month year; on a 4-4-5 or 52-53 week year (which
-/// starts a few days off a month) the nearest first of a month, since the
-/// engine splits balance reports at its fiscal start month (S1, U-25).
+/// The day the engine starts the fiscal year containing `to`. The engine
+/// knows only the fiscal start month and splits balance reports at its
+/// first day (S1, U-25): on a 4-4-5 or 52-53 week year, which starts a few
+/// days off a month, that is the latest first of the start month on or
+/// before `to`, not the desktop's retail start.
 fn year_start(req: &ReportRequest, to: CalendarDate) -> CalendarDate {
-    let start = req
-        .fiscal_year_start
-        .or_else(|| CalendarDate::from_ymd(to.year(), 1, 1).ok())
-        .unwrap_or(to);
-    match start.day() {
-        1 => start,
-        d if d <= 15 => start.start_of_month(),
-        _ => start.end_of_month().add_days(1).unwrap_or(start).min(to),
+    let Some(start) = req.fiscal_year_start else {
+        return CalendarDate::from_ymd(to.year(), 1, 1).unwrap_or(to);
+    };
+    if start.day() == 1 {
+        return start;
+    }
+    // The month a retail year stands for: the nearest first of a month.
+    let month = if start.day() <= 15 {
+        start.month()
+    } else {
+        start.month() % 12 + 1
+    };
+    let this = CalendarDate::from_ymd(to.year(), month, 1).unwrap_or(to);
+    if this <= to {
+        this
+    } else {
+        CalendarDate::from_ymd(to.year() - 1, month, 1).unwrap_or(start)
     }
 }
 
@@ -1028,6 +1038,12 @@ mod tests {
             })
             .collect();
         assert!(froms.iter().all(|f| *f == d(2033, 1, 1)), "{froms:?}");
+        // Between the retail start and the 1st, the engine's year is the
+        // one before.
+        let early = d(2032, 12, 30);
+        let mut r2 = req(Source::TrialBalance, ReportDates::AsOf(early));
+        r2.fiscal_year_start = Some(d(2032, 12, 26));
+        assert_eq!(year_start(&r2, early), d(2032, 1, 1));
         v["drillTarget"] = serde_json::json!({"startDate": "2033-02-01"});
         let t = trial_balance(&v, &r, as_of).expect("tb");
         assert!(t.rows.iter().any(|r| matches!(
