@@ -185,6 +185,23 @@ fn column_options(posted: &Posted) -> Vec<(String, &'static str, ReportOptions)>
         q4(o);
         o.extras.insert(Extra::PriorPeriod);
     });
+    // B3/T4: November compares with all of October; a one-date sheet with
+    // the previous month end.
+    add("profit_loss__2026-11_prior_period", "profit_loss", &|o| {
+        o.dates = DateChoice::Fixed {
+            from: d(2026, 11, 1),
+            to: d(2026, 11, 30),
+        };
+        o.extras.insert(Extra::PriorPeriod);
+    });
+    add(
+        "balance_sheet__2026-11-30_prior_period",
+        "balance_sheet",
+        &|o| {
+            o.dates = DateChoice::AsOf(d(2026, 11, 30));
+            o.extras.insert(Extra::PriorPeriod);
+        },
+    );
     add(
         "profit_loss__2026-q4_by_client",
         "profit_loss_by_client",
@@ -568,34 +585,112 @@ async fn october_matches_the_practice_company(s: &Session, sample: &Sample) {
     assert_eq!(got, want, "October by account = the practice fixture");
 }
 
+/// U-213 (PR-6 engine fixes): the cash Trial Balance's prior years'
+/// retained earnings on the cash basis (review B1). Provisional name until
+/// the engine PR merges (Q-PR6e).
+const CASH_TB_FIX: &str = "report-fixes-v2";
+
+/// The P&L's net income over `from..=to` on `basis`.
+async fn net_income(s: &Session, from: CalendarDate, to: CalendarDate, basis: Basis) -> Decimal {
+    let mut o = ReportOptions::for_spec(find("profit_loss").expect("p&l"));
+    o.dates = DateChoice::Fixed { from, to };
+    o.basis = Some(basis);
+    let (_, pl) = run(s, "profit_loss", &o).await;
+    dec(&pl.rows.last().expect("net").cells[0])
+}
+
 /// Cross-check 2: the Balance Sheet and the P&L tie to the Trial Balance,
-/// and every Trial Balance account to the General Ledger.
-async fn statements_tie_to_the_trial_balance(s: &Session, at: CalendarDate, basis: Basis) {
+/// and every Trial Balance account to the General Ledger; the sheet's
+/// equity rows tie to the P&L across the year boundary (T2) and every
+/// sheet amount drills to what sums to it, or has no drill (T3).
+async fn statements_tie_to_the_trial_balance(
+    s: &Session,
+    at: CalendarDate,
+    basis: Basis,
+    cash_tb_fixed: bool,
+) {
     let mut tb_o = ReportOptions::for_spec(find("trial_balance").expect("tb"));
     tb_o.dates = DateChoice::AsOf(at);
     tb_o.basis = Some(basis);
     let (_, tb) = run(s, "trial_balance", &tb_o).await;
     let grand = tb.rows.last().expect("total");
-    assert_eq!(
-        dec(&grand.cells[0]),
-        dec(&grand.cells[1]),
-        "{at} TB balances"
-    );
-    // Net debit per account number.
-    let tb_net: BTreeMap<String, Decimal> = tb
-        .rows
-        .iter()
-        .filter(|r| r.kind == RowKind::Account)
-        .filter_map(|r| {
-            let n = r.caption.split(" \u{b7} ").next()?.to_string();
-            Some((n, dec(&r.cells[0]) - dec(&r.cells[1])))
-        })
-        .collect();
+    // B1: before U-213 the cash TB's prior years' row is accrual income.
+    let b1 = basis == Basis::Cash && !cash_tb_fixed;
+    if b1 && dec(&grand.cells[0]) != dec(&grand.cells[1]) {
+        pending(
+            "U-213",
+            "the cash Trial Balance balances after the first fiscal year (B1)",
+        );
+    } else {
+        assert_eq!(
+            dec(&grand.cells[0]),
+            dec(&grand.cells[1]),
+            "{at} {basis:?} TB balances"
+        );
+    }
+    // S5/T10: the practice history's journal entries keep A/R and A/P on
+    // cash basis: the note says so.
+    if basis == Basis::Cash {
+        assert_eq!(
+            tb.meta.note.as_deref(),
+            Some(cl_api::resources::reports::adapters::statements::CASH_AR_AP_NOTE),
+            "{at} cash TB note"
+        );
+    }
+    // Net debit per account number; the computed prior years' row and the
+    // Retained Earnings account share 30120 and add up (N7).
+    let mut tb_net: BTreeMap<String, Decimal> = BTreeMap::new();
+    let mut posted_re = Decimal::ZERO;
+    for r in tb.rows.iter().filter(|r| r.kind == RowKind::Account) {
+        let Some(n) = r.caption.split(" \u{b7} ").next() else {
+            continue;
+        };
+        let net = dec(&r.cells[0]) - dec(&r.cells[1]);
+        *tb_net.entry(n.to_string()).or_default() += net;
+        let account_row = r
+            .path
+            .0
+            .last()
+            .is_some_and(|k| cl_core::ids::AccountId::parse(k).is_ok());
+        if n == "30120" && account_row {
+            posted_re += net;
+        }
+    }
 
     let mut bs_o = ReportOptions::for_spec(find("balance_sheet").expect("bs"));
     bs_o.dates = DateChoice::AsOf(at);
     bs_o.basis = Some(basis);
     let (_, bs) = run(s, "balance_sheet", &bs_o).await;
+    if basis == Basis::Cash {
+        assert_eq!(
+            bs.meta.note.as_deref(),
+            Some(cl_api::resources::reports::adapters::statements::CASH_AR_AP_NOTE),
+            "{at} cash sheet note"
+        );
+    }
+    // T2: the sheet's equity across the year boundary. Net income (current
+    // year) is the fiscal year-to-date P&L; the Retained Earnings line is
+    // the prior years' P&L plus what was posted to it.
+    let year_ni = net_income(s, d(at.year(), 1, 1), at, basis).await;
+    let prior_ni = net_income(s, d(1900, 1, 1), d(at.year() - 1, 12, 31), basis).await;
+    assert!(!prior_ni.is_zero(), "the 2025 slice has income");
+    let equity_row = |pred: &dyn Fn(&cl_core::report::ReportRow) -> bool| {
+        bs.rows
+            .iter()
+            .find(|r| r.path.0.first().is_some_and(|p| p == "equity") && pred(r))
+            .map(|r| dec(&r.cells[0]))
+    };
+    assert_eq!(
+        equity_row(&|r| r.caption == "@reports.bs.net_income").unwrap_or_default(),
+        year_ni,
+        "{at} {basis:?} net income = the year-to-date P&L"
+    );
+    assert_eq!(
+        equity_row(&|r| r.caption.starts_with("30120 ")).unwrap_or_default(),
+        prior_ni - posted_re,
+        "{at} {basis:?} Retained Earnings = prior years' income + posted"
+    );
+    every_bs_cell_drills_to_its_amount(s, &bs).await;
     for r in bs.rows.iter().filter(|r| r.kind == RowKind::Account) {
         let Some(n) = r.caption.split(" \u{b7} ").next() else {
             continue;
@@ -611,14 +706,21 @@ async fn statements_tie_to_the_trial_balance(s: &Session, at: CalendarDate, basi
         if r.expandable && sheet.is_zero() {
             continue;
         }
+        if b1 && n == "30120" {
+            // B1: the cash TB's computed row is accrual until U-213.
+            continue;
+        }
         assert_eq!(tb_value, want, "{at} {basis:?} sheet {n} ties to the TB");
-        // And to the ledger.
-        let drill = r.drill.as_ref().expect("drill").at(&bs.columns[0]);
-        assert_eq!(
-            drill_net(s, &drill).await,
-            tb_value,
-            "{at} {n} ties to the GL"
-        );
+        // And to the ledger, unless the line holds what no ledger does
+        // (Retained Earnings with prior years' income, B2).
+        match r.drill.as_ref() {
+            Some(drill) => assert_eq!(
+                drill_net(s, &drill.at(&bs.columns[0])).await,
+                tb_value,
+                "{at} {n} ties to the GL"
+            ),
+            None => assert_eq!(n, "30120", "{at} only Retained Earnings has no drill"),
+        }
     }
     let assets = bs
         .rows
@@ -657,6 +759,90 @@ async fn statements_tie_to_the_trial_balance(s: &Session, at: CalendarDate, basi
             want,
             "{at} {basis:?} P&L {n} ties to the TB"
         );
+    }
+}
+
+/// B3/T4: November's "Prior period" column is all of October (13,865.14,
+/// the mockup's net income, with its October 1 lines), not the 30 days
+/// before November; the one-date sheet's prior column is October 31's.
+async fn prior_period_is_the_previous_month(s: &Session) {
+    use cl_core::report::Extra;
+    let mut o = ReportOptions::for_spec(find("profit_loss").expect("p&l"));
+    o.dates = DateChoice::Fixed {
+        from: d(2026, 11, 1),
+        to: d(2026, 11, 30),
+    };
+    o.extras.insert(Extra::PriorPeriod);
+    let (req, t) = run(s, "profit_loss", &o).await;
+    assert_eq!(
+        req.prior_ranges
+            .as_deref()
+            .and_then(<[_]>::first)
+            .map(|r| (r.from, r.to)),
+        Some((d(2026, 10, 1), d(2026, 10, 31)))
+    );
+    let prior = t
+        .columns
+        .iter()
+        .position(|c| c.key == "total_prior")
+        .expect("prior column");
+    assert_eq!(
+        dec(&t.rows.last().expect("net").cells[prior]),
+        Decimal::new(1_386_514, 2),
+        "November's prior period is October"
+    );
+    let mut b = ReportOptions::for_spec(find("balance_sheet").expect("bs"));
+    b.dates = DateChoice::AsOf(d(2026, 11, 30));
+    b.extras.insert(Extra::PriorPeriod);
+    let (_, sheet) = run(s, "balance_sheet", &b).await;
+    let mut oct = ReportOptions::for_spec(find("balance_sheet").expect("bs"));
+    oct.dates = DateChoice::AsOf(d(2026, 10, 31));
+    let (_, oct) = run(s, "balance_sheet", &oct).await;
+    let prior = sheet
+        .columns
+        .iter()
+        .position(|c| c.key.ends_with("_prior"))
+        .expect("prior column");
+    assert_eq!(
+        sheet.rows.last().map(|r| dec(&r.cells[prior])),
+        oct.rows.last().map(|r| dec(&r.cells[0])),
+        "the sheet's prior period is October 31"
+    );
+}
+
+/// T3 (B2): every Balance Sheet amount drills to what sums to it (ledger
+/// lines, or the P&L for net income), or has no drill: the calculated
+/// rows, Retained Earnings carrying prior years' income, Total equity with
+/// either, and the grand total.
+async fn every_bs_cell_drills_to_its_amount(s: &Session, bs: &ReportTable) {
+    for r in &bs.rows {
+        let Cell::Amount(cell) = r.cells[0] else {
+            continue;
+        };
+        let section = r.path.0.first().map(String::as_str).unwrap_or_default();
+        match &r.drill {
+            Some(d @ Drill::Lines { .. }) => {
+                let net = drill_net(s, &d.at(&bs.columns[0])).await;
+                let want = if section.starts_with("assets") {
+                    cell
+                } else {
+                    -cell
+                };
+                assert_eq!(net, want, "drill of {} sums to it", r.caption);
+            }
+            Some(Drill::ProfitLoss {
+                from, to, basis, ..
+            }) => {
+                let ni = net_income(s, *from, *to, basis.unwrap_or(Basis::Accrual)).await;
+                assert_eq!(ni, cell, "{} opens the P&L that equals it", r.caption);
+            }
+            Some(other) => panic!("{}: unexpected drill {other:?}", r.caption),
+            None => assert!(
+                r.kind == RowKind::Grand || section.starts_with("equity"),
+                "{} has no drill",
+                r.caption
+            ),
+        }
     }
 }
 
@@ -712,7 +898,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     october_matches_the_practice_company(&s, &sample).await;
     for at in [d(2026, 10, 31), d(2026, 11, 30), d(2026, 12, 31)] {
         for basis in [Basis::Accrual, Basis::Cash] {
-            statements_tie_to_the_trial_balance(&s, at, basis).await;
+            statements_tie_to_the_trial_balance(&s, at, basis, caps.has(CASH_TB_FIX)).await;
         }
     }
     let mut drilled = 0;
@@ -769,6 +955,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             }
         }
         assert!(cells > 100, "column cells drill");
+        prior_period_is_the_previous_month(&s).await;
     }
     for (item, cap, why) in [
         (
@@ -879,6 +1066,15 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         }
     }
     for g in all {
+        // B1: a cash Trial Balance golden would pin the accrual prior years'
+        // row until U-213; those files stay as they are (Q-PR6e).
+        if g.key == "trial_balance" && g.file.ends_with("_cash") && !caps.has(CASH_TB_FIX) {
+            pending(
+                "U-213",
+                &format!("{} (cash prior years' retained earnings)", g.file),
+            );
+            continue;
+        }
         let (_, t) = run(&s, g.key, &g.options).await;
         // A tag split is written as presented: the owner's label style and
         // account-total choice (AC5).
