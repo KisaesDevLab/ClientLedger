@@ -33,6 +33,17 @@ steps:
   - wait: {ms: 400}
   - assert_state: {key: screen.basis, equals: cash}
   - assert_state: {key: screen.state, equals: shown}
+  # A drill from a cash report opens its ledger on cash (PR6-QA-3).
+  - click: {role: link, index: 0}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.report, equals: transaction_detail_by_account}
+  - assert_state: {key: screen.basis, equals: cash}
+  - command: file.close_window
+  - wait: {ms: 300}
+  - click: {label: Profit & Loss, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  - assert_state: {key: screen.basis, equals: cash}
   - click: {role: button, label: Accrual}
   - wait: {ms: 400}
   - assert_state: {key: screen.basis, equals: accrual}

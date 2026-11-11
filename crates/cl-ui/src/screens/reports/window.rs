@@ -69,10 +69,14 @@ const NUM_MIN: f32 = 72.0;
 /// Room around a cell's text.
 const PAD: f32 = 14.0;
 
-/// What the column widths were measured for.
+/// What the column widths were measured for. The table's serial changes
+/// with every table shown, not with every run asked: the dimmed old table
+/// drawn while a run is pending must not lend its widths to the new one
+/// (PR6-QA-1).
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct WidthKey {
-    generation: u64,
+    table: u64,
+    columns: usize,
     rows: usize,
     collapsed: usize,
     zoom_bits: u32,
@@ -85,7 +89,13 @@ pub(crate) struct Widths {
     key: WidthKey,
     caption: f32,
     cells: Vec<f32>,
+    /// Text columns whose longest text is a short code or status (a
+    /// number, "Below $2,000"): [`fit`] doesn't cut them.
+    short: Vec<bool>,
 }
+
+/// A text column with no text longer than this keeps its width.
+const SHORT_TEXT: usize = 14;
 
 /// The pick lists: (id text, name).
 #[derive(Default)]
@@ -129,6 +139,8 @@ pub struct ReportWindow {
     generation: u64,
     job: Option<(u64, Job<ReportTable>)>,
     pub(super) table: Option<ReportTable>,
+    /// Counts the tables shown (the width cache's key).
+    table_serial: u64,
     pub(super) error: Option<ApiError>,
     pub(super) problem: Option<&'static str>,
     pub(super) ran_at: Option<String>,
@@ -220,6 +232,7 @@ impl ReportWindow {
             generation: 0,
             job: None,
             table: None,
+            table_serial: 0,
             error: None,
             problem: None,
             ran_at: None,
@@ -459,7 +472,7 @@ impl ReportWindow {
             }
             match r {
                 Ok(table) => {
-                    self.table = Some(table);
+                    self.set_table(table);
                     self.state = RunState::Shown;
                     self.ran_at = Some(
                         chrono::Local::now()
@@ -479,6 +492,19 @@ impl ReportWindow {
         super::budgets::poll(self);
         super::ask::poll(self);
         super::email::poll(self);
+    }
+
+    /// Shows `table`; its columns are measured afresh (PR6-QA-1).
+    pub(crate) fn set_table(&mut self, table: ReportTable) {
+        self.table = Some(table);
+        self.table_serial += 1;
+        self.widths = None;
+    }
+
+    /// The measured caption and cell widths (tests).
+    #[cfg(test)]
+    pub(crate) fn widths_for_test(&self) -> Option<(f32, Vec<f32>)> {
+        self.widths.as_ref().map(|w| (w.caption, w.cells.clone()))
     }
 
     /// A row's caption: a tag row under the tag split in the owner's label
@@ -643,7 +669,8 @@ impl ReportWindow {
     /// wide as its longest caption up to a cap.
     fn measure(&mut self, ui: &Ui, rows: &[usize]) -> Widths {
         let key = WidthKey {
-            generation: self.generation,
+            table: self.table_serial,
+            columns: self.table.as_ref().map_or(0, |t| t.columns.len()),
             rows: rows.len(),
             collapsed: self.options.collapsed.len(),
             zoom_bits: ui.ctx().pixels_per_point().to_bits(),
@@ -658,11 +685,13 @@ impl ReportWindow {
                 key,
                 caption: CAPTION_MIN,
                 cells: Vec::new(),
+                short: Vec::new(),
             };
         };
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
-        let mono = egui::TextStyle::Monospace.resolve(ui.style());
         let body = egui::TextStyle::Body.resolve(ui.style());
+        // The cells' own font: the body size in the monospace family.
+        let mono = egui::FontId::new(body.size, egui::FontFamily::Monospace);
         let head = egui::FontId::proportional(12.0);
         let glyph = ui.fonts_mut(|f| f.glyph_width(&mono, '0'));
         let measure = |s: &str, font: &egui::FontId| {
@@ -672,14 +701,20 @@ impl ReportWindow {
                     .x
             })
         };
-        // Cells are monospace: the most characters is the widest.
+        // Cells are monospace: the most characters is the widest; that
+        // text is laid out too, in case a glyph comes from a fallback font.
         let mut chars = vec![0usize; table.columns.len()];
+        let mut widest = vec![String::new(); table.columns.len()];
         let mut longest: (usize, f32, String) = (0, 0.0, String::new());
         for &i in rows {
             let r = &table.rows[i];
             for (ci, c) in r.cells.iter().enumerate().take(chars.len()) {
-                let n = cell_text(c, style).chars().count();
-                chars[ci] = chars[ci].max(n);
+                let s = cell_text(c, style);
+                let n = s.chars().count();
+                if n > chars[ci] {
+                    chars[ci] = n;
+                    widest[ci] = s;
+                }
             }
             let caption = self.caption_of(table, i);
             let indent = f32::from(r.level) * 16.0 + if r.expandable { 22.0 } else { 0.0 };
@@ -697,10 +732,10 @@ impl ReportWindow {
         let cells = table
             .columns
             .iter()
-            .zip(&chars)
-            .map(|(c, n)| {
+            .zip(chars.iter().zip(&widest))
+            .map(|(c, (n, text))| {
                 let heading = measure(&label(&c.caption), &head) + PAD;
-                let cell = *n as f32 * glyph + PAD;
+                let cell = (*n as f32 * glyph).max(measure(text, &mono)) + PAD;
                 if c.kind.is_numeric() {
                     cell.max(heading.min(140.0)).max(NUM_MIN)
                 } else {
@@ -708,10 +743,12 @@ impl ReportWindow {
                 }
             })
             .collect();
+        let short = chars.iter().map(|n| *n <= SHORT_TEXT).collect();
         let w = Widths {
             key,
             caption,
             cells,
+            short,
         };
         self.widths = Some(w.clone());
         w
@@ -778,10 +815,15 @@ impl ReportWindow {
                 let text = RichText::new(super::label(note))
                     .size(12.0)
                     .color(tokens.text_secondary);
-                // S5: the note opens the entries it is about.
+                // S5: the note opens the entries it is about, through a
+                // link that looks like one (PR6-QA-3).
                 match &meta.note_drill {
                     Some(d) => {
-                        if ui.link(text).clicked() {
+                        ui.label(text);
+                        let link = ui
+                            .link(RichText::new(t("reports.note.see_entries")).size(12.0))
+                            .on_hover_text(t("reports.drill.hint"));
+                        if link.clicked() {
                             follow = Some(d.clone());
                         }
                     }
@@ -1094,8 +1136,9 @@ fn fixed_box(ui: &mut Ui, size: Vec2, layout: Layout, add: impl FnOnce(&mut Ui))
 }
 
 /// Narrows the caption and text columns (names, memos) toward their
-/// minimum until the table fits `room`; amounts and dates keep their width,
-/// so a figure is never cut (QA-2). What still doesn't fit scrolls.
+/// minimum until the table fits `room`; amounts, dates and short codes or
+/// statuses keep their width, so a figure is never cut (QA-2, PR6-QA-4).
+/// What still doesn't fit scrolls.
 fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
     let total = w.caption + w.cells.iter().sum::<f32>();
     let excess = total - room;
@@ -1108,7 +1151,7 @@ fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
         .enumerate()
         .filter(|(_, c)| c.kind == cl_core::report::ColumnKind::Text)
         .map(|(i, _)| i)
-        .filter(|i| *i < w.cells.len())
+        .filter(|i| *i < w.cells.len() && !w.short.get(*i).copied().unwrap_or(false))
         .collect();
     let slack: f32 = (w.caption - CAPTION_FIT_MIN).max(0.0)
         + text
