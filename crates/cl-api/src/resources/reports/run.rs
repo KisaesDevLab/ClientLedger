@@ -460,6 +460,20 @@ mod tests {
         let mut p = ReportRequest::new(Source::ProfitLoss, ReportDates::Range(oct()));
         p.filters.account_ids.clone_from(&g.filters.account_ids);
         assert_eq!(missing_capability(&p, pr_a), Some(DRILL));
+        // With U-201: P&L columns run; the TB's tag split still waits.
+        let pr_b = |c: &str| c == EXACT || c == COLUMNS || c == DRILL;
+        let mut cols =
+            ReportRequest::new(Source::ProfitLoss, ReportDates::Ranges(vec![oct(), oct()]));
+        cols.extras.insert(Extra::Ytd);
+        assert_eq!(missing_capability(&cols, pr_b), None);
+        let mut tb = ReportRequest::new(Source::TrialBalance, ReportDates::AsOf(d(2026, 10, 31)));
+        tb.tag_split = Some(
+            cl_core::ids::TagGroupId::parse("22222222-2222-4222-8222-222222222222").expect("g"),
+        );
+        assert_eq!(missing_capability(&tb, pr_b), Some(COLUMNS));
+        let j = ReportRequest::new(Source::Journal, ReportDates::Range(oct()));
+        assert_eq!(missing_capability(&j, pr_a), Some(DRILL));
+        assert_eq!(missing_capability(&j, pr_b), None);
         // Routes exact before PR-A need nothing more.
         let a = ReportRequest::new(Source::ArAgingSummary, ReportDates::AsOf(d(2026, 10, 31)));
         assert_eq!(missing_capability(&a, |_| false), None);
