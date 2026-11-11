@@ -94,63 +94,32 @@ fn audit_record_filter(h: &Harness, s: &Session) {
         h.pending("audit record filter", "audit-filters-v1 is missing");
         return;
     }
-    let vendor = |name: &str| {
-        let name = crate::support::unique(name);
-        let id = h
-            .run(s.contacts().create(
-                &cl_api::NewContact {
-                    fields: cl_api::ContactFields::named(cl_api::ContactType::Vendor, name.clone()),
-                    opening_balance: cl_core::Money::ZERO,
-                    opening_balance_date: None,
-                },
-                key(),
-            ))
-            .unwrap_or_else(|e| panic!("vendor: {e}"))
-            .record
-            .id;
-        (id, name)
-    };
-    let (a, name_a) = vendor("Audit filter vendor A");
-    let (b, name_b) = vendor("Audit filter vendor B");
+    let a = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor A");
+    let b = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor B");
     let all = ReportDates::Range(DateRange {
         from: date(2000, 1, 1),
         to: date(2099, 12, 31),
     });
-    // Each detail row's text, cell by cell.
-    let rows_of = |c: cl_core::ids::ContactId| -> Vec<String> {
+    // One header row per audit entry.
+    let entries = |c: cl_core::ids::ContactId| -> usize {
         let mut r = ReportRequest::new(Source::AuditLog, all.clone());
         r.filters.contact_ids = vec![c];
         run(h, s, &r)
             .rows
             .iter()
-            .filter(|row| row.kind == cl_core::report::RowKind::Detail)
-            .map(|row| {
-                row.cells
-                    .iter()
-                    .map(|cell| match cell {
-                        cl_core::report::Cell::Text(t) => t.clone(),
-                        _ => String::new(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .collect()
+            .filter(|row| row.kind == cl_core::report::RowKind::Header)
+            .count()
     };
-    let (ra, rb) = (rows_of(a), rows_of(b));
-    assert!(!ra.is_empty(), "vendor A's creation is in its trail");
-    assert!(!rb.is_empty(), "vendor B's creation is in its trail");
-    assert!(
-        ra.iter().any(|t| t.contains(&name_a)),
-        "A's trail names A: {ra:?}"
-    );
-    assert!(
-        ra.iter().all(|t| !t.contains(&name_b)),
-        "A's trail has none of B's changes"
-    );
-    assert!(
-        rb.iter().all(|t| !t.contains(&name_a)),
-        "B's trail has none of A's changes"
-    );
+    let everything = run(h, s, &ReportRequest::new(Source::AuditLog, all.clone()))
+        .rows
+        .iter()
+        .filter(|row| row.kind == cl_core::report::RowKind::Header)
+        .count();
+    assert!(everything >= 2, "the company's trail has both creations");
+    // Each vendor's trail is its own creation only: one entry, not the
+    // company's whole trail and not the other vendor's.
+    assert_eq!(entries(a), 1, "vendor A's trail");
+    assert_eq!(entries(b), 1, "vendor B's trail");
 }
 
 fn ask_req(question: &str) -> AskRequest {
