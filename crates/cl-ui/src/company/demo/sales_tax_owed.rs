@@ -328,6 +328,11 @@ fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
         };
         let empty = Vec::new();
         let sets = settled.get(txn).unwrap_or(&empty);
+        let sum_tax: Decimal = rows
+            .iter()
+            .filter(|r| r.doc == DocKind::Invoice)
+            .map(|r| r.tax)
+            .sum();
         for r in rows {
             let cash = basis == SalesTaxBasis::Cash;
             if !cash || matches!(r.doc, DocKind::Receipt | DocKind::Daily) {
@@ -348,7 +353,14 @@ fn events(state: &DemoState, basis: SalesTaxBasis) -> Vec<Event> {
                         share(r.tax, p + add, p, total),
                         share(r.base, p + add, p, total),
                     );
-                    e.exact = Some(r.tax * add / total);
+                    // U-209: the cash ledger moves the invoice's tax in
+                    // cents per settlement; a row's exact share is its part
+                    // of that, so nothing is left over to round.
+                    e.exact = Some(if sum_tax.is_zero() {
+                        Decimal::ZERO
+                    } else {
+                        share(sum_tax, p + add, p, total) * r.tax / sum_tax
+                    });
                     out.push(e);
                     p += add;
                 }
@@ -529,7 +541,7 @@ fn columns(
     let mut by: BTreeMap<SalesTaxItemId, Cols> = BTreeMap::new();
     let mut unassigned = Decimal::ZERO;
     // The exact running-total shares and their rounded cents in range (the
-    // engine shows round5(exact) - rounded, golden 7: -0.002790).
+    // engine shows round5(exact) - rounded; since U-209 golden 7: 0).
     let (mut exact, mut rounded) = (Decimal::ZERO, Decimal::ZERO);
     for e in events(state, basis) {
         let payment = matches!(e.col, Col::Paid | Col::Adjustments | Col::Opening);
