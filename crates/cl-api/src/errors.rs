@@ -443,6 +443,10 @@ pub enum LocalValidation {
     /// from zero to cents, or it has a cost without a quantity; nothing
     /// was sent.
     LineAmountMismatch,
+    /// A report that lists one vendor or one bank account was run without
+    /// one chosen (P28: Transactions by Vendor, Vendor Statement, Check
+    /// Register); nothing was sent.
+    MissingPick,
 }
 
 /// A save was refused because its date is on or before the closing date.

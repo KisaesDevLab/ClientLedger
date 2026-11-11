@@ -641,6 +641,9 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         .await
         .unwrap_or_else(|e| panic!("the report story posts: {e}"));
     let sample = Sample::load();
+    if let Ok(dir) = std::env::var("CL_REPORT_DUMP") {
+        return dump_raw(&s, Path::new(&dir)).await;
+    }
 
     // ---------------------------------------------------- cross-checks
     october_matches_the_practice_company(&s, &sample).await;
@@ -788,6 +791,130 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         "golden reports: {mismatched:?} (after a reviewed change: cargo xtask golden-reports --bless)"
     );
     let _ = s.logout().await;
+}
+
+/// A developer aid (`CL_REPORT_DUMP=<dir>`): the raw answers of the list
+/// routes on the golden company, for recording adapter samples in
+/// `crates/cl-api/tests/fixtures/reports/`. Ids are named stably.
+async fn dump_raw(s: &Session, dir: &Path) {
+    std::fs::create_dir_all(dir).expect("dump dir");
+    let contacts = s
+        .contacts()
+        .list_all(&ContactFilter::default())
+        .await
+        .expect("contacts");
+    let id_of = |n: &str| {
+        contacts
+            .iter()
+            .find(|c| c.fields.display_name == n)
+            .map(|c| c.id.to_string())
+            .unwrap_or_default()
+    };
+    let vendor = id_of("Table Rock Nursery");
+    let bank = s
+        .accounts()
+        .list_all(&AccountFilter::default())
+        .await
+        .expect("accounts")
+        .into_iter()
+        .find(|a| a.fields.account_number.as_deref() == Some("1010"))
+        .map(|a| a.id.to_string())
+        .unwrap_or_default();
+    let q4: &[(&str, &str)] = &[
+        ("exact", "1"),
+        ("start_date", "2026-10-01"),
+        ("end_date", "2026-12-31"),
+    ];
+    let at = |d: &'static str| -> Vec<(&'static str, &'static str)> {
+        vec![("exact", "1"), ("as_of_date", d)]
+    };
+    let mut calls: Vec<(String, String, Vec<(String, String)>)> = Vec::new();
+    let mut add = |name: &str, route: &str, q: &[(&str, &str)]| {
+        calls.push((
+            name.to_string(),
+            route.to_string(),
+            q.iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+        ));
+    };
+    for (name, route) in [
+        ("ar_aging_detail", "ar-aging-detail"),
+        ("ap_aging_summary", "ap-aging-summary"),
+        ("ap_aging_detail", "ap-aging-detail"),
+        ("unpaid_bills", "unpaid-bills"),
+        ("customer_balance_summary", "customer-balance-summary"),
+        ("customer_balance_detail", "customer-balance-detail"),
+        ("vendor_balance_summary", "vendor-balance-summary"),
+        ("vendor_balance_detail", "vendor-balance-detail"),
+        ("bank_balances", "bank-balances"),
+    ] {
+        add(name, route, &at("2026-11-30"));
+    }
+    let mut open = at("2026-11-30");
+    open.push(("open", "1"));
+    add("open_invoices", "invoice-list", &open);
+    for (name, route) in [
+        ("invoice_list", "invoice-list"),
+        ("sales_by_customer", "sales-by-customer"),
+        ("sales_by_item", "sales-by-item"),
+        ("expense_by_vendor", "expense-by-vendor"),
+        ("bill_payment_history", "bill-payment-history"),
+        ("deposit_detail", "deposit-detail"),
+        ("account_activity_summary", "account-activity-summary"),
+    ] {
+        add(name, route, q4);
+    }
+    let mut v = q4.to_vec();
+    v.push(("vendor_id", vendor.as_str()));
+    add("transactions_by_vendor", "transaction-list-by-vendor", &v);
+    add("vendor_statement", "vendor-statement", &v);
+    let mut c = q4.to_vec();
+    c.push(("account_id", bank.as_str()));
+    add("check_register", "check-register", &c);
+    add(
+        "vendor_1099_summary",
+        "vendor-1099-summary",
+        &[("exact", "1"), ("year", "2026")],
+    );
+    add(
+        "ap_1099_prep",
+        "ap-1099-prep",
+        &[("exact", "1"), ("tax_year", "2026")],
+    );
+    for (name, route, q) in calls {
+        let path = if route.starts_with('/') {
+            route
+        } else {
+            format!("/api/v1/reports/{route}")
+        };
+        let q: Vec<(&str, &str)> = q.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let body = loop {
+            let r = s
+                .raw(cl_api::Method::Get, &path, &q, None)
+                .await
+                .expect("raw");
+            if r.status == 429 {
+                tokio::time::sleep(Duration::from_secs(20)).await;
+                continue;
+            }
+            assert!(r.status < 300, "{name}: {} {}", r.status, r.body);
+            break r.body;
+        };
+        let text = serde_json::to_string_pretty(&body).expect("json");
+        std::fs::write(dir.join(format!("{name}.json")), text).expect("write");
+    }
+    let r = s
+        .raw(
+            cl_api::Method::Get,
+            "/api/v1/duplicates",
+            &[("start_date", "2026-10-01"), ("end_date", "2026-12-31")],
+            None,
+        )
+        .await
+        .expect("raw");
+    let text = serde_json::to_string_pretty(&r.body).expect("json");
+    std::fs::write(dir.join("duplicates.json"), text).expect("write");
 }
 
 #[test]

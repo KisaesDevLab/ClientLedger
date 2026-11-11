@@ -79,6 +79,11 @@ pub enum BasisMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(missing_docs, reason = "filter kinds, as named")]
 pub enum FilterKind {
+    /// One vendor, chosen before the report runs (Transactions by Vendor,
+    /// Vendor Statement).
+    Vendor,
+    /// One bank account, chosen before the report runs (Check Register).
+    BankAccount,
     Accounts,
     Contacts,
     Tags,
@@ -166,6 +171,17 @@ impl ReportSpec {
     /// True when `has` reports every capability this report needs.
     pub fn available(&self, has: impl Fn(&str) -> bool) -> bool {
         self.capabilities.iter().all(|c| has(c))
+    }
+
+    /// The pick this report needs before it can run with `filters`
+    /// (`None`: it can run).
+    #[must_use]
+    pub fn missing_pick(&self, filters: &super::options::Filters) -> Option<FilterKind> {
+        self.filters.iter().copied().find(|k| match k {
+            FilterKind::Vendor => filters.contact_ids.is_empty(),
+            FilterKind::BankAccount => filters.account_ids.is_empty(),
+            _ => false,
+        })
     }
 
     /// The default column choice.

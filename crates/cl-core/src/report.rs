@@ -65,6 +65,7 @@ pub enum Source {
     CustomerBalanceSummary,
     CustomerBalanceDetail,
     VendorBalanceSummary,
+    VendorBalanceDetail,
     ApAgingSummary,
     ApAgingDetail,
     UnpaidBills,
@@ -93,7 +94,7 @@ pub enum Source {
 
 impl Source {
     /// Every source, in catalog order.
-    pub const ALL: [Source; 37] = [
+    pub const ALL: [Source; 38] = [
         Source::ProfitLoss,
         Source::BalanceSheet,
         Source::TrialBalance,
@@ -107,6 +108,7 @@ impl Source {
         Source::CustomerBalanceSummary,
         Source::CustomerBalanceDetail,
         Source::VendorBalanceSummary,
+        Source::VendorBalanceDetail,
         Source::ApAgingSummary,
         Source::ApAgingDetail,
         Source::UnpaidBills,
@@ -151,6 +153,7 @@ impl Source {
             Source::CustomerBalanceSummary => "/api/v1/reports/customer-balance-summary",
             Source::CustomerBalanceDetail => "/api/v1/reports/customer-balance-detail",
             Source::VendorBalanceSummary => "/api/v1/reports/vendor-balance-summary",
+            Source::VendorBalanceDetail => "/api/v1/reports/vendor-balance-detail",
             Source::ApAgingSummary => "/api/v1/reports/ap-aging-summary",
             Source::ApAgingDetail => "/api/v1/reports/ap-aging-detail",
             Source::UnpaidBills => "/api/v1/reports/unpaid-bills",
@@ -319,6 +322,10 @@ pub struct ReportFilters {
     /// Lines without a tag of this group (U-202).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub untagged_in_group: Option<TagGroupId>,
+    /// One aging bucket of an aging detail (an aging cell's drill; the
+    /// rows are picked by the engine's bucket, never recomputed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<AgingBucket>,
 }
 
 /// What one report run asks of the engine: the resolved, concrete form of

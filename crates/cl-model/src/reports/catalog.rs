@@ -326,6 +326,7 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "customer_balance_detail",
         title: "reports.title.customer_balance_detail",
         source: Source::CustomerBalanceDetail,
+        sort: SortMode::None,
         capabilities: &[caps::EXACT, caps::OPEN_ASOF],
         ..OPEN_ITEMS
     },
@@ -337,26 +338,34 @@ pub static CATALOG: &[ReportSpec] = &[
         ..OPEN_ITEMS
     },
     ReportSpec {
+        key: "vendor_balance_detail",
+        title: "reports.title.vendor_balance_detail",
+        source: Source::VendorBalanceDetail,
+        sort: SortMode::None,
+        capabilities: &[caps::EXACT, caps::OPEN_ASOF],
+        ..OPEN_ITEMS
+    },
+    ReportSpec {
         key: "ap_aging_summary",
         title: "reports.title.ap_aging_summary",
         source: Source::ApAgingSummary,
         drill: DrillRule::Aging,
         layout: Layout::Aging,
-        capabilities: &[caps::AP_AGING],
+        capabilities: &[caps::EXACT, caps::AP_AGING],
         ..OPEN_ITEMS
     },
     ReportSpec {
         key: "ap_aging_detail",
         title: "reports.title.ap_aging_detail",
         source: Source::ApAgingDetail,
-        capabilities: &[caps::AP_AGING],
+        capabilities: &[caps::EXACT, caps::AP_AGING],
         ..OPEN_ITEMS
     },
     ReportSpec {
         key: "unpaid_bills",
         title: "reports.title.unpaid_bills",
         source: Source::UnpaidBills,
-        capabilities: &[caps::AP_AGING],
+        capabilities: &[caps::EXACT, caps::AP_AGING],
         ..OPEN_ITEMS
     },
     ReportSpec {
@@ -365,6 +374,8 @@ pub static CATALOG: &[ReportSpec] = &[
         source: Source::VendorStatement,
         dates: DateMode::Range,
         default_dates: DatePreset::ThisMonth,
+        filters: &[FilterKind::Vendor],
+        // A running balance can't be sorted (Q-P28k).
         sort: SortMode::None,
         ..OPEN_ITEMS
     },
@@ -412,6 +423,8 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "transactions_by_vendor",
         title: "reports.title.transactions_by_vendor",
         source: Source::TransactionListByVendor,
+        basis: BasisMode::NotApplicable,
+        filters: &[FilterKind::Vendor],
         ..LIST
     },
     ReportSpec {
@@ -467,6 +480,7 @@ pub static CATALOG: &[ReportSpec] = &[
         group: CatalogGroup::Banking,
         source: Source::CheckRegister,
         basis: BasisMode::NotApplicable,
+        filters: &[FilterKind::BankAccount],
         ..LIST
     },
     ReportSpec {
@@ -485,6 +499,7 @@ pub static CATALOG: &[ReportSpec] = &[
         title: "reports.title.account_activity_summary",
         group: CatalogGroup::Banking,
         source: Source::AccountActivitySummary,
+        basis: BasisMode::NotApplicable,
         drill: DrillRule::Lines,
         ..LIST
     },
@@ -551,7 +566,8 @@ pub static CATALOG: &[ReportSpec] = &[
         title: "reports.title.duplicate_finder",
         group: CatalogGroup::Controls,
         source: Source::Duplicates,
-        dates: DateMode::None,
+        // The engine scans by date; dates are always sent.
+        default_dates: DatePreset::ThisQuarter,
         basis: BasisMode::NotApplicable,
         sort: SortMode::None,
         // Exact today (Q-P28o): a list of pairs, no capability.

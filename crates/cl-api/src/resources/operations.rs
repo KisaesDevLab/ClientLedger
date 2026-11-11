@@ -1709,6 +1709,52 @@ pub(crate) const REPORT_REVENUE_BY_CATEGORY: Operation =
 /// Expenses by Category (U-14 exact).
 pub(crate) const REPORT_EXPENSE_BY_CATEGORY: Operation =
     read("/api/v1/reports/expense-by-category");
+/// `ar-aging-detail` (P28 WP3).
+pub(crate) const REPORT_AR_AGING_DETAIL: Operation = read("/api/v1/reports/ar-aging-detail");
+/// `invoice-list` (P28 WP3).
+pub(crate) const REPORT_INVOICE_LIST: Operation = read("/api/v1/reports/invoice-list");
+/// `customer-balance-detail` (P28 WP3).
+pub(crate) const REPORT_CUSTOMER_BALANCE_DETAIL: Operation =
+    read("/api/v1/reports/customer-balance-detail");
+/// `vendor-balance-summary` (P28 WP3).
+pub(crate) const REPORT_VENDOR_BALANCE_SUMMARY: Operation =
+    read("/api/v1/reports/vendor-balance-summary");
+/// `vendor-balance-detail` (P28 WP3).
+pub(crate) const REPORT_VENDOR_BALANCE_DETAIL: Operation =
+    read("/api/v1/reports/vendor-balance-detail");
+/// `ap-aging-detail` (P28 WP3).
+pub(crate) const REPORT_AP_AGING_DETAIL: Operation = read("/api/v1/reports/ap-aging-detail");
+/// `unpaid-bills` (P28 WP3).
+pub(crate) const REPORT_UNPAID_BILLS: Operation = read("/api/v1/reports/unpaid-bills");
+/// `sales-by-customer` (P28 WP3).
+pub(crate) const REPORT_SALES_BY_CUSTOMER: Operation = read("/api/v1/reports/sales-by-customer");
+/// `sales-by-item` (P28 WP3).
+pub(crate) const REPORT_SALES_BY_ITEM: Operation = read("/api/v1/reports/sales-by-item");
+/// `expense-by-vendor` (P28 WP3).
+pub(crate) const REPORT_EXPENSE_BY_VENDOR: Operation = read("/api/v1/reports/expense-by-vendor");
+/// `transaction-list-by-vendor` (P28 WP3).
+pub(crate) const REPORT_TRANSACTION_LIST_BY_VENDOR: Operation =
+    read("/api/v1/reports/transaction-list-by-vendor");
+/// `bill-payment-history` (P28 WP3).
+pub(crate) const REPORT_BILL_PAYMENT_HISTORY: Operation =
+    read("/api/v1/reports/bill-payment-history");
+/// `vendor-1099-summary` (P28 WP3).
+pub(crate) const REPORT_VENDOR_1099_SUMMARY: Operation =
+    read("/api/v1/reports/vendor-1099-summary");
+/// `ap-1099-prep` (P28 WP3).
+pub(crate) const REPORT_AP_1099_PREP: Operation = read("/api/v1/reports/ap-1099-prep");
+/// `check-register` (P28 WP3).
+pub(crate) const REPORT_CHECK_REGISTER: Operation = read("/api/v1/reports/check-register");
+/// `bank-balances` (P28 WP3).
+pub(crate) const REPORT_BANK_BALANCES: Operation = read("/api/v1/reports/bank-balances");
+/// `account-activity-summary` (P28 WP3).
+pub(crate) const REPORT_ACCOUNT_ACTIVITY_SUMMARY: Operation =
+    read("/api/v1/reports/account-activity-summary");
+/// `closing-date-exceptions` (P28 WP3).
+pub(crate) const REPORT_CLOSING_DATE_EXCEPTIONS: Operation =
+    read("/api/v1/reports/closing-date-exceptions");
+/// The duplicate pairs scan (P28 WP3, Duplicate Finder).
+pub(crate) const DUPLICATES_SCAN: Operation = read("/api/v1/duplicates");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1722,7 +1768,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 382] = [
+pub const OPERATIONS: [Operation; 401] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2122,6 +2168,25 @@ pub const OPERATIONS: [Operation; 382] = [
     REPORT_GENERAL_LEDGER,
     REPORT_REVENUE_BY_CATEGORY,
     REPORT_EXPENSE_BY_CATEGORY,
+    REPORT_AR_AGING_DETAIL,
+    REPORT_INVOICE_LIST,
+    REPORT_CUSTOMER_BALANCE_DETAIL,
+    REPORT_VENDOR_BALANCE_SUMMARY,
+    REPORT_VENDOR_BALANCE_DETAIL,
+    REPORT_AP_AGING_DETAIL,
+    REPORT_UNPAID_BILLS,
+    REPORT_SALES_BY_CUSTOMER,
+    REPORT_SALES_BY_ITEM,
+    REPORT_EXPENSE_BY_VENDOR,
+    REPORT_TRANSACTION_LIST_BY_VENDOR,
+    REPORT_BILL_PAYMENT_HISTORY,
+    REPORT_VENDOR_1099_SUMMARY,
+    REPORT_AP_1099_PREP,
+    REPORT_CHECK_REGISTER,
+    REPORT_BANK_BALANCES,
+    REPORT_ACCOUNT_ACTIVITY_SUMMARY,
+    REPORT_CLOSING_DATE_EXCEPTIONS,
+    DUPLICATES_SCAN,
 ];
 
 /// Looks up a covered operation.

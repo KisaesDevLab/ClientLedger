@@ -1,0 +1,15 @@
+{
+  "data": [],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-01-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "taxYear": 2026,
+  "title": "1099 Vendor Preparation",
+  "totalPaidExact": "0.0000",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

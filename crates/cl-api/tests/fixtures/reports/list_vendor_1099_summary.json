@@ -1,0 +1,61 @@
+{
+  "boxCatalog": [
+    {
+      "box": "NEC-1",
+      "boxNumber": "1",
+      "form": "1099-NEC",
+      "label": "Nonemployee compensation",
+      "thresholdExact": "600.0000"
+    },
+    {
+      "box": "MISC-1",
+      "boxNumber": "1",
+      "form": "1099-MISC",
+      "label": "Rents",
+      "thresholdExact": "600.0000"
+    },
+    {
+      "box": "MISC-2",
+      "boxNumber": "2",
+      "form": "1099-MISC",
+      "label": "Royalties",
+      "thresholdExact": "10.0000"
+    },
+    {
+      "box": "MISC-3",
+      "boxNumber": "3",
+      "form": "1099-MISC",
+      "label": "Other income",
+      "thresholdExact": "600.0000"
+    },
+    {
+      "box": "MISC-6",
+      "boxNumber": "6",
+      "form": "1099-MISC",
+      "label": "Medical & health care payments",
+      "thresholdExact": "600.0000"
+    },
+    {
+      "box": "MISC-10",
+      "boxNumber": "10",
+      "form": "1099-MISC",
+      "label": "Gross proceeds paid to attorney",
+      "thresholdExact": "600.0000"
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-01-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "rows": [],
+  "title": "1099 Summary",
+  "totalsExact": {
+    "total": "0.0000"
+  },
+  "year": "2026",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

@@ -12,7 +12,7 @@ use super::{amount, col, name_or, row};
 use crate::resources::customer_statements::AgingBuckets;
 use crate::resources::reports::ArAgingSummary;
 
-const CAPTIONS: [&str; 6] = [
+pub(crate) const CAPTIONS: [&str; 6] = [
     "@reports.col.current",
     "@reports.col.days_1_30",
     "@reports.col.days_31_60",

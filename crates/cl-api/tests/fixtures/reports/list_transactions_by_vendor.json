@@ -1,0 +1,45 @@
+{
+  "data": [
+    {
+      "id": "1390f8f3-4d1e-4741-aeaf-653fb7bf4a30",
+      "memo": "Payment to vendor",
+      "total": "1000.0000",
+      "totalExact": "1000.0000",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "txn_type": "bill_payment"
+    },
+    {
+      "id": "91aa618b-200b-4af5-9f0d-6386a072a777",
+      "memo": null,
+      "total": "115.6000",
+      "totalExact": "115.6000",
+      "txn_date": "2026-11-22",
+      "txn_number": "VC-00001",
+      "txn_type": "vendor_credit"
+    },
+    {
+      "id": "94c20905-3333-4c81-8861-ddcaf75c4646",
+      "memo": null,
+      "total": "2300.6000",
+      "totalExact": "2300.6000",
+      "txn_date": "2026-11-18",
+      "txn_number": "BILL-00002",
+      "txn_type": "bill"
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "title": "Transactions by Vendor",
+  "totalsExact": {
+    "total": "3416.2000"
+  },
+  "vendorId": "8621c571-0526-4c18-90c7-a09f220a5599",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

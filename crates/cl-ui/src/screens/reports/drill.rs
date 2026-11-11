@@ -95,7 +95,11 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             }
             Target::Report(Box::new(open))
         }
-        Drill::Aging { contact, as_of, .. } => {
+        Drill::Aging {
+            contact,
+            as_of,
+            bucket,
+        } => {
             let key = if source == Source::ApAgingSummary {
                 "ap_aging_detail"
             } else {
@@ -107,6 +111,7 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             let mut o = ReportOptions::for_spec(spec);
             o.dates = DateChoice::AsOf(*as_of);
             o.filters.contact_ids = contact.iter().copied().collect();
+            o.filters.bucket = Some(*bucket).filter(|b| *b != cl_core::report::AgingBucket::Total);
             Target::Report(Box::new(ReportOpen {
                 key: key.to_string(),
                 options: Some(o),

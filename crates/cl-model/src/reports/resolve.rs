@@ -158,6 +158,9 @@ pub fn resolve(
         txn_types: f.txn_types.clone(),
         adjusting: f.adjusting,
         untagged_in_group: f.untagged_in_group,
+        bucket: f
+            .bucket
+            .filter(|b| *b != cl_core::report::AgingBucket::Total),
     };
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;

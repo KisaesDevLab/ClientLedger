@@ -1,0 +1,49 @@
+{
+  "data": [
+    {
+      "contact_id": null,
+      "total": "73431.7800",
+      "totalExact": "73431.7800",
+      "vendor_name": "Uncategorized"
+    },
+    {
+      "contact_id": "92645f6e-9d3a-4c71-bd80-1390043f57d5",
+      "total": "2318.6000",
+      "totalExact": "2318.6000",
+      "vendor_name": "Ozark Feed & Seed"
+    },
+    {
+      "contact_id": "8621c571-0526-4c18-90c7-a09f220a5599",
+      "total": "2185.0000",
+      "totalExact": "2185.0000",
+      "vendor_name": "Table Rock Nursery"
+    },
+    {
+      "contact_id": "ae21e30c-1a1a-4f8f-9fea-0c12e080e02d",
+      "total": "118.0300",
+      "totalExact": "118.0300",
+      "vendor_name": "Persimmon Hill Plants"
+    },
+    {
+      "contact_id": "6790ec3c-ae4d-46a4-97a1-14d09eeb9d9b",
+      "total": "75.6500",
+      "totalExact": "75.6500",
+      "vendor_name": "Stone County Permits"
+    }
+  ],
+  "endDate": "2026-12-31",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "startDate": "2026-10-01",
+  "title": "Expenses by Vendor",
+  "totalsExact": {
+    "total": "82629.2800"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

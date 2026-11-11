@@ -1,0 +1,82 @@
+{
+  "data": [
+    {
+      "account_number": "1010",
+      "account_type": "asset",
+      "id": "9e5baaca-2e87-4621-94e3-a92e787f14c5",
+      "name": "Operating Checking",
+      "net": 13684.2,
+      "netExact": "13684.2000",
+      "total_credit": 117968.89,
+      "total_creditExact": "117968.8900",
+      "total_debit": 131653.09,
+      "total_debitExact": "131653.0900"
+    },
+    {
+      "account_number": "10150",
+      "account_type": "asset",
+      "id": "f47f61c4-fa3d-4262-a839-832ae3139b6d",
+      "name": "Payments Clearing",
+      "net": 2092.5,
+      "netExact": "2092.5000",
+      "total_credit": 0,
+      "total_creditExact": "0.0000",
+      "total_debit": 2092.5,
+      "total_debitExact": "2092.5000"
+    },
+    {
+      "account_number": "1020",
+      "account_type": "asset",
+      "id": "390b0807-7138-4a8c-9145-0982aa527dd0",
+      "name": "Savings",
+      "net": 3450,
+      "netExact": "3450.0000",
+      "total_credit": 0,
+      "total_creditExact": "0.0000",
+      "total_debit": 3450,
+      "total_debitExact": "3450.0000"
+    },
+    {
+      "account_number": "6700",
+      "account_type": "expense",
+      "id": "1100ae38-2068-4bfd-93d3-2e65bb9f155c",
+      "name": "Vehicle Expenses",
+      "net": 2801.63,
+      "netExact": "2801.6300",
+      "total_credit": 0,
+      "total_creditExact": "0.0000",
+      "total_debit": 2801.63,
+      "total_debitExact": "2801.6300"
+    },
+    {
+      "account_number": "8000",
+      "account_type": "other_expense",
+      "id": "7ef64ad4-35f8-46b6-80c0-72e11e5fc4f8",
+      "name": "Interest Expense",
+      "net": 212,
+      "netExact": "212.0000",
+      "total_credit": 0,
+      "total_creditExact": "0.0000",
+      "total_debit": 212,
+      "total_debitExact": "212.0000"
+    }
+  ],
+  "endDate": "2026-12-31",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "startDate": "2026-10-01",
+  "title": "Account Activity Summary",
+  "totalCredits": 709688.2,
+  "totalCreditsExact": "709688.2000",
+  "totalDebits": 709688.2,
+  "totalDebitsExact": "709688.2000",
+  "totalNet": 0,
+  "totalNetExact": "0.0000",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

@@ -1,0 +1,49 @@
+{
+  "data": [
+    {
+      "amount_paid": "1590.2500",
+      "amount_paidExact": "1590.2500",
+      "balance_due": "0.0000",
+      "balance_dueExact": "0.0000",
+      "customer_name": "Table Rock Dental",
+      "due_date": "2026-12-12",
+      "id": "2b6a8672-ad45-42ce-99c5-a8c6ec921199",
+      "invoice_status": "paid",
+      "status": "posted",
+      "total": "1590.2500",
+      "totalExact": "1590.2500",
+      "txn_date": "2026-11-12",
+      "txn_number": "INV-1002"
+    },
+    {
+      "amount_paid": "1000.0000",
+      "amount_paidExact": "1000.0000",
+      "balance_due": "2033.3300",
+      "balance_dueExact": "2033.3300",
+      "customer_name": "Riverbend HOA",
+      "due_date": "2026-12-05",
+      "id": "88aec58b-ff29-405f-8a55-83f32052d46a",
+      "invoice_status": "partial",
+      "status": "posted",
+      "total": "3033.3300",
+      "totalExact": "3033.3300",
+      "txn_date": "2026-11-05",
+      "txn_number": "INV-1001"
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "title": "Invoice List",
+  "totalsExact": {
+    "amount_paid": "2590.2500",
+    "balance_due": "2033.3300",
+    "total": "4623.5800"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

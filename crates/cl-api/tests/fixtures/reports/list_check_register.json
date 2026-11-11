@@ -1,0 +1,84 @@
+{
+  "accountId": "9e5baaca-2e87-4621-94e3-a92e787f14c5",
+  "data": [
+    {
+      "check_number": null,
+      "credit": "0.0000",
+      "creditExact": "0.0000",
+      "debit": "1590.2500",
+      "debitExact": "1590.2500",
+      "id": "a7e905ef-e577-4ae1-a307-358c30e56efa",
+      "memo": null,
+      "payee": "Table Rock Dental",
+      "txn_date": "2026-12-15",
+      "txn_number": null,
+      "txn_type": "customer_payment"
+    },
+    {
+      "check_number": null,
+      "credit": "1000.0000",
+      "creditExact": "1000.0000",
+      "debit": "0.0000",
+      "debitExact": "0.0000",
+      "id": "1390f8f3-4d1e-4741-aeaf-653fb7bf4a30",
+      "memo": "Payment to vendor",
+      "payee": "Table Rock Nursery",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "txn_type": "bill_payment"
+    },
+    {
+      "check_number": null,
+      "credit": "1180.4000",
+      "creditExact": "1180.4000",
+      "debit": "0.0000",
+      "debitExact": "0.0000",
+      "id": "be84aec0-c50f-46aa-895e-920deaf4ed9d",
+      "memo": "Payment to vendor",
+      "payee": "Ozark Mulch Supply",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "txn_type": "bill_payment"
+    },
+    {
+      "check_number": null,
+      "credit": "0.0000",
+      "creditExact": "0.0000",
+      "debit": "4688.7400",
+      "debitExact": "4688.7400",
+      "id": "26873132-880b-4af6-b1e0-ff5e7e477bda",
+      "memo": "payment PMT-INV-1260 · Whitetail Hunting Lodge · Payment received",
+      "payee": null,
+      "txn_date": "2026-10-01",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    },
+    {
+      "check_number": null,
+      "credit": "1442.4200",
+      "creditExact": "1442.4200",
+      "debit": "0.0000",
+      "debitExact": "0.0000",
+      "id": "7de7c78f-907b-4229-aad7-df9eb16aa0bc",
+      "memo": "bill payment 4400 · Stone County Permits · Bill payment",
+      "payee": null,
+      "txn_date": "2026-10-01",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "title": "Check Register",
+  "totalsExact": {
+    "credit": "117968.8900",
+    "debit": "131653.0900"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

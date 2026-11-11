@@ -1,0 +1,310 @@
+{
+  "asOfDate": "2026-11-30",
+  "data": [
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Bear Creek Hauling",
+      "id": "0630a14f-29ae-43f4-b251-dfddeb807fe1",
+      "items": [
+        {
+          "amountExact": "1450.0000",
+          "date": "2026-01-13",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "1450.0000",
+          "runningBalanceExact": "1450.0000",
+          "txnId": "cafab819-26d3-4626-aae8-364ca3548ade",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-1450.0000",
+          "date": "2026-02-05",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-1450.0000",
+          "runningBalanceExact": "0.0000",
+          "txnId": "bd84ad05-1983-4680-a4de-4b7118ff37be",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "130.7200",
+          "date": "2026-03-02",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "130.7200",
+          "runningBalanceExact": "130.7200",
+          "txnId": "0e25e527-5e27-4bb8-82ff-e72fba1d57b2",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-130.7200",
+          "date": "2026-03-18",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-130.7200",
+          "runningBalanceExact": "0.0000",
+          "txnId": "75c38e97-d2d5-423c-b9eb-5042e0092ccd",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "529.3400",
+          "date": "2026-05-10",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "529.3400",
+          "runningBalanceExact": "529.3400",
+          "txnId": "c714cbc6-22d9-4143-bd74-64f72e7738d6",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-529.3400",
+          "date": "2026-06-04",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-529.3400",
+          "runningBalanceExact": "0.0000",
+          "txnId": "efd8b775-2835-4f6b-b46b-63029290a4ad",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Blue Eye Lumber",
+      "id": "c54f8811-e90d-4efa-bd8b-0ed0328fd5be",
+      "items": [
+        {
+          "amountExact": "2575.9100",
+          "date": "2026-05-31",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2575.9100",
+          "runningBalanceExact": "2575.9100",
+          "txnId": "d8f99024-3d8c-4957-b175-c63a8f267d5e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-2575.9100",
+          "date": "2026-06-23",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-2575.9100",
+          "runningBalanceExact": "0.0000",
+          "txnId": "b09882a7-05d2-4c95-b5ed-a6d81bf579a0",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "2290.8300",
+      "balanceExact": "2290.8300",
+      "display_name": "Bluff View Trucking",
+      "id": "ef9ca51b-8ccc-4f7c-b7dd-87ef0b4fcbd7",
+      "items": [
+        {
+          "amountExact": "196.3300",
+          "date": "2026-03-29",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "196.3300",
+          "runningBalanceExact": "196.3300",
+          "txnId": "bb66cf4c-a89b-4005-9f77-fbd8426b3b88",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-196.3300",
+          "date": "2026-04-26",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-196.3300",
+          "runningBalanceExact": "0.0000",
+          "txnId": "3da68b16-4037-4115-a883-5857ff47981f",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "1870.6900",
+          "date": "2026-08-11",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "1870.6900",
+          "runningBalanceExact": "1870.6900",
+          "txnId": "04b224fa-d64e-4315-b597-887e9dea8459",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "284.7400",
+          "date": "2026-10-18",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "284.7400",
+          "runningBalanceExact": "284.7400",
+          "txnId": "a860ba64-9e2e-422d-a90b-cdba054dcc2e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "2006.0900",
+          "date": "2026-11-03",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2006.0900",
+          "runningBalanceExact": "2290.8300",
+          "txnId": "6b5af65c-e95b-468b-857b-310ea45588ac",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Thunder Ridge Subcontracting",
+      "id": "ca71710f-64f0-4653-9e3f-1ed1306c4f48",
+      "items": [
+        {
+          "amountExact": "106.2700",
+          "date": "2026-01-13",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "106.2700",
+          "runningBalanceExact": "106.2700",
+          "txnId": "9228f054-d124-40bc-88aa-12877f7a4f63",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-106.2700",
+          "date": "2026-01-26",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-106.2700",
+          "runningBalanceExact": "0.0000",
+          "txnId": "7669a87a-2c9a-4dde-9f85-76a1e3482b72",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "2295.4000",
+          "date": "2026-02-28",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2295.4000",
+          "runningBalanceExact": "2295.4000",
+          "txnId": "d7b17c1d-5243-444d-ad07-c955fe87c09e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "1813.3700",
+          "date": "2026-09-23",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "1813.3700",
+          "runningBalanceExact": "1813.3700",
+          "txnId": "1d6e44b1-3364-404f-a5f4-c0c76ed7b1a7",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-1813.3700",
+          "date": "2026-10-13",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-1813.3700",
+          "runningBalanceExact": "0.0000",
+          "txnId": "0b26fe35-a85d-46fd-a759-e9be76196d70",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "96.4400",
+      "balanceExact": "96.4400",
+      "display_name": "White River Stone Yard",
+      "id": "441603de-7eae-4582-b712-a335f4b1eaed",
+      "items": [
+        {
+          "amountExact": "536.1800",
+          "date": "2026-01-01",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "536.1800",
+          "runningBalanceExact": "536.1800",
+          "txnId": "0bfbc6ad-4a46-464b-a7ba-1b8a5b5d6b99",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-536.1800",
+          "date": "2026-01-29",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-536.1800",
+          "runningBalanceExact": "0.0000",
+          "txnId": "2e626927-86fe-4dc4-a55d-f9ffcb7019b2",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "532.3400",
+          "date": "2026-02-26",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "532.3400",
+          "runningBalanceExact": "532.3400",
+          "txnId": "97570c86-2196-40bf-bc43-e9a84a49cffe",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-1450.0000",
+          "date": "2026-10-08",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-1450.0000",
+          "runningBalanceExact": "0.0000",
+          "txnId": "0f619159-cd00-4b7a-8aec-b9145b9d330e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "96.4400",
+          "date": "2026-10-23",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "96.4400",
+          "runningBalanceExact": "96.4400",
+          "txnId": "c0f67aa4-20ea-44a6-b63b-1d30f4d69f9d",
+          "txnType": "journal_entry"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Vendor Balance Detail",
+  "totalsExact": {
+    "balance": "19171.9300"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

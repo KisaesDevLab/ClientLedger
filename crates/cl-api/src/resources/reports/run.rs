@@ -64,10 +64,75 @@ pub const fn supported(source: Source) -> bool {
             | Source::Journal
             | Source::RevenueByCategory
             | Source::ExpenseByCategory
+    ) || list_family(source)
+}
+
+/// The lists of WP3 (who owes what, sales and spending, banking, 1099,
+/// controls).
+const fn list_family(source: Source) -> bool {
+    matches!(
+        source,
+        Source::ArAgingDetail
+            | Source::ApAgingSummary
+            | Source::ApAgingDetail
+            | Source::InvoiceList
+            | Source::UnpaidBills
+            | Source::CustomerBalanceSummary
+            | Source::CustomerBalanceDetail
+            | Source::VendorBalanceSummary
+            | Source::VendorBalanceDetail
+            | Source::VendorStatement
+            | Source::SalesByCustomer
+            | Source::SalesByItem
+            | Source::ExpenseByVendor
+            | Source::TransactionListByVendor
+            | Source::BillPaymentHistory
+            | Source::Vendor1099Summary
+            | Source::Ap1099Prep
+            | Source::DepositDetail
+            | Source::CheckRegister
+            | Source::BankBalances
+            | Source::AccountActivitySummary
+            | Source::AuditLog
+            | Source::ClosingDateExceptions
+            | Source::Duplicates
     )
 }
 
-/// U-14: exact amounts.
+/// U-121: A/P aging, Unpaid Bills as of a date.
+pub const AP_AGING: &str = "ap-aging-exact-v1";
+/// U-121: open balances and Open Invoices as of a date.
+pub const OPEN_ASOF: &str = "open-balances-asof-v1";
+/// U-204 (PR-E): Closing Date Exceptions.
+pub const CLOSING: &str = "closing-exceptions-v1";
+/// U-204 (PR-E): the audit-log company, user and record filters.
+pub const AUDIT: &str = "audit-filters-v1";
+
+/// The capability a list request still needs, or `None`.
+fn list_capability(req: &ReportRequest, has: &impl Fn(&str) -> bool) -> Option<&'static str> {
+    let need: &[&'static str] = match req.source {
+        // Exact before P28 (the legacy route, read through `openExact`).
+        Source::ArAgingDetail | Source::Duplicates => &[],
+        Source::ApAgingSummary | Source::ApAgingDetail | Source::UnpaidBills => &[EXACT, AP_AGING],
+        Source::InvoiceList if matches!(req.dates, ReportDates::AsOf(_)) => &[EXACT, OPEN_ASOF],
+        Source::CustomerBalanceSummary
+        | Source::CustomerBalanceDetail
+        | Source::VendorBalanceSummary
+        | Source::VendorBalanceDetail => &[EXACT, OPEN_ASOF],
+        Source::SalesByCustomer | Source::SalesByItem
+            if req
+                .filters
+                .adjusting
+                .is_some_and(|a| a != Adjusting::Include) =>
+        {
+            &[EXACT, DRILL]
+        }
+        Source::AuditLog => &[AUDIT],
+        Source::ClosingDateExceptions => &[CLOSING],
+        _ => &[EXACT],
+    };
+    need.iter().copied().find(|c| !has(c))
+}
 pub const EXACT: &str = crate::wire::Capabilities::REPORTS_EXACT;
 /// U-201: period, YTD, prior and compare columns, tag split.
 pub const COLUMNS: &str = "reports-columns-v1";
@@ -94,6 +159,9 @@ const fn exact_family(source: Source) -> bool {
 /// would ignore: PR-A answers `period_ranges` with the plain report.
 #[must_use]
 pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Option<&'static str> {
+    if list_family(req.source) {
+        return list_capability(req, &has);
+    }
     if !exact_family(req.source) {
         return None;
     }
@@ -358,6 +426,17 @@ impl Reports<'_> {
             let v: serde_json::Value = crate::session::decode(&reply, "report")?;
             return adapt_exact(req, &v);
         }
+        if let Some(op) = super::list_run::operation(req.source) {
+            let caps = self.0.client().capabilities();
+            if list_family(req.source) && missing_capability(req, |c| caps.has(c)).is_some() {
+                return Err(ApiError::Local(LocalValidation::Unsupported));
+            }
+            let mut call = Call::at(Method::Get, op.route());
+            call.query = super::list_run::query(req)?;
+            let reply = self.0.send(op, call, None).await?;
+            let v: serde_json::Value = crate::session::decode(&reply, "report")?;
+            return super::list_run::adapt(req, &v);
+        }
         match req.source {
             Source::ArAgingSummary => {
                 let d = as_of(&req.dates)?;
@@ -416,12 +495,22 @@ mod tests {
     }
 
     #[test]
-    fn this_build_reads_the_exact_statements_but_not_the_lists_yet() {
+    fn this_build_reads_the_statements_and_the_lists() {
         assert!(supported(Source::ArAgingSummary));
         assert!(supported(Source::ProfitLoss));
         assert!(supported(Source::GeneralLedger));
-        assert!(!supported(Source::InvoiceList), "WP3");
+        assert!(supported(Source::InvoiceList), "WP3");
+        assert!(supported(Source::ClosingDateExceptions), "WP3 (PR-E gated)");
         assert!(!supported(Source::BudgetVsActual), "WP4");
+        // PR-D and PR-E gate their lists.
+        let r = ReportRequest::new(Source::UnpaidBills, ReportDates::AsOf(d(2026, 11, 30)));
+        assert_eq!(missing_capability(&r, |c| c == EXACT), Some(AP_AGING));
+        let c = ReportRequest::new(Source::ClosingDateExceptions, ReportDates::Range(oct()));
+        assert_eq!(missing_capability(&c, |c| c == EXACT), Some(CLOSING));
+        let o = ReportRequest::new(Source::InvoiceList, ReportDates::AsOf(d(2026, 11, 30)));
+        assert_eq!(missing_capability(&o, |c| c == EXACT), Some(OPEN_ASOF));
+        let l = ReportRequest::new(Source::InvoiceList, ReportDates::Range(oct()));
+        assert_eq!(missing_capability(&l, |c| c == EXACT), None);
     }
 
     fn d(y: i32, m: u32, dd: u32) -> CalendarDate {

@@ -116,6 +116,9 @@ pub struct Filters {
     /// U-202 `tag_scope=untagged_in_group`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub untagged_in_group: Option<cl_core::ids::TagGroupId>,
+    /// One aging bucket (an aging cell's drill into the detail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<cl_core::report::AgingBucket>,
 }
 
 /// How a tag row's caption is written (formatting only).

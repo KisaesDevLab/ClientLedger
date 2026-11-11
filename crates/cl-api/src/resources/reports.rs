@@ -12,6 +12,7 @@
 
 pub mod adapters;
 pub mod definitions;
+pub mod list_run;
 pub mod run;
 
 use cl_core::ids::{AccountId, ContactId, TransactionId};
