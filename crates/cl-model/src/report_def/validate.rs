@@ -396,10 +396,19 @@ impl<'a> Units<'a> {
         self.unit(id, &mut seen)
     }
 
+    /// `seen` holds the ids on the current path only (released on the way
+    /// out), so a node reached twice (a group of a and b, then a formula
+    /// a + b) is not mistaken for a cycle.
     fn unit(&self, id: &str, seen: &mut HashSet<String>) -> NodeUnit {
         if !seen.insert(id.to_string()) {
             return NodeUnit::Mixed; // a cycle can't be a unit
         }
+        let u = self.unit_inner(id, seen);
+        seen.remove(id);
+        u
+    }
+
+    fn unit_inner(&self, id: &str, seen: &mut HashSet<String>) -> NodeUnit {
         let Some(node) = self.by_id.get(id) else {
             return NodeUnit::Nothing;
         };

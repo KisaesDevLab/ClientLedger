@@ -257,3 +257,43 @@ fn a_detail_tab_checks_the_echoed_subtotal_for_equality() {
     assert!(d.books_changed);
     assert_eq!(d.subtotal, Some(a), "the footer stays the first echo");
 }
+
+#[test]
+fn after_expand_all_collapsing_one_line_keeps_the_others_open() {
+    let mut s = shown();
+    s.expand_all();
+    let all = [
+        p(&["n:a", "account:1"]),
+        p(&["n:a", "account:2"]),
+        p(&["n:b", "account:3"]),
+    ];
+    s.run_ok(2, "s1", &all);
+    s.collapse(&all[1], 0);
+    assert!(!s.is_open_all());
+    assert!(s.is_open(&all[0]) && s.is_open(&all[2]));
+    assert!(!s.is_open(&all[1]));
+    let fx = s.tick(DEBOUNCE_MS);
+    let (_, open, _) = run_of(&fx).expect("run");
+    assert_eq!(open, Some(vec![all[0].clone(), all[2].clone()]));
+    s.run_ok(3, "s1", &[]);
+    assert!(s.is_open(&all[0]) && !s.is_open(&all[1]));
+}
+
+#[test]
+fn hidden_rows_follow_closed_prefixes_only() {
+    let s = shown();
+    let rows = vec![
+        (p(&["n:a"]), false),
+        (p(&["n:a", "account:1"]), true),
+        (p(&["n:a", "account:1", "t:1"]), false),
+        (p(&["n:a", "account:2"]), true),
+        (p(&["n:a", "account:2", "item:x"]), true),
+        (p(&["n:a", "account:2", "item:x", "t:2"]), false),
+        (p(&["n:a", "account:22"]), false),
+    ];
+    // account:1 is open (the first run's default), account:2 is not.
+    assert_eq!(
+        s.hidden(&rows),
+        [false, false, false, false, true, true, false]
+    );
+}

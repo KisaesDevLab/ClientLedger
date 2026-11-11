@@ -258,13 +258,15 @@ impl BuilderRunState {
         if self.open_all {
             return vec![false; rows.len()];
         }
-        let closed: Vec<&RowPath> = rows
+        // One set lookup per proper prefix: linear in the rows (up to
+        // 100,000 group rows, most of them closed at first).
+        let closed: std::collections::HashSet<&[String]> = rows
             .iter()
             .filter(|(p, expandable)| *expandable && !self.is_open(p))
-            .map(|(p, _)| p)
+            .map(|(p, _)| p.0.as_slice())
             .collect();
         rows.iter()
-            .map(|(p, _)| closed.iter().any(|c| p.is_under(c)))
+            .map(|(p, _)| (1..p.0.len()).any(|k| closed.contains(&p.0[..k])))
             .collect()
     }
 
@@ -366,16 +368,21 @@ impl BuilderRunState {
         }
     }
 
-    /// The run of `generation` answered with `stamp` and the open paths the
-    /// engine expanded on a first run (`defaultExpanded`).
+    /// The run of `generation` answered with `stamp` and the paths the
+    /// engine expanded (`defaultExpanded` on a first run, everything on an
+    /// expand-all run).
     pub fn run_ok(&mut self, generation: u64, stamp: &str, opened: &[RowPath]) -> Vec<Effect> {
         if generation != self.generation {
             return Vec::new(); // a superseded answer
         }
         self.in_flight = None;
-        if self.first_run {
+        // A first run (`open: null`) and an expand-all run learn the open
+        // set from the engine's `expanded` rows, so collapsing one line
+        // afterwards keeps the others open.
+        if self.first_run || self.open_all {
             self.open = opened.iter().cloned().collect();
             self.first_run = false;
+            self.asked = None;
         } else if let Some(asked) = self.asked.take() {
             self.open = asked;
         }

@@ -179,6 +179,10 @@ pub struct BuilderRun {
     pub stamp: String,
     /// Sections the role can't see (their node ids).
     pub denied: Vec<String>,
+    /// The paths the engine expanded (`expanded: true`): the sections'
+    /// defaults on a first run, everything on an `openAll` run. The window
+    /// seeds its open set from them.
+    pub expanded: Vec<RowPath>,
 }
 
 /// One page of detail.
@@ -309,11 +313,15 @@ impl ReportBuilder<'_> {
         read_run(&v)
     }
 
-    /// One page of a path's detail.
+    /// One page of a path's detail, read against the run's `columns`.
     ///
     /// # Errors
     /// As [`ReportBuilder::run`].
-    pub async fn detail(&self, req: &DetailRequest) -> Result<DetailPage, ApiError> {
+    pub async fn detail(
+        &self,
+        req: &DetailRequest,
+        columns: &[ColumnHead],
+    ) -> Result<DetailPage, ApiError> {
         self.require(Capabilities::REPORT_BUILDER)?;
         let body =
             serde_json::to_vec(req).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
@@ -322,7 +330,7 @@ impl ReportBuilder<'_> {
         let v: Value = serde_json::from_slice(&reply.body).map_err(|_| ApiError::Decode {
             what: "report detail",
         })?;
-        read_detail(&v, &req.node_id)
+        read_detail(&v, &req.node_id, columns)
     }
 
     /// The engine's field catalogue, as sent (`cl-model` reads it).
@@ -559,12 +567,33 @@ fn drill(
         },
         Some("profit_loss") => {
             let range = range_of(d)?.ok_or(shape("drill range"))?;
+            // The section's adjusting lens and tags, when sent, so the
+            // drill ties on a tagged or adjusting Balance Sheet.
+            let adjusting = match d.get("adjusting").and_then(Value::as_str) {
+                None => None,
+                Some("include") => Some(Adjusting::Include),
+                Some("exclude") => Some(Adjusting::Exclude),
+                Some("only") => Some(Adjusting::Only),
+                Some(_) => return Err(shape("drill adjusting")),
+            };
+            let tag_ids = match d.get("tagIds") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .map(|t| {
+                        t.as_str()
+                            .and_then(|s| cl_core::ids::TagId::parse(s).ok())
+                            .ok_or(shape("drill tag"))
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(_) => return Err(shape("drill tag")),
+            };
             Drill::ProfitLoss {
                 from: range.from,
                 to: range.to,
                 basis: meta_basis,
-                adjusting: None,
-                tag_ids: Vec::new(),
+                adjusting,
+                tag_ids,
             }
         }
         _ => return Err(shape("drill kind")),
@@ -679,13 +708,20 @@ fn meta(v: &Value) -> Result<(ReportMeta, Vec<String>), ApiError> {
 pub fn read_run(v: &Value) -> Result<BuilderRun, ApiError> {
     let cols = columns(v)?;
     let (meta, denied) = meta(v)?;
-    let rows = v
+    let raw = v
         .get("rows")
         .and_then(Value::as_array)
-        .ok_or(shape("rows"))?
+        .ok_or(shape("rows"))?;
+    let rows = raw
         .iter()
         .map(|r| row(r, &cols, meta.basis))
         .collect::<Result<Vec<_>, _>>()?;
+    let expanded = raw
+        .iter()
+        .zip(&rows)
+        .filter(|(r, _)| r.get("expanded") == Some(&Value::Bool(true)))
+        .map(|(_, x)| x.path.clone())
+        .collect();
     let text = |k: &'static str| {
         v.get(k)
             .and_then(Value::as_str)
@@ -701,16 +737,16 @@ pub fn read_run(v: &Value) -> Result<BuilderRun, ApiError> {
             meta,
         },
         denied,
+        expanded,
     })
 }
 
-/// Reads a `/run/detail` answer for `node_id` (its rows carry the run's
-/// columns in `columns`).
+/// Reads a `/run/detail` answer (`{rows, cursor, subtotal}`, plan §4) for
+/// `node_id`; its cells line up with the run's `cols`.
 ///
 /// # Errors
 /// As [`read_run`].
-pub fn read_detail(v: &Value, node_id: &str) -> Result<DetailPage, ApiError> {
-    let cols = columns(v)?;
+pub fn read_detail(v: &Value, node_id: &str, cols: &[ColumnHead]) -> Result<DetailPage, ApiError> {
     let rows = v
         .get("rows")
         .and_then(Value::as_array)
@@ -721,7 +757,7 @@ pub fn read_detail(v: &Value, node_id: &str) -> Result<DetailPage, ApiError> {
     let rows = rows
         .iter()
         .map(|r| {
-            let mut row = row(r, &cols, None)?;
+            let mut row = row(r, cols, None)?;
             // A detail page's `more`-less rows belong to the asked node.
             if let Some(Drill::BuilderPage { node_id: n, .. }) = &mut row.drill
                 && n.is_empty()

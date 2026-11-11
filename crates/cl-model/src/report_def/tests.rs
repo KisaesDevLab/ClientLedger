@@ -410,3 +410,22 @@ fn caps_on_filters_group_bys_terms_compare_and_text() {
         ("columns.headers.total".into(), Code::Limit)
     );
 }
+
+#[test]
+fn a_node_reached_twice_keeps_its_unit() {
+    // A group holding a, b and the formula a + b; then a formula and
+    // percentOf on the group. Each of a and b is reached twice.
+    let mut v = pnl();
+    v["nodes"] = json!([
+        {"type": "group", "id": "g", "caption": "G", "children": [
+            money_section("a"),
+            money_section("b"),
+            {"type": "formula", "id": "ab", "caption": "a+b",
+             "terms": [{"nodeId": "a", "sign": 1}, {"nodeId": "b", "sign": 1}]}
+        ]},
+        {"type": "formula", "id": "twice", "caption": "x",
+         "terms": [{"nodeId": "g", "sign": 1}, {"nodeId": "ab", "sign": -1}]}
+    ]);
+    v["columns"]["percentOf"] = json!("g");
+    parse_value(&v).expect("valid");
+}

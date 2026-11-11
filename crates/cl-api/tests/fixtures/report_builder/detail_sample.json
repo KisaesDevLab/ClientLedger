@@ -1,9 +1,5 @@
 {
   "_note": "Hand-written from A07 plan section 4 until PR-C's samples replace it. Synthetic.",
-  "columns": [
-    { "key": "date", "caption": "Date", "kind": "date" },
-    { "key": "amount", "caption": "Amount", "kind": "amount" }
-  ],
   "rows": [
     { "kind": "opening", "nodeId": "bank", "level": 2, "path": ["n:bank", "account:x", "opening"],
       "caption": "Opening balance", "cells": [null, "100.0000"], "expandable": false, "expanded": false },

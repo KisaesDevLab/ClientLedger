@@ -13,6 +13,15 @@ fn sample(name: &str) -> Value {
     serde_json::from_str(text).expect("fixture")
 }
 
+/// The columns of the run the detail sample pages.
+fn detail_columns() -> Vec<ColumnHead> {
+    columns(&json!({"columns": [
+        {"key": "date", "caption": "Date", "kind": "date"},
+        {"key": "amount", "caption": "Amount", "kind": "amount"}
+    ]}))
+    .expect("columns")
+}
+
 fn d(s: &str) -> Decimal {
     Decimal::from_str_exact(s).expect("decimal")
 }
@@ -23,6 +32,13 @@ fn a_run_keeps_the_exact_strings_and_maps_every_kind() {
     assert_eq!(run.fingerprint, "fp-1");
     assert_eq!(run.stamp, "41");
     assert_eq!(run.denied, ["bills"]);
+    assert_eq!(
+        run.expanded,
+        [
+            RowPath::of(["n:income"]),
+            RowPath::of(["n:income", "account:7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60"])
+        ]
+    );
     let t = &run.table;
     assert_eq!(t.columns.len(), 6);
     let kinds: Vec<RowKind> = t.rows.iter().map(|r| r.kind).collect();
@@ -103,20 +119,34 @@ fn drills_are_builder_detail_pages_forms_and_profit_and_loss() {
         })
     );
     assert!(matches!(t.rows[8].drill, Some(Drill::ProfitLoss { .. })));
+    // The section's lens and tags travel with the earnings drill.
+    let mut v = sample("run");
+    v["rows"][8]["drill"]["adjusting"] = json!("exclude");
+    v["rows"][8]["drill"]["tagIds"] = json!(["33333333-3333-4333-8333-333333333333"]);
+    let t = read_run(&v).expect("run").table;
+    assert!(matches!(
+        &t.rows[8].drill,
+        Some(Drill::ProfitLoss { adjusting: Some(Adjusting::Exclude), tag_ids, .. }) if tag_ids.len() == 1
+    ));
     assert_eq!(t.rows[7].drill, None, "formulas don't drill");
     assert_eq!(t.rows[6].drill, None, "denied rows don't drill");
 }
 
 #[test]
 fn a_detail_page_echoes_the_subtotal() {
-    let p = read_detail(&sample("detail"), "bank").expect("page");
+    let p = read_detail(&sample("detail"), "bank", &detail_columns()).expect("page");
     assert_eq!(p.rows.len(), 2);
     assert_eq!(p.rows[0].kind, RowKind::Earnings, "the opening row");
     assert_eq!(p.cursor.as_deref(), Some("eyJrIjoiMiJ9"));
     assert_eq!(p.subtotal[1], Cell::Amount(d("125.1000")));
     let mut last = sample("detail");
     last["cursor"] = Value::Null;
-    assert_eq!(read_detail(&last, "bank").expect("page").cursor, None);
+    assert_eq!(
+        read_detail(&last, "bank", &detail_columns())
+            .expect("page")
+            .cursor,
+        None
+    );
 }
 
 #[test]
@@ -145,13 +175,13 @@ fn anything_off_contract_is_a_shape_error() {
     let mut v = sample("detail");
     v["subtotal"] = json!(["125.10"]);
     assert!(matches!(
-        read_detail(&v, "bank"),
+        read_detail(&v, "bank", &detail_columns()),
         Err(ApiError::ReportShape { .. })
     ));
     let mut v = sample("detail");
     v["rows"] = json!(vec![v["rows"][1].clone(); PAGE_ROWS + 1]);
     assert!(matches!(
-        read_detail(&v, "bank"),
+        read_detail(&v, "bank", &detail_columns()),
         Err(ApiError::ReportShape { .. })
     ));
 }
