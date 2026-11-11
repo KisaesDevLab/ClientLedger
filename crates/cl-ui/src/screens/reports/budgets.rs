@@ -962,6 +962,75 @@ mod tests {
         assert!(p.pending.contains(&a));
     }
 
+    fn lines_of(id: &str, account: AccountId, first: Decimal) -> BudgetLines {
+        let mut periods = [Decimal::ZERO; PERIODS];
+        periods[0] = first;
+        BudgetLines {
+            budget: Budget {
+                id: id.to_string(),
+                name: id.to_string(),
+                fiscal_year: 2026,
+                fiscal_year_start: None,
+                tag_id: None,
+                version: 1,
+            },
+            lines: vec![cl_api::resources::reports::budgets::BudgetLine {
+                account_id: account,
+                account_name: "Sales".into(),
+                account_number: Some("4000".into()),
+                account_type: "revenue".into(),
+                periods,
+                total: first,
+            }],
+            totals: cl_api::resources::reports::budgets::BudgetTotals::default(),
+        }
+    }
+
+    /// B1: budget A's late answer never shows under budget B.
+    #[test]
+    fn an_answer_for_another_budget_is_dropped() {
+        let a = AccountId::parse(A).expect("id");
+        let mut p = BudgetPanel {
+            selected: Some("b".into()),
+            ..BudgetPanel::default()
+        };
+        saved(&mut p, vec![(a, row("10"))], Ok(lines_of("a", a, Decimal::TEN)));
+        assert!(p.lines.is_none(), "A's lines are not B's");
+        assert!(p.changed.is_none());
+        saved(&mut p, vec![], Ok(lines_of("b", a, Decimal::ONE)));
+        assert_eq!(p.lines.as_ref().map(|l| l.budget.id.as_str()), Some("b"));
+        assert_eq!(p.changed.as_deref(), Some("b"), "Budget vs. Actual on B runs again");
+    }
+
+    /// B1: switching budgets with typed rows asks; nothing is dropped yet.
+    #[test]
+    fn typed_rows_make_the_panel_unsaved() {
+        let a = AccountId::parse(A).expect("id");
+        let mut p = BudgetPanel::default();
+        assert!(!p.has_unsaved());
+        p.drafts.insert(a, row("5"));
+        assert!(p.has_unsaved(), "the window is dirty and select() asks first");
+    }
+
+    /// S4: a cell the owner didn't touch sends the engine's exact value;
+    /// display rounds half away from zero.
+    #[test]
+    fn untouched_cells_keep_the_engine_value() {
+        let mut engine = [Decimal::ZERO; PERIODS];
+        engine[0] = Decimal::new(100_125, 3);
+        engine[1] = Decimal::new(5_005, 3);
+        assert_eq!(cell_text(engine[0]), "100.13", "half away from zero");
+        let mut cells: [String; PERIODS] = engine.map(cell_text);
+        cells[2] = "7".into();
+        let out = row_to_send(&cells, engine).expect("row");
+        assert_eq!(out[0].to_wire(), "100.1250", "kept exactly");
+        assert_eq!(out[1].to_wire(), "5.0050");
+        assert_eq!(out[2].to_wire(), "7.0000", "typed");
+        cells[0] = "100.12".into();
+        let out = row_to_send(&cells, engine).expect("row");
+        assert_eq!(out[0].to_wire(), "100.1200", "the owner's change wins");
+    }
+
     #[test]
     fn a_july_fiscal_year_is_named_by_its_end_year() {
         let f = cl_core::fiscal::FiscalYearSpec::Calendar { start_month: 7 };
