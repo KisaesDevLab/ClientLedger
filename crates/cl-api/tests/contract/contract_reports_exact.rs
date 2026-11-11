@@ -618,6 +618,35 @@ pub fn columns_drill_and_tag_split(h: &Harness) {
                     continue;
                 };
                 let Some(cd) = d.for_cell(c) else { continue };
+                // PR6-QA-2: a column's net income opens the P&L of its
+                // own fiscal year to its date, whose net income it is.
+                if let Drill::ProfitLoss {
+                    from,
+                    to,
+                    basis,
+                    adjusting,
+                    ..
+                } = &cd
+                {
+                    let mut r =
+                        ReportRequest::new(Source::ProfitLoss, ReportDates::Range(DateRange {
+                            from: *from,
+                            to: *to,
+                        }));
+                    r.basis = *basis;
+                    r.filters.adjusting = *adjusting;
+                    let pl = run(h, s, &r);
+                    let net = pl.rows.last().expect("net income");
+                    assert_eq!(
+                        net.cells.first(),
+                        Some(&Cell::Amount(cell)),
+                        "{} ({}): net income drill",
+                        row.caption,
+                        c.key
+                    );
+                    n += 1;
+                    continue;
+                }
                 let credit = row.path.0.first().is_some_and(|p| {
                     p.starts_with("income")
                         || p.starts_with("other_income")
