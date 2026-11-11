@@ -235,6 +235,7 @@ fn sorting_keeps_totals_in_place() {
             caption: "Total".into(),
             kind: ColumnKind::Amount,
             range: None,
+            drill: None,
         }],
         rows: vec![
             row(RowKind::Header, "h", 0),

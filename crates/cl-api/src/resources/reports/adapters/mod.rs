@@ -25,6 +25,7 @@ pub(crate) fn col(key: &str, caption: &str, kind: ColumnKind) -> ColumnHead {
         caption: caption.to_string(),
         kind,
         range: None,
+        drill: None,
     }
 }
 

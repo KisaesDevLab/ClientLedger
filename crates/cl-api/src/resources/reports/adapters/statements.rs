@@ -312,6 +312,7 @@ fn amount_col(key: &str, caption: &str, range: DateRange) -> ColumnHead {
         caption: caption.to_string(),
         kind: ColumnKind::Amount,
         range: Some(range),
+        drill: None,
     }
 }
 

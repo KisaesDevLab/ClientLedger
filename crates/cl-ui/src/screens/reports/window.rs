@@ -523,7 +523,7 @@ impl ReportWindow {
                                     .drill
                                     .as_ref()
                                     .filter(|_| matches!(cell, Cell::Amount(_)) && !text.is_empty())
-                                    .map(|d| d.at(col))
+                                    .and_then(|d| d.for_cell(col))
                                     .filter(|d| {
                                         super::drill::live(&self.link, self.spec.source, d)
                                     });

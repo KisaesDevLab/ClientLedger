@@ -56,6 +56,7 @@ fn columns(range: DateRange) -> Vec<ColumnHead> {
         caption: caption.to_string(),
         kind: ColumnKind::Amount,
         range: Some(range),
+        drill: None,
     };
     vec![
         col("date", "@reports.col.date", ColumnKind::Date),

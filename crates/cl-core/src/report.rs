@@ -448,6 +448,23 @@ pub struct ColumnHead {
     /// The dates behind an amount column (drill-down uses them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub range: Option<DateRange>,
+    /// What a column of a split adds to a cell's drill (U-201: a client or
+    /// tag column), or that its cells have none ($ and % change).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill: Option<ColumnDrill>,
+}
+
+/// A column's part of a cell's drill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColumnDrill {
+    /// The lines of one client.
+    Contact(ContactId),
+    /// The lines of one tag, or without a tag of a group.
+    Tag(TagScope),
+    /// The column's cells have no lines behind them (a change, "All
+    /// others", lines without a client).
+    None,
 }
 
 /// What a row is (U-119 run-row kinds plus the tag split's).
@@ -635,6 +652,27 @@ pub enum Drill {
 }
 
 impl Drill {
+    /// The drill of the cell in `column`, or `None` when the column's cells
+    /// have no lines behind them: [`Drill::at`] plus the column's client or
+    /// tag.
+    #[must_use]
+    pub fn for_cell(&self, column: &ColumnHead) -> Option<Drill> {
+        let mut d = self.at(column);
+        match (column.drill, &mut d) {
+            (Some(ColumnDrill::None), _) => return None,
+            (Some(ColumnDrill::Contact(c)), Drill::Lines { contact, .. }) => *contact = Some(c),
+            (Some(ColumnDrill::Tag(t)), Drill::Lines { tag, .. }) => {
+                // A row already scoped to a tag can't take a second one.
+                if *tag != TagScope::Any {
+                    return None;
+                }
+                *tag = t;
+            }
+            _ => {}
+        }
+        Some(d)
+    }
+
     /// The drill for a cell in `column`: a column with its own dates
     /// narrows a `Lines` drill to them (a balance keeps `from: None`).
     #[must_use]
@@ -905,12 +943,14 @@ mod tests {
                         from: day(2026, 10, 1),
                         to: day(2026, 10, 31),
                     }),
+                    drill: None,
                 },
                 ColumnHead {
                     key: "pct_total".into(),
                     caption: "% of income".into(),
                     kind: ColumnKind::Percent,
                     range: None,
+                    drill: None,
                 },
             ],
             rows: vec![

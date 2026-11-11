@@ -304,6 +304,7 @@ mod tests {
             caption: format!("@reports.col.{key}"),
             kind,
             range: None,
+            drill: None,
         };
         let r = |kind, level, caption: &str, cells| ReportRow {
             kind,

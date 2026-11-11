@@ -56,6 +56,7 @@ pub fn by_category(
             caption: "@reports.col.total".into(),
             kind: ColumnKind::Amount,
             range: Some(range),
+            drill: None,
         }],
         rows,
         meta: ReportMeta {
