@@ -180,6 +180,22 @@ impl Session {
 }
 
 impl ReportDefinitions<'_> {
+    /// A builder body needs `report-defs-builder-v1` (Q-220: an older
+    /// engine would refuse the kind with a bare 400).
+    fn require_kind(self, kind: &str) -> Result<(), ApiError> {
+        self.require()?;
+        if kind == "builder"
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(Capabilities::REPORT_DEFS_BUILDER)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        Ok(())
+    }
+
     fn require(self) -> Result<(), ApiError> {
         if self
             .0
@@ -225,7 +241,7 @@ impl ReportDefinitions<'_> {
     /// `PayloadTooLarge` over 64 KB (nothing sent); [`definition_refusal`]
     /// for the engine's refusals; any [`ApiError`].
     pub async fn create(&self, w: &DefinitionWrite) -> Result<DefinitionRow, ApiError> {
-        self.require()?;
+        self.require_kind(&w.kind)?;
         let mut call = Call::at(Method::Post, REPORT_DEFS_CREATE.route());
         call = call.json_body(body(w, max_bytes(&w.kind))?);
         let reply = self.0.send(&REPORT_DEFS_CREATE, call, None).await?;
@@ -242,7 +258,7 @@ impl ReportDefinitions<'_> {
         version: u64,
         w: &DefinitionWrite,
     ) -> Result<DefinitionRow, ApiError> {
-        self.require()?;
+        self.require_kind(&w.kind)?;
         let mut v =
             serde_json::to_value(w).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
         if let Value::Object(m) = &mut v {

@@ -218,10 +218,13 @@ pub enum BuilderRefusal {
     Timeout,
     /// Over 100,000 group rows (422 `REPORT_TOO_LARGE`).
     TooLarge,
-    /// The definition breaks a rule (400 `DEFINITION_INVALID {path, code}`).
+    /// The definition breaks a rule (400 `DEFINITION_INVALID {path, code}`;
+    /// the run adds `NOT_ON_CASH` and `NOT_IN_COMPANY`).
     Invalid {
-        /// Where (when sent).
+        /// Where, from `definition` (when sent).
         path: Option<String>,
+        /// The rule's code (when sent).
+        code: Option<String>,
     },
     /// The memorized definition changed (409 `STALE_VERSION`).
     StaleDefinition,
@@ -258,11 +261,8 @@ pub fn builder_refusal(e: &ApiError) -> Option<BuilderRefusal> {
         ApiError::Validation(v) => match v.code().map(crate::ErrorCode::as_str) {
             Some("REPORT_TOO_LARGE") => BuilderRefusal::TooLarge,
             Some("DEFINITION_INVALID") => BuilderRefusal::Invalid {
-                path: v
-                    .issues()
-                    .first()
-                    .and_then(|i| i.path.as_ref())
-                    .map(|p| p.as_str().to_string()),
+                path: v.details().text("path").map(str::to_string),
+                code: v.details().text("code").map(str::to_string),
             },
             _ => return None,
         },

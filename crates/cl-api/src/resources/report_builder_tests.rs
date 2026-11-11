@@ -292,8 +292,10 @@ fn refusals_are_recognised() {
         Some(BuilderRefusal::TooLarge)
     );
     assert!(matches!(
-        r(400, err("DEFINITION_INVALID", json!([{"path": ["nodes", 0, "terms"], "message": "FORMULA_FORWARD_REF"}]))),
-        Some(BuilderRefusal::Invalid { path: Some(p) }) if p == "nodes.0.terms"
+        // The PR-A body: `details: {path, code}`.
+        r(400, err("DEFINITION_INVALID", json!({"path": "definition.nodes.0.polarity", "code": "MIXED_POLARITY"}))),
+        Some(BuilderRefusal::Invalid { path: Some(p), code: Some(c) })
+            if p == "definition.nodes.0.polarity" && c == "MIXED_POLARITY"
     ));
     assert_eq!(
         r(409, err("STALE_VERSION", json!({"current": 4}))),

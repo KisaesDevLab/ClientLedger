@@ -25,6 +25,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cl_core::report::{Cell, RowPath};
 
+/// Open paths an explicit run request may carry (the engine's cap).
+pub const MAX_OPEN_PATHS: usize = 1_000;
+
 /// The debounce between an expand or collapse and the run it causes.
 pub const DEBOUNCE_MS: u64 = 150;
 
@@ -105,6 +108,8 @@ pub enum Banner {
     TryAgain,
     /// It took too long ("Try fewer months or add a filter").
     TookTooLong,
+    /// More than 1,000 parts were open; some were closed (Q-A07r).
+    TooManyOpen,
 }
 
 /// What the window must do.
@@ -281,8 +286,19 @@ impl BuilderRunState {
         self.due_at = None;
         let open = if self.first_run {
             None
+        } else if self.open_all {
+            // Everything is open: the paths aren't sent (they may be more
+            // than an explicit list can carry).
+            Some(Vec::new())
         } else {
-            let set = self.pending.clone().unwrap_or_else(|| self.open.clone());
+            let mut set = self.pending.clone().unwrap_or_else(|| self.open.clone());
+            if set.len() > MAX_OPEN_PATHS {
+                // An explicit list carries at most 1,000 paths (Q-A07r): the
+                // first ones in path order stay open, the rest close.
+                set = set.into_iter().take(MAX_OPEN_PATHS).collect();
+                self.pending = Some(set.clone());
+                self.banner = Some(Banner::TooManyOpen);
+            }
             let list = set.iter().cloned().collect();
             self.asked = Some(set);
             Some(list)

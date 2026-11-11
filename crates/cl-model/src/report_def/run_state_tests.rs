@@ -297,3 +297,34 @@ fn hidden_rows_follow_closed_prefixes_only() {
         [false, false, false, false, true, true, false]
     );
 }
+
+#[test]
+fn more_than_a_thousand_open_paths_never_lock_the_report() {
+    let mut s = shown();
+    s.expand_all();
+    let many: Vec<RowPath> = (0..1_001)
+        .map(|i| p(&["n:a", &format!("account:{i:05}")]))
+        .collect();
+    s.run_ok(2, "s1", &many);
+    // Refresh with everything open sends no list at all.
+    let fx = s.refresh();
+    let (_, open, all) = run_of(&fx).expect("run");
+    assert!(all);
+    assert_eq!(open, Some(Vec::new()));
+    s.run_ok(3, "s1", &many);
+    // Collapsing one leaves 1,000: exactly the cap, sent as is.
+    s.collapse(&many[0], 0);
+    let fx = s.tick(DEBOUNCE_MS);
+    let (_, open, all) = run_of(&fx).expect("run");
+    assert!(!all);
+    assert_eq!(open.expect("list").len(), MAX_OPEN_PATHS);
+    assert_eq!(s.banner(), None);
+    s.run_ok(4, "s1", &[]);
+    // Opening two more goes over: the list is cut to the cap and says so.
+    s.expand(&many[0], 0);
+    s.expand(&p(&["n:b", "account:x"]), 0);
+    let fx = s.tick(DEBOUNCE_MS);
+    let (_, open, _) = run_of(&fx).expect("run");
+    assert_eq!(open.expect("list").len(), MAX_OPEN_PATHS);
+    assert_eq!(s.banner(), Some(Banner::TooManyOpen));
+}

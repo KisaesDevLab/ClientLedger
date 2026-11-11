@@ -124,7 +124,7 @@ fn unknown_fields_and_missing_required_ones_are_refused_at_every_depth() {
     cases.push(source);
     for v in cases {
         assert!(
-            matches!(parse_value(&v), Err(DefinitionError::Malformed(_))),
+            matches!(parse_value(&v), Err(DefinitionError::Malformed { .. })),
             "{v}"
         );
     }
@@ -146,7 +146,10 @@ fn duplicate_keys_are_refused_at_every_depth() {
     for text in [top, nested, headers] {
         assert_ne!(text, PNL, "the fixture changed");
         match parse(&text) {
-            Err(DefinitionError::Malformed(m)) => assert!(m.contains("duplicate"), "{m}"),
+            Err(DefinitionError::Malformed {
+                kind: MalformedKind::DuplicateKey,
+                ..
+            }) => {}
             other => panic!("{other:?}"),
         }
     }

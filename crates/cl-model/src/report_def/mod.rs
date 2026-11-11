@@ -24,6 +24,38 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// engine's 413 decides.
 pub const MAX_BYTES: usize = 256 * 1024;
 
+/// What made a definition unreadable, without its content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MalformedKind {
+    /// A key appears twice in one object.
+    DuplicateKey,
+    /// A key schema v1 doesn't have, or a value outside an enumeration.
+    UnknownKey,
+    /// A required key is missing.
+    MissingKey,
+    /// Not JSON, or a value of the wrong type.
+    Other,
+}
+
+fn malformed(e: &serde_json::Error) -> DefinitionError {
+    // The message is only classified, never kept: it may quote owner text.
+    let m = e.to_string();
+    let kind = if m.starts_with("duplicate field") {
+        MalformedKind::DuplicateKey
+    } else if m.starts_with("unknown field") || m.starts_with("unknown variant") {
+        MalformedKind::UnknownKey
+    } else if m.starts_with("missing field") {
+        MalformedKind::MissingKey
+    } else {
+        MalformedKind::Other
+    };
+    DefinitionError::Malformed {
+        kind,
+        line: e.line(),
+        column: e.column(),
+    }
+}
+
 /// Why a builder definition can't be used.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DefinitionError {
@@ -36,10 +68,17 @@ pub enum DefinitionError {
     /// Over 256 KB.
     #[error("this report definition is too large")]
     TooLarge,
-    /// Not schema v1 JSON: an unknown or repeated field, a wrong type (the
-    /// engine's `SCHEMA`).
-    #[error("this report definition can't be read: {0}")]
-    Malformed(String),
+    /// Not schema v1 JSON (the engine's `SCHEMA`). Holds no text from the
+    /// file: a caption is owner data.
+    #[error("this report definition can't be read ({kind:?} at line {line}, column {column})")]
+    Malformed {
+        /// What kind of problem.
+        kind: MalformedKind,
+        /// Line in the text (1-based; 0 when not from text).
+        line: usize,
+        /// Column.
+        column: usize,
+    },
     /// A rule is broken (`DEFINITION_INVALID {path, code}`).
     #[error("this report definition breaks a rule ({}) at {path}", code.as_str())]
     Invalid {
@@ -79,8 +118,7 @@ fn too_deep(v: &serde_json::Value, path: &str, depth: usize) -> Option<String> {
 /// # Errors
 /// Any [`DefinitionError`].
 pub fn parse(text: &str) -> Result<BuilderDefinition, DefinitionError> {
-    let value: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| malformed(&e))?;
     let version = value
         .get("schemaVersion")
         .and_then(serde_json::Value::as_u64);
@@ -90,8 +128,7 @@ pub fn parse(text: &str) -> Result<BuilderDefinition, DefinitionError> {
     if value.get("kind").and_then(serde_json::Value::as_str) != Some("builder") {
         return Err(DefinitionError::NotBuilder);
     }
-    let compact =
-        serde_json::to_string(&value).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
+    let compact = serde_json::to_string(&value).map_err(|e| malformed(&e))?;
     if compact.len() > MAX_BYTES {
         return Err(DefinitionError::TooLarge);
     }
@@ -101,8 +138,7 @@ pub fn parse(text: &str) -> Result<BuilderDefinition, DefinitionError> {
             code: Code::TooDeep,
         });
     }
-    let def: BuilderDefinition =
-        serde_json::from_str(text).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
+    let def: BuilderDefinition = serde_json::from_str(text).map_err(|e| malformed(&e))?;
     if def.schema_version != SCHEMA_VERSION {
         return Err(DefinitionError::Invalid {
             path: "definition.schemaVersion".into(),
@@ -138,7 +174,7 @@ pub fn check(def: &BuilderDefinition) -> Result<(), DefinitionError> {
 /// [`DefinitionError::Malformed`] if it can't be written (never, for
 /// these plain types).
 pub fn to_text(def: &BuilderDefinition) -> Result<String, DefinitionError> {
-    serde_json::to_string(def).map_err(|e| DefinitionError::Malformed(e.to_string()))
+    serde_json::to_string(def).map_err(|e| malformed(&e))
 }
 
 #[cfg(test)]

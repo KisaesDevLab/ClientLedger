@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use cl_model::report_def::{Code, DefinitionError, parse};
+use cl_model::report_def::{Code, DefinitionError, MalformedKind, parse};
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -57,7 +57,13 @@ fn engine_cases_read_the_same_way() {
         }
         if desktop_refuses {
             assert!(
-                matches!(got, Err(DefinitionError::Malformed(ref m)) if m.contains("duplicate")),
+                matches!(
+                    got,
+                    Err(DefinitionError::Malformed {
+                        kind: MalformedKind::DuplicateKey,
+                        ..
+                    })
+                ),
                 "{file}: {got:?}"
             );
             continue;
@@ -71,7 +77,7 @@ fn engine_cases_read_the_same_way() {
             "SCHEMA" => assert!(
                 matches!(
                     got,
-                    Err(DefinitionError::Malformed(_)
+                    Err(DefinitionError::Malformed { .. }
                         | DefinitionError::Invalid {
                             code: Code::Schema,
                             ..
