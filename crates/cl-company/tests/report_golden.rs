@@ -838,6 +838,27 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
                 .map(|(file, key, options)| Golden { file, key, options }),
         );
     }
+    if let Some(budget) = &posted.budget_id {
+        let year = |o: &mut ReportOptions| {
+            o.dates = DateChoice::Fixed {
+                from: d(2026, 1, 1),
+                to: d(2026, 12, 31),
+            };
+        };
+        for basis in [Basis::Accrual, Basis::Cash] {
+            let mut o = ReportOptions::for_spec(find("budget_vs_actual").expect("bva"));
+            year(&mut o);
+            o.budget_id = Some(budget.clone());
+            o.basis = Some(basis);
+            let (_, t) = run(&s, "budget_vs_actual", &o).await;
+            budget_actuals_tie_to_the_pl(&s, &t, basis).await;
+            all.push(Golden {
+                file: format!("budget_vs_actual__2026_{}", basis.as_str()),
+                key: "budget_vs_actual",
+                options: o,
+            });
+        }
+    }
     for g in all {
         let (_, t) = run(&s, g.key, &g.options).await;
         // A tag split is written as presented: the owner's label style and
@@ -876,6 +897,39 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         "golden reports: {mismatched:?} (after a reviewed change: cargo xtask golden-reports --bless)"
     );
     let _ = s.logout().await;
+}
+
+/// Budget vs. Actual's actual cells are the P&L by fiscal period's, account
+/// by account and period by period (each table column group is actual,
+/// budget, over, %).
+async fn budget_actuals_tie_to_the_pl(s: &Session, t: &ReportTable, basis: Basis) {
+    let mut p = ReportOptions::for_spec(find("profit_loss_by_fiscal_period").expect("p&l"));
+    p.dates = DateChoice::Fixed {
+        from: d(2026, 1, 1),
+        to: d(2026, 12, 31),
+    };
+    p.basis = Some(basis);
+    let (_, pl) = run(s, "profit_loss_by_fiscal_period", &p).await;
+    let mut tied = 0;
+    for r in t.rows.iter().filter(|r| r.kind == RowKind::Account) {
+        let id = r.path.0.last().cloned().unwrap_or_default();
+        let row = pl
+            .rows
+            .iter()
+            .find(|x| x.kind == RowKind::Account && x.path.0.last() == Some(&id));
+        for i in 0..12 {
+            let want = row.map_or(Decimal::ZERO, |x| dec(&x.cells[i]));
+            assert_eq!(
+                dec(&r.cells[i * 4]),
+                want,
+                "BvA {} period {} ({basis:?}) = the P&L",
+                r.caption,
+                i + 1
+            );
+            tied += 1;
+        }
+    }
+    assert!(tied >= 36, "the budgeted accounts tie");
 }
 
 /// The aging details' lines in a stable order: the engine breaks

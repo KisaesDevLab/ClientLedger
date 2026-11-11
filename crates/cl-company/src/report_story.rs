@@ -143,6 +143,22 @@ pub struct ReportStory {
     pub tag_groups: Vec<StoryTagGroup>,
     /// The postings, in order.
     pub steps: Vec<StoryStep>,
+    /// A budget for Budget vs. Actual (U-203), made after the steps when
+    /// the engine has `budgets-exact-v1`.
+    #[serde(default)]
+    pub budget: Option<StoryBudget>,
+}
+
+/// A budget: per account number, twelve fiscal-period cells.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryBudget {
+    /// Name.
+    pub name: String,
+    /// The fiscal year.
+    pub fiscal_year: i32,
+    /// Account number to its twelve cells.
+    pub lines: std::collections::BTreeMap<String, Vec<Money>>,
 }
 
 impl ReportStory {
@@ -165,6 +181,8 @@ pub struct Posted {
     pub tags: HashMap<String, TagId>,
     /// Tag group name to id.
     pub tag_groups: HashMap<String, cl_core::ids::TagGroupId>,
+    /// The story's budget, when made.
+    pub budget_id: Option<String>,
 }
 
 /// Lookups by the fixture's names.
@@ -498,7 +516,45 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
         };
         posted.transactions.insert(s.id.clone(), id);
     }
+    if let Some(b) = &story.budget
+        && session
+            .client()
+            .capabilities()
+            .has(cl_api::Capabilities::BUDGETS_EXACT)
+    {
+        posted.budget_id = Some(post_budget(session, &names, b).await?);
+    }
     Ok(posted)
+}
+
+async fn post_budget(
+    session: &Session,
+    names: &Names,
+    b: &StoryBudget,
+) -> Result<String, CompanyError> {
+    use cl_api::resources::reports::budgets::{BudgetLineWrite, NewBudget, PERIODS};
+    let budgets = session.budgets();
+    let made = budgets
+        .create(
+            &NewBudget {
+                name: b.name.clone(),
+                fiscal_year: b.fiscal_year,
+            },
+            IdempotencyKey::new(),
+        )
+        .await?;
+    let mut lines = Vec::new();
+    for (number, cells) in &b.lines {
+        let periods: [Money; PERIODS] = cells.clone().try_into().map_err(|_| missing(number))?;
+        lines.push(BudgetLineWrite {
+            account_id: names.account(number)?,
+            periods,
+        });
+    }
+    budgets
+        .save_lines(&made.id, made.version, &lines, IdempotencyKey::new())
+        .await?;
+    Ok(made.id)
 }
 
 #[cfg(test)]
