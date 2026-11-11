@@ -507,6 +507,6 @@ mod tag_tests {
             w.notice.as_deref(),
             Some(crate::i18n::t("reports.memorize.tag_dropped").as_str())
         );
-        assert!(w.options.filters.tag_ids.is_empty());
+        assert_eq!(w.options.filters.tag_ids, Vec::<cl_core::ids::TagId>::new());
     }
 }

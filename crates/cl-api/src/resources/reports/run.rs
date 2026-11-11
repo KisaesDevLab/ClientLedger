@@ -257,6 +257,10 @@ fn join<T: std::fmt::Display>(ids: &[T]) -> String {
 ///
 /// # Errors
 /// `Local(BadRange)` for dates the route doesn't take.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one pass over the request's options, in route order"
+)]
 pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiError> {
     let mut q: Vec<(String, String)> = vec![("exact".into(), "1".into())];
     let mut push = |k: &str, v: String| q.push((k.to_string(), v));
@@ -509,6 +513,7 @@ impl Reports<'_> {
     /// or an engine without its capability; `Local(BadRange)` for dates the
     /// route doesn't take; [`ApiError::ReportShape`] when the answer lacks
     /// its exact fields; any [`ApiError`].
+    #[allow(clippy::too_many_lines, reason = "one dispatch per route family")]
     pub async fn run(&self, req: &ReportRequest) -> Result<ReportTable, ApiError> {
         if req.source == Source::BudgetVsActual {
             let id = req

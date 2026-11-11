@@ -371,6 +371,10 @@ fn year_start(req: &ReportRequest, to: CalendarDate) -> CalendarDate {
 ///
 /// # Errors
 /// [`ApiError::ReportShape`] when an exact field is missing.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the three sections, then the equity rules, in order"
+)]
 pub fn balance_sheet(
     v: &Value,
     req: &ReportRequest,
@@ -552,6 +556,10 @@ fn flags_equity(v: &Value) -> bool {
 
 /// The cash-basis A/R and A/P note from U-213's `meta.cashArApResidue`:
 /// `Some(None)` when the engine says there is none, `None` before U-213.
+#[allow(
+    clippy::option_option,
+    reason = "absent (before U-213) differs from null (no residue)"
+)]
 fn residue_note(v: &Value, req: &ReportRequest, to: CalendarDate) -> Option<Option<Drill>> {
     let r = v.pointer("/meta/cashArApResidue")?;
     if r.is_null() {
@@ -596,27 +604,25 @@ pub fn finish_balances(
     table: &mut ReportTable,
     roles: Option<&AccountRoles>,
 ) {
-    if req.source == Source::BalanceSheet && !super::columns::is_columns(v) {
-        if !flags_equity(v) {
-            let re = roles.map(|r| r.retained_earnings.map(|a| a.to_string()));
-            let mut cleared = false;
-            for r in &mut table.rows {
-                let equity = r.path.0.first().is_some_and(|p| p == "equity");
-                let hit = match &re {
-                    Some(Some(id)) => r.path.0.last() == Some(id),
-                    Some(None) => false,
-                    None => r.kind == RowKind::Account || r.kind == RowKind::AccountTotal,
-                };
-                if equity && hit && r.drill.is_some() {
-                    r.drill = None;
-                    cleared = true;
-                }
+    if req.source == Source::BalanceSheet && !super::columns::is_columns(v) && !flags_equity(v) {
+        let re = roles.map(|r| r.retained_earnings.map(|a| a.to_string()));
+        let mut cleared = false;
+        for r in &mut table.rows {
+            let equity = r.path.0.first().is_some_and(|p| p == "equity");
+            let hit = match &re {
+                Some(Some(id)) => r.path.0.last() == Some(id),
+                Some(None) => false,
+                None => r.kind == RowKind::Account || r.kind == RowKind::AccountTotal,
+            };
+            if equity && hit && r.drill.is_some() {
+                r.drill = None;
+                cleared = true;
             }
-            if cleared {
-                for r in &mut table.rows {
-                    if r.path.0.first().is_some_and(|p| p == "equity~total") {
-                        r.drill = None;
-                    }
+        }
+        if cleared {
+            for r in &mut table.rows {
+                if r.path.0.first().is_some_and(|p| p == "equity~total") {
+                    r.drill = None;
                 }
             }
         }

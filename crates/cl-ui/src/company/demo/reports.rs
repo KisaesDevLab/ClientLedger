@@ -1252,10 +1252,14 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
     };
     let mut table = adapt_exact(req, &v)?;
     // What `Reports::run` adds from the chart's roles (B2, S5).
-    use cl_api::resources::reports::adapters::statements;
-    if statements::wants_roles(req, &v) {
-        let roles = statements::AccountRoles::of(&b.chart);
-        statements::finish_balances(req, &v, &mut table, Some(&roles));
+    if cl_api::resources::reports::adapters::statements::wants_roles(req, &v) {
+        let roles = cl_api::resources::reports::adapters::statements::AccountRoles::of(&b.chart);
+        cl_api::resources::reports::adapters::statements::finish_balances(
+            req,
+            &v,
+            &mut table,
+            Some(&roles),
+        );
     }
     Ok(table)
 }

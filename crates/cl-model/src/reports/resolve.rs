@@ -230,10 +230,10 @@ fn retail_year_starts(req: &ReportRequest, fiscal: FiscalYearSpec) -> Option<Vec
         ReportDates::None => {}
     }
     if let Some(p) = &req.prior_ranges {
-        p.iter().for_each(|r| {
+        for r in p {
             days.push(r.from);
             days.push(r.to);
-        });
+        }
     }
     let mut starts: Vec<CalendarDate> = days
         .into_iter()
@@ -744,13 +744,13 @@ mod tests {
     fn prior_of(
         key: &str,
         f: impl FnOnce(&mut ReportOptions),
-        fiscal: &FiscalYearSpec,
+        fiscal: FiscalYearSpec,
     ) -> ReportRequest {
         let spec = find(key).expect("spec");
         let mut o = ReportOptions::for_spec(spec);
         o.extras.insert(Extra::PriorPeriod);
         f(&mut o);
-        resolve(spec, &o, fiscal, d(2026, 12, 4)).expect("resolve")
+        resolve(spec, &o, &fiscal, d(2026, 12, 4)).expect("resolve")
     }
 
     /// B3/T4: "Prior period" is the previous period on the calendar, not
@@ -761,7 +761,7 @@ mod tests {
         let req = prior_of(
             "profit_loss",
             |o| o.dates = DateChoice::Preset(DatePreset::LastMonth),
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -771,7 +771,7 @@ mod tests {
         let req = prior_of(
             "profit_loss",
             |o| o.dates = DateChoice::Preset(DatePreset::ThisMonth),
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -787,7 +787,7 @@ mod tests {
                     to: d(2026, 12, 31),
                 }
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -801,7 +801,7 @@ mod tests {
                     to: d(2026, 11, 30),
                 }
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -816,7 +816,7 @@ mod tests {
                     to: d(2026, 10, 31),
                 }
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -828,7 +828,7 @@ mod tests {
             |o| {
                 o.extras.insert(Extra::PriorYear);
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(req.prior_ranges, None);
     }
@@ -844,7 +844,7 @@ mod tests {
                     to: d(2026, 3, 31),
                 };
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges,
@@ -864,7 +864,7 @@ mod tests {
         let req = prior_of(
             "profit_loss_by_fiscal_period",
             |o| o.columns = ColumnBy::FiscalPeriod,
-            &f,
+            f,
         );
         let ReportDates::Ranges(cols) = &req.dates else {
             panic!("ranges")
@@ -883,7 +883,7 @@ mod tests {
         let req = prior_of(
             "balance_sheet",
             |o| o.dates = DateChoice::AsOf(d(2026, 11, 15)),
-            &CAL,
+            CAL,
         );
         assert_eq!(req.dates, ReportDates::AsOf(d(2026, 11, 15)));
         assert_eq!(
@@ -897,7 +897,7 @@ mod tests {
         let req = prior_of(
             "balance_sheet",
             |o| o.dates = DateChoice::Preset(DatePreset::LastQuarter),
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges
@@ -913,7 +913,7 @@ mod tests {
                 o.columns = ColumnBy::Month;
                 o.dates = DateChoice::AsOf(d(2026, 3, 15));
             },
-            &CAL,
+            CAL,
         );
         assert_eq!(
             req.prior_ranges
