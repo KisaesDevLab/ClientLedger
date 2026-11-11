@@ -10,7 +10,7 @@ total,0,gross_profit,@reports.pl.gross_profit,-553.2031165782839259
 header,0,expenses,@reports.pl.expenses,
 account,1,expenses/acct:6100,6100 · Fuel,128.36
 account,1,expenses/acct:6150,6150 · Insurance,1445
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,216.9268834217160741
-subtotal,0,expenses~total,@reports.pl.total_expenses,1790.2868834217160741
-total,0,operating_income,@reports.pl.operating_income,-2343.49
-grand,0,net_income,@reports.pl.net_income,-2343.49
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,966.9268834217160741
+subtotal,0,expenses~total,@reports.pl.total_expenses,2540.2868834217160741
+total,0,operating_income,@reports.pl.operating_income,-3093.49
+grand,0,net_income,@reports.pl.net_income,-3093.49

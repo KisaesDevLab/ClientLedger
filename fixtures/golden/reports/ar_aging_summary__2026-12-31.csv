@@ -41,7 +41,7 @@ detail,1,clients/contact:Powersite Dam Tours/38,Powersite Dam Tours,0,0,0,0,0,0
 detail,1,clients/contact:Protem Lakeside HOA/39,Protem Lakeside HOA,0,0,0,0,0,0
 detail,1,clients/contact:Reeds Spring Hardware/40,Reeds Spring Hardware,0,0,0,0,0,0
 detail,1,clients/contact:Ridgedale Chapel/41,Ridgedale Chapel,0,0,0,1331.75,0,1331.75
-detail,1,clients/contact:Riverbend HOA/42,Riverbend HOA,0,2033.33,288157.74,-23580.94,-257634.19,8975.94
+detail,1,clients/contact:Riverbend HOA/42,Riverbend HOA,270,2033.33,288157.74,-23580.94,-257634.19,9245.94
 detail,1,clients/contact:Roark Creek Dentistry/43,Roark Creek Dentistry,0,0,-3117.5,3117.5,0,0
 detail,1,clients/contact:Rockaway Beach Diner/44,Rockaway Beach Diner,0,0,0,4089.59,0,4089.59
 detail,1,clients/contact:Shepherd Hills Clinic/45,Shepherd Hills Clinic,0,0,0,0,0,0
@@ -62,4 +62,4 @@ detail,1,clients/contact:Walnut Shade Farmhouse/59,Walnut Shade Farmhouse,0,0,-1
 detail,1,clients/contact:White River Lumber/60,White River Lumber,0,0,942.11,0,0,942.11
 detail,1,clients/contact:Whitetail Hunting Lodge/61,Whitetail Hunting Lodge,0,0,0,0,0,0
 detail,1,clients/contact:Wildwood Pediatrics/62,Wildwood Pediatrics,0,0,0,-787.46,4790.29,4002.83
-grand,0,total,@reports.row.total,0,2033.33,276612.18,-49195.73,-178654.05,50795.73
+grand,0,total,@reports.row.total,270,2033.33,276612.18,-49195.73,-178654.05,51065.73

@@ -4,14 +4,16 @@ detail,1,rows/1,Ozark Feed & Seed,2318.6
 detail,1,rows/2,Table Rock Nursery,2185
 detail,1,rows/3,Taney County Landfill,1212.9
 detail,1,rows/4,Ozark Mulch Supply,1180.4
-detail,1,rows/5,Elm Street Accountants,493.15
-detail,1,rows/6,Riverbend Fuel,463.83
-detail,1,rows/7,Pine Ridge Storage Units,415.27
-detail,1,rows/8,Blue Eye Lumber,320.43
-detail,1,rows/9,Ozark Mulch Supply,245
-detail,1,rows/10,Oak Grove Uniforms,222.97
-detail,1,rows/11,Mountain Software Co,191.27
-detail,1,rows/12,Table Rock Nursery,179.98
-detail,1,rows/13,Persimmon Hill Plants,118.03
-detail,1,rows/14,Stone County Permits,75.65
-grand,0,total,@reports.row.total,83054.26
+detail,1,rows/5,Thunder Ridge Subcontracting,750
+detail,1,rows/6,Elm Street Accountants,493.15
+detail,1,rows/7,Riverbend Fuel,463.83
+detail,1,rows/8,Pine Ridge Storage Units,415.27
+detail,1,rows/9,Blue Eye Lumber,320.43
+detail,1,rows/10,Ozark Mulch Supply,245
+detail,1,rows/11,Oak Grove Uniforms,222.97
+detail,1,rows/12,Mountain Software Co,191.27
+detail,1,rows/13,Table Rock Nursery,179.98
+detail,1,rows/14,Persimmon Hill Plants,118.03
+detail,1,rows/15,Riverbend HOA,111
+detail,1,rows/16,Stone County Permits,75.65
+grand,0,total,@reports.row.total,83915.26

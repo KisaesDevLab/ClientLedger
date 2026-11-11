@@ -32,9 +32,9 @@ detail,1,vendors/contact:Rockaway Auto Glass/29,Rockaway Auto Glass,0,0,0,0,0,0
 detail,1,vendors/contact:Shepherd Hills Office Supply/30,Shepherd Hills Office Supply,0,0,-390.81,263.68,127.13,0
 detail,1,vendors/contact:Stone County Permits/31,Stone County Permits,0,0,-1442.42,-7.58,1450,0
 detail,1,vendors/contact:Sycamore Fence Co/32,Sycamore Fence Co,0,0,237.01,-811.29,811.29,237.01
-detail,1,vendors/contact:Table Rock Nursery/33,Table Rock Nursery,2300.6,844.92,3915,0,0,7060.52
+detail,1,vendors/contact:Table Rock Nursery/33,Table Rock Nursery,2670.6,844.92,3915,0,0,7430.52
 detail,1,vendors/contact:Table Rock Small Engine/34,Table Rock Small Engine,0,0,0,0,0,0
 detail,1,vendors/contact:Taney County Landfill/35,Taney County Landfill,0,0,975.48,-572.62,572.62,975.48
 detail,1,vendors/contact:Thunder Ridge Subcontracting/36,Thunder Ridge Subcontracting,0,0,-1813.37,1813.37,0,0
 detail,1,vendors/contact:White River Stone Yard/37,White River Stone Yard,0,0,-1353.56,1450,0,96.44
-grand,0,total,@reports.row.total,3481,4695.22,2114.82,-6596.92,15477.81,19171.93
+grand,0,total,@reports.row.total,3851,4695.22,2114.82,-6596.92,15477.81,19541.93

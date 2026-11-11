@@ -1,4 +1,5 @@
 kind,level,path,caption,date,number,due,status,amount,paid,open
-detail,1,rows/0,Table Rock Dental,2026-11-12,INV-1002,2026-12-12,@reports.status.paid,1590.25,1590.25,0
-detail,1,rows/1,Riverbend HOA,2026-11-05,INV-1001,2026-12-05,@reports.status.partial,3033.33,1000,2033.33
-grand,0,total,@reports.row.total,,,,,4623.58,2590.25,2033.33
+detail,1,rows/0,Riverbend HOA,2026-12-04,INV-1003,2027-01-03,@reports.status.draft,270,0,270
+detail,1,rows/1,Table Rock Dental,2026-11-12,INV-1002,2026-12-12,@reports.status.paid,1590.25,1590.25,0
+detail,1,rows/2,Riverbend HOA,2026-11-05,INV-1001,2026-12-05,@reports.status.partial,3033.33,1000,2033.33
+grand,0,total,@reports.row.total,,,,,4893.58,2590.25,2303.33

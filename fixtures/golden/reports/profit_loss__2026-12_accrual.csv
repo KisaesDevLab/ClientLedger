@@ -1,7 +1,15 @@
 kind,level,path,caption,total
+header,0,income,@reports.pl.income,
+account,1,income/acct:4000,4000 · Service Income,270
+subtotal,0,income~total,@reports.pl.total_income,270
+header,0,cogs,@reports.pl.cogs,
+account,1,cogs/acct:5100,5100 · Plants,111
+subtotal,0,cogs~total,@reports.pl.total_cogs,111
+total,0,gross_profit,@reports.pl.gross_profit,159
 header,0,expenses,@reports.pl.expenses,
 account,1,expenses/acct:6100,6100 · Fuel,128.36
 account,1,expenses/acct:6150,6150 · Insurance,1445
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,179.98
-subtotal,0,expenses~total,@reports.pl.total_expenses,1753.34
-grand,0,net_income,@reports.pl.net_income,-1753.34
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,929.98
+subtotal,0,expenses~total,@reports.pl.total_expenses,2503.34
+total,0,operating_income,@reports.pl.operating_income,-2344.34
+grand,0,net_income,@reports.pl.net_income,-2344.34

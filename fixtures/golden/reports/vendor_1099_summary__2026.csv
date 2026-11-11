@@ -1,2 +1,29 @@
 kind,level,path,caption,tin,NEC-1,MISC-1,MISC-2,MISC-3,MISC-6,MISC-10,total
-grand,0,total,@reports.row.total,,,,,,,,0
+detail,1,rows/0,Branson Equipment Rental,,444.2,,,,,,444.2
+detail,1,rows/1,Cedar Hollow Signs,,1007.37,,,,,,1007.37
+detail,1,rows/2,City of Hollister Water,,937.96,,,,,,937.96
+detail,1,rows/3,Copper Kettle Catering,,1214,,,,,,1214
+detail,1,rows/4,Elm Street Accountants,,968.14,,,,,,968.14
+detail,1,rows/5,Empire Electric Cooperative,,1561,,,,,,1561
+detail,1,rows/6,Hollister Fuel Stop,,584.55,,,,,,584.55
+detail,1,rows/7,Kimberling Fertilizer,,1101.58,,,,,,1101.58
+detail,1,rows/8,Lakeside Insurance Agency,,724.83,,,,,,724.83
+detail,1,rows/9,Lampe Seed & Feed,,143.65,,,,,,143.65
+detail,1,rows/10,Monett Tire & Lube,,1473.82,,,,,,1473.82
+detail,1,rows/11,Mountain Software Co,,420.37,,,,,,420.37
+detail,1,rows/12,Oak Grove Uniforms,,222.97,,,,,,222.97
+detail,1,rows/13,Ozark Mulch Supply,,1899.7,,,,,,1899.7
+detail,1,rows/14,Ozark Office Supply,,1089.46,,,,,,1089.46
+detail,1,rows/15,Persimmon Hill Plants,,117.95,,,,,,117.95
+detail,1,rows/16,Pine Ridge Storage Units,,335.27,,,,,,335.27
+detail,1,rows/17,Powersite Trailer Sales,,1988.77,,,,,,1988.77
+detail,1,rows/18,Reeds Spring Welding,,552.93,,,,,,552.93
+detail,1,rows/19,Riverbend Fuel,,1062.06,,,,,,1062.06
+detail,1,rows/20,Rockaway Auto Glass,,348.26,,,,,,348.26
+detail,1,rows/21,Shepherd Hills Office Supply,,771.77,,,,,,771.77
+detail,1,rows/22,Stone County Permits,,722.94,,,,,,722.94
+detail,1,rows/23,Table Rock Nursery,,264.98,,,,,,264.98
+detail,1,rows/24,Table Rock Small Engine,,173.05,,,,,,173.05
+detail,1,rows/25,Taney County Landfill,,1212.9,,,,,,1212.9
+detail,1,rows/26,Thunder Ridge Subcontracting,,750,,,,,,750
+grand,0,total,@reports.row.total,,22094.48,,,,,,22094.48

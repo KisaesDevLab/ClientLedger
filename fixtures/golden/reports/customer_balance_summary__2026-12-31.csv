@@ -7,10 +7,10 @@ detail,1,rows/4,Indian Point Resort,5035.49
 detail,1,rows/5,Mincy Hollow Ranch,3159.59
 detail,1,rows/6,Northfork Veterinary,3946.03
 detail,1,rows/7,Ridgedale Chapel,1331.75
-detail,1,rows/8,Riverbend HOA,8975.94
+detail,1,rows/8,Riverbend HOA,9245.94
 detail,1,rows/9,Rockaway Beach Diner,4089.59
 detail,1,rows/10,Stone Mill Bistro,4759.66
 detail,1,rows/11,Thunder Ridge Stables,2100.19
 detail,1,rows/12,White River Lumber,942.11
 detail,1,rows/13,Wildwood Pediatrics,4002.83
-grand,0,total,@reports.row.total,50795.73
+grand,0,total,@reports.row.total,51065.73

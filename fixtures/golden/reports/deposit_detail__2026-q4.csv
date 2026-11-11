@@ -1,2 +1,3 @@
 kind,level,path,caption,date,number,memo,amount
-grand,0,total,@reports.row.total,,,,0
+detail,1,rows/0,,2026-12-11,,Owner contribution,2500
+grand,0,total,@reports.row.total,,,,2500

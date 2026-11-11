@@ -1,29 +1,29 @@
 kind,level,path,caption,t:tag:North lawn,t:tag:Courtyard,no_tag,total
 header,0,income,@reports.pl.income,,,,
-account,1,income/acct:4000,4000 · Service Income,2250,1250,390975.97,394475.97
-subtotal,0,income~total,@reports.pl.total_income,2250,1250,390975.97,394475.97
+account,1,income/acct:4000,4000 · Service Income,2250,1250,391245.97,394745.97
+subtotal,0,income~total,@reports.pl.total_income,2250,1250,391245.97,394745.97
 header,0,cogs,@reports.pl.cogs,,,,
 account,1,cogs/acct:5000,5000 · Subcontractors,0,0,3099.38,3099.38
-account,1,cogs/acct:5100,5100 · Plants,0,2100,6244.5,8344.5
+account,1,cogs/acct:5100,5100 · Plants,0,2100,6355.5,8455.5
 account,1,cogs/acct:5110,5110 · Mulch & stone,1180.4,0,1275.5,2455.9
 account,1,cogs/acct:5200,5200 · Project Supplies and Materials,0,0,35441.15,35441.15
-subtotal,0,cogs~total,@reports.pl.total_cogs,1180.4,2100,46060.53,49340.93
-total,0,gross_profit,@reports.pl.gross_profit,1069.6,-850,344915.44,345135.04
+subtotal,0,cogs~total,@reports.pl.total_cogs,1180.4,2100,46171.53,49451.93
+total,0,gross_profit,@reports.pl.gross_profit,1069.6,-850,345074.44,345294.04
 header,0,expenses,@reports.pl.expenses,,,,
 account,1,expenses/acct:6000,6000 · Advertising and Marketing,0,0,701.56,701.56
 account,1,expenses/acct:6100,6100 · Fuel,0,0,2659.83,2659.83
 account,1,expenses/acct:6150,6150 · Insurance,1200,245,0,1445
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,0,0,937.75,937.75
 account,1,expenses/acct:6300,6300 · Rent,0,0,4350,4350
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,0,0,5496.12,5496.12
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,0,0,6246.12,6246.12
 account,1,expenses/acct:6400,6400 · Telephone and Internet,0,0,617.98,617.98
 account,1,expenses/acct:6500,6500 · Utilities,0,0,1311.95,1311.95
 account,1,expenses/acct:6550,6550 · Wages,0,0,12091.3,12091.3
 account,1,expenses/acct:6560,6560 · Payroll Taxes,0,0,1088.21,1088.21
 account,1,expenses/acct:6700,6700 · Vehicle Expenses,0,0,2801.63,2801.63
-subtotal,0,expenses~total,@reports.pl.total_expenses,1200,245,32056.33,33501.33
-total,0,operating_income,@reports.pl.operating_income,-130.4,-1095,312859.11,311633.71
+subtotal,0,expenses~total,@reports.pl.total_expenses,1200,245,32806.33,34251.33
+total,0,operating_income,@reports.pl.operating_income,-130.4,-1095,312268.11,311042.71
 header,0,other_expenses,@reports.pl.other_expenses,,,,
 account,1,other_expenses/acct:8000,8000 · Interest Expense,0,0,212,212
 subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,0,0,212,212
-grand,0,net_income,@reports.pl.net_income,-130.4,-1095,312647.11,311421.71
+grand,0,net_income,@reports.pl.net_income,-130.4,-1095,312056.11,310830.71

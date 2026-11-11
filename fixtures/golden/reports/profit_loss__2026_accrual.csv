@@ -1,29 +1,29 @@
 kind,level,path,caption,total
 header,0,income,@reports.pl.income,
-account,1,income/acct:4000,4000 · Service Income,1140832.39
-subtotal,0,income~total,@reports.pl.total_income,1140832.39
+account,1,income/acct:4000,4000 · Service Income,1141102.39
+subtotal,0,income~total,@reports.pl.total_income,1141102.39
 header,0,cogs,@reports.pl.cogs,
 account,1,cogs/acct:5000,5000 · Subcontractors,50850.56
-account,1,cogs/acct:5100,5100 · Plants,10072.96
+account,1,cogs/acct:5100,5100 · Plants,10183.96
 account,1,cogs/acct:5110,5110 · Mulch & stone,3387.85
 account,1,cogs/acct:5200,5200 · Project Supplies and Materials,356388.84
-subtotal,0,cogs~total,@reports.pl.total_cogs,420700.21
-total,0,gross_profit,@reports.pl.gross_profit,720132.18
+subtotal,0,cogs~total,@reports.pl.total_cogs,420811.21
+total,0,gross_profit,@reports.pl.gross_profit,720291.18
 header,0,expenses,@reports.pl.expenses,
 account,1,expenses/acct:6000,6000 · Advertising and Marketing,10936.61
 account,1,expenses/acct:6100,6100 · Fuel,8972.83
 account,1,expenses/acct:6150,6150 · Insurance,17034.13
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,8024.17
 account,1,expenses/acct:6300,6300 · Rent,44950
-account,1,expenses/acct:6350,6350 · Repairs and Maintenance,41222.84
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,41972.84
 account,1,expenses/acct:6400,6400 · Telephone and Internet,4100.37
 account,1,expenses/acct:6500,6500 · Utilities,8338.23
 account,1,expenses/acct:6550,6550 · Wages,123930.56
 account,1,expenses/acct:6560,6560 · Payroll Taxes,11153.65
 account,1,expenses/acct:6700,6700 · Vehicle Expenses,15807.22
-subtotal,0,expenses~total,@reports.pl.total_expenses,294470.61
-total,0,operating_income,@reports.pl.operating_income,425661.57
+subtotal,0,expenses~total,@reports.pl.total_expenses,295220.61
+total,0,operating_income,@reports.pl.operating_income,425070.57
 header,0,other_expenses,@reports.pl.other_expenses,
 account,1,other_expenses/acct:8000,8000 · Interest Expense,2120
 subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,2120
-grand,0,net_income,@reports.pl.net_income,423541.57
+grand,0,net_income,@reports.pl.net_income,422950.57

@@ -2,7 +2,7 @@ kind,level,path,caption,total
 account,1,accounts/acct:5200,5200 · Project Supplies and Materials,35441.15
 account,1,accounts/acct:6550,6550 · Wages,12091.3
 account,1,accounts/acct:5100,5100 · Plants,7207.5531165782839259
-account,1,accounts/acct:6350,6350 · Repairs and Maintenance,5448.0668834217160741
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,6198.0668834217160741
 account,1,accounts/acct:6300,6300 · Rent,4350
 account,1,accounts/acct:5000,5000 · Subcontractors,3099.38
 account,1,accounts/acct:6700,6700 · Vehicle Expenses,2801.63
@@ -15,4 +15,4 @@ account,1,accounts/acct:6250,6250 · Office Supplies and Software,937.75
 account,1,accounts/acct:6000,6000 · Advertising and Marketing,701.56
 account,1,accounts/acct:6400,6400 · Telephone and Internet,617.98
 account,1,accounts/acct:8000,8000 · Interest Expense,212
-grand,0,total,@reports.row.total,81869.26
+grand,0,total,@reports.row.total,82619.26

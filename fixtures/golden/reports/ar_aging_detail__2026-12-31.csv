@@ -473,6 +473,7 @@ detail,1,,Riverbend HOA,2026-11-02,@reports.txn.journal_entry,,,59,@reports.buck
 detail,1,,Riverbend HOA,2026-11-03,@reports.txn.journal_entry,,,58,@reports.bucket.31_60,-2950.74
 detail,1,,Riverbend HOA,2026-11-05,@reports.txn.invoice,INV-1001,2026-12-05,26,@reports.bucket.1_30,2033.33
 detail,1,,Riverbend HOA,2026-11-25,@reports.txn.credit_memo,1001,,36,@reports.bucket.31_60,-150
+detail,1,,Riverbend HOA,2026-12-04,@reports.txn.invoice,INV-1003,2027-01-03,-3,@reports.bucket.current,270
 detail,1,,Roark Creek Dentistry,2026-02-16,@reports.txn.journal_entry,,,318,@reports.bucket.90_up,206.82
 detail,1,,Roark Creek Dentistry,2026-02-16,@reports.txn.journal_entry,,,318,@reports.bucket.90_up,635.39
 detail,1,,Roark Creek Dentistry,2026-03-18,@reports.txn.journal_entry,,,288,@reports.bucket.90_up,-206.82
@@ -687,4 +688,4 @@ detail,1,,Wildwood Pediatrics,2026-10-04,@reports.txn.journal_entry,,,88,@report
 detail,1,,Wildwood Pediatrics,2026-10-06,@reports.txn.journal_entry,,,86,@reports.bucket.61_90,928.88
 detail,1,,Wildwood Pediatrics,2026-10-24,@reports.txn.journal_entry,,,68,@reports.bucket.61_90,3073.95
 detail,1,,Wildwood Pediatrics,2026-10-31,@reports.txn.journal_entry,,,61,@reports.bucket.61_90,-529.21
-grand,0,total,@reports.row.total,,,,,,,50795.73
+grand,0,total,@reports.row.total,,,,,,,51065.73

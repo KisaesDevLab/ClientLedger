@@ -1,5 +1,5 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,84695.42,0
+account,1,accounts/acct:1010,1010 · Operating Checking,86445.42,0
 account,1,accounts/acct:1020,1020 · Savings,15450,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
 account,1,accounts/acct:1510,1510 · Vehicles,62012.34,0
@@ -15,7 +15,7 @@ account,1,accounts/acct:6100,6100 · Fuel,8972.83,0
 account,1,accounts/acct:6150,6150 · Insurance,17034.13,0
 account,1,accounts/acct:6250,6250 · Office Supplies and Software,8024.17,0
 account,1,accounts/acct:6300,6300 · Rent,44950,0
-account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41174.7868834217160741,0
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41924.7868834217160741,0
 account,1,accounts/acct:6400,6400 · Telephone and Internet,4100.37,0
 account,1,accounts/acct:6500,6500 · Utilities,8338.23,0
 account,1,accounts/acct:6550,6550 · Wages,123930.56,0
@@ -26,7 +26,7 @@ account,1,accounts/acct:10150,10150 · Payments Clearing,2092.5,0
 account,1,accounts/acct:10200,10200 · Accounts Receivable,48912.4,0
 account,1,accounts/acct:20100,20100 · Accounts Payable,0,15806.53
 account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
-account,1,accounts/acct:30160,30160 · Owner's Contribution,0,3450
+account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5950
 account,1,accounts/acct:30170,30170 · Owner's Draw,353267.44,0
 account,1,accounts/acct:49900,49900 · Unapplied receipts,0,500
-grand,0,total,@reports.row.total,1330523.58,1330523.58
+grand,0,total,@reports.row.total,1333023.58,1333023.58
