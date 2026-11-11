@@ -663,6 +663,12 @@ pub(crate) const VENDOR_1099_PROFILE_PUT: Operation = write(
     "/api/v1/practice/1099/vendors/{contactId}/profile",
 );
 
+/// Replaces the accounts mapped to one 1099 form box (the 1099 Center).
+pub(crate) const FORM_1099_ACCOUNT_MAPPINGS_PUT: Operation = write(
+    Method::Put,
+    "/api/v1/practice/1099/account-mappings/{formBox}",
+);
+
 // ---- P11 tags ----------------------------------------------------------------
 
 /// Tag groups with their active tags.
@@ -1830,7 +1836,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 413] = [
+pub const OPERATIONS: [Operation; 414] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1921,6 +1927,7 @@ pub const OPERATIONS: [Operation; 413] = [
     REPORT_VENDOR_STATEMENT,
     VENDOR_1099_PROFILE,
     VENDOR_1099_PROFILE_PUT,
+    FORM_1099_ACCOUNT_MAPPINGS_PUT,
     TAG_GROUPS_LIST,
     TAG_GROUPS_CREATE,
     TAG_GROUP_PUT,

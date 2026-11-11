@@ -619,23 +619,13 @@ async fn post_1099(session: &Session, names: &Names, f: &Story1099) -> Result<()
     let accounts = f
         .accounts
         .iter()
-        .map(|n| names.account(n).map(|a| a.to_string()))
+        .map(|n| names.account(n))
         .collect::<Result<Vec<_>, _>>()?;
-    session
-        .raw_mapped(
-            cl_api::Method::Put,
-            &format!("/api/v1/practice/1099/account-mappings/{}", f.form_box),
-            Some(&serde_json::json!({ "accountIds": accounts })),
-        )
+    let form = session.form1099();
+    form.set_account_mappings(&f.form_box, &accounts, IdempotencyKey::new())
         .await?;
     for v in &f.vendors {
-        let id = names.contact(Some(v))?;
-        session
-            .raw_mapped(
-                cl_api::Method::Put,
-                &format!("/api/v1/practice/1099/vendors/{id}/profile"),
-                Some(&serde_json::json!({ "is1099Eligible": true })),
-            )
+        form.set_eligible(names.contact(Some(v))?, true, IdempotencyKey::new())
             .await?;
     }
     Ok(())

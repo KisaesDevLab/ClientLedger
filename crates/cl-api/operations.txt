@@ -145,6 +145,7 @@ GET     /api/v1/reports/ap-aging-summary        idempotent
 GET     /api/v1/reports/vendor-statement        idempotent
 GET     /api/v1/practice/1099/vendors/{contactId}/profile idempotent
 PUT     /api/v1/practice/1099/vendors/{contactId}/profile pre-handler-only
+PUT     /api/v1/practice/1099/account-mappings/{formBox} pre-handler-only
 GET     /api/v1/tags/groups/list                idempotent
 POST    /api/v1/tags/groups                     pre-handler-only
 PUT     /api/v1/tags/groups/{id}                pre-handler-only
