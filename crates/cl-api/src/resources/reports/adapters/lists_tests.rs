@@ -147,7 +147,7 @@ fn every_recorded_list_reads_with_the_engine_s_total() {
             "net",
             "0",
         ),
-        (q4(Source::Ap1099Prep), "ap_1099_prep", "paid", "0"),
+        (q4(Source::Ap1099Prep), "ap_1099_prep", "reportable", "0"),
         (
             q4(Source::Vendor1099Summary),
             "vendor_1099_summary",
