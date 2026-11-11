@@ -41,7 +41,7 @@ steps:
   - click: {role: button, label: Email}
   - wait: {ms: 200}
   - assert_state: {key: screen.email.open, equals: true}
-  - click: {role: text_input, label: To, index: 1}
+  - click: {role: text_input, label: Email to}
   - type: {text: "banker@example.com"}
   - click: {label: CSV}
   - screenshot: email-form

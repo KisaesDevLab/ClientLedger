@@ -184,6 +184,24 @@ pub fn definition(d: &mut DemoState, id: &str) -> Result<DefinitionRow, ApiError
         .ok_or_else(not_found)
 }
 
+/// Deletes memorized report `id` at `version` (QA-12).
+///
+/// # Errors
+/// `NotFound`; `Conflict(Stale)` for another version.
+pub fn delete_definition(d: &mut DemoState, id: &str, version: u64) -> Result<(), ApiError> {
+    let s = store(d);
+    let i = s
+        .definitions
+        .iter()
+        .position(|r| r.id == id)
+        .ok_or_else(not_found)?;
+    if s.definitions[i].version != version {
+        return Err(refusal(409, "STALE_VERSION"));
+    }
+    s.definitions.remove(i);
+    Ok(())
+}
+
 /// Saves a memorized report: new (`target` is `None`) or over `target`'s
 /// version.
 ///

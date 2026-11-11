@@ -170,6 +170,7 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut go = false;
     let mut close = false;
     let mut settings = false;
+    let current = w.exportable();
     egui::Frame::group(ui.style()).show(ui, |ui| {
         let m = &mut w.mailer;
         ui.label(RichText::new(t("reports.email.title")).strong());
@@ -201,7 +202,7 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             form::inline_error(ui, tokens, e);
         }
         ui.horizontal(|ui| {
-            let ready = !addresses(&m.to).is_empty() && m.job.is_none();
+            let ready = !addresses(&m.to).is_empty() && m.job.is_none() && current;
             if ui
                 .add_enabled(ready, egui::Button::new(t("reports.email.send")))
                 .clicked()

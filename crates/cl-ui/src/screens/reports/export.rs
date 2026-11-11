@@ -74,6 +74,10 @@ impl Exporter {
         self.message.clone()
     }
 
+    pub(crate) fn clear_message(&mut self) {
+        self.message = None;
+    }
+
     pub(crate) fn state(&self) -> serde_json::Value {
         serde_json::json!({
             "busy": self.busy(),
@@ -90,6 +94,10 @@ fn tr(key: &str) -> String {
 
 /// The file's bytes for the rows on screen.
 pub(crate) fn bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
+    // Never an old table under new labels (B2).
+    if !w.exportable() {
+        return None;
+    }
     // What the window shows: its rows in order, tag rows in the owner's
     // label style, hidden account totals left out (Q-271, AC5).
     let table = &cl_model::reports::present(w.table.as_ref()?, &w.shown_rows(), &w.options);

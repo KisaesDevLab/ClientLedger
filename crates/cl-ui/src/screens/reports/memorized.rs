@@ -35,6 +35,10 @@ pub(crate) struct Dialog {
     /// The engine refused with 409 `STALE_VERSION`.
     pub(crate) conflict: bool,
     pub(crate) problem: Option<&'static str>,
+    /// Delete was clicked: waiting for the yes (QA-12).
+    pub(crate) confirm_delete: bool,
+    /// The Name field takes the focus once, when the dialog opens.
+    focused: bool,
 }
 
 /// The memorized reports and the dialog.
@@ -44,6 +48,10 @@ pub(crate) struct Memo {
     pub(crate) groups: Vec<DefinitionGroup>,
     load: Option<Job<(Vec<DefinitionRow>, Vec<DefinitionGroup>)>>,
     save: Option<Job<DefinitionRow>>,
+    /// The options the save in flight sends (S7): marked saved on success,
+    /// whatever changed on screen meanwhile.
+    sending: Option<ReportOptions>,
+    remove: Option<Job<()>>,
     pub(crate) dialog: Option<Dialog>,
     /// The memorized report on screen, as read.
     pub(crate) current: Option<DefinitionRow>,
@@ -59,7 +67,7 @@ impl Memo {
     }
 
     pub(crate) fn busy(&self) -> bool {
-        self.load.is_some() || self.save.is_some()
+        self.load.is_some() || self.save.is_some() || self.remove.is_some()
     }
 }
 
@@ -98,12 +106,13 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 open_row(w, &row);
             }
             Ok(row) => {
-                w.memo.saved = Some(w.options.clone());
+                w.memo.saved = w.memo.sending.take().or_else(|| Some(w.options.clone()));
                 w.memo.current = Some(row);
                 w.memo.dialog = None;
                 load(w);
             }
             Err(e) => {
+                w.memo.sending = None;
                 if std::mem::take(&mut w.memo.reloading) && w.memo.dialog.is_none() {
                     w.notice = Some(t("reports.memorize.failed"));
                 }
@@ -127,6 +136,51 @@ pub(super) fn poll(w: &mut ReportWindow) {
     }
 }
 
+/// Polls a delete.
+fn poll_remove(w: &mut ReportWindow) {
+    if let Some(r) = engine::poll(&mut w.memo.remove) {
+        match r {
+            Ok(()) => {
+                w.memo.current = None;
+                w.memo.saved = None;
+                w.memo.dialog = None;
+                w.notice = Some(t("reports.memorize.deleted"));
+                load(w);
+            }
+            Err(e) => {
+                if let Some(d) = w.memo.dialog.as_mut() {
+                    d.confirm_delete = false;
+                    d.problem = Some(match definition_refusal(&e) {
+                        Some(DefinitionRefusal::Stale) => "reports.memorize.conflict",
+                        Some(DefinitionRefusal::NotAuthor) => "reports.memorize.not_author",
+                        _ => "reports.memorize.failed",
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Deletes the memorized report shown.
+fn remove(w: &mut ReportWindow) {
+    let Some((id, version)) = w.memo.current.as_ref().map(|c| (c.id.clone(), c.version)) else {
+        return;
+    };
+    w.memo.remove = Some(engine::write(
+        &w.link,
+        w.group.as_ref(),
+        OrphanLabel {
+            what: "orphan.report_memorize",
+            key: None,
+        },
+        {
+            let id = id.clone();
+            move |d| crate::company::demo::report_store::delete_definition(d, &id, version)
+        },
+        move |s| async move { s.report_definitions().delete(&id, version).await },
+    ));
+}
+
 /// Opens the dialog on the report shown (Ctrl+M).
 pub(super) fn open_dialog(w: &mut ReportWindow) {
     if !available(&w.link) {
@@ -141,6 +195,8 @@ pub(super) fn open_dialog(w: &mut ReportWindow) {
         group,
         conflict: false,
         problem: None,
+        confirm_delete: false,
+        focused: false,
     });
 }
 
@@ -159,6 +215,7 @@ fn save(w: &mut ReportWindow, how: SaveAs) {
         return;
     }
     d.problem = None;
+    w.memo.sending = Some(w.options.clone());
     let def = StandardDefinition::new(w.spec.key, w.options.clone());
     let Ok(body) = serde_json::to_value(&def) else {
         d.problem = Some("reports.memorize.invalid");
@@ -264,9 +321,11 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         Save(SaveAs),
         Reload,
         Close,
+        Delete,
     }
+    poll_remove(w);
     let changes = w.memo.current.is_some();
-    let saving = w.memo.save.is_some();
+    let saving = w.memo.save.is_some() || w.memo.remove.is_some();
     let groups = w.memo.groups.clone();
     let Some(d) = w.memo.dialog.as_mut() else {
         return;
@@ -274,7 +333,19 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut click = None;
     form::card(ui, tokens, |ui| {
         form::heading(ui, tokens, &t("reports.memorize.title"));
-        form::field(ui, &t("reports.memorize.name"), &mut d.name);
+        let name = form::field(ui, &t("reports.memorize.name"), &mut d.name);
+        // QA-12: the cursor starts in Name; Enter there saves.
+        if !d.focused {
+            name.request_focus();
+            d.focused = true;
+        }
+        if name.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !saving {
+            click = Some(Click::Save(if changes && !d.conflict {
+                SaveAs::Changes
+            } else {
+                SaveAs::New
+            }));
+        }
         let shown = d
             .group
             .as_ref()
@@ -320,7 +391,30 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             if ui.button(t("reports.memorize.cancel")).clicked() {
                 click = Some(Click::Close);
             }
+            if changes && !d.confirm_delete {
+                ui.separator();
+                if ui
+                    .add_enabled(!saving, egui::Button::new(t("reports.memorize.delete")))
+                    .clicked()
+                {
+                    d.confirm_delete = true;
+                }
+            }
         });
+        if d.confirm_delete {
+            form::inline_warning(ui, tokens, &t("reports.memorize.delete_question"));
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!saving, egui::Button::new(t("reports.memorize.delete_confirm")))
+                    .clicked()
+                {
+                    click = Some(Click::Delete);
+                }
+                if ui.button(t("reports.memorize.delete_cancel")).clicked() {
+                    d.confirm_delete = false;
+                }
+            });
+        }
     });
     match click {
         Some(Click::Save(how)) => save(w, how),
@@ -341,6 +435,7 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             }
         }
         Some(Click::Close) => w.memo.dialog = None,
+        Some(Click::Delete) => remove(w),
         None => {}
     }
 }

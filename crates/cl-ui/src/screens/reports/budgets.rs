@@ -86,6 +86,15 @@ pub(crate) struct BudgetPanel {
     pub(crate) new_year: String,
     pub(crate) new_name: String,
     copy_from: Option<String>,
+    /// Opening another budget (or reloading this one) would drop rows the
+    /// owner typed: the budget asked for, waiting for Discard (B1).
+    pub(crate) confirm_discard: Option<String>,
+    /// Copy over a budget that already has amounts: waiting for a yes
+    /// (QA-11).
+    pub(crate) confirm_copy: Option<String>,
+    /// A save, fill, adjust or copy changed this budget: Budget vs. Actual
+    /// on it runs again (QA-10).
+    pub(crate) changed: Option<String>,
 }
 
 impl BudgetPanel {
@@ -116,6 +125,8 @@ impl BudgetPanel {
             "stale": self.stale,
             "error": self.error.is_some(),
             "bad_cell": self.bad_cell.is_some(),
+            "confirm_discard": self.confirm_discard.is_some(),
+            "confirm_copy": self.confirm_copy.is_some(),
         })
     }
 }
@@ -123,9 +134,30 @@ impl BudgetPanel {
 /// A cell's value as the editor shows it (2 places, no separators: the
 /// text the owner edits).
 pub(crate) fn cell_text(d: Decimal) -> String {
-    let mut r = d.round_dp(2);
+    // Half away from zero, as the engine and every display round (S4).
+    let mut r = d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
     r.rescale(2);
     r.to_string()
+}
+
+/// The twelve values a row sends. A cell still showing the engine's value
+/// sends that exact value, never its two-place rounding, so a sub-cent
+/// cell the owner didn't touch is kept as it is (S4); a typed cell is the
+/// owner's amount.
+///
+/// # Errors
+/// The period index (0-11) of the first cell that isn't an amount.
+pub(crate) fn row_to_send(
+    cells: &[String; PERIODS],
+    engine: [Decimal; PERIODS],
+) -> Result<[Money; PERIODS], usize> {
+    let mut out = parse_row(cells)?;
+    for (i, slot) in out.iter_mut().enumerate() {
+        if cells[i] == cell_text(engine[i]) {
+            *slot = Money::parse_wire(&engine[i].to_string()).map_err(|_| i)?;
+        }
+    }
+    Ok(out)
 }
 
 /// The twelve cells of a row from the owner's text, or the first that
@@ -231,13 +263,30 @@ fn budget_accounts(all: Vec<cl_api::Account>) -> Vec<BudgetAccount> {
     rows.into_iter().map(|r| r.2).collect()
 }
 
-/// Opens budget `id` in the editor.
+/// Opens budget `id` in the editor (the picker, Reload, a new budget).
+/// Rows the owner typed and hasn't saved are never dropped silently: the
+/// panel asks first (B1).
 pub(super) fn select(w: &mut ReportWindow, id: String) {
+    if w.budgets.has_unsaved() {
+        w.budgets.confirm_discard = Some(id);
+        return;
+    }
+    open_budget(w, id);
+}
+
+/// Opens budget `id`, dropping typed rows and anything in flight for the
+/// budget shown before: a late answer can never land under another
+/// budget's name (B1).
+pub(super) fn open_budget(w: &mut ReportWindow, id: String) {
     let p = &mut w.budgets;
     p.selected = Some(id.clone());
     p.lines = None;
     p.drafts.clear();
     p.pending.clear();
+    p.save = None;
+    p.action = None;
+    p.confirm_discard = None;
+    p.confirm_copy = None;
     p.stale = false;
     p.error = None;
     p.bad_cell = None;
@@ -273,17 +322,24 @@ fn start_save(w: &mut ReportWindow) {
     if p.save.is_some() || p.stale || p.pending.is_empty() {
         return;
     }
-    let (Some(id), Some(lines)) = (p.selected.clone(), p.lines.as_ref()) else {
+    let Some(lines) = p.lines.as_ref() else {
         return;
     };
+    // The budget the lines (and their version) belong to, never just the
+    // one picked (B1).
+    if p.selected.as_deref() != Some(lines.budget.id.as_str()) {
+        return;
+    }
+    let id = lines.budget.id.clone();
     let version = lines.budget.version;
+    let engine_lines = lines.clone();
     let mut sent = Vec::new();
     let mut writes = Vec::new();
     for a in std::mem::take(&mut p.pending) {
         let Some(text) = p.drafts.get(&a).cloned() else {
             continue;
         };
-        let Ok(periods) = parse_row(&text) else {
+        let Ok(periods) = row_to_send(&text, values(Some(&engine_lines), a)) else {
             continue;
         };
         writes.push(BudgetLineWrite {
@@ -322,9 +378,13 @@ fn start_whole(w: &mut ReportWindow, what: Whole) {
     if p.has_unsaved() || p.action.is_some() || p.stale {
         return;
     }
-    let (Some(id), Some(lines)) = (p.selected.clone(), p.lines.as_ref()) else {
+    let Some(lines) = p.lines.as_ref() else {
         return;
     };
+    if p.selected.as_deref() != Some(lines.budget.id.as_str()) {
+        return;
+    }
+    let id = lines.budget.id.clone();
     let version = lines.budget.version;
     let basis = w
         .options
@@ -411,14 +471,17 @@ fn start_create(w: &mut ReportWindow) {
 }
 
 /// A finished save: adopt the engine's lines and version; rows edited
-/// again meanwhile stay as typed.
+/// again meanwhile stay as typed. An answer for a budget no longer shown
+/// is dropped (B1).
 pub(crate) fn saved(
     p: &mut BudgetPanel,
     sent: Vec<(AccountId, [String; PERIODS])>,
     r: Result<BudgetLines, ApiError>,
 ) {
     match r {
+        Ok(lines) if p.selected.as_deref() != Some(lines.budget.id.as_str()) => {}
         Ok(lines) => {
+            p.changed = Some(lines.budget.id.clone());
             for (a, text) in sent {
                 if p.drafts.get(&a) == Some(&text) {
                     p.drafts.remove(&a);
@@ -457,6 +520,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
         }
         if let Some(r) = engine::poll(&mut p.lines_job) {
             match r {
+                Ok(l) if p.selected.as_deref() != Some(l.budget.id.as_str()) => {}
                 Ok(l) => {
                     p.lines = Some(l);
                     p.stale = false;
@@ -472,7 +536,10 @@ pub(super) fn poll(w: &mut ReportWindow) {
         }
         if let Some(r) = engine::poll(&mut p.action) {
             match r {
+                // An answer for a budget no longer shown is dropped (B1).
+                Ok(l) if p.selected.as_deref() != Some(l.budget.id.as_str()) => {}
                 Ok(l) => {
+                    p.changed = Some(l.budget.id.clone());
                     p.lines = Some(l);
                     p.error = None;
                 }
@@ -497,6 +564,12 @@ pub(super) fn poll(w: &mut ReportWindow) {
         select(w, id);
     }
     start_save(w);
+    // QA-10: Budget vs. Actual on the budget just changed runs again.
+    if let Some(id) = w.budgets.changed.take()
+        && w.options.budget_id.as_deref() == Some(id.as_str())
+    {
+        w.run();
+    }
 }
 
 fn refusal_text(e: &ApiError) -> Option<String> {
@@ -531,6 +604,8 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut whole: Option<Whole> = None;
     let mut create = false;
     let mut reload = false;
+    let mut discard: Option<bool> = None;
+    let mut copy_answer: Option<bool> = None;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.label(RichText::new(t("reports.budget.title")).strong());
         let p = &mut w.budgets;
@@ -578,6 +653,28 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         if p.stale && ui.button(t("reports.budget.reload")).clicked() {
             reload = true;
         }
+        if p.confirm_discard.is_some() {
+            form::inline_warning(ui, tokens, &t("reports.budget.discard_question"));
+            ui.horizontal(|ui| {
+                if ui.button(t("reports.budget.discard")).clicked() {
+                    discard = Some(true);
+                }
+                if ui.button(t("reports.budget.keep_editing")).clicked() {
+                    discard = Some(false);
+                }
+            });
+        }
+        if p.confirm_copy.is_some() {
+            form::inline_warning(ui, tokens, &t("reports.budget.copy_question"));
+            ui.horizontal(|ui| {
+                if ui.button(t("reports.budget.copy_confirm")).clicked() {
+                    copy_answer = Some(true);
+                }
+                if ui.button(t("reports.budget.copy_cancel")).clicked() {
+                    copy_answer = Some(false);
+                }
+            });
+        }
         let Some(lines) = p.lines.clone() else {
             if p.selected.is_some() {
                 form::progress_line(ui, tokens, &t("reports.loading"));
@@ -615,12 +712,17 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 .as_ref()
                 .and_then(|c| others.iter().find(|b| &b.id == c))
                 .map_or_else(|| t("reports.budget.copy_from"), |b| b.name.clone());
+            let copy_label = t("reports.budget.copy_from");
             egui::ComboBox::from_id_salt("budget_copy_from")
                 .selected_text(shown)
                 .show_ui(ui, |ui| {
                     for b in &others {
                         ui.selectable_value(&mut p.copy_from, Some(b.id.clone()), &b.name);
                     }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &copy_label)
                 });
             if ui
                 .add_enabled(
@@ -630,7 +732,14 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 .clicked()
                 && let Some(c) = p.copy_from.clone()
             {
-                whole = Some(Whole::Copy(c));
+                // QA-11: the engine's copy writes the other budget's
+                // accounts over this one's; a budget that already has
+                // amounts asks first.
+                if lines.lines.iter().any(|l| l.periods.iter().any(|v| !v.is_zero())) {
+                    p.confirm_copy = Some(c);
+                } else {
+                    whole = Some(Whole::Copy(c));
+                }
             }
             if !can_whole && p.has_unsaved() {
                 ui.label(
@@ -758,6 +867,24 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     });
     if let Some(id) = pick {
         select(w, id);
+    }
+    match discard {
+        Some(true) => {
+            if let Some(id) = w.budgets.confirm_discard.take() {
+                open_budget(w, id);
+            }
+        }
+        Some(false) => w.budgets.confirm_discard = None,
+        None => {}
+    }
+    match copy_answer {
+        Some(true) => {
+            if let Some(c) = w.budgets.confirm_copy.take() {
+                whole = Some(Whole::Copy(c));
+            }
+        }
+        Some(false) => w.budgets.confirm_copy = None,
+        None => {}
     }
     if create {
         start_create(w);

@@ -48,6 +48,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
     }
     let mut click = None;
     let shown = w.table.is_some();
+    let current = w.exportable();
     ui.horizontal_wrapped(|ui| {
         if ui.button(t("reports.tool.customize")).clicked() {
             click = Some(Click::Customize);
@@ -61,7 +62,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
             click = Some(Click::Memorize);
         }
         ui.separator();
-        ui.add_enabled_ui(shown, |ui| {
+        ui.add_enabled_ui(current, |ui| {
             if ui
                 .button(t("reports.tool.print"))
                 .on_hover_text(t("reports.tool.print.key"))

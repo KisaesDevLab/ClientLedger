@@ -210,6 +210,7 @@ impl ReportWindow {
         self.table = None;
         self.error = None;
         self.notice = None;
+        self.export.clear_message();
         self.memo.current = None;
         self.run();
     }
@@ -220,6 +221,8 @@ impl ReportWindow {
         let rerun = self.options.needs_run(&next);
         self.options = next;
         if rerun {
+            // "Saved <file>." was about the report before (QA-15).
+            self.export.clear_message();
             if self.table.is_some() {
                 self.state = RunState::Stale;
             }
@@ -469,6 +472,12 @@ impl ReportWindow {
         self.set_options(next);
     }
 
+    /// True when the table on screen is the answer to the options on
+    /// screen: only then can it be printed, exported or emailed (B2).
+    pub(crate) fn exportable(&self) -> bool {
+        self.state == RunState::Shown && self.table.is_some()
+    }
+
     /// The report's title as shown (the owner's rename first).
     pub(crate) fn title_text(&self) -> String {
         self.options
@@ -500,7 +509,14 @@ impl ReportWindow {
                 )
             });
         }
-        if let Some(b) = self.options.basis {
+        // The basis the table ran on, never the options' (B2): a failed or
+        // pending run must not label the old figures with the new basis.
+        let basis = self
+            .table
+            .as_ref()
+            .and_then(|t| t.meta.basis)
+            .or(self.options.basis.filter(|_| self.state == RunState::Shown));
+        if let Some(b) = basis {
             parts.push(t(match b {
                 cl_core::report::Basis::Accrual => "reports.basis.accrual_basis",
                 cl_core::report::Basis::Cash => "reports.basis.cash_basis",
@@ -570,7 +586,12 @@ impl ReportWindow {
             return;
         }
         self.header(ui, tokens);
-        let dim = matches!(self.state, RunState::Stale | RunState::Running);
+        // A table older than the options on screen is drawn dimmed, also
+        // when the run for the new options failed (B2).
+        let dim = matches!(
+            self.state,
+            RunState::Stale | RunState::Running | RunState::Failed
+        );
         if dim {
             ui.multiply_opacity(0.55);
         }
@@ -759,6 +780,30 @@ impl ReportWindow {
         self.set_options(next);
     }
 
+    /// Esc: closes the innermost form open in the window (the Memorize
+    /// dialog, Email, a question of the budget editor, the editor when
+    /// nothing in it is unsaved). False when nothing was open (QA-13).
+    pub(crate) fn escape(&mut self) -> bool {
+        if self.memo.dialog_open() {
+            self.memo.dialog = None;
+        } else if self.mailer.open {
+            self.mailer.open = false;
+            self.mailer.message = None;
+        } else if self.budgets.confirm_discard.is_some() || self.budgets.confirm_copy.is_some() {
+            self.budgets.confirm_discard = None;
+            self.budgets.confirm_copy = None;
+        } else if self.budgets.open {
+            // Unsaved rows stay on screen; the owner leaves the row (it
+            // saves) or picks Discard.
+            if !self.budgets.has_unsaved() {
+                self.budgets.open = false;
+            }
+        } else {
+            return false;
+        }
+        true
+    }
+
     #[cfg(test)]
     pub(crate) fn state_json_for_test(&self) -> Value {
         self.state_json()
@@ -915,7 +960,26 @@ impl Screen for ReportWindow {
     }
 
     fn scope(&self) -> Scope {
-        Scope::Window
+        // With a form open in the window (Memorize, Email, the budget
+        // editor) Esc reaches it (QA-13).
+        if self.memo.dialog_open() || self.mailer.open || self.budgets.open {
+            Scope::Form
+        } else {
+            Scope::Window
+        }
+    }
+
+    /// Typed budget rows not saved yet, or a memorized report whose options
+    /// changed (plan §4): the tab shows the dot and closing asks (B1).
+    fn dirty(&self) -> bool {
+        self.budgets.has_unsaved() || super::memorized::changed(self)
+    }
+
+    /// Budget rows save as the owner leaves them and a memorized report
+    /// through its dialog, so the close prompt offers Close anyway or Keep
+    /// editing only.
+    fn can_save(&self) -> bool {
+        false
     }
 
     fn command(&mut self, id: CommandId) -> bool {
@@ -938,10 +1002,7 @@ impl Screen for ReportWindow {
                 super::export::print(self);
                 true
             }
-            "form.revert" if self.memo.dialog_open() => {
-                self.memo.dialog = None;
-                true
-            }
+            "form.revert" => self.escape(),
             _ => false,
         }
     }
