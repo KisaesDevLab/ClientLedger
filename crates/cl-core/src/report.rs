@@ -56,6 +56,7 @@ pub enum Source {
     BalanceSheet,
     TrialBalance,
     GeneralLedger,
+    Journal,
     TransactionList,
     BudgetVsActual,
     ArAgingSummary,
@@ -92,11 +93,12 @@ pub enum Source {
 
 impl Source {
     /// Every source, in catalog order.
-    pub const ALL: [Source; 36] = [
+    pub const ALL: [Source; 37] = [
         Source::ProfitLoss,
         Source::BalanceSheet,
         Source::TrialBalance,
         Source::GeneralLedger,
+        Source::Journal,
         Source::TransactionList,
         Source::BudgetVsActual,
         Source::ArAgingSummary,
@@ -139,7 +141,8 @@ impl Source {
             Source::ProfitLoss => "/api/v1/reports/profit-loss",
             Source::BalanceSheet => "/api/v1/reports/balance-sheet",
             Source::TrialBalance => "/api/v1/reports/trial-balance",
-            Source::GeneralLedger => "/api/v1/reports/general-ledger",
+            // The Journal is the ledger grouped by transaction (U-202).
+            Source::GeneralLedger | Source::Journal => "/api/v1/reports/general-ledger",
             Source::TransactionList => "/api/v1/reports/transaction-list",
             Source::BudgetVsActual => "/api/v1/budgets/:id/vs-actual",
             Source::ArAgingSummary => "/api/v1/reports/ar-aging-summary",
@@ -1076,7 +1079,12 @@ mod tests {
             assert!(s.route().starts_with("/api/v1/"), "{s:?}");
         }
         let mut seen = std::collections::HashSet::new();
-        assert!(Source::ALL.iter().all(|s| seen.insert(s.route())));
+        assert!(
+            Source::ALL
+                .iter()
+                .filter(|s| **s != Source::Journal)
+                .all(|s| seen.insert(s.route()))
+        );
     }
 
     #[test]

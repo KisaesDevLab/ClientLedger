@@ -13,6 +13,7 @@ pub mod categories;
 pub mod columns;
 pub(crate) mod exact;
 pub mod inventory;
+pub mod journal;
 pub mod ledger;
 pub mod sales_tax;
 pub mod statements;

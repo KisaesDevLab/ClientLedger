@@ -61,6 +61,7 @@ pub const fn supported(source: Source) -> bool {
             | Source::BalanceSheet
             | Source::TrialBalance
             | Source::GeneralLedger
+            | Source::Journal
             | Source::RevenueByCategory
             | Source::ExpenseByCategory
     )
@@ -81,6 +82,7 @@ const fn exact_family(source: Source) -> bool {
             | Source::BalanceSheet
             | Source::TrialBalance
             | Source::GeneralLedger
+            | Source::Journal
             | Source::RevenueByCategory
             | Source::ExpenseByCategory
     )
@@ -128,6 +130,8 @@ pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Op
         || f.untagged_in_group.is_some();
     match req.source {
         Source::GeneralLedger if drill_filters && !has(DRILL) => Some(DRILL),
+        // The Journal is U-202's.
+        Source::Journal if !has(DRILL) => Some(DRILL),
         // The statements take a tag list and the adjusting lens only.
         Source::ProfitLoss | Source::BalanceSheet | Source::TrialBalance
             if drill_filters || !f.account_ids.is_empty() || !f.item_ids.is_empty() =>
@@ -212,7 +216,10 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     }
     if matches!(
         req.source,
-        Source::GeneralLedger | Source::RevenueByCategory | Source::ExpenseByCategory
+        Source::GeneralLedger
+            | Source::Journal
+            | Source::RevenueByCategory
+            | Source::ExpenseByCategory
     ) && !f.account_ids.is_empty()
     {
         push("account_ids", join(&f.account_ids));
@@ -224,7 +231,10 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
         push("tag_scope", "untagged_in_group".to_string());
         push("tag_group_id", g.to_string());
     }
-    if req.source == Source::GeneralLedger {
+    if req.source == Source::Journal {
+        push("group_by", "transaction".to_string());
+    }
+    if matches!(req.source, Source::GeneralLedger | Source::Journal) {
         push("limit", adapters::ledger::SCREEN_LIMIT.to_string());
         if let Some(c) = f.contact_ids.first() {
             push("contact_id", c.to_string());
@@ -296,7 +306,7 @@ fn exact_operation(source: Source) -> Option<&'static Operation> {
         Source::ProfitLoss => &REPORT_PROFIT_LOSS,
         Source::BalanceSheet => &REPORT_BALANCE_SHEET,
         Source::TrialBalance => &REPORT_TRIAL_BALANCE,
-        Source::GeneralLedger => &REPORT_GENERAL_LEDGER,
+        Source::GeneralLedger | Source::Journal => &REPORT_GENERAL_LEDGER,
         Source::RevenueByCategory => &REPORT_REVENUE_BY_CATEGORY,
         Source::ExpenseByCategory => &REPORT_EXPENSE_BY_CATEGORY,
         _ => return None,
@@ -320,6 +330,7 @@ pub fn adapt_exact(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportT
         Source::BalanceSheet => statements::balance_sheet(v, req, as_of(&req.dates)?),
         Source::TrialBalance => statements::trial_balance(v, req, as_of(&req.dates)?),
         Source::GeneralLedger => ledger::general_ledger(v, req, range(&req.dates)?),
+        Source::Journal => adapters::journal::journal(v, req, range(&req.dates)?),
         Source::RevenueByCategory | Source::ExpenseByCategory => {
             categories::by_category(v, req, range(&req.dates)?)
         }

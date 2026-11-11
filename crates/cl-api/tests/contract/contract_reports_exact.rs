@@ -700,4 +700,30 @@ pub fn columns_drill_and_tag_split(h: &Harness) {
     bs.filters.tag_ids = vec![b.tag];
     let sheet = run(h, s, &bs);
     assert!(check(&sheet, true) > 2, "balances drill");
+
+    // The Journal: the books' four entries, each balanced, by date.
+    let mut j = ReportRequest::new(
+        Source::Journal,
+        ReportDates::Range(DateRange {
+            from: first.from,
+            to: second.to,
+        }),
+    );
+    j.filters.tag_ids = vec![b.tag];
+    let journal = run(h, s, &j);
+    let heads = journal
+        .rows
+        .iter()
+        .filter(|r| r.kind == RowKind::Header)
+        .count();
+    assert_eq!(heads, 4, "four entries");
+    for r in journal
+        .rows
+        .iter()
+        .filter(|r| r.kind == RowKind::AccountTotal)
+    {
+        assert_eq!(dec(&r.cells[5]), dec(&r.cells[6]), "each entry balances");
+    }
+    let grand = journal.rows.last().expect("total");
+    assert_eq!(dec(&grand.cells[5]).to_string(), "75.3000");
 }

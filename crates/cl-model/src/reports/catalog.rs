@@ -266,7 +266,7 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "journal",
         title: "reports.title.journal",
         group: CatalogGroup::Company,
-        source: Source::GeneralLedger,
+        source: Source::Journal,
         filters: LEDGER_FILTERS,
         sort: SortMode::None,
         capabilities: &[caps::EXACT, caps::DRILL],

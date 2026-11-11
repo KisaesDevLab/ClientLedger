@@ -1,0 +1,29 @@
+kind,level,path,caption,total,total_prior,total_change,total_pct_change
+header,0,income,@reports.pl.income,,,,
+account,1,income/acct:4000,4000 · Service Income,394475.97,246154.72,148321.25,60.3
+subtotal,0,income~total,@reports.pl.total_income,394475.97,246154.72,148321.25,60.3
+header,0,cogs,@reports.pl.cogs,,,,
+account,1,cogs/acct:5000,5000 · Subcontractors,3099.38,20868.64,-17769.26,-85.1
+account,1,cogs/acct:5100,5100 · Plants,8344.5,1728.46,6616.04,382.8
+account,1,cogs/acct:5110,5110 · Mulch & stone,2455.9,931.95,1523.95,163.5
+account,1,cogs/acct:5200,5200 · Project Supplies and Materials,35441.15,101336.14,-65894.99,-65
+subtotal,0,cogs~total,@reports.pl.total_cogs,49340.93,124865.19,-75524.26,-60.5
+total,0,gross_profit,@reports.pl.gross_profit,345135.04,121289.53,223845.51,184.6
+header,0,expenses,@reports.pl.expenses,,,,
+account,1,expenses/acct:6000,6000 · Advertising and Marketing,701.56,3233.99,-2532.43,-78.3
+account,1,expenses/acct:6100,6100 · Fuel,2659.83,1796.65,863.18,48
+account,1,expenses/acct:6150,6150 · Insurance,1200,5126.43,-3926.43,-76.6
+account,1,expenses/acct:6250,6250 · Office Supplies and Software,937.75,3188.13,-2250.38,-70.6
+account,1,expenses/acct:6300,6300 · Rent,4350,10150,-5800,-57.1
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5316.14,9166.18,-3850.04,-42
+account,1,expenses/acct:6400,6400 · Telephone and Internet,617.98,1318.62,-700.64,-53.1
+account,1,expenses/acct:6500,6500 · Utilities,1311.95,3509.68,-2197.73,-62.6
+account,1,expenses/acct:6550,6550 · Wages,12091.3,37124.77,-25033.47,-67.4
+account,1,expenses/acct:6560,6560 · Payroll Taxes,1088.21,3341.2,-2252.99,-67.4
+account,1,expenses/acct:6700,6700 · Vehicle Expenses,2801.63,3047.79,-246.16,-8.1
+subtotal,0,expenses~total,@reports.pl.total_expenses,33076.35,81003.44,-47927.09,-59.2
+total,0,operating_income,@reports.pl.operating_income,312058.69,40286.09,271772.6,674.6
+header,0,other_expenses,@reports.pl.other_expenses,,,,
+account,1,other_expenses/acct:8000,8000 · Interest Expense,212,636,-424,-66.7
+subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,212,636,-424,-66.7
+grand,0,net_income,@reports.pl.net_income,311846.69,39650.09,272196.6,686.5
