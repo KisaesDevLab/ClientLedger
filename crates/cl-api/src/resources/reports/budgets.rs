@@ -610,7 +610,7 @@ mod tests {
                        "fiscalYearStart": "2027-01-01", "tagId": null, "version": 2},
             "version": 3,
             "lines": [{"account_id": ACCT, "account_name": "Sales", "account_number": "4000",
-                       "account_type": "revenue", "month_1": 1000.1, "periodsExact": p("1000.1000"),
+                       "account_type": "revenue", "periodsExact": p("1000.1000"),
                        "totalExact": "1000.1000"}],
             "totalsExact": {"revenue": t("1000.1000"), "cogs": t("0.0000"), "expenses": t("0.0000"),
                             "otherRevenue": t("0.0000"), "otherExpenses": t("0.0000"),

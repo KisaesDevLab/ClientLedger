@@ -395,6 +395,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.budget.bad_cell", "That isn't an amount. Type a number like 1250 or 1,250.00."),
     ("reports.budget.stale", "Someone else changed this budget. Reload to see their changes; what you typed is kept until then."),
     ("reports.budget.reload", "Reload"),
+    ("reports.budget.other_year", "These dates are outside the budget's fiscal year. Choose the budget again, or dates in its year."),
     ("reports.budget.year_taken", "There is already a budget for that fiscal year. Choose it from the list instead."),
     ("reports.budget.line_invalid", "A budget can only hold income and expense accounts, with at most two decimal places."),
     // Ask a question (Q-73)

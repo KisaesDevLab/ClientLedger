@@ -42,6 +42,9 @@ pub(crate) struct AskBar {
     pub ran_as: Option<String>,
     /// The owner's words the engine couldn't find.
     pub unresolved: Vec<String>,
+    /// The report and options the line describes: it shows only while
+    /// the window still runs exactly those.
+    ran_for: Option<(&'static str, cl_model::reports::ReportOptions)>,
     /// A plain message (i18n key).
     pub message: Option<&'static str>,
     pub error: Option<ApiError>,
@@ -130,7 +133,9 @@ fn start(w: &mut ReportWindow) {
         return;
     }
     match a.gate {
-        None => {
+        // Not read yet, or off last time: read the switches again (the
+        // owner may have turned Ask on since).
+        None | Some(false) => {
             a.waiting = true;
             if a.gate_job.is_none() {
                 a.gate_job = Some(engine::read(
@@ -146,7 +151,6 @@ fn start(w: &mut ReportWindow) {
                 ));
             }
         }
-        Some(false) => a.message = Some("reports.ask.ai_off"),
         Some(true) => {
             let link = std::sync::Arc::clone(&w.link);
             let req = request(&a.text, |s| super::available(&link, s), w.today);
@@ -169,15 +173,21 @@ pub(crate) fn apply(w: &mut ReportWindow, m: &AskMapping) {
     };
     w.ask.ran_as = Some(model::ran_as(spec, &options, &w.fiscal, w.today, &|k| t(k)));
     w.ask.unresolved = m.unresolved.iter().map(|(_, s)| s.clone()).collect();
+    w.ask.ran_for = Some((spec.key, options.clone()));
     w.show_report(spec, options);
 }
 
 pub(super) fn poll(w: &mut ReportWindow) {
     if let Some(r) = engine::poll(&mut w.ask.gate_job) {
         // A failed read is "not on": nothing goes out.
-        w.ask.gate = Some(r.unwrap_or(false));
+        let on = r.unwrap_or(false);
+        w.ask.gate = Some(on);
         if std::mem::take(&mut w.ask.waiting) {
-            start(w);
+            if on {
+                start(w);
+            } else {
+                w.ask.message = Some("reports.ask.ai_off");
+            }
         }
     }
     if let Some(r) = engine::poll(&mut w.ask.job) {
@@ -234,7 +244,12 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             ui.spinner();
         }
     });
-    if let Some(line) = &w.ask.ran_as {
+    let current = w
+        .ask
+        .ran_for
+        .as_ref()
+        .is_some_and(|(k, o)| *k == w.spec.key && *o == w.options);
+    if let Some(line) = w.ask.ran_as.as_ref().filter(|_| current) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!("{} {line}", t("reports.ask.ran_as")))

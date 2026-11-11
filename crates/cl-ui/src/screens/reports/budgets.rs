@@ -329,7 +329,16 @@ fn start_whole(w: &mut ReportWindow, what: Whole) {
 
 fn start_create(w: &mut ReportWindow) {
     let p = &mut w.budgets;
-    let Ok(year) = p.new_year.trim().parse::<i32>() else {
+    // The app names a fiscal year by the year it ends in; the engine's
+    // budget year is the calendar year it starts in.
+    let Some(year) = p
+        .new_year
+        .trim()
+        .parse::<i32>()
+        .ok()
+        .and_then(|label| w.fiscal.year(label).ok())
+        .map(|fy| fy.start.year())
+    else {
         p.error = Some(ApiError::Local(LocalValidation::InvalidValue));
         return;
     };
@@ -380,10 +389,10 @@ pub(crate) fn saved(
             p.error = None;
         }
         Err(e) => {
-            // The rows stay unsaved, so nothing typed is lost.
-            for (a, _) in sent {
-                p.pending.insert(a);
-            }
+            // The rows stay as typed (drafts), so nothing is lost; they are
+            // sent again only when the owner leaves a row again, never in a
+            // loop.
+            let _ = sent;
             if budget_refusal(&e) == Some(BudgetRefusal::Stale) {
                 p.stale = true;
                 p.pending.clear();
@@ -770,5 +779,31 @@ mod tests {
         saved(&mut p, vec![(a, row("10"))], Err(stale));
         assert!(p.stale);
         assert_eq!(p.drafts.get(&a), Some(&row("10")), "nothing typed is lost");
+    }
+
+    #[test]
+    fn a_failed_save_is_not_retried_in_a_loop() {
+        let a = AccountId::parse(A).expect("id");
+        let mut p = BudgetPanel::default();
+        p.drafts.insert(a, row("10"));
+        saved(&mut p, vec![(a, row("10"))], Err(ApiError::Timeout));
+        assert!(p.pending.is_empty(), "waits for the owner's next commit");
+        assert!(p.drafts.contains_key(&a), "the text stays");
+        assert!(!p.stale);
+        assert!(p.error.is_some());
+        // The owner leaves the row again: it is queued once more.
+        commit_row(&mut p, a);
+        assert!(p.pending.contains(&a));
+    }
+
+    #[test]
+    fn a_july_fiscal_year_is_named_by_its_end_year() {
+        let f = cl_core::fiscal::FiscalYearSpec::Calendar { start_month: 7 };
+        let fy = f.year(2027).expect("fy");
+        assert_eq!(
+            fy.start.year(),
+            2026,
+            "FY2027 starts July 2026: the engine's budget year 2026"
+        );
     }
 }

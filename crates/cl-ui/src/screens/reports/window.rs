@@ -320,6 +320,12 @@ impl ReportWindow {
                 return;
             }
         };
+        if self.budget_year_differs(&req) {
+            self.problem = Some("reports.budget.other_year");
+            self.table = None;
+            self.state = RunState::Failed;
+            return;
+        }
         if !super::request_runs(&self.link, &req) {
             self.state = RunState::Unavailable;
             self.table = None;
@@ -336,6 +342,25 @@ impl ReportWindow {
         self.job = Some((self.generation, job));
         self.state = RunState::Running;
         self.poll();
+    }
+
+    /// Budget vs. Actual on dates outside the chosen budget's fiscal year:
+    /// the engine would set another year's actuals against its periods.
+    fn budget_year_differs(&self, req: &cl_core::report::ReportRequest) -> bool {
+        let (Some(id), Some(list)) = (req.budget_id.as_ref(), self.budgets.list.as_ref()) else {
+            return false;
+        };
+        let Some(start) = list
+            .iter()
+            .find(|b| &b.id == id)
+            .and_then(|b| b.fiscal_year_start)
+        else {
+            return false;
+        };
+        let Some(first) = req.dates.span().map(|r| r.from) else {
+            return false;
+        };
+        self.fiscal.year_containing(start).ok() != self.fiscal.year_containing(first).ok()
     }
 
     pub(crate) fn poll(&mut self) {

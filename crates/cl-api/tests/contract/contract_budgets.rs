@@ -2,9 +2,9 @@
 //! `budgets-exact-v1`, AC4).
 //!
 //! The hand fixture `fixtures/budgets/bva_hand.json` (a copy of the
-//! engine's, every expected value worked out by hand) is posted into a
-//! company of its own, so no other test's activity reaches its rows or
-//! totals and its fiscal year 2026 budget is the company's only one. The
+//! engine's, every expected value worked out by hand) is posted into tenant
+//! B twelve years on (2037-2039, years no other test posts in), with fresh
+//! accounts and tags, so no other test's activity reaches its rows or totals. The
 //! fixture's entry for "another company" is left out: the expected values
 //! exclude it by design. Its unpaid invoice is posted as an accrual-only
 //! entry, which is what the invoice is to the P&L (income on accrual, none
@@ -45,8 +45,14 @@ fn d(s: &str) -> Decimal {
     Decimal::from_str(s).expect("decimal")
 }
 
+/// Years the fixture moves forward: tenant B is shared, and no other test
+/// posts in 2037-2039, so the fixture's rows and totals are its own.
+const SHIFT: i32 = 12;
+
+/// A fixture date, moved [SHIFT] years on (month and day unchanged).
 fn cal(s: &str) -> cl_core::CalendarDate {
-    cl_core::CalendarDate::parse_wire(s).expect("date")
+    let d = cl_core::CalendarDate::parse_wire(s).expect("date");
+    cl_core::CalendarDate::from_ymd(d.year() + SHIFT, d.month(), d.day()).expect("shifted date")
 }
 
 /// The company's books: fixture account number to id, tag key to id, and
@@ -298,25 +304,16 @@ pub fn hand_fixture_and_writes(h: &Harness) {
         return;
     }
     let fx = fixture();
-    // A company of its own (switched back by the next `s3()`).
+    // Tenant B (no company of its own: that would be one more rate-limited
+    // auth call), in years no other test posts in.
     let s = h.s3();
-    let made = h
-        .run(s.create_company(&cl_api::NewCompany {
-            company_name: unique("BvA Co"),
-            business_type: Some("default".into()),
-            entity_type: None,
-            system_accounts_only: None,
-        }))
-        .unwrap_or_else(|e| panic!("create company: {e}"));
-    h.run(s.open_company(made.tenant_id))
-        .unwrap_or_else(|e| panic!("open company: {e}"));
     let b = books(h, &s, &fx);
     let budgets = s.budgets();
     let created = h
         .run(budgets.create(
             &NewBudget {
                 name: fx["budget"]["name"].as_str().expect("name").into(),
-                fiscal_year: 2026,
+                fiscal_year: 2026 + SHIFT,
             },
             key(),
         ))
@@ -415,7 +412,7 @@ pub fn hand_fixture_and_writes(h: &Harness) {
         .run(budgets.create(
             &NewBudget {
                 name: unique("again"),
-                fiscal_year: 2026,
+                fiscal_year: 2026 + SHIFT,
             },
             key(),
         ))
@@ -436,7 +433,7 @@ pub fn hand_fixture_and_writes(h: &Harness) {
         .run(budgets.create(
             &NewBudget {
                 name: unique("FY2027"),
-                fiscal_year: 2027,
+                fiscal_year: 2027 + SHIFT,
             },
             key(),
         ))
