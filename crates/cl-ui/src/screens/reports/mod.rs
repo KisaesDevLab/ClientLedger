@@ -55,6 +55,7 @@ fn key_of(kind: &str) -> Option<&'static str> {
         KIND | "reports.profit_loss" => "profit_loss",
         "reports.balance_sheet" => "balance_sheet",
         "reports.trial_balance" => "trial_balance",
+        "reports.ar_aging" => "ar_aging_summary",
         _ => return None,
     })
 }

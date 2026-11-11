@@ -35,6 +35,7 @@ fn every_reports_command_opens_the_window() {
         KIND,
         "reports.profit_loss",
         "reports.balance_sheet",
+        "reports.ar_aging",
         "reports.trial_balance",
     ] {
         let cmd = cl_model::commands::find(kind).expect("command");

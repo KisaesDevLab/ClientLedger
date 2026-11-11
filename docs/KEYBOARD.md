@@ -212,6 +212,6 @@ Find these from the menus or with `Ctrl+K`.
 - **Vendors:** Vendors, Paid with Personal Funds, Sales Tax Owed, Pay Sales Tax, Adjust Quantity/Value on Hand, Physical Inventory Count, Items to Reorder, Receipt Inbox, Match Vendor Statement…, Review Documents
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
-- **Reports:** Reports, Profit & Loss, Balance Sheet, Inventory Value, Inventory Value Detail, Stock Status
+- **Reports:** Reports, Profit & Loss, Balance Sheet, A/R Aging Summary, Inventory Value, Inventory Value Detail, Stock Status
 - **Company:** Company Information, Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail
 - **Help:** Privacy Notice, Support ClientLedger on Ko-fi, About ClientLedger

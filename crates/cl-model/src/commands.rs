@@ -452,6 +452,8 @@ pub const COMMANDS: &[Command] = &[
     built("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None),
     built("reports.balance_sheet", "Balance Sheet", Some(Menu::Reports), 1, None),
     built("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T')),
+    // P28 WP3 (Q-P16g): Home's "Open aging" opens the A/R aging.
+    built("reports.ar_aging", "A/R Aging Summary", Some(Menu::Reports), 1, None),
     // P28: the report window's own commands (plan WP1 step 5).
     cmd("reports.refresh", "Refresh Report", None, 3, key(Mods::NONE, Key::F(5)), Scope::Window),
     cmd("reports.memorize", "Memorize Report", None, 3, ctrl('M'), Scope::Window),
@@ -806,6 +808,7 @@ mod tests {
             "reports.profit_loss",
             "reports.balance_sheet",
             "reports.trial_balance",
+            "reports.ar_aging",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
