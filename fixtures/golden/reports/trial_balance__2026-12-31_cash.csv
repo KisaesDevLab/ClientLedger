@@ -7,7 +7,7 @@ account,1,accounts/acct:2050,2050 · Business Credit Card,0,1617.99
 account,1,accounts/acct:2200,2200 · Vehicle and Equipment Loans,0,31200
 account,1,accounts/acct:4000,4000 · Service Income,0,1138949.06
 account,1,accounts/acct:5000,5000 · Subcontractors,50850.56,0
-account,1,accounts/acct:5100,5100 · Plants,8936.0131165782839259,0
+account,1,accounts/acct:5100,5100 · Plants,8936.01,0
 account,1,accounts/acct:5110,5110 · Mulch & stone,3387.85,0
 account,1,accounts/acct:5200,5200 · Project Supplies and Materials,356388.84,0
 account,1,accounts/acct:6000,6000 · Advertising and Marketing,10936.61,0
@@ -15,7 +15,7 @@ account,1,accounts/acct:6100,6100 · Fuel,8972.83,0
 account,1,accounts/acct:6150,6150 · Insurance,17034.13,0
 account,1,accounts/acct:6250,6250 · Office Supplies and Software,8024.17,0
 account,1,accounts/acct:6300,6300 · Rent,44950,0
-account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41924.7868834217160741,0
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41924.79,0
 account,1,accounts/acct:6400,6400 · Telephone and Internet,4100.37,0
 account,1,accounts/acct:6500,6500 · Utilities,8338.23,0
 account,1,accounts/acct:6550,6550 · Wages,123930.56,0

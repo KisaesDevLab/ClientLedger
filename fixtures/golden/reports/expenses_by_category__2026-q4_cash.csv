@@ -1,8 +1,8 @@
 kind,level,path,caption,total
 account,1,accounts/acct:5200,5200 · Project Supplies and Materials,35441.15
 account,1,accounts/acct:6550,6550 · Wages,12091.3
-account,1,accounts/acct:5100,5100 · Plants,7207.5531165782839259
-account,1,accounts/acct:6350,6350 · Repairs and Maintenance,6198.0668834217160741
+account,1,accounts/acct:5100,5100 · Plants,7207.55
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,6198.07
 account,1,accounts/acct:6300,6300 · Rent,4350
 account,1,accounts/acct:5000,5000 · Subcontractors,3099.38
 account,1,accounts/acct:6700,6700 · Vehicle Expenses,2801.63

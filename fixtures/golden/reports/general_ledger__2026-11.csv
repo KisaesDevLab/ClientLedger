@@ -10,7 +10,7 @@ detail,1,acct:1010/6:#7,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-
 detail,1,acct:1010/7:#8,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1315 · Walnut Shade Farmhouse · Payment received,,1556.38,0,78635.46
 detail,1,acct:1010/8:#9,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1328 · Roark Creek Dentistry · Payment received,,3117.5,0,81752.96
 detail,1,acct:1010/9:#10,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1331 · Riverbend HOA · Payment received,,2950.74,0,84703.7
-detail,1,acct:1010/10:#11,@reports.txn.expense,2026-11-04,,Elm Street Accountants,Check,,0,493.15,84210.55
+detail,1,acct:1010/10:#11,@reports.txn.expense,2026-11-04,4417,Elm Street Accountants,Check,,0,493.15,84210.55
 detail,1,acct:1010/11:#12,@reports.txn.customer_payment,2026-11-20,,Riverbend HOA,,,1000,0,85210.55
 detail,1,acct:1010/12:#13,@reports.txn.customer_payment,2026-11-28,,Hollister Family Trust,,,500,0,85710.55
 account_total,0,acct:1010~total,@reports.row.total_of 1010 · Operating Checking,,,,,,24160.04,25351.62,85710.55
@@ -236,7 +236,7 @@ detail,1,acct:5110/0:#199,@reports.txn.bill,2026-11-03,BILL-00001,Ozark Mulch Su
 account_total,0,acct:5110~total,@reports.row.total_of 5110 · Mulch & stone,,,,,,1180.4,0,3387.85
 header,0,acct:5200,5200 · Project Supplies and Materials,,,,@reports.row.beginning_balance,,,,353889.6
 detail,1,acct:5200/0:#200,@reports.txn.journal_entry,2026-11-03,,,bill B-192 · Bluff View Trucking · Vendor bill,,2006.09,0,355895.69
-detail,1,acct:5200/1:#201,@reports.txn.expense,2026-11-04,,Elm Street Accountants,Check,,493.15,0,356388.84
+detail,1,acct:5200/1:#201,@reports.txn.expense,2026-11-04,4417,Elm Street Accountants,Check,,493.15,0,356388.84
 account_total,0,acct:5200~total,@reports.row.total_of 5200 · Project Supplies and Materials,,,,,,2499.24,0,356388.84
 header,0,acct:6000,6000 · Advertising and Marketing,,,,@reports.row.beginning_balance,,,,10936.61
 account_total,0,acct:6000~total,@reports.row.total_of 6000 · Advertising and Marketing,,,,,,0,0,10936.61
