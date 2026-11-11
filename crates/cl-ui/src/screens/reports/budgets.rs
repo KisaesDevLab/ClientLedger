@@ -162,6 +162,12 @@ pub(super) fn toggle(w: &mut ReportWindow) {
     w.budgets.open = !w.budgets.open;
     if w.budgets.open {
         load(w);
+        // The editor starts on the budget the report runs on.
+        if w.budgets.selected.is_none()
+            && let Some(id) = w.options.budget_id.clone()
+        {
+            select(w, id);
+        }
     }
 }
 

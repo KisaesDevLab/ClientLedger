@@ -147,7 +147,14 @@ impl ReportWindow {
         let tag_groups_job = Some(engine::read(
             &link,
             group.as_ref(),
-            |_| Ok(Vec::new()),
+            |d| {
+                Ok(d.tag_groups
+                    .clone()
+                    .unwrap_or_else(crate::company::demo::lists::tag_groups)
+                    .into_iter()
+                    .map(|g| (g.id, g.fields.name))
+                    .collect())
+            },
             |s| async move {
                 Ok(s.tags()
                     .groups()

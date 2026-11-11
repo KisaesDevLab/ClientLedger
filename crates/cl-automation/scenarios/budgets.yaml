@@ -3,7 +3,7 @@
 # Actual on the fiscal year's periods (actual, budget, over budget, % of
 # budget, every figure the demo engine's); Edit budgets opens the editor
 # with its rows; Adjust by % changes every cell; Email sends the report as
-# a PDF (the demo sends nothing). Synthetic.
+# a CSV file (the demo sends nothing). Synthetic.
 name: budgets
 description: Budget vs. Actual on the demo's budget, the budget editor, and the Email form.
 steps:
@@ -15,7 +15,7 @@ steps:
   - wait: {ms: 300}
   - assert_state: {key: screen.report, equals: budget_vs_actual}
   - assert_state: {key: screen.problem, equals: choose_budget}
-  - click: {label: Choose a budget, index: 0}
+  - click: {role: combo_box, label: Budget}
   - wait: {ms: 200}
   - click: {label: 2026 budget, index: 0}
   - wait: {ms: 500}
@@ -41,8 +41,9 @@ steps:
   - click: {role: button, label: Email}
   - wait: {ms: 200}
   - assert_state: {key: screen.email.open, equals: true}
-  - click: {role: text_input, label: To}
+  - click: {role: text_input, label: To, index: 1}
   - type: {text: "banker@example.com"}
+  - click: {label: CSV}
   - screenshot: email-form
   - click: {role: button, label: Send}
   - wait: {ms: 400}

@@ -13,7 +13,7 @@ steps:
   - click: {label: Profit & Loss by Tag Group, index: 0}
   - wait: {ms: 300}
   - assert_state: {key: screen.report, equals: profit_loss_by_tag_group}
-  - click: {label: Choose a tag group, index: 0}
+  - click: {role: combo_box, label: Tag group}
   - wait: {ms: 200}
   - click: {label: Route, index: 0}
   - wait: {ms: 500}

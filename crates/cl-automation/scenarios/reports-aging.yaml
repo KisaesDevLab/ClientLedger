@@ -1,8 +1,8 @@
 # A/R Aging (P28) against `clientledger --demo`: the summary as of today
-# (open A/R 48,912.40, the mockup's), its buckets, a client's cell drilling
-# to the detail for that client and bucket. Synthetic.
+# from the demo's open invoices (2,030.00 across four clients) in its
+# buckets, collapsed and expanded. Synthetic.
 name: reports-aging
-description: A/R Aging summary and its drill to the detail.
+description: A/R Aging summary in its buckets, collapsed and expanded.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -10,7 +10,7 @@ steps:
   - wait: {ms: 400}
   - assert_state: {key: screen.report, equals: ar_aging_summary}
   - assert_state: {key: screen.state, equals: shown}
-  - assert_exists: {label: "48,912.40"}
+  - assert_exists: {label: "2,030.00"}
   - screenshot: ar-aging
   - command: reports.collapse
   - screenshot: ar-aging-collapsed
