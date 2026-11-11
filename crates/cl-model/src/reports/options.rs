@@ -283,11 +283,10 @@ pub fn tag_row_caption(account: &str, tag: &str, split: &TagSplit) -> String {
     let names = format!("{aname} - {tname}");
     let sep = &split.separator;
     let numbers = match (split.label, an, tn) {
-        (TagLabel::None, _, _) => None,
+        (TagLabel::None, _, _) | (_, None, None) => None,
         (TagLabel::Append, Some(a), Some(t)) => Some(format!("{a}{sep}{t}")),
         (TagLabel::Prepend, Some(a), Some(t)) => Some(format!("{t}{sep}{a}")),
         (_, Some(n), None) | (_, None, Some(n)) => Some(n.to_string()),
-        (_, None, None) => None,
     };
     match numbers {
         Some(n) => format!("{n} {names}"),
