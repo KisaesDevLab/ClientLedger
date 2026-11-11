@@ -139,7 +139,8 @@ fn columns(
         // (PR6-QA-2); a change column has no drill at all.
         if balance
             && drill.is_none()
-            && let Some(fy) = text(c, "fiscalYearStart").and_then(|s| CalendarDate::parse_wire(s).ok())
+            && let Some(fy) =
+                text(c, "fiscalYearStart").and_then(|s| CalendarDate::parse_wire(s).ok())
         {
             drill = Some(ColumnDrill::IncomeFrom(fy));
         }
@@ -861,10 +862,8 @@ mod tests {
             .iter()
             .find(|r| r.kind == RowKind::Account && r.drill.is_some())
             .expect("account");
-        let Some(Drill::Lines { basis, to, .. }) = acct
-            .drill
-            .as_ref()
-            .and_then(|x| x.for_cell(&t.columns[1]))
+        let Some(Drill::Lines { basis, to, .. }) =
+            acct.drill.as_ref().and_then(|x| x.for_cell(&t.columns[1]))
         else {
             panic!("lines")
         };

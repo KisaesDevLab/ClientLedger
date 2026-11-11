@@ -273,15 +273,15 @@ fn vendors_below_the_1099_threshold_are_marked_not_hidden() {
         {"contactId": null, "name": "Older engine", "tinLast4": null,
          "boxes": {"NEC-1": "10.0000"}, "totalExact": "10.0000"}
     ]);
-    s["totalsExact"] = serde_json::json!({"NEC-1": "3360.0000", "MISC-2": "5.0000", "total": "3365.0000"});
+    s["totalsExact"] =
+        serde_json::json!({"NEC-1": "3360.0000", "MISC-2": "5.0000", "total": "3365.0000"});
     let t = list_run::adapt(&q4(Source::Vendor1099Summary), &s).expect("summary");
     let th = col(&t, "threshold");
     let by = |name: &str| {
         t.rows
             .iter()
             .find(|r| r.caption == name)
-            .map(|r| r.cells[th].clone())
-            .unwrap_or_else(|| panic!("{name} listed"))
+            .map_or_else(|| panic!("{name} listed"), |r| r.cells[th].clone())
     };
     assert_eq!(
         by("Below"),

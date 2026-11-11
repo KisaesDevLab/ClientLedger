@@ -1103,7 +1103,11 @@ pub fn vendor_1099_summary(v: &Value, req: &ReportRequest) -> Result<ReportTable
             Some(Value::Bool(false)) => {
                 let mut of = boxes
                     .iter()
-                    .filter(|b| e.get("boxes").and_then(|m| m.get(b.as_str())).is_some_and(|x| !x.is_null()))
+                    .filter(|b| {
+                        e.get("boxes")
+                            .and_then(|m| m.get(b.as_str()))
+                            .is_some_and(|x| !x.is_null())
+                    })
                     .map(|b| thresholds.get(b).copied());
                 let first = of.next().flatten();
                 match first {

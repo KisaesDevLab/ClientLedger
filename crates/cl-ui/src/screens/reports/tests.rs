@@ -581,7 +581,11 @@ fn wide_prior_amounts_fit_their_cells() {
         columns: vec![col("balance", ColumnKind::Amount)],
         rows: vec![
             row(RowKind::Account, "A/R", vec![Cell::Amount(dec("52385.98"))]),
-            row(RowKind::Total, "Total assets", vec![Cell::Amount(dec("2609.03"))]),
+            row(
+                RowKind::Total,
+                "Total assets",
+                vec![Cell::Amount(dec("2609.03"))],
+            ),
         ],
         meta: ReportMeta::default(),
     };
@@ -787,7 +791,11 @@ fn cash_drills_open_on_cash() {
         );
         if source == Source::TrialBalance {
             assert!(t.meta.note.is_some(), "the A/R-A/P note");
-            let d = t.meta.note_drill.clone().expect("the note links its entries");
+            let d = t
+                .meta
+                .note_drill
+                .clone()
+                .expect("the note links its entries");
             check(source, &d, "note");
         }
     }

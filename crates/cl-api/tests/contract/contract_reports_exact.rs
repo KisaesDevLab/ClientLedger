@@ -628,11 +628,13 @@ pub fn columns_drill_and_tag_split(h: &Harness) {
                     ..
                 } = &cd
                 {
-                    let mut r =
-                        ReportRequest::new(Source::ProfitLoss, ReportDates::Range(DateRange {
+                    let mut r = ReportRequest::new(
+                        Source::ProfitLoss,
+                        ReportDates::Range(DateRange {
                             from: *from,
                             to: *to,
-                        }));
+                        }),
+                    );
                     r.basis = *basis;
                     r.filters.adjusting = *adjusting;
                     let pl = run(h, s, &r);
