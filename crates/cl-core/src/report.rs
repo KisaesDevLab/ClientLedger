@@ -353,6 +353,10 @@ pub struct ReportRequest {
     pub fiscal_year_start: Option<CalendarDate>,
     /// The budget (Budget vs. Actual).
     pub budget_id: Option<String>,
+    /// Budget vs. Actual: the budget period (1..12) of the first range; the
+    /// ranges are whole fiscal periods of the budget's year (Q-P28n).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_period: Option<u8>,
 }
 
 impl ReportRequest {
@@ -369,6 +373,7 @@ impl ReportRequest {
             tag_split: None,
             fiscal_year_start: None,
             budget_id: None,
+            first_period: None,
         }
     }
 }

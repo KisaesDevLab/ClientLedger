@@ -1,4 +1,3 @@
 # The engine's reports-email-v1 keyed route set (U-207, P28): emailing a report file,
-# `x-idempotency: true` in its openapi.json. WP4 sends it through cl-api; until then this
-# file only pins the engine's mark. Append-only for this capability name.
+# `x-idempotency: true` in its openapi.json. cl-api sends it (KeySet::ReportsEmailV1). Append-only for this capability name.
 POST /api/v1/reports/email

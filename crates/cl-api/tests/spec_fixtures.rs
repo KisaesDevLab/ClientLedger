@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 15] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 17] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -299,6 +299,19 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 15] = [
         "keyable-report-defs",
         cl_api::KeySet::ReportDefsV1,
         4,
+    ),
+    // P28 WP4 (U-203, U-207): budget writes and report email.
+    (
+        "idempotency_budgets_v1_routes.txt",
+        "keyable-budgets",
+        cl_api::KeySet::BudgetsV1,
+        6,
+    ),
+    (
+        "idempotency_reports_email_v1_routes.txt",
+        "keyable-reports-email",
+        cl_api::KeySet::ReportsEmailV1,
+        1,
     ),
     // P25 (U-06): bank file import commit and undo, keyed under
     // bank-import-batch-v1; client-declared until the pin bump.

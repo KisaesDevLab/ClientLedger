@@ -578,6 +578,13 @@ impl Capabilities {
     pub const REPORTS_EXACT: &'static str = "reports-exact-v1";
     /// U-118 (PR-F): memorized reports, `kind:'standard'`.
     pub const REPORT_DEFS: &'static str = "report-defs-v1";
+    /// U-203 (PR-C): company-scoped, versioned, validated budgets and the
+    /// exact Budget vs. Actual.
+    pub const BUDGETS_EXACT: &'static str = "budgets-exact-v1";
+    /// U-207 (PR-E): `POST /reports/email`.
+    pub const REPORTS_EMAIL: &'static str = "reports-email-v1";
+    /// U-206 (PR-G): `POST /reports/ask`.
+    pub const REPORTS_ASK: &'static str = "reports-ask-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

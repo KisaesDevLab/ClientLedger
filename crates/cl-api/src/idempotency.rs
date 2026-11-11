@@ -316,6 +316,10 @@ pub(crate) struct Executor {
     /// The engine replays keys on memorized-report writes (`report-defs-v1`,
     /// U-118).
     report_defs_v1: AtomicBool,
+    /// Budget writes replay keys (`budgets-exact-v1`, U-203).
+    budgets_v1: AtomicBool,
+    /// Report email replays keys (`reports-email-v1`, U-207).
+    reports_email_v1: AtomicBool,
     bank_import_v1: AtomicBool,
     feed_v1: AtomicBool,
     feed_post_v1: AtomicBool,
@@ -388,6 +392,8 @@ impl Executor {
             idempotency_inventory_v1: AtomicBool::new(false),
             unit_sets_v1: AtomicBool::new(false),
             report_defs_v1: AtomicBool::new(false),
+            budgets_v1: AtomicBool::new(false),
+            reports_email_v1: AtomicBool::new(false),
             bank_import_v1: AtomicBool::new(false),
             feed_v1: AtomicBool::new(false),
             feed_post_v1: AtomicBool::new(false),
@@ -495,6 +501,16 @@ impl Executor {
         self.report_defs_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `budgets-exact-v1` (U-203).
+    pub(crate) fn set_budgets_v1(&self, on: bool) {
+        self.budgets_v1.store(on, Ordering::Relaxed);
+    }
+
+    /// Record whether the engine advertises `reports-email-v1` (U-207).
+    pub(crate) fn set_reports_email_v1(&self, on: bool) {
+        self.reports_email_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises `bank-import-batch-v1` (its
     /// import commit and undo replay keys; U-06, P25).
     pub(crate) fn set_bank_import_v1(&self, on: bool) {
@@ -552,6 +568,8 @@ impl Executor {
             KeySet::InventoryV1 => self.idempotency_inventory_v1.load(Ordering::Relaxed),
             KeySet::UnitSetsV1 => self.unit_sets_v1.load(Ordering::Relaxed),
             KeySet::ReportDefsV1 => self.report_defs_v1.load(Ordering::Relaxed),
+            KeySet::BudgetsV1 => self.budgets_v1.load(Ordering::Relaxed),
+            KeySet::ReportsEmailV1 => self.reports_email_v1.load(Ordering::Relaxed),
             KeySet::BankImportV1 => self.bank_import_v1.load(Ordering::Relaxed),
             KeySet::FeedV1 => self.feed_v1.load(Ordering::Relaxed),
             KeySet::FeedPostV1 => self.feed_post_v1.load(Ordering::Relaxed),

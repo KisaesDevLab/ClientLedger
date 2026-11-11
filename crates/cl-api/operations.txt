@@ -479,3 +479,15 @@ GET     /api/v1/reports/bank-balances           idempotent
 GET     /api/v1/reports/account-activity-summary idempotent
 GET     /api/v1/reports/closing-date-exceptions idempotent
 GET     /api/v1/duplicates                      idempotent
+GET     /api/v1/budgets                         idempotent
+POST    /api/v1/budgets                         keyable-budgets
+PUT     /api/v1/budgets/{id}                    keyable-budgets
+DELETE  /api/v1/budgets/{id}                    pre-handler-only
+GET     /api/v1/budgets/{id}/lines              idempotent
+PUT     /api/v1/budgets/{id}/lines              keyable-budgets
+POST    /api/v1/budgets/{id}/fill-from-actuals  keyable-budgets
+POST    /api/v1/budgets/{id}/copy-from/{sourceId} keyable-budgets
+POST    /api/v1/budgets/{id}/adjust-by-percent  keyable-budgets
+GET     /api/v1/budgets/{id}/vs-actual          idempotent
+POST    /api/v1/reports/email                   keyable-reports-email
+POST    /api/v1/reports/ask                     pre-handler-only

@@ -164,6 +164,10 @@ impl Client {
         self.exec()
             .set_report_defs_v1(info.capabilities.has(Capabilities::REPORT_DEFS));
         self.exec()
+            .set_budgets_v1(info.capabilities.has(Capabilities::BUDGETS_EXACT));
+        self.exec()
+            .set_reports_email_v1(info.capabilities.has(Capabilities::REPORTS_EMAIL));
+        self.exec()
             .set_bank_import_v1(info.capabilities.has(Capabilities::BANK_IMPORT_BATCH));
         self.exec()
             .set_feed_v1(info.capabilities.has(Capabilities::FEED_IDEMPOTENCY));

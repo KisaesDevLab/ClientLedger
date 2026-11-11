@@ -57,6 +57,8 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
             RetryClass::Keyable(KeySet::ReportDefsV1) => "keyable-report-defs",
+            RetryClass::Keyable(KeySet::BudgetsV1) => "keyable-budgets",
+            RetryClass::Keyable(KeySet::ReportsEmailV1) => "keyable-reports-email",
             RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
             RetryClass::Keyable(KeySet::FeedV1) => "keyable-feed",
             RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
@@ -141,6 +143,11 @@ pub enum KeySet {
     /// Keyed under `report-defs-v1` (U-118, P28) with `idempotency-v1`'s
     /// contract: creating and changing memorized reports and their groups.
     ReportDefsV1,
+    /// `budgets-exact-v1` (U-203, P28): budget create and change, lines,
+    /// fill from actuals, copy and adjust by percent.
+    BudgetsV1,
+    /// `reports-email-v1` (U-207, P28): emailing a report file.
+    ReportsEmailV1,
     /// `bank-import-batch-v1` (U-06, P25): a bank import commit (its
     /// preview on the same route takes no key, [`crate::client`] `no_key`)
     /// and undoing an import.
@@ -185,6 +192,8 @@ impl KeySet {
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
             KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
             KeySet::ReportDefsV1 => crate::wire::Capabilities::REPORT_DEFS,
+            KeySet::BudgetsV1 => crate::wire::Capabilities::BUDGETS_EXACT,
+            KeySet::ReportsEmailV1 => crate::wire::Capabilities::REPORTS_EMAIL,
             KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
             KeySet::FeedV1 => crate::wire::Capabilities::FEED_IDEMPOTENCY,
             KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
@@ -1755,6 +1764,59 @@ pub(crate) const REPORT_CLOSING_DATE_EXCEPTIONS: Operation =
     read("/api/v1/reports/closing-date-exceptions");
 /// The duplicate pairs scan (P28 WP3, Duplicate Finder).
 pub(crate) const DUPLICATES_SCAN: Operation = read("/api/v1/duplicates");
+// P28 WP4: budgets (U-203, `budgets-exact-v1`), report email (U-207,
+// `reports-email-v1`) and ask a question (U-206, `reports-ask-v1`).
+/// The company's budgets.
+pub(crate) const BUDGETS_LIST: Operation = read("/api/v1/budgets");
+/// Creates a budget for a fiscal year.
+pub(crate) const BUDGETS_CREATE: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Post, "/api/v1/budgets");
+/// Renames or changes a budget (`version`).
+pub(crate) const BUDGET_PUT: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Put, "/api/v1/budgets/{id}");
+/// Deletes a budget and its lines.
+pub(crate) const BUDGET_DELETE: Operation = write(Method::Delete, "/api/v1/budgets/{id}");
+/// A budget's lines with the engine's totals.
+pub(crate) const BUDGET_LINES: Operation = read("/api/v1/budgets/{id}/lines");
+/// Saves budget lines (`version`).
+pub(crate) const BUDGET_LINES_PUT: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Put, "/api/v1/budgets/{id}/lines");
+/// Fills a budget from last year's actuals.
+pub(crate) const BUDGET_FILL: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/fill-from-actuals",
+);
+/// Copies another budget's lines.
+pub(crate) const BUDGET_COPY: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/copy-from/{sourceId}",
+);
+/// Adjusts every cell by a percent.
+pub(crate) const BUDGET_ADJUST: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/adjust-by-percent",
+);
+/// Budget vs. Actual (`exact=1`).
+pub(crate) const BUDGET_VS_ACTUAL: Operation = read("/api/v1/budgets/{id}/vs-actual");
+/// Emails an exported report file through the company mail server.
+pub(crate) const REPORT_EMAIL: Operation = keyable_in(
+    KeySet::ReportsEmailV1,
+    Method::Post,
+    "/api/v1/reports/email",
+);
+/// Maps a question to a catalog report (changes nothing; not keyed; a
+/// model call can take a while, so the long class).
+pub(crate) const REPORT_ASK: Operation = op(
+    Method::Post,
+    "/api/v1/reports/ask",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1768,7 +1830,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 401] = [
+pub const OPERATIONS: [Operation; 413] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2187,6 +2249,18 @@ pub const OPERATIONS: [Operation; 401] = [
     REPORT_ACCOUNT_ACTIVITY_SUMMARY,
     REPORT_CLOSING_DATE_EXCEPTIONS,
     DUPLICATES_SCAN,
+    BUDGETS_LIST,
+    BUDGETS_CREATE,
+    BUDGET_PUT,
+    BUDGET_DELETE,
+    BUDGET_LINES,
+    BUDGET_LINES_PUT,
+    BUDGET_FILL,
+    BUDGET_COPY,
+    BUDGET_ADJUST,
+    BUDGET_VS_ACTUAL,
+    REPORT_EMAIL,
+    REPORT_ASK,
 ];
 
 /// Looks up a covered operation.
@@ -2302,6 +2376,10 @@ mod tests {
                 Some(KeySet::UnitSetsV1)
             } else if KEYABLE_REPORT_DEFS.contains(&route) {
                 Some(KeySet::ReportDefsV1)
+            } else if KEYABLE_BUDGETS.contains(&route) {
+                Some(KeySet::BudgetsV1)
+            } else if route == ("POST", "/api/v1/reports/email") {
+                Some(KeySet::ReportsEmailV1)
             } else if KEYABLE_BANK_IMPORT.contains(&route) {
                 Some(KeySet::BankImportV1)
             } else if KEYABLE_FEED.contains(&route) {
@@ -2352,10 +2430,11 @@ mod tests {
                 + KEYABLE_INVENTORY.len()
                 + KEYABLE_UNIT_SETS.len()
                 + KEYABLE_REPORT_DEFS.len()
+                + KEYABLE_BUDGETS.len()
                 + KEYABLE_BANK_IMPORT.len()
                 + KEYABLE_FEED.len()
                 + KEYABLE_FEED_POST.len()
-                + 2,
+                + 3,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2516,6 +2595,16 @@ mod tests {
     ];
 
     const KEYABLE_UNIT_SETS: [(&str, &str); 1] = [("POST", "/api/v1/unit-sets")];
+
+    /// `budgets-exact-v1` (U-203); `tests/fixtures/idempotency_budgets_v1_routes.txt`.
+    const KEYABLE_BUDGETS: [(&str, &str); 6] = [
+        ("POST", "/api/v1/budgets"),
+        ("POST", "/api/v1/budgets/{id}/adjust-by-percent"),
+        ("POST", "/api/v1/budgets/{id}/copy-from/{sourceId}"),
+        ("POST", "/api/v1/budgets/{id}/fill-from-actuals"),
+        ("PUT", "/api/v1/budgets/{id}"),
+        ("PUT", "/api/v1/budgets/{id}/lines"),
+    ];
 
     const KEYABLE_REPORT_DEFS: [(&str, &str); 4] = [
         ("POST", "/api/v1/report-builder/definitions"),

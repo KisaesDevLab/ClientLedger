@@ -64,6 +64,7 @@ pub const fn supported(source: Source) -> bool {
             | Source::Journal
             | Source::RevenueByCategory
             | Source::ExpenseByCategory
+            | Source::BudgetVsActual
     ) || list_family(source)
 }
 
@@ -134,6 +135,8 @@ fn list_capability(req: &ReportRequest, has: &impl Fn(&str) -> bool) -> Option<&
     need.iter().copied().find(|c| !has(c))
 }
 pub const EXACT: &str = crate::wire::Capabilities::REPORTS_EXACT;
+/// U-203: exact budgets and Budget vs. Actual.
+pub const BUDGETS: &str = crate::wire::Capabilities::BUDGETS_EXACT;
 /// U-201: period, YTD, prior and compare columns, tag split.
 pub const COLUMNS: &str = "reports-columns-v1";
 /// U-202: the GL drill filters (client, amount, cleared, types).
@@ -159,6 +162,9 @@ const fn exact_family(source: Source) -> bool {
 /// would ignore: PR-A answers `period_ranges` with the plain report.
 #[must_use]
 pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Option<&'static str> {
+    if req.source == Source::BudgetVsActual {
+        return (!has(BUDGETS)).then_some(BUDGETS);
+    }
     if list_family(req.source) {
         return list_capability(req, &has);
     }
@@ -418,6 +424,28 @@ pub fn adapt_exact(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportT
     }
 }
 
+/// The Budget vs. Actual query of `req`: its ranges are whole budget
+/// periods (a single range is one period).
+///
+/// # Errors
+/// `Local(BadRange)` without dates.
+pub fn bva_query(req: &ReportRequest) -> Result<super::budgets::BvaQuery, ApiError> {
+    let ranges = match &req.dates {
+        ReportDates::Ranges(v) => v.iter().map(|r| (r.from, r.to)).collect(),
+        ReportDates::Range(r) => vec![(r.from, r.to)],
+        ReportDates::AsOf(_) | ReportDates::None => {
+            return Err(ApiError::Local(LocalValidation::BadRange));
+        }
+    };
+    Ok(super::budgets::BvaQuery {
+        ranges,
+        first_period: req.first_period.unwrap_or(1),
+        basis: req.basis.map(cl_core::report::Basis::as_str),
+        adjusting: req.filters.adjusting.map(Adjusting::as_str),
+        tag_split: req.tag_split,
+    })
+}
+
 impl Reports<'_> {
     /// Runs `req` and returns its table.
     ///
@@ -427,6 +455,14 @@ impl Reports<'_> {
     /// route doesn't take; [`ApiError::ReportShape`] when the answer lacks
     /// its exact fields; any [`ApiError`].
     pub async fn run(&self, req: &ReportRequest) -> Result<ReportTable, ApiError> {
+        if req.source == Source::BudgetVsActual {
+            let id = req
+                .budget_id
+                .as_deref()
+                .ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
+            let v = self.0.budgets().vs_actual(id, &bva_query(req)?).await?;
+            return adapters::bva::table(&v, req);
+        }
         if let Some(op) = exact_operation(req.source) {
             let caps = self.0.client().capabilities();
             if missing_capability(req, |c| caps.has(c)).is_some() {
@@ -513,7 +549,13 @@ mod tests {
         assert!(supported(Source::GeneralLedger));
         assert!(supported(Source::InvoiceList), "WP3");
         assert!(supported(Source::ClosingDateExceptions), "WP3 (PR-E gated)");
-        assert!(!supported(Source::BudgetVsActual), "WP4");
+        assert!(supported(Source::BudgetVsActual), "WP4");
+        let bva = ReportRequest::new(Source::BudgetVsActual, ReportDates::Range(oct()));
+        assert_eq!(missing_capability(&bva, |c| c == EXACT), Some(BUDGETS));
+        assert_eq!(missing_capability(&bva, |c| c == BUDGETS), None);
+        let bq = bva_query(&bva).expect("q");
+        assert_eq!(bq.ranges.len(), 1);
+        assert_eq!(bq.first_period, 1);
         // PR-D and PR-E gate their lists.
         let r = ReportRequest::new(Source::UnpaidBills, ReportDates::AsOf(d(2026, 11, 30)));
         assert_eq!(missing_capability(&r, |c| c == EXACT), Some(AP_AGING));

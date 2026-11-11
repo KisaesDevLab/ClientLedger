@@ -9,6 +9,7 @@
 //! WP2 and WP3.
 
 pub mod ar_aging;
+pub mod bva;
 pub mod categories;
 pub mod columns;
 pub mod controls;

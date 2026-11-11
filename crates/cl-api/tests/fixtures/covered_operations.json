@@ -399,5 +399,17 @@
   {"method":"GET","path":"/api/v1/reports/bank-balances","inSpec":true,"fragmentHash":"becea71e90e1d26ee9b95c2d65507b77b5030fbc398e5b590a130473266c44d5"},
   {"method":"GET","path":"/api/v1/reports/account-activity-summary","inSpec":true,"fragmentHash":"7656ba0cfed0455de4539150969c89d1bec45adb509128c3995b563e5ea7e8d8"},
   {"method":"GET","path":"/api/v1/reports/closing-date-exceptions","inSpec":true,"fragmentHash":"3a5148e7008ee3acc11736bcfd081d3c47e2f4353ed7293ebf7569d83fe8215a"},
-  {"method":"GET","path":"/api/v1/duplicates","inSpec":true,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/duplicates","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/budgets","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/budgets","inSpec":true,"fragmentHash":"2a511f6959e66d2c342a85ee23006054e684fa4550643b75398345b639a81ada"},
+  {"method":"PUT","path":"/api/v1/budgets/{id}","inSpec":true,"fragmentHash":"05302d204229287850af1b1afde60b32dfac98c48ded522530f595e8c78b7191"},
+  {"method":"DELETE","path":"/api/v1/budgets/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"GET","path":"/api/v1/budgets/{id}/lines","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
+  {"method":"PUT","path":"/api/v1/budgets/{id}/lines","inSpec":true,"fragmentHash":"4e5181af962fc66ee05c6a94b6fd98eecc1981b7b91268a2601db600cbea2585"},
+  {"method":"POST","path":"/api/v1/budgets/{id}/fill-from-actuals","inSpec":true,"fragmentHash":"c0422fa2caa638e9104c10080b17c3cbcf750e5ad535f6a2e617986ae95ae9de"},
+  {"method":"POST","path":"/api/v1/budgets/{id}/copy-from/{sourceId}","inSpec":true,"fragmentHash":"53b2f796925fa274c956eb801814ee436b3317fa2235b4bc6c1fa45a616ed5e3"},
+  {"method":"POST","path":"/api/v1/budgets/{id}/adjust-by-percent","inSpec":true,"fragmentHash":"7f82ff357fe843532064269ba873daf6cc49d4a34eee76136b36ffed3bb301f0"},
+  {"method":"GET","path":"/api/v1/budgets/{id}/vs-actual","inSpec":true,"fragmentHash":"a308a2199f40852a4e1ab493d4ef1111ba84737a1be3123f21df104c866501fa"},
+  {"method":"POST","path":"/api/v1/reports/email","inSpec":true,"fragmentHash":"254bcec1125d2087bfcaf35db39d3a167b0ad4a60c5251a813467a01351cbd74"},
+  {"method":"POST","path":"/api/v1/reports/ask","inSpec":true,"fragmentHash":"18e329f3d46ad78f9c7b8000a962479fbc55a3567eeccdcd7c7817945ea771ce"}
 ]
