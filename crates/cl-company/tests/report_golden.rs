@@ -38,7 +38,7 @@ use cl_api::{
 use cl_company::report_story::{Posted, ReportStory};
 use cl_company::sample::Sample;
 use cl_core::fiscal::FiscalYearSpec;
-use cl_core::report::{Basis, Cell, Drill, ReportRequest, ReportTable, RowKind, TagScope};
+use cl_core::report::{Basis, Cell, Drill, ReportRequest, ReportTable, RowKind};
 use cl_core::{CalendarDate, Secret};
 use cl_host::{AdminAccount, HostConfig, HostState, Supervisor};
 use cl_model::reports::{DateChoice, ReportOptions, find, resolve};
@@ -436,13 +436,8 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
     };
     o.basis = *basis;
     o.filters.adjusting = *adjusting;
-    match tag {
-        TagScope::Tag(t) => o.filters.tag_ids = vec![*t],
-        TagScope::UntaggedInGroup(g) => o.filters.untagged_in_group = Some(*g),
-        TagScope::Any => {}
-        TagScope::Untagged => panic!("no filter names lines without any tag"),
-    }
-    o.filters.contact_ids = contact.iter().copied().collect();
+    o.filters.set_tag_scope(*tag);
+    o.filters.set_contact_scope(contact);
     let key = format!(
         "{:?}",
         (
@@ -451,7 +446,10 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
             o.filters.adjusting,
             &o.filters.tag_ids,
             o.filters.untagged_in_group,
-            &o.filters.contact_ids
+            o.filters.untagged,
+            &o.filters.contact_ids,
+            o.filters.no_contact,
+            &o.filters.other_contacts_than
         )
     );
     let cached = LEDGERS.lock().expect("cache").get(&key).cloned();

@@ -213,7 +213,10 @@ pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Op
         || f.amount_max.is_some()
         || f.cleared.is_some()
         || !f.txn_types.is_empty()
-        || f.untagged_in_group.is_some();
+        || f.untagged_in_group.is_some()
+        || f.no_contact
+        || f.other_contacts_than.is_some()
+        || f.untagged;
     match req.source {
         Source::GeneralLedger if drill_filters && !has(DRILL) => Some(DRILL),
         // The Journal is U-202's.
@@ -297,7 +300,10 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     {
         push("adjusting", a.as_str().to_string());
     }
-    if !f.tag_ids.is_empty() {
+    if f.untagged && matches!(req.source, Source::GeneralLedger | Source::Journal) {
+        // Lines with no tag at all (an untagged column's cell, S6).
+        push("tag_id", "untagged".into());
+    } else if !f.tag_ids.is_empty() {
         push("tag_id", join(&f.tag_ids));
     }
     if matches!(
@@ -327,8 +333,17 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     }
     if matches!(req.source, Source::GeneralLedger | Source::Journal) {
         push("limit", adapters::ledger::SCREEN_LIMIT.to_string());
-        if let Some(c) = f.contact_ids.first() {
-            push("contact_id", c.to_string());
+        // Every client chosen (S4: Ask can name several), or the "No
+        // client" / "All others" cells' selectors (S6).
+        if f.no_contact {
+            push("contact_id", "none".into());
+        } else if let Some(shown) = &f.other_contacts_than {
+            push("contact_id", "others".into());
+            if !shown.is_empty() {
+                push("exclude_contact_ids", join(shown));
+            }
+        } else if !f.contact_ids.is_empty() {
+            push("contact_id", join(&f.contact_ids));
         }
         if let Some(a) = f.amount_min {
             push("amount_min", a.to_string());
@@ -489,7 +504,28 @@ impl Reports<'_> {
             call.query = exact_query(req)?;
             let reply = self.0.send(op, call, None).await?;
             let v: serde_json::Value = crate::session::decode(&reply, "report")?;
-            return adapt_exact(req, &v);
+            let mut table = adapt_exact(req, &v)?;
+            if adapters::statements::wants_roles(req, &v) {
+                // One chart read (balance accounts only); a failed read
+                // leaves the equity rows without drills and no note.
+                let filter = crate::resources::accounts::AccountFilter {
+                    types: vec![
+                        crate::resources::accounts::AccountType::Asset,
+                        crate::resources::accounts::AccountType::Liability,
+                        crate::resources::accounts::AccountType::Equity,
+                    ],
+                    ..Default::default()
+                };
+                let roles = self
+                    .0
+                    .accounts()
+                    .list_all(&filter)
+                    .await
+                    .ok()
+                    .map(|a| adapters::statements::AccountRoles::of(&a));
+                adapters::statements::finish_balances(req, &v, &mut table, roles.as_ref());
+            }
+            return Ok(table);
         }
         if let Some(op) = super::list_run::operation(req.source) {
             let caps = self.0.client().capabilities();
@@ -701,6 +737,27 @@ mod tests {
         let bq = q(&b);
         assert!(bq.contains(&"as_of_date=2026-11-15".to_string()));
         assert!(bq.contains(&"prior_ranges=2026-09-01..2026-09-30".to_string()));
+        // S4/T8: every client Ask chose; S6: "No client", "All others"
+        // and untagged cells use the engine's selectors.
+        let c1: cl_core::ids::ContactId =
+            "11111111-1111-4111-8111-111111111111".parse().expect("id");
+        let c2: cl_core::ids::ContactId =
+            "22222222-2222-4222-8222-222222222222".parse().expect("id");
+        let mut gl = ReportRequest::new(Source::GeneralLedger, ReportDates::Range(oct()));
+        gl.filters.contact_ids = vec![c1, c2];
+        assert!(q(&gl).contains(&format!("contact_id={c1},{c2}")));
+        gl.filters.contact_ids.clear();
+        gl.filters.no_contact = true;
+        assert!(q(&gl).contains(&"contact_id=none".to_string()));
+        assert_eq!(missing_capability(&gl, |c| c == EXACT), Some(DRILL));
+        gl.filters.no_contact = false;
+        gl.filters.other_contacts_than = Some(vec![c1]);
+        let oq = q(&gl);
+        assert!(oq.contains(&"contact_id=others".to_string()));
+        assert!(oq.contains(&format!("exclude_contact_ids={c1}")));
+        gl.filters.other_contacts_than = None;
+        gl.filters.untagged = true;
+        assert!(q(&gl).contains(&"tag_id=untagged".to_string()));
         // A count that doesn't match the columns is not sent.
         p.dates = ReportDates::Ranges(vec![oct(), oct()]);
         assert!(!q(&p).iter().any(|s| s.starts_with("prior_ranges")));

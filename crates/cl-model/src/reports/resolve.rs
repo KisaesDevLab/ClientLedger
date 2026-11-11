@@ -143,6 +143,13 @@ pub fn resolve(
         None
     };
     let f = &opts.filters;
+    // A memorized report from before Q-PR6b may carry a tag on the Balance
+    // Sheet or Trial Balance: the report doesn't take one any more.
+    let tags = spec.filters.contains(&super::spec::FilterKind::Tags)
+        || !matches!(
+            spec.source,
+            cl_core::report::Source::BalanceSheet | cl_core::report::Source::TrialBalance
+        );
     let amount = |s: &Option<String>| -> Result<_, ResolveError> {
         s.as_deref()
             .map(|s| {
@@ -166,7 +173,7 @@ pub fn resolve(
     req.filters = ReportFilters {
         account_ids: f.account_ids.clone(),
         contact_ids: f.contact_ids.clone(),
-        tag_ids: f.tag_ids.clone(),
+        tag_ids: if tags { f.tag_ids.clone() } else { Vec::new() },
         item_ids: f.item_ids.clone(),
         amount_min,
         amount_max,
@@ -178,6 +185,8 @@ pub fn resolve(
             .bucket
             .filter(|b| *b != cl_core::report::AgingBucket::Total),
         no_contact: f.no_contact,
+        other_contacts_than: f.other_contacts_than.clone(),
+        untagged: f.untagged,
     };
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;
@@ -873,5 +882,32 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![d(2025, 12, 31), d(2026, 1, 31), d(2026, 2, 28)]
         );
+    }
+
+    /// PR-6 S2 (Q-PR6b): the Balance Sheet and Trial Balance take no tag
+    /// filter, even from a memorized report saved before.
+    #[test]
+    fn balance_reports_take_no_tag() {
+        let tag: cl_core::ids::TagId = "33333333-3333-4333-8333-333333333333".parse().expect("t");
+        for key in [
+            "balance_sheet",
+            "balance_sheet_comparative",
+            "trial_balance",
+        ] {
+            let spec = find(key).expect("spec");
+            assert!(
+                !spec.filters.contains(&crate::reports::FilterKind::Tags),
+                "{key}"
+            );
+            let mut o = ReportOptions::for_spec(spec);
+            o.filters.tag_ids = vec![tag];
+            let r = resolve(spec, &o, &CAL, d(2026, 11, 4)).expect("resolve");
+            assert!(r.filters.tag_ids.is_empty(), "{key}");
+        }
+        let pl = find("profit_loss").expect("p&l");
+        let mut o = ReportOptions::for_spec(pl);
+        o.filters.tag_ids = vec![tag];
+        let r = resolve(pl, &o, &CAL, d(2026, 11, 4)).expect("resolve");
+        assert_eq!(r.filters.tag_ids, vec![tag]);
     }
 }

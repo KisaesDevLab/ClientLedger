@@ -227,6 +227,17 @@ pub fn options_for(c: &AskChoice) -> Option<(&'static ReportSpec, ReportOptions)
         }
         o.extras.insert(e);
     }
+    // A filter the report doesn't take is a mapping to refuse, never one
+    // to drop silently (PR-6 S2/S4).
+    for (set, kind) in [
+        (!c.account_ids.is_empty(), FilterKind::Accounts),
+        (!c.contact_ids.is_empty(), FilterKind::Contacts),
+        (!c.tag_ids.is_empty(), FilterKind::Tags),
+    ] {
+        if set && !spec.filters.contains(&kind) {
+            return None;
+        }
+    }
     o.filters.account_ids.clone_from(&c.account_ids);
     o.filters.contact_ids.clone_from(&c.contact_ids);
     o.filters.tag_ids.clone_from(&c.tag_ids);
@@ -325,9 +336,7 @@ mod tests {
             basis: Some(Basis::Cash),
             columns: Some("month".into()),
             extras: vec!["pct_of_income".into()],
-            account_ids: vec![
-                AccountId::parse("11111111-1111-4111-8111-111111111111").expect("id"),
-            ],
+            account_ids: vec![],
             contact_ids: vec![],
             tag_ids: vec![],
         }
@@ -361,6 +370,34 @@ mod tests {
             "needs a budget"
         );
         assert!(options_for(&choice("not_a_report")).is_none());
+    }
+
+    /// PR-6 S2/S4/T8: a filter the report doesn't take is refused, never
+    /// dropped; the ledgers keep every client named.
+    #[test]
+    fn filters_the_report_doesnt_take_are_refused() {
+        let acct = AccountId::parse("11111111-1111-4111-8111-111111111111").expect("id");
+        let tag = TagId::parse("33333333-3333-4333-8333-333333333333").expect("t");
+        let mut pl = choice("profit_loss");
+        pl.account_ids = vec![acct];
+        assert!(options_for(&pl).is_none(), "the P&L takes no account");
+        for key in ["balance_sheet", "trial_balance"] {
+            let mut c = choice(key);
+            c.columns = None;
+            c.extras.clear();
+            assert!(options_for(&c).is_some(), "{key}");
+            c.tag_ids = vec![tag];
+            assert!(options_for(&c).is_none(), "{key} takes no tag (Q-PR6b)");
+        }
+        let mut gl = choice("transaction_detail_by_account");
+        gl.columns = None;
+        gl.extras.clear();
+        gl.contact_ids = vec![
+            ContactId::parse("44444444-4444-4444-8444-444444444444").expect("c"),
+            ContactId::parse("55555555-5555-4555-8555-555555555555").expect("c"),
+        ];
+        let (_, o) = options_for(&gl).expect("ledger");
+        assert_eq!(o.filters.contact_ids.len(), 2, "both clients");
     }
 
     /// Every run of digits in the line.

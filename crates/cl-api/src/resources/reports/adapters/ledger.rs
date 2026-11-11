@@ -218,7 +218,7 @@ fn split_rows(
             account_ids: vec![acc],
             from: Some(range.from),
             to: range.to,
-            contact: None,
+            contact: cl_core::report::ContactScope::Any,
             tag,
             basis: req.basis,
             adjusting: req.filters.adjusting,

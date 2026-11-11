@@ -166,7 +166,7 @@ impl Builder<'_> {
             account_ids: ids,
             from: Some(self.from),
             to: self.to,
-            contact: None,
+            contact: cl_core::report::ContactScope::Any,
             tag,
             basis: self.req.basis,
             adjusting: self.req.filters.adjusting,

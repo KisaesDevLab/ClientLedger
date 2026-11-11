@@ -9,8 +9,8 @@
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TagId};
 use cl_core::report::{
-    Cell, ColumnHead, ColumnKind, DateRange, Drill, ReportMeta, ReportRequest, ReportRow,
-    ReportTable, RowKind, RowPath, TagScope,
+    Basis, Cell, ColumnHead, ColumnKind, DateRange, Drill, ReportMeta, ReportRequest, ReportRow,
+    ReportTable, RowKind, RowPath, Source, TagScope,
 };
 use serde_json::Value;
 
@@ -46,7 +46,7 @@ pub(crate) fn lines(
         account_ids: ids,
         from,
         to,
-        contact: None,
+        contact: cl_core::report::ContactScope::Any,
         tag: drill_tag(req)?,
         basis: req.basis,
         adjusting: req.filters.adjusting,
@@ -330,11 +330,24 @@ const BS_NET_INCOME: &str = "Net Income (Current Year)";
 /// account.
 const BS_RETAINED: &str = "Retained Earnings (Prior Years)";
 
-/// The fiscal year's first day for `to` (the request's, or January 1).
+/// The row flag of a Retained Earnings line that includes the prior
+/// years' income (the column layout's; the classic layout's with U-213).
+pub const PRIOR_INCOME_FLAG: &str = "includesPriorYearsIncome";
+
+/// The day the engine starts the fiscal year containing `to`: the request's
+/// start on a calendar-month year; on a 4-4-5 or 52-53 week year (which
+/// starts a few days off a month) the nearest first of a month, since the
+/// engine splits balance reports at its fiscal start month (S1, U-25).
 fn year_start(req: &ReportRequest, to: CalendarDate) -> CalendarDate {
-    req.fiscal_year_start
+    let start = req
+        .fiscal_year_start
         .or_else(|| CalendarDate::from_ymd(to.year(), 1, 1).ok())
-        .unwrap_or(to)
+        .unwrap_or(to);
+    match start.day() {
+        1 => start,
+        d if d <= 15 => start.start_of_month(),
+        _ => start.end_of_month().add_days(1).unwrap_or(start).min(to),
+    }
 }
 
 /// Balance Sheet as of `as_of`, one balance column.
@@ -392,20 +405,41 @@ pub fn balance_sheet(
             ids: Vec::new(),
         };
         s.entries(entries, &bs_named)?;
-        // The current year's net income opens the fiscal year-to-date P&L;
-        // the prior years' row has no drill.
+        // The current year's net income opens the fiscal year-to-date P&L
+        // with the sheet's basis, lens and tags (S3); the prior years' row
+        // has no drill.
         for r in &mut s.rows {
             if r.caption == "@reports.bs.net_income" {
                 r.drill = Some(Drill::ProfitLoss {
                     from: fy,
                     to: as_of,
                     basis: req.basis,
+                    adjusting: req.filters.adjusting,
+                    tag_ids: req.filters.tag_ids.clone(),
                 });
             }
         }
+        // B2: the Retained Earnings account's line also carries the prior
+        // years' income, which no ledger line holds (U-213 flags it).
+        let folded: Vec<String> = entries
+            .iter()
+            .filter(|e| e.get(PRIOR_INCOME_FLAG) == Some(&Value::Bool(true)))
+            .filter_map(|e| text(e, "accountId").map(str::to_string))
+            .collect();
+        for r in &mut s.rows {
+            if r.path.0.last().is_some_and(|k| folded.contains(k)) {
+                r.drill = None;
+            }
+        }
+        // A section total drills only when its ledger sums to it: equity
+        // with a calculated row (net income, prior years) or a folded
+        // Retained Earnings line has no drill.
+        let calculated = entries
+            .iter()
+            .any(|e| e.get("accountId").is_none_or(Value::is_null));
         rows.push(header(key, title));
         rows.append(&mut s.rows);
-        let drill = if s.ids.len() <= MAX_DRILL_ACCOUNTS {
+        let drill = if s.ids.len() <= MAX_DRILL_ACCOUNTS && !calculated && folded.is_empty() {
             lines(req, s.ids, None, as_of)
         } else {
             None
@@ -439,6 +473,120 @@ pub fn balance_sheet(
     })
 }
 
+/// The accounts a balance report needs to know by role: the designated
+/// Retained Earnings account (B2) and A/R and A/P (S5).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccountRoles {
+    /// The Retained Earnings account (`system_tag = retained_earnings`).
+    pub retained_earnings: Option<AccountId>,
+    /// Accounts receivable and payable accounts.
+    pub receivable_payable: Vec<AccountId>,
+}
+
+impl AccountRoles {
+    /// The roles in a chart of accounts.
+    #[must_use]
+    pub fn of(accounts: &[crate::resources::accounts::Account]) -> AccountRoles {
+        let role = |a: &crate::resources::accounts::Account, r: &str| {
+            a.system_tag.as_deref() == Some(r) || a.fields.detail_type.as_deref() == Some(r)
+        };
+        AccountRoles {
+            retained_earnings: accounts
+                .iter()
+                .find(|a| a.system_tag.as_deref() == Some("retained_earnings"))
+                .map(|a| a.id),
+            receivable_payable: accounts
+                .iter()
+                .filter(|a| role(a, "accounts_receivable") || role(a, "accounts_payable"))
+                .map(|a| a.id)
+                .collect(),
+        }
+    }
+}
+
+/// True when [`finish_balances`] needs the chart's roles: a classic
+/// Balance Sheet from an engine that doesn't flag the folded Retained
+/// Earnings line, or a cash-basis Balance Sheet or Trial Balance.
+#[must_use]
+pub fn wants_roles(req: &ReportRequest, v: &Value) -> bool {
+    let unflagged_sheet = req.source == Source::BalanceSheet
+        && !super::columns::is_columns(v)
+        && !v
+            .get("equity")
+            .and_then(Value::as_array)
+            .is_some_and(|e| e.iter().any(|e| e.get(PRIOR_INCOME_FLAG).is_some()));
+    let cash_balances = req.basis == Some(Basis::Cash)
+        && matches!(req.source, Source::BalanceSheet | Source::TrialBalance);
+    unflagged_sheet || cash_balances
+}
+
+/// The note on a cash-basis report that shows an A/R or A/P balance (S5,
+/// Q-SPF7).
+pub const CASH_AR_AP_NOTE: &str = "@reports.note.cash_ar_ap";
+
+/// What only the chart's roles tell (`roles` is `None` when they couldn't
+/// be read):
+/// - B2: on an engine that doesn't flag it, the Retained Earnings line of
+///   a classic Balance Sheet may carry the prior years' income, which no
+///   ledger holds: it and the equity total have no drill (unknown roles:
+///   no equity row drills).
+/// - S5: a cash-basis Balance Sheet or Trial Balance with an A/R or A/P
+///   balance says why in one line.
+pub fn finish_balances(
+    req: &ReportRequest,
+    v: &Value,
+    table: &mut ReportTable,
+    roles: Option<&AccountRoles>,
+) {
+    if req.source == Source::BalanceSheet && wants_roles(req, v) && !super::columns::is_columns(v) {
+        let flagged = v
+            .get("equity")
+            .and_then(Value::as_array)
+            .is_some_and(|e| e.iter().any(|e| e.get(PRIOR_INCOME_FLAG).is_some()));
+        if !flagged {
+            let re = roles.map(|r| r.retained_earnings.map(|a| a.to_string()));
+            let mut cleared = false;
+            for r in &mut table.rows {
+                let equity = r.path.0.first().is_some_and(|p| p == "equity");
+                let hit = match &re {
+                    Some(Some(id)) => r.path.0.last() == Some(id),
+                    Some(None) => false,
+                    None => r.kind == RowKind::Account || r.kind == RowKind::AccountTotal,
+                };
+                if equity && hit && r.drill.is_some() {
+                    r.drill = None;
+                    cleared = true;
+                }
+            }
+            if cleared {
+                for r in &mut table.rows {
+                    if r.path.0.first().is_some_and(|p| p == "equity~total") {
+                        r.drill = None;
+                    }
+                }
+            }
+        }
+    }
+    if req.basis == Some(Basis::Cash)
+        && matches!(req.source, Source::BalanceSheet | Source::TrialBalance)
+        && let Some(roles) = roles
+    {
+        let shown = table.rows.iter().any(|r| {
+            r.kind == RowKind::Account
+                && r.path
+                    .0
+                    .last()
+                    .is_some_and(|k| roles.receivable_payable.iter().any(|a| a.to_string() == *k))
+                && r.cells
+                    .iter()
+                    .any(|c| matches!(c, Cell::Amount(x) if !x.is_zero()))
+        });
+        if shown {
+            table.meta.note = Some(CASH_AR_AP_NOTE.to_string());
+        }
+    }
+}
+
 /// Account types whose balance restarts each fiscal year.
 fn is_pl_type(t: Option<&str>) -> bool {
     matches!(
@@ -459,7 +607,13 @@ pub fn trial_balance(
     as_of: CalendarDate,
 ) -> Result<ReportTable, ApiError> {
     require_exact(v)?;
-    let fy = year_start(req, as_of);
+    // The engine says where its income window starts (S1).
+    let fy = v
+        .pointer("/drillTarget/startDate")
+        .and_then(Value::as_str)
+        .and_then(|s| CalendarDate::parse_wire(s).ok())
+        .filter(|d| *d <= as_of)
+        .unwrap_or_else(|| year_start(req, as_of));
     let range = DateRange {
         from: fy,
         to: as_of,
@@ -703,7 +857,9 @@ mod tests {
             Some(Drill::ProfitLoss {
                 from: d(2033, 1, 1),
                 to: as_of,
-                basis: Some(Basis::Accrual)
+                basis: Some(Basis::Accrual),
+                adjusting: None,
+                tag_ids: Vec::new(),
             })
         );
         let bank = t
@@ -752,5 +908,131 @@ mod tests {
             })
             .collect();
         assert!(froms.contains(&None) && froms.contains(&Some(d(2033, 1, 1))));
+    }
+
+    const RE: &str = "4e1d0d2b-0000-4000-8000-000000000001";
+
+    fn sheet_with_retained(net_income: bool, flag: Option<bool>) -> Value {
+        let mut v = fixture("exact_balance_sheet_accrual");
+        let mut re = serde_json::json!({"accountId": RE, "accountNumber": "30120",
+            "balance": 10, "balanceExact": "10.0000", "depth": 0,
+            "name": "Retained Earnings", "parentAccountId": null});
+        if let Some(f) = flag {
+            re[PRIOR_INCOME_FLAG] = Value::Bool(f);
+        }
+        let eq = v["equity"].as_array_mut().expect("equity");
+        if !net_income {
+            eq.clear();
+        }
+        eq.push(re);
+        v
+    }
+
+    fn row<'t>(t: &'t ReportTable, last: &str) -> &'t ReportRow {
+        t.rows
+            .iter()
+            .find(|r| r.path.0.last().is_some_and(|k| k == last))
+            .unwrap_or_else(|| panic!("{last}"))
+    }
+
+    /// B2/T3: an equity amount drills only to a ledger that sums to it.
+    #[test]
+    fn equity_drills_only_where_the_ledger_sums() {
+        let as_of = d(2033, 3, 31);
+        let r = req(Source::BalanceSheet, ReportDates::AsOf(as_of));
+        // A calculated net income row: the equity total has no drill.
+        let v = sheet_with_retained(true, None);
+        let mut t = balance_sheet(&v, &r, as_of).expect("bs");
+        assert!(row(&t, "equity~total").drill.is_none());
+        // The pinned engine doesn't flag the Retained Earnings line: the
+        // chart's role decides.
+        assert!(wants_roles(&r, &v));
+        let roles = AccountRoles {
+            retained_earnings: Some(AccountId::parse(RE).expect("id")),
+            receivable_payable: Vec::new(),
+        };
+        finish_balances(&r, &v, &mut t, Some(&roles));
+        assert!(row(&t, RE).drill.is_none(), "prior income has no ledger");
+        // Unknown roles: no equity row drills.
+        let v = sheet_with_retained(false, None);
+        let mut t = balance_sheet(&v, &r, as_of).expect("bs");
+        assert!(row(&t, "equity~total").drill.is_some(), "only ledger rows");
+        finish_balances(&r, &v, &mut t, None);
+        assert!(row(&t, RE).drill.is_none());
+        assert!(row(&t, "equity~total").drill.is_none());
+        // Another account is the Retained Earnings one: this line drills.
+        let mut t = balance_sheet(&v, &r, as_of).expect("bs");
+        let other = AccountRoles {
+            retained_earnings: Some(
+                AccountId::parse("4e1d0d2b-0000-4000-8000-000000000002").expect("id"),
+            ),
+            receivable_payable: Vec::new(),
+        };
+        finish_balances(&r, &v, &mut t, Some(&other));
+        assert!(row(&t, RE).drill.is_some());
+        assert!(row(&t, "equity~total").drill.is_some());
+        // U-213's flag: the engine says so, no chart read.
+        let v = sheet_with_retained(false, Some(true));
+        let t = balance_sheet(&v, &r, as_of).expect("bs");
+        assert!(!wants_roles(&r, &v));
+        assert!(row(&t, RE).drill.is_none());
+        assert!(row(&t, "equity~total").drill.is_none());
+        let v = sheet_with_retained(false, Some(false));
+        let t = balance_sheet(&v, &r, as_of).expect("bs");
+        assert!(row(&t, RE).drill.is_some());
+    }
+
+    /// S5/T10: a cash-basis sheet with an A/R or A/P balance says why.
+    #[test]
+    fn a_cash_basis_ar_or_ap_balance_carries_a_note() {
+        let as_of = d(2033, 3, 31);
+        let mut r = req(Source::BalanceSheet, ReportDates::AsOf(as_of));
+        r.basis = Some(Basis::Cash);
+        let v = fixture("exact_balance_sheet_accrual");
+        let owed = v["liabilities"][0]["accountId"]
+            .as_str()
+            .and_then(|s| AccountId::parse(s).ok())
+            .expect("id");
+        let mut t = balance_sheet(&v, &r, as_of).expect("bs");
+        assert!(wants_roles(&r, &v));
+        finish_balances(&r, &v, &mut t, Some(&AccountRoles::default()));
+        assert_eq!(t.meta.note, None, "no A/R or A/P balance");
+        let roles = AccountRoles {
+            retained_earnings: None,
+            receivable_payable: vec![owed],
+        };
+        finish_balances(&r, &v, &mut t, Some(&roles));
+        assert_eq!(t.meta.note.as_deref(), Some(CASH_AR_AP_NOTE));
+        // Accrual: never.
+        r.basis = Some(Basis::Accrual);
+        let mut t = balance_sheet(&v, &r, as_of).expect("bs");
+        finish_balances(&r, &v, &mut t, Some(&roles));
+        assert_eq!(t.meta.note, None);
+    }
+
+    /// S1: the Trial Balance drills from the engine's year start.
+    #[test]
+    fn trial_balance_drills_from_the_engine_s_year_start() {
+        let as_of = d(2033, 3, 31);
+        let mut r = req(Source::TrialBalance, ReportDates::AsOf(as_of));
+        // A 4-4-5 year that starts on Dec 26 (the desktop's calendar).
+        r.fiscal_year_start = Some(d(2032, 12, 26));
+        let mut v = fixture("exact_trial_balance_accrual");
+        let t = trial_balance(&v, &r, as_of).expect("tb");
+        let froms: Vec<_> = t
+            .rows
+            .iter()
+            .filter_map(|r| match &r.drill {
+                Some(Drill::Lines { from: Some(f), .. }) => Some(*f),
+                _ => None,
+            })
+            .collect();
+        assert!(froms.iter().all(|f| *f == d(2033, 1, 1)), "{froms:?}");
+        v["drillTarget"] = serde_json::json!({"startDate": "2033-02-01"});
+        let t = trial_balance(&v, &r, as_of).expect("tb");
+        assert!(t.rows.iter().any(|r| matches!(
+            &r.drill,
+            Some(Drill::Lines { from: Some(f), .. }) if *f == d(2033, 2, 1)
+        )));
     }
 }

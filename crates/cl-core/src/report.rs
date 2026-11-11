@@ -329,6 +329,13 @@ pub struct ReportFilters {
     /// Only rows without a contact (the aging's "(no client)" row).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_contact: bool,
+    /// Lines of every client but these (a client column's "All others"
+    /// cell, S6; the ledgers' `contact_id=others`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_contacts_than: Option<Vec<ContactId>>,
+    /// Lines with no tag at all (an untagged column's cell, S6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub untagged: bool,
 }
 
 /// What one report run asks of the engine: the resolved, concrete form of
@@ -481,12 +488,28 @@ pub struct ColumnHead {
     pub drill: Option<ColumnDrill>,
 }
 
+/// Which clients' lines a drill opens (S6: the engine's `contact_id`
+/// selectors).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContactScope {
+    /// Any client or none.
+    #[default]
+    Any,
+    /// One client's lines.
+    One(ContactId),
+    /// Lines with no client ("No client").
+    NoContact,
+    /// Lines of every client but these ("All others").
+    Others(Vec<ContactId>),
+}
+
 /// A column's part of a cell's drill.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnDrill {
-    /// The lines of one client.
-    Contact(ContactId),
+    /// The lines of a client column ("No client" and "All others" too).
+    Contact(ContactScope),
     /// The lines of one tag, or without a tag of a group.
     Tag(TagScope),
     /// The column's cells have no lines behind them (a change, "All
@@ -641,8 +664,9 @@ pub enum Drill {
         from: Option<CalendarDate>,
         /// Last day.
         to: CalendarDate,
-        /// One client (a client column).
-        contact: Option<ContactId>,
+        /// The client column's clients.
+        #[serde(default)]
+        contact: ContactScope,
         /// The tag scope (tag split rows).
         tag: TagScope,
         /// The report's basis.
@@ -675,6 +699,12 @@ pub enum Drill {
         to: CalendarDate,
         /// The basis the sheet ran on.
         basis: Option<Basis>,
+        /// The sheet's adjusting lens (S3).
+        #[serde(default)]
+        adjusting: Option<Adjusting>,
+        /// The sheet's tag filter (S3).
+        #[serde(default)]
+        tag_ids: Vec<TagId>,
     },
 }
 
@@ -685,15 +715,15 @@ impl Drill {
     #[must_use]
     pub fn for_cell(&self, column: &ColumnHead) -> Option<Drill> {
         let mut d = self.at(column);
-        match (column.drill, &mut d) {
+        match (&column.drill, &mut d) {
             (Some(ColumnDrill::None), _) => return None,
-            (Some(ColumnDrill::Contact(c)), Drill::Lines { contact, .. }) => *contact = Some(c),
+            (Some(ColumnDrill::Contact(c)), Drill::Lines { contact, .. }) => *contact = c.clone(),
             (Some(ColumnDrill::Tag(t)), Drill::Lines { tag, .. }) => {
                 // A row already scoped to a tag can't take a second one.
                 if *tag != TagScope::Any {
                     return None;
                 }
-                *tag = t;
+                *tag = *t;
             }
             _ => {}
         }
@@ -720,7 +750,7 @@ impl Drill {
                 account_ids: account_ids.clone(),
                 from: from.map(|_| r.from),
                 to: r.to,
-                contact: *contact,
+                contact: contact.clone(),
                 tag: *tag,
                 basis: *basis,
                 adjusting: *adjusting,
@@ -1069,7 +1099,7 @@ mod tests {
             account_ids: vec![],
             from: Some(day(2026, 1, 1)),
             to: day(2026, 10, 31),
-            contact: None,
+            contact: ContactScope::Any,
             tag: TagScope::Any,
             basis: Some(Basis::Accrual),
             adjusting: None,
@@ -1087,7 +1117,7 @@ mod tests {
             account_ids: vec![],
             from: None,
             to: day(2026, 10, 31),
-            contact: None,
+            contact: ContactScope::Any,
             tag: TagScope::Any,
             basis: None,
             adjusting: None,

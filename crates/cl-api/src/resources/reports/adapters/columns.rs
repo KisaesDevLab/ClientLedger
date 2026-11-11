@@ -9,8 +9,8 @@
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ContactId, TagGroupId, TagId};
 use cl_core::report::{
-    Cell, ColumnDrill, ColumnHead, ColumnKind, DateRange, Drill, ReportMeta, ReportRequest,
-    ReportRow, ReportTable, RowKind, RowPath, TagScope,
+    Cell, ColumnDrill, ColumnHead, ColumnKind, ContactScope, DateRange, Drill, ReportMeta,
+    ReportRequest, ReportRow, ReportTable, RowKind, RowPath, TagScope,
 };
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -67,10 +67,20 @@ fn column_drill(d: &Value) -> Result<Option<ColumnDrill>, ApiError> {
         return Ok(Some(ColumnDrill::None));
     }
     if let Some(c) = text(d, "contact_id") {
-        // "No client" and "All others" select lines a drill can't name yet.
-        return Ok(Some(
-            ContactId::parse(c).map_or(ColumnDrill::None, ColumnDrill::Contact),
-        ));
+        // One client, "No client", or "All others" but the named ones (S6).
+        let scope = match c {
+            "none" => ContactScope::NoContact,
+            "others" => ContactScope::Others(
+                text(d, "exclude_contact_ids")
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| ContactId::parse(s).map_err(|_| shape("drill.exclude_contact_ids")))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            _ => ContactScope::One(ContactId::parse(c).map_err(|_| shape("drill.contact_id"))?),
+        };
+        return Ok(Some(ColumnDrill::Contact(scope)));
     }
     Ok(tag_scope(d)?.map(ColumnDrill::Tag))
 }
@@ -214,7 +224,7 @@ impl Builder<'_> {
             account_ids: ids,
             from: if self.balance { None } else { self.from },
             to: self.to,
-            contact: None,
+            contact: ContactScope::Any,
             tag,
             basis: self.req.basis,
             adjusting: self.req.filters.adjusting,
@@ -488,7 +498,14 @@ pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTabl
                 (*total_title).to_string(),
                 section_total,
             );
-            t.drill = b.lines(ids, None);
+            // B2: a total with a calculated row (net income, prior years)
+            // or a Retained Earnings line carrying prior income has no
+            // ledger that sums to it.
+            let unledgered = entries.iter().any(|e| {
+                e.get("calculated") == Some(&Value::Bool(true))
+                    || e.get(super::statements::PRIOR_INCOME_FLAG) == Some(&Value::Bool(true))
+            });
+            t.drill = if unledgered { None } else { b.lines(ids, None) };
             rows.push(t);
         }
         if !balance
@@ -731,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn client_columns_without_a_client_have_no_drill() {
+    fn client_columns_without_a_client_drill_with_the_engine_s_selector() {
         let v = fixture("columns_profit_loss_by_contact");
         let r = req(
             Source::ProfitLoss,
@@ -741,7 +758,22 @@ mod tests {
             }),
         );
         let t = table(&v, &r, false).expect("table");
-        assert_eq!(t.columns[0].drill, Some(ColumnDrill::None));
+        // S6: "No client" opens the lines without one.
+        assert_eq!(
+            t.columns[0].drill,
+            Some(ColumnDrill::Contact(ContactScope::NoContact))
+        );
         assert_eq!(t.columns[1].drill, None);
+        // "All others" opens every client's lines but the named columns'.
+        let mut v = v;
+        v["columns"][0]["drill"] = serde_json::json!({"contact_id": "others",
+            "exclude_contact_ids": "11111111-1111-4111-8111-111111111111"});
+        let t = table(&v, &r, false).expect("table");
+        assert_eq!(
+            t.columns[0].drill,
+            Some(ColumnDrill::Contact(ContactScope::Others(vec![
+                ContactId::parse("11111111-1111-4111-8111-111111111111").expect("id")
+            ])))
+        );
     }
 }

@@ -571,12 +571,17 @@ fn scoped_net(h: &Harness, s: &Session, d: &Drill) -> Decimal {
     r.basis = *basis;
     r.filters.account_ids.clone_from(account_ids);
     r.filters.adjusting = *adjusting;
-    r.filters.contact_ids = contact.iter().copied().collect();
+    match contact {
+        cl_core::report::ContactScope::Any => {}
+        cl_core::report::ContactScope::One(c) => r.filters.contact_ids = vec![*c],
+        cl_core::report::ContactScope::NoContact => r.filters.no_contact = true,
+        cl_core::report::ContactScope::Others(v) => r.filters.other_contacts_than = Some(v.clone()),
+    }
     match tag {
         TagScope::Tag(t) => r.filters.tag_ids = vec![*t],
         TagScope::UntaggedInGroup(g) => r.filters.untagged_in_group = Some(*g),
         TagScope::Any => {}
-        TagScope::Untagged => panic!("no filter names lines without any tag"),
+        TagScope::Untagged => r.filters.untagged = true,
     }
     run(h, s, &r)
         .rows

@@ -771,11 +771,7 @@ impl ReportWindow {
             }
             ui.label(RichText::new(self.title_text()).size(18.0).strong());
             ui.label(RichText::new(self.subtitle()).color(tokens.text_secondary));
-            if let Some(note) = self
-                .table
-                .as_ref()
-                .and_then(|t| t.meta.note.as_ref())
-            {
+            if let Some(note) = self.table.as_ref().and_then(|t| t.meta.note.as_ref()) {
                 ui.label(
                     RichText::new(super::label(note))
                         .size(12.0)

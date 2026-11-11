@@ -81,6 +81,12 @@ const LEDGER_FILTERS: &[FilterKind] = &[
 /// The statements' routes filter by tag and the adjusting lens only; an
 /// account or name filter is the ledger's (Q-P28ah).
 const STATEMENT_FILTERS: &[FilterKind] = &[FilterKind::Tags, FilterKind::Adjusting];
+/// The Balance Sheet and Trial Balance: the adjusting lens only. The
+/// engine applies a tag to these reports' lines differently by basis, so a
+/// tag-filtered sheet or Trial Balance may not balance and its drills may
+/// not sum (PR-6 S2, Q-P28ah amended by Q-PR6b); the tag split is the
+/// balance view by tag.
+const BALANCE_FILTERS: &[FilterKind] = &[FilterKind::Adjusting];
 
 /// A P&L-like statement.
 const STATEMENT: ReportSpec = ReportSpec {
@@ -212,6 +218,7 @@ pub static CATALOG: &[ReportSpec] = &[
         columns: BS_COLUMNS,
         extras: BS_EXTRAS,
         drill: DrillRule::Balance,
+        filters: BALANCE_FILTERS,
         ..STATEMENT
     },
     ReportSpec {
@@ -224,6 +231,7 @@ pub static CATALOG: &[ReportSpec] = &[
         extras: BS_EXTRAS,
         default_extras: &[Extra::PriorYear],
         drill: DrillRule::Balance,
+        filters: BALANCE_FILTERS,
         capabilities: &[caps::EXACT, caps::COLUMNS],
         ..STATEMENT
     },
@@ -238,6 +246,7 @@ pub static CATALOG: &[ReportSpec] = &[
         columns: &[ColumnBy::Total],
         extras: &[],
         drill: DrillRule::Balance,
+        filters: BALANCE_FILTERS,
         ..STATEMENT
     },
     ReportSpec {

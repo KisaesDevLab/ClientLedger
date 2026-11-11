@@ -215,7 +215,7 @@ fn drills_open_forms_and_report_tabs() {
             .collect(),
         from: Some(as_of),
         to: as_of,
-        contact: None,
+        contact: cl_core::report::ContactScope::Any,
         tag,
         basis: None,
         adjusting: None,
@@ -229,6 +229,58 @@ fn drills_open_forms_and_report_tabs() {
         target(Source::ProfitLoss, &lines(501, TagScope::Any)),
         Target::Nothing("reports.drill.narrow")
     );
+    // S6: an untagged cell and the "No client" / "All others" cells open
+    // the ledger with the engine's selectors.
+    let Target::Report(open) = target(Source::ProfitLoss, &lines(1, TagScope::Untagged)) else {
+        panic!("untagged lines open the ledger")
+    };
+    assert!(open.options.expect("o").filters.untagged);
+    let shown: cl_core::ids::ContactId =
+        "22222222-2222-4222-8222-222222222222".parse().expect("id");
+    for (scope, check) in [
+        (
+            cl_core::report::ContactScope::NoContact,
+            Box::new(|f: &cl_model::reports::options::Filters| f.no_contact)
+                as Box<dyn Fn(&cl_model::reports::options::Filters) -> bool>,
+        ),
+        (
+            cl_core::report::ContactScope::Others(vec![shown]),
+            Box::new(move |f: &cl_model::reports::options::Filters| {
+                f.other_contacts_than == Some(vec![shown]) && f.contact_ids.is_empty()
+            }),
+        ),
+    ] {
+        let mut d = lines(1, TagScope::Any);
+        if let Drill::Lines { contact, .. } = &mut d {
+            *contact = scope;
+        }
+        let Target::Report(open) = target(Source::ProfitLoss, &d) else {
+            panic!("a client column opens the ledger")
+        };
+        assert!(check(&open.options.expect("o").filters));
+    }
+    // S3/T7: a Balance Sheet's net income opens the P&L with the sheet's
+    // adjusting lens and tags.
+    let tag: cl_core::ids::TagId = "33333333-3333-4333-8333-333333333333".parse().expect("t");
+    let Target::Report(open) = target(
+        Source::BalanceSheet,
+        &Drill::ProfitLoss {
+            from: CalendarDate::from_ymd(2026, 1, 1).expect("d"),
+            to: as_of,
+            basis: Some(cl_core::report::Basis::Cash),
+            adjusting: Some(cl_core::report::Adjusting::Exclude),
+            tag_ids: vec![tag],
+        },
+    ) else {
+        panic!("the P&L")
+    };
+    let o = open.options.expect("o");
+    assert_eq!(o.basis, Some(cl_core::report::Basis::Cash));
+    assert_eq!(
+        o.filters.adjusting,
+        Some(cl_core::report::Adjusting::Exclude)
+    );
+    assert_eq!(o.filters.tag_ids, vec![tag]);
 }
 
 #[test]
