@@ -15,7 +15,7 @@ pub use schema::{
     Earnings, Filter, FilterOp, Formula, Group, GroupBy, Measure, Node, Periods, Polarity, Section,
     SourceKey, Spacer, Term, TextRow, Unit,
 };
-pub use validate::{Code, Issue, issues};
+pub use validate::{Code, Issue, NodeUnit, issues, node_units};
 
 /// The schema this build reads and writes.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -36,7 +36,8 @@ pub enum DefinitionError {
     /// Over 256 KB.
     #[error("this report definition is too large")]
     TooLarge,
-    /// Not schema v1 JSON: an unknown or repeated field, a wrong type.
+    /// Not schema v1 JSON: an unknown or repeated field, a wrong type (the
+    /// engine's `SCHEMA`).
     #[error("this report definition can't be read: {0}")]
     Malformed(String),
     /// A rule is broken (`DEFINITION_INVALID {path, code}`).
@@ -49,39 +50,64 @@ pub enum DefinitionError {
     },
 }
 
-#[derive(serde::Deserialize)]
-struct Peek {
-    #[serde(rename = "schemaVersion")]
-    schema_version: Option<u64>,
-    kind: Option<String>,
+/// The path of the first value nested deeper than any valid definition can
+/// be (the engine's `deepestPath`: a node at the deepest group level sits at
+/// JSON depth 16 and its filters add 4 more), or `None`.
+fn too_deep(v: &serde_json::Value, path: &str, depth: usize) -> Option<String> {
+    if depth > 2 * validate::limits::DEPTH + 8 {
+        return Some(path.to_string());
+    }
+    match v {
+        serde_json::Value::Array(a) => a
+            .iter()
+            .enumerate()
+            .find_map(|(i, x)| too_deep(x, &format!("{path}.{i}"), depth + 1)),
+        serde_json::Value::Object(m) => m
+            .iter()
+            .find_map(|(k, x)| too_deep(x, &format!("{path}.{k}"), depth + 1)),
+        _ => None,
+    }
 }
 
-/// Reads a definition from its JSON text: a newer `schemaVersion` is
-/// refused first (before any strict check could call it "unknown field"),
-/// then the strict parse (unknown and repeated fields refused at every
-/// depth), then the rules.
+/// Reads a definition from its JSON text, in the engine's order with one
+/// change: a newer `schemaVersion` is refused first (the owner is asked to update the app,
+/// before any strict check could call a new field unknown). Then the size
+/// (UTF-8 bytes of the compact JSON, as the engine measures it), the
+/// nesting bound, the strict parse (unknown and repeated keys refused at
+/// every depth, which the engine's `JSON.parse` can't see) and the rules.
 ///
 /// # Errors
 /// Any [`DefinitionError`].
 pub fn parse(text: &str) -> Result<BuilderDefinition, DefinitionError> {
-    if text.len() > MAX_BYTES {
-        return Err(DefinitionError::TooLarge);
-    }
-    let peek: Peek =
+    let value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
-    if peek
-        .schema_version
-        .is_some_and(|v| v > u64::from(SCHEMA_VERSION))
-    {
+    let version = value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64);
+    if version.is_some_and(|v| v > u64::from(SCHEMA_VERSION)) {
         return Err(DefinitionError::Newer);
     }
-    if peek.kind.as_deref() != Some("builder") {
+    if value.get("kind").and_then(serde_json::Value::as_str) != Some("builder") {
         return Err(DefinitionError::NotBuilder);
+    }
+    let compact =
+        serde_json::to_string(&value).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
+    if compact.len() > MAX_BYTES {
+        return Err(DefinitionError::TooLarge);
+    }
+    if let Some(path) = too_deep(&value, "definition", 0) {
+        return Err(DefinitionError::Invalid {
+            path,
+            code: Code::TooDeep,
+        });
     }
     let def: BuilderDefinition =
         serde_json::from_str(text).map_err(|e| DefinitionError::Malformed(e.to_string()))?;
     if def.schema_version != SCHEMA_VERSION {
-        return Err(DefinitionError::Malformed("schemaVersion".into()));
+        return Err(DefinitionError::Invalid {
+            path: "definition.schemaVersion".into(),
+            code: Code::Schema,
+        });
     }
     check(&def)?;
     Ok(def)

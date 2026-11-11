@@ -22,7 +22,7 @@
       "measure": "amount",
       "polarity": "natural",
       "filters": [
-        { "field": "account_type", "op": "in", "values": ["income", "other_income"] },
+        { "field": "account_type", "op": "in", "values": ["revenue", "other_revenue"] },
         { "field": "tag", "op": "in", "ids": ["33333333-3333-4333-8333-333333333333"] }
       ],
       "groupBy": [

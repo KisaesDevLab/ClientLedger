@@ -1,82 +1,103 @@
-//! The definition rules (A07 plan §3): limits, ids, the uuid-in-text
-//! refusal and the `DEFINITION_INVALID {path, code}` codes. The engine
-//! checks the same rules and decides; this copy lets the editor (A08)
-//! explain a problem before anything is sent.
+//! The definition rules: a port of the engine's `checkBuilderRules`
+//! (`packages/shared/src/report-builder/schemas.ts`), in the same order and
+//! with the same `{path, code}`, plus the shape checks zod makes that serde
+//! can't (lengths in UTF-16 units, patterns, enumerations, caps), reported
+//! as `SCHEMA` first, as the engine does. The engine decides; this copy
+//! lets the editor (A08) explain a problem before anything is sent.
 
 use std::collections::{HashMap, HashSet};
 
-use super::fields::{self, Availability};
+use super::fields::{self, Sign};
 use super::outline::{self, Visit};
 use super::schema::{
-    BuilderDefinition, Display, Measure, Node, Polarity, Section, SourceKey, Unit,
+    BuilderDefinition, Display, Earnings, FilterOp, Measure, Node, Polarity, Section, SourceKey,
+    Unit,
 };
 
-/// Caps (ADD-03 step 1, plan §3).
+/// Caps (`RB_MAX_*`).
 pub mod limits {
     /// Nodes of every kind at any depth.
     pub const NODES: usize = 200;
+    /// Deepest `children` nesting (a top-level node is depth 1).
+    pub const DEPTH: usize = 8;
+    /// Ids per filter.
+    pub const IDS: usize = 500;
+    /// Values per filter.
+    pub const VALUES: usize = 500;
+    /// Filters per section.
+    pub const FILTERS: usize = 20;
+    /// Group-bys per section.
+    pub const GROUP_BYS: usize = 3;
     /// Detail fields.
     pub const DETAIL_FIELDS: usize = 24;
     /// Compare sets.
     pub const COMPARE: usize = 2;
-    /// Filters per section.
-    pub const FILTERS: usize = 20;
-    /// Ids or values per filter.
-    pub const LIST: usize = 500;
-    /// Group-bys per section.
-    pub const GROUP_BYS: usize = 3;
     /// Terms per formula.
     pub const TERMS: usize = 20;
-    /// Characters in a header caption.
+    /// Renamed headers.
+    pub const HEADERS: usize = 64;
+    /// UTF-16 units in a caption or title.
+    pub const CAPTION: usize = 200;
+    /// UTF-16 units in a header caption.
     pub const HEADER_CAPTION: usize = 80;
-    /// Characters in a text row.
+    /// UTF-16 units in a text row.
     pub const TEXT: usize = 500;
+    /// UTF-16 units in an enumeration value.
+    pub const VALUE_LEN: usize = 40;
     /// Period columns a run may ask for.
     pub const PERIODS: usize = 36;
 }
 
-/// Why a definition is invalid (the engine's `code`).
+/// Why a definition is invalid (`RB_ERROR_CODES`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(missing_docs, reason = "the engine's codes, as named")]
 pub enum Code {
-    /// A formula term is not an earlier row, is an ancestor, or is a
-    /// text, blank or page-break row.
-    FormulaForwardRef,
-    /// A formula mixes money with counts or quantities.
-    FormulaUnits,
-    /// `percentOf` is not a money node or `section`.
-    PercentBase,
-    /// `earnings` outside `gl` balance or `tb_net`, or with filters other
-    /// than tag and adjusting.
-    EarningsFilter,
-    /// Aging buckets outside open items, or with periods.
-    BucketsPeriods,
-    /// A running balance whose innermost group is not the account.
-    RunningBalance,
-    /// `natural` polarity over accounts on both normal sides.
-    MixedPolarity,
-    /// Over a cap (contract guess: `LIMIT`).
-    Limit,
-    /// A node id outside `^[a-z0-9_-]{1,32}$`, or a uuid (guess).
-    NodeId,
-    /// Two nodes share an id (guess).
+    Schema,
+    TooManyNodes,
+    TooDeep,
     DuplicateId,
-    /// A uuid in a caption or text (guess).
     UuidInText,
-    /// A field, group-by or measure the source doesn't have (guess).
-    UnknownField,
-    /// A choice greyed out in v1 (guess).
-    Unavailable,
-    /// An entity id that is not a uuid (guess).
-    BadId,
-    /// A formula sign other than 1 or -1 (guess).
-    BadSign,
+    NotInSource,
+    FilterOp,
+    FormulaForwardRef,
+    FormulaUnits,
+    PercentBase,
+    EarningsFilter,
+    BucketsPeriods,
+    RunningBalance,
+    MixedPolarity,
 }
 
 impl Code {
+    /// Every code.
+    pub const ALL: [Code; 14] = [
+        Code::Schema,
+        Code::TooManyNodes,
+        Code::TooDeep,
+        Code::DuplicateId,
+        Code::UuidInText,
+        Code::NotInSource,
+        Code::FilterOp,
+        Code::FormulaForwardRef,
+        Code::FormulaUnits,
+        Code::PercentBase,
+        Code::EarningsFilter,
+        Code::BucketsPeriods,
+        Code::RunningBalance,
+        Code::MixedPolarity,
+    ];
+
     /// The engine's code.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Code::Schema => "SCHEMA",
+            Code::TooManyNodes => "TOO_MANY_NODES",
+            Code::TooDeep => "TOO_DEEP",
+            Code::DuplicateId => "DUPLICATE_ID",
+            Code::UuidInText => "UUID_IN_TEXT",
+            Code::NotInSource => "NOT_IN_SOURCE",
+            Code::FilterOp => "FILTER_OP",
             Code::FormulaForwardRef => "FORMULA_FORWARD_REF",
             Code::FormulaUnits => "FORMULA_UNITS",
             Code::PercentBase => "PERCENT_BASE",
@@ -84,390 +105,548 @@ impl Code {
             Code::BucketsPeriods => "BUCKETS_PERIODS",
             Code::RunningBalance => "RUNNING_BALANCE",
             Code::MixedPolarity => "MIXED_POLARITY",
-            Code::Limit => "LIMIT",
-            Code::NodeId => "NODE_ID",
-            Code::DuplicateId => "DUPLICATE_ID",
-            Code::UuidInText => "UUID_IN_TEXT",
-            Code::UnknownField => "UNKNOWN_FIELD",
-            Code::Unavailable => "FIELD_UNAVAILABLE",
-            Code::BadId => "BAD_ID",
-            Code::BadSign => "BAD_SIGN",
         }
+    }
+
+    /// The code named `s`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Code> {
+        Code::ALL.into_iter().find(|c| c.as_str() == s)
     }
 }
 
-/// One problem: where (a JSON path such as `nodes.0.terms.1`) and why.
+/// One problem: where (a path from `definition`) and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Issue {
-    /// JSON path.
+    /// Path, e.g. `definition.nodes.0.terms.1.nodeId`.
     pub path: String,
     /// Code.
     pub code: Code,
 }
 
-/// Every problem in `def`, in tree order.
-#[must_use]
-pub fn issues(def: &BuilderDefinition) -> Vec<Issue> {
-    let mut out = Vec::new();
-    let mut push = |path: String, code: Code| out.push(Issue { path, code });
-    let visits = outline::walk(&def.nodes);
-    if visits.len() > limits::NODES {
-        push("nodes".into(), Code::Limit);
-    }
-    if def.title.as_deref().is_some_and(contains_uuid) {
-        push("title".into(), Code::UuidInText);
-    }
-    check_columns(def, &mut push);
+struct Issues(Vec<Issue>);
 
-    let mut order: HashMap<&str, &Visit<'_>> = HashMap::new();
-    let mut seen = HashSet::new();
-    for v in &visits {
-        let id = v.node.id();
-        if !valid_node_id(id) {
-            push(format!("{}.id", v.path), Code::NodeId);
-        } else if !seen.insert(id) {
-            push(format!("{}.id", v.path), Code::DuplicateId);
-        }
-        order.entry(id).or_insert(v);
-    }
-    let units = Units::new(&visits);
-    for v in &visits {
-        match v.node {
-            Node::Section(s) => check_section(def, s, &v.path, &mut push),
-            Node::Group(g) => {
-                caption(&g.caption, &format!("{}.caption", v.path), &mut push);
-                if let Some(t) = &g.total_caption {
-                    caption(t, &format!("{}.totalCaption", v.path), &mut push);
-                }
-            }
-            Node::Formula(f) => {
-                caption(&f.caption, &format!("{}.caption", v.path), &mut push);
-                if f.terms.len() > limits::TERMS {
-                    push(format!("{}.terms", v.path), Code::Limit);
-                }
-                let mut seen_units = HashSet::new();
-                for (i, t) in f.terms.iter().enumerate() {
-                    let at = format!("{}.terms.{i}", v.path);
-                    if t.sign != 1 && t.sign != -1 {
-                        push(format!("{at}.sign"), Code::BadSign);
-                    }
-                    let ok = order.get(t.node_id.as_str()).is_some_and(|target| {
-                        target.order < v.order
-                            && !v.ancestors.contains(&t.node_id.as_str())
-                            && matches!(
-                                target.node,
-                                Node::Section(_) | Node::Group(_) | Node::Formula(_)
-                            )
-                    });
-                    if ok {
-                        seen_units.insert(units.of(&t.node_id));
-                    } else {
-                        push(at, Code::FormulaForwardRef);
-                    }
-                }
-                if seen_units.len() > 1 || seen_units.contains(&NodeUnit::Mixed) {
-                    push(format!("{}.terms", v.path), Code::FormulaUnits);
-                }
-            }
-            Node::Text(t) => {
-                if t.text.chars().count() > limits::TEXT {
-                    push(format!("{}.text", v.path), Code::Limit);
-                }
-                if contains_uuid(&t.text) {
-                    push(format!("{}.text", v.path), Code::UuidInText);
-                }
-            }
-            Node::Blank(_) | Node::PageBreak(_) => {}
-        }
-    }
-    if let Some(p) = &def.columns.percent_of {
-        let ok = p == "section"
-            || (order.contains_key(p.as_str()) && units.of(p) == NodeUnit::One(Unit::Money));
-        if !ok {
-            push("columns.percentOf".into(), Code::PercentBase);
-        }
-    }
-    if def.columns.aging_buckets == Some(true) {
-        for v in &visits {
-            if let Node::Section(s) = v.node
-                && !s.source.is_open_items()
-            {
-                push(format!("{}.source", v.path), Code::BucketsPeriods);
-            }
-        }
-    }
-    out
-}
-
-fn check_columns(def: &BuilderDefinition, push: &mut impl FnMut(String, Code)) {
-    let c = &def.columns;
-    if c.detail_fields.len() > limits::DETAIL_FIELDS {
-        push("columns.detailFields".into(), Code::Limit);
-    }
-    let known = fields::all_detail_fields();
-    for (i, f) in c.detail_fields.iter().enumerate() {
-        if !known.contains(&f.as_str()) {
-            push(format!("columns.detailFields.{i}"), Code::UnknownField);
-        }
-    }
-    if c.compare.len() > limits::COMPARE {
-        push("columns.compare".into(), Code::Limit);
-    }
-    if c.aging_buckets == Some(true) && c.periods.is_some() {
-        push("columns.agingBuckets".into(), Code::BucketsPeriods);
-    }
-    for (k, v) in &c.headers {
-        let at = format!("columns.headers.{k}");
-        if v.chars().count() > limits::HEADER_CAPTION {
-            push(at.clone(), Code::Limit);
-        }
-        if contains_uuid(v) || contains_uuid(k) {
-            push(at, Code::UuidInText);
-        }
+impl Issues {
+    fn add(&mut self, path: impl Into<String>, code: Code) {
+        self.0.push(Issue {
+            path: path.into(),
+            code,
+        });
     }
 }
 
-fn caption(text: &str, at: &str, push: &mut impl FnMut(String, Code)) {
-    if contains_uuid(text) {
-        push(at.to_string(), Code::UuidInText);
-    }
+/// UTF-16 units, as JavaScript counts a string's length.
+fn units16(s: &str) -> usize {
+    s.encode_utf16().count()
 }
 
-fn check_section(
-    def: &BuilderDefinition,
-    s: &Section,
-    path: &str,
-    push: &mut impl FnMut(String, Code),
-) {
-    caption(&s.caption, &format!("{path}.caption"), push);
-    if let Some(t) = &s.total_caption {
-        caption(t, &format!("{path}.totalCaption"), push);
-    }
-    if let Availability::Greyed(_) = fields::source_availability(s.source) {
-        push(format!("{path}.source"), Code::Unavailable);
-    }
-    let offered = fields::of(s.source);
-    match fields::measure_availability(s.source, s.measure, def.basis) {
-        Availability::Available => {}
-        Availability::Greyed(_) if !offered.measures.contains(&s.measure) => {
-            push(format!("{path}.measure"), Code::UnknownField);
-        }
-        Availability::Greyed(_) => push(format!("{path}.measure"), Code::Unavailable),
-    }
-    if s.filters.len() > limits::FILTERS {
-        push(format!("{path}.filters"), Code::Limit);
-    }
-    for (i, f) in s.filters.iter().enumerate() {
-        let at = format!("{path}.filters.{i}");
-        if !offered.filters.contains(&f.field.as_str()) {
-            push(format!("{at}.field"), Code::UnknownField);
-        }
-        if let Some(ids) = &f.ids {
-            if ids.len() > limits::LIST {
-                push(format!("{at}.ids"), Code::Limit);
-            }
-            if let Some(j) = ids
-                .iter()
-                .position(|x| cl_core::ids::parse_uuid(x).is_err())
-            {
-                push(format!("{at}.ids.{j}"), Code::BadId);
-            }
-        }
-        if f.values.as_ref().is_some_and(|v| v.len() > limits::LIST) {
-            push(format!("{at}.values"), Code::Limit);
-        }
-    }
-    if s.group_by.len() > limits::GROUP_BYS {
-        push(format!("{path}.groupBy"), Code::Limit);
-    }
-    for (i, g) in s.group_by.iter().enumerate() {
-        let at = format!("{path}.groupBy.{i}");
-        if !offered.group_bys.contains(&g.key.as_str()) {
-            push(format!("{at}.key"), Code::UnknownField);
-        } else if !fields::group_availability(s.source, &g.key).is_available() {
-            push(format!("{at}.key"), Code::Unavailable);
-        }
-        if g.tag_group_id
-            .as_deref()
-            .is_some_and(|x| cl_core::ids::parse_uuid(x).is_err())
-        {
-            push(format!("{at}.tagGroupId"), Code::BadId);
-        }
-    }
-    if s.earnings.is_some() {
-        let measure_ok = matches!(s.measure, Measure::Balance | Measure::TbNet);
-        let filters_ok = s
-            .filters
-            .iter()
-            .all(|f| matches!(f.field.as_str(), "tag" | "adjusting"));
-        if s.source != SourceKey::Gl || !measure_ok || !filters_ok {
-            push(format!("{path}.earnings"), Code::EarningsFilter);
-        }
-    }
-    if s.measure == Measure::Balance
-        && s.display != Display::Summary
-        && s.group_by.last().is_none_or(|g| g.key != "account")
-    {
-        push(format!("{path}.groupBy"), Code::RunningBalance);
-    }
-    if mixed_polarity(s) {
-        push(format!("{path}.polarity"), Code::MixedPolarity);
-    }
+/// A caption: 1–`max` units, no space at either end (text is stored as
+/// sent, never trimmed).
+fn caption_ok(s: &str, max: usize) -> bool {
+    !s.is_empty() && s.trim() == s && units16(s) <= max
 }
 
-/// `natural` on a `gl` amount or balance needs its accounts on one normal
-/// side. An account-id filter is left to the engine (only it knows each
-/// account's type); account-type values are checked here.
-fn mixed_polarity(s: &Section) -> bool {
-    if s.source != SourceKey::Gl
-        || s.earnings.is_some()
-        || !matches!(s.measure, Measure::Amount | Measure::Balance)
-        || s.polarity.is_some_and(|p| p != Polarity::Natural)
-    {
-        return false;
-    }
-    let mut sides = HashSet::new();
-    let mut narrowed = false;
-    for f in &s.filters {
-        match (f.field.as_str(), f.op) {
-            ("account", super::schema::FilterOp::In) => return false,
-            ("account_type", super::schema::FilterOp::In) => {
-                narrowed = true;
-                for v in f.values.iter().flatten() {
-                    sides.insert(normal_side(v));
-                }
-            }
-            _ => {}
-        }
-    }
-    !narrowed || sides.len() != 1 || sides.contains(&None)
-}
-
-/// An account type's normal side (`Some(true)`: debit).
-fn normal_side(account_type: &str) -> Option<bool> {
-    match account_type {
-        "asset"
-        | "bank"
-        | "accounts_receivable"
-        | "other_current_asset"
-        | "fixed_asset"
-        | "other_asset"
-        | "expense"
-        | "cogs"
-        | "cost_of_goods_sold"
-        | "other_expense" => Some(true),
-        "liability"
-        | "accounts_payable"
-        | "credit_card"
-        | "other_current_liability"
-        | "long_term_liability"
-        | "equity"
-        | "revenue"
-        | "income"
-        | "other_revenue"
-        | "other_income" => Some(false),
-        _ => None,
-    }
-}
-
-/// A node's unit for formulas and `percentOf`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum NodeUnit {
-    One(Unit),
-    Mixed,
-    Nothing,
-}
-
-struct Units<'a> {
-    by_id: HashMap<&'a str, &'a Node>,
-}
-
-impl<'a> Units<'a> {
-    fn new(visits: &[Visit<'a>]) -> Units<'a> {
-        let mut by_id = HashMap::new();
-        for v in visits {
-            by_id.entry(v.node.id()).or_insert(v.node);
-        }
-        Units { by_id }
-    }
-
-    fn of(&self, id: &str) -> NodeUnit {
-        let mut seen = HashSet::new();
-        self.unit(id, &mut seen)
-    }
-
-    /// `seen` holds the ids on the current path only (released on the way
-    /// out), so a node reached twice (a group of a and b, then a formula
-    /// a + b) is not mistaken for a cycle.
-    fn unit(&self, id: &str, seen: &mut HashSet<String>) -> NodeUnit {
-        if !seen.insert(id.to_string()) {
-            return NodeUnit::Mixed; // a cycle can't be a unit
-        }
-        let u = self.unit_inner(id, seen);
-        seen.remove(id);
-        u
-    }
-
-    fn unit_inner(&self, id: &str, seen: &mut HashSet<String>) -> NodeUnit {
-        let Some(node) = self.by_id.get(id) else {
-            return NodeUnit::Nothing;
-        };
-        let parts: Vec<NodeUnit> = match node {
-            Node::Section(s) => return NodeUnit::One(s.measure.unit()),
-            Node::Group(g) => g.children.iter().map(|c| self.unit(c.id(), seen)).collect(),
-            Node::Formula(f) => f
-                .terms
-                .iter()
-                .map(|t| self.unit(&t.node_id, seen))
-                .collect(),
-            Node::Text(_) | Node::Blank(_) | Node::PageBreak(_) => return NodeUnit::Nothing,
-        };
-        let mut found = NodeUnit::Nothing;
-        for p in parts {
-            found = match (found, p) {
-                (x, NodeUnit::Nothing) => x,
-                (NodeUnit::Nothing, y) => y,
-                (NodeUnit::One(a), NodeUnit::One(b)) if a == b => NodeUnit::One(a),
-                _ => NodeUnit::Mixed,
-            };
-        }
-        found
-    }
-}
-
-/// `^[a-z0-9_-]{1,32}$` and not a 32-digit uuid.
+/// `^[a-z0-9_-]{1,32}$`.
 #[must_use]
 pub fn valid_node_id(id: &str) -> bool {
     (1..=32).contains(&id.len())
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
-        && !(id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// True when `text` holds a uuid token (8-4-4-4-12 hex digits): ids
-/// belong only at the id paths, never in owner text.
-#[must_use]
-pub fn contains_uuid(text: &str) -> bool {
+fn preset_ok(s: &str) -> bool {
+    (1..=40).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn column_key_ok(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && s.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b':' | b'-')
+        })
+}
+
+/// `^-?\d{1,15}(\.\d{1,4})?$`.
+fn decimal_ok(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    let (int, frac) = match s.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (s, None),
+    };
+    let digits =
+        |x: &str, max: usize| (1..=max).contains(&x.len()) && x.bytes().all(|b| b.is_ascii_digit());
+    digits(int, 15) && frac.is_none_or(|f| digits(f, 4))
+}
+
+/// A whole uuid, any case.
+fn is_uuid(s: &str) -> bool {
+    s.len() == 36 && uuid_at(s.as_bytes(), 0)
+}
+
+fn uuid_at(b: &[u8], start: usize) -> bool {
     const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
-    let b = text.as_bytes();
-    if b.len() < 36 {
-        return false;
-    }
-    (0..=b.len() - 36).any(|start| {
-        let mut i = start;
-        for (n, len) in GROUPS.iter().enumerate() {
-            if !b[i..i + len].iter().all(u8::is_ascii_hexdigit) {
+    let mut i = start;
+    for (n, len) in GROUPS.iter().enumerate() {
+        if !b[i..i + len].iter().all(u8::is_ascii_hexdigit) {
+            return false;
+        }
+        i += len;
+        if n < 4 {
+            if b[i] != b'-' {
                 return false;
             }
-            i += len;
-            if n < 4 {
-                if b[i] != b'-' {
-                    return false;
+            i += 1;
+        }
+    }
+    true
+}
+
+/// True when `text` holds a uuid token: ids belong only at the id paths,
+/// never in owner text.
+#[must_use]
+pub fn contains_uuid(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.len() >= 36 && (0..=b.len() - 36).any(|start| uuid_at(b, start))
+}
+
+/// Every problem in `def`: the shape checks first (`SCHEMA`), then the
+/// engine's rules in its order. The engine reports the first.
+#[must_use]
+pub fn issues(def: &BuilderDefinition) -> Vec<Issue> {
+    let visits = outline::walk(&def.nodes);
+    let mut out = Issues(Vec::new());
+    shape(def, &visits, &mut out);
+    rules(def, &visits, &mut out);
+    out.0
+}
+
+fn shape(def: &BuilderDefinition, visits: &[Visit<'_>], out: &mut Issues) {
+    if def
+        .title
+        .as_deref()
+        .is_some_and(|t| !caption_ok(t, limits::CAPTION))
+    {
+        out.add("definition.title", Code::Schema);
+    }
+    if def.dates.preset.as_deref().is_some_and(|p| !preset_ok(p)) {
+        out.add("definition.dates.preset", Code::Schema);
+    }
+    let c = &def.columns;
+    for (i, f) in c.detail_fields.iter().enumerate() {
+        if !fields::DETAIL_FIELDS.contains(&f.as_str()) {
+            out.add(format!("definition.columns.detailFields.{i}"), Code::Schema);
+        }
+    }
+    let unique: HashSet<&String> = c.detail_fields.iter().collect();
+    if c.detail_fields.len() > limits::DETAIL_FIELDS || unique.len() != c.detail_fields.len() {
+        out.add("definition.columns.detailFields", Code::Schema);
+    }
+    if c.aging_buckets == Some(false) {
+        out.add("definition.columns.agingBuckets", Code::Schema);
+    }
+    if c.compare.len() > limits::COMPARE {
+        out.add("definition.columns.compare", Code::Schema);
+    }
+    if c.percent_of
+        .as_deref()
+        .is_some_and(|p| p != "section" && !valid_node_id(p))
+    {
+        out.add("definition.columns.percentOf", Code::Schema);
+    }
+    for (k, v) in &c.headers {
+        if !column_key_ok(k) || !caption_ok(v, limits::HEADER_CAPTION) {
+            out.add(format!("definition.columns.headers.{k}"), Code::Schema);
+        }
+    }
+    if c.headers.len() > limits::HEADERS {
+        out.add("definition.columns.headers", Code::Schema);
+    }
+    for v in visits {
+        node_shape(v, out);
+    }
+}
+
+fn node_shape(v: &Visit<'_>, out: &mut Issues) {
+    let p = &v.path;
+    if !valid_node_id(v.node.id()) {
+        out.add(format!("{p}.id"), Code::Schema);
+    }
+    let captions: [Option<&String>; 2] = match v.node {
+        Node::Section(s) => [Some(&s.caption), s.total_caption.as_ref()],
+        Node::Group(g) => [Some(&g.caption), g.total_caption.as_ref()],
+        Node::Formula(f) => [Some(&f.caption), None],
+        _ => [None, None],
+    };
+    for (key, c) in ["caption", "totalCaption"].iter().zip(captions) {
+        if c.is_some_and(|c| !caption_ok(c, limits::CAPTION)) {
+            out.add(format!("{p}.{key}"), Code::Schema);
+        }
+    }
+    match v.node {
+        Node::Section(s) => section_shape(s, p, out),
+        Node::Formula(f) => {
+            if f.terms.is_empty() || f.terms.len() > limits::TERMS {
+                out.add(format!("{p}.terms"), Code::Schema);
+            }
+            for (i, t) in f.terms.iter().enumerate() {
+                if !valid_node_id(&t.node_id) {
+                    out.add(format!("{p}.terms.{i}.nodeId"), Code::Schema);
                 }
-                i += 1;
+                if t.sign != 1 && t.sign != -1 {
+                    out.add(format!("{p}.terms.{i}.sign"), Code::Schema);
+                }
             }
         }
-        true
-    })
+        Node::Text(t) => {
+            if units16(&t.text) > limits::TEXT {
+                out.add(format!("{p}.text"), Code::Schema);
+            }
+        }
+        Node::Group(_) | Node::Blank(_) | Node::PageBreak(_) => {}
+    }
+}
+
+fn section_shape(s: &Section, p: &str, out: &mut Issues) {
+    if s.filters.len() > limits::FILTERS {
+        out.add(format!("{p}.filters"), Code::Schema);
+    }
+    for (i, f) in s.filters.iter().enumerate() {
+        let fp = format!("{p}.filters.{i}");
+        if !fields::FILTER_FIELDS.contains(&f.field.as_str()) {
+            out.add(format!("{fp}.field"), Code::Schema);
+        }
+        if let Some(ids) = &f.ids {
+            if let Some(j) = ids.iter().position(|x| !is_uuid(x)) {
+                out.add(format!("{fp}.ids.{j}"), Code::Schema);
+            }
+            if ids.len() > limits::IDS {
+                out.add(format!("{fp}.ids"), Code::Schema);
+            }
+        }
+        if let Some(values) = &f.values {
+            if let Some(j) = values
+                .iter()
+                .position(|x| x.is_empty() || units16(x) > limits::VALUE_LEN)
+            {
+                out.add(format!("{fp}.values.{j}"), Code::Schema);
+            }
+            if values.len() > limits::VALUES {
+                out.add(format!("{fp}.values"), Code::Schema);
+            }
+        }
+        if f.value.as_deref().is_some_and(|v| !decimal_ok(v)) {
+            out.add(format!("{fp}.value"), Code::Schema);
+        }
+    }
+    if s.group_by.len() > limits::GROUP_BYS {
+        out.add(format!("{p}.groupBy"), Code::Schema);
+    }
+    for (i, g) in s.group_by.iter().enumerate() {
+        if !fields::GROUP_KEYS.contains(&g.key.as_str()) {
+            out.add(format!("{p}.groupBy.{i}.key"), Code::Schema);
+        }
+        if g.tag_group_id.as_deref().is_some_and(|x| !is_uuid(x)) {
+            out.add(format!("{p}.groupBy.{i}.tagGroupId"), Code::Schema);
+        }
+    }
+}
+
+/// A section's sign when its polarity is left out, or `natural` on a
+/// non-gl source (`effectivePolarity`). `None`: open items (owed-positive).
+#[must_use]
+pub fn effective_polarity(s: &Section) -> Option<Polarity> {
+    match fields::of(s.source).sign {
+        Sign::OwedPositive => None,
+        _ if s.polarity.is_some_and(|p| p != Polarity::Natural) => s.polarity,
+        Sign::Natural => Some(Polarity::Natural),
+        Sign::DebitMinusCredit => Some(Polarity::Debit),
+        Sign::CreditMinusDebit => Some(Polarity::Credit),
+    }
+}
+
+/// A node's unit (`nodeUnits`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NodeUnit {
+    /// One unit.
+    One(Unit),
+    /// A group or formula over different units.
+    Mixed,
+    /// No figures (text and spacing).
+    Nothing,
+}
+
+/// Every node's unit, computed as the engine does: groups from their
+/// children, formulas from the units of the terms already seen.
+#[must_use]
+pub fn node_units(nodes: &[Node]) -> HashMap<String, NodeUnit> {
+    fn combine(parts: impl Iterator<Item = NodeUnit>) -> NodeUnit {
+        let kids: Vec<NodeUnit> = parts.filter(|u| *u != NodeUnit::Nothing).collect();
+        match kids.first() {
+            None => NodeUnit::Nothing,
+            Some(first) if kids.iter().all(|k| k == first) => *first,
+            Some(_) => NodeUnit::Mixed,
+        }
+    }
+    fn unit_of(n: &Node, units: &mut HashMap<String, NodeUnit>) -> NodeUnit {
+        let u = match n {
+            Node::Section(s) => NodeUnit::One(s.measure.unit()),
+            Node::Group(g) => {
+                let kids: Vec<NodeUnit> = g.children.iter().map(|c| unit_of(c, units)).collect();
+                combine(kids.into_iter())
+            }
+            Node::Formula(f) => combine(
+                f.terms
+                    .iter()
+                    .filter_map(|t| units.get(&t.node_id).copied()),
+            ),
+            Node::Text(_) | Node::Blank(_) | Node::PageBreak(_) => NodeUnit::Nothing,
+        };
+        units.insert(n.id().to_string(), u);
+        u
+    }
+    let mut units = HashMap::new();
+    for n in nodes {
+        unit_of(n, &mut units);
+    }
+    units
+}
+
+fn rules(def: &BuilderDefinition, visits: &[Visit<'_>], out: &mut Issues) {
+    if visits.len() > limits::NODES {
+        out.add("definition.nodes", Code::TooManyNodes);
+    }
+    if let Some(v) = visits.iter().find(|v| v.depth > limits::DEPTH) {
+        out.add(v.path.clone(), Code::TooDeep);
+    }
+    let mut seen = HashSet::new();
+    for v in visits {
+        let id = v.node.id();
+        if id == "section" || !seen.insert(id) {
+            out.add(format!("{}.id", v.path), Code::DuplicateId);
+        }
+    }
+    text_rules(def, visits, out);
+
+    let units = node_units(&def.nodes);
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    for (i, v) in visits.iter().enumerate() {
+        // The engine's Map keeps the last node of a repeated id.
+        index.insert(v.node.id(), i);
+    }
+    let running = def
+        .columns
+        .detail_fields
+        .iter()
+        .any(|f| f == "running_balance");
+    let sections: Vec<(&Section, &str)> = visits
+        .iter()
+        .filter_map(|v| match v.node {
+            Node::Section(s) => Some((s, v.path.as_str())),
+            _ => None,
+        })
+        .collect();
+    for (s, p) in &sections {
+        section_rules(s, p, running, out);
+    }
+
+    let cols = &def.columns;
+    if cols.aging_buckets == Some(true) {
+        if cols.periods.is_some() || !cols.compare.is_empty() {
+            out.add("definition.columns.agingBuckets", Code::BucketsPeriods);
+        }
+        for (s, p) in &sections {
+            if !fields::of(s.source).open_items {
+                out.add(format!("{p}.source"), Code::BucketsPeriods);
+            }
+        }
+    }
+    if running && (cols.periods.is_some() || !cols.compare.is_empty()) {
+        out.add("definition.columns.detailFields", Code::RunningBalance);
+    }
+    if let Some(base) = cols.percent_of.as_deref() {
+        if base != "section"
+            && (!index.contains_key(base) || units.get(base) != Some(&NodeUnit::One(Unit::Money)))
+        {
+            out.add("definition.columns.percentOf", Code::PercentBase);
+        }
+        for (s, p) in &sections {
+            if s.measure.unit() != Unit::Money {
+                out.add(format!("{p}.measure"), Code::PercentBase);
+            }
+        }
+    }
+    formula_rules(visits, &index, &units, out);
+}
+
+fn text_rules(def: &BuilderDefinition, visits: &[Visit<'_>], out: &mut Issues) {
+    if def.title.as_deref().is_some_and(contains_uuid) {
+        out.add("definition.title", Code::UuidInText);
+    }
+    for (k, v) in &def.columns.headers {
+        if contains_uuid(k) || contains_uuid(v) {
+            out.add(format!("definition.columns.headers.{k}"), Code::UuidInText);
+        }
+    }
+    for v in visits {
+        let p = &v.path;
+        let (caption, total) = match v.node {
+            Node::Section(s) => (Some(&s.caption), s.total_caption.as_ref()),
+            Node::Group(g) => (Some(&g.caption), g.total_caption.as_ref()),
+            Node::Formula(f) => (Some(&f.caption), None),
+            _ => (None, None),
+        };
+        if caption.is_some_and(|c| contains_uuid(c)) {
+            out.add(format!("{p}.caption"), Code::UuidInText);
+        }
+        if total.is_some_and(|c| contains_uuid(c)) {
+            out.add(format!("{p}.totalCaption"), Code::UuidInText);
+        }
+        if let Node::Text(t) = v.node
+            && contains_uuid(&t.text)
+        {
+            out.add(format!("{p}.text"), Code::UuidInText);
+        }
+    }
+}
+
+fn formula_rules(
+    visits: &[Visit<'_>],
+    index: &HashMap<&str, usize>,
+    units: &HashMap<String, NodeUnit>,
+    out: &mut Issues,
+) {
+    for (i, v) in visits.iter().enumerate() {
+        let Node::Formula(f) = v.node else { continue };
+        for (ti, t) in f.terms.iter().enumerate() {
+            let tp = format!("{}.terms.{ti}.nodeId", v.path);
+            let ok = index.get(t.node_id.as_str()).is_some_and(|&j| {
+                j < i
+                    && !v.ancestors.contains(&t.node_id.as_str())
+                    && matches!(
+                        visits[j].node,
+                        Node::Section(_) | Node::Group(_) | Node::Formula(_)
+                    )
+            });
+            if !ok {
+                out.add(tp, Code::FormulaForwardRef);
+                continue;
+            }
+            if !matches!(
+                units.get(&t.node_id),
+                Some(NodeUnit::One(Unit::Money | Unit::Count | Unit::Quantity))
+            ) {
+                out.add(tp, Code::FormulaUnits);
+            }
+        }
+        if units.get(&f.id) == Some(&NodeUnit::Mixed) {
+            out.add(format!("{}.terms", v.path), Code::FormulaUnits);
+        }
+    }
+}
+
+fn filter_ok(f: &super::schema::Filter, fp: &str, out: &mut Issues) -> bool {
+    let field = f.field.as_str();
+    let list_op = matches!(f.op, FilterOp::In | FilterOp::NotIn);
+    let (has_ids, has_values, has_value) = (f.ids.is_some(), f.values.is_some(), f.value.is_some());
+    match f.op {
+        FilterOp::IsNone => {
+            fields::NULLABLE_FILTER_FIELDS.contains(&field) && !has_ids && !has_values && !has_value
+        }
+        FilterOp::Gte | FilterOp::Lte => {
+            fields::SCALAR_FILTER_FIELDS.contains(&field) && has_value && !has_ids && !has_values
+        }
+        _ if fields::ID_FILTER_FIELDS.contains(&field) => {
+            list_op && f.ids.as_ref().is_some_and(|x| !x.is_empty()) && !has_values && !has_value
+        }
+        _ => match fields::filter_values(field) {
+            Some(allowed) => {
+                for (vi, v) in f.values.iter().flatten().enumerate() {
+                    if !allowed.contains(&v.as_str()) {
+                        out.add(format!("{fp}.values.{vi}"), Code::FilterOp);
+                    }
+                }
+                list_op
+                    && f.values.as_ref().is_some_and(|x| !x.is_empty())
+                    && !has_ids
+                    && !has_value
+            }
+            None => false,
+        },
+    }
+}
+
+fn section_rules(s: &Section, p: &str, running: bool, out: &mut Issues) {
+    let info = fields::of(s.source);
+    if !info.measures.contains(&s.measure) {
+        out.add(format!("{p}.measure"), Code::NotInSource);
+    }
+    if info.sign == Sign::OwedPositive && s.polarity.is_some() {
+        out.add(format!("{p}.polarity"), Code::NotInSource);
+    }
+    for (gi, g) in s.group_by.iter().enumerate() {
+        if !info.group_bys.contains(&g.key.as_str()) {
+            out.add(format!("{p}.groupBy.{gi}.key"), Code::NotInSource);
+        }
+        if g.tag_group_id.is_some() != (g.key == "tag") {
+            out.add(format!("{p}.groupBy.{gi}.tagGroupId"), Code::Schema);
+        }
+    }
+    let keys: HashSet<&str> = s.group_by.iter().map(|g| g.key.as_str()).collect();
+    if keys.len() != s.group_by.len() {
+        out.add(format!("{p}.groupBy"), Code::Schema);
+    }
+    for (fi, f) in s.filters.iter().enumerate() {
+        let fp = format!("{p}.filters.{fi}");
+        if !info.filters.contains(&f.field.as_str()) {
+            out.add(format!("{fp}.field"), Code::NotInSource);
+        }
+        if !filter_ok(f, &fp, out) {
+            out.add(format!("{fp}.op"), Code::FilterOp);
+        }
+    }
+    if let Some(e) = s.earnings {
+        let need = match e {
+            Earnings::BalanceSheet => Measure::Balance,
+            Earnings::TrialBalance => Measure::TbNet,
+        };
+        if s.source != SourceKey::Gl || s.measure != need {
+            out.add(format!("{p}.earnings"), Code::EarningsFilter);
+        }
+        for (fi, f) in s.filters.iter().enumerate() {
+            if !matches!(f.field.as_str(), "tag" | "account" | "account_type") {
+                out.add(format!("{p}.filters.{fi}.field"), Code::EarningsFilter);
+            }
+        }
+    }
+    if s.display != Display::Summary && running {
+        let inner = s.group_by.last().map(|g| g.key.as_str());
+        if !matches!(s.source, SourceKey::Gl | SourceKey::Bank) || inner != Some("account") {
+            out.add(format!("{p}.groupBy"), Code::RunningBalance);
+        }
+    }
+    if effective_polarity(s) == Some(Polarity::Natural)
+        && matches!(s.measure, Measure::Amount | Measure::Balance)
+    {
+        let type_filter = s
+            .filters
+            .iter()
+            .find(|f| f.field == "account_type" && f.op == FilterOp::In);
+        let account_filter = s
+            .filters
+            .iter()
+            .any(|f| f.field == "account" && f.op == FilterOp::In);
+        let sides: HashSet<bool> = type_filter
+            .and_then(|f| f.values.as_ref())
+            .into_iter()
+            .flatten()
+            .map(|t| fields::DEBIT_NORMAL_TYPES.contains(&t.as_str()))
+            .collect();
+        // An account filter is checked by the run (one normal side).
+        let one_side = type_filter.is_some() && sides.len() == 1;
+        if !one_side && !account_filter {
+            out.add(format!("{p}.polarity"), Code::MixedPolarity);
+        }
+    }
 }

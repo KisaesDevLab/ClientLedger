@@ -11,10 +11,10 @@ pub struct Visit<'a> {
     pub node: &'a Node,
     /// Its place in pre-order (0 = first).
     pub order: usize,
-    /// Depth (0 = top level).
+    /// Depth (1 = top level, as the engine counts).
     pub depth: usize,
-    /// Its JSON path (`nodes.0.children.2`), as the engine reports it in
-    /// `DEFINITION_INVALID {path}`.
+    /// Its path from `definition` (`definition.nodes.0.children.2`), as the
+    /// engine reports it in `DEFINITION_INVALID {path}`.
     pub path: String,
     /// The ids of the groups it lies under, outermost first.
     pub ancestors: Vec<&'a str>,
@@ -29,7 +29,7 @@ pub fn walk(nodes: &[Node]) -> Vec<Visit<'_>> {
         .iter()
         .enumerate()
         .rev()
-        .map(|(i, n)| (n, 0, format!("nodes.{i}"), Vec::new()))
+        .map(|(i, n)| (n, 1, format!("definition.nodes.{i}"), Vec::new()))
         .collect();
     while let Some((node, depth, path, ancestors)) = stack.pop() {
         let mut inner = ancestors.clone();
@@ -92,9 +92,9 @@ mod tests {
         let v = walk(&nodes);
         let ids: Vec<&str> = v.iter().map(|x| x.node.id()).collect();
         assert_eq!(ids, ["a", "a1", "a2", "a2x", "b"]);
-        assert_eq!(v[3].path, "nodes.0.children.1.children.0");
+        assert_eq!(v[3].path, "definition.nodes.0.children.1.children.0");
         assert_eq!(v[3].ancestors, ["a", "a2"]);
-        assert_eq!(v[3].depth, 2);
+        assert_eq!(v[3].depth, 3);
         assert_eq!(v[4].order, 4);
         assert_eq!(count(&nodes), 5);
         assert!(find(&nodes, "a2x").is_some());

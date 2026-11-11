@@ -9,18 +9,55 @@
   "nodes": [
     {
       "type": "section",
-      "id": "sheet",
-      "caption": "Balance Sheet",
+      "id": "assets",
+      "caption": "Assets",
       "source": "gl",
       "measure": "balance",
-      "polarity": "natural",
-      "filters": [{ "field": "adjusting", "op": "eq", "value": "include" }],
-      "groupBy": [{ "key": "account_type" }, { "key": "account" }],
+      "filters": [{ "field": "account_type", "op": "in", "values": ["asset"] }],
+      "groupBy": [{ "key": "account" }],
       "display": "expandable",
-      "defaultExpanded": true,
+      "defaultExpanded": false,
       "showTotal": true,
-      "hideZero": true,
-      "earnings": "balance_sheet"
+      "totalCaption": "Total Assets",
+      "hideZero": true
+    },
+    {
+      "type": "group",
+      "id": "le",
+      "caption": "Liabilities and Equity",
+      "showTotal": true,
+      "children": [
+        {
+          "type": "section",
+          "id": "liabilities",
+          "caption": "Liabilities",
+          "source": "gl",
+          "measure": "balance",
+          "filters": [{ "field": "account_type", "op": "in", "values": ["liability"] }],
+          "groupBy": [{ "key": "account" }],
+          "display": "summary",
+          "defaultExpanded": false,
+          "showTotal": true,
+          "hideZero": true
+        },
+        {
+          "type": "section",
+          "id": "equity",
+          "caption": "Equity",
+          "source": "gl",
+          "measure": "balance",
+          "filters": [
+            { "field": "account_type", "op": "in", "values": ["equity"] },
+            { "field": "tag", "op": "is_none" }
+          ],
+          "groupBy": [{ "key": "account" }],
+          "display": "summary",
+          "defaultExpanded": false,
+          "showTotal": true,
+          "hideZero": false,
+          "earnings": "balance_sheet"
+        }
+      ]
     }
   ]
 }

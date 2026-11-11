@@ -1,6 +1,6 @@
-//! Schema and rule tests (plan §9 R-T9, R-T10, R-T14). The JSON fixtures
-//! are hand-written from plan §3 until PR-A's shared fixtures land; the
-//! `report_def_fixtures` integration test parses those too once present.
+//! Schema and rule tests (plan §9 R-T9, R-T10, R-T14) on the hand
+//! fixtures; `tests/report_def_fixtures.rs` runs the engine's shared cases
+//! (PR-A) once pinned.
 
 use serde_json::{Value, json};
 
@@ -30,9 +30,18 @@ fn blank(id: &str) -> Value {
     json!({"type": "blank", "id": id})
 }
 
-fn money_section(id: &str) -> Value {
-    json!({"type": "section", "id": id, "caption": id, "source": "sales", "measure": "amount",
-           "display": "summary"})
+fn section(id: &str, source: &str, measure: &str) -> Value {
+    json!({"type": "section", "id": id, "caption": id, "source": source, "measure": measure,
+           "filters": [], "groupBy": [], "display": "summary",
+           "defaultExpanded": false, "showTotal": true, "hideZero": false})
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "reads like the JSON it builds"
+)]
+fn group(id: &str, children: Vec<Value>) -> Value {
+    json!({"type": "group", "id": id, "caption": id, "children": children, "showTotal": true})
 }
 
 #[test]
@@ -49,7 +58,6 @@ fn the_hand_fixtures_parse_and_round_trip() {
     let Node::Section(s) = &def.nodes[0] else {
         panic!("section")
     };
-    // Ids sit only at the id paths: filters' ids and groupBy's tagGroupId.
     assert_eq!(
         s.filters[1].ids.as_deref(),
         Some(&["33333333-3333-4333-8333-333333333333".to_string()][..])
@@ -58,38 +66,63 @@ fn the_hand_fixtures_parse_and_round_trip() {
         s.group_by[1].tag_group_id.as_deref(),
         Some("44444444-4444-4444-8444-444444444444")
     );
-    assert_eq!(
-        s.filters[0].values.as_deref(),
-        Some(&["income".to_string(), "other_income".to_string()][..])
-    );
 }
 
 #[test]
-fn a_newer_version_is_refused_before_strict_parsing() {
+fn a_newer_version_is_refused_before_anything_else() {
     let mut v = pnl();
     v["schemaVersion"] = json!(2);
     v["aFieldFromVersionTwo"] = json!(true);
+    v["nodes"] = json!(vec![blank("x"); 300]);
     assert_eq!(parse_value(&v), Err(DefinitionError::Newer));
     let mut v = pnl();
     v["kind"] = json!("standard");
     assert_eq!(parse_value(&v), Err(DefinitionError::NotBuilder));
+    let mut v = pnl();
+    v["schemaVersion"] = json!(0);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.schemaVersion".into(), Code::Schema)
+    );
 }
 
 #[test]
-fn unknown_fields_are_refused_at_every_depth() {
-    let mut top = pnl();
-    top["extra"] = json!(1);
-    let mut cols = pnl();
-    cols["columns"]["extra"] = json!(1);
-    let mut node = pnl();
-    node["nodes"][4]["children"][0]["extra"] = json!(1);
-    let mut filter = pnl();
-    filter["nodes"][0]["filters"][0]["extra"] = json!(1);
-    let mut term = pnl();
-    term["nodes"][2]["terms"][0]["extra"] = json!(1);
+fn unknown_fields_and_missing_required_ones_are_refused_at_every_depth() {
+    let mut cases = Vec::new();
+    for ptr in [
+        "",
+        "/columns",
+        "/nodes/4/children/0",
+        "/nodes/0/filters/0",
+        "/nodes/2/terms/0",
+        "/columns/compare/0",
+    ] {
+        let mut v = pnl();
+        v.pointer_mut(ptr).expect(ptr)["extra"] = json!(1);
+        cases.push(v);
+    }
     let mut kind = pnl();
     kind["nodes"][3]["type"] = json!("chart");
-    for v in [top, cols, node, filter, term, kind] {
+    cases.push(kind);
+    // Booleans and lists the engine requires are required here too.
+    for (ptr, key) in [
+        ("/nodes/1", "hideZero"),
+        ("/nodes/1", "filters"),
+        ("/nodes/4", "children"),
+        ("/columns", "headers"),
+        ("/columns/compare/0", "amount"),
+    ] {
+        let mut v = pnl();
+        v.pointer_mut(ptr)
+            .and_then(Value::as_object_mut)
+            .expect(ptr)
+            .remove(key);
+        cases.push(v);
+    }
+    let mut source = pnl();
+    source["nodes"][1]["source"] = json!("inventory");
+    cases.push(source);
+    for v in cases {
         assert!(
             matches!(parse_value(&v), Err(DefinitionError::Malformed(_))),
             "{v}"
@@ -120,41 +153,68 @@ fn duplicate_keys_are_refused_at_every_depth() {
 }
 
 #[test]
-fn two_hundred_nodes_pass_and_two_hundred_and_one_fail_at_any_depth() {
-    // 1 group + 199 blanks inside it = 200 nodes.
+fn two_hundred_nodes_pass_and_two_hundred_and_one_fail() {
     let children: Vec<Value> = (0..199).map(|i| blank(&format!("b{i}"))).collect();
     let mut v = pnl();
     v["columns"]["percentOf"] = json!("section");
-    v["nodes"] = json!([{"type": "group", "id": "g", "caption": "G", "children": children}]);
+    v["nodes"] = json!([group("g", children)]);
     parse_value(&v).expect("200 nodes");
     v["nodes"][0]["children"]
         .as_array_mut()
         .expect("arr")
         .push(blank("b199"));
-    assert_eq!(code_of(parse_value(&v)), ("nodes".into(), Code::Limit));
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes".into(), Code::TooManyNodes)
+    );
 }
 
 #[test]
-fn twenty_four_detail_fields_pass_and_twenty_five_fail() {
+fn groups_nest_eight_deep_and_no_deeper() {
+    let nest = |depth: usize| {
+        let mut n = blank("leaf");
+        for d in (0..depth).rev() {
+            n = group(&format!("g{d}"), vec![n]);
+        }
+        n
+    };
     let mut v = pnl();
-    v["columns"]["detailFields"] = json!(vec!["date"; 24]);
-    parse_value(&v).expect("24");
-    v["columns"]["detailFields"] = json!(vec!["date"; 25]);
+    v["columns"]["percentOf"] = json!("section");
+    v["nodes"] = json!([nest(7)]); // the leaf sits at depth 8
+    parse_value(&v).expect("8 deep");
+    v["nodes"] = json!([nest(8)]);
+    let (path, code) = code_of(parse_value(&v));
+    assert_eq!(code, Code::TooDeep);
+    assert!(path.ends_with(".children.0"), "{path}");
+}
+
+#[test]
+fn detail_fields_are_capped_known_and_used_once() {
+    let mut v = pnl();
+    // Every field but the running balance (the P&L has periods).
+    let all: Vec<&str> = fields::DETAIL_FIELDS
+        .iter()
+        .copied()
+        .filter(|f| *f != "running_balance")
+        .collect();
+    v["columns"]["detailFields"] = json!(all);
+    parse_value(&v).expect("21 fields");
+    v["columns"]["detailFields"] = json!(["date", "date"]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.detailFields".into(), Code::Limit)
+        ("definition.columns.detailFields".into(), Code::Schema)
     );
     v["columns"]["detailFields"] = json!(["shoe_size"]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.detailFields.0".into(), Code::UnknownField)
+        ("definition.columns.detailFields.0".into(), Code::Schema)
     );
 }
 
 #[test]
-fn the_byte_cap_counts_bytes_not_characters() {
-    // 500 characters of three-byte text per row stays inside each text cap
-    // but pushes the whole file past 256 KB.
+fn the_byte_cap_counts_compact_utf8_bytes() {
+    // 500 three-byte characters per row (500 UTF-16 units, the text cap);
+    // 190 rows pass 256 KB, 150 don't.
     let text: String = "\u{20ac}".repeat(500);
     let rows: Vec<Value> = (0..190)
         .map(|i| json!({"type": "text", "id": format!("t{i}"), "text": text}))
@@ -162,21 +222,37 @@ fn the_byte_cap_counts_bytes_not_characters() {
     let mut v = pnl();
     v["columns"]["percentOf"] = json!("section");
     v["nodes"] = json!(rows);
-    let s = serde_json::to_string(&v).expect("text");
-    assert!(s.chars().count() < MAX_BYTES && s.len() > MAX_BYTES);
-    assert_eq!(parse(&s), Err(DefinitionError::TooLarge));
+    assert_eq!(parse_value(&v), Err(DefinitionError::TooLarge));
     v["nodes"] = json!(rows[..150]);
-    parse_value(&v).expect("under the cap");
+    // Pretty-printed it is larger than compact; only compact counts.
+    let pretty = serde_json::to_string_pretty(&v).expect("text");
+    parse(&pretty).expect("under the cap");
+}
+
+#[test]
+fn lengths_count_utf16_units_and_edges_are_kept() {
+    let mut v = pnl();
+    v["nodes"][0]["caption"] = json!("\u{1F600}".repeat(100)); // 200 units
+    parse_value(&v).expect("200 units");
+    v["nodes"][0]["caption"] = json!("\u{1F600}".repeat(101)); // 202 units
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.0.caption".into(), Code::Schema)
+    );
+    v["nodes"][0]["caption"] = json!("Income ");
+    assert_eq!(code_of(parse_value(&v)).1, Code::Schema);
+    v["nodes"][0]["caption"] = json!("");
+    assert_eq!(code_of(parse_value(&v)).1, Code::Schema);
 }
 
 #[test]
 fn a_uuid_in_owner_text_is_refused() {
     let cases = [
-        ("/title", "title"),
-        ("/nodes/0/caption", "nodes.0.caption"),
-        ("/nodes/0/totalCaption", "nodes.0.totalCaption"),
-        ("/nodes/7/text", "nodes.7.text"),
-        ("/columns/headers/total", "columns.headers.total"),
+        ("/title", "definition.title"),
+        ("/nodes/0/caption", "definition.nodes.0.caption"),
+        ("/nodes/0/totalCaption", "definition.nodes.0.totalCaption"),
+        ("/nodes/7/text", "definition.nodes.7.text"),
+        ("/columns/headers/total", "definition.columns.headers.total"),
     ];
     for (ptr, path) in cases {
         let mut v = pnl();
@@ -192,53 +268,124 @@ fn ids_are_checked_where_they_belong() {
     v["nodes"][0]["filters"][1]["ids"] = json!(["not-a-uuid"]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.0.filters.1.ids.0".into(), Code::BadId)
+        ("definition.nodes.0.filters.1.ids.0".into(), Code::Schema)
     );
     let mut v = pnl();
     v["nodes"][0]["filters"][1]["ids"] = json!(vec![UUID; 501]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.0.filters.1.ids".into(), Code::Limit)
+        ("definition.nodes.0.filters.1.ids".into(), Code::Schema)
     );
+    // A tag group with, and only with, group by tag.
     let mut v = pnl();
-    v["nodes"][0]["groupBy"][1]["tagGroupId"] = json!("x");
+    v["nodes"][0]["groupBy"][0]["tagGroupId"] = json!(UUID);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.0.groupBy.1.tagGroupId".into(), Code::BadId)
+        (
+            "definition.nodes.0.groupBy.0.tagGroupId".into(),
+            Code::Schema
+        )
+    );
+    // A uuid is not a node id.
+    let mut v = pnl();
+    v["nodes"][3]["id"] = json!(UUID);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.3.id".into(), Code::Schema)
     );
 }
 
 #[test]
-fn node_ids_follow_the_pattern_and_are_unique() {
-    for bad in [
-        "Income",
-        "",
-        "a b",
-        &"a".repeat(33),
-        "0123456789abcdef0123456789abcdef",
-    ] {
+fn node_ids_follow_the_pattern_are_unique_and_section_is_reserved() {
+    for bad in ["Income", "", "a b", &"a".repeat(33)] {
         let mut v = pnl();
         v["nodes"][3]["id"] = json!(bad);
-        assert_eq!(code_of(parse_value(&v)).1, Code::NodeId, "{bad:?}");
+        assert_eq!(code_of(parse_value(&v)).1, Code::Schema, "{bad:?}");
+    }
+    for dup in ["income", "section"] {
+        let mut v = pnl();
+        v["nodes"][3]["id"] = json!(dup);
+        assert_eq!(
+            code_of(parse_value(&v)),
+            ("definition.nodes.3.id".into(), Code::DuplicateId)
+        );
+    }
+}
+
+#[test]
+fn filters_take_the_right_operator_and_values() {
+    let cases = [
+        // ids on a value field
+        (
+            json!({"field": "account_type", "op": "in", "ids": [UUID]}),
+            "op",
+        ),
+        // a value outside the enumeration
+        (
+            json!({"field": "account_type", "op": "in", "values": ["income"]}),
+            "values.0",
+        ),
+        // is_none on a field that is never empty
+        (json!({"field": "account", "op": "is_none"}), "op"),
+        // gte without a value
+        (json!({"field": "amount", "op": "gte"}), "op"),
+    ];
+    for (filter, at) in cases {
+        let mut v = pnl();
+        v["nodes"][1]["filters"] =
+            json!([{"field": "account_type", "op": "in", "values": ["cogs"]}, filter]);
+        assert_eq!(
+            code_of(parse_value(&v)),
+            (format!("definition.nodes.1.filters.1.{at}"), Code::FilterOp)
+        );
     }
     let mut v = pnl();
-    v["nodes"][3]["id"] = json!("income");
+    v["nodes"][1]["filters"] = json!([
+        {"field": "account_type", "op": "in", "values": ["cogs"]},
+        {"field": "amount", "op": "gte", "value": "-12.5"},
+        {"field": "contact", "op": "is_none"}
+    ]);
+    parse_value(&v).expect("valid filters");
+    v["nodes"][1]["filters"][1]["value"] = json!("12.50001");
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.3.id".into(), Code::DuplicateId)
+        ("definition.nodes.1.filters.1.value".into(), Code::Schema)
     );
 }
 
 #[test]
-fn formulas_take_only_earlier_money_rows() {
-    // Forward.
+fn sources_offer_only_their_own_measures_groups_and_polarity() {
+    let mut v = pnl();
+    v["nodes"][1]["measure"] = json!("quantity");
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.1.measure".into(), Code::NotInSource)
+    );
+    let mut v: Value = serde_json::from_str(AGING).expect("json");
+    v["nodes"][0]["groupBy"] = json!([{"key": "tag", "tagGroupId": UUID}]);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.0.groupBy.0.key".into(), Code::NotInSource)
+    );
+    let mut v: Value = serde_json::from_str(AGING).expect("json");
+    v["nodes"][0]["polarity"] = json!("debit");
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.0.polarity".into(), Code::NotInSource)
+    );
+}
+
+#[test]
+fn formulas_take_only_earlier_rows_of_one_unit() {
     let mut v = pnl();
     v["nodes"][2]["terms"][1]["nodeId"] = json!("expenses");
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.2.terms.1".into(), Code::FormulaForwardRef)
+        (
+            "definition.nodes.2.terms.1.nodeId".into(),
+            Code::FormulaForwardRef
+        )
     );
-    // Itself, unknown, and a blank row.
     for target in ["net_income", "nope", "b1"] {
         let mut v = pnl();
         v["nodes"][5]["terms"][0]["nodeId"] = json!(target);
@@ -257,28 +404,70 @@ fn formulas_take_only_earlier_money_rows() {
                      "terms": [{"nodeId": "spend", "sign": 1}]}));
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.4.children.1.terms.0".into(), Code::FormulaForwardRef)
+        (
+            "definition.nodes.4.children.1.terms.0.nodeId".into(),
+            Code::FormulaForwardRef
+        )
     );
-    // Units.
+    // Money with a count.
     let mut v = pnl();
-    v["nodes"][1]["source"] = json!("sales");
-    v["nodes"][1]["measure"] = json!("count");
-    v["nodes"][1]["filters"] = json!([]);
+    v["columns"]
+        .as_object_mut()
+        .expect("obj")
+        .remove("percentOf");
+    v["nodes"][1] = section("cogs", "sales", "count");
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.2.terms".into(), Code::FormulaUnits)
+        ("definition.nodes.2.terms".into(), Code::FormulaUnits)
     );
-    // Sign.
+    // A trial-balance pair can't be a term.
+    let mut v = pnl();
+    v["columns"]
+        .as_object_mut()
+        .expect("obj")
+        .remove("percentOf");
+    v["nodes"][1] = section("cogs", "gl", "tb_net");
+    assert_eq!(
+        code_of(parse_value(&v)),
+        (
+            "definition.nodes.2.terms.1.nodeId".into(),
+            Code::FormulaUnits
+        )
+    );
+    // Sign and term count.
     let mut v = pnl();
     v["nodes"][2]["terms"][0]["sign"] = json!(2);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.2.terms.0.sign".into(), Code::BadSign)
+        ("definition.nodes.2.terms.0.sign".into(), Code::Schema)
+    );
+    let mut v = pnl();
+    v["nodes"][2]["terms"] = json!([]);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.2.terms".into(), Code::Schema)
     );
 }
 
 #[test]
-fn percent_of_takes_a_money_node_or_section() {
+fn a_node_reached_twice_keeps_its_unit() {
+    let mut v = pnl();
+    v["nodes"] = json!([
+        group("g", vec![
+            section("a", "sales", "amount"),
+            section("b", "sales", "amount"),
+            json!({"type": "formula", "id": "ab", "caption": "a+b",
+                   "terms": [{"nodeId": "a", "sign": 1}, {"nodeId": "b", "sign": 1}]})
+        ]),
+        {"type": "formula", "id": "twice", "caption": "x",
+         "terms": [{"nodeId": "g", "sign": 1}, {"nodeId": "ab", "sign": -1}]}
+    ]);
+    v["columns"]["percentOf"] = json!("g");
+    parse_value(&v).expect("valid");
+}
+
+#[test]
+fn percent_of_takes_a_money_node_or_section_over_money_sections() {
     let mut v = pnl();
     v["columns"]["percentOf"] = json!("section");
     parse_value(&v).expect("section");
@@ -288,144 +477,133 @@ fn percent_of_takes_a_money_node_or_section() {
         v["columns"]["percentOf"] = json!(bad);
         assert_eq!(
             code_of(parse_value(&v)),
-            ("columns.percentOf".into(), Code::PercentBase)
+            ("definition.columns.percentOf".into(), Code::PercentBase)
         );
     }
     let mut v = pnl();
-    v["nodes"].as_array_mut().expect("arr").push(json!(
-        {"type": "section", "id": "n", "caption": "n", "source": "sales",
-         "measure": "count", "display": "summary"}));
-    v["columns"]["percentOf"] = json!("n");
+    v["nodes"]
+        .as_array_mut()
+        .expect("arr")
+        .push(section("n", "sales", "count"));
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.percentOf".into(), Code::PercentBase)
+        ("definition.nodes.8.measure".into(), Code::PercentBase)
     );
 }
 
 #[test]
 fn earnings_buckets_running_balance_and_polarity_rules() {
-    // Earnings with an account filter.
     let mut v: Value = serde_json::from_str(SHEET).expect("json");
-    v["nodes"][0]["filters"] = json!([{"field": "account", "op": "in", "ids": [UUID]}]);
+    v["nodes"][1]["children"][1]["filters"][1] = json!({"field": "contact", "op": "is_none"});
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.0.earnings".into(), Code::EarningsFilter)
+        (
+            "definition.nodes.1.children.1.filters.1.field".into(),
+            Code::EarningsFilter
+        )
     );
-    // Earnings on sales.
-    let mut v = pnl();
-    v["nodes"][1]["earnings"] = json!("trial_balance");
-    assert_eq!(code_of(parse_value(&v)).1, Code::EarningsFilter);
+    let mut v: Value = serde_json::from_str(SHEET).expect("json");
+    v["nodes"][1]["children"][1]["earnings"] = json!("trial_balance");
+    assert_eq!(
+        code_of(parse_value(&v)),
+        (
+            "definition.nodes.1.children.1.earnings".into(),
+            Code::EarningsFilter
+        )
+    );
     // Buckets with periods, and on an activity section.
     let mut v: Value = serde_json::from_str(AGING).expect("json");
     v["columns"]["periods"] = json!("month");
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.agingBuckets".into(), Code::BucketsPeriods)
+        (
+            "definition.columns.agingBuckets".into(),
+            Code::BucketsPeriods
+        )
     );
     let mut v: Value = serde_json::from_str(AGING).expect("json");
     v["nodes"]
         .as_array_mut()
         .expect("arr")
-        .push(money_section("s2"));
+        .push(section("s2", "sales", "amount"));
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.1.source".into(), Code::BucketsPeriods)
+        ("definition.nodes.1.source".into(), Code::BucketsPeriods)
     );
-    // A running balance grouped by account type last.
+    let mut v: Value = serde_json::from_str(AGING).expect("json");
+    v["columns"]["agingBuckets"] = json!(false);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.columns.agingBuckets".into(), Code::Schema)
+    );
+    // A running balance needs the account innermost, and no periods.
     let mut v: Value = serde_json::from_str(SHEET).expect("json");
-    v["nodes"][0]["groupBy"] = json!([{"key": "account"}, {"key": "account_type"}]);
+    v["columns"]["detailFields"] = json!(["date", "running_balance"]);
+    parse_value(&v).expect("by account");
+    v["nodes"][0]["groupBy"] = json!([{"key": "account"}, {"key": "contact"}]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.0.groupBy".into(), Code::RunningBalance)
+        ("definition.nodes.0.groupBy".into(), Code::RunningBalance)
     );
-    // Natural over income and expense accounts.
-    let mut v = pnl();
-    v["nodes"][1]["filters"][0]["values"] = json!(["cogs", "income"]);
+    let mut v: Value = serde_json::from_str(SHEET).expect("json");
+    v["columns"]["detailFields"] = json!(["running_balance"]);
+    v["columns"]["periods"] = json!("month");
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.1.polarity".into(), Code::MixedPolarity)
+        (
+            "definition.columns.detailFields".into(),
+            Code::RunningBalance
+        )
+    );
+    // Natural over income and expense accounts; an explicit side is fine.
+    let mut v = pnl();
+    v["nodes"][1]["filters"][0]["values"] = json!(["cogs", "revenue"]);
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.nodes.1.polarity".into(), Code::MixedPolarity)
     );
     v["nodes"][1]["polarity"] = json!("debit");
     parse_value(&v).expect("an explicit side");
 }
 
 #[test]
-fn greyed_choices_are_refused() {
-    let mut v = pnl();
-    v["basis"] = json!("cash");
-    v["nodes"][1]["source"] = json!("sales");
-    v["nodes"][1]["measure"] = json!("quantity");
-    v["nodes"][1]["filters"] = json!([]);
-    v["nodes"][2]["terms"] = json!([{"nodeId": "income", "sign": 1}]);
-    v["nodes"][5]["terms"] = json!([{"nodeId": "gross_profit", "sign": 1}]);
-    assert_eq!(
-        code_of(parse_value(&v)),
-        ("nodes.1.measure".into(), Code::Unavailable)
-    );
-    let mut v = pnl();
-    v["nodes"][1]["groupBy"] = json!([{"key": "project"}]);
-    assert_eq!(
-        code_of(parse_value(&v)),
-        ("nodes.1.groupBy.0.key".into(), Code::Unavailable)
-    );
-}
-
-#[test]
-fn caps_on_filters_group_bys_terms_compare_and_text() {
+fn caps_on_filters_group_bys_compare_text_and_headers() {
     let mut v = pnl();
     v["nodes"][1]["filters"] = json!(vec![json!({"field": "tag", "op": "in", "ids": [UUID]}); 21]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.1.filters".into(), Code::Limit)
+        ("definition.nodes.1.filters".into(), Code::Schema)
     );
     let mut v = pnl();
-    v["nodes"][1]["groupBy"] = json!(vec![json!({"key": "account"}); 4]);
+    v["nodes"][1]["groupBy"] =
+        json!([{"key": "account"}, {"key": "contact"}, {"key": "item"}, {"key": "month"}]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.1.groupBy".into(), Code::Limit)
-    );
-    let mut v = pnl();
-    v["nodes"][2]["terms"] = json!(vec![json!({"nodeId": "income", "sign": 1}); 21]);
-    assert_eq!(
-        code_of(parse_value(&v)),
-        ("nodes.2.terms".into(), Code::Limit)
+        ("definition.nodes.1.groupBy".into(), Code::Schema)
     );
     let mut v = pnl();
     let c = v["columns"]["compare"][0].clone();
     v["columns"]["compare"] = json!([c.clone(), c.clone(), c]);
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.compare".into(), Code::Limit)
+        ("definition.columns.compare".into(), Code::Schema)
     );
     let mut v = pnl();
     v["nodes"][7]["text"] = json!("x".repeat(501));
     assert_eq!(
         code_of(parse_value(&v)),
-        ("nodes.7.text".into(), Code::Limit)
+        ("definition.nodes.7.text".into(), Code::Schema)
     );
     let mut v = pnl();
     v["columns"]["headers"]["total"] = json!("x".repeat(81));
     assert_eq!(
         code_of(parse_value(&v)),
-        ("columns.headers.total".into(), Code::Limit)
+        ("definition.columns.headers.total".into(), Code::Schema)
     );
-}
-
-#[test]
-fn a_node_reached_twice_keeps_its_unit() {
-    // A group holding a, b and the formula a + b; then a formula and
-    // percentOf on the group. Each of a and b is reached twice.
     let mut v = pnl();
-    v["nodes"] = json!([
-        {"type": "group", "id": "g", "caption": "G", "children": [
-            money_section("a"),
-            money_section("b"),
-            {"type": "formula", "id": "ab", "caption": "a+b",
-             "terms": [{"nodeId": "a", "sign": 1}, {"nodeId": "b", "sign": 1}]}
-        ]},
-        {"type": "formula", "id": "twice", "caption": "x",
-         "terms": [{"nodeId": "g", "sign": 1}, {"nodeId": "ab", "sign": -1}]}
-    ]);
-    v["columns"]["percentOf"] = json!("g");
-    parse_value(&v).expect("valid");
+    v["columns"]["headers"]["Total"] = json!("x");
+    assert_eq!(
+        code_of(parse_value(&v)),
+        ("definition.columns.headers.Total".into(), Code::Schema)
+    );
 }

@@ -1,9 +1,10 @@
 //! Definition schema v1 (A07 plan §3): the serde mirror of the engine's
-//! strict zod schema. Every struct refuses unknown fields and duplicate
-//! keys, so a file the engine would refuse is refused here too.
-//!
-//! Shapes the plan does not pin yet are marked "contract guess" and are
-//! replaced by PR-A's shared fixtures when they land.
+//! strict zod schema (`packages/shared/src/report-builder/schemas.ts`).
+//! Every struct refuses unknown fields and repeated keys; every field the
+//! engine requires is required here (no serde defaults), so a body the
+//! engine would refuse for its shape fails here too. Enumerated keys whose
+//! lists live in [`super::fields`] are kept as text and checked by
+//! [`super::validate`] (code `SCHEMA`), with the engine's path.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -11,8 +12,6 @@ use std::fmt;
 use cl_core::report::{Adjusting, Basis};
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
-
-use crate::reports::DatePreset;
 
 /// `kind`: always `builder` for this schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +29,7 @@ pub struct BuilderDefinition {
     pub schema_version: u32,
     /// `builder`.
     pub kind: BuilderKind,
-    /// The report's title (owner text).
+    /// The report's title (owner text, 1–200 UTF-16 units, no edge spaces).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// Range or as-of, with an optional preset.
@@ -63,9 +62,9 @@ pub enum DateMode {
 pub struct Dates {
     /// Range or as-of.
     pub mode: DateMode,
-    /// A preset (`None`: the dates are chosen when it runs).
+    /// A preset key (`^[a-z0-9_]{1,40}$`; `None`: chosen when it runs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preset: Option<DatePreset>,
+    pub preset: Option<String>,
 }
 
 /// Periods side by side.
@@ -95,13 +94,10 @@ pub struct CompareSet {
     /// Compared with.
     pub base: CompareBase,
     /// Show the compared amount.
-    #[serde(default)]
     pub amount: bool,
     /// Show the $ change.
-    #[serde(default)]
     pub dollar_change: bool,
     /// Show the % change.
-    #[serde(default)]
     pub percent_change: bool,
 }
 
@@ -109,30 +105,29 @@ pub struct CompareSet {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Columns {
-    /// Detail fields in order (≤ 24).
-    #[serde(default)]
+    /// Detail fields in order (≤ 24, each once).
     pub detail_fields: Vec<String>,
     /// Periods side by side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub periods: Option<Periods>,
-    /// Aging-bucket columns (open-item sections only, never with periods).
+    /// Aging-bucket columns: `true` or absent (`false` is refused).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aging_buckets: Option<bool>,
     /// Compare sets (≤ 2).
-    #[serde(default)]
     pub compare: Vec<CompareSet>,
     /// `% of`: a money node's id, or `section`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percent_of: Option<String>,
-    /// Renamed headers: column key to caption (≤ 80 characters).
-    #[serde(default, deserialize_with = "unique_map")]
+    /// Renamed headers: column key to caption (≤ 64; ≤ 80 units each).
+    #[serde(deserialize_with = "unique_map")]
     pub headers: BTreeMap<String, String>,
 }
 
-/// A transaction source (plan §4 table).
+/// A transaction source (`RB_SOURCES`). Inventory and projects are offered
+/// greyed out ([`super::fields::UNAVAILABLE_SOURCES`]) and not accepted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(missing_docs, reason = "sources, as named in the plan's §4 table")]
+#[allow(missing_docs, reason = "sources, as named in fields.ts")]
 pub enum SourceKey {
     Sales,
     ItemSales,
@@ -143,13 +138,11 @@ pub enum SourceKey {
     Gl,
     Bank,
     Tax,
-    /// Greyed out in v1 (Q-A07g).
-    Inventory,
 }
 
 impl SourceKey {
     /// Every source, in menu order.
-    pub const ALL: [SourceKey; 10] = [
+    pub const ALL: [SourceKey; 9] = [
         SourceKey::Sales,
         SourceKey::ItemSales,
         SourceKey::Purchases,
@@ -159,14 +152,7 @@ impl SourceKey {
         SourceKey::Gl,
         SourceKey::Bank,
         SourceKey::Tax,
-        SourceKey::Inventory,
     ];
-
-    /// An open-item source (as of a date, Q-307).
-    #[must_use]
-    pub const fn is_open_items(self) -> bool {
-        matches!(self, SourceKey::ArOpen | SourceKey::ApOpen)
-    }
 
     /// The wire name.
     #[must_use]
@@ -181,28 +167,28 @@ impl SourceKey {
             SourceKey::Gl => "gl",
             SourceKey::Bank => "bank",
             SourceKey::Tax => "tax",
-            SourceKey::Inventory => "inventory",
         }
     }
 }
 
-/// What a section adds up.
+/// What a section adds up (`RB_MEASURES`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(missing_docs, reason = "measures, as named in the plan's §4 table")]
+#[allow(missing_docs, reason = "measures, as named in fields.ts")]
 pub enum Measure {
     Amount,
-    Quantity,
-    Count,
-    OpenBalance,
-    OriginalAmount,
     Debit,
     Credit,
     Balance,
     TbNet,
+    Count,
+    Quantity,
+    OpenBalance,
+    OriginalAmount,
 }
 
-/// The unit a measure is in (formulas can't mix them, `FORMULA_UNITS`).
+/// The unit a measure is in (`RB_MEASURE_UNIT`): formulas and percents
+/// never mix units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Unit {
     /// Dollars.
@@ -211,6 +197,8 @@ pub enum Unit {
     Count,
     /// Item quantity.
     Quantity,
+    /// A debit and a credit column (`tb_net`).
+    DebitCredit,
 }
 
 impl Measure {
@@ -220,23 +208,8 @@ impl Measure {
         match self {
             Measure::Count => Unit::Count,
             Measure::Quantity => Unit::Quantity,
+            Measure::TbNet => Unit::DebitCredit,
             _ => Unit::Money,
-        }
-    }
-
-    /// The wire name.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Measure::Amount => "amount",
-            Measure::Quantity => "quantity",
-            Measure::Count => "count",
-            Measure::OpenBalance => "open_balance",
-            Measure::OriginalAmount => "original_amount",
-            Measure::Debit => "debit",
-            Measure::Credit => "credit",
-            Measure::Balance => "balance",
-            Measure::TbNet => "tb_net",
         }
     }
 }
@@ -245,7 +218,7 @@ impl Measure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Polarity {
-    /// Each account's normal side.
+    /// The source's default (each account's normal side on `gl`).
     Natural,
     /// Debits positive.
     Debit,
@@ -265,25 +238,29 @@ pub enum Display {
     Expandable,
 }
 
-/// The engine's earnings rows in an equity section (Q-313).
+/// The engine's earnings rows (Q-313).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Earnings {
-    /// Prior years' and this year's net income (Balance Sheet).
+    /// Prior years' and this year's net income (`balance`).
     BalanceSheet,
-    /// Retained earnings (prior years) only (Trial Balance, Q-A07n).
+    /// Retained earnings, prior years (`tb_net`, Q-A07n).
     TrialBalance,
 }
 
-/// A filter operator. Contract guess: PR-A's `schemas.ts` pins the set.
+/// A filter operator (`RB_FILTER_OPS`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(missing_docs, reason = "operators, as named")]
 pub enum FilterOp {
+    /// One of the ids or values.
     In,
+    /// None of the ids or values.
     NotIn,
-    Eq,
+    /// Empty (no contact, no item, untagged).
+    IsNone,
+    /// At least `value` (amount).
     Gte,
+    /// At most `value` (amount).
     Lte,
 }
 
@@ -291,34 +268,33 @@ pub enum FilterOp {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Filter {
-    /// The field it filters ([`super::fields`]).
+    /// The field ([`super::fields::FILTER_FIELDS`]).
     pub field: String,
     /// How.
     pub op: FilterOp,
-    /// Entity ids (≤ 500 UUIDs; the only place ids appear).
+    /// Entity ids (≤ 500 uuids; the only place ids appear).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ids: Option<Vec<String>>,
-    /// Enumerated values (≤ 500: transaction types, account types,
-    /// buckets, due status, cleared state).
+    /// Enumerated values (≤ 500, 1–40 characters each).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<String>>,
-    /// One value (an exact amount or a date, as text).
+    /// An exact amount (`^-?\d{1,15}(\.\d{1,4})?$`), as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
 }
 
-/// One group-by (≤ 3 per section).
+/// One group-by (≤ 3 per section, each key once).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GroupBy {
-    /// The key ([`super::fields`]).
+    /// The key ([`super::fields::GROUP_KEYS`]).
     pub key: String,
-    /// The tag group, for a tag group-by.
+    /// The tag group: with, and only with, key `tag`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_group_id: Option<String>,
 }
 
-/// One formula term (≤ 20).
+/// One formula term (1–20).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Term {
@@ -340,28 +316,23 @@ pub struct Section {
     pub source: SourceKey,
     /// Measure.
     pub measure: Measure,
-    /// Sign (`None`: the source's default).
+    /// Sign (`None`: the source's default; open items take none).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub polarity: Option<Polarity>,
     /// Filters.
-    #[serde(default)]
     pub filters: Vec<Filter>,
     /// Group-bys, outermost first.
-    #[serde(default)]
     pub group_by: Vec<GroupBy>,
     /// Display.
     pub display: Display,
     /// Expandable lines start open.
-    #[serde(default)]
     pub default_expanded: bool,
     /// Show a total row.
-    #[serde(default)]
     pub show_total: bool,
     /// The total's caption (owner text).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_caption: Option<String>,
     /// Hide rows that are all zero.
-    #[serde(default)]
     pub hide_zero: bool,
     /// The engine's earnings rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -377,10 +348,8 @@ pub struct Group {
     /// Caption.
     pub caption: String,
     /// The nodes under it.
-    #[serde(default)]
     pub children: Vec<Node>,
     /// Show a total row.
-    #[serde(default)]
     pub show_total: bool,
     /// The total's caption.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,7 +374,7 @@ pub struct Formula {
 pub struct TextRow {
     /// Node id.
     pub id: String,
-    /// The text (≤ 500 characters).
+    /// The text (≤ 500 UTF-16 units; may be empty).
     pub text: String,
 }
 
@@ -417,7 +386,7 @@ pub struct Spacer {
     pub id: String,
 }
 
-/// One node of the tree. The discriminator is `type` (contract guess).
+/// One node of the tree, discriminated by `type`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Node {
