@@ -1,0 +1,60 @@
+{
+  "asOfDate": "2033-03-31",
+  "assets": [
+    {
+      "accountId": "47bcc627-0b34-44a0-8a41-fd1c8c468bc1",
+      "accountNumber": null,
+      "balance": -49.7,
+      "balanceExact": "-49.7000",
+      "depth": 0,
+      "name": "ExactBank 008461ce7f",
+      "parentAccountId": null
+    }
+  ],
+  "basis": "accrual",
+  "equity": [
+    {
+      "accountId": null,
+      "accountNumber": null,
+      "balance": -74.7,
+      "balanceExact": "-74.7000",
+      "depth": 0,
+      "name": "Net Income (Current Year)",
+      "parentAccountId": null
+    }
+  ],
+  "footer": "",
+  "labels": {
+    "assets": "Assets",
+    "equity": "Equity",
+    "liabilities": "Liabilities",
+    "totalLiabilitiesAndEquity": "Total Liabilities & Equity"
+  },
+  "liabilities": [
+    {
+      "accountId": "3039295e-83c1-44cc-9b4d-f44488773dcd",
+      "accountNumber": null,
+      "balance": 25,
+      "balanceExact": "25.0000",
+      "depth": 0,
+      "name": "ExactOwed 314d203b67",
+      "parentAccountId": null
+    }
+  ],
+  "meta": {
+    "asOf": "2033-03-31",
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Balance Sheet - Accrual Basis",
+  "totalAssets": -49.7,
+  "totalAssetsExact": "-49.7000",
+  "totalEquity": -74.7,
+  "totalEquityExact": "-74.7000",
+  "totalLiabilities": 25,
+  "totalLiabilitiesAndEquity": -49.7,
+  "totalLiabilitiesAndEquityExact": "-49.7000",
+  "totalLiabilitiesExact": "25.0000"
+}

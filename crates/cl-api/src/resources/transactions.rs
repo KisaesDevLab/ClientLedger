@@ -1010,14 +1010,9 @@ pub struct TransactionSummary {
     pub check_number: Option<u64>,
 }
 
-/// Basis lens of the transaction list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ReportBasis {
-    /// Cash basis (`both` and `cash` entries).
-    Cash,
-    /// Accrual basis (`both` and `accrual` entries).
-    Accrual,
-}
+/// Basis lens of the transaction list and the reports (P28: the shared
+/// [`cl_core::report::Basis`]).
+pub type ReportBasis = cl_core::report::Basis;
 
 /// Sort keys of the transaction list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

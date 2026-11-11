@@ -1,0 +1,41 @@
+{
+  "accounts": [
+    {
+      "accountId": "9e5baaca-2e87-4621-94e3-a92e787f14c5",
+      "accountNumber": "1010",
+      "balance": 85710.55,
+      "balanceExact": "85710.5500",
+      "isInactive": false,
+      "name": "Operating Checking"
+    },
+    {
+      "accountId": "844a132c-3a27-4779-a624-0dec0c57d221",
+      "accountNumber": "10100",
+      "balance": 0,
+      "balanceExact": "0.0000",
+      "isInactive": false,
+      "name": "Cash"
+    },
+    {
+      "accountId": "390b0807-7138-4a8c-9145-0982aa527dd0",
+      "accountNumber": "1020",
+      "balance": 15450,
+      "balanceExact": "15450.0000",
+      "isInactive": false,
+      "name": "Savings"
+    }
+  ],
+  "asOfDate": "2026-11-30",
+  "footer": "",
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Bank Account Balances",
+  "totalBalance": 101160.55,
+  "totalBalanceExact": "101160.5500",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

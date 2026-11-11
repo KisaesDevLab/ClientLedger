@@ -1,0 +1,4 @@
+kind,level,path,caption,date,type,number,payee,memo,amount
+header,0,pairs/0,@reports.row.duplicate_pair 0,,,,,,
+detail,1,pairs/0/a,,2026-12-15,@reports.txn.expense,,Table Rock Nursery,Shrubs,89.99
+detail,1,pairs/0/b,,2026-12-15,@reports.txn.expense,,Table Rock Nursery,Shrubs,89.99

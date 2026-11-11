@@ -1,0 +1,26 @@
+{
+  "data": [
+    {
+      "account_id": "5b6a6cba-50cb-44db-b4ac-51260fa57692",
+      "account_number": null,
+      "account_type": "revenue",
+      "category": "ExactRev e935915dc4",
+      "total": "0.3000",
+      "totalExact": "0.3000"
+    }
+  ],
+  "endDate": "2033-03-31",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2033-03-01",
+    "reportSchemaVersion": "2",
+    "to": "2033-03-31"
+  },
+  "startDate": "2033-03-01",
+  "title": "Revenues by Category",
+  "totalsExact": {
+    "total": "0.3000"
+  }
+}

@@ -56,6 +56,9 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
+            RetryClass::Keyable(KeySet::ReportDefsV1) => "keyable-report-defs",
+            RetryClass::Keyable(KeySet::BudgetsV1) => "keyable-budgets",
+            RetryClass::Keyable(KeySet::ReportsEmailV1) => "keyable-reports-email",
             RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
             RetryClass::Keyable(KeySet::FeedV1) => "keyable-feed",
             RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
@@ -137,6 +140,14 @@ pub enum KeySet {
     /// Keyed under `units-of-measure-v1` (U-161, P24) with `idempotency-v1`'s
     /// contract: creating a unit set.
     UnitSetsV1,
+    /// Keyed under `report-defs-v1` (U-118, P28) with `idempotency-v1`'s
+    /// contract: creating and changing memorized reports and their groups.
+    ReportDefsV1,
+    /// `budgets-exact-v1` (U-203, P28): budget create and change, lines,
+    /// fill from actuals, copy and adjust by percent.
+    BudgetsV1,
+    /// `reports-email-v1` (U-207, P28): emailing a report file.
+    ReportsEmailV1,
     /// `bank-import-batch-v1` (U-06, P25): a bank import commit (its
     /// preview on the same route takes no key, [`crate::client`] `no_key`)
     /// and undoing an import.
@@ -180,6 +191,9 @@ impl KeySet {
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
             KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
+            KeySet::ReportDefsV1 => crate::wire::Capabilities::REPORT_DEFS,
+            KeySet::BudgetsV1 => crate::wire::Capabilities::BUDGETS_EXACT,
+            KeySet::ReportsEmailV1 => crate::wire::Capabilities::REPORTS_EMAIL,
             KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
             KeySet::FeedV1 => crate::wire::Capabilities::FEED_IDEMPOTENCY,
             KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
@@ -647,6 +661,12 @@ pub(crate) const VENDOR_1099_PROFILE: Operation =
 pub(crate) const VENDOR_1099_PROFILE_PUT: Operation = write(
     Method::Put,
     "/api/v1/practice/1099/vendors/{contactId}/profile",
+);
+
+/// Replaces the accounts mapped to one 1099 form box (the 1099 Center).
+pub(crate) const FORM_1099_ACCOUNT_MAPPINGS_PUT: Operation = write(
+    Method::Put,
+    "/api/v1/practice/1099/account-mappings/{formBox}",
 );
 
 // ---- P11 tags ----------------------------------------------------------------
@@ -1654,6 +1674,155 @@ pub(crate) const UNIT_SET_GET: Operation = read("/api/v1/unit-sets/{id}");
 pub(crate) const UNIT_SET_PUT: Operation = write(Method::Put, "/api/v1/unit-sets/{id}");
 /// Deletes a unit set no item or line names.
 pub(crate) const UNIT_SET_DELETE: Operation = write(Method::Delete, "/api/v1/unit-sets/{id}");
+// P28: memorized reports (U-118, `report-defs-v1`). Not keyed yet: a
+// retried save is caught by the name rule (409 `NAME_TAKEN`) or the version
+// (409 `STALE_VERSION`).
+/// Memorized reports.
+pub(crate) const REPORT_DEFS_LIST: Operation = read("/api/v1/report-builder/definitions");
+/// Memorizes a report.
+pub(crate) const REPORT_DEFS_CREATE: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Post,
+    "/api/v1/report-builder/definitions",
+);
+/// One memorized report.
+pub(crate) const REPORT_DEF_GET: Operation = read("/api/v1/report-builder/definitions/{id}");
+/// Saves changes to a memorized report (`version`).
+pub(crate) const REPORT_DEF_PUT: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Put,
+    "/api/v1/report-builder/definitions/{id}",
+);
+/// Deletes a memorized report (`version`).
+pub(crate) const REPORT_DEF_DELETE: Operation =
+    write(Method::Delete, "/api/v1/report-builder/definitions/{id}");
+/// Memorized report groups.
+pub(crate) const REPORT_DEF_GROUPS_LIST: Operation =
+    read("/api/v1/report-builder/definition-groups");
+/// Adds a group.
+pub(crate) const REPORT_DEF_GROUPS_CREATE: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Post,
+    "/api/v1/report-builder/definition-groups",
+);
+/// Renames or moves a group (`version`).
+pub(crate) const REPORT_DEF_GROUP_PUT: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Put,
+    "/api/v1/report-builder/definition-groups/{id}",
+);
+/// Deletes a group; its reports move to no group (`version`).
+pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
+    Method::Delete,
+    "/api/v1/report-builder/definition-groups/{id}",
+);
+/// The General Ledger and Transaction Detail by Account (U-14 exact).
+pub(crate) const REPORT_GENERAL_LEDGER: Operation = read("/api/v1/reports/general-ledger");
+/// Revenue by Category (U-14 exact).
+pub(crate) const REPORT_REVENUE_BY_CATEGORY: Operation =
+    read("/api/v1/reports/revenue-by-category");
+/// Expenses by Category (U-14 exact).
+pub(crate) const REPORT_EXPENSE_BY_CATEGORY: Operation =
+    read("/api/v1/reports/expense-by-category");
+/// `ar-aging-detail` (P28 WP3).
+pub(crate) const REPORT_AR_AGING_DETAIL: Operation = read("/api/v1/reports/ar-aging-detail");
+/// `invoice-list` (P28 WP3).
+pub(crate) const REPORT_INVOICE_LIST: Operation = read("/api/v1/reports/invoice-list");
+/// `customer-balance-detail` (P28 WP3).
+pub(crate) const REPORT_CUSTOMER_BALANCE_DETAIL: Operation =
+    read("/api/v1/reports/customer-balance-detail");
+/// `vendor-balance-summary` (P28 WP3).
+pub(crate) const REPORT_VENDOR_BALANCE_SUMMARY: Operation =
+    read("/api/v1/reports/vendor-balance-summary");
+/// `vendor-balance-detail` (P28 WP3).
+pub(crate) const REPORT_VENDOR_BALANCE_DETAIL: Operation =
+    read("/api/v1/reports/vendor-balance-detail");
+/// `ap-aging-detail` (P28 WP3).
+pub(crate) const REPORT_AP_AGING_DETAIL: Operation = read("/api/v1/reports/ap-aging-detail");
+/// `unpaid-bills` (P28 WP3).
+pub(crate) const REPORT_UNPAID_BILLS: Operation = read("/api/v1/reports/unpaid-bills");
+/// `sales-by-customer` (P28 WP3).
+pub(crate) const REPORT_SALES_BY_CUSTOMER: Operation = read("/api/v1/reports/sales-by-customer");
+/// `sales-by-item` (P28 WP3).
+pub(crate) const REPORT_SALES_BY_ITEM: Operation = read("/api/v1/reports/sales-by-item");
+/// `expense-by-vendor` (P28 WP3).
+pub(crate) const REPORT_EXPENSE_BY_VENDOR: Operation = read("/api/v1/reports/expense-by-vendor");
+/// `transaction-list-by-vendor` (P28 WP3).
+pub(crate) const REPORT_TRANSACTION_LIST_BY_VENDOR: Operation =
+    read("/api/v1/reports/transaction-list-by-vendor");
+/// `bill-payment-history` (P28 WP3).
+pub(crate) const REPORT_BILL_PAYMENT_HISTORY: Operation =
+    read("/api/v1/reports/bill-payment-history");
+/// `vendor-1099-summary` (P28 WP3).
+pub(crate) const REPORT_VENDOR_1099_SUMMARY: Operation =
+    read("/api/v1/reports/vendor-1099-summary");
+/// `ap-1099-prep` (P28 WP3).
+pub(crate) const REPORT_AP_1099_PREP: Operation = read("/api/v1/reports/ap-1099-prep");
+/// `check-register` (P28 WP3).
+pub(crate) const REPORT_CHECK_REGISTER: Operation = read("/api/v1/reports/check-register");
+/// `bank-balances` (P28 WP3).
+pub(crate) const REPORT_BANK_BALANCES: Operation = read("/api/v1/reports/bank-balances");
+/// `account-activity-summary` (P28 WP3).
+pub(crate) const REPORT_ACCOUNT_ACTIVITY_SUMMARY: Operation =
+    read("/api/v1/reports/account-activity-summary");
+/// `closing-date-exceptions` (P28 WP3).
+pub(crate) const REPORT_CLOSING_DATE_EXCEPTIONS: Operation =
+    read("/api/v1/reports/closing-date-exceptions");
+/// The duplicate pairs scan (P28 WP3, Duplicate Finder).
+pub(crate) const DUPLICATES_SCAN: Operation = read("/api/v1/duplicates");
+// P28 WP4: budgets (U-203, `budgets-exact-v1`), report email (U-207,
+// `reports-email-v1`) and ask a question (U-206, `reports-ask-v1`).
+/// The company's budgets.
+pub(crate) const BUDGETS_LIST: Operation = read("/api/v1/budgets");
+/// Creates a budget for a fiscal year.
+pub(crate) const BUDGETS_CREATE: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Post, "/api/v1/budgets");
+/// Renames or changes a budget (`version`).
+pub(crate) const BUDGET_PUT: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Put, "/api/v1/budgets/{id}");
+/// Deletes a budget and its lines.
+pub(crate) const BUDGET_DELETE: Operation = write(Method::Delete, "/api/v1/budgets/{id}");
+/// A budget's lines with the engine's totals.
+pub(crate) const BUDGET_LINES: Operation = read("/api/v1/budgets/{id}/lines");
+/// Saves budget lines (`version`).
+pub(crate) const BUDGET_LINES_PUT: Operation =
+    keyable_in(KeySet::BudgetsV1, Method::Put, "/api/v1/budgets/{id}/lines");
+/// Fills a budget from last year's actuals.
+pub(crate) const BUDGET_FILL: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/fill-from-actuals",
+);
+/// Copies another budget's lines.
+pub(crate) const BUDGET_COPY: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/copy-from/{sourceId}",
+);
+/// Adjusts every cell by a percent.
+pub(crate) const BUDGET_ADJUST: Operation = keyable_in(
+    KeySet::BudgetsV1,
+    Method::Post,
+    "/api/v1/budgets/{id}/adjust-by-percent",
+);
+/// Budget vs. Actual (`exact=1`).
+pub(crate) const BUDGET_VS_ACTUAL: Operation = read("/api/v1/budgets/{id}/vs-actual");
+/// Emails an exported report file through the company mail server.
+pub(crate) const REPORT_EMAIL: Operation = keyable_in(
+    KeySet::ReportsEmailV1,
+    Method::Post,
+    "/api/v1/reports/email",
+);
+/// Maps a question to a catalog report (changes nothing; not keyed; a
+/// model call can take a while, so the long class).
+pub(crate) const REPORT_ASK: Operation = op(
+    Method::Post,
+    "/api/v1/reports/ask",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -1667,7 +1836,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 370] = [
+pub const OPERATIONS: [Operation; 414] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1758,6 +1927,7 @@ pub const OPERATIONS: [Operation; 370] = [
     REPORT_VENDOR_STATEMENT,
     VENDOR_1099_PROFILE,
     VENDOR_1099_PROFILE_PUT,
+    FORM_1099_ACCOUNT_MAPPINGS_PUT,
     TAG_GROUPS_LIST,
     TAG_GROUPS_CREATE,
     TAG_GROUP_PUT,
@@ -2054,6 +2224,50 @@ pub const OPERATIONS: [Operation; 370] = [
     RECON_CANCEL,
     RECON_DETAIL_REPORT,
     RECON_DISCREPANCY,
+    // P28
+    REPORT_DEFS_LIST,
+    REPORT_DEFS_CREATE,
+    REPORT_DEF_GET,
+    REPORT_DEF_PUT,
+    REPORT_DEF_DELETE,
+    REPORT_DEF_GROUPS_LIST,
+    REPORT_DEF_GROUPS_CREATE,
+    REPORT_DEF_GROUP_PUT,
+    REPORT_DEF_GROUP_DELETE,
+    REPORT_GENERAL_LEDGER,
+    REPORT_REVENUE_BY_CATEGORY,
+    REPORT_EXPENSE_BY_CATEGORY,
+    REPORT_AR_AGING_DETAIL,
+    REPORT_INVOICE_LIST,
+    REPORT_CUSTOMER_BALANCE_DETAIL,
+    REPORT_VENDOR_BALANCE_SUMMARY,
+    REPORT_VENDOR_BALANCE_DETAIL,
+    REPORT_AP_AGING_DETAIL,
+    REPORT_UNPAID_BILLS,
+    REPORT_SALES_BY_CUSTOMER,
+    REPORT_SALES_BY_ITEM,
+    REPORT_EXPENSE_BY_VENDOR,
+    REPORT_TRANSACTION_LIST_BY_VENDOR,
+    REPORT_BILL_PAYMENT_HISTORY,
+    REPORT_VENDOR_1099_SUMMARY,
+    REPORT_AP_1099_PREP,
+    REPORT_CHECK_REGISTER,
+    REPORT_BANK_BALANCES,
+    REPORT_ACCOUNT_ACTIVITY_SUMMARY,
+    REPORT_CLOSING_DATE_EXCEPTIONS,
+    DUPLICATES_SCAN,
+    BUDGETS_LIST,
+    BUDGETS_CREATE,
+    BUDGET_PUT,
+    BUDGET_DELETE,
+    BUDGET_LINES,
+    BUDGET_LINES_PUT,
+    BUDGET_FILL,
+    BUDGET_COPY,
+    BUDGET_ADJUST,
+    BUDGET_VS_ACTUAL,
+    REPORT_EMAIL,
+    REPORT_ASK,
 ];
 
 /// Looks up a covered operation.
@@ -2167,6 +2381,12 @@ mod tests {
                 Some(KeySet::InventoryV1)
             } else if KEYABLE_UNIT_SETS.contains(&route) {
                 Some(KeySet::UnitSetsV1)
+            } else if KEYABLE_REPORT_DEFS.contains(&route) {
+                Some(KeySet::ReportDefsV1)
+            } else if KEYABLE_BUDGETS.contains(&route) {
+                Some(KeySet::BudgetsV1)
+            } else if route == ("POST", "/api/v1/reports/email") {
+                Some(KeySet::ReportsEmailV1)
             } else if KEYABLE_BANK_IMPORT.contains(&route) {
                 Some(KeySet::BankImportV1)
             } else if KEYABLE_FEED.contains(&route) {
@@ -2216,10 +2436,12 @@ mod tests {
                 + KEYABLE_RECOVERY.len()
                 + KEYABLE_INVENTORY.len()
                 + KEYABLE_UNIT_SETS.len()
+                + KEYABLE_REPORT_DEFS.len()
+                + KEYABLE_BUDGETS.len()
                 + KEYABLE_BANK_IMPORT.len()
                 + KEYABLE_FEED.len()
                 + KEYABLE_FEED_POST.len()
-                + 2,
+                + 3,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
         assert_eq!(
@@ -2380,6 +2602,23 @@ mod tests {
     ];
 
     const KEYABLE_UNIT_SETS: [(&str, &str); 1] = [("POST", "/api/v1/unit-sets")];
+
+    /// `budgets-exact-v1` (U-203); `tests/fixtures/idempotency_budgets_v1_routes.txt`.
+    const KEYABLE_BUDGETS: [(&str, &str); 6] = [
+        ("POST", "/api/v1/budgets"),
+        ("POST", "/api/v1/budgets/{id}/adjust-by-percent"),
+        ("POST", "/api/v1/budgets/{id}/copy-from/{sourceId}"),
+        ("POST", "/api/v1/budgets/{id}/fill-from-actuals"),
+        ("PUT", "/api/v1/budgets/{id}"),
+        ("PUT", "/api/v1/budgets/{id}/lines"),
+    ];
+
+    const KEYABLE_REPORT_DEFS: [(&str, &str); 4] = [
+        ("POST", "/api/v1/report-builder/definitions"),
+        ("PUT", "/api/v1/report-builder/definitions/{id}"),
+        ("POST", "/api/v1/report-builder/definition-groups"),
+        ("PUT", "/api/v1/report-builder/definition-groups/{id}"),
+    ];
 
     const KEYABLE_BANK_IMPORT: [(&str, &str); 2] = [
         ("POST", "/api/v1/banking/feed/import-batch"),

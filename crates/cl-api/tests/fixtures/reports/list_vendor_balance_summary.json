@@ -1,0 +1,47 @@
+{
+  "asOfDate": "2026-11-30",
+  "data": [
+    {
+      "balance": "2290.8300",
+      "balanceExact": "2290.8300",
+      "display_name": "Bluff View Trucking",
+      "id": "ef9ca51b-8ccc-4f7c-b7dd-87ef0b4fcbd7"
+    },
+    {
+      "balance": "449.0100",
+      "balanceExact": "449.0100",
+      "display_name": "Cedar Hollow Signs",
+      "id": "8a65becc-8419-4de4-ad05-be1032ddbeca"
+    },
+    {
+      "balance": "984.6900",
+      "balanceExact": "984.6900",
+      "display_name": "Crane Creek Tree Service",
+      "id": "eccede9a-41ed-4988-82ed-8f26f4f46a3e"
+    },
+    {
+      "balance": "975.4800",
+      "balanceExact": "975.4800",
+      "display_name": "Taney County Landfill",
+      "id": "3a367e91-68d0-41f8-ab0c-ed143d065418"
+    },
+    {
+      "balance": "96.4400",
+      "balanceExact": "96.4400",
+      "display_name": "White River Stone Yard",
+      "id": "441603de-7eae-4582-b712-a335f4b1eaed"
+    }
+  ],
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Vendor Balance Summary",
+  "totalsExact": {
+    "balance": "19171.9300"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

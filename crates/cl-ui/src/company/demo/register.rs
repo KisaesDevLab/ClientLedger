@@ -554,6 +554,13 @@ impl DemoLedger {
         self.reconciled_date = date;
     }
 
+    /// True when transaction `id` was voided in the demo (its amounts are
+    /// zero; the reports leave its lines out, P28 WP5).
+    #[must_use]
+    pub fn is_voided(&self, id: u32) -> bool {
+        self.voided.contains(&id)
+    }
+
     /// The sample's transactions with the demo's changes, then the ones
     /// recorded in the demo.
     #[must_use]

@@ -1,0 +1,148 @@
+{
+  "basis": "accrual",
+  "cogs": [],
+  "columns": [
+    {
+      "caption": "Exact f4d076d4c2",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-03-01",
+        "tag_id": "487f7968-7ded-4036-8150-c514a45e4501"
+      },
+      "from": "2033-03-01",
+      "key": "t:487f7968-7ded-4036-8150-c514a45e4501",
+      "kind": "tag",
+      "tagId": "487f7968-7ded-4036-8150-c514a45e4501",
+      "tagNumber": null,
+      "to": "2033-03-31",
+      "valueType": "amount"
+    },
+    {
+      "caption": "Total",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-03-01"
+      },
+      "from": "2033-03-01",
+      "key": "total",
+      "kind": "total",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    }
+  ],
+  "drillTarget": {
+    "amount": "netChangeExact",
+    "params": {
+      "adjusting": "include",
+      "basis": "accrual"
+    },
+    "path": "/reports/general-ledger"
+  },
+  "endDate": "2033-03-31",
+  "expenses": [
+    {
+      "accountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "43a240cc-820e-491a-9144-6521a6343eb4"
+      },
+      "name": "ExactExp efc0c41713",
+      "parentAccountId": null,
+      "rollupValuesExact": [
+        "75.0000",
+        "75.0000"
+      ],
+      "rowKind": "account",
+      "valuesExact": [
+        "25.0000",
+        "25.0000"
+      ]
+    },
+    {
+      "accountId": "f202871e-bb23-47a6-b332-669a768608c9",
+      "accountNumber": null,
+      "depth": 1,
+      "drill": {
+        "account_ids": "f202871e-bb23-47a6-b332-669a768608c9"
+      },
+      "name": "ExactSub 3d9fb85e67",
+      "parentAccountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "rowKind": "account",
+      "valuesExact": [
+        "50.0000",
+        "50.0000"
+      ]
+    }
+  ],
+  "footer": "",
+  "labels": {
+    "cogs": "Cost of Goods Sold",
+    "expenses": "Expenses",
+    "grossProfit": "Gross Profit",
+    "netIncome": "Net Income",
+    "operatingIncome": "Operating Income",
+    "otherExpenses": "Other Expenses",
+    "otherRevenue": "Other Revenue",
+    "revenue": "Revenue"
+  },
+  "layout": "columns",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2033-03-01",
+    "reportSchemaVersion": "2",
+    "to": "2033-03-31"
+  },
+  "otherExpenses": [],
+  "otherRevenue": [],
+  "revenue": [
+    {
+      "accountId": "60736041-10cd-45c6-9906-cc978ac5bd25",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "60736041-10cd-45c6-9906-cc978ac5bd25"
+      },
+      "name": "ExactRev 8dab713dfe",
+      "parentAccountId": null,
+      "rowKind": "account",
+      "valuesExact": [
+        "0.3000",
+        "0.3000"
+      ]
+    }
+  ],
+  "startDate": "2033-03-01",
+  "tagSplit": null,
+  "title": "Profit and Loss - Accrual Basis",
+  "totalsExact": {
+    "grossProfit": null,
+    "netIncome": [
+      "-74.7000",
+      "-74.7000"
+    ],
+    "operatingIncome": null,
+    "totalCogs": [
+      "0.0000",
+      "0.0000"
+    ],
+    "totalExpenses": [
+      "75.0000",
+      "75.0000"
+    ],
+    "totalOtherExpenses": [
+      "0.0000",
+      "0.0000"
+    ],
+    "totalOtherRevenue": [
+      "0.0000",
+      "0.0000"
+    ],
+    "totalRevenue": [
+      "0.3000",
+      "0.3000"
+    ]
+  }
+}

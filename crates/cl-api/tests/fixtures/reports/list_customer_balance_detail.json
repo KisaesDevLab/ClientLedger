@@ -1,0 +1,343 @@
+{
+  "asOfDate": "2026-11-30",
+  "data": [
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Barn Owl Books",
+      "id": "e3e53b90-9591-4185-b9b3-bbcaadf4ef78",
+      "items": [
+        {
+          "amountExact": "2144.8800",
+          "date": "2026-03-20",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2144.8800",
+          "runningBalanceExact": "2144.8800",
+          "txnId": "8b47321c-e8d2-4e27-809f-df29f9297655",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-2144.8800",
+          "date": "2026-04-04",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-2144.8800",
+          "runningBalanceExact": "0.0000",
+          "txnId": "b92de8fc-dbc1-471a-b882-8b9c70875776",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "3642.9600",
+          "date": "2026-05-10",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "3642.9600",
+          "runningBalanceExact": "3642.9600",
+          "txnId": "19c55357-c85f-4d81-80ce-d9a12b664de6",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-1958.0000",
+          "date": "2026-10-13",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-1958.0000",
+          "runningBalanceExact": "3720.2700",
+          "txnId": "9b78b8a5-6bba-4c2b-aaba-8f4f465743dc",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-3720.2700",
+          "date": "2026-10-15",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-3720.2700",
+          "runningBalanceExact": "0.0000",
+          "txnId": "296c4ce6-e589-4cd4-9fde-82a893e8111c",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "720.3100",
+      "balanceExact": "720.3100",
+      "display_name": "Bear Creek Campground",
+      "id": "6925eb31-aeab-4d02-8542-a50c9b0b8da1",
+      "items": [
+        {
+          "amountExact": "505.4400",
+          "date": "2026-07-23",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "505.4400",
+          "runningBalanceExact": "505.4400",
+          "txnId": "4fdd5d5a-70dd-4f15-82ed-4f99799652f9",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "4339.8300",
+          "date": "2026-07-27",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "4339.8300",
+          "runningBalanceExact": "4845.2700",
+          "txnId": "795a83da-701b-434c-a6c8-26803959af1e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-505.4400",
+          "date": "2026-08-17",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-505.4400",
+          "runningBalanceExact": "4339.8300",
+          "txnId": "037ef97f-c1c0-4d29-aa0b-57c5df3a517a",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-2025.6800",
+          "date": "2026-10-10",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-2025.6800",
+          "runningBalanceExact": "0.0000",
+          "txnId": "2430ab3d-9dc8-49be-81d1-ce2cad1e613e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "720.3100",
+          "date": "2026-10-31",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "720.3100",
+          "runningBalanceExact": "720.3100",
+          "txnId": "03255a3c-a709-4789-9cdc-70ad962a1ef9",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Blue Eye Feed Co",
+      "id": "e4633874-52b1-47d1-a7c7-e4b35d0ac894",
+      "items": [
+        {
+          "amountExact": "634.5000",
+          "date": "2026-01-08",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "634.5000",
+          "runningBalanceExact": "634.5000",
+          "txnId": "b0d157aa-4fdc-4b55-ad5b-1326c8ff292e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "4327.5300",
+          "date": "2026-01-13",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "4327.5300",
+          "runningBalanceExact": "4962.0300",
+          "txnId": "ab1699af-6c6b-47ed-a58c-6f42d85f721b",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "1891.7100",
+          "date": "2026-01-31",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "1891.7100",
+          "runningBalanceExact": "6853.7400",
+          "txnId": "6960d705-9a9d-4095-9571-76720cd15e1c",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-4327.5300",
+          "date": "2026-01-31",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-4327.5300",
+          "runningBalanceExact": "2526.2100",
+          "txnId": "aae0eaa9-74e1-4151-94fa-a0a640e1209e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "2921.1200",
+          "date": "2026-08-06",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2921.1200",
+          "runningBalanceExact": "2921.1200",
+          "txnId": "065496ba-6673-4768-add5-79cc8f9d303e",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-2921.1200",
+          "date": "2026-09-08",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-2921.1200",
+          "runningBalanceExact": "0.0000",
+          "txnId": "f4c3df8b-f68b-45fd-bcea-8c3ac4aad972",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "0.0000",
+      "balanceExact": "0.0000",
+      "display_name": "Whitetail Hunting Lodge",
+      "id": "e29af45d-1bf0-44d6-bbe5-0b38f6e02da7",
+      "items": [
+        {
+          "amountExact": "3647.8100",
+          "date": "2026-02-05",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "3647.8100",
+          "runningBalanceExact": "3647.8100",
+          "txnId": "ce6286dd-6c0c-475d-b065-27921d8eccdb",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-3647.8100",
+          "date": "2026-02-20",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-3647.8100",
+          "runningBalanceExact": "0.0000",
+          "txnId": "17c88be3-86df-40c9-9d4f-cd7a4297a883",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "3159.0700",
+          "date": "2026-03-08",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "3159.0700",
+          "runningBalanceExact": "3159.0700",
+          "txnId": "0e490dde-1017-438f-a492-a59e42ff07fc",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "4688.7400",
+          "date": "2026-08-26",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "4688.7400",
+          "runningBalanceExact": "4688.7400",
+          "txnId": "6cbb4540-6049-4933-994a-cde8630de899",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-4688.7400",
+          "date": "2026-10-01",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-4688.7400",
+          "runningBalanceExact": "0.0000",
+          "txnId": "26873132-880b-4af6-b1e0-ff5e7e477bda",
+          "txnType": "journal_entry"
+        }
+      ]
+    },
+    {
+      "balance": "4002.8300",
+      "balanceExact": "4002.8300",
+      "display_name": "Wildwood Pediatrics",
+      "id": "96bc62b7-e6bb-4117-961e-ac4dfd3b2fb4",
+      "items": [
+        {
+          "amountExact": "1175.6200",
+          "date": "2026-03-04",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "1175.6200",
+          "runningBalanceExact": "1175.6200",
+          "txnId": "9ad8222e-8546-47d0-9dba-b4c034a44103",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-1175.6200",
+          "date": "2026-03-28",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-1175.6200",
+          "runningBalanceExact": "0.0000",
+          "txnId": "00238a2a-0138-47e8-a7e6-88c89d7740ed",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "2364.2200",
+          "date": "2026-05-05",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "2364.2200",
+          "runningBalanceExact": "2364.2200",
+          "txnId": "f2190c34-7e5a-451a-b909-c9ee72db4448",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "3073.9500",
+          "date": "2026-10-24",
+          "dueDate": null,
+          "kind": "other",
+          "number": null,
+          "openExact": "3073.9500",
+          "runningBalanceExact": "4532.0400",
+          "txnId": "f226cde3-7a1e-4c1d-8348-3a8eef68568a",
+          "txnType": "journal_entry"
+        },
+        {
+          "amountExact": "-529.2100",
+          "date": "2026-10-31",
+          "dueDate": null,
+          "kind": "credit",
+          "number": null,
+          "openExact": "-529.2100",
+          "runningBalanceExact": "4002.8300",
+          "txnId": "2d85ddae-63ae-4465-a0cd-3d2b03758067",
+          "txnType": "journal_entry"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Customer Balance Detail",
+  "totalsExact": {
+    "balance": "52385.9800"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

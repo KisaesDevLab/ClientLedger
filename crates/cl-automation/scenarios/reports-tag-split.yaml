@@ -1,0 +1,29 @@
+# Tag split and tag columns (P28 AC5) against `clientledger --demo`: Profit
+# & Loss by Tag Group on Route gives a column per route tag, "No tag in
+# group" and the total; Customize splits each account by the Route tags
+# with the account's total. The demo puts route tags on invoice income
+# lines (Q-P28af). Synthetic.
+name: reports-tag-split
+description: P&L by tag group columns and the tag split rows.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 300}
+  - click: {label: Profit & Loss by Tag Group, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: profit_loss_by_tag_group}
+  - click: {role: combo_box, label: Tag group}
+  - wait: {ms: 200}
+  - click: {label: Route, index: 0}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: by-tag-group
+  - click: {label: Profit & Loss, index: 0}
+  - wait: {ms: 400}
+  - click: {role: button, label: Customize}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.customize, equals: true}
+  - screenshot: customize
+  - command: file.close_window
+  - wait: {ms: 300}

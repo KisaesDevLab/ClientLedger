@@ -171,21 +171,18 @@ pub fn cash_running_total_golden_7(h: &Harness) {
     assert_eq!(spr.tax.bad_debts, Money::ZERO);
     assert_eq!(row(&nov, x.state).tax.collected, Money::ZERO, "unpaid");
     assert_eq!(row(&nov, x.city).tax.collected, Money::ZERO, "unpaid");
-    // 88.75 × 725.84 / 1088.75 = 59.16721…: −0.00279 is left over (the
-    // State agency's November; golden 7 counts the same way).
+    // U-209: the cash ledger moves the tax in whole cents per settlement and
+    // the exact column is that, so nothing is left over (golden 7's
+    // roundingDifference 0.000000; it was -0.002790 before).
     let st = by_agency(h, &x, SalesTaxBasis::Cash, x.state_agency);
     assert_eq!(st.agencies[0].totals.collected, m("59.17"));
-    match st.rounding_difference {
-        Some(rd) => assert_eq!(
+    if let Some(rd) = st.rounding_difference {
+        assert_eq!(
             rd,
-            SixPlaceAmount::parse("-0.002790").expect("six places"),
+            SixPlaceAmount::parse("0.000000").expect("six places"),
             "{}",
             rd.to_text()
-        ),
-        None => assert!(
-            nov.rounding_difference.is_some(),
-            "the cash report states its rounding"
-        ),
+        );
     }
     let dec = x.liability(
         h,

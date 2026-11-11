@@ -200,6 +200,9 @@ pub enum OpenPayload {
     /// to Bank Feed" on a matched entry, Import Bank File's "Open Bank
     /// Feed"). An open Bank Feed window takes it rather than a new one.
     FeedAt(crate::screens::bank_feed::FeedTarget),
+    /// P28: a report window on this report and options (a drill-down,
+    /// Home's chart month, a memorized report).
+    Report(Box<crate::screens::reports::ReportOpen>),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

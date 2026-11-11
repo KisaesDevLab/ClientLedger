@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "item_id": null,
+      "item_name": "Uncategorized",
+      "item_sku": "",
+      "total": "4473.5800",
+      "totalExact": "4473.5800",
+      "txn_count": 3
+    }
+  ],
+  "endDate": "2026-12-31",
+  "grandTotalExact": "4473.5800",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "startDate": "2026-10-01",
+  "title": "Sales by Item",
+  "totalsExact": {
+    "total": "4473.5800"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

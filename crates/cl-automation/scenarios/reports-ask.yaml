@@ -1,0 +1,34 @@
+# Ask a question (P28, Q-65) against `clientledger --demo`: the demo's stub
+# mapper (no AI call, no amounts) maps the mockup's question to Profit &
+# Loss for last month with % of income and year to date; the "Ran as" line
+# names the report, dates and basis from the options that ran; a question
+# no report fits says so and keeps the report. Synthetic.
+name: reports-ask
+description: The ask bar maps the mockup's question and refuses one no report fits.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 300}
+  - click: {label: A/R Aging, index: 0}
+  - wait: {ms: 300}
+  - click: {role: text_input, label: Ask}
+  - type: {text: "How did October compare with the year so far?"}
+  - key: Enter
+  - wait: {ms: 600}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_state: {key: screen.extras, equals: 2}
+  - assert_state: {key: screen.ask.message, equals: null}
+  - assert_exists: {label_contains: "Ran as:"}
+  - screenshot: ask-mapped
+  - click: {role: text_input, label: Ask}
+  - key: Ctrl+A
+  - type: {text: "What's the weather tomorrow?"}
+  - key: Enter
+  - wait: {ms: 400}
+  - assert_state: {key: screen.ask.message, equals: unmapped}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  - screenshot: ask-unmapped
+  - command: file.close_window
+  - wait: {ms: 300}

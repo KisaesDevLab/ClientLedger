@@ -1,0 +1,269 @@
+kind,level,path,caption,date,number,name,memo,tag,debit,credit,balance
+header,0,acct:1010,1010 · Operating Checking,,,,@reports.row.beginning_balance,,,,86902.13
+detail,1,acct:1010/0:#1,@reports.txn.journal_entry,2026-11-01,,,payment PMT-INV-1277 · Kimberling Marina · Payment received,,2744.67,0,89646.8
+detail,1,acct:1010/1:#2,@reports.txn.journal_entry,2026-11-02,,,expense  · Shepherd Hills Office Supply · Check,,0,129.91,89516.89
+detail,1,acct:1010/2:#3,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1273 · Kimberling Marina · Payment received,,4219.64,0,93736.53
+detail,1,acct:1010/3:#4,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1330 · Lampe Country Store · Payment received,,1956.61,0,95693.14
+detail,1,acct:1010/4:#5,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1332 · Pine Ridge Storage · Payment received,,4081.59,0,99774.73
+detail,1,acct:1010/5:#6,@reports.txn.journal_entry,2026-11-03,,,expense  · Kurt (owner) · Owner draw,,0,24728.56,75046.17
+detail,1,acct:1010/6:#7,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1313 · Cedar Hollow Church · Payment received,,2032.91,0,77079.08
+detail,1,acct:1010/7:#8,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1315 · Walnut Shade Farmhouse · Payment received,,1556.38,0,78635.46
+detail,1,acct:1010/8:#9,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1328 · Roark Creek Dentistry · Payment received,,3117.5,0,81752.96
+detail,1,acct:1010/9:#10,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1331 · Riverbend HOA · Payment received,,2950.74,0,84703.7
+detail,1,acct:1010/10:#11,@reports.txn.expense,2026-11-04,4417,Elm Street Accountants,Check,,0,493.15,84210.55
+detail,1,acct:1010/11:#12,@reports.txn.customer_payment,2026-11-20,,Riverbend HOA,,,1000,0,85210.55
+detail,1,acct:1010/12:#13,@reports.txn.customer_payment,2026-11-28,,Hollister Family Trust,,,500,0,85710.55
+account_total,0,acct:1010~total,@reports.row.total_of 1010 · Operating Checking,,,,,,24160.04,25351.62,85710.55
+header,0,acct:10150,10150 · Payments Clearing,,,,@reports.row.beginning_balance,,,,0
+detail,1,acct:10150/0:#14,@reports.txn.journal_entry,2026-11-02,,,payment 5521 · Hollister Family Trust · Payment received for INV-1356,,1250,0,1250
+detail,1,acct:10150/1:#15,@reports.txn.journal_entry,2026-11-03,,,payment 1094 · Maple Street Bakery · Payment received for INV-1357,,842.5,0,2092.5
+account_total,0,acct:10150~total,@reports.row.total_of 10150 · Payments Clearing,,,,,,2092.5,0,2092.5
+header,0,acct:1020,1020 · Savings,,,,@reports.row.beginning_balance,,,,12000
+detail,1,acct:1020/0:#16,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-1 · Kurt (owner) · Owner contribution to savings,,50,0,12050
+detail,1,acct:1020/1:#17,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-10 · Kurt (owner) · Owner contribution to savings,,50,0,12100
+detail,1,acct:1020/2:#18,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-11 · Kurt (owner) · Owner contribution to savings,,50,0,12150
+detail,1,acct:1020/3:#19,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-12 · Kurt (owner) · Owner contribution to savings,,50,0,12200
+detail,1,acct:1020/4:#20,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-13 · Kurt (owner) · Owner contribution to savings,,50,0,12250
+detail,1,acct:1020/5:#21,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-14 · Kurt (owner) · Owner contribution to savings,,50,0,12300
+detail,1,acct:1020/6:#22,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-15 · Kurt (owner) · Owner contribution to savings,,50,0,12350
+detail,1,acct:1020/7:#23,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-16 · Kurt (owner) · Owner contribution to savings,,50,0,12400
+detail,1,acct:1020/8:#24,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-17 · Kurt (owner) · Owner contribution to savings,,50,0,12450
+detail,1,acct:1020/9:#25,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-18 · Kurt (owner) · Owner contribution to savings,,50,0,12500
+detail,1,acct:1020/10:#26,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-19 · Kurt (owner) · Owner contribution to savings,,50,0,12550
+detail,1,acct:1020/11:#27,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-2 · Kurt (owner) · Owner contribution to savings,,50,0,12600
+detail,1,acct:1020/12:#28,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-20 · Kurt (owner) · Owner contribution to savings,,50,0,12650
+detail,1,acct:1020/13:#29,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-21 · Kurt (owner) · Owner contribution to savings,,50,0,12700
+detail,1,acct:1020/14:#30,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-22 · Kurt (owner) · Owner contribution to savings,,50,0,12750
+detail,1,acct:1020/15:#31,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-23 · Kurt (owner) · Owner contribution to savings,,50,0,12800
+detail,1,acct:1020/16:#32,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-24 · Kurt (owner) · Owner contribution to savings,,50,0,12850
+detail,1,acct:1020/17:#33,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-25 · Kurt (owner) · Owner contribution to savings,,50,0,12900
+detail,1,acct:1020/18:#34,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-26 · Kurt (owner) · Owner contribution to savings,,50,0,12950
+detail,1,acct:1020/19:#35,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-27 · Kurt (owner) · Owner contribution to savings,,50,0,13000
+detail,1,acct:1020/20:#36,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-28 · Kurt (owner) · Owner contribution to savings,,50,0,13050
+detail,1,acct:1020/21:#37,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-29 · Kurt (owner) · Owner contribution to savings,,50,0,13100
+detail,1,acct:1020/22:#38,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-3 · Kurt (owner) · Owner contribution to savings,,50,0,13150
+detail,1,acct:1020/23:#39,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-30 · Kurt (owner) · Owner contribution to savings,,50,0,13200
+detail,1,acct:1020/24:#40,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-31 · Kurt (owner) · Owner contribution to savings,,50,0,13250
+detail,1,acct:1020/25:#41,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-32 · Kurt (owner) · Owner contribution to savings,,50,0,13300
+detail,1,acct:1020/26:#42,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-33 · Kurt (owner) · Owner contribution to savings,,50,0,13350
+detail,1,acct:1020/27:#43,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-34 · Kurt (owner) · Owner contribution to savings,,50,0,13400
+detail,1,acct:1020/28:#44,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-35 · Kurt (owner) · Owner contribution to savings,,50,0,13450
+detail,1,acct:1020/29:#45,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-36 · Kurt (owner) · Owner contribution to savings,,50,0,13500
+detail,1,acct:1020/30:#46,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-37 · Kurt (owner) · Owner contribution to savings,,50,0,13550
+detail,1,acct:1020/31:#47,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-38 · Kurt (owner) · Owner contribution to savings,,50,0,13600
+detail,1,acct:1020/32:#48,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-39 · Kurt (owner) · Owner contribution to savings,,50,0,13650
+detail,1,acct:1020/33:#49,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-4 · Kurt (owner) · Owner contribution to savings,,50,0,13700
+detail,1,acct:1020/34:#50,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-40 · Kurt (owner) · Owner contribution to savings,,50,0,13750
+detail,1,acct:1020/35:#51,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-41 · Kurt (owner) · Owner contribution to savings,,50,0,13800
+detail,1,acct:1020/36:#52,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-42 · Kurt (owner) · Owner contribution to savings,,50,0,13850
+detail,1,acct:1020/37:#53,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-43 · Kurt (owner) · Owner contribution to savings,,50,0,13900
+detail,1,acct:1020/38:#54,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-44 · Kurt (owner) · Owner contribution to savings,,50,0,13950
+detail,1,acct:1020/39:#55,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-45 · Kurt (owner) · Owner contribution to savings,,50,0,14000
+detail,1,acct:1020/40:#56,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-46 · Kurt (owner) · Owner contribution to savings,,50,0,14050
+detail,1,acct:1020/41:#57,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-47 · Kurt (owner) · Owner contribution to savings,,50,0,14100
+detail,1,acct:1020/42:#58,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-48 · Kurt (owner) · Owner contribution to savings,,50,0,14150
+detail,1,acct:1020/43:#59,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-49 · Kurt (owner) · Owner contribution to savings,,50,0,14200
+detail,1,acct:1020/44:#60,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-5 · Kurt (owner) · Owner contribution to savings,,50,0,14250
+detail,1,acct:1020/45:#61,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-50 · Kurt (owner) · Owner contribution to savings,,50,0,14300
+detail,1,acct:1020/46:#62,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-51 · Kurt (owner) · Owner contribution to savings,,50,0,14350
+detail,1,acct:1020/47:#63,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-52 · Kurt (owner) · Owner contribution to savings,,50,0,14400
+detail,1,acct:1020/48:#64,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-53 · Kurt (owner) · Owner contribution to savings,,50,0,14450
+detail,1,acct:1020/49:#65,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-54 · Kurt (owner) · Owner contribution to savings,,50,0,14500
+detail,1,acct:1020/50:#66,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-55 · Kurt (owner) · Owner contribution to savings,,50,0,14550
+detail,1,acct:1020/51:#67,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-56 · Kurt (owner) · Owner contribution to savings,,50,0,14600
+detail,1,acct:1020/52:#68,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-57 · Kurt (owner) · Owner contribution to savings,,50,0,14650
+detail,1,acct:1020/53:#69,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-58 · Kurt (owner) · Owner contribution to savings,,50,0,14700
+detail,1,acct:1020/54:#70,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-59 · Kurt (owner) · Owner contribution to savings,,50,0,14750
+detail,1,acct:1020/55:#71,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-6 · Kurt (owner) · Owner contribution to savings,,50,0,14800
+detail,1,acct:1020/56:#72,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-60 · Kurt (owner) · Owner contribution to savings,,50,0,14850
+detail,1,acct:1020/57:#73,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-61 · Kurt (owner) · Owner contribution to savings,,50,0,14900
+detail,1,acct:1020/58:#74,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-62 · Kurt (owner) · Owner contribution to savings,,50,0,14950
+detail,1,acct:1020/59:#75,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-63 · Kurt (owner) · Owner contribution to savings,,50,0,15000
+detail,1,acct:1020/60:#76,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-64 · Kurt (owner) · Owner contribution to savings,,50,0,15050
+detail,1,acct:1020/61:#77,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-65 · Kurt (owner) · Owner contribution to savings,,50,0,15100
+detail,1,acct:1020/62:#78,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-66 · Kurt (owner) · Owner contribution to savings,,50,0,15150
+detail,1,acct:1020/63:#79,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-67 · Kurt (owner) · Owner contribution to savings,,50,0,15200
+detail,1,acct:1020/64:#80,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-68 · Kurt (owner) · Owner contribution to savings,,50,0,15250
+detail,1,acct:1020/65:#81,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-69 · Kurt (owner) · Owner contribution to savings,,50,0,15300
+detail,1,acct:1020/66:#82,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-7 · Kurt (owner) · Owner contribution to savings,,50,0,15350
+detail,1,acct:1020/67:#83,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-8 · Kurt (owner) · Owner contribution to savings,,50,0,15400
+detail,1,acct:1020/68:#84,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-9 · Kurt (owner) · Owner contribution to savings,,50,0,15450
+account_total,0,acct:1020~total,@reports.row.total_of 1020 · Savings,,,,,,3450,0,15450
+header,0,acct:10200,10200 · Accounts Receivable,,,,@reports.row.beginning_balance,,,,-227849.78
+detail,1,acct:10200/0:#85,@reports.txn.journal_entry,2026-11-01,,,invoice INV-1356 · Hollister Family Trust · Landscaping services,,1250,0,-226599.78
+detail,1,acct:10200/1:#86,@reports.txn.journal_entry,2026-11-01,,,invoice INV-1357 · Maple Street Bakery · Landscaping services,,842.5,0,-225757.28
+detail,1,acct:10200/2:#87,@reports.txn.journal_entry,2026-11-01,,,payment PMT-INV-1277 · Kimberling Marina · Payment received,,0,2744.67,-228501.95
+detail,1,acct:10200/3:#88,@reports.txn.journal_entry,2026-11-02,,,payment 5521 · Hollister Family Trust · Payment received for INV-1356,,0,1250,-229751.95
+detail,1,acct:10200/4:#89,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1341 · White River Lumber · Landscaping services,,942.11,0,-228809.84
+detail,1,acct:10200/5:#90,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1343 · Copper Kettle Coffee · Landscaping services,,1961.85,0,-226847.99
+detail,1,acct:10200/6:#91,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1355 · Riverbend HOA · Fall cleanup contract,,291258.48,0,64410.49
+detail,1,acct:10200/7:#92,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1273 · Kimberling Marina · Payment received,,0,4219.64,60190.85
+detail,1,acct:10200/8:#93,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1330 · Lampe Country Store · Payment received,,0,1956.61,58234.24
+detail,1,acct:10200/9:#94,@reports.txn.journal_entry,2026-11-02,,,payment PMT-INV-1332 · Pine Ridge Storage · Payment received,,0,4081.59,54152.65
+detail,1,acct:10200/10:#95,@reports.txn.journal_entry,2026-11-03,,,payment 1094 · Maple Street Bakery · Payment received for INV-1357,,0,842.5,53310.15
+detail,1,acct:10200/11:#96,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1313 · Cedar Hollow Church · Payment received,,0,2032.91,51277.24
+detail,1,acct:10200/12:#97,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1315 · Walnut Shade Farmhouse · Payment received,,0,1556.38,49720.86
+detail,1,acct:10200/13:#98,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1328 · Roark Creek Dentistry · Payment received,,0,3117.5,46603.36
+detail,1,acct:10200/14:#99,@reports.txn.journal_entry,2026-11-03,,,payment PMT-INV-1331 · Riverbend HOA · Payment received,,0,2950.74,43652.62
+detail,1,acct:10200/15:#100,@reports.txn.journal_entry,2026-11-04,,,invoice INV-1342 · Thunder Ridge Stables · Landscaping services,,2100.19,0,45752.81
+detail,1,acct:10200/16:#101,@reports.txn.journal_entry,2026-11-04,,,invoice INV-1344 · Mincy Hollow Ranch · Landscaping services,,3159.59,0,48912.4
+detail,1,acct:10200/17:#102,@reports.txn.invoice,2026-11-05,INV-1001,Riverbend HOA,,,3033.33,0,51945.73
+detail,1,acct:10200/18:#103,@reports.txn.invoice,2026-11-12,INV-1002,Table Rock Dental,,,1590.25,0,53535.98
+detail,1,acct:10200/19:#104,@reports.txn.customer_payment,2026-11-20,,Riverbend HOA,,,0,1000,52535.98
+detail,1,acct:10200/20:#105,@reports.txn.credit_memo,2026-11-25,1001,Riverbend HOA,,,0,150,52385.98
+account_total,0,acct:10200~total,@reports.row.total_of 10200 · Accounts Receivable,,,,,,306138.3,25902.54,52385.98
+header,0,acct:1500,1500 · Equipment,,,,@reports.row.beginning_balance,,,,47987.66
+account_total,0,acct:1500~total,@reports.row.total_of 1500 · Equipment,,,,,,0,0,47987.66
+header,0,acct:1510,1510 · Vehicles,,,,@reports.row.beginning_balance,,,,62012.34
+account_total,0,acct:1510~total,@reports.row.total_of 1510 · Vehicles,,,,,,0,0,62012.34
+header,0,acct:Inventory Asset,Inventory Asset,,,,@reports.row.beginning_balance,,,,0
+detail,1,acct:Inventory Asset/0:#106,@reports.txn.bill,2026-11-26,BILL-00003,Table Rock Nursery,,,370,0,370
+account_total,0,acct:Inventory Asset~total,@reports.row.total_of Inventory Asset,,,,,,370,0,370
+header,0,acct:20100,20100 · Accounts Payable,,,,@reports.row.beginning_balance,,,,13406.23
+detail,1,acct:20100/0:#107,@reports.txn.journal_entry,2026-11-03,,,bill B-192 · Bluff View Trucking · Vendor bill,,0,2006.09,15412.32
+detail,1,acct:20100/1:#108,@reports.txn.bill,2026-11-03,BILL-00001,Ozark Mulch Supply,,,0,1180.4,16592.72
+detail,1,acct:20100/2:#109,@reports.txn.journal_entry,2026-11-04,,,bill B-191 · Pine Ridge Storage Units · Vendor bill,,0,394.21,16986.93
+detail,1,acct:20100/3:#110,@reports.txn.bill,2026-11-18,BILL-00002,Table Rock Nursery,,,0,2300.6,19287.53
+detail,1,acct:20100/4:#111,@reports.txn.vendor_credit,2026-11-22,VC-00001,Table Rock Nursery,,,115.6,0,19171.93
+detail,1,acct:20100/5:#112,@reports.txn.bill,2026-11-26,BILL-00003,Table Rock Nursery,,,0,370,19541.93
+account_total,0,acct:20100~total,@reports.row.total_of 20100 · Accounts Payable,,,,,,115.6,6251.3,19541.93
+header,0,acct:2050,2050 · Business Credit Card,,,,@reports.row.beginning_balance,,,,0
+detail,1,acct:2050/0:#113,@reports.txn.journal_entry,2026-11-04,,,card charge  · Monett Tire & Lube · Card charge,,0,289.63,289.63
+account_total,0,acct:2050~total,@reports.row.total_of 2050 · Business Credit Card,,,,,,0,289.63,289.63
+header,0,acct:2200,2200 · Vehicle and Equipment Loans,,,,@reports.row.beginning_balance,,,,31200
+account_total,0,acct:2200~total,@reports.row.total_of 2200 · Vehicle and Equipment Loans,,,,,,0,0,31200
+header,0,acct:2400,2400 · Customer Deposits,,,,@reports.row.beginning_balance,,,,0
+detail,1,acct:2400/0:#114,@reports.txn.customer_payment,2026-11-28,,Hollister Family Trust,,,0,500,500
+account_total,0,acct:2400~total,@reports.row.total_of 2400 · Customer Deposits,,,,,,0,500,500
+header,0,acct:30000,30000 · Opening Balances,,,,@reports.row.beginning_balance,,,,139000
+account_total,0,acct:30000~total,@reports.row.total_of 30000 · Opening Balances,,,,,,0,0,139000
+header,0,acct:30160,30160 · Owner's Contribution,,,,@reports.row.beginning_balance,,,,0
+detail,1,acct:30160/0:#115,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-1 · Kurt (owner) · Owner contribution to savings,,0,50,50
+detail,1,acct:30160/1:#116,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-10 · Kurt (owner) · Owner contribution to savings,,0,50,100
+detail,1,acct:30160/2:#117,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-11 · Kurt (owner) · Owner contribution to savings,,0,50,150
+detail,1,acct:30160/3:#118,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-12 · Kurt (owner) · Owner contribution to savings,,0,50,200
+detail,1,acct:30160/4:#119,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-13 · Kurt (owner) · Owner contribution to savings,,0,50,250
+detail,1,acct:30160/5:#120,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-14 · Kurt (owner) · Owner contribution to savings,,0,50,300
+detail,1,acct:30160/6:#121,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-15 · Kurt (owner) · Owner contribution to savings,,0,50,350
+detail,1,acct:30160/7:#122,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-16 · Kurt (owner) · Owner contribution to savings,,0,50,400
+detail,1,acct:30160/8:#123,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-17 · Kurt (owner) · Owner contribution to savings,,0,50,450
+detail,1,acct:30160/9:#124,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-18 · Kurt (owner) · Owner contribution to savings,,0,50,500
+detail,1,acct:30160/10:#125,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-19 · Kurt (owner) · Owner contribution to savings,,0,50,550
+detail,1,acct:30160/11:#126,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-2 · Kurt (owner) · Owner contribution to savings,,0,50,600
+detail,1,acct:30160/12:#127,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-20 · Kurt (owner) · Owner contribution to savings,,0,50,650
+detail,1,acct:30160/13:#128,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-21 · Kurt (owner) · Owner contribution to savings,,0,50,700
+detail,1,acct:30160/14:#129,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-22 · Kurt (owner) · Owner contribution to savings,,0,50,750
+detail,1,acct:30160/15:#130,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-23 · Kurt (owner) · Owner contribution to savings,,0,50,800
+detail,1,acct:30160/16:#131,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-24 · Kurt (owner) · Owner contribution to savings,,0,50,850
+detail,1,acct:30160/17:#132,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-25 · Kurt (owner) · Owner contribution to savings,,0,50,900
+detail,1,acct:30160/18:#133,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-26 · Kurt (owner) · Owner contribution to savings,,0,50,950
+detail,1,acct:30160/19:#134,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-27 · Kurt (owner) · Owner contribution to savings,,0,50,1000
+detail,1,acct:30160/20:#135,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-28 · Kurt (owner) · Owner contribution to savings,,0,50,1050
+detail,1,acct:30160/21:#136,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-29 · Kurt (owner) · Owner contribution to savings,,0,50,1100
+detail,1,acct:30160/22:#137,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-3 · Kurt (owner) · Owner contribution to savings,,0,50,1150
+detail,1,acct:30160/23:#138,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-30 · Kurt (owner) · Owner contribution to savings,,0,50,1200
+detail,1,acct:30160/24:#139,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-31 · Kurt (owner) · Owner contribution to savings,,0,50,1250
+detail,1,acct:30160/25:#140,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-32 · Kurt (owner) · Owner contribution to savings,,0,50,1300
+detail,1,acct:30160/26:#141,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-33 · Kurt (owner) · Owner contribution to savings,,0,50,1350
+detail,1,acct:30160/27:#142,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-34 · Kurt (owner) · Owner contribution to savings,,0,50,1400
+detail,1,acct:30160/28:#143,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-35 · Kurt (owner) · Owner contribution to savings,,0,50,1450
+detail,1,acct:30160/29:#144,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-36 · Kurt (owner) · Owner contribution to savings,,0,50,1500
+detail,1,acct:30160/30:#145,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-37 · Kurt (owner) · Owner contribution to savings,,0,50,1550
+detail,1,acct:30160/31:#146,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-38 · Kurt (owner) · Owner contribution to savings,,0,50,1600
+detail,1,acct:30160/32:#147,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-39 · Kurt (owner) · Owner contribution to savings,,0,50,1650
+detail,1,acct:30160/33:#148,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-4 · Kurt (owner) · Owner contribution to savings,,0,50,1700
+detail,1,acct:30160/34:#149,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-40 · Kurt (owner) · Owner contribution to savings,,0,50,1750
+detail,1,acct:30160/35:#150,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-41 · Kurt (owner) · Owner contribution to savings,,0,50,1800
+detail,1,acct:30160/36:#151,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-42 · Kurt (owner) · Owner contribution to savings,,0,50,1850
+detail,1,acct:30160/37:#152,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-43 · Kurt (owner) · Owner contribution to savings,,0,50,1900
+detail,1,acct:30160/38:#153,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-44 · Kurt (owner) · Owner contribution to savings,,0,50,1950
+detail,1,acct:30160/39:#154,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-45 · Kurt (owner) · Owner contribution to savings,,0,50,2000
+detail,1,acct:30160/40:#155,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-46 · Kurt (owner) · Owner contribution to savings,,0,50,2050
+detail,1,acct:30160/41:#156,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-47 · Kurt (owner) · Owner contribution to savings,,0,50,2100
+detail,1,acct:30160/42:#157,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-48 · Kurt (owner) · Owner contribution to savings,,0,50,2150
+detail,1,acct:30160/43:#158,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-49 · Kurt (owner) · Owner contribution to savings,,0,50,2200
+detail,1,acct:30160/44:#159,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-5 · Kurt (owner) · Owner contribution to savings,,0,50,2250
+detail,1,acct:30160/45:#160,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-50 · Kurt (owner) · Owner contribution to savings,,0,50,2300
+detail,1,acct:30160/46:#161,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-51 · Kurt (owner) · Owner contribution to savings,,0,50,2350
+detail,1,acct:30160/47:#162,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-52 · Kurt (owner) · Owner contribution to savings,,0,50,2400
+detail,1,acct:30160/48:#163,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-53 · Kurt (owner) · Owner contribution to savings,,0,50,2450
+detail,1,acct:30160/49:#164,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-54 · Kurt (owner) · Owner contribution to savings,,0,50,2500
+detail,1,acct:30160/50:#165,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-55 · Kurt (owner) · Owner contribution to savings,,0,50,2550
+detail,1,acct:30160/51:#166,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-56 · Kurt (owner) · Owner contribution to savings,,0,50,2600
+detail,1,acct:30160/52:#167,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-57 · Kurt (owner) · Owner contribution to savings,,0,50,2650
+detail,1,acct:30160/53:#168,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-58 · Kurt (owner) · Owner contribution to savings,,0,50,2700
+detail,1,acct:30160/54:#169,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-59 · Kurt (owner) · Owner contribution to savings,,0,50,2750
+detail,1,acct:30160/55:#170,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-6 · Kurt (owner) · Owner contribution to savings,,0,50,2800
+detail,1,acct:30160/56:#171,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-60 · Kurt (owner) · Owner contribution to savings,,0,50,2850
+detail,1,acct:30160/57:#172,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-61 · Kurt (owner) · Owner contribution to savings,,0,50,2900
+detail,1,acct:30160/58:#173,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-62 · Kurt (owner) · Owner contribution to savings,,0,50,2950
+detail,1,acct:30160/59:#174,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-63 · Kurt (owner) · Owner contribution to savings,,0,50,3000
+detail,1,acct:30160/60:#175,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-64 · Kurt (owner) · Owner contribution to savings,,0,50,3050
+detail,1,acct:30160/61:#176,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-65 · Kurt (owner) · Owner contribution to savings,,0,50,3100
+detail,1,acct:30160/62:#177,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-66 · Kurt (owner) · Owner contribution to savings,,0,50,3150
+detail,1,acct:30160/63:#178,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-67 · Kurt (owner) · Owner contribution to savings,,0,50,3200
+detail,1,acct:30160/64:#179,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-68 · Kurt (owner) · Owner contribution to savings,,0,50,3250
+detail,1,acct:30160/65:#180,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-69 · Kurt (owner) · Owner contribution to savings,,0,50,3300
+detail,1,acct:30160/66:#181,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-7 · Kurt (owner) · Owner contribution to savings,,0,50,3350
+detail,1,acct:30160/67:#182,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-8 · Kurt (owner) · Owner contribution to savings,,0,50,3400
+detail,1,acct:30160/68:#183,@reports.txn.journal_entry,2026-11-04,,,deposit DEP-9 · Kurt (owner) · Owner contribution to savings,,0,50,3450
+account_total,0,acct:30160~total,@reports.row.total_of 30160 · Owner's Contribution,,,,,,0,3450,3450
+header,0,acct:30170,30170 · Owner's Draw,,,,@reports.row.beginning_balance,,,,-328538.88
+detail,1,acct:30170/0:#184,@reports.txn.journal_entry,2026-11-03,,,expense  · Kurt (owner) · Owner draw,,24728.56,0,-353267.44
+account_total,0,acct:30170~total,@reports.row.total_of 30170 · Owner's Draw,,,,,,24728.56,0,-353267.44
+header,0,acct:4000,4000 · Service Income,,,,@reports.row.beginning_balance,,,,834844.09
+detail,1,acct:4000/0:#185,@reports.txn.journal_entry,2026-11-01,,,invoice INV-1356 · Hollister Family Trust · Landscaping services,,0,1250,836094.09
+detail,1,acct:4000/1:#186,@reports.txn.journal_entry,2026-11-01,,,invoice INV-1357 · Maple Street Bakery · Landscaping services,,0,842.5,836936.59
+detail,1,acct:4000/2:#187,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1341 · White River Lumber · Landscaping services,,0,942.11,837878.7
+detail,1,acct:4000/3:#188,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1343 · Copper Kettle Coffee · Landscaping services,,0,1961.85,839840.55
+detail,1,acct:4000/4:#189,@reports.txn.journal_entry,2026-11-02,,,invoice INV-1355 · Riverbend HOA · Fall cleanup contract,,0,291258.48,1131099.03
+detail,1,acct:4000/5:#190,@reports.txn.journal_entry,2026-11-04,,,invoice INV-1342 · Thunder Ridge Stables · Landscaping services,,0,2100.19,1133199.22
+detail,1,acct:4000/6:#191,@reports.txn.journal_entry,2026-11-04,,,invoice INV-1344 · Mincy Hollow Ranch · Landscaping services,,0,3159.59,1136358.81
+detail,1,acct:4000/7:#192,@reports.txn.invoice,2026-11-05,INV-1001,Riverbend HOA,,North lawn,0,2400,1138758.81
+detail,1,acct:4000/8:#193,@reports.txn.invoice,2026-11-05,INV-1001,Riverbend HOA,,,0,633.33,1139392.14
+detail,1,acct:4000/9:#194,@reports.txn.invoice,2026-11-12,INV-1002,Table Rock Dental,,Courtyard,0,1250,1140642.14
+detail,1,acct:4000/10:#195,@reports.txn.invoice,2026-11-12,INV-1002,Table Rock Dental,,Fall cleanup,0,340.25,1140982.39
+detail,1,acct:4000/11:#196,@reports.txn.credit_memo,2026-11-25,1001,Riverbend HOA,,North lawn,150,0,1140832.39
+account_total,0,acct:4000~total,@reports.row.total_of 4000 · Service Income,,,,,,150,306138.3,1140832.39
+header,0,acct:5000,5000 · Subcontractors,,,,@reports.row.beginning_balance,,,,50850.56
+account_total,0,acct:5000~total,@reports.row.total_of 5000 · Subcontractors,,,,,,0,0,50850.56
+header,0,acct:5100,5100 · Plants,,,,@reports.row.beginning_balance,,,,7972.96
+detail,1,acct:5100/0:#197,@reports.txn.bill,2026-11-18,BILL-00002,Table Rock Nursery,,Courtyard,2215.6,0,10188.56
+detail,1,acct:5100/1:#198,@reports.txn.vendor_credit,2026-11-22,VC-00001,Table Rock Nursery,,Courtyard,0,115.6,10072.96
+account_total,0,acct:5100~total,@reports.row.total_of 5100 · Plants,,,,,,2215.6,115.6,10072.96
+header,0,acct:5110,5110 · Mulch & stone,,,,@reports.row.beginning_balance,,,,2207.45
+detail,1,acct:5110/0:#199,@reports.txn.bill,2026-11-03,BILL-00001,Ozark Mulch Supply,,North lawn,1180.4,0,3387.85
+account_total,0,acct:5110~total,@reports.row.total_of 5110 · Mulch & stone,,,,,,1180.4,0,3387.85
+header,0,acct:5200,5200 · Project Supplies and Materials,,,,@reports.row.beginning_balance,,,,353889.6
+detail,1,acct:5200/0:#200,@reports.txn.journal_entry,2026-11-03,,,bill B-192 · Bluff View Trucking · Vendor bill,,2006.09,0,355895.69
+detail,1,acct:5200/1:#201,@reports.txn.expense,2026-11-04,4417,Elm Street Accountants,Check,,493.15,0,356388.84
+account_total,0,acct:5200~total,@reports.row.total_of 5200 · Project Supplies and Materials,,,,,,2499.24,0,356388.84
+header,0,acct:6000,6000 · Advertising and Marketing,,,,@reports.row.beginning_balance,,,,10936.61
+account_total,0,acct:6000~total,@reports.row.total_of 6000 · Advertising and Marketing,,,,,,0,0,10936.61
+header,0,acct:6100,6100 · Fuel,,,,@reports.row.beginning_balance,,,,8554.84
+detail,1,acct:6100/0:#202,@reports.txn.journal_entry,2026-11-04,,,card charge  · Monett Tire & Lube · Card charge,,289.63,0,8844.47
+account_total,0,acct:6100~total,@reports.row.total_of 6100 · Fuel,,,,,,289.63,0,8844.47
+header,0,acct:6150,6150 · Insurance,,,,@reports.row.beginning_balance,,,,15589.13
+account_total,0,acct:6150~total,@reports.row.total_of 6150 · Insurance,,,,,,0,0,15589.13
+header,0,acct:6250,6250 · Office Supplies and Software,,,,@reports.row.beginning_balance,,,,8024.17
+account_total,0,acct:6250~total,@reports.row.total_of 6250 · Office Supplies and Software,,,,,,0,0,8024.17
+header,0,acct:6300,6300 · Rent,,,,@reports.row.beginning_balance,,,,44950
+account_total,0,acct:6300~total,@reports.row.total_of 6300 · Rent,,,,,,0,0,44950
+header,0,acct:6350,6350 · Repairs and Maintenance,,,,@reports.row.beginning_balance,,,,40827.95
+detail,1,acct:6350/0:#203,@reports.txn.journal_entry,2026-11-02,,,expense  · Shepherd Hills Office Supply · Check,,129.91,0,40957.86
+detail,1,acct:6350/1:#204,@reports.txn.bill,2026-11-18,BILL-00002,Table Rock Nursery,,,85,0,41042.86
+account_total,0,acct:6350~total,@reports.row.total_of 6350 · Repairs and Maintenance,,,,,,214.91,0,41042.86
+header,0,acct:6400,6400 · Telephone and Internet,,,,@reports.row.beginning_balance,,,,4100.37
+account_total,0,acct:6400~total,@reports.row.total_of 6400 · Telephone and Internet,,,,,,0,0,4100.37
+header,0,acct:6500,6500 · Utilities,,,,@reports.row.beginning_balance,,,,7944.02
+detail,1,acct:6500/0:#205,@reports.txn.journal_entry,2026-11-04,,,bill B-191 · Pine Ridge Storage Units · Vendor bill,,394.21,0,8338.23
+account_total,0,acct:6500~total,@reports.row.total_of 6500 · Utilities,,,,,,394.21,0,8338.23
+header,0,acct:6550,6550 · Wages,,,,@reports.row.beginning_balance,,,,123930.56
+account_total,0,acct:6550~total,@reports.row.total_of 6550 · Wages,,,,,,0,0,123930.56
+header,0,acct:6560,6560 · Payroll Taxes,,,,@reports.row.beginning_balance,,,,11153.65
+account_total,0,acct:6560~total,@reports.row.total_of 6560 · Payroll Taxes,,,,,,0,0,11153.65
+header,0,acct:6700,6700 · Vehicle Expenses,,,,@reports.row.beginning_balance,,,,15807.22
+account_total,0,acct:6700~total,@reports.row.total_of 6700 · Vehicle Expenses,,,,,,0,0,15807.22
+header,0,acct:8000,8000 · Interest Expense,,,,@reports.row.beginning_balance,,,,2120
+account_total,0,acct:8000~total,@reports.row.total_of 8000 · Interest Expense,,,,,,0,0,2120
+grand,0,total,@reports.row.total,,,,,,367998.99,367998.99,

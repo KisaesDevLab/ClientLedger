@@ -1,0 +1,8 @@
+# The engine's report-defs-v1 keyed route set (U-118, P28): creating and changing memorized
+# reports and their groups, `x-idempotency: true` in its openapi.json, with idempotency-v1's
+# contract. Append-only for this capability name: `keyable-report-defs` in operations.txt
+# (`KeySet::ReportDefsV1`), keyed only while the engine advertises `report-defs-v1`.
+POST /api/v1/report-builder/definition-groups
+POST /api/v1/report-builder/definitions
+PUT /api/v1/report-builder/definition-groups/{id}
+PUT /api/v1/report-builder/definitions/{id}

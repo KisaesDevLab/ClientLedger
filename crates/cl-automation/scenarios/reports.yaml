@@ -1,0 +1,108 @@
+# Report window (P28) against `clientledger --demo`: the Reports menu opens
+# Profit & Loss on last month (October 2026) from the demo engine's sample
+# postings (net income 13,865.14, the mockup's); % of income and Year to
+# date add the mockup's columns; Cash and Month columns run again; an
+# amount (October's Fuel) drills to the ledger behind it and a ledger
+# amount opens its form (the first line, a check, in Write Check);
+# Memorize keeps the report under Memorized; Export CSV writes the file.
+# Sales Tax Liability still runs (A/R Aging has its own scenario: opening
+# it seeds P22's 10/01 credit memo, which would move October off the
+# mockup's figures for the compare run). Synthetic.
+name: reports
+description: Profit & Loss with % of income and YTD, basis, Month columns, drill, open a form, memorize, export.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 400}
+  - assert_state: {key: screen.screen, equals: reports}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_exists: {role: text_input, label: Find a report}
+  - assert_exists: {role: link, index: 0}
+  # --- % of income and Year to date (the mockup) --------------------------
+  - click: {role: check_box, label: "% of income"}
+  - wait: {ms: 300}
+  - click: {role: check_box, label: "Year to date"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_state: {key: screen.extras, equals: 2}
+  - screenshot: profit-loss
+  # --- Basis -----------------------------------------------------------------
+  - click: {role: button, label: Cash}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.basis, equals: cash}
+  - assert_state: {key: screen.state, equals: shown}
+  - click: {role: button, label: Accrual}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.basis, equals: accrual}
+  # --- Drill: October's Fuel opens the ledger behind it --------------------
+  - click: {role: link, label: "2,241.84", index: 0}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.report, equals: transaction_detail_by_account}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: drill
+  # --- A ledger amount opens where the register would (QA-1): this demo
+  # expense has no check number, so it isn't a check and opens in its
+  # register, never as a blank Write Check -------------------------------
+  - click: {role: link, index: 0}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.screen, equals: register}
+  - screenshot: open-form
+  - command: file.close_window
+  - wait: {ms: 300}
+  # The demo may have other windows open: go back by the tabs.
+  - click: {label: Transaction Detail by Account, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: transaction_detail_by_account}
+  - command: file.close_window
+  - wait: {ms: 300}
+  - click: {label: Profit & Loss, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: profit_loss}
+  # --- Month columns -----------------------------------------------------------
+  - click: {label: Profit & Loss by Month, index: 0}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.report, equals: profit_loss_by_month}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: by-month
+  # --- Memorize ----------------------------------------------------------------
+  - command: reports.memorize
+  - assert_state: {key: screen.memorize_dialog, equals: true}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: "P&L by month for the owner {theme}"}
+  - screenshot: memorize
+  - click: {role: button, label: Memorize, index: 1}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.memorize_dialog, equals: false}
+  - click: {role: text_input, label: Find a report}
+  - type: {text: "for the"}
+  - wait: {ms: 200}
+  - assert_exists: {label_contains: "P&L by month for the owner", index: 0}
+  - assert_exists: {label: Monthly P&L for the bank}
+  - screenshot: memorized
+  - key: Ctrl+A
+  - key: Delete
+  # --- Export CSV -----------------------------------------------------------
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/reports/profit-loss-{theme}.csv"]}
+  - click: {role: button, label: Export CSV}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.export.ok, equals: true}
+  # --- The reports that ran before WP5 ---------------------------------------
+  - click: {label: Sales Tax Liability, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: sales_tax_liability}
+  - key: F5
+  - wait: {ms: 200}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: sales-tax
+  - command: file.close_window
+  - wait: {ms: 300}
+compare:
+  - command: reports.center
+  - wait: {ms: 400}
+  - click: {role: check_box, label: "% of income"}
+  - wait: {ms: 300}
+  - click: {role: check_box, label: "Year to date"}
+  - wait: {ms: 400}

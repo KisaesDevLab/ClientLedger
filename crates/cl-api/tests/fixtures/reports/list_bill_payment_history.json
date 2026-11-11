@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "bill_count": "1",
+      "check_number": null,
+      "id": "1390f8f3-4d1e-4741-aeaf-653fb7bf4a30",
+      "total": "1000.0000",
+      "totalExact": "1000.0000",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "vendor_name": "Table Rock Nursery"
+    },
+    {
+      "bill_count": "1",
+      "check_number": null,
+      "id": "be84aec0-c50f-46aa-895e-920deaf4ed9d",
+      "total": "1180.4000",
+      "totalExact": "1180.4000",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "vendor_name": "Ozark Mulch Supply"
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "title": "Bill Payment History",
+  "totalsExact": {
+    "total": "2180.4000"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

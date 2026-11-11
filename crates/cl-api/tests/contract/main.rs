@@ -19,6 +19,7 @@ mod contract_batch;
 mod contract_billable;
 mod contract_bills;
 mod contract_bounced_check;
+mod contract_budgets;
 mod contract_capabilities;
 mod contract_cash_basis_spf;
 mod contract_census;
@@ -62,6 +63,9 @@ mod contract_reconcile;
 mod contract_refunds;
 mod contract_register;
 mod contract_register_property;
+mod contract_report_defs;
+mod contract_reports_exact;
+mod contract_reports_p28;
 mod contract_resources;
 mod contract_run_due;
 mod contract_sales_receipts;
@@ -1342,6 +1346,38 @@ fn main() -> std::process::ExitCode {
         (
             "inventory::closed_period_refuses_inventory",
             contract_inventory::closed_period_refuses_inventory,
+        ),
+        (
+            "report_defs::crud_conflicts_and_groups",
+            contract_report_defs::crud_conflicts_and_groups,
+        ),
+        (
+            "budgets::hand_fixture_and_writes",
+            contract_budgets::hand_fixture_and_writes,
+        ),
+        (
+            "reports_exact::record_statements",
+            contract_reports_exact::record_statements,
+        ),
+        (
+            "reports_exact::statements_drill_and_tie",
+            contract_reports_exact::statements_drill_and_tie,
+        ),
+        (
+            "reports_exact::columns_drill_and_tag_split",
+            contract_reports_exact::columns_drill_and_tag_split,
+        ),
+        (
+            "reports_p28::who_owes_what_lists_and_controls",
+            contract_reports_p28::who_owes_what_lists_and_controls,
+        ),
+        (
+            "reports_p28::ask_off_then_ollama",
+            contract_reports_p28::ask_off_then_ollama,
+        ),
+        (
+            "reports_p28::email_without_smtp",
+            contract_reports_p28::email_without_smtp,
         ),
         (
             "session::logout_ends_the_session",

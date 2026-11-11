@@ -7,13 +7,15 @@
 //! `Debug` of the update body never shows a tax ID.
 
 use cl_core::Timestamp;
-use cl_core::ids::ContactId;
+use cl_core::ids::{AccountId, ContactId};
 use serde::{Deserialize, Serialize};
 
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::idempotency::IdempotencyKey;
-use crate::resources::operations::{VENDOR_1099_PROFILE, VENDOR_1099_PROFILE_PUT};
+use crate::resources::operations::{
+    FORM_1099_ACCOUNT_MAPPINGS_PUT, VENDOR_1099_PROFILE, VENDOR_1099_PROFILE_PUT,
+};
 use crate::session::{Session, decode, json_body};
 
 /// Kind of taxpayer number.
@@ -152,6 +154,65 @@ impl Form1099<'_> {
         .json_body(json_body(update)?);
         call.idempotency_key = Some(key);
         self.0.send(&VENDOR_1099_PROFILE_PUT, call, None).await?;
+        Ok(())
+    }
+}
+
+impl Form1099<'_> {
+    /// Marks `vendor` as one who gets a 1099 (or not).
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn set_eligible(
+        &self,
+        vendor: ContactId,
+        eligible: bool,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        let body = serde_json::json!({ "is1099Eligible": eligible });
+        let mut call = Call::new(
+            Method::Put,
+            VENDOR_1099_PROFILE_PUT.route(),
+            profile_path(vendor),
+        )
+        .json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
+        self.0.send(&VENDOR_1099_PROFILE_PUT, call, None).await?;
+        Ok(())
+    }
+
+    /// Replaces the accounts mapped to the 1099 form box `form_box` (the
+    /// engine's value, like `NEC-1`).
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a box that isn't letters, digits and a
+    /// dash; any [`ApiError`].
+    pub async fn set_account_mappings(
+        &self,
+        form_box: &str,
+        accounts: &[AccountId],
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        if form_box.is_empty()
+            || !form_box
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue,
+            ));
+        }
+        let body = serde_json::json!({ "accountIds": accounts });
+        let mut call = Call::new(
+            Method::Put,
+            FORM_1099_ACCOUNT_MAPPINGS_PUT.route(),
+            format!("/api/v1/practice/1099/account-mappings/{form_box}"),
+        )
+        .json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
+        self.0
+            .send(&FORM_1099_ACCOUNT_MAPPINGS_PUT, call, None)
+            .await?;
         Ok(())
     }
 }

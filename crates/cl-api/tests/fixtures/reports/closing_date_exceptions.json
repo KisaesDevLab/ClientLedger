@@ -1,0 +1,42 @@
+{
+  "_comment": "Recorded against the plan's contract (engine PR-E, U-204, closing-exceptions-v1); synthetic. Replace with a live sample when PR-E merges.",
+  "data": [
+    {
+      "auditId": "0b6f1d2e-3c4a-4b5c-8d6e-7f8091a2b3c4",
+      "at": "2026-11-05T15:02:11.000Z",
+      "userId": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "userName": "Golden Owner",
+      "action": "create",
+      "transactionId": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60",
+      "txnType": "journal_entry",
+      "txnNumber": null,
+      "txnDateBefore": null,
+      "txnDateAfter": "2026-09-15",
+      "closingDate": "2026-09-30",
+      "method": "password",
+      "amountBeforeExact": null,
+      "amountAfterExact": "12.3400"
+    },
+    {
+      "auditId": "3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a61",
+      "at": "2026-11-06T09:30:00.000Z",
+      "userId": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "userName": "Golden Owner",
+      "action": "update",
+      "transactionId": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60",
+      "txnType": "journal_entry",
+      "txnNumber": null,
+      "txnDateBefore": "2026-09-15",
+      "txnDateAfter": "2026-09-15",
+      "closingDate": "2026-09-30",
+      "method": "password",
+      "amountBeforeExact": "123.4000",
+      "amountAfterExact": "12.3400"
+    }
+  ],
+  "total": 2,
+  "truncated": false,
+  "closingDate": "2026-09-30",
+  "timeline": [{ "at": "2026-10-31T12:00:00.000Z", "closingDate": "2026-09-30" }],
+  "meta": { "from": "2026-01-01", "to": "2026-12-31" }
+}

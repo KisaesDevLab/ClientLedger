@@ -1,0 +1,19 @@
+# A/R Aging (P28) against `clientledger --demo`: the summary as of today
+# from the demo's open invoices (2,030.00 across four clients) in its
+# buckets, collapsed and expanded. Synthetic.
+name: reports-aging
+description: A/R Aging summary in its buckets, collapsed and expanded.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.ar_aging
+  - wait: {ms: 400}
+  - assert_state: {key: screen.report, equals: ar_aging_summary}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_exists: {label: "2,030.00"}
+  - screenshot: ar-aging
+  - command: reports.collapse
+  - screenshot: ar-aging-collapsed
+  - command: reports.collapse
+  - command: file.close_window
+  - wait: {ms: 300}

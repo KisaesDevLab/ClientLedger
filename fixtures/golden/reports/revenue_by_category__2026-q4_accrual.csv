@@ -1,0 +1,3 @@
+kind,level,path,caption,total
+account,1,accounts/acct:4000,4000 · Service Income,394895.97
+grand,0,total,@reports.row.total,394895.97

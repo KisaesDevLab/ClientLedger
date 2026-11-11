@@ -1,0 +1,383 @@
+kind,level,path,caption,date,type,number,vendor_number,due,days,bucket,amount,open
+detail,1,,Bear Creek Hauling,2026-01-13,@reports.txn.journal_entry,,,,321,@reports.bucket.over_90,1450,1450
+detail,1,,Bear Creek Hauling,2026-02-05,@reports.txn.journal_entry,,,,298,@reports.bucket.over_90,-1450,-1450
+detail,1,,Bear Creek Hauling,2026-03-02,@reports.txn.journal_entry,,,,273,@reports.bucket.over_90,130.72,130.72
+detail,1,,Bear Creek Hauling,2026-03-18,@reports.txn.journal_entry,,,,257,@reports.bucket.over_90,-130.72,-130.72
+detail,1,,Bear Creek Hauling,2026-05-10,@reports.txn.journal_entry,,,,204,@reports.bucket.over_90,529.34,529.34
+detail,1,,Bear Creek Hauling,2026-06-04,@reports.txn.journal_entry,,,,179,@reports.bucket.over_90,-529.34,-529.34
+detail,1,,Blue Eye Lumber,2026-05-31,@reports.txn.journal_entry,,,,183,@reports.bucket.over_90,2575.91,2575.91
+detail,1,,Blue Eye Lumber,2026-06-23,@reports.txn.journal_entry,,,,160,@reports.bucket.over_90,-2575.91,-2575.91
+detail,1,,Bluff View Trucking,2026-03-29,@reports.txn.journal_entry,,,,246,@reports.bucket.over_90,196.33,196.33
+detail,1,,Bluff View Trucking,2026-04-26,@reports.txn.journal_entry,,,,218,@reports.bucket.over_90,-196.33,-196.33
+detail,1,,Bluff View Trucking,2026-08-11,@reports.txn.journal_entry,,,,111,@reports.bucket.over_90,1870.69,1870.69
+detail,1,,Bluff View Trucking,2026-09-03,@reports.txn.journal_entry,,,,88,@reports.bucket.61_90,-1870.69,-1870.69
+detail,1,,Bluff View Trucking,2026-09-07,@reports.txn.journal_entry,,,,84,@reports.bucket.61_90,178.52,178.52
+detail,1,,Bluff View Trucking,2026-09-23,@reports.txn.journal_entry,,,,68,@reports.bucket.61_90,-178.52,-178.52
+detail,1,,Bluff View Trucking,2026-10-18,@reports.txn.journal_entry,,,,43,@reports.bucket.31_60,284.74,284.74
+detail,1,,Bluff View Trucking,2026-11-03,@reports.txn.journal_entry,,,,27,@reports.bucket.1_30,2006.09,2006.09
+detail,1,,Branson Equipment Rental,2026-06-18,@reports.txn.journal_entry,,,,165,@reports.bucket.over_90,353.69,353.69
+detail,1,,Branson Equipment Rental,2026-06-21,@reports.txn.journal_entry,,,,162,@reports.bucket.over_90,473.04,473.04
+detail,1,,Branson Equipment Rental,2026-07-04,@reports.txn.journal_entry,,,,149,@reports.bucket.over_90,-473.04,-473.04
+detail,1,,Branson Equipment Rental,2026-07-14,@reports.txn.journal_entry,,,,139,@reports.bucket.over_90,-353.69,-353.69
+detail,1,,Branson Equipment Rental,2026-09-19,@reports.txn.journal_entry,,,,72,@reports.bucket.61_90,431.11,431.11
+detail,1,,Branson Equipment Rental,2026-10-15,@reports.txn.journal_entry,,,,46,@reports.bucket.31_60,-431.11,-431.11
+detail,1,,Cedar Hollow Signs,2026-03-12,@reports.txn.journal_entry,,,,263,@reports.bucket.over_90,1291.17,1291.17
+detail,1,,Cedar Hollow Signs,2026-03-25,@reports.txn.journal_entry,,,,250,@reports.bucket.over_90,-1291.17,-1291.17
+detail,1,,Cedar Hollow Signs,2026-04-22,@reports.txn.journal_entry,,,,222,@reports.bucket.over_90,216.51,216.51
+detail,1,,Cedar Hollow Signs,2026-05-17,@reports.txn.journal_entry,,,,197,@reports.bucket.over_90,-216.51,-216.51
+detail,1,,Cedar Hollow Signs,2026-06-13,@reports.txn.journal_entry,,,,170,@reports.bucket.over_90,187.71,187.71
+detail,1,,Cedar Hollow Signs,2026-07-04,@reports.txn.journal_entry,,,,149,@reports.bucket.over_90,-187.71,-187.71
+detail,1,,Cedar Hollow Signs,2026-07-29,@reports.txn.journal_entry,,,,124,@reports.bucket.over_90,714.25,714.25
+detail,1,,Cedar Hollow Signs,2026-08-20,@reports.txn.journal_entry,,,,102,@reports.bucket.over_90,-714.25,-714.25
+detail,1,,Cedar Hollow Signs,2026-09-17,@reports.txn.journal_entry,,,,74,@reports.bucket.61_90,1912.95,1912.95
+detail,1,,Cedar Hollow Signs,2026-09-30,@reports.txn.journal_entry,,,,61,@reports.bucket.61_90,-1912.95,-1912.95
+detail,1,,Cedar Hollow Signs,2026-10-17,@reports.txn.journal_entry,,,,44,@reports.bucket.31_60,449.01,449.01
+detail,1,,City of Hollister Water,2026-01-05,@reports.txn.journal_entry,,,,329,@reports.bucket.over_90,1450,1450
+detail,1,,City of Hollister Water,2026-01-15,@reports.txn.journal_entry,,,,319,@reports.bucket.over_90,-1450,-1450
+detail,1,,City of Hollister Water,2026-02-16,@reports.txn.journal_entry,,,,287,@reports.bucket.over_90,1343.55,1343.55
+detail,1,,City of Hollister Water,2026-02-26,@reports.txn.journal_entry,,,,277,@reports.bucket.over_90,2576,2576
+detail,1,,City of Hollister Water,2026-03-12,@reports.txn.journal_entry,,,,263,@reports.bucket.over_90,-1343.55,-1343.55
+detail,1,,City of Hollister Water,2026-03-14,@reports.txn.journal_entry,,,,261,@reports.bucket.over_90,-2576,-2576
+detail,1,,City of Hollister Water,2026-04-13,@reports.txn.journal_entry,,,,231,@reports.bucket.over_90,412.77,412.77
+detail,1,,City of Hollister Water,2026-05-09,@reports.txn.journal_entry,,,,205,@reports.bucket.over_90,-412.77,-412.77
+detail,1,,City of Hollister Water,2026-06-11,@reports.txn.journal_entry,,,,172,@reports.bucket.over_90,1030.97,1030.97
+detail,1,,City of Hollister Water,2026-06-23,@reports.txn.journal_entry,,,,160,@reports.bucket.over_90,-1030.97,-1030.97
+detail,1,,City of Hollister Water,2026-07-26,@reports.txn.journal_entry,,,,127,@reports.bucket.over_90,2637.3,2637.3
+detail,1,,City of Hollister Water,2026-08-10,@reports.txn.journal_entry,,,,112,@reports.bucket.over_90,-2637.3,-2637.3
+detail,1,,Copper Kettle Catering,2026-03-30,@reports.txn.journal_entry,,,,245,@reports.bucket.over_90,1450,1450
+detail,1,,Copper Kettle Catering,2026-04-23,@reports.txn.journal_entry,,,,221,@reports.bucket.over_90,-1450,-1450
+detail,1,,Copper Kettle Catering,2026-05-06,@reports.txn.journal_entry,,,,208,@reports.bucket.over_90,784.81,784.81
+detail,1,,Copper Kettle Catering,2026-05-25,@reports.txn.journal_entry,,,,189,@reports.bucket.over_90,-784.81,-784.81
+detail,1,,Copper Kettle Catering,2026-08-31,@reports.txn.journal_entry,,,,91,@reports.bucket.over_90,118.59,118.59
+detail,1,,Copper Kettle Catering,2026-09-14,@reports.txn.journal_entry,,,,77,@reports.bucket.61_90,517.36,517.36
+detail,1,,Copper Kettle Catering,2026-09-20,@reports.txn.journal_entry,,,,71,@reports.bucket.61_90,-118.59,-118.59
+detail,1,,Copper Kettle Catering,2026-09-24,@reports.txn.journal_entry,,,,67,@reports.bucket.61_90,-517.36,-517.36
+detail,1,,Copper Kettle Catering,2026-09-30,@reports.txn.journal_entry,,,,61,@reports.bucket.61_90,495.97,495.97
+detail,1,,Copper Kettle Catering,2026-10-23,@reports.txn.journal_entry,,,,38,@reports.bucket.31_60,-495.97,-495.97
+detail,1,,Crane Creek Tree Service,2026-03-08,@reports.txn.journal_entry,,,,267,@reports.bucket.over_90,195.34,195.34
+detail,1,,Crane Creek Tree Service,2026-03-24,@reports.txn.journal_entry,,,,251,@reports.bucket.over_90,-195.34,-195.34
+detail,1,,Crane Creek Tree Service,2026-04-02,@reports.txn.journal_entry,,,,242,@reports.bucket.over_90,847.79,847.79
+detail,1,,Crane Creek Tree Service,2026-04-13,@reports.txn.journal_entry,,,,231,@reports.bucket.over_90,-847.79,-847.79
+detail,1,,Crane Creek Tree Service,2026-04-20,@reports.txn.journal_entry,,,,224,@reports.bucket.over_90,1468.48,1468.48
+detail,1,,Crane Creek Tree Service,2026-04-21,@reports.txn.journal_entry,,,,223,@reports.bucket.over_90,376.2,376.2
+detail,1,,Crane Creek Tree Service,2026-05-03,@reports.txn.journal_entry,,,,211,@reports.bucket.over_90,-376.2,-376.2
+detail,1,,Crane Creek Tree Service,2026-05-07,@reports.txn.journal_entry,,,,207,@reports.bucket.over_90,-1468.48,-1468.48
+detail,1,,Crane Creek Tree Service,2026-06-05,@reports.txn.journal_entry,,,,178,@reports.bucket.over_90,125.54,125.54
+detail,1,,Crane Creek Tree Service,2026-06-19,@reports.txn.journal_entry,,,,164,@reports.bucket.over_90,-125.54,-125.54
+detail,1,,Crane Creek Tree Service,2026-10-12,@reports.txn.journal_entry,,,,49,@reports.bucket.31_60,984.69,984.69
+detail,1,,Elm Street Accountants,2026-01-02,@reports.txn.journal_entry,,,,332,@reports.bucket.over_90,1450,1450
+detail,1,,Elm Street Accountants,2026-01-15,@reports.txn.journal_entry,,,,319,@reports.bucket.over_90,-1450,-1450
+detail,1,,Elm Street Accountants,2026-02-25,@reports.txn.journal_entry,,,,278,@reports.bucket.over_90,241.97,241.97
+detail,1,,Elm Street Accountants,2026-03-18,@reports.txn.journal_entry,,,,257,@reports.bucket.over_90,-241.97,-241.97
+detail,1,,Elm Street Accountants,2026-05-23,@reports.txn.journal_entry,,,,191,@reports.bucket.over_90,397.67,397.67
+detail,1,,Elm Street Accountants,2026-06-17,@reports.txn.journal_entry,,,,166,@reports.bucket.over_90,-397.67,-397.67
+detail,1,,Elm Street Accountants,2026-06-26,@reports.txn.journal_entry,,,,157,@reports.bucket.over_90,419.3,419.3
+detail,1,,Elm Street Accountants,2026-07-22,@reports.txn.journal_entry,,,,131,@reports.bucket.over_90,-419.3,-419.3
+detail,1,,Elm Street Accountants,2026-08-22,@reports.txn.journal_entry,,,,100,@reports.bucket.over_90,205.54,205.54
+detail,1,,Elm Street Accountants,2026-08-28,@reports.txn.journal_entry,,,,94,@reports.bucket.over_90,345.06,345.06
+detail,1,,Elm Street Accountants,2026-09-11,@reports.txn.journal_entry,,,,80,@reports.bucket.61_90,-205.54,-205.54
+detail,1,,Elm Street Accountants,2026-09-24,@reports.txn.journal_entry,,,,67,@reports.bucket.61_90,-345.06,-345.06
+detail,1,,Empire Electric Cooperative,2026-02-21,@reports.txn.journal_entry,,,,282,@reports.bucket.over_90,103.85,103.85
+detail,1,,Empire Electric Cooperative,2026-03-04,@reports.txn.journal_entry,,,,271,@reports.bucket.over_90,-103.85,-103.85
+detail,1,,Empire Electric Cooperative,2026-03-09,@reports.txn.journal_entry,,,,266,@reports.bucket.over_90,1450,1450
+detail,1,,Empire Electric Cooperative,2026-03-22,@reports.txn.journal_entry,,,,253,@reports.bucket.over_90,-1450,-1450
+detail,1,,Empire Electric Cooperative,2026-06-30,@reports.txn.journal_entry,,,,153,@reports.bucket.over_90,943.49,943.49
+detail,1,,Empire Electric Cooperative,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,165.3,165.3
+detail,1,,Empire Electric Cooperative,2026-07-17,@reports.txn.journal_entry,,,,136,@reports.bucket.over_90,-165.3,-165.3
+detail,1,,Empire Electric Cooperative,2026-07-28,@reports.txn.journal_entry,,,,125,@reports.bucket.over_90,-943.49,-943.49
+detail,1,,Empire Electric Cooperative,2026-08-02,@reports.txn.journal_entry,,,,120,@reports.bucket.over_90,112.39,112.39
+detail,1,,Empire Electric Cooperative,2026-08-14,@reports.txn.journal_entry,,,,108,@reports.bucket.over_90,1450,1450
+detail,1,,Empire Electric Cooperative,2026-08-16,@reports.txn.journal_entry,,,,106,@reports.bucket.over_90,-112.39,-112.39
+detail,1,,Empire Electric Cooperative,2026-09-02,@reports.txn.journal_entry,,,,89,@reports.bucket.61_90,-1450,-1450
+detail,1,,Empire Electric Cooperative,2026-09-02,@reports.txn.journal_entry,,,,89,@reports.bucket.61_90,2196.91,2196.91
+detail,1,,Empire Electric Cooperative,2026-09-22,@reports.txn.journal_entry,,,,69,@reports.bucket.61_90,-2196.91,-2196.91
+detail,1,,Galena Gravel,2026-02-11,@reports.txn.journal_entry,,,,292,@reports.bucket.over_90,1942.3,1942.3
+detail,1,,Galena Gravel,2026-02-22,@reports.txn.journal_entry,,,,281,@reports.bucket.over_90,618.25,618.25
+detail,1,,Galena Gravel,2026-03-08,@reports.txn.journal_entry,,,,267,@reports.bucket.over_90,1632.2,1632.2
+detail,1,,Galena Gravel,2026-03-10,@reports.txn.journal_entry,,,,265,@reports.bucket.over_90,-1942.3,-1942.3
+detail,1,,Galena Gravel,2026-03-10,@reports.txn.journal_entry,,,,265,@reports.bucket.over_90,-618.25,-618.25
+detail,1,,Galena Gravel,2026-03-25,@reports.txn.journal_entry,,,,250,@reports.bucket.over_90,-1632.2,-1632.2
+detail,1,,Galena Gravel,2026-04-07,@reports.txn.journal_entry,,,,237,@reports.bucket.over_90,1450,1450
+detail,1,,Galena Gravel,2026-04-22,@reports.txn.journal_entry,,,,222,@reports.bucket.over_90,-1450,-1450
+detail,1,,Galena Gravel,2026-06-29,@reports.txn.journal_entry,,,,154,@reports.bucket.over_90,1450,1450
+detail,1,,Galena Gravel,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,678.36,678.36
+detail,1,,Galena Gravel,2026-07-11,@reports.txn.journal_entry,,,,142,@reports.bucket.over_90,-1450,-1450
+detail,1,,Galena Gravel,2026-07-29,@reports.txn.journal_entry,,,,124,@reports.bucket.over_90,-678.36,-678.36
+detail,1,,Hollister Fuel Stop,2026-07-21,@reports.txn.journal_entry,,,,132,@reports.bucket.over_90,1450,1450
+detail,1,,Hollister Fuel Stop,2026-08-12,@reports.txn.journal_entry,,,,110,@reports.bucket.over_90,-1450,-1450
+detail,1,,Kimberling Fertilizer,2026-01-01,@reports.txn.journal_entry,,,,333,@reports.bucket.over_90,202.16,202.16
+detail,1,,Kimberling Fertilizer,2026-01-11,@reports.txn.journal_entry,,,,323,@reports.bucket.over_90,-202.16,-202.16
+detail,1,,Kimberling Fertilizer,2026-02-27,@reports.txn.journal_entry,,,,276,@reports.bucket.over_90,472.75,472.75
+detail,1,,Kimberling Fertilizer,2026-03-10,@reports.txn.journal_entry,,,,265,@reports.bucket.over_90,248.98,248.98
+detail,1,,Kimberling Fertilizer,2026-03-19,@reports.txn.journal_entry,,,,256,@reports.bucket.over_90,-472.75,-472.75
+detail,1,,Kimberling Fertilizer,2026-03-30,@reports.txn.journal_entry,,,,245,@reports.bucket.over_90,-248.98,-248.98
+detail,1,,Kimberling Fertilizer,2026-04-22,@reports.txn.journal_entry,,,,222,@reports.bucket.over_90,154.86,154.86
+detail,1,,Kimberling Fertilizer,2026-05-04,@reports.txn.journal_entry,,,,210,@reports.bucket.over_90,-154.86,-154.86
+detail,1,,Kimberling Fertilizer,2026-08-13,@reports.txn.journal_entry,,,,109,@reports.bucket.over_90,2559.15,2559.15
+detail,1,,Kimberling Fertilizer,2026-08-20,@reports.txn.journal_entry,,,,102,@reports.bucket.over_90,209.67,209.67
+detail,1,,Kimberling Fertilizer,2026-09-05,@reports.txn.journal_entry,,,,86,@reports.bucket.61_90,-209.67,-209.67
+detail,1,,Kimberling Fertilizer,2026-09-10,@reports.txn.journal_entry,,,,81,@reports.bucket.61_90,-2559.15,-2559.15
+detail,1,,Lakeside Insurance Agency,2026-06-20,@reports.txn.journal_entry,,,,163,@reports.bucket.over_90,193.95,193.95
+detail,1,,Lakeside Insurance Agency,2026-07-14,@reports.txn.journal_entry,,,,139,@reports.bucket.over_90,-193.95,-193.95
+detail,1,,Lakeside Insurance Agency,2026-08-22,@reports.txn.journal_entry,,,,100,@reports.bucket.over_90,1450,1450
+detail,1,,Lakeside Insurance Agency,2026-09-19,@reports.txn.journal_entry,,,,72,@reports.bucket.61_90,-1450,-1450
+detail,1,,Lakeside Insurance Agency,2026-10-01,@reports.txn.journal_entry,,,,60,@reports.bucket.31_60,233.44,233.44
+detail,1,,Lakeside Insurance Agency,2026-10-17,@reports.txn.journal_entry,,,,44,@reports.bucket.31_60,-233.44,-233.44
+detail,1,,Lampe Seed & Feed,2026-02-22,@reports.txn.journal_entry,,,,281,@reports.bucket.over_90,144.31,144.31
+detail,1,,Lampe Seed & Feed,2026-03-10,@reports.txn.journal_entry,,,,265,@reports.bucket.over_90,-144.31,-144.31
+detail,1,,Lampe Seed & Feed,2026-04-20,@reports.txn.journal_entry,,,,224,@reports.bucket.over_90,603.97,603.97
+detail,1,,Lampe Seed & Feed,2026-04-29,@reports.txn.journal_entry,,,,215,@reports.bucket.over_90,1465.84,1465.84
+detail,1,,Lampe Seed & Feed,2026-05-11,@reports.txn.journal_entry,,,,203,@reports.bucket.over_90,-603.97,-603.97
+detail,1,,Lampe Seed & Feed,2026-05-20,@reports.txn.journal_entry,,,,194,@reports.bucket.over_90,-1465.84,-1465.84
+detail,1,,Lampe Seed & Feed,2026-08-20,@reports.txn.journal_entry,,,,102,@reports.bucket.over_90,288.5,288.5
+detail,1,,Lampe Seed & Feed,2026-09-08,@reports.txn.journal_entry,,,,83,@reports.bucket.61_90,-288.5,-288.5
+detail,1,,Midwest Irrigation Parts,2026-02-10,@reports.txn.journal_entry,,,,293,@reports.bucket.over_90,122.13,122.13
+detail,1,,Midwest Irrigation Parts,2026-02-21,@reports.txn.journal_entry,,,,282,@reports.bucket.over_90,1450,1450
+detail,1,,Midwest Irrigation Parts,2026-02-21,@reports.txn.journal_entry,,,,282,@reports.bucket.over_90,984.49,984.49
+detail,1,,Midwest Irrigation Parts,2026-02-22,@reports.txn.journal_entry,,,,281,@reports.bucket.over_90,-122.13,-122.13
+detail,1,,Midwest Irrigation Parts,2026-03-12,@reports.txn.journal_entry,,,,263,@reports.bucket.over_90,-1450,-1450
+detail,1,,Midwest Irrigation Parts,2026-03-14,@reports.txn.journal_entry,,,,261,@reports.bucket.over_90,708.27,708.27
+detail,1,,Midwest Irrigation Parts,2026-03-20,@reports.txn.journal_entry,,,,255,@reports.bucket.over_90,-984.49,-984.49
+detail,1,,Midwest Irrigation Parts,2026-03-26,@reports.txn.journal_entry,,,,249,@reports.bucket.over_90,-708.27,-708.27
+detail,1,,Midwest Irrigation Parts,2026-04-27,@reports.txn.journal_entry,,,,217,@reports.bucket.over_90,2961.27,2961.27
+detail,1,,Midwest Irrigation Parts,2026-05-16,@reports.txn.journal_entry,,,,198,@reports.bucket.over_90,-2961.27,-2961.27
+detail,1,,Midwest Irrigation Parts,2026-07-02,@reports.txn.journal_entry,,,,151,@reports.bucket.over_90,1597.58,1597.58
+detail,1,,Midwest Irrigation Parts,2026-07-22,@reports.txn.journal_entry,,,,131,@reports.bucket.over_90,132.9,132.9
+detail,1,,Midwest Irrigation Parts,2026-07-25,@reports.txn.journal_entry,,,,128,@reports.bucket.over_90,-1597.58,-1597.58
+detail,1,,Midwest Irrigation Parts,2026-08-02,@reports.txn.journal_entry,,,,120,@reports.bucket.over_90,-132.9,-132.9
+detail,1,,Midwest Irrigation Parts,2026-10-29,@reports.txn.journal_entry,,,,32,@reports.bucket.31_60,263.74,263.74
+detail,1,,Monett Tire & Lube,2026-05-19,@reports.txn.journal_entry,,,,195,@reports.bucket.over_90,2344.87,2344.87
+detail,1,,Monett Tire & Lube,2026-06-05,@reports.txn.journal_entry,,,,178,@reports.bucket.over_90,-2344.87,-2344.87
+detail,1,,Monett Tire & Lube,2026-08-30,@reports.txn.journal_entry,,,,92,@reports.bucket.over_90,2456.79,2456.79
+detail,1,,Monett Tire & Lube,2026-09-10,@reports.txn.journal_entry,,,,81,@reports.bucket.61_90,178.76,178.76
+detail,1,,Monett Tire & Lube,2026-09-18,@reports.txn.journal_entry,,,,73,@reports.bucket.61_90,-2456.79,-2456.79
+detail,1,,Monett Tire & Lube,2026-09-22,@reports.txn.journal_entry,,,,69,@reports.bucket.61_90,411.16,411.16
+detail,1,,Monett Tire & Lube,2026-09-25,@reports.txn.journal_entry,,,,66,@reports.bucket.61_90,-178.76,-178.76
+detail,1,,Monett Tire & Lube,2026-10-09,@reports.txn.journal_entry,,,,52,@reports.bucket.31_60,640,640
+detail,1,,Monett Tire & Lube,2026-10-14,@reports.txn.journal_entry,,,,47,@reports.bucket.31_60,-411.16,-411.16
+detail,1,,Mountain Software Co,2026-04-04,@reports.txn.journal_entry,,,,240,@reports.bucket.over_90,1834.55,1834.55
+detail,1,,Mountain Software Co,2026-04-06,@reports.txn.journal_entry,,,,238,@reports.bucket.over_90,576.9,576.9
+detail,1,,Mountain Software Co,2026-04-17,@reports.txn.journal_entry,,,,227,@reports.bucket.over_90,-576.9,-576.9
+detail,1,,Mountain Software Co,2026-04-28,@reports.txn.journal_entry,,,,216,@reports.bucket.over_90,-1834.55,-1834.55
+detail,1,,Oak Grove Uniforms,2026-01-17,@reports.txn.journal_entry,,,,317,@reports.bucket.over_90,126.96,126.96
+detail,1,,Oak Grove Uniforms,2026-01-28,@reports.txn.journal_entry,,,,306,@reports.bucket.over_90,-126.96,-126.96
+detail,1,,Oak Grove Uniforms,2026-02-05,@reports.txn.journal_entry,,,,298,@reports.bucket.over_90,1450,1450
+detail,1,,Oak Grove Uniforms,2026-02-17,@reports.txn.journal_entry,,,,286,@reports.bucket.over_90,-1450,-1450
+detail,1,,Oak Grove Uniforms,2026-03-29,@reports.txn.journal_entry,,,,246,@reports.bucket.over_90,377.42,377.42
+detail,1,,Oak Grove Uniforms,2026-04-14,@reports.txn.journal_entry,,,,230,@reports.bucket.over_90,-377.42,-377.42
+detail,1,,Oak Grove Uniforms,2026-07-30,@reports.txn.journal_entry,,,,123,@reports.bucket.over_90,1450,1450
+detail,1,,Oak Grove Uniforms,2026-08-10,@reports.txn.journal_entry,,,,112,@reports.bucket.over_90,-1450,-1450
+detail,1,,Oak Grove Uniforms,2026-08-30,@reports.txn.journal_entry,,,,92,@reports.bucket.over_90,144.56,144.56
+detail,1,,Oak Grove Uniforms,2026-09-18,@reports.txn.journal_entry,,,,73,@reports.bucket.61_90,-144.56,-144.56
+detail,1,,Oak Grove Uniforms,2026-09-19,@reports.txn.journal_entry,,,,72,@reports.bucket.61_90,318.41,318.41
+detail,1,,Oak Grove Uniforms,2026-10-08,@reports.txn.journal_entry,,,,53,@reports.bucket.31_60,3099.38,3099.38
+detail,1,,Oak Grove Uniforms,2026-10-10,@reports.txn.journal_entry,,,,51,@reports.bucket.31_60,-318.41,-318.41
+detail,1,,Oak Grove Uniforms,2026-10-19,@reports.txn.journal_entry,,,,42,@reports.bucket.31_60,-3099.38,-3099.38
+detail,1,,Ozark Cellular,2026-02-20,@reports.txn.journal_entry,,,,283,@reports.bucket.over_90,783.86,783.86
+detail,1,,Ozark Cellular,2026-03-10,@reports.txn.journal_entry,,,,265,@reports.bucket.over_90,-783.86,-783.86
+detail,1,,Ozark Cellular,2026-06-23,@reports.txn.journal_entry,,,,160,@reports.bucket.over_90,2248.83,2248.83
+detail,1,,Ozark Cellular,2026-06-25,@reports.txn.journal_entry,,,,158,@reports.bucket.over_90,1450,1450
+detail,1,,Ozark Cellular,2026-07-05,@reports.txn.journal_entry,,,,148,@reports.bucket.over_90,-2248.83,-2248.83
+detail,1,,Ozark Cellular,2026-07-20,@reports.txn.journal_entry,,,,133,@reports.bucket.over_90,-1450,-1450
+detail,1,,Ozark Feed & Seed,2026-10-06,@reports.txn.journal_entry,,,,55,@reports.bucket.31_60,1286.4,1286.4
+detail,1,,Ozark Mulch Supply,2026-03-05,@reports.txn.journal_entry,,,,270,@reports.bucket.over_90,1450,1450
+detail,1,,Ozark Mulch Supply,2026-03-12,@reports.txn.journal_entry,,,,263,@reports.bucket.over_90,803.72,803.72
+detail,1,,Ozark Mulch Supply,2026-03-28,@reports.txn.journal_entry,,,,247,@reports.bucket.over_90,-1450,-1450
+detail,1,,Ozark Mulch Supply,2026-04-02,@reports.txn.journal_entry,,,,242,@reports.bucket.over_90,-803.72,-803.72
+detail,1,,Ozark Mulch Supply,2026-07-02,@reports.txn.journal_entry,,,,151,@reports.bucket.over_90,947.14,947.14
+detail,1,,Ozark Mulch Supply,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,208.6,208.6
+detail,1,,Ozark Mulch Supply,2026-07-13,@reports.txn.journal_entry,,,,140,@reports.bucket.over_90,-208.6,-208.6
+detail,1,,Ozark Mulch Supply,2026-07-26,@reports.txn.journal_entry,,,,127,@reports.bucket.over_90,-947.14,-947.14
+detail,1,,Ozark Mulch Supply,2026-07-26,@reports.txn.journal_entry,,,,127,@reports.bucket.over_90,777.94,777.94
+detail,1,,Ozark Mulch Supply,2026-08-05,@reports.txn.journal_entry,,,,117,@reports.bucket.over_90,-777.94,-777.94
+detail,1,,Ozark Mulch Supply,2026-09-26,@reports.txn.journal_entry,,,,65,@reports.bucket.61_90,100.09,100.09
+detail,1,,Ozark Mulch Supply,2026-10-10,@reports.txn.journal_entry,,,,51,@reports.bucket.31_60,-100.09,-100.09
+detail,1,,Ozark Mulch Supply,2026-11-03,@reports.txn.bill,BILL-00001,OMS-1182,2026-12-03,0,@reports.bucket.current,1180.4,1180.4
+detail,1,,Ozark Office Supply,2026-01-05,@reports.txn.journal_entry,,,,329,@reports.bucket.over_90,1885.3,1885.3
+detail,1,,Ozark Office Supply,2026-01-13,@reports.txn.journal_entry,,,,321,@reports.bucket.over_90,197.77,197.77
+detail,1,,Ozark Office Supply,2026-02-02,@reports.txn.journal_entry,,,,301,@reports.bucket.over_90,-1885.3,-1885.3
+detail,1,,Ozark Office Supply,2026-02-02,@reports.txn.journal_entry,,,,301,@reports.bucket.over_90,-197.77,-197.77
+detail,1,,Ozark Office Supply,2026-02-22,@reports.txn.journal_entry,,,,281,@reports.bucket.over_90,1450,1450
+detail,1,,Ozark Office Supply,2026-03-04,@reports.txn.journal_entry,,,,271,@reports.bucket.over_90,-1450,-1450
+detail,1,,Ozark Office Supply,2026-04-10,@reports.txn.journal_entry,,,,234,@reports.bucket.over_90,723.45,723.45
+detail,1,,Ozark Office Supply,2026-04-24,@reports.txn.journal_entry,,,,220,@reports.bucket.over_90,-723.45,-723.45
+detail,1,,Ozark Office Supply,2026-08-29,@reports.txn.journal_entry,,,,93,@reports.bucket.over_90,561.95,561.95
+detail,1,,Ozark Office Supply,2026-09-13,@reports.txn.journal_entry,,,,78,@reports.bucket.61_90,-561.95,-561.95
+detail,1,,Ozark Office Supply,2026-10-26,@reports.txn.journal_entry,,,,35,@reports.bucket.31_60,218.44,218.44
+detail,1,,Persimmon Hill Plants,2026-04-23,@reports.txn.journal_entry,,,,221,@reports.bucket.over_90,904.55,904.55
+detail,1,,Persimmon Hill Plants,2026-05-11,@reports.txn.journal_entry,,,,203,@reports.bucket.over_90,-904.55,-904.55
+detail,1,,Persimmon Hill Plants,2026-06-11,@reports.txn.journal_entry,,,,172,@reports.bucket.over_90,2026.32,2026.32
+detail,1,,Persimmon Hill Plants,2026-07-08,@reports.txn.journal_entry,,,,145,@reports.bucket.over_90,-2026.32,-2026.32
+detail,1,,Persimmon Hill Plants,2026-10-06,@reports.txn.journal_entry,,,,55,@reports.bucket.31_60,183.26,183.26
+detail,1,,Persimmon Hill Plants,2026-10-09,@reports.txn.journal_entry,,,,52,@reports.bucket.31_60,1450,1450
+detail,1,,Persimmon Hill Plants,2026-10-20,@reports.txn.journal_entry,,,,41,@reports.bucket.31_60,-183.26,-183.26
+detail,1,,Persimmon Hill Plants,2026-10-24,@reports.txn.journal_entry,,,,37,@reports.bucket.31_60,-1450,-1450
+detail,1,,Persimmon Hill Plants,2026-10-31,@reports.txn.journal_entry,,,,30,@reports.bucket.1_30,1450,1450
+detail,1,,Pine Ridge Storage Units,2026-04-13,@reports.txn.journal_entry,,,,231,@reports.bucket.over_90,570.53,570.53
+detail,1,,Pine Ridge Storage Units,2026-04-13,@reports.txn.journal_entry,,,,231,@reports.bucket.over_90,997,997
+detail,1,,Pine Ridge Storage Units,2026-04-27,@reports.txn.journal_entry,,,,217,@reports.bucket.over_90,-570.53,-570.53
+detail,1,,Pine Ridge Storage Units,2026-05-08,@reports.txn.journal_entry,,,,206,@reports.bucket.over_90,-997,-997
+detail,1,,Pine Ridge Storage Units,2026-10-08,@reports.txn.journal_entry,,,,53,@reports.bucket.31_60,104.84,104.84
+detail,1,,Pine Ridge Storage Units,2026-10-28,@reports.txn.journal_entry,,,,33,@reports.bucket.31_60,-104.84,-104.84
+detail,1,,Pine Ridge Storage Units,2026-11-04,@reports.txn.journal_entry,,,,26,@reports.bucket.1_30,394.21,394.21
+detail,1,,Powersite Trailer Sales,2026-01-08,@reports.txn.journal_entry,,,,326,@reports.bucket.over_90,1450,1450
+detail,1,,Powersite Trailer Sales,2026-01-20,@reports.txn.journal_entry,,,,314,@reports.bucket.over_90,-1450,-1450
+detail,1,,Powersite Trailer Sales,2026-05-02,@reports.txn.journal_entry,,,,212,@reports.bucket.over_90,1450,1450
+detail,1,,Powersite Trailer Sales,2026-05-14,@reports.txn.journal_entry,,,,200,@reports.bucket.over_90,-1450,-1450
+detail,1,,Powersite Trailer Sales,2026-08-24,@reports.txn.journal_entry,,,,98,@reports.bucket.over_90,856.27,856.27
+detail,1,,Powersite Trailer Sales,2026-09-13,@reports.txn.journal_entry,,,,78,@reports.bucket.61_90,1450,1450
+detail,1,,Powersite Trailer Sales,2026-09-14,@reports.txn.journal_entry,,,,77,@reports.bucket.61_90,-856.27,-856.27
+detail,1,,Powersite Trailer Sales,2026-10-09,@reports.txn.journal_entry,,,,52,@reports.bucket.31_60,-1450,-1450
+detail,1,,Reeds Spring Welding,2026-05-22,@reports.txn.journal_entry,,,,192,@reports.bucket.over_90,679.61,679.61
+detail,1,,Reeds Spring Welding,2026-06-13,@reports.txn.journal_entry,,,,170,@reports.bucket.over_90,-679.61,-679.61
+detail,1,,Reeds Spring Welding,2026-07-07,@reports.txn.journal_entry,,,,146,@reports.bucket.over_90,738.23,738.23
+detail,1,,Reeds Spring Welding,2026-08-04,@reports.txn.journal_entry,,,,118,@reports.bucket.over_90,-738.23,-738.23
+detail,1,,Riverbend Fuel,2026-05-04,@reports.txn.journal_entry,,,,210,@reports.bucket.over_90,401.06,401.06
+detail,1,,Riverbend Fuel,2026-05-18,@reports.txn.journal_entry,,,,196,@reports.bucket.over_90,-401.06,-401.06
+detail,1,,Riverbend Fuel,2026-06-24,@reports.txn.journal_entry,,,,159,@reports.bucket.over_90,751.7,751.7
+detail,1,,Riverbend Fuel,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,1617.05,1617.05
+detail,1,,Riverbend Fuel,2026-07-12,@reports.txn.journal_entry,,,,141,@reports.bucket.over_90,-751.7,-751.7
+detail,1,,Riverbend Fuel,2026-07-13,@reports.txn.journal_entry,,,,140,@reports.bucket.over_90,-1617.05,-1617.05
+detail,1,,Riverbend Fuel,2026-10-07,@reports.txn.journal_entry,,,,54,@reports.bucket.31_60,1412.06,1412.06
+detail,1,,Riverbend Fuel,2026-10-13,@reports.txn.journal_entry,,,,48,@reports.bucket.31_60,1017.53,1017.53
+detail,1,,Riverbend Fuel,2026-10-22,@reports.txn.journal_entry,,,,39,@reports.bucket.31_60,232.7,232.7
+detail,1,,Riverbend Fuel,2026-10-24,@reports.txn.journal_entry,,,,37,@reports.bucket.31_60,-1017.53,-1017.53
+detail,1,,Riverbend Hardware,2026-01-13,@reports.txn.journal_entry,,,,321,@reports.bucket.over_90,380.06,380.06
+detail,1,,Riverbend Hardware,2026-01-19,@reports.txn.journal_entry,,,,315,@reports.bucket.over_90,589.94,589.94
+detail,1,,Riverbend Hardware,2026-01-24,@reports.txn.journal_entry,,,,310,@reports.bucket.over_90,1822.07,1822.07
+detail,1,,Riverbend Hardware,2026-01-30,@reports.txn.journal_entry,,,,304,@reports.bucket.over_90,1450,1450
+detail,1,,Riverbend Hardware,2026-01-31,@reports.txn.journal_entry,,,,303,@reports.bucket.over_90,-380.06,-380.06
+detail,1,,Riverbend Hardware,2026-02-03,@reports.txn.journal_entry,,,,300,@reports.bucket.over_90,-1822.07,-1822.07
+detail,1,,Riverbend Hardware,2026-02-11,@reports.txn.journal_entry,,,,292,@reports.bucket.over_90,-1450,-1450
+detail,1,,Riverbend Hardware,2026-02-12,@reports.txn.journal_entry,,,,291,@reports.bucket.over_90,-589.94,-589.94
+detail,1,,Riverbend Hardware,2026-02-25,@reports.txn.journal_entry,,,,278,@reports.bucket.over_90,103.89,103.89
+detail,1,,Riverbend Hardware,2026-03-18,@reports.txn.journal_entry,,,,257,@reports.bucket.over_90,115.55,115.55
+detail,1,,Riverbend Hardware,2026-03-24,@reports.txn.journal_entry,,,,251,@reports.bucket.over_90,-103.89,-103.89
+detail,1,,Riverbend Hardware,2026-04-09,@reports.txn.journal_entry,,,,235,@reports.bucket.over_90,-115.55,-115.55
+detail,1,,Riverbend Hardware,2026-09-09,@reports.txn.journal_entry,,,,82,@reports.bucket.61_90,577.55,577.55
+detail,1,,Riverbend Hardware,2026-10-05,@reports.txn.journal_entry,,,,56,@reports.bucket.31_60,-577.55,-577.55
+detail,1,,Riverbend Hardware,2026-10-07,@reports.txn.journal_entry,,,,54,@reports.bucket.31_60,1450,1450
+detail,1,,Riverbend Hardware,2026-10-24,@reports.txn.journal_entry,,,,37,@reports.bucket.31_60,-1450,-1450
+detail,1,,Rockaway Auto Glass,2026-01-19,@reports.txn.journal_entry,,,,315,@reports.bucket.over_90,3049.28,3049.28
+detail,1,,Rockaway Auto Glass,2026-01-29,@reports.txn.journal_entry,,,,305,@reports.bucket.over_90,188.06,188.06
+detail,1,,Rockaway Auto Glass,2026-02-06,@reports.txn.journal_entry,,,,297,@reports.bucket.over_90,-3049.28,-3049.28
+detail,1,,Rockaway Auto Glass,2026-02-09,@reports.txn.journal_entry,,,,294,@reports.bucket.over_90,-188.06,-188.06
+detail,1,,Rockaway Auto Glass,2026-02-14,@reports.txn.journal_entry,,,,289,@reports.bucket.over_90,1697.93,1697.93
+detail,1,,Rockaway Auto Glass,2026-03-13,@reports.txn.journal_entry,,,,262,@reports.bucket.over_90,-1697.93,-1697.93
+detail,1,,Rockaway Auto Glass,2026-04-12,@reports.txn.journal_entry,,,,232,@reports.bucket.over_90,129.74,129.74
+detail,1,,Rockaway Auto Glass,2026-05-05,@reports.txn.journal_entry,,,,209,@reports.bucket.over_90,-129.74,-129.74
+detail,1,,Rockaway Auto Glass,2026-05-21,@reports.txn.journal_entry,,,,193,@reports.bucket.over_90,528.65,528.65
+detail,1,,Rockaway Auto Glass,2026-06-15,@reports.txn.journal_entry,,,,168,@reports.bucket.over_90,-528.65,-528.65
+detail,1,,Shepherd Hills Office Supply,2026-02-26,@reports.txn.journal_entry,,,,277,@reports.bucket.over_90,1013.84,1013.84
+detail,1,,Shepherd Hills Office Supply,2026-03-04,@reports.txn.journal_entry,,,,271,@reports.bucket.over_90,2708.47,2708.47
+detail,1,,Shepherd Hills Office Supply,2026-03-23,@reports.txn.journal_entry,,,,252,@reports.bucket.over_90,-1013.84,-1013.84
+detail,1,,Shepherd Hills Office Supply,2026-03-28,@reports.txn.journal_entry,,,,247,@reports.bucket.over_90,-2708.47,-2708.47
+detail,1,,Shepherd Hills Office Supply,2026-06-24,@reports.txn.journal_entry,,,,159,@reports.bucket.over_90,354.74,354.74
+detail,1,,Shepherd Hills Office Supply,2026-07-14,@reports.txn.journal_entry,,,,139,@reports.bucket.over_90,-354.74,-354.74
+detail,1,,Shepherd Hills Office Supply,2026-07-27,@reports.txn.journal_entry,,,,126,@reports.bucket.over_90,1945.21,1945.21
+detail,1,,Shepherd Hills Office Supply,2026-08-18,@reports.txn.journal_entry,,,,104,@reports.bucket.over_90,-1945.21,-1945.21
+detail,1,,Shepherd Hills Office Supply,2026-08-31,@reports.txn.journal_entry,,,,91,@reports.bucket.over_90,127.13,127.13
+detail,1,,Shepherd Hills Office Supply,2026-09-01,@reports.txn.journal_entry,,,,90,@reports.bucket.61_90,123.65,123.65
+detail,1,,Shepherd Hills Office Supply,2026-09-04,@reports.txn.journal_entry,,,,87,@reports.bucket.61_90,334.75,334.75
+detail,1,,Shepherd Hills Office Supply,2026-09-13,@reports.txn.journal_entry,,,,78,@reports.bucket.61_90,-123.65,-123.65
+detail,1,,Shepherd Hills Office Supply,2026-09-16,@reports.txn.journal_entry,,,,75,@reports.bucket.61_90,184.56,184.56
+detail,1,,Shepherd Hills Office Supply,2026-09-21,@reports.txn.journal_entry,,,,70,@reports.bucket.61_90,206.25,206.25
+detail,1,,Shepherd Hills Office Supply,2026-09-24,@reports.txn.journal_entry,,,,67,@reports.bucket.61_90,-334.75,-334.75
+detail,1,,Shepherd Hills Office Supply,2026-09-25,@reports.txn.journal_entry,,,,66,@reports.bucket.61_90,-127.13,-127.13
+detail,1,,Shepherd Hills Office Supply,2026-10-09,@reports.txn.journal_entry,,,,52,@reports.bucket.31_60,2387.42,2387.42
+detail,1,,Shepherd Hills Office Supply,2026-10-12,@reports.txn.journal_entry,,,,49,@reports.bucket.31_60,-184.56,-184.56
+detail,1,,Shepherd Hills Office Supply,2026-10-13,@reports.txn.journal_entry,,,,48,@reports.bucket.31_60,-206.25,-206.25
+detail,1,,Shepherd Hills Office Supply,2026-10-26,@reports.txn.journal_entry,,,,35,@reports.bucket.31_60,-2387.42,-2387.42
+detail,1,,Stone County Permits,2026-01-17,@reports.txn.journal_entry,,,,317,@reports.bucket.over_90,1450,1450
+detail,1,,Stone County Permits,2026-02-07,@reports.txn.journal_entry,,,,296,@reports.bucket.over_90,-1450,-1450
+detail,1,,Stone County Permits,2026-03-26,@reports.txn.journal_entry,,,,249,@reports.bucket.over_90,252.64,252.64
+detail,1,,Stone County Permits,2026-04-15,@reports.txn.journal_entry,,,,229,@reports.bucket.over_90,-252.64,-252.64
+detail,1,,Stone County Permits,2026-06-08,@reports.txn.journal_entry,,,,175,@reports.bucket.over_90,790.21,790.21
+detail,1,,Stone County Permits,2026-06-20,@reports.txn.journal_entry,,,,163,@reports.bucket.over_90,-790.21,-790.21
+detail,1,,Stone County Permits,2026-08-17,@reports.txn.journal_entry,,,,105,@reports.bucket.over_90,1450,1450
+detail,1,,Stone County Permits,2026-09-01,@reports.txn.journal_entry,,,,90,@reports.bucket.61_90,-1450,-1450
+detail,1,,Stone County Permits,2026-09-03,@reports.txn.journal_entry,,,,88,@reports.bucket.61_90,1442.42,1442.42
+detail,1,,Stone County Permits,2026-10-01,@reports.txn.journal_entry,,,,60,@reports.bucket.31_60,-1442.42,-1442.42
+detail,1,,Sycamore Fence Co,2026-03-07,@reports.txn.journal_entry,,,,268,@reports.bucket.over_90,144.31,144.31
+detail,1,,Sycamore Fence Co,2026-03-29,@reports.txn.journal_entry,,,,246,@reports.bucket.over_90,123.04,123.04
+detail,1,,Sycamore Fence Co,2026-04-04,@reports.txn.journal_entry,,,,240,@reports.bucket.over_90,-144.31,-144.31
+detail,1,,Sycamore Fence Co,2026-04-19,@reports.txn.journal_entry,,,,225,@reports.bucket.over_90,-123.04,-123.04
+detail,1,,Sycamore Fence Co,2026-05-03,@reports.txn.journal_entry,,,,211,@reports.bucket.over_90,670.31,670.31
+detail,1,,Sycamore Fence Co,2026-05-17,@reports.txn.journal_entry,,,,197,@reports.bucket.over_90,533.05,533.05
+detail,1,,Sycamore Fence Co,2026-05-22,@reports.txn.journal_entry,,,,192,@reports.bucket.over_90,-670.31,-670.31
+detail,1,,Sycamore Fence Co,2026-06-03,@reports.txn.journal_entry,,,,180,@reports.bucket.over_90,-533.05,-533.05
+detail,1,,Sycamore Fence Co,2026-08-14,@reports.txn.journal_entry,,,,108,@reports.bucket.over_90,811.29,811.29
+detail,1,,Sycamore Fence Co,2026-09-01,@reports.txn.journal_entry,,,,90,@reports.bucket.61_90,-811.29,-811.29
+detail,1,,Sycamore Fence Co,2026-10-08,@reports.txn.journal_entry,,,,53,@reports.bucket.31_60,136.56,136.56
+detail,1,,Sycamore Fence Co,2026-10-22,@reports.txn.journal_entry,,,,39,@reports.bucket.31_60,237.01,237.01
+detail,1,,Sycamore Fence Co,2026-10-23,@reports.txn.journal_entry,,,,38,@reports.bucket.31_60,-136.56,-136.56
+detail,1,,Table Rock Nursery,2026-03-04,@reports.txn.journal_entry,,,,271,@reports.bucket.over_90,2287.81,2287.81
+detail,1,,Table Rock Nursery,2026-03-23,@reports.txn.journal_entry,,,,252,@reports.bucket.over_90,-2287.81,-2287.81
+detail,1,,Table Rock Nursery,2026-04-23,@reports.txn.journal_entry,,,,221,@reports.bucket.over_90,1059.24,1059.24
+detail,1,,Table Rock Nursery,2026-05-06,@reports.txn.journal_entry,,,,208,@reports.bucket.over_90,-1059.24,-1059.24
+detail,1,,Table Rock Nursery,2026-05-31,@reports.txn.journal_entry,,,,183,@reports.bucket.over_90,311.2,311.2
+detail,1,,Table Rock Nursery,2026-06-15,@reports.txn.journal_entry,,,,168,@reports.bucket.over_90,-311.2,-311.2
+detail,1,,Table Rock Nursery,2026-06-17,@reports.txn.journal_entry,,,,166,@reports.bucket.over_90,1450,1450
+detail,1,,Table Rock Nursery,2026-07-08,@reports.txn.journal_entry,,,,145,@reports.bucket.over_90,-1450,-1450
+detail,1,,Table Rock Nursery,2026-07-12,@reports.txn.journal_entry,,,,141,@reports.bucket.over_90,847.71,847.71
+detail,1,,Table Rock Nursery,2026-08-06,@reports.txn.journal_entry,,,,116,@reports.bucket.over_90,-847.71,-847.71
+detail,1,,Table Rock Nursery,2026-10-12,@reports.txn.journal_entry,,,,49,@reports.bucket.31_60,3915,3915
+detail,1,,Table Rock Nursery,2026-10-31,@reports.txn.journal_entry,,,,30,@reports.bucket.1_30,960.52,960.52
+detail,1,,Table Rock Nursery,2026-11-18,@reports.txn.bill,BILL-00002,TRN-5521,2026-12-18,0,@reports.bucket.current,2300.6,2300.6
+detail,1,,Table Rock Nursery,2026-11-22,@reports.txn.vendor_credit,VC-00001,TRN-CR-77,,8,@reports.bucket.1_30,-115.6,-115.6
+detail,1,,Table Rock Nursery,2026-11-26,@reports.txn.bill,BILL-00003,TRN-5590,2026-12-26,0,@reports.bucket.current,370,370
+detail,1,,Table Rock Small Engine,2026-01-03,@reports.txn.journal_entry,,,,331,@reports.bucket.over_90,185.03,185.03
+detail,1,,Table Rock Small Engine,2026-01-29,@reports.txn.journal_entry,,,,305,@reports.bucket.over_90,-185.03,-185.03
+detail,1,,Table Rock Small Engine,2026-05-11,@reports.txn.journal_entry,,,,203,@reports.bucket.over_90,1450,1450
+detail,1,,Table Rock Small Engine,2026-05-12,@reports.txn.journal_entry,,,,202,@reports.bucket.over_90,1450,1450
+detail,1,,Table Rock Small Engine,2026-05-19,@reports.txn.journal_entry,,,,195,@reports.bucket.over_90,1345.24,1345.24
+detail,1,,Table Rock Small Engine,2026-05-21,@reports.txn.journal_entry,,,,193,@reports.bucket.over_90,-1450,-1450
+detail,1,,Table Rock Small Engine,2026-06-01,@reports.txn.journal_entry,,,,182,@reports.bucket.over_90,-1345.24,-1345.24
+detail,1,,Table Rock Small Engine,2026-06-09,@reports.txn.journal_entry,,,,174,@reports.bucket.over_90,-1450,-1450
+detail,1,,Table Rock Small Engine,2026-06-15,@reports.txn.journal_entry,,,,168,@reports.bucket.over_90,501.16,501.16
+detail,1,,Table Rock Small Engine,2026-07-01,@reports.txn.journal_entry,,,,152,@reports.bucket.over_90,-501.16,-501.16
+detail,1,,Table Rock Small Engine,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,532.42,532.42
+detail,1,,Table Rock Small Engine,2026-07-23,@reports.txn.journal_entry,,,,130,@reports.bucket.over_90,281.19,281.19
+detail,1,,Table Rock Small Engine,2026-07-29,@reports.txn.journal_entry,,,,124,@reports.bucket.over_90,-532.42,-532.42
+detail,1,,Table Rock Small Engine,2026-08-17,@reports.txn.journal_entry,,,,105,@reports.bucket.over_90,-281.19,-281.19
+detail,1,,Taney County Landfill,2026-01-15,@reports.txn.journal_entry,,,,319,@reports.bucket.over_90,1218.55,1218.55
+detail,1,,Taney County Landfill,2026-01-28,@reports.txn.journal_entry,,,,306,@reports.bucket.over_90,-1218.55,-1218.55
+detail,1,,Taney County Landfill,2026-04-22,@reports.txn.journal_entry,,,,222,@reports.bucket.over_90,223.84,223.84
+detail,1,,Taney County Landfill,2026-05-03,@reports.txn.journal_entry,,,,211,@reports.bucket.over_90,574.21,574.21
+detail,1,,Taney County Landfill,2026-05-09,@reports.txn.journal_entry,,,,205,@reports.bucket.over_90,-223.84,-223.84
+detail,1,,Taney County Landfill,2026-05-30,@reports.txn.journal_entry,,,,184,@reports.bucket.over_90,-574.21,-574.21
+detail,1,,Taney County Landfill,2026-06-02,@reports.txn.journal_entry,,,,181,@reports.bucket.over_90,1450,1450
+detail,1,,Taney County Landfill,2026-06-12,@reports.txn.journal_entry,,,,171,@reports.bucket.over_90,-1450,-1450
+detail,1,,Taney County Landfill,2026-08-16,@reports.txn.journal_entry,,,,106,@reports.bucket.over_90,221.37,221.37
+detail,1,,Taney County Landfill,2026-08-25,@reports.txn.journal_entry,,,,97,@reports.bucket.over_90,351.25,351.25
+detail,1,,Taney County Landfill,2026-09-08,@reports.txn.journal_entry,,,,83,@reports.bucket.61_90,-351.25,-351.25
+detail,1,,Taney County Landfill,2026-09-12,@reports.txn.journal_entry,,,,79,@reports.bucket.61_90,-221.37,-221.37
+detail,1,,Taney County Landfill,2026-10-30,@reports.txn.journal_entry,,,,31,@reports.bucket.31_60,975.48,975.48
+detail,1,,Thunder Ridge Subcontracting,2026-01-13,@reports.txn.journal_entry,,,,321,@reports.bucket.over_90,106.27,106.27
+detail,1,,Thunder Ridge Subcontracting,2026-01-26,@reports.txn.journal_entry,,,,308,@reports.bucket.over_90,-106.27,-106.27
+detail,1,,Thunder Ridge Subcontracting,2026-02-28,@reports.txn.journal_entry,,,,275,@reports.bucket.over_90,2295.4,2295.4
+detail,1,,Thunder Ridge Subcontracting,2026-03-05,@reports.txn.journal_entry,,,,270,@reports.bucket.over_90,259.48,259.48
+detail,1,,Thunder Ridge Subcontracting,2026-03-23,@reports.txn.journal_entry,,,,252,@reports.bucket.over_90,-2295.4,-2295.4
+detail,1,,Thunder Ridge Subcontracting,2026-03-26,@reports.txn.journal_entry,,,,249,@reports.bucket.over_90,-259.48,-259.48
+detail,1,,Thunder Ridge Subcontracting,2026-05-19,@reports.txn.journal_entry,,,,195,@reports.bucket.over_90,1450,1450
+detail,1,,Thunder Ridge Subcontracting,2026-05-30,@reports.txn.journal_entry,,,,184,@reports.bucket.over_90,257.38,257.38
+detail,1,,Thunder Ridge Subcontracting,2026-06-08,@reports.txn.journal_entry,,,,175,@reports.bucket.over_90,2237.12,2237.12
+detail,1,,Thunder Ridge Subcontracting,2026-06-10,@reports.txn.journal_entry,,,,173,@reports.bucket.over_90,-1450,-1450
+detail,1,,Thunder Ridge Subcontracting,2026-06-21,@reports.txn.journal_entry,,,,162,@reports.bucket.over_90,-2237.12,-2237.12
+detail,1,,Thunder Ridge Subcontracting,2026-06-25,@reports.txn.journal_entry,,,,158,@reports.bucket.over_90,-257.38,-257.38
+detail,1,,Thunder Ridge Subcontracting,2026-09-23,@reports.txn.journal_entry,,,,68,@reports.bucket.61_90,1813.37,1813.37
+detail,1,,Thunder Ridge Subcontracting,2026-10-13,@reports.txn.journal_entry,,,,48,@reports.bucket.31_60,-1813.37,-1813.37
+detail,1,,White River Stone Yard,2026-01-01,@reports.txn.journal_entry,,,,333,@reports.bucket.over_90,536.18,536.18
+detail,1,,White River Stone Yard,2026-01-29,@reports.txn.journal_entry,,,,305,@reports.bucket.over_90,-536.18,-536.18
+detail,1,,White River Stone Yard,2026-02-26,@reports.txn.journal_entry,,,,277,@reports.bucket.over_90,532.34,532.34
+detail,1,,White River Stone Yard,2026-03-08,@reports.txn.journal_entry,,,,267,@reports.bucket.over_90,-532.34,-532.34
+detail,1,,White River Stone Yard,2026-05-31,@reports.txn.journal_entry,,,,183,@reports.bucket.over_90,937.56,937.56
+detail,1,,White River Stone Yard,2026-06-18,@reports.txn.journal_entry,,,,165,@reports.bucket.over_90,-937.56,-937.56
+detail,1,,White River Stone Yard,2026-07-03,@reports.txn.journal_entry,,,,150,@reports.bucket.over_90,322.65,322.65
+detail,1,,White River Stone Yard,2026-07-24,@reports.txn.journal_entry,,,,129,@reports.bucket.over_90,386.66,386.66
+detail,1,,White River Stone Yard,2026-07-28,@reports.txn.journal_entry,,,,125,@reports.bucket.over_90,-322.65,-322.65
+detail,1,,White River Stone Yard,2026-08-07,@reports.txn.journal_entry,,,,115,@reports.bucket.over_90,-386.66,-386.66
+detail,1,,White River Stone Yard,2026-09-21,@reports.txn.journal_entry,,,,70,@reports.bucket.61_90,1450,1450
+detail,1,,White River Stone Yard,2026-10-08,@reports.txn.journal_entry,,,,53,@reports.bucket.31_60,-1450,-1450
+detail,1,,White River Stone Yard,2026-10-23,@reports.txn.journal_entry,,,,38,@reports.bucket.31_60,96.44,96.44
+grand,0,total,@reports.row.total,,,,,,,,,19541.93

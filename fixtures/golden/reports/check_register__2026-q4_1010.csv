@@ -1,0 +1,117 @@
+kind,level,path,caption,date,type,check_number,payee,memo,deposit,payment
+detail,1,,,2026-10-01,@reports.txn.journal_entry,,,bill payment 4400 · Stone County Permits · Bill payment,0,1442.42
+detail,1,,,2026-10-01,@reports.txn.journal_entry,,,payment PMT-INV-1260 · Whitetail Hunting Lodge · Payment received,4688.74,0
+detail,1,,,2026-10-01,@reports.txn.journal_entry,,,payment PMT-INV-1299 · Wildwood Pediatrics · Payment received,191.29,0
+detail,1,,,2026-10-02,@reports.txn.expense,4401,Ozark Feed & Seed,Plants and mulch,0,2318.6
+detail,1,,,2026-10-03,@reports.txn.journal_entry,,,payment PMT-INV-1245 · Taney County Title · Payment received,3349.64,0
+detail,1,,,2026-10-04,@reports.txn.journal_entry,,,expense  · Stone County Permits · Check,0,246.58
+detail,1,,,2026-10-04,@reports.txn.journal_entry,,,payment PMT-INV-1295 · Indian Point Resort · Payment received,248.66,0
+detail,1,,,2026-10-04,@reports.txn.journal_entry,,,payment PMT-INV-1296 · Wildwood Pediatrics · Payment received,4261.08,0
+detail,1,,,2026-10-05,@reports.txn.expense,4402,Mountain Software Co,Check,0,191.27
+detail,1,,,2026-10-05,@reports.txn.journal_entry,,,bill payment  · Riverbend Hardware · Bill payment,0,577.55
+detail,1,,,2026-10-05,@reports.txn.journal_entry,,,payment PMT-INV-1258 · Kimberling Marina · Payment received,2183.07,0
+detail,1,,,2026-10-05,@reports.txn.journal_entry,,,payment PMT-INV-1282 · Thunder Ridge Stables · Payment received,1184.45,0
+detail,1,,,2026-10-06,@reports.txn.journal_entry,,,payment PMT-INV-1291 · Mill Creek Pottery · Payment received,4468.05,0
+detail,1,,,2026-10-07,@reports.txn.expense,4403,Taney County Landfill,Check,0,357.38
+detail,1,,,2026-10-07,@reports.txn.journal_entry,,,expense  · Thunder Ridge Subcontracting · Check,0,77.13
+detail,1,,,2026-10-07,@reports.txn.journal_entry,,,expense  · White River Stone Yard · Check,0,126.39
+detail,1,,,2026-10-08,@reports.txn.expense,4404,Persimmon Hill Plants,Check,0,118.03
+detail,1,,,2026-10-08,@reports.txn.journal_entry,,,bill payment  · White River Stone Yard · Bill payment,0,1450
+detail,1,,,2026-10-08,@reports.txn.journal_entry,,,expense  · Crane Creek Tree Service · Check,0,591.75
+detail,1,,,2026-10-08,@reports.txn.journal_entry,,,journal entry PR-10-8 · Payroll,0,6595.73
+detail,1,,,2026-10-08,@reports.txn.journal_entry,,,payment PMT-INV-1301 · Bluff View Estates · Payment received,4713.19,0
+detail,1,,,2026-10-09,@reports.txn.journal_entry,,,bill payment  · Powersite Trailer Sales · Bill payment,0,1450
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,bill payment  · Ozark Mulch Supply · Bill payment,0,100.09
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,bill payment 4405 · Oak Grove Uniforms · Bill payment,0,318.41
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,payment PMT-INV-1274 · Mincy Hollow Ranch · Payment received,225.75,0
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,payment PMT-INV-1278 · Hickory Ridge Apartments · Payment received,2845.38,0
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,payment PMT-INV-1286 · Forsyth Public Library · Payment received,276.71,0
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,payment PMT-INV-1290 · Bear Creek Campground · Payment received,2025.68,0
+detail,1,,,2026-10-10,@reports.txn.journal_entry,,,payment PMT-INV-1297 · Silver Dollar Rentals · Payment received,967.44,0
+detail,1,,,2026-10-11,@reports.txn.journal_entry,,,expense  · Oak Grove Uniforms · Check,0,535.54
+detail,1,,,2026-10-11,@reports.txn.journal_entry,,,payment PMT-INV-1276 · Cedar Creek Winery · Payment received,1689.56,0
+detail,1,,,2026-10-11,@reports.txn.journal_entry,,,payment PMT-INV-1293 · Cardinal Hill Daycare · Payment received,301.06,0
+detail,1,,,2026-10-12,@reports.txn.expense,4407,Pine Ridge Storage Units,Check,0,415.27
+detail,1,,,2026-10-12,@reports.txn.journal_entry,,,bill payment 4406 · Shepherd Hills Office Supply · Bill payment,0,184.56
+detail,1,,,2026-10-12,@reports.txn.journal_entry,,,expense  · Monett Tire & Lube · Check,0,224.76
+detail,1,,,2026-10-12,@reports.txn.journal_entry,,,expense  · Ozark Office Supply · Check,0,348.51
+detail,1,,,2026-10-13,@reports.txn.journal_entry,,,bill payment  · Thunder Ridge Subcontracting · Bill payment,0,1813.37
+detail,1,,,2026-10-13,@reports.txn.journal_entry,,,bill payment 4408 · Shepherd Hills Office Supply · Bill payment,0,206.25
+detail,1,,,2026-10-13,@reports.txn.journal_entry,,,payment PMT-INV-1283 · Barn Owl Books · Payment received,1958,0
+detail,1,,,2026-10-13,@reports.txn.journal_entry,,,payment PMT-INV-1284 · Indian Point Resort · Payment received,3817.05,0
+detail,1,,,2026-10-14,@reports.txn.journal_entry,,,bill payment  · Monett Tire & Lube · Bill payment,0,411.16
+detail,1,,,2026-10-14,@reports.txn.journal_entry,,,payment PMT-INV-1294 · Juniper Court Condos · Payment received,1140.51,0
+detail,1,,,2026-10-15,@reports.txn.expense,4409,Riverbend Fuel,Check,0,463.83
+detail,1,,,2026-10-15,@reports.txn.journal_entry,,,bill payment  · Branson Equipment Rental · Bill payment,0,431.11
+detail,1,,,2026-10-15,@reports.txn.journal_entry,,,expense  · Cedar Hollow Signs · Check,0,280.56
+detail,1,,,2026-10-15,@reports.txn.journal_entry,,,expense  · Lakeview Credit Union · Truck loan payment,0,892
+detail,1,,,2026-10-15,@reports.txn.journal_entry,,,payment PMT-INV-1285 · Barn Owl Books · Payment received,3720.27,0
+detail,1,,,2026-10-15,@reports.txn.journal_entry,,,payment PMT-INV-1304 · Compton Ridge Church · Payment received,3461.75,0
+detail,1,,,2026-10-17,@reports.txn.expense,4410,Blue Eye Lumber,Check,0,320.43
+detail,1,,,2026-10-17,@reports.txn.journal_entry,,,bill payment  · Lakeside Insurance Agency · Bill payment,0,233.44
+detail,1,,,2026-10-18,@reports.txn.journal_entry,,,payment PMT-INV-1319 · Timber Lake Lodge · Payment received,500.7,0
+detail,1,,,2026-10-19,@reports.txn.journal_entry,,,bill payment  · Oak Grove Uniforms · Bill payment,0,3099.38
+detail,1,,,2026-10-19,@reports.txn.journal_entry,,,payment PMT-INV-1302 · Cardinal Hill Daycare · Payment received,2793.55,0
+detail,1,,,2026-10-19,@reports.txn.journal_entry,,,payment PMT-INV-1308 · Ridgedale Chapel · Payment received,4188.16,0
+detail,1,,,2026-10-20,@reports.txn.expense,4411,Oak Grove Uniforms,Check,0,222.97
+detail,1,,,2026-10-20,@reports.txn.journal_entry,,,bill payment  · Persimmon Hill Plants · Bill payment,0,183.26
+detail,1,,,2026-10-20,@reports.txn.journal_entry,,,expense  · Business Credit Card · Card payment,0,2016.92
+detail,1,,,2026-10-20,@reports.txn.journal_entry,,,expense  · Mountain Software Co · Check,0,334.1
+detail,1,,,2026-10-22,@reports.txn.journal_entry,,,journal entry PR-10-22 · Payroll,0,6583.78
+detail,1,,,2026-10-22,@reports.txn.journal_entry,,,payment PMT-INV-1329 · Shepherd Hills Clinic · Payment received,669.38,0
+detail,1,,,2026-10-22,@reports.txn.journal_entry,,,payment PMT-INV-1340 · Tri-Lakes Insurance · Payment received,3382.61,0
+detail,1,,,2026-10-23,@reports.txn.journal_entry,,,bill payment  · Sycamore Fence Co · Bill payment,0,136.56
+detail,1,,,2026-10-23,@reports.txn.journal_entry,,,bill payment 4412 · Copper Kettle Catering · Bill payment,0,495.97
+detail,1,,,2026-10-23,@reports.txn.journal_entry,,,payment PMT-INV-1300 · Oak Grove Orchard · Payment received,1103.69,0
+detail,1,,,2026-10-24,@reports.txn.journal_entry,,,bill payment  · Riverbend Hardware · Bill payment,0,1450
+detail,1,,,2026-10-24,@reports.txn.journal_entry,,,bill payment 4413 · Persimmon Hill Plants · Bill payment,0,1450
+detail,1,,,2026-10-24,@reports.txn.journal_entry,,,bill payment 4414 · Riverbend Fuel · Bill payment,0,1017.53
+detail,1,,,2026-10-24,@reports.txn.journal_entry,,,expense  · Empire Electric Cooperative · Check,0,510.28
+detail,1,,,2026-10-24,@reports.txn.journal_entry,,,payment PMT-INV-1292 · Bull Shoals Cabins · Payment received,4421.27,0
+detail,1,,,2026-10-25,@reports.txn.journal_entry,,,payment PMT-INV-1279 · Valley View Assisted Living · Payment received,1640.78,0
+detail,1,,,2026-10-26,@reports.txn.journal_entry,,,bill payment  · Shepherd Hills Office Supply · Bill payment,0,2387.42
+detail,1,,,2026-10-26,@reports.txn.journal_entry,,,expense  · Midwest Irrigation Parts · Check,0,89.64
+detail,1,,,2026-10-26,@reports.txn.journal_entry,,,payment PMT-INV-1305 · Elm Street Flats · Payment received,998.43,0
+detail,1,,,2026-10-26,@reports.txn.journal_entry,,,payment PMT-INV-1335 · Reeds Spring Hardware · Payment received,1894.46,0
+detail,1,,,2026-10-26,@reports.txn.journal_entry,,,payment PMT-INV-1338 · Lampe Country Store · Payment received,4553.45,0
+detail,1,,,2026-10-27,@reports.txn.expense,4415,Stone County Permits,Check,0,75.65
+detail,1,,,2026-10-27,@reports.txn.journal_entry,,,payment PMT-INV-1311 · Reeds Spring Hardware · Payment received,902.56,0
+detail,1,,,2026-10-27,@reports.txn.journal_entry,,,payment PMT-INV-1324 · Forsyth Public Library · Payment received,1877.49,0
+detail,1,,,2026-10-27,@reports.txn.journal_entry,,,payment PMT-INV-1336 · Hollister Family Trust · Payment received,3108.92,0
+detail,1,,,2026-10-28,@reports.txn.journal_entry,,,bill payment  · Pine Ridge Storage Units · Bill payment,0,104.84
+detail,1,,,2026-10-28,@reports.txn.journal_entry,,,expense  · Kurt (owner) · Owner draw,0,3500
+detail,1,,,2026-10-28,@reports.txn.journal_entry,,,expense  · Stone County Permits · Check,0,509.57
+detail,1,,,2026-10-28,@reports.txn.journal_entry,,,payment PMT-INV-1309 · Maple Street Bakery · Payment received,4738.47,0
+detail,1,,,2026-10-28,@reports.txn.journal_entry,,,payment PMT-INV-1318 · Pine Ridge Storage · Payment received,539.56,0
+detail,1,,,2026-10-29,@reports.txn.expense,4416,Taney County Landfill,Check,0,855.52
+detail,1,,,2026-10-29,@reports.txn.journal_entry,,,payment PMT-INV-1323 · Sugar Creek Bakery · Payment received,2501.05,0
+detail,1,,,2026-10-30,@reports.txn.journal_entry,,,payment PMT-INV-1275 · Dogwood Canyon Rentals · Payment received,4642.36,0
+detail,1,,,2026-10-30,@reports.txn.journal_entry,,,payment PMT-INV-1289 · Cedar Creek Winery · Payment received,1227.65,0
+detail,1,,,2026-10-30,@reports.txn.journal_entry,,,payment PMT-INV-1303 · Ozark Mountain Daycare · Payment received,1692.64,0
+detail,1,,,2026-10-30,@reports.txn.journal_entry,,,payment PMT-INV-1316 · Pine Ridge Storage · Payment received,3660.71,0
+detail,1,,,2026-10-30,@reports.txn.journal_entry,,,payment PMT-INV-1320 · Hickory Ridge Apartments · Payment received,4008.35,0
+detail,1,,,2026-10-31,@reports.txn.journal_entry,,,expense  · Kurt (owner) · Owner draw,0,42691.36
+detail,1,,,2026-10-31,@reports.txn.journal_entry,,,payment PMT-INV-1288 · Wildwood Pediatrics · Payment received,529.21,0
+detail,1,,,2026-10-31,@reports.txn.journal_entry,,,payment PMT-INV-1337 · Maple Street Bakery · Payment received,2610.02,0
+detail,1,,,2026-11-01,@reports.txn.journal_entry,,,payment PMT-INV-1277 · Kimberling Marina · Payment received,2744.67,0
+detail,1,,,2026-11-02,@reports.txn.journal_entry,,,expense  · Shepherd Hills Office Supply · Check,0,129.91
+detail,1,,,2026-11-02,@reports.txn.journal_entry,,,payment PMT-INV-1273 · Kimberling Marina · Payment received,4219.64,0
+detail,1,,,2026-11-02,@reports.txn.journal_entry,,,payment PMT-INV-1330 · Lampe Country Store · Payment received,1956.61,0
+detail,1,,,2026-11-02,@reports.txn.journal_entry,,,payment PMT-INV-1332 · Pine Ridge Storage · Payment received,4081.59,0
+detail,1,,,2026-11-03,@reports.txn.journal_entry,,,expense  · Kurt (owner) · Owner draw,0,24728.56
+detail,1,,,2026-11-03,@reports.txn.journal_entry,,,payment PMT-INV-1313 · Cedar Hollow Church · Payment received,2032.91,0
+detail,1,,,2026-11-03,@reports.txn.journal_entry,,,payment PMT-INV-1315 · Walnut Shade Farmhouse · Payment received,1556.38,0
+detail,1,,,2026-11-03,@reports.txn.journal_entry,,,payment PMT-INV-1328 · Roark Creek Dentistry · Payment received,3117.5,0
+detail,1,,,2026-11-03,@reports.txn.journal_entry,,,payment PMT-INV-1331 · Riverbend HOA · Payment received,2950.74,0
+detail,1,,,2026-11-04,@reports.txn.expense,4417,Elm Street Accountants,Check,0,493.15
+detail,1,,,2026-11-20,@reports.txn.customer_payment,,Riverbend HOA,,1000,0
+detail,1,,,2026-11-28,@reports.txn.customer_payment,,Hollister Family Trust,,500,0
+detail,1,,,2026-12-02,@reports.txn.bill_payment,,Ozark Mulch Supply,Payment to vendor,0,1180.4
+detail,1,,,2026-12-02,@reports.txn.bill_payment,,Table Rock Nursery,Payment to vendor,0,1000
+detail,1,,,2026-12-08,@reports.txn.expense,5001,Ozark Mulch Supply,Mulch delivery,0,245
+detail,1,,,2026-12-10,@reports.txn.expense,5002,Thunder Ridge Subcontracting,Equipment repair labor,0,750
+detail,1,,,2026-12-11,@reports.txn.deposit,,,Owner contribution,2500,0
+detail,1,,,2026-12-15,@reports.txn.customer_payment,,Table Rock Dental,,1590.25,0
+detail,1,,,2026-12-15,@reports.txn.expense,,Table Rock Nursery,Shrubs,0,89.99
+detail,1,,,2026-12-15,@reports.txn.expense,,Table Rock Nursery,Shrubs,0,89.99
+grand,0,total,@reports.row.total,,,,,,134153.09,119143.87

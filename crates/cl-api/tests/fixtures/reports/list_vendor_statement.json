@@ -1,0 +1,65 @@
+{
+  "closingBalance": 1185,
+  "closingBalanceExact": "1185.0000",
+  "endDate": "2026-12-31",
+  "lines": [
+    {
+      "balance": 2300.6,
+      "balanceExact": "2300.6000",
+      "charge": 2300.6,
+      "chargeExact": "2300.6000",
+      "id": "94c20905-3333-4c81-8861-ddcaf75c4646",
+      "memo": null,
+      "payment": 0,
+      "paymentExact": "0.0000",
+      "txn_date": "2026-11-18",
+      "txn_number": "BILL-00002",
+      "txn_type": "bill",
+      "vendor_invoice_number": "TRN-5521"
+    },
+    {
+      "balance": 2185,
+      "balanceExact": "2185.0000",
+      "charge": 0,
+      "chargeExact": "0.0000",
+      "id": "91aa618b-200b-4af5-9f0d-6386a072a777",
+      "memo": null,
+      "payment": 115.6,
+      "paymentExact": "115.6000",
+      "txn_date": "2026-11-22",
+      "txn_number": "VC-00001",
+      "txn_type": "vendor_credit",
+      "vendor_invoice_number": "TRN-CR-77"
+    },
+    {
+      "balance": 1185,
+      "balanceExact": "1185.0000",
+      "charge": 0,
+      "chargeExact": "0.0000",
+      "id": "1390f8f3-4d1e-4741-aeaf-653fb7bf4a30",
+      "memo": "Payment to vendor",
+      "payment": 1000,
+      "paymentExact": "1000.0000",
+      "txn_date": "2026-12-02",
+      "txn_number": null,
+      "txn_type": "bill_payment",
+      "vendor_invoice_number": null
+    }
+  ],
+  "meta": {
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2026-10-01",
+    "reportSchemaVersion": "2",
+    "to": "2026-12-31"
+  },
+  "openingBalance": 0,
+  "openingBalanceExact": "0.0000",
+  "startDate": "2026-10-01",
+  "title": "Vendor Statement",
+  "totalChargesExact": "2300.6000",
+  "totalPaymentsExact": "1115.6000",
+  "vendorId": "8621c571-0526-4c18-90c7-a09f220a5599",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

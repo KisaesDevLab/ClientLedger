@@ -199,7 +199,7 @@ impl AttentionKind {
         match self {
             AttentionKind::BankWaiting => Some("banking.feed"),
             AttentionKind::ReconcileUnfinished => Some("banking.reconcile"),
-            AttentionKind::InvoicesOverdue => Some("reports.center"),
+            AttentionKind::InvoicesOverdue => Some("reports.ar_aging"),
             AttentionKind::BillsDue { .. } => Some("vendors.pay_bills"),
             AttentionKind::PayrollUnposted => Some("payroll.import"),
             // Preferences, on its Document intake panel.

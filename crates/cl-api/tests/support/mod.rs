@@ -985,6 +985,31 @@ impl OllamaStub {
         });
     }
 
+    /// Answers `POST /api/chat` with `content` ahead of any reply mounted
+    /// earlier (wiremock's priority 1): the shared stub serves several
+    /// tests in one binary.
+    pub fn serve_chat_first(&self, h: &Harness, content: &str) {
+        use wiremock::matchers::{method, path};
+        let body = serde_json::json!({
+            "model": "llama3.1:8b",
+            "message": { "role": "assistant", "content": content },
+            "done": true,
+            "done_reason": "stop",
+            "prompt_eval_count": 1,
+            "eval_count": 1,
+        })
+        .to_string();
+        h.run(async {
+            wiremock::Mock::given(method("POST"))
+                .and(path("/api/chat"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .with_priority(1)
+                .mount(&self.server)
+                .await;
+        });
+    }
     /// The bodies of the `POST /api/chat` requests served so far.
     pub fn chat_bodies(&self, h: &Harness) -> Vec<String> {
         h.run(async {

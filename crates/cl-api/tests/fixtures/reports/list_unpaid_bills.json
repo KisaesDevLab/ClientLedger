@@ -1,0 +1,63 @@
+{
+  "asOfDate": "2026-11-30",
+  "data": [
+    {
+      "amount_paid": "0.0000",
+      "amount_paidExact": "0.0000",
+      "balance_due": "1180.4000",
+      "balance_dueExact": "1180.4000",
+      "bill_status": "unpaid",
+      "contact_id": "898cef7a-df64-4fba-bae5-009e1c7ae951",
+      "credits_applied": "0.0000",
+      "credits_appliedExact": "0.0000",
+      "days_overdue": 0,
+      "discount_amount": "0.0000",
+      "discount_amountExact": "0.0000",
+      "due_date": "2026-12-03",
+      "id": "d1673c3b-7ab4-4019-a22b-f1bb1751e6a1",
+      "total": "1180.4000",
+      "totalExact": "1180.4000",
+      "txn_date": "2026-11-03",
+      "txn_number": "BILL-00001",
+      "vendor_invoice_number": "OMS-1182",
+      "vendor_name": "Ozark Mulch Supply"
+    },
+    {
+      "amount_paid": "0.0000",
+      "amount_paidExact": "0.0000",
+      "balance_due": "2300.6000",
+      "balance_dueExact": "2300.6000",
+      "bill_status": "unpaid",
+      "contact_id": "8621c571-0526-4c18-90c7-a09f220a5599",
+      "credits_applied": "0.0000",
+      "credits_appliedExact": "0.0000",
+      "days_overdue": 0,
+      "discount_amount": "0.0000",
+      "discount_amountExact": "0.0000",
+      "due_date": "2026-12-18",
+      "id": "94c20905-3333-4c81-8861-ddcaf75c4646",
+      "total": "2300.6000",
+      "totalExact": "2300.6000",
+      "txn_date": "2026-11-18",
+      "txn_number": "BILL-00002",
+      "vendor_invoice_number": "TRN-5521",
+      "vendor_name": "Table Rock Nursery"
+    }
+  ],
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Unpaid Bills",
+  "totalsExact": {
+    "amount_paid": "0.0000",
+    "balance_due": "3481.0000",
+    "credits_applied": "0.0000",
+    "discount_amount": "0.0000",
+    "total": "3481.0000"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

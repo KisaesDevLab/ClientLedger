@@ -1,0 +1,4 @@
+kind,level,path,caption,total
+account,1,accounts/acct:4000,4000 · Service Income,392592.64
+account,1,accounts/acct:49900,49900 · Unapplied receipts,500
+grand,0,total,@reports.row.total,393092.64

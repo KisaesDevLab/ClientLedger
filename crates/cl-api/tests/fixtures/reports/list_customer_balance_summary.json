@@ -1,0 +1,47 @@
+{
+  "asOfDate": "2026-11-30",
+  "data": [
+    {
+      "balance": "720.3100",
+      "balanceExact": "720.3100",
+      "display_name": "Bear Creek Campground",
+      "id": "6925eb31-aeab-4d02-8542-a50c9b0b8da1"
+    },
+    {
+      "balance": "7362.7400",
+      "balanceExact": "7362.7400",
+      "display_name": "Copper Kettle Coffee",
+      "id": "71679b8d-92a7-4e11-809f-2395908106d5"
+    },
+    {
+      "balance": "1612.2200",
+      "balanceExact": "1612.2200",
+      "display_name": "Forsyth Public Library",
+      "id": "c4605013-59f1-46bc-aadd-8f795443e115"
+    },
+    {
+      "balance": "942.1100",
+      "balanceExact": "942.1100",
+      "display_name": "White River Lumber",
+      "id": "01cad497-bf9f-49d1-a4a3-cc2ad7bcc151"
+    },
+    {
+      "balance": "4002.8300",
+      "balanceExact": "4002.8300",
+      "display_name": "Wildwood Pediatrics",
+      "id": "96bc62b7-e6bb-4117-961e-ac4dfd3b2fb4"
+    }
+  ],
+  "meta": {
+    "asOf": "2026-11-30",
+    "basis": null,
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "title": "Customer Balance Summary",
+  "totalsExact": {
+    "balance": "52385.9800"
+  },
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

@@ -145,6 +145,7 @@ GET     /api/v1/reports/ap-aging-summary        idempotent
 GET     /api/v1/reports/vendor-statement        idempotent
 GET     /api/v1/practice/1099/vendors/{contactId}/profile idempotent
 PUT     /api/v1/practice/1099/vendors/{contactId}/profile pre-handler-only
+PUT     /api/v1/practice/1099/account-mappings/{formBox} pre-handler-only
 GET     /api/v1/tags/groups/list                idempotent
 POST    /api/v1/tags/groups                     pre-handler-only
 PUT     /api/v1/tags/groups/{id}                pre-handler-only
@@ -445,3 +446,49 @@ POST    /api/v1/banking/reconciliations/{id}/undo pre-handler-only
 POST    /api/v1/banking/reconciliations/{id}/cancel pre-handler-only
 GET     /api/v1/reports/reconciliation-detail   idempotent
 GET     /api/v1/reports/reconciliation-discrepancy idempotent
+# P28: memorized reports (U-118, report-defs-v1; creates and changes keyed under report-defs-v1)
+GET     /api/v1/report-builder/definitions      idempotent
+POST    /api/v1/report-builder/definitions      keyable-report-defs
+GET     /api/v1/report-builder/definitions/{id} idempotent
+PUT     /api/v1/report-builder/definitions/{id} keyable-report-defs
+DELETE  /api/v1/report-builder/definitions/{id} pre-handler-only
+GET     /api/v1/report-builder/definition-groups idempotent
+POST    /api/v1/report-builder/definition-groups keyable-report-defs
+PUT     /api/v1/report-builder/definition-groups/{id} keyable-report-defs
+DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only
+# P28 WP2: exact statements and ledgers (U-14, reports-exact-v1)
+GET     /api/v1/reports/general-ledger          idempotent
+GET     /api/v1/reports/revenue-by-category     idempotent
+GET     /api/v1/reports/expense-by-category     idempotent
+# P28 WP3: who owes what, lists, tax, controls (U-14, U-121, U-204)
+GET     /api/v1/reports/ar-aging-detail         idempotent
+GET     /api/v1/reports/invoice-list            idempotent
+GET     /api/v1/reports/customer-balance-detail idempotent
+GET     /api/v1/reports/vendor-balance-summary  idempotent
+GET     /api/v1/reports/vendor-balance-detail   idempotent
+GET     /api/v1/reports/ap-aging-detail         idempotent
+GET     /api/v1/reports/unpaid-bills            idempotent
+GET     /api/v1/reports/sales-by-customer       idempotent
+GET     /api/v1/reports/sales-by-item           idempotent
+GET     /api/v1/reports/expense-by-vendor       idempotent
+GET     /api/v1/reports/transaction-list-by-vendor idempotent
+GET     /api/v1/reports/bill-payment-history    idempotent
+GET     /api/v1/reports/vendor-1099-summary     idempotent
+GET     /api/v1/reports/ap-1099-prep            idempotent
+GET     /api/v1/reports/check-register          idempotent
+GET     /api/v1/reports/bank-balances           idempotent
+GET     /api/v1/reports/account-activity-summary idempotent
+GET     /api/v1/reports/closing-date-exceptions idempotent
+GET     /api/v1/duplicates                      idempotent
+GET     /api/v1/budgets                         idempotent
+POST    /api/v1/budgets                         keyable-budgets
+PUT     /api/v1/budgets/{id}                    keyable-budgets
+DELETE  /api/v1/budgets/{id}                    pre-handler-only
+GET     /api/v1/budgets/{id}/lines              idempotent
+PUT     /api/v1/budgets/{id}/lines              keyable-budgets
+POST    /api/v1/budgets/{id}/fill-from-actuals  keyable-budgets
+POST    /api/v1/budgets/{id}/copy-from/{sourceId} keyable-budgets
+POST    /api/v1/budgets/{id}/adjust-by-percent  keyable-budgets
+GET     /api/v1/budgets/{id}/vs-actual          idempotent
+POST    /api/v1/reports/email                   keyable-reports-email
+POST    /api/v1/reports/ask                     pre-handler-only

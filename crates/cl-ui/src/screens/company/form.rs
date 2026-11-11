@@ -503,6 +503,22 @@ pub fn inline_error(ui: &mut Ui, tokens: &Tokens, error: &dyn cl_core::OwnerFaci
     inline_warning(ui, tokens, &text);
 }
 
+/// [`inline_error`] with "Copy details" (Q-119) for an error the owner
+/// can't fix: a fresh error id, `context` and the scrubbed detail (no
+/// amounts, names or memo text) go to the clipboard.
+pub fn inline_error_details(ui: &mut Ui, tokens: &Tokens, error: &cl_api::ApiError, context: &str) {
+    inline_error(ui, tokens, error);
+    if ui.button(t("errors.copy_details")).clicked() {
+        let detail = crate::errors::scrub_line(&cl_core::OwnerFacing::scrubbed_detail(error));
+        ui.ctx().copy_text(crate::errors::details_text(
+            crate::errors::fresh_id(),
+            context,
+            &detail,
+            &[],
+        ));
+    }
+}
+
 /// Shows a plain-language problem inline, as [`inline_error`] does.
 pub fn inline_warning(ui: &mut Ui, tokens: &Tokens, text: &str) {
     egui::Frame::new()
@@ -511,6 +527,22 @@ pub fn inline_warning(ui: &mut Ui, tokens: &Tokens, text: &str) {
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+        });
+}
+
+/// [`inline_warning`] whose text is not selectable, so it is no stop in
+/// the tab order (a message beside its own link or button).
+pub fn inline_note(ui: &mut Ui, tokens: &Tokens, text: &str) {
+    egui::Frame::new()
+        .fill(tokens.warn_surface)
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(text).color(tokens.warn_text))
+                    .wrap()
+                    .selectable(false),
+            );
         });
 }
 

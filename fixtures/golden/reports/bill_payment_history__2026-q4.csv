@@ -1,0 +1,4 @@
+kind,level,path,caption,date,number,check_number,bills,amount
+detail,1,rows/0,Ozark Mulch Supply,2026-12-02,,,1,1180.4
+detail,1,rows/1,Table Rock Nursery,2026-12-02,,,1,1000
+grand,0,total,@reports.row.total,,,,,2180.4

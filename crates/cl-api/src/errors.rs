@@ -443,6 +443,10 @@ pub enum LocalValidation {
     /// from zero to cents, or it has a cost without a quantity; nothing
     /// was sent.
     LineAmountMismatch,
+    /// A report that lists one vendor or one bank account was run without
+    /// one chosen (P28: Transactions by Vendor, Vendor Statement, Check
+    /// Register); nothing was sent.
+    MissingPick,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -696,6 +700,14 @@ pub enum ApiError {
         /// Which part (never the content).
         what: &'static str,
     },
+    /// A report answer lacks the exact `*Exact` fields this version reads
+    /// (U-14, P28 plan section 6): never read from the rounded numbers
+    /// instead. Usually an engine without `reports-exact-v1`.
+    #[error("report answer without exact amounts ({what})")]
+    ReportShape {
+        /// Which part (never the content).
+        what: &'static str,
+    },
     /// The engine answered a save with 2xx, so it **is** recorded, but its
     /// answer could not be read (for example a newer engine sent a value
     /// this version does not know). Owner wording: "Saved — reload to see
@@ -869,6 +881,9 @@ fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)>
             Some("fix.api.undo_in_bank_feed"),
         ));
     }
+    if matches!(e, ApiError::ReportShape { .. }) {
+        return Some(("error.api.report_shape", Some("fix.api.update_engine")));
+    }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
             return Some((
@@ -936,6 +951,7 @@ fn draft_message(
 }
 
 impl OwnerFacing for ApiError {
+    #[allow(clippy::too_many_lines, reason = "one arm per error kind")]
     fn owner_message(&self) -> OwnerMessage {
         if let Some((key, fix)) = special_message(self) {
             return OwnerMessage {
@@ -1023,7 +1039,9 @@ impl OwnerFacing for ApiError {
                 ("error.api.outcome_unknown", Some("fix.api.check_again"))
             }
             // Worded in `special_message`.
-            ApiError::IdempotencyKeyReused { .. } => ("error.api.internal", None),
+            ApiError::IdempotencyKeyReused { .. } | ApiError::ReportShape { .. } => {
+                ("error.api.internal", None)
+            }
             ApiError::Server { .. }
             | ApiError::Protocol { .. }
             | ApiError::Decode { .. }

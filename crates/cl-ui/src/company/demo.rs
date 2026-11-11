@@ -50,6 +50,8 @@ pub mod bank_import;
 pub mod feed_review;
 // P27: Reconcile (the mockup's October statement).
 pub mod reconcile;
+pub mod report_store;
+pub mod reports;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,6 +177,8 @@ pub struct DemoState {
     pub inventory: inventory::DemoInventory,
     /// P24: unit sets (U-161).
     pub units: units::DemoUnits,
+    /// P28: memorized reports, budgets and report email.
+    pub report_store: report_store::DemoReportStore,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -303,6 +307,7 @@ impl DemoState {
             sales_tax: sales_tax::DemoSalesTax::default(),
             inventory: inventory::DemoInventory::default(),
             units: units::DemoUnits::default(),
+            report_store: report_store::DemoReportStore::default(),
         }
     }
 

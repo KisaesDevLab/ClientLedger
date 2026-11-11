@@ -1097,11 +1097,17 @@ fn the_demo_chart_shows_the_mockup_and_drills_into_the_report() {
         end: date(2026, 10, 31),
     };
     h.drill(oct);
+    // Q-P16h: the P&L opens on that fiscal period.
+    let want = crate::screens::reports::profit_loss_for(cl_core::report::DateRange {
+        from: date(2026, 10, 1),
+        to: date(2026, 10, 31),
+    });
     assert_eq!(
         link.drain(),
-        vec![CompanyEvent::OpenWindow(CommandId::new(
-            "reports.profit_loss"
-        ))]
+        vec![CompanyEvent::OpenWith(
+            CommandId::new("reports.profit_loss"),
+            Box::new(crate::windows::OpenPayload::Report(Box::new(want)))
+        )]
     );
     assert_eq!(h.state()["chart"]["drill"], "2026-10-01..2026-10-31");
 }
@@ -1285,4 +1291,23 @@ fn the_kofi_button_opens_the_page_only_when_clicked() {
     );
     frame(&mut h, Vec::new());
     assert_eq!(sink.opened(), [support::KOFI_URL], "exactly one");
+}
+
+/// Q-P16g / Q-P28r: with the aging read, Home counts invoices more than 60
+/// days past due; without it the shared overdue rule stays.
+#[test]
+fn invoices_more_than_60_days_past_due_come_from_the_aging() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    h.data.summary = Slot::ready(demo::summary(&mut DemoState::new(), DemoState::today(), 7));
+    h.data.past_60 = Slot::ready(2);
+    let items = attention::items(&h.data, 14, false, false);
+    assert_eq!(counted(&items, "invoices_overdue"), Some(2));
+    let lines = attention::lines(&h, &h.attention());
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.text == "2 invoices more than 60 days past due"),
+        "{lines:#?}"
+    );
 }

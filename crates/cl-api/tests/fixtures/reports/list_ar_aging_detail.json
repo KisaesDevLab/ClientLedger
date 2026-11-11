@@ -1,0 +1,171 @@
+{
+  "asOfDate": "2026-11-30",
+  "buckets": {
+    "current": 3623.58,
+    "days1to30": 275525.01,
+    "days31to60": -42859.64,
+    "days61to90": -33239.31,
+    "over90": -150663.66
+  },
+  "bucketsExact": {
+    "current": "3623.58",
+    "days1to30": "275525.01",
+    "days31to60": "-42859.64",
+    "days61to90": "-33239.31",
+    "over90": "-150663.66"
+  },
+  "customers": [
+    {
+      "buckets": {
+        "current": "0.00",
+        "days1to30": "0.00",
+        "days31to60": "-5678.27",
+        "days61to90": "5678.27",
+        "over90": "0.00"
+      },
+      "contactId": "e3e53b90-9591-4185-b9b3-bbcaadf4ef78",
+      "name": "Barn Owl Books",
+      "total": "0.00"
+    },
+    {
+      "buckets": {
+        "current": "0.00",
+        "days1to30": "720.31",
+        "days31to60": "-2025.68",
+        "days61to90": "556.69",
+        "over90": "1468.99"
+      },
+      "contactId": "6925eb31-aeab-4d02-8542-a50c9b0b8da1",
+      "name": "Bear Creek Campground",
+      "total": "720.31"
+    },
+    {
+      "buckets": {
+        "current": "0.00",
+        "days1to30": "0.00",
+        "days31to60": "0.00",
+        "days61to90": "-2921.12",
+        "over90": "2921.12"
+      },
+      "contactId": "e4633874-52b1-47d1-a7c7-e4b35d0ac894",
+      "name": "Blue Eye Feed Co",
+      "total": "0.00"
+    },
+    {
+      "buckets": {
+        "current": "0.00",
+        "days1to30": "0.00",
+        "days31to60": "-4688.74",
+        "days61to90": "0.00",
+        "over90": "4688.74"
+      },
+      "contactId": "e29af45d-1bf0-44d6-bbe5-0b38f6e02da7",
+      "name": "Whitetail Hunting Lodge",
+      "total": "0.00"
+    },
+    {
+      "buckets": {
+        "current": "0.00",
+        "days1to30": "-529.21",
+        "days31to60": "-449.54",
+        "days61to90": "3003.91",
+        "over90": "1977.67"
+      },
+      "contactId": "96bc62b7-e6bb-4117-961e-ac4dfd3b2fb4",
+      "name": "Wildwood Pediatrics",
+      "total": "4002.83"
+    }
+  ],
+  "details": [
+    {
+      "amount_paid": "0.0000",
+      "balance": 2492.74,
+      "balance_due": null,
+      "bucket": "90+",
+      "contact_id": "01cad497-bf9f-49d1-a4a3-cc2ad7bcc151",
+      "customer_name": "White River Lumber",
+      "daysOverdue": 333,
+      "due_date": null,
+      "id": "94cb3f81-473d-456b-abe9-2adde9af4a47",
+      "kind": "other",
+      "openExact": "2492.7400",
+      "total": null,
+      "txn_date": "2026-01-01",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    },
+    {
+      "amount_paid": "0.0000",
+      "balance": -2492.74,
+      "balance_due": null,
+      "bucket": "90+",
+      "contact_id": "01cad497-bf9f-49d1-a4a3-cc2ad7bcc151",
+      "customer_name": "White River Lumber",
+      "daysOverdue": 310,
+      "due_date": null,
+      "id": "df4f0e54-ab60-41d1-94e9-d36700b56312",
+      "kind": "credit",
+      "openExact": "-2492.7400",
+      "total": null,
+      "txn_date": "2026-01-24",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    },
+    {
+      "amount_paid": "0.0000",
+      "balance": 2666.89,
+      "balance_due": null,
+      "bucket": "90+",
+      "contact_id": "01cad497-bf9f-49d1-a4a3-cc2ad7bcc151",
+      "customer_name": "White River Lumber",
+      "daysOverdue": 231,
+      "due_date": null,
+      "id": "86a1bc99-7cf8-436e-9e3d-82f9c3e23fae",
+      "kind": "other",
+      "openExact": "2666.8900",
+      "total": null,
+      "txn_date": "2026-04-13",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    },
+    {
+      "amount_paid": "0.0000",
+      "balance": -3689.67,
+      "balance_due": null,
+      "bucket": "61-90",
+      "contact_id": "eaa785e1-cf5f-4825-92a4-c68544f1b231",
+      "customer_name": "Greenway Fitness",
+      "daysOverdue": 84,
+      "due_date": null,
+      "id": "ce7d8824-3102-4d67-8129-34119472d193",
+      "kind": "credit",
+      "openExact": "-3689.6700",
+      "total": null,
+      "txn_date": "2026-09-07",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    },
+    {
+      "amount_paid": "0.0000",
+      "balance": -2262.57,
+      "balance_due": null,
+      "bucket": "61-90",
+      "contact_id": "eaa785e1-cf5f-4825-92a4-c68544f1b231",
+      "customer_name": "Greenway Fitness",
+      "daysOverdue": 74,
+      "due_date": null,
+      "id": "f194e809-5c87-4f35-8620-ad79041a23c8",
+      "kind": "credit",
+      "openExact": "-2262.5700",
+      "total": null,
+      "txn_date": "2026-09-17",
+      "txn_number": null,
+      "txn_type": "journal_entry"
+    }
+  ],
+  "difference": "0.00",
+  "title": "AR Aging Summary",
+  "total": 52385.98,
+  "totalExact": "52385.9800",
+  "_comment": "Recorded from the engine (fa557dd2) on the golden company, trimmed to a few rows (totals are the full report's). Synthetic."
+}

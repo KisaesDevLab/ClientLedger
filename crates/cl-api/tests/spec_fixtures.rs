@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 14] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 17] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -291,6 +291,26 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 14] = [
         "idempotency_unit_sets_v1_routes.txt",
         "keyable-unit-sets",
         cl_api::KeySet::UnitSetsV1,
+        1,
+    ),
+    // P28 (U-118): memorized-report writes, keyed under report-defs-v1.
+    (
+        "idempotency_report_defs_v1_routes.txt",
+        "keyable-report-defs",
+        cl_api::KeySet::ReportDefsV1,
+        4,
+    ),
+    // P28 WP4 (U-203, U-207): budget writes and report email.
+    (
+        "idempotency_budgets_v1_routes.txt",
+        "keyable-budgets",
+        cl_api::KeySet::BudgetsV1,
+        6,
+    ),
+    (
+        "idempotency_reports_email_v1_routes.txt",
+        "keyable-reports-email",
+        cl_api::KeySet::ReportsEmailV1,
         1,
     ),
     // P25 (U-06): bank file import commit and undo, keyed under
@@ -482,6 +502,14 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         ),
         ("idempotency_inventory_v1_routes.txt", "inventory-adjust-v1"),
         ("idempotency_unit_sets_v1_routes.txt", "units-of-measure-v1"),
+        ("idempotency_report_defs_v1_routes.txt", "report-defs-v1"),
+        // P28 (U-203, U-207): budget writes and report email, keyed by the
+        // engine; cl-api sends them in WP4.
+        ("idempotency_budgets_v1_routes.txt", "budgets-exact-v1"),
+        (
+            "idempotency_reports_email_v1_routes.txt",
+            "reports-email-v1",
+        ),
         (
             "idempotency_bank_import_v1_routes.txt",
             "bank-import-batch-v1",

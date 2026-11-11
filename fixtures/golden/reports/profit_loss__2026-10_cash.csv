@@ -1,0 +1,28 @@
+kind,level,path,caption,total
+header,0,income,@reports.pl.income,
+account,1,income/acct:4000,4000 · Service Income,88487.67
+subtotal,0,income~total,@reports.pl.total_income,88487.67
+header,0,cogs,@reports.pl.cogs,
+account,1,cogs/acct:5000,5000 · Subcontractors,3099.38
+account,1,cogs/acct:5100,5100 · Plants,6244.5
+account,1,cogs/acct:5110,5110 · Mulch & stone,1275.5
+account,1,cogs/acct:5200,5200 · Project Supplies and Materials,32941.91
+subtotal,0,cogs~total,@reports.pl.total_cogs,43561.29
+total,0,gross_profit,@reports.pl.gross_profit,44926.38
+header,0,expenses,@reports.pl.expenses,
+account,1,expenses/acct:6000,6000 · Advertising and Marketing,701.56
+account,1,expenses/acct:6100,6100 · Fuel,2241.84
+account,1,expenses/acct:6250,6250 · Office Supplies and Software,937.75
+account,1,expenses/acct:6300,6300 · Rent,4350
+account,1,expenses/acct:6350,6350 · Repairs and Maintenance,5101.23
+account,1,expenses/acct:6400,6400 · Telephone and Internet,617.98
+account,1,expenses/acct:6500,6500 · Utilities,917.74
+account,1,expenses/acct:6550,6550 · Wages,12091.3
+account,1,expenses/acct:6560,6560 · Payroll Taxes,1088.21
+account,1,expenses/acct:6700,6700 · Vehicle Expenses,2801.63
+subtotal,0,expenses~total,@reports.pl.total_expenses,30849.24
+total,0,operating_income,@reports.pl.operating_income,14077.14
+header,0,other_expenses,@reports.pl.other_expenses,
+account,1,other_expenses/acct:8000,8000 · Interest Expense,212
+subtotal,0,other_expenses~total,@reports.pl.total_other_expenses,212
+grand,0,net_income,@reports.pl.net_income,13865.14

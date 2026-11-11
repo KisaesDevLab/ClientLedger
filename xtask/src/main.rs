@@ -10,6 +10,7 @@ mod engine_test;
 mod fetch_lock;
 mod gen_invoices;
 mod gen_sample;
+mod golden_reports;
 mod grid_bench;
 mod keymap_doc;
 mod layering;
@@ -70,6 +71,9 @@ usage: cargo xtask <command>
                      Q-285 and A06 minimums
   gen-sample [--check]
                      write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
+  golden-reports [--bless]
+                     golden company reports against the real engine: cross-checks, then compare
+                     (or write, --bless) fixtures/golden/reports
   run [--no-prepare] [-- <app args>]
                      build the engine and fetch PostgreSQL and PDFium if needed, then start the desktop app
   ui-check <screen> [--compare] [--no-build]
@@ -189,6 +193,7 @@ fn main() -> Result<()> {
         Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
+        Some("golden-reports") => golden_reports::golden_reports(&args[1..]),
         Some("gen-invoices") => gen_invoices::gen_invoices(&args[1..]),
         Some("docread-accuracy") => docread_accuracy::docread_accuracy(&args[1..]),
         Some("grid-bench") => grid_bench::grid_bench(&args[1..]),

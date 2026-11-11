@@ -24,3 +24,12 @@ zune-jpeg = "0.5.15"
 flate2 = "1.1.10"
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 thiserror = "2.0.21"
+# Report exports to Excel (P28, Q-P28f). MIT OR Apache-2.0; its zip tree is
+# MIT (cargo deny checked).
+rust_xlsxwriter = { version = "0.102.0", default-features = false }
+cl-core = { path = "../cl-core" }
+
+[dev-dependencies]
+# Reads the exported workbook back (AC3). Already in the tree via rust_xlsxwriter.
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
+tempfile = "3"

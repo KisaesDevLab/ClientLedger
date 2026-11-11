@@ -339,7 +339,7 @@ fn parse_user_units(s: &str, rules: UserInput, int_digits: u32) -> Result<i128, 
 }
 
 /// `1234567` → `1,234,567`.
-fn group_thousands(whole: u128) -> String {
+pub(crate) fn group_thousands(whole: u128) -> String {
     let digits = whole.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
