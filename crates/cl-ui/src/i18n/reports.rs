@@ -224,7 +224,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.customize.title", "Customize this report"),
     ("reports.customize.report_title", "Report title"),
     ("reports.customize.run_time", "Show when the report was run"),
-    ("reports.customize.tag_split_later", "Tag split and filters by account, name and tag arrive with the next engine update."),
     ("reports.customize.done", "Done"),
     ("reports.export.saved", "Saved {file}."),
     ("reports.export.failed", "The file couldn't be saved. Check that the folder exists and you can write to it, then try again."),
@@ -254,6 +253,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.report_shape", "This report needs an update of the bookkeeping engine."),
     ("fix.api.update_engine", "Update ClientLedger, then run the report again."),
     // P28 WP3: lists, agings, controls
+    ("reports.problem.tag_split_tag_filter", "Showing tagged amounts separately can't be combined with a tag filter. Clear one of them."),
+    ("reports.row.untagged", "Not tagged in this group"),
+    ("reports.row.split_total", "Total for the period"),
     ("reports.title.vendor_balance_detail", "Vendor Balance Detail"),
     ("reports.col.due", "Due"),
     ("reports.col.days_overdue", "Days past due"),

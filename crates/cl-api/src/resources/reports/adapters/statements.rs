@@ -7,7 +7,7 @@
 //! figures; nothing here adds them up.
 
 use cl_core::CalendarDate;
-use cl_core::ids::AccountId;
+use cl_core::ids::{AccountId, TagId};
 use cl_core::report::{
     Cell, ColumnHead, ColumnKind, DateRange, Drill, ReportMeta, ReportRequest, ReportRow,
     ReportTable, RowKind, RowPath, TagScope,
@@ -466,22 +466,73 @@ pub fn trial_balance(
         to: as_of,
     };
     let mut rows = Vec::new();
+    // Under the tag split (U-201) each account is its untagged row, its tag
+    // rows and its total (the unsplit row), in the engine's order.
+    let group = req.tag_split;
+    let mut current = String::new();
     for (i, e) in list(v, "data")?.iter().enumerate() {
         let account = id(e, "accountId", AccountId::parse)?;
         let depth = e.get("depth").and_then(Value::as_u64).unwrap_or(0);
-        let key = account.map_or_else(|| format!("row{i}"), |a| a.to_string());
-        let mut r = row(
-            RowKind::Account,
-            u8::try_from(depth + 1).unwrap_or(u8::MAX),
-            RowPath::of(["accounts", key.as_str()]),
-            account_caption(text(e, "account_number"), text(e, "name")),
-            vec![cell(e, "debitExact")?, cell(e, "creditExact")?],
-        );
+        let level = u8::try_from(depth + 1).unwrap_or(u8::MAX);
+        let name = account_caption(text(e, "account_number"), text(e, "name"));
+        let cells = vec![cell(e, "debitExact")?, cell(e, "creditExact")?];
         // Income and expense accounts count from the fiscal year's start;
         // balance accounts from the first entry.
         let from = is_pl_type(text(e, "account_type")).then_some(fy);
-        r.drill = account.and_then(|a| lines(req, vec![a], from, as_of));
-        rows.push(r);
+        let drill = |tag: TagScope| {
+            account
+                .and_then(|a| lines(req, vec![a], from, as_of))
+                .map(|mut d| {
+                    if let Drill::Lines { tag: t, .. } = &mut d {
+                        *t = tag;
+                    }
+                    d
+                })
+        };
+        match (text(e, "rowKind"), group) {
+            (Some("tag"), Some(_)) => {
+                let tag = id(e, "tagId", TagId::parse)?;
+                let mut r = row(
+                    RowKind::TagRow,
+                    level.saturating_add(1),
+                    RowPath::of(["accounts", current.as_str()]).child(format!(
+                        "t:{}",
+                        tag.map(|t| t.to_string()).unwrap_or_default()
+                    )),
+                    account_caption(text(e, "tagNumber"), text(e, "tagName")),
+                    cells,
+                );
+                r.drill = tag.and_then(|t| drill(TagScope::Tag(t)));
+                rows.push(r);
+            }
+            (Some("account_total"), Some(_)) => {
+                let mut r = row(
+                    RowKind::AccountTotal,
+                    level,
+                    RowPath::of(["accounts", format!("{current}~split").as_str()]),
+                    format!("@reports.row.total_of {name}"),
+                    cells,
+                );
+                r.drill = drill(TagScope::Any);
+                rows.push(r);
+            }
+            _ => {
+                current = account.map_or_else(|| format!("row{i}"), |a| a.to_string());
+                let mut r = row(
+                    RowKind::Account,
+                    level,
+                    RowPath::of(["accounts", current.as_str()]),
+                    name,
+                    cells,
+                );
+                r.expandable = group.is_some();
+                r.drill = match group {
+                    Some(g) => drill(TagScope::UntaggedInGroup(g)),
+                    None => account.and_then(|a| lines(req, vec![a], from, as_of)),
+                };
+                rows.push(r);
+            }
+        }
     }
     let mut grand = row(
         RowKind::Grand,

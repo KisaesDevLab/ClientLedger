@@ -139,6 +139,7 @@ pub fn general_ledger(
             });
             rows.push(r);
         }
+        split_rows(a, req, range, account, &key, &mut rows)?;
         let mut tot = row(
             RowKind::AccountTotal,
             0,
@@ -193,6 +194,90 @@ pub fn general_ledger(
             hidden_notice: false,
         },
     })
+}
+
+/// The tag split of one account (U-201, `accounts[].tagSplit`): its lines
+/// without a tag of the group, one row per tag with activity, and the
+/// account's total for the period, each with the engine's debits and
+/// credits and a drill to its lines.
+fn split_rows(
+    a: &Value,
+    req: &ReportRequest,
+    range: DateRange,
+    account: Option<AccountId>,
+    key: &str,
+    rows: &mut Vec<cl_core::report::ReportRow>,
+) -> Result<(), ApiError> {
+    use cl_core::ids::TagId;
+    use cl_core::report::TagScope;
+    let Some(group) = req.tag_split else {
+        return Ok(());
+    };
+    let drill = |tag: TagScope| {
+        account.map(|acc| Drill::Lines {
+            account_ids: vec![acc],
+            from: Some(range.from),
+            to: range.to,
+            contact: None,
+            tag,
+            basis: req.basis,
+            adjusting: req.filters.adjusting,
+        })
+    };
+    let money = |e: &Value| -> Result<Vec<Cell>, ApiError> {
+        Ok(vec![
+            Cell::Empty,
+            Cell::Empty,
+            Cell::Empty,
+            Cell::Empty,
+            Cell::Empty,
+            cell(e, "periodDebitsExact")?,
+            cell(e, "periodCreditsExact")?,
+            Cell::Empty,
+        ])
+    };
+    for e in list(a, "tagSplit")? {
+        match text(e, "rowKind") {
+            Some("tag") => {
+                let tag = id(e, "tagId", TagId::parse)?;
+                let mut r = row(
+                    RowKind::TagRow,
+                    1,
+                    RowPath::of([
+                        key,
+                        format!("t:{}", tag.map(|t| t.to_string()).unwrap_or_default()).as_str(),
+                    ]),
+                    account_caption(text(e, "tagNumber"), text(e, "tagName")),
+                    money(e)?,
+                );
+                r.drill = tag.and_then(|t| drill(TagScope::Tag(t)));
+                rows.push(r);
+            }
+            Some("account_total") => {
+                let mut r = row(
+                    RowKind::AccountTotal,
+                    1,
+                    RowPath::of([key, "split~split"]),
+                    "@reports.row.split_total".into(),
+                    money(e)?,
+                );
+                r.drill = drill(TagScope::Any);
+                rows.push(r);
+            }
+            _ => {
+                let mut r = row(
+                    RowKind::Subtotal,
+                    1,
+                    RowPath::of([key, "untagged"]),
+                    "@reports.row.untagged".into(),
+                    money(e)?,
+                );
+                r.drill = drill(TagScope::UntaggedInGroup(group));
+                rows.push(r);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

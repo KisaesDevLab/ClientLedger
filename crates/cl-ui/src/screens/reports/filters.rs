@@ -337,8 +337,8 @@ pub(super) fn options_panel(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) 
 
 /// "Show tagged amounts separately" (Q-271): the tag group, the optional
 /// account total, and the label style with its separator. Needs
-/// `reports-columns-v1`; the Trial Balance's and the ledger's split wait
-/// for a later update.
+/// `reports-columns-v1` (the P&L, Balance Sheet, Trial Balance and General
+/// Ledger split).
 fn tag_split_options(
     w: &ReportWindow,
     ui: &mut Ui,
@@ -346,12 +346,8 @@ fn tag_split_options(
     next: &mut cl_model::reports::ReportOptions,
 ) {
     use cl_model::reports::{TagLabel, TagSplit};
-    let runs = matches!(
-        w.spec.source,
-        cl_core::report::Source::ProfitLoss | cl_core::report::Source::BalanceSheet
-    ) && has(w, cl_model::reports::catalog::caps::COLUMNS);
-    if !runs {
-        form::hint(ui, tokens, &t("reports.customize.tag_split_later"));
+    if !has(w, cl_model::reports::catalog::caps::COLUMNS) {
+        form::hint(ui, tokens, &t("reports.needs_update"));
         return;
     }
     let current = next

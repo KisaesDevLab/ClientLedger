@@ -823,6 +823,7 @@ fn problem_key(e: &cl_model::reports::ResolveError) -> &'static str {
         R::NoTagGroup => "reports.problem.no_tag_group",
         R::ProjectsUnavailable => "reports.problem.projects",
         R::TagSplitWithCompare => "reports.problem.tag_split_compare",
+        R::TagSplitWithTagFilter => "reports.problem.tag_split_tag_filter",
         R::BadAmount => "reports.problem.bad_amount",
     }
 }

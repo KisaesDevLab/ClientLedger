@@ -34,6 +34,9 @@ pub enum ResolveError {
     /// Tag split with columns by tag or client (Q-P28h).
     #[error("tag split can't be used with columns by tag or client")]
     TagSplitWithCompare,
+    /// Tag split with a tag filter (the engine takes one or the other).
+    #[error("tag split can't be used with a tag filter")]
+    TagSplitWithTagFilter,
     /// An amount filter that isn't an amount.
     #[error("the amount filter isn't an amount")]
     BadAmount,
@@ -108,6 +111,11 @@ pub fn resolve(
     };
     if tag_split.is_some() && compare != Compare::None {
         return Err(ResolveError::TagSplitWithCompare);
+    }
+    if tag_split.is_some()
+        && (!opts.filters.tag_ids.is_empty() || opts.filters.untagged_in_group.is_some())
+    {
+        return Err(ResolveError::TagSplitWithTagFilter);
     }
     let extras: std::collections::BTreeSet<_> = opts
         .extras

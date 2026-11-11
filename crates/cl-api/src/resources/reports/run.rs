@@ -183,6 +183,13 @@ pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Op
                     && !req.extras.contains(&cl_core::report::Extra::Ytd)
                     && !req.extras.contains(&cl_core::report::Extra::PctOfIncome)
             }
+            // The Trial Balance and the ledger take the tag split only.
+            Source::TrialBalance | Source::GeneralLedger => {
+                req.tag_split.is_some()
+                    && req.columns == Compare::None
+                    && req.extras.is_empty()
+                    && !matches!(req.dates, ReportDates::Ranges(_))
+            }
             _ => false,
         };
         if !ok || !has(COLUMNS) {
@@ -294,6 +301,11 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     }
     if matches!(req.source, Source::ProfitLoss | Source::BalanceSheet) {
         columns_query(req, &mut push);
+    } else if let Some(g) = req.tag_split
+        && matches!(req.source, Source::TrialBalance | Source::GeneralLedger)
+    {
+        push("tag_split", "1".into());
+        push("tag_group_id", g.to_string());
     }
     if let Some(g) = f.untagged_in_group {
         push("tag_scope", "untagged_in_group".to_string());
@@ -550,7 +562,7 @@ mod tests {
         let mut p = ReportRequest::new(Source::ProfitLoss, ReportDates::Range(oct()));
         p.filters.account_ids.clone_from(&g.filters.account_ids);
         assert_eq!(missing_capability(&p, pr_a), Some(DRILL));
-        // With U-201: P&L columns run; the TB's tag split still waits.
+        // With U-201: P&L columns and the TB's tag split run.
         let pr_b = |c: &str| c == EXACT || c == COLUMNS || c == DRILL;
         let mut cols =
             ReportRequest::new(Source::ProfitLoss, ReportDates::Ranges(vec![oct(), oct()]));
@@ -560,7 +572,13 @@ mod tests {
         tb.tag_split = Some(
             cl_core::ids::TagGroupId::parse("22222222-2222-4222-8222-222222222222").expect("g"),
         );
-        assert_eq!(missing_capability(&tb, pr_b), Some(COLUMNS));
+        assert_eq!(missing_capability(&tb, pr_b), None);
+        assert_eq!(missing_capability(&tb, pr_a), Some(COLUMNS));
+        assert!(
+            exact_query(&tb)
+                .expect("q")
+                .contains(&("tag_split".to_string(), "1".to_string()))
+        );
         let j = ReportRequest::new(Source::Journal, ReportDates::Range(oct()));
         assert_eq!(missing_capability(&j, pr_a), Some(DRILL));
         assert_eq!(missing_capability(&j, pr_b), None);
