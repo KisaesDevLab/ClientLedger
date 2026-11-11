@@ -1,0 +1,252 @@
+{
+  "basis": "accrual",
+  "cogs": [],
+  "columns": [
+    {
+      "caption": "Total",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-03-01"
+      },
+      "from": "2033-03-01",
+      "key": "total",
+      "kind": "total",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    }
+  ],
+  "drillTarget": {
+    "amount": "netChangeExact",
+    "params": {
+      "adjusting": "include",
+      "basis": "accrual"
+    },
+    "path": "/reports/general-ledger"
+  },
+  "endDate": "2033-03-31",
+  "expenses": [
+    {
+      "accountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "43a240cc-820e-491a-9144-6521a6343eb4",
+        "tag_group_id": "e2000773-7016-4df8-a1ee-46c854135039",
+        "tag_scope": "untagged_in_group"
+      },
+      "name": "ExactExp efc0c41713",
+      "parentAccountId": null,
+      "rollupValuesExact": [
+        "75.0000"
+      ],
+      "rowKind": "account",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "0.0000"
+      ]
+    },
+    {
+      "accountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "43a240cc-820e-491a-9144-6521a6343eb4",
+        "tag_id": "487f7968-7ded-4036-8150-c514a45e4501"
+      },
+      "name": "ExactExp efc0c41713",
+      "parentAccountId": null,
+      "rowKind": "tag",
+      "tagId": "487f7968-7ded-4036-8150-c514a45e4501",
+      "tagName": "Exact f4d076d4c2",
+      "tagNumber": null,
+      "valuesExact": [
+        "25.0000"
+      ]
+    },
+    {
+      "accountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "43a240cc-820e-491a-9144-6521a6343eb4"
+      },
+      "name": "ExactExp efc0c41713",
+      "parentAccountId": null,
+      "rowKind": "account_total",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "25.0000"
+      ]
+    },
+    {
+      "accountId": "f202871e-bb23-47a6-b332-669a768608c9",
+      "accountNumber": null,
+      "depth": 1,
+      "drill": {
+        "account_ids": "f202871e-bb23-47a6-b332-669a768608c9",
+        "tag_group_id": "e2000773-7016-4df8-a1ee-46c854135039",
+        "tag_scope": "untagged_in_group"
+      },
+      "name": "ExactSub 3d9fb85e67",
+      "parentAccountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "rowKind": "account",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "0.0000"
+      ]
+    },
+    {
+      "accountId": "f202871e-bb23-47a6-b332-669a768608c9",
+      "accountNumber": null,
+      "depth": 1,
+      "drill": {
+        "account_ids": "f202871e-bb23-47a6-b332-669a768608c9",
+        "tag_id": "487f7968-7ded-4036-8150-c514a45e4501"
+      },
+      "name": "ExactSub 3d9fb85e67",
+      "parentAccountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "rowKind": "tag",
+      "tagId": "487f7968-7ded-4036-8150-c514a45e4501",
+      "tagName": "Exact f4d076d4c2",
+      "tagNumber": null,
+      "valuesExact": [
+        "50.0000"
+      ]
+    },
+    {
+      "accountId": "f202871e-bb23-47a6-b332-669a768608c9",
+      "accountNumber": null,
+      "depth": 1,
+      "drill": {
+        "account_ids": "f202871e-bb23-47a6-b332-669a768608c9"
+      },
+      "name": "ExactSub 3d9fb85e67",
+      "parentAccountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "rowKind": "account_total",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "50.0000"
+      ]
+    }
+  ],
+  "footer": "",
+  "labels": {
+    "cogs": "Cost of Goods Sold",
+    "expenses": "Expenses",
+    "grossProfit": "Gross Profit",
+    "netIncome": "Net Income",
+    "operatingIncome": "Operating Income",
+    "otherExpenses": "Other Expenses",
+    "otherRevenue": "Other Revenue",
+    "revenue": "Revenue"
+  },
+  "layout": "columns",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2033-03-01",
+    "reportSchemaVersion": "2",
+    "to": "2033-03-31"
+  },
+  "otherExpenses": [],
+  "otherRevenue": [],
+  "revenue": [
+    {
+      "accountId": "60736041-10cd-45c6-9906-cc978ac5bd25",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "60736041-10cd-45c6-9906-cc978ac5bd25",
+        "tag_group_id": "e2000773-7016-4df8-a1ee-46c854135039",
+        "tag_scope": "untagged_in_group"
+      },
+      "name": "ExactRev 8dab713dfe",
+      "parentAccountId": null,
+      "rowKind": "account",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "0.0000"
+      ]
+    },
+    {
+      "accountId": "60736041-10cd-45c6-9906-cc978ac5bd25",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "60736041-10cd-45c6-9906-cc978ac5bd25",
+        "tag_id": "487f7968-7ded-4036-8150-c514a45e4501"
+      },
+      "name": "ExactRev 8dab713dfe",
+      "parentAccountId": null,
+      "rowKind": "tag",
+      "tagId": "487f7968-7ded-4036-8150-c514a45e4501",
+      "tagName": "Exact f4d076d4c2",
+      "tagNumber": null,
+      "valuesExact": [
+        "0.3000"
+      ]
+    },
+    {
+      "accountId": "60736041-10cd-45c6-9906-cc978ac5bd25",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "60736041-10cd-45c6-9906-cc978ac5bd25"
+      },
+      "name": "ExactRev 8dab713dfe",
+      "parentAccountId": null,
+      "rowKind": "account_total",
+      "tagId": null,
+      "tagName": null,
+      "tagNumber": null,
+      "valuesExact": [
+        "0.3000"
+      ]
+    }
+  ],
+  "startDate": "2033-03-01",
+  "tagSplit": {
+    "tagGroupId": "e2000773-7016-4df8-a1ee-46c854135039",
+    "tags": [
+      {
+        "tagId": "487f7968-7ded-4036-8150-c514a45e4501",
+        "tagName": "Exact f4d076d4c2",
+        "tagNumber": null
+      }
+    ]
+  },
+  "title": "Profit and Loss - Accrual Basis",
+  "totalsExact": {
+    "grossProfit": null,
+    "netIncome": [
+      "-74.7000"
+    ],
+    "operatingIncome": null,
+    "totalCogs": [
+      "0.0000"
+    ],
+    "totalExpenses": [
+      "75.0000"
+    ],
+    "totalOtherExpenses": [
+      "0.0000"
+    ],
+    "totalOtherRevenue": [
+      "0.0000"
+    ],
+    "totalRevenue": [
+      "0.3000"
+    ]
+  }
+}

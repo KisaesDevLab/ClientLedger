@@ -1,0 +1,517 @@
+{
+  "basis": "accrual",
+  "cogs": [],
+  "columns": [
+    {
+      "caption": "Mar 1, 2033 - Mar 15, 2033",
+      "drill": {
+        "end_date": "2033-03-15",
+        "start_date": "2033-03-01"
+      },
+      "from": "2033-03-01",
+      "key": "p0",
+      "kind": "period",
+      "to": "2033-03-15",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p0",
+      "caption": "Prior year",
+      "drill": {
+        "end_date": "2032-03-15",
+        "start_date": "2032-03-01"
+      },
+      "from": "2032-03-01",
+      "key": "p0_prior",
+      "kind": "prior",
+      "to": "2032-03-15",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p0",
+      "caption": "$ Change",
+      "drill": null,
+      "from": null,
+      "key": "p0_change",
+      "kind": "change",
+      "to": null,
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p0",
+      "caption": "% Change",
+      "drill": null,
+      "from": null,
+      "key": "p0_pct_change",
+      "kind": "pct_change",
+      "to": null,
+      "valueType": "percent"
+    },
+    {
+      "caption": "Mar 16, 2033 - Mar 31, 2033",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-03-16"
+      },
+      "from": "2033-03-16",
+      "key": "p1",
+      "kind": "period",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p1",
+      "caption": "Prior year",
+      "drill": {
+        "end_date": "2032-03-31",
+        "start_date": "2032-03-16"
+      },
+      "from": "2032-03-16",
+      "key": "p1_prior",
+      "kind": "prior",
+      "to": "2032-03-31",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p1",
+      "caption": "$ Change",
+      "drill": null,
+      "from": null,
+      "key": "p1_change",
+      "kind": "change",
+      "to": null,
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p1",
+      "caption": "% Change",
+      "drill": null,
+      "from": null,
+      "key": "p1_pct_change",
+      "kind": "pct_change",
+      "to": null,
+      "valueType": "percent"
+    },
+    {
+      "caption": "Total",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-03-01"
+      },
+      "from": "2033-03-01",
+      "key": "total",
+      "kind": "total",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    },
+    {
+      "caption": "YTD",
+      "drill": {
+        "end_date": "2033-03-31",
+        "start_date": "2033-01-01"
+      },
+      "from": "2033-01-01",
+      "key": "ytd",
+      "kind": "ytd",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "ytd",
+      "caption": "Prior year",
+      "drill": {
+        "end_date": "2032-03-31",
+        "start_date": "2032-01-01"
+      },
+      "from": "2032-01-01",
+      "key": "ytd_prior",
+      "kind": "prior",
+      "to": "2032-03-31",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "ytd",
+      "caption": "$ Change",
+      "drill": null,
+      "from": null,
+      "key": "ytd_change",
+      "kind": "change",
+      "to": null,
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "ytd",
+      "caption": "% Change",
+      "drill": null,
+      "from": null,
+      "key": "ytd_pct_change",
+      "kind": "pct_change",
+      "to": null,
+      "valueType": "percent"
+    }
+  ],
+  "drillTarget": {
+    "amount": "netChangeExact",
+    "params": {
+      "adjusting": "include",
+      "basis": "accrual"
+    },
+    "path": "/reports/general-ledger"
+  },
+  "endDate": "2033-03-31",
+  "expenses": [
+    {
+      "accountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "43a240cc-820e-491a-9144-6521a6343eb4"
+      },
+      "name": "ExactExp efc0c41713",
+      "parentAccountId": null,
+      "pctOfIncomeExact": [
+        "8333.3",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "8333.3",
+        "8333.3",
+        null,
+        null,
+        null
+      ],
+      "rollupValuesExact": [
+        "75.0000",
+        "0.0000",
+        "75.0000",
+        null,
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "75.0000",
+        "75.0000",
+        "0.0000",
+        "75.0000",
+        null
+      ],
+      "rowKind": "account",
+      "valuesExact": [
+        "25.0000",
+        "0.0000",
+        "25.0000",
+        null,
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "25.0000",
+        "25.0000",
+        "0.0000",
+        "25.0000",
+        null
+      ]
+    },
+    {
+      "accountId": "f202871e-bb23-47a6-b332-669a768608c9",
+      "accountNumber": null,
+      "depth": 1,
+      "drill": {
+        "account_ids": "f202871e-bb23-47a6-b332-669a768608c9"
+      },
+      "name": "ExactSub 3d9fb85e67",
+      "parentAccountId": "43a240cc-820e-491a-9144-6521a6343eb4",
+      "pctOfIncomeExact": [
+        "16666.7",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "16666.7",
+        "16666.7",
+        null,
+        null,
+        null
+      ],
+      "rowKind": "account",
+      "valuesExact": [
+        "50.0000",
+        "0.0000",
+        "50.0000",
+        null,
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "50.0000",
+        "50.0000",
+        "0.0000",
+        "50.0000",
+        null
+      ]
+    }
+  ],
+  "footer": "",
+  "labels": {
+    "cogs": "Cost of Goods Sold",
+    "expenses": "Expenses",
+    "grossProfit": "Gross Profit",
+    "netIncome": "Net Income",
+    "operatingIncome": "Operating Income",
+    "otherExpenses": "Other Expenses",
+    "otherRevenue": "Other Revenue",
+    "revenue": "Revenue"
+  },
+  "layout": "columns",
+  "meta": {
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "from": "2033-01-01",
+    "reportSchemaVersion": "2",
+    "to": "2033-03-31"
+  },
+  "otherExpenses": [],
+  "otherRevenue": [],
+  "pctOfIncomeTotalsExact": {
+    "grossProfit": null,
+    "netIncome": [
+      "-24900.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "-24900.0",
+      "-24900.0",
+      null,
+      null,
+      null
+    ],
+    "operatingIncome": null,
+    "totalCogs": [
+      "0.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "0.0",
+      "0.0",
+      null,
+      null,
+      null
+    ],
+    "totalExpenses": [
+      "25000.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "25000.0",
+      "25000.0",
+      null,
+      null,
+      null
+    ],
+    "totalOtherExpenses": [
+      "0.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "0.0",
+      "0.0",
+      null,
+      null,
+      null
+    ],
+    "totalOtherRevenue": [
+      "0.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "0.0",
+      "0.0",
+      null,
+      null,
+      null
+    ],
+    "totalRevenue": [
+      "100.0",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "100.0",
+      "100.0",
+      null,
+      null,
+      null
+    ]
+  },
+  "revenue": [
+    {
+      "accountId": "60736041-10cd-45c6-9906-cc978ac5bd25",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "60736041-10cd-45c6-9906-cc978ac5bd25"
+      },
+      "name": "ExactRev 8dab713dfe",
+      "parentAccountId": null,
+      "pctOfIncomeExact": [
+        "100.0",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "100.0",
+        "100.0",
+        null,
+        null,
+        null
+      ],
+      "rowKind": "account",
+      "valuesExact": [
+        "0.3000",
+        "0.0000",
+        "0.3000",
+        null,
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "0.3000",
+        "0.3000",
+        "0.0000",
+        "0.3000",
+        null
+      ]
+    }
+  ],
+  "startDate": "2033-03-01",
+  "tagSplit": null,
+  "title": "Profit and Loss - Accrual Basis",
+  "totalsExact": {
+    "grossProfit": null,
+    "netIncome": [
+      "-74.7000",
+      "0.0000",
+      "-74.7000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "-74.7000",
+      "-74.7000",
+      "0.0000",
+      "-74.7000",
+      null
+    ],
+    "operatingIncome": null,
+    "totalCogs": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null
+    ],
+    "totalExpenses": [
+      "75.0000",
+      "0.0000",
+      "75.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "75.0000",
+      "75.0000",
+      "0.0000",
+      "75.0000",
+      null
+    ],
+    "totalOtherExpenses": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null
+    ],
+    "totalOtherRevenue": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null
+    ],
+    "totalRevenue": [
+      "0.3000",
+      "0.0000",
+      "0.3000",
+      null,
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "0.3000",
+      "0.3000",
+      "0.0000",
+      "0.3000",
+      null
+    ]
+  }
+}

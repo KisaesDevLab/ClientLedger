@@ -10,6 +10,7 @@
 
 pub mod ar_aging;
 pub mod categories;
+pub mod columns;
 pub(crate) mod exact;
 pub mod inventory;
 pub mod ledger;

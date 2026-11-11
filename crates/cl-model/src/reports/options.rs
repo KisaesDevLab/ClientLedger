@@ -112,6 +112,10 @@ pub struct Filters {
     /// The adjusting lens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjusting: Option<Adjusting>,
+    /// Lines without a tag of this group (a tag split's untagged row,
+    /// U-202 `tag_scope=untagged_in_group`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untagged_in_group: Option<cl_core::ids::TagGroupId>,
 }
 
 /// How a tag row's caption is written (formatting only).

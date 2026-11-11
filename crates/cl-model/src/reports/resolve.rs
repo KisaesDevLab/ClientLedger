@@ -157,6 +157,7 @@ pub fn resolve(
         cleared: f.cleared,
         txn_types: f.txn_types.clone(),
         adjusting: f.adjusting,
+        untagged_in_group: f.untagged_in_group,
     };
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;

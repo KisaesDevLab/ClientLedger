@@ -313,6 +313,9 @@ pub struct ReportFilters {
     /// The adjusting lens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjusting: Option<Adjusting>,
+    /// Lines without a tag of this group (U-202).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untagged_in_group: Option<TagGroupId>,
 }
 
 /// What one report run asks of the engine: the resolved, concrete form of

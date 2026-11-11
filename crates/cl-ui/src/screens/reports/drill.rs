@@ -76,10 +76,9 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             match tag {
                 TagScope::Any => {}
                 TagScope::Tag(t) => o.filters.tag_ids = vec![*t],
-                // U-202's untagged scopes need the engine update.
-                TagScope::Untagged | TagScope::UntaggedInGroup(_) => {
-                    return Target::Nothing("reports.drill.untagged_later");
-                }
+                TagScope::UntaggedInGroup(g) => o.filters.untagged_in_group = Some(*g),
+                // Lines with no tag at all: no catalog filter names them.
+                TagScope::Untagged => return Target::Nothing("reports.drill.untagged_later"),
             }
             Target::Report(Box::new(ReportOpen {
                 key: spec.key.to_string(),

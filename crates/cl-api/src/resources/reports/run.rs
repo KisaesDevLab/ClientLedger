@@ -103,16 +103,29 @@ pub fn missing_capability(req: &ReportRequest, has: impl Fn(&str) -> bool) -> Op
         || req.columns != Compare::None
         || req.tag_split.is_some();
     if columns {
-        // U-201's answers add a column list; this build reads them once
-        // the engine update is recorded (Q-220), so until then they wait.
-        return Some(COLUMNS);
+        // U-201: columns on the P&L and Balance Sheet only (compare and YTD
+        // on the P&L); the Trial Balance's and the ledger's tag split read
+        // another shape this build doesn't read yet.
+        let ok = match req.source {
+            Source::ProfitLoss => true,
+            Source::BalanceSheet => {
+                req.columns == Compare::None
+                    && !req.extras.contains(&cl_core::report::Extra::Ytd)
+                    && !req.extras.contains(&cl_core::report::Extra::PctOfIncome)
+            }
+            _ => false,
+        };
+        if !ok || !has(COLUMNS) {
+            return Some(COLUMNS);
+        }
     }
     let f = &req.filters;
     let drill_filters = !f.contact_ids.is_empty()
         || f.amount_min.is_some()
         || f.amount_max.is_some()
         || f.cleared.is_some()
-        || !f.txn_types.is_empty();
+        || !f.txn_types.is_empty()
+        || f.untagged_in_group.is_some();
     match req.source {
         Source::GeneralLedger if drill_filters && !has(DRILL) => Some(DRILL),
         // The statements take a tag list and the adjusting lens only.
@@ -149,7 +162,12 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     let mut q: Vec<(String, String)> = vec![("exact".into(), "1".into())];
     let mut push = |k: &str, v: String| q.push((k.to_string(), v));
     match req.source {
-        Source::BalanceSheet => push("as_of_date", as_of(&req.dates)?.to_wire()),
+        Source::BalanceSheet => {
+            push("as_of_date", as_of(&req.dates)?.to_wire());
+            if let ReportDates::Ranges(v) = &req.dates {
+                push("period_ranges", ranges_param(v));
+            }
+        }
         Source::TrialBalance => {
             // The engine's Trial Balance is a balance at its end date
             // (income and expenses from the fiscal year's start); the start
@@ -158,6 +176,18 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
             let from = req.fiscal_year_start.filter(|f| *f <= to).unwrap_or(to);
             push("start_date", from.to_wire());
             push("end_date", to.to_wire());
+        }
+        Source::ProfitLoss => {
+            let r = req
+                .dates
+                .span()
+                .filter(|_| !matches!(req.dates, ReportDates::AsOf(_) | ReportDates::None))
+                .ok_or(ApiError::Local(LocalValidation::BadRange))?;
+            push("start_date", r.from.to_wire());
+            push("end_date", r.to.to_wire());
+            if let ReportDates::Ranges(v) = &req.dates {
+                push("period_ranges", ranges_param(v));
+            }
         }
         _ => {
             let r = range(&req.dates)?;
@@ -187,6 +217,13 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     {
         push("account_ids", join(&f.account_ids));
     }
+    if matches!(req.source, Source::ProfitLoss | Source::BalanceSheet) {
+        columns_query(req, &mut push);
+    }
+    if let Some(g) = f.untagged_in_group {
+        push("tag_scope", "untagged_in_group".to_string());
+        push("tag_group_id", g.to_string());
+    }
     if req.source == Source::GeneralLedger {
         push("limit", adapters::ledger::SCREEN_LIMIT.to_string());
         if let Some(c) = f.contact_ids.first() {
@@ -213,6 +250,46 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     Ok(q)
 }
 
+/// `a..b,c..d`.
+fn ranges_param(v: &[DateRange]) -> String {
+    v.iter()
+        .map(|r| format!("{}..{}", r.from.to_wire(), r.to.to_wire()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// U-201's column options (period ranges go with the dates).
+fn columns_query(req: &ReportRequest, push: &mut impl FnMut(&str, String)) {
+    use cl_core::report::Extra;
+    if req.extras.contains(&Extra::Ytd) {
+        push("ytd", "1".into());
+        if let Some(f) = req.fiscal_year_start {
+            push("fiscal_year_start", f.to_wire());
+        }
+    }
+    // One prior column per period: the prior year wins when both are on.
+    if req.extras.contains(&Extra::PriorYear) {
+        push("prior", "year".into());
+    } else if req.extras.contains(&Extra::PriorPeriod) {
+        push("prior", "period".into());
+    }
+    if req.extras.contains(&Extra::PctOfIncome) {
+        push("pct_of_income", "1".into());
+    }
+    match req.columns {
+        Compare::None => {}
+        Compare::ByContact => push("compare", "by_contact".into()),
+        Compare::ByTag { tag_group_id } => {
+            push("compare", "by_tag".into());
+            push("tag_group_id", tag_group_id.to_string());
+        }
+    }
+    if let Some(g) = req.tag_split {
+        push("tag_split", "1".into());
+        push("tag_group_id", g.to_string());
+    }
+}
+
 /// The operation an exact source reads.
 fn exact_operation(source: Source) -> Option<&'static Operation> {
     Some(match source {
@@ -236,6 +313,9 @@ fn exact_operation(source: Source) -> Option<&'static Operation> {
 pub fn adapt_exact(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, ApiError> {
     use adapters::{categories, ledger, statements};
     match req.source {
+        Source::ProfitLoss | Source::BalanceSheet if adapters::columns::is_columns(v) => {
+            adapters::columns::table(v, req, req.source == Source::BalanceSheet)
+        }
         Source::ProfitLoss => statements::profit_loss(v, req, range(&req.dates)?),
         Source::BalanceSheet => statements::balance_sheet(v, req, as_of(&req.dates)?),
         Source::TrialBalance => statements::trial_balance(v, req, as_of(&req.dates)?),

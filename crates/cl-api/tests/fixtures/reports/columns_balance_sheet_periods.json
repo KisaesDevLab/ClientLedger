@@ -1,0 +1,231 @@
+{
+  "asOfDate": "2033-03-31",
+  "assets": [
+    {
+      "accountId": "e706da49-d831-4a34-b9e9-eea266d08b8c",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "e706da49-d831-4a34-b9e9-eea266d08b8c"
+      },
+      "name": "ExactBank f35d945801",
+      "parentAccountId": null,
+      "rowKind": "account",
+      "valuesExact": [
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "-49.7000",
+        "0.0000",
+        "-49.7000",
+        null
+      ]
+    }
+  ],
+  "basis": "accrual",
+  "columns": [
+    {
+      "asOf": "2033-02-28",
+      "caption": "As of Feb 28, 2033",
+      "drill": {
+        "end_date": "2033-02-28"
+      },
+      "from": "2033-02-01",
+      "key": "p0",
+      "kind": "as_of",
+      "to": "2033-02-28",
+      "valueType": "amount"
+    },
+    {
+      "asOf": "2032-02-28",
+      "baseKey": "p0",
+      "caption": "Prior year",
+      "drill": {
+        "end_date": "2032-02-28"
+      },
+      "from": null,
+      "key": "p0_prior",
+      "kind": "prior",
+      "to": "2032-02-28",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p0",
+      "caption": "$ Change",
+      "drill": null,
+      "from": null,
+      "key": "p0_change",
+      "kind": "change",
+      "to": null,
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p0",
+      "caption": "% Change",
+      "drill": null,
+      "from": null,
+      "key": "p0_pct_change",
+      "kind": "pct_change",
+      "to": null,
+      "valueType": "percent"
+    },
+    {
+      "asOf": "2033-03-31",
+      "caption": "As of Mar 31, 2033",
+      "drill": {
+        "end_date": "2033-03-31"
+      },
+      "from": "2033-03-01",
+      "key": "p1",
+      "kind": "as_of",
+      "to": "2033-03-31",
+      "valueType": "amount"
+    },
+    {
+      "asOf": "2032-03-31",
+      "baseKey": "p1",
+      "caption": "Prior year",
+      "drill": {
+        "end_date": "2032-03-31"
+      },
+      "from": null,
+      "key": "p1_prior",
+      "kind": "prior",
+      "to": "2032-03-31",
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p1",
+      "caption": "$ Change",
+      "drill": null,
+      "from": null,
+      "key": "p1_change",
+      "kind": "change",
+      "to": null,
+      "valueType": "amount"
+    },
+    {
+      "baseKey": "p1",
+      "caption": "% Change",
+      "drill": null,
+      "from": null,
+      "key": "p1_pct_change",
+      "kind": "pct_change",
+      "to": null,
+      "valueType": "percent"
+    }
+  ],
+  "drillTarget": {
+    "amount": "endingBalanceExact",
+    "params": {
+      "adjusting": "include",
+      "basis": "accrual"
+    },
+    "path": "/reports/general-ledger"
+  },
+  "equity": [
+    {
+      "accountId": null,
+      "accountNumber": null,
+      "calculated": true,
+      "depth": 0,
+      "drill": null,
+      "name": "Net Income (Current Year)",
+      "parentAccountId": null,
+      "rowKind": "account",
+      "valuesExact": [
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "-74.7000",
+        "0.0000",
+        "-74.7000",
+        null
+      ]
+    }
+  ],
+  "footer": "",
+  "labels": {
+    "assets": "Assets",
+    "equity": "Equity",
+    "liabilities": "Liabilities",
+    "totalLiabilitiesAndEquity": "Total Liabilities & Equity"
+  },
+  "layout": "columns",
+  "liabilities": [
+    {
+      "accountId": "f756da46-43fe-4db3-b9e9-201d3bf3d9f5",
+      "accountNumber": null,
+      "depth": 0,
+      "drill": {
+        "account_ids": "f756da46-43fe-4db3-b9e9-201d3bf3d9f5"
+      },
+      "name": "ExactOwed f11f4ae76b",
+      "parentAccountId": null,
+      "rowKind": "account",
+      "valuesExact": [
+        "0.0000",
+        "0.0000",
+        "0.0000",
+        null,
+        "25.0000",
+        "0.0000",
+        "25.0000",
+        null
+      ]
+    }
+  ],
+  "meta": {
+    "asOf": "2033-03-31",
+    "basis": "accrual",
+    "cashBasisRules": null,
+    "exact": true,
+    "reportSchemaVersion": "2"
+  },
+  "tagSplit": null,
+  "title": "Balance Sheet - Accrual Basis",
+  "totalsExact": {
+    "totalAssets": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "-49.7000",
+      "0.0000",
+      "-49.7000",
+      null
+    ],
+    "totalEquity": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "-74.7000",
+      "0.0000",
+      "-74.7000",
+      null
+    ],
+    "totalLiabilities": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "25.0000",
+      "0.0000",
+      "25.0000",
+      null
+    ],
+    "totalLiabilitiesAndEquity": [
+      "0.0000",
+      "0.0000",
+      "0.0000",
+      null,
+      "-49.7000",
+      "0.0000",
+      "-49.7000",
+      null
+    ]
+  }
+}

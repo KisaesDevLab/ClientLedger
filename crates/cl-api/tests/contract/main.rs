@@ -1358,6 +1358,10 @@ fn main() -> std::process::ExitCode {
             contract_reports_exact::statements_drill_and_tie,
         ),
         (
+            "reports_exact::columns_drill_and_tag_split",
+            contract_reports_exact::columns_drill_and_tag_split,
+        ),
+        (
             "session::logout_ends_the_session",
             contract_session::logout_ends_the_session,
         ),

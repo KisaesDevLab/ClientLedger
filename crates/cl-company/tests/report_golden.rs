@@ -147,6 +147,59 @@ fn range(o: &mut ReportOptions, from: CalendarDate, to: CalendarDate) {
 }
 
 /// The goldens this engine runs (PR-A, `reports-exact-v1`).
+/// The U-201 goldens (`reports-columns-v1`): Q4 2026 by month, with YTD
+/// and % of income, by client, by tag group and with the tag split.
+fn column_options(posted: &Posted) -> Vec<(String, &'static str, ReportOptions)> {
+    use cl_core::report::Extra;
+    use cl_model::reports::{ColumnBy, TagLabel, TagSplit};
+    let job = posted.tag_groups["Job site"];
+    let q4 = |o: &mut ReportOptions| {
+        o.dates = DateChoice::Fixed {
+            from: d(2026, 10, 1),
+            to: d(2026, 12, 31),
+        };
+    };
+    let mut v = Vec::new();
+    let mut add = |file: &str, key: &'static str, f: &dyn Fn(&mut ReportOptions)| {
+        let mut o = ReportOptions::for_spec(find(key).expect("spec"));
+        f(&mut o);
+        v.push((file.to_string(), key, o));
+    };
+    add("profit_loss__2026-q4_by_month_ytd_pct", "profit_loss_by_month", &|o| {
+        q4(o);
+        o.columns = ColumnBy::Month;
+        o.extras.insert(Extra::Ytd);
+        o.extras.insert(Extra::PctOfIncome);
+    });
+    add("profit_loss__2026-q4_prior_period", "profit_loss", &|o| {
+        q4(o);
+        o.extras.insert(Extra::PriorPeriod);
+    });
+    add("profit_loss__2026-q4_by_client", "profit_loss_by_client", &|o| {
+        q4(o);
+        o.columns = ColumnBy::Client;
+    });
+    add("profit_loss__2026-q4_by_tag_job_site", "profit_loss_by_tag_group", &|o| {
+        q4(o);
+        o.columns = ColumnBy::TagGroup;
+        o.column_tag_group_id = Some(job);
+    });
+    add("profit_loss__2026-q4_tag_split_job_site", "profit_loss", &|o| {
+        q4(o);
+        o.tag_split = Some(TagSplit {
+            tag_group_id: job,
+            show_account_total: true,
+            label: TagLabel::default(),
+            separator: "-".into(),
+        });
+    });
+    add("balance_sheet__2026-q4_by_month", "balance_sheet", &|o| {
+        o.dates = DateChoice::AsOf(d(2026, 12, 31));
+        o.columns = ColumnBy::Month;
+    });
+    v
+}
+
 fn goldens(posted: &Posted) -> Vec<Golden> {
     let north = posted.tags["North lawn"];
     let mut v = Vec::new();
@@ -293,10 +346,10 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
         account_ids,
         from,
         to,
+        contact,
         tag,
         basis,
         adjusting,
-        ..
     } = drill
     else {
         panic!("not a lines drill: {drill:?}")
@@ -314,12 +367,16 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
     };
     o.basis = *basis;
     o.filters.adjusting = *adjusting;
-    if let TagScope::Tag(t) = tag {
-        o.filters.tag_ids = vec![*t];
+    match tag {
+        TagScope::Tag(t) => o.filters.tag_ids = vec![*t],
+        TagScope::UntaggedInGroup(g) => o.filters.untagged_in_group = Some(*g),
+        TagScope::Any => {}
+        TagScope::Untagged => panic!("no filter names lines without any tag"),
     }
+    o.filters.contact_ids = contact.iter().copied().collect();
     let key = format!(
         "{:?}",
-        (o.dates, o.basis, o.filters.adjusting, &o.filters.tag_ids)
+        (o.dates, o.basis, o.filters.adjusting, &o.filters.tag_ids, o.filters.untagged_in_group, &o.filters.contact_ids)
     );
     let cached = LEDGERS.lock().expect("cache").get(&key).cloned();
     let nets = if let Some(n) = cached {
@@ -520,8 +577,10 @@ async fn every_pl_cell_drills_to_its_amount(s: &Session, t: &ReportTable) -> usi
     for r in &t.rows {
         let Some(drill) = &r.drill else { continue };
         for (i, c) in t.columns.iter().enumerate() {
-            let cell = dec(&r.cells[i]);
-            let d = drill.at(c);
+            let Cell::Amount(cell) = r.cells[i] else {
+                continue;
+            };
+            let Some(d) = drill.for_cell(c) else { continue };
             let net = drill_net(s, &d).await;
             let income = r
                 .path
@@ -585,6 +644,30 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         drilled > 100,
         "account, parent total and subtotal cells drill"
     );
+    if caps.has("reports-columns-v1") && caps.has("reports-drill-v1") {
+        let mut cells = 0;
+        for (file, key, o) in column_options(&posted) {
+            let (_, t) = run(&s, key, &o).await;
+            if key.starts_with("balance_sheet") {
+                continue;
+            }
+            cells += every_pl_cell_drills_to_its_amount(&s, &t).await;
+            // AC5: untagged + tags = the account total.
+            for (i, r) in t.rows.iter().enumerate() {
+                if r.kind != RowKind::Account || t.rows.get(i + 1).is_none_or(|n| n.kind != RowKind::TagRow && n.kind != RowKind::AccountTotal) {
+                    continue;
+                }
+                let mut sum = dec(&r.cells[0]);
+                let mut j = i + 1;
+                while t.rows[j].kind == RowKind::TagRow {
+                    sum += dec(&t.rows[j].cells[0]);
+                    j += 1;
+                }
+                assert_eq!(sum, dec(&t.rows[j].cells[0]), "{file}: {} untagged + tags", r.caption);
+            }
+        }
+        assert!(cells > 100, "column cells drill");
+    }
     for (item, cap, why) in [
         (
             "U-201",
@@ -638,7 +721,11 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     }
     let dir = golden_dir();
     let mut mismatched = Vec::new();
-    for g in goldens(&posted) {
+    let mut all = goldens(&posted);
+    if caps.has("reports-columns-v1") {
+        all.extend(column_options(&posted).into_iter().map(|(file, key, options)| Golden { file, key, options }));
+    }
+    for g in all {
         let (_, t) = run(&s, g.key, &g.options).await;
         let csv = stable_ids(&t.to_canonical_csv(), &names);
         let path = dir.join(format!("{}.csv", g.file));
