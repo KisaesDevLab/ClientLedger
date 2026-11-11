@@ -5,6 +5,7 @@
 //!
 //! No egui, no I/O, no money arithmetic: the engine computes every amount.
 
+pub mod ask;
 pub mod catalog;
 pub mod definition;
 pub mod options;

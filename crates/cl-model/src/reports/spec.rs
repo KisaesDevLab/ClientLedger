@@ -84,6 +84,8 @@ pub enum FilterKind {
     Vendor,
     /// One bank account, chosen before the report runs (Check Register).
     BankAccount,
+    /// The budget, chosen before Budget vs. Actual runs.
+    Budget,
     Accounts,
     Contacts,
     Tags,
@@ -182,6 +184,16 @@ impl ReportSpec {
             FilterKind::BankAccount => filters.account_ids.is_empty(),
             _ => false,
         })
+    }
+
+    /// The pick this report needs before it can run with opts: a
+    /// vendor, a bank account or a budget (None: it can run).
+    #[must_use]
+    pub fn missing_pick_in(&self, opts: &super::options::ReportOptions) -> Option<FilterKind> {
+        if self.filters.contains(&FilterKind::Budget) && opts.budget_id.is_none() {
+            return Some(FilterKind::Budget);
+        }
+        self.missing_pick(&opts.filters)
     }
 
     /// The default column choice.

@@ -10,7 +10,7 @@
 //! entry, which is what the invoice is to the P&L (income on accrual, none
 //! on cash).
 //!
-//! Every BvA cell is read through `Reports::run` (the table the window,
+//! Every Budget vs. Actual cell is read through `Reports::run` (the table the window,
 //! the exports and the goldens see) and compared by value with the
 //! fixture.
 
@@ -216,7 +216,7 @@ fn expect_cells(cells: &[Cell], exp: &Value, label: &str) {
         );
         match want("budget") {
             Some(Value::String(b)) => {
-                assert_eq!(*at(1), Cell::Amount(d(&b)), "{label} budget[{i}]")
+                assert_eq!(*at(1), Cell::Amount(d(&b)), "{label} budget[{i}]");
             }
             Some(Value::Null) => assert_eq!(*at(1), Cell::Empty, "{label} budget[{i}] none"),
             _ => {}

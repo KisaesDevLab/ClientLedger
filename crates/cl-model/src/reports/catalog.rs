@@ -277,9 +277,11 @@ pub static CATALOG: &[ReportSpec] = &[
         title: "reports.title.budget_vs_actual",
         source: Source::BudgetVsActual,
         default_dates: DatePreset::ThisYear,
-        columns: &[ColumnBy::Total, ColumnBy::FiscalPeriod, ColumnBy::Quarter],
+        // One column group per budget period (whole fiscal periods, 4-4-5
+        // aware), then the total (U-203, Q-P28n).
+        columns: &[ColumnBy::FiscalPeriod],
         extras: &[],
-        filters: &[],
+        filters: &[FilterKind::Budget],
         capabilities: &[caps::BUDGETS],
         ..STATEMENT
     },

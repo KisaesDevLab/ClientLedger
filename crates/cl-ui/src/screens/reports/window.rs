@@ -90,6 +90,12 @@ pub struct ReportWindow {
     /// one of them (Transactions by Vendor, Vendor Statement, Check
     /// Register); loaded once, on the first such report.
     pub(super) picks: Picks,
+    /// The budgets panel (Budget vs. Actual).
+    pub(super) budgets: super::budgets::BudgetPanel,
+    /// The ask-a-question bar.
+    pub(super) ask: super::ask::AskBar,
+    /// The Email form (U-207).
+    pub(super) mailer: super::email::Mailer,
     pub(super) spec: &'static ReportSpec,
     pub(super) options: ReportOptions,
     pub(crate) state: RunState,
@@ -153,6 +159,9 @@ impl ReportWindow {
         ));
         let mut w = ReportWindow {
             picks: Picks::default(),
+            budgets: super::budgets::BudgetPanel::default(),
+            ask: super::ask::AskBar::default(),
+            mailer: super::email::Mailer::default(),
             tag_groups: Vec::new(),
             tag_groups_job,
             group,
@@ -229,6 +238,10 @@ impl ReportWindow {
     fn load_picks(&mut self) {
         use cl_model::reports::FilterKind;
         let wants = |k| self.spec.filters.contains(&k);
+        if wants(FilterKind::Budget) && self.budgets.list.is_none() {
+            super::budgets::load(self);
+        }
+        let wants = |k| self.spec.filters.contains(&k);
         if wants(FilterKind::Vendor)
             && self.picks.vendors.is_none()
             && self.picks.vendors_job.is_none()
@@ -289,9 +302,10 @@ impl ReportWindow {
         }
         self.sync_dates();
         self.load_picks();
-        if let Some(k) = self.spec.missing_pick(&self.options.filters) {
+        if let Some(k) = self.spec.missing_pick_in(&self.options) {
             self.problem = Some(match k {
                 cl_model::reports::FilterKind::BankAccount => "reports.pick.choose_bank_account",
+                cl_model::reports::FilterKind::Budget => "reports.pick.choose_budget",
                 _ => "reports.pick.choose_vendor",
             });
             self.table = None;
@@ -366,6 +380,9 @@ impl ReportWindow {
             }
         }
         super::memorized::poll(self);
+        super::budgets::poll(self);
+        super::ask::poll(self);
+        super::email::poll(self);
     }
 
     /// A row's caption: a tag row under the tag split in the owner's label
@@ -477,11 +494,14 @@ impl ReportWindow {
             ui.separator();
             ui.vertical(|ui| {
                 super::filters::toolbar(self, ui, &tokens);
+                super::ask::ui(self, ui, &tokens);
                 super::filters::filter_bar(self, ui, &tokens);
+                super::budgets::ui(self, ui, &tokens);
                 if self.customize {
                     super::filters::options_panel(self, ui, &tokens);
                 }
                 super::memorized::ui(self, ui, &tokens);
+                super::email::ui(self, ui, &tokens);
                 self.body(ui, &tokens);
             });
         });
@@ -734,6 +754,10 @@ impl ReportWindow {
             "error": self.error.is_some(),
             "export": self.export.state(),
             "search": !self.search.is_empty(),
+            "budget": self.budgets.state_json(),
+            "ask": self.ask.state_json(),
+            "email": self.mailer.state_json(),
+            "email_available": super::email::available(self),
         })
     }
 }
@@ -842,7 +866,13 @@ impl Screen for ReportWindow {
         egui::ScrollArea::vertical()
             .id_salt("report_window")
             .show(ui, |ui| self.draw(ui));
-        if self.job.is_some() || self.fiscal_job.is_some() || self.export.busy() || self.memo.busy()
+        if self.job.is_some()
+            || self.fiscal_job.is_some()
+            || self.export.busy()
+            || self.memo.busy()
+            || self.budgets.busy()
+            || self.ask.busy()
+            || self.mailer.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

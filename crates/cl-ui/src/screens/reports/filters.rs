@@ -2,7 +2,7 @@
 //! Export Excel, Export CSV, Save PDF, Collapse, Refresh; Dates, From/To
 //! (or As of), Columns, the basis toggle and the extra columns. Choices the
 //! engine can't do yet are greyed with "Needs an engine update" (Q-220).
-//! Email is hidden until U-207 (Q-P28i).
+//! Email shows with U-207 (`reports-email-v1`, Q-P28i).
 
 use cl_core::report::{Basis, Extra};
 use cl_model::reports::catalog::{column_capability, extra_capability};
@@ -42,6 +42,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         Xlsx,
         Csv,
         Pdf,
+        Email,
         Collapse,
         Refresh,
     }
@@ -77,6 +78,9 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
             if ui.button(t("reports.tool.save_pdf")).clicked() {
                 click = Some(Click::Pdf);
             }
+            if super::email::available(w) && ui.button(t("reports.tool.email")).clicked() {
+                click = Some(Click::Email);
+            }
         });
         ui.separator();
         if ui
@@ -100,6 +104,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         Some(Click::Xlsx) => super::export::start(w, ui.ctx(), super::export::Kind::Xlsx),
         Some(Click::Csv) => super::export::start(w, ui.ctx(), super::export::Kind::Csv),
         Some(Click::Pdf) => super::export::start(w, ui.ctx(), super::export::Kind::Pdf),
+        Some(Click::Email) => super::email::open(w),
         Some(Click::Collapse) => w.toggle_collapse_all(),
         Some(Click::Refresh) => w.run(),
         None => {}
@@ -121,6 +126,7 @@ fn preset_text(choice: DateChoice) -> String {
 pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut next = w.options.clone();
     let spec = w.spec;
+    let mut edit_budgets = false;
     ui.horizontal_wrapped(|ui| {
         if spec.dates != DateMode::None {
             let l = ui.label(RichText::new(t("reports.filter.dates")).size(12.0));
@@ -167,6 +173,19 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             }
         }
         pick(w, ui, &mut next);
+        if spec
+            .filters
+            .contains(&cl_model::reports::FilterKind::Budget)
+        {
+            budget_pick(w, ui, &mut next);
+            if ui
+                .button(t("reports.budget.edit"))
+                .on_hover_text(t("reports.budget.edit.hint"))
+                .clicked()
+            {
+                edit_budgets = true;
+            }
+        }
         if spec.columns.len() > 1 {
             let l = ui.label(RichText::new(t("reports.filter.columns")).size(12.0));
             egui::ComboBox::from_id_salt("report_columns")
@@ -237,7 +256,43 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     if next != w.options {
         w.set_options(next);
     }
+    if edit_budgets {
+        super::budgets::toggle(w);
+    }
     ui.separator();
+}
+
+/// Budget vs. Actual's budget. Choosing one runs the report on that
+/// budget's fiscal year (its periods are the year's, Q-P28n).
+fn budget_pick(w: &ReportWindow, ui: &mut Ui, next: &mut cl_model::reports::ReportOptions) {
+    let list = w.budgets.list.as_deref().unwrap_or_default();
+    let shown = next
+        .budget_id
+        .as_ref()
+        .and_then(|id| list.iter().find(|b| &b.id == id))
+        .map_or_else(|| t("reports.pick.choose_budget_short"), |b| b.name.clone());
+    let l = ui.label(RichText::new(t("reports.pick.budget")).size(12.0));
+    egui::ComboBox::from_id_salt("report_pick_budget")
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            for b in list {
+                let on = next.budget_id.as_deref() == Some(b.id.as_str());
+                if ui.selectable_label(on, &b.name).clicked() {
+                    next.budget_id = Some(b.id.clone());
+                    if let Some(fy) = b
+                        .fiscal_year_start
+                        .and_then(|s| w.fiscal.year_containing(s).ok())
+                    {
+                        next.dates = DateChoice::Fixed {
+                            from: fy.start,
+                            to: fy.end,
+                        };
+                    }
+                }
+            }
+        })
+        .response
+        .labelled_by(l.id);
 }
 
 /// The one vendor or bank account a report lists (Transactions by Vendor,

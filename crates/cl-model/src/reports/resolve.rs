@@ -96,6 +96,14 @@ pub fn resolve(
         DateMode::Range if periods => ReportDates::Ranges(split(columns, span, *fiscal)?),
         DateMode::Range => ReportDates::Range(span),
     };
+    // Budget vs. Actual: whole fiscal periods of one fiscal year, each a
+    // budget period (custom dates snap out, Q-P28n).
+    let (dates, first_period) = if spec.source == cl_core::report::Source::BudgetVsActual {
+        let (ranges, first) = budget_periods(span, *fiscal)?;
+        (ReportDates::Ranges(ranges), Some(first))
+    } else {
+        (dates, None)
+    };
     let compare = match columns {
         ColumnBy::Client => Compare::ByContact,
         ColumnBy::TagGroup => Compare::ByTag {
@@ -174,7 +182,34 @@ pub fn resolve(
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;
     req.budget_id.clone_from(&opts.budget_id);
+    req.first_period = first_period;
     Ok(req)
+}
+
+/// The fiscal periods span touches, within the fiscal year of its first
+/// day, and the number (1-12) of the first: Budget vs. Actual's columns.
+fn budget_periods(
+    span: DateRange,
+    fiscal: FiscalYearSpec,
+) -> Result<(Vec<DateRange>, u8), ResolveError> {
+    let fy = fiscal.year_containing(span.from)?;
+    let to = span.to.min(fy.end);
+    let chosen: Vec<_> = fiscal
+        .periods(&fy)?
+        .into_iter()
+        .filter(|p| p.end >= span.from && p.start <= to)
+        .collect();
+    let first = chosen.first().map_or(1, |p| p.number);
+    Ok((
+        chosen
+            .into_iter()
+            .map(|p| DateRange {
+                from: p.start,
+                to: p.end,
+            })
+            .collect(),
+        first,
+    ))
 }
 
 /// `span` cut into `by` columns, each clipped to `span`.
@@ -434,5 +469,50 @@ mod tests {
             Err(ResolveError::Backwards)
         );
         let _ = DatePreset::ALL;
+    }
+
+    #[test]
+    fn budget_vs_actual_runs_whole_fiscal_periods_of_one_year() {
+        let spec = find("budget_vs_actual").expect("bva");
+        let mut o = ReportOptions::for_spec(spec);
+        assert_eq!(
+            spec.missing_pick_in(&o),
+            Some(crate::reports::FilterKind::Budget),
+            "a budget first"
+        );
+        o.budget_id = Some("b1".into());
+        assert_eq!(spec.missing_pick_in(&o), None);
+        let r = resolve(spec, &o, &CAL, d(2026, 11, 4)).expect("this year");
+        let ReportDates::Ranges(v) = &r.dates else {
+            panic!("{:?}", r.dates)
+        };
+        assert_eq!(v.len(), 12);
+        assert_eq!(r.first_period, Some(1));
+        assert_eq!(r.budget_id.as_deref(), Some("b1"));
+        // Custom dates snap out to whole periods and stop at the year's end.
+        o.dates = DateChoice::Fixed {
+            from: d(2026, 2, 10),
+            to: d(2027, 1, 5),
+        };
+        let r = resolve(spec, &o, &CAL, d(2026, 11, 4)).expect("custom");
+        let ReportDates::Ranges(v) = &r.dates else {
+            panic!("{:?}", r.dates)
+        };
+        assert_eq!(r.first_period, Some(2));
+        assert_eq!(v.first().map(|x| x.from), Some(d(2026, 2, 1)));
+        assert_eq!(v.last().map(|x| x.to), Some(d(2026, 12, 31)));
+        // 4-4-5: the periods are the retail calendar's.
+        let f = FiscalYearSpec::Retail {
+            pattern: RetailPattern::P445,
+            year_end_month: 12,
+            end_rule: YearEndRule::LastWeekday(Weekday::Sat),
+        };
+        o.dates = DateChoice::Preset(DatePreset::ThisYear);
+        let r = resolve(spec, &o, &f, d(2026, 11, 4)).expect("4-4-5");
+        let ReportDates::Ranges(v) = &r.dates else {
+            panic!("{:?}", r.dates)
+        };
+        assert_eq!(v.len(), 12);
+        assert_eq!(v[0].from.days_until(v[0].to) + 1, 28, "four weeks");
     }
 }

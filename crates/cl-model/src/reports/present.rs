@@ -15,10 +15,12 @@ fn is_split_total(row: &ReportRow) -> bool {
 }
 
 /// True when the owner's options hide `row` (a split's account total
-/// without "Show a total for each account").
+/// without "Show a total for each account"). Budget vs. Actual always
+/// shows them: the budget lives on the account total (U-203).
 #[must_use]
 pub fn hidden(row: &ReportRow, options: &ReportOptions) -> bool {
     is_split_total(row)
+        && options.budget_id.is_none()
         && !options
             .tag_split
             .as_ref()

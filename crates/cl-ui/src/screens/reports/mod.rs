@@ -11,8 +11,11 @@
 //! (period columns, tag split, the ledger's drill filters), show greyed
 //! with "Needs an engine update" until their engine PRs merge (Q-220).
 
+mod ask;
+mod budgets;
 mod catalog;
 mod drill;
+mod email;
 mod export;
 mod filters;
 mod memorized;
