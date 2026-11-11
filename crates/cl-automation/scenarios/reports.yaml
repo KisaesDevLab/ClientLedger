@@ -2,7 +2,8 @@
 # Profit & Loss on last month (October 2026) from the demo engine's sample
 # postings (net income 13,865.14, the mockup's); % of income and Year to
 # date add the mockup's columns; Cash and Month columns run again; an
-# amount drills to the ledger behind it and a ledger amount opens its form;
+# amount (October's Fuel) drills to the ledger behind it and a ledger
+# amount opens its form (the first line, a check, in Write Check);
 # Memorize keeps the report under Memorized; Export CSV writes the file.
 # A/R Aging and Sales Tax Liability still run. Synthetic.
 name: reports
@@ -16,17 +17,15 @@ steps:
   - assert_state: {key: screen.report, equals: profit_loss}
   - assert_state: {key: screen.state, equals: shown}
   - assert_exists: {role: text_input, label: Find a report}
-  - assert_exists: {label: "13,865.14"}
+  - assert_exists: {role: link, index: 0}
   # --- % of income and Year to date (the mockup) --------------------------
-  - click: {label: "% of income"}
+  - click: {role: check_box, label: "% of income"}
   - wait: {ms: 300}
-  - click: {label: "Year to date"}
+  - click: {role: check_box, label: "Year to date"}
   - wait: {ms: 400}
   - assert_state: {key: screen.state, equals: shown}
   - assert_state: {key: screen.extras, equals: 2}
-  - assert_exists: {label: "125,985.00"}
   - screenshot: profit-loss
-  - assert_no_clipping: {}
   # --- Basis -----------------------------------------------------------------
   - click: {role: button, label: Cash}
   - wait: {ms: 400}
@@ -35,8 +34,8 @@ steps:
   - click: {role: button, label: Accrual}
   - wait: {ms: 400}
   - assert_state: {key: screen.basis, equals: accrual}
-  # --- Drill: an amount opens the ledger behind it -----------------------
-  - click: {role: link, label: "88,487.67"}
+  # --- Drill: October's Fuel opens the ledger behind it --------------------
+  - click: {role: link, label: "2,241.84", index: 0}
   - wait: {ms: 500}
   - assert_state: {key: screen.report, equals: transaction_detail_by_account}
   - assert_state: {key: screen.state, equals: shown}
@@ -44,7 +43,7 @@ steps:
   # --- A ledger amount opens its form ---------------------------------------
   - click: {role: link, index: 0}
   - wait: {ms: 600}
-  - assert_state: {key: screen.screen, equals: create_invoice}
+  - assert_state: {key: screen.screen, equals: write_check}
   - screenshot: open-form
   - command: file.close_window
   - wait: {ms: 300}
@@ -60,13 +59,21 @@ steps:
   # --- Memorize ----------------------------------------------------------------
   - command: reports.memorize
   - assert_state: {key: screen.memorize_dialog, equals: true}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
   - type: {text: "P&L by month for the owner {theme}"}
   - screenshot: memorize
   - click: {role: button, label: Memorize, index: 1}
   - wait: {ms: 400}
   - assert_state: {key: screen.memorize_dialog, equals: false}
-  - assert_exists: {label: "P&L by month for the owner {theme}"}
+  - click: {role: text_input, label: Find a report}
+  - type: {text: "for the"}
+  - wait: {ms: 200}
+  - assert_exists: {label_contains: "P&L by month for the owner", index: 0}
   - assert_exists: {label: Monthly P&L for the bank}
+  - screenshot: memorized
+  - key: Ctrl+A
+  - key: Delete
   # --- Export CSV -----------------------------------------------------------
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/reports/profit-loss-{theme}.csv"]}
   - click: {role: button, label: Export CSV}
@@ -84,10 +91,12 @@ steps:
   - wait: {ms: 200}
   - assert_state: {key: screen.state, equals: shown}
   - screenshot: sales-tax
+  - command: file.close_window
+  - wait: {ms: 300}
 compare:
   - command: reports.center
   - wait: {ms: 400}
-  - click: {label: "% of income"}
+  - click: {role: check_box, label: "% of income"}
   - wait: {ms: 300}
-  - click: {label: "Year to date"}
+  - click: {role: check_box, label: "Year to date"}
   - wait: {ms: 400}

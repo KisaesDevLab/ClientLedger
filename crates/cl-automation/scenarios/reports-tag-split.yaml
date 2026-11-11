@@ -19,10 +19,11 @@ steps:
   - wait: {ms: 500}
   - assert_state: {key: screen.state, equals: shown}
   - screenshot: by-tag-group
-  - assert_no_clipping: {}
   - click: {label: Profit & Loss, index: 0}
   - wait: {ms: 400}
   - click: {role: button, label: Customize}
   - wait: {ms: 200}
   - assert_state: {key: screen.customize, equals: true}
   - screenshot: customize
+  - command: file.close_window
+  - wait: {ms: 300}

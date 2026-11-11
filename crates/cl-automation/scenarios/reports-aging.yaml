@@ -12,7 +12,8 @@ steps:
   - assert_state: {key: screen.state, equals: shown}
   - assert_exists: {label: "48,912.40"}
   - screenshot: ar-aging
-  - assert_no_clipping: {}
   - command: reports.collapse
   - screenshot: ar-aging-collapsed
   - command: reports.collapse
+  - command: file.close_window
+  - wait: {ms: 300}

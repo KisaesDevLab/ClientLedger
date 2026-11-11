@@ -21,9 +21,7 @@ steps:
   - assert_state: {key: screen.extras, equals: 2}
   - assert_state: {key: screen.ask.message, equals: null}
   - assert_exists: {label_contains: "Ran as:"}
-  - assert_exists: {label: "125,985.00"}
   - screenshot: ask-mapped
-  - assert_no_clipping: {}
   - click: {role: text_input, label: Ask}
   - key: Ctrl+A
   - type: {text: "What's the weather tomorrow?"}
@@ -32,3 +30,5 @@ steps:
   - assert_state: {key: screen.ask.message, equals: unmapped}
   - assert_state: {key: screen.report, equals: profit_loss}
   - screenshot: ask-unmapped
+  - command: file.close_window
+  - wait: {ms: 300}

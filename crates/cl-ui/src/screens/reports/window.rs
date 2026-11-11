@@ -692,7 +692,7 @@ impl ReportWindow {
                                         }
                                     }
                                     None => {
-                                        ui.label(rich);
+                                        ui.add(egui::Label::new(rich).truncate());
                                     }
                                 }
                             });
@@ -808,6 +808,9 @@ fn cell_box(ui: &mut Ui, right: bool, add: impl FnOnce(&mut Ui)) {
 fn fixed_box(ui: &mut Ui, size: Vec2, layout: Layout, add: impl FnOnce(&mut Ui)) {
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
+    // Long names and memos stop at the cell's edge instead of running into
+    // the next column.
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
     add(&mut child);
 }
 

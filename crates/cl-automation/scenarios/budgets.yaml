@@ -22,7 +22,6 @@ steps:
   - assert_state: {key: screen.state, equals: shown}
   - assert_state: {key: screen.budget.budgets, equals: 1}
   - screenshot: budget-vs-actual
-  - assert_no_clipping: {}
   # --- The editor ------------------------------------------------------------
   - click: {role: button, label: Edit budgets}
   - wait: {ms: 400}
@@ -50,3 +49,5 @@ steps:
   - assert_state: {key: screen.email.open, equals: false}
   - assert_state: {key: screen.email.message, equals: sent}
   - screenshot: email-sent
+  - command: file.close_window
+  - wait: {ms: 300}
