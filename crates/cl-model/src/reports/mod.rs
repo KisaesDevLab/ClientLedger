@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod definition;
 pub mod options;
+pub mod present;
 pub mod presets;
 pub mod resolve;
 pub mod spec;
@@ -18,6 +19,7 @@ pub use options::{
     AmountFilter, ColumnBy, DateChoice, HeaderOptions, ReportOptions, Sort, TagLabel, TagSplit,
     tag_row_caption,
 };
+pub use present::{hidden, present, tag_caption};
 pub use presets::DatePreset;
 pub use resolve::{ResolveError, resolve};
 pub use spec::{

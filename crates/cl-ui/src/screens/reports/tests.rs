@@ -307,3 +307,67 @@ fn every_widget_is_named() {
     let unnamed = crate::screens::unnamed_widgets(&nodes);
     assert!(unnamed.is_empty(), "{unnamed:?}");
 }
+
+/// AC5: CSV, Excel and PDF carry the owner's tag-row labels and the
+/// account-total choice, not the engine's raw rows.
+#[test]
+fn exports_carry_the_tag_labels_and_the_total_choice() {
+    use cl_core::report::{ReportMeta, ReportRow, ReportTable, RowPath};
+    use cl_model::reports::{TagLabel, TagSplit};
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    let row = |kind, path: &[&str], caption: &str| ReportRow {
+        kind,
+        level: 1,
+        path: RowPath::of(path.iter().copied()),
+        caption: caption.into(),
+        cells: vec![Cell::Amount(rust_decimal::Decimal::new(1234, 2))],
+        drill: None,
+        expandable: false,
+    };
+    w.table = Some(ReportTable {
+        columns: vec![cl_core::report::ColumnHead {
+            key: "total".into(),
+            caption: "@reports.col.total".into(),
+            kind: cl_core::report::ColumnKind::Amount,
+            range: None,
+            drill: None,
+        }],
+        rows: vec![
+            row(RowKind::Account, &["expenses", "a"], "6100 \u{b7} Repairs"),
+            row(
+                RowKind::TagRow,
+                &["expenses", "a", "t:1"],
+                "10 \u{b7} Lake Area",
+            ),
+            row(
+                RowKind::AccountTotal,
+                &["expenses", "a~split"],
+                "@reports.row.total_of Repairs",
+            ),
+        ],
+        meta: ReportMeta::default(),
+    });
+    let mut split = TagSplit {
+        tag_group_id: cl_core::ids::TagGroupId::parse("22222222-2222-4222-8222-222222222222")
+            .expect("g"),
+        show_account_total: false,
+        label: TagLabel::Prepend,
+        separator: "/".into(),
+    };
+    w.options.tag_split = Some(split.clone());
+    let csv = |w: &ReportWindow| {
+        String::from_utf8(super::export::bytes(w, super::export::Kind::Csv).expect("csv"))
+            .expect("utf8")
+    };
+    let text = csv(&w);
+    assert!(text.contains("10/6100 Repairs - Lake Area"), "{text}");
+    assert!(!text.contains("Total Repairs"), "{text}");
+    split.show_account_total = true;
+    split.label = TagLabel::None;
+    w.options.tag_split = Some(split);
+    let text = csv(&w);
+    assert!(text.contains("Repairs - Lake Area"), "{text}");
+    assert!(!text.contains("10/6100"), "{text}");
+    assert!(text.contains("Total Repairs"), "{text}");
+}

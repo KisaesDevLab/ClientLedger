@@ -370,17 +370,9 @@ impl ReportWindow {
 
     /// A row's caption: a tag row under the tag split in the owner's label
     /// style (Q-271), anything else as the table says.
-    pub(crate) fn caption_of(&self, table: &ReportTable, r: &cl_core::report::ReportRow) -> String {
-        if r.kind == cl_core::report::RowKind::TagRow
-            && let Some(split) = &self.options.tag_split
-        {
-            let n = r.path.0.len().saturating_sub(1);
-            let parent = cl_core::report::RowPath(r.path.0[..n].to_vec());
-            if let Some(acct) = table.rows.iter().find(|x| x.path == parent) {
-                return cl_model::reports::tag_row_caption(&acct.caption, &r.caption, split);
-            }
-        }
-        label(&r.caption)
+    pub(crate) fn caption_of(&self, table: &ReportTable, i: usize) -> String {
+        cl_model::reports::tag_caption(table, i, &self.options)
+            .unwrap_or_else(|| label(&table.rows[i].caption))
     }
 
     /// The rows shown: collapse (Q-P28j), then sort within groups
@@ -391,18 +383,7 @@ impl ReportWindow {
         };
         let mut rows = table.visible(&self.options.collapsed);
         // The tag split's account totals show only when asked for (Q-271).
-        if !self
-            .options
-            .tag_split
-            .as_ref()
-            .is_some_and(|t| t.show_account_total)
-        {
-            rows.retain(|&i| {
-                let r = &table.rows[i];
-                !(r.kind == cl_core::report::RowKind::AccountTotal
-                    && r.path.0.last().is_some_and(|p| p.ends_with("~split")))
-            });
-        }
+        rows.retain(|&i| !cl_model::reports::hidden(&table.rows[i], &self.options));
         if let (Some(sort), SortMode::WithinGroups) = (&self.options.sort, self.spec.sort)
             && let Some(col) = table.columns.iter().position(|c| c.key == sort.column)
         {
@@ -615,7 +596,7 @@ impl ReportWindow {
                             Layout::left_to_right(Align::Center),
                             |ui| {
                                 ui.add_space(f32::from(r.level) * 16.0);
-                                let caption = self.caption_of(table, r);
+                                let caption = self.caption_of(table, i);
                                 if r.expandable {
                                     let open = !collapsed.contains(&r.path);
                                     let arrow = if open { "\u{2212}" } else { "+" };

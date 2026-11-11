@@ -83,14 +83,17 @@ impl Exporter {
     }
 }
 
+/// An `@` caption's text: `key` or `key name` (a total of a named row).
 fn tr(key: &str) -> String {
-    t(key)
+    super::label(&format!("@{key}"))
 }
 
 /// The file's bytes for the rows on screen.
 pub(crate) fn bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
-    let table = w.table.as_ref()?;
-    let rows = w.shown_rows();
+    // What the window shows: its rows in order, tag rows in the owner's
+    // label style, hidden account totals left out (Q-271, AC5).
+    let table = &cl_model::reports::present(w.table.as_ref()?, &w.shown_rows(), &w.options);
+    let rows: Vec<usize> = (0..table.rows.len()).collect();
     let title = w.title_text();
     let mut head = Vec::new();
     if !w.company.is_empty() {
