@@ -152,7 +152,7 @@ fn a_detail_page_echoes_the_subtotal() {
 #[test]
 fn anything_off_contract_is_a_shape_error() {
     let cases: Vec<(&str, Value)> = vec![
-        ("/rows/1/cells/2", json!(1200.0)),
+        ("/rows/1/cells/2", json!(1200)),
         ("/rows/1/cells/2", json!("1,200.00")),
         ("/rows/1/cells/2", json!("1e3")),
         ("/rows/1/kind", json!("chart")),
