@@ -436,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names, reason = "one request per case")]
     fn options_the_engine_would_ignore_wait_for_their_update() {
         use cl_core::report::Extra;
         let pr_a = |c: &str| c == EXACT;
