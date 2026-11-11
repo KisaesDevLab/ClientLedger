@@ -244,6 +244,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.drill.no_form", "This transaction can't be opened from here yet."),
     ("reports.drill.in_register", "This entry opens in its register. Find it there by its date."),
     ("errors.copy_details", "Copy details"),
+    ("reports.export.sub_cents", "Some amounts have more than two decimal places; each is shown to the cent and totals are exact, so a column can differ from its total by a cent."),
     ("reports.note.cash_ar_ap", "On cash basis, A/R and A/P show journal entries posted to them and payments not yet applied."),
     ("reports.drill.narrow", "This total covers more than 500 accounts. Narrow the report to see its transactions."),
     ("reports.problem.fiscal", "Those dates are outside your fiscal calendar."),

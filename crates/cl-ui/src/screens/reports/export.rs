@@ -151,6 +151,17 @@ pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
     Some(Snapshot { table, title, head })
 }
 
+/// True when a shown amount has more than two decimal places (imports,
+/// 4-place journal entries): rows print rounded to cents while totals are
+/// the engine's exact sums, so a printed column can miss its total by a
+/// cent (review N3).
+fn has_sub_cents(t: &cl_core::report::ReportTable) -> bool {
+    t.rows
+        .iter()
+        .flat_map(|r| &r.cells)
+        .any(|c| matches!(c, cl_core::report::Cell::Amount(d) if d.normalize().scale() > 2))
+}
+
 impl Snapshot {
     /// The file (pure; runs on any thread).
     pub(crate) fn render(&self, kind: Kind) -> Option<Built> {
@@ -165,12 +176,15 @@ impl Snapshot {
                 .ok()
                 .map(|(b, n)| (b, usize::try_from(n).unwrap_or(usize::MAX))),
             Kind::Pdf => {
-                let subtitle = self
+                let mut subtitle: Vec<String> = self
                     .head
                     .iter()
                     .filter(|l| **l != self.title)
                     .cloned()
                     .collect();
+                if has_sub_cents(table) {
+                    subtitle.push(tr("reports.export.sub_cents"));
+                }
                 let doc =
                     cl_print::report_export::to_report(table, &rows, &self.title, subtitle, &tr);
                 cl_print::reports::render_report(&doc).ok().map(|b| (b, 0))
@@ -340,4 +354,32 @@ fn poll_print(w: &mut ReportWindow) {
             },
         )),
     ));
+}
+
+#[cfg(test)]
+mod sub_cent_tests {
+    use cl_core::report::{Cell, ReportRow, ReportTable, RowKind, RowPath};
+
+    fn table(amount: &str) -> ReportTable {
+        ReportTable {
+            rows: vec![ReportRow {
+                kind: RowKind::Account,
+                level: 1,
+                path: RowPath::of(["a"]),
+                caption: "a".into(),
+                cells: vec![Cell::Amount(amount.parse().expect("d"))],
+                drill: None,
+                expandable: false,
+            }],
+            ..ReportTable::default()
+        }
+    }
+
+    /// N3: a PDF footnote when a shown amount has sub-cents.
+    #[test]
+    fn sub_cent_amounts_are_found() {
+        assert!(super::has_sub_cents(&table("10.0050")));
+        assert!(!super::has_sub_cents(&table("10.5000")));
+        assert!(crate::i18n::has("reports.export.sub_cents"));
+    }
 }
