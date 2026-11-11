@@ -1,0 +1,52 @@
+# Budgets and Budget vs. Actual (P28 AC4) against `clientledger --demo`:
+# the demo keeps the sample's "2026 budget"; choosing it runs Budget vs.
+# Actual on the fiscal year's periods (actual, budget, over budget, % of
+# budget, every figure the demo engine's); Edit budgets opens the editor
+# with its rows; Adjust by % changes every cell; Email sends the report as
+# a PDF (the demo sends nothing). Synthetic.
+name: budgets
+description: Budget vs. Actual on the demo's budget, the budget editor, and the Email form.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 300}
+  - click: {label: Budget vs. Actual, index: 0}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.report, equals: budget_vs_actual}
+  - assert_state: {key: screen.problem, equals: choose_budget}
+  - click: {label: Choose a budget, index: 0}
+  - wait: {ms: 200}
+  - click: {label: 2026 budget, index: 0}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_state: {key: screen.budget.budgets, equals: 1}
+  - screenshot: budget-vs-actual
+  - assert_no_clipping: {}
+  # --- The editor ------------------------------------------------------------
+  - click: {role: button, label: Edit budgets}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.budget.open, equals: true}
+  - assert_state: {key: screen.budget.selected, equals: true}
+  - assert_state: {key: screen.budget.lines, equals: 8}
+  - screenshot: budget-editor
+  - click: {role: text_input, label: Percent}
+  - type: {text: "5"}
+  - click: {role: button, label: "Adjust by %"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.budget.error, equals: false}
+  - assert_state: {key: screen.budget.unsaved, equals: 0}
+  - click: {role: button, label: Edit budgets}
+  - wait: {ms: 300}
+  # --- Email -----------------------------------------------------------------
+  - click: {role: button, label: Email}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.email.open, equals: true}
+  - click: {role: text_input, label: To}
+  - type: {text: "banker@example.com"}
+  - screenshot: email-form
+  - click: {role: button, label: Send}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.email.open, equals: false}
+  - assert_state: {key: screen.email.message, equals: sent}
+  - screenshot: email-sent

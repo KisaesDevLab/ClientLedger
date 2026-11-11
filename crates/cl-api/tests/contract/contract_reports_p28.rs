@@ -84,6 +84,39 @@ pub fn who_owes_what_lists_and_controls(h: &Harness) {
             assert_eq!(r.cells.len(), t.columns.len(), "{src:?}: cells line up");
         }
     }
+    audit_record_filter(h, s);
+}
+
+/// U-204 (`audit-filters-v1`): the audit trail of one record lists that
+/// record's changes and none of another record's.
+fn audit_record_filter(h: &Harness, s: &Session) {
+    if !s.client().capabilities().has(AUDIT) {
+        h.pending("audit record filter", "audit-filters-v1 is missing");
+        return;
+    }
+    let a = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor A");
+    let b = crate::contract_pay_bills::vendor(h, s, "Audit filter vendor B");
+    let today = ReportDates::Range(DateRange {
+        from: date(2000, 1, 1),
+        to: date(2099, 12, 31),
+    });
+    let of = |c: cl_core::ids::ContactId| {
+        let mut r = ReportRequest::new(Source::AuditLog, today.clone());
+        r.filters.contact_ids = vec![c];
+        run(h, s, &r)
+    };
+    let paths = |t: &ReportTable| -> std::collections::BTreeSet<String> {
+        t.rows
+            .iter()
+            .filter(|r| r.path.0.first().is_some_and(|p| p == "rows"))
+            .map(|r| format!("{:?}", r.path))
+            .collect()
+    };
+    let (ta, tb) = (of(a), of(b));
+    let (pa, pb) = (paths(&ta), paths(&tb));
+    assert!(!pa.is_empty(), "vendor A's creation is in its trail");
+    assert!(!pb.is_empty(), "vendor B's creation is in its trail");
+    assert!(pa.is_disjoint(&pb), "A's trail has none of B's changes");
 }
 
 /// True when a POST under `/reports` met the router-level `reports`

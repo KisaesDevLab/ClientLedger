@@ -23,7 +23,7 @@ use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use super::DemoState;
-use super::reports::{Books, debit_normal, percent1};
+use super::reports::{Books, percent1};
 
 /// One budget and its lines (account → the twelve period amounts).
 #[derive(Clone, Debug)]

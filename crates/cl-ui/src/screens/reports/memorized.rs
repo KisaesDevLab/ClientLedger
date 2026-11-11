@@ -7,7 +7,7 @@
 use cl_api::resources::reports::definitions::{
     DefinitionGroup, DefinitionRefusal, DefinitionRow, DefinitionWrite, definition_refusal,
 };
-use cl_api::{ApiError, Capabilities, LocalValidation, OrphanLabel};
+use cl_api::{Capabilities, OrphanLabel};
 use cl_model::reports::{ReportOptions, StandardDefinition};
 use eframe::egui::{self, RichText, Ui};
 

@@ -16,7 +16,7 @@ use cl_api::resources::reports::ask::{
     AskDates as ApiDates, AskMapping, AskParam as ApiParam, AskRefusal, AskReport, AskRequest,
     ask_refusal,
 };
-use cl_api::{ApiError, Capabilities, LocalValidation};
+use cl_api::{ApiError, Capabilities};
 use cl_model::reports::ask::{self as model, AskChoice, AskDates, AskParam};
 use eframe::egui::{self, RichText, Ui};
 
