@@ -62,6 +62,15 @@ const ROW_H: f32 = 22.0;
 const CAPTION_W: f32 = 230.0;
 const CELL_W: f32 = 96.0;
 
+/// The pick lists: (id text, name).
+#[derive(Default)]
+pub(crate) struct Picks {
+    pub(super) vendors: Option<Vec<(String, String)>>,
+    vendors_job: Option<Job<Vec<(String, String)>>>,
+    pub(super) banks: Option<Vec<(String, String)>>,
+    banks_job: Option<Job<Vec<(String, String)>>>,
+}
+
 /// A report window.
 pub struct ReportWindow {
     pub(super) link: Arc<CompanyLink>,
@@ -77,6 +86,10 @@ pub struct ReportWindow {
     /// Tag group columns.
     pub(super) tag_groups: Vec<(cl_core::ids::TagGroupId, String)>,
     tag_groups_job: Option<Job<Vec<(cl_core::ids::TagGroupId, String)>>>,
+    /// Vendors and bank accounts (id text, name) for the reports that list
+    /// one of them (Transactions by Vendor, Vendor Statement, Check
+    /// Register); loaded once, on the first such report.
+    pub(super) picks: Picks,
     pub(super) spec: &'static ReportSpec,
     pub(super) options: ReportOptions,
     pub(crate) state: RunState,
@@ -139,6 +152,7 @@ impl ReportWindow {
             },
         ));
         let mut w = ReportWindow {
+            picks: Picks::default(),
             tag_groups: Vec::new(),
             tag_groups_job,
             group,
@@ -211,6 +225,55 @@ impl ReportWindow {
         }
     }
 
+    /// Starts loading the vendor or bank account list a report needs.
+    fn load_picks(&mut self) {
+        use cl_model::reports::FilterKind;
+        let wants = |k| self.spec.filters.contains(&k);
+        if wants(FilterKind::Vendor)
+            && self.picks.vendors.is_none()
+            && self.picks.vendors_job.is_none()
+        {
+            self.picks.vendors_job = Some(engine::read(
+                &self.link,
+                self.group.as_ref(),
+                |_| Ok(Vec::new()),
+                |s| async move {
+                    let f = cl_api::ContactFilter {
+                        contact_type: Some(cl_api::ContactType::Vendor),
+                        is_active: Some(true),
+                        ..cl_api::ContactFilter::default()
+                    };
+                    Ok(s.contacts()
+                        .list_all(&f)
+                        .await?
+                        .into_iter()
+                        .map(|c| (c.id.to_string(), c.fields.display_name))
+                        .collect())
+                },
+            ));
+        }
+        if wants(FilterKind::BankAccount)
+            && self.picks.banks.is_none()
+            && self.picks.banks_job.is_none()
+        {
+            self.picks.banks_job = Some(engine::read(
+                &self.link,
+                self.group.as_ref(),
+                |_| Ok(Vec::new()),
+                |s| async move {
+                    let all = s
+                        .accounts()
+                        .list_all(&cl_api::AccountFilter::default())
+                        .await?;
+                    Ok(crate::screens::receipt_inbox::picker::bank_accounts(&all)
+                        .into_iter()
+                        .map(|(id, n)| (id.to_string(), n))
+                        .collect())
+                },
+            ));
+        }
+    }
+
     /// Runs the report (Refresh, F5).
     pub(crate) fn run(&mut self) {
         self.problem = None;
@@ -225,6 +288,16 @@ impl ReportWindow {
             return;
         }
         self.sync_dates();
+        self.load_picks();
+        if let Some(k) = self.spec.missing_pick(&self.options.filters) {
+            self.problem = Some(match k {
+                cl_model::reports::FilterKind::BankAccount => "reports.pick.choose_bank_account",
+                _ => "reports.pick.choose_vendor",
+            });
+            self.table = None;
+            self.state = RunState::Shown;
+            return;
+        }
         let req = match resolve(self.spec, &self.options, &self.fiscal, self.today) {
             Ok(r) => r,
             Err(e) => {
@@ -252,6 +325,12 @@ impl ReportWindow {
     }
 
     pub(crate) fn poll(&mut self) {
+        if let Some(r) = engine::poll(&mut self.picks.vendors_job) {
+            self.picks.vendors = Some(r.unwrap_or_default());
+        }
+        if let Some(r) = engine::poll(&mut self.picks.banks_job) {
+            self.picks.banks = Some(r.unwrap_or_default());
+        }
         if let Some(r) = engine::poll(&mut self.tag_groups_job) {
             // Without the list the pickers stay empty; the report still runs.
             self.tag_groups = r.unwrap_or_default();

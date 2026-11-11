@@ -166,6 +166,7 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 }
             }
         }
+        pick(w, ui, &mut next);
         if spec.columns.len() > 1 {
             let l = ui.label(RichText::new(t("reports.filter.columns")).size(12.0));
             egui::ComboBox::from_id_salt("report_columns")
@@ -237,6 +238,62 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         w.set_options(next);
     }
     ui.separator();
+}
+
+/// The one vendor or bank account a report lists (Transactions by Vendor,
+/// Vendor Statement, Check Register).
+fn pick(w: &ReportWindow, ui: &mut Ui, next: &mut cl_model::reports::ReportOptions) {
+    use cl_model::reports::FilterKind;
+    for k in w.spec.filters {
+        let (label, choose, list) = match k {
+            FilterKind::Vendor => (
+                "reports.pick.vendor",
+                "reports.pick.choose_vendor_short",
+                w.picks.vendors.as_deref(),
+            ),
+            FilterKind::BankAccount => (
+                "reports.pick.bank_account",
+                "reports.pick.choose_bank_account_short",
+                w.picks.banks.as_deref(),
+            ),
+            _ => continue,
+        };
+        let list = list.unwrap_or_default();
+        let current = match k {
+            FilterKind::Vendor => next.filters.contact_ids.first().map(ToString::to_string),
+            _ => next.filters.account_ids.first().map(ToString::to_string),
+        };
+        let shown = current
+            .as_ref()
+            .and_then(|c| list.iter().find(|(id, _)| id == c))
+            .map_or_else(|| t(choose), |(_, n)| n.clone());
+        let l = ui.label(RichText::new(t(label)).size(12.0));
+        egui::ComboBox::from_id_salt(("report_pick", label))
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                for (id, name) in list {
+                    let on = current.as_deref() == Some(id.as_str());
+                    if ui.selectable_label(on, name).clicked() {
+                        match k {
+                            FilterKind::Vendor => {
+                                next.filters.contact_ids = cl_core::ids::ContactId::parse(id)
+                                    .ok()
+                                    .into_iter()
+                                    .collect();
+                            }
+                            _ => {
+                                next.filters.account_ids = cl_core::ids::AccountId::parse(id)
+                                    .ok()
+                                    .into_iter()
+                                    .collect();
+                            }
+                        }
+                    }
+                }
+            })
+            .response
+            .labelled_by(l.id);
+    }
 }
 
 const fn extra_label(e: Extra) -> &'static str {

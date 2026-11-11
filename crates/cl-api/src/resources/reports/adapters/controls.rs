@@ -185,6 +185,35 @@ pub fn field_label(k: &str) -> String {
     }
 }
 
+/// Records the trail names in plain words (`@reports.audit.entity.*`).
+pub const AUDIT_ENTITIES: [&str; 14] = [
+    "transaction",
+    "account",
+    "contact",
+    "company",
+    "tag",
+    "item",
+    "user",
+    "bank_feed",
+    "reconciliation",
+    "budget",
+    "closing_date_override",
+    "report_email",
+    "report_definition",
+    "payment_applications",
+];
+
+/// A record kind's caption: the plain-words key, else its own name with
+/// spaces.
+#[must_use]
+pub fn entity_label(e: &str) -> String {
+    if AUDIT_ENTITIES.contains(&e) {
+        format!("@reports.audit.entity.{e}")
+    } else {
+        e.replace('_', " ")
+    }
+}
+
 /// The Audit Trail: each change newest first as a heading (when, who,
 /// what, which record) and one line per changed field with its before and
 /// after values from the audit images.
@@ -214,7 +243,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
                 read(e, F::Date("created_at"))?,
                 read(e, F::Text("userName"))?,
                 read(e, F::Code("reports.audit.action", "action"))?,
-                Cell::Text(format!("@reports.audit.entity.{entity}")),
+                Cell::Text(entity_label(entity)),
                 Cell::Empty,
                 Cell::Empty,
             ],
