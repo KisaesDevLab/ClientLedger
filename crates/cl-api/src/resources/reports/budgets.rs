@@ -154,6 +154,9 @@ pub fn budget_refusal(e: &ApiError) -> Option<BudgetRefusal> {
             reason: ConflictReason::AlreadyExists,
             ..
         } => Some(BudgetRefusal::YearTaken),
+        ApiError::Conflict { code: Some(c), .. } if c.as_str() == "BUDGET_YEAR_TAKEN" => {
+            Some(BudgetRefusal::YearTaken)
+        }
         ApiError::Conflict {
             code: None, reason, ..
         } if *reason != ConflictReason::Busy => Some(BudgetRefusal::YearTaken),
