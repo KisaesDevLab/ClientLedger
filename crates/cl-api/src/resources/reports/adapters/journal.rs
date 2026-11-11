@@ -142,6 +142,7 @@ pub fn journal(v: &Value, req: &ReportRequest, range: DateRange) -> Result<Repor
             dates: Some(req.dates.clone()),
             truncated,
             note: None,
+            note_drill: None,
             hidden_notice: false,
         },
     })

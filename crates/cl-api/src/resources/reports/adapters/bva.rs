@@ -418,6 +418,7 @@ pub fn table(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiError> {
             dates: Some(ReportDates::Ranges(ranges)),
             truncated: None,
             note: None,
+            note_drill: None,
             hidden_notice: false,
         },
     })

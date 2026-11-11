@@ -191,6 +191,7 @@ pub fn general_ledger(
             dates: Some(req.dates.clone()),
             truncated,
             note: None,
+            note_drill: None,
             hidden_notice: false,
         },
     })

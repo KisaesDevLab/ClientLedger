@@ -109,6 +109,12 @@ pub const CLOSING: &str = "closing-exceptions-v1";
 /// U-209: the P28 QA report fixes (1099 amount by box, cents on cash basis,
 /// check numbers on report rows).
 pub const REPORT_FIXES: &str = "report-fixes-v1";
+/// U-213: the PR-6 report fixes (cash prior years' retained earnings, the
+/// sheet's equity flags, `fiscal_year_start`, no tag on balance reports,
+/// the cash A/R and A/P residue).
+pub const REPORT_FIXES_2: &str = "report-fixes-v2";
+/// U-212: 1099 amounts are cash paid in the year; thresholds by year.
+pub const REPORT_1099_PAID: &str = "report-1099-paid-v1";
 /// U-204 (PR-E): the audit-log company, user and record filters.
 pub const AUDIT: &str = "audit-filters-v1";
 
@@ -331,6 +337,23 @@ pub fn exact_query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiErro
     if req.source == Source::Journal {
         push("group_by", "transaction".to_string());
     }
+    // S1 (U-213): a retail calendar's year starts, so the engine splits
+    // the year where the desktop does.
+    if let Some(starts) = &req.fiscal_year_starts
+        && matches!(
+            req.source,
+            Source::BalanceSheet | Source::TrialBalance | Source::GeneralLedger
+        )
+    {
+        push(
+            "fiscal_year_start",
+            starts
+                .iter()
+                .map(|d| d.to_wire())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
     if matches!(req.source, Source::GeneralLedger | Source::Journal) {
         push("limit", adapters::ledger::SCREEN_LIMIT.to_string());
         // Every client chosen (S4: Ask can name several), or the "No
@@ -500,12 +523,18 @@ impl Reports<'_> {
             if missing_capability(req, |c| caps.has(c)).is_some() {
                 return Err(ApiError::Local(LocalValidation::Unsupported));
             }
+            // An engine before U-213 refuses `fiscal_year_start`: the
+            // adapters then drill from its own month split (S1).
+            let mut sent = req.clone();
+            if !caps.has(REPORT_FIXES_2) {
+                sent.fiscal_year_starts = None;
+            }
             let mut call = Call::at(Method::Get, op.route());
-            call.query = exact_query(req)?;
+            call.query = exact_query(&sent)?;
             let reply = self.0.send(op, call, None).await?;
             let v: serde_json::Value = crate::session::decode(&reply, "report")?;
             let mut table = adapt_exact(req, &v)?;
-            if adapters::statements::wants_roles(req, &v) {
+            if matches!(req.source, Source::BalanceSheet | Source::TrialBalance) {
                 // One chart read (balance accounts only); a failed read
                 // leaves the equity rows without drills and no note.
                 let filter = crate::resources::accounts::AccountFilter {
@@ -516,13 +545,16 @@ impl Reports<'_> {
                     ],
                     ..Default::default()
                 };
-                let roles = self
-                    .0
-                    .accounts()
-                    .list_all(&filter)
-                    .await
-                    .ok()
-                    .map(|a| adapters::statements::AccountRoles::of(&a));
+                let roles = if adapters::statements::wants_roles(req, &v) {
+                    self.0
+                        .accounts()
+                        .list_all(&filter)
+                        .await
+                        .ok()
+                        .map(|a| adapters::statements::AccountRoles::of(&a))
+                } else {
+                    None
+                };
                 adapters::statements::finish_balances(req, &v, &mut table, roles.as_ref());
             }
             return Ok(table);

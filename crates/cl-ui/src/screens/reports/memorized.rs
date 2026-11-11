@@ -263,8 +263,20 @@ fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
         w.notice = Some(t("reports.memorize.unreadable"));
         return;
     };
-    w.show_report(spec, def.options.clone());
-    w.memo.saved = Some(def.options);
+    // A Balance Sheet or Trial Balance saved with a tag filter runs
+    // without it now, and says so (S2, Q-PR6b).
+    let mut options = def.options;
+    let dropped = !spec.filters.contains(&cl_model::reports::FilterKind::Tags)
+        && (!options.filters.tag_ids.is_empty() || options.filters.untagged);
+    if dropped {
+        options.filters.tag_ids.clear();
+        options.filters.untagged = false;
+    }
+    w.show_report(spec, options.clone());
+    if dropped {
+        w.notice = Some(t("reports.memorize.tag_dropped"));
+    }
+    w.memo.saved = Some(options);
     w.memo.current = Some(row.clone());
 }
 
@@ -451,5 +463,50 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         Some(Click::Close) => w.memo.dialog = None,
         Some(Click::Delete) => remove(w),
         None => {}
+    }
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use std::sync::Arc;
+
+    use cl_model::CommandId;
+    use cl_model::reports::{ReportOptions, StandardDefinition, find};
+
+    /// S2 (Q-PR6b): a Balance Sheet memorized with a tag runs for all tags
+    /// and says so.
+    #[test]
+    fn a_saved_tag_on_a_balance_report_is_dropped_with_a_notice() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("d");
+        let spec = find("balance_sheet").expect("bs");
+        let mut w = super::ReportWindow::new(
+            Arc::clone(&link),
+            CommandId::new(super::super::KIND),
+            None,
+            spec,
+            today,
+        );
+        let mut o = ReportOptions::for_spec(spec);
+        o.filters.tag_ids = vec!["33333333-3333-4333-8333-333333333333".parse().expect("t")];
+        let row = cl_api::resources::reports::definitions::DefinitionRow {
+            id: "r1".into(),
+            group_id: None,
+            name: "Sheet by tag".into(),
+            kind: "standard".into(),
+            definition: serde_json::to_value(StandardDefinition::new("balance_sheet", o))
+                .expect("json"),
+            version: 1,
+            created_by: None,
+            created_by_name: None,
+            updated_at: None,
+        };
+        super::open_row(&mut w, &row);
+        assert_eq!(
+            w.notice.as_deref(),
+            Some(crate::i18n::t("reports.memorize.tag_dropped").as_str())
+        );
+        assert!(w.options.filters.tag_ids.is_empty());
     }
 }

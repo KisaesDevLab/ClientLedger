@@ -408,7 +408,7 @@ pub fn statements_drill_and_tie(h: &Harness) {
         let mut t = ReportRequest::new(Source::TrialBalance, ReportDates::AsOf(as_of));
         t.basis = Some(basis);
         t.fiscal_year_start = Some(date(2033, 1, 1));
-        t.filters.tag_ids = vec![b.tag];
+        // The Trial Balance and Balance Sheet take no tag (Q-PR6b, U-213).
         let tb = run(h, s, &t);
         let grand = tb.rows.last().expect("total");
         assert_eq!(dec(&grand.cells[0]), dec(&grand.cells[1]), "TB balances");
@@ -416,7 +416,6 @@ pub fn statements_drill_and_tie(h: &Harness) {
         let mut bs = ReportRequest::new(Source::BalanceSheet, ReportDates::AsOf(as_of));
         bs.basis = Some(basis);
         bs.fiscal_year_start = Some(date(2033, 1, 1));
-        bs.filters.tag_ids = vec![b.tag];
         let sheet = run(h, s, &bs);
         let assets = sheet
             .rows
@@ -731,4 +730,117 @@ pub fn columns_drill_and_tag_split(h: &Harness) {
     }
     let grand = journal.rows.last().expect("total");
     assert_eq!(dec(&grand.cells[5]).to_string(), "75.3000");
+}
+
+/// U-213 (`report-fixes-v2`, PR-6): a tag on the Trial Balance or the
+/// sheet is refused; the sheet says which equity no ledger holds and where
+/// it split the year; `fiscal_year_start` (a retail year start) moves the
+/// split; cash basis reports what A/R and A/P keep from entries, and the
+/// note's link selects exactly those lines.
+pub fn report_fixes_v2(h: &Harness) {
+    if !caps(h) || !h.require_cap("report-fixes-v2", "U-213") {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let tb = "/api/v1/reports/trial-balance";
+    let r = h
+        .run(s.raw(
+            Method::Get,
+            tb,
+            &[
+                ("exact", "1"),
+                ("end_date", "2033-03-31"),
+                ("tag_id", &b.tag.to_string()),
+            ],
+            None,
+        ))
+        .expect("tb");
+    assert_eq!(r.status, 400, "{}", r.body);
+    assert_eq!(
+        r.body["error"]["code"], "TAG_FILTER_NOT_AVAILABLE",
+        "{}",
+        r.body
+    );
+    // The sheet's equity flags and year start; a retail start moves it.
+    let v = get(
+        h,
+        s,
+        "exact_balance_sheet_fixes_v2",
+        "/api/v1/reports/balance-sheet",
+        &[
+            ("as_of_date", "2033-03-31"),
+            ("fiscal_year_start", "2032-12-26"),
+        ],
+    );
+    assert_eq!(v["fiscalYearStart"], "2032-12-26", "{v}");
+    assert!(v.get("calculatedEquityExact").is_some(), "{v}");
+    let mut r = ReportRequest::new(Source::BalanceSheet, ReportDates::AsOf(date(2033, 3, 31)));
+    r.basis = Some(Basis::Accrual);
+    r.fiscal_year_starts = Some(vec![date(2032, 12, 26)]);
+    let sheet = run(h, s, &r);
+    let ni = sheet
+        .rows
+        .iter()
+        .find(|x| x.caption == "@reports.bs.net_income")
+        .expect("net income");
+    assert!(
+        matches!(ni.drill, Some(Drill::ProfitLoss { from, .. }) if from == date(2032, 12, 26)),
+        "{:?}",
+        ni.drill
+    );
+    // Cash basis: a journal entry on A/R stays; the note links to it.
+    let ar = h
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts")
+        .into_iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_receivable"))
+        .expect("A/R")
+        .id;
+    post(
+        h,
+        s,
+        &entry(
+            (3, 20),
+            vec![
+                JeLine {
+                    account: ar,
+                    side: Side::Debit(m("40.00")),
+                    description: None,
+                    tag: None,
+                    contact: None,
+                },
+                JeLine {
+                    account: b.revenue,
+                    side: Side::Credit(m("40.00")),
+                    description: None,
+                    tag: None,
+                    contact: None,
+                },
+            ],
+        ),
+    );
+    let mut c = ReportRequest::new(Source::TrialBalance, ReportDates::AsOf(date(2033, 3, 31)));
+    c.basis = Some(Basis::Cash);
+    let t = run(h, s, &c);
+    let grand = t.rows.last().expect("total");
+    assert_eq!(
+        dec(&grand.cells[0]),
+        dec(&grand.cells[1]),
+        "cash TB balances"
+    );
+    assert!(t.meta.note.is_some(), "the residue note");
+    let Some(Drill::EntriesOfTypes {
+        account_ids,
+        txn_types,
+        ..
+    }) = &t.meta.note_drill
+    else {
+        panic!("{:?}", t.meta.note_drill)
+    };
+    assert!(account_ids.contains(&ar));
+    assert!(
+        txn_types.iter().any(|x| x == "journal_entry"),
+        "{txn_types:?}"
+    );
 }

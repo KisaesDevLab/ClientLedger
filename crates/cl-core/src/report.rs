@@ -369,6 +369,11 @@ pub struct ReportRequest {
     /// sheet compares with each range's end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_ranges: Option<Vec<DateRange>>,
+    /// A 4-4-5 or 52-53 week calendar's fiscal year starts covering the
+    /// report's dates (U-213 `fiscal_year_start`, S1); `None` on a
+    /// calendar-month year, where the engine's start month agrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fiscal_year_starts: Option<Vec<CalendarDate>>,
 }
 
 impl ReportRequest {
@@ -387,6 +392,7 @@ impl ReportRequest {
             budget_id: None,
             first_period: None,
             prior_ranges: None,
+            fiscal_year_starts: None,
         }
     }
 }
@@ -706,6 +712,18 @@ pub enum Drill {
         #[serde(default)]
         tag_ids: Vec<TagId>,
     },
+    /// The lines of some transaction types on some accounts through a date
+    /// (S5: the entries that keep A/R and A/P on cash basis).
+    EntriesOfTypes {
+        /// Accounts.
+        account_ids: Vec<AccountId>,
+        /// The engine's transaction type names.
+        txn_types: Vec<String>,
+        /// Last day.
+        to: CalendarDate,
+        /// The report's basis.
+        basis: Option<Basis>,
+    },
 }
 
 impl Drill {
@@ -838,6 +856,10 @@ pub struct ReportMeta {
     /// note). Never the engine's general cash-basis rules sentence, which
     /// the owner dropped (Q-P28ai).
     pub note: Option<String>,
+    /// What the note's link opens (S5: the entries that keep A/R and A/P
+    /// on cash basis).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_drill: Option<Drill>,
     /// Rows were capped.
     pub truncated: Option<Truncated>,
     /// Rows of accounts the user can't see were left out (Q-157 hook).

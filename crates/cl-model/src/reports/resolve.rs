@@ -200,7 +200,48 @@ pub fn resolve(
         let balance = spec.dates == DateMode::AsOf;
         req.prior_ranges = prior_ranges(&req.dates, columns, span, *fiscal, balance);
     }
+    req.fiscal_year_starts = retail_year_starts(&req, *fiscal);
     Ok(req)
+}
+
+/// The fiscal year starts covering a balance report's or ledger's dates
+/// on a 4-4-5 or 52-53 week calendar (S1, U-213 `fiscal_year_start`): the
+/// engine otherwise splits the year at the first of its start month.
+/// `None` on a calendar-month year or for other reports.
+fn retail_year_starts(req: &ReportRequest, fiscal: FiscalYearSpec) -> Option<Vec<CalendarDate>> {
+    use cl_core::report::Source;
+    if !matches!(fiscal, FiscalYearSpec::Retail { .. })
+        || !matches!(
+            req.source,
+            Source::BalanceSheet | Source::TrialBalance | Source::GeneralLedger
+        )
+    {
+        return None;
+    }
+    let mut days: Vec<CalendarDate> = Vec::new();
+    let mut add = |r: &DateRange| {
+        days.push(r.from);
+        days.push(r.to);
+    };
+    match &req.dates {
+        ReportDates::Range(r) => add(r),
+        ReportDates::Ranges(v) => v.iter().for_each(&mut add),
+        ReportDates::AsOf(d) => days.push(*d),
+        ReportDates::None => {}
+    }
+    if let Some(p) = &req.prior_ranges {
+        p.iter().for_each(|r| {
+            days.push(r.from);
+            days.push(r.to);
+        });
+    }
+    let mut starts: Vec<CalendarDate> = days
+        .into_iter()
+        .filter_map(|d| fiscal.year_containing(d).ok().map(|y| y.start))
+        .collect();
+    starts.sort();
+    starts.dedup();
+    (!starts.is_empty() && starts.len() <= 50).then_some(starts)
 }
 
 /// A calendar unit a span or column can be a whole (or a part) of.
@@ -909,5 +950,28 @@ mod tests {
         o.filters.tag_ids = vec![tag];
         let r = resolve(pl, &o, &CAL, d(2026, 11, 4)).expect("resolve");
         assert_eq!(r.filters.tag_ids, vec![tag]);
+    }
+
+    /// S1 (U-213): a retail calendar sends its year starts on balance
+    /// reports and the ledger; a calendar-month year sends none.
+    #[test]
+    fn retail_calendars_send_their_year_starts() {
+        let f = FiscalYearSpec::Retail {
+            pattern: RetailPattern::P445,
+            year_end_month: 12,
+            end_rule: YearEndRule::LastWeekday(Weekday::Sat),
+        };
+        let tb = find("trial_balance").expect("tb");
+        let mut o = ReportOptions::for_spec(tb);
+        o.dates = DateChoice::AsOf(d(2026, 1, 10));
+        let r = resolve(tb, &o, &f, d(2026, 3, 1)).expect("tb");
+        let fy = f.year_containing(d(2026, 1, 10)).expect("fy").start;
+        assert_eq!(r.fiscal_year_starts, Some(vec![fy]));
+        assert_ne!(fy.day(), 1, "a retail start");
+        let r = resolve(tb, &o, &CAL, d(2026, 3, 1)).expect("tb");
+        assert_eq!(r.fiscal_year_starts, None);
+        let pl = find("profit_loss").expect("p&l");
+        let r = resolve(pl, &ReportOptions::for_spec(pl), &f, d(2026, 3, 1)).expect("p&l");
+        assert_eq!(r.fiscal_year_starts, None);
     }
 }

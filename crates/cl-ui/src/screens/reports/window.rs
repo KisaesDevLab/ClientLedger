@@ -763,7 +763,8 @@ impl ReportWindow {
         self.grid(ui, tokens);
     }
 
-    fn header(&self, ui: &mut Ui, tokens: &Tokens) {
+    fn header(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let mut follow = None;
         ui.add_space(8.0);
         ui.vertical_centered(|ui| {
             if !self.company.is_empty() {
@@ -771,14 +772,28 @@ impl ReportWindow {
             }
             ui.label(RichText::new(self.title_text()).size(18.0).strong());
             ui.label(RichText::new(self.subtitle()).color(tokens.text_secondary));
-            if let Some(note) = self.table.as_ref().and_then(|t| t.meta.note.as_ref()) {
-                ui.label(
-                    RichText::new(super::label(note))
-                        .size(12.0)
-                        .color(tokens.text_secondary),
-                );
+            if let Some(meta) = self.table.as_ref().map(|t| &t.meta)
+                && let Some(note) = &meta.note
+            {
+                let text = RichText::new(super::label(note))
+                    .size(12.0)
+                    .color(tokens.text_secondary);
+                // S5: the note opens the entries it is about.
+                match &meta.note_drill {
+                    Some(d) => {
+                        if ui.link(text).clicked() {
+                            follow = Some(d.clone());
+                        }
+                    }
+                    None => {
+                        ui.label(text);
+                    }
+                }
             }
         });
+        if let Some(d) = follow {
+            super::drill::open(self, &d);
+        }
         ui.add_space(10.0);
     }
 

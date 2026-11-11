@@ -104,6 +104,28 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             }
             Target::Report(Box::new(open))
         }
+        Drill::EntriesOfTypes {
+            account_ids,
+            txn_types,
+            to,
+            basis,
+        } => {
+            let Some(spec) = cl_model::reports::find("transaction_detail_by_account") else {
+                return Target::Nothing("reports.drill.no_form");
+            };
+            let mut o = ReportOptions::for_spec(spec);
+            o.dates = DateChoice::Fixed {
+                from: cl_core::CalendarDate::min(),
+                to: *to,
+            };
+            o.basis = basis.or(o.basis);
+            o.filters.account_ids.clone_from(account_ids);
+            o.filters.txn_types.clone_from(txn_types);
+            Target::Report(Box::new(ReportOpen {
+                key: spec.key.to_string(),
+                options: Some(o),
+            }))
+        }
         Drill::Aging {
             contact,
             as_of,
