@@ -342,7 +342,7 @@ mod tests {
         );
         assert!(matches!(t.rows[1].drill, Some(Drill::Transaction { .. })));
         assert!(t.meta.truncated.is_none());
-        let bad = json!({"data": [{"amountBeforeExact": 12.34}]});
+        let bad = json!({"data": [{"amountBeforeExact": 1234}]});
         assert!(closing_exceptions(&bad, &req(Source::ClosingDateExceptions)).is_err());
     }
 

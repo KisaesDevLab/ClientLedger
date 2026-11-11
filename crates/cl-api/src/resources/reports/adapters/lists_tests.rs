@@ -252,7 +252,7 @@ fn a_tin_shows_its_last_four_digits_only() {
 fn a_number_where_exact_text_belongs_is_refused() {
     let v = serde_json::json!({
         "meta": {"exact": true},
-        "data": [{"display_name": "A", "id": null, "balanceExact": 12.5}],
+        "data": [{"display_name": "A", "id": null, "balanceExact": 125}],
         "totalsExact": {"balance": "12.5"}
     });
     assert!(list_run::adapt(&at(Source::CustomerBalanceSummary), &v).is_err());
