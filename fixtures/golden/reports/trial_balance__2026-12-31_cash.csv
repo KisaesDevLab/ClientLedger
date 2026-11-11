@@ -1,14 +1,14 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,86445.42,0
+account,1,accounts/acct:1010,1010 · Operating Checking,87295.42,0
 account,1,accounts/acct:1020,1020 · Savings,15450,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
 account,1,accounts/acct:1510,1510 · Vehicles,62012.34,0
 account,1,accounts/acct:2050,2050 · Business Credit Card,0,1617.99
 account,1,accounts/acct:2200,2200 · Vehicle and Equipment Loans,0,31200
-account,1,accounts/acct:4000,4000 · Service Income,0,1138949.06
+account,1,accounts/acct:4000,4000 · Service Income,0,1139949.06
 account,1,accounts/acct:5000,5000 · Subcontractors,50850.56,0
 account,1,accounts/acct:5100,5100 · Plants,8936.01,0
-account,1,accounts/acct:5110,5110 · Mulch & stone,3387.85,0
+account,1,accounts/acct:5110,5110 · Mulch & stone,3787.85,0
 account,1,accounts/acct:5200,5200 · Project Supplies and Materials,356388.84,0
 account,1,accounts/acct:6000,6000 · Advertising and Marketing,10936.61,0
 account,1,accounts/acct:6100,6100 · Fuel,8972.83,0
@@ -26,7 +26,9 @@ account,1,accounts/acct:10150,10150 · Payments Clearing,2092.5,0
 account,1,accounts/acct:10200,10200 · Accounts Receivable,48912.4,0
 account,1,accounts/acct:20100,20100 · Accounts Payable,0,15806.53
 account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
-account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5950
+account,1,accounts/acct:30120,30120 · Retained Earnings,0,100
+account,1,accounts/row28,30120 · Retained Earnings (Prior Years),0,250
+account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5850
 account,1,accounts/acct:30170,30170 · Owner's Draw,353267.44,0
 account,1,accounts/acct:49900,49900 · Unapplied receipts,0,500
-grand,0,total,@reports.row.total,1333023.58,1333023.58
+grand,0,total,@reports.row.total,1334273.58,1334273.58
