@@ -791,10 +791,14 @@ impl ReportWindow {
             form::hint(ui, tokens, &t("reports.empty"));
             return;
         }
-        let widths = self.measure(ui, &rows);
+        let mut widths = self.measure(ui, &rows);
         let Some(table) = self.table.as_ref() else {
             return;
         };
+        // Each cell is followed by the layout's spacing.
+        #[allow(clippy::cast_precision_loss, reason = "a column count")]
+        let gaps = ui.spacing().item_spacing.x * (table.columns.len() + 1) as f32;
+        fit(&mut widths, table, ui.available_width() - gaps - 16.0);
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         let mut action: Option<GridAction> = None;
         let width_of = |ci: usize| widths.cells.get(ci).copied().unwrap_or(NUM_MIN);
@@ -1065,6 +1069,43 @@ fn fixed_box(ui: &mut Ui, size: Vec2, layout: Layout, add: impl FnOnce(&mut Ui))
     child.set_clip_rect(rect.intersect(ui.clip_rect()));
     add(&mut child);
 }
+
+/// Narrows the caption and text columns (names, memos) toward their
+/// minimum until the table fits `room`; amounts and dates keep their width,
+/// so a figure is never cut (QA-2). What still doesn't fit scrolls.
+fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
+    let total = w.caption + w.cells.iter().sum::<f32>();
+    let excess = total - room;
+    if excess <= 0.0 {
+        return;
+    }
+    let text: Vec<usize> = table
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.kind == cl_core::report::ColumnKind::Text)
+        .map(|(i, _)| i)
+        .filter(|i| *i < w.cells.len())
+        .collect();
+    let slack: f32 = (w.caption - CAPTION_FIT_MIN).max(0.0)
+        + text
+            .iter()
+            .map(|&i| (w.cells[i] - TEXT_MIN).max(0.0))
+            .sum::<f32>();
+    if slack <= 0.0 {
+        return;
+    }
+    let share = (excess / slack).min(1.0);
+    let cut = (w.caption - CAPTION_FIT_MIN).max(0.0) * share;
+    w.caption -= cut;
+    for &i in &text {
+        let c = (w.cells[i] - TEXT_MIN).max(0.0) * share;
+        w.cells[i] -= c;
+    }
+}
+
+/// The caption column's smallest width when the table must fit.
+const CAPTION_FIT_MIN: f32 = 120.0;
 
 /// The company's fiscal start month.
 fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
