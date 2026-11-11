@@ -405,7 +405,7 @@ fn profit_loss(b: &Books, req: &ReportRequest, r: DateRange) -> Value {
         totals.insert(key, total);
         out.insert(key.into(), Value::Array(entries));
     }
-    let t = |k: &str| totals.get(k).copied().unwrap_or_default();
+    let section_total = |k: &str| totals.get(k).copied().unwrap_or_default();
     let has_cogs = out
         .get("cogs")
         .and_then(Value::as_array)
@@ -415,9 +415,12 @@ fn profit_loss(b: &Books, req: &ReportRequest, r: DateRange) -> Value {
             .and_then(Value::as_array)
             .is_some_and(|v| !v.is_empty())
     });
-    let gross = t("revenue") - t("cogs");
-    let operating = gross - t("expenses");
-    let net = t("revenue") + t("otherRevenue") - t("cogs") - t("expenses") - t("otherExpenses");
+    let gross = section_total("revenue") - section_total("cogs");
+    let operating = gross - section_total("expenses");
+    let net = section_total("revenue") + section_total("otherRevenue")
+        - section_total("cogs")
+        - section_total("expenses")
+        - section_total("otherExpenses");
     for (k, total_key) in [
         ("revenue", "totalRevenueExact"),
         ("cogs", "totalCogsExact"),
@@ -425,7 +428,7 @@ fn profit_loss(b: &Books, req: &ReportRequest, r: DateRange) -> Value {
         ("otherRevenue", "totalOtherRevenueExact"),
         ("otherExpenses", "totalOtherExpensesExact"),
     ] {
-        out.insert(total_key.into(), json!(ex(t(k))));
+        out.insert(total_key.into(), json!(ex(section_total(k))));
     }
     out.insert(
         "grossProfitExact".into(),

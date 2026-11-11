@@ -588,7 +588,7 @@ pub fn budget_vs_actual(d: &mut DemoState, req: &ReportRequest) -> Result<Report
         totals.insert(key, total);
         out.insert(key.into(), Value::Array(rows));
     }
-    let t = |k: &str| totals.get(k).cloned().unwrap_or_else(|| zero.clone());
+    let section_total = |k: &str| totals.get(k).cloned().unwrap_or_else(|| zero.clone());
     let combine = |f: &dyn Fn(usize, bool) -> Decimal| -> Value {
         json!(
             (0..=n)
@@ -601,11 +601,11 @@ pub fn budget_vs_actual(d: &mut DemoState, req: &ReportRequest) -> Result<Report
             .map_or(Decimal::ZERO, |x| if actual { x.0 } else { x.1 })
     };
     let (rev, cogs, exp, orev, oexp) = (
-        t("revenue"),
-        t("cogs"),
-        t("expenses"),
-        t("otherRevenue"),
-        t("otherExpenses"),
+        section_total("revenue"),
+        section_total("cogs"),
+        section_total("expenses"),
+        section_total("otherRevenue"),
+        section_total("otherExpenses"),
     );
     let has_cogs = out
         .get("cogs")
