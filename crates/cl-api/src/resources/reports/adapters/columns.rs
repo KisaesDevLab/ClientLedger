@@ -134,6 +134,15 @@ fn columns(
                 _ => None,
             }
         };
+        let mut drill = column_drill(c.get("drill").unwrap_or(&Value::Null))?;
+        // An as-of column says where its net income's year starts
+        // (PR6-QA-2); a change column has no drill at all.
+        if balance
+            && drill.is_none()
+            && let Some(fy) = text(c, "fiscalYearStart").and_then(|s| CalendarDate::parse_wire(s).ok())
+        {
+            drill = Some(ColumnDrill::IncomeFrom(fy));
+        }
         heads.push(ColumnHead {
             key: key.clone(),
             caption: text(c, "caption").unwrap_or("").to_string(),
@@ -143,7 +152,7 @@ fn columns(
                 ColumnKind::Amount
             },
             range,
-            drill: column_drill(c.get("drill").unwrap_or(&Value::Null))?,
+            drill,
         });
         let with_pct = pct && !percent && kind != "change";
         if with_pct {
@@ -200,6 +209,9 @@ struct Builder<'r> {
     balance: bool,
     to: CalendarDate,
     from: Option<CalendarDate>,
+    /// A sheet whose every as-of column says where its year starts: the
+    /// first one (each column puts in its own, [`ColumnDrill::IncomeFrom`]).
+    income_from: Option<CalendarDate>,
 }
 
 /// One open parent: depth, path key, caption, its roll-up and its ids.
@@ -334,7 +346,22 @@ impl Builder<'_> {
                     );
                     r.expandable = rollup.is_some() || split;
                     let calculated = e.get("calculated") == Some(&Value::Bool(true));
-                    r.drill = if calculated { None } else { self.row_drill(e)? };
+                    r.drill = if calculated {
+                        // The current year's net income opens the P&L of
+                        // each column's fiscal year to its date (PR6-QA-2);
+                        // the prior years' row has none.
+                        self.income_from
+                            .filter(|_| r.caption == "@reports.bs.net_income")
+                            .map(|from| Drill::ProfitLoss {
+                                from,
+                                to: self.to,
+                                basis: self.req.basis,
+                                adjusting: self.req.filters.adjusting,
+                                tag_ids: self.req.filters.tag_ids.clone(),
+                            })
+                    } else {
+                        self.row_drill(e)?
+                    };
                     rows.push(r);
                     let own: Vec<AccountId> = account.into_iter().collect();
                     ids.extend(own.iter().copied());
@@ -388,12 +415,32 @@ pub fn table(v: &Value, req: &ReportRequest, balance: bool) -> Result<ReportTabl
     let pct_totals = v.get("pctOfIncomeTotalsExact").filter(|p| p.is_object());
     let (heads, cols) = columns(v, req, balance, pct_totals.is_some())?;
     let span = req.dates.span().ok_or(shape("dates"))?;
+    // Every drilling column must know its year start, or no column's net
+    // income drills (a missing one would open the wrong year).
+    let income_from = if balance {
+        let starts: Vec<Option<CalendarDate>> = heads
+            .iter()
+            .filter(|h| h.kind == ColumnKind::Amount && h.drill != Some(ColumnDrill::None))
+            .map(|h| match h.drill {
+                Some(ColumnDrill::IncomeFrom(fy)) => Some(fy),
+                _ => None,
+            })
+            .collect();
+        if starts.iter().all(Option::is_some) {
+            starts.first().copied().flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let b = Builder {
         req,
         cols: &cols,
         balance,
         to: span.to,
         from: Some(span.from),
+        income_from,
     };
     let totals = v.get("totalsExact").ok_or(shape("totalsExact"))?;
     let total_cells = |key: &'static str| -> Result<Option<Vec<Cell>>, ApiError> {
@@ -744,7 +791,96 @@ mod tests {
             .iter()
             .find(|r| r.caption == "@reports.bs.net_income")
             .expect("ni");
-        assert!(ni.drill.is_none(), "calculated rows have no drill");
+        assert!(
+            ni.drill.is_none(),
+            "an engine that doesn't say where each column's year starts: no drill"
+        );
+    }
+
+    /// PR6-QA-2: with Prior period on, each as-of column's net income
+    /// opens the P&L of its own fiscal year to its own date (the engine's
+    /// column `fiscalYearStart`); $ and % change and the prior years' row
+    /// stay without a drill.
+    #[test]
+    fn each_balance_column_s_net_income_opens_its_own_year() {
+        let mut v = fixture("columns_balance_sheet_periods");
+        for (i, fy) in [
+            (0, "2033-01-01"),
+            (1, "2032-01-01"),
+            (4, "2033-01-01"),
+            (5, "2032-01-01"),
+        ] {
+            v["columns"][i]["fiscalYearStart"] = Value::String(fy.into());
+        }
+        let mut r = req(
+            Source::BalanceSheet,
+            ReportDates::Ranges(vec![
+                DateRange {
+                    from: d(2033, 2, 1),
+                    to: d(2033, 2, 28),
+                },
+                DateRange {
+                    from: d(2033, 3, 1),
+                    to: d(2033, 3, 31),
+                },
+            ]),
+        );
+        r.basis = Some(Basis::Cash);
+        let t = table(&v, &r, true).expect("table");
+        let ni = t
+            .rows
+            .iter()
+            .find(|r| r.caption == "@reports.bs.net_income")
+            .expect("ni");
+        let d0 = ni.drill.as_ref().expect("net income drills");
+        let at = |key: &str| {
+            let c = t.columns.iter().find(|c| c.key == key).expect("column");
+            d0.for_cell(c)
+        };
+        let pl = |from, to| Drill::ProfitLoss {
+            from,
+            to,
+            basis: Some(Basis::Cash),
+            adjusting: None,
+            tag_ids: Vec::new(),
+        };
+        assert_eq!(at("p0"), Some(pl(d(2033, 1, 1), d(2033, 2, 28))));
+        assert_eq!(at("p0_prior"), Some(pl(d(2032, 1, 1), d(2032, 2, 28))));
+        assert_eq!(at("p1"), Some(pl(d(2033, 1, 1), d(2033, 3, 31))));
+        assert_eq!(at("p1_prior"), Some(pl(d(2032, 1, 1), d(2032, 3, 31))));
+        assert_eq!(at("p0_change"), None);
+        assert_eq!(at("p0_pct_change"), None);
+        let prior_years = t
+            .rows
+            .iter()
+            .find(|r| r.caption == "@reports.bs.retained_prior");
+        assert!(prior_years.is_none_or(|r| r.drill.is_none()));
+        // Account rows still open their lines on the sheet's basis.
+        let acct = t
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Account && r.drill.is_some())
+            .expect("account");
+        let Some(Drill::Lines { basis, to, .. }) = acct
+            .drill
+            .as_ref()
+            .and_then(|x| x.for_cell(&t.columns[1]))
+        else {
+            panic!("lines")
+        };
+        assert_eq!((basis, to), (Some(Basis::Cash), d(2032, 2, 28)));
+        // One column without a year start: no column's net income drills.
+        v["columns"][5]
+            .as_object_mut()
+            .expect("column")
+            .remove("fiscalYearStart");
+        let t = table(&v, &r, true).expect("table");
+        assert!(
+            t.rows
+                .iter()
+                .find(|r| r.caption == "@reports.bs.net_income")
+                .is_some_and(|r| r.drill.is_none())
+        );
     }
 
     #[test]

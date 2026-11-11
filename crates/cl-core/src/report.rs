@@ -518,6 +518,10 @@ pub enum ColumnDrill {
     Contact(ContactScope),
     /// The lines of one tag, or without a tag of a group.
     Tag(TagScope),
+    /// A balance column: the first day of the fiscal year its as-of date
+    /// falls in, where its net income's Profit & Loss starts (PR6-QA-2,
+    /// the engine's column `fiscalYearStart`).
+    IncomeFrom(CalendarDate),
     /// The column's cells have no lines behind them (a change, "All
     /// others", lines without a client).
     None,
@@ -743,6 +747,7 @@ impl Drill {
                 }
                 *tag = *t;
             }
+            (Some(ColumnDrill::IncomeFrom(fy)), Drill::ProfitLoss { from, .. }) => *from = *fy,
             _ => {}
         }
         Some(d)
@@ -772,6 +777,23 @@ impl Drill {
                 tag: *tag,
                 basis: *basis,
                 adjusting: *adjusting,
+            },
+            // A balance column's net income runs to its own as-of date.
+            (
+                Drill::ProfitLoss {
+                    from,
+                    basis,
+                    adjusting,
+                    tag_ids,
+                    ..
+                },
+                Some(r),
+            ) => Drill::ProfitLoss {
+                from: *from,
+                to: r.to,
+                basis: *basis,
+                adjusting: *adjusting,
+                tag_ids: tag_ids.clone(),
             },
             (Drill::Aging { contact, as_of, .. }, _) => match AgingBucket::of_column(&column.key) {
                 Some(bucket) => Drill::Aging {
