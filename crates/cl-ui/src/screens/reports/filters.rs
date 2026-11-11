@@ -184,6 +184,22 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 .response
                 .labelled_by(l.id);
         }
+        if next.columns == cl_model::reports::ColumnBy::TagGroup {
+            let l = ui.label(RichText::new(t("reports.filter.tag_group")).size(12.0));
+            let current = next
+                .column_tag_group_id
+                .and_then(|g| w.tag_groups.iter().find(|(id, _)| *id == g))
+                .map_or_else(|| t("reports.filter.choose_tag_group"), |(_, n)| n.clone());
+            egui::ComboBox::from_id_salt("report_column_tag_group")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    for (id, name) in &w.tag_groups {
+                        ui.selectable_value(&mut next.column_tag_group_id, Some(*id), name);
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        }
         if spec.basis == BasisMode::Toggle {
             ui.separator();
             for (b, key) in [
@@ -251,7 +267,7 @@ pub(super) fn options_panel(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) 
             next.header.hide_run_time = !run_time;
         }
         if w.spec.tag_split {
-            form::hint(ui, tokens, &t("reports.customize.tag_split_later"));
+            tag_split_options(w, ui, tokens, &mut next);
         }
         if ui.button(t("reports.customize.done")).clicked() {
             w.customize = false;
@@ -259,6 +275,83 @@ pub(super) fn options_panel(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) 
     });
     if next != w.options {
         w.set_options(next);
+    }
+}
+
+/// "Show tagged amounts separately" (Q-271): the tag group, the optional
+/// account total, and the label style with its separator. Needs
+/// `reports-columns-v1`; the Trial Balance's and the ledger's split wait
+/// for a later update.
+fn tag_split_options(
+    w: &ReportWindow,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    next: &mut cl_model::reports::ReportOptions,
+) {
+    use cl_model::reports::{TagLabel, TagSplit};
+    let runs = matches!(
+        w.spec.source,
+        cl_core::report::Source::ProfitLoss | cl_core::report::Source::BalanceSheet
+    ) && has(w, cl_model::reports::catalog::caps::COLUMNS);
+    if !runs {
+        form::hint(ui, tokens, &t("reports.customize.tag_split_later"));
+        return;
+    }
+    let current = next
+        .tag_split
+        .as_ref()
+        .and_then(|s| w.tag_groups.iter().find(|(id, _)| *id == s.tag_group_id))
+        .map_or_else(|| t("reports.customize.tag_split_off"), |(_, n)| n.clone());
+    let l = ui.label(t("reports.customize.tag_split"));
+    egui::ComboBox::from_id_salt("report_tag_split")
+        .selected_text(current)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(
+                    next.tag_split.is_none(),
+                    t("reports.customize.tag_split_off"),
+                )
+                .clicked()
+            {
+                next.tag_split = None;
+            }
+            for (id, name) in &w.tag_groups {
+                let on = next
+                    .tag_split
+                    .as_ref()
+                    .is_some_and(|s| s.tag_group_id == *id);
+                if ui.selectable_label(on, name).clicked() {
+                    let mut s = next.tag_split.clone().unwrap_or(TagSplit {
+                        tag_group_id: *id,
+                        show_account_total: false,
+                        label: TagLabel::default(),
+                        separator: "-".into(),
+                    });
+                    s.tag_group_id = *id;
+                    next.tag_split = Some(s);
+                }
+            }
+        })
+        .response
+        .labelled_by(l.id);
+    if let Some(s) = next.tag_split.as_mut() {
+        ui.checkbox(
+            &mut s.show_account_total,
+            t("reports.customize.account_total"),
+        );
+        ui.horizontal(|ui| {
+            ui.label(t("reports.customize.tag_label"));
+            for (v, key) in [
+                (TagLabel::Append, "reports.customize.label_append"),
+                (TagLabel::Prepend, "reports.customize.label_prepend"),
+                (TagLabel::None, "reports.customize.label_none"),
+            ] {
+                ui.radio_value(&mut s.label, v, t(key));
+            }
+        });
+        if s.label != TagLabel::None {
+            form::field(ui, &t("reports.customize.separator"), &mut s.separator);
+        }
     }
 }
 

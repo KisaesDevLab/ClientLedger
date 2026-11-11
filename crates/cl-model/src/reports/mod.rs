@@ -16,6 +16,7 @@ pub use catalog::{CATALOG, find, search};
 pub use definition::{DefinitionError, SCHEMA_VERSION, StandardDefinition};
 pub use options::{
     AmountFilter, ColumnBy, DateChoice, HeaderOptions, ReportOptions, Sort, TagLabel, TagSplit,
+    tag_row_caption,
 };
 pub use presets::DatePreset;
 pub use resolve::{ResolveError, resolve};

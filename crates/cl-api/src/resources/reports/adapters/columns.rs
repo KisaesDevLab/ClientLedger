@@ -253,11 +253,9 @@ impl Builder<'_> {
             let values = cells(self.cols, e.get("valuesExact").unwrap_or(&Value::Null), pct)?;
             match kind {
                 "tag" => {
-                    let label = match (text(e, "tagNumber"), text(e, "tagName")) {
-                        (Some(n), Some(t)) => format!("{n} {t}"),
-                        (None, Some(t)) => t.to_string(),
-                        _ => String::new(),
-                    };
+                    // `number · name`, like an account; the window writes the
+                    // owner's label style (Q-271).
+                    let label = account_caption(text(e, "tagNumber"), text(e, "tagName"));
                     let tag = text(e, "tagId").unwrap_or("");
                     let mut r = row(
                         RowKind::TagRow,

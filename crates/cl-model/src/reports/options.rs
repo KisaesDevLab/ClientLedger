@@ -265,3 +265,69 @@ impl ReportOptions {
             || self.budget_id != other.budget_id
     }
 }
+
+/// A tag row's caption under the tag split (Q-271, formatting only):
+/// `account` and `tag` are `number · name` (or a bare name). Append gives
+/// `6100-10 Repairs - Lake Area`, prepend `10-6100 Repairs - Lake Area`,
+/// none `Repairs - Lake Area`; the separator is the owner's.
+#[must_use]
+pub fn tag_row_caption(account: &str, tag: &str, split: &TagSplit) -> String {
+    fn parts(s: &str) -> (Option<&str>, &str) {
+        match s.split_once(" \u{b7} ") {
+            Some((n, name)) => (Some(n), name),
+            None => (None, s),
+        }
+    }
+    let (an, aname) = parts(account);
+    let (tn, tname) = parts(tag);
+    let names = format!("{aname} - {tname}");
+    let sep = &split.separator;
+    let numbers = match (split.label, an, tn) {
+        (TagLabel::None, _, _) => None,
+        (TagLabel::Append, Some(a), Some(t)) => Some(format!("{a}{sep}{t}")),
+        (TagLabel::Prepend, Some(a), Some(t)) => Some(format!("{t}{sep}{a}")),
+        (_, Some(n), None) | (_, None, Some(n)) => Some(n.to_string()),
+        (_, None, None) => None,
+    };
+    match numbers {
+        Some(n) => format!("{n} {names}"),
+        None => names,
+    }
+}
+
+#[cfg(test)]
+mod tag_caption_tests {
+    use super::*;
+
+    fn split(label: TagLabel) -> TagSplit {
+        TagSplit {
+            tag_group_id: cl_core::ids::TagGroupId::parse("33333333-3333-4333-8333-333333333333")
+                .expect("id"),
+            show_account_total: false,
+            label,
+            separator: "-".into(),
+        }
+    }
+
+    #[test]
+    fn q271_labels() {
+        let a = "6100 \u{b7} Repairs";
+        let t = "10 \u{b7} Lake Area";
+        assert_eq!(
+            tag_row_caption(a, t, &split(TagLabel::Append)),
+            "6100-10 Repairs - Lake Area"
+        );
+        assert_eq!(
+            tag_row_caption(a, t, &split(TagLabel::Prepend)),
+            "10-6100 Repairs - Lake Area"
+        );
+        assert_eq!(
+            tag_row_caption(a, t, &split(TagLabel::None)),
+            "Repairs - Lake Area"
+        );
+        assert_eq!(
+            tag_row_caption("Repairs", "Lake Area", &split(TagLabel::Append)),
+            "Repairs - Lake Area"
+        );
+    }
+}

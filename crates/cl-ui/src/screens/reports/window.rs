@@ -73,6 +73,10 @@ pub struct ReportWindow {
     pub(super) fiscal: FiscalYearSpec,
     calendar: cl_settings::FiscalCalendar,
     fiscal_job: Option<Job<Option<u8>>>,
+    /// The company's tag groups (id, name), for the tag split and the
+    /// Tag group columns.
+    pub(super) tag_groups: Vec<(cl_core::ids::TagGroupId, String)>,
+    tag_groups_job: Option<Job<Vec<(cl_core::ids::TagGroupId, String)>>>,
     pub(super) spec: &'static ReportSpec,
     pub(super) options: ReportOptions,
     pub(crate) state: RunState,
@@ -121,7 +125,22 @@ impl ReportWindow {
             |_| Ok(Some(1)),
             |s| async move { Ok(s.company_settings().await?.fiscal_year_start_month) },
         ));
+        let tag_groups_job = Some(engine::read(
+            &link,
+            group.as_ref(),
+            |_| Ok(Vec::new()),
+            |s| async move {
+                Ok(s.tags()
+                    .groups()
+                    .await?
+                    .into_iter()
+                    .map(|g| (g.id, g.fields.name))
+                    .collect())
+            },
+        ));
         let mut w = ReportWindow {
+            tag_groups: Vec::new(),
+            tag_groups_job,
             group,
             kind,
             today,
@@ -233,6 +252,10 @@ impl ReportWindow {
     }
 
     pub(crate) fn poll(&mut self) {
+        if let Some(r) = engine::poll(&mut self.tag_groups_job) {
+            // Without the list the pickers stay empty; the report still runs.
+            self.tag_groups = r.unwrap_or_default();
+        }
         if let Some(r) = engine::poll(&mut self.fiscal_job) {
             let start = r.ok().flatten();
             self.fiscal = crate::screens::home::charts::spec(start, self.calendar);
@@ -266,6 +289,21 @@ impl ReportWindow {
         super::memorized::poll(self);
     }
 
+    /// A row's caption: a tag row under the tag split in the owner's label
+    /// style (Q-271), anything else as the table says.
+    pub(crate) fn caption_of(&self, table: &ReportTable, r: &cl_core::report::ReportRow) -> String {
+        if r.kind == cl_core::report::RowKind::TagRow
+            && let Some(split) = &self.options.tag_split
+        {
+            let n = r.path.0.len().saturating_sub(1);
+            let parent = cl_core::report::RowPath(r.path.0[..n].to_vec());
+            if let Some(acct) = table.rows.iter().find(|x| x.path == parent) {
+                return cl_model::reports::tag_row_caption(&acct.caption, &r.caption, split);
+            }
+        }
+        label(&r.caption)
+    }
+
     /// The rows shown: collapse (Q-P28j), then sort within groups
     /// (Q-P28k).
     pub(crate) fn shown_rows(&self) -> Vec<usize> {
@@ -273,6 +311,19 @@ impl ReportWindow {
             return Vec::new();
         };
         let mut rows = table.visible(&self.options.collapsed);
+        // The tag split's account totals show only when asked for (Q-271).
+        if !self
+            .options
+            .tag_split
+            .as_ref()
+            .is_some_and(|t| t.show_account_total)
+        {
+            rows.retain(|&i| {
+                let r = &table.rows[i];
+                !(r.kind == cl_core::report::RowKind::AccountTotal
+                    && r.path.0.last().is_some_and(|p| p.ends_with("~split")))
+            });
+        }
         if let (Some(sort), SortMode::WithinGroups) = (&self.options.sort, self.spec.sort)
             && let Some(col) = table.columns.iter().position(|c| c.key == sort.column)
         {
@@ -485,7 +536,7 @@ impl ReportWindow {
                             Layout::left_to_right(Align::Center),
                             |ui| {
                                 ui.add_space(f32::from(r.level) * 16.0);
-                                let caption = label(&r.caption);
+                                let caption = self.caption_of(table, r);
                                 if r.expandable {
                                     let open = !collapsed.contains(&r.path);
                                     let arrow = if open { "\u{2212}" } else { "+" };
