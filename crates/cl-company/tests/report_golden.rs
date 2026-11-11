@@ -165,34 +165,50 @@ fn column_options(posted: &Posted) -> Vec<(String, &'static str, ReportOptions)>
         f(&mut o);
         v.push((file.to_string(), key, o));
     };
-    add("profit_loss__2026-q4_by_month_ytd_pct", "profit_loss_by_month", &|o| {
-        q4(o);
-        o.columns = ColumnBy::Month;
-        o.extras.insert(Extra::Ytd);
-        o.extras.insert(Extra::PctOfIncome);
-    });
+    add(
+        "profit_loss__2026-q4_by_month_ytd_pct",
+        "profit_loss_by_month",
+        &|o| {
+            q4(o);
+            o.columns = ColumnBy::Month;
+            o.extras.insert(Extra::Ytd);
+            o.extras.insert(Extra::PctOfIncome);
+        },
+    );
     add("profit_loss__2026-q4_prior_period", "profit_loss", &|o| {
         q4(o);
         o.extras.insert(Extra::PriorPeriod);
     });
-    add("profit_loss__2026-q4_by_client", "profit_loss_by_client", &|o| {
-        q4(o);
-        o.columns = ColumnBy::Client;
-    });
-    add("profit_loss__2026-q4_by_tag_job_site", "profit_loss_by_tag_group", &|o| {
-        q4(o);
-        o.columns = ColumnBy::TagGroup;
-        o.column_tag_group_id = Some(job);
-    });
-    add("profit_loss__2026-q4_tag_split_job_site", "profit_loss", &|o| {
-        q4(o);
-        o.tag_split = Some(TagSplit {
-            tag_group_id: job,
-            show_account_total: true,
-            label: TagLabel::default(),
-            separator: "-".into(),
-        });
-    });
+    add(
+        "profit_loss__2026-q4_by_client",
+        "profit_loss_by_client",
+        &|o| {
+            q4(o);
+            o.columns = ColumnBy::Client;
+        },
+    );
+    add(
+        "profit_loss__2026-q4_by_tag_job_site",
+        "profit_loss_by_tag_group",
+        &|o| {
+            q4(o);
+            o.columns = ColumnBy::TagGroup;
+            o.column_tag_group_id = Some(job);
+        },
+    );
+    add(
+        "profit_loss__2026-q4_tag_split_job_site",
+        "profit_loss",
+        &|o| {
+            q4(o);
+            o.tag_split = Some(TagSplit {
+                tag_group_id: job,
+                show_account_total: true,
+                label: TagLabel::default(),
+                separator: "-".into(),
+            });
+        },
+    );
     add("balance_sheet__2026-q4_by_month", "balance_sheet", &|o| {
         o.dates = DateChoice::AsOf(d(2026, 12, 31));
         o.columns = ColumnBy::Month;
@@ -376,7 +392,14 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
     o.filters.contact_ids = contact.iter().copied().collect();
     let key = format!(
         "{:?}",
-        (o.dates, o.basis, o.filters.adjusting, &o.filters.tag_ids, o.filters.untagged_in_group, &o.filters.contact_ids)
+        (
+            o.dates,
+            o.basis,
+            o.filters.adjusting,
+            &o.filters.tag_ids,
+            o.filters.untagged_in_group,
+            &o.filters.contact_ids
+        )
     );
     let cached = LEDGERS.lock().expect("cache").get(&key).cloned();
     let nets = if let Some(n) = cached {
@@ -654,7 +677,11 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             cells += every_pl_cell_drills_to_its_amount(&s, &t).await;
             // AC5: untagged + tags = the account total.
             for (i, r) in t.rows.iter().enumerate() {
-                if r.kind != RowKind::Account || t.rows.get(i + 1).is_none_or(|n| n.kind != RowKind::TagRow && n.kind != RowKind::AccountTotal) {
+                if r.kind != RowKind::Account
+                    || t.rows.get(i + 1).is_none_or(|n| {
+                        n.kind != RowKind::TagRow && n.kind != RowKind::AccountTotal
+                    })
+                {
                     continue;
                 }
                 let mut sum = dec(&r.cells[0]);
@@ -663,7 +690,12 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
                     sum += dec(&t.rows[j].cells[0]);
                     j += 1;
                 }
-                assert_eq!(sum, dec(&t.rows[j].cells[0]), "{file}: {} untagged + tags", r.caption);
+                assert_eq!(
+                    sum,
+                    dec(&t.rows[j].cells[0]),
+                    "{file}: {} untagged + tags",
+                    r.caption
+                );
             }
         }
         assert!(cells > 100, "column cells drill");
@@ -723,7 +755,11 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let mut mismatched = Vec::new();
     let mut all = goldens(&posted);
     if caps.has("reports-columns-v1") {
-        all.extend(column_options(&posted).into_iter().map(|(file, key, options)| Golden { file, key, options }));
+        all.extend(
+            column_options(&posted)
+                .into_iter()
+                .map(|(file, key, options)| Golden { file, key, options }),
+        );
     }
     for g in all {
         let (_, t) = run(&s, g.key, &g.options).await;
