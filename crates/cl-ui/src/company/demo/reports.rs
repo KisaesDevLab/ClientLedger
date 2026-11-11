@@ -149,7 +149,9 @@ impl Lens {
         }
         if self.amount_min.is_some() || self.amount_max.is_some() {
             let size = (p.debit - p.credit).abs();
-            if self.amount_min.is_some_and(|m| size < m) || self.amount_max.is_some_and(|m| size > m) {
+            if self.amount_min.is_some_and(|m| size < m)
+                || self.amount_max.is_some_and(|m| size > m)
+            {
                 return false;
             }
         }

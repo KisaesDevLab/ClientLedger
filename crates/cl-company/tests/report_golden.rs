@@ -60,9 +60,15 @@ fn skip(why: &str) {
     eprintln!("SKIPPED: {why} (CI's engine job sets CL_API_REQUIRE=1)");
 }
 
+/// A capability the pinned engine lacks: under `CL_API_REQUIRE=1` that is
+/// a failure, never a quiet skip of AC4/AC5 (review S11).
 fn pending(item: &str, why: &str) {
+    assert!(!require(), "CL_API_REQUIRE=1 but {item} is pending: {why}");
     eprintln!("PENDING({item}): {why}");
 }
+
+/// How many drills were also run as the window sends them.
+static OWN_DRILLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn engine_exe() -> Option<PathBuf> {
     if let Some(p) = cl_host::find_engine_exe(None) {
@@ -465,10 +471,25 @@ async fn drill_net(s: &Session, drill: &Drill) -> Decimal {
         LEDGERS.lock().expect("cache").insert(key, n.clone());
         n
     };
-    account_ids
+    let total: Decimal = account_ids
         .iter()
         .map(|a| nets.get(&a.to_string()).copied().unwrap_or_default())
-        .sum()
+        .sum();
+    // S11: a few drills also run exactly as the window sends them (the
+    // drill's own account filter), and must agree with the whole ledger.
+    if OWN_DRILLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 6 {
+        let mut own = o.clone();
+        own.filters.account_ids.clone_from(account_ids);
+        let (_, gl) = run(s, spec.key, &own).await;
+        let sum: Decimal = gl
+            .rows
+            .iter()
+            .filter(|r| r.kind == RowKind::AccountTotal)
+            .map(|r| dec(&r.cells[5]) - dec(&r.cells[6]))
+            .sum();
+        assert_eq!(sum, total, "the drill's own request sums to the same lines");
+    }
+    total
 }
 
 /// Whole ledgers already read, by their options.

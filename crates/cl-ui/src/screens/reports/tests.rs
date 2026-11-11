@@ -148,7 +148,16 @@ fn exports_read_the_rows_on_screen() {
     assert!(!super::drill::live(&link, Source::ArAgingSummary, &d));
     let csv = String::from_utf8(super::export::bytes(&w, super::export::Kind::Csv).expect("csv"))
         .expect("utf8");
-    assert!(csv.starts_with(",Current,"), "{csv}");
+    // Header lines first (QA-6), then the heading row.
+    assert!(csv.starts_with("A/R Aging"), "{csv}");
+    assert!(
+        csv.contains(
+            "
+
+,Current,"
+        ),
+        "{csv}"
+    );
     assert!(csv.contains("Total"));
     let xlsx = super::export::bytes(&w, super::export::Kind::Xlsx).expect("xlsx");
     assert_eq!(&xlsx[..2], b"PK");
@@ -455,4 +464,28 @@ fn owner_text_starting_with_at_is_not_a_key() {
     assert_eq!(label("@home"), "@home");
     assert_eq!(label("Plain"), "Plain");
     assert_ne!(label("@reports.empty"), "@reports.empty");
+}
+
+/// QA-7: an aging hides a name whose every column is zero (a test, not a
+/// sum); totals and headers always stay.
+#[test]
+fn all_zero_rows_are_names_with_nothing_open() {
+    use cl_core::report::{ReportRow, RowPath};
+    let row = |kind, cells| ReportRow {
+        kind,
+        level: 0,
+        path: RowPath::of(["r"]),
+        caption: "Branson Hills Inn".into(),
+        cells,
+        drill: None,
+        expandable: false,
+    };
+    let z = || Cell::Amount(rust_decimal::Decimal::ZERO);
+    assert!(super::window::all_zero(&row(RowKind::Detail, vec![z(), z()])));
+    assert!(!super::window::all_zero(&row(
+        RowKind::Detail,
+        vec![z(), Cell::Amount(rust_decimal::Decimal::new(-567_827, 2))]
+    )));
+    assert!(!super::window::all_zero(&row(RowKind::Grand, vec![z(), z()])));
+    assert!(!super::window::all_zero(&row(RowKind::Detail, vec![Cell::Text("x".into())])));
 }

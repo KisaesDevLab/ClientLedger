@@ -59,8 +59,33 @@ impl RunState {
 }
 
 const ROW_H: f32 = 22.0;
-const CAPTION_W: f32 = 230.0;
-const CELL_W: f32 = 96.0;
+/// The caption column's bounds; a longer caption ends in an ellipsis.
+const CAPTION_MIN: f32 = 200.0;
+const CAPTION_MAX: f32 = 420.0;
+/// A text column's bounds (names, memos); amounts are never cut (QA-5).
+const TEXT_MIN: f32 = 56.0;
+const TEXT_MAX: f32 = 260.0;
+const NUM_MIN: f32 = 72.0;
+/// Room around a cell's text.
+const PAD: f32 = 14.0;
+
+/// What the column widths were measured for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct WidthKey {
+    generation: u64,
+    rows: usize,
+    collapsed: usize,
+    zoom_bits: u32,
+}
+
+/// Column widths of the table on screen (caption first), measured once per
+/// table (QA-2, QA-3, QA-5).
+#[derive(Clone, PartialEq)]
+pub(crate) struct Widths {
+    key: WidthKey,
+    caption: f32,
+    cells: Vec<f32>,
+}
 
 /// The pick lists: (id text, name).
 #[derive(Default)]
@@ -120,6 +145,15 @@ pub struct ReportWindow {
     /// A drill's read of the transaction it opens (QA-1).
     pub(super) drill_job: Option<Job<super::drill::Opens>>,
     pub(super) drill_id: Option<cl_core::ids::TransactionId>,
+    /// The measured column widths and the rows' horizontal scroll, which
+    /// the heading row follows.
+    widths: Option<Widths>,
+    /// The fiscal year's read failed; Refresh reads it again (S8).
+    fiscal_failed: bool,
+    h_offset: f32,
+    /// The report list beside the report: `None` follows the window's
+    /// width (hidden when narrow, as at 200% zoom, QA-14).
+    pub(super) catalog_open: Option<bool>,
     pub(super) drill_error: Option<ApiError>,
     bus: crate::data_bus::Subscription,
 }
@@ -144,12 +178,7 @@ impl ReportWindow {
                     .and_then(|list| list.get(*id).map(|r| r.flags.fiscal_calendar))
             })
             .unwrap_or_default();
-        let fiscal_job = Some(engine::read(
-            &link,
-            group.as_ref(),
-            |_| Ok(Some(1)),
-            |s| async move { Ok(s.company_settings().await?.fiscal_year_start_month) },
-        ));
+        let fiscal_job = Some(fiscal_read(&link, group.as_ref()));
         let tag_groups_job = Some(engine::read(
             &link,
             group.as_ref(),
@@ -202,6 +231,10 @@ impl ReportWindow {
             notice: None,
             drill_job: None,
             drill_id: None,
+            widths: None,
+            fiscal_failed: false,
+            h_offset: 0.0,
+            catalog_open: None,
             drill_error: None,
             bus: crate::data_bus::Subscription::detached(),
             link,
@@ -312,6 +345,11 @@ impl ReportWindow {
     pub(crate) fn run(&mut self) {
         self.problem = None;
         self.error = None;
+        // The fiscal year couldn't be read: read it again first (S8).
+        if self.fiscal_failed {
+            self.fiscal_failed = false;
+            self.fiscal_job = Some(fiscal_read(&self.link, self.group.as_ref()));
+        }
         if self.fiscal_job.is_some() {
             self.state = RunState::Empty;
             return;
@@ -396,9 +434,19 @@ impl ReportWindow {
             self.tag_groups = r.unwrap_or_default();
         }
         if let Some(r) = engine::poll(&mut self.fiscal_job) {
-            let start = r.ok().flatten();
-            self.fiscal = crate::screens::home::charts::spec(start, self.calendar);
-            self.run();
+            match r {
+                Ok(start) => {
+                    self.fiscal = crate::screens::home::charts::spec(start, self.calendar);
+                    self.run();
+                }
+                // Never a silent January year on a July company (S8): the
+                // error shows with Try again.
+                Err(e) => {
+                    self.fiscal_failed = true;
+                    self.error = Some(e);
+                    self.state = RunState::Failed;
+                }
+            }
         }
         if let Some((generation, job)) = self.job.as_mut()
             && let Some(r) = job.take()
@@ -449,6 +497,12 @@ impl ReportWindow {
         let mut rows = table.visible(&self.options.collapsed);
         // The tag split's account totals show only when asked for (Q-271).
         rows.retain(|&i| !cl_model::reports::hidden(&table.rows[i], &self.options));
+        // An aging lists names with something open; a name whose every
+        // column is zero shows only when asked for (QA-7). A test, not a
+        // sum: the figures are the engine's.
+        if self.spec.layout == cl_model::reports::Layout::Aging && !self.options.show_zero_rows {
+            rows.retain(|&i| !all_zero(&table.rows[i]));
+        }
         if let (Some(sort), SortMode::WithinGroups) = (&self.options.sort, self.spec.sort)
             && let Some(col) = table.columns.iter().position(|c| c.key == sort.column)
         {
@@ -547,25 +601,120 @@ impl ReportWindow {
 
     fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
+        // At a large zoom the list would take a third of the window: it
+        // folds away behind a button (QA-14).
+        let narrow = ui.available_width() < 900.0;
+        let show_list = self.catalog_open.unwrap_or(!narrow);
         ui.horizontal_top(|ui| {
+            if show_list {
+                ui.vertical(|ui| {
+                    ui.set_width(if narrow { 180.0 } else { 230.0 });
+                    super::catalog::show(self, ui, &tokens);
+                });
+                ui.separator();
+            }
             ui.vertical(|ui| {
-                ui.set_width(230.0);
-                super::catalog::show(self, ui, &tokens);
-            });
-            ui.separator();
-            ui.vertical(|ui| {
+                let key = if show_list {
+                    "reports.list.hide"
+                } else {
+                    "reports.list.show"
+                };
+                if (narrow || self.catalog_open.is_some()) && ui.small_button(t(key)).clicked() {
+                    self.catalog_open = Some(!show_list);
+                }
                 super::filters::toolbar(self, ui, &tokens);
                 super::ask::ui(self, ui, &tokens);
                 super::filters::filter_bar(self, ui, &tokens);
-                super::budgets::ui(self, ui, &tokens);
+                // The dialogs sit above the editor, so they open in view
+                // (QA-12).
+                super::memorized::ui(self, ui, &tokens);
+                super::email::ui(self, ui, &tokens);
                 if self.customize {
                     super::filters::options_panel(self, ui, &tokens);
                 }
-                super::memorized::ui(self, ui, &tokens);
-                super::email::ui(self, ui, &tokens);
+                super::budgets::ui(self, ui, &tokens);
                 self.body(ui, &tokens);
             });
         });
+    }
+
+    /// The widths of the table's columns: amounts as wide as their widest
+    /// figure, text up to a cap (then an ellipsis), the caption column as
+    /// wide as its longest caption up to a cap.
+    fn measure(&mut self, ui: &Ui, rows: &[usize]) -> Widths {
+        let key = WidthKey {
+            generation: self.generation,
+            rows: rows.len(),
+            collapsed: self.options.collapsed.len(),
+            zoom_bits: ui.ctx().pixels_per_point().to_bits(),
+        };
+        if let Some(w) = &self.widths
+            && w.key == key
+        {
+            return w.clone();
+        }
+        let Some(table) = self.table.as_ref() else {
+            return Widths {
+                key,
+                caption: CAPTION_MIN,
+                cells: Vec::new(),
+            };
+        };
+        let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
+        let mono = egui::TextStyle::Monospace.resolve(ui.style());
+        let body = egui::TextStyle::Body.resolve(ui.style());
+        let head = egui::FontId::proportional(12.0);
+        let glyph = ui.fonts_mut(|f| f.glyph_width(&mono, '0'));
+        let measure = |s: &str, font: &egui::FontId| {
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap(s.to_string(), font.clone(), egui::Color32::WHITE)
+                    .size()
+                    .x
+            })
+        };
+        // Cells are monospace: the most characters is the widest.
+        let mut chars = vec![0usize; table.columns.len()];
+        let mut longest: (usize, f32, String) = (0, 0.0, String::new());
+        for &i in rows {
+            let r = &table.rows[i];
+            for (ci, c) in r.cells.iter().enumerate().take(chars.len()) {
+                let n = cell_text(c, style).chars().count();
+                chars[ci] = chars[ci].max(n);
+            }
+            let caption = self.caption_of(table, i);
+            let indent = f32::from(r.level) * 16.0 + if r.expandable { 22.0 } else { 0.0 };
+            if caption.chars().count() + usize::from(r.level) * 2 > longest.0 {
+                longest = (
+                    caption.chars().count() + usize::from(r.level) * 2,
+                    indent,
+                    caption,
+                );
+            }
+        }
+        let caption =
+            (measure(&longest.2, &body) * 1.08 + longest.1 + PAD).clamp(CAPTION_MIN, CAPTION_MAX);
+        #[allow(clippy::cast_precision_loss, reason = "a character count")]
+        let cells = table
+            .columns
+            .iter()
+            .zip(&chars)
+            .map(|(c, n)| {
+                let heading = measure(&label(&c.caption), &head) + PAD;
+                let cell = *n as f32 * glyph + PAD;
+                if c.kind.is_numeric() {
+                    cell.max(heading.min(140.0)).max(NUM_MIN)
+                } else {
+                    cell.max(heading.min(TEXT_MAX)).clamp(TEXT_MIN, TEXT_MAX)
+                }
+            })
+            .collect();
+        let w = Widths {
+            key,
+            caption,
+            cells,
+        };
+        self.widths = Some(w.clone());
+        w
     }
 
     fn body(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -642,32 +791,45 @@ impl ReportWindow {
             form::hint(ui, tokens, &t("reports.empty"));
             return;
         }
+        let widths = self.measure(ui, &rows);
+        let Some(table) = self.table.as_ref() else {
+            return;
+        };
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         let mut action: Option<GridAction> = None;
-        // The heading row.
-        ui.horizontal(|ui| {
-            ui.allocate_exact_size(Vec2::new(CAPTION_W, ROW_H), egui::Sense::hover());
-            for (ci, c) in table.columns.iter().enumerate() {
-                cell_box(ui, c.kind.is_numeric(), |ui| {
-                    let text = RichText::new(label(&c.caption)).strong().size(12.0);
-                    let sortable = self.spec.sort == SortMode::WithinGroups;
-                    if sortable {
-                        if ui
-                            .add(egui::Button::new(text).frame(false))
-                            .on_hover_text(t("reports.sort.hint"))
-                            .clicked()
-                        {
-                            action = Some(GridAction::Sort(ci));
-                        }
-                    } else {
-                        ui.label(text);
+        let width_of = |ci: usize| widths.cells.get(ci).copied().unwrap_or(NUM_MIN);
+        // The heading row follows the rows' horizontal scroll.
+        egui::ScrollArea::horizontal()
+            .id_salt("report_heading")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .scroll_source(egui::scroll_area::ScrollSource::NONE)
+            .horizontal_scroll_offset(self.h_offset)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.allocate_exact_size(Vec2::new(widths.caption, ROW_H), egui::Sense::hover());
+                    for (ci, c) in table.columns.iter().enumerate() {
+                        cell_box(ui, width_of(ci), c.kind.is_numeric(), |ui| {
+                            let text = RichText::new(label(&c.caption)).strong().size(12.0);
+                            let sortable = self.spec.sort == SortMode::WithinGroups;
+                            if sortable {
+                                if ui
+                                    .add(egui::Button::new(text).frame(false))
+                                    .on_hover_text(t("reports.sort.hint"))
+                                    .clicked()
+                                {
+                                    action = Some(GridAction::Sort(ci));
+                                }
+                            } else {
+                                ui.add(egui::Label::new(text).truncate());
+                            }
+                        });
                     }
                 });
-            }
-        });
+            });
         ui.separator();
         let collapsed = &self.options.collapsed;
-        egui::ScrollArea::both()
+        let out = egui::ScrollArea::both()
             .id_salt("report_rows")
             .auto_shrink([false, true])
             .show_rows(ui, ROW_H, rows.len(), |ui, range| {
@@ -681,7 +843,7 @@ impl ReportWindow {
                         );
                         fixed_box(
                             ui,
-                            Vec2::new(CAPTION_W, ROW_H),
+                            Vec2::new(widths.caption, ROW_H),
                             Layout::left_to_right(Align::Center),
                             |ui| {
                                 ui.add_space(f32::from(r.level) * 16.0);
@@ -708,15 +870,27 @@ impl ReportWindow {
                                     }
                                 }
                                 let text = RichText::new(caption);
-                                ui.label(if strong { text.strong() } else { text });
+                                ui.add(
+                                    egui::Label::new(if strong { text.strong() } else { text })
+                                        .truncate(),
+                                );
                             },
                         );
                         for (ci, cell) in r.cells.iter().enumerate() {
                             let Some(col) = table.columns.get(ci) else {
                                 continue;
                             };
-                            let text = cell_text(cell, style);
-                            cell_box(ui, col.kind.is_numeric(), |ui| {
+                            // A ledger line's empty side is blank, not a
+                            // 0.00 link (QA-2).
+                            let blank_side = r.kind == RowKind::Detail
+                                && matches!(col.key.as_str(), "debit" | "credit")
+                                && matches!(cell, Cell::Amount(d) if d.is_zero());
+                            let text = if blank_side {
+                                String::new()
+                            } else {
+                                cell_text(cell, style)
+                            };
+                            cell_box(ui, width_of(ci), col.kind.is_numeric(), |ui| {
                                 let rich = RichText::new(&text).family(egui::FontFamily::Monospace);
                                 let rich = if strong { rich.strong() } else { rich };
                                 let drill = r
@@ -735,6 +909,11 @@ impl ReportWindow {
                                             action = Some(GridAction::Drill(d));
                                         }
                                     }
+                                    // Amounts fit their column; only text
+                                    // ends in an ellipsis (QA-5).
+                                    None if col.kind.is_numeric() => {
+                                        ui.label(rich);
+                                    }
                                     None => {
                                         ui.add(egui::Label::new(rich).truncate());
                                     }
@@ -744,6 +923,10 @@ impl ReportWindow {
                     });
                 }
             });
+        if (out.state.clamped_offset().x - self.h_offset).abs() > 0.5 {
+            ui.ctx().request_repaint();
+        }
+        let new_offset = out.state.clamped_offset().x;
         if let Some(n) = table.meta.truncated {
             form::hint(
                 ui,
@@ -764,6 +947,7 @@ impl ReportWindow {
                     .color(tokens.text_secondary),
             );
         }
+        self.h_offset = new_offset;
         match action {
             Some(GridAction::Collapse(p)) => self.toggle_collapse(&p),
             Some(GridAction::Drill(d)) => super::drill::open(self, &d),
@@ -863,13 +1047,13 @@ enum GridAction {
 }
 
 /// A fixed-width cell, numbers right-aligned.
-fn cell_box(ui: &mut Ui, right: bool, add: impl FnOnce(&mut Ui)) {
+fn cell_box(ui: &mut Ui, width: f32, right: bool, add: impl FnOnce(&mut Ui)) {
     let layout = if right {
         Layout::right_to_left(Align::Center)
     } else {
         Layout::left_to_right(Align::Center)
     };
-    fixed_box(ui, Vec2::new(CELL_W, ROW_H), layout, add);
+    fixed_box(ui, Vec2::new(width, ROW_H), layout, add);
 }
 
 /// Exactly `size`, whatever the content (columns line up row to row).
@@ -880,6 +1064,26 @@ fn fixed_box(ui: &mut Ui, size: Vec2, layout: Layout, add: impl FnOnce(&mut Ui))
     // the next column.
     child.set_clip_rect(rect.intersect(ui.clip_rect()));
     add(&mut child);
+}
+
+/// The company's fiscal start month.
+fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
+    engine::read(
+        link,
+        group,
+        |_| Ok(Some(1)),
+        |s| async move { Ok(s.company_settings().await?.fiscal_year_start_month) },
+    )
+}
+
+/// A name row whose every amount is zero (pinned rows never are).
+pub(crate) fn all_zero(r: &cl_core::report::ReportRow) -> bool {
+    !r.kind.is_pinned()
+        && r.cells.iter().any(|c| matches!(c, Cell::Amount(_)))
+        && r.cells.iter().all(|c| match c {
+            Cell::Amount(d) => d.is_zero(),
+            _ => true,
+        })
 }
 
 /// A cell as shown (display formatting only, plan §6).

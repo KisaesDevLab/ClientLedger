@@ -530,6 +530,22 @@ pub fn inline_warning(ui: &mut Ui, tokens: &Tokens, text: &str) {
         });
 }
 
+/// [`inline_warning`] whose text is not selectable, so it is no stop in
+/// the tab order (a message beside its own link or button).
+pub fn inline_note(ui: &mut Ui, tokens: &Tokens, text: &str) {
+    egui::Frame::new()
+        .fill(tokens.warn_surface)
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(text).color(tokens.warn_text))
+                    .wrap()
+                    .selectable(false),
+            );
+        });
+}
+
 /// A short progress line.
 pub fn progress_line(ui: &mut Ui, tokens: &Tokens, text: &str) {
     ui.horizontal(|ui| {

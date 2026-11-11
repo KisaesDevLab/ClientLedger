@@ -21,13 +21,14 @@ pub(super) fn show(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     .labelled_by(l.id);
     let hits = search(&w.search, |s| t(s.title));
     let mut pick = None;
+    let mut memorized = 0;
     egui::ScrollArea::vertical()
         .id_salt("report_catalog")
         .max_height(ui.available_height().max(200.0))
         .show(ui, |ui| {
             for group in CatalogGroup::ALL {
                 if group == CatalogGroup::Memorized {
-                    super::memorized::catalog(w, ui, tokens);
+                    memorized = super::memorized::catalog(w, ui, tokens);
                     continue;
                 }
                 let in_group: Vec<_> = hits.iter().filter(|s| s.group == group).collect();
@@ -60,7 +61,8 @@ pub(super) fn show(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                     }
                 }
             }
-            if hits.is_empty() {
+            // A memorized match is a match (QA-15).
+            if hits.is_empty() && memorized == 0 {
                 ui.label(RichText::new(t("reports.find.none")).color(tokens.text_secondary));
             }
         });

@@ -206,7 +206,9 @@ fn secret(name: &str) -> bool {
     let joined: String = w.concat();
     w.iter().any(|x| SECRET_WORDS.contains(&x.as_str()))
         || SECRET_WORDS.contains(&joined.as_str())
-        || ["taxid", "apikey", "privatekey"].iter().any(|k| joined.contains(k))
+        || ["taxid", "apikey", "privatekey"]
+            .iter()
+            .any(|k| joined.contains(k))
 }
 
 fn camel(s: &str) -> String {
@@ -432,12 +434,31 @@ mod secret_tests {
     #[test]
     fn taxpayer_ids_and_secrets_are_matched_by_word() {
         for s in [
-            "ein", "companyEin", "tin", "taxId", "tax_id", "ssn", "smtpPass", "smtp_password",
-            "apiKey", "api_key", "closingPasswordHash", "accessToken", "clientSecret",
+            "ein",
+            "companyEin",
+            "tin",
+            "taxId",
+            "tax_id",
+            "ssn",
+            "smtpPass",
+            "smtp_password",
+            "apiKey",
+            "api_key",
+            "closingPasswordHash",
+            "accessToken",
+            "clientSecret",
         ] {
             assert!(secret(s), "{s} is hidden");
         }
-        for s in ["settings", "reportKey", "name", "einstein", "printStatus", "keyword", "memo"] {
+        for s in [
+            "settings",
+            "reportKey",
+            "name",
+            "einstein",
+            "printStatus",
+            "keyword",
+            "memo",
+        ] {
             assert!(!secret(s), "{s} shows");
         }
     }

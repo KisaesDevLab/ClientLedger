@@ -721,9 +721,7 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                     }
                 })
                 .response
-                .widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &copy_label)
-                });
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &copy_label));
             if ui
                 .add_enabled(
                     can_whole && p.copy_from.is_some(),
@@ -735,7 +733,11 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 // QA-11: the engine's copy writes the other budget's
                 // accounts over this one's; a budget that already has
                 // amounts asks first.
-                if lines.lines.iter().any(|l| l.periods.iter().any(|v| !v.is_zero())) {
+                if lines
+                    .lines
+                    .iter()
+                    .any(|l| l.periods.iter().any(|v| !v.is_zero()))
+                {
                     p.confirm_copy = Some(c);
                 } else {
                     whole = Some(Whole::Copy(c));
@@ -994,12 +996,20 @@ mod tests {
             selected: Some("b".into()),
             ..BudgetPanel::default()
         };
-        saved(&mut p, vec![(a, row("10"))], Ok(lines_of("a", a, Decimal::TEN)));
+        saved(
+            &mut p,
+            vec![(a, row("10"))],
+            Ok(lines_of("a", a, Decimal::TEN)),
+        );
         assert!(p.lines.is_none(), "A's lines are not B's");
         assert!(p.changed.is_none());
         saved(&mut p, vec![], Ok(lines_of("b", a, Decimal::ONE)));
         assert_eq!(p.lines.as_ref().map(|l| l.budget.id.as_str()), Some("b"));
-        assert_eq!(p.changed.as_deref(), Some("b"), "Budget vs. Actual on B runs again");
+        assert_eq!(
+            p.changed.as_deref(),
+            Some("b"),
+            "Budget vs. Actual on B runs again"
+        );
     }
 
     /// B1: switching budgets with typed rows asks; nothing is dropped yet.
@@ -1009,7 +1019,10 @@ mod tests {
         let mut p = BudgetPanel::default();
         assert!(!p.has_unsaved());
         p.drafts.insert(a, row("5"));
-        assert!(p.has_unsaved(), "the window is dirty and select() asks first");
+        assert!(
+            p.has_unsaved(),
+            "the window is dirty and select() asks first"
+        );
     }
 
     /// S4: a cell the owner didn't touch sends the engine's exact value;

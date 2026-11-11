@@ -136,7 +136,9 @@ pub(crate) fn live(link: &crate::company::CompanyLink, source: Source, drill: &D
         Target::Report(open) => {
             cl_model::reports::find(&open.key).is_some_and(|s| super::available(link, s))
         }
-        Target::Nothing(_) => false,
+        // A subtotal over too many accounts stays a link: the click says
+        // to narrow the report (review nit).
+        Target::Nothing(key) => key == "reports.drill.narrow",
     }
 }
 
@@ -171,12 +173,17 @@ pub(crate) enum Opens {
 /// other entry in the form that owns its shape, else its register. A
 /// template-posted expense that isn't a check never opens a blank check.
 #[must_use]
-pub(crate) fn route(t: &cl_api::Transaction, is_check: bool, accounts: &[cl_api::Account]) -> Opens {
+pub(crate) fn route(
+    t: &cl_api::Transaction,
+    is_check: bool,
+    accounts: &[cl_api::Account],
+) -> Opens {
     use crate::screens::register::{class_of, form_for};
     if is_check && t.status == cl_api::TxnStatus::Posted {
         return Opens::Form(crate::screens::write_check::KIND);
     }
-    let class = |id: cl_core::ids::AccountId| accounts.iter().find(|a| a.id == id).and_then(class_of);
+    let class =
+        |id: cl_core::ids::AccountId| accounts.iter().find(|a| a.id == id).and_then(class_of);
     if let Some(f) = form_for(t, &class) {
         return Opens::Form(f);
     }
@@ -238,9 +245,7 @@ pub(super) fn poll_probe(w: &mut ReportWindow) {
         return;
     };
     match r {
-        Ok(Opens::Form(f)) => w
-            .link
-            .push(CompanyEvent::OpenRecord(CommandId::new(f), id)),
+        Ok(Opens::Form(f)) => w.link.push(CompanyEvent::OpenRecord(CommandId::new(f), id)),
         Ok(Opens::Register(a)) => {
             w.notice = Some(t("reports.drill.in_register"));
             w.link.push(CompanyEvent::OpenRegister(a));
@@ -332,9 +337,15 @@ mod tests {
         let chart = crate::company::demo::chart();
         let bank = crate::company::demo::account_id(1010);
         let cost = crate::company::demo::account_id(6100);
-        let t = expense(vec![line(0, cost, "49.00", "0"), line(1, bank, "0", "49.00")]);
+        let t = expense(vec![
+            line(0, cost, "49.00", "0"),
+            line(1, bank, "0", "49.00"),
+        ]);
         assert_eq!(route(&t, false, &chart), Opens::Register(bank));
-        assert_eq!(route(&t, true, &chart), Opens::Form(crate::screens::write_check::KIND));
+        assert_eq!(
+            route(&t, true, &chart),
+            Opens::Form(crate::screens::write_check::KIND)
+        );
         let card = chart
             .iter()
             .find(|a| {
@@ -343,10 +354,22 @@ mod tests {
             })
             .map(|a| a.id)
             .expect("the demo has a card");
-        let c = expense(vec![line(0, cost, "12.00", "0"), line(1, card, "0", "12.00")]);
-        assert_eq!(route(&c, false, &chart), Opens::Form(crate::screens::card_charge::KIND));
+        let c = expense(vec![
+            line(0, cost, "12.00", "0"),
+            line(1, card, "0", "12.00"),
+        ]);
+        assert_eq!(
+            route(&c, false, &chart),
+            Opens::Form(crate::screens::card_charge::KIND)
+        );
         assert!(matches!(
-            target(Source::GeneralLedger, &Drill::Transaction { id: t.id, txn_type: "expense".into() }),
+            target(
+                Source::GeneralLedger,
+                &Drill::Transaction {
+                    id: t.id,
+                    txn_type: "expense".into()
+                }
+            ),
             Target::Probe(_)
         ));
     }

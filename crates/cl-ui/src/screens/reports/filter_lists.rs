@@ -6,10 +6,10 @@
 //! The amount filter is the owner's typed amount (`Money::parse_user`),
 //! sent as an exact decimal string; nothing here adds up money.
 
+use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId, ItemId, TagId};
 use cl_core::money::UserInput;
 use cl_core::report::{Adjusting, Cleared};
-use cl_core::Money;
 use cl_model::reports::{AmountFilter, FilterKind, ReportOptions};
 use eframe::egui::{self, RichText, Ui};
 
@@ -128,18 +128,31 @@ pub(crate) const TXN_TYPES: [&str; 14] = [
 
 /// Starts loading the lists the report's filters need.
 pub(crate) fn load(w: &mut ReportWindow) {
-    if offered(w, FilterKind::Accounts) && w.filter_lists.accounts.is_none() && w.filter_lists.accounts_job.is_none() {
+    if offered(w, FilterKind::Accounts)
+        && w.filter_lists.accounts.is_none()
+        && w.filter_lists.accounts_job.is_none()
+    {
         w.filter_lists.accounts_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
-            |d| Ok(accounts_of(&d.chart.clone().unwrap_or_else(crate::company::demo::chart))),
+            |d| {
+                Ok(accounts_of(
+                    &d.chart.clone().unwrap_or_else(crate::company::demo::chart),
+                ))
+            },
             |s| async move {
-                let all = s.accounts().list_all(&cl_api::AccountFilter::default()).await?;
+                let all = s
+                    .accounts()
+                    .list_all(&cl_api::AccountFilter::default())
+                    .await?;
                 Ok(accounts_of(&all))
             },
         ));
     }
-    if offered(w, FilterKind::Contacts) && w.filter_lists.contacts.is_none() && w.filter_lists.contacts_job.is_none() {
+    if offered(w, FilterKind::Contacts)
+        && w.filter_lists.contacts.is_none()
+        && w.filter_lists.contacts_job.is_none()
+    {
         w.filter_lists.contacts_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
@@ -161,22 +174,40 @@ pub(crate) fn load(w: &mut ReportWindow) {
             },
         ));
     }
-    if offered(w, FilterKind::Tags) && w.filter_lists.tags.is_none() && w.filter_lists.tags_job.is_none() {
+    if offered(w, FilterKind::Tags)
+        && w.filter_lists.tags.is_none()
+        && w.filter_lists.tags_job.is_none()
+    {
         w.filter_lists.tags_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
-            |d| Ok(tags_of(d.tags.clone().unwrap_or_else(crate::company::demo::lists::tags))),
+            |d| {
+                Ok(tags_of(
+                    d.tags
+                        .clone()
+                        .unwrap_or_else(crate::company::demo::lists::tags),
+                ))
+            },
             |s| async move {
                 let all = s.tags().list_all(&cl_api::TagFilter::default()).await?;
                 Ok(tags_of(all))
             },
         ));
     }
-    if offered(w, FilterKind::Items) && w.filter_lists.items.is_none() && w.filter_lists.items_job.is_none() {
+    if offered(w, FilterKind::Items)
+        && w.filter_lists.items.is_none()
+        && w.filter_lists.items_job.is_none()
+    {
         w.filter_lists.items_job = Some(engine::read(
             &w.link,
             w.group.as_ref(),
-            |d| Ok(items_of(d.items.clone().unwrap_or_else(crate::company::demo::lists::items))),
+            |d| {
+                Ok(items_of(
+                    d.items
+                        .clone()
+                        .unwrap_or_else(crate::company::demo::lists::items),
+                ))
+            },
             |s| async move {
                 let all = s.items().list_all(&cl_api::ItemFilter::default()).await?;
                 Ok(items_of(all))
@@ -247,7 +278,9 @@ pub(crate) fn amount_filter(min: &str, max: &str) -> Result<Option<AmountFilter>
         if s.is_empty() {
             return Ok(None);
         }
-        Money::parse_user(s, UserInput::MONEY).map(|m| Some(m.abs())).map_err(|_| ())
+        Money::parse_user(s, UserInput::MONEY)
+            .map(|m| Some(m.abs()))
+            .map_err(|_| ())
     };
     let (lo, hi) = (one(min)?, one(max)?);
     if let (Some(a), Some(b)) = (lo, hi)
@@ -268,10 +301,10 @@ pub(crate) fn amount_filter(min: &str, max: &str) -> Result<Option<AmountFilter>
 fn chosen_text<T: PartialEq>(list: &[(T, String)], chosen: &[T], all: &str) -> String {
     match chosen {
         [] => t(all),
-        [one] => list
-            .iter()
-            .find(|(id, _)| id == one)
-            .map_or_else(|| t_with("reports.filter.n_chosen", &[("n", "1")]), |(_, n)| n.clone()),
+        [one] => list.iter().find(|(id, _)| id == one).map_or_else(
+            || t_with("reports.filter.n_chosen", &[("n", "1")]),
+            |(_, n)| n.clone(),
+        ),
         many => t_with("reports.filter.n_chosen", &[("n", &many.len().to_string())]),
     }
 }
@@ -326,7 +359,10 @@ fn single<T: Copy + PartialEq>(
                 chosen.clear();
             }
             for (id, name) in list {
-                if ui.selectable_label(chosen.first() == Some(id), name).clicked() {
+                if ui
+                    .selectable_label(chosen.first() == Some(id), name)
+                    .clicked()
+                {
                     *chosen = vec![*id];
                 }
             }
@@ -347,21 +383,49 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens, next: &mut 
     ui.horizontal_wrapped(|ui| {
         if offered(w, FilterKind::Accounts) {
             let list = lists.accounts.clone().unwrap_or_default();
-            multi(ui, "accounts", "reports.filter.accounts", "reports.filter.all_accounts", &list, &mut next.filters.account_ids);
+            multi(
+                ui,
+                "accounts",
+                "reports.filter.accounts",
+                "reports.filter.all_accounts",
+                &list,
+                &mut next.filters.account_ids,
+            );
         }
         if offered(w, FilterKind::Contacts) {
             // The ledger and the aging details take one name.
             let list = lists.contacts.clone().unwrap_or_default();
-            single(ui, "contacts", "reports.filter.name", "reports.filter.all_names", &list, &mut next.filters.contact_ids);
+            single(
+                ui,
+                "contacts",
+                "reports.filter.name",
+                "reports.filter.all_names",
+                &list,
+                &mut next.filters.contact_ids,
+            );
         }
         if offered(w, FilterKind::Tags) {
             let list = lists.tags.clone().unwrap_or_default();
-            multi(ui, "tags", "reports.filter.tags", "reports.filter.all_tags", &list, &mut next.filters.tag_ids);
+            multi(
+                ui,
+                "tags",
+                "reports.filter.tags",
+                "reports.filter.all_tags",
+                &list,
+                &mut next.filters.tag_ids,
+            );
         }
         if offered(w, FilterKind::Items) {
             // The inventory detail takes one item.
             let list = lists.items.clone().unwrap_or_default();
-            single(ui, "items", "reports.filter.item", "reports.filter.all_items", &list, &mut next.filters.item_ids);
+            single(
+                ui,
+                "items",
+                "reports.filter.item",
+                "reports.filter.all_items",
+                &list,
+                &mut next.filters.item_ids,
+            );
         }
     });
     ui.horizontal_wrapped(|ui| {
@@ -372,7 +436,14 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens, next: &mut 
                 .collect();
             let mut chosen: Vec<&str> = next.filters.txn_types.iter().map(String::as_str).collect();
             let before = chosen.clone();
-            multi(ui, "types", "reports.filter.types", "reports.filter.all_types", &list, &mut chosen);
+            multi(
+                ui,
+                "types",
+                "reports.filter.types",
+                "reports.filter.all_types",
+                &list,
+                &mut chosen,
+            );
             if chosen != before {
                 next.filters.txn_types = chosen.into_iter().map(str::to_string).collect();
             }
@@ -390,7 +461,12 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens, next: &mut 
             egui::ComboBox::from_id_salt("report_filter_cleared")
                 .selected_text(text(next.filters.cleared))
                 .show_ui(ui, |ui| {
-                    for c in [None, Some(Cleared::Cleared), Some(Cleared::Uncleared), Some(Cleared::Reconciled)] {
+                    for c in [
+                        None,
+                        Some(Cleared::Cleared),
+                        Some(Cleared::Uncleared),
+                        Some(Cleared::Reconciled),
+                    ] {
                         ui.selectable_value(&mut next.filters.cleared, c, text(c));
                     }
                 })
@@ -460,7 +536,10 @@ mod tests {
         assert_eq!(a.max, None);
         assert_eq!(amount_filter(" ", ""), Ok(None), "blank: no filter");
         assert!(amount_filter("abc", "").is_err());
-        assert!(amount_filter("100", "50").is_err(), "the engine refuses min > max");
+        assert!(
+            amount_filter("100", "50").is_err(),
+            "the engine refuses min > max"
+        );
         let b = amount_filter("-20", "20").expect("ok").expect("some");
         assert_eq!(b.min.as_deref(), Some("20.0000"), "sizes, not signs");
         assert_eq!(display_amount("1250.0000"), "1250.00");

@@ -268,10 +268,20 @@ fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
     w.memo.current = Some(row.clone());
 }
 
-/// The catalog's "Memorized" section.
-pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
+/// The catalog's "Memorized" section, narrowed by the catalog's search
+/// (every word in the name). Returns how many it lists.
+pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usize {
     if !available(&w.link) {
-        return;
+        return 0;
+    }
+    let words: Vec<String> = w.search.split_whitespace().map(str::to_lowercase).collect();
+    let matches = |r: &DefinitionRow| {
+        let name = r.name.to_lowercase();
+        words.iter().all(|x| name.contains(x.as_str()))
+    };
+    let shown = w.memo.list.iter().filter(|r| matches(r)).count();
+    if !words.is_empty() && shown == 0 {
+        return 0;
     }
     ui.add_space(6.0);
     ui.label(
@@ -285,7 +295,7 @@ pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 .size(12.0)
                 .color(tokens.text_secondary),
         );
-        return;
+        return 0;
     }
     let mut pick = None;
     let mut groups: Vec<Option<&DefinitionGroup>> = w.memo.groups.iter().map(Some).collect();
@@ -295,7 +305,7 @@ pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             .memo
             .list
             .iter()
-            .filter(|r| r.group_id.as_deref() == g.map(|g| g.id.as_str()))
+            .filter(|r| r.group_id.as_deref() == g.map(|g| g.id.as_str()) && matches(r))
             .collect();
         if rows.is_empty() {
             continue;
@@ -313,6 +323,7 @@ pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     if let Some(r) = pick {
         open_row(w, &r);
     }
+    shown
 }
 
 /// The dialog, above the report.
@@ -405,7 +416,10 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             form::inline_warning(ui, tokens, &t("reports.memorize.delete_question"));
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(!saving, egui::Button::new(t("reports.memorize.delete_confirm")))
+                    .add_enabled(
+                        !saving,
+                        egui::Button::new(t("reports.memorize.delete_confirm")),
+                    )
                     .clicked()
                 {
                     click = Some(Click::Delete);

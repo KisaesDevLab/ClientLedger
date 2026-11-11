@@ -61,7 +61,9 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         {
             click = Some(Click::Memorize);
         }
-        ui.separator();
+        // Space, not a rule: a wrapped bar never starts with a lone
+        // separator (QA-14).
+        ui.add_space(12.0);
         ui.add_enabled_ui(current, |ui| {
             if ui
                 .button(t("reports.tool.print"))
@@ -83,7 +85,9 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
                 click = Some(Click::Email);
             }
         });
-        ui.separator();
+        // Space, not a rule: a wrapped bar never starts with a lone
+        // separator (QA-14).
+        ui.add_space(12.0);
         if ui
             .add_enabled(shown, egui::Button::new(t("reports.tool.collapse")))
             .clicked()
@@ -238,6 +242,10 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                     .color(tokens.text_secondary),
             )
             .on_hover_text(t("reports.basis.not_applicable.why"));
+        }
+        if spec.layout == cl_model::reports::Layout::Aging {
+            ui.checkbox(&mut next.show_zero_rows, t("reports.filter.show_zero_rows"))
+                .on_hover_text(t("reports.filter.show_zero_rows.why"));
         }
         for e in spec.extras {
             let ok = has(w, extra_capability(*e));

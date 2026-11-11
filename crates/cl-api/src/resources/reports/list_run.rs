@@ -252,7 +252,10 @@ mod tests {
             {"bucket": "90+", "kind": "other"}
         ]});
         assert_eq!(past_60_count(&v).expect("count"), 2);
-        assert!(past_60_count(&serde_json::json!({})).is_err(), "no details: not zero");
+        assert!(
+            past_60_count(&serde_json::json!({})).is_err(),
+            "no details: not zero"
+        );
         assert_eq!(
             past_60_count(&serde_json::json!({"details": []})).expect("count"),
             0

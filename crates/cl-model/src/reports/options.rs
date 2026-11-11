@@ -232,6 +232,10 @@ pub struct ReportOptions {
     /// Header.
     #[serde(default)]
     pub header: HeaderOptions,
+    /// Agings: show names whose every column is zero (QA-7; hidden by
+    /// default, a display choice only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_zero_rows: bool,
 }
 
 impl ReportOptions {
@@ -253,6 +257,7 @@ impl ReportOptions {
             sort: None,
             collapsed: Vec::new(),
             header: HeaderOptions::default(),
+            show_zero_rows: false,
         }
     }
 

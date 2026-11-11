@@ -274,12 +274,12 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         });
     }
     if let Some(m) = w.ask.message {
-        ui.horizontal_wrapped(|ui| {
-            form::inline_warning(ui, tokens, &t(m));
-            if m == "reports.ask.ai_off" && ui.link(t("reports.ask.open_settings")).clicked() {
-                settings = true;
-            }
-        });
+        // The message, then its link on a line of its own (QA-15); the
+        // message isn't a focus stop.
+        form::inline_note(ui, tokens, &t(m));
+        if m == "reports.ask.ai_off" && ui.link(t("reports.ask.open_settings")).clicked() {
+            settings = true;
+        }
     }
     if let Some(e) = &w.ask.error {
         form::inline_error(ui, tokens, e);
