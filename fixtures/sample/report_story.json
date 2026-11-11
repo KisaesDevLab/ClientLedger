@@ -58,6 +58,18 @@
       "kind": "deposit_held", "id": "D1", "date": "2026-11-28", "client": "Hollister Family Trust", "amount": "500.00"
     },
     {
+      "kind": "bill", "id": "BINV1", "date": "2026-11-26", "due": "2026-12-26", "vendor": "Table Rock Nursery",
+      "number": "TRN-5590",
+      "lines": [{ "account": "inventory", "item": "Boxwood 3 gal", "quantity": "20", "unitPrice": "18.50", "amount": "370.00" }]
+    },
+    {
+      "kind": "reconcile", "id": "REC1", "date": "2026-11-30"
+    },
+    {
+      "kind": "invoice", "id": "IINV1", "date": "2026-12-04", "client": "Riverbend HOA",
+      "lines": [{ "account": "4000", "item": "Boxwood 3 gal", "quantity": "6" }]
+    },
+    {
       "kind": "pay_bills", "id": "BP1", "date": "2026-12-02",
       "bills": [
         { "bill": "B1", "cash": "1180.40" },
@@ -105,8 +117,8 @@
     },
     {
       "kind": "check", "id": "CHK2", "date": "2026-12-10", "vendor": "Thunder Ridge Subcontracting", "number": "5002",
-      "memo": "Retaining wall labor",
-      "lines": [{ "account": "5000", "amount": "750.00" }]
+      "memo": "Equipment repair labor",
+      "lines": [{ "account": "6350", "amount": "750.00" }]
     },
     {
       "kind": "deposit", "id": "DEP1", "date": "2026-12-11", "memo": "Owner contribution",
@@ -120,7 +132,8 @@
       ]
     }
   ],
-  "form1099": { "formBox": "NEC-1", "accounts": ["5000"], "vendors": ["Thunder Ridge Subcontracting"] },
+  "inventory": { "name": "Boxwood 3 gal", "price": "45.00", "income": "4000", "cogs": "5100" },
+  "form1099": { "formBox": "NEC-1", "accounts": ["6350"], "vendors": ["Thunder Ridge Subcontracting"] },
   "budget": {
     "name": "2026 plan",
     "fiscalYear": 2026,

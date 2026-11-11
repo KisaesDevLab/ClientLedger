@@ -64,6 +64,16 @@ pub struct StoryLine {
     /// Tag name.
     #[serde(default)]
     pub tag: Option<String>,
+    /// The story's inventory part (an item line instead of an account
+    /// line; `account` is then ignored).
+    #[serde(default)]
+    pub item: Option<String>,
+    /// The item line's quantity.
+    #[serde(default)]
+    pub quantity: Option<Quantity>,
+    /// A bill item line's unit cost (its amount is `amount`).
+    #[serde(default)]
+    pub unit_price: Option<Money>,
 }
 
 /// An application of a payment, bill payment or credit.
@@ -147,9 +157,26 @@ pub struct ReportStory {
     /// the engine has `budgets-exact-v1`.
     #[serde(default)]
     pub budget: Option<StoryBudget>,
+    /// An inventory part made before the steps (inventory turned on).
+    #[serde(default)]
+    pub inventory: Option<StoryItem>,
     /// 1099 setup made before the steps (the 1099 goldens' vendors).
     #[serde(default)]
     pub form1099: Option<Story1099>,
+}
+
+/// An inventory part: its name, sales price, and income and COGS accounts.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryItem {
+    /// Name.
+    pub name: String,
+    /// Sales price.
+    pub price: Money,
+    /// Income account number.
+    pub income: String,
+    /// Cost of goods sold account number.
+    pub cogs: String,
 }
 
 /// 1099 setup: accounts mapped to one form box and the vendors marked
@@ -293,6 +320,20 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
     if let Some(f) = &story.form1099 {
         post_1099(session, &names, f).await?;
     }
+    let mut item_ids: HashMap<String, (cl_core::ids::ItemId, AccountId)> = HashMap::new();
+    if let Some(i) = &story.inventory {
+        let made = post_item(session, &names, i).await?;
+        item_ids.insert(i.name.clone(), made);
+    }
+    let part = |l: &StoryLine| -> Result<Option<(cl_core::ids::ItemId, AccountId, Quantity)>, CompanyError> {
+        match &l.item {
+            None => Ok(None),
+            Some(n) => {
+                let (id, asset) = item_ids.get(n).copied().ok_or_else(|| missing(n))?;
+                Ok(Some((id, asset, l.quantity.ok_or_else(|| missing(n))?)))
+            }
+        }
+    };
     let one = Quantity::parse_wire("1").map_err(|_| missing("quantity"))?;
     let plain = PostingOptions::default();
     for s in &story.steps {
@@ -300,11 +341,14 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
             "invoice" | "credit_memo" => {
                 let mut lines = Vec::new();
                 for l in &s.lines {
-                    let mut x = InvoiceLine::account(
-                        names.account(&l.account)?,
-                        one,
-                        amount(l.amount, &s.id)?,
-                    );
+                    let mut x = match part(l)? {
+                        Some((item, _, q)) => InvoiceLine::item(item, q),
+                        None => InvoiceLine::account(
+                            names.account(&l.account)?,
+                            one,
+                            amount(l.amount, &s.id)?,
+                        ),
+                    };
                     x.tag_id = tag(l)?;
                     lines.push(x);
                 }
@@ -403,7 +447,15 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                 for l in &s.lines {
                     let a = amount(l.amount, &s.id)?;
                     total = total.checked_add(a).map_err(|_| missing(&s.id))?;
-                    let mut x = BillLineDraft::expense(names.account(&l.account)?, a);
+                    let mut x = match part(l)? {
+                        Some((item, asset, q)) => BillLineDraft {
+                            item: Some(item),
+                            quantity: Some(q),
+                            unit_price: l.unit_price,
+                            ..BillLineDraft::expense(asset, a)
+                        },
+                        None => BillLineDraft::expense(names.account(&l.account)?, a),
+                    };
                     x.tag = tag(l)?;
                     lines.push(x);
                 }
@@ -571,6 +623,10 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
                     .record
                     .id
             }
+            "reconcile" => {
+                reconcile(session, names.account("1010")?, s.date).await?;
+                continue;
+            }
             "deposit" => {
                 let mut lines = Vec::new();
                 for l in &s.lines {
@@ -611,6 +667,95 @@ pub async fn post(session: &Session, story: &ReportStory) -> Result<Posted, Comp
         posted.budget_id = Some(post_budget(session, &names, b).await?);
     }
     Ok(posted)
+}
+
+/// Turns inventory on and makes the story's part (the engine's Inventory
+/// Asset account holds it); answers its id and asset account.
+async fn post_item(
+    session: &Session,
+    names: &Names,
+    i: &StoryItem,
+) -> Result<(cl_core::ids::ItemId, AccountId), CompanyError> {
+    session
+        .set_inventory_enabled(true, IdempotencyKey::new())
+        .await?;
+    let asset = session
+        .accounts()
+        .list_all(&AccountFilter::default())
+        .await?
+        .into_iter()
+        .find(|a| a.system_tag.as_deref() == Some("inventory_asset"))
+        .ok_or_else(|| missing("inventory_asset"))?
+        .id;
+    let fields = cl_api::ItemFields {
+        purchase: cl_api::ItemPurchase {
+            asset_account_id: Some(asset),
+            cogs_account_id: Some(names.account(&i.cogs)?),
+            ..cl_api::ItemPurchase::default()
+        },
+        name: i.name.clone(),
+        description: None,
+        unit_price: Some(i.price),
+        income_account_id: names.account(&i.income)?,
+        is_taxable: false,
+        item_type: cl_api::ItemType::InventoryPart,
+        discount_percent: None,
+        tax_code_id: None,
+    };
+    let made = session
+        .items()
+        .create(&fields, IdempotencyKey::new())
+        .await?
+        .record
+        .id;
+    Ok((made, asset))
+}
+
+/// Reconciles `account` through `date`: every line on or before it is
+/// ticked and the statement balance is the cleared balance the engine
+/// works out (a synthetic statement), then the reconciliation finishes
+/// (the closed period's lines with the practice password).
+async fn reconcile(
+    session: &Session,
+    account: AccountId,
+    date: CalendarDate,
+) -> Result<(), CompanyError> {
+    use cl_api::resources::reconciliations::{LINES_MAX, ReconPatch, ReconStart};
+    let r = session.reconciliations();
+    let started = r
+        .start(&ReconStart {
+            account,
+            statement_date: date,
+            statement_ending_balance: Money::ZERO,
+            service_charge: None,
+            interest: None,
+        })
+        .await?;
+    let full = r.get(started.id).await?;
+    let ticks: Vec<_> = full
+        .lines
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| !l.cleared && !l.after_statement_date && l.date <= date)
+        .map(|l| (l.journal_line, true))
+        .collect();
+    let mut at = started;
+    for chunk in ticks.chunks(LINES_MAX) {
+        at = r.tick(at.id, chunk).await?;
+    }
+    r.patch(
+        at.id,
+        &ReconPatch {
+            statement_ending_balance: Some(at.cleared_balance),
+            ..ReconPatch::default()
+        },
+    )
+    .await?;
+    let auth = ClosedPeriodAuthorization::with_password(Secret::new(
+        crate::sample::SAMPLE_CLOSING_PASSWORD,
+    ));
+    r.complete(at.id, Some(&auth)).await?;
+    Ok(())
 }
 
 /// Maps the 1099 accounts to their box and marks the vendors eligible
