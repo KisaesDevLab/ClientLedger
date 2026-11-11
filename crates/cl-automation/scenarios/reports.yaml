@@ -5,7 +5,9 @@
 # amount (October's Fuel) drills to the ledger behind it and a ledger
 # amount opens its form (the first line, a check, in Write Check);
 # Memorize keeps the report under Memorized; Export CSV writes the file.
-# A/R Aging and Sales Tax Liability still run. Synthetic.
+# Sales Tax Liability still runs (A/R Aging has its own scenario: opening
+# it seeds P22's 10/01 credit memo, which would move October off the
+# mockup's figures for the compare run). Synthetic.
 name: reports
 description: Profit & Loss with % of income and YTD, basis, Month columns, drill, open a form, memorize, export.
 steps:
@@ -80,10 +82,6 @@ steps:
   - wait: {ms: 500}
   - assert_state: {key: screen.export.ok, equals: true}
   # --- The reports that ran before WP5 ---------------------------------------
-  - click: {label: A/R Aging, index: 0}
-  - wait: {ms: 300}
-  - assert_state: {key: screen.report, equals: ar_aging_summary}
-  - assert_state: {key: screen.state, equals: shown}
   - click: {label: Sales Tax Liability, index: 0}
   - wait: {ms: 300}
   - assert_state: {key: screen.report, equals: sales_tax_liability}
