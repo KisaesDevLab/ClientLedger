@@ -445,15 +445,15 @@ POST    /api/v1/banking/reconciliations/{id}/undo pre-handler-only
 POST    /api/v1/banking/reconciliations/{id}/cancel pre-handler-only
 GET     /api/v1/reports/reconciliation-detail   idempotent
 GET     /api/v1/reports/reconciliation-discrepancy idempotent
-# P28: memorized reports (U-118, report-defs-v1; not keyed, 409 NAME_TAKEN / STALE_VERSION guard a retry)
+# P28: memorized reports (U-118, report-defs-v1; creates and changes keyed under report-defs-v1)
 GET     /api/v1/report-builder/definitions      idempotent
-POST    /api/v1/report-builder/definitions      pre-handler-only
+POST    /api/v1/report-builder/definitions      keyable-report-defs
 GET     /api/v1/report-builder/definitions/{id} idempotent
-PUT     /api/v1/report-builder/definitions/{id} pre-handler-only
+PUT     /api/v1/report-builder/definitions/{id} keyable-report-defs
 DELETE  /api/v1/report-builder/definitions/{id} pre-handler-only
 GET     /api/v1/report-builder/definition-groups idempotent
-POST    /api/v1/report-builder/definition-groups pre-handler-only
-PUT     /api/v1/report-builder/definition-groups/{id} pre-handler-only
+POST    /api/v1/report-builder/definition-groups keyable-report-defs
+PUT     /api/v1/report-builder/definition-groups/{id} keyable-report-defs
 DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only
 # P28 WP2: exact statements and ledgers (U-14, reports-exact-v1)
 GET     /api/v1/reports/general-ledger          idempotent

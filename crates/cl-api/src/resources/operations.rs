@@ -56,6 +56,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::RecoveryV1) => "keyable-recovery",
             RetryClass::Keyable(KeySet::InventoryV1) => "keyable-inventory",
             RetryClass::Keyable(KeySet::UnitSetsV1) => "keyable-unit-sets",
+            RetryClass::Keyable(KeySet::ReportDefsV1) => "keyable-report-defs",
             RetryClass::Keyable(KeySet::BankImportV1) => "keyable-bank-import",
             RetryClass::Keyable(KeySet::FeedV1) => "keyable-feed",
             RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
@@ -137,6 +138,9 @@ pub enum KeySet {
     /// Keyed under `units-of-measure-v1` (U-161, P24) with `idempotency-v1`'s
     /// contract: creating a unit set.
     UnitSetsV1,
+    /// Keyed under `report-defs-v1` (U-118, P28) with `idempotency-v1`'s
+    /// contract: creating and changing memorized reports and their groups.
+    ReportDefsV1,
     /// `bank-import-batch-v1` (U-06, P25): a bank import commit (its
     /// preview on the same route takes no key, [`crate::client`] `no_key`)
     /// and undoing an import.
@@ -180,6 +184,7 @@ impl KeySet {
             KeySet::RecoveryV1 => crate::wire::Capabilities::IDEMPOTENCY_RECOVERY,
             KeySet::InventoryV1 => crate::wire::Capabilities::INVENTORY_ADJUST,
             KeySet::UnitSetsV1 => crate::wire::Capabilities::UNITS_OF_MEASURE,
+            KeySet::ReportDefsV1 => crate::wire::Capabilities::REPORT_DEFS,
             KeySet::BankImportV1 => crate::wire::Capabilities::BANK_IMPORT_BATCH,
             KeySet::FeedV1 => crate::wire::Capabilities::FEED_IDEMPOTENCY,
             KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
@@ -1660,13 +1665,19 @@ pub(crate) const UNIT_SET_DELETE: Operation = write(Method::Delete, "/api/v1/uni
 /// Memorized reports.
 pub(crate) const REPORT_DEFS_LIST: Operation = read("/api/v1/report-builder/definitions");
 /// Memorizes a report.
-pub(crate) const REPORT_DEFS_CREATE: Operation =
-    write(Method::Post, "/api/v1/report-builder/definitions");
+pub(crate) const REPORT_DEFS_CREATE: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Post,
+    "/api/v1/report-builder/definitions",
+);
 /// One memorized report.
 pub(crate) const REPORT_DEF_GET: Operation = read("/api/v1/report-builder/definitions/{id}");
 /// Saves changes to a memorized report (`version`).
-pub(crate) const REPORT_DEF_PUT: Operation =
-    write(Method::Put, "/api/v1/report-builder/definitions/{id}");
+pub(crate) const REPORT_DEF_PUT: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Put,
+    "/api/v1/report-builder/definitions/{id}",
+);
 /// Deletes a memorized report (`version`).
 pub(crate) const REPORT_DEF_DELETE: Operation =
     write(Method::Delete, "/api/v1/report-builder/definitions/{id}");
@@ -1674,11 +1685,17 @@ pub(crate) const REPORT_DEF_DELETE: Operation =
 pub(crate) const REPORT_DEF_GROUPS_LIST: Operation =
     read("/api/v1/report-builder/definition-groups");
 /// Adds a group.
-pub(crate) const REPORT_DEF_GROUPS_CREATE: Operation =
-    write(Method::Post, "/api/v1/report-builder/definition-groups");
+pub(crate) const REPORT_DEF_GROUPS_CREATE: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Post,
+    "/api/v1/report-builder/definition-groups",
+);
 /// Renames or moves a group (`version`).
-pub(crate) const REPORT_DEF_GROUP_PUT: Operation =
-    write(Method::Put, "/api/v1/report-builder/definition-groups/{id}");
+pub(crate) const REPORT_DEF_GROUP_PUT: Operation = keyable_in(
+    KeySet::ReportDefsV1,
+    Method::Put,
+    "/api/v1/report-builder/definition-groups/{id}",
+);
 /// Deletes a group; its reports move to no group (`version`).
 pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
     Method::Delete,
@@ -2218,6 +2235,8 @@ mod tests {
                 Some(KeySet::InventoryV1)
             } else if KEYABLE_UNIT_SETS.contains(&route) {
                 Some(KeySet::UnitSetsV1)
+            } else if KEYABLE_REPORT_DEFS.contains(&route) {
+                Some(KeySet::ReportDefsV1)
             } else if KEYABLE_BANK_IMPORT.contains(&route) {
                 Some(KeySet::BankImportV1)
             } else if KEYABLE_FEED.contains(&route) {
@@ -2267,6 +2286,7 @@ mod tests {
                 + KEYABLE_RECOVERY.len()
                 + KEYABLE_INVENTORY.len()
                 + KEYABLE_UNIT_SETS.len()
+                + KEYABLE_REPORT_DEFS.len()
                 + KEYABLE_BANK_IMPORT.len()
                 + KEYABLE_FEED.len()
                 + KEYABLE_FEED_POST.len()
@@ -2431,6 +2451,13 @@ mod tests {
     ];
 
     const KEYABLE_UNIT_SETS: [(&str, &str); 1] = [("POST", "/api/v1/unit-sets")];
+
+    const KEYABLE_REPORT_DEFS: [(&str, &str); 4] = [
+        ("POST", "/api/v1/report-builder/definitions"),
+        ("PUT", "/api/v1/report-builder/definitions/{id}"),
+        ("POST", "/api/v1/report-builder/definition-groups"),
+        ("PUT", "/api/v1/report-builder/definition-groups/{id}"),
+    ];
 
     const KEYABLE_BANK_IMPORT: [(&str, &str); 2] = [
         ("POST", "/api/v1/banking/feed/import-batch"),

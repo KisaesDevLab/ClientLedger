@@ -313,6 +313,9 @@ pub(crate) struct Executor {
     /// The engine replays keys on unit-set creation (`units-of-measure-v1`,
     /// U-161).
     unit_sets_v1: AtomicBool,
+    /// The engine replays keys on memorized-report writes (`report-defs-v1`,
+    /// U-118).
+    report_defs_v1: AtomicBool,
     bank_import_v1: AtomicBool,
     feed_v1: AtomicBool,
     feed_post_v1: AtomicBool,
@@ -384,6 +387,7 @@ impl Executor {
             idempotency_recovery_v1: AtomicBool::new(false),
             idempotency_inventory_v1: AtomicBool::new(false),
             unit_sets_v1: AtomicBool::new(false),
+            report_defs_v1: AtomicBool::new(false),
             bank_import_v1: AtomicBool::new(false),
             feed_v1: AtomicBool::new(false),
             feed_post_v1: AtomicBool::new(false),
@@ -485,6 +489,12 @@ impl Executor {
         self.unit_sets_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `report-defs-v1` (its
+    /// memorized-report writes replay keys; U-118, P28).
+    pub(crate) fn set_report_defs_v1(&self, on: bool) {
+        self.report_defs_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises `bank-import-batch-v1` (its
     /// import commit and undo replay keys; U-06, P25).
     pub(crate) fn set_bank_import_v1(&self, on: bool) {
@@ -541,6 +551,7 @@ impl Executor {
             KeySet::RecoveryV1 => self.idempotency_recovery_v1.load(Ordering::Relaxed),
             KeySet::InventoryV1 => self.idempotency_inventory_v1.load(Ordering::Relaxed),
             KeySet::UnitSetsV1 => self.unit_sets_v1.load(Ordering::Relaxed),
+            KeySet::ReportDefsV1 => self.report_defs_v1.load(Ordering::Relaxed),
             KeySet::BankImportV1 => self.bank_import_v1.load(Ordering::Relaxed),
             KeySet::FeedV1 => self.feed_v1.load(Ordering::Relaxed),
             KeySet::FeedPostV1 => self.feed_post_v1.load(Ordering::Relaxed),

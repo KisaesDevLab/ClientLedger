@@ -23,6 +23,10 @@ fn opt_text(v: &Value, key: &str) -> Cell {
 }
 
 /// The Journal over `range`.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one pass: heading, lines, totals per transaction"
+)]
 ///
 /// # Errors
 /// [`ApiError::ReportShape`] when an exact field is missing.
