@@ -47,3 +47,4 @@ pub mod units;
 pub use commands::{COMMANDS, Command, CommandId, Menu};
 pub use keymap::{EnterMode, Key, Keymap, KeymapError, Mods, Scope, Shortcut};
 pub use text::TextKey;
+pub mod report_def;

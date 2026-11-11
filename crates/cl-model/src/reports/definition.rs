@@ -82,6 +82,64 @@ impl StandardDefinition {
     }
 }
 
+/// A memorized report of either kind, routed on its `kind` (A07).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Memorized {
+    /// A catalog report with options.
+    Standard(Box<StandardDefinition>),
+    /// A Report Builder definition.
+    Builder(Box<crate::report_def::BuilderDefinition>),
+}
+
+/// Why a memorized report can't be opened.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum MemorizedError {
+    /// A standard definition's problem.
+    #[error(transparent)]
+    Standard(#[from] DefinitionError),
+    /// A builder definition's problem.
+    #[error(transparent)]
+    Builder(#[from] crate::report_def::DefinitionError),
+    /// Neither kind, or not readable.
+    #[error("this memorized report can't be read")]
+    Unreadable,
+}
+
+impl MemorizedError {
+    /// Saved by a newer version of the app (either kind).
+    #[must_use]
+    pub const fn is_newer(&self) -> bool {
+        matches!(
+            self,
+            MemorizedError::Standard(DefinitionError::Newer)
+                | MemorizedError::Builder(crate::report_def::DefinitionError::Newer)
+        )
+    }
+}
+
+/// Reads a stored definition body: `standard` goes to
+/// [`StandardDefinition`], `builder` through the strict schema v1 parse.
+///
+/// # Errors
+/// [`MemorizedError`].
+pub fn read_memorized(body: &serde_json::Value) -> Result<Memorized, MemorizedError> {
+    match body.get("kind").and_then(serde_json::Value::as_str) {
+        Some("standard") => {
+            let def: StandardDefinition =
+                serde_json::from_value(body.clone()).map_err(|_| MemorizedError::Unreadable)?;
+            def.check()?;
+            Ok(Memorized::Standard(Box::new(def)))
+        }
+        Some("builder") => {
+            let text = serde_json::to_string(body).map_err(|_| MemorizedError::Unreadable)?;
+            Ok(Memorized::Builder(Box::new(crate::report_def::parse(
+                &text,
+            )?)))
+        }
+        _ => Err(MemorizedError::Unreadable),
+    }
+}
+
 /// `^[a-z0-9_]{1,64}$`.
 #[must_use]
 pub fn valid_key(k: &str) -> bool {
@@ -189,6 +247,32 @@ mod tests {
         v["reportKey"] = serde_json::json!("Profit-Loss");
         let def: StandardDefinition = serde_json::from_value(v).expect("parse");
         assert_eq!(def.check(), Err(DefinitionError::UnknownReport));
+    }
+
+    #[test]
+    fn memorized_bodies_route_on_their_kind() {
+        assert!(matches!(
+            read_memorized(&fixture()),
+            Ok(Memorized::Standard(_))
+        ));
+        let builder: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/report_def/ar_aging_summary.json"
+        ))
+        .expect("json");
+        assert!(matches!(
+            read_memorized(&builder),
+            Ok(Memorized::Builder(_))
+        ));
+        let mut newer = builder.clone();
+        newer["schemaVersion"] = serde_json::json!(9);
+        assert!(read_memorized(&newer).expect_err("newer").is_newer());
+        let mut newer = fixture();
+        newer["schemaVersion"] = serde_json::json!(9);
+        assert!(read_memorized(&newer).expect_err("newer").is_newer());
+        assert_eq!(
+            read_memorized(&serde_json::json!({"kind": "chart"})),
+            Err(MemorizedError::Unreadable)
+        );
     }
 
     #[test]

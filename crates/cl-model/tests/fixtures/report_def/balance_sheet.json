@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "builder",
+  "title": "Balance Sheet",
+  "dates": { "mode": "asOf", "preset": "end_of_last_month" },
+  "basis": "accrual",
+  "adjusting": "include",
+  "columns": { "detailFields": [], "compare": [], "headers": {} },
+  "nodes": [
+    {
+      "type": "section",
+      "id": "sheet",
+      "caption": "Balance Sheet",
+      "source": "gl",
+      "measure": "balance",
+      "polarity": "natural",
+      "filters": [{ "field": "adjusting", "op": "eq", "value": "include" }],
+      "groupBy": [{ "key": "account_type" }, { "key": "account" }],
+      "display": "expandable",
+      "defaultExpanded": true,
+      "showTotal": true,
+      "hideZero": true,
+      "earnings": "balance_sheet"
+    }
+  ]
+}

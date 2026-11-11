@@ -150,6 +150,11 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
                 options: Some(o),
             }))
         }
+        // Report Builder drills page the engine's detail inside the
+        // builder window (A07 WP2), never through a catalog report.
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. } => {
+            Target::Nothing("reports.drill.no_form")
+        }
     }
 }
 
