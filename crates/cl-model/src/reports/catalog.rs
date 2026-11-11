@@ -78,12 +78,9 @@ const LEDGER_FILTERS: &[FilterKind] = &[
     FilterKind::TxnTypes,
     FilterKind::Adjusting,
 ];
-const STATEMENT_FILTERS: &[FilterKind] = &[
-    FilterKind::Accounts,
-    FilterKind::Contacts,
-    FilterKind::Tags,
-    FilterKind::Adjusting,
-];
+/// The statements' routes filter by tag and the adjusting lens only; an
+/// account or name filter is the ledger's (Q-P28ah).
+const STATEMENT_FILTERS: &[FilterKind] = &[FilterKind::Tags, FilterKind::Adjusting];
 
 /// A P&L-like statement.
 const STATEMENT: ReportSpec = ReportSpec {
@@ -137,7 +134,8 @@ const OPEN_ITEMS: ReportSpec = ReportSpec {
     columns: &[ColumnBy::Total],
     default_extras: &[],
     extras: &[],
-    filters: &[FilterKind::Contacts],
+    // Only the aging details narrow by name (Q-P28ah).
+    filters: &[],
     tag_split: false,
     sort: SortMode::WithinGroups,
     drill: DrillRule::Transaction,
@@ -299,6 +297,7 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "ar_aging_detail",
         title: "reports.title.ar_aging_detail",
         source: Source::ArAgingDetail,
+        filters: &[FilterKind::Contacts],
         capabilities: &[caps::AR_AGING],
         ..OPEN_ITEMS
     },
@@ -360,6 +359,7 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "ap_aging_detail",
         title: "reports.title.ap_aging_detail",
         source: Source::ApAgingDetail,
+        filters: &[FilterKind::Contacts],
         capabilities: &[caps::EXACT, caps::AP_AGING],
         ..OPEN_ITEMS
     },
@@ -386,7 +386,8 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "sales_by_client",
         title: "reports.title.sales_by_client",
         source: Source::SalesByCustomer,
-        filters: &[FilterKind::Contacts, FilterKind::Adjusting],
+        // The route takes the adjusting lens, not a client (Q-P28ah).
+        filters: &[FilterKind::Adjusting],
         drill: DrillRule::Lines,
         capabilities: &[caps::EXACT, caps::DRILL],
         ..LIST
@@ -395,7 +396,8 @@ pub static CATALOG: &[ReportSpec] = &[
         key: "sales_by_item",
         title: "reports.title.sales_by_item",
         source: Source::SalesByItem,
-        filters: &[FilterKind::Items, FilterKind::Adjusting],
+        // The route takes the adjusting lens, not an item (Q-P28ah).
+        filters: &[FilterKind::Adjusting],
         drill: DrillRule::Lines,
         capabilities: &[caps::EXACT, caps::DRILL],
         ..LIST

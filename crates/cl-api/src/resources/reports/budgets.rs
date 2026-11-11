@@ -148,7 +148,15 @@ pub fn budget_refusal(e: &ApiError) -> Option<BudgetRefusal> {
         ApiError::Conflict { code: Some(c), .. } if c.as_str() == "STALE_VERSION" => {
             Some(BudgetRefusal::Stale)
         }
-        ApiError::Conflict { .. } => Some(BudgetRefusal::YearTaken),
+        // The engine's "a budget for this year already exists" has no code
+        // of its own; an idempotency or busy 409 is not that (S10).
+        ApiError::Conflict {
+            reason: ConflictReason::AlreadyExists,
+            ..
+        } => Some(BudgetRefusal::YearTaken),
+        ApiError::Conflict { code: None, reason, .. } if *reason != ConflictReason::Busy => {
+            Some(BudgetRefusal::YearTaken)
+        }
         ApiError::Validation(v)
             if v.code()
                 .is_some_and(|c| c.as_str() == "BUDGET_LINE_INVALID") =>

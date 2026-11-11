@@ -376,3 +376,83 @@ fn exports_carry_the_tag_labels_and_the_total_choice() {
     assert!(!text.contains("10/6100"), "{text}");
     assert!(text.contains("Total Repairs"), "{text}");
 }
+
+/// B3, Q-P28ah: every filter a report offers reaches its route (it changes
+/// the query, or the list's narrowing), and none of them makes the window
+/// say "Needs an engine update" on an engine with every capability. So no
+/// filter is shown and then ignored, and Ask (which offers the same
+/// filters) never maps to a dead end.
+#[test]
+fn every_offered_filter_changes_what_runs() {
+    use cl_api::resources::reports::{list_run, run};
+    use cl_model::reports::{AmountFilter, CATALOG, FilterKind, resolve};
+    let fiscal = cl_core::fiscal::FiscalYearSpec::CALENDAR_YEAR;
+    let acc = cl_core::ids::AccountId::parse("11111111-1111-4111-8111-111111111111").expect("id");
+    let con = cl_core::ids::ContactId::parse("22222222-2222-4222-8222-222222222222").expect("id");
+    let tag = cl_core::ids::TagId::parse("33333333-3333-4333-8333-333333333333").expect("id");
+    let item = cl_core::ids::ItemId::parse("44444444-4444-4444-8444-444444444444").expect("id");
+    let query = |req: &cl_core::report::ReportRequest| {
+        run::exact_query(req)
+            .or_else(|_| list_run::query(req))
+            .unwrap_or_default()
+    };
+    for spec in CATALOG {
+        let mut base = ReportOptions::for_spec(spec);
+        base.column_tag_group_id = Some(
+            cl_core::ids::TagGroupId::parse("55555555-5555-4555-8555-555555555555").expect("id"),
+        );
+        // The pickers a report waits for.
+        if spec.filters.contains(&FilterKind::Vendor) {
+            base.filters.contact_ids = vec![con];
+        }
+        if spec.filters.contains(&FilterKind::BankAccount) {
+            base.filters.account_ids = vec![acc];
+        }
+        for k in spec.filters {
+            let mut o = base.clone();
+            match k {
+                FilterKind::Vendor | FilterKind::BankAccount | FilterKind::Budget => continue,
+                FilterKind::Accounts => o.filters.account_ids = vec![acc],
+                FilterKind::Contacts => o.filters.contact_ids = vec![con],
+                FilterKind::Tags => o.filters.tag_ids = vec![tag],
+                FilterKind::Items => o.filters.item_ids = vec![item],
+                FilterKind::Amount => {
+                    o.filters.amount = Some(AmountFilter {
+                        min: Some("10.0000".into()),
+                        max: None,
+                    });
+                }
+                FilterKind::Cleared => o.filters.cleared = Some(cl_core::report::Cleared::Cleared),
+                FilterKind::TxnTypes => o.filters.txn_types = vec!["expense".into()],
+                FilterKind::Adjusting => {
+                    o.filters.adjusting = Some(cl_core::report::Adjusting::Exclude);
+                }
+            }
+            let req = resolve(spec, &o, &fiscal, today()).expect(spec.key);
+            assert_eq!(
+                run::missing_capability(&req, |_| true),
+                None,
+                "{} {k:?} needs no engine update",
+                spec.key
+            );
+            let before = resolve(spec, &base, &fiscal, today()).expect(spec.key);
+            let changed = query(&req) != query(&before)
+                // Item filters go to the inventory route's own argument,
+                // the aging details narrow their rows by name.
+                || (*k == FilterKind::Items && spec.source == Source::InventoryValuationDetail)
+                || (*k == FilterKind::Contacts
+                    && matches!(spec.source, Source::ArAgingDetail | Source::ApAgingDetail));
+            assert!(changed, "{} {k:?} reaches the route", spec.key);
+        }
+    }
+}
+
+/// S3: a payee or memo that starts with `@` shows as typed; app keys still
+/// translate.
+#[test]
+fn owner_text_starting_with_at_is_not_a_key() {
+    assert_eq!(label("@Home Depot"), "@Home Depot");
+    assert_eq!(label("@home"), "@home");
+    assert_eq!(label("Plain"), "Plain");
+    assert_ne!(label("@reports.empty"), "@reports.empty");
+}

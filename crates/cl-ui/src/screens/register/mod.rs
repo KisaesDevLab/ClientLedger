@@ -20,6 +20,7 @@
 mod dialogs;
 mod docs;
 mod edit;
+pub(crate) use edit::form_for;
 pub mod entry_row;
 pub mod filters;
 pub mod footer;

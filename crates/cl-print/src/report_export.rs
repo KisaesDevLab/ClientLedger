@@ -60,13 +60,29 @@ fn exact(d: Decimal) -> String {
     n.to_string()
 }
 
+/// A date as the app shows it (MM/DD/YYYY), in every export (QA-9).
+fn us_date(d: cl_core::CalendarDate) -> String {
+    format!("{:02}/{:02}/{}", d.month(), d.day(), d.year())
+}
+
+/// Text a spreadsheet would read as a formula (`=`, `+`, `-`, `@`, a tab
+/// or a carriage return first) gets a leading apostrophe, so an owner's
+/// payee or memo never runs as one when the CSV is opened. Only text
+/// cells: amounts keep their exact strings.
+fn neutral(s: String) -> String {
+    match s.trim_start_matches(' ').chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{s}"),
+        _ => s,
+    }
+}
+
 fn csv_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {
     match c {
         Cell::Empty | Cell::Percent(None) => String::new(),
-        Cell::Text(s) => label(tr, s),
+        Cell::Text(s) => neutral(label(tr, s)),
         Cell::Amount(d) => exact(*d),
         Cell::Percent(Some(d)) | Cell::Quantity(d) => canonical_decimal(*d),
-        Cell::Date(d) => d.to_wire(),
+        Cell::Date(d) => us_date(*d),
         Cell::Count(n) => n.to_string(),
     }
 }
@@ -74,18 +90,42 @@ fn csv_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {
 /// The owner's CSV: a heading line, then one line per row with the caption
 /// indented two spaces per level and the exact figures.
 #[must_use]
-pub fn to_csv(t: &ReportTable, rows: &[usize], tr: &dyn Fn(&str) -> String) -> String {
+pub fn to_csv(
+    t: &ReportTable,
+    rows: &[usize],
+    head: &[String],
+    tr: &dyn Fn(&str) -> String,
+) -> String {
     let mut out = String::new();
-    let mut head = vec![String::new()];
-    head.extend(t.columns.iter().map(|c| label(tr, &c.caption)));
-    push_csv_line(&mut out, &head);
+    // The company, title, dates and basis, and any note, as in the
+    // workbook and the PDF (QA-6, S1), then a blank line.
+    for h in head {
+        push_csv_line(&mut out, &[neutral(h.clone())]);
+    }
+    if !head.is_empty() {
+        out.push('\n');
+    }
+    // A list without row captions has no empty first column (QA-9).
+    let captions = rows
+        .iter()
+        .filter_map(|&i| t.rows.get(i))
+        .any(|r| !label(tr, &r.caption).is_empty());
+    let mut heading = Vec::new();
+    if captions {
+        heading.push(String::new());
+    }
+    heading.extend(t.columns.iter().map(|c| neutral(label(tr, &c.caption))));
+    push_csv_line(&mut out, &heading);
     for &i in rows {
         let Some(r) = t.rows.get(i) else { continue };
-        let mut line = vec![format!(
-            "{}{}",
-            "  ".repeat(usize::from(r.level)),
-            label(tr, &r.caption)
-        )];
+        let mut line = Vec::new();
+        if captions {
+            line.push(neutral(format!(
+                "{}{}",
+                "  ".repeat(usize::from(r.level)),
+                label(tr, &r.caption)
+            )));
+        }
         line.extend(r.cells.iter().map(|c| csv_cell(c, tr)));
         push_csv_line(&mut out, &line);
     }
@@ -161,7 +201,7 @@ pub fn to_xlsx(
                     ws.write_string(r, col, label(tr, s))?;
                 }
                 Cell::Date(d) => {
-                    ws.write_string(r, col, d.to_wire())?;
+                    ws.write_string(r, col, us_date(*d))?;
                 }
                 Cell::Count(n) => {
                     // A count up to u32::MAX is exact in an f64; larger as text.
@@ -347,10 +387,61 @@ mod tests {
     #[test]
     fn csv_has_exact_figures_and_no_separators() {
         let t = table();
-        let csv = to_csv(&t, &[0, 2], &tr);
+        let csv = to_csv(&t, &[0, 2], &[], &tr);
         assert_eq!(
             csv,
             ",Total,reports.col.pct\n  4000 · Installation,38420.50,63.7\nNet income,-0.10,0\n"
+        );
+    }
+
+    /// QA-6, QA-9 and the formula nit: header lines first, dates as the app
+    /// shows them, no empty first column on a list, and text that a
+    /// spreadsheet would run as a formula is neutralised (amounts aren't).
+    #[test]
+    fn csv_has_a_header_us_dates_and_no_formulas() {
+        let t = ReportTable {
+            columns: vec![
+                ColumnHead {
+                    key: "date".into(),
+                    caption: "Date".into(),
+                    kind: ColumnKind::Date,
+                    range: None,
+                    drill: None,
+                },
+                ColumnHead {
+                    key: "name".into(),
+                    caption: "Name".into(),
+                    kind: ColumnKind::Text,
+                    range: None,
+                    drill: None,
+                },
+                ColumnHead {
+                    key: "amount".into(),
+                    caption: "Amount".into(),
+                    kind: ColumnKind::Amount,
+                    range: None,
+                    drill: None,
+                },
+            ],
+            rows: vec![ReportRow {
+                kind: RowKind::Detail,
+                level: 0,
+                path: RowPath::of(["r"]),
+                caption: String::new(),
+                cells: vec![
+                    Cell::Date(cl_core::CalendarDate::from_ymd(2026, 12, 5).expect("date")),
+                    Cell::Text("=HYPERLINK(1)".into()),
+                    Cell::Amount(d("-64.18")),
+                ],
+                drill: None,
+                expandable: false,
+            }],
+            meta: ReportMeta::default(),
+        };
+        let csv = to_csv(&t, &[0], &["Acme".into(), "Duplicates".into()], &tr);
+        assert_eq!(
+            csv,
+            "Acme\nDuplicates\n\nDate,Name,Amount\n12/05/2026,'=HYPERLINK(1),-64.18\n"
         );
     }
 

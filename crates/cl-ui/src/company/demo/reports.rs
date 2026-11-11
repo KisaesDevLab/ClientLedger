@@ -121,6 +121,12 @@ pub(crate) fn percent1(part: Decimal, base: Decimal) -> Option<String> {
 struct Lens {
     tags: Vec<TagId>,
     untagged_in: Option<BTreeSet<TagId>>,
+    /// The ledger's transaction types (the engine's names).
+    types: Vec<String>,
+    /// Line sizes |debit - credit| at least / at most (the demo's stand-in
+    /// for the engine's amount filter).
+    amount_min: Option<Decimal>,
+    amount_max: Option<Decimal>,
 }
 
 impl Lens {
@@ -128,12 +134,24 @@ impl Lens {
         Lens {
             tags: req.filters.tag_ids.clone(),
             untagged_in: req.filters.untagged_in_group.map(group_tags),
+            types: req.filters.txn_types.clone(),
+            amount_min: req.filters.amount_min,
+            amount_max: req.filters.amount_max,
         }
     }
 
     fn keeps(&self, p: &Post) -> bool {
         if !self.tags.is_empty() && !p.tag.is_some_and(|t| self.tags.contains(&t)) {
             return false;
+        }
+        if !self.types.is_empty() && !self.types.contains(&p.txn_type) {
+            return false;
+        }
+        if self.amount_min.is_some() || self.amount_max.is_some() {
+            let size = (p.debit - p.credit).abs();
+            if self.amount_min.is_some_and(|m| size < m) || self.amount_max.is_some_and(|m| size > m) {
+                return false;
+            }
         }
         match &self.untagged_in {
             Some(g) => !p.tag.is_some_and(|t| g.contains(&t)),

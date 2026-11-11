@@ -361,8 +361,8 @@ const fn extra_label(e: Extra) -> &'static str {
     }
 }
 
-/// Customize: the owner's title, the run time on or off, the adjusting
-/// lens. (Tag split and the id filters come with the engine update.)
+/// Customize: the owner's title, the run time on or off, the tag split,
+/// and the filters the report's route applies (B3, Q-P28ah).
 pub(super) fn options_panel(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut next = w.options.clone();
     form::card(ui, tokens, |ui| {
@@ -382,6 +382,7 @@ pub(super) fn options_panel(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) 
         if w.spec.tag_split {
             tag_split_options(w, ui, tokens, &mut next);
         }
+        super::filter_lists::ui(w, ui, tokens, &mut next);
         if ui.button(t("reports.customize.done")).clicked() {
             w.customize = false;
         }

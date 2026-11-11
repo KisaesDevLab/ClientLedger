@@ -90,6 +90,8 @@ pub struct ReportWindow {
     /// one of them (Transactions by Vendor, Vendor Statement, Check
     /// Register); loaded once, on the first such report.
     pub(super) picks: Picks,
+    /// The filters' pick lists and the amount filter's text (B3).
+    pub(super) filter_lists: super::filter_lists::FilterLists,
     /// The budgets panel (Budget vs. Actual).
     pub(super) budgets: super::budgets::BudgetPanel,
     /// The ask-a-question bar.
@@ -115,6 +117,10 @@ pub struct ReportWindow {
     pub(super) memo: super::memorized::Memo,
     /// A plain message (drill-down that has no target yet, export done).
     pub(super) notice: Option<String>,
+    /// A drill's read of the transaction it opens (QA-1).
+    pub(super) drill_job: Option<Job<super::drill::Opens>>,
+    pub(super) drill_id: Option<cl_core::ids::TransactionId>,
+    pub(super) drill_error: Option<ApiError>,
     bus: crate::data_bus::Subscription,
 }
 
@@ -166,6 +172,7 @@ impl ReportWindow {
         ));
         let mut w = ReportWindow {
             picks: Picks::default(),
+            filter_lists: super::filter_lists::FilterLists::default(),
             budgets: super::budgets::BudgetPanel::default(),
             ask: super::ask::AskBar::default(),
             mailer: super::email::Mailer::default(),
@@ -193,6 +200,9 @@ impl ReportWindow {
             export: super::export::Exporter::default(),
             memo: super::memorized::Memo::default(),
             notice: None,
+            drill_job: None,
+            drill_id: None,
+            drill_error: None,
             bus: crate::data_bus::Subscription::detached(),
             link,
         };
@@ -211,6 +221,7 @@ impl ReportWindow {
         self.error = None;
         self.notice = None;
         self.export.clear_message();
+        self.filter_lists.sync(&self.options);
         self.memo.current = None;
         self.run();
     }
@@ -414,6 +425,8 @@ impl ReportWindow {
                 }
             }
         }
+        super::filter_lists::poll(self);
+        super::drill::poll_probe(self);
         super::memorized::poll(self);
         super::budgets::poll(self);
         super::ask::poll(self);
@@ -562,6 +575,9 @@ impl ReportWindow {
         if let Some(n) = self.export.message() {
             form::hint(ui, tokens, &n);
         }
+        if let Some(e) = &self.drill_error {
+            form::inline_error_details(ui, tokens, e, "reports.drill");
+        }
         match self.state {
             RunState::Unavailable => {
                 form::inline_warning(ui, tokens, &t("reports.needs_update"));
@@ -577,7 +593,7 @@ impl ReportWindow {
             form::inline_warning(ui, tokens, &t(p));
         }
         if let Some(e) = &self.error {
-            form::inline_error(ui, tokens, e);
+            form::inline_error_details(ui, tokens, e, "reports.run");
             if ui.button(t("reports.retry")).clicked() {
                 self.run();
             }
@@ -953,6 +969,8 @@ impl Screen for ReportWindow {
             || self.budgets.busy()
             || self.ask.busy()
             || self.mailer.busy()
+            || self.filter_lists.busy()
+            || self.drill_job.is_some()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

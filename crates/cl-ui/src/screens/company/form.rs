@@ -503,6 +503,22 @@ pub fn inline_error(ui: &mut Ui, tokens: &Tokens, error: &dyn cl_core::OwnerFaci
     inline_warning(ui, tokens, &text);
 }
 
+/// [`inline_error`] with "Copy details" (Q-119) for an error the owner
+/// can't fix: a fresh error id, `context` and the scrubbed detail (no
+/// amounts, names or memo text) go to the clipboard.
+pub fn inline_error_details(ui: &mut Ui, tokens: &Tokens, error: &cl_api::ApiError, context: &str) {
+    inline_error(ui, tokens, error);
+    if ui.button(t("errors.copy_details")).clicked() {
+        let detail = crate::errors::scrub_line(&cl_core::OwnerFacing::scrubbed_detail(error));
+        ui.ctx().copy_text(crate::errors::details_text(
+            crate::errors::fresh_id(),
+            context,
+            &detail,
+            &[],
+        ));
+    }
+}
+
 /// Shows a plain-language problem inline, as [`inline_error`] does.
 pub fn inline_warning(ui: &mut Ui, tokens: &Tokens, text: &str) {
     egui::Frame::new()

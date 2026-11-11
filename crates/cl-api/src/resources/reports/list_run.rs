@@ -197,11 +197,17 @@ pub fn adapt(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, 
 /// (Q-P16g, Q-P28r): its rows in the 61-90 and 91+ buckets that are
 /// invoices or charges (open credits there are not invoices). A count, no
 /// money arithmetic.
-#[must_use]
-pub fn past_60_count(v: &serde_json::Value) -> u64 {
+///
+/// # Errors
+/// [`ApiError::ReportShape`]-like `Decode` when the answer has no `details`
+/// list: Home must not say "none past due" on an answer it can't read (S9).
+pub fn past_60_count(v: &serde_json::Value) -> Result<u64, ApiError> {
     v.get("details")
         .and_then(serde_json::Value::as_array)
-        .map_or(0, |rows| {
+        .ok_or(ApiError::Decode {
+            what: "A/R aging detail",
+        })
+        .map(|rows| {
             rows.iter()
                 .filter(|r| {
                     matches!(
@@ -228,7 +234,7 @@ impl super::Reports<'_> {
         call.query = vec![("as_of_date".into(), today.to_wire())];
         let reply = self.0.send(op, call, None).await?;
         let v: serde_json::Value = crate::session::decode(&reply, "report")?;
-        Ok(past_60_count(&v))
+        past_60_count(&v)
     }
 }
 
@@ -245,7 +251,11 @@ mod tests {
             {"bucket": "31-60", "kind": "invoice"},
             {"bucket": "90+", "kind": "other"}
         ]});
-        assert_eq!(past_60_count(&v), 2);
-        assert_eq!(past_60_count(&serde_json::json!({})), 0);
+        assert_eq!(past_60_count(&v).expect("count"), 2);
+        assert!(past_60_count(&serde_json::json!({})).is_err(), "no details: not zero");
+        assert_eq!(
+            past_60_count(&serde_json::json!({"details": []})).expect("count"),
+            0
+        );
     }
 }

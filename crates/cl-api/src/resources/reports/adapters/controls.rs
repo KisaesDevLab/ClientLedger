@@ -165,6 +165,50 @@ const QUIET: [&str; 14] = [
     "companyId",
 ];
 
+/// Name tokens that mark a taxpayer id or a secret (S2): a field whose
+/// name has one of them as a whole word (`ein`, `companyEin`, `smtp_pass`),
+/// or runs them together (`apiKey`, `taxId`), never shows. Whole words are
+/// compared, so `settings` or `reportKey` still show.
+const SECRET_WORDS: [&str; 12] = [
+    "ein", "tin", "ssn", "taxid", "pass", "password", "secret", "token", "apikey", "hash", "pin",
+    "iban",
+];
+
+/// The field's name split into lower-case words (`smtpPassHash` → smtp,
+/// pass, hash; `tax_id` → tax, id).
+fn words(name: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for ch in name.chars() {
+        if ch == '_' || ch == '-' || ch == '.' {
+            if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if ch.is_uppercase() && prev_lower && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        prev_lower = ch.is_lowercase() || ch.is_ascii_digit();
+        cur.extend(ch.to_lowercase());
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// True for a field that must never show in the trail.
+fn secret(name: &str) -> bool {
+    let w = words(name);
+    let joined: String = w.concat();
+    w.iter().any(|x| SECRET_WORDS.contains(&x.as_str()))
+        || SECRET_WORDS.contains(&joined.as_str())
+        || ["taxid", "apikey", "privatekey"].iter().any(|k| joined.contains(k))
+}
+
 fn camel(s: &str) -> String {
     let mut out = String::new();
     let mut up = false;
@@ -280,7 +324,10 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             let b = before.and_then(|o| o.get(key.as_str()));
             let a = after.and_then(|o| o.get(key.as_str()));
             // An update lists what changed; a create or delete what it had.
-            if (before.is_some() && after.is_some() && a == b) || QUIET.contains(&key.as_str()) {
+            if (before.is_some() && after.is_some() && a == b)
+                || QUIET.contains(&key.as_str())
+                || secret(key)
+            {
                 continue;
             }
             rows.push(row(
@@ -373,5 +420,25 @@ mod tests {
         ));
         assert_eq!(t.meta.truncated.map(|x| x.total), Some(3));
         assert_eq!(field_label("txn_number"), "@reports.audit.field.txnNumber");
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::secret;
+
+    /// S2: the company EIN, passwords, keys and tokens never show; plain
+    /// fields that merely contain those letters do.
+    #[test]
+    fn taxpayer_ids_and_secrets_are_matched_by_word() {
+        for s in [
+            "ein", "companyEin", "tin", "taxId", "tax_id", "ssn", "smtpPass", "smtp_password",
+            "apiKey", "api_key", "closingPasswordHash", "accessToken", "clientSecret",
+        ] {
+            assert!(secret(s), "{s} is hidden");
+        }
+        for s in ["settings", "reportKey", "name", "einstein", "printStatus", "keyword", "memo"] {
+            assert!(!secret(s), "{s} shows");
+        }
     }
 }

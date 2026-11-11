@@ -1111,7 +1111,8 @@ impl WriteCheckScreen {
             }
         }
         if let Some(e) = &self.save.error {
-            form::inline_error(ui, tokens, e);
+            // QA-1: Copy details for a read or save that failed.
+            form::inline_error_details(ui, tokens, e, "write_check");
         }
         if let Some(ev) = self.save.lost.ui(
             ui,

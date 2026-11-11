@@ -17,6 +17,7 @@ mod catalog;
 mod drill;
 mod email;
 mod export;
+mod filter_lists;
 mod filters;
 mod memorized;
 mod window;
@@ -125,15 +126,24 @@ pub(crate) fn request_runs(link: &CompanyLink, req: &ReportRequest) -> bool {
 }
 
 /// Text for a caption: `@key` is an i18n key, `@key name` one that names
-/// an account (`Total {name}`), anything else owner data.
+/// an account (`Total {name}`), anything else owner data. Owner text that
+/// happens to start with `@` ("@Home Depot") is not a key the app knows,
+/// so it shows as typed (S3).
 #[must_use]
 pub(crate) fn label(s: &str) -> String {
-    match s.strip_prefix('@') {
-        Some(rest) => match rest.split_once(' ') {
-            Some((key, name)) => crate::i18n::t(key).replace("{name}", name),
-            None => crate::i18n::t(rest),
-        },
-        None => s.to_string(),
+    let Some(rest) = s.strip_prefix('@') else {
+        return s.to_string();
+    };
+    let (key, name) = match rest.split_once(' ') {
+        Some((key, name)) => (key, Some(name)),
+        None => (rest, None),
+    };
+    if !crate::i18n::has(key) {
+        return s.to_string();
+    }
+    match name {
+        Some(name) => crate::i18n::t(key).replace("{name}", name),
+        None => crate::i18n::t(key),
     }
 }
 
