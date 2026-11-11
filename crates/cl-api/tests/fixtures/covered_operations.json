@@ -102,7 +102,7 @@
   {"method":"GET","path":"/api/v1/accounts/{id}/register","inSpec":true,"fragmentHash":"9897f4f4ac0e93f7dc927e0245597dce86786de534dc8e6f837f430da7a1210e"},
   {"method":"GET","path":"/api/v1/accounts/{id}/register/summary","inSpec":true,"fragmentHash":"f318f0724a4301fdd773354e58e56c901da17e187235d580404e3061d2174ff4"},
   {"method":"POST","path":"/api/v1/checks","inSpec":true,"fragmentHash":"8f14b6abf03e32a43bc0dbe8f1be99f72516f77fc316682f93aeaddafcd5faef"},
-  {"method":"GET","path":"/api/v1/audit-log","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/audit-log","inSpec":true,"fragmentHash":"e825a82828ed29798c7a78344d1c7a39b788a8569ebb6e98e21468d6b9202f4b"},
   {"method":"GET","path":"/api/v1/company/closing-password","inSpec":true,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/company/closing-password","inSpec":true,"fragmentHash":"9e982f14396e41f1c6b3414a57fc6320cb7f25b75c4366b057a2181dbed0f9d6"},
   {"method":"DELETE","path":"/api/v1/transactions/{id}","inSpec":true,"fragmentHash":"8e0ec50dd60dc17c5a7c4a8b4050b95ab4d0f16c972afffd77ef92b7dc5e0f85"},
@@ -398,6 +398,6 @@
   {"method":"GET","path":"/api/v1/reports/check-register","inSpec":true,"fragmentHash":"2440afda25e54764110c1b51fa89fd9c04c1eeed764bdb5a70b53afa51f39b47"},
   {"method":"GET","path":"/api/v1/reports/bank-balances","inSpec":true,"fragmentHash":"becea71e90e1d26ee9b95c2d65507b77b5030fbc398e5b590a130473266c44d5"},
   {"method":"GET","path":"/api/v1/reports/account-activity-summary","inSpec":true,"fragmentHash":"7656ba0cfed0455de4539150969c89d1bec45adb509128c3995b563e5ea7e8d8"},
-  {"method":"GET","path":"/api/v1/reports/closing-date-exceptions","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/closing-date-exceptions","inSpec":true,"fragmentHash":"3a5148e7008ee3acc11736bcfd081d3c47e2f4353ed7293ebf7569d83fe8215a"},
   {"method":"GET","path":"/api/v1/duplicates","inSpec":true,"fragmentHash":null}
 ]

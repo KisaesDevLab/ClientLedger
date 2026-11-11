@@ -459,7 +459,7 @@ DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only
 GET     /api/v1/reports/general-ledger          idempotent
 GET     /api/v1/reports/revenue-by-category     idempotent
 GET     /api/v1/reports/expense-by-category     idempotent
-# P28 WP3: who owes what, lists, tax, controls (U-14, U-121; closing-date-exceptions is PR-E U-204, outside the pinned spec)
+# P28 WP3: who owes what, lists, tax, controls (U-14, U-121, U-204)
 GET     /api/v1/reports/ar-aging-detail         idempotent
 GET     /api/v1/reports/invoice-list            idempotent
 GET     /api/v1/reports/customer-balance-detail idempotent
