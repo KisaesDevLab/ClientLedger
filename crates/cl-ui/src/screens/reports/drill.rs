@@ -111,6 +111,8 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
             let mut o = ReportOptions::for_spec(spec);
             o.dates = DateChoice::AsOf(*as_of);
             o.filters.contact_ids = contact.iter().copied().collect();
+            // The "(no client)" row opens only the rows without one.
+            o.filters.no_contact = contact.is_none();
             o.filters.bucket = Some(*bucket).filter(|b| *b != cl_core::report::AgingBucket::Total);
             Target::Report(Box::new(ReportOpen {
                 key: key.to_string(),

@@ -146,8 +146,15 @@ pub const AUDIT_FIELDS: [&str; 16] = [
     "voidReason",
 ];
 
-/// Bookkeeping fields the trail leaves out.
-const QUIET: [&str; 8] = [
+/// Bookkeeping fields the trail leaves out, and taxpayer ids and secrets
+/// (Q-P28p, non-negotiable 11), which never show.
+const QUIET: [&str; 14] = [
+    "taxId",
+    "tax_id",
+    "tin",
+    "password",
+    "passwordHash",
+    "password_hash",
     "id",
     "tenantId",
     "tenant_id",

@@ -493,7 +493,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         // P28 (U-203, U-207): budget writes and report email, keyed by the
         // engine; cl-api sends them in WP4.
         ("idempotency_budgets_v1_routes.txt", "budgets-exact-v1"),
-        ("idempotency_reports_email_v1_routes.txt", "reports-email-v1"),
+        (
+            "idempotency_reports_email_v1_routes.txt",
+            "reports-email-v1",
+        ),
         (
             "idempotency_bank_import_v1_routes.txt",
             "bank-import-batch-v1",

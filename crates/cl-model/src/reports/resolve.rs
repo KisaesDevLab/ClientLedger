@@ -169,6 +169,7 @@ pub fn resolve(
         bucket: f
             .bucket
             .filter(|b| *b != cl_core::report::AgingBucket::Total),
+        no_contact: f.no_contact,
     };
     req.tag_split = tag_split;
     req.fiscal_year_start = fiscal_year_start;

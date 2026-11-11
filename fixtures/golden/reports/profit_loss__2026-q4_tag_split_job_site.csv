@@ -1,18 +1,18 @@
 kind,level,path,caption,total
 header,0,income,@reports.pl.income,
 account,1,income/acct:4000,4000 · Service Income,390975.97
-tag,2,income/acct:4000/t:tag:North lawn,101 · North lawn,2250
-tag,2,income/acct:4000/t:tag:Courtyard,102 · Courtyard,1250
+tag,2,income/acct:4000/t:tag:North lawn,4000-101 Service Income - North lawn,2250
+tag,2,income/acct:4000/t:tag:Courtyard,4000-102 Service Income - Courtyard,1250
 account_total,1,income/acct:4000~split,@reports.row.total_of 4000 · Service Income,394475.97
 subtotal,0,income~total,@reports.pl.total_income,394475.97
 header,0,cogs,@reports.pl.cogs,
 account,1,cogs/acct:5000,5000 · Subcontractors,3099.38
 account_total,1,cogs/acct:5000~split,@reports.row.total_of 5000 · Subcontractors,3099.38
 account,1,cogs/acct:5100,5100 · Plants,6244.5
-tag,2,cogs/acct:5100/t:tag:Courtyard,102 · Courtyard,2100
+tag,2,cogs/acct:5100/t:tag:Courtyard,5100-102 Plants - Courtyard,2100
 account_total,1,cogs/acct:5100~split,@reports.row.total_of 5100 · Plants,8344.5
 account,1,cogs/acct:5110,5110 · Mulch & stone,1275.5
-tag,2,cogs/acct:5110/t:tag:North lawn,101 · North lawn,1180.4
+tag,2,cogs/acct:5110/t:tag:North lawn,5110-101 Mulch & stone - North lawn,1180.4
 account_total,1,cogs/acct:5110~split,@reports.row.total_of 5110 · Mulch & stone,2455.9
 account,1,cogs/acct:5200,5200 · Project Supplies and Materials,35441.15
 account_total,1,cogs/acct:5200~split,@reports.row.total_of 5200 · Project Supplies and Materials,35441.15
@@ -24,7 +24,7 @@ account_total,1,expenses/acct:6000~split,@reports.row.total_of 6000 · Advertisi
 account,1,expenses/acct:6100,6100 · Fuel,2659.83
 account_total,1,expenses/acct:6100~split,@reports.row.total_of 6100 · Fuel,2659.83
 account,1,expenses/acct:6150,6150 · Insurance,0
-tag,2,expenses/acct:6150/t:tag:North lawn,101 · North lawn,1200
+tag,2,expenses/acct:6150/t:tag:North lawn,6150-101 Insurance - North lawn,1200
 account_total,1,expenses/acct:6150~split,@reports.row.total_of 6150 · Insurance,1200
 account,1,expenses/acct:6250,6250 · Office Supplies and Software,937.75
 account_total,1,expenses/acct:6250~split,@reports.row.total_of 6250 · Office Supplies and Software,937.75

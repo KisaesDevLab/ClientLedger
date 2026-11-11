@@ -119,6 +119,9 @@ pub struct Filters {
     /// One aging bucket (an aging cell's drill into the detail).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket: Option<cl_core::report::AgingBucket>,
+    /// Only rows without a contact (the aging's "(no client)" row).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_contact: bool,
 }
 
 /// How a tag row's caption is written (formatting only).

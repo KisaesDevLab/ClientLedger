@@ -615,8 +615,10 @@ fn opt_text(v: &Value, key: &str) -> Cell {
 pub(crate) fn read(v: &Value, f: F) -> Result<Cell, ApiError> {
     Ok(match f {
         F::Text(k) => opt_text(v, k),
+        // Only an explicit `null` id is "no contact"; a route whose rows
+        // carry no id (the Invoice List) shows the name.
         F::Name { name, id, none } => match v.get(id) {
-            None | Some(Value::Null) => Cell::Text(none.to_string()),
+            Some(Value::Null) => Cell::Text(none.to_string()),
             _ => {
                 text(v, name).map_or_else(|| Cell::Text(none.to_string()), |s| Cell::Text(s.into()))
             }
@@ -646,14 +648,45 @@ pub(crate) fn read(v: &Value, f: F) -> Result<Cell, ApiError> {
             _ => return Err(shape(k)),
         },
         F::TxnType(k) => text(v, k).map_or(Cell::Empty, |t| Cell::Text(type_label(t))),
-        F::Code(prefix, k) => text(v, k).map_or(Cell::Empty, |code| {
-            Cell::Text(format!(
-                "@{prefix}.{}",
-                code.replace('-', "_").replace('+', "_up")
-            ))
-        }),
+        F::Code(prefix, k) => {
+            text(v, k).map_or(Cell::Empty, |code| Cell::Text(code_label(prefix, code)))
+        }
         F::Last4(k) => text(v, k).map_or(Cell::Empty, |t| Cell::Text(last4(t))),
     })
+}
+
+/// The engine codes each `@` prefix names in plain words; any other code
+/// shows as the engine's word with spaces (never a raw key).
+const CODES: [(&str, &[&str]); 4] = [
+    (
+        "reports.bucket",
+        &["current", "1_30", "31_60", "61_90", "90_up", "over_90"],
+    ),
+    (
+        "reports.status",
+        &[
+            "draft", "sent", "viewed", "partial", "paid", "overdue", "void", "open", "unpaid",
+        ],
+    ),
+    (
+        "reports.audit.action",
+        &["create", "update", "void", "delete", "override"],
+    ),
+    ("reports.closing.method", &["password", "confirmed"]),
+];
+
+/// The caption of engine code `code` under `prefix`.
+#[must_use]
+pub fn code_label(prefix: &str, code: &str) -> String {
+    let norm = code.replace('-', "_").replace('+', "_up");
+    let known = CODES
+        .iter()
+        .any(|(p, list)| *p == prefix && list.contains(&norm.as_str()));
+    if known {
+        format!("@{prefix}.{norm}")
+    } else {
+        code.replace('_', " ")
+    }
 }
 
 /// A taxpayer id as `•••• 1234` (Q-P28p): never more than its last four
@@ -689,7 +722,16 @@ fn drill_of(e: &Value, d: RowDrill) -> Result<Option<Drill>, ApiError> {
 }
 
 /// True when the row stays under the request's contact and bucket.
-fn kept(e: &Value, n: &Narrow, contacts: &HashSet<ContactId>, bucket: Option<AgingBucket>) -> bool {
+fn kept(
+    e: &Value,
+    n: &Narrow,
+    contacts: &HashSet<ContactId>,
+    no_contact: bool,
+    bucket: Option<AgingBucket>,
+) -> bool {
+    if no_contact && !matches!(e.get(n.contact), None | Some(Value::Null)) {
+        return false;
+    }
     if !contacts.is_empty() {
         let c = text(e, n.contact).and_then(|s| ContactId::parse(s).ok());
         if !c.is_some_and(|c| contacts.contains(&c)) {
@@ -723,7 +765,8 @@ pub(crate) fn table(v: &Value, req: &ReportRequest, l: &Layout) -> Result<Report
         .collect();
     let contacts: HashSet<ContactId> = req.filters.contact_ids.iter().copied().collect();
     let bucket = req.filters.bucket;
-    let narrowed = l.narrow.is_some() && (!contacts.is_empty() || bucket.is_some());
+    let narrowed =
+        l.narrow.is_some() && (!contacts.is_empty() || bucket.is_some() || req.filters.no_contact);
     let mut rows = Vec::new();
     let items = match v.get(l.rows) {
         Some(Value::Array(a)) => a.as_slice(),
@@ -732,7 +775,7 @@ pub(crate) fn table(v: &Value, req: &ReportRequest, l: &Layout) -> Result<Report
     };
     for (i, e) in items.iter().enumerate() {
         if let Some(n) = &l.narrow
-            && !kept(e, n, &contacts, bucket)
+            && !kept(e, n, &contacts, req.filters.no_contact, bucket)
         {
             continue;
         }

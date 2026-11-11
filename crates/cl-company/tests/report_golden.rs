@@ -209,6 +209,53 @@ fn column_options(posted: &Posted) -> Vec<(String, &'static str, ReportOptions)>
             });
         },
     );
+    // AC5: the label styles, with and without the account total (the CSV
+    // is the presented table, `cl_model::reports::present`).
+    for (name, label, total) in [
+        ("append", TagLabel::Append, false),
+        ("prepend", TagLabel::Prepend, false),
+        ("none", TagLabel::None, false),
+        ("total_append", TagLabel::Append, true),
+    ] {
+        let file = format!("profit_loss__2026-q4_tag_split_{name}");
+        add(&file, "profit_loss", &|o| {
+            q4(o);
+            o.tag_split = Some(TagSplit {
+                tag_group_id: job,
+                show_account_total: total,
+                label,
+                separator: "-".into(),
+            });
+        });
+    }
+    // The Trial Balance's and the ledger's tag split (U-201).
+    let split = |o: &mut ReportOptions| {
+        o.tag_split = Some(TagSplit {
+            tag_group_id: job,
+            show_account_total: true,
+            label: TagLabel::default(),
+            separator: "-".into(),
+        });
+    };
+    add(
+        "trial_balance__2026-12-31_tag_split_job_site",
+        "trial_balance",
+        &|o| {
+            o.dates = DateChoice::AsOf(d(2026, 12, 31));
+            split(o);
+        },
+    );
+    add(
+        "general_ledger__2026-11_tag_split_job_site",
+        "general_ledger",
+        &|o| {
+            o.dates = DateChoice::Fixed {
+                from: d(2026, 11, 1),
+                to: d(2026, 11, 30),
+            };
+            split(o);
+        },
+    );
     add("balance_sheet__2026-q4_by_month", "balance_sheet", &|o| {
         o.dates = DateChoice::AsOf(d(2026, 12, 31));
         o.columns = ColumnBy::Month;
@@ -674,6 +721,10 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             if key.starts_with("balance_sheet") {
                 continue;
             }
+            if key == "trial_balance" || key == "general_ledger" {
+                split_identity(&file, &t);
+                continue;
+            }
             cells += every_pl_cell_drills_to_its_amount(&s, &t).await;
             // AC5: untagged + tags = the account total.
             for (i, r) in t.rows.iter().enumerate() {
@@ -789,6 +840,14 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     }
     for g in all {
         let (_, t) = run(&s, g.key, &g.options).await;
+        // A tag split is written as presented: the owner's label style and
+        // account-total choice (AC5).
+        let t = if g.options.tag_split.is_some() {
+            let all: Vec<usize> = (0..t.rows.len()).collect();
+            cl_model::reports::present(&t, &all, &g.options)
+        } else {
+            t
+        };
         let mut csv = stable_ids(&t.to_canonical_csv(), &names);
         if g.key == "ar_aging_detail" || g.key == "ap_aging_detail" {
             csv = stable_order(&csv);
@@ -846,6 +905,44 @@ fn stable_order(csv: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// The Trial Balance's and the ledger's tag split partition each account
+/// (AC5): untagged + tags = the account's total, on debits and credits
+/// (the TB shows a net on one side, so it compares debit − credit).
+fn split_identity(file: &str, t: &ReportTable) {
+    let mut checked = 0;
+    for (i, r) in t.rows.iter().enumerate() {
+        let (start, cols): (bool, &[usize]) = match (file.starts_with("trial"), r.kind) {
+            (true, RowKind::Account) => (true, &[0, 1]),
+            (false, RowKind::Subtotal) if r.path.0.last().is_some_and(|p| p == "untagged") => {
+                (true, &[5, 6])
+            }
+            _ => (false, &[]),
+        };
+        if !start {
+            continue;
+        }
+        let net = |row: &cl_core::report::ReportRow| -> Decimal {
+            if cols[0] == 0 {
+                dec(&row.cells[0]) - dec(&row.cells[1])
+            } else {
+                dec(&row.cells[cols[0]]) - dec(&row.cells[cols[1]])
+            }
+        };
+        let mut sum = net(r);
+        let mut j = i + 1;
+        while t.rows.get(j).is_some_and(|x| x.kind == RowKind::TagRow) {
+            sum += net(&t.rows[j]);
+            j += 1;
+        }
+        let Some(total) = t.rows.get(j).filter(|x| x.kind == RowKind::AccountTotal) else {
+            panic!("{file}: {} has no split total", r.caption);
+        };
+        assert_eq!(sum, net(total), "{file}: {} untagged + tags", r.caption);
+        checked += 1;
+    }
+    assert!(checked > 0, "{file}: split rows");
 }
 
 /// The WP3 goldens (U-121, U-14 lists): agings, open items and balances
@@ -944,8 +1041,41 @@ async fn who_owes_what_ties(s: &Session) {
             ar,
             "{at} client balances"
         );
+        let (k, o) = as_of("customer_balance_detail");
+        assert_eq!(
+            grand(&run(s, k, &o).await.1, "balance"),
+            ar,
+            "{at} client balance detail"
+        );
         let (k, o) = as_of("ap_aging_summary");
         let ap = grand(&run(s, k, &o).await.1, "total");
+        let (k, o) = as_of("vendor_balance_detail");
+        assert_eq!(
+            grand(&run(s, k, &o).await.1, "balance"),
+            ap,
+            "{at} vendor balance detail"
+        );
+        // An independent figure: the A/R and A/P accounts on the Trial
+        // Balance (10200 and 20100 in the practice chart).
+        let (k, o) = as_of("trial_balance");
+        let (_, tb) = run(s, k, &o).await;
+        let net = |n: &str| {
+            tb.rows
+                .iter()
+                .find(|r| r.caption.starts_with(&format!("{n} ·")))
+                .map(|r| dec(&r.cells[0]) - dec(&r.cells[1]))
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            net("10200"),
+            ar,
+            "{at} A/R aging = A/R on the Trial Balance"
+        );
+        assert_eq!(
+            -net("20100"),
+            ap,
+            "{at} A/P aging = A/P on the Trial Balance"
+        );
         let (k, o) = as_of("ap_aging_detail");
         let (_, detail) = run(s, k, &o).await;
         assert_eq!(grand(&detail, "open"), ap, "{at} A/P detail");
@@ -994,6 +1124,29 @@ async fn closing_exceptions_list_the_closed_period_entry(s: &Session) {
             .any(|r| r.cells[after] == Cell::Date(d(2026, 9, 15))),
         "the closed-period reclass is listed: {:?}",
         t.rows
+    );
+    // The Audit Trail (audit-filters-v1) reads, lists the story's
+    // transactions in plain words, and shows no taxpayer id.
+    let mut o = ReportOptions::for_spec(find("audit_trail").expect("spec"));
+    range(&mut o, d(2000, 1, 1), d(2099, 12, 31));
+    let (_, t) = run(s, "audit_trail", &o).await;
+    let record = t
+        .columns
+        .iter()
+        .position(|c| c.key == "record")
+        .expect("record");
+    assert!(
+        t.rows
+            .iter()
+            .any(|r| r.cells[record] == Cell::Text("@reports.audit.entity.transaction".into())),
+        "the audit trail lists transactions"
+    );
+    assert!(
+        !t.rows
+            .iter()
+            .any(|r| r.caption.to_lowercase().contains("tax_id")
+                || r.caption.to_lowercase().contains("taxid")),
+        "no taxpayer id in the trail"
     );
 }
 

@@ -1,0 +1,67 @@
+kind,level,path,caption,debit,credit
+account,1,accounts/acct:1010,1010 · Operating Checking,85120.4,0
+account_total,1,accounts/acct:1010~split,@reports.row.total_of 1010 · Operating Checking,85120.4,0
+account,1,accounts/acct:1020,1020 · Savings,15450,0
+account_total,1,accounts/acct:1020~split,@reports.row.total_of 1020 · Savings,15450,0
+account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
+account_total,1,accounts/acct:1500~split,@reports.row.total_of 1500 · Equipment,47987.66,0
+account,1,accounts/acct:1510,1510 · Vehicles,62012.34,0
+account_total,1,accounts/acct:1510~split,@reports.row.total_of 1510 · Vehicles,62012.34,0
+account,1,accounts/acct:2050,2050 · Business Credit Card,0,1617.99
+account_total,1,accounts/acct:2050~split,@reports.row.total_of 2050 · Business Credit Card,0,1617.99
+account,1,accounts/acct:2200,2200 · Vehicle and Equipment Loans,0,31200
+account_total,1,accounts/acct:2200~split,@reports.row.total_of 2200 · Vehicle and Equipment Loans,0,31200
+account,1,accounts/acct:2400,2400 · Customer Deposits,0,500
+account_total,1,accounts/acct:2400~split,@reports.row.total_of 2400 · Customer Deposits,0,500
+account,1,accounts/acct:4000,4000 · Service Income,0,1137332.39
+tag,2,accounts/acct:4000/t:tag:North lawn,4000-101 Service Income - North lawn,0,2250
+tag,2,accounts/acct:4000/t:tag:Courtyard,4000-102 Service Income - Courtyard,0,1250
+account_total,1,accounts/acct:4000~split,@reports.row.total_of 4000 · Service Income,0,1140832.39
+account,1,accounts/acct:5000,5000 · Subcontractors,50850.56,0
+account_total,1,accounts/acct:5000~split,@reports.row.total_of 5000 · Subcontractors,50850.56,0
+account,1,accounts/acct:5100,5100 · Plants,7972.96,0
+tag,2,accounts/acct:5100/t:tag:Courtyard,5100-102 Plants - Courtyard,2100,0
+account_total,1,accounts/acct:5100~split,@reports.row.total_of 5100 · Plants,10072.96,0
+account,1,accounts/acct:5110,5110 · Mulch & stone,2207.45,0
+tag,2,accounts/acct:5110/t:tag:North lawn,5110-101 Mulch & stone - North lawn,1180.4,0
+account_total,1,accounts/acct:5110~split,@reports.row.total_of 5110 · Mulch & stone,3387.85,0
+account,1,accounts/acct:5200,5200 · Project Supplies and Materials,356388.84,0
+account_total,1,accounts/acct:5200~split,@reports.row.total_of 5200 · Project Supplies and Materials,356388.84,0
+account,1,accounts/acct:6000,6000 · Advertising and Marketing,10936.61,0
+account_total,1,accounts/acct:6000~split,@reports.row.total_of 6000 · Advertising and Marketing,10936.61,0
+account,1,accounts/acct:6100,6100 · Fuel,8972.83,0
+account_total,1,accounts/acct:6100~split,@reports.row.total_of 6100 · Fuel,8972.83,0
+account,1,accounts/acct:6150,6150 · Insurance,15589.13,0
+tag,2,accounts/acct:6150/t:tag:North lawn,6150-101 Insurance - North lawn,1200,0
+account_total,1,accounts/acct:6150~split,@reports.row.total_of 6150 · Insurance,16789.13,0
+account,1,accounts/acct:6250,6250 · Office Supplies and Software,8024.17,0
+account_total,1,accounts/acct:6250~split,@reports.row.total_of 6250 · Office Supplies and Software,8024.17,0
+account,1,accounts/acct:6300,6300 · Rent,44950,0
+account_total,1,accounts/acct:6300~split,@reports.row.total_of 6300 · Rent,44950,0
+account,1,accounts/acct:6350,6350 · Repairs and Maintenance,41042.86,0
+account_total,1,accounts/acct:6350~split,@reports.row.total_of 6350 · Repairs and Maintenance,41042.86,0
+account,1,accounts/acct:6400,6400 · Telephone and Internet,4100.37,0
+account_total,1,accounts/acct:6400~split,@reports.row.total_of 6400 · Telephone and Internet,4100.37,0
+account,1,accounts/acct:6500,6500 · Utilities,8338.23,0
+account_total,1,accounts/acct:6500~split,@reports.row.total_of 6500 · Utilities,8338.23,0
+account,1,accounts/acct:6550,6550 · Wages,123930.56,0
+account_total,1,accounts/acct:6550~split,@reports.row.total_of 6550 · Wages,123930.56,0
+account,1,accounts/acct:6560,6560 · Payroll Taxes,11153.65,0
+account_total,1,accounts/acct:6560~split,@reports.row.total_of 6560 · Payroll Taxes,11153.65,0
+account,1,accounts/acct:6700,6700 · Vehicle Expenses,15807.22,0
+account_total,1,accounts/acct:6700~split,@reports.row.total_of 6700 · Vehicle Expenses,15807.22,0
+account,1,accounts/acct:8000,8000 · Interest Expense,2120,0
+account_total,1,accounts/acct:8000~split,@reports.row.total_of 8000 · Interest Expense,2120,0
+account,1,accounts/acct:10150,10150 · Payments Clearing,2092.5,0
+account_total,1,accounts/acct:10150~split,@reports.row.total_of 10150 · Payments Clearing,2092.5,0
+account,1,accounts/acct:10200,10200 · Accounts Receivable,50795.73,0
+account_total,1,accounts/acct:10200~split,@reports.row.total_of 10200 · Accounts Receivable,50795.73,0
+account,1,accounts/acct:20100,20100 · Accounts Payable,0,16991.53
+account_total,1,accounts/acct:20100~split,@reports.row.total_of 20100 · Accounts Payable,0,16991.53
+account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
+account_total,1,accounts/acct:30000~split,@reports.row.total_of 30000 · Opening Balances,0,139000
+account,1,accounts/acct:30160,30160 · Owner's Contribution,0,3450
+account_total,1,accounts/acct:30160~split,@reports.row.total_of 30160 · Owner's Contribution,0,3450
+account,1,accounts/acct:30170,30170 · Owner's Draw,353267.44,0
+account_total,1,accounts/acct:30170~split,@reports.row.total_of 30170 · Owner's Draw,353267.44,0
+grand,0,total,@reports.row.total,1333591.91,1333591.91

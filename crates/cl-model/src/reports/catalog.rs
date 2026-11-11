@@ -694,6 +694,30 @@ mod tests {
         assert_eq!(column_capability(ColumnBy::Project), Some(caps::PROJECTS));
     }
 
+    /// Q-P28z: the reports that list one vendor or bank account wait for
+    /// the pick; the others run.
+    #[test]
+    fn vendor_and_bank_lists_wait_for_their_pick() {
+        use super::super::options::Filters;
+        let mut f = Filters::default();
+        for (key, kind) in [
+            ("transactions_by_vendor", FilterKind::Vendor),
+            ("vendor_statement", FilterKind::Vendor),
+            ("check_register", FilterKind::BankAccount),
+        ] {
+            assert_eq!(find(key).expect(key).missing_pick(&f), Some(kind), "{key}");
+        }
+        assert_eq!(find("unpaid_bills").expect("ub").missing_pick(&f), None);
+        f.contact_ids = vec![
+            cl_core::ids::ContactId::parse("7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60").expect("id"),
+        ];
+        assert_eq!(find("vendor_statement").expect("vs").missing_pick(&f), None);
+        assert_eq!(
+            find("check_register").expect("cr").missing_pick(&f),
+            Some(FilterKind::BankAccount)
+        );
+    }
+
     #[test]
     fn search_matches_every_word() {
         let title = |s: &ReportSpec| s.key.replace('_', " ");

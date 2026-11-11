@@ -278,3 +278,29 @@ fn a_vendor_or_bank_account_must_be_chosen_first() {
     let y = list_run::query(&q4(Source::Ap1099Prep)).expect("y");
     assert_eq!(y[1], ("tax_year".to_string(), "2026".to_string()));
 }
+
+#[test]
+fn engine_codes_outside_the_known_words_show_as_words_not_keys() {
+    assert_eq!(code_label("reports.bucket", "90+"), "@reports.bucket.90_up");
+    assert_eq!(
+        code_label("reports.audit.action", "entry_changed"),
+        "entry changed"
+    );
+    assert_eq!(code_label("reports.status", "paid"), "@reports.status.paid");
+}
+
+/// The Invoice List's rows carry no contact id: the name shows.
+#[test]
+fn the_invoice_list_shows_client_names() {
+    let t = run(&q4(Source::InvoiceList), "invoice_list");
+    assert_eq!(t.rows[0].caption, "Table Rock Dental");
+}
+
+/// The aging's "(no client)" row opens only rows without a client.
+#[test]
+fn the_no_client_aging_drill_keeps_rows_without_a_client() {
+    let mut r = at(Source::ArAgingDetail);
+    r.filters.no_contact = true;
+    let t = run(&r, "ar_aging_detail");
+    assert_eq!(t.rows, Vec::new(), "every recorded row has a client");
+}

@@ -326,6 +326,9 @@ pub struct ReportFilters {
     /// rows are picked by the engine's bucket, never recomputed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket: Option<AgingBucket>,
+    /// Only rows without a contact (the aging's "(no client)" row).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_contact: bool,
 }
 
 /// What one report run asks of the engine: the resolved, concrete form of
