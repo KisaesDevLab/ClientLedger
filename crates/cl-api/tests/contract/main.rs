@@ -65,6 +65,7 @@ mod contract_register;
 mod contract_register_property;
 mod contract_report_defs;
 mod contract_reports_exact;
+mod contract_reports_p28;
 mod contract_resources;
 mod contract_run_due;
 mod contract_sales_receipts;
@@ -1365,6 +1366,18 @@ fn main() -> std::process::ExitCode {
         (
             "reports_exact::columns_drill_and_tag_split",
             contract_reports_exact::columns_drill_and_tag_split,
+        ),
+        (
+            "reports_p28::who_owes_what_lists_and_controls",
+            contract_reports_p28::who_owes_what_lists_and_controls,
+        ),
+        (
+            "reports_p28::ask_off_then_ollama",
+            contract_reports_p28::ask_off_then_ollama,
+        ),
+        (
+            "reports_p28::email_without_smtp",
+            contract_reports_p28::email_without_smtp,
         ),
         (
             "session::logout_ends_the_session",
