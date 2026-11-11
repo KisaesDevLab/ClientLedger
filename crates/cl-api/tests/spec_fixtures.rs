@@ -490,6 +490,10 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         ("idempotency_inventory_v1_routes.txt", "inventory-adjust-v1"),
         ("idempotency_unit_sets_v1_routes.txt", "units-of-measure-v1"),
         ("idempotency_report_defs_v1_routes.txt", "report-defs-v1"),
+        // P28 (U-203, U-207): budget writes and report email, keyed by the
+        // engine; cl-api sends them in WP4.
+        ("idempotency_budgets_v1_routes.txt", "budgets-exact-v1"),
+        ("idempotency_reports_email_v1_routes.txt", "reports-email-v1"),
         (
             "idempotency_bank_import_v1_routes.txt",
             "bank-import-batch-v1",

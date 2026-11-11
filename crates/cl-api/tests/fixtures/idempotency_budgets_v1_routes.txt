@@ -1,0 +1,9 @@
+# The engine's budgets-exact-v1 keyed route set (U-203, P28): budget writes,
+# `x-idempotency: true` in its openapi.json. WP4 reads them through cl-api; until then this
+# file only pins the engine's marks. Append-only for this capability name.
+POST /api/v1/budgets
+POST /api/v1/budgets/{id}/adjust-by-percent
+POST /api/v1/budgets/{id}/copy-from/{sourceId}
+POST /api/v1/budgets/{id}/fill-from-actuals
+PUT /api/v1/budgets/{id}
+PUT /api/v1/budgets/{id}/lines
