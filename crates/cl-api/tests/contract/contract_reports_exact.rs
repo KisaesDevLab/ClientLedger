@@ -190,12 +190,15 @@ pub fn record_statements(h: &Harness) {
             &q,
         );
         assert_eq!(pl["netIncomeExact"], "-74.7000", "{pl}");
+        // The balance reports take no tag since U-213 (Q-PR6b).
+        let mut bq = range.to_vec();
+        bq.push(("basis", basis));
         let tb = get(
             h,
             s,
             &format!("trial_balance_{basis}"),
             "/api/v1/reports/trial-balance",
-            &q,
+            &bq,
         );
         assert!(tb["totalDebitsExact"].is_string(), "{tb}");
         let bs = get(
@@ -203,11 +206,7 @@ pub fn record_statements(h: &Harness) {
             s,
             &format!("balance_sheet_{basis}"),
             "/api/v1/reports/balance-sheet",
-            &[
-                ("as_of_date", "2033-03-31"),
-                ("basis", basis),
-                ("tag_id", tag.as_str()),
-            ],
+            &[("as_of_date", "2033-03-31"), ("basis", basis)],
         );
         assert!(bs["totalAssetsExact"].is_string(), "{bs}");
         let mut gq = range.to_vec();
@@ -695,13 +694,12 @@ pub fn columns_drill_and_tag_split(h: &Harness) {
     assert!(accounts >= 2);
     check(&split, false);
 
-    // Balance Sheet as-of columns, by tag.
+    // Balance Sheet as-of columns (no tag filter since U-213, Q-PR6b).
     let mut bs = ReportRequest::new(
         Source::BalanceSheet,
         ReportDates::Ranges(vec![first, second]),
     );
     bs.basis = Some(Basis::Accrual);
-    bs.filters.tag_ids = vec![b.tag];
     let sheet = run(h, s, &bs);
     assert!(check(&sheet, true) > 2, "balances drill");
 
@@ -808,7 +806,7 @@ pub fn report_fixes_v2(h: &Harness) {
                     side: Side::Debit(m("40.00")),
                     description: None,
                     tag: None,
-                    contact: None,
+                    contact: Some(crate::contract_journal_entries::customer(h, s)),
                 },
                 JeLine {
                     account: b.revenue,
