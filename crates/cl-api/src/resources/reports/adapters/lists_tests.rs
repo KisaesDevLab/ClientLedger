@@ -237,8 +237,10 @@ fn a_tin_shows_its_last_four_digits_only() {
     assert_eq!(last4(""), "");
     let v = serde_json::json!({
         "meta": {"exact": true},
-        "data": [{"vendor_name": "A", "tax_id": "123-45-6789", "address": "", "total_paidExact": "700.0000"}],
-        "totalPaidExact": "700.0000"
+        "data": [{"vendor_name": "A", "tax_id": "123-45-6789", "address": "", "total_paidExact": "700.0000",
+                  "reportable_totalExact": "650.0000", "reportable_meets_threshold": true}],
+        "totalPaidExact": "700.0000",
+        "totalReportableExact": "650.0000"
     });
     let t = list_run::adapt(&q4(Source::Ap1099Prep), &v).expect("t");
     assert_eq!(
@@ -246,6 +248,10 @@ fn a_tin_shows_its_last_four_digits_only() {
         Cell::Text("\u{2022}\u{2022}\u{2022}\u{2022} 6789".into())
     );
     assert!(!t.to_canonical_csv().contains("123-45"));
+    // QA-8, U-209: the 1099 amount by box, not every payment.
+    let csv = t.to_canonical_csv();
+    assert!(csv.contains("650"), "{csv}");
+    assert!(!csv.contains("700"), "{csv}");
 }
 
 /// The engine's `check_number` is a pg integer: the Check Register shows

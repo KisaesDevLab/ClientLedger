@@ -106,6 +106,9 @@ pub const AP_AGING: &str = "ap-aging-exact-v1";
 pub const OPEN_ASOF: &str = "open-balances-asof-v1";
 /// U-204 (PR-E): Closing Date Exceptions.
 pub const CLOSING: &str = "closing-exceptions-v1";
+/// U-209: the P28 QA report fixes (1099 amount by box, cents on cash basis,
+/// check numbers on report rows).
+pub const REPORT_FIXES: &str = "report-fixes-v1";
 /// U-204 (PR-E): the audit-log company, user and record filters.
 pub const AUDIT: &str = "audit-filters-v1";
 
@@ -128,6 +131,8 @@ fn list_capability(req: &ReportRequest, has: &impl Fn(&str) -> bool) -> Option<&
         {
             &[EXACT, DRILL]
         }
+        // The 1099 amount by box arrives with U-209 (Q-220).
+        Source::Ap1099Prep => &[EXACT, REPORT_FIXES],
         Source::AuditLog => &[AUDIT],
         Source::ClosingDateExceptions => &[CLOSING],
         _ => &[EXACT],

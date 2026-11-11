@@ -481,11 +481,20 @@ fn all_zero_rows_are_names_with_nothing_open() {
         expandable: false,
     };
     let z = || Cell::Amount(rust_decimal::Decimal::ZERO);
-    assert!(super::window::all_zero(&row(RowKind::Detail, vec![z(), z()])));
+    assert!(super::window::all_zero(&row(
+        RowKind::Detail,
+        vec![z(), z()]
+    )));
     assert!(!super::window::all_zero(&row(
         RowKind::Detail,
         vec![z(), Cell::Amount(rust_decimal::Decimal::new(-567_827, 2))]
     )));
-    assert!(!super::window::all_zero(&row(RowKind::Grand, vec![z(), z()])));
-    assert!(!super::window::all_zero(&row(RowKind::Detail, vec![Cell::Text("x".into())])));
+    assert!(!super::window::all_zero(&row(
+        RowKind::Grand,
+        vec![z(), z()]
+    )));
+    assert!(!super::window::all_zero(&row(
+        RowKind::Detail,
+        vec![Cell::Text("x".into())]
+    )));
 }

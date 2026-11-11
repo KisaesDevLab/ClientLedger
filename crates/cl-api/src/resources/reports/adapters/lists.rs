@@ -560,9 +560,15 @@ const PREP_1099: Layout = Layout {
             ColumnKind::Text,
             F::Text("address"),
         ),
+        // U-209 (`report-fixes-v1`): the 1099 amount from the account-to-box
+        // mapping, as the 1099 Summary, not every payment (QA-8).
         tot(
-            amt("paid", "@reports.col.total_paid", "total_paidExact"),
-            "/totalPaidExact",
+            amt(
+                "reportable",
+                "@reports.col.reportable_1099",
+                "reportable_totalExact",
+            ),
+            "/totalReportableExact",
         ),
     ],
     drill: RowDrill::None,

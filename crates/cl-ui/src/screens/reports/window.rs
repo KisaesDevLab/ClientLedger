@@ -944,6 +944,14 @@ impl ReportWindow {
                 ),
             );
         }
+        // What the Duplicate Finder compares (U-209 note, QA-9).
+        if self.spec.source == cl_core::report::Source::Duplicates {
+            ui.label(
+                RichText::new(t("reports.duplicates.how"))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
+        }
         if self.spec.drill != cl_model::reports::DrillRule::None {
             ui.label(
                 RichText::new(t("reports.drill.footer"))
