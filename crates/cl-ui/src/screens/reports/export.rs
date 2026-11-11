@@ -54,9 +54,9 @@ impl Kind {
 struct Pending {
     kind: Kind,
     build: Option<Receiver<Option<Built>>>,
-    built: Option<Option<Built>>,
+    built: Slot<Built>,
     dialog: Receiver<Option<PathBuf>>,
-    path: Option<Option<PathBuf>>,
+    path: Slot<PathBuf>,
 }
 
 /// A finished file and how many values it wrote as text (xlsx).
@@ -220,19 +220,32 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
     w.export.pending = Some(Pending {
         kind,
         build: Some(snap.spawn(kind)),
-        built: None,
+        built: Slot::Waiting,
         dialog,
-        path: None,
+        path: Slot::Waiting,
     });
 }
 
-/// A finished receive: `Some(value)` once, `Some(None)` when the sender
-/// went away.
-fn take<T>(rx: &Receiver<Option<T>>) -> Option<Option<T>> {
+/// An answer from another thread.
+enum Slot<T> {
+    /// Not in yet.
+    Waiting,
+    /// In: a value, or nothing (cancelled, failed, the sender went away).
+    Done(Option<T>),
+}
+
+impl<T> Slot<T> {
+    const fn waiting(&self) -> bool {
+        matches!(self, Slot::Waiting)
+    }
+}
+
+/// A finished receive, once; `Done(None)` when the sender went away.
+fn take<T>(rx: &Receiver<Option<T>>) -> Slot<T> {
     match rx.try_recv() {
-        Ok(v) => Some(v),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(None),
+        Ok(v) => Slot::Done(v),
+        Err(TryRecvError::Empty) => Slot::Waiting,
+        Err(TryRecvError::Disconnected) => Slot::Done(None),
     }
 }
 
@@ -243,24 +256,25 @@ pub(super) fn poll(w: &mut ReportWindow) {
     let Some(p) = w.export.pending.as_mut() else {
         return;
     };
-    if p.built.is_none()
+    if p.built.waiting()
         && let Some(rx) = &p.build
-        && let Some(v) = take(rx)
     {
-        p.built = Some(v);
-        p.build = None;
+        p.built = take(rx);
+        if !p.built.waiting() {
+            p.build = None;
+        }
     }
-    if p.path.is_none()
+    if p.path.waiting()
         && let Ok(chosen) = p.dialog.try_recv()
     {
-        p.path = Some(chosen);
+        p.path = Slot::Done(chosen);
     }
     // Cancelled: nothing to write, whatever the build.
-    if matches!(p.path, Some(None)) {
+    if matches!(p.path, Slot::Done(None)) {
         w.export.pending = None;
         return;
     }
-    if p.built.is_none() || p.path.is_none() {
+    if p.built.waiting() || p.path.waiting() {
         return;
     }
     let Some(Pending {
@@ -269,7 +283,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
     else {
         return;
     };
-    let (Some(built), Some(Some(path))) = (built, path) else {
+    let (Slot::Done(built), Slot::Done(Some(path))) = (built, path) else {
         return;
     };
     let file = path
@@ -306,7 +320,7 @@ fn poll_print(w: &mut ReportWindow) {
     let Some((_, rx)) = w.export.printing.as_ref() else {
         return;
     };
-    let Some(built) = take(rx) else {
+    let Slot::Done(built) = take(rx) else {
         return;
     };
     let Some((title, _)) = w.export.printing.take() else {

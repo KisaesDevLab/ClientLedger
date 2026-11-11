@@ -122,11 +122,11 @@ fn send(w: &mut ReportWindow) {
     w.mailer.message = None;
     w.mailer.error = None;
     let form = w.mailer.form();
-    if let Some((f, mail, key)) = w.mailer.unknown.take() {
-        if f == form {
-            dispatch(w, form, mail, key);
-            return;
-        }
+    if let Some((f, mail, key)) = w.mailer.unknown.take()
+        && f == form
+    {
+        dispatch(w, form, mail, key);
+        return;
     }
     let Some(snap) = snapshot(w) else {
         w.mailer.message = Some("reports.export.failed");
