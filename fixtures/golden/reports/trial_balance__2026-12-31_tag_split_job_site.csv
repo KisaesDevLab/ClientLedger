@@ -1,6 +1,6 @@
 kind,level,path,caption,debit,credit
-account,1,accounts/acct:1010,1010 · Operating Checking,86445.42,0
-account_total,1,accounts/acct:1010~split,@reports.row.total_of 1010 · Operating Checking,86445.42,0
+account,1,accounts/acct:1010,1010 · Operating Checking,87045.42,0
+account_total,1,accounts/acct:1010~split,@reports.row.total_of 1010 · Operating Checking,87045.42,0
 account,1,accounts/acct:1020,1020 · Savings,15450,0
 account_total,1,accounts/acct:1020~split,@reports.row.total_of 1020 · Savings,15450,0
 account,1,accounts/acct:1500,1500 · Equipment,47987.66,0
@@ -63,8 +63,12 @@ account,1,accounts/acct:20100,20100 · Accounts Payable,0,17361.53
 account_total,1,accounts/acct:20100~split,@reports.row.total_of 20100 · Accounts Payable,0,17361.53
 account,1,accounts/acct:30000,30000 · Opening Balances,0,139000
 account_total,1,accounts/acct:30000~split,@reports.row.total_of 30000 · Opening Balances,0,139000
-account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5950
-account_total,1,accounts/acct:30160~split,@reports.row.total_of 30160 · Owner's Contribution,0,5950
+account,1,accounts/acct:30120,30120 · Retained Earnings,0,100
+account_total,1,accounts/acct:30120~split,@reports.row.total_of 30120 · Retained Earnings,0,100
+account,1,accounts/row66,30120 · Retained Earnings (Prior Years),0,600
+account_total,1,accounts/row66~split,@reports.row.total_of 30120 · Retained Earnings (Prior Years),0,600
+account,1,accounts/acct:30160,30160 · Owner's Contribution,0,5850
+account_total,1,accounts/acct:30160~split,@reports.row.total_of 30160 · Owner's Contribution,0,5850
 account,1,accounts/acct:30170,30170 · Owner's Draw,353267.44,0
 account_total,1,accounts/acct:30170~split,@reports.row.total_of 30170 · Owner's Draw,353267.44,0
-grand,0,total,@reports.row.total,1336731.91,1336731.91
+grand,0,total,@reports.row.total,1337331.91,1337331.91

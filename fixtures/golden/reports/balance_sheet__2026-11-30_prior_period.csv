@@ -1,0 +1,24 @@
+kind,level,path,caption,total,total_prior,total_change,total_pct_change
+header,0,assets,@reports.bs.assets,,,,
+account,1,assets/acct:1010,1010 · Operating Checking,86310.55,87502.13,-1191.58,-1.4
+account,1,assets/acct:10150,10150 · Payments Clearing,2092.5,0,2092.5,
+account,1,assets/acct:1020,1020 · Savings,15450,12000,3450,28.8
+account,1,assets/acct:10200,10200 · Accounts Receivable,52385.98,-227849.78,280235.76,123
+account,1,assets/acct:1500,1500 · Equipment,47987.66,47987.66,0,0
+account,1,assets/acct:1510,1510 · Vehicles,62012.34,62012.34,0,0
+account,1,assets/acct:Inventory Asset,Inventory Asset,370,0,370,
+total,0,assets~total,@reports.bs.total_assets,266609.03,-18347.65,284956.68,1553.1
+header,0,liabilities,@reports.bs.liabilities,,,,
+account,1,liabilities/acct:20100,20100 · Accounts Payable,19541.93,13406.23,6135.7,45.8
+account,1,liabilities/acct:2050,2050 · Business Credit Card,289.63,0,289.63,
+account,1,liabilities/acct:2200,2200 · Vehicle and Equipment Loans,31200,31200,0,0
+account,1,liabilities/acct:2400,2400 · Customer Deposits,500,0,500,
+subtotal,0,liabilities~total,@reports.bs.total_liabilities,51531.56,44606.23,6925.33,15.5
+header,0,equity,@reports.bs.equity,,,,
+account,1,equity/acct:30000,30000 · Opening Balances,139000,139000,0,0
+account,1,equity/acct:30120,30120 · Retained Earnings,700,700,0,0
+account,1,equity/acct:30160,30160 · Owner's Contribution,3350,-100,3450,3450
+account,1,equity/acct:30170,30170 · Owner's Draw,-353267.44,-328538.88,-24728.56,-7.5
+account,1,equity/row4,@reports.bs.net_income,425294.91,125985,299309.91,237.6
+subtotal,0,equity~total,@reports.bs.total_equity,215077.47,-62953.88,278031.35,441.6
+grand,0,liabilities_and_equity,@reports.bs.total_liabilities_and_equity,266609.03,-18347.65,284956.68,1553.1
