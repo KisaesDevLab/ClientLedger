@@ -516,8 +516,9 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                     .get(&c.key)
                     .cloned()
                     .unwrap_or_else(|| super::super::label(&c.caption));
-            ui.add_sized(
-                [CELL_W, 18.0],
+            right(
+                ui,
+                CELL_W,
                 egui::Label::new(RichText::new(text).size(12.0).strong()),
             );
         }
@@ -593,12 +594,22 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                 } else {
                     RichText::new(caption)
                 };
-                let l = ui.add_sized(
-                    [CAPTION_W - indent - 18.0, 18.0],
-                    egui::Label::new(text)
-                        .truncate()
-                        .sense(egui::Sense::click()),
-                );
+                // Captions start at the left, amounts end at the right
+                // (the mockup's statement layout).
+                let l = ui
+                    .allocate_ui_with_layout(
+                        egui::vec2(CAPTION_W - indent - 18.0, 18.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(CAPTION_W - indent - 18.0);
+                            ui.add(
+                                egui::Label::new(text)
+                                    .truncate()
+                                    .sense(egui::Sense::click()),
+                            )
+                        },
+                    )
+                    .inner;
                 if l.clicked()
                     && let Some(n) = node.clone()
                 {
@@ -613,8 +624,9 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                             other => super::super::window::cell_text(other, style),
                         })
                         .unwrap_or_default();
-                    ui.add_sized(
-                        [CELL_W, 18.0],
+                    right(
+                        ui,
+                        CELL_W,
                         egui::Label::new(RichText::new(text).monospace()),
                     );
                 }
@@ -631,4 +643,16 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
         s.ed.select(Some(&n));
         s.tab = PropTab::Row;
     }
+}
+
+/// A label in a cell `width` wide, against its right edge.
+fn right(ui: &mut Ui, width: f32, label: egui::Label) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 18.0),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(label);
+        },
+    );
 }
