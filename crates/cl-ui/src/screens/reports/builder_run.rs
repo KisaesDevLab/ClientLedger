@@ -1590,9 +1590,11 @@ fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
         return;
     };
     let base = b.baseline.as_ref();
-    // Back to its editor (Q-A08x), only dates changed in this tab come
-    // along: the editor may have moved on since its Run report (R2).
-    let dates = if b.editor.is_some() && base.is_some_and(|x| x.dates == w.options.dates) {
+    // Only dates changed in this tab come along: back to its editor
+    // (Q-A08x) the editor may have moved on since its Run report (R2); a
+    // memorized report runs on the window's defaults where it has none
+    // (no preset), and those are not a change to it (QA-15).
+    let dates = if base.is_some_and(|x| x.dates == w.options.dates) {
         None
     } else {
         Some(w.options.dates)

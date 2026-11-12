@@ -259,7 +259,7 @@ fn steps(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 }
                 if !open {
                     ui.label(
-                        RichText::new(summary(&g, step))
+                        RichText::new(summary(&g, step, s.band.custom.is_some()))
                             .size(12.0)
                             .color(tokens.text_secondary),
                     );
@@ -279,7 +279,7 @@ fn steps(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     }
 }
 
-fn summary(g: &GuidedState, step: Step) -> String {
+fn summary(g: &GuidedState, step: Step, custom: bool) -> String {
     match step {
         Step::Source => g
             .source
@@ -292,6 +292,7 @@ fn summary(g: &GuidedState, step: Step) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         Step::Lines => g.display.map(|d| t(display_key(d))).unwrap_or_default(),
+        Step::Dates if custom => t("builder.band.custom"),
         Step::Dates => g
             .preset
             .as_deref()
@@ -474,12 +475,19 @@ fn body(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, step: Step) {
                 .map(|(p, _)| picker::on(t(p.label())))
                 .collect();
             choices.push(picker::on(t("builder.band.each_time")));
-            let at = g
-                .preset
-                .as_deref()
-                .and_then(super::preset_of)
-                .and_then(|p| PRESETS.iter().position(|(x, _)| *x == p))
-                .unwrap_or(PRESETS.len());
+            // Custom dates, as in Advanced's band (QA-1): From/To for this
+            // session only (Q-A08q).
+            choices.push(picker::on(t("builder.band.custom")));
+            let custom_at = choices.len() - 1;
+            let at = if s.band.custom.is_some() {
+                custom_at
+            } else {
+                g.preset
+                    .as_deref()
+                    .and_then(super::preset_of)
+                    .and_then(|p| PRESETS.iter().position(|(x, _)| *x == p))
+                    .unwrap_or(PRESETS.len())
+            };
             if let Some(i) = picker::pick(
                 ui,
                 ("g-dates", s.id.0),
@@ -488,8 +496,13 @@ fn body(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, step: Step) {
                 Some(at),
                 200.0,
             ) {
-                let preset: Option<DatePreset> = PRESETS.get(i).map(|(p, _)| *p);
-                change(s, |g| g.preset = preset.map(|p| preset_name(p).to_string()));
+                if i == custom_at {
+                    s.choose_custom_dates();
+                } else {
+                    s.band.custom = None;
+                    let preset: Option<DatePreset> = PRESETS.get(i).map(|(p, _)| *p);
+                    change(s, |g| g.preset = preset.map(|p| preset_name(p).to_string()));
+                }
                 return;
             }
             // From/To (As of): this session's dates, as in Advanced's band
@@ -592,8 +605,11 @@ fn nav(s: &mut BuilderScreen, ui: &mut Ui, step: Step) {
             step != Step::Source,
             egui::Button::new(t("builder.guided.back")).min_size(egui::vec2(0.0, TALL)),
         );
+        // A pressed button goes with its step: the next step's question
+        // takes the keyboard on the next frame, as Alt+B / Alt+N do (QA-4).
         if back.clicked() {
             s.command(cl_model::CommandId::new("builder.guided_back"));
+            s.focus_next = Some(Pane::Outline);
         }
         crate::widgets::kbd(ui, "Alt B");
         let tokens = Tokens::of(ui.ctx());
@@ -608,8 +624,10 @@ fn nav(s: &mut BuilderScreen, ui: &mut Ui, step: Step) {
             .min_size(egui::vec2(0.0, TALL)),
         );
         let next = next.on_disabled_hover_text(t("builder.guided.answer_first"));
+        s.next_at = Some(next.rect);
         if next.clicked() {
             s.command(cl_model::CommandId::new("builder.guided_next"));
+            s.focus_next = Some(Pane::Outline);
         }
         crate::widgets::kbd(ui, "Alt N");
     });

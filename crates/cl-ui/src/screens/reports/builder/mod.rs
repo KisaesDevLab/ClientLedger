@@ -272,6 +272,10 @@ pub(crate) struct Band {
     pub(crate) custom: Option<DateChoice>,
     pub(crate) from: crate::screens::company::form::DateInput,
     pub(crate) to: crate::screens::company::form::DateInput,
+    /// From or To had the keyboard last frame: its text is left alone.
+    pub(crate) typing: bool,
+    /// The From field's widget (tests focus it).
+    pub(crate) from_id: Option<egui::Id>,
 }
 
 /// The editor window.
@@ -328,6 +332,8 @@ pub struct BuilderScreen {
     pub(crate) starter_menu: bool,
     /// The list just opened: its first choice takes the keyboard.
     pub(crate) starter_menu_new: bool,
+    /// Where Guided's Next button was drawn (tests click it).
+    pub(crate) next_at: Option<egui::Rect>,
 }
 
 impl BuilderScreen {
@@ -376,6 +382,8 @@ impl BuilderScreen {
                 custom: None,
                 from: date.clone(),
                 to: date,
+                typing: false,
+                from_id: None,
             },
             lists: lists::Lists::default(),
             save: save::SaveState::default(),
@@ -385,6 +393,7 @@ impl BuilderScreen {
             starters_job: None,
             starter_menu: false,
             starter_menu_new: false,
+            next_at: None,
         }
     }
 
@@ -721,6 +730,22 @@ impl BuilderScreen {
             DateChoice::Preset(p) => p.range(&self.fiscal, self.today).ok(),
             DateChoice::Fixed { from, to } => Some(cl_core::report::DateRange { from, to }),
             DateChoice::AsOf(d) => Some(cl_core::report::DateRange { from: d, to: d }),
+        }
+    }
+
+    /// "Custom dates": the dates shown now become this session's own
+    /// (Q-A08q); From/To then take typing.
+    pub(crate) fn choose_custom_dates(&mut self) {
+        if let Some(r) = self.shown_dates() {
+            self.band.custom = Some(if self.as_of() {
+                DateChoice::AsOf(r.to)
+            } else {
+                DateChoice::Fixed {
+                    from: r.from,
+                    to: r.to,
+                }
+            });
+            self.preview.edited(&self.ed);
         }
     }
 

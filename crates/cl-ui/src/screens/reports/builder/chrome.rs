@@ -373,16 +373,8 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
             let mut nd = d.clone();
             nd.preset = None;
             s.apply(Op::Dates(nd));
-        } else if let Some(r) = s.shown_dates() {
-            s.band.custom = Some(if s.as_of() {
-                DateChoice::AsOf(r.to)
-            } else {
-                DateChoice::Fixed {
-                    from: r.from,
-                    to: r.to,
-                }
-            });
-            s.preview.edited(&s.ed);
+        } else {
+            s.choose_custom_dates();
         }
     }
     // What is left on this line, not the line's width (a wrapping row).
@@ -395,10 +387,11 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
 /// From and To (As of): they show the report's dates; typing makes them
 /// this session's custom dates (Q-A08q). Guided step 4 shows them too.
 pub(super) fn from_to(s: &mut BuilderScreen, ui: &mut Ui) {
-    // The fields show the report's dates; typing makes them this
-    // session's custom dates.
+    // The fields show the dates the report runs on (a preset's, or the
+    // custom ones carried in from a report window, QA-14), except while
+    // one is being typed in: a keystroke is never undone (QA-1).
     if let Some(r) = s.shown_dates()
-        && s.band.custom.is_none()
+        && !s.band.typing
         && s.pending.is_none()
     {
         if s.band.from.value != Some(r.from) {
@@ -410,9 +403,12 @@ pub(super) fn from_to(s: &mut BuilderScreen, ui: &mut Ui) {
     }
     let today = s.today;
     let mut changed = false;
+    let mut typing = false;
     if !s.as_of() {
         let r = form::date_field(ui, &t("builder.band.from"), &mut s.band.from, today);
         changed |= r.lost_focus();
+        typing |= r.has_focus();
+        s.band.from_id = Some(r.id);
     }
     let label = if s.as_of() {
         t("builder.band.as_of_date")
@@ -421,6 +417,8 @@ pub(super) fn from_to(s: &mut BuilderScreen, ui: &mut Ui) {
     };
     let r = form::date_field(ui, &label, &mut s.band.to, today);
     changed |= r.lost_focus();
+    typing |= r.has_focus();
+    s.band.typing = typing;
     if changed && let Some(to) = s.band.to.value {
         let next = if s.as_of() {
             Some(DateChoice::AsOf(to))

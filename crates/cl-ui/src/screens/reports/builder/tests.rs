@@ -1406,3 +1406,221 @@ fn an_add_picker_reaches_the_third_match_by_keys() {
     run(vec![key(egui::Key::Enter)]);
     assert_eq!(added.get(), Some(2), "the third A: Avocado");
 }
+
+/// QA-15: Edit in Report Builder on an unchanged memorized builder report
+/// (opened from the Memorized list, as it runs) opens clean: no dot, Save
+/// changes off, no prompt on close.
+#[test]
+fn an_unchanged_memorized_builder_report_opens_clean() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    // Saved with "Choose each time it runs" and the company's basis: the
+    // window runs it on its own defaults, which are not changes.
+    let mut d = s.ed.definition().dates.clone();
+    d.preset = None;
+    s.apply(Op::Dates(d));
+    memorize_as(&ctx, &mut s, "QA P&L built");
+    assert!(!Screen::dirty(&s), "saved");
+    let id = s.ed.saved().map(|x| x.id.clone()).expect("memorized");
+    let row = {
+        let mut st = link.demo_state().expect("demo");
+        crate::company::demo::report_store::definition(&mut st, &id).expect("row")
+    };
+    let mut w = super::super::window::ReportWindow::new(
+        Arc::clone(&link),
+        CommandId::new(super::super::KIND),
+        None,
+        cl_model::reports::find("profit_loss").expect("p&l"),
+        today(),
+    );
+    w.poll();
+    super::super::memorized::open_row(&mut w, &row);
+    w.poll();
+    let _ = link.drain();
+    super::super::builder_run::customize(&mut w);
+    let mut seed = None;
+    for _ in 0..200 {
+        w.poll();
+        seed = link.drain().into_iter().find_map(|e| match e {
+            CompanyEvent::OpenWith(_, p) => match *p {
+                OpenPayload::BuilderEditor(b) => Some(*b),
+                _ => None,
+            },
+            _ => None,
+        });
+        if seed.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let seed = seed.expect("the editor opens");
+    let mut again = BuilderScreen::new(Arc::clone(&link), None, today());
+    assert!(again.open_with(OpenPayload::BuilderEditor(Box::new(seed))));
+    frames(&ctx, &mut again);
+    assert!(
+        !Screen::dirty(&again),
+        "unchanged: {:?} vs {:?}",
+        again.ed.definition(),
+        again.ed.saved().map(|x| &x.def)
+    );
+    assert!(!again.ed.can_save_changes());
+}
+
+/// One frame at `secs` with `events`.
+fn frame_with(ctx: &egui::Context, s: &mut BuilderScreen, secs: f64, events: Vec<egui::Event>) {
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            time: Some(secs),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| s.ui(ui),
+    );
+    out.textures_delta.clear();
+}
+
+fn key_event(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+/// QA-1: typing in From while a preset is chosen keeps every keystroke,
+/// and leaving the field makes the typed dates this session's custom
+/// dates (as the standard reports do); the preset stays the report's.
+#[test]
+fn typing_a_date_over_a_preset_makes_custom_dates() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    s.focus_to = None;
+    let from = s.band.from_id.expect("From is drawn");
+    assert_eq!(s.band.from.text, "11/01/2026", "This month");
+    let before = s.ed.definition().clone();
+    ctx.memory_mut(|m| m.request_focus(from));
+    frame(&ctx, &mut s, 5.0);
+    frame_with(
+        &ctx,
+        &mut s,
+        5.1,
+        vec![key_event(egui::Key::A, egui::Modifiers::COMMAND)],
+    );
+    frame_with(&ctx, &mut s, 5.2, vec![egui::Event::Text("10/0".into())]);
+    frame(&ctx, &mut s, 5.3);
+    assert_eq!(s.band.from.text, "10/0", "a keystroke is never undone");
+    frame_with(&ctx, &mut s, 5.4, vec![egui::Event::Text("1/2026".into())]);
+    frame_with(
+        &ctx,
+        &mut s,
+        5.5,
+        vec![key_event(egui::Key::Tab, egui::Modifiers::NONE)],
+    );
+    frame(&ctx, &mut s, 5.6);
+    let oct1 = CalendarDate::from_ymd(2026, 10, 1).expect("date");
+    let nov30 = CalendarDate::from_ymd(2026, 11, 30).expect("date");
+    assert_eq!(
+        s.band.custom,
+        Some(cl_model::reports::DateChoice::Fixed {
+            from: oct1,
+            to: nov30
+        })
+    );
+    assert_eq!(s.band.from.text, "10/01/2026");
+    assert_eq!(
+        s.ed.definition().dates.preset.as_deref(),
+        Some("this_month"),
+        "typed dates are for this session only (Q-A08q)"
+    );
+    assert_eq!(s.ed.definition(), &before, "not a change to the report");
+}
+
+/// QA-1: Guided's "Which dates?" step offers Custom dates.
+#[test]
+fn guided_dates_offer_custom_dates() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Guided);
+    if let Some(g) = s.guided.as_mut() {
+        g.set_source(cl_model::report_def::SourceKey::ArOpen);
+    }
+    s.guided_changed();
+    s.choose_custom_dates();
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    assert!(s.band.custom.is_some());
+    assert_eq!(
+        s.band.from.value,
+        s.shown_dates().map(|r| r.from),
+        "the fields show the custom dates"
+    );
+}
+
+/// QA-14: Edit in Report Builder from a report run as of 10/31 shows As of
+/// 10/31 in the band (the date its preview and Run report use), not today.
+#[test]
+fn an_as_of_report_carried_in_shows_its_date() {
+    let mut def = blank_definition();
+    def.dates.mode = cl_model::report_def::DateMode::AsOf;
+    let oct31 = CalendarDate::from_ymd(2026, 10, 31).expect("date");
+    let seed = BuilderSeed::Customize(Box::new(CustomizeSeed {
+        def,
+        title: "Balance Sheet".into(),
+        origin: Origin::Standard("balance_sheet".into()),
+        saved: None,
+        dates: Some(cl_model::reports::DateChoice::AsOf(oct31)),
+        basis: None,
+        adjusting: None,
+        filters_dropped: false,
+        editor: None,
+    }));
+    let (_d, _l, mut s) = editor(seed);
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    assert_eq!(s.band.to.value, Some(oct31));
+    assert_eq!(s.band.to.text, "10/31/2026");
+    assert_eq!(
+        s.run_options().1.dates,
+        cl_model::reports::DateChoice::AsOf(oct31)
+    );
+}
+
+/// QA-4: a click on Guided's Next hands the keyboard to the next step's
+/// question, as Alt+N does.
+#[test]
+fn guided_next_by_click_keeps_the_keyboard() {
+    let ctx = themed();
+    let (_d, _l, mut s) = editor(BuilderSeed::Guided);
+    if let Some(g) = s.guided.as_mut() {
+        g.set_source(cl_model::report_def::SourceKey::ArOpen);
+    }
+    s.guided_changed();
+    frames(&ctx, &mut s);
+    let at = s.next_at.expect("Next is drawn").center();
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame_with(&ctx, &mut s, 6.0, vec![egui::Event::PointerMoved(at)]);
+    frame_with(&ctx, &mut s, 6.1, vec![click(true)]);
+    frame_with(&ctx, &mut s, 6.2, vec![click(false)]);
+    assert_eq!(
+        s.guided.as_ref().map(|g| g.step),
+        Some(cl_model::report_def::guided::Step::Grouping)
+    );
+    frame(&ctx, &mut s, 6.3);
+    frame(&ctx, &mut s, 6.4);
+    assert!(
+        focused_role(&ctx),
+        "the next step's question has the keyboard"
+    );
+}
