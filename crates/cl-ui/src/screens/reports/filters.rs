@@ -37,6 +37,7 @@ fn has(w: &ReportWindow, cap: &str) -> bool {
 pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
     enum Click {
         Customize,
+        Builder,
         Memorize,
         Print,
         Xlsx,
@@ -53,10 +54,26 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         if ui.button(t("reports.tool.customize")).clicked() {
             click = Some(Click::Customize);
         }
-        // A builder report isn't memorized from here (Q-A07t(1), S-L1):
-        // its definition would be saved as a standard report.
+        // A08 (Q-A08g, Q-A08k): open what is shown in the Report Builder
+        // editor; off, with the reason, when it can't be.
+        let off = super::builder_run::customize_off(w);
+        let r = ui
+            .add_enabled(
+                off.is_none() && !w.edit.busy(),
+                egui::Button::new(t("reports.tool.builder_customize")),
+            )
+            .on_hover_text(t("reports.tool.builder_customize.hint"));
+        let r = match off {
+            Some(why) => r.on_disabled_hover_text(t(why)),
+            None => r,
+        };
+        if r.clicked() {
+            click = Some(Click::Builder);
+        }
+        // A builder report is memorized as a builder report (A08 lifts
+        // Q-A07t(1)); a detail tab is not a report of its own.
         if super::memorized::available(&w.link)
-            && w.builder.is_none()
+            && !w.builder.as_ref().is_some_and(|b| b.is_detail())
             && ui
                 .button(t("reports.tool.memorize"))
                 .on_hover_text(t("reports.tool.memorize.key"))
@@ -107,6 +124,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
     });
     match click {
         Some(Click::Customize) => w.customize = !w.customize,
+        Some(Click::Builder) => super::builder_run::customize(w),
         Some(Click::Memorize) => super::memorized::open_dialog(w),
         Some(Click::Print) => super::export::print(w),
         Some(Click::Xlsx) => super::export::start(w, ui.ctx(), super::export::Kind::Xlsx),

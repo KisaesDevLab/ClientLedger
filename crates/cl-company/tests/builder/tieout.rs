@@ -748,6 +748,13 @@ async fn drills_sum_to_their_cells(s: &Session, list: &[Starter]) {
 }
 pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
     let list = s.report_builder().starters().await.expect("starters");
+    // A08 (Q-A08g): every starter Customize opens is served.
+    for key in cl_model::reports::mapped_starters() {
+        assert!(
+            list.iter().any(|st| st.key == key),
+            "REPORT_STARTERS names {key}, which /starters doesn't serve"
+        );
+    }
     let chart = s
         .accounts()
         .list_all(&AccountFilter::default())

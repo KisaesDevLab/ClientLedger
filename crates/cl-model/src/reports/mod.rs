@@ -15,7 +15,8 @@ pub mod resolve;
 pub mod spec;
 
 pub use catalog::{
-    BUILDER_AS_OF, BUILDER_AS_OF_TOTAL, BUILDER_RANGE, BUILDER_RANGE_TOTAL, CATALOG, find, search,
+    BUILDER_AS_OF, BUILDER_AS_OF_TOTAL, BUILDER_RANGE, BUILDER_RANGE_TOTAL, CATALOG, NO_STARTER,
+    REPORT_STARTERS, find, mapped_starters, search, starter_for,
 };
 pub use definition::{DefinitionError, SCHEMA_VERSION, StandardDefinition};
 pub use options::{
