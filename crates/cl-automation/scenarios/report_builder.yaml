@@ -228,18 +228,6 @@ steps:
   - assert_focused: {label: PREVIEW}
   - key: Shift+F6
   - assert_state: {key: screen.pane, equals: properties}
-  # --- Problems to fix: the formula above its rows (AC13) ------------------------
-  - key: Shift+F6
-  - assert_state: {key: screen.pane, equals: outline}
-  - key: Alt+Up
-  - key: Alt+Up
-  - assert_state: {key: screen.can_run, equals: false}
-  - assert_exists: {role: button, label: Go to row, index: 0}
-  - screenshot: problems
-  - key: Ctrl+Z
-  - key: Ctrl+Z
-  - assert_state: {key: screen.can_run, equals: true}
-  - assert_state: {key: screen.dirty, equals: false}
   # --- The panes reflow (UI review H1, README rule 6) ---------------------------
   - resize: {width: 960, height: 640}
   - wait: {ms: 300}
@@ -253,6 +241,18 @@ steps:
   - resize: {width: 1440, height: 940}
   - wait: {ms: 300}
   - assert_state: {key: screen.layout, equals: wide}
+  # --- Problems to fix: the formula above the rows it uses (AC13) -----------------
+  - focus: {role: tree_item, label: Formula Gross profit}
+  - key: Alt+Up
+  - key: Alt+Up
+  - wait: {ms: 300}
+  - assert_state: {key: screen.can_run, equals: false}
+  - assert_exists: {role: button, label: Go to row, index: 0}
+  - screenshot: problems
+  - key: Ctrl+Z
+  - key: Ctrl+Z
+  - assert_state: {key: screen.can_run, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
   - command: file.close_window
   # --- Guided: who owes me, by name, as of today --------------------------------
   - command: reports.builder_editor
@@ -279,13 +279,6 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.guided_step, equals: done}
   - screenshot: guided-done
-  # Guided on a narrow window: the preview moves below the steps (H1).
-  - resize: {width: 960, height: 640}
-  - wait: {ms: 300}
-  - assert_state: {key: screen.layout, equals: stacked}
-  - screenshot: guided-narrow
-  - resize: {width: 1440, height: 940}
-  - wait: {ms: 300}
   # Run report: its button, by keys (review R11).
   - key: Tab
   - key: Tab
@@ -301,6 +294,13 @@ steps:
   # Back to the editor; Open in Advanced by keys.
   - command: file.close_window
   - assert_state: {key: screen.screen, equals: report_builder}
+  # Guided on a narrow window: the preview moves below the steps (H1).
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.layout, equals: stacked}
+  - screenshot: guided-narrow
+  - resize: {width: 1440, height: 940}
+  - wait: {ms: 300}
   - key: Alt+B
   - key: Alt+N
   - key: Tab
