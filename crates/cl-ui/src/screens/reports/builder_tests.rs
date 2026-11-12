@@ -708,3 +708,37 @@ fn new_report_is_found_by_its_own_words() {
         );
     }
 }
+
+/// QA-10: two compares and a `% of` give distinct, sentence-case
+/// headings; one compare keeps the short ones.
+#[test]
+fn compare_headings_are_distinct() {
+    let def: cl_model::report_def::BuilderDefinition = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+        "columns": {"detailFields": [], "headers": {}, "percentOf": "inc",
+            "compare": [
+                {"base": "prior_period", "amount": true, "dollarChange": true, "percentChange": true},
+                {"base": "prior_year", "amount": true, "dollarChange": true, "percentChange": false}
+            ]},
+        "nodes": [{"type": "section", "id": "inc", "caption": "Income", "source": "gl",
+            "measure": "amount", "filters": [], "groupBy": [], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false}]
+    }))
+    .expect("def");
+    let cap = |k: &str| super::builder_run::compare_caption(&def, k);
+    assert_eq!(cap("total:c0").as_deref(), Some("Prior period"));
+    assert_eq!(cap("total:c1").as_deref(), Some("Prior year"));
+    let a = cap("total:c0:change").expect("change");
+    let b = cap("total:c1:change").expect("change");
+    assert_ne!(a, b, "two $ columns are told apart");
+    assert_eq!(cap("total:pct").as_deref(), Some("% of Income"));
+    assert_eq!(cap("p3:pct").as_deref(), Some("% of Income"));
+    assert_eq!(cap("bucket:current"), None, "not a compare");
+    assert_eq!(cap("total:c0:debit"), None);
+    let mut one = def.clone();
+    one.columns.compare.truncate(1);
+    assert_eq!(
+        super::builder_run::compare_caption(&one, "total:c0:change").as_deref(),
+        Some("$ change")
+    );
+}

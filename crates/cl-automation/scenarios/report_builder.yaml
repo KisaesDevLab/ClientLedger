@@ -181,8 +181,8 @@ steps:
   - key: Space
   - assert_focused: {role: combo_box, label: Compare with}
   - wait: {ms: 800}
-  - assert_exists: {label: Prior Period, index: 0}
-  - assert_exists: {label: $ Change, index: 0}
+  - assert_exists: {label: Prior period, index: 0}
+  - assert_exists: {label: $ change, index: 0}
   # --- Rename the Total header ------------------------------------------------------
   - key: F6
   - assert_focused: {label: PREVIEW}

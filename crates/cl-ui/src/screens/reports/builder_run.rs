@@ -41,7 +41,7 @@ use super::builder::{BuilderSeed, CustomizeSeed, EditorId};
 use super::builder_ref::BuilderRunOpen;
 use super::window::{ReportWindow, RunState};
 use crate::company::CompanyEvent;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::screens::invoice::engine::{self, Job};
 use crate::theme::Tokens;
@@ -638,10 +638,66 @@ fn dress_columns(def: Option<&BuilderDefinition>, columns: &mut [ColumnHead]) {
     let Some(def) = def else { return };
     for c in columns {
         if !def.columns.headers.contains_key(&c.key)
-            && let Some(k) = column_key(c).or_else(|| period_caption(c))
+            && let Some(k) = compare_caption(def, &c.key)
+                .or_else(|| column_key(c))
+                .or_else(|| period_caption(c))
         {
             c.caption = k;
         }
+    }
+}
+
+/// A compare or `% of` column's heading, in the app's sentence case and
+/// never twice the same (QA-10): "Prior year", "$ change" ("$ vs prior
+/// year" when two compares stand side by side), "% of Income".
+pub(crate) fn compare_caption(def: &BuilderDefinition, key: &str) -> Option<String> {
+    use cl_model::report_def::CompareBase;
+    let parts: Vec<&str> = key.split(':').collect();
+    let compare = |p: &str| {
+        let i: usize = p.strip_prefix('c')?.parse().ok()?;
+        def.columns.compare.get(i).map(|c| c.base)
+    };
+    let base_key = |b: CompareBase| match b {
+        CompareBase::PriorYear => "prior_year",
+        CompareBase::PriorPeriod => "prior_period",
+    };
+    let many = def.columns.compare.len() > 1;
+    let change = |kind: &str, b: CompareBase| {
+        if many {
+            t(&format!("reports.builder.col.{kind}_vs_{}", base_key(b)))
+        } else {
+            t(&format!("reports.builder.col.{kind}"))
+        }
+    };
+    match parts.as_slice() {
+        [_, c] if compare(c).is_some() => {
+            compare(c).map(|b| t(&format!("reports.builder.col.{}", base_key(b))))
+        }
+        [_, c, "change"] => compare(c).map(|b| change("change", b)),
+        [_, c, "pct_change"] => compare(c).map(|b| change("pct_change", b)),
+        [_, "pct"] => Some(match def.columns.percent_of.as_deref() {
+            None | Some("section") => t("reports.builder.col.percent_section"),
+            Some(id) => match cl_model::report_def::outline::find(&def.nodes, id) {
+                Some(n) => t_with(
+                    "reports.builder.col.percent_of",
+                    &[("row", &node_caption(n))],
+                ),
+                None => t("reports.builder.col.percent"),
+            },
+        }),
+        _ => None,
+    }
+}
+
+/// A row's caption (a text row's text).
+fn node_caption(n: &cl_model::report_def::Node) -> String {
+    use cl_model::report_def::Node;
+    match n {
+        Node::Section(x) => x.caption.clone(),
+        Node::Group(x) => x.caption.clone(),
+        Node::Formula(x) => x.caption.clone(),
+        Node::Text(x) => x.text.clone(),
+        _ => String::new(),
     }
 }
 
