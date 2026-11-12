@@ -556,7 +556,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                 ui.add_space(indent);
                 if r.expandable {
                     let open = s.preview.state.is_open(&r.path);
-                    let mark = if open { "\u{25be}" } else { "\u{25b8}" };
+                    let mark = if open { "\u{2212}" } else { "+" };
                     let b = ui.small_button(mark);
                     let name = t(if open {
                         "builder.preview.close_line"

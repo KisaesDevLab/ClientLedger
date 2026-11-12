@@ -1,0 +1,347 @@
+# Report Builder editor (ADD-03 A08, AC6, AC14) against `clientledger --demo`,
+# keyboard only (keys, typing and commands; no clicks): a P&L with Gross
+# profit built from a blank report in Advanced (two sections filtered by
+# account type and a formula over them), Last month on Accrual, a compare
+# with the period before, the Total header renamed, undo and redo, Memorize
+# (Ctrl+M); F6 / Shift+F6 move between the outline, the settings and the
+# preview; then Guided: Who owes me by name, totals only, as of today, Open
+# in Advanced and Run report (aging columns, a client line).
+# Figures are the demo's (October 2026, accrual). Synthetic.
+name: report_builder
+description: Report Builder editor - keyboard-only P&L with Gross profit, compare, renamed header, undo/redo, Memorize, F6 panes, Guided A/R aging.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- Guided first: who owes me, by name, as of today (it seeds the demo's
+  # A/R credit memo, so the P&L below reads the same books in light and dark)
+  - command: reports.builder_editor
+  - assert_state: {key: screen.mode, equals: guided}
+  - assert_focused: {label: "What do you want to report on?"}
+  - key: Tab
+  - key: Down
+  - key: Down
+  - key: Down
+  - key: Down
+  - assert_focused: {role: radio_button, label: Who owes me}
+  - key: Space
+  - key: Alt+N
+  - assert_state: {key: screen.guided_step, equals: grouping}
+  - key: Tab
+  - assert_focused: {role: combo_box, label: Group by}
+  - key: Alt+N
+  - assert_state: {key: screen.guided_step, equals: lines}
+  - key: Tab
+  - assert_focused: {role: radio_button, label: Totals only}
+  - key: Space
+  - key: Alt+N
+  - assert_state: {key: screen.guided_step, equals: dates}
+  - key: Alt+N
+  - assert_state: {key: screen.guided_step, equals: done}
+  - screenshot: guided-done
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: button, label: Open in Advanced}
+  - key: Space
+  - assert_state: {key: screen.mode, equals: advanced}
+  - assert_focused: {role: tree_item, label: Section Who owes me}
+  - command: builder.run_report
+  - wait: {ms: 800}
+  - assert_state: {key: screen.screen, equals: reports}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_exists: {label: Current, index: 0}
+  - assert_exists: {label: 91 and over, index: 0}
+  - assert_exists: {label: Bluestem Veterinary Clinic, index: 0}
+  - screenshot: guided-aging-run
+  # Close the result tab, then the editor without keeping it.
+  - command: file.close_window
+  - command: file.close_window
+  - assert_state: {key: prompt_open, equals: true}
+  - key: Tab
+  - assert_focused: {role: button, label: Discard changes}
+  - key: Space
+  - assert_state: {key: prompt_open, equals: false}
+  # --- A new report, blank in Advanced ---------------------------------------
+  - command: reports.builder_editor
+  - assert_state: {key: screen.screen, equals: report_builder}
+  - assert_state: {key: screen.mode, equals: guided}
+  - assert_focused: {label: "What do you want to report on?"}
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - assert_focused: {role: button, label: Blank report in Advanced}
+  - key: Space
+  - assert_state: {key: screen.mode, equals: advanced}
+  # An empty outline opens the Add menu on Section.
+  - assert_focused: {role: button, label: Section}
+  # --- Section "Income": all accounts whose type is Income -------------------
+  - key: Space
+  - assert_focused: {role: tree_item, label: Section New section}
+  - key: F2
+  - assert_focused: {role: text_input, label: Row name}
+  - key: Ctrl+A
+  - type: {text: Income}
+  - key: Enter
+  - assert_focused: {role: tree_item, label: Section Income}
+  - key: F6
+  - assert_focused: {role: tab, label: Row}
+  - assert_state: {key: screen.pane, equals: properties}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: text_input, label: Caption}
+  - key: Tab
+  - assert_focused: {role: combo_box, label: What to report on}
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: button, label: + Add a filter}
+  - key: Space
+  - assert_focused: {role: combo_box, label: Filter on}
+  - key: Down
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: combo_box, label: Add}
+  # "i": Income, the first value starting with I.
+  - type: {text: i}
+  - assert_exists: {role: button, label_contains: "Income", index: 0}
+  - assert_state: {key: screen.can_run, equals: true}
+  # --- Section "Cost of goods sold" --------------------------------------------
+  - key: Shift+F6
+  - assert_focused: {role: tree_item, label: Section Income}
+  - key: Insert
+  - assert_focused: {role: button, label: Section}
+  - key: Space
+  - key: F2
+  - key: Ctrl+A
+  - type: {text: Cost of goods sold}
+  - key: Enter
+  - assert_focused: {role: tree_item, label: Section Cost of goods sold}
+  - key: F6
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: button, label: + Add a filter}
+  - key: Space
+  - assert_focused: {role: combo_box, label: Filter on}
+  - key: Down
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: c}
+  - assert_state: {key: screen.can_run, equals: true}
+  # --- Formula "Gross profit" = Income - Cost of goods sold ----------------------
+  - key: Shift+F6
+  - key: Insert
+  - key: Down
+  - key: Down
+  - assert_focused: {role: button, label: Formula}
+  - key: Space
+  - key: F2
+  - key: Ctrl+A
+  - type: {text: Gross profit}
+  - key: Enter
+  - assert_focused: {role: tree_item, label: Formula Gross profit}
+  - assert_state: {key: screen.rows, equals: 3}
+  - key: F6
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: combo_box, label: Add a row}
+  - type: {text: i}
+  - type: {text: c}
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - assert_focused: {role: radio_button, label_contains: "Cost of goods sold: −"}
+  - key: Space
+  # --- Last month, Accrual (the settings band) --------------------------------
+  - key: Shift+F6
+  - assert_focused: {role: tree_item, label: Formula Gross profit}
+  # Back through the outline (rows, then its toolbar) to the band.
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - assert_focused: {role: combo_box, label: Adjusting entries}
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - assert_focused: {role: combo_box, label: Dates}
+  - type: {text: l}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: radio_button, label: "Basis: Accrual"}
+  - key: Space
+  - key: Ctrl+Enter
+  - wait: {ms: 800}
+  - assert_state: {key: screen.preview.phase, equals: shown}
+  - assert_state: {key: screen.can_run, equals: true}
+  - assert_exists: {label_contains: "10/01/2026 – 10/31/2026 · Accrual basis · Preview", index: 0}
+  - assert_exists: {label: Gross profit, index: 0}
+  # Income 88,087.67 (after the A/R credit memo) less Cost of goods sold 43,561.29.
+  - assert_exists: {label: "44,526.38", index: 0}
+  - screenshot: gross-profit
+  # --- Columns: the period before with $ change --------------------------------
+  - key: F6
+  - assert_focused: {role: tab, label: Row}
+  - key: Tab
+  - key: Space
+  - assert_state: {key: screen.tab, equals: columns}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: button, label: + Add a compare}
+  - key: Space
+  - assert_focused: {role: combo_box, label: Compare with}
+  - wait: {ms: 800}
+  - assert_exists: {label: Prior Period, index: 0}
+  - assert_exists: {label: $ Change, index: 0}
+  # --- Rename the Total header ------------------------------------------------------
+  - key: F6
+  - assert_focused: {label: PREVIEW}
+  - assert_state: {key: screen.pane, equals: preview}
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - assert_focused: {role: text_input, label: Total}
+  - type: {text: Oct 2026}
+  - key: Tab
+  - wait: {ms: 800}
+  - assert_exists: {label: Oct 2026, index: 1}
+  - screenshot: renamed-header
+  # --- Undo, then redo -----------------------------------------------------------------
+  - key: Ctrl+Z
+  - wait: {ms: 800}
+  - assert_not_exists: {label: Oct 2026}
+  - assert_state: {key: screen.can_redo, equals: true}
+  - key: Ctrl+Y
+  - wait: {ms: 800}
+  - assert_exists: {label: Oct 2026, index: 1}
+  # --- Memorize (Ctrl+M) --------------------------------------------------------------
+  - key: Ctrl+M
+  - assert_state: {key: screen.save, equals: memorize}
+  - assert_focused: {role: text_input, label: Report name, index: 1}
+  - key: Ctrl+A
+  - type: {text: "Gross profit by keyboard {theme}"}
+  - key: Enter
+  - assert_state: {key: screen.save, equals: idle}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.saved.can_edit, equals: true}
+  - assert_exists: {label_contains: "Saved ", index: 0}
+  - screenshot: memorized
+  # --- F6 / Shift+F6 cycle the panes --------------------------------------------------
+  - key: F6
+  - assert_state: {key: screen.pane, equals: outline}
+  - assert_state: {key: screen.outline_focused, equals: true}
+  - key: F6
+  - assert_state: {key: screen.pane, equals: properties}
+  - assert_focused: {role: tab, label: Row}
+  - key: F6
+  - assert_state: {key: screen.pane, equals: preview}
+  - assert_focused: {label: PREVIEW}
+  - key: Shift+F6
+  - assert_state: {key: screen.pane, equals: properties}
+  - command: file.close_window
+compare:
+  # The mockup's state: the P&L with Gross profit, Last month, Accrual.
+  - command: reports.builder_editor
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Space
+  - key: Space
+  - key: F2
+  - key: Ctrl+A
+  - type: {text: Income}
+  - key: Enter
+  - key: F6
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Space
+  - key: Down
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: i}
+  - key: Shift+F6
+  - key: Insert
+  - key: Space
+  - key: F2
+  - key: Ctrl+A
+  - type: {text: Cost of goods sold}
+  - key: Enter
+  - key: F6
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Space
+  - key: Down
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: c}
+  - key: Shift+F6
+  - key: Insert
+  - key: Down
+  - key: Down
+  - key: Space
+  - key: F2
+  - key: Ctrl+A
+  - type: {text: Gross profit}
+  - key: Enter
+  - key: F6
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: i}
+  - type: {text: c}
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Space
+  - key: Shift+F6
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - type: {text: l}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Space
+  - key: Ctrl+Enter
+  - wait: {ms: 1000}
+  - assert_exists: {label: "44,526.38", index: 0}

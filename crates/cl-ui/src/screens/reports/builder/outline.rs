@@ -283,7 +283,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             let indent = (row.depth - 1) as f32 * 16.0;
             let mut x = rect.left() + 4.0 + indent;
             if row.has_children {
-                let mark = if row.folded { "\u{25b8}" } else { "\u{25be}" };
+                let mark = if row.folded { "+" } else { "\u{2212}" };
                 p.text(
                     egui::pos2(x, rect.center().y),
                     egui::Align2::LEFT_CENTER,

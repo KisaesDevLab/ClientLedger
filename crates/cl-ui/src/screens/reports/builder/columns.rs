@@ -123,7 +123,7 @@ fn compare(
                         changed = true;
                     }
                 }
-                let r = ui.small_button("\u{2715}");
+                let r = ui.small_button("\u{d7}");
                 let name = t("builder.columns.remove_compare");
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                 if r.on_hover_text(&name).clicked() {

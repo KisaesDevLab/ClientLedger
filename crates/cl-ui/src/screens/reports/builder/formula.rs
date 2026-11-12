@@ -45,7 +45,7 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, f: &Form
                 next = Some(n);
             }
             ui.label(&caption);
-            let x = ui.small_button("\u{2715}");
+            let x = ui.small_button("\u{d7}");
             let name = t_with("builder.formula.remove", &[("row", &caption)]);
             x.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
             if x.on_hover_text(&name).clicked() {

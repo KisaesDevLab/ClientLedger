@@ -269,7 +269,7 @@ fn filter_row(
             }
             changed = Some(nf);
         }
-        let x = ui.small_button("\u{2715}");
+        let x = ui.small_button("\u{d7}");
         let name = t("builder.filter.remove");
         x.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         if x.on_hover_text(&name).clicked() {
@@ -399,7 +399,7 @@ fn chips(
     ui.horizontal_wrapped(|ui| {
         for (k, v) in items.iter().enumerate() {
             let shown = text(s, v);
-            let r = ui.button(format!("{shown} \u{2715}"));
+            let r = ui.button(format!("{shown} \u{d7}"));
             let name = crate::i18n::t_with("builder.filter.remove_value", &[("value", &shown)]);
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
             if r.clicked() {

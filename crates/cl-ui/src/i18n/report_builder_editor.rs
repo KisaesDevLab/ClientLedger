@@ -19,7 +19,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.toolbar.redo", "Redo"),
     ("builder.toolbar.nothing_to_undo", "Nothing to undo"),
     ("builder.toolbar.nothing_to_redo", "Nothing to redo"),
-    ("builder.toolbar.export", "Export \u{25be}"),
+    ("builder.toolbar.export", "Export\u{2026}"),
     ("builder.toolbar.print", "Print"),
     ("builder.toolbar.guided_view", "Guided view"),
     ("builder.toolbar.guided_off", "Guided view works for a report with one section and no filters. Keep editing here."),
@@ -73,7 +73,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Outline
     ("builder.outline.title", "OUTLINE"),
     ("builder.outline.count", "{n} of {max} rows"),
-    ("builder.outline.add", "Add \u{25be}"),
+    ("builder.outline.add", "Add\u{2026}"),
     ("builder.outline.delete", "Delete"),
     ("builder.outline.up", "Move the row up"),
     ("builder.outline.down", "Move the row down"),

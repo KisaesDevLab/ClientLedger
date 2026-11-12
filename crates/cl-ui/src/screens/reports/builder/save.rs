@@ -372,7 +372,15 @@ pub(crate) fn dialogs(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                     r.request_focus();
                     d.focused = true;
                 }
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                // Enter in the name memorizes: the field gives the
+                // keyboard up as it reads the Enter, so ask whether it had
+                // it (AC6).
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if enter
+                    && (r.lost_focus()
+                        || r.has_focus()
+                        || ui.memory(|m| m.had_focus_last_frame(r.id)))
+                {
                     submit = true;
                 }
                 if let Some(p) = d.problem {
