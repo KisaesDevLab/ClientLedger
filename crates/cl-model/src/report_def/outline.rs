@@ -134,8 +134,8 @@ pub fn insert_after(
     let (parent, at, depth) = if into_group && is_group {
         (path.clone(), usize::MAX, path.len() + 1)
     } else {
-        let (last, parent) = path.split_last().ok_or(OutlineError::NotFound)?;
-        (parent.to_vec(), last + 1, path.len())
+        let (idx, parent) = path.split_last().ok_or(OutlineError::NotFound)?;
+        (parent.to_vec(), idx + 1, path.len())
     };
     if depth + height(&node) - 1 > super::validate::limits::DEPTH {
         return Err(OutlineError::TooDeep);
@@ -150,9 +150,9 @@ pub fn insert_after(
 /// (`None`: no such node).
 pub fn remove(nodes: &mut Vec<Node>, id: &str) -> Option<Vec<String>> {
     let path = locate(nodes, id)?;
-    let (last, parent) = path.split_last()?;
+    let (idx, parent) = path.split_last()?;
     let list = siblings_mut(nodes, parent)?;
-    let gone = list.remove(*last);
+    let gone = list.remove(*idx);
     Some(
         walk(std::slice::from_ref(&gone))
             .iter()
@@ -184,20 +184,20 @@ pub fn shift(nodes: &mut Vec<Node>, id: &str, up: bool) -> bool {
     let Some(path) = locate(nodes, id) else {
         return false;
     };
-    let Some((&last, parent)) = path.split_last() else {
+    let Some((&idx, parent)) = path.split_last() else {
         return false;
     };
     let Some(list) = siblings_mut(nodes, parent) else {
         return false;
     };
     let other = if up {
-        last.checked_sub(1)
+        idx.checked_sub(1)
     } else {
-        Some(last + 1).filter(|&o| o < list.len())
+        Some(idx + 1).filter(|&o| o < list.len())
     };
     match other {
         Some(o) => {
-            list.swap(last, o);
+            list.swap(idx, o);
             true
         }
         None => false,
@@ -211,16 +211,16 @@ pub fn shift(nodes: &mut Vec<Node>, id: &str, up: bool) -> bool {
 /// there is none); [`OutlineError::TooDeep`] past 8 levels.
 pub fn indent(nodes: &mut Vec<Node>, id: &str) -> Result<(), OutlineError> {
     let path = locate(nodes, id).ok_or(OutlineError::NotFound)?;
-    let (&last, parent) = path.split_last().ok_or(OutlineError::NotFound)?;
+    let (&idx, parent) = path.split_last().ok_or(OutlineError::NotFound)?;
     let list = siblings_mut(nodes, parent).ok_or(OutlineError::NotFound)?;
-    let above = last.checked_sub(1).ok_or(OutlineError::NoGroupAbove)?;
+    let above = idx.checked_sub(1).ok_or(OutlineError::NoGroupAbove)?;
     if !matches!(list.get(above), Some(Node::Group(_))) {
         return Err(OutlineError::NoGroupAbove);
     }
-    if path.len() + height(&list[last]) > super::validate::limits::DEPTH {
+    if path.len() + height(&list[idx]) > super::validate::limits::DEPTH {
         return Err(OutlineError::TooDeep);
     }
-    let node = list.remove(last);
+    let node = list.remove(idx);
     if let Some(Node::Group(g)) = list.get_mut(above) {
         g.children.push(node);
     }
@@ -236,14 +236,14 @@ pub fn outdent(nodes: &mut Vec<Node>, id: &str) -> bool {
     if path.len() < 2 {
         return false;
     }
-    let (&last, parent) = path.split_last().unwrap_or((&0, &[]));
+    let (&idx, parent) = path.split_last().unwrap_or((&0, &[]));
     let Some((&group_at, outer)) = parent.split_last() else {
         return false;
     };
     let Some(list) = siblings_mut(nodes, parent) else {
         return false;
     };
-    let node = list.remove(last);
+    let node = list.remove(idx);
     let Some(outer_list) = siblings_mut(nodes, outer) else {
         return false;
     };
@@ -258,13 +258,13 @@ pub fn rename(nodes: &mut Vec<Node>, id: &str, text: &str) -> bool {
     let Some(path) = locate(nodes, id) else {
         return false;
     };
-    let Some((&last, parent)) = path.split_last() else {
+    let Some((&idx, parent)) = path.split_last() else {
         return false;
     };
     let Some(list) = siblings_mut(nodes, parent) else {
         return false;
     };
-    match &mut list[last] {
+    match &mut list[idx] {
         Node::Section(s) => s.caption = text.to_string(),
         Node::Group(g) => g.caption = text.to_string(),
         Node::Formula(f) => f.caption = text.to_string(),
@@ -281,17 +281,17 @@ pub fn replace(nodes: &mut Vec<Node>, node: Node) -> bool {
     let Some(path) = locate(nodes, node.id()) else {
         return false;
     };
-    let Some((&last, parent)) = path.split_last() else {
+    let Some((&idx, parent)) = path.split_last() else {
         return false;
     };
     let Some(list) = siblings_mut(nodes, parent) else {
         return false;
     };
     let mut node = node;
-    if let (Node::Group(old), Node::Group(new)) = (&mut list[last], &mut node) {
+    if let (Node::Group(old), Node::Group(new)) = (&mut list[idx], &mut node) {
         new.children = std::mem::take(&mut old.children);
     }
-    list[last] = node;
+    list[idx] = node;
     true
 }
 

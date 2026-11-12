@@ -134,7 +134,7 @@ pub fn of(def: &BuilderDefinition) -> Vec<Problem> {
 mod tests {
     use super::*;
 
-    fn def(nodes: serde_json::Value) -> BuilderDefinition {
+    fn def(nodes: &serde_json::Value) -> BuilderDefinition {
         serde_json::from_value(serde_json::json!({
             "schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
             "columns": {"detailFields": [], "compare": [], "headers": {}},
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn a_path_lands_on_the_deepest_row_it_names() {
-        let d = def(serde_json::json!([
+        let d = def(&serde_json::json!([
             {"type": "group", "id": "g", "caption": "G", "showTotal": false, "children": [
                 {"type": "blank", "id": "b"},
                 {"type": "formula", "id": "f", "caption": "F", "terms": []}
