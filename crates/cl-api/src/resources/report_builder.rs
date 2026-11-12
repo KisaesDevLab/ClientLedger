@@ -226,6 +226,9 @@ pub struct Starter {
     pub key: String,
     /// Its title (engine text).
     pub title: String,
+    /// The standard report it ties out to (`/reports/<tiesTo>`), when the
+    /// engine says.
+    pub ties_to: Option<String>,
     /// The definition (schema v1 JSON).
     pub definition: Value,
 }
@@ -900,6 +903,7 @@ fn read_starters(v: &Value) -> Result<Vec<Starter>, ApiError> {
                     what: "starter key",
                 })?,
                 title: text("title").unwrap_or_default(),
+                ties_to: text("tiesTo"),
                 definition: s
                     .get("definition")
                     .filter(|d| d.is_object())
