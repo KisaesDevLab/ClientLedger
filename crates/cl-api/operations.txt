@@ -459,10 +459,11 @@ GET     /api/v1/report-builder/definition-groups idempotent
 POST    /api/v1/report-builder/definition-groups keyable-report-defs
 PUT     /api/v1/report-builder/definition-groups/{id} keyable-report-defs
 DELETE  /api/v1/report-builder/definition-groups/{id} pre-handler-only
-# A07: Report Builder runs (U-119c, report-builder-v1); read-only POSTs
+# A07: Report Builder runs (U-119c report-builder-v1, U-119d report-builder-starters-v1); read-only POSTs
 POST    /api/v1/report-builder/run              pre-handler-only
 POST    /api/v1/report-builder/run/detail       pre-handler-only
 GET     /api/v1/report-builder/fields           idempotent
+GET     /api/v1/report-builder/starters         idempotent
 # P28 WP2: exact statements and ledgers (U-14, reports-exact-v1)
 GET     /api/v1/reports/general-ledger          idempotent
 GET     /api/v1/reports/revenue-by-category     idempotent
