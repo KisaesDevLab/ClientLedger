@@ -426,8 +426,11 @@ async fn trial_balance(s: &Session, st: &Starter, at: CalendarDate, basis: Basis
     );
 }
 
-/// The ledger: each account's net and the sums of its lines' debits and
-/// credits equal the General Ledger's account totals.
+/// The ledger (starters v2, U-119f: one natural-sign section per account
+/// type): the same accounts as the General Ledger, opening-only accounts
+/// included (QA-4), and each account's net, debits and credits equal the
+/// General Ledger's account totals, the net in the account's natural sign
+/// (QA-3: credit-normal sections show credits positive).
 async fn ledger(s: &Session, st: &Starter, from: CalendarDate, to: CalendarDate, basis: Basis) {
     let what = format!("ledger {from} {basis:?}");
     let (req, std) = standard(s, "general_ledger", |o| {
@@ -447,14 +450,27 @@ async fn ledger(s: &Session, st: &Starter, from: CalendarDate, to: CalendarDate,
     let (total, debit, credit) = (col(&t, "total"), col(&t, "f:debit"), col(&t, "f:credit"));
     let mut got = Lines::new();
     let mut line = String::new();
+    let mut accounts = std::collections::BTreeSet::new();
     for r in &t.rows {
         match r.kind {
             RowKind::Group => {
                 line = key(&r.caption);
+                accounts.insert(line.clone());
+                // Back to debit-positive to compare with the ledger's
+                // debit - credit.
+                let credit_normal = matches!(
+                    r.path.0.first().map(String::as_str),
+                    Some("n:liabilities" | "n:equity" | "n:income" | "n:other_income")
+                );
+                let net = amount(&r.cells[total]);
                 add(
                     &mut got,
                     line.clone(),
-                    vec![amount(&r.cells[total]), Decimal::ZERO, Decimal::ZERO],
+                    vec![
+                        if credit_normal { -net } else { net },
+                        Decimal::ZERO,
+                        Decimal::ZERO,
+                    ],
                 );
             }
             RowKind::Detail => add(
@@ -471,10 +487,13 @@ async fn ledger(s: &Session, st: &Starter, from: CalendarDate, to: CalendarDate,
     }
     let (sd, sc) = (col(&std, "debit"), col(&std, "credit"));
     let mut want = Lines::new();
+    let mut std_accounts = std::collections::BTreeSet::new();
     for r in std.rows.iter().filter(|r| r.kind == RowKind::AccountTotal) {
         let (dr, cr) = (amount(&r.cells[sd]), amount(&r.cells[sc]));
+        std_accounts.insert(key(&r.caption));
         add(&mut want, key(&r.caption), vec![dr - cr, dr, cr]);
     }
+    assert_eq!(accounts, std_accounts, "{what}: the same accounts (QA-4)");
     assert_eq!(
         drop_zero(got),
         drop_zero(want),
@@ -560,38 +579,6 @@ async fn open_items(s: &Session, st: &Starter, std_key: &str, at: CalendarDate) 
     assert_eq!(
         amount(&node.cells[total]),
         amount(&grand.cells[open]),
-        "{what}: total"
-    );
-}
-
-/// An open-items starter grouped by name: each name's open amount and the
-/// total equal the balance summary's (zero names hidden on both sides).
-async fn open_by_name(s: &Session, st: &Starter, std_key: &str, at: CalendarDate) {
-    let what = format!("{} {at}", st.key);
-    let (_, std) = standard(s, std_key, |o| o.dates = DateChoice::AsOf(at)).await;
-    let t = builder_run(s, st, RunDates::as_of(at), Vec::new(), Basis::Accrual).await;
-    let total = col(&t, "total");
-    let balance = col(&std, "balance");
-    let got = builder_lines(&t, &[total]);
-    assert!(!got.is_empty(), "{what}: names");
-    assert_eq!(
-        got,
-        std_lines(&std, &[balance]),
-        "{what}: by name, both ways"
-    );
-    let node = t
-        .rows
-        .iter()
-        .find(|r| r.kind == RowKind::Total)
-        .unwrap_or_else(|| panic!("{what}: a total"));
-    let grand = std
-        .rows
-        .iter()
-        .rfind(|r| r.kind == RowKind::Grand)
-        .unwrap_or_else(|| panic!("{what}: a grand total"));
-    assert_eq!(
-        amount(&node.cells[total]),
-        amount(&grand.cells[balance]),
         "{what}: total"
     );
 }
@@ -869,23 +856,18 @@ pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
             .await;
             tied.insert(st.key.as_str());
         }
-        // Open Invoices and Unpaid Bills list every open A/R or A/P item,
-        // as the agings do; the standard lists list invoice and bill
-        // documents only (on the golden company most open items are
-        // journal entries), so they tie by name (Q-A07u(8)).
-        for key in ["ar_aging_detail", "ap_aging_detail"] {
-            let st = starter(&list, key);
-            open_items(s, st, key, at).await;
-            tied.insert(st.key.as_str());
-        }
-        // Grouped by name with zero names hidden: each name's open amount
-        // is the balance summary's.
-        for (key, std_key) in [
-            ("open_invoices", "customer_balance_summary"),
-            ("unpaid_bills", "vendor_balance_summary"),
+        // The aging details list every open A/R or A/P item; Open
+        // Invoices and Unpaid Bills (starters v2, U-119f) only invoices
+        // and bills, as the standard lists do: each ties line for line to
+        // its standard report (Q-A07u(8), QA-5).
+        for key in [
+            "ar_aging_detail",
+            "ap_aging_detail",
+            "open_invoices",
+            "unpaid_bills",
         ] {
             let st = starter(&list, key);
-            open_by_name(s, st, std_key, at).await;
+            open_items(s, st, key, at).await;
             tied.insert(st.key.as_str());
         }
     }
