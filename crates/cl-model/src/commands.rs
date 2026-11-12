@@ -458,6 +458,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("reports.refresh", "Refresh Report", None, 3, key(Mods::NONE, Key::F(5)), Scope::Window),
     cmd("reports.memorize", "Memorize Report", None, 3, ctrl('M'), Scope::Window),
     cmd("reports.collapse", "Collapse or Expand Rows", None, 3, None, Scope::Window),
+    // A08: the Report Builder editor, one window per report; opened from the
+    // Reports list ("New report...") and Customize, no menu entry.
+    built("reports.builder_editor", "Report Builder", None, 3, None),
     // P24 (Q-P24n): the inventory reports; print and export come with P28.
     built("reports.inventory_value", "Inventory Value", Some(Menu::Reports), 2, None),
     built("reports.inventory_value_detail", "Inventory Value Detail", Some(Menu::Reports), 2, None),
@@ -809,6 +812,8 @@ mod tests {
             "reports.balance_sheet",
             "reports.trial_balance",
             "reports.ar_aging",
+            // A08
+            "reports.builder_editor",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

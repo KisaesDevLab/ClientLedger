@@ -386,6 +386,26 @@ impl Shell {
                 return;
             }
         }
+        // A08 (Q-A08x): an open window that answers for this payload takes
+        // it (an editor's result tab, an editor's Customize return).
+        let in_place = self
+            .windows
+            .all()
+            .iter()
+            .find(|w| w.screen.takes_in_place(&payload))
+            .map(|w| w.id);
+        if let Some(id) = in_place {
+            let taken = self
+                .windows
+                .all_mut()
+                .iter_mut()
+                .find(|w| w.id == id)
+                .is_some_and(|w| w.screen.open_with(payload.clone()));
+            if taken {
+                self.windows.activate(id);
+                return;
+            }
+        }
         let back = self.windows.active().map(|w| w.id);
         let mut screen = self.make_screen(kind);
         if screen.open_with(payload) {

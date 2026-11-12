@@ -84,6 +84,15 @@ pub trait Screen {
         false
     }
 
+    /// True when this open window should take `payload` itself rather than
+    /// a new window opening (A08, Q-A08x: an editor's result tab is
+    /// refreshed by the next Run report; Customize from that tab returns to
+    /// its editor). The shell then brings it to the front and calls
+    /// [`Screen::open_with`] on it.
+    fn takes_in_place(&self, _payload: &OpenPayload) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {
@@ -208,6 +217,15 @@ pub enum OpenPayload {
     BuilderStarter(String),
     /// A07: a Report Builder subtotal's detail in a new report tab.
     BuilderDetail(Box<crate::screens::reports::BuilderDetailOpen>),
+    /// A08: the Report Builder editor on this start (Guided, Blank, a
+    /// starter, Customize on a report), `reports.builder_editor`. An open
+    /// editor with the same [`crate::screens::reports::builder::EditorId`]
+    /// takes it in place (Customize from its result tab, Q-A08x).
+    BuilderEditor(Box<crate::screens::reports::builder::BuilderSeed>),
+    /// A08: an editor's Run report: its definition in a report window
+    /// (`reports.center`), one result tab per editor refreshed in place
+    /// (Q-A08x).
+    BuilderDefinition(Box<crate::screens::reports::builder_ref::BuilderRunOpen>),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

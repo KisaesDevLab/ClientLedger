@@ -13,6 +13,10 @@
 
 mod ask;
 mod budgets;
+// A08: the Report Builder editor, and the one RunRef its preview, its
+// Run report and the window's builder mode share (plan §3.4).
+pub mod builder;
+pub mod builder_ref;
 mod builder_run;
 mod catalog;
 mod drill;
@@ -76,6 +80,12 @@ pub fn make(
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
+    if kind.as_str() == builder::KIND {
+        return Some(Box::new(builder::BuilderScreen::new(
+            Arc::clone(link),
+            today,
+        )));
+    }
     let key = key_of(kind.as_str())?;
     let spec = cl_model::reports::find(key)?;
     Some(Box::new(ReportWindow::new(
