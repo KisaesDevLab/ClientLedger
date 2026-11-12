@@ -11,11 +11,9 @@
 //! The definition is passed through as JSON (`cl-model` owns its shape and
 //! cl-api may not depend on it).
 //!
-//! Contract guesses (A07-desktop-status.md lists them): until PR-C's
-//! samples are pinned, the wire shapes of `drill`, `fields`, `meta.notes`,
-//! `meta.denied`, `meta.truncated`, a "—" cell and the `opening` row kind
-//! follow the reading below; one function per shape so the samples replace
-//! them in one place.
+//! The shapes follow engine PR-C (bc41f48d) and its samples in
+//! `tests/fixtures/report_builder/` (copied from the engine's
+//! `shared/src/report-builder/fixtures/run`).
 
 use std::str::FromStr;
 
@@ -23,7 +21,7 @@ use cl_core::CalendarDate;
 use cl_core::ids::TransactionId;
 use cl_core::report::{
     Adjusting, Basis, Cell, ColumnDrill, ColumnHead, ColumnKind, DateRange, Drill, ReportDates,
-    ReportMeta, ReportRow, ReportTable, RowKind, RowPath, Truncated,
+    ReportMeta, ReportRow, ReportTable, RowKind, RowPath,
 };
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -47,6 +45,8 @@ pub const MAX_OPEN_PATHS: usize = 1_000;
 pub const MAX_PATH_SEGMENTS: usize = 4;
 /// Period columns a run may ask for (checked before sending).
 pub const MAX_PERIODS: usize = 36;
+/// Fiscal year starts a run may send.
+pub const MAX_FISCAL_YEAR_STARTS: usize = 60;
 
 /// What the run is for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -129,18 +129,23 @@ pub struct RunRef {
 }
 
 /// `POST /report-builder/run`.
+///
+/// A row is expanded when `expand_all` is set, its path is in `open`, or its
+/// section has `defaultExpanded` and the path is not in `collapsed` (the
+/// engine's rule; `open` wins over `collapsed`, `expand_all` over both).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunRequest {
     /// Definition, dates and ranges.
     #[serde(flatten)]
     pub reference: RunRef,
-    /// Open paths: `None` (`null`) on the first run uses the sections'
-    /// `defaultExpanded`; afterwards the window's set (`[]`: all closed).
-    pub open: Option<Vec<RowPath>>,
-    /// Expand everything (bounded by the caps).
+    /// Paths opened by the owner (≤ 1,000).
+    pub open: Vec<RowPath>,
+    /// Paths closed under a `defaultExpanded` section (≤ 1,000).
+    pub collapsed: Vec<RowPath>,
+    /// Expand everything (bounded by the row caps; `collapsed` is ignored).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub open_all: bool,
+    pub expand_all: bool,
     /// Screen or export.
     pub purpose: RunPurpose,
 }
@@ -154,9 +159,9 @@ pub struct DetailRequest {
     pub reference: RunRef,
     /// The section.
     pub node_id: String,
-    /// The engine path.
+    /// The engine path (the innermost group-by line, or `n:<id>`).
     pub path: RowPath,
-    /// A period column's dates.
+    /// A period column's dates (range reports only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<DateRange>,
     /// The page after this cursor (`None`: the first page).
@@ -164,31 +169,49 @@ pub struct DetailRequest {
     pub cursor: Option<String>,
     /// The run's fingerprint (409 `RUN_CHANGED {reason:'params'}`).
     pub fingerprint: String,
-    /// The run's stamp (409 `RUN_CHANGED {reason:'books'}`).
-    pub stamp: String,
+    /// The run's ledger stamp (409 `RUN_CHANGED {reason:'books'}`).
+    pub stamp: u64,
+}
+
+/// Which of the engine's columns a table shows: the engine keeps a compare
+/// amount that only feeds a change as a `hidden` column with null cells, in
+/// place, so every row (and every detail page) carries one cell per wire
+/// column. The table drops them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ColumnLayout {
+    /// Columns on the wire.
+    pub wire: usize,
+    /// The wire index of each shown column, in order.
+    pub shown: Vec<usize>,
 }
 
 /// A run's answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuilderRun {
-    /// The rows as a table.
+    /// The rows as a table (hidden columns dropped). Value cells are
+    /// [`Cell::Amount`]; a count or quantity section's unit is the
+    /// definition's to apply (`cl_model::report_def::apply_units`).
     pub table: ReportTable,
+    /// The wire columns behind the table's (detail pages use it).
+    pub layout: ColumnLayout,
     /// Hash of every parameter but the open paths and purpose.
     pub fingerprint: String,
     /// The ledger stamp the run read.
-    pub stamp: String,
+    pub stamp: u64,
     /// Sections the role can't see (their node ids).
     pub denied: Vec<String>,
-    /// The paths the engine expanded (`expanded: true`): the sections'
-    /// defaults on a first run, everything on an `openAll` run. The window
-    /// seeds its open set from them.
+    /// The paths the engine shows expanded (`expanded: true`): the window's
+    /// open set after every run.
     pub expanded: Vec<RowPath>,
+    /// A path was capped (its `more` row pages the rest).
+    pub truncated: bool,
 }
 
 /// One page of detail.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DetailPage {
-    /// Up to 500 rows.
+    /// Up to 500 rows (an `opening` row first on a running balance). Their
+    /// level is the engine's 0: the window places them under their line.
     pub rows: Vec<ReportRow>,
     /// The next page's cursor (`None`: the last page).
     pub cursor: Option<String>,
@@ -260,6 +283,9 @@ pub fn builder_refusal(e: &ApiError) -> Option<BuilderRefusal> {
         }
         ApiError::Validation(v) => match v.code().map(crate::ErrorCode::as_str) {
             Some("REPORT_TOO_LARGE") => BuilderRefusal::TooLarge,
+            // A cursor the engine can't read: run again, as for new
+            // parameters.
+            Some("CURSOR_INVALID") => BuilderRefusal::ParamsChanged,
             Some("DEFINITION_INVALID") => BuilderRefusal::Invalid {
                 path: v.details().text("path").map(str::to_string),
                 code: v.details().text("code").map(str::to_string),
@@ -310,10 +336,10 @@ impl ReportBuilder<'_> {
         let reply = self.0.send(&REPORT_BUILDER_RUN, call, None).await?;
         let v: Value = serde_json::from_slice(&reply.body)
             .map_err(|_| ApiError::Decode { what: "report run" })?;
-        read_run(&v)
+        read_run(&v, req.reference.adjusting)
     }
 
-    /// One page of a path's detail, read against the run's `columns`.
+    /// One page of a path's detail, read against the run's columns.
     ///
     /// # Errors
     /// As [`ReportBuilder::run`].
@@ -321,8 +347,13 @@ impl ReportBuilder<'_> {
         &self,
         req: &DetailRequest,
         columns: &[ColumnHead],
+        layout: &ColumnLayout,
     ) -> Result<DetailPage, ApiError> {
         self.require(Capabilities::REPORT_BUILDER)?;
+        check_reference(&req.reference)?;
+        if req.path.0.is_empty() || req.path.0.len() > MAX_PATH_SEGMENTS {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
         let body =
             serde_json::to_vec(req).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
         let call = Call::at(Method::Post, REPORT_BUILDER_DETAIL.route()).json_body(body);
@@ -330,7 +361,7 @@ impl ReportBuilder<'_> {
         let v: Value = serde_json::from_slice(&reply.body).map_err(|_| ApiError::Decode {
             what: "report detail",
         })?;
-        read_detail(&v, &req.node_id, columns)
+        read_detail(&v, columns, layout)
     }
 
     /// The engine's field catalogue, as sent (`cl-model` reads it).
@@ -361,26 +392,38 @@ impl ReportBuilder<'_> {
     }
 }
 
+fn check_reference(r: &RunRef) -> Result<(), ApiError> {
+    // Without periods a compare set is one range; with them, one per period.
+    let compare_ok = r
+        .compare_ranges
+        .iter()
+        .all(|c| c.len() == r.period_ranges.len().max(1));
+    if r.period_ranges.len() > MAX_PERIODS
+        || r.compare_ranges.len() > 2
+        || !compare_ok
+        || r.fiscal_year_starts.is_empty()
+        || r.fiscal_year_starts.len() > MAX_FISCAL_YEAR_STARTS
+        || (r.definition.is_some() == r.definition_id.is_some())
+    {
+        return Err(ApiError::Local(LocalValidation::InvalidValue));
+    }
+    Ok(())
+}
+
 /// The request caps the engine also checks: refused before sending.
 ///
 /// # Errors
 /// `Local(InvalidValue)`.
 pub fn check_run(req: &RunRequest) -> Result<(), ApiError> {
-    let bad = || ApiError::Local(LocalValidation::InvalidValue);
-    let r = &req.reference;
-    if r.period_ranges.len() > MAX_PERIODS
-        || r.compare_ranges.len() > 2
-        || r.compare_ranges
-            .iter()
-            .any(|c| c.len() != r.period_ranges.len())
-        || (r.definition.is_some() == r.definition_id.is_some())
-    {
-        return Err(bad());
-    }
-    if let Some(open) = &req.open
-        && (open.len() > MAX_OPEN_PATHS || open.iter().any(|p| p.0.len() > MAX_PATH_SEGMENTS))
-    {
-        return Err(bad());
+    check_reference(&req.reference)?;
+    let paths_ok = |list: &[RowPath]| {
+        list.len() <= MAX_OPEN_PATHS
+            && list
+                .iter()
+                .all(|p| !p.0.is_empty() && p.0.len() <= MAX_PATH_SEGMENTS)
+    };
+    if !paths_ok(&req.open) || !paths_ok(&req.collapsed) {
+        return Err(ApiError::Local(LocalValidation::InvalidValue));
     }
     Ok(())
 }
@@ -396,66 +439,101 @@ fn exact(s: &str, what: &'static str) -> Result<Decimal, ApiError> {
     Decimal::from_str_exact(s).map_err(|_| shape(what))
 }
 
-fn range_of(v: &Value) -> Result<Option<DateRange>, ApiError> {
+fn date(v: Option<&Value>, what: &'static str) -> Result<CalendarDate, ApiError> {
+    v.and_then(Value::as_str)
+        .and_then(|s| CalendarDate::parse_wire(s).ok())
+        .ok_or(shape(what))
+}
+
+/// A column's `range`: `{from, to}`, or `{from: null, to}` for an as-of
+/// column. The detail request takes only full ranges, so an as-of column
+/// carries none (its cells drill over the run's dates, Q-A07s).
+fn column_range(v: Option<&Value>) -> Result<Option<DateRange>, ApiError> {
     match v {
-        Value::Null => Ok(None),
-        Value::Object(_) => {
-            let d = |k: &'static str| {
-                v.get(k)
-                    .and_then(Value::as_str)
-                    .and_then(|s| CalendarDate::parse_wire(s).ok())
-                    .ok_or(shape("range"))
-            };
-            Ok(Some(DateRange {
-                from: d("from")?,
-                to: d("to")?,
-            }))
+        None | Some(Value::Null) => Ok(None),
+        Some(r @ Value::Object(_)) => {
+            let to = date(r.get("to"), "range")?;
+            match r.get("from") {
+                None | Some(Value::Null) => Ok(None),
+                from => Ok(Some(DateRange {
+                    from: date(from, "range")?,
+                    to,
+                })),
+            }
         }
-        _ => Err(shape("range")),
+        Some(_) => Err(shape("range")),
     }
 }
 
-fn column_kind(s: &str) -> Result<ColumnKind, ApiError> {
-    Ok(match s {
-        "amount" => ColumnKind::Amount,
-        "percent" => ColumnKind::Percent,
+/// What a detail field's cells hold.
+fn field_kind(field: &str) -> Result<ColumnKind, ApiError> {
+    Ok(match field {
+        "date" | "due_date" | "service_date" => ColumnKind::Date,
+        "debit" | "credit" | "amount" | "running_balance" | "open_balance"
+        | "original_amount" | "unit_price" => ColumnKind::Amount,
         "quantity" => ColumnKind::Quantity,
-        "count" => ColumnKind::Count,
-        "text" => ColumnKind::Text,
-        "date" => ColumnKind::Date,
-        _ => return Err(shape("column kind")),
+        "days_past_due" => ColumnKind::Count,
+        "txn_type" | "number" | "contact" | "memo" | "description" | "account" | "item"
+        | "tag" | "cleared" | "aging_bucket" => ColumnKind::Text,
+        _ => return Err(shape("detail field")),
     })
 }
 
-fn columns(v: &Value) -> Result<Vec<ColumnHead>, ApiError> {
+/// One wire column: `None` for a `hidden` one.
+fn column(c: &Value) -> Result<Option<ColumnHead>, ApiError> {
+    let (kind, drill) = match c.get("kind").and_then(Value::as_str).unwrap_or("") {
+        "hidden" => return Ok(None),
+        "field" => (
+            field_kind(c.get("field").and_then(Value::as_str).unwrap_or(""))?,
+            None,
+        ),
+        // Amounts with lines behind them: the row's drill narrowed to the
+        // column's dates.
+        "total" | "period" | "prior" | "total_debit" | "total_credit" | "period_debit"
+        | "period_credit" | "prior_debit" | "prior_credit" => (ColumnKind::Amount, None),
+        // A change has no lines of its own; an aging bucket's lines are the
+        // whole path's (the detail can't narrow to a bucket).
+        "change" | "bucket" => (ColumnKind::Amount, Some(ColumnDrill::None)),
+        "pct_change" | "percent" => (ColumnKind::Percent, Some(ColumnDrill::None)),
+        _ => return Err(shape("column kind")),
+    };
+    Ok(Some(ColumnHead {
+        key: c
+            .get("key")
+            .and_then(Value::as_str)
+            .ok_or(shape("column key"))?
+            .to_string(),
+        caption: c
+            .get("caption")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        kind,
+        range: column_range(c.get("range"))?,
+        drill,
+    }))
+}
+
+fn columns(v: &Value) -> Result<(Vec<ColumnHead>, ColumnLayout), ApiError> {
     let list = v
         .get("columns")
         .and_then(Value::as_array)
         .ok_or(shape("columns"))?;
-    list.iter()
-        .map(|c| {
-            let kind = column_kind(c.get("kind").and_then(Value::as_str).unwrap_or(""))?;
-            // Percent, compare and change columns have no lines behind
-            // their cells (plan §4 drill rules).
-            let no_drill =
-                kind == ColumnKind::Percent || c.get("drillable") == Some(&Value::Bool(false));
-            Ok(ColumnHead {
-                key: c
-                    .get("key")
-                    .and_then(Value::as_str)
-                    .ok_or(shape("column key"))?
-                    .to_string(),
-                caption: c
-                    .get("caption")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                kind,
-                range: range_of(c.get("range").unwrap_or(&Value::Null))?,
-                drill: no_drill.then_some(ColumnDrill::None),
-            })
-        })
-        .collect()
+    let mut heads = Vec::with_capacity(list.len());
+    let mut shown = Vec::with_capacity(list.len());
+    for (i, c) in list.iter().enumerate() {
+        if let Some(h) = column(c)? {
+            heads.push(h);
+            shown.push(i);
+        }
+    }
+    Ok((
+        heads,
+        ColumnLayout {
+            wire: list.len(),
+            shown,
+        },
+    ))
 }
 
 fn row_kind(s: &str) -> Result<RowKind, ApiError> {
@@ -476,15 +554,8 @@ fn row_kind(s: &str) -> Result<RowKind, ApiError> {
     })
 }
 
-/// The "—" a cell shows when it depends on a section the role can't see.
-const DASH: &str = "\u{2014}";
-
-fn cell(col: &ColumnHead, raw: &Value, field: Option<&Value>) -> Result<Cell, ApiError> {
-    let v = match (raw, field) {
-        (Value::Null, Some(f)) => f,
-        _ => raw,
-    };
-    let s = match v {
+fn cell(col: &ColumnHead, raw: &Value) -> Result<Cell, ApiError> {
+    let s = match raw {
         Value::Null => {
             return Ok(match col.kind {
                 ColumnKind::Percent => Cell::Percent(None),
@@ -495,9 +566,6 @@ fn cell(col: &ColumnHead, raw: &Value, field: Option<&Value>) -> Result<Cell, Ap
         // A number is never read as money (U-14).
         _ => return Err(shape("cell")),
     };
-    if s == DASH && col.kind.is_numeric() {
-        return Ok(Cell::Text(DASH.into()));
-    }
     Ok(match col.kind {
         ColumnKind::Amount => Cell::Amount(exact(s, "amount cell")?),
         ColumnKind::Percent => Cell::Percent(Some(exact(s, "percent cell")?)),
@@ -510,47 +578,64 @@ fn cell(col: &ColumnHead, raw: &Value, field: Option<&Value>) -> Result<Cell, Ap
     })
 }
 
-fn path_of(v: &Value) -> Result<RowPath, ApiError> {
-    let parts = v
-        .get("path")
-        .and_then(Value::as_array)
-        .ok_or(shape("path"))?;
+fn path_in(v: Option<&Value>, what: &'static str) -> Result<RowPath, ApiError> {
+    let parts = v.and_then(Value::as_array).ok_or(shape(what))?;
+    if parts.is_empty() {
+        return Err(shape(what));
+    }
     parts
         .iter()
-        .map(|p| p.as_str().map(str::to_string).ok_or(shape("path")))
+        .map(|p| p.as_str().map(str::to_string).ok_or(shape(what)))
         .collect::<Result<Vec<_>, _>>()
         .map(RowPath)
 }
 
-/// A row's drill (contract guess): `{kind:'transaction', transactionId,
-/// txnType}`, `{kind:'detail'}` (the row's own node and path),
-/// `{kind:'profit_loss', from, to}`, or nothing. A `more` row pages with
-/// its `cursor`.
+/// A `profit_loss` drill's first day: the engine starts prior years'
+/// earnings at `0001-01-01`, before the first day the app keeps; that
+/// means "from the beginning".
+fn earliest(v: Option<&Value>) -> Result<CalendarDate, ApiError> {
+    match v.and_then(Value::as_str) {
+        Some(s) if s.len() == 10 && s < "1900-01-01" => Ok(CalendarDate::min()),
+        _ => date(v, "drill range"),
+    }
+}
+
+/// The run's basis and lens, which an earnings drill keeps.
+#[derive(Clone, Copy)]
+struct Lens {
+    basis: Option<Basis>,
+    adjusting: Option<Adjusting>,
+}
+
+/// A row's drill: `{type:'transaction', txnId, txnType}`, `{type:'detail',
+/// nodeId, path}`, `{type:'profit_loss', from, to}`, or nothing. A `more`
+/// row pages with its `cursor` (`null`: from the start).
 fn drill(
     r: &Value,
     kind: RowKind,
     node_id: &str,
     path: &RowPath,
-    meta_basis: Option<Basis>,
+    lens: Lens,
 ) -> Result<Option<Drill>, ApiError> {
     if kind == RowKind::More {
-        let cursor = r
-            .get("cursor")
-            .and_then(Value::as_str)
-            .ok_or(shape("cursor"))?;
+        let cursor = match r.get("cursor") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => return Err(shape("cursor")),
+        };
         return Ok(Some(Drill::BuilderPage {
             node_id: node_id.to_string(),
             path: path.clone(),
-            cursor: cursor.to_string(),
+            cursor,
         }));
     }
     let Some(d) = r.get("drill").filter(|d| !d.is_null()) else {
         return Ok(None);
     };
-    Ok(Some(match d.get("kind").and_then(Value::as_str) {
+    Ok(Some(match d.get("type").and_then(Value::as_str) {
         Some("transaction") => Drill::Transaction {
             id: d
-                .get("transactionId")
+                .get("txnId")
                 .and_then(Value::as_str)
                 .and_then(|s| TransactionId::parse(s).ok())
                 .ok_or(shape("drill transaction"))?,
@@ -561,160 +646,152 @@ fn drill(
                 .to_string(),
         },
         Some("detail") => Drill::BuilderDetail {
-            node_id: node_id.to_string(),
-            path: path.clone(),
+            node_id: d
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .ok_or(shape("drill node"))?
+                .to_string(),
+            path: path_in(d.get("path"), "drill path")?,
             range: None,
         },
-        Some("profit_loss") => {
-            let range = range_of(d)?.ok_or(shape("drill range"))?;
-            // The section's adjusting lens and tags, when sent, so the
-            // drill ties on a tagged or adjusting Balance Sheet.
-            let adjusting = match d.get("adjusting").and_then(Value::as_str) {
-                None => None,
-                Some("include") => Some(Adjusting::Include),
-                Some("exclude") => Some(Adjusting::Exclude),
-                Some("only") => Some(Adjusting::Only),
-                Some(_) => return Err(shape("drill adjusting")),
-            };
-            let tag_ids = match d.get("tagIds") {
-                None | Some(Value::Null) => Vec::new(),
-                Some(Value::Array(a)) => a
-                    .iter()
-                    .map(|t| {
-                        t.as_str()
-                            .and_then(|s| cl_core::ids::TagId::parse(s).ok())
-                            .ok_or(shape("drill tag"))
-                    })
-                    .collect::<Result<_, _>>()?,
-                Some(_) => return Err(shape("drill tag")),
-            };
-            Drill::ProfitLoss {
-                from: range.from,
-                to: range.to,
-                basis: meta_basis,
-                adjusting,
-                tag_ids,
-            }
-        }
+        // The run's lens travels with it. A tag-filtered Balance Sheet
+        // section's earnings drill carries no tags (Q-A07s).
+        Some("profit_loss") => Drill::ProfitLoss {
+            from: earliest(d.get("from"))?,
+            to: date(d.get("to"), "drill range")?,
+            basis: lens.basis,
+            adjusting: lens.adjusting,
+            tag_ids: Vec::new(),
+        },
         _ => return Err(shape("drill kind")),
     }))
 }
 
-fn row(r: &Value, cols: &[ColumnHead], basis: Option<Basis>) -> Result<ReportRow, ApiError> {
-    let kind = row_kind(r.get("kind").and_then(Value::as_str).unwrap_or(""))?;
+/// Fixed engine captions the window translates.
+fn caption_of(kind: RowKind, wire_kind: &str, caption: Option<&str>) -> String {
+    match (kind, wire_kind) {
+        (RowKind::Denied, _) => "@reports.builder.denied".into(),
+        (RowKind::More, _) => "@reports.builder.more".into(),
+        (_, "opening") => "@reports.builder.opening".into(),
+        _ => caption.unwrap_or_default().to_string(),
+    }
+}
+
+fn row(r: &Value, cols: &[ColumnHead], layout: &ColumnLayout, lens: Lens) -> Result<ReportRow, ApiError> {
+    let wire_kind = r.get("kind").and_then(Value::as_str).unwrap_or("");
+    let kind = row_kind(wire_kind)?;
     let node_id = r
         .get("nodeId")
         .and_then(Value::as_str)
-        .unwrap_or_default()
+        .ok_or(shape("node id"))?
         .to_string();
-    let path = path_of(r)?;
+    let path = path_in(r.get("path"), "path")?;
     let level = r
         .get("level")
         .and_then(Value::as_u64)
         .and_then(|l| u8::try_from(l).ok())
         .ok_or(shape("level"))?;
-    let raw = match r.get("cells") {
-        Some(Value::Array(a)) => a.as_slice(),
-        None | Some(Value::Null) => &[],
-        _ => return Err(shape("cells")),
-    };
-    // Layout rows carry no cells; every other row carries one per column.
-    if !raw.is_empty() && raw.len() != cols.len() {
+    // One cell per wire column, every row.
+    let raw = r
+        .get("cells")
+        .and_then(Value::as_array)
+        .ok_or(shape("cells"))?;
+    if raw.len() != layout.wire {
         return Err(shape("cells"));
     }
-    let fields = r.get("fields").and_then(Value::as_object);
     let cells = cols
         .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let field = fields.and_then(|f| f.get(&c.key));
-            cell(c, raw.get(i).unwrap_or(&Value::Null), field)
-        })
+        .zip(&layout.shown)
+        .map(|(c, &i)| cell(c, &raw[i]))
         .collect::<Result<Vec<_>, _>>()?;
-    let caption = match (kind, r.get("caption").and_then(Value::as_str)) {
-        (_, Some(c)) if !c.is_empty() => c.to_string(),
-        (RowKind::Denied, _) => "@reports.builder.denied".into(),
-        (RowKind::More, _) => "@reports.builder.more".into(),
-        _ => String::new(),
-    };
     Ok(ReportRow {
-        drill: drill(r, kind, &node_id, &path, basis)?,
+        drill: drill(r, kind, &node_id, &path, lens)?,
+        caption: caption_of(kind, wire_kind, r.get("caption").and_then(Value::as_str)),
         kind,
         level,
         path,
-        caption,
         cells,
         expandable: r.get("expandable") == Some(&Value::Bool(true)),
     })
 }
 
-fn meta(v: &Value) -> Result<(ReportMeta, Vec<String>), ApiError> {
+/// The engine's notes the window words itself.
+fn note_key(note: &str) -> String {
+    match note {
+        "No activity for these dates" => "@reports.builder.no_activity".into(),
+        other => other.to_string(),
+    }
+}
+
+fn strings(v: Option<&Value>, what: &'static str) -> Result<Vec<String>, ApiError> {
+    v.and_then(Value::as_array)
+        .ok_or(shape(what))?
+        .iter()
+        .map(|n| n.as_str().map(str::to_string).ok_or(shape(what)))
+        .collect()
+}
+
+fn meta(v: &Value) -> Result<(ReportMeta, Vec<String>, bool), ApiError> {
     let m = v.get("meta").ok_or(shape("meta"))?;
     let basis = match m.get("basis").and_then(Value::as_str) {
         Some("cash") => Some(Basis::Cash),
         Some("accrual") => Some(Basis::Accrual),
-        _ => None,
+        _ => return Err(shape("meta basis")),
     };
     let dates = match m.get("dates") {
-        Some(d) if d.get("asOf").is_some() => Some(ReportDates::AsOf(
-            d.get("asOf")
-                .and_then(Value::as_str)
-                .and_then(|s| CalendarDate::parse_wire(s).ok())
-                .ok_or(shape("meta dates"))?,
-        )),
-        Some(d) if !d.is_null() => range_of(d)?.map(ReportDates::Range),
+        Some(d) if d.get("asOf").is_some() => {
+            Some(ReportDates::AsOf(date(d.get("asOf"), "meta dates")?))
+        }
+        Some(d @ Value::Object(_)) => Some(ReportDates::Range(DateRange {
+            from: date(d.get("from"), "meta dates")?,
+            to: date(d.get("to"), "meta dates")?,
+        })),
         _ => None,
     };
-    let notes: Vec<&str> = m
-        .get("notes")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-    let truncated = match m.get("truncated") {
-        Some(t) if t.is_object() => Some(Truncated {
-            shown: t.get("shown").and_then(Value::as_u64).unwrap_or(0),
-            total: t.get("total").and_then(Value::as_u64).unwrap_or(0),
-        }),
-        _ => None,
-    };
-    let denied = m
-        .get("denied")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let notes: Vec<String> = strings(m.get("notes"), "meta notes")?
+        .iter()
+        .map(|n| note_key(n))
+        .collect();
+    let truncated = m
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .ok_or(shape("meta truncated"))?;
+    let denied = strings(m.get("denied"), "meta denied")?;
     Ok((
         ReportMeta {
             basis,
             dates,
             note: (!notes.is_empty()).then(|| notes.join(" ")),
             note_drill: None,
-            truncated,
+            // A capped path has its own `more` row; the counts aren't sent.
+            truncated: None,
             hidden_notice: m.get("hiddenNotice") == Some(&Value::Bool(true)),
         },
         denied,
+        truncated,
     ))
 }
 
-/// Reads a `/run` answer.
+/// Reads a `/run` answer; `adjusting` is the run's lens (earnings drills
+/// keep it).
 ///
 /// # Errors
 /// [`ApiError::ReportShape`] for anything not in the contract: an unknown
-/// row kind, a non-exact amount, a cell count that doesn't match.
-pub fn read_run(v: &Value) -> Result<BuilderRun, ApiError> {
-    let cols = columns(v)?;
-    let (meta, denied) = meta(v)?;
+/// row or column kind, a non-exact amount, a cell count that doesn't match.
+pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, ApiError> {
+    let (cols, layout) = columns(v)?;
+    let (meta, denied, truncated) = meta(v)?;
     let raw = v
         .get("rows")
         .and_then(Value::as_array)
         .ok_or(shape("rows"))?;
+    let lens = Lens {
+        basis: meta.basis,
+        adjusting,
+    };
     let rows = raw
         .iter()
-        .map(|r| row(r, &cols, meta.basis))
+        .map(|r| row(r, &cols, &layout, lens))
         .collect::<Result<Vec<_>, _>>()?;
     let expanded = raw
         .iter()
@@ -722,31 +799,40 @@ pub fn read_run(v: &Value) -> Result<BuilderRun, ApiError> {
         .filter(|(r, _)| r.get("expanded") == Some(&Value::Bool(true)))
         .map(|(_, x)| x.path.clone())
         .collect();
-    let text = |k: &'static str| {
-        v.get(k)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .ok_or(shape(k))
-    };
+    let fingerprint = v
+        .get("fingerprint")
+        .and_then(Value::as_str)
+        .ok_or(shape("fingerprint"))?
+        .to_string();
+    let stamp = v
+        .get("stamp")
+        .and_then(Value::as_u64)
+        .ok_or(shape("stamp"))?;
     Ok(BuilderRun {
-        fingerprint: text("fingerprint")?,
-        stamp: text("stamp")?,
         table: ReportTable {
             columns: cols,
             rows,
             meta,
         },
+        layout,
+        fingerprint,
+        stamp,
         denied,
         expanded,
+        truncated,
     })
 }
 
-/// Reads a `/run/detail` answer (`{rows, cursor, subtotal}`, plan §4) for
-/// `node_id`; its cells line up with the run's `cols`.
+/// Reads a `/run/detail` answer (`{rows, cursor, subtotal}`): its cells
+/// line up with the run's wire columns (`layout`).
 ///
 /// # Errors
 /// As [`read_run`].
-pub fn read_detail(v: &Value, node_id: &str, cols: &[ColumnHead]) -> Result<DetailPage, ApiError> {
+pub fn read_detail(
+    v: &Value,
+    cols: &[ColumnHead],
+    layout: &ColumnLayout,
+) -> Result<DetailPage, ApiError> {
     let rows = v
         .get("rows")
         .and_then(Value::as_array)
@@ -754,30 +840,25 @@ pub fn read_detail(v: &Value, node_id: &str, cols: &[ColumnHead]) -> Result<Deta
     if rows.len() > PAGE_ROWS {
         return Err(shape("page size"));
     }
+    let lens = Lens {
+        basis: None,
+        adjusting: None,
+    };
     let rows = rows
         .iter()
-        .map(|r| {
-            let mut row = row(r, cols, None)?;
-            // A detail page's `more`-less rows belong to the asked node.
-            if let Some(Drill::BuilderPage { node_id: n, .. }) = &mut row.drill
-                && n.is_empty()
-            {
-                node_id.clone_into(n);
-            }
-            Ok(row)
-        })
+        .map(|r| row(r, cols, layout, lens))
         .collect::<Result<Vec<_>, ApiError>>()?;
     let subtotal_raw = v
         .get("subtotal")
         .and_then(Value::as_array)
         .ok_or(shape("subtotal"))?;
-    if subtotal_raw.len() != cols.len() {
+    if subtotal_raw.len() != layout.wire {
         return Err(shape("subtotal"));
     }
     let subtotal = cols
         .iter()
-        .zip(subtotal_raw)
-        .map(|(c, s)| cell(c, s, None))
+        .zip(&layout.shown)
+        .map(|(c, &i)| cell(c, &subtotal_raw[i]))
         .collect::<Result<Vec<_>, _>>()?;
     let cursor = match v.get("cursor") {
         Some(Value::String(s)) => Some(s.clone()),

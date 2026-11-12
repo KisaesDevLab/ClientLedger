@@ -784,8 +784,9 @@ pub enum Drill {
         node_id: String,
         /// The engine path the page continues.
         path: RowPath,
-        /// The engine's opaque cursor.
-        cursor: String,
+        /// The engine's opaque cursor (`None`: page from the start, the
+        /// engine's `cursor: null` when a whole path was capped).
+        cursor: Option<String>,
     },
 }
 
@@ -1255,7 +1256,7 @@ mod tests {
         let page = Drill::BuilderPage {
             node_id: "income".into(),
             path: RowPath::of(["n:income"]),
-            cursor: "abc".into(),
+            cursor: Some("abc".into()),
         };
         assert_eq!(page.at(col), page, "a page keeps its cursor");
         for k in [

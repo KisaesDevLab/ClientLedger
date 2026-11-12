@@ -1,187 +1,409 @@
-//! Adapter tests on the hand samples (plan §7 WP1); PR-C's engine samples
-//! replace them when pinned. These prove the reading below, not the
-//! engine's contract: the contract tests in `tests/contract/` do that.
+//! Adapter tests on the engine's own samples (PR-C, bc41f48d:
+//! `shared/src/report-builder/fixtures/run`, copied to
+//! `tests/fixtures/report_builder/`). Each sample is `{request, response}`;
+//! the requests are descriptions, so the wire shape of a request is pinned
+//! here and proved live by the contract test.
 
 use super::*;
 use serde_json::json;
 
 fn sample(name: &str) -> Value {
     let text = match name {
-        "run" => include_str!("../../tests/fixtures/report_builder/run_sample.json"),
-        _ => include_str!("../../tests/fixtures/report_builder/detail_sample.json"),
+        "profit_loss_accrual" => {
+            include_str!("../../tests/fixtures/report_builder/profit_loss_accrual.json")
+        }
+        "profit_loss_cash" => {
+            include_str!("../../tests/fixtures/report_builder/profit_loss_cash.json")
+        }
+        "balance_sheet_accrual" => {
+            include_str!("../../tests/fixtures/report_builder/balance_sheet_accrual.json")
+        }
+        "balance_sheet_cash" => {
+            include_str!("../../tests/fixtures/report_builder/balance_sheet_cash.json")
+        }
+        "transaction_detail_by_account" => include_str!(
+            "../../tests/fixtures/report_builder/transaction_detail_by_account.json"
+        ),
+        "run_detail_page" => {
+            include_str!("../../tests/fixtures/report_builder/run_detail_page.json")
+        }
+        "expandable_open" => {
+            include_str!("../../tests/fixtures/report_builder/expandable_open.json")
+        }
+        "profit_loss_compare_prior_year" => include_str!(
+            "../../tests/fixtures/report_builder/profit_loss_compare_prior_year.json"
+        ),
+        "denied_section" => include_str!("../../tests/fixtures/report_builder/denied_section.json"),
+        other => panic!("no sample {other}"),
     };
-    serde_json::from_str(text).expect("fixture")
+    let v: Value = serde_json::from_str(text).expect("fixture");
+    v["response"].clone()
 }
 
-/// The columns of the run the detail sample pages.
-fn detail_columns() -> Vec<ColumnHead> {
-    columns(&json!({"columns": [
-        {"key": "date", "caption": "Date", "kind": "date"},
-        {"key": "amount", "caption": "Amount", "kind": "amount"}
-    ]}))
-    .expect("columns")
+const RUNS: [&str; 8] = [
+    "profit_loss_accrual",
+    "profit_loss_cash",
+    "balance_sheet_accrual",
+    "balance_sheet_cash",
+    "transaction_detail_by_account",
+    "expandable_open",
+    "profit_loss_compare_prior_year",
+    "denied_section",
+];
+
+fn run(name: &str) -> BuilderRun {
+    read_run(&sample(name), None).expect(name)
 }
 
 fn d(s: &str) -> Decimal {
     Decimal::from_str_exact(s).expect("decimal")
 }
 
+fn day(y: i32, m: u32, dd: u32) -> CalendarDate {
+    CalendarDate::from_ymd(y, m, dd).expect("day")
+}
+
+const ZERO_ID: &str = "00000000-0000-4000-8000-000000000000";
+
 #[test]
-fn a_run_keeps_the_exact_strings_and_maps_every_kind() {
-    let run = read_run(&sample("run")).expect("run");
-    assert_eq!(run.fingerprint, "fp-1");
-    assert_eq!(run.stamp, "41");
-    assert_eq!(run.denied, ["bills"]);
+fn every_engine_sample_reads() {
+    for name in RUNS {
+        let r = run(name);
+        assert_eq!(r.fingerprint.len(), 64, "{name}");
+        assert!(r.stamp > 0, "{name}");
+        assert!(!r.truncated, "{name}");
+        for row in &r.table.rows {
+            assert_eq!(row.cells.len(), r.table.columns.len(), "{name}");
+        }
+    }
+}
+
+#[test]
+fn a_profit_and_loss_keeps_the_exact_strings() {
+    let r = run("profit_loss_accrual");
+    let t = &r.table;
+    assert_eq!(t.columns.len(), 1);
+    assert_eq!(t.columns[0].key, "total");
+    assert_eq!(t.columns[0].kind, ColumnKind::Amount);
     assert_eq!(
-        run.expanded,
-        [
-            RowPath::of(["n:income"]),
-            RowPath::of(["n:income", "account:7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60"])
-        ]
+        t.columns[0].range,
+        Some(DateRange {
+            from: day(2026, 1, 1),
+            to: day(2026, 12, 31)
+        })
     );
-    let t = &run.table;
-    assert_eq!(t.columns.len(), 6);
-    let kinds: Vec<RowKind> = t.rows.iter().map(|r| r.kind).collect();
+    assert_eq!(t.meta.basis, Some(Basis::Accrual));
+    let kinds: Vec<RowKind> = t.rows.iter().take(6).map(|r| r.kind).collect();
     assert_eq!(
         kinds,
         [
             RowKind::Header,
             RowKind::Group,
-            RowKind::Detail,
-            RowKind::More,
-            RowKind::Group,
-            RowKind::Subtotal,
-            RowKind::Denied,
-            RowKind::Formula,
-            RowKind::Earnings,
-            RowKind::Blank,
-            RowKind::Text,
+            RowKind::Total,
+            RowKind::Header,
+            RowKind::Total,
+            RowKind::Formula
         ]
     );
-    // Sub-cent amounts stay exact: 800.005 is not rounded.
-    assert_eq!(t.rows[1].cells[3], Cell::Amount(d("800.005")));
-    assert_eq!(t.rows[1].cells[5], Cell::Percent(Some(d("100.0"))));
-    assert_eq!(t.rows[2].cells[5], Cell::Percent(None));
-    // Detail fields fill the text and date columns.
+    // 43.3300 stays four places, exactly.
+    assert_eq!(t.rows[7].cells[0], Cell::Amount(d("43.3300")));
+    assert_eq!(t.rows[15].caption, "Net Income");
+    assert_eq!(t.rows[15].cells[0], Cell::Amount(d("111.6700")));
+    assert_eq!(t.rows[0].cells[0], Cell::Empty, "a header has no amount");
+    // A line and a total drill to their own node and path; formulas don't.
     assert_eq!(
-        t.rows[2].cells[0],
-        Cell::Date(CalendarDate::from_ymd(2026, 10, 4).expect("d"))
-    );
-    assert_eq!(t.rows[2].cells[1], Cell::Text("1001".into()));
-    // Layout rows get empty cells, one per column.
-    assert!(
-        t.rows[0]
-            .cells
-            .iter()
-            .all(|c| matches!(c, Cell::Empty | Cell::Percent(None)))
-    );
-    // A cell that depends on a denied section shows the dash.
-    assert_eq!(t.rows[7].cells[2], Cell::Text("\u{2014}".into()));
-    assert_eq!(t.rows[6].caption, "@reports.builder.denied");
-    assert_eq!(t.rows[3].caption, "@reports.builder.more");
-    assert_eq!(t.meta.basis, Some(Basis::Accrual));
-    assert!(t.rows[1].expandable);
-}
-
-#[test]
-fn drills_are_builder_detail_pages_forms_and_profit_and_loss() {
-    let run = read_run(&sample("run")).expect("run");
-    let t = &run.table;
-    let sub = t.rows[5].drill.as_ref().expect("subtotal drill");
-    assert_eq!(
-        sub,
-        &Drill::BuilderDetail {
+        t.rows[1].drill,
+        Some(Drill::BuilderDetail {
             node_id: "income".into(),
-            path: RowPath::of(["n:income", "total"]),
+            path: RowPath::of(["n:income", &format!("account:{ZERO_ID}")]),
             range: None,
-        }
-    );
-    // A period column drills with its own dates; the percent column not at all.
-    assert!(matches!(
-        sub.for_cell(&t.columns[2]),
-        Some(Drill::BuilderDetail { range: Some(r), .. }) if r.from == CalendarDate::from_ymd(2026, 10, 1).expect("d")
-    ));
-    assert_eq!(sub.for_cell(&t.columns[5]), None);
-    assert!(matches!(
-        &t.rows[2].drill,
-        Some(Drill::Transaction { txn_type, .. }) if txn_type == "invoice"
-    ));
-    assert_eq!(
-        t.rows[3].drill,
-        Some(Drill::BuilderPage {
-            node_id: "income".into(),
-            path: RowPath::of([
-                "n:income",
-                "account:7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60",
-                "more"
-            ]),
-            cursor: "eyJrIjoiMSJ9".into(),
         })
     );
-    assert!(matches!(t.rows[8].drill, Some(Drill::ProfitLoss { .. })));
-    // The section's lens and tags travel with the earnings drill.
-    let mut v = sample("run");
-    v["rows"][8]["drill"]["adjusting"] = json!("exclude");
-    v["rows"][8]["drill"]["tagIds"] = json!(["33333333-3333-4333-8333-333333333333"]);
-    let t = read_run(&v).expect("run").table;
+    assert_eq!(
+        t.rows[2].drill,
+        Some(Drill::BuilderDetail {
+            node_id: "income".into(),
+            path: RowPath::of(["n:income"]),
+            range: None,
+        })
+    );
+    assert_eq!(t.rows[5].drill, None);
+    // The total column's dates narrow a cell's drill.
     assert!(matches!(
-        &t.rows[8].drill,
-        Some(Drill::ProfitLoss { adjusting: Some(Adjusting::Exclude), tag_ids, .. }) if tag_ids.len() == 1
+        t.rows[1].drill.as_ref().and_then(|x| x.for_cell(&t.columns[0])),
+        Some(Drill::BuilderDetail { range: Some(rg), .. }) if rg.from == day(2026, 1, 1)
     ));
-    assert_eq!(t.rows[7].drill, None, "formulas don't drill");
-    assert_eq!(t.rows[6].drill, None, "denied rows don't drill");
+    assert_eq!(run("profit_loss_cash").table.meta.basis, Some(Basis::Cash));
 }
 
 #[test]
-fn a_detail_page_echoes_the_subtotal() {
-    let p = read_detail(&sample("detail"), "bank", &detail_columns()).expect("page");
+fn a_balance_sheet_as_of_column_and_earnings_rows() {
+    let v = sample("balance_sheet_accrual");
+    let r = read_run(&v, Some(Adjusting::Exclude)).expect("bs");
+    let t = &r.table;
+    // `{from: null, to}`: the detail request takes no half range.
+    assert_eq!(t.columns[0].range, None);
+    assert_eq!(t.meta.dates, Some(ReportDates::AsOf(day(2026, 12, 31))));
+    assert_eq!(t.rows[8].kind, RowKind::Earnings);
+    assert_eq!(t.rows[8].caption, "Prior years' net income");
+    assert_eq!(t.rows[8].cells[0], Cell::Amount(d("500.0000")));
+    // Prior years start at 0001-01-01 on the wire: from the first day kept.
+    assert_eq!(
+        t.rows[8].drill,
+        Some(Drill::ProfitLoss {
+            from: CalendarDate::min(),
+            to: day(2025, 12, 31),
+            basis: Some(Basis::Accrual),
+            adjusting: Some(Adjusting::Exclude),
+            tag_ids: Vec::new(),
+        })
+    );
+    assert!(matches!(
+        t.rows[9].drill,
+        Some(Drill::ProfitLoss { from, .. }) if from == day(2026, 1, 1)
+    ));
+    assert_eq!(t.rows[11].kind, RowKind::Formula);
+    assert_eq!(t.rows[11].cells[0], Cell::Amount(d("656.6700")));
+    assert_eq!(
+        run("balance_sheet_cash").table.meta.basis,
+        Some(Basis::Cash)
+    );
+}
+
+#[test]
+fn compare_columns_change_and_percent() {
+    let r = run("profit_loss_compare_prior_year");
+    let t = &r.table;
+    let keys: Vec<&str> = t.columns.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["total", "total:c0", "total:c0:change", "total:c0:pct_change"]
+    );
+    assert_eq!(
+        t.columns[1].range,
+        Some(DateRange {
+            from: day(2025, 1, 1),
+            to: day(2025, 12, 31)
+        })
+    );
+    assert_eq!(t.rows[1].cells[2], Cell::Amount(d("-300.0000")));
+    assert_eq!(t.rows[1].cells[3], Cell::Percent(Some(d("-60.0"))));
+    // A zero base has no percent.
+    assert_eq!(t.rows[7].cells[3], Cell::Percent(None));
+    let drill = t.rows[1].drill.clone().expect("drill");
+    // The prior amount drills over its own year; changes don't drill.
+    assert!(matches!(
+        drill.for_cell(&t.columns[1]),
+        Some(Drill::BuilderDetail { range: Some(rg), .. }) if rg.from == day(2025, 1, 1)
+    ));
+    assert_eq!(drill.for_cell(&t.columns[2]), None);
+    assert_eq!(drill.for_cell(&t.columns[3]), None);
+}
+
+#[test]
+fn a_hidden_compare_column_keeps_its_wire_place() {
+    let mut v = sample("profit_loss_compare_prior_year");
+    // `amount: false` with a change: the engine sends the prior column as
+    // `hidden` with null cells.
+    v["columns"][1]["kind"] = json!("hidden");
+    for row in v["rows"].as_array_mut().expect("rows") {
+        row["cells"][1] = Value::Null;
+    }
+    let r = read_run(&v, None).expect("run");
+    assert_eq!(r.layout.wire, 4);
+    assert_eq!(r.layout.shown, [0, 2, 3]);
+    let t = &r.table;
+    assert_eq!(t.columns.len(), 3);
+    assert_eq!(t.columns[1].key, "total:c0:change");
+    assert_eq!(t.rows[1].cells[1], Cell::Amount(d("-300.0000")));
+    // A detail page carries the hidden cell too.
+    let page = json!({"rows": [], "cursor": null,
+                      "subtotal": ["1.0000", null, "2.0000", "3.0"]});
+    let p = read_detail(&page, &t.columns, &r.layout).expect("page");
+    assert_eq!(
+        p.subtotal,
+        [
+            Cell::Amount(d("1.0000")),
+            Cell::Amount(d("2.0000")),
+            Cell::Percent(Some(d("3.0")))
+        ]
+    );
+}
+
+#[test]
+fn a_detail_section_types_its_field_columns() {
+    let r = run("transaction_detail_by_account");
+    let t = &r.table;
+    let kinds: Vec<ColumnKind> = t.columns.iter().map(|c| c.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            ColumnKind::Date,
+            ColumnKind::Text,
+            ColumnKind::Text,
+            ColumnKind::Text,
+            ColumnKind::Text,
+            ColumnKind::Amount,
+            ColumnKind::Amount,
+            ColumnKind::Amount,
+            ColumnKind::Amount,
+            ColumnKind::Amount,
+        ]
+    );
+    assert_eq!(t.columns[0].key, "f:date");
+    let opening = &t.rows[2];
+    assert_eq!(opening.kind, RowKind::Earnings);
+    assert_eq!(opening.caption, "@reports.builder.opening");
+    assert_eq!(opening.cells[8], Cell::Amount(d("500.0000")));
+    let detail = &t.rows[3];
+    assert_eq!(detail.kind, RowKind::Detail);
+    assert_eq!(detail.cells[0], Cell::Date(day(2026, 3, 1)));
+    assert_eq!(detail.cells[1], Cell::Text("Cash Sale".into()));
+    assert_eq!(detail.cells[2], Cell::Empty);
+    assert_eq!(detail.cells[8], Cell::Amount(d("520.0000")));
+    assert!(matches!(
+        &detail.drill,
+        Some(Drill::Transaction { txn_type, .. }) if txn_type == "cash_sale"
+    ));
+    // Detail rows share their line's path (the window places them under
+    // it); the lines are expanded.
+    assert_eq!(detail.path, t.rows[1].path);
+    assert!(r.expanded.contains(&t.rows[1].path));
+}
+
+#[test]
+fn the_expanded_rows_are_the_open_set() {
+    let r = run("expandable_open");
+    assert_eq!(
+        r.expanded,
+        [RowPath::of(["n:sales", &format!("contact:{ZERO_ID}")])]
+    );
+    assert!(r.table.rows[1].expandable);
+    assert_eq!(r.table.rows[2].level, 2);
+}
+
+#[test]
+fn a_denied_section_and_the_formula_over_it() {
+    let r = run("denied_section");
+    assert_eq!(r.denied, ["purch"]);
+    let t = &r.table;
+    assert_eq!(t.rows[3].kind, RowKind::Denied);
+    assert_eq!(t.rows[3].caption, "@reports.builder.denied");
+    assert_eq!(t.rows[3].drill, None);
+    // The formula that needs it has no amount (the window shows the dash).
+    assert_eq!(t.rows[4].kind, RowKind::Formula);
+    assert_eq!(t.rows[4].cells, [Cell::Empty]);
+}
+
+#[test]
+fn a_detail_page_reads_against_the_runs_columns() {
+    let r = run("transaction_detail_by_account");
+    let p = read_detail(&sample("run_detail_page"), &r.table.columns, &r.layout).expect("page");
     assert_eq!(p.rows.len(), 2);
     assert_eq!(p.rows[0].kind, RowKind::Earnings, "the opening row");
-    assert_eq!(p.cursor.as_deref(), Some("eyJrIjoiMiJ9"));
-    assert_eq!(p.subtotal[1], Cell::Amount(d("125.1000")));
-    let mut last = sample("detail");
-    last["cursor"] = Value::Null;
+    assert_eq!(p.rows[0].level, 0);
+    assert!(matches!(
+        &p.rows[1].drill,
+        Some(Drill::Transaction { txn_type, .. }) if txn_type == "bill"
+    ));
+    assert_eq!(p.cursor, None);
+    assert_eq!(p.subtotal[9], Cell::Amount(d("45.0000")));
+    let mut next = sample("run_detail_page");
+    next["cursor"] = json!("eyJrIjoibGluZSJ9");
     assert_eq!(
-        read_detail(&last, "bank", &detail_columns())
+        read_detail(&next, &r.table.columns, &r.layout)
             .expect("page")
-            .cursor,
-        None
+            .cursor
+            .as_deref(),
+        Some("eyJrIjoibGluZSJ9")
+    );
+}
+
+#[test]
+fn a_more_row_pages_with_its_cursor_or_from_the_start() {
+    let mut v = sample("expandable_open");
+    let more = |cursor: Value| {
+        json!({"kind": "more", "nodeId": "sales", "level": 2,
+               "path": ["n:sales", "contact:x"], "caption": "More rows",
+               "cells": [null], "cursor": cursor,
+               "expandable": false, "expanded": false})
+    };
+    let rows = v["rows"].as_array_mut().expect("rows");
+    rows.push(more(json!("abc")));
+    rows.push(more(Value::Null));
+    v["meta"]["truncated"] = json!(true);
+    let r = read_run(&v, None).expect("run");
+    assert!(r.truncated);
+    let n = r.table.rows.len();
+    assert_eq!(r.table.rows[n - 2].caption, "@reports.builder.more");
+    assert_eq!(
+        r.table.rows[n - 2].drill,
+        Some(Drill::BuilderPage {
+            node_id: "sales".into(),
+            path: RowPath::of(["n:sales", "contact:x"]),
+            cursor: Some("abc".into()),
+        })
+    );
+    assert!(matches!(
+        &r.table.rows[n - 1].drill,
+        Some(Drill::BuilderPage { cursor: None, .. })
+    ));
+}
+
+#[test]
+fn the_no_activity_note_is_worded_by_the_window() {
+    let mut v = sample("profit_loss_accrual");
+    v["meta"]["notes"] = json!(["No activity for these dates"]);
+    let r = read_run(&v, None).expect("run");
+    assert_eq!(
+        r.table.meta.note.as_deref(),
+        Some("@reports.builder.no_activity")
     );
 }
 
 #[test]
 fn anything_off_contract_is_a_shape_error() {
     let cases: Vec<(&str, Value)> = vec![
-        ("/rows/1/cells/2", json!(1200)),
-        ("/rows/1/cells/2", json!("1,200.00")),
-        ("/rows/1/cells/2", json!("1e3")),
+        ("/rows/1/cells/0", json!(200)),
+        ("/rows/1/cells/0", json!("1,200.00")),
+        ("/rows/1/cells/0", json!("1e3")),
         ("/rows/1/kind", json!("chart")),
-        ("/rows/1/drill/kind", json!("teleport")),
-        ("/rows/3/cursor", Value::Null),
-        ("/columns/2/kind", json!("money")),
+        ("/rows/1/drill/type", json!("teleport")),
+        ("/rows/1/drill/path", json!([])),
         ("/rows/1/level", json!(-1)),
+        ("/columns/0/kind", json!("money")),
+        ("/stamp", json!("9")),
+        ("/meta/truncated", json!({"shown": 1, "total": 2})),
+        ("/meta/basis", json!("modified")),
     ];
     for (ptr, bad) in cases {
-        let mut v = sample("run");
+        let mut v = sample("profit_loss_accrual");
         *v.pointer_mut(ptr).expect(ptr) = bad;
         assert!(
-            matches!(read_run(&v), Err(ApiError::ReportShape { .. })),
+            matches!(read_run(&v, None), Err(ApiError::ReportShape { .. })),
             "{ptr}"
         );
     }
-    let mut v = sample("run");
-    v["rows"][1]["cells"].as_array_mut().expect("arr").pop();
-    assert!(matches!(read_run(&v), Err(ApiError::ReportShape { .. })));
-    let mut v = sample("detail");
-    v["subtotal"] = json!(["125.10"]);
+    let mut v = sample("profit_loss_accrual");
+    v["rows"][0]["cells"] = json!([]);
+    assert!(
+        matches!(read_run(&v, None), Err(ApiError::ReportShape { .. })),
+        "one cell per column, layout rows too"
+    );
+    let mut v = sample("transaction_detail_by_account");
+    v["columns"][0]["field"] = json!("mood");
+    assert!(matches!(read_run(&v, None), Err(ApiError::ReportShape { .. })));
+    let r = run("transaction_detail_by_account");
+    let mut v = sample("run_detail_page");
+    v["subtotal"] = json!(["45.0000"]);
     assert!(matches!(
-        read_detail(&v, "bank", &detail_columns()),
+        read_detail(&v, &r.table.columns, &r.layout),
         Err(ApiError::ReportShape { .. })
     ));
-    let mut v = sample("detail");
+    let mut v = sample("run_detail_page");
     v["rows"] = json!(vec![v["rows"][1].clone(); PAGE_ROWS + 1]);
     assert!(matches!(
-        read_detail(&v, "bank", &detail_columns()),
+        read_detail(&v, &r.table.columns, &r.layout),
         Err(ApiError::ReportShape { .. })
     ));
 }
@@ -192,78 +414,115 @@ fn reference() -> RunRef {
         definition_id: None,
         version: None,
         dates: RunDates::range(DateRange {
-            from: CalendarDate::from_ymd(2026, 10, 1).expect("d"),
-            to: CalendarDate::from_ymd(2026, 11, 30).expect("d"),
+            from: day(2026, 10, 1),
+            to: day(2026, 11, 30),
         }),
         period_ranges: Vec::new(),
         compare_ranges: Vec::new(),
-        fiscal_year_starts: vec![CalendarDate::from_ymd(2026, 1, 1).expect("d")],
+        fiscal_year_starts: vec![day(2026, 1, 1)],
         basis: Some(Basis::Cash),
         adjusting: None,
     }
 }
 
+fn request() -> RunRequest {
+    RunRequest {
+        reference: reference(),
+        open: Vec::new(),
+        collapsed: Vec::new(),
+        expand_all: false,
+        purpose: RunPurpose::Screen,
+    }
+}
+
 #[test]
 fn the_request_wire_shape_is_pinned() {
-    let req = RunRequest {
-        reference: reference(),
-        open: None,
-        open_all: false,
-        purpose: RunPurpose::Screen,
-    };
     assert_eq!(
-        serde_json::to_value(&req).expect("json"),
+        serde_json::to_value(request()).expect("json"),
         json!({
             "definition": {"schemaVersion": 1, "kind": "builder"},
             "dates": {"from": "2026-10-01", "to": "2026-11-30"},
             "fiscalYearStarts": ["2026-01-01"],
             "basis": "cash",
-            "open": null,
+            "open": [],
+            "collapsed": [],
             "purpose": "screen"
         })
     );
+    let mut all = request();
+    all.expand_all = true;
+    all.collapsed = vec![RowPath::of(["n:a", "account:x"])];
+    let v = serde_json::to_value(&all).expect("json");
+    assert_eq!(v["expandAll"], json!(true));
+    assert_eq!(v["collapsed"], json!([["n:a", "account:x"]]));
     let detail = DetailRequest {
         reference: reference(),
         node_id: "income".into(),
         path: RowPath::of(["n:income", "account:none"]),
         range: None,
         cursor: Some("c".into()),
-        fingerprint: "fp".into(),
-        stamp: "41".into(),
+        fingerprint: "f".repeat(64),
+        stamp: 41,
     };
     let v = serde_json::to_value(&detail).expect("json");
     assert_eq!(v["path"], json!(["n:income", "account:none"]));
     assert_eq!(v["nodeId"], "income");
+    assert_eq!(v["stamp"], json!(41), "the stamp is a number");
     assert!(v.get("open").is_none() && v.get("purpose").is_none());
+    let mut as_of = reference();
+    as_of.dates = RunDates::as_of(day(2026, 12, 31));
+    assert_eq!(
+        serde_json::to_value(&as_of).expect("json")["dates"],
+        json!({"asOf": "2026-12-31"})
+    );
 }
 
 #[test]
 fn requests_over_the_caps_are_refused_before_sending() {
     let ok = RunRequest {
-        reference: reference(),
-        open: Some(vec![RowPath::of(["n:a"])]),
-        open_all: false,
-        purpose: RunPurpose::Screen,
+        open: vec![RowPath::of(["n:a"])],
+        ..request()
     };
     check_run(&ok).expect("ok");
     let range = DateRange {
-        from: CalendarDate::from_ymd(2026, 1, 1).expect("d"),
-        to: CalendarDate::from_ymd(2026, 1, 31).expect("d"),
+        from: day(2026, 1, 1),
+        to: day(2026, 1, 31),
     };
     let mut periods = ok.clone();
     periods.reference.period_ranges = vec![range; MAX_PERIODS];
     check_run(&periods).expect("36 periods");
     periods.reference.period_ranges.push(range);
+    let mut one_compare = ok.clone();
+    one_compare.reference.compare_ranges = vec![vec![range]];
+    check_run(&one_compare).expect("a compare range without periods");
     let mut compare = ok.clone();
     compare.reference.period_ranges = vec![range; 2];
     compare.reference.compare_ranges = vec![vec![range; 1]];
     let mut deep = ok.clone();
-    deep.open = Some(vec![RowPath::of(["a", "b", "c", "d", "e"])]);
+    deep.open = vec![RowPath::of(["a", "b", "c", "d", "e"])];
+    let mut empty_path = ok.clone();
+    empty_path.collapsed = vec![RowPath::default()];
     let mut many = ok.clone();
-    many.open = Some(vec![RowPath::of(["a"]); MAX_OPEN_PATHS + 1]);
+    many.open = vec![RowPath::of(["a"]); MAX_OPEN_PATHS + 1];
+    let mut many_closed = ok.clone();
+    many_closed.collapsed = vec![RowPath::of(["a"]); MAX_OPEN_PATHS + 1];
     let mut both = ok.clone();
     both.reference.definition_id = Some("d1".into());
-    for bad in [periods, compare, deep, many, both] {
+    let mut no_years = ok.clone();
+    no_years.reference.fiscal_year_starts.clear();
+    let mut years = ok.clone();
+    years.reference.fiscal_year_starts = vec![day(2026, 1, 1); MAX_FISCAL_YEAR_STARTS + 1];
+    for bad in [
+        periods,
+        compare,
+        deep,
+        empty_path,
+        many,
+        many_closed,
+        both,
+        no_years,
+        years,
+    ] {
         assert!(matches!(
             check_run(&bad),
             Err(ApiError::Local(LocalValidation::InvalidValue))
@@ -284,15 +543,18 @@ fn refusals_are_recognised() {
         Some(BuilderRefusal::ParamsChanged)
     );
     assert_eq!(
+        r(400, err("CURSOR_INVALID", json!({}))),
+        Some(BuilderRefusal::ParamsChanged)
+    );
+    assert_eq!(
         r(503, err("REPORT_TIMEOUT", json!({}))),
         Some(BuilderRefusal::Timeout)
     );
     assert_eq!(
-        r(422, err("REPORT_TOO_LARGE", json!({}))),
+        r(422, err("REPORT_TOO_LARGE", json!({"limit": 100_000}))),
         Some(BuilderRefusal::TooLarge)
     );
     assert!(matches!(
-        // The PR-A body: `details: {path, code}`.
         r(400, err("DEFINITION_INVALID", json!({"path": "definition.nodes.0.polarity", "code": "MIXED_POLARITY"}))),
         Some(BuilderRefusal::Invalid { path: Some(p), code: Some(c) })
             if p == "definition.nodes.0.polarity" && c == "MIXED_POLARITY"
@@ -306,7 +568,7 @@ fn refusals_are_recognised() {
         Some(BuilderRefusal::Deleted)
     );
     assert_eq!(
-        r(403, err("FORBIDDEN", json!({}))),
+        r(403, err("PERMISSION_DENIED", json!({}))),
         Some(BuilderRefusal::Denied)
     );
     assert_eq!(
@@ -320,7 +582,7 @@ fn refusals_are_recognised() {
 fn starters_read_bare_or_wrapped() {
     let one = json!({"key": "profit_loss", "title": "Profit & Loss",
                      "definition": {"schemaVersion": 1, "kind": "builder"}});
-    for v in [json!([one.clone()]), json!({"data": [one.clone()]})] {
+    for v in [json!([one.clone()]), json!({"starters": [one.clone()]})] {
         let s = read_starters(&v).expect("starters");
         assert_eq!(s[0].key, "profit_loss");
     }

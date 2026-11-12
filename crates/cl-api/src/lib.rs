@@ -118,7 +118,7 @@ pub use resources::register::{
     RegisterSummary,
 };
 pub use resources::report_builder::{
-    BuilderRefusal, BuilderRun, DetailPage, DetailRequest, ReportBuilder, RunDates, RunPurpose,
+    BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, ReportBuilder, RunDates, RunPurpose,
     RunRef, RunRequest, Starter, builder_refusal,
 };
 pub use resources::reports::{
