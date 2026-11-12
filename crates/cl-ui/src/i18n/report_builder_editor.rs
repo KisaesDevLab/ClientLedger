@@ -5,4 +5,6 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.title", "Report Builder"),
+    ("shortcuts.scope.builder", "In the Report Builder"),
+    ("shortcuts.scope.outline", "In the report outline"),
 ];

@@ -88,6 +88,8 @@ fn scope_key(s: Scope) -> &'static str {
         Scope::List => "list",
         Scope::Feed => "feed",
         Scope::Reconcile => "reconcile",
+        Scope::Builder => "builder",
+        Scope::Outline => "outline",
     }
 }
 
