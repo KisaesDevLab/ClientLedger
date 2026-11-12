@@ -440,3 +440,243 @@ pub fn totals_and_columns_drill_to_their_lines(h: &Harness) {
     );
     assert_eq!(Cell::Amount(sum(&rows, april)), line.cells[april]);
 }
+
+/// A one-section `gl` definition over `accounts`, grouped by account, with
+/// one compare set on `base` (A08).
+fn compared(accounts: &[String], as_of: bool, base: Option<&str>) -> Value {
+    let compare: Vec<Value> = base
+        .map(|b| json!({"base": b, "amount": true, "dollarChange": true, "percentChange": false}))
+        .into_iter()
+        .collect();
+    json!({
+        "schemaVersion": 1, "kind": "builder",
+        "dates": {"mode": if as_of { "asOf" } else { "range" }},
+        "columns": {"detailFields": [], "compare": compare, "headers": {}},
+        "nodes": [{
+            "type": "section", "id": "s1", "caption": "Accounts", "source": "gl",
+            "measure": if as_of { "balance" } else { "amount" }, "polarity": "debit",
+            "filters": [{"field": "account", "op": "in", "ids": accounts}],
+            "groupBy": [{"key": "account"}], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false
+        }]
+    })
+}
+
+fn plain(definition: Value, dates: RunDates, starts: Vec<CalendarDate>) -> RunRef {
+    RunRef {
+        definition: Some(definition),
+        definition_id: None,
+        version: None,
+        dates,
+        period_ranges: Vec::new(),
+        compare_ranges: Vec::new(),
+        fiscal_year_starts: starts,
+        basis: None,
+        adjusting: None,
+    }
+}
+
+/// Every group and subtotal row's cell under `key`, by path.
+fn cells_by_path(r: &BuilderRun, key: &str) -> Vec<(cl_core::report::RowPath, Cell)> {
+    let col = r
+        .table
+        .columns
+        .iter()
+        .position(|c| c.key == key)
+        .unwrap_or_else(|| panic!("column {key}"));
+    r.table
+        .rows
+        .iter()
+        .filter(|x| matches!(x.kind, RowKind::Group | RowKind::Subtotal))
+        .map(|x| (x.path.clone(), x.cells[col].clone()))
+        .collect()
+}
+
+/// A08 (Q-A07u(2)): the desktop's `compareRanges` are what the engine
+/// compares with. October's prior period is September 1-30 (not the
+/// engine's same-length shift, August 31 - September 30): the compare
+/// cells equal the totals of a separate run over September, string for
+/// string, and an August 31 posting stays out of them.
+pub fn prior_period_compare_ranges_are_used(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbCmpBank");
+    let rent = account(h, s, AccountType::Expense, "RbCmpRent");
+    for (m, d, amt) in [
+        (8, 31, "7.00"),
+        (9, 1, "100.25"),
+        (9, 30, "0.0050"),
+        (10, 15, "40.00"),
+    ] {
+        post(h, s, &je2(date(YEAR, m, d), "rb", rent.id, bank.id, amt));
+    }
+    let ids = [rent.id.to_string(), bank.id.to_string()];
+    let starts = vec![date(YEAR - 1, 1, 1), date(YEAR, 1, 1)];
+    let mut october = plain(
+        compared(&ids, false, Some("prior_period")),
+        RunDates::range(DateRange {
+            from: date(YEAR, 10, 1),
+            to: date(YEAR, 10, 31),
+        }),
+        starts.clone(),
+    );
+    october.compare_ranges = vec![vec![DateRange {
+        from: date(YEAR, 9, 1),
+        to: date(YEAR, 9, 30),
+    }]];
+    let a = run(h, s, &request(october, false)).expect("october with compare");
+    let september = plain(
+        compared(&ids, false, None),
+        RunDates::range(DateRange {
+            from: date(YEAR, 9, 1),
+            to: date(YEAR, 9, 30),
+        }),
+        starts,
+    );
+    let b = run(h, s, &request(september, false)).expect("september");
+    let compare = cells_by_path(&a, "total:c0");
+    let totals = cells_by_path(&b, "total");
+    assert_ne!(compare.len(), 0);
+    assert_eq!(compare, totals, "compare cells = September's totals");
+    let rent_line = a
+        .table
+        .rows
+        .iter()
+        .find(|x| x.kind == RowKind::Group && x.caption.contains("RbCmpRent"))
+        .expect("rent line");
+    let col = a
+        .table
+        .columns
+        .iter()
+        .position(|c| c.key == "total:c0")
+        .expect("compare column");
+    assert_eq!(
+        rent_line.cells[col],
+        Cell::Amount(rust_decimal::Decimal::from_str_exact("100.2550").expect("d")),
+        "August 31 is not in the period before October"
+    );
+}
+
+/// A08: an as-of balance report compared with the same day a year before
+/// equals a separate as-of run at that day.
+pub fn prior_year_as_of_compare_ranges_are_used(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbYoyBank");
+    let savings = account(h, s, AccountType::Asset, "RbYoySavings");
+    for (m, d, amt) in [(2, 10, "250.00"), (3, 31, "0.0001"), (6, 1, "99.99")] {
+        post(h, s, &je2(date(YEAR, m, d), "rb", savings.id, bank.id, amt));
+    }
+    let ids = [savings.id.to_string(), bank.id.to_string()];
+    let starts = vec![date(YEAR - 1, 1, 1), date(YEAR, 1, 1), date(YEAR + 1, 1, 1)];
+    let mut now = plain(
+        compared(&ids, true, Some("prior_year")),
+        RunDates::as_of(date(YEAR + 1, 3, 31)),
+        starts.clone(),
+    );
+    now.compare_ranges = vec![vec![DateRange {
+        from: date(YEAR, 3, 31),
+        to: date(YEAR, 3, 31),
+    }]];
+    let a = run(h, s, &request(now, false)).expect("as of with compare");
+    let then = plain(
+        compared(&ids, true, None),
+        RunDates::as_of(date(YEAR, 3, 31)),
+        starts,
+    );
+    let b = run(h, s, &request(then, false)).expect("a year before");
+    let compare = cells_by_path(&a, "total:c0");
+    assert_ne!(compare.len(), 0);
+    assert_eq!(compare, cells_by_path(&b, "total"));
+}
+
+/// A08 (Q-A08c, Q-310): a builder definition is memorized with `canEdit`,
+/// changed at its version, refused when stale or named like another, and
+/// its kind can't change.
+pub fn builder_definitions_save_and_refuse(h: &Harness) {
+    use cl_api::resources::reports::definitions::{
+        DefinitionRefusal, DefinitionWrite, definition_refusal,
+    };
+    if !caps(h) || !h.require_cap(Capabilities::REPORT_DEFS_BUILDER, "U-119c") {
+        return;
+    }
+    let s = &h.s1;
+    let defs = s.report_definitions();
+    let bank = account(h, s, AccountType::Asset, "RbSaveBank");
+    let body = compared(&[bank.id.to_string()], false, Some("prior_period"));
+    let name = crate::support::unique("Builder P&L");
+    let w = DefinitionWrite {
+        name: name.clone(),
+        group_id: None,
+        kind: "builder".into(),
+        definition: body.clone(),
+    };
+    let key = cl_api::IdempotencyKey::new();
+    let row = h.run(defs.create(&w, key.clone())).expect("create");
+    assert_eq!(row.kind, "builder");
+    assert!(row.can_edit, "the author may change it");
+    assert_eq!(row.definition, body);
+    // The same press again (the same key) stores no second row.
+    let replay = h.run(defs.create(&w, key)).expect("replay");
+    assert_eq!(replay.id, row.id);
+
+    let mut changed = w.clone();
+    changed.definition["columns"]["compare"] = json!([]);
+    let next = h
+        .run(defs.update(&row.id, row.version, &changed))
+        .expect("update");
+    assert!(next.version > row.version);
+    assert!(next.can_edit);
+    let stale = h
+        .run(defs.update(&row.id, row.version, &changed))
+        .expect_err("stale");
+    assert_eq!(definition_refusal(&stale), Some(DefinitionRefusal::Stale));
+
+    // Another report with the same name: NAME_TAKEN.
+    let again = h
+        .run(defs.create(&w, cl_api::IdempotencyKey::new()))
+        .expect_err("name taken");
+    assert_eq!(
+        definition_refusal(&again),
+        Some(DefinitionRefusal::NameTaken)
+    );
+
+    // The kind can't change.
+    let standard = DefinitionWrite {
+        name,
+        group_id: None,
+        kind: "standard".into(),
+        definition: json!({"schemaVersion": 1, "kind": "standard", "reportKey": "profit_loss",
+                           "options": {"dates": {"preset": "last_month"}}}),
+    };
+    h.run(defs.update(&row.id, next.version, &standard))
+        .expect_err("a kind change is refused");
+    let read = h.run(defs.get(&row.id)).expect("get");
+    assert_eq!(read.kind, "builder");
+    assert!(read.can_edit);
+
+    // An invalid builder body says where.
+    let mut bad = w.clone();
+    bad.name = crate::support::unique("Bad builder");
+    bad.definition["nodes"][0]["polarity"] = json!("natural");
+    bad.definition["nodes"][0]["filters"] = json!([]);
+    let e = h
+        .run(defs.create(&bad, cl_api::IdempotencyKey::new()))
+        .expect_err("invalid");
+    assert!(
+        matches!(
+            definition_refusal(&e),
+            Some(DefinitionRefusal::Invalid {
+                path: Some(_),
+                code: Some(_)
+            })
+        ),
+        "{:?}",
+        definition_refusal(&e)
+    );
+    h.run(defs.delete(&row.id, read.version)).expect("delete");
+}

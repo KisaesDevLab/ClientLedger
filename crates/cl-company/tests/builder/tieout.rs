@@ -879,3 +879,51 @@ pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
         .collect();
     assert!(untied.is_empty(), "starters with no tie-out: {untied:?}");
 }
+
+/// Q-A08h (A08 WP-B1): the standard Revenue by Category ties to the
+/// standard P&L's income sections, account by account and in total, on
+/// both bases (a credit memo's debit to an income account reduces both).
+pub(super) async fn revenue_by_category_ties_to_profit_loss(s: &Session) {
+    let ranges = [
+        (d(2026, 10, 1), d(2026, 10, 31)),
+        (d(2026, 10, 1), d(2026, 12, 31)),
+        (d(2026, 1, 1), d(2026, 12, 31)),
+    ];
+    for basis in [Basis::Accrual, Basis::Cash] {
+        for (from, to) in ranges {
+            let fixed = |o: &mut ReportOptions| {
+                o.dates = DateChoice::Fixed { from, to };
+                o.basis = Some(basis);
+            };
+            let what = format!("revenue by category {from}..{to} {basis:?}");
+            let (_, rev) = standard(s, "revenue_by_category", fixed).await;
+            let (_, mut pl) = standard(s, "profit_loss", fixed).await;
+            let (rc, pc) = (std_cols(&rev), std_cols(&pl));
+            assert_eq!(rc.len(), pc.len(), "{what}: value columns line up");
+            let sections = ["income", "other_income"];
+            let mut income = zeros(pc.len());
+            for sec in sections {
+                if let Some(v) = std_total(&pl, &format!("{sec}~total"), &pc) {
+                    for (a, b) in income.iter_mut().zip(v) {
+                        *a += b;
+                    }
+                }
+            }
+            let grand = rev
+                .rows
+                .iter()
+                .rfind(|r| matches!(r.kind, RowKind::Grand | RowKind::Total))
+                .unwrap_or_else(|| panic!("{what}: a total"));
+            assert_eq!(values(grand, &rc), income, "{what}: total = P&L income");
+            pl.rows.retain(|r| {
+                r.path
+                    .0
+                    .first()
+                    .is_some_and(|p| sections.iter().any(|s| p.split('/').next() == Some(*s)))
+            });
+            let lines = std_lines(&rev, &rc);
+            assert!(!lines.is_empty(), "{what}: lines");
+            assert_eq!(lines, std_lines(&pl, &pc), "{what}: accounts, both ways");
+        }
+    }
+}

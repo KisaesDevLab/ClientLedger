@@ -290,6 +290,7 @@ fn an_unreadable_memorized_builder_report_says_why() {
             created_by: None,
             created_by_name: None,
             updated_at: None,
+            can_edit: true,
         };
     super::memorized::open_row(
         &mut w,
