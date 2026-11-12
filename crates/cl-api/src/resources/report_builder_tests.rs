@@ -604,3 +604,18 @@ fn starters_read_bare_or_wrapped() {
     }
     assert!(read_starters(&json!([{"key": "x"}])).is_err());
 }
+
+#[test]
+fn an_open_item_detail_row_without_a_path_takes_its_lines() {
+    // Engine 106ca6c5 sends `path: []` on open-item detail rows in `/run`.
+    let mut v = sample("transaction_detail_by_account");
+    v["rows"][3]["path"] = json!([]);
+    let r = read_run(&v, None).expect("run");
+    assert_eq!(r.table.rows[3].path, r.table.rows[1].path);
+    // Anything else without a path is still off contract.
+    v["rows"][1]["path"] = json!([]);
+    assert!(matches!(
+        read_run(&v, None),
+        Err(ApiError::ReportShape { .. })
+    ));
+}

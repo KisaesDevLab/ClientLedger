@@ -698,7 +698,13 @@ fn row(
         .and_then(Value::as_str)
         .ok_or(shape("node id"))?
         .to_string();
-    let path = path_in(r.get("path"), "path")?;
+    // Engine bc41f48d..106ca6c5: an open-item section's detail rows in
+    // `/run` carry `path: []` (run.ts keeps the page's path only on
+    // `/run/detail`); `read_run` gives them their line's path.
+    let path = match r.get("path").and_then(Value::as_array) {
+        Some(a) if a.is_empty() && wire_kind == "detail" => RowPath::default(),
+        _ => path_in(r.get("path"), "path")?,
+    };
     let level = r
         .get("level")
         .and_then(Value::as_u64)
@@ -802,10 +808,18 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
         basis: meta.basis,
         adjusting,
     };
-    let rows = raw
+    let mut rows = raw
         .iter()
         .map(|r| row(r, &cols, &layout, lens))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut line = RowPath::default();
+    for r in &mut rows {
+        if r.kind == RowKind::Detail && r.path.0.is_empty() {
+            r.path = line.clone();
+        } else if r.kind != RowKind::Detail {
+            line = r.path.clone();
+        }
+    }
     let expanded = raw
         .iter()
         .zip(&rows)
