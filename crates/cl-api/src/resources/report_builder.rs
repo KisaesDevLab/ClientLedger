@@ -478,6 +478,7 @@ fn column_range(v: Option<&Value>) -> Result<Option<DateRange>, ApiError> {
 /// column.
 #[allow(
     clippy::ref_option,
+    clippy::trivially_copy_pass_by_ref,
     reason = "serde's serialize_with hands the field by reference"
 )]
 fn wire_range<S: serde::Serializer>(r: &Option<DateRange>, s: S) -> Result<S::Ok, S::Error> {
