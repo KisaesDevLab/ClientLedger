@@ -1035,6 +1035,17 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             "Report Builder starters tie out to the standard reports",
         );
     }
+    // Q-A08h: Revenue by Category nets an income account's debits (a
+    // credit memo) as the P&L does; before the engine fix it summed credits
+    // only (150.00 over the P&L on 4000 in Q4 2026).
+    if caps.has("reports-revenue-net-v1") {
+        builder_tieout::revenue_by_category_ties_to_profit_loss(&s).await;
+    } else {
+        pending(
+            "Q-A08h",
+            "Revenue by Category ties to the P&L income (reports-revenue-net-v1)",
+        );
+    }
     if caps.has("open-balances-asof-v1") && caps.has("ap-aging-exact-v1") {
         who_owes_what_ties(&s).await;
         all.extend(list_goldens(vendor, bank));
