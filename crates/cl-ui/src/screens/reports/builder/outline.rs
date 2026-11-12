@@ -37,6 +37,52 @@ const fn icon(kind: RowKind) -> &'static str {
     }
 }
 
+/// A kind's badge colors (fill, letter, border), as the mockup draws them:
+/// sections in the accent, groups in info, formulas in the warning
+/// surface, text, blank and page-break rows neutral (UI review M2). Tokens
+/// only (Q-A08b); the formula border is `warn` (the mockup's warn-border
+/// is not a token, Q-A08aa).
+pub(crate) fn badge_colors(
+    kind: RowKind,
+    tokens: &Tokens,
+) -> (egui::Color32, egui::Color32, egui::Color32) {
+    match kind {
+        RowKind::Section => (tokens.accent_tint, tokens.accent, tokens.accent_border),
+        RowKind::Group => (tokens.info_tint, tokens.info, tokens.info),
+        RowKind::Formula => (tokens.warn_surface, tokens.warn_text, tokens.warn),
+        RowKind::Text | RowKind::Blank | RowKind::PageBreak => (
+            tokens.neutral_chip,
+            tokens.neutral_chip_text,
+            tokens.border_strong,
+        ),
+    }
+}
+
+/// Paints a kind's badge in `rect`.
+pub(crate) fn paint_badge(p: &egui::Painter, rect: egui::Rect, kind: RowKind, tokens: &Tokens) {
+    let (fill, ink, border) = badge_colors(kind, tokens);
+    p.rect_filled(rect, 3.0, fill);
+    p.rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    p.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon(kind),
+        egui::FontId::monospace(10.0),
+        ink,
+    );
+}
+
+/// A kind's badge as a widget (the Row tab's kind line).
+pub(crate) fn badge(ui: &mut Ui, kind: RowKind, tokens: &Tokens) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), Sense::hover());
+    paint_badge(ui.painter(), rect, kind, tokens);
+}
+
 /// The i18n key naming a kind.
 pub(crate) const fn kind_key(kind: RowKind) -> &'static str {
     match kind {
@@ -95,8 +141,14 @@ fn sub_caption(s: &BuilderScreen, node: &Node) -> String {
 fn add_menu(s: &mut BuilderScreen, ui: &mut Ui) {
     let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
     egui::Frame::group(ui.style()).show(ui, |ui| {
+        let can = s.ed.can_add();
+        if !can {
+            ui.label(RichText::new(t("builder.refused.too_many_rows")).size(12.0));
+        }
         for (n, kind) in RowKind::ALL.iter().enumerate() {
-            let r = ui.button(t(kind_key(*kind)));
+            let r = ui
+                .add_enabled(can, egui::Button::new(t(kind_key(*kind))))
+                .on_disabled_hover_text(t("builder.refused.too_many_rows"));
             if n == 0 && !ui.memory(|m| m.focused().is_some_and(|f| f == r.id)) && s.add_menu_new {
                 r.request_focus();
             }
@@ -158,7 +210,13 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 crate::screens::company::form::inline_note(
                     ui,
                     tokens,
-                    &t("builder.outline.near_cap"),
+                    &t_with(
+                        "builder.outline.near_cap",
+                        &[
+                            ("n", &s.ed.row_count().to_string()),
+                            ("max", &limits::NODES.to_string()),
+                        ],
+                    ),
                 );
             }
             if s.add_menu {
@@ -169,10 +227,21 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 .auto_shrink([false, false])
                 .max_height(ui.available_height() - 40.0)
                 .show(ui, |ui| rows(s, ui, tokens));
-            ui.label(
-                RichText::new(t("builder.outline.keys"))
-                    .size(11.0)
-                    .color(tokens.text_secondary),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("builder.outline.offers"))
+                        .size(12.0)
+                        .color(tokens.text_tertiary),
+                )
+                .wrap(),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("builder.outline.keys"))
+                        .size(11.0)
+                        .color(tokens.text_secondary),
+                )
+                .wrap(),
             );
         });
 }
@@ -197,7 +266,17 @@ fn toolbar(s: &mut BuilderScreen, ui: &mut Ui) {
             s.add_menu_new = s.add_menu;
         }
         let has = sel.is_some();
-        let del = ui.add_enabled(has, egui::Button::new(t("builder.outline.delete")));
+        let del = ui
+            .add_enabled_ui(has, |ui| {
+                ui.horizontal(|ui| {
+                    let r = ui.button(t("builder.outline.delete"));
+                    kbd(ui, "Del");
+                    r
+                })
+                .inner
+            })
+            .inner
+            .on_hover_text(t("builder.outline.delete_tip"));
         if del.clicked() {
             s.command(cl_model::CommandId::new("builder.remove"));
         }
@@ -297,24 +376,19 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 egui::pos2(x, rect.center().y - 8.0),
                 egui::vec2(16.0, 16.0),
             );
-            p.rect_stroke(
-                icon_rect,
-                2.0,
-                egui::Stroke::new(1.0, tokens.border_strong),
-                egui::StrokeKind::Inside,
-            );
-            p.text(
-                icon_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                icon(row.kind),
-                egui::FontId::monospace(10.0),
-                tokens.text_secondary,
-            );
+            paint_badge(p, icon_rect, row.kind, tokens);
             x += 22.0;
             let muted = matches!(row.kind, RowKind::Blank | RowKind::PageBreak);
-            p.text(
-                egui::pos2(x, rect.center().y),
-                egui::Align2::LEFT_CENTER,
+            // The sub-caption keeps its room at the right; both are cut
+            // with an ellipsis rather than run into each other (UI L).
+            let room = (rect.right() - 4.0 - x).max(0.0);
+            let sub_w = if sub.is_empty() {
+                0.0
+            } else {
+                (room * 0.4).min(90.0)
+            };
+            let cap = elided(
+                ui,
                 &caption,
                 egui::FontId::proportional(13.0),
                 if muted {
@@ -322,13 +396,27 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 } else {
                     tokens.text_primary
                 },
+                (room - sub_w - 6.0).max(0.0),
+            );
+            p.galley(
+                egui::pos2(x, rect.center().y - cap.size().y / 2.0),
+                cap,
+                tokens.text_primary,
             );
             if !sub.is_empty() {
-                p.text(
-                    egui::pos2(rect.right() - 4.0, rect.center().y),
-                    egui::Align2::RIGHT_CENTER,
+                let g = elided(
+                    ui,
                     &sub,
                     egui::FontId::proportional(11.0),
+                    tokens.text_secondary,
+                    sub_w,
+                );
+                p.galley(
+                    egui::pos2(
+                        rect.right() - 4.0 - g.size().x,
+                        rect.center().y - g.size().y / 2.0,
+                    ),
+                    g,
                     tokens.text_secondary,
                 );
             }
@@ -378,6 +466,19 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     if any_focus {
         s.pane = Pane::Outline;
     }
+}
+
+/// `text` laid out on one line, cut with an ellipsis at `width`.
+fn elided(
+    ui: &Ui,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    ui.painter().layout_job(job)
 }
 
 /// The row being renamed: a text field; Enter commits, Esc cancels.

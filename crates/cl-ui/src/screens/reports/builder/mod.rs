@@ -266,6 +266,10 @@ pub struct BuilderScreen {
     pub(crate) add_menu: bool,
     /// The Add menu just opened: its first choice takes the keyboard.
     pub(crate) add_menu_new: bool,
+    /// The Export menu is open (Excel, CSV, PDF).
+    pub(crate) export_menu: bool,
+    /// The Export menu just opened: its first choice takes the keyboard.
+    pub(crate) export_menu_new: bool,
     /// Text being typed into a field, by field.
     pub(crate) drafts: HashMap<FieldKey, String>,
     /// The field with the keyboard, when it is one of ours.
@@ -315,6 +319,8 @@ impl BuilderScreen {
             rename: None,
             add_menu: false,
             add_menu_new: false,
+            export_menu: false,
+            export_menu_new: false,
             drafts: HashMap::new(),
             pending: None,
             status: None,
@@ -642,6 +648,11 @@ impl BuilderScreen {
     /// Run report: the full report in its result tab (one per editor,
     /// Q-A08x), never the capped preview (Q-A08m).
     pub(crate) fn run_report(&mut self) {
+        self.run_then(None);
+    }
+
+    /// Run report, then `then` in the tab: its export or print (Q-A08m).
+    pub(crate) fn run_then(&mut self, then: Option<super::builder_ref::AfterRun>) {
         self.commit_pending();
         if !self.ed.can_run() {
             self.status = Some(t("builder.status.fix_first"));
@@ -655,6 +666,7 @@ impl BuilderScreen {
             options,
             saved: self.ed.saved().cloned(),
             origin: self.ed.origin().clone(),
+            then,
         };
         super::builder_run::show_result(&self.link, open);
     }
@@ -873,6 +885,10 @@ impl Screen for BuilderScreen {
     fn command(&mut self, id: CommandId) -> bool {
         let advanced = self.guided.is_none();
         match id.as_str() {
+            // At 200 rows Insert says why instead of opening the menu (R15).
+            "builder.add" if advanced && !self.ed.can_add() => {
+                self.status = Some(t("builder.refused.too_many_rows"));
+            }
             "builder.add" if advanced => {
                 self.add_menu = true;
                 self.add_menu_new = true;
@@ -943,7 +959,8 @@ impl Screen for BuilderScreen {
                 self.pane = Pane::Outline;
                 self.focus_to = Some(Pane::Outline);
             }
-            "builder.run_report" | "file.print" => self.run_report(),
+            "builder.run_report" => self.run_report(),
+            "file.print" => self.run_then(Some(super::builder_ref::AfterRun::Print)),
             "builder.save_changes" => {
                 self.commit_pending();
                 if self.ed.can_save_changes() {

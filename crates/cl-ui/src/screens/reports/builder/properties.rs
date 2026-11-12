@@ -3,13 +3,13 @@
 //! group, a formula (`formula.rs`), a text row, or a plain note for blank
 //! rows and page breaks.
 
+use cl_model::report_def::Node;
 use cl_model::report_def::editor::{Op, RowKind};
-use cl_model::report_def::{Node, outline as tree};
 use eframe::egui::{self, RichText, Ui};
 
 use super::picker::{self, Choice};
 use super::{BuilderScreen, FieldKey, Pane, PropTab};
-use crate::i18n::{t, t_with};
+use crate::i18n::t;
 use crate::theme::Tokens;
 
 /// The pane.
@@ -51,6 +51,8 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 /// transactions").
 fn kind_line(ui: &mut Ui, tokens: &Tokens, kind: RowKind) {
     ui.horizontal(|ui| {
+        // The kind's badge, as in the outline (UI review M2).
+        super::outline::badge(ui, kind, tokens);
         ui.label(RichText::new(t(super::outline::kind_key(kind))).strong());
         ui.label(
             RichText::new(t(&format!(
@@ -96,6 +98,19 @@ fn row_tab(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                     280.0,
                 );
             }
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(crate::i18n::t_count(
+                        "builder.row.group_inside",
+                        g.children.len(),
+                        &[],
+                    ))
+                    .size(12.0)
+                    .color(tokens.text_tertiary),
+                )
+                .wrap(),
+            );
         }
         Node::Formula(f) => super::formula::draw(s, ui, tokens, &f),
         Node::Text(x) => {
@@ -134,21 +149,37 @@ fn report_tab(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         280.0,
     );
     ui.add_space(6.0);
-    let group = s.ed.group_id().map_or_else(
-        || t("builder.report.no_group"),
-        |_| t("builder.report.in_group"),
-    );
-    ui.label(t_with("builder.report.group_line", &[("group", &group)]));
+    // The memorized group, by name (UI review M7).
+    super::save::load_groups(s);
+    let groups = s.save.groups().to_vec();
+    let mut choices: Vec<Choice> = vec![picker::on(t("builder.report.no_group"))];
+    choices.extend(groups.iter().map(|(_, n)| picker::on(n.clone())));
+    let current =
+        s.ed.group_id()
+            .and_then(|g| groups.iter().position(|(id, _)| id == g))
+            .map_or(0, |i| i + 1);
+    if let Some(i) = picker::pick(
+        ui,
+        ("report-group", s.id.0),
+        &t("builder.report.memorized_group"),
+        &choices,
+        Some(current),
+        260.0,
+    ) {
+        let g = i
+            .checked_sub(1)
+            .and_then(|i| groups.get(i))
+            .map(|g| g.0.clone());
+        s.apply(Op::MemorizedGroup(g));
+    }
     ui.add_space(6.0);
     let line = match s.ed.saved() {
         None => t("builder.report.who_new"),
         Some(x) if x.can_edit => t("builder.report.who_can"),
         Some(_) => t("builder.save.not_author"),
     };
-    ui.label(RichText::new(line).size(12.0).color(tokens.text_secondary));
+    ui.add(egui::Label::new(RichText::new(line).size(12.0).color(tokens.text_secondary)).wrap());
     ui.add_space(8.0);
-    let _: Option<Choice> = None;
-    let _ = tree::count(&s.ed.definition().nodes);
     if ui.button(t("builder.toolbar.memorize")).clicked() {
         s.commit_pending();
         super::save::open_memorize(s, false);

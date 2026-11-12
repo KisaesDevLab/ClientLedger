@@ -81,6 +81,11 @@ impl SaveState {
         self.job.is_some() || self.theirs.is_some() || self.groups_job.is_some()
     }
 
+    /// The groups read so far (none until read).
+    pub(crate) fn groups(&self) -> &[(String, String)] {
+        self.groups.as_deref().unwrap_or_default()
+    }
+
     /// True while a dialog is open (the editor's keys wait).
     pub(crate) fn dialog_open(&self) -> bool {
         self.memorize.is_some() || self.conflict
@@ -139,6 +144,12 @@ pub(crate) fn open_memorize(s: &mut BuilderScreen, closing: bool) {
         problem: None,
         focused: false,
     });
+    load_groups(s);
+}
+
+/// Reads the memorized-report groups once (the Memorize dialog and the
+/// Report tab pick from them).
+pub(crate) fn load_groups(s: &mut BuilderScreen) {
     if s.save.groups.is_none() && s.save.groups_job.is_none() {
         s.save.groups_job = Some(engine::read(
             &s.link,

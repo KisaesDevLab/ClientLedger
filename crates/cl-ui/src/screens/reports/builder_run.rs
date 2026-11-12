@@ -1409,6 +1409,7 @@ impl Edit {
 /// editor's preview, AC8).
 pub(crate) fn open_definition(w: &mut ReportWindow, open: BuilderRunOpen) {
     w.new_view();
+    w.after_run = open.then;
     let mut b = Builder::new("editor");
     b.title.clone_from(&open.title);
     b.json = serde_json::to_value(&open.def).unwrap_or(Value::Null);

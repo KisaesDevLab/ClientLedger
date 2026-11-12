@@ -14,7 +14,7 @@ use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 use crate::widgets::{button_with_chip, primary_button};
-use crate::windows::Screen;
+use crate::windows::{OpenPayload, Screen};
 
 /// A toolbar button with its shortcut chip, off with a reason when it
 /// can't act.
@@ -95,14 +95,14 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.command(cl_model::CommandId::new("builder.redo"));
         }
         ui.separator();
-        // Export and Print run the full report in its tab (Q-A08m).
+        // Export and Print run the full report in its tab, then open that
+        // tab's export or print (Q-A08m, R13): never the capped preview.
         if tool(ui, &t("builder.toolbar.export"), "", can_run, &fix) {
-            s.run_report();
-            s.status = Some(t("builder.status.export_in_tab"));
+            s.export_menu = !s.export_menu;
+            s.export_menu_new = s.export_menu;
         }
         if tool(ui, &t("builder.toolbar.print"), "Ctrl P", can_run, &fix) {
-            s.run_report();
-            s.status = Some(t("builder.status.print_in_tab"));
+            s.run_then(Some(super::super::builder_ref::AfterRun::Print));
         }
         ui.separator();
         let guided_ok = GuidedState::from_definition(s.ed.definition()).is_some();
@@ -116,7 +116,68 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.show_guided();
         }
     });
+    if s.export_menu {
+        export_menu(s, ui);
+    }
     hint(s, ui, tokens);
+}
+
+/// Export ▾: Excel, CSV or PDF of the full run (Q-A08m). The first choice
+/// takes the keyboard when it opens; Esc closes it.
+fn export_menu(s: &mut BuilderScreen, ui: &mut Ui) {
+    use super::super::builder_ref::AfterRun;
+    use super::super::export::Kind;
+    let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (n, (key, kind)) in [
+                ("builder.export.xlsx", Kind::Xlsx),
+                ("builder.export.csv", Kind::Csv),
+                ("builder.export.pdf", Kind::Pdf),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let r = ui.button(t(key));
+                if n == 0 && s.export_menu_new {
+                    r.request_focus();
+                }
+                if r.clicked() {
+                    s.run_then(Some(AfterRun::Export(kind)));
+                    close = true;
+                }
+            }
+        });
+    });
+    s.export_menu_new = false;
+    if close {
+        s.export_menu = false;
+    }
+}
+
+/// The report the editor started from, as its title and what opens it: a
+/// standard report, or the ready-made report a starter is (UI review M6).
+fn origin_link(origin: &cl_model::report_def::editor::Origin) -> Option<(String, OpenPayload)> {
+    use cl_model::report_def::editor::Origin;
+    let open = |key: &str| super::super::ReportOpen {
+        key: key.to_string(),
+        options: None,
+    };
+    match origin {
+        Origin::Standard(k) => {
+            let spec = cl_model::reports::find(k)?;
+            Some((t(spec.title), OpenPayload::Report(Box::new(open(spec.key)))))
+        }
+        Origin::Starter(k) => {
+            let title = cl_model::reports::REPORT_STARTERS
+                .iter()
+                .find(|(_, st)| st == k)
+                .and_then(|(r, _)| cl_model::reports::find(r))
+                .map_or_else(|| t("builder.origin.starter"), |spec| t(spec.title));
+            Some((title, OpenPayload::BuilderStarter(k.clone())))
+        }
+        _ => None,
+    }
 }
 
 /// "Saved 9:38 AM · Author: Kurt · Started from Profit & Loss", or "Not
@@ -141,19 +202,36 @@ fn hint(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         }
         None => parts.push(t("builder.hint.not_saved")),
     }
+    let link = origin_link(s.ed.origin());
     let origin = match s.ed.origin() {
         cl_model::report_def::editor::Origin::Blank => t("builder.origin.blank"),
         cl_model::report_def::editor::Origin::Guided => t("builder.origin.guided"),
         cl_model::report_def::editor::Origin::Memorized => t("builder.origin.memorized"),
-        cl_model::report_def::editor::Origin::Starter(k)
-        | cl_model::report_def::editor::Origin::Standard(k) => k.replace('_', " "),
+        _ => String::new(),
     };
-    parts.push(t_with("builder.hint.started", &[("origin", &origin)]));
-    ui.label(
-        RichText::new(parts.join(" \u{b7} "))
-            .size(12.0)
-            .color(tokens.text_secondary),
-    );
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let text = if link.is_some() {
+            format!(
+                "{} \u{b7} {}",
+                parts.join(" \u{b7} "),
+                t("builder.hint.started_link")
+            )
+        } else {
+            parts.push(t_with("builder.hint.started", &[("origin", &origin)]));
+            parts.join(" \u{b7} ")
+        };
+        ui.label(RichText::new(text).size(12.0).color(tokens.text_secondary));
+        if let Some((title, payload)) = link {
+            let r = ui.link(RichText::new(title).size(12.0));
+            if r.on_hover_text(t("builder.hint.open_origin")).clicked() {
+                s.link.push(crate::company::CompanyEvent::OpenWith(
+                    cl_model::CommandId::new(super::super::KIND),
+                    Box::new(payload),
+                ));
+            }
+        }
+    });
     if let Some(st) = &s.status {
         ui.label(RichText::new(st).size(12.0).color(tokens.warn_text));
     }
@@ -203,7 +281,7 @@ pub(crate) fn band(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             None => 2,
         };
         let l = picker::caption(ui, &t("builder.band.basis"));
-        l.on_hover_text(t("builder.band.basis_tip"));
+        l.on_hover_text(t("builder.band.basis_tip_advanced"));
         if let Some(i) = picker::segmented(
             ui,
             &t("builder.band.basis"),
@@ -231,10 +309,11 @@ pub(crate) fn band(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             .iter()
             .map(|k| picker::on(t(&format!("builder.band.adjusting.{k}"))))
             .collect();
-        if let Some(i) = picker::pick(
+        if let Some(i) = picker::pick_tip(
             ui,
             ("adjusting", s.id.0),
             &t("builder.band.adjusting"),
+            Some(&t("reports.filter.adjusting.why")),
             &choices,
             Some(adj),
             110.0,

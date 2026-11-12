@@ -114,6 +114,19 @@ pub struct BuilderRunOpen {
     pub(crate) saved: Option<Saved>,
     /// Where the editor's report started.
     pub(crate) origin: Origin,
+    /// What the tab does once the run is shown: the editor's Export or
+    /// Print (Q-A08m).
+    pub(crate) then: Option<AfterRun>,
+}
+
+/// The editor's Export or Print, done in the result tab once its full run
+/// is shown (Q-A08m, review R13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AfterRun {
+    /// Print the tab.
+    Print,
+    /// Export the tab.
+    Export(super::export::Kind),
 }
 
 impl std::fmt::Debug for BuilderRunOpen {

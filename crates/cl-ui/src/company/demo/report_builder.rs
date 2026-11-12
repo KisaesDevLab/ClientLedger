@@ -253,8 +253,14 @@ fn plan(def: &Value, r: &cl_api::resources::report_builder::RunRef) -> Result<Pl
             })
             .collect()
     };
+    // As the engine: each period starts after the one before ends (an
+    // as-of run's slots are days, so their ends ascend).
     for w in base.windows(2) {
-        if w[1].to <= w[0].to {
+        let overlaps = match w[1].from {
+            Some(from) => from <= w[0].to,
+            None => w[1].to <= w[0].to,
+        };
+        if overlaps {
             return Err(invalid_param("periodRanges"));
         }
     }
@@ -1338,6 +1344,70 @@ mod tests {
 
     fn october() -> RunDates {
         range(day(2026, 10, 1), day(2026, 10, 31))
+    }
+
+    /// UI review H2: the builder's P&L sections tie to the standard Profit &
+    /// Loss on the same books (October 2026), and an A/R run that seeds the
+    /// demo's credit memo moves both the same way.
+    #[test]
+    fn a_builder_pnl_ties_to_the_standard_profit_and_loss() {
+        let mut d = DemoState::new();
+        let def = gross_profit(&plain_columns());
+        let standard = |d: &DemoState, caption: &str| {
+            let req = cl_core::report::ReportRequest::new(
+                cl_core::report::Source::ProfitLoss,
+                cl_core::report::ReportDates::Range(DateRange {
+                    from: day(2026, 10, 1),
+                    to: day(2026, 10, 31),
+                }),
+            );
+            let pl = super::super::reports::statement(d, &req).expect("p&l");
+            let row = pl
+                .rows
+                .iter()
+                .find(|r| r.caption == caption)
+                .unwrap_or_else(|| panic!("{caption}"));
+            amount(&row.cells[0])
+        };
+        for seeded in [false, true] {
+            if seeded {
+                super::super::credit_memos::seed(&mut d);
+            }
+            let t = run(&mut d, &req(&def, october(), Vec::new()), false)
+                .expect("run")
+                .table;
+            assert_eq!(
+                amount(&cell(&t, RowKind::Total, "income", "total")),
+                standard(&d, "@reports.pl.total_income"),
+                "seeded {seeded}"
+            );
+            assert_eq!(
+                amount(&cell(&t, RowKind::Formula, "gp", "total")),
+                standard(&d, "@reports.pl.gross_profit"),
+                "seeded {seeded}"
+            );
+        }
+    }
+    /// R16: overlapping periods are refused as the engine refuses them
+    /// (a period starting on or before the end of the one before).
+    #[test]
+    fn overlapping_periods_are_refused() {
+        let mut d = DemoState::default();
+        let def = gross_profit(&plain_columns());
+        let mut r = req(&def, range(day(2026, 10, 1), day(2026, 11, 30)), Vec::new());
+        r.reference.period_ranges = vec![
+            DateRange {
+                from: day(2026, 10, 1),
+                to: day(2026, 10, 31),
+            },
+            DateRange {
+                from: day(2026, 10, 15),
+                to: day(2026, 11, 30),
+            },
+        ];
+        assert!(run(&mut d, &r, false).is_err());
+        r.reference.period_ranges[1].from = day(2026, 11, 1);
+        assert!(run(&mut d, &r, false).is_ok());
     }
 
     #[test]

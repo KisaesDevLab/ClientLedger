@@ -167,6 +167,9 @@ pub struct ReportWindow {
     /// width (hidden when narrow, as at 200% zoom, QA-14).
     pub(super) catalog_open: Option<bool>,
     pub(super) drill_error: Option<ApiError>,
+    /// The Report Builder editor's Export or Print, done once this tab's
+    /// run is shown (Q-A08m).
+    pub(super) after_run: Option<super::builder_ref::AfterRun>,
     bus: crate::data_bus::Subscription,
     /// A Report Builder report shown under the stand-in spec (A07).
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
@@ -260,6 +263,7 @@ impl ReportWindow {
             h_offset: 0.0,
             catalog_open: None,
             drill_error: None,
+            after_run: None,
             bus: crate::data_bus::Subscription::detached(),
             builder: None,
             starters: super::builder_run::Starters::default(),
@@ -1375,6 +1379,23 @@ fn problem_key(e: &cl_model::reports::ResolveError) -> &'static str {
     }
 }
 
+impl ReportWindow {
+    /// The editor's Export or Print, once the full run is on screen; a run
+    /// that failed drops it (the tab says why).
+    pub(super) fn do_after_run(&mut self, ctx: &egui::Context) {
+        use super::builder_ref::AfterRun;
+        match self.state {
+            RunState::Shown if self.table.is_some() => match self.after_run.take() {
+                Some(AfterRun::Print) => super::export::print(self),
+                Some(AfterRun::Export(kind)) => super::export::start(self, ctx, kind),
+                None => {}
+            },
+            RunState::Failed | RunState::Unavailable => self.after_run = None,
+            _ => {}
+        }
+    }
+}
+
 impl Screen for ReportWindow {
     fn title(&self) -> String {
         self.title_text()
@@ -1387,6 +1408,7 @@ impl Screen for ReportWindow {
             self.run();
         }
         super::export::poll(self);
+        self.do_after_run(ui.ctx());
         egui::ScrollArea::vertical()
             .id_salt(("report_window", self.view))
             .show(ui, |ui| self.draw(ui));

@@ -316,6 +316,7 @@ fn an_editors_run_report_has_one_tab_that_returns_to_it() {
         options: cl_model::reports::ReportOptions::for_spec(spec),
         saved: None,
         origin: cl_model::report_def::editor::Origin::Blank,
+        then: None,
     };
     let mut w = window(&link);
     w.poll();
@@ -335,6 +336,45 @@ fn an_editors_run_report_has_one_tab_that_returns_to_it() {
     assert_eq!(seed.editor, Some(editor));
     assert_eq!(seed.origin, cl_model::report_def::editor::Origin::Blank);
     assert_eq!(seed.def, open.def);
+}
+
+/// R13 (Q-A08m): the editor's Print runs the full report in its tab, then
+/// prints that tab (its PDF in the document tab), never the preview.
+#[test]
+fn the_editors_print_prints_its_result_tab() {
+    let (_d, link) = demo();
+    let def = cl_model::report_def::parse(&pl_starter().to_string()).expect("def");
+    let spec = super::builder_ref::spec_for(&def);
+    let open = super::builder_ref::BuilderRunOpen {
+        editor: super::builder::EditorId::next(),
+        title: "My report".into(),
+        def,
+        options: cl_model::reports::ReportOptions::for_spec(spec),
+        saved: None,
+        origin: cl_model::report_def::editor::Origin::Blank,
+        then: Some(super::builder_ref::AfterRun::Print),
+    };
+    let mut w = window(&link);
+    w.poll();
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open))));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown, "{:?}", w.error);
+    let _ = link.drain();
+    w.do_after_run(&egui::Context::default());
+    assert!(w.after_run.is_none(), "done once");
+    let mut opened = false;
+    for _ in 0..200 {
+        super::export::poll(&mut w);
+        opened = link.drain().into_iter().any(|e| {
+            matches!(e, crate::company::CompanyEvent::OpenWith(_, p)
+                if matches!(*p, OpenPayload::Document(_)))
+        });
+        if opened {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(opened, "the full run's PDF opened to print");
 }
 
 /// A08 (Q-A07u(1)): Customize on a memorized builder report re-reads its

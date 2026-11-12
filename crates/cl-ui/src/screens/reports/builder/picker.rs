@@ -37,9 +37,27 @@ pub(crate) fn pick(
     current: Option<usize>,
     width: f32,
 ) -> Option<usize> {
+    pick_tip(ui, salt, label, None, choices, current, width)
+}
+
+/// [`pick`] whose label explains a term (accounting jargon gets a tooltip,
+/// non-negotiable 12): on the label, and as the picker's description.
+pub(crate) fn pick_tip(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    label: &str,
+    tip: Option<&str>,
+    choices: &[Choice],
+    current: Option<usize>,
+    width: f32,
+) -> Option<usize> {
     let key = format!("{salt:?}");
     let id = ui.make_persistent_id(("builder.pick", salt));
     let l = caption(ui, label);
+    let l = match tip {
+        Some(tip) => l.on_hover_text(tip),
+        None => l,
+    };
     let mut picked = None;
     let shown = current
         .and_then(|i| choices.get(i))
@@ -55,7 +73,11 @@ pub(crate) fn pick(
                             picked = Some(i);
                         }
                     }
+                    // The reason is part of the text, as drawn ("Expenses
+                    // — below this row"), so keyboard and screen-reader
+                    // users get it too (UI review M1).
                     Availability::Greyed(why) => {
+                        let text = format!("{text} \u{2014} {}", t(why));
                         ui.add_enabled(false, egui::Button::selectable(false, text))
                             .on_disabled_hover_text(t(why));
                     }
@@ -63,6 +85,10 @@ pub(crate) fn pick(
             }
         });
     let resp = inner.response.labelled_by(l.id);
+    let resp = match tip {
+        Some(tip) => resp.on_hover_text(tip),
+        None => resp,
+    };
     // A control that was just added asks for the keyboard by its salt
     // ([`want_focus`]): ids of widgets after an added row move.
     if ui.data(|d| d.get_temp::<String>(want_id())).as_deref() == Some(key.as_str()) {
@@ -153,7 +179,11 @@ pub(crate) fn segmented(
                 Availability::Greyed(why) => r.on_disabled_hover_text(t(why)),
                 Availability::Available => r,
             };
-            let name = format!("{label}: {text}");
+            // A greyed choice names its reason for screen readers (M1).
+            let name = match a {
+                Availability::Greyed(why) => format!("{label}: {text} \u{2014} {}", t(why)),
+                Availability::Available => format!("{label}: {text}"),
+            };
             r.widget_info(|| {
                 egui::WidgetInfo::selected(
                     egui::Role::RadioButton,

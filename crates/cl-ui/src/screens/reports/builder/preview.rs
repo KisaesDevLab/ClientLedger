@@ -553,6 +553,11 @@ enum Act {
 /// problems or a failure stand, the last good table is drawn in the
 /// secondary text color with a line saying so (never by opacity, which
 /// would put the text under 4.5:1).
+#[allow(
+    clippy::many_single_char_names,
+    clippy::too_many_lines,
+    reason = "one row loop: s, i, r, l as in the run window's"
+)]
 fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable, dim: bool) {
     let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
     let composed: Vec<usize> = table
@@ -581,6 +586,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
     if let Some(key) = s.preview.drill_note {
         form::inline_note(ui, tokens, &t(key));
     }
+    #[allow(clippy::cast_precision_loss, reason = "a few dozen columns at most")]
     let width = CAPTION_W + CELL_W * shown_cols.len() as f32;
     let rows_of: Vec<(RowPath, bool, bool)> = table
         .rows
