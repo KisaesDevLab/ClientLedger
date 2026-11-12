@@ -172,6 +172,8 @@ pub struct ReportWindow {
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
     /// The Report Builder starters (catalog column).
     pub(super) starters: super::builder_run::Starters,
+    /// A Customize in waiting (A08).
+    pub(super) edit: super::builder_run::Edit,
     /// Which report is on screen: unique per window and per report shown
     /// (A07 QA-7, QA-11). Scroll positions and the export message belong
     /// to it, so a new report or a new tab opens at the top with no
@@ -261,6 +263,7 @@ impl ReportWindow {
             bus: crate::data_bus::Subscription::detached(),
             builder: None,
             starters: super::builder_run::Starters::default(),
+            edit: super::builder_run::Edit::default(),
             view: next_view(),
             link,
         };
@@ -1186,6 +1189,8 @@ impl ReportWindow {
             "columns_by": self.options.columns,
             "extras": self.options.extras.len(),
             "customize": self.customize,
+            // A08: why "Edit in Report Builder" is off (`null`: it works).
+            "builder_customize_off": super::builder_run::customize_off(self),
             "memorize_available": super::memorized::available(&self.link),
             "memorize_dialog": self.memo.dialog_open(),
             "memorized_changed": super::memorized::changed(self),
@@ -1396,6 +1401,7 @@ impl Screen for ReportWindow {
             || self.drill_job.is_some()
             || self.builder.as_ref().is_some_and(|b| b.busy())
             || self.starters.busy()
+            || self.edit.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1432,7 +1438,7 @@ impl Screen for ReportWindow {
                 true
             }
             "reports.memorize" => {
-                if super::memorized::available(&self.link) && self.builder.is_none() {
+                if super::memorized::available(&self.link) {
                     super::memorized::open_dialog(self);
                 }
                 true
@@ -1461,6 +1467,10 @@ impl Screen for ReportWindow {
                 super::builder_run::open_detail(self, *open);
                 return true;
             }
+            OpenPayload::BuilderDefinition(open) => {
+                super::builder_run::open_definition(self, *open);
+                return true;
+            }
             _ => return false,
         };
         let ReportOpen { key, options } = *open;
@@ -1474,6 +1484,11 @@ impl Screen for ReportWindow {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    /// An editor's next Run report refreshes its result tab (Q-A08x).
+    fn takes_in_place(&self, payload: &OpenPayload) -> bool {
+        super::builder_run::takes(self, payload)
     }
 }
 

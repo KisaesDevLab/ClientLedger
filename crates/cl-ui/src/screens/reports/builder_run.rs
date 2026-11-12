@@ -20,6 +20,7 @@ use cl_api::resources::report_builder::{
     BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, RunPurpose, RunRef,
     RunRequest, Starter, builder_refusal,
 };
+use cl_api::resources::reports::definitions::DefinitionRow;
 use cl_core::report::{
     Cell, ColumnHead, DateRange, Drill, ReportDates, ReportMeta, ReportRow, ReportTable, RowKind,
     RowPath,
@@ -36,6 +37,8 @@ use eframe::egui::{RichText, Ui};
 use serde_json::{Value, json};
 
 use super::KIND;
+use super::builder::{BuilderSeed, CustomizeSeed, EditorId};
+use super::builder_ref::BuilderRunOpen;
 use super::window::{ReportWindow, RunState};
 use crate::company::CompanyEvent;
 use crate::i18n::t;
@@ -43,6 +46,7 @@ use crate::screens::company::form;
 use crate::screens::invoice::engine::{self, Job};
 use crate::theme::Tokens;
 use crate::windows::OpenPayload;
+use cl_model::report_def::editor::{Origin, Saved, SavedKind};
 
 /// A subtotal's detail, opened in a new report tab.
 #[derive(Clone, Debug, PartialEq)]
@@ -128,6 +132,15 @@ pub(crate) struct Builder {
     /// The rows shown, for (table serial, run-state revision): rebuilt only
     /// when either moves, not every frame (S-L6).
     visible: RefCell<Option<(u64, u64, Vec<usize>)>>,
+    /// The window's options as the report was shown: Memorize writes only
+    /// what changed since into the definition (A08).
+    baseline: Option<ReportOptions>,
+    /// The editor whose Run report this is (Q-A08x).
+    pub(crate) editor: Option<EditorId>,
+    /// Where the editor's report started (Customize returns to it).
+    origin: Option<Origin>,
+    /// The memorized row behind the editor's report.
+    saved: Option<Saved>,
 }
 
 impl Builder {
@@ -147,6 +160,10 @@ impl Builder {
             problem: None,
             loaded: 0,
             visible: RefCell::new(None),
+            baseline: None,
+            editor: None,
+            origin: None,
+            saved: None,
         }
     }
 
@@ -261,6 +278,7 @@ pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
             };
             b.def = Some(def);
             b.json = starter.definition.clone();
+            b.baseline = Some(o.clone());
             w.spec = spec;
             w.options = o;
         }
@@ -664,6 +682,7 @@ pub(crate) fn dress(
 /// Polls the jobs (each frame).
 pub(crate) fn poll(w: &mut ReportWindow) {
     poll_starters(w);
+    poll_edit(w);
     poll_run(w);
     poll_page(w);
     poll_detail(w);
@@ -1264,6 +1283,14 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             .size(11.0)
             .color(tokens.text_secondary),
     );
+    // A08: a new report starts in Guided mode (Q-A08a).
+    if ui
+        .selectable_label(false, t("reports.builder.new_report"))
+        .on_hover_text(t("reports.builder.new_report.hint"))
+        .clicked()
+    {
+        super::builder::open(&w.link, BuilderSeed::Guided);
+    }
     let current = w.builder.as_ref().map(|b| b.key.clone());
     let mut pick = None;
     for s in shown {
@@ -1298,6 +1325,343 @@ pub(crate) fn state_json(b: &Builder, table: Option<&ReportTable>) -> Value {
         "paging": b.page.is_some(),
         "loaded": b.loaded,
     })
+}
+
+// ------------------------------------------------- A08: editor entry points
+
+/// A Customize waiting for something (WP-B3, plan §3.7).
+#[derive(Default)]
+pub(crate) struct Edit {
+    /// Customize on a standard report waits for the starters list.
+    wanted: bool,
+    /// Customize on a memorized builder report re-reads its row first, once
+    /// per press (Q-A07u(1)): `saved` and `can_edit` are the engine's now.
+    job: Option<Job<DefinitionRow>>,
+}
+
+impl Edit {
+    /// Waiting for the starters or the row.
+    pub(crate) fn busy(&self) -> bool {
+        self.wanted || self.job.is_some()
+    }
+}
+
+/// Opens an editor's Run report in the window (`OpenPayload::
+/// BuilderDefinition`, Q-A08x): a full run of its definition with the
+/// editor's dates, basis and period columns (the same `RunRef` as the
+/// editor's preview, AC8).
+pub(crate) fn open_definition(w: &mut ReportWindow, open: BuilderRunOpen) {
+    w.new_view();
+    let mut b = Builder::new("editor");
+    b.title.clone_from(&open.title);
+    b.json = serde_json::to_value(&open.def).unwrap_or(Value::Null);
+    b.editor = Some(open.editor);
+    b.origin = Some(open.origin);
+    b.saved = open.saved;
+    b.baseline = Some(open.options.clone());
+    w.spec = super::builder_ref::spec_for(&open.def);
+    b.def = Some(open.def);
+    w.options = open.options;
+    w.builder = Some(Box::new(b));
+    w.table = None;
+    w.error = None;
+    // Memorize in the result tab makes a new report; the editor's own
+    // Save changes updates its row.
+    w.memo.current = None;
+    w.memo.saved = None;
+    w.run();
+}
+
+/// Shows an editor's Run report in its result tab (a new report window the
+/// first time, the same tab after, Q-A08x).
+#[allow(dead_code, reason = "A08: WP-A2's Run report calls it")]
+pub(crate) fn show_result(link: &crate::company::CompanyLink, open: BuilderRunOpen) {
+    link.push(CompanyEvent::OpenWith(
+        CommandId::new(KIND),
+        Box::new(OpenPayload::BuilderDefinition(Box::new(open))),
+    ));
+}
+
+/// The window is `payload`'s editor's result tab (`Screen::takes_in_place`).
+pub(crate) fn takes(w: &ReportWindow, payload: &OpenPayload) -> bool {
+    matches!(
+        payload,
+        OpenPayload::BuilderDefinition(o)
+            if w.builder.as_ref().is_some_and(|b| b.editor == Some(o.editor))
+    )
+}
+
+/// Why Customize (open in the Report Builder) is off for what the window
+/// shows, as an i18n key; `None` when it works (Q-A08k).
+pub(crate) fn customize_off(w: &ReportWindow) -> Option<&'static str> {
+    if let Some(b) = &w.builder {
+        if b.detail.is_some() {
+            return Some("reports.customize.detail");
+        }
+        if b.def.is_none() {
+            return Some(b.problem.unwrap_or("reports.builder.unreadable"));
+        }
+        return (!available(w)).then_some("reports.customize.engine");
+    }
+    let Some(key) = cl_model::reports::starter_for(w.spec.key) else {
+        return Some("reports.customize.no_starter");
+    };
+    if !available(w) {
+        return Some("reports.customize.engine");
+    }
+    w.starters
+        .list
+        .as_ref()
+        .is_some_and(|l| !l.iter().any(|s| s.key == key))
+        .then_some("reports.customize.no_starter")
+}
+
+/// Customize: opens the Report Builder editor on what the window shows (a
+/// standard report's starter, a starter, a memorized builder report, or the
+/// editor this result tab belongs to).
+pub(crate) fn customize(w: &mut ReportWindow) {
+    if customize_off(w).is_some() || w.edit.busy() {
+        return;
+    }
+    if w.builder.is_some() {
+        if let Some(id) = w
+            .memo
+            .current
+            .as_ref()
+            .filter(|c| c.kind == "builder")
+            .map(|c| c.id.clone())
+        {
+            let demo_id = id.clone();
+            w.edit.job = Some(engine::read(
+                &w.link,
+                w.group.as_ref(),
+                move |d| crate::company::demo::report_store::definition(d, &demo_id),
+                move |s| async move { s.report_definitions().get(&id).await },
+            ));
+            return;
+        }
+        seed_from_builder(w, None);
+        return;
+    }
+    load_starters(w);
+    w.edit.wanted = true;
+    poll_edit(w);
+}
+
+/// Polls a Customize in waiting.
+fn poll_edit(w: &mut ReportWindow) {
+    if let Some(r) = engine::poll(&mut w.edit.job) {
+        match r {
+            Ok(row) => seed_from_builder(w, Some(row)),
+            Err(e) => {
+                w.notice = Some(t(match failure(&e) {
+                    Failure::Deleted => "reports.builder.deleted",
+                    _ => "reports.customize.failed",
+                }));
+            }
+        }
+    }
+    if !w.edit.wanted {
+        return;
+    }
+    let Some(list) = w.starters.list.as_ref() else {
+        return;
+    };
+    w.edit.wanted = false;
+    let key = cl_model::reports::starter_for(w.spec.key);
+    match list.iter().find(|s| Some(s.key.as_str()) == key).cloned() {
+        Some(st) => seed_from_standard(w, &st),
+        None => w.notice = Some(t("reports.customize.no_starter")),
+    }
+}
+
+/// The editor's view of a memorized row.
+fn saved_of(row: &DefinitionRow, def: BuilderDefinition, kind: SavedKind) -> Saved {
+    Saved {
+        id: row.id.clone(),
+        version: row.version,
+        kind,
+        can_edit: row.can_edit,
+        def,
+        name: row.name.clone(),
+        group_id: row.group_id.clone(),
+        author: row.created_by_name.clone(),
+        updated_at: row.updated_at,
+    }
+}
+
+/// A definition's text read, or the notice that says why it can't be.
+fn read_def(w: &mut ReportWindow, v: &Value) -> Option<BuilderDefinition> {
+    let text = serde_json::to_string(v).unwrap_or_default();
+    match cl_model::report_def::parse(&text) {
+        Ok(def) => Some(def),
+        Err(e) => {
+            w.notice = Some(t(
+                if matches!(e, cl_model::report_def::DefinitionError::Newer) {
+                    "reports.builder.newer"
+                } else {
+                    "reports.builder.unreadable"
+                },
+            ));
+            None
+        }
+    }
+}
+
+/// Customize on a builder report (`row`: its memorized row, as re-read).
+fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
+    let (def, saved, origin) = if let Some(row) = row {
+        let Some(def) = read_def(w, &row.definition) else {
+            return;
+        };
+        let saved = saved_of(&row, def.clone(), SavedKind::Builder);
+        (def, Some(saved), Origin::Memorized)
+    } else {
+        let Some(b) = w.builder.as_ref() else {
+            return;
+        };
+        let Some(def) = b.def.clone() else {
+            return;
+        };
+        let origin = b
+            .origin
+            .clone()
+            .unwrap_or_else(|| Origin::Starter(b.key.clone()));
+        (def, b.saved.clone(), origin)
+    };
+    let Some(b) = w.builder.as_ref() else {
+        return;
+    };
+    let base = b.baseline.as_ref();
+    let seed = CustomizeSeed {
+        title: saved.as_ref().map_or_else(|| b.title(), |s| s.name.clone()),
+        def,
+        origin,
+        saved,
+        dates: Some(w.options.dates),
+        // The definition's own basis unless the owner changed it here.
+        basis: if base.is_some_and(|x| x.basis == w.options.basis) {
+            None
+        } else {
+            w.options.basis
+        },
+        adjusting: None,
+        filters_dropped: false,
+        editor: b.editor,
+    };
+    super::builder::open(&w.link, BuilderSeed::Customize(Box::new(seed)));
+}
+
+/// Customize on a standard report: the editor on its starter, with the
+/// window's dates, basis and adjusting lens, not its filters (Q-A08k).
+fn seed_from_standard(w: &mut ReportWindow, st: &Starter) {
+    let Some(def) = read_def(w, &st.definition) else {
+        return;
+    };
+    // A memorized standard report: Memorize makes a new builder report
+    // (the kind can't change); Save changes stays off.
+    let saved = w
+        .memo
+        .current
+        .as_ref()
+        .filter(|c| c.kind == "standard")
+        .map(|row| saved_of(row, def.clone(), SavedKind::Standard));
+    let o = &w.options;
+    let seed = CustomizeSeed {
+        title: saved
+            .as_ref()
+            .map_or_else(|| w.title_text(), |s| s.name.clone()),
+        def,
+        origin: Origin::Standard(w.spec.key.to_string()),
+        saved,
+        dates: Some(o.dates),
+        basis: o.basis,
+        adjusting: o.filters.adjusting,
+        filters_dropped: o.filters != cl_model::reports::options::Filters::default()
+            || o.tag_split.is_some(),
+        editor: None,
+    };
+    super::builder::open(&w.link, BuilderSeed::Customize(Box::new(seed)));
+}
+
+/// The engine's name for a date preset (the reverse of [`preset`]).
+fn preset_name(p: DatePreset) -> &'static str {
+    match p {
+        DatePreset::Today => "today",
+        DatePreset::ThisMonth => "this_month",
+        DatePreset::LastMonth => "last_month",
+        DatePreset::ThisQuarter => "this_quarter",
+        DatePreset::LastQuarter => "last_quarter",
+        DatePreset::ThisYear => "this_year",
+        DatePreset::LastYear => "last_year",
+        DatePreset::YearToDate => "this_year_to_date",
+        DatePreset::EndOfLastMonth => "end_of_last_month",
+    }
+}
+
+/// The definition Memorize saves for the builder report shown: its own,
+/// with the window's date preset, basis and period columns where the owner
+/// changed them here (fixed From/To dates stay session only, Q-A08q).
+/// `None` for a detail tab or an unreadable definition.
+pub(crate) fn memorize_body(w: &ReportWindow) -> Option<Value> {
+    let b = w.builder.as_ref().filter(|b| b.detail.is_none())?;
+    b.def.as_ref()?;
+    let mut v = b.json.clone();
+    let base = b.baseline.as_ref();
+    let o = &w.options;
+    let obj = v.as_object_mut()?;
+    if base.is_none_or(|x| x.dates != o.dates)
+        && let DateChoice::Preset(p) = o.dates
+        && let Some(dates) = obj.get_mut("dates").and_then(Value::as_object_mut)
+    {
+        dates.insert("preset".into(), Value::from(preset_name(p)));
+    }
+    if base.is_none_or(|x| x.basis != o.basis) {
+        match o.basis {
+            Some(basis) => {
+                obj.insert("basis".into(), Value::from(basis.as_str()));
+            }
+            None => {
+                obj.remove("basis");
+            }
+        }
+    }
+    if base.is_none_or(|x| x.columns != o.columns)
+        && let Some(columns) = obj.get_mut("columns").and_then(Value::as_object_mut)
+    {
+        match o.columns {
+            ColumnBy::Month => {
+                columns.insert("periods".into(), Value::from("month"));
+            }
+            ColumnBy::Quarter => {
+                columns.insert("periods".into(), Value::from("quarter"));
+            }
+            ColumnBy::Year => {
+                columns.insert("periods".into(), Value::from("year"));
+            }
+            _ => {
+                columns.remove("periods");
+            }
+        }
+    }
+    let text = serde_json::to_string(&v).ok()?;
+    cl_model::report_def::parse(&text).ok()?;
+    Some(v)
+}
+
+/// A builder report was memorized as `row` (Memorize in the window): the
+/// window shows that definition from now on.
+pub(crate) fn memorized(w: &mut ReportWindow, row: &DefinitionRow) {
+    let options = w.options.clone();
+    let Some(b) = w.builder.as_mut() else {
+        return;
+    };
+    let text = serde_json::to_string(&row.definition).unwrap_or_default();
+    if let Ok(def) = cl_model::report_def::parse(&text) {
+        b.def = Some(def);
+        b.json = row.definition.clone();
+        b.baseline = Some(options);
+    }
 }
 
 #[cfg(test)]
