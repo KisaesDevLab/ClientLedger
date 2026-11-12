@@ -706,12 +706,20 @@ fn the_preview_rows_equal_the_result_tabs_up_to_the_cut() {
     assert!(s.ed.can_run(), "{:?}", s.ed.problems());
     settle(&ctx, &mut s, 1.0);
     let preview = s.preview.table.clone().expect("a preview");
-    let (order, cut) = super::preview::shown(&preview);
-    // The 50-row cut: display only, counted in rows.
+    // The demo plays U-217: a preview run, cut by the engine at 50
+    // transactions per line (the line's "more" row marks the cut).
+    assert!(s.preview.engine_cut, "the demo answers a preview run");
+    let (order, cut) = super::preview::shown(&preview, s.preview.engine_cut);
     assert!(cut, "the demo line has more than 50 transactions");
-    let details = order
+    let more = preview
+        .rows
         .iter()
-        .filter(|&&i| preview.rows[i].kind == cl_core::report::RowKind::Detail)
+        .position(|r| r.kind == cl_core::report::RowKind::More)
+        .expect("the cut line's more row");
+    let details = preview.rows[..more]
+        .iter()
+        .rev()
+        .take_while(|r| r.kind == cl_core::report::RowKind::Detail)
         .count();
     assert_eq!(details, super::preview::PREVIEW_DETAIL_ROWS);
     assert_eq!(s.state()["preview"]["cut"], true);
@@ -733,7 +741,8 @@ fn the_preview_rows_equal_the_result_tabs_up_to_the_cut() {
     let tab = w.table.clone().expect("the full run");
     assert!(tab.rows.len() >= preview.rows.len());
     assert_eq!(tab.columns, preview.columns);
-    for &i in &order {
+    // Up to the cut, row for row (the full run goes on past it).
+    for &i in order.iter().filter(|&&i| i < more) {
         let (a, b) = (&preview.rows[i], &tab.rows[i]);
         assert_eq!(
             (a.kind, &a.path, &a.cells),
@@ -876,4 +885,42 @@ fn a_name_no_longer_in_the_company_is_a_problem_until_the_next_edit() {
     assert!(s.ed.engine_problem().is_none());
     settle(&ctx, &mut s, t + 1.0);
     assert!(s.preview.asked_count > asked);
+}
+
+/// U-217 fallback: an engine without `report-builder-preview-v1` gets the
+/// screen run, and the preview cuts it on screen after 50 transactions in
+/// display order; a preview run (the engine's own cut) shows every row.
+#[test]
+fn the_preview_cut_is_on_screen_without_the_engine_preview() {
+    use cl_core::report::{ReportMeta, ReportRow, ReportTable, RowKind as K, RowPath};
+    let row = |kind| ReportRow {
+        kind,
+        level: 0,
+        path: RowPath(vec!["n:s1".into()]),
+        caption: String::new(),
+        cells: Vec::new(),
+        drill: None,
+        expandable: false,
+    };
+    let mut rows = vec![row(K::Group)];
+    rows.extend((0..60).map(|_| row(K::Detail)));
+    rows.push(row(K::More));
+    rows.push(row(K::Total));
+    let table = ReportTable {
+        columns: Vec::new(),
+        rows,
+        meta: ReportMeta::default(),
+    };
+    let (order, cut) = super::preview::shown(&table, false);
+    assert!(cut);
+    let details = order
+        .iter()
+        .filter(|&&i| table.rows[i].kind == K::Detail)
+        .count();
+    assert_eq!(details, super::preview::PREVIEW_DETAIL_ROWS);
+    assert!(order.iter().all(|&i| table.rows[i].kind != K::More));
+    assert_eq!(order.last().map(|&i| table.rows[i].kind), Some(K::Total));
+    let (all, cut) = super::preview::shown(&table, true);
+    assert!(cut, "the line's more row says the engine cut it");
+    assert_eq!(all.len(), table.rows.len());
 }

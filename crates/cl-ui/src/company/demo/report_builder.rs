@@ -824,6 +824,8 @@ struct Render<'a> {
     plan: &'a Plan,
     books: &'a Books,
     percent_of: Option<String>,
+    /// A preview run (U-217): every line cut at 50 transactions.
+    preview: bool,
     rows: Vec<Value>,
     totals: Totals,
     denied: Vec<String>,
@@ -987,7 +989,9 @@ impl Render<'_> {
                 "expandable": display == "expandable", "expanded": open
             }));
             if open {
-                let cap = if display == "detail" {
+                let cap = if self.preview {
+                    cl_api::resources::report_builder::PREVIEW_DETAIL_ROWS
+                } else if display == "detail" {
                     DEMO_DETAIL_RUN
                 } else {
                     DEMO_PAGE
@@ -1046,12 +1050,19 @@ pub fn run(d: &mut DemoState, req: &RunRequest, slow: bool) -> Result<BuilderRun
         plan: &plan,
         books: &books,
         percent_of,
+        preview: req.purpose == cl_api::resources::report_builder::RunPurpose::Preview,
         rows: Vec::new(),
         totals: Totals::new(),
         denied: Vec::new(),
     };
     r.nodes(d, &top, 0);
-    let Render { rows, denied, .. } = r;
+    let Render {
+        rows,
+        denied,
+        preview,
+        ..
+    } = r;
+    let cut = preview && rows.iter().any(|x| x["kind"] == "more");
     let notes: Vec<&str> = if rows.iter().all(|r| {
         r["cells"]
             .as_array()
@@ -1069,7 +1080,8 @@ pub fn run(d: &mut DemoState, req: &RunRequest, slow: bool) -> Result<BuilderRun
     let v = json!({
         "columns": plan.cols, "rows": rows,
         "meta": {"basis": req.reference.basis.map_or("accrual", cl_core::report::Basis::as_str),
-                 "dates": dates, "notes": notes, "truncated": false, "hiddenNotice": null, "denied": denied},
+                 "dates": dates, "notes": notes, "truncated": cut, "hiddenNotice": null, "denied": denied,
+                 "preview": if preview { json!({"detailRowsPerLine": cl_api::resources::report_builder::PREVIEW_DETAIL_ROWS}) } else { Value::Null }},
         "fingerprint": fingerprint(&req.reference),
         "stamp": stamp(&books),
     });

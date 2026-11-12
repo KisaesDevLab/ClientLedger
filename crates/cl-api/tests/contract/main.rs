@@ -1377,6 +1377,10 @@ fn main() -> std::process::ExitCode {
             contract_report_builder::builder_definitions_save_and_refuse,
         ),
         (
+            "report_builder::a_preview_run_is_the_screen_run_cut_at_fifty",
+            contract_report_builder::a_preview_run_is_the_screen_run_cut_at_fifty,
+        ),
+        (
             "budgets::hand_fixture_and_writes",
             contract_budgets::hand_fixture_and_writes,
         ),

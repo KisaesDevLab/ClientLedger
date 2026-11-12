@@ -680,3 +680,64 @@ pub fn builder_definitions_save_and_refuse(h: &Harness) {
     );
     h.run(defs.delete(&row.id, read.version)).expect("delete");
 }
+
+/// U-217 (`report-builder-preview-v1`): a preview run is the screen run
+/// cut at 50 transactions per line, its "more" row marking the cut, with
+/// the same fingerprint and the same rows up to the cut (AC8).
+pub fn a_preview_run_is_the_screen_run_cut_at_fifty(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::REPORT_BUILDER_PREVIEW, "U-217") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbPrevBank");
+    let fuel = account(h, s, AccountType::Expense, "RbPrevFuel");
+    for i in 0..55 {
+        let day = date(YEAR, 5, 1 + (i % 28));
+        post(h, s, &je2(day, "rb", fuel.id, bank.id, "1.25"));
+    }
+    let mut def = ledger(&[fuel.id.to_string()]);
+    def["nodes"][0]["display"] = json!("detail");
+    def["nodes"][0]["defaultExpanded"] = json!(true);
+    def["columns"]["detailFields"] = json!(["date", "memo", "amount"]);
+    let reference = reference(&def);
+    let whole = run(h, s, &request(reference.clone(), false)).expect("screen run");
+    let mut req = request(reference, false);
+    req.purpose = RunPurpose::Preview;
+    let cut = run(h, s, &req).expect("preview run");
+    assert_eq!(cut.preview_rows, Some(50));
+    assert_eq!(whole.preview_rows, None);
+    assert!(cut.truncated);
+    assert_eq!(
+        cut.fingerprint, whole.fingerprint,
+        "purpose is not a parameter"
+    );
+    assert_eq!(cut.table.columns, whole.table.columns);
+    let more = cut
+        .table
+        .rows
+        .iter()
+        .position(|r| r.kind == RowKind::More)
+        .expect("the cut line's more row");
+    let details = cut.table.rows[..more]
+        .iter()
+        .filter(|r| r.kind == RowKind::Detail)
+        .count();
+    assert_eq!(details, 50);
+    for i in 0..more {
+        let (a, b) = (&cut.table.rows[i], &whole.table.rows[i]);
+        assert_eq!(
+            (a.kind, &a.path, &a.cells),
+            (b.kind, &b.path, &b.cells),
+            "row {i}"
+        );
+    }
+    // The totals after the cut are the full run's too.
+    let total = |r: &BuilderRun| {
+        r.table
+            .rows
+            .iter()
+            .rfind(|x| x.kind == RowKind::Total)
+            .map(|x| x.cells.clone())
+    };
+    assert_eq!(total(&cut), total(&whole));
+}

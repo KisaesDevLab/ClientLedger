@@ -57,7 +57,16 @@ pub enum RunPurpose {
     Screen,
     /// A file (100,000 detail rows, A09).
     Export,
+    /// The Report Builder editor's preview (U-217,
+    /// `report-builder-preview-v1`): the screen run cut at
+    /// [`PREVIEW_DETAIL_ROWS`] detail rows per line, each cut line ending in
+    /// its `more` row. Not in the fingerprint, so its figures are the full
+    /// run's (AC8).
+    Preview,
 }
+
+/// Detail rows per line in a preview run (U-217).
+pub const PREVIEW_DETAIL_ROWS: usize = 50;
 
 /// The run's dates: a range, or an as-of date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -213,6 +222,9 @@ pub struct BuilderRun {
     pub expanded: Vec<RowPath>,
     /// A path was capped (its `more` row pages the rest).
     pub truncated: bool,
+    /// A preview run's cut (`meta.preview.detailRowsPerLine`, U-217);
+    /// `None` on screen and export runs.
+    pub preview_rows: Option<usize>,
 }
 
 /// One page of detail.
@@ -793,6 +805,19 @@ fn strings(v: Option<&Value>, what: &'static str) -> Result<Vec<String>, ApiErro
         .collect()
 }
 
+/// `meta.preview.detailRowsPerLine` of a preview run (U-217).
+fn preview_rows(v: &Value) -> Result<Option<usize>, ApiError> {
+    match v.get("meta").and_then(|m| m.get("preview")) {
+        None | Some(Value::Null) => Ok(None),
+        Some(p) => p
+            .get("detailRowsPerLine")
+            .and_then(Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Some)
+            .ok_or(shape("meta preview")),
+    }
+}
+
 fn meta(v: &Value) -> Result<(ReportMeta, Vec<String>, bool), ApiError> {
     let m = v.get("meta").ok_or(shape("meta"))?;
     let basis = match m.get("basis").and_then(Value::as_str) {
@@ -843,6 +868,7 @@ fn meta(v: &Value) -> Result<(ReportMeta, Vec<String>, bool), ApiError> {
 pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, ApiError> {
     let (cols, layout) = columns(v)?;
     let (meta, denied, truncated) = meta(v)?;
+    let preview_rows = preview_rows(v)?;
     let raw = v
         .get("rows")
         .and_then(Value::as_array)
@@ -912,6 +938,7 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
         denied,
         expanded,
         truncated,
+        preview_rows,
     })
 }
 

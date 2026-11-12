@@ -8,9 +8,13 @@
 //!   last edit; Ctrl+Enter runs now; a newer edit cancels the run in
 //!   flight and a late answer is dropped by generation (A07's
 //!   `BuilderRunState`).
-//! - The 50-row cut is display only: after the 50th transaction row in
-//!   display order, later transaction and "more" rows are not shown and
-//!   one info row says so. Rows are counted, never amounts.
+//! - The 50-row cut: with `report-builder-preview-v1` (U-217) the run is
+//!   sent with purpose `preview` and the engine cuts each line at 50
+//!   transactions (the line's "more" row marks the cut; not shown here).
+//!   An older engine gets the `screen` run and the cut is display only:
+//!   after the 50th transaction row in display order, later transaction
+//!   and "more" rows are not shown. Either way one info row says so.
+//!   Rows are counted, never amounts.
 //! - A failure shows over the last good table, dimmed; while problems
 //!   exist nothing is sent and the last good table stays under them.
 
@@ -57,6 +61,8 @@ pub(crate) struct Preview {
     pub(crate) ran_at: Option<String>,
     /// Runs asked (tests: debounce and cancel).
     pub(crate) asked_count: u64,
+    /// The engine cut [`Self::table`] per line (a preview run, U-217).
+    pub(crate) engine_cut: bool,
 }
 
 impl Preview {
@@ -80,11 +86,15 @@ impl Preview {
 
     /// For the control channel (no amounts).
     pub(crate) fn state_json(&self) -> Value {
-        let rows = self.table.as_ref().map(|t| shown(t).0.len());
+        let rows = self
+            .table
+            .as_ref()
+            .map(|t| shown(t, self.engine_cut).0.len());
         json!({
             "phase": self.state.phase().name(),
             "rows": rows,
-            "cut": self.table.as_ref().is_some_and(|t| shown(t).1),
+            "cut": self.table.as_ref().is_some_and(|t| shown(t, self.engine_cut).1),
+            "engine_cut": self.engine_cut,
             "failed": self.failed,
             "pending": self.stale,
             "asked": self.asked_count,
@@ -98,7 +108,13 @@ pub(crate) fn node_of(path: &RowPath) -> Option<&str> {
 }
 
 /// The rows shown, in engine order, and whether the 50-row cut hid some.
-pub(crate) fn shown(table: &ReportTable) -> (Vec<usize>, bool) {
+/// `engine_cut`: the engine already cut each line (a preview run); every
+/// row is shown and a line's "more" row says it was cut.
+pub(crate) fn shown(table: &ReportTable, engine_cut: bool) -> (Vec<usize>, bool) {
+    if engine_cut {
+        let cut = table.rows.iter().any(|r| r.kind == RowKind::More);
+        return ((0..table.rows.len()).collect(), cut);
+    }
     let mut out = Vec::new();
     let mut details = 0usize;
     let mut cut = false;
@@ -205,12 +221,23 @@ fn apply(s: &mut BuilderScreen, fx: Vec<Effect>) {
                 let Some((reference, _)) = s.preview.asked.clone() else {
                     continue;
                 };
+                // U-217: the engine cuts a preview run (the same figures
+                // as the full run; purpose is outside the fingerprint).
+                let purpose = if s.link.is_demo()
+                    || s.link
+                        .capabilities()
+                        .has(cl_api::Capabilities::REPORT_BUILDER_PREVIEW)
+                {
+                    RunPurpose::Preview
+                } else {
+                    RunPurpose::Screen
+                };
                 let req = RunRequest {
                     reference,
                     open,
                     collapsed,
                     expand_all,
-                    purpose: RunPurpose::Screen,
+                    purpose,
                 };
                 s.preview.asked_count += 1;
                 let job = super::super::builder_run::run_job(&s.link, s.group.as_ref(), req, false);
@@ -247,6 +274,7 @@ fn poll(s: &mut BuilderScreen) {
                 return;
             }
             let denied = !run.denied.is_empty();
+            p.engine_cut = run.preview_rows.is_some();
             let def = p.asked.as_ref().map(|(_, d)| d.clone());
             p.table = Some(super::super::builder_run::dress(
                 def.as_ref(),
@@ -369,7 +397,11 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 Some(at) => t_with("builder.preview.updated", &[("time", at)]),
                 None => String::new(),
             };
-            if s.preview.table.as_ref().is_some_and(|t| shown(t).1) {
+            if s.preview
+                .table
+                .as_ref()
+                .is_some_and(|t| shown(t, s.preview.engine_cut).1)
+            {
                 line.push_str(&t("builder.preview.first_50"));
             }
             ui.label(RichText::new(line).size(12.0).color(tokens.text_secondary));
@@ -499,7 +531,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
         })
         .collect();
     let hidden = s.preview.state.hidden(&rows_of);
-    let (order, cut) = shown(table);
+    let (order, cut) = shown(table, s.preview.engine_cut);
     let selected = s.ed.selection().map(str::to_string);
     let mut toggles = Vec::new();
     let mut picks = Vec::new();

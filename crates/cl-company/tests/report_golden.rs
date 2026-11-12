@@ -1038,7 +1038,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     // Q-A08h: Revenue by Category nets an income account's debits (a
     // credit memo) as the P&L does; before the engine fix it summed credits
     // only (150.00 over the P&L on 4000 in Q4 2026).
-    if caps.has("reports-revenue-net-v1") {
+    if caps.has(cl_api::Capabilities::REPORTS_REVENUE_NET) {
         builder_tieout::revenue_by_category_ties_to_profit_loss(&s).await;
     } else {
         pending(
