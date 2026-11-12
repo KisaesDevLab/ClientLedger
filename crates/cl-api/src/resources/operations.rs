@@ -1718,8 +1718,8 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
 );
 // A07: Report Builder runs (U-119, `report-builder-v1`). Read-only POSTs,
 // never blind-retried (a 503 `REPORT_TIMEOUT` already took 30 s), with the
-// long timeout. Not in `OPERATIONS` or `operations.txt` until the engine pin
-// that serves them (PR-C, PR-D): the spec fixtures list only routes the
+// long timeout. `/starters` joins `OPERATIONS` and `operations.txt` with the
+// engine pin that serves it (PR-D): the spec fixtures list only routes the
 // pinned `openapi.json` documents.
 /// Runs a builder definition.
 pub(crate) const REPORT_BUILDER_RUN: Operation = op(
@@ -1863,7 +1863,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 414] = [
+pub const OPERATIONS: [Operation; 417] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2261,6 +2261,10 @@ pub const OPERATIONS: [Operation; 414] = [
     REPORT_DEF_GROUPS_CREATE,
     REPORT_DEF_GROUP_PUT,
     REPORT_DEF_GROUP_DELETE,
+    // A07
+    REPORT_BUILDER_RUN,
+    REPORT_BUILDER_DETAIL,
+    REPORT_BUILDER_FIELDS,
     REPORT_GENERAL_LEDGER,
     REPORT_REVENUE_BY_CATEGORY,
     REPORT_EXPENSE_BY_CATEGORY,
