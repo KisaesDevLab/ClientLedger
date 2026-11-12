@@ -801,8 +801,10 @@ impl BuilderScreen {
                     });
                 });
             }
+            // The whole screen scrolls (see `ui`): fixed heights here.
             Layout::PreviewBelow => {
-                let top = (h * 0.55).max(240.0);
+                let _ = h;
+                let top = 380.0;
                 ui.horizontal_top(|ui| {
                     pane(ui, egui::vec2(OUTLINE_W, top), &mut |ui| {
                         outline::draw(self, ui, tokens);
@@ -814,7 +816,7 @@ impl BuilderScreen {
                     });
                 });
                 ui.separator();
-                let below = ui.available_height().max(200.0);
+                let below = 420.0;
                 pane(ui, egui::vec2(w, below), &mut |ui| {
                     preview::draw(self, ui, tokens);
                 });
@@ -976,28 +978,45 @@ impl Screen for BuilderScreen {
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
         preview::tick(self, ui);
-        let room = ui.available_width();
+        // A little room is kept at the right edge, so a wrapping row never
+        // reaches under the window's edge (H1).
+        // The shell can hand a rectangle wider than the window on a narrow
+        // one (its least content width): only what is on screen counts.
+        let on_screen =
+            ui.clip_rect().intersect(ui.ctx().content_rect()).right() - ui.max_rect().left();
+        let room = (ui.available_width().min(on_screen) - 16.0).max(200.0);
         let was_guided = self.guided.is_some();
-        if self.guided.is_some() {
-            guided::draw(self, ui, &tokens);
-        } else if Layout::for_width(room) == Layout::Stacked {
-            // The minimum window at 200% zoom: toolbar, band and panes
-            // scroll together, so nothing is squeezed out of sight (H1).
-            egui::ScrollArea::vertical()
-                .id_salt(("builder-stacked", self.id.0))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+        let area =
+            egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(room, ui.available_height()));
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(area.expand(8.0)));
+                if self.guided.is_some() {
+                    guided::draw(self, ui, &tokens);
+                } else if Layout::for_width(room) != Layout::Wide {
+                    // A narrow window (and the minimum one at 200% zoom):
+                    // toolbar, band and panes scroll together, so nothing is
+                    // squeezed or cut out of sight (H1).
+                    egui::ScrollArea::vertical()
+                        .id_salt(("builder-stacked", self.id.0))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            chrome::toolbar(self, ui, &tokens);
+                            chrome::band(self, ui, &tokens);
+                            ui.separator();
+                            self.panes(ui, &tokens, room);
+                        });
+                } else {
                     chrome::toolbar(self, ui, &tokens);
                     chrome::band(self, ui, &tokens);
                     ui.separator();
                     self.panes(ui, &tokens, room);
-                });
-        } else {
-            chrome::toolbar(self, ui, &tokens);
-            chrome::band(self, ui, &tokens);
-            ui.separator();
-            self.panes(ui, &tokens, room);
-        }
+                }
+            },
+        );
         save::dialogs(self, ui, &tokens);
         // A switch between Guided and Advanced moves the keyboard on the
         // next frame, when the other mode is drawn.
@@ -1150,6 +1169,13 @@ impl Screen for BuilderScreen {
 
     fn take_close_request(&mut self) -> bool {
         std::mem::take(&mut self.save.close_now)
+    }
+
+    /// The editor lays out and scrolls its own panes (H1): the shell draws
+    /// it straight into the window, so nothing scrolls the whole screen
+    /// sideways.
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn save_in_progress(&self) -> bool {

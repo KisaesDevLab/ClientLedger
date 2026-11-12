@@ -47,7 +47,16 @@ pub(crate) fn badge_colors(
     tokens: &Tokens,
 ) -> (egui::Color32, egui::Color32, egui::Color32) {
     match kind {
-        RowKind::Section => (tokens.accent_tint, tokens.accent, tokens.accent_border),
+        // Dark's accent on its tint is 4.3:1: the letter takes the
+        // primary text there (4.5:1 for text, DESIGN.md).
+        RowKind::Section => {
+            let ink = if crate::theme::contrast(tokens.accent, tokens.accent_tint) >= 4.5 {
+                tokens.accent
+            } else {
+                tokens.text_primary
+            };
+            (tokens.accent_tint, ink, tokens.accent_border)
+        }
         RowKind::Group => (tokens.info_tint, tokens.info, tokens.info),
         RowKind::Formula => (tokens.warn_surface, tokens.warn_text, tokens.warn),
         RowKind::Text | RowKind::Blank | RowKind::PageBreak => (

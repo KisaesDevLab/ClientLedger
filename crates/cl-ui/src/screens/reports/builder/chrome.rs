@@ -13,27 +13,23 @@ use super::{BuilderScreen, FieldKey, PRESETS, preset_name};
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::theme::Tokens;
-use crate::widgets::{button_with_chip, primary_button};
 use crate::windows::{OpenPayload, Screen};
 
 /// A toolbar button with its shortcut chip, off with a reason when it
 /// can't act.
 fn tool(ui: &mut Ui, label: &str, chip: &str, on: bool, why: &str) -> bool {
-    let r = ui.add_enabled_ui(on, |ui| {
-        if chip.is_empty() {
-            ui.button(label)
-        } else {
-            button_with_chip(ui, label, chip)
-        }
-    });
-    let r = if on {
-        r.inner
+    // One widget, added straight into the wrapping row (a child scope
+    // would start a row of its own and never wrap, H1); its shortcut is
+    // inside it.
+    let b = if chip.is_empty() {
+        egui::Button::new(label)
     } else {
-        r.inner.on_disabled_hover_text(why)
+        egui::Button::new(label).shortcut_text(chip)
     };
+    let r = ui.add_enabled(on, b);
+    let r = if on { r } else { r.on_disabled_hover_text(why) };
     r.clicked()
 }
-
 /// The toolbar and the hint line.
 pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let can_run = s.ed.can_run();
@@ -42,10 +38,17 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         // A narrow window wraps whole buttons onto the next line; it never
         // squeezes a label into a column of letters (H1).
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-        let run = ui.add_enabled_ui(can_run, |ui| {
-            primary_button(ui, &t("builder.toolbar.run_report"))
-        });
-        if run.inner.on_disabled_hover_text(&fix).clicked() {
+        let tokens = Tokens::of(ui.ctx());
+        let run = ui.add_enabled(
+            can_run,
+            egui::Button::new(
+                RichText::new(t("builder.toolbar.run_report"))
+                    .strong()
+                    .color(tokens.on_accent),
+            )
+            .fill(tokens.accent),
+        );
+        if run.on_disabled_hover_text(&fix).clicked() {
             s.run_report();
         }
         if tool(
@@ -275,6 +278,8 @@ pub(crate) fn band(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.band.custom = None;
             s.apply(Op::Dates(d));
         }
+        // A narrow band puts From and To on their own line (they are a
+        // label and a field together, H1).
         dates(s, ui, &def.dates);
     });
     ui.horizontal_wrapped(|ui| {
@@ -379,6 +384,10 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
             });
             s.preview.edited(&s.ed);
         }
+    }
+    // What is left on this line, not the line's width (a wrapping row).
+    if ui.available_size_before_wrap().x < 400.0 {
+        ui.end_row();
     }
     from_to(s, ui);
 }

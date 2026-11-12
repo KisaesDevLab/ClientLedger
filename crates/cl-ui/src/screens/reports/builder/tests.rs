@@ -1337,3 +1337,22 @@ fn a_preview_amount_drills_to_its_detail_tab() {
     assert!(opened, "the detail tab opened");
     assert_eq!(s.preview.drill_note, None);
 }
+
+/// Step 5 (contrast): every outline badge letter is at least 4.5:1 on its
+/// fill in light and dark.
+#[test]
+fn badge_letters_meet_contrast_in_both_themes() {
+    for theme in [
+        crate::theme::ThemeChoice::Light,
+        crate::theme::ThemeChoice::Dark,
+    ] {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, theme);
+        let tokens = crate::theme::Tokens::of(&ctx);
+        for kind in RowKind::ALL {
+            let (fill, ink, _) = super::outline::badge_colors(kind, &tokens);
+            let c = crate::theme::contrast(ink, fill);
+            assert!(c >= 4.5, "{theme:?} {kind:?}: {c}");
+        }
+    }
+}
