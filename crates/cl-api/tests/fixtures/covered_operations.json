@@ -379,7 +379,7 @@
   {"method":"POST","path":"/api/v1/report-builder/definition-groups","inSpec":true,"fragmentHash":"313e1d26239061c0cb82280978168a119e8737e705841b75ad90b1a0df784477"},
   {"method":"PUT","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":true,"fragmentHash":"dddec7c81f9284d8b9bbd5f370742c9144690964aaa1f62785d867e7d64e8cca"},
   {"method":"DELETE","path":"/api/v1/report-builder/definition-groups/{id}","inSpec":true,"fragmentHash":"5bf8658582507688f5dfa4c252139798a61939cff700b2bcd3b78b39ef02fc89"},
-  {"method":"POST","path":"/api/v1/report-builder/run","inSpec":true,"fragmentHash":"c1b834e4afc9f19efb3f6655fc1d8199efaaf2b2ea78ebf98d60041abbe56a26"},
+  {"method":"POST","path":"/api/v1/report-builder/run","inSpec":true,"fragmentHash":"3ad2644852cf8cc479dc7da901bd0eb0b23d10272fe0bcb683eae01b59269626"},
   {"method":"POST","path":"/api/v1/report-builder/run/detail","inSpec":true,"fragmentHash":"b5948717f1fe43c1fff31503cdf1610f4e056379767d691467208f5b4b681bff"},
   {"method":"GET","path":"/api/v1/report-builder/fields","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/report-builder/starters","inSpec":true,"fragmentHash":null},
