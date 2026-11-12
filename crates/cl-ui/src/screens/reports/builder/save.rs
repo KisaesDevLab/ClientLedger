@@ -174,6 +174,12 @@ fn memorize(s: &mut BuilderScreen) {
     ));
 }
 
+/// Memorize as the dialog's button does (tests).
+#[cfg(test)]
+pub(crate) fn memorize_for_test(s: &mut BuilderScreen) {
+    memorize(s);
+}
+
 fn set_problem(s: &mut BuilderScreen, key: &'static str) {
     if let Some(d) = s.save.memorize.as_mut() {
         d.problem = Some(key);
