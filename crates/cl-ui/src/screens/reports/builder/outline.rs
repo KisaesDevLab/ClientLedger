@@ -113,7 +113,8 @@ fn add_menu(s: &mut BuilderScreen, ui: &mut Ui) {
                     caption,
                 });
                 close = true;
-                s.focus_to = Some(Pane::Outline);
+                s.focus_next = Some(Pane::Outline);
+                ui.ctx().request_repaint();
             }
         }
     });
@@ -404,17 +405,21 @@ fn rename_row(s: &mut BuilderScreen, ui: &mut Ui, depth: usize) {
         }
     });
     match done {
+        // The field goes away this frame: the row takes the keyboard on
+        // the next one.
         Some(true) => {
             s.rename = None;
             s.apply(Op::Rename {
                 id: id.clone(),
                 text,
             });
-            s.focus_to = Some(Pane::Outline);
+            s.focus_next = Some(Pane::Outline);
+            ui.ctx().request_repaint();
         }
         Some(false) => {
             s.rename = None;
-            s.focus_to = Some(Pane::Outline);
+            s.focus_next = Some(Pane::Outline);
+            ui.ctx().request_repaint();
         }
         None => s.rename = Some((id, text)),
     }

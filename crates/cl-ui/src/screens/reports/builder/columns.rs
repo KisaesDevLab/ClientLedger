@@ -138,7 +138,13 @@ fn compare(
     }
     if c.compare.len() < limits::COMPARE {
         let on = rule.is_available();
-        let r = ui.add_enabled(on, egui::Button::new(t("builder.columns.add_compare")));
+        // A stable id: the button keeps the keyboard when a compare is
+        // added above it (AC6).
+        let r = ui
+            .push_id(("compare-add", s.id.0), |ui| {
+                ui.add_enabled(on, egui::Button::new(t("builder.columns.add_compare")))
+            })
+            .inner;
         let r = match greyed(rule) {
             Some(k) => r.on_disabled_hover_text(t(k)),
             None => r,

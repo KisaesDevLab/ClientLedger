@@ -9,6 +9,7 @@ use cl_model::report_def::{CompareBase, Display, GroupBy, Periods, SourceKey};
 use cl_model::reports::DatePreset;
 use eframe::egui::{self, RichText, Ui};
 
+use super::Pane;
 use super::picker::{self, Choice};
 use super::{BuilderScreen, FieldKey, PRESETS, preset_name};
 use crate::i18n::t;
@@ -46,6 +47,8 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.guided = None;
             s.ed = cl_model::report_def::editor::BuilderEditor::blank();
             s.preview.edited(&s.ed);
+            s.pane = Pane::Outline;
+            s.focus_to = Some(Pane::Outline);
         }
         if ui.button(t("builder.guided.switch")).clicked() {
             s.open_in_advanced();
@@ -104,7 +107,19 @@ fn steps(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(RichText::new(t(question_key(step))).strong());
+                // The open step's question takes the keyboard when the
+                // editor opens, after Next or Back and on F6: Tab then
+                // reaches its choices (AC6).
+                let q = ui.add(
+                    egui::Label::new(RichText::new(t(question_key(step))).strong())
+                        .sense(egui::Sense::focusable_noninteractive()),
+                );
+                if open && matches!(s.focus_to, Some(Pane::Outline | Pane::Properties)) {
+                    q.request_focus();
+                }
+                if open && q.has_focus() {
+                    s.pane = Pane::Outline;
+                }
                 if !open {
                     ui.label(
                         RichText::new(summary(&g, step))

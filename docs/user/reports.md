@@ -24,6 +24,22 @@ Under **Report Builder** in the report list are ready-made reports built from yo
 - If the books change while you look at the lines behind an amount, the report says so: click **Refresh**.
 - A report that takes too long stops after 30 seconds. Try fewer months or open fewer lines.
 
+## Build or change a report
+
+Open the **Report Builder** in two ways:
+
+- **New report…** under **Report Builder** in the report list asks five questions: what to report on (sales, purchases, who owes you, all accounts and more), how to group it, which columns, which dates, and a name. The preview on the right fills in as you answer. Press **Alt+N** for the next question and **Alt+B** to go back. At the end, **Run report**, **Memorize**, or **Open in Advanced** to keep changing it.
+- **Edit in Report Builder** on a report's toolbar opens that report's rows and columns in the Report Builder, with the same dates and Accrual or Cash. Filters aren't carried over; add them as filters on a row. A report that can't be changed in the Report Builder yet says so.
+
+In **Advanced**, the report is a list of rows on the left, the selected row's settings in the middle and a live preview on the right.
+
+- **Rows**: a *section* adds up transactions (for example all accounts whose type is Income); a *group* puts rows under one heading with a total; a *formula* adds and subtracts rows above it (Income − Cost of goods sold = Gross profit); *text*, *blank rows* and *page breaks* help with layout. A report has up to 200 rows.
+- Keys in the row list: **Insert** adds a row, **Delete** removes one, **F2** renames it, **Alt+↑/↓** moves it, **Tab** puts it inside the group above and **Shift+Tab** takes it out. **F6** and **Shift+F6** move between the row list, the settings and the preview.
+- **Columns** tab: a column per month, quarter or year; a comparison with the period before or the same period last year ($ and % change); a "% of" column; the transaction columns to show; and your own column headings.
+- Every figure comes from your books, the same as when you run the report. The preview shows up to 50 transactions under each line; **Run report** (or **Ctrl+Enter** to refresh the preview) shows them all.
+- **Ctrl+Z** undoes a change and **Ctrl+Y** redoes it. Something that needs fixing shows under **Problems to fix**, with **Go to row**; the report runs again once it is fixed.
+- **Memorize** (**Ctrl+M**) saves the report under its name. **Save changes** updates a memorized report you made (or any, if you are an owner). If someone else changed it meanwhile, you can keep yours as a copy or load theirs.
+
 ## Changing what a report shows
 
 - **Dates**: pick a range like *Last month* or *Year to date*, or type your own **From** and **To**. Reports that show a balance take one **As of** date.

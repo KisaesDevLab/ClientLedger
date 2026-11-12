@@ -174,7 +174,13 @@ fn filters(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, sec: &Section) {
         });
     }
     let full = sec.filters.len() >= limits::FILTERS;
-    let r = ui.add_enabled(!full, egui::Button::new(t("builder.filter.add")));
+    // A stable id: the button keeps the keyboard when a filter is added
+    // above it (AC6).
+    let r = ui
+        .push_id(("filter-add", &sec.id), |ui| {
+            ui.add_enabled(!full, egui::Button::new(t("builder.filter.add")))
+        })
+        .inner;
     let r = r.on_disabled_hover_text(t("builder.filter.full"));
     if r.clicked()
         && let Some(field) = offered.first()

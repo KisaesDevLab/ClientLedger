@@ -254,6 +254,10 @@ pub struct BuilderScreen {
     pub(crate) pane: Pane,
     /// Focus to move this frame (F6, keys in the tree).
     pub(crate) focus_to: Option<Pane>,
+    /// Focus to move next frame: a choice made with the keyboard in a
+    /// widget that goes away this frame (the Add menu) can't hand the
+    /// focus on in the same frame.
+    pub(crate) focus_next: Option<Pane>,
     /// The outline tree had the keyboard last frame (its scope is on).
     pub(crate) outline_focused: bool,
     /// The row being renamed in place (F2): its id and the text so far.
@@ -304,7 +308,9 @@ impl BuilderScreen {
             guided: Some(GuidedState::new()),
             tab: PropTab::Row,
             pane: Pane::Outline,
-            focus_to: None,
+            // A new editor takes the keyboard (AC6).
+            focus_to: Some(Pane::Outline),
+            focus_next: None,
             outline_focused: false,
             rename: None,
             add_menu: false,
@@ -725,6 +731,9 @@ impl Screen for BuilderScreen {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
+        if let Some(p) = self.focus_next.take() {
+            self.focus_to = Some(p);
+        }
         self.poll();
         let tokens = Tokens::of(ui.ctx());
         if self.preview.busy() || self.save.busy() || self.fiscal_job.is_some() || self.lists.busy()
@@ -733,6 +742,7 @@ impl Screen for BuilderScreen {
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
         preview::tick(self, ui);
+        let was_guided = self.guided.is_some();
         if self.guided.is_some() {
             guided::draw(self, ui, &tokens);
         } else {
@@ -762,7 +772,13 @@ impl Screen for BuilderScreen {
             });
         }
         save::dialogs(self, ui, &tokens);
-        self.focus_to = None;
+        // A switch between Guided and Advanced moves the keyboard on the
+        // next frame, when the other mode is drawn.
+        if self.guided.is_some() == was_guided {
+            self.focus_to = None;
+        } else {
+            ui.ctx().request_repaint();
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -847,16 +863,29 @@ impl Screen for BuilderScreen {
             }
             "builder.next_pane" if advanced => self.cycle_pane(true),
             "builder.prev_pane" if advanced => self.cycle_pane(false),
+            // Guided: the open step and the preview (AC6).
+            "builder.next_pane" | "builder.prev_pane" => {
+                self.pane = if self.pane == Pane::Preview {
+                    Pane::Outline
+                } else {
+                    Pane::Preview
+                };
+                self.focus_to = Some(self.pane);
+            }
             "builder.guided_back" => {
                 if let Some(g) = self.guided.as_mut() {
                     g.go_back();
                 }
+                self.pane = Pane::Outline;
+                self.focus_to = Some(Pane::Outline);
             }
             "builder.guided_next" => {
                 self.commit_pending();
                 if let Some(g) = self.guided.as_mut() {
                     g.go_next();
                 }
+                self.pane = Pane::Outline;
+                self.focus_to = Some(Pane::Outline);
             }
             "builder.run_report" | "file.print" => self.run_report(),
             "builder.save_changes" => {
