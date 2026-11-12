@@ -249,6 +249,7 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 fn toolbar(s: &mut BuilderScreen, ui: &mut Ui) {
     let sel = s.ed.selection().map(str::to_string);
     ui.horizontal_wrapped(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         let add = ui.add_enabled_ui(s.ed.can_add(), |ui| {
             ui.horizontal(|ui| {
                 let r = ui.button(t("builder.outline.add"));

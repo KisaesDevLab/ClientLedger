@@ -39,6 +39,9 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let can_run = s.ed.can_run();
     let fix = t("builder.status.fix_first");
     ui.horizontal_wrapped(|ui| {
+        // A narrow window wraps whole buttons onto the next line; it never
+        // squeezes a label into a column of letters (H1).
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         let run = ui.add_enabled_ui(can_run, |ui| {
             primary_button(ui, &t("builder.toolbar.run_report"))
         });
@@ -241,6 +244,7 @@ fn hint(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 pub(crate) fn band(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let _ = tokens;
     ui.horizontal_wrapped(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         let name = s.ed.name().to_string();
         picker::text(
             s,

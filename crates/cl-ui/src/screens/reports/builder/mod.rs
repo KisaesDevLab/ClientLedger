@@ -819,24 +819,19 @@ impl BuilderScreen {
                     preview::draw(self, ui, tokens);
                 });
             }
+            // The whole screen scrolls (see `ui`): fixed heights here.
             Layout::Stacked => {
-                egui::ScrollArea::vertical()
-                    .id_salt(("builder-stacked", self.id.0))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let w = ui.available_width();
-                        pane(ui, egui::vec2(w, 300.0), &mut |ui| {
-                            outline::draw(self, ui, tokens);
-                        });
-                        ui.separator();
-                        pane(ui, egui::vec2(w, 420.0), &mut |ui| {
-                            properties::draw(self, ui, tokens);
-                        });
-                        ui.separator();
-                        pane(ui, egui::vec2(w, 420.0), &mut |ui| {
-                            preview::draw(self, ui, tokens);
-                        });
-                    });
+                pane(ui, egui::vec2(w, 300.0), &mut |ui| {
+                    outline::draw(self, ui, tokens);
+                });
+                ui.separator();
+                pane(ui, egui::vec2(w, 420.0), &mut |ui| {
+                    properties::draw(self, ui, tokens);
+                });
+                ui.separator();
+                pane(ui, egui::vec2(w, 420.0), &mut |ui| {
+                    preview::draw(self, ui, tokens);
+                });
             }
         }
     }
@@ -985,6 +980,18 @@ impl Screen for BuilderScreen {
         let was_guided = self.guided.is_some();
         if self.guided.is_some() {
             guided::draw(self, ui, &tokens);
+        } else if Layout::for_width(room) == Layout::Stacked {
+            // The minimum window at 200% zoom: toolbar, band and panes
+            // scroll together, so nothing is squeezed out of sight (H1).
+            egui::ScrollArea::vertical()
+                .id_salt(("builder-stacked", self.id.0))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    chrome::toolbar(self, ui, &tokens);
+                    chrome::band(self, ui, &tokens);
+                    ui.separator();
+                    self.panes(ui, &tokens, room);
+                });
         } else {
             chrome::toolbar(self, ui, &tokens);
             chrome::band(self, ui, &tokens);
