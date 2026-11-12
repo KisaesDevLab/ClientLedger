@@ -453,6 +453,17 @@ impl Shell {
         };
         link.set_dirty_windows(self.windows.dirty_ids().len());
         self.poll_closing(&link, ctx);
+        // A08: a window whose own save finished asks to close (that window,
+        // never another of its kind).
+        let closing: Vec<WindowId> = self
+            .windows
+            .all_mut()
+            .iter_mut()
+            .filter_map(|w| w.screen.take_close_request().then_some(w.id))
+            .collect();
+        for id in closing {
+            self.windows.close_now(id);
+        }
         for event in link.drain() {
             match event {
                 CompanyEvent::SignedIn { user } => {

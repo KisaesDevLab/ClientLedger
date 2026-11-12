@@ -55,6 +55,8 @@ pub(crate) struct SaveState {
     groups_job: Option<Job<Vec<(String, String)>>>,
     /// Close the window once saved (the close prompt's Save).
     close_after: bool,
+    /// Saved after the close prompt: the shell closes this window.
+    pub(crate) close_now: bool,
 }
 
 impl SaveState {
@@ -261,9 +263,9 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
             s.save.conflict = false;
             s.status = Some(t("builder.save.saved"));
             if std::mem::take(&mut s.save.close_after) {
-                s.link.push(crate::company::CompanyEvent::CloseWindow(
-                    cl_model::CommandId::new(super::KIND),
-                ));
+                // This editor closes, never another one (the shell asks each
+                // window, `Screen::take_close_request`).
+                s.save.close_now = true;
             }
         }
         Err(e) => refused(s, kind, &e),

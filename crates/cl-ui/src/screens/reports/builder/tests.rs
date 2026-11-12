@@ -408,31 +408,107 @@ fn save_changes_needs_the_right_to_change_it() {
     assert_eq!(s.save.state_name(), "idle", "nothing is sent");
 }
 
-#[test]
-fn closing_a_dirty_editor_memorizes_then_closes() {
-    let (_d, link, mut s) = editor(BuilderSeed::Blank);
-    assert!(!Screen::dirty(&s));
+/// An editor on the shell's company with a dirty Gross profit report.
+fn dirty_editor(link: &Arc<CompanyLink>, name: &str) -> BuilderScreen {
+    let mut s = BuilderScreen::new(Arc::clone(link), None, today());
+    assert!(s.open_with(OpenPayload::BuilderEditor(Box::new(BuilderSeed::Blank))));
     gross_profit(&mut s);
-    assert!(Screen::dirty(&s));
-    assert!(!Screen::save(&mut s), "the window stays until saved");
-    assert_eq!(s.save.state_name(), "memorize");
+    s.apply(Op::Name(name.into()));
+    s
+}
+
+#[test]
+fn saving_from_the_close_prompt_closes_that_editor_only() {
+    let mut shell = demo();
+    let link = Arc::clone(shell.company_link().expect("demo link"));
     let ctx = themed();
-    frame(&ctx, &mut s, 0.0);
-    if let Some(d) = s.save.memorize.as_mut() {
-        d.name = "Gross profit report".into();
+    let mut first = dirty_editor(&link, "First report");
+    let second = dirty_editor(&link, "Second report");
+    assert!(Screen::dirty(&first) && Screen::dirty(&second));
+    // The close prompt's Save on the first: Memorize, then it closes.
+    assert!(!Screen::save(&mut first), "the window stays until saved");
+    assert_eq!(first.save.state_name(), "memorize");
+    super::save::memorize_for_test(&mut first);
+    for t in 0..4 {
+        frame(&ctx, &mut first, f64::from(t));
     }
-    super::save::memorize_for_test(&mut s);
-    for t in 1..5 {
-        frame(&ctx, &mut s, f64::from(t));
-    }
-    assert!(!Screen::dirty(&s), "saved");
-    assert_eq!(s.ed.name(), "Gross profit report");
-    assert!(s.ed.saved().is_some_and(|x| x.kind == SavedKind::Builder));
+    assert!(!Screen::dirty(&first), "saved");
+    assert_eq!(first.ed.name(), "First report");
     assert!(
-        link.drain()
-            .iter()
-            .any(|e| matches!(e, CompanyEvent::CloseWindow(k) if k.as_str() == KIND))
+        first
+            .ed
+            .saved()
+            .is_some_and(|x| x.kind == SavedKind::Builder)
     );
+    let first_id = first.id.0;
+    let second_id = second.id.0;
+    // The second editor was opened first: "the first editor of its kind"
+    // would be the wrong one.
+    shell
+        .windows
+        .open_new(CommandId::new(KIND), Box::new(second));
+    shell
+        .windows
+        .open_new(CommandId::new(KIND), Box::new(first));
+    assert_eq!(editors(&shell), [second_id, first_id]);
+    shell.apply_events_now();
+    assert_eq!(editors(&shell), [second_id], "only the saved editor closed");
+    shell.apply_events_now();
+    assert_eq!(editors(&shell), [second_id], "and only once");
+}
+
+#[test]
+fn tab_in_a_caption_field_moves_on_and_never_indents() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    let g = add(&mut s, RowKind::Group, "Expenses");
+    s.ed.set_folded(&g, true);
+    let row = add(&mut s, RowKind::Group, "Second");
+    frame(&ctx, &mut s, 0.0);
+    // Focus the Row tab's Caption field for real.
+    s.focus_to = None;
+    let field = super::picker::text_id(s.id, &FieldKey::Caption(row.clone()));
+    ctx.memory_mut(|m| m.request_focus(field));
+    frame(&ctx, &mut s, 0.1);
+    assert!(
+        ctx.memory(|m| m.has_focus(field)),
+        "the caption field has the keyboard"
+    );
+    assert!(!s.outline_focused);
+    assert_eq!(s.scope(), Scope::Builder);
+    // Tab as the shell sees it: nothing of the outline's in this scope.
+    let km = Keymap::new(COMMANDS).expect("keymap");
+    assert_eq!(
+        km.resolve(s.scope(), Shortcut::new(Mods::NONE, Key::Tab)),
+        None
+    );
+    // And egui's own Tab: focus moves on, the row stays where it is.
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            time: Some(0.2),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ui| s.ui(ui),
+    );
+    out.textures_delta.clear();
+    frame(&ctx, &mut s, 0.3);
+    assert_eq!(
+        tree::locate(&s.ed.definition().nodes, &row),
+        Some(vec![1]),
+        "not indented"
+    );
+    assert!(!ctx.memory(|m| m.has_focus(field)), "focus moved on");
 }
 
 #[test]

@@ -93,6 +93,13 @@ pub trait Screen {
         false
     }
 
+    /// True (once) when this window asks to close itself: a save the close
+    /// prompt started has finished (A08). The shell closes this window, not
+    /// another of its kind.
+    fn take_close_request(&mut self) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {

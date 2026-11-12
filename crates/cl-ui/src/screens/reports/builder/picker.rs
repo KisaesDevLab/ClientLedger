@@ -176,7 +176,7 @@ pub(crate) fn text_bare(
     width: f32,
     labelled_by: Option<egui::Id>,
 ) -> Response {
-    let id = ui.make_persistent_id(("builder.text", &key));
+    let id = text_id(s.id, &key);
     let mut buf = s
         .drafts
         .get(&key)
@@ -204,6 +204,12 @@ pub(crate) fn text_bare(
         }
     }
     r
+}
+
+/// A text field's id: stable for the editor and the field, wherever it is
+/// drawn (the control channel and tests find it).
+pub(crate) fn text_id(editor: super::EditorId, key: &FieldKey) -> egui::Id {
+    egui::Id::unique(("builder.text", editor.0, key))
 }
 
 /// A checkbox. Returns the new value when it was toggled.

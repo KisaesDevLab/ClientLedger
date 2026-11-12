@@ -891,6 +891,10 @@ impl Screen for BuilderScreen {
         self.state_json()
     }
 
+    fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.save.close_now)
+    }
+
     fn takes_in_place(&self, payload: &OpenPayload) -> bool {
         matches!(
             payload,
