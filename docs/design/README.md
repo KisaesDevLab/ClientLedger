@@ -1,4 +1,7 @@
 # docs/design — reference mockups
+| Transactions / attachments | 1,512 / 214 |
+| `ReportBuilder` | A08 | Outline (sections, groups, formulas, text, blank, page break) with row count, Row / Columns / Report properties tabs, live preview; Guided view (5 steps, Q-A08a). Approved by the owner 2026-11-12 (Q-A08b). **Duplicate in the outline is PROPOSED — do not build.** The top "Mockup only" strip is not part of the app.
+# docs/design — reference mockups
 
 These are the owner-approved visual references for ClientLedger's screens. Each screen exists twice:
 

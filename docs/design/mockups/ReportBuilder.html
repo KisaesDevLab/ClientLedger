@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger DRAFT mockup for owner approval (ADD-03, Q-305, Q-A08a). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). Once approved the owner moves it to docs/design/mockups/. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Report Builder</title>
+</head>
+<body>
+<style>
+/* Tokens from docs/DESIGN.md. Light values are the DESIGN.md hex values; dark values marked "derived" are not in DESIGN.md yet (see ReportBuilder-notes.md). */
+:root{
+  --chrome-title:#1E2421;--chrome-title-text:#E9E6E0;--chrome-title-muted:#A9B0AB;--company-stripe:#3E7CB1;
+  --surface-app:#E9E6E0;--surface-panel:#F7F5F1;--surface-window:#FFFFFF;--surface-subtle:#FBFAF8;--surface-form:#F2F6F5;
+  --border-strong:#C9C4BA;--border-default:#DAD6CE;--border-row:#EEEBE5;
+  --text-primary:#1E2421;--text-secondary:#4F5752;--text-tertiary:#6B726D;--text-placeholder:#8C928E;
+  --accent:#0F5E5A;--accent-hover:#0A4441;--accent-tint:#E6F0EF;--accent-border:#B9C9C6;--on-accent:#FFFFFF;
+  --warn:#B5651D;--warn-tint:#FFF8EF;--warn-surface:#FFF4E5;--warn-text:#6B3A0C;--warn-border:#E8C9A0;
+  --info:#23406E;--info-tint:#E8EEF8;
+  --neutral-chip:#EEEBE5;--neutral-chip-text:#3A403C;
+  --locked-row:#F6F5F2;--locked-text:#5C625E;
+  --kbd-bg:#FFFFFF;
+}
+:root[data-theme="dark"]{
+  --chrome-title:#0C0E0D;--chrome-title-text:#E6E9E7;--chrome-title-muted:#949C97;--company-stripe:#3E7CB1;
+  --surface-app:#121513;--surface-panel:#1A1E1C;--surface-window:#202523;--surface-subtle:#262B29;--surface-form:#1F2B29;
+  --border-strong:#3D4541;--border-default:#343B38;--border-row:#2B312E;
+  --text-primary:#E6E9E7;--text-secondary:#B4BBB7;--text-tertiary:#949C97;--text-placeholder:#7C847F;
+  --accent:#3FA39C;--accent-hover:#5BB8B1;--accent-tint:#1C3533;--accent-border:#2F5551;--on-accent:#0C1211;
+  --warn:#D98A45;--warn-tint:#2E2418;--warn-surface:#33261A;--warn-text:#F0C48E;--warn-border:#6B4A26;
+  --info:#9DB8E8;--info-tint:#1D2638;
+  --neutral-chip:#2B312E;--neutral-chip-text:#CDD3CF;
+  --locked-row:#1D211F;--locked-text:#9AA19D;
+  --kbd-bg:#262B29;
+}
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--text-primary);background:var(--surface-app);font-size:13px}
+a{color:var(--accent)}a:hover{color:var(--accent-hover)}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+input,select,textarea{background:var(--surface-window);color:var(--text-primary)}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--kbd-bg);border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--neutral-chip-text);white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:var(--chrome-title);color:var(--chrome-title-text);display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid var(--company-stripe)}
+.menu{background:var(--surface-panel);border-bottom:1px solid var(--border-strong);display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:var(--surface-panel);border-right:1px solid var(--border-strong);padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:var(--text-primary)}
+.rail a:hover{background:var(--border-row)}
+.rail a.on{background:var(--accent);color:var(--on-accent);font-weight:500}
+.badge{background:var(--warn);color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid var(--border-strong);flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:var(--text-secondary);border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:var(--border-strong);border-bottom-color:var(--surface-window);background:var(--surface-window);margin-bottom:-1px;font-weight:600;color:var(--text-primary)}
+.status{background:var(--surface-panel);border-top:1px solid var(--border-strong);display:flex;gap:20px;padding:6px 16px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap}
+.btn{border:1px solid var(--border-strong);background:var(--surface-window);border-radius:4px;padding:5px 10px;cursor:pointer}
+.btnp{border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);border-radius:4px;padding:6px 14px;font-weight:600;cursor:pointer}
+.tool{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border-default);background:var(--surface-subtle)}
+.tool button{background:none;border:1px solid transparent;border-radius:4px;padding:5px 9px;cursor:pointer}
+.tool button:hover{border-color:var(--border-strong);background:var(--surface-window)}
+.tool .btnp{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.tool .btnp:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.tool button[disabled]{color:var(--text-placeholder);cursor:default}
+.sep{width:1px;height:20px;background:var(--border-default);margin:0 6px}
+.filt{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border-default)}
+.filt label{display:flex;gap:6px;align-items:center;color:var(--text-secondary);font-size:12px}
+.filt select,.filt input[type=text]{padding:4px 6px;border:1px solid var(--border-strong);border-radius:4px;font-size:13px}
+.segc{display:flex;border:1px solid var(--border-strong);border-radius:4px;overflow:hidden;width:fit-content}
+.segc button{background:var(--surface-window);border:0;border-right:1px solid var(--border-strong);padding:4px 10px;cursor:pointer}
+.segc button:last-child{border-right:0}
+.segc button.on{background:var(--accent);color:var(--on-accent);font-weight:600}
+.segc button[disabled]{color:var(--text-placeholder);cursor:default}
+.pl{width:100%;border-collapse:collapse;min-width:560px}
+.pl th{font-weight:600;color:var(--text-secondary);text-align:right;padding:6px 10px;border-bottom:2px solid var(--text-primary);white-space:nowrap;font-size:12px}
+.pl th:first-child{text-align:left}
+.pl td{padding:4px 10px;white-space:nowrap}
+.pl td.n{font-family:'IBM Plex Mono',monospace;text-align:right}
+.pl td.p{font-family:'IBM Plex Mono',monospace;text-align:right;color:var(--text-secondary)}
+.pl tr.h td{font-weight:600;padding-top:10px}
+.pl tr.i td:first-child{padding-left:28px}
+.pl tr.d td:first-child{white-space:normal;min-width:220px}
+.pl tr.d td{font-size:12px;color:var(--text-secondary);background:var(--surface-subtle)}
+.pl tr.d td:first-child{padding-left:46px}
+.pl tr.t td{font-weight:600;border-top:1px solid var(--text-placeholder)}
+.pl tr.g td{font-weight:700;border-top:1px solid var(--text-primary)}
+.pl tr.net td{font-weight:700;border-top:1px solid var(--text-primary);border-bottom:3px double var(--text-primary);padding:7px 10px}
+.pl tr.sel td{background:var(--accent-tint)}
+.pl tr.txt td{color:var(--text-secondary);font-style:italic;padding-top:12px}
+.pl tr.den td{color:var(--text-tertiary)}
+.pl a{color:var(--text-primary);text-decoration:none;border-bottom:1px dotted var(--text-placeholder)}
+.pl a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.tw{display:inline-block;width:14px;color:var(--text-tertiary);font-size:10px}
+/* builder-specific */
+.pane{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border-default)}
+.panehead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-default);background:var(--surface-subtle)}
+.panehead h2{margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)}
+.otree{list-style:none;margin:0;padding:6px;display:flex;flex-direction:column;gap:1px}
+.otree li{display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:4px;cursor:default;border:1px solid transparent}
+.otree li:hover{background:var(--border-row)}
+.otree li.on{background:var(--accent-tint);border-color:var(--accent-border);font-weight:600}
+.otree li.err{background:var(--warn-tint)}
+.otree .ind1{padding-left:24px}
+.otree .ind2{padding-left:42px}
+.ico{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:3px;font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;flex-shrink:0}
+.ico.s{background:var(--accent-tint);color:var(--accent);border:1px solid var(--accent-border)}
+.ico.g{background:var(--info-tint);color:var(--info);border:1px solid var(--info)}
+.ico.f{background:var(--warn-surface);color:var(--warn-text);border:1px solid var(--warn-border)}
+.ico.n{background:var(--neutral-chip);color:var(--neutral-chip-text);border:1px solid var(--border-strong)}
+.osub{color:var(--text-tertiary);font-size:11px;font-weight:400;margin-left:auto;white-space:nowrap}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;padding:10px 12px;border-top:1px solid var(--border-default);font-size:12px;color:var(--text-secondary);margin-top:auto}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-secondary)}
+.fld input,.fld select,.fld textarea{font-size:14px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:4px}
+.fld input:focus{outline:2px solid var(--accent);outline-offset:0}
+.props{padding:12px;display:flex;flex-direction:column;gap:12px}
+.ptabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--border-default);background:var(--surface-subtle)}
+.ptabs a{text-decoration:none;padding:6px 12px;color:var(--text-secondary);border:1px solid transparent;border-radius:6px 6px 0 0;font-size:12px}
+.ptabs a.on{border-color:var(--border-default);border-bottom-color:var(--surface-window);background:var(--surface-window);margin-bottom:-1px;font-weight:600;color:var(--text-primary)}
+.grp{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border-row);padding-top:10px}
+.grp>h3{margin:0;font-size:12px;font-weight:600;color:var(--text-primary)}
+.hint{font-size:12px;color:var(--text-tertiary)}
+.chip{background:var(--neutral-chip);color:var(--neutral-chip-text);border-radius:10px;padding:1px 8px;font-size:12px;white-space:nowrap}
+.frow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--border-default);border-radius:4px;background:var(--surface-subtle)}
+.frow select{padding:3px 6px;border:1px solid var(--border-strong);border-radius:4px}
+.x{margin-left:auto;background:none;border:0;color:var(--text-tertiary);cursor:pointer}
+.jg{border-bottom:1px dotted var(--text-tertiary);cursor:help}
+.prop{background:var(--warn-surface);color:var(--warn-text);border:1px solid var(--warn-border);border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
+.phase{background:var(--info-tint);color:var(--info);border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+.callout{border:1px solid var(--warn-border);background:var(--warn-surface);color:var(--warn-text);border-radius:6px;padding:8px 10px;font-size:12px;display:flex;gap:8px;align-items:flex-start}
+.callout.info{border-color:var(--accent-border);background:var(--accent-tint);color:var(--text-primary)}
+.callout b{font-weight:600}
+.card{border:1px solid var(--border-default);border-radius:6px;background:var(--surface-window);overflow:hidden;display:flex;flex-direction:column}
+.card>h2{margin:0;padding:9px 12px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border-default);background:var(--surface-subtle);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.cardb{padding:12px;display:flex;flex-direction:column;gap:10px}
+.steps{display:flex;gap:0;flex-wrap:wrap;list-style:none;margin:0;padding:0;border:1px solid var(--border-default);border-radius:6px;overflow:hidden}
+.steps li{flex:1 1 110px;padding:10px 12px;display:flex;gap:10px;align-items:center;background:var(--surface-subtle);border-right:1px solid var(--border-default);color:var(--text-secondary)}
+.steps li:last-child{border-right:0}
+.steps .dot{width:22px;height:22px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:1px solid var(--border-strong);background:var(--surface-window);flex-shrink:0}
+.steps li.done .dot{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.steps li.cur{background:var(--accent-tint);color:var(--text-primary);font-weight:600}
+.steps li.cur .dot{border:2px solid var(--accent);color:var(--accent)}
+.pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.opt{border:1px solid var(--border-strong);border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:3px;background:var(--surface-window)}
+.opt b{font-weight:600;font-size:13px}
+.opt span{font-size:12px;color:var(--text-secondary)}
+.opt.on{border:2px solid var(--accent);background:var(--accent-tint);padding:8px 9px}
+.opt.off{background:var(--locked-row);color:var(--locked-text);border-style:dashed}
+.opt.off span{color:var(--locked-text)}
+.gstep{border:1px solid var(--border-default);border-radius:6px;background:var(--surface-window)}
+.gstep.cur{border:2px solid var(--accent)}
+.gstep.later{opacity:.85}
+.gstep>header{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border-default);background:var(--surface-subtle)}
+.gstep>header h3{margin:0;font-size:14px;font-weight:600}
+.gstep>header .sum{margin-left:auto;font-size:12px;color:var(--text-secondary)}
+.gstep .b{padding:12px;display:flex;flex-direction:column;gap:10px}
+.mockbar{background:repeating-linear-gradient(135deg,var(--surface-panel),var(--surface-panel) 10px,var(--surface-app) 10px,var(--surface-app) 20px);border-bottom:1px dashed var(--border-strong);display:flex;gap:14px;align-items:center;padding:6px 16px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap}
+.band{border-top:1px dashed var(--border-strong);padding:16px 16px 24px;display:flex;flex-direction:column;gap:12px;background:var(--surface-app)}
+.band>h2{margin:0;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)}
+.bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.view[hidden]{display:none !important}
+.list{display:flex;flex-direction:column;border:1px solid var(--border-default);border-radius:4px;overflow:hidden}
+.list>div{display:flex;align-items:center;gap:8px;padding:5px 8px;border-top:1px solid var(--border-row)}
+.list>div:first-child{border-top:0}
+.list>div.on{background:var(--accent-tint)}
+.list>div.dim{color:var(--text-placeholder)}
+.mv{margin-left:auto;display:flex;gap:2px}
+.mv button{background:none;border:1px solid var(--border-strong);border-radius:3px;padding:0 5px;cursor:pointer;font-size:11px;color:var(--text-secondary)}
+</style>
+
+<div class="mockbar" role="region" aria-label="Mockup controls (not part of the app)">
+  <b>Mockup only — not part of the app</b>
+  <span>State</span>
+  <div class="segc" role="group" aria-label="Mockup state"><button id="v-adv" class="on" type="button">Advanced editor</button><button id="v-gui" type="button">Guided (New report)</button></div>
+  <span>Theme</span>
+  <div class="segc" role="group" aria-label="Theme"><button id="t-light" class="on" type="button">Light</button><button id="t-dark" type="button">Dark</button></div>
+  <span>Draft for owner approval · ADD-03 / Q-305 / Q-A08a · see ReportBuilder-notes.md</span>
+</div>
+
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: var(--surface-app)">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: var(--chrome-title-muted)">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: var(--chrome-title-muted)">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text-secondary)"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: var(--text-tertiary); font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: var(--text-tertiary); font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a class="on" href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="Register.html"><span>Register · Operating</span></a>
+      <a href="Reports.html"><span>Profit &amp; Loss</span></a>
+      <a class="on" href="#"><span class="win-name">Report Builder ●</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="Register.html">Register · Operating</a>
+        <a href="Reports.html">Profit &amp; Loss</a>
+        <a class="on" href="#"><span class="tab-name">Report Builder · Monthly P&amp;L for the bank ●</span></a>
+      </nav>
+
+      <!-- ===================== ADVANCED EDITOR ===================== -->
+      <div id="adv" class="view" style="background: var(--surface-window); flex-grow: 1; display: flex; flex-direction: column">
+        <div class="tool" role="toolbar" aria-label="Report Builder tools">
+          <button class="btnp" style="padding: 5px 12px">Run report</button>
+          <button>Refresh preview <kbd>Ctrl Enter</kbd></button>
+          <span class="sep"></span>
+          <button>Save changes</button><button>Memorize <kbd>Ctrl M</kbd></button>
+          <span class="sep"></span>
+          <button>Undo <kbd>Ctrl Z</kbd></button><button>Redo <kbd>Ctrl Y</kbd></button>
+          <span class="sep"></span>
+          <button>Export ▾</button><button>Print <kbd>Ctrl P</kbd></button>
+          <span class="sep"></span>
+          <button>Guided view</button>
+          <div style="flex-grow: 1"></div>
+          <span class="hint">Saved 9:38 AM · Author: Kurt · Started from <a href="Reports.html">Profit &amp; Loss</a></span>
+        </div>
+        <div class="filt" aria-label="Report settings">
+          <label>Report name <input type="text" value="Monthly P&amp;L for the bank" style="width: 220px"></label>
+          <div class="segc" role="group" aria-label="Date mode" title="A date range shows activity between two dates. 'As of' shows what was open on one date — for open invoices and unpaid bills."><button class="on">Date range</button><button>As of a date</button></div>
+          <label>Dates <select><option>Last month</option><option>This month</option><option>This quarter</option><option>This year to date</option><option>Last year</option><option>Choose when it runs</option></select></label>
+          <label>From <input type="text" class="mono" value="10/01/2026" style="width: 92px"></label>
+          <label>To <input type="text" class="mono" value="10/31/2026" style="width: 92px"></label>
+          <span style="display: flex; gap: 6px; align-items: center"><label><span class="jg" title="Accrual counts income when you invoice and expenses when you get a bill. Cash counts them when money actually moves.">Basis</span></label>
+          <div class="segc" role="group" aria-label="Basis"><button class="on">Accrual</button><button>Cash</button><button>Company default</button></div></span>
+          <label><span class="jg" title="Adjusting entries are the year-end journal entries your accountant makes.">Adjusting entries</span> <select><option>Include</option><option>Leave out</option><option>Only these</option></select></label>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+          <!-- OUTLINE -->
+          <section class="pane" style="flex: 1 1 240px; max-width: 250px; background: var(--surface-subtle)" aria-label="Report outline">
+            <div class="panehead"><h2>Outline</h2><span class="hint">13 of 200 rows</span></div>
+            <div class="tool" role="toolbar" aria-label="Outline tools" style="padding: 4px 6px; gap: 0">
+              <button title="Add a row below the selected one">Add ▾ <kbd>Ins</kbd></button>
+              <button title="Remove the selected row">Delete <kbd>Del</kbd></button>
+              <button title="Move up" aria-label="Move up">↑</button><button title="Move down" aria-label="Move down">↓</button>
+              <button title="Indent (put it under the group above)" aria-label="Indent">→</button><button title="Outdent" aria-label="Outdent">←</button>
+              <button title="Duplicate the selected row">Duplicate</button><span class="prop" title="Not in A08's step list; needs an owner decision">PROPOSED</span>
+            </div>
+            <ul class="otree" role="tree" aria-label="Rows of the report">
+              <li role="treeitem"><span class="ico n" title="Text row">T</span>Prepared for First Ozark Community Bank</li>
+              <li role="treeitem"><span class="ico n" title="Blank row">␣</span><span style="color: var(--text-tertiary)">Blank row</span></li>
+              <li role="treeitem"><span class="ico s" title="Section">S</span>Income<span class="osub">by account</span></li>
+              <li role="treeitem"><span class="ico s" title="Section">S</span>Cost of goods sold<span class="osub">by account</span></li>
+              <li role="treeitem"><span class="ico f" title="Formula">=</span>Gross profit<span class="osub">Income − COGS</span></li>
+              <li role="treeitem" aria-selected="true" class="on"><span class="ico s" title="Section">S</span>Expenses<span class="osub">by account</span></li>
+              <li role="treeitem"><span class="ico f" title="Formula">=</span>Net operating income<span class="osub">GP − Exp.</span></li>
+              <li role="treeitem" aria-expanded="true"><span class="ico g" title="Group">G</span>Other items<span class="osub">group</span></li>
+              <li role="treeitem" class="ind1"><span class="ico s" title="Section">S</span>Other income<span class="osub">by account</span></li>
+              <li role="treeitem" class="ind1"><span class="ico s" title="Section">S</span>Other expenses<span class="osub">by account</span></li>
+              <li role="treeitem"><span class="ico f" title="Formula">=</span>Net income<span class="osub">NOI + Other</span></li>
+              <li role="treeitem"><span class="ico n" title="Page break">⤓</span><span style="color: var(--text-tertiary)">Page break</span></li>
+              <li role="treeitem"><span class="ico n" title="Text row">T</span>Figures are unaudited.</li>
+            </ul>
+            <div style="padding: 6px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12px">
+              <span class="hint">Add ▾ offers: Section · Group · Formula · Text · Blank row · Page break</span>
+            </div>
+            <div class="keys" aria-label="Outline keys">
+              <kbd>Ins</kbd><span>Add a row</span>
+              <kbd>Del</kbd><span>Remove the row</span>
+              <kbd>Alt ↑ ↓</kbd><span>Move the row</span>
+              <kbd>Tab</kbd><span>Indent · <kbd>Shift Tab</kbd> outdent</span>
+              <kbd>F2</kbd><span>Rename</span>
+              <kbd>Ctrl Z</kbd><span>Undo · <kbd>Ctrl Y</kbd> redo</span>
+            </div>
+          </section>
+
+          <!-- PROPERTIES -->
+          <section class="pane" style="flex: 1 1 300px; max-width: 320px" aria-label="Properties of the selected row">
+            <nav class="ptabs" aria-label="Properties tabs"><a class="on" href="#">Row</a><a href="#columns-tab">Columns</a><a href="#report-tab">Report</a></nav>
+            <div class="props">
+              <div style="display: flex; align-items: center; gap: 8px"><span class="ico s">S</span><b style="font-size: 14px">Section</b><span class="hint">adds up transactions</span></div>
+              <label class="fld">Caption <input value="Expenses"></label>
+              <label class="fld">What to report on
+                <select><option>Sales &amp; customers</option><option>Items sold</option><option>Purchases &amp; vendors</option><option>Items bought</option><option>Who owes me (open invoices)</option><option>What I owe (unpaid bills)</option><option selected>All accounts (general ledger)</option><option>Bank and card accounts</option><option>Sales tax</option><option disabled>Inventory — after inventory is set up</option><option disabled>Projects — coming in a later update</option></select>
+              </label>
+              <label class="fld">Add up
+                <select><option selected>Amount</option><option>Debits only</option><option>Credits only</option><option>Balance at the end date</option><option>Debit and credit columns</option><option>Number of transactions</option><option disabled>Quantity — not for this source</option></select>
+              </label>
+
+              <div class="grp">
+                <h3>Include only</h3>
+                <div class="frow"><select><option>Account type</option></select><select><option>is one of</option></select><span class="chip">Expense</span><button class="x" aria-label="Remove filter">✕</button></div>
+                <a href="#" style="font-size: 12px">+ Add a filter</a>
+                <span class="hint">Filters: account, account type, name, item, tag, transaction type, amount, cleared.</span>
+              </div>
+
+              <div class="grp">
+                <h3>Group by <span class="hint" style="font-weight: 400">up to 3</span></h3>
+                <div class="frow"><span class="hint">1</span><select><option>Account</option></select><button class="x" aria-label="Remove">✕</button></div>
+                <div class="frow" style="border-style: dashed; background: none"><span class="hint">2</span><select style="color: var(--text-placeholder)"><option>then by… (optional)</option><option>Account type</option><option>Name</option><option>Item</option><option>Transaction type</option><option>Tag (one tag group)</option><option>Month</option><option>Quarter</option><option>Year</option></select></div>
+              </div>
+
+              <div class="grp">
+                <h3>Show</h3>
+                <div class="segc" role="group" aria-label="Display"><button title="One line per group, with subtotals">Summary</button><button title="Every transaction">Every transaction</button><button class="on" title="Summary lines you can open to see their transactions">Summary you can open</button></div>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox"> Start with the lines opened</label>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox" checked> Hide lines that are all zero</label>
+              </div>
+
+              <div class="grp">
+                <h3>Total</h3>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox" checked> Show a total row</label>
+                <label class="fld">Total caption <input value="Total expenses"></label>
+                <label class="fld"><span><span class="jg" title="Each section shows its amounts as positive numbers in their usual direction: income and sales as credits, expenses as debits. That way Gross profit = Income − Cost of goods sold reads naturally.">Show as positive</span></span>
+                  <select><option>The usual direction (expenses as positive)</option><option>Debits as positive</option><option>Credits as positive</option></select>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <!-- PREVIEW -->
+          <section style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column" aria-label="Live preview">
+            <div class="panehead"><h2>Preview</h2><span class="hint">Updated 9:41 AM · first 50 transactions · <a href="#">Run report</a> for all of them</span></div>
+            <div style="overflow-x: auto; padding: 16px 12px 20px">
+              <div style="text-align: center; display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px">
+                <div style="font-weight: 600">Ozark Ridge Landscaping LLC</div>
+                <div style="font-size: 18px; font-weight: 600">Monthly P&amp;L for the bank</div>
+                <div style="color: var(--text-secondary)">October 2026 · Accrual basis · Preview</div>
+              </div>
+              <table class="pl">
+                <thead><tr><th></th><th>Oct 2026</th><th>% of income</th><th>Sep 2026</th><th>$ Change</th></tr></thead>
+                <tbody>
+                  <tr class="txt"><td colspan="5">Prepared for First Ozark Community Bank</td></tr>
+                  <tr><td colspan="5">&nbsp;</td></tr>
+                  <tr class="h"><td colspan="5">Income</td></tr>
+                  <tr class="i"><td><span class="tw">▸</span>4000 · Landscape installation</td><td class="n"><a href="#">38,420.00</a></td><td class="p">63.7%</td><td class="n">34,915.00</td><td class="n">3,505.00</td></tr>
+                  <tr class="i"><td><span class="tw">▸</span>4010 · Maintenance contracts</td><td class="n"><a href="#">21,860.00</a></td><td class="p">36.3%</td><td class="n">21,860.00</td><td class="n">0.00</td></tr>
+                  <tr class="t"><td>Total income</td><td class="n">60,280.00</td><td class="p">100.0%</td><td class="n">56,775.00</td><td class="n">3,505.00</td></tr>
+                  <tr class="h"><td colspan="5">Cost of goods sold</td></tr>
+                  <tr class="i"><td><span class="tw">▸</span>5100 · Materials:Plants</td><td class="n"><a href="#">9,412.35</a></td><td class="p">15.6%</td><td class="n">8,640.20</td><td class="n">772.15</td></tr>
+                  <tr class="i"><td><span class="tw">▸</span>5110 · Materials:Mulch &amp; stone</td><td class="n"><a href="#">4,218.90</a></td><td class="p">7.0%</td><td class="n">3,977.45</td><td class="n">241.45</td></tr>
+                  <tr class="i"><td><span class="tw">▸</span>5200 · Subcontractors</td><td class="n"><a href="#">6,500.00</a></td><td class="p">10.8%</td><td class="n">5,850.00</td><td class="n">650.00</td></tr>
+                  <tr class="t"><td>Total cost of goods sold</td><td class="n">20,131.25</td><td class="p">33.4%</td><td class="n">18,467.65</td><td class="n">1,663.60</td></tr>
+                  <tr class="g"><td>Gross profit</td><td class="n">40,148.75</td><td class="p">66.6%</td><td class="n">38,307.35</td><td class="n">1,841.40</td></tr>
+                  <tr class="h sel"><td colspan="5">Expenses</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6100 · Payroll wages</td><td class="n"><a href="#">18,240.00</a></td><td class="p">30.3%</td><td class="n">18,240.00</td><td class="n">0.00</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6110 · Payroll taxes</td><td class="n"><a href="#">1,395.36</a></td><td class="p">2.3%</td><td class="n">1,395.36</td><td class="n">0.00</td></tr>
+                  <tr class="i sel"><td><span class="tw">▾</span>6200 · Fuel</td><td class="n"><a href="#">2,384.17</a></td><td class="p">4.0%</td><td class="n">2,211.84</td><td class="n">172.33</td></tr>
+                  <tr class="d"><td><span class="mono">10/02</span> · Expense · 2291 · Ridgeline Fuel Stop · Fleet fuel, trucks 1–3</td><td class="n">612.48</td><td></td><td></td><td></td></tr>
+                  <tr class="d"><td><span class="mono">10/09</span> · Expense · 2304 · Ridgeline Fuel Stop · Fleet fuel</td><td class="n">587.10</td><td></td><td></td><td></td></tr>
+                  <tr class="d"><td><span class="mono">10/16</span> · Bill · 88412 · Bluestem Bulk Diesel · Off-road diesel, 140 gal</td><td class="n">563.36</td><td></td><td></td><td></td></tr>
+                  <tr class="d"><td><span class="mono">10/23</span> · Expense · 2321 · Ridgeline Fuel Stop · Fleet fuel</td><td class="n">621.23</td><td></td><td></td><td></td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6210 · Equipment rental</td><td class="n"><a href="#">1,850.00</a></td><td class="p">3.1%</td><td class="n">1,240.00</td><td class="n">610.00</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6300 · Insurance</td><td class="n"><a href="#">1,120.00</a></td><td class="p">1.9%</td><td class="n">1,120.00</td><td class="n">0.00</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6400 · Repairs &amp; maintenance</td><td class="n"><a href="#">946.52</a></td><td class="p">1.6%</td><td class="n">1,318.07</td><td class="n">-371.55</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6500 · Office &amp; software</td><td class="n"><a href="#">312.40</a></td><td class="p">0.5%</td><td class="n">298.40</td><td class="n">14.00</td></tr>
+                  <tr class="i sel"><td><span class="tw">▸</span>6600 · Bank fees</td><td class="n"><a href="#">48.00</a></td><td class="p">0.1%</td><td class="n">48.00</td><td class="n">0.00</td></tr>
+                  <tr class="t sel"><td>Total expenses</td><td class="n">26,296.45</td><td class="p">43.6%</td><td class="n">25,871.67</td><td class="n">424.78</td></tr>
+                  <tr class="g"><td>Net operating income</td><td class="n">13,852.30</td><td class="p">23.0%</td><td class="n">12,435.68</td><td class="n">1,416.62</td></tr>
+                  <tr class="h"><td colspan="5">Other items</td></tr>
+                  <tr class="h"><td colspan="5" style="padding-left: 22px">Other income</td></tr>
+                  <tr class="i"><td style="padding-left: 40px"><span class="tw">▸</span>7000 · Interest income</td><td class="n"><a href="#">12.84</a></td><td class="p">0.0%</td><td class="n">11.92</td><td class="n">0.92</td></tr>
+                  <tr class="t"><td style="padding-left: 22px">Total other income</td><td class="n">12.84</td><td class="p">0.0%</td><td class="n">11.92</td><td class="n">0.92</td></tr>
+                  <tr class="h"><td colspan="5" style="padding-left: 22px">Other expenses</td></tr>
+                  <tr class="txt"><td colspan="5" style="padding-left: 40px; padding-top: 2px">No activity for these dates.</td></tr>
+                  <tr class="t"><td>Total other items</td><td class="n">12.84</td><td class="p">0.0%</td><td class="n">11.92</td><td class="n">0.92</td></tr>
+                  <tr class="net"><td>Net income</td><td class="n">13,865.14</td><td class="p">23.0%</td><td class="n">12,447.60</td><td class="n">1,417.54</td></tr>
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-tertiary); font-size: 11px; padding: 10px; border-bottom: 1px dashed var(--border-strong)">page break</td></tr>
+                  <tr class="txt"><td colspan="5">Figures are unaudited.</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top: 12px; font-size: 12px; color: var(--text-tertiary)">Rows for the selected section are highlighted. 4020 · Snow removal is hidden because it is all zero. Click ▸ to open a line; click an underlined amount to see the transactions behind it. Every figure comes from the books — the preview is the same run as the report, limited to 50 transactions.</div>
+            </div>
+          </section>
+        </div>
+
+        <!-- OTHER PANELS AND EXAMPLE STATES -->
+        <div class="band" aria-label="Other panels and example states">
+          <h2>Other panels of the same editor (shown here so they can be reviewed without clicking)</h2>
+          <div class="bgrid">
+            <div class="card" id="columns-tab">
+              <h2><span>Columns tab</span><span class="hint" style="font-weight: 400">whole report</span></h2>
+              <div class="cardb">
+                <div class="grp" style="border-top: 0; padding-top: 0">
+                  <h3>Columns across</h3>
+                  <div class="segc" role="group" aria-label="Periods"><button class="on">Total only</button><button>Month</button><button>Quarter</button><button>Year</button></div>
+                  <label style="display: flex; gap: 6px; align-items: center; color: var(--text-placeholder)" title="Aging columns are only for 'Who owes me' and 'What I owe' sections, and not together with months side by side."><input type="checkbox" disabled> Aging columns (Current, 1–30, 31–60, 61–90, over 90 days)</label>
+                </div>
+                <div class="grp">
+                  <h3>Compare with <span class="hint" style="font-weight: 400">up to 2</span></h3>
+                  <div class="frow"><select><option>The period before</option><option>Same period last year</option></select><label><input type="checkbox" checked> amount</label><label><input type="checkbox" checked> $ change</label><label><input type="checkbox"> % change</label><button class="x" aria-label="Remove">✕</button></div>
+                  <a href="#" style="font-size: 12px">+ Add a second comparison</a>
+                </div>
+                <div class="grp">
+                  <h3><span class="jg" title="Shows each amount as a percentage of one row's total, e.g. every expense as a % of income.">% of</span></h3>
+                  <select style="padding: 5px 6px; border: 1px solid var(--border-strong); border-radius: 4px"><option>Income (total)</option><option>Each section's own total</option><option>(none)</option></select>
+                </div>
+                <div class="grp">
+                  <h3>Transaction columns <span class="hint" style="font-weight: 400">shown when a line is opened · 6 picked</span></h3>
+                  <div class="list">
+                    <div><input type="checkbox" checked>Date<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div><input type="checkbox" checked>Type<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div><input type="checkbox" checked>Num<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div class="on"><input type="checkbox" checked>Name<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div><input type="checkbox" checked>Memo<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div><input type="checkbox" checked>Amount<span class="mv"><button>↑</button><button>↓</button></span></div>
+                    <div class="dim"><input type="checkbox">Description · Account · Item · Tag · Debit · Credit · Cleared · Balance · Service Date …</div>
+                  </div>
+                </div>
+                <div class="grp">
+                  <h3>Rename headers</h3>
+                  <table class="pl" style="min-width: 0">
+                    <thead><tr><th>Column</th><th style="text-align: left">Shown as</th></tr></thead>
+                    <tbody>
+                      <tr><td>Total</td><td><input value="Oct 2026" style="width: 140px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 4px"></td></tr>
+                      <tr><td>%</td><td><input value="% of income" style="width: 140px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 4px"></td></tr>
+                      <tr><td>Prior Period</td><td><input value="Sep 2026" style="width: 140px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 4px"></td></tr>
+                      <tr><td>$ Change</td><td><input placeholder="$ Change" style="width: 140px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 4px"></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" id="formula-tab">
+              <h2><span>Row tab · formula selected (Gross profit)</span></h2>
+              <div class="cardb">
+                <label class="fld">Caption <input value="Gross profit"></label>
+                <div class="grp" style="border-top: 0; padding-top: 0">
+                  <h3>Adds and subtracts</h3>
+                  <div class="frow"><div class="segc"><button class="on">+</button><button>−</button></div><span>Income <span class="hint">(total)</span></span><button class="x" aria-label="Remove term">✕</button></div>
+                  <div class="frow"><div class="segc"><button>+</button><button class="on">−</button></div><span>Cost of goods sold <span class="hint">(total)</span></span><button class="x" aria-label="Remove term">✕</button></div>
+                  <label class="fld">Add a row
+                    <select><option>Choose a row above this one…</option><option>Income</option><option>Cost of goods sold</option><option disabled>Expenses — below this row</option><option disabled>Other items — below this row</option></select>
+                  </label>
+                  <span class="hint">A formula can only use rows above it, so it can never go in circles. The engine does the math.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span>Row tab · group selected (Other items)</span></h2>
+              <div class="cardb">
+                <label class="fld">Caption <input value="Other items"></label>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox" checked> Show a total row</label>
+                <label class="fld">Total caption <input value="Total other items"></label>
+                <span class="hint">2 rows inside. Select a row below it and press <kbd>Tab</kbd> to put it inside the group.</span>
+              </div>
+              <h2 id="report-tab" style="border-top: 1px solid var(--border-default)"><span>Report tab</span></h2>
+              <div class="cardb">
+                <label class="fld">Report name <input value="Monthly P&amp;L for the bank"></label>
+                <label class="fld">Memorized group <select><option>For the bank</option><option>Monthly</option><option>(no group)</option></select></label>
+                <span class="hint">Everyone who can see reports can run it. Only you (the author) or an admin can change or delete it; others can memorize a copy.</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn">Export report file (.clreport)…</button><span class="phase">A09</span></div>
+              </div>
+            </div>
+          </div>
+
+          <h2>Example states (not the main state — for review)</h2>
+          <div class="bgrid">
+            <div class="card">
+              <h2><span>A section the role can't see</span><span class="hint" style="font-weight: 400">viewer: Sales staff</span></h2>
+              <div class="cardb">
+                <table class="pl" style="min-width: 0">
+                  <thead><tr><th></th><th>Oct 2026</th></tr></thead>
+                  <tbody>
+                    <tr class="h"><td colspan="2">Sales</td></tr>
+                    <tr class="t"><td>Total sales</td><td class="n">60,280.00</td></tr>
+                    <tr class="h den"><td>Bills by vendor</td><td class="n">—</td></tr>
+                    <tr class="den"><td colspan="2" style="padding-left: 28px; font-size: 12px">Your role can't see this part of the report</td></tr>
+                    <tr class="g den"><td>Sales less bills</td><td class="n">—</td></tr>
+                  </tbody>
+                </table>
+                <span class="hint">A formula that uses a hidden section also shows "—", so no hidden figure can be worked out from it.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span>Problems to fix before it runs</span><span class="hint" style="font-weight: 400">3 problems</span></h2>
+              <div class="cardb">
+                <div class="callout"><span>⚠</span><span><b>Gross profit</b> uses <b>Expenses</b>, which is below it. A formula can only use rows above it. Move the formula down or pick another row. <a href="#">Go to row</a></span></div>
+                <div class="callout"><span>⚠</span><span><b>Average job</b> mixes dollars with a count of transactions. A formula can only combine rows that add up the same kind of thing. <a href="#">Go to row</a></span></div>
+                <div class="callout"><span>⚠</span><span>Aging columns can't be shown with months side by side. Turn one of them off in <a href="#">Columns</a>.</span></div>
+                <span class="hint">In the outline the row gets a warning tint; Run report stays off until these are fixed. The preview keeps the last good result.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span>Limits</span></h2>
+              <div class="cardb">
+                <div class="callout"><span>⚠</span><span>This report has <b>196 of 200</b> rows allowed. Remove rows you don't need, or split it into two reports.</span></div>
+                <div class="callout"><span>⚠</span><span>This filter lists <b>500 of 500</b> names allowed. Filter by account type or tag instead.</span></div>
+                <div class="callout info"><span>ⓘ</span><span>The preview shows the first 50 transactions. <a href="#">Run report</a> to see all of them (up to 5,000, then Load more).</span></div>
+                <div class="callout"><span>⚠</span><span>The report took too long. Try fewer months or add a filter.</span></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span>Choices that don't apply</span></h2>
+              <div class="cardb">
+                <div class="frow"><select disabled><option>Group by Tag</option></select><span class="hint">Open invoices and unpaid bills can be filtered by tag but not grouped by it.</span></div>
+                <div class="frow"><select disabled><option>Add up: Quantity</option></select><span class="hint">Quantity needs accrual basis.</span></div>
+                <div class="callout info"><span>ⓘ</span><span><b>Who owes me</b> sections show what was open on the as-of date; cash or accrual doesn't change them.</span></div>
+                <div class="callout info" style="align-items: center"><span>ⓘ</span><span>Some amounts are hidden for your role.</span><span class="phase" style="margin-left: auto">P29</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== GUIDED MODE ===================== -->
+      <div id="gui" class="view" hidden style="background: var(--surface-window); flex-grow: 1; display: flex; flex-direction: column">
+        <div class="tool" role="toolbar" aria-label="New report tools">
+          <b style="padding: 0 6px">New report</b>
+          <span class="sep"></span>
+          <button>Start from a ready-made report ▾</button>
+          <button>Blank report in Advanced</button>
+          <div style="flex-grow: 1"></div>
+          <button>Switch to Advanced</button>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+          <div style="flex: 999 1 560px; min-width: 0; padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 12px">
+            <ol class="steps" aria-label="Guide steps">
+              <li class="done"><span class="dot">✓</span><span>What to report on</span></li>
+              <li class="done"><span class="dot">✓</span><span>Grouping</span></li>
+              <li class="cur" aria-current="step"><span class="dot">3</span><span>Columns</span></li>
+              <li><span class="dot">4</span><span>Date range</span></li>
+              <li><span class="dot">5</span><span>Done</span></li>
+            </ol>
+
+            <section class="gstep">
+              <header><span class="dot" style="width: 22px; height: 22px; border-radius: 11px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">1</span><h3>What do you want to report on?</h3><span class="sum">Sales &amp; customers · <a href="#">change</a></span></header>
+              <div class="b">
+                <div class="pick">
+                  <div class="opt on"><b>Sales &amp; customers</b><span>Invoices, sales receipts and credits</span></div>
+                  <div class="opt"><b>Items sold</b><span>What you sold, with quantities</span></div>
+                  <div class="opt"><b>Purchases &amp; vendors</b><span>Bills, checks and card charges</span></div>
+                  <div class="opt"><b>Items bought</b><span>What you bought, with quantities</span></div>
+                  <div class="opt"><b>Who owes me</b><span>Open invoices on a date</span></div>
+                  <div class="opt"><b>What I owe</b><span>Unpaid bills on a date</span></div>
+                  <div class="opt"><b>All accounts</b><span>Every account in your books</span></div>
+                  <div class="opt"><b>Bank and card accounts</b><span>Money in and out, cleared or not</span></div>
+                  <div class="opt"><b>Sales tax</b><span>Tax collected and paid</span></div>
+                  <div class="opt off"><b>Inventory</b><span>After inventory is set up</span></div>
+                  <div class="opt off"><b>Projects</b><span>Coming in a later update</span></div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary)">
+                  <span>Or describe it:</span><input type="text" placeholder="e.g. sales by client and item for last quarter" style="flex: 1 1 260px; padding: 5px 8px; border: 1px solid var(--border-strong); border-radius: 4px"><button class="btn">Draft it</button><span class="phase">A10</span>
+                  <span style="flex-basis: 100%">AI picks the pieces; every number comes from your books.</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="gstep">
+              <header><span class="dot" style="width: 22px; height: 22px; border-radius: 11px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">2</span><h3>How should it be grouped?</h3><span class="sum">Client, then item · <a href="#">change</a></span></header>
+              <div class="b">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+                  <label class="fld">Group by<select><option>Client</option></select></label>
+                  <label class="fld">then by<select><option>Item</option></select></label>
+                  <label class="fld">then by<select><option>(nothing)</option><option>Month</option><option>Transaction type</option><option>Tag</option></select></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="gstep cur">
+              <header><span class="dot" style="width: 22px; height: 22px; border-radius: 11px; border: 2px solid var(--accent); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">3</span><h3>What should each line show?</h3></header>
+              <div class="b">
+                <div class="pick" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
+                  <div class="opt"><b>Totals only</b><span>One line per client and item</span></div>
+                  <div class="opt"><b>Every transaction</b><span>Each sale listed</span></div>
+                  <div class="opt on"><b>Totals you can open</b><span>Click a line to see its sales</span></div>
+                </div>
+                <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end">
+                  <label class="fld">Columns across<div class="segc"><button class="on">Total only</button><button>Month</button><button>Quarter</button><button>Year</button></div></label>
+                  <label class="fld">Compare with<select><option>(nothing)</option><option>The period before</option><option>Same period last year</option></select></label>
+                  <label style="display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-secondary)"><input type="checkbox" checked> % of total</label>
+                </div>
+                <div class="fld">Transaction columns (when a line is opened)
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip">Date ✕</span><span class="chip">Type ✕</span><span class="chip">Num ✕</span><span class="chip">Memo ✕</span><span class="chip">Amount ✕</span><a href="#" style="font-size: 12px">+ Add</a></div>
+                </div>
+                <div style="display: flex; gap: 8px; justify-content: flex-end"><button class="btn" style="min-height: 44px">Back <kbd>Alt B</kbd></button><button class="btnp" style="min-height: 44px">Next <kbd>Alt N</kbd></button></div>
+              </div>
+            </section>
+
+            <section class="gstep later">
+              <header><span class="dot" style="width: 22px; height: 22px; border-radius: 11px; border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">4</span><h3>Which dates?</h3></header>
+              <div class="b">
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+                  <label class="fld">Dates<select><option>Last month</option><option>This month</option><option>This quarter</option><option>This year to date</option><option>Choose each time it runs</option></select></label>
+                  <label class="fld">From<input class="mono" value="10/01/2026" style="width: 110px"></label>
+                  <label class="fld">To<input class="mono" value="10/31/2026" style="width: 110px"></label>
+                  <label class="fld"><span class="jg" title="Accrual counts a sale when you invoice. Cash counts it when you're paid.">Basis</span><div class="segc"><button class="on">Accrual</button><button>Cash</button></div></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="gstep later">
+              <header><span class="dot" style="width: 22px; height: 22px; border-radius: 11px; border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">5</span><h3>Done</h3></header>
+              <div class="b">
+                <label class="fld">Report name<input value="Sales by client and item" style="max-width: 320px"></label>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btnp" style="min-height: 44px">Run report</button><button class="btn" style="min-height: 44px">Memorize <kbd>Ctrl M</kbd></button><button class="btn" style="min-height: 44px">Open in Advanced</button></div>
+                <span class="hint">You can change anything later in the Advanced editor.</span>
+              </div>
+            </section>
+          </div>
+
+          <aside style="flex: 1 1 380px; max-width: 460px; border-left: 1px solid var(--border-default); display: flex; flex-direction: column" aria-label="Preview">
+            <div class="panehead"><h2>Preview</h2><span class="hint">updates as you choose</span></div>
+            <div style="overflow-x: auto; padding: 14px 14px 18px">
+              <div style="text-align: center; margin-bottom: 10px"><div style="font-size: 15px; font-weight: 600">Sales by client and item</div><div style="color: var(--text-secondary); font-size: 12px">October 2026 · Accrual basis</div></div>
+              <table class="pl" style="min-width: 0">
+                <thead><tr><th></th><th>Total</th><th>% of total</th></tr></thead>
+                <tbody>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Bluff View Apartments</td><td class="n">11,300.00</td><td class="p">18.7%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Hollister Residence</td><td class="n">9,860.00</td><td class="p">16.4%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Kessler Residence</td><td class="n">3,985.00</td><td class="p">6.6%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Maple Hollow Townhomes</td><td class="n">7,815.00</td><td class="p">13.0%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▾</span>Pinecrest Village HOA</td><td class="n">14,250.00</td><td class="p">23.6%</td></tr>
+                  <tr class="i"><td style="padding-left: 30px">Planting &amp; bed install</td><td class="n">9,600.00</td><td class="p">15.9%</td></tr>
+                  <tr class="i"><td style="padding-left: 30px">Monthly maintenance</td><td class="n">4,650.00</td><td class="p">7.7%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Riverbend Church</td><td class="n">5,650.00</td><td class="p">9.4%</td></tr>
+                  <tr class="i"><td style="padding-left: 4px"><span class="tw">▸</span>Table Rock Family Dental</td><td class="n">7,420.00</td><td class="p">12.3%</td></tr>
+                  <tr class="net"><td>Total sales</td><td class="n">60,280.00</td><td class="p">100.0%</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span><kbd>Ins</kbd> add row</span>
+    <span><kbd>Alt ↑ ↓</kbd> move</span>
+    <span><kbd>F2</kbd> rename</span>
+    <span><kbd>Ctrl Enter</kbd> refresh preview</span>
+    <span><kbd>Ctrl M</kbd> memorize</span>
+    <span><kbd>Ctrl /</kbd> shortcuts</span>
+  </footer>
+</div>
+<script>
+(function () {
+  var root = document.documentElement;
+  function seg(onId, offId) { document.getElementById(onId).classList.add('on'); document.getElementById(offId).classList.remove('on'); }
+  document.getElementById('t-light').onclick = function () { root.removeAttribute('data-theme'); seg('t-light', 't-dark'); };
+  document.getElementById('t-dark').onclick = function () { root.setAttribute('data-theme', 'dark'); seg('t-dark', 't-light'); };
+  function view(adv) {
+    document.getElementById('adv').hidden = !adv;
+    document.getElementById('gui').hidden = adv;
+    document.querySelector('.tab-name').textContent = adv ? 'Report Builder · Monthly P&L for the bank ●' : 'New report ●';
+    document.querySelector('.win-name').textContent = adv ? 'Report Builder ●' : 'New report ●';
+    seg(adv ? 'v-adv' : 'v-gui', adv ? 'v-gui' : 'v-adv');
+  }
+  document.getElementById('v-adv').onclick = function () { view(true); };
+  document.getElementById('v-gui').onclick = function () { view(false); };
+})();
+</script>
+</body>
+</html>
