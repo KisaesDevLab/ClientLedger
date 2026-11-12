@@ -233,6 +233,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.tool.export_csv", "Export CSV"),
     ("reports.tool.save_pdf", "Save PDF"),
     ("reports.tool.collapse", "Collapse"),
+    ("reports.tool.expand_all", "Expand all"),
     ("reports.tool.refresh", "Refresh"),
     ("reports.tool.refresh.key", "F5"),
     ("reports.collapse_row", "Collapse {row}"),

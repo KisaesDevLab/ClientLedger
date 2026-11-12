@@ -57,6 +57,9 @@ struct Pending {
     built: Slot<Built>,
     dialog: Receiver<Option<PathBuf>>,
     path: Slot<PathBuf>,
+    /// The report it was made from ([`ReportWindow::view`]): once another
+    /// report is shown, "Saved ..." isn't said over it (A07 QA-7).
+    view: u64,
 }
 
 /// A finished file and how many values it wrote as text (xlsx).
@@ -227,6 +230,30 @@ pub(crate) fn bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
     snapshot(w)?.render(kind).map(|(b, _)| b)
 }
 
+/// A message as if a file were just saved (tests).
+#[cfg(test)]
+pub(crate) fn set_message_for_test(w: &mut ReportWindow, m: &str) {
+    w.export.message = Some(m.to_string());
+}
+
+/// An export of `bytes` to `path` whose build and Save dialog are both in,
+/// made from the report on screen now (tests).
+#[cfg(test)]
+pub(crate) fn pending_for_test(w: &mut ReportWindow, bytes: Vec<u8>, path: PathBuf) {
+    let (btx, build) = std::sync::mpsc::channel();
+    let (dtx, dialog) = std::sync::mpsc::channel();
+    let _ = btx.send(Some((bytes, 0)));
+    let _ = dtx.send(Some(path));
+    w.export.pending = Some(Pending {
+        kind: Kind::Csv,
+        build: Some(build),
+        built: Slot::Waiting,
+        dialog,
+        path: Slot::Waiting,
+        view: w.view,
+    });
+}
+
 /// Builds the file and asks where to save it, then writes.
 pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
     w.export.message = None;
@@ -256,6 +283,7 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
         built: Slot::Waiting,
         dialog,
         path: Slot::Waiting,
+        view: w.view,
     });
 }
 
@@ -311,7 +339,11 @@ pub(super) fn poll(w: &mut ReportWindow) {
         return;
     }
     let Some(Pending {
-        kind, built, path, ..
+        kind,
+        built,
+        path,
+        view,
+        ..
     }) = w.export.pending.take()
     else {
         return;
@@ -326,6 +358,12 @@ pub(super) fn poll(w: &mut ReportWindow) {
     let ok = built
         .as_ref()
         .is_some_and(|(b, _)| cl_print::report_export::write_atomic(&path, b).is_ok());
+    // Another report is on screen now: the file is still written, and
+    // only a failure is said (A07 QA-7).
+    if view != w.view && ok {
+        w.export.last = Some((kind, ok));
+        return;
+    }
     w.export.message = Some(match built {
         Some((_, text)) if ok && text > 0 => t_with(
             "reports.export.saved_with_text",

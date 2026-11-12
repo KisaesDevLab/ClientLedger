@@ -92,7 +92,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         // separator (QA-14).
         ui.add_space(12.0);
         if ui
-            .add_enabled(shown, egui::Button::new(t("reports.tool.collapse")))
+            .add_enabled(shown, egui::Button::new(t(w.collapse_label())))
             .clicked()
         {
             click = Some(Click::Collapse);

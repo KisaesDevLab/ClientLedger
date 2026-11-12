@@ -208,12 +208,12 @@ pub(crate) fn load_starters(w: &mut ReportWindow) {
 
 /// Opens the starter `key` (`OpenPayload::BuilderStarter`).
 pub(crate) fn open_starter(w: &mut ReportWindow, key: &str) {
+    w.new_view();
     let mut b = Builder::new(key);
     b.wanted = Some(key.to_string());
     w.builder = Some(Box::new(b));
     w.table = None;
     w.error = None;
-    w.notice = None;
     load_starters(w);
     poll_starters(w);
     if !available(w)
@@ -227,6 +227,7 @@ pub(crate) fn open_starter(w: &mut ReportWindow, key: &str) {
 
 /// Shows `starter` (a catalog click or a loaded payload).
 pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
+    w.new_view();
     let text = serde_json::to_string(&starter.definition).unwrap_or_default();
     let mut b = Builder::new(&starter.key);
     match cl_model::report_def::parse(&text) {
@@ -278,7 +279,6 @@ pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
     w.builder = Some(Box::new(b));
     w.table = None;
     w.error = None;
-    w.notice = None;
     w.memo.current = None;
     w.run();
 }
@@ -301,6 +301,7 @@ fn preset(name: Option<&str>) -> Option<DatePreset> {
 
 /// Opens a subtotal's detail tab (`OpenPayload::BuilderDetail`).
 pub(crate) fn open_detail(w: &mut ReportWindow, open: BuilderDetailOpen) {
+    w.new_view();
     let mut b = Builder::new("detail");
     b.title.clone_from(&open.title);
     b.json = open.definition.clone();
@@ -882,10 +883,16 @@ pub(crate) fn toggle(w: &mut ReportWindow, path: &RowPath, ui: &Ui) {
     }
 }
 
+/// True when Collapse closes everything (anything is open); else the
+/// button expands all (A07 QA-9).
+pub(crate) fn collapses(b: &Builder) -> bool {
+    b.state.is_open_all() || !b.state.open_paths().is_empty()
+}
+
 /// Expand all, or Collapse all when anything is open.
 pub(crate) fn toggle_all(w: &mut ReportWindow) {
     if let Some(b) = w.builder.as_mut() {
-        let fx = if b.state.is_open_all() || !b.state.open_paths().is_empty() {
+        let fx = if collapses(b) {
             b.state.collapse_all()
         } else {
             b.state.expand_all()

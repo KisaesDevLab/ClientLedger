@@ -383,3 +383,90 @@ fn an_aging_definition_has_no_columns_choice() {
     assert_eq!(w.spec.columns, &[cl_model::reports::ColumnBy::Total]);
     assert_eq!(w.options.columns, cl_model::reports::ColumnBy::Total);
 }
+
+/// A07 QA-7, QA-11: every switch (standard to standard, standard to a
+/// starter, a new detail tab) starts a new view: no "Saved ..." line from
+/// the report before, scroll back at the top.
+#[test]
+fn a_new_report_starts_clean_and_at_the_top() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    let first = w.view;
+    super::export::set_message_for_test(&mut w, "Saved pl.csv.");
+    let spec = find("balance_sheet").expect("bs");
+    w.show_report(spec, cl_model::reports::ReportOptions::for_spec(spec));
+    assert!(w.export.message().is_none(), "standard to standard");
+    assert_ne!(w.view, first);
+    w.poll();
+    super::export::set_message_for_test(&mut w, "Saved bs.csv.");
+    w.notice = Some("a notice".into());
+    let before = w.view;
+    assert!(w.open_with(OpenPayload::BuilderStarter("profit_loss".into())));
+    w.poll();
+    assert!(w.export.message().is_none(), "standard to a starter");
+    assert!(w.notice.is_none());
+    assert_ne!(w.view, before);
+    assert_eq!(w.state_json_for_test()["message"], false);
+    // Two windows never share a view (their scroll areas are their own).
+    let (a, b) = ledger_line_tab(&link);
+    assert_ne!(a.view, b.view);
+}
+
+/// A07 QA-7: an export that finishes after another report is shown still
+/// writes its file, but doesn't say "Saved ..." over the new report.
+#[test]
+fn a_late_export_says_nothing_over_the_next_report() {
+    let (_d, link) = demo();
+    let dir = tempfile::tempdir().expect("tmp");
+    let mut w = window(&link);
+    w.poll();
+    let path = dir.path().join("pl.csv");
+    super::export::pending_for_test(
+        &mut w,
+        b"a
+"
+        .to_vec(),
+        path.clone(),
+    );
+    assert!(w.open_with(OpenPayload::BuilderStarter("profit_loss".into())));
+    w.poll();
+    super::export::poll(&mut w);
+    assert!(path.exists(), "the file is written");
+    assert!(w.export.message().is_none(), "{:?}", w.export.message());
+    // On the same report it is said.
+    let path = dir.path().join("b.csv");
+    super::export::pending_for_test(
+        &mut w,
+        b"a
+"
+        .to_vec(),
+        path.clone(),
+    );
+    super::export::poll(&mut w);
+    assert!(w.export.message().is_some_and(|m| m.contains("b.csv")));
+}
+
+/// A07 QA-9: the Collapse button says what it does, on a builder run and
+/// on a standard report.
+#[test]
+fn the_collapse_button_says_what_it_does() {
+    let (_d, link) = demo();
+    let mut w = starter(&link, "sales_and_purchases");
+    let before = w.collapse_label();
+    w.toggle_collapse_all();
+    w.poll();
+    assert_ne!(w.collapse_label(), before, "builder");
+    w.toggle_collapse_all();
+    w.poll();
+    assert_eq!(w.collapse_label(), before, "builder, back");
+    let spec = find("sales_tax_liability").expect("spec");
+    w.show_report(spec, cl_model::reports::ReportOptions::for_spec(spec));
+    w.poll();
+    assert_eq!(w.collapse_label(), "reports.tool.collapse");
+    w.toggle_collapse_all();
+    w.poll();
+    assert_eq!(w.collapse_label(), "reports.tool.expand_all");
+    assert_eq!(w.state_json_for_test()["collapse_label"], "expand_all");
+    assert!(crate::i18n::has("reports.tool.expand_all"));
+}

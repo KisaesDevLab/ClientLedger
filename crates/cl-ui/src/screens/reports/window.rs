@@ -172,6 +172,18 @@ pub struct ReportWindow {
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
     /// The Report Builder starters (catalog column).
     pub(super) starters: super::builder_run::Starters,
+    /// Which report is on screen: unique per window and per report shown
+    /// (A07 QA-7, QA-11). Scroll positions and the export message belong
+    /// to it, so a new report or a new tab opens at the top with no
+    /// "Saved ..." line from the report before.
+    pub(super) view: u64,
+}
+
+/// Hands out [`ReportWindow::view`] numbers.
+static VIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_view() -> u64 {
+    VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl ReportWindow {
@@ -256,6 +268,7 @@ impl ReportWindow {
             bus: crate::data_bus::Subscription::detached(),
             builder: None,
             starters: super::builder_run::Starters::default(),
+            view: next_view(),
             link,
         };
         w.bus = w.link.bus().subscribe();
@@ -267,16 +280,26 @@ impl ReportWindow {
     /// Switches to `spec` with `options` (catalog click, drill-down,
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
+        self.new_view();
         self.builder = None;
         self.spec = spec;
         self.options = options;
         self.table = None;
         self.error = None;
-        self.notice = None;
-        self.export.clear_message();
         self.filter_lists.sync(&self.options);
         self.memo.current = None;
         self.run();
+    }
+
+    /// Another report is shown in this window (standard, builder, detail):
+    /// it opens at the top, with none of the last report's messages
+    /// (A07 QA-7, QA-11). Every switch goes through here.
+    pub(crate) fn new_view(&mut self) {
+        self.view = next_view();
+        self.notice = None;
+        self.drill_error = None;
+        self.export.clear_message();
+        self.h_offset = 0.0;
     }
 
     /// New options: run again when the engine's answer would change;
@@ -562,6 +585,25 @@ impl ReportWindow {
             next.collapsed.push(path.clone());
         }
         self.set_options(next);
+    }
+
+    /// True when the Collapse button would expand everything instead (the
+    /// same test [`Self::toggle_collapse_all`] makes), so its label says
+    /// "Expand all" (A07 QA-9).
+    pub(crate) fn collapse_expands(&self) -> bool {
+        match &self.builder {
+            Some(b) => !super::builder_run::collapses(b),
+            None => !self.options.collapsed.is_empty(),
+        }
+    }
+
+    /// The Collapse button's label key.
+    pub(crate) fn collapse_label(&self) -> &'static str {
+        if self.collapse_expands() {
+            "reports.tool.expand_all"
+        } else {
+            "reports.tool.collapse"
+        }
     }
 
     /// Collapse every expandable row, or expand all when any is collapsed.
@@ -890,7 +932,7 @@ impl ReportWindow {
         let width_of = |ci: usize| widths.cells.get(ci).copied().unwrap_or(NUM_MIN);
         // The heading row follows the rows' horizontal scroll.
         egui::ScrollArea::horizontal()
-            .id_salt("report_heading")
+            .id_salt(("report_heading", self.view))
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .scroll_source(egui::scroll_area::ScrollSource::NONE)
             .horizontal_scroll_offset(self.h_offset)
@@ -920,7 +962,7 @@ impl ReportWindow {
         ui.separator();
         let collapsed = &self.options.collapsed;
         let out = egui::ScrollArea::both()
-            .id_salt("report_rows")
+            .id_salt(("report_rows", self.view))
             .auto_shrink([false, true])
             .show_rows(ui, ROW_H, rows.len(), |ui, range| {
                 for &i in &rows[range] {
@@ -1133,6 +1175,9 @@ impl ReportWindow {
             "columns": self.table.as_ref().map_or(0, |t| t.columns.len()),
             "column_keys": self.table.as_ref().map(|t| t.columns.iter().map(|c| c.key.clone()).collect::<Vec<_>>()),
             "collapsed": self.options.collapsed.len(),
+            // The Collapse button's label (A07 QA-9).
+            "collapse_label": if self.collapse_expands() { "expand_all" } else { "collapse" },
+            "message": self.export.message().is_some() || self.notice.is_some(),
             "basis": self.options.basis.map(cl_core::report::Basis::as_str),
             "columns_by": self.options.columns,
             "extras": self.options.extras.len(),
@@ -1317,7 +1362,7 @@ impl Screen for ReportWindow {
         }
         super::export::poll(self);
         egui::ScrollArea::vertical()
-            .id_salt("report_window")
+            .id_salt(("report_window", self.view))
             .show(ui, |ui| self.draw(ui));
         if self.job.is_some()
             || self.fiscal_job.is_some()
