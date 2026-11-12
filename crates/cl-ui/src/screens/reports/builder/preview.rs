@@ -440,6 +440,11 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.pane = Pane::Preview;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(t("builder.preview.for_all"))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
             if ui.link(t("builder.toolbar.run_report")).clicked() {
                 s.run_report();
             }
@@ -485,6 +490,19 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     };
     header(s, ui, tokens);
     rows(s, ui, tokens, &table, dim);
+    footnote(ui, tokens);
+}
+
+/// The note under the table (the mockup's footnote).
+fn footnote(ui: &mut Ui, tokens: &Tokens) {
+    ui.add(
+        egui::Label::new(
+            RichText::new(t("builder.preview.footnote"))
+                .size(12.0)
+                .color(tokens.text_tertiary),
+        )
+        .wrap(),
+    );
 }
 
 fn banner_key(b: Banner) -> &'static str {
@@ -508,6 +526,13 @@ fn header(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             .map(|r| {
                 if s.as_of() || r.from == r.to {
                     crate::shell::us_date(r.to)
+                } else if r.from.day() == 1 && r.to == r.from.end_of_month() {
+                    // A whole month reads as the mockup's "October 2026".
+                    format!(
+                        "{} {}",
+                        t(&format!("home.month_long.{}", r.from.month())),
+                        r.from.year()
+                    )
                 } else {
                     format!(
                         "{} \u{2013} {}",
@@ -610,6 +635,8 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
     egui::ScrollArea::both()
         .id_salt(("builder-preview", s.id.0))
         .auto_shrink([false, false])
+        // Room for the footnote under the table.
+        .max_height((ui.available_height() - 40.0).max(80.0))
         .show_rows(ui, ROW_H, total + 1, |ui, range| {
             ui.set_min_width(width);
             for k in range {

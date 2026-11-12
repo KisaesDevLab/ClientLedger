@@ -376,6 +376,12 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
             s.preview.edited(&s.ed);
         }
     }
+    from_to(s, ui);
+}
+
+/// From and To (As of): they show the report's dates; typing makes them
+/// this session's custom dates (Q-A08q). Guided step 4 shows them too.
+pub(super) fn from_to(s: &mut BuilderScreen, ui: &mut Ui) {
     // The fields show the report's dates; typing makes them this
     // session's custom dates.
     if let Some(r) = s.shown_dates()
@@ -429,5 +435,4 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
                 .italics(),
         );
     }
-    let _ = egui::Id::NULL;
 }

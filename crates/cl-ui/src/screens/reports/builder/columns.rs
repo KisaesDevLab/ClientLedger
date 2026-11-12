@@ -85,7 +85,10 @@ fn compare(
     c: &cl_model::report_def::Columns,
     rule: Availability,
 ) {
-    ui.label(RichText::new(t("builder.columns.compare")).strong());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(t("builder.columns.compare")).strong());
+        ui.label(RichText::new(t("builder.columns.compare_up_to")).size(12.0));
+    });
     for (i, set) in c.compare.iter().enumerate() {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             let bases = [CompareBase::PriorPeriod, CompareBase::PriorYear];
@@ -142,7 +145,12 @@ fn compare(
         // added above it (AC6).
         let r = ui
             .push_id(("compare-add", s.id.0), |ui| {
-                ui.add_enabled(on, egui::Button::new(t("builder.columns.add_compare")))
+                let key = if c.compare.is_empty() {
+                    "builder.columns.add_compare"
+                } else {
+                    "builder.columns.add_compare_second"
+                };
+                ui.add_enabled(on, egui::Button::new(t(key)))
             })
             .inner;
         let r = match greyed(rule) {
@@ -190,9 +198,14 @@ fn percent_of(
             a(Availability::Available),
         ),
     ];
+    // A row's total, as drawn: "Income (total)".
     choices.extend(money.iter().map(|id| {
         (
-            super::outline::caption_of(s, id),
+            format!(
+                "{} {}",
+                super::outline::caption_of(s, id),
+                t("builder.formula.total")
+            ),
             a(Availability::Available),
         )
     }));
@@ -201,10 +214,11 @@ fn percent_of(
         Some("section") => Some(1),
         Some(id) => money.iter().position(|m| m == id).map(|p| p + 2),
     };
-    if let Some(i) = picker::pick(
+    if let Some(i) = picker::pick_tip(
         ui,
         ("pct", s.id.0),
         &t("builder.columns.percent"),
+        Some(&t("builder.columns.percent_tip")),
         &choices,
         at,
         220.0,
@@ -235,7 +249,7 @@ fn detail_fields(
                 ("max", &limits::DETAIL_FIELDS.to_string()),
             ],
         ))
-        .size(11.0)
+        .size(12.0)
         .color(tokens.text_secondary),
     );
     let chosen = &def.columns.detail_fields;

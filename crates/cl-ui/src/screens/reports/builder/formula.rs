@@ -45,6 +45,11 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, f: &Form
                 next = Some(n);
             }
             ui.label(&caption);
+            ui.label(
+                RichText::new(t("builder.formula.total"))
+                    .size(12.0)
+                    .color(tokens.text_tertiary),
+            );
             let x = ui.small_button("\u{d7}");
             let name = t_with("builder.formula.remove", &[("row", &caption)]);
             x.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
@@ -84,10 +89,13 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, f: &Form
             next = Some(n);
         }
     }
-    ui.label(
-        RichText::new(t("builder.formula.hint"))
-            .size(11.0)
-            .color(tokens.text_secondary),
+    ui.add(
+        egui::Label::new(
+            RichText::new(t("builder.formula.hint"))
+                .size(12.0)
+                .color(tokens.text_tertiary),
+        )
+        .wrap(),
     );
     if let Some(n) = next {
         s.apply(Op::Edit(Node::Formula(n)));

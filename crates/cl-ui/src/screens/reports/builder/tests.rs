@@ -1236,3 +1236,104 @@ fn an_untouched_customize_of_a_memorized_standard_report_is_clean() {
         "a standard row's kind can't change"
     );
 }
+
+/// H1: the panes reflow at narrow widths and at 200% zoom (README rule 6):
+/// side by side, the preview below, or all stacked; Guided moves its
+/// preview below the steps.
+#[test]
+fn the_panes_reflow_on_a_narrow_window() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    let ctx = themed();
+    for (w, h, want) in [
+        (1400.0, 900.0, "wide"),
+        (760.0, 640.0, "preview_below"),
+        (480.0, 320.0, "stacked"),
+    ] {
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    time: Some(1.0),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(w, h),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    s.ui(ui);
+                },
+            );
+            out.textures_delta.clear();
+        }
+        assert_eq!(s.state()["layout"], want, "{w}x{h}");
+    }
+    let (_d, _l, mut g) = editor(BuilderSeed::Guided);
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(480.0, 320.0),
+            )),
+            ..Default::default()
+        },
+        |ui| g.ui(ui),
+    );
+    out.textures_delta.clear();
+    assert_eq!(g.state()["layout"], "stacked");
+}
+
+/// Not covered by the review: Guided Done → Memorize → close asks nothing;
+/// a later answer is a change Save changes keeps on the same report (no
+/// "name taken" on its own name).
+#[test]
+fn guided_done_memorize_then_close_is_clean_and_saves_in_place() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Guided);
+    let ctx = themed();
+    if let Some(g) = s.guided.as_mut() {
+        g.set_source(cl_model::report_def::SourceKey::ArOpen);
+    }
+    s.guided_changed();
+    for _ in 0..4 {
+        s.command(CommandId::new("builder.guided_next"));
+    }
+    assert!(Screen::dirty(&s), "a guided report not yet saved");
+    memorize_as(&ctx, &mut s, "Who owes me");
+    assert!(s.ed.saved().is_some(), "{:?}", s.save.memorize);
+    assert!(!Screen::dirty(&s), "closing asks nothing");
+    let id = s.ed.saved().map(|x| x.id.clone());
+    if let Some(g) = s.guided.as_mut() {
+        g.name = "Who owes me now".into();
+    }
+    s.guided_changed();
+    assert!(Screen::dirty(&s) && s.ed.can_save_changes());
+    assert!(!Screen::save(&mut s));
+    frames(&ctx, &mut s);
+    assert!(!Screen::dirty(&s), "saved in place: {:?}", s.status);
+    assert_eq!(s.ed.saved().map(|x| x.id.clone()), id, "the same report");
+}
+/// Plan §3.4 (review "not covered"): an underlined amount in the preview
+/// drills as in A07: a subtotal's detail tab under the preview's run.
+#[test]
+fn a_preview_amount_drills_to_its_detail_tab() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    settle(&ctx, &mut s, 1.0);
+    let table = s.preview.table.clone().expect("a preview");
+    let d = table
+        .rows
+        .iter()
+        .find_map(|r| match &r.drill {
+            Some(d @ cl_core::report::Drill::BuilderDetail { .. }) => Some(d.clone()),
+            _ => None,
+        })
+        .expect("a line with its transactions behind it");
+    let _ = link.drain();
+    super::preview::drill(&mut s, &d);
+    let opened = link.drain().into_iter().any(|e| {
+        matches!(e, CompanyEvent::OpenWith(_, p) if matches!(*p, OpenPayload::BuilderDetail(_)))
+    });
+    assert!(opened, "the detail tab opened");
+    assert_eq!(s.preview.drill_note, None);
+}

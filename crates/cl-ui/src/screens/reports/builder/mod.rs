@@ -192,6 +192,45 @@ pub(crate) enum FieldKey {
     GuidedName,
 }
 
+/// The outline's width (mockup 240–250).
+const OUTLINE_W: f32 = 248.0;
+/// The properties' width (mockup 300–320).
+const PROPS_W: f32 = 312.0;
+/// The preview's least width beside the other panes.
+const PREVIEW_MIN: f32 = 360.0;
+
+/// How the panes are laid out (H1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Layout {
+    /// Side by side.
+    Wide,
+    /// Outline and properties side by side, the preview below.
+    PreviewBelow,
+    /// One above the other, scrolling.
+    Stacked,
+}
+
+impl Layout {
+    /// The layout for `width` points.
+    pub(crate) fn for_width(width: f32) -> Layout {
+        if width >= OUTLINE_W + PROPS_W + PREVIEW_MIN + 24.0 {
+            Layout::Wide
+        } else if width >= OUTLINE_W + 280.0 + 12.0 {
+            Layout::PreviewBelow
+        } else {
+            Layout::Stacked
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Layout::Wide => "wide",
+            Layout::PreviewBelow => "preview_below",
+            Layout::Stacked => "stacked",
+        }
+    }
+}
+
 /// The three panes F6 moves between (Q-A08d).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Pane {
@@ -280,6 +319,15 @@ pub struct BuilderScreen {
     pub(crate) lists: lists::Lists,
     pub(crate) save: save::SaveState,
     pub(crate) preview: preview::Preview,
+    /// The panes' layout last frame (the control channel).
+    pub(crate) layout: Layout,
+    /// The ready-made reports (`/starters`), once read.
+    pub(crate) starters: Option<Vec<cl_api::resources::report_builder::Starter>>,
+    starters_job: Option<Job<Vec<cl_api::resources::report_builder::Starter>>>,
+    /// Guided's "Start from a ready-made report" list is open.
+    pub(crate) starter_menu: bool,
+    /// The list just opened: its first choice takes the keyboard.
+    pub(crate) starter_menu_new: bool,
 }
 
 impl BuilderScreen {
@@ -332,6 +380,11 @@ impl BuilderScreen {
             lists: lists::Lists::default(),
             save: save::SaveState::default(),
             preview: preview::Preview::default(),
+            layout: Layout::Wide,
+            starters: None,
+            starters_job: None,
+            starter_menu: false,
+            starter_menu_new: false,
         }
     }
 
@@ -556,9 +609,40 @@ impl BuilderScreen {
             .unwrap_or_default();
         if let Some(def) = g.to_definition(&caption) {
             let name = g.name.clone();
-            self.ed = BuilderEditor::new(def, &name, Origin::Guided, None);
+            // A guided report memorized from Done keeps its row: a later
+            // answer is a change to it, never a new report (no "name taken"
+            // on its own name).
+            let saved = self.ed.saved().cloned();
+            let origin = self.ed.origin().clone();
+            let group = self.ed.group_id().map(str::to_string);
+            self.ed = BuilderEditor::new(def, &name, origin, saved);
+            if group.as_deref() != self.ed.group_id() {
+                let _ = self.ed.apply(Op::MemorizedGroup(group));
+            }
             self.preview.edited(&self.ed);
         }
+    }
+
+    /// Reads the ready-made reports once.
+    pub(crate) fn load_starters(&mut self) {
+        if self.starters.is_some() || self.starters_job.is_some() {
+            return;
+        }
+        self.starters_job = Some(engine::read(
+            &self.link,
+            self.group.as_ref(),
+            |_| crate::company::demo::report_builder::starters(),
+            |s| async move { s.report_builder().starters().await },
+        ));
+    }
+
+    /// A ready-made report opens in Advanced (Guided's list).
+    pub(crate) fn open_starter(&mut self, key: String, def: BuilderDefinition, title: String) {
+        self.seed(BuilderSeed::Starter {
+            key,
+            def: Box::new(def),
+            title,
+        });
     }
 
     /// Guided's "Open in Advanced": the answers become the report, one
@@ -680,6 +764,83 @@ impl BuilderScreen {
         }
     }
 
+    /// The three panes, laid out for the room there is (UI review H1,
+    /// docs/design README rule 6): side by side when the preview keeps
+    /// `PREVIEW_MIN`; the outline and properties above the preview when
+    /// only they fit side by side; else all three stacked, scrolling (the
+    /// minimum window at 200% zoom).
+    fn panes(&mut self, ui: &mut Ui, tokens: &Tokens, room: f32) {
+        // The window's width, taken before the toolbar and band drew (a
+        // wide row there must not widen the panes).
+        let w = ui.available_width().min(room);
+        let h = ui.available_height();
+        let layout = Layout::for_width(w);
+        self.layout = layout;
+        let pane = |ui: &mut Ui, size: egui::Vec2, f: &mut dyn FnMut(&mut Ui)| {
+            ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_min_size(size);
+                ui.set_max_size(size);
+                f(ui);
+            });
+        };
+        match layout {
+            Layout::Wide => {
+                ui.horizontal_top(|ui| {
+                    ui.set_min_height(h);
+                    pane(ui, egui::vec2(OUTLINE_W, h), &mut |ui| {
+                        outline::draw(self, ui, tokens);
+                    });
+                    ui.separator();
+                    pane(ui, egui::vec2(PROPS_W, h), &mut |ui| {
+                        properties::draw(self, ui, tokens);
+                    });
+                    ui.separator();
+                    let rest = ui.available_width();
+                    pane(ui, egui::vec2(rest, h), &mut |ui| {
+                        preview::draw(self, ui, tokens);
+                    });
+                });
+            }
+            Layout::PreviewBelow => {
+                let top = (h * 0.55).max(240.0);
+                ui.horizontal_top(|ui| {
+                    pane(ui, egui::vec2(OUTLINE_W, top), &mut |ui| {
+                        outline::draw(self, ui, tokens);
+                    });
+                    ui.separator();
+                    let rest = ui.available_width();
+                    pane(ui, egui::vec2(rest, top), &mut |ui| {
+                        properties::draw(self, ui, tokens);
+                    });
+                });
+                ui.separator();
+                let below = ui.available_height().max(200.0);
+                pane(ui, egui::vec2(w, below), &mut |ui| {
+                    preview::draw(self, ui, tokens);
+                });
+            }
+            Layout::Stacked => {
+                egui::ScrollArea::vertical()
+                    .id_salt(("builder-stacked", self.id.0))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let w = ui.available_width();
+                        pane(ui, egui::vec2(w, 300.0), &mut |ui| {
+                            outline::draw(self, ui, tokens);
+                        });
+                        ui.separator();
+                        pane(ui, egui::vec2(w, 420.0), &mut |ui| {
+                            properties::draw(self, ui, tokens);
+                        });
+                        ui.separator();
+                        pane(ui, egui::vec2(w, 420.0), &mut |ui| {
+                            preview::draw(self, ui, tokens);
+                        });
+                    });
+            }
+        }
+    }
+
     /// Moves focus to the next or previous pane (F6 / Shift+F6).
     fn cycle_pane(&mut self, forward: bool) {
         let at = Pane::ALL.iter().position(|p| *p == self.pane).unwrap_or(0);
@@ -729,6 +890,11 @@ impl BuilderScreen {
             }
             self.preview.edited(&self.ed);
         }
+        if let Some(r) = engine::poll(&mut self.starters_job) {
+            // An engine without starters: the list is empty and the button
+            // says why.
+            self.starters = Some(r.unwrap_or_default());
+        }
         self.lists.poll();
         save::poll(self);
     }
@@ -745,6 +911,7 @@ impl BuilderScreen {
             "selected": self.ed.selection(),
             "tab": format!("{:?}", self.tab).to_lowercase(),
             "pane": self.pane.name(),
+            "layout": self.layout.name(),
             "outline_focused": self.outline_focused,
             "dirty": self.ed.dirty(),
             "can_run": self.ed.can_run(),
@@ -804,12 +971,17 @@ impl Screen for BuilderScreen {
         }
         self.poll();
         let tokens = Tokens::of(ui.ctx());
-        if self.preview.busy() || self.save.busy() || self.fiscal_job.is_some() || self.lists.busy()
+        if self.preview.busy()
+            || self.save.busy()
+            || self.fiscal_job.is_some()
+            || self.lists.busy()
+            || self.starters_job.is_some()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
         preview::tick(self, ui);
+        let room = ui.available_width();
         let was_guided = self.guided.is_some();
         if self.guided.is_some() {
             guided::draw(self, ui, &tokens);
@@ -817,27 +989,7 @@ impl Screen for BuilderScreen {
             chrome::toolbar(self, ui, &tokens);
             chrome::band(self, ui, &tokens);
             ui.separator();
-            let h = ui.available_height();
-            ui.horizontal_top(|ui| {
-                ui.set_min_height(h);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(248.0, h),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| outline::draw(self, ui, &tokens),
-                );
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(312.0, h),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| properties::draw(self, ui, &tokens),
-                );
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), h),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| preview::draw(self, ui, &tokens),
-                );
-            });
+            self.panes(ui, &tokens, room);
         }
         save::dialogs(self, ui, &tokens);
         // A switch between Guided and Advanced moves the keyboard on the
@@ -850,10 +1002,9 @@ impl Screen for BuilderScreen {
     }
 
     fn dirty(&self) -> bool {
-        match &self.guided {
-            Some(g) => g.source.is_some(),
-            None => self.ed.dirty(),
-        }
+        // Guided builds into the editor: the same rule (a memorized guided
+        // report is clean until the next answer).
+        self.ed.dirty()
     }
 
     fn can_save(&self) -> bool {

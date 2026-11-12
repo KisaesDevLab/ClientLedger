@@ -15,8 +15,59 @@ use super::{BuilderScreen, FieldKey, PRESETS, preset_name};
 use crate::i18n::t;
 use crate::screens::company::form;
 use crate::theme::Tokens;
-use crate::widgets::primary_button;
 use crate::windows::Screen;
+
+/// Guided's main buttons are at least 44 points tall (the mockup's
+/// touch-size buttons).
+const TALL: f32 = 44.0;
+
+/// Transaction columns (when a line is opened): chips with ✕ and "+ Add"
+/// (UI review M4).
+fn detail_chips(s: &mut BuilderScreen, ui: &mut Ui, g: &GuidedState) {
+    picker::caption(ui, &t("builder.guided.detail"));
+    let mut next = None;
+    ui.horizontal_wrapped(|ui| {
+        for (i, f) in g.detail_fields.iter().enumerate() {
+            let name = t(&format!("reports.builder.field.{f}"));
+            let r = ui.button(format!("{name} \u{d7}"));
+            let label = crate::i18n::t_with("builder.filter.remove_value", &[("value", &name)]);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+            if r.clicked() {
+                let mut v = g.detail_fields.clone();
+                v.remove(i);
+                next = Some(v);
+            }
+        }
+    });
+    let left: Vec<&str> = fields::DETAIL_FIELDS
+        .iter()
+        .copied()
+        .filter(|f| *f != "running_balance" && !g.detail_fields.iter().any(|x| x == f))
+        .collect();
+    if g.detail_fields.len() < limits::DETAIL_FIELDS && !left.is_empty() {
+        let mut choices: Vec<Choice> = vec![picker::on(t("builder.guided.detail_add"))];
+        choices.extend(
+            left.iter()
+                .map(|f| picker::on(t(&format!("reports.builder.field.{f}")))),
+        );
+        if let Some(k) = picker::pick(
+            ui,
+            ("g-detail", s.id.0),
+            &t("builder.guided.detail_add_label"),
+            &choices,
+            Some(0),
+            200.0,
+        ) && k > 0
+        {
+            let mut v = g.detail_fields.clone();
+            v.push(left[k - 1].to_string());
+            next = Some(v);
+        }
+    }
+    if let Some(v) = next {
+        change(s, |g| g.detail_fields = v);
+    }
+}
 
 const fn step_key(s: Step) -> &'static str {
     match s {
@@ -38,11 +89,73 @@ const fn question_key(s: Step) -> &'static str {
     }
 }
 
-/// The Guided screen: steps on the left, the preview on the right.
+/// The Guided screen: steps on the left, the preview on the right; on a
+/// narrow window (or at 200% zoom) the preview moves below the steps (H1).
 pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
-    ui.horizontal(|ui| {
+    toolbar(s, ui);
+    if s.starter_menu {
+        starter_menu(s, ui);
+    }
+    ui.separator();
+    let w = ui.available_width();
+    let h = ui.available_height();
+    if w >= 760.0 {
+        s.layout = super::Layout::Wide;
+        ui.horizontal_top(|ui| {
+            let left = (w * 0.58).clamp(380.0, w - 340.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(left, h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("guided", s.id.0))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| steps(s, ui, tokens));
+                },
+            );
+            ui.separator();
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| super::preview::draw(s, ui, tokens),
+            );
+        });
+    } else {
+        s.layout = super::Layout::Stacked;
+        egui::ScrollArea::vertical()
+            .id_salt(("guided", s.id.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                steps(s, ui, tokens);
+                ui.separator();
+                let w = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(w, 420.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_size(egui::vec2(w, 420.0));
+                        super::preview::draw(s, ui, tokens);
+                    },
+                );
+            });
+    }
+}
+
+/// "New report", Start from a ready-made report ▾, Blank report in
+/// Advanced, and Switch to Advanced at the right (UI review M3).
+fn toolbar(s: &mut BuilderScreen, ui: &mut Ui) {
+    ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(t("builder.guided.title")).strong());
         ui.separator();
+        let ready = s.starters.as_ref().is_none_or(|l| !l.is_empty());
+        let r = ui
+            .add_enabled(ready, egui::Button::new(t("builder.guided.ready_made")))
+            .on_disabled_hover_text(t("builder.guided.no_starters"));
+        if r.clicked() {
+            s.starter_menu = !s.starter_menu;
+            s.starter_menu_new = s.starter_menu;
+            s.load_starters();
+        }
         if ui.button(t("builder.guided.blank_advanced")).clicked() {
             s.guided = None;
             s.ed = cl_model::report_def::editor::BuilderEditor::blank();
@@ -50,32 +163,53 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.pane = Pane::Outline;
             s.focus_to = Some(Pane::Outline);
         }
-        if ui.button(t("builder.guided.switch")).clicked() {
-            s.open_in_advanced();
-        }
-    });
-    ui.separator();
-    let h = ui.available_height();
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2((ui.available_width() * 0.58).max(420.0), h),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt(("guided", s.id.0))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| steps(s, ui, tokens));
-            },
-        );
-        ui.separator();
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), h),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| super::preview::draw(s, ui, tokens),
-        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(t("builder.guided.switch")).clicked() {
+                s.open_in_advanced();
+            }
+        });
     });
 }
 
+/// The ready-made reports: one opens in Advanced. The first takes the
+/// keyboard; Esc closes the list.
+fn starter_menu(s: &mut BuilderScreen, ui: &mut Ui) {
+    let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let Some(list) = s.starters.clone() else {
+        form::progress_line(
+            ui,
+            &Tokens::of(ui.ctx()),
+            &t("builder.guided.loading_starters"),
+        );
+        return;
+    };
+    let mut pick = None;
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (n, st) in list.iter().enumerate() {
+                let r = ui.button(&st.title);
+                if n == 0 && s.starter_menu_new {
+                    r.request_focus();
+                }
+                if r.clicked() {
+                    pick = Some(st.clone());
+                }
+            }
+        });
+    });
+    s.starter_menu_new = false;
+    if let Some(st) = pick {
+        close = true;
+        let text = serde_json::to_string(&st.definition).unwrap_or_default();
+        match cl_model::report_def::parse(&text) {
+            Ok(def) => s.open_starter(st.key, def, st.title),
+            Err(_) => s.status = Some(t("reports.builder.unreadable")),
+        }
+    }
+    if close {
+        s.starter_menu = false;
+    }
+}
 fn steps(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let Some(g) = s.guided.clone() else {
         return;
@@ -327,7 +461,9 @@ fn body(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, step: Step) {
             }
             if let Some(v) = picker::check(ui, g.percent_of_total, &t("builder.guided.percent")) {
                 change(s, |g| g.percent_of_total = v);
+                return;
             }
+            detail_chips(s, ui, &g);
         }
         Step::Dates => {
             let mut choices: Vec<Choice> = PRESETS
@@ -353,12 +489,19 @@ fn body(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, step: Step) {
                 change(s, |g| g.preset = preset.map(|p| preset_name(p).to_string()));
                 return;
             }
+            // From/To (As of): this session's dates, as in Advanced's band
+            // (Q-A08q), shown under the date choice (UI review M5).
+            ui.horizontal_wrapped(|ui| super::chrome::from_to(s, ui));
+            if g.open_items() {
+                form::inline_note(ui, tokens, &t("builder.guided.open_items_basis"));
+            }
             let basis = match g.basis {
                 Some(cl_core::report::Basis::Accrual) => 0,
                 Some(cl_core::report::Basis::Cash) => 1,
                 None => 2,
             };
-            picker::caption(ui, &t("builder.band.basis"));
+            picker::caption(ui, &t("builder.band.basis"))
+                .on_hover_text(t("builder.band.basis_tip"));
             if let Some(i) = picker::segmented(
                 ui,
                 &t("builder.band.basis"),
@@ -388,16 +531,42 @@ fn body(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, step: Step) {
                 &name,
                 320.0,
             );
-            ui.horizontal(|ui| {
-                if primary_button(ui, &t("builder.toolbar.run_report")).clicked() {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().interact_size.y = TALL;
+                let run = ui.add(
+                    egui::Button::new(
+                        RichText::new(t("builder.toolbar.run_report"))
+                            .strong()
+                            .color(tokens.on_accent),
+                    )
+                    .fill(tokens.accent)
+                    .min_size(egui::vec2(0.0, TALL)),
+                );
+                if run.clicked() {
                     s.commit_pending();
                     s.run_report();
                 }
-                if ui.button(t("builder.toolbar.memorize")).clicked() {
+                let memo = ui
+                    .horizontal(|ui| {
+                        let r = ui.add(
+                            egui::Button::new(t("builder.toolbar.memorize"))
+                                .min_size(egui::vec2(0.0, TALL)),
+                        );
+                        crate::widgets::kbd(ui, "Ctrl M");
+                        r
+                    })
+                    .inner;
+                if memo.clicked() {
                     s.commit_pending();
                     super::save::open_memorize(s, false);
                 }
-                if ui.button(t("builder.guided.open_advanced")).clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(t("builder.guided.open_advanced"))
+                            .min_size(egui::vec2(0.0, TALL)),
+                    )
+                    .clicked()
+                {
                     s.open_in_advanced();
                 }
             });
@@ -418,13 +587,23 @@ fn nav(s: &mut BuilderScreen, ui: &mut Ui, step: Step) {
     ui.horizontal(|ui| {
         let back = ui.add_enabled(
             step != Step::Source,
-            egui::Button::new(t("builder.guided.back")),
+            egui::Button::new(t("builder.guided.back")).min_size(egui::vec2(0.0, TALL)),
         );
         if back.clicked() {
             s.command(cl_model::CommandId::new("builder.guided_back"));
         }
         crate::widgets::kbd(ui, "Alt B");
-        let next = ui.add_enabled(complete, egui::Button::new(t("builder.guided.next")));
+        let tokens = Tokens::of(ui.ctx());
+        let next = ui.add_enabled(
+            complete,
+            egui::Button::new(
+                RichText::new(t("builder.guided.next"))
+                    .strong()
+                    .color(tokens.on_accent),
+            )
+            .fill(tokens.accent)
+            .min_size(egui::vec2(0.0, TALL)),
+        );
         let next = next.on_disabled_hover_text(t("builder.guided.answer_first"));
         if next.clicked() {
             s.command(cl_model::CommandId::new("builder.guided_next"));

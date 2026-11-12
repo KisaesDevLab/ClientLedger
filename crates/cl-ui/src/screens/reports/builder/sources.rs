@@ -314,7 +314,17 @@ fn filter_row(
         );
         let list = s.lists.get(which).cloned().unwrap_or_default();
         if ids.len() >= limits::IDS {
-            ui.label(RichText::new(t("builder.filter.ids_full")).size(11.0));
+            crate::screens::company::form::inline_note(
+                ui,
+                &Tokens::of(ui.ctx()),
+                &crate::i18n::t_with(
+                    "builder.filter.ids_full",
+                    &[
+                        ("n", &ids.len().to_string()),
+                        ("max", &limits::IDS.to_string()),
+                    ],
+                ),
+            );
         } else {
             let left: Vec<&(String, String)> =
                 list.iter().filter(|(x, _)| !ids.contains(x)).collect();
@@ -445,7 +455,7 @@ fn group_bys(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, sec: &Section)
         let mut choices: Vec<Choice> = vec![picker::on(t(if slot == 0 {
             "builder.group.none_first"
         } else {
-            "builder.group.none"
+            "builder.group.then_optional"
         }))];
         choices.extend(all.iter().map(|(k, a)| {
             let a = if used.contains(k) {
