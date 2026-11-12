@@ -47,6 +47,8 @@ steps:
   # --- A detail line opens its form -------------------------------------------
   - click: {role: link, index: 0}
   - wait: {ms: 600}
+  # The transaction's own form opened (an income line's invoice).
+  - assert_state: {key: screen.screen, equals: create_invoice}
   - command: file.close_window
   - wait: {ms: 300}
   - command: file.close_window
