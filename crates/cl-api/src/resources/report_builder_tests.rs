@@ -21,18 +21,18 @@ fn sample(name: &str) -> Value {
         "balance_sheet_cash" => {
             include_str!("../../tests/fixtures/report_builder/balance_sheet_cash.json")
         }
-        "transaction_detail_by_account" => include_str!(
-            "../../tests/fixtures/report_builder/transaction_detail_by_account.json"
-        ),
+        "transaction_detail_by_account" => {
+            include_str!("../../tests/fixtures/report_builder/transaction_detail_by_account.json")
+        }
         "run_detail_page" => {
             include_str!("../../tests/fixtures/report_builder/run_detail_page.json")
         }
         "expandable_open" => {
             include_str!("../../tests/fixtures/report_builder/expandable_open.json")
         }
-        "profit_loss_compare_prior_year" => include_str!(
-            "../../tests/fixtures/report_builder/profit_loss_compare_prior_year.json"
-        ),
+        "profit_loss_compare_prior_year" => {
+            include_str!("../../tests/fixtures/report_builder/profit_loss_compare_prior_year.json")
+        }
         "denied_section" => include_str!("../../tests/fixtures/report_builder/denied_section.json"),
         other => panic!("no sample {other}"),
     };
@@ -177,7 +177,12 @@ fn compare_columns_change_and_percent() {
     let keys: Vec<&str> = t.columns.iter().map(|c| c.key.as_str()).collect();
     assert_eq!(
         keys,
-        ["total", "total:c0", "total:c0:change", "total:c0:pct_change"]
+        [
+            "total",
+            "total:c0",
+            "total:c0:change",
+            "total:c0:pct_change"
+        ]
     );
     assert_eq!(
         t.columns[1].range,
@@ -392,7 +397,10 @@ fn anything_off_contract_is_a_shape_error() {
     );
     let mut v = sample("transaction_detail_by_account");
     v["columns"][0]["field"] = json!("mood");
-    assert!(matches!(read_run(&v, None), Err(ApiError::ReportShape { .. })));
+    assert!(matches!(
+        read_run(&v, None),
+        Err(ApiError::ReportShape { .. })
+    ));
     let r = run("transaction_detail_by_account");
     let mut v = sample("run_detail_page");
     v["subtotal"] = json!(["45.0000"]);

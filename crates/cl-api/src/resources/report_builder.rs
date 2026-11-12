@@ -469,12 +469,12 @@ fn column_range(v: Option<&Value>) -> Result<Option<DateRange>, ApiError> {
 fn field_kind(field: &str) -> Result<ColumnKind, ApiError> {
     Ok(match field {
         "date" | "due_date" | "service_date" => ColumnKind::Date,
-        "debit" | "credit" | "amount" | "running_balance" | "open_balance"
-        | "original_amount" | "unit_price" => ColumnKind::Amount,
+        "debit" | "credit" | "amount" | "running_balance" | "open_balance" | "original_amount"
+        | "unit_price" => ColumnKind::Amount,
         "quantity" => ColumnKind::Quantity,
         "days_past_due" => ColumnKind::Count,
-        "txn_type" | "number" | "contact" | "memo" | "description" | "account" | "item"
-        | "tag" | "cleared" | "aging_bucket" => ColumnKind::Text,
+        "txn_type" | "number" | "contact" | "memo" | "description" | "account" | "item" | "tag"
+        | "cleared" | "aging_bucket" => ColumnKind::Text,
         _ => return Err(shape("detail field")),
     })
 }
@@ -677,7 +677,12 @@ fn caption_of(kind: RowKind, wire_kind: &str, caption: Option<&str>) -> String {
     }
 }
 
-fn row(r: &Value, cols: &[ColumnHead], layout: &ColumnLayout, lens: Lens) -> Result<ReportRow, ApiError> {
+fn row(
+    r: &Value,
+    cols: &[ColumnHead],
+    layout: &ColumnLayout,
+    lens: Lens,
+) -> Result<ReportRow, ApiError> {
     let wire_kind = r.get("kind").and_then(Value::as_str).unwrap_or("");
     let kind = row_kind(wire_kind)?;
     let node_id = r
