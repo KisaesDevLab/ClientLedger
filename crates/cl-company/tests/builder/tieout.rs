@@ -521,9 +521,9 @@ async fn check_register(s: &Session, st: &Starter, bank: AccountId, number: &str
     assert_eq!((dr, cr), (dep, pay), "check register {number}: lines");
 }
 
-/// An open-items detail starter: the total, each client's or vendor's
-/// open amount (when `by_name`), and the open amounts line for line.
-async fn open_items(s: &Session, st: &Starter, std_key: &str, at: CalendarDate, by_name: bool) {
+/// An open-items detail starter: the total and the open amounts line for
+/// line.
+async fn open_items(s: &Session, st: &Starter, std_key: &str, at: CalendarDate) {
     let what = format!("{} {at}", st.key);
     let (_, std) = standard(s, std_key, |o| o.dates = DateChoice::AsOf(at)).await;
     let t = builder_run(s, st, RunDates::as_of(at), Vec::new(), Basis::Accrual).await;
@@ -557,14 +557,38 @@ async fn open_items(s: &Session, st: &Starter, std_key: &str, at: CalendarDate, 
         amount(&grand.cells[open]),
         "{what}: total"
     );
-    if by_name {
-        let got = builder_lines(&t, &[total]);
-        let mut want = Lines::new();
-        for r in std.rows.iter().filter(|r| r.kind == RowKind::Detail) {
-            add(&mut want, key(&r.caption), vec![amount(&r.cells[open])]);
-        }
-        assert_eq!(got, drop_zero(want), "{what}: by name, both ways");
-    }
+}
+
+/// An open-items starter grouped by name: each name's open amount and the
+/// total equal the balance summary's (zero names hidden on both sides).
+async fn open_by_name(s: &Session, st: &Starter, std_key: &str, at: CalendarDate) {
+    let what = format!("{} {at}", st.key);
+    let (_, std) = standard(s, std_key, |o| o.dates = DateChoice::AsOf(at)).await;
+    let t = builder_run(s, st, RunDates::as_of(at), Vec::new(), Basis::Accrual).await;
+    let total = col(&t, "total");
+    let balance = col(&std, "balance");
+    let got = builder_lines(&t, &[total]);
+    assert!(!got.is_empty(), "{what}: names");
+    assert_eq!(
+        got,
+        std_lines(&std, &[balance]),
+        "{what}: by name, both ways"
+    );
+    let node = t
+        .rows
+        .iter()
+        .find(|r| r.kind == RowKind::Total)
+        .unwrap_or_else(|| panic!("{what}: a total"));
+    let grand = std
+        .rows
+        .iter()
+        .rfind(|r| r.kind == RowKind::Grand)
+        .unwrap_or_else(|| panic!("{what}: a grand total"));
+    assert_eq!(
+        amount(&node.cells[total]),
+        amount(&grand.cells[balance]),
+        "{what}: total"
+    );
 }
 
 /// The detail of `drill` paged to the end (waiting out the rate limit):
@@ -683,25 +707,45 @@ async fn drills_sum_to_their_cells(s: &Session, list: &[Starter]) {
                 continue;
             };
             let (rows, subtotal) = page_all(s, &reference, &run, drill).await;
-            for &c in &cols {
-                assert_eq!(
-                    subtotal[c], row.cells[c],
-                    "{}: {} subtotal ({})",
-                    st.key, row.caption, run.table.columns[c].key
-                );
-                let sum: Decimal = rows
-                    .iter()
+            let sum = |c: usize| -> Decimal {
+                rows.iter()
                     .filter(|x| x.kind == RowKind::Detail)
                     .map(|x| amount(&x.cells[c]))
-                    .sum();
+                    .sum()
+            };
+            let mut seen = Vec::new();
+            for &c in &cols {
+                let key = &run.table.columns[c].key;
                 assert_eq!(
-                    sum,
-                    amount(&row.cells[c]),
-                    "{}: {} lines sum ({})",
-                    st.key,
-                    row.caption,
-                    run.table.columns[c].key
+                    subtotal[c], row.cells[c],
+                    "{}: {} subtotal ({key})",
+                    st.key, row.caption
                 );
+                // A Trial Balance line shows its net on one side; its lines
+                // carry both: debits less credits is the comparison.
+                if let Some(base) = key.strip_suffix("debit") {
+                    let credit = cols
+                        .iter()
+                        .copied()
+                        .find(|&k| run.table.columns[k].key == format!("{base}credit"))
+                        .unwrap_or_else(|| panic!("{key} has its credit column"));
+                    seen.push(credit);
+                    assert_eq!(
+                        sum(c) - sum(credit),
+                        amount(&row.cells[c]) - amount(&row.cells[credit]),
+                        "{}: {} lines net ({key})",
+                        st.key,
+                        row.caption
+                    );
+                } else if !seen.contains(&c) {
+                    assert_eq!(
+                        sum(c),
+                        amount(&row.cells[c]),
+                        "{}: {} lines sum ({key})",
+                        st.key,
+                        row.caption
+                    );
+                }
             }
             drilled += 1;
         }
@@ -820,14 +864,23 @@ pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
             .await;
             tied.insert(st.key.as_str());
         }
-        for (key, by_name) in [
-            ("ar_aging_detail", false),
-            ("ap_aging_detail", false),
-            ("open_invoices", true),
-            ("unpaid_bills", true),
+        // Open Invoices and Unpaid Bills list every open A/R or A/P item,
+        // as the agings do; the standard lists list invoice and bill
+        // documents only (on the golden company most open items are
+        // journal entries), so they tie by name (Q-A07u(8)).
+        for key in ["ar_aging_detail", "ap_aging_detail"] {
+            let st = starter(&list, key);
+            open_items(s, st, key, at).await;
+            tied.insert(st.key.as_str());
+        }
+        // Grouped by name with zero names hidden: each name's open amount
+        // is the balance summary's.
+        for (key, std_key) in [
+            ("open_invoices", "customer_balance_summary"),
+            ("unpaid_bills", "vendor_balance_summary"),
         ] {
             let st = starter(&list, key);
-            open_items(s, st, key, at, by_name).await;
+            open_by_name(s, st, std_key, at).await;
             tied.insert(st.key.as_str());
         }
     }
