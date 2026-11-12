@@ -3,29 +3,32 @@
 //! in milliseconds, and performs the [`Effect`]s it returns.
 //!
 //! ```text
-//! Empty -> Running{gen, open} -> Shown | Failed | TimedOut | Unavailable(cap)
-//! Shown|Running --expand(p)/collapse(p)--> pending open updated;
-//!     Running{gen+1, cumulative open} (debounced 150 ms)
+//! Empty -> Running{gen} -> Shown | Failed | TimedOut | Unavailable(cap)
+//! Shown|Running --expand(p)/collapse(p)--> shown set updated at once;
+//!     open/collapsed lists updated; Running{gen+1} (debounced 150 ms)
 //!   collapse also hides p's rows at once and cancels any Paging under p
 //! Running(gen) superseded --> request cancelled (one in-flight run)
 //! Shown --More(p)--> Paging{gen, p, cursor} -> rows replace the More row;
 //!   dropped if p closed or gen changed
 //!   409 RUN_CHANGED -> banner (books) | rerun (params)
-//! Running failed/timed out after expand --> keep last table, revert open,
-//!   "Try again"
+//! Running failed/timed out after expand --> keep last table, revert the
+//!   lists and the shown set, "Try again"
 //! Rerun with same stamp --> re-request loaded pages per path
 //! definitionId 409 STALE_VERSION --> reload definition, rerun; 404 --> deleted
-//! Expand all --> openAll; Collapse all --> open = []
+//! Expand all --> expandAll; Collapse all --> open = [], collapsed = shown
 //! ```
 //!
-//! The client's open set is authoritative: rows the engine sends under a
-//! path the set doesn't hold are hidden ([`BuilderRunState::hidden`]).
+//! The engine expands a row when `expandAll` is set, its path is in `open`,
+//! or its section has `defaultExpanded` and the path is not in `collapsed`
+//! (engine PR-C, Q-A07r). The window keeps the two lists it sends and takes
+//! the engine's `expanded` rows as the shown open set after every run.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use cl_core::report::{Cell, RowPath};
 
-/// Open paths an explicit run request may carry (the engine's cap).
+/// Paths each run-request list (`open`, `collapsed`) may carry (the
+/// engine's cap).
 pub const MAX_OPEN_PATHS: usize = 1_000;
 
 /// The debounce between an expand or collapse and the run it causes.
@@ -108,22 +111,24 @@ pub enum Banner {
     TryAgain,
     /// It took too long ("Try fewer months or add a filter").
     TookTooLong,
-    /// More than 1,000 parts were open; some were closed (Q-A07r).
+    /// More than 1,000 parts were opened or closed by hand; some were left
+    /// as the report's default (Q-A07r).
     TooManyOpen,
 }
 
 /// What the window must do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
-    /// Run generation `generation` with these open paths (`None`: the sections'
-    /// defaults, first run only) or everything open.
+    /// Run generation `generation` with these lists.
     Run {
         /// The generation the answer must carry.
         generation: u64,
-        /// Open paths.
-        open: Option<Vec<RowPath>>,
+        /// Paths opened by hand (≤ 1,000).
+        open: Vec<RowPath>,
+        /// Paths closed under a `defaultExpanded` section (≤ 1,000).
+        collapsed: Vec<RowPath>,
         /// Expand all.
-        open_all: bool,
+        expand_all: bool,
     },
     /// Cancel the request of generation `generation` (one in flight per window).
     Cancel {
@@ -138,8 +143,8 @@ pub enum Effect {
         node_id: String,
         /// The path.
         path: RowPath,
-        /// The cursor.
-        cursor: String,
+        /// The cursor (`None`: from the start).
+        cursor: Option<String>,
     },
     /// After a rerun on the same stamp: load `pages` pages under `path`
     /// again, so "Load more" isn't lost.
@@ -161,25 +166,34 @@ struct Paging {
     path: RowPath,
 }
 
+/// The two lists a run sends.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Lists {
+    open: BTreeSet<RowPath>,
+    collapsed: BTreeSet<RowPath>,
+}
+
 /// The builder window's run state.
 #[derive(Clone, Debug)]
 pub struct BuilderRunState {
     phase: Phase,
     generation: u64,
     in_flight: Option<u64>,
-    /// The open set of the table shown (authoritative once shown).
-    open: BTreeSet<RowPath>,
+    /// The open set of the table shown (the engine's `expanded` rows).
+    shown: BTreeSet<RowPath>,
     /// The open set asked for and not yet shown: shown at once (collapse
     /// hides rows immediately), sent when the debounce ends.
     pending: Option<BTreeSet<RowPath>>,
-    /// The open set of the run in flight (kept on success, reverted on
-    /// failure).
-    asked: Option<BTreeSet<RowPath>>,
+    /// The lists the next run sends.
+    lists: Lists,
+    /// The lists of the last run shown (restored when a run fails).
+    committed: Lists,
+    /// The lists of the run in flight.
+    asked: Option<Lists>,
     due_at: Option<u64>,
-    open_all: bool,
-    first_run: bool,
+    expand_all: bool,
     has_table: bool,
-    stamp: Option<String>,
+    stamp: Option<u64>,
     paging: Option<Paging>,
     pages: BTreeMap<RowPath, usize>,
     banner: Option<Banner>,
@@ -191,6 +205,19 @@ impl Default for BuilderRunState {
     }
 }
 
+/// Keeps the first `MAX_OPEN_PATHS` paths in path order: `true` when some
+/// were cut.
+fn cap(set: &mut BTreeSet<RowPath>) -> bool {
+    if set.len() <= MAX_OPEN_PATHS {
+        return false;
+    }
+    *set = std::mem::take(set)
+        .into_iter()
+        .take(MAX_OPEN_PATHS)
+        .collect();
+    true
+}
+
 impl BuilderRunState {
     /// Nothing run yet.
     #[must_use]
@@ -199,12 +226,13 @@ impl BuilderRunState {
             phase: Phase::Empty,
             generation: 0,
             in_flight: None,
-            open: BTreeSet::new(),
+            shown: BTreeSet::new(),
             pending: None,
+            lists: Lists::default(),
+            committed: Lists::default(),
             asked: None,
             due_at: None,
-            open_all: false,
-            first_run: true,
+            expand_all: false,
             has_table: false,
             stamp: None,
             paging: None,
@@ -231,22 +259,28 @@ impl BuilderRunState {
         self.banner
     }
 
+    /// The ledger stamp of the table shown.
+    #[must_use]
+    pub const fn stamp(&self) -> Option<u64> {
+        self.stamp
+    }
+
     /// The open paths the screen follows (pending ones first).
     #[must_use]
     pub fn open_paths(&self) -> &BTreeSet<RowPath> {
-        self.pending.as_ref().unwrap_or(&self.open)
+        self.pending.as_ref().unwrap_or(&self.shown)
     }
 
     /// Everything is open.
     #[must_use]
     pub const fn is_open_all(&self) -> bool {
-        self.open_all
+        self.expand_all
     }
 
     /// True when `path` is open.
     #[must_use]
     pub fn is_open(&self, path: &RowPath) -> bool {
-        self.open_all || self.open_paths().contains(path)
+        self.expand_all || self.open_paths().contains(path)
     }
 
     /// A page is being fetched under `path`.
@@ -255,23 +289,28 @@ impl BuilderRunState {
         self.paging.as_ref().is_some_and(|p| &p.path == path)
     }
 
-    /// Which rows to hide: each row whose path lies under an expandable
-    /// row's path that isn't open. `rows` is (path, expandable) in table
-    /// order.
+    /// Which rows to hide. `rows` is (path, expandable, leaf) in table
+    /// order, where a leaf is a detail, opening or `more` row: the engine
+    /// gives those their line's path. A row hides when an expandable row
+    /// whose path is a proper prefix of its own is closed, and a leaf also
+    /// when its own line is closed.
     #[must_use]
-    pub fn hidden(&self, rows: &[(RowPath, bool)]) -> Vec<bool> {
-        if self.open_all {
+    pub fn hidden(&self, rows: &[(RowPath, bool, bool)]) -> Vec<bool> {
+        if self.expand_all {
             return vec![false; rows.len()];
         }
-        // One set lookup per proper prefix: linear in the rows (up to
-        // 100,000 group rows, most of them closed at first).
+        // One set lookup per prefix: linear in the rows (up to 100,000
+        // group rows, most of them closed at first).
         let closed: std::collections::HashSet<&[String]> = rows
             .iter()
-            .filter(|(p, expandable)| *expandable && !self.is_open(p))
-            .map(|(p, _)| p.0.as_slice())
+            .filter(|(p, expandable, _)| *expandable && !self.is_open(p))
+            .map(|(p, _, _)| p.0.as_slice())
             .collect();
         rows.iter()
-            .map(|(p, _)| (1..p.0.len()).any(|k| closed.contains(&p.0[..k])))
+            .map(|(p, _, leaf)| {
+                let end = if *leaf { p.0.len() + 1 } else { p.0.len() };
+                (1..end).any(|k| closed.contains(&p.0[..k]))
+            })
             .collect()
     }
 
@@ -284,30 +323,20 @@ impl BuilderRunState {
         self.in_flight = Some(self.generation);
         self.paging = None;
         self.due_at = None;
-        let open = if self.first_run {
-            None
-        } else if self.open_all {
-            // Everything is open: the paths aren't sent (they may be more
-            // than an explicit list can carry).
-            Some(Vec::new())
-        } else {
-            let mut set = self.pending.clone().unwrap_or_else(|| self.open.clone());
-            if set.len() > MAX_OPEN_PATHS {
-                // An explicit list carries at most 1,000 paths (Q-A07r): the
-                // first ones in path order stay open, the rest close.
-                set = set.into_iter().take(MAX_OPEN_PATHS).collect();
-                self.pending = Some(set.clone());
-                self.banner = Some(Banner::TooManyOpen);
-            }
-            let list = set.iter().cloned().collect();
-            self.asked = Some(set);
-            Some(list)
-        };
+        // Each list carries at most 1,000 paths (Q-A07r): the first ones in
+        // path order are sent, the rest follow the report's default.
+        let cut_open = cap(&mut self.lists.open);
+        let cut_closed = cap(&mut self.lists.collapsed);
+        if cut_open || cut_closed {
+            self.banner = Some(Banner::TooManyOpen);
+        }
+        self.asked = Some(self.lists.clone());
         self.phase = Phase::Running;
         fx.push(Effect::Run {
             generation: self.generation,
-            open,
-            open_all: self.open_all,
+            open: self.lists.open.iter().cloned().collect(),
+            collapsed: self.lists.collapsed.iter().cloned().collect(),
+            expand_all: self.expand_all,
         });
         fx
     }
@@ -319,17 +348,25 @@ impl BuilderRunState {
     }
 
     fn toggle(&mut self, path: &RowPath, open: bool, now_ms: u64) -> Vec<Effect> {
-        let mut set = if self.open_all {
-            // Leaving "expand all": every path shown open stays open.
-            self.open_all = false;
-            self.open.clone()
-        } else {
-            self.open_paths().clone()
-        };
+        if self.expand_all {
+            // Leaving "expand all" (the engine ignores `collapsed` under
+            // it): every path shown open is listed as opened by hand.
+            self.expand_all = false;
+            self.lists.open = self.shown.clone();
+            self.lists.collapsed.clear();
+        }
+        let mut set = self.open_paths().clone();
         if open {
             set.insert(path.clone());
+            self.lists.open.insert(path.clone());
+            self.lists.collapsed.remove(path);
         } else {
-            set.retain(|p| p != path && !p.is_under(path));
+            let gone = |p: &RowPath| p == path || p.is_under(path);
+            set.retain(|p| !gone(p));
+            self.lists.open.retain(|p| !gone(p));
+            // `open` wins over `collapsed`, so a default-open path needs
+            // both changes.
+            self.lists.collapsed.insert(path.clone());
             if self
                 .paging
                 .as_ref()
@@ -337,7 +374,7 @@ impl BuilderRunState {
             {
                 self.paging = None;
             }
-            self.pages.retain(|p, _| p != path && !p.is_under(path));
+            self.pages.retain(|p, _| !gone(p));
         }
         self.pending = Some(set);
         self.due_at = Some(now_ms + DEBOUNCE_MS);
@@ -356,19 +393,21 @@ impl BuilderRunState {
         self.toggle(path, false, now_ms)
     }
 
-    /// Expand all: one run with `openAll` (bounded by the engine's caps).
+    /// Expand all: one run with `expandAll` (bounded by the engine's caps).
     pub fn expand_all(&mut self) -> Vec<Effect> {
-        self.open_all = true;
-        self.first_run = false;
+        self.expand_all = true;
         self.pending = None;
         self.next_run()
     }
 
-    /// Collapse all: `open = []`.
+    /// Collapse all: nothing opened by hand, every path shown open closed
+    /// (default-open sections too).
     pub fn collapse_all(&mut self) -> Vec<Effect> {
-        self.open_all = false;
-        self.first_run = false;
+        let shown = self.open_paths().clone();
+        self.expand_all = false;
         self.pages.clear();
+        self.lists.open.clear();
+        self.lists.collapsed.extend(shown);
         self.pending = Some(BTreeSet::new());
         self.next_run()
     }
@@ -376,40 +415,30 @@ impl BuilderRunState {
     /// Call each frame: sends the debounced run when it is due.
     pub fn tick(&mut self, now_ms: u64) -> Vec<Effect> {
         match self.due_at {
-            Some(t) if now_ms >= t => {
-                self.first_run = false;
-                self.next_run()
-            }
+            Some(t) if now_ms >= t => self.next_run(),
             _ => Vec::new(),
         }
     }
 
     /// The run of `generation` answered with `stamp` and the paths the
-    /// engine expanded (`defaultExpanded` on a first run, everything on an
-    /// expand-all run).
-    pub fn run_ok(&mut self, generation: u64, stamp: &str, opened: &[RowPath]) -> Vec<Effect> {
+    /// engine shows expanded: they are the open set from now on.
+    pub fn run_ok(&mut self, generation: u64, stamp: u64, expanded: &[RowPath]) -> Vec<Effect> {
         if generation != self.generation {
             return Vec::new(); // a superseded answer
         }
         self.in_flight = None;
-        // A first run (`open: null`) and an expand-all run learn the open
-        // set from the engine's `expanded` rows, so collapsing one line
-        // afterwards keeps the others open.
-        if self.first_run || self.open_all {
-            self.open = opened.iter().cloned().collect();
-            self.first_run = false;
-            self.asked = None;
-        } else if let Some(asked) = self.asked.take() {
-            self.open = asked;
+        if let Some(asked) = self.asked.take() {
+            self.committed = asked;
         }
+        self.shown = expanded.iter().cloned().collect();
         // An expand made while this ran stays pending (its run is due).
         if self.due_at.is_none() {
             self.pending = None;
         }
         self.phase = Phase::Shown;
         self.has_table = true;
-        let same_books = self.stamp.as_deref() == Some(stamp);
-        self.stamp = Some(stamp.to_string());
+        let same_books = self.stamp == Some(stamp);
+        self.stamp = Some(stamp);
         if !same_books {
             self.pages.clear();
             return Vec::new();
@@ -433,7 +462,9 @@ impl BuilderRunState {
         self.in_flight = None;
         self.asked = None;
         if self.due_at.is_none() {
-            self.pending = None; // revert the open set to the shown one
+            // Revert to the table shown and the lists that made it.
+            self.pending = None;
+            self.lists = self.committed.clone();
         }
         match why {
             Failure::StaleDefinition => {
@@ -464,8 +495,9 @@ impl BuilderRunState {
         self.next_run()
     }
 
-    /// "Load more" on a `more` row of `node_id` at `path`.
-    pub fn more(&mut self, node_id: &str, path: &RowPath, cursor: &str) -> Vec<Effect> {
+    /// "Load more" on a `more` row of `node_id` at `path` (`cursor`
+    /// `None`: from the start).
+    pub fn more(&mut self, node_id: &str, path: &RowPath, cursor: Option<&str>) -> Vec<Effect> {
         if self.phase != Phase::Shown || self.paging.is_some() {
             return Vec::new();
         }
@@ -477,7 +509,7 @@ impl BuilderRunState {
             generation: self.generation,
             node_id: node_id.to_string(),
             path: path.clone(),
-            cursor: cursor.to_string(),
+            cursor: cursor.map(str::to_string),
         }]
     }
 

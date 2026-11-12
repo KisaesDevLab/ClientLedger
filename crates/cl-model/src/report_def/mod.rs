@@ -8,6 +8,7 @@ pub mod fields;
 pub mod outline;
 pub mod run_state;
 pub mod schema;
+pub mod units;
 pub mod validate;
 
 pub use schema::{
@@ -15,6 +16,7 @@ pub use schema::{
     Earnings, Filter, FilterOp, Formula, Group, GroupBy, Measure, Node, Periods, Polarity, Section,
     SourceKey, Spacer, Term, TextRow, Unit,
 };
+pub use units::apply_units;
 pub use validate::{Code, Issue, NodeUnit, issues, node_units};
 
 /// The schema this build reads and writes.
