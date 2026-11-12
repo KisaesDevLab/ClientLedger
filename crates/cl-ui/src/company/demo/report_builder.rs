@@ -256,6 +256,16 @@ fn is_open(req: &RunRequest, section: &Value, path: &[String]) -> bool {
         || (section["defaultExpanded"] == true && !req.collapsed.iter().any(|c| c.0 == p))
 }
 
+/// The builder's type of `p`: a check is `check`, as the engine's
+/// builder sends it (run.ts `is_check`, A07 QA-2).
+fn builder_type(p: &Post) -> &str {
+    if p.is_check && p.txn_type == "expense" {
+        "check"
+    } else {
+        &p.txn_type
+    }
+}
+
 fn txn_label(t: &str) -> String {
     let mut s = t.replace('_', " ");
     if let Some(f) = s.get_mut(0..1) {
@@ -270,7 +280,7 @@ fn detail_cells(cols: &[Value], section: &Value, p: &Post) -> Vec<Value> {
     cols.iter()
         .map(|c| match c["field"].as_str() {
             Some("date") => json!(p.date.to_wire()),
-            Some("txn_type") => json!(txn_label(&p.txn_type)),
+            Some("txn_type") => json!(txn_label(builder_type(p))),
             Some("number") => json!(p.number),
             Some("contact") => p.contact.as_ref().map_or(Value::Null, |c| json!(c)),
             Some("memo") => json!(p.memo),
@@ -284,8 +294,8 @@ fn detail_row(cols: &[Value], section: &Value, path: &[String], p: &Post) -> Val
     json!({
         "kind": "detail", "nodeId": section["id"], "level": 2, "path": path,
         "caption": "", "cells": detail_cells(cols, section, p),
-        "fields": {"txnId": p.txn.to_string(), "txnType": p.txn_type, "lineId": format!("{}", p.line)},
-        "drill": {"type": "transaction", "txnId": p.txn.to_string(), "txnType": p.txn_type},
+        "fields": {"txnId": p.txn.to_string(), "txnType": builder_type(p), "lineId": format!("{}", p.line)},
+        "drill": {"type": "transaction", "txnId": p.txn.to_string(), "txnType": builder_type(p)},
         "expandable": false, "expanded": false
     })
 }
@@ -542,6 +552,28 @@ pub fn detail(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A07 QA-2 parity: a demo check is `check` in a builder row, as the
+    /// engine sends it; other expenses stay `expense`.
+    #[test]
+    fn checks_are_named_check_in_builder_rows() {
+        let mut d = DemoState::default();
+        let books = Books::load(&mut d);
+        let check = books
+            .posts
+            .iter()
+            .find(|p| p.is_check)
+            .expect("a demo check");
+        assert_eq!(builder_type(check), "check");
+        let row = detail_row(&[], &Value::Null, &[], check);
+        assert_eq!(row["drill"]["txnType"], "check");
+        assert!(
+            books
+                .posts
+                .iter()
+                .any(|p| !p.is_check && builder_type(p) == p.txn_type)
+        );
+    }
 
     #[test]
     fn the_demo_starters_are_valid_definitions() {
