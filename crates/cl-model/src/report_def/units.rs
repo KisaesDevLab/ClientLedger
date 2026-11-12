@@ -3,7 +3,9 @@
 //! amounts; the definition knows which sections count rows or items, so
 //! the window applies it here before showing the table.
 
-use cl_core::report::{Cell, ColumnKind, ReportTable};
+use std::collections::HashMap;
+
+use cl_core::report::{Cell, ColumnHead, ColumnKind, ReportRow, ReportTable};
 use rust_decimal::Decimal;
 
 use super::schema::{BuilderDefinition, Unit};
@@ -28,31 +30,64 @@ fn as_count(d: Decimal) -> Cell {
 /// and percents keep their own kinds; money, debit-credit and mixed rows
 /// stay amounts.
 pub fn apply_units(def: &BuilderDefinition, table: &mut ReportTable) {
-    let units = node_units(&def.nodes);
-    let value_cols: Vec<bool> = table
-        .columns
+    apply_units_to_rows(def, &table.columns, &mut table.rows);
+}
+
+fn value_columns(columns: &[ColumnHead]) -> Vec<bool> {
+    columns
         .iter()
         .map(|c| c.kind == ColumnKind::Amount && !c.key.starts_with("f:"))
-        .collect();
-    for row in &mut table.rows {
-        let unit = node_of(&row.path.0).and_then(|n| units.get(n)).copied();
-        let convert: fn(Decimal) -> Cell = match unit {
-            Some(NodeUnit::One(Unit::Count)) => as_count,
-            Some(NodeUnit::One(Unit::Quantity)) => Cell::Quantity,
-            _ => continue,
-        };
-        for (cell, is_value) in row.cells.iter_mut().zip(&value_cols) {
-            if let (true, Cell::Amount(d)) = (*is_value, &*cell) {
-                *cell = convert(*d);
-            }
+        .collect()
+}
+
+fn converter(units: &HashMap<String, NodeUnit>, node: Option<&str>) -> Option<fn(Decimal) -> Cell> {
+    match node.and_then(|n| units.get(n)) {
+        Some(NodeUnit::One(Unit::Count)) => Some(as_count),
+        Some(NodeUnit::One(Unit::Quantity)) => Some(Cell::Quantity),
+        _ => None,
+    }
+}
+
+fn convert_cells(cells: &mut [Cell], values: &[bool], convert: fn(Decimal) -> Cell) {
+    for (cell, is_value) in cells.iter_mut().zip(values) {
+        if let (true, Cell::Amount(d)) = (*is_value, &*cell) {
+            *cell = convert(*d);
         }
+    }
+}
+
+/// As [`apply_units`], for rows read against `columns` (a detail page).
+pub fn apply_units_to_rows(
+    def: &BuilderDefinition,
+    columns: &[ColumnHead],
+    rows: &mut [ReportRow],
+) {
+    let units = node_units(&def.nodes);
+    let values = value_columns(columns);
+    for row in rows {
+        if let Some(convert) = converter(&units, node_of(&row.path.0)) {
+            convert_cells(&mut row.cells, &values, convert);
+        }
+    }
+}
+
+/// As [`apply_units`], for a detail page's echoed subtotal of `node_id`.
+pub fn apply_units_to_cells(
+    def: &BuilderDefinition,
+    columns: &[ColumnHead],
+    node_id: &str,
+    cells: &mut [Cell],
+) {
+    let units = node_units(&def.nodes);
+    if let Some(convert) = converter(&units, Some(node_id)) {
+        convert_cells(cells, &value_columns(columns), convert);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cl_core::report::{ColumnHead, ReportRow, RowKind, RowPath};
+    use cl_core::report::{RowKind, RowPath};
 
     fn col(key: &str, kind: ColumnKind) -> ColumnHead {
         ColumnHead {
@@ -142,5 +177,14 @@ mod tests {
         assert_eq!(t.rows[0].cells[3], Cell::Percent(Some(d("50.0"))));
         assert_eq!(t.rows[1].cells[1], Cell::Quantity(d("2.5000")));
         assert_eq!(t.rows[2].cells[1], Cell::Amount(d("10.0000")));
+        // A detail page's echoed subtotal takes its node's unit.
+        let mut sub = vec![
+            Cell::Empty,
+            Cell::Amount(d("4.0000")),
+            Cell::Empty,
+            Cell::Percent(None),
+        ];
+        apply_units_to_cells(&def, &t.columns, "n", &mut sub);
+        assert_eq!(sub[1], Cell::Count(4));
     }
 }

@@ -481,19 +481,24 @@ fn field_kind(field: &str) -> Result<ColumnKind, ApiError> {
 
 /// One wire column: `None` for a `hidden` one.
 fn column(c: &Value) -> Result<Option<ColumnHead>, ApiError> {
+    let range = column_range(c.get("range"))?;
     let (kind, drill) = match c.get("kind").and_then(Value::as_str).unwrap_or("") {
         "hidden" => return Ok(None),
         "field" => (
             field_kind(c.get("field").and_then(Value::as_str).unwrap_or(""))?,
             None,
         ),
-        // Amounts with lines behind them: the row's drill narrowed to the
-        // column's dates.
-        "total" | "period" | "prior" | "total_debit" | "total_credit" | "period_debit"
-        | "period_credit" | "prior_debit" | "prior_credit" => (ColumnKind::Amount, None),
-        // A change has no lines of its own; an aging bucket's lines are the
-        // whole path's (the detail can't narrow to a bucket).
-        "change" | "bucket" => (ColumnKind::Amount, Some(ColumnDrill::None)),
+        // The total's lines are the run's.
+        "total" | "total_debit" | "total_credit" => (ColumnKind::Amount, None),
+        // A period column drills over its own dates; an as-of period has
+        // no full range the detail takes, so it doesn't drill (Q-A07s).
+        "period" | "period_debit" | "period_credit" if range.is_some() => {
+            (ColumnKind::Amount, None)
+        }
+        // Compare and change cells don't drill (plan §4), nor do aging
+        // buckets (the detail can't narrow to a bucket) or as-of periods.
+        "period" | "period_debit" | "period_credit" | "prior" | "prior_debit" | "prior_credit"
+        | "change" | "bucket" => (ColumnKind::Amount, Some(ColumnDrill::None)),
         "pct_change" | "percent" => (ColumnKind::Percent, Some(ColumnDrill::None)),
         _ => return Err(shape("column kind")),
     };
@@ -509,7 +514,7 @@ fn column(c: &Value) -> Result<Option<ColumnHead>, ApiError> {
             .unwrap_or_default()
             .to_string(),
         kind,
-        range: column_range(c.get("range"))?,
+        range,
         drill,
     }))
 }

@@ -114,6 +114,9 @@ pub enum Banner {
     /// More than 1,000 parts were opened or closed by hand; some were left
     /// as the report's default (Q-A07r).
     TooManyOpen,
+    /// The last expand would show over 100,000 rows; the table is the last
+    /// good one ("Add a filter or fewer group-bys").
+    TooLarge,
 }
 
 /// What the window must do.
@@ -166,11 +169,12 @@ struct Paging {
     path: RowPath,
 }
 
-/// The two lists a run sends.
+/// What a run sends about the open rows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Lists {
     open: BTreeSet<RowPath>,
     collapsed: BTreeSet<RowPath>,
+    expand_all: bool,
 }
 
 /// The builder window's run state.
@@ -191,7 +195,6 @@ pub struct BuilderRunState {
     /// The lists of the run in flight.
     asked: Option<Lists>,
     due_at: Option<u64>,
-    expand_all: bool,
     has_table: bool,
     stamp: Option<u64>,
     paging: Option<Paging>,
@@ -232,7 +235,6 @@ impl BuilderRunState {
             committed: Lists::default(),
             asked: None,
             due_at: None,
-            expand_all: false,
             has_table: false,
             stamp: None,
             paging: None,
@@ -274,13 +276,13 @@ impl BuilderRunState {
     /// Everything is open.
     #[must_use]
     pub const fn is_open_all(&self) -> bool {
-        self.expand_all
+        self.lists.expand_all
     }
 
     /// True when `path` is open.
     #[must_use]
     pub fn is_open(&self, path: &RowPath) -> bool {
-        self.expand_all || self.open_paths().contains(path)
+        self.lists.expand_all || self.open_paths().contains(path)
     }
 
     /// A page is being fetched under `path`.
@@ -296,7 +298,7 @@ impl BuilderRunState {
     /// when its own line is closed.
     #[must_use]
     pub fn hidden(&self, rows: &[(RowPath, bool, bool)]) -> Vec<bool> {
-        if self.expand_all {
+        if self.lists.expand_all {
             return vec![false; rows.len()];
         }
         // One set lookup per prefix: linear in the rows (up to 100,000
@@ -336,7 +338,7 @@ impl BuilderRunState {
             generation: self.generation,
             open: self.lists.open.iter().cloned().collect(),
             collapsed: self.lists.collapsed.iter().cloned().collect(),
-            expand_all: self.expand_all,
+            expand_all: self.lists.expand_all,
         });
         fx
     }
@@ -348,10 +350,10 @@ impl BuilderRunState {
     }
 
     fn toggle(&mut self, path: &RowPath, open: bool, now_ms: u64) -> Vec<Effect> {
-        if self.expand_all {
+        if self.lists.expand_all {
             // Leaving "expand all" (the engine ignores `collapsed` under
             // it): every path shown open is listed as opened by hand.
-            self.expand_all = false;
+            self.lists.expand_all = false;
             self.lists.open = self.shown.clone();
             self.lists.collapsed.clear();
         }
@@ -395,7 +397,7 @@ impl BuilderRunState {
 
     /// Expand all: one run with `expandAll` (bounded by the engine's caps).
     pub fn expand_all(&mut self) -> Vec<Effect> {
-        self.expand_all = true;
+        self.lists.expand_all = true;
         self.pending = None;
         self.next_run()
     }
@@ -404,7 +406,7 @@ impl BuilderRunState {
     /// (default-open sections too).
     pub fn collapse_all(&mut self) -> Vec<Effect> {
         let shown = self.open_paths().clone();
-        self.expand_all = false;
+        self.lists.expand_all = false;
         self.pages.clear();
         self.lists.open.clear();
         self.lists.collapsed.extend(shown);
@@ -472,6 +474,11 @@ impl BuilderRunState {
                 return vec![Effect::ReloadDefinition];
             }
             Failure::Deleted => self.phase = Phase::Deleted,
+            // Expand all is what usually trips the cap: keep the table.
+            Failure::TooLarge if self.has_table => {
+                self.phase = Phase::Shown;
+                self.banner = Some(Banner::TooLarge);
+            }
             Failure::TooLarge => self.phase = Phase::Unavailable(Cap::TooLarge),
             Failure::NeedsEngineUpdate => {
                 self.phase = Phase::Unavailable(Cap::NeedsEngineUpdate);

@@ -196,12 +196,20 @@ fn compare_columns_change_and_percent() {
     // A zero base has no percent.
     assert_eq!(t.rows[7].cells[3], Cell::Percent(None));
     let drill = t.rows[1].drill.clone().expect("drill");
-    // The prior amount drills over its own year; changes don't drill.
-    assert!(matches!(
-        drill.for_cell(&t.columns[1]),
-        Some(Drill::BuilderDetail { range: Some(rg), .. }) if rg.from == day(2025, 1, 1)
-    ));
+    // Compare and change cells don't drill (plan §4).
+    assert_eq!(drill.for_cell(&t.columns[1]), None);
     assert_eq!(drill.for_cell(&t.columns[2]), None);
+    // An as-of period column has no full range: it doesn't drill either.
+    let as_of = column(&json!({"key": "p1", "caption": "Mar", "kind": "period",
+                                "range": {"from": null, "to": "2026-03-31"}}))
+    .expect("column")
+    .expect("shown");
+    assert_eq!(drill.for_cell(&as_of), None);
+    let ranged = column(&json!({"key": "p1", "caption": "Mar", "kind": "period",
+                                 "range": {"from": "2026-03-01", "to": "2026-03-31"}}))
+    .expect("column")
+    .expect("shown");
+    assert!(drill.for_cell(&ranged).is_some());
     assert_eq!(drill.for_cell(&t.columns[3]), None);
 }
 

@@ -16,7 +16,7 @@ pub use schema::{
     Earnings, Filter, FilterOp, Formula, Group, GroupBy, Measure, Node, Periods, Polarity, Section,
     SourceKey, Spacer, Term, TextRow, Unit,
 };
-pub use units::apply_units;
+pub use units::{apply_units, apply_units_to_cells, apply_units_to_rows};
 pub use validate::{Code, Issue, NodeUnit, issues, node_units};
 
 /// The schema this build reads and writes.

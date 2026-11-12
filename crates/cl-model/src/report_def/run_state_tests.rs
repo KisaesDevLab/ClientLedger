@@ -60,7 +60,7 @@ fn expand_is_debounced_then_runs_with_the_paths_opened_by_hand() {
     assert!(!all);
     // The default-open line needs no entry.
     assert_eq!(open, [p(&["n:a", "account:2"]), p(&["n:b", "account:3"])]);
-    assert!(collapsed.is_empty());
+    assert_eq!(collapsed, Vec::<RowPath>::new());
     assert_eq!(s.phase(), Phase::Running);
     let now_open = [
         p(&["n:a", "account:1"]),
@@ -78,15 +78,15 @@ fn collapsing_a_default_open_line_lists_it_as_collapsed() {
     let line = p(&["n:a", "account:1"]);
     s.collapse(&line, 0);
     let (_, open, collapsed, _) = run_of(&s.tick(DEBOUNCE_MS)).expect("run");
-    assert!(open.is_empty());
-    assert_eq!(collapsed, [line.clone()]);
+    assert_eq!(open, Vec::<RowPath>::new());
+    assert_eq!(collapsed, std::slice::from_ref(&line));
     s.run_ok(2, 7, &[]);
     assert!(!s.is_open(&line));
     // Opening it again moves it back: `open` wins over `collapsed`.
     s.expand(&line, 1_000);
     let (_, open, collapsed, _) = run_of(&s.tick(1_000 + DEBOUNCE_MS)).expect("run");
     assert_eq!(open, [line]);
-    assert!(collapsed.is_empty());
+    assert_eq!(collapsed, Vec::<RowPath>::new());
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn a_failed_or_slow_run_after_expand_keeps_the_table_and_reverts_open() {
     assert!(!s.is_open(&extra), "reverted");
     // The lists are reverted too: the next run doesn't carry the path.
     let (_, open, _, _) = run_of(&s.refresh()).expect("run");
-    assert!(open.is_empty());
+    assert_eq!(open, Vec::<RowPath>::new());
     s.run_ok(3, 7, &[p(&["n:a", "account:1"])]);
     s.expand(&extra, 1_000);
     s.tick(1_000 + DEBOUNCE_MS);
@@ -236,7 +236,7 @@ fn a_rerun_on_the_same_stamp_reloads_the_pages_loaded() {
     s.page_ok(1, &line);
     s.expand(&p(&["n:b", "account:9"]), 0);
     s.tick(DEBOUNCE_MS);
-    let fx = s.run_ok(2, 7, &[line.clone()]);
+    let fx = s.run_ok(2, 7, std::slice::from_ref(&line));
     assert_eq!(
         fx,
         [Effect::Repage {
@@ -277,7 +277,7 @@ fn expand_all_and_collapse_all() {
     );
     let fx = s.collapse_all();
     let (_, open, collapsed, all) = run_of(&fx).expect("run");
-    assert!(open.is_empty());
+    assert_eq!(open, Vec::<RowPath>::new());
     // Everything shown open is closed, default-open sections included.
     assert_eq!(collapsed, [p(&["x"])]);
     assert!(!all);
@@ -383,7 +383,30 @@ fn collapse_all_over_a_thousand_default_open_lines_is_cut_and_says_so() {
         .collect();
     s.run_ok(1, 7, &many);
     let (_, open, collapsed, _) = run_of(&s.collapse_all()).expect("run");
-    assert!(open.is_empty());
+    assert_eq!(open, Vec::<RowPath>::new());
     assert_eq!(collapsed.len(), MAX_OPEN_PATHS);
     assert_eq!(s.banner(), Some(Banner::TooManyOpen));
+}
+
+#[test]
+fn a_failed_expand_all_reverts_the_flag_and_too_large_keeps_the_table() {
+    let mut s = shown();
+    s.expand_all();
+    s.run_failed(2, Failure::TooLarge);
+    assert_eq!(s.phase(), Phase::Shown, "the table on screen stays");
+    assert_eq!(s.banner(), Some(Banner::TooLarge));
+    assert!(!s.is_open_all(), "reverted");
+    assert!(
+        !run_of(&s.refresh()).expect("run").3,
+        "Refresh doesn't resend it"
+    );
+    s.run_ok(3, 7, &[]);
+    s.expand_all();
+    s.run_ok(4, 7, &[p(&["n:a", "account:1"]), p(&["n:a", "account:2"])]);
+    // A collapse after Expand all that fails goes back to Expand all.
+    s.collapse(&p(&["n:a", "account:2"]), 0);
+    s.tick(DEBOUNCE_MS);
+    s.run_failed(5, Failure::Other);
+    assert!(s.is_open_all());
+    assert!(run_of(&s.refresh()).expect("run").3);
 }
