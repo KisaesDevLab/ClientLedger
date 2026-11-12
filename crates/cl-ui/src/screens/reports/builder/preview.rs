@@ -561,6 +561,22 @@ fn header(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 
 const CAPTION_W: f32 = 260.0;
 const CELL_W: f32 = 96.0;
+/// The narrowest a caption gets before the table scrolls across.
+const CAPTION_MIN: f32 = 160.0;
+/// The narrowest an amount column gets: "-123,456.78" whole (QA-6).
+const CELL_MIN: f32 = 88.0;
+
+/// The caption and amount column widths for `cols` columns in `avail`
+/// points: the full widths when they fit; else the caption, then the
+/// columns narrow down to their least; past that the table scrolls across
+/// (QA-6: aging columns were cut mid-figure at the pane's edge).
+pub(crate) fn widths(avail: f32, cols: usize) -> (f32, f32) {
+    #[allow(clippy::cast_precision_loss, reason = "a few dozen columns at most")]
+    let n = cols.max(1) as f32;
+    let cap = (avail - n * CELL_MIN).clamp(CAPTION_MIN, CAPTION_W);
+    let cell = ((avail - cap) / n).clamp(CELL_MIN, CELL_W);
+    (cap, cell)
+}
 /// Every preview row is this tall: the rows are virtualized (R4).
 const ROW_H: f32 = 20.0;
 /// Opened-line detail rows: date · type · number · name · memo in the
@@ -611,8 +627,16 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
     if let Some(key) = s.preview.drill_note {
         form::inline_note(ui, tokens, &t(key));
     }
+    // Each column also takes the row's item spacing; room is kept for the
+    // vertical scroll bar at the right.
+    let gap = ui.spacing().item_spacing.x;
     #[allow(clippy::cast_precision_loss, reason = "a few dozen columns at most")]
-    let width = CAPTION_W + CELL_W * shown_cols.len() as f32;
+    let n = shown_cols.len() as f32;
+    let (cap_w, cell_w) = widths(
+        ui.available_width() - 16.0 - gap * (n + 2.0),
+        shown_cols.len(),
+    );
+    let width = cap_w + (cell_w + gap) * n + gap * 2.0;
     let rows_of: Vec<(RowPath, bool, bool)> = table
         .rows
         .iter()
@@ -632,6 +656,9 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
     let source = super::super::builder_ref::spec_for(s.ed.definition()).source;
     let mut acts = Vec::new();
     let total = visible.len() + usize::from(cut);
+    // Solid scroll bars: a table wider than the pane shows that it
+    // scrolls across, not only on hover (QA-6).
+    ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
     egui::ScrollArea::both()
         .id_salt(("builder-preview", s.id.0))
         .auto_shrink([false, false])
@@ -642,7 +669,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
             for k in range {
                 // Row 0: the headings (they scroll across with the figures).
                 if k == 0 {
-                    headings(s, ui, table, &shown_cols);
+                    headings(s, ui, table, &shown_cols, (cap_w, cell_w));
                     continue;
                 }
                 let Some(&i) = visible.get(k - 1) else {
@@ -715,7 +742,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                 let text = if strong { text.strong() } else { text };
                 // Captions start at the left, amounts end at the right
                 // (the mockup's statement layout).
-                let cw = (CAPTION_W - indent - 18.0).max(40.0);
+                let cw = (cap_w - indent - 18.0).max(40.0);
                 let l = row
                     .allocate_ui_with_layout(
                         egui::vec2(cw, ROW_H),
@@ -756,10 +783,10 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                     let rich = if dim { rich.color(ink) } else { rich };
                     let rich = if strong { rich.strong() } else { rich };
                     row.allocate_ui_with_layout(
-                        egui::vec2(CELL_W, ROW_H),
+                        egui::vec2(cell_w, ROW_H),
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            ui.set_min_width(CELL_W);
+                            ui.set_min_width(cell_w);
                             match drill {
                                 Some(d) => {
                                     let resp = ui.link(rich).on_hover_text(t("reports.drill.hint"));
@@ -789,10 +816,16 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
 }
 
 /// The column headings (a renamed header shows its new name).
-fn headings(s: &BuilderScreen, ui: &mut Ui, table: &ReportTable, shown_cols: &[usize]) {
+fn headings(
+    s: &BuilderScreen,
+    ui: &mut Ui,
+    table: &ReportTable,
+    shown_cols: &[usize],
+    (cap_w, cell_w): (f32, f32),
+) {
     ui.horizontal(|ui| {
         ui.set_height(ROW_H);
-        ui.add_sized([CAPTION_W, ROW_H], egui::Label::new(""));
+        ui.add_sized([cap_w, ROW_H], egui::Label::new(""));
         for &ci in shown_cols {
             let c = &table.columns[ci];
             let text =
@@ -804,7 +837,7 @@ fn headings(s: &BuilderScreen, ui: &mut Ui, table: &ReportTable, shown_cols: &[u
                     .unwrap_or_else(|| super::super::label(&c.caption));
             right(
                 ui,
-                CELL_W,
+                cell_w,
                 egui::Label::new(RichText::new(text).size(12.0).strong()).truncate(),
             );
         }

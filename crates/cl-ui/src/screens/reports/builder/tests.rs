@@ -1824,3 +1824,16 @@ fn a_report_memorized_here_does_not_say_it_started_from_one() {
     let memorized = crate::i18n::t("builder.origin.memorized");
     assert!(!text.contains(&memorized), "{text}");
 }
+
+/// QA-6: six aging columns fit the preview pane at 1440 wide (about 830
+/// points) whole; past the least widths the table scrolls instead.
+#[test]
+fn preview_columns_narrow_to_fit_before_they_scroll() {
+    let (cap, cell) = super::preview::widths(780.0, 6);
+    assert!(cap + 6.0 * cell <= 780.0 + 0.01, "{cap} {cell}");
+    assert!(cell >= 88.0, "a whole figure: {cell}");
+    // Plenty of room: the full widths.
+    assert_eq!(super::preview::widths(2000.0, 2), (260.0, 96.0));
+    // Too little: the least widths, and the table scrolls.
+    assert_eq!(super::preview::widths(300.0, 6), (160.0, 88.0));
+}
