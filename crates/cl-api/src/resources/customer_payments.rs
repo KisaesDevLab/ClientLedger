@@ -93,6 +93,16 @@ pub(crate) fn de_stored<'de, D: Deserializer<'de>>(d: D) -> Result<Money, D::Err
     Money::parse_wire(&s).map_err(|_| de::Error::custom("money"))
 }
 
+/// An optional stored money string; `null` or absent is `None`.
+pub(crate) fn de_stored_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Money>, D::Error> {
+    match Option::<String>::deserialize(d)? {
+        Some(s) => Money::parse_wire(&s)
+            .map(Some)
+            .map_err(|_| de::Error::custom("money")),
+        None => Ok(None),
+    }
+}
+
 pub(crate) fn ser_cents<S: Serializer>(m: &Money, s: S) -> Result<S::Ok, S::Error> {
     let w = cents_wire(*m).map_err(|_| serde::ser::Error::custom("money to the cent"))?;
     s.serialize_str(&w)

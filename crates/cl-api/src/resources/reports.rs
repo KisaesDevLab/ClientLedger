@@ -432,6 +432,28 @@ pub struct ArAgingCustomer {
     /// The total (exact string).
     #[serde(deserialize_with = "crate::resources::customer_payments::de_stored")]
     pub total: Money,
+    /// The client's exact buckets (each item's exact open amount; engine
+    /// PR-B, Q-A07c). Absent on engines before `report-foundations-v1`.
+    #[serde(default)]
+    pub buckets_exact: Option<crate::resources::customer_statements::AgingBuckets>,
+    /// The client's exact total (as `buckets_exact`).
+    #[serde(
+        default,
+        deserialize_with = "crate::resources::customer_payments::de_stored_opt"
+    )]
+    pub total_exact: Option<Money>,
+}
+
+impl ArAgingCustomer {
+    /// The buckets and total to show: the exact ones when the engine sends
+    /// them, else the legacy ones.
+    #[must_use]
+    pub fn shown(&self) -> (&crate::resources::customer_statements::AgingBuckets, Money) {
+        match (&self.buckets_exact, self.total_exact) {
+            (Some(b), Some(t)) => (b, t),
+            _ => (&self.buckets, self.total),
+        }
+    }
 }
 
 impl std::fmt::Debug for ArAgingCustomer {
