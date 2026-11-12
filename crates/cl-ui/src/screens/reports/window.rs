@@ -197,15 +197,8 @@ impl ReportWindow {
         today: CalendarDate,
     ) -> ReportWindow {
         let group = link.group().and_then(Result::ok);
-        let calendar = open
-            .as_ref()
-            .and_then(|(id, _)| {
-                link.store()
-                    .load()
-                    .ok()
-                    .and_then(|list| list.get(*id).map(|r| r.flags.fiscal_calendar))
-            })
-            .unwrap_or_default();
+        let calendar = company_calendar(&link, open.as_ref());
+
         let fiscal_job = Some(fiscal_read(&link, group.as_ref()));
         let tag_groups_job = Some(engine::read(
             &link,
@@ -1274,8 +1267,25 @@ fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
 /// The caption column's smallest width when the table must fit.
 const CAPTION_FIT_MIN: f32 = 120.0;
 
-/// The company's fiscal start month.
-fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
+/// The open company's fiscal calendar (4-4-5 and the like), kept on this
+/// computer (Q-P08c); the report window and the Report Builder editor read
+/// it the same way, so their runs match (A08 AC8).
+pub(super) fn company_calendar(
+    link: &CompanyLink,
+    open: Option<&(cl_core::ids::TenantId, String)>,
+) -> cl_settings::FiscalCalendar {
+    open.and_then(|(id, _)| {
+        link.store()
+            .load()
+            .ok()
+            .and_then(|list| list.get(*id).map(|r| r.flags.fiscal_calendar))
+    })
+    .unwrap_or_default()
+}
+
+/// The company's fiscal start month (the window and the A08 editor; the
+/// answer becomes a spec through `home::charts::spec(start, calendar)`).
+pub(super) fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
     engine::read(
         link,
         group,

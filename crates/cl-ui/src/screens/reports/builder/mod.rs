@@ -69,6 +69,10 @@ pub enum BuilderSeed {
 pub struct CustomizeSeed {
     /// The definition to edit.
     pub def: BuilderDefinition,
+    /// The Report name to start with (owner data): the memorized name, else
+    /// the window's report title. The editor makes it the definition's
+    /// title too (Q-A08r).
+    pub title: String,
     /// Where it started.
     pub origin: Origin,
     /// The memorized row, as re-read for this action (Q-A07u(1)).
@@ -125,6 +129,10 @@ pub struct BuilderScreen {
     link: Arc<CompanyLink>,
     #[allow(dead_code, reason = "A08 seam: WP-A2 resolves dates with it")]
     today: CalendarDate,
+    /// The open company (header name; the key of its fiscal calendar,
+    /// `window::company_calendar`).
+    #[allow(dead_code, reason = "A08 seam: WP-A2 reads the fiscal year with it")]
+    open: Option<(cl_core::ids::TenantId, String)>,
     id: EditorId,
     seed: Option<BuilderSeed>,
 }
@@ -132,10 +140,15 @@ pub struct BuilderScreen {
 impl BuilderScreen {
     /// A new editor (Guided until a payload says otherwise).
     #[must_use]
-    pub fn new(link: Arc<CompanyLink>, today: CalendarDate) -> BuilderScreen {
+    pub fn new(
+        link: Arc<CompanyLink>,
+        open: Option<(cl_core::ids::TenantId, String)>,
+        today: CalendarDate,
+    ) -> BuilderScreen {
         BuilderScreen {
             link,
             today,
+            open,
             id: EditorId::next(),
             seed: None,
         }
@@ -161,6 +174,13 @@ impl Screen for BuilderScreen {
         }
     }
 
+    fn state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "screen": "report_builder",
+            "editor": self.id.0,
+        })
+    }
+
     fn takes_in_place(&self, payload: &OpenPayload) -> bool {
         matches!(
             payload,
@@ -178,3 +198,6 @@ impl std::fmt::Debug for BuilderScreen {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests;

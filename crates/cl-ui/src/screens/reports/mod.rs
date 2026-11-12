@@ -83,6 +83,7 @@ pub fn make(
     if kind.as_str() == builder::KIND {
         return Some(Box::new(builder::BuilderScreen::new(
             Arc::clone(link),
+            open,
             today,
         )));
     }

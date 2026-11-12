@@ -870,6 +870,13 @@ impl Shell {
         self.apply_company_events(None);
     }
 
+    /// Applies what the company screens reported, without a frame (tests:
+    /// a screen's `OpenWith` reaching the shell).
+    #[cfg(test)]
+    pub(crate) fn apply_events_now(&mut self) {
+        self.apply_company_events(None);
+    }
+
     /// State of the window in front, for the control channel.
     #[must_use]
     pub fn active_screen_state(&self) -> serde_json::Value {

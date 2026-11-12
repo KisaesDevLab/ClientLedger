@@ -53,7 +53,11 @@ pub struct Saved {
     /// True when this user may change it (the engine's `canEdit`: the
     /// author, an owner or a super admin, Q-310).
     pub can_edit: bool,
-    /// The definition as saved (dirty compares with it).
+    /// The definition as saved (dirty compares with it). For a
+    /// [`SavedKind::Standard`] row, whose body is not a builder definition,
+    /// it is the mapped starter's definition the editor opened on (with the
+    /// row's dates and basis applied), so an untouched Customize is not
+    /// dirty; Save changes stays off for that kind.
     pub def: BuilderDefinition,
     /// The memorized name (owner data).
     pub name: String,
