@@ -60,6 +60,18 @@ pub struct EditorId(u64);
 /// Hands out [`EditorId`]s.
 static EDITORS: AtomicU64 = AtomicU64::new(1);
 
+/// The open editors' report titles, by company and editor (QA-2): two
+/// editors on the same title read "New report" and "New report 2" in their
+/// tabs, the sidebar and their result tabs.
+static OPEN_TITLES: std::sync::Mutex<Vec<(usize, u64, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// The open-titles list (a poisoned lock still holds the list).
+fn open_titles() -> std::sync::MutexGuard<'static, Vec<(usize, u64, String)>> {
+    OPEN_TITLES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl EditorId {
     /// A new editor's id.
     #[must_use]
@@ -773,7 +785,7 @@ impl BuilderScreen {
         let (_, options) = self.run_options();
         let open = super::builder_ref::BuilderRunOpen {
             editor: self.id,
-            title: self.report_title(),
+            title: self.shown_title(),
             def: self.ed.definition().clone(),
             options,
             saved: self.ed.saved().cloned(),
@@ -781,6 +793,28 @@ impl BuilderScreen {
             then,
         };
         super::builder_run::show_result(&self.link, open);
+    }
+
+    /// The report's title as its tab shows it: the title, numbered when an
+    /// earlier editor of this company has the same one ("New report 2",
+    /// QA-2).
+    pub(crate) fn shown_title(&self) -> String {
+        let base = self.report_title();
+        let company = Arc::as_ptr(&self.link) as usize;
+        let mut open = open_titles();
+        match open.iter_mut().find(|(_, id, _)| *id == self.id.0) {
+            Some(e) => e.2.clone_from(&base),
+            None => open.push((company, self.id.0, base.clone())),
+        }
+        let before = open
+            .iter()
+            .filter(|(c, id, t)| *c == company && *id < self.id.0 && *t == base)
+            .count();
+        if before == 0 {
+            base
+        } else {
+            format!("{base} {}", before + 1)
+        }
     }
 
     /// The report's title: its name, else "Report Builder".
@@ -990,7 +1024,7 @@ fn removed_text(r: cl_model::report_def::editor::Removed) -> String {
 
 impl Screen for BuilderScreen {
     fn title(&self) -> String {
-        t_with("builder.tab", &[("name", &self.report_title())])
+        t_with("builder.tab", &[("name", &self.shown_title())])
     }
 
     fn ui(&mut self, ui: &mut Ui) {
@@ -1229,6 +1263,12 @@ impl Screen for BuilderScreen {
             OpenPayload::BuilderEditor(seed)
                 if matches!(&**seed, BuilderSeed::Customize(c) if self.is_mine(c))
         )
+    }
+}
+
+impl Drop for BuilderScreen {
+    fn drop(&mut self) {
+        open_titles().retain(|(_, id, _)| *id != self.id.0);
     }
 }
 

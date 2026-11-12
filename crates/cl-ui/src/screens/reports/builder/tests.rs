@@ -1791,3 +1791,36 @@ fn an_open_report_window_lists_a_report_memorized_in_the_editor() {
     assert_eq!(w.memo.list.len(), before + 1);
     assert!(w.memo.list.iter().any(|r| r.name == "Listed at once"));
 }
+
+/// QA-2: two new editors read "New report" and "New report 2"; a closed
+/// one gives its title back; another company's editors don't count.
+#[test]
+fn two_editors_on_the_same_title_are_told_apart() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let first = BuilderScreen::new(Arc::clone(&link), None, today());
+    let second = BuilderScreen::new(Arc::clone(&link), None, today());
+    assert_eq!(first.shown_title(), "New report");
+    assert_eq!(second.shown_title(), "New report 2");
+    assert!(Screen::title(&second).ends_with("New report 2"));
+    drop(first);
+    assert_eq!(second.shown_title(), "New report");
+    let dir2 = tempfile::tempdir().expect("tmp");
+    let other = Arc::new(CompanyLink::demo(dir2.path()));
+    let third = BuilderScreen::new(other, None, today());
+    assert_eq!(third.shown_title(), "New report");
+}
+
+/// QA-2: after the first Memorize the hint says when it was saved, never
+/// that it started from a memorized report.
+#[test]
+fn a_report_memorized_here_does_not_say_it_started_from_one() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    memorize_as(&ctx, &mut s, "Mine");
+    assert!(s.ed.saved().is_some());
+    let (text, _) = super::chrome::hint_text(&s);
+    let memorized = crate::i18n::t("builder.origin.memorized");
+    assert!(!text.contains(&memorized), "{text}");
+}

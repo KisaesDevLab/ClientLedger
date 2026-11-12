@@ -189,6 +189,27 @@ fn origin_link(origin: &cl_model::report_def::editor::Origin) -> Option<(String,
 /// "Saved 9:38 AM · Author: Kurt · Started from Profit & Loss", or "Not
 /// saved yet"; then the status line.
 fn hint(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
+    let (text, link) = hint_text(s);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.label(RichText::new(text).size(12.0).color(tokens.text_secondary));
+        if let Some((title, payload)) = link {
+            let r = ui.link(RichText::new(title).size(12.0));
+            if r.on_hover_text(t("builder.hint.open_origin")).clicked() {
+                s.link.push(crate::company::CompanyEvent::OpenWith(
+                    cl_model::CommandId::new(super::super::KIND),
+                    Box::new(payload),
+                ));
+            }
+        }
+    });
+    if let Some(st) = &s.status {
+        ui.label(RichText::new(st).size(12.0).color(tokens.warn_text));
+    }
+}
+
+/// The hint line's text, and the report it started from as a link.
+pub(super) fn hint_text(s: &BuilderScreen) -> (String, Option<(String, OpenPayload)>) {
     let mut parts = Vec::new();
     match s.ed.saved() {
         Some(saved) => {
@@ -212,35 +233,26 @@ fn hint(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let origin = match s.ed.origin() {
         cl_model::report_def::editor::Origin::Blank => t("builder.origin.blank"),
         cl_model::report_def::editor::Origin::Guided => t("builder.origin.guided"),
-        cl_model::report_def::editor::Origin::Memorized => t("builder.origin.memorized"),
+        // A saved report's hint already says "Saved … · Author": a report
+        // memorized here never "started from a memorized report" (QA-2).
+        cl_model::report_def::editor::Origin::Memorized if s.ed.saved().is_none() => {
+            t("builder.origin.memorized")
+        }
         _ => String::new(),
     };
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let text = if link.is_some() {
-            format!(
-                "{} \u{b7} {}",
-                parts.join(" \u{b7} "),
-                t("builder.hint.started_link")
-            )
-        } else {
+    let text = if link.is_some() {
+        format!(
+            "{} \u{b7} {}",
+            parts.join(" \u{b7} "),
+            t("builder.hint.started_link")
+        )
+    } else {
+        if !origin.is_empty() {
             parts.push(t_with("builder.hint.started", &[("origin", &origin)]));
-            parts.join(" \u{b7} ")
-        };
-        ui.label(RichText::new(text).size(12.0).color(tokens.text_secondary));
-        if let Some((title, payload)) = link {
-            let r = ui.link(RichText::new(title).size(12.0));
-            if r.on_hover_text(t("builder.hint.open_origin")).clicked() {
-                s.link.push(crate::company::CompanyEvent::OpenWith(
-                    cl_model::CommandId::new(super::super::KIND),
-                    Box::new(payload),
-                ));
-            }
         }
-    });
-    if let Some(st) = &s.status {
-        ui.label(RichText::new(st).size(12.0).color(tokens.warn_text));
-    }
+        parts.join(" \u{b7} ")
+    };
+    (text, link)
 }
 
 /// The settings band.
