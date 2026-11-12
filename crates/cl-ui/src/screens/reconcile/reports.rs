@@ -186,26 +186,31 @@ pub(crate) fn report(r: &ReconReport, kind: Kind) -> Report {
                 heading: t("reconcile.col.date"),
                 share: 1.0,
                 right: false,
+                whole: false,
             },
             Column {
                 heading: t("reconcile.col.ref"),
                 share: 0.8,
                 right: false,
+                whole: false,
             },
             Column {
                 heading: t("reconcile.col.payee"),
                 share: 3.0,
                 right: false,
+                whole: false,
             },
             Column {
                 heading: t("reconcile.report.payment"),
                 share: 1.2,
                 right: true,
+                whole: false,
             },
             Column {
                 heading: t("reconcile.report.deposit"),
                 share: 1.2,
                 right: true,
+                whole: false,
             },
         ]
     };
@@ -481,26 +486,31 @@ pub(crate) fn discrepancy_doc(
                     heading: t("reconcile.discrepancy.col.what"),
                     share: 1.4,
                     right: false,
+                    whole: false,
                 },
                 Column {
                     heading: t("reconcile.discrepancy.col.date"),
                     share: 1.0,
                     right: false,
+                    whole: false,
                 },
                 Column {
                     heading: t("reconcile.discrepancy.col.payee"),
                     share: 2.4,
                     right: false,
+                    whole: false,
                 },
                 Column {
                     heading: t("reconcile.discrepancy.col.fields"),
                     share: 1.6,
                     right: false,
+                    whole: false,
                 },
                 Column {
                     heading: t("reconcile.discrepancy.col.effect"),
                     share: 1.0,
                     right: true,
+                    whole: false,
                 },
             ],
             rows,

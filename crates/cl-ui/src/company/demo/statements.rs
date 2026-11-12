@@ -292,11 +292,17 @@ pub fn ar_aging(state: &mut DemoState, as_of: CalendarDate) -> Result<ArAgingSum
     for c in clients {
         let mine: Vec<OpenItem> = items.iter().filter(|i| i.client == c).cloned().collect();
         let a = age(&mine, as_of);
+        // The demo's open items are exact already: the exact buckets are
+        // the same figures (engine PR-B sends both).
+        let buckets = a.buckets()?;
+        let total = money(a.total())?;
         customers.push(ArAgingCustomer {
             contact_id: Some(c),
             name: client_name(state, c),
-            buckets: a.buckets()?,
-            total: money(a.total())?,
+            buckets_exact: Some(buckets),
+            total_exact: Some(total),
+            buckets,
+            total,
         });
     }
     let all = age(&items, as_of);

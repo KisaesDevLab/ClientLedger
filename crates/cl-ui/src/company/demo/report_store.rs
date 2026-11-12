@@ -233,6 +233,11 @@ pub fn save_definition(
         if r.version != version {
             return Err(refusal(409, "STALE_VERSION"));
         }
+        // The engine refuses a kind change (report-definitions.service.ts):
+        // a builder report is never overwritten by a standard one (#3).
+        if r.kind != w.kind || r.definition["kind"] != w.definition["kind"] {
+            return Err(invalid());
+        }
         r.name = name.to_string();
         r.group_id.clone_from(&w.group_id);
         r.definition = w.definition.clone();

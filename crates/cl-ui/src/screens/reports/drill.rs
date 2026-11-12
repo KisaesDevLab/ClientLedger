@@ -26,6 +26,9 @@ pub(crate) fn form_of(txn_type: &str) -> Option<&'static str> {
         "customer_payment" => "clients.receive_payment",
         "bill" | "vendor_credit" => "vendors.enter_bill",
         "bill_payment" => "vendors.bill_payment",
+        // The Report Builder names a check (an `expense` with a print
+        // status) `check` (engine run.ts, A07 QA-2).
+        "check" => crate::screens::write_check::KIND,
         "transfer" => "banking.transfer",
         "journal_entry" => "company.journal_entry",
         _ => return None,
@@ -150,12 +153,23 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
                 options: Some(o),
             }))
         }
+        // Report Builder drills page the engine's detail inside the
+        // builder window (A07 WP2), never through a catalog report.
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. } => {
+            Target::Nothing("reports.drill.no_form")
+        }
     }
 }
 
 /// True when clicking `drill` shows something now: a form, or a report the
 /// engine can run. Amounts with a dead-end drill are drawn without a link.
 pub(crate) fn live(link: &crate::company::CompanyLink, source: Source, drill: &Drill) -> bool {
+    if matches!(
+        drill,
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. }
+    ) {
+        return true;
+    }
     match target(source, drill) {
         Target::Form(..) | Target::Probe(_) => true,
         Target::Report(open) => {
@@ -170,6 +184,13 @@ pub(crate) fn live(link: &crate::company::CompanyLink, source: Source, drill: &D
 /// Opens what `drill` points at.
 pub(super) fn open(w: &mut ReportWindow, drill: &Drill) {
     w.notice = None;
+    if matches!(
+        drill,
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. }
+    ) {
+        super::builder_run::drill(w, drill);
+        return;
+    }
     match target(w.spec.source, drill) {
         Target::Form(form, id) => w
             .link
@@ -397,5 +418,22 @@ mod tests {
             ),
             Target::Probe(_)
         ));
+    }
+
+    /// A07 QA-2: a builder detail row of type `check` opens Write Check
+    /// (it was drawn as plain text, with no form behind it).
+    #[test]
+    fn builder_check_rows_open_write_check() {
+        let id = TransactionId::parse("d0000000-0000-4000-8000-b00000000002").expect("id");
+        assert_eq!(
+            target(
+                Source::GeneralLedger,
+                &Drill::Transaction {
+                    id,
+                    txn_type: "check".into()
+                }
+            ),
+            Target::Form(crate::screens::write_check::KIND, id)
+        );
     }
 }

@@ -168,6 +168,22 @@ pub struct ReportWindow {
     pub(super) catalog_open: Option<bool>,
     pub(super) drill_error: Option<ApiError>,
     bus: crate::data_bus::Subscription,
+    /// A Report Builder report shown under the stand-in spec (A07).
+    pub(super) builder: Option<Box<super::builder_run::Builder>>,
+    /// The Report Builder starters (catalog column).
+    pub(super) starters: super::builder_run::Starters,
+    /// Which report is on screen: unique per window and per report shown
+    /// (A07 QA-7, QA-11). Scroll positions and the export message belong
+    /// to it, so a new report or a new tab opens at the top with no
+    /// "Saved ..." line from the report before.
+    pub(super) view: u64,
+}
+
+/// Hands out [`ReportWindow::view`] numbers.
+static VIEWS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_view() -> u64 {
+    VIEWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl ReportWindow {
@@ -250,6 +266,9 @@ impl ReportWindow {
             catalog_open: None,
             drill_error: None,
             bus: crate::data_bus::Subscription::detached(),
+            builder: None,
+            starters: super::builder_run::Starters::default(),
+            view: next_view(),
             link,
         };
         w.bus = w.link.bus().subscribe();
@@ -261,15 +280,26 @@ impl ReportWindow {
     /// Switches to `spec` with `options` (catalog click, drill-down,
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
+        self.new_view();
+        self.builder = None;
         self.spec = spec;
         self.options = options;
         self.table = None;
         self.error = None;
-        self.notice = None;
-        self.export.clear_message();
         self.filter_lists.sync(&self.options);
         self.memo.current = None;
         self.run();
+    }
+
+    /// Another report is shown in this window (standard, builder, detail):
+    /// it opens at the top, with none of the last report's messages
+    /// (A07 QA-7, QA-11). Every switch goes through here.
+    pub(crate) fn new_view(&mut self) {
+        self.view = next_view();
+        self.notice = None;
+        self.drill_error = None;
+        self.export.clear_message();
+        self.h_offset = 0.0;
     }
 
     /// New options: run again when the engine's answer would change;
@@ -365,6 +395,11 @@ impl ReportWindow {
         }
         if self.fiscal_job.is_some() {
             self.state = RunState::Empty;
+            return;
+        }
+        if self.builder.is_some() {
+            self.sync_dates();
+            super::builder_run::run(self);
             return;
         }
         if !available(&self.link, self.spec) {
@@ -486,6 +521,7 @@ impl ReportWindow {
                 }
             }
         }
+        super::builder_run::poll(self);
         super::filter_lists::poll(self);
         super::drill::poll_probe(self);
         super::memorized::poll(self);
@@ -520,6 +556,9 @@ impl ReportWindow {
         let Some(table) = &self.table else {
             return Vec::new();
         };
+        if let Some(b) = &self.builder {
+            return super::builder_run::shown_rows(b, table, self.table_serial);
+        }
         let mut rows = table.visible(&self.options.collapsed);
         // The tag split's account totals show only when asked for (Q-271).
         rows.retain(|&i| !cl_model::reports::hidden(&table.rows[i], &self.options));
@@ -548,8 +587,31 @@ impl ReportWindow {
         self.set_options(next);
     }
 
+    /// True when the Collapse button would expand everything instead (the
+    /// same test [`Self::toggle_collapse_all`] makes), so its label says
+    /// "Expand all" (A07 QA-9).
+    pub(crate) fn collapse_expands(&self) -> bool {
+        match &self.builder {
+            Some(b) => !super::builder_run::collapses(b),
+            None => !self.options.collapsed.is_empty(),
+        }
+    }
+
+    /// The Collapse button's label key.
+    pub(crate) fn collapse_label(&self) -> &'static str {
+        if self.collapse_expands() {
+            "reports.tool.expand_all"
+        } else {
+            "reports.tool.collapse"
+        }
+    }
+
     /// Collapse every expandable row, or expand all when any is collapsed.
     pub(crate) fn toggle_collapse_all(&mut self) {
+        if self.builder.is_some() {
+            super::builder_run::toggle_all(self);
+            return;
+        }
         let mut next = self.options.clone();
         if next.collapsed.is_empty() {
             next.collapsed = self
@@ -573,6 +635,14 @@ impl ReportWindow {
 
     /// The report's title as shown (the owner's rename first).
     pub(crate) fn title_text(&self) -> String {
+        if let Some(b) = &self.builder {
+            return self
+                .options
+                .header
+                .title
+                .clone()
+                .unwrap_or_else(|| b.title());
+        }
         self.options
             .header
             .title
@@ -778,6 +848,7 @@ impl ReportWindow {
         if let Some(p) = self.problem {
             form::inline_warning(ui, tokens, &t(p));
         }
+        super::builder_run::banner(self, ui, tokens);
         if let Some(e) = &self.error {
             form::inline_error_details(ui, tokens, e, "reports.run");
             if ui.button(t("reports.retry")).clicked() {
@@ -861,7 +932,7 @@ impl ReportWindow {
         let width_of = |ci: usize| widths.cells.get(ci).copied().unwrap_or(NUM_MIN);
         // The heading row follows the rows' horizontal scroll.
         egui::ScrollArea::horizontal()
-            .id_salt("report_heading")
+            .id_salt(("report_heading", self.view))
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .scroll_source(egui::scroll_area::ScrollSource::NONE)
             .horizontal_scroll_offset(self.h_offset)
@@ -891,7 +962,7 @@ impl ReportWindow {
         ui.separator();
         let collapsed = &self.options.collapsed;
         let out = egui::ScrollArea::both()
-            .id_salt("report_rows")
+            .id_salt(("report_rows", self.view))
             .auto_shrink([false, true])
             .show_rows(ui, ROW_H, rows.len(), |ui, range| {
                 for &i in &rows[range] {
@@ -900,7 +971,11 @@ impl ReportWindow {
                         ui.set_height(ROW_H);
                         let strong = matches!(
                             r.kind,
-                            RowKind::Header | RowKind::Total | RowKind::Grand | RowKind::Subtotal
+                            RowKind::Header
+                                | RowKind::Total
+                                | RowKind::Grand
+                                | RowKind::Subtotal
+                                | RowKind::Formula
                         );
                         fixed_box(
                             ui,
@@ -910,7 +985,10 @@ impl ReportWindow {
                                 ui.add_space(f32::from(r.level) * 16.0);
                                 let caption = self.caption_of(table, i);
                                 if r.expandable {
-                                    let open = !collapsed.contains(&r.path);
+                                    let open = match &self.builder {
+                                        Some(b) => b.state.is_open(&r.path),
+                                        None => !collapsed.contains(&r.path),
+                                    };
                                     let arrow = if open { "\u{2212}" } else { "+" };
                                     let key = if open {
                                         "reports.collapse_row"
@@ -929,6 +1007,15 @@ impl ReportWindow {
                                     if resp.clicked() {
                                         action = Some(GridAction::Collapse(r.path.clone()));
                                     }
+                                }
+                                // A capped path's `more` row pages the rest.
+                                if r.kind == RowKind::More
+                                    && let Some(d) = &r.drill
+                                {
+                                    if ui.button(label(&r.caption)).clicked() {
+                                        action = Some(GridAction::Drill(d.clone()));
+                                    }
+                                    return;
                                 }
                                 let text = RichText::new(caption);
                                 ui.add(
@@ -952,7 +1039,14 @@ impl ReportWindow {
                                 cell_text(cell, style)
                             };
                             cell_box(ui, width_of(ci), col.kind.is_numeric(), |ui| {
-                                let rich = RichText::new(&text).family(egui::FontFamily::Monospace);
+                                // Figures and dates in the figure font; names,
+                                // types and memos in the text font (A07 QA-6).
+                                let rich = RichText::new(&text);
+                                let rich = if matches!(cell, Cell::Text(_)) {
+                                    rich
+                                } else {
+                                    rich.family(egui::FontFamily::Monospace)
+                                };
                                 let rich = if strong { rich.strong() } else { rich };
                                 let drill = r
                                     .drill
@@ -1018,6 +1112,9 @@ impl ReportWindow {
         }
         self.h_offset = new_offset;
         match action {
+            Some(GridAction::Collapse(p)) if self.builder.is_some() => {
+                super::builder_run::toggle(self, &p, ui);
+            }
             Some(GridAction::Collapse(p)) => self.toggle_collapse(&p),
             Some(GridAction::Drill(d)) => super::drill::open(self, &d),
             Some(GridAction::Sort(ci)) => self.sort_by(ci),
@@ -1089,6 +1186,9 @@ impl ReportWindow {
             "columns": self.table.as_ref().map_or(0, |t| t.columns.len()),
             "column_keys": self.table.as_ref().map(|t| t.columns.iter().map(|c| c.key.clone()).collect::<Vec<_>>()),
             "collapsed": self.options.collapsed.len(),
+            // The Collapse button's label (A07 QA-9).
+            "collapse_label": if self.collapse_expands() { "expand_all" } else { "collapse" },
+            "message": self.export.message().is_some() || self.notice.is_some(),
             "basis": self.options.basis.map(cl_core::report::Basis::as_str),
             "columns_by": self.options.columns,
             "extras": self.options.extras.len(),
@@ -1104,6 +1204,7 @@ impl ReportWindow {
             "ask": self.ask.state_json(),
             "email": self.mailer.state_json(),
             "email_available": super::email::available(self),
+            "builder": self.builder.as_deref().map(|b| super::builder_run::state_json(b, self.table.as_ref())),
         })
     }
 }
@@ -1266,12 +1367,13 @@ impl Screen for ReportWindow {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
+        super::builder_run::tick(self, ui);
         if self.job.is_none() && !self.link.bus().take(&mut self.bus).is_empty() {
             self.run();
         }
         super::export::poll(self);
         egui::ScrollArea::vertical()
-            .id_salt("report_window")
+            .id_salt(("report_window", self.view))
             .show(ui, |ui| self.draw(ui));
         if self.job.is_some()
             || self.fiscal_job.is_some()
@@ -1282,6 +1384,8 @@ impl Screen for ReportWindow {
             || self.mailer.busy()
             || self.filter_lists.busy()
             || self.drill_job.is_some()
+            || self.builder.as_ref().is_some_and(|b| b.busy())
+            || self.starters.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1318,7 +1422,7 @@ impl Screen for ReportWindow {
                 true
             }
             "reports.memorize" => {
-                if super::memorized::available(&self.link) {
+                if super::memorized::available(&self.link) && self.builder.is_none() {
                     super::memorized::open_dialog(self);
                 }
                 true
@@ -1337,8 +1441,17 @@ impl Screen for ReportWindow {
     }
 
     fn open_with(&mut self, payload: OpenPayload) -> bool {
-        let OpenPayload::Report(open) = payload else {
-            return false;
+        let open = match payload {
+            OpenPayload::Report(open) => open,
+            OpenPayload::BuilderStarter(key) => {
+                super::builder_run::open_starter(self, &key);
+                return true;
+            }
+            OpenPayload::BuilderDetail(open) => {
+                super::builder_run::open_detail(self, *open);
+                return true;
+            }
+            _ => return false,
         };
         let ReportOpen { key, options } = *open;
         let Some(spec) = cl_model::reports::find(&key) else {

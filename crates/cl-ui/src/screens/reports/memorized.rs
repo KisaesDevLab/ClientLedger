@@ -61,6 +61,17 @@ pub(crate) struct Memo {
     reloading: bool,
 }
 
+#[cfg(test)]
+impl Dialog {
+    /// A dialog with `name` typed (tests).
+    pub(crate) fn named(name: &str) -> Dialog {
+        Dialog {
+            name: name.into(),
+            ..Dialog::default()
+        }
+    }
+}
+
 impl Memo {
     pub(crate) fn dialog_open(&self) -> bool {
         self.dialog.is_some()
@@ -183,7 +194,10 @@ fn remove(w: &mut ReportWindow) {
 
 /// Opens the dialog on the report shown (Ctrl+M).
 pub(super) fn open_dialog(w: &mut ReportWindow) {
-    if !available(&w.link) {
+    // A builder report (a starter, a memorized builder report) can't be
+    // saved from here: the dialog writes a standard definition (S-L1,
+    // Q-A07t(1)).
+    if !available(&w.link) || w.builder.is_some() {
         return;
     }
     let (name, group) = match &w.memo.current {
@@ -200,12 +214,27 @@ pub(super) fn open_dialog(w: &mut ReportWindow) {
     });
 }
 
-/// The options changed since the memorized report was read.
+/// The options changed since the memorized report was read. Never for a
+/// builder report: it has no save path here, so the tab is never dirty
+/// (#3).
 pub(crate) fn changed(w: &ReportWindow) -> bool {
-    w.memo.current.is_some() && w.memo.saved.as_ref() != Some(&w.options)
+    w.builder.is_none() && w.memo.current.is_some() && w.memo.saved.as_ref() != Some(&w.options)
 }
 
-fn save(w: &mut ReportWindow, how: SaveAs) {
+pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
+    // Belt and braces for S-L1: a builder definition is never overwritten
+    // by a standard one.
+    if w.builder.is_some()
+        || w.memo
+            .current
+            .as_ref()
+            .is_some_and(|c| c.kind != "standard" || c.definition["kind"] != "standard")
+    {
+        if let Some(d) = w.memo.dialog.as_mut() {
+            d.problem = Some("reports.memorize.invalid");
+        }
+        return;
+    }
     let Some(d) = w.memo.dialog.as_mut() else {
         return;
     };
@@ -253,13 +282,41 @@ fn save(w: &mut ReportWindow, how: SaveAs) {
 }
 
 /// Opens a memorized report: its catalog report with its options.
-fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
-    let def: Result<StandardDefinition, _> = serde_json::from_value(row.definition.clone());
-    let Some((spec, def)) = def
-        .ok()
-        .filter(|d| d.check().is_ok())
-        .and_then(|d| cl_model::reports::find(&d.report_key).map(|s| (s, d)))
-    else {
+pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
+    let read = cl_model::reports::definition::read_memorized(&row.definition);
+    // A Report Builder definition runs as a builder report (A07). It is
+    // sent inline at the version read (Q-A07t). One that can't be read
+    // (saved by a newer version, #8) opens the builder window with the
+    // message, never a blank one.
+    let builder = matches!(
+        read,
+        Ok(cl_model::reports::definition::Memorized::Builder(_))
+    ) || row.definition["kind"] == "builder";
+    if builder {
+        let s = cl_api::resources::report_builder::Starter {
+            key: row.id.clone(),
+            title: row.name.clone(),
+            ties_to: None,
+            definition: row.definition.clone(),
+        };
+        super::builder_run::show_starter(w, &s);
+        w.memo.saved = Some(w.options.clone());
+        w.memo.current = Some(row.clone());
+        return;
+    }
+    let def = match read {
+        Ok(cl_model::reports::definition::Memorized::Standard(def)) => *def,
+        Err(e) => {
+            w.notice = Some(t(if e.is_newer() {
+                "reports.memorize.newer"
+            } else {
+                "reports.memorize.unreadable"
+            }));
+            return;
+        }
+        Ok(cl_model::reports::definition::Memorized::Builder(_)) => return,
+    };
+    let Some(spec) = cl_model::reports::find(&def.report_key) else {
         w.notice = Some(t("reports.memorize.unreadable"));
         return;
     };

@@ -1716,6 +1716,31 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
     Method::Delete,
     "/api/v1/report-builder/definition-groups/{id}",
 );
+// A07: Report Builder runs (U-119, `report-builder-v1`). Read-only POSTs,
+// never blind-retried (a 503 `REPORT_TIMEOUT` already took 30 s), with the
+// long timeout.
+/// Runs a builder definition.
+pub(crate) const REPORT_BUILDER_RUN: Operation = op(
+    Method::Post,
+    "/api/v1/report-builder/run",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// One page of a path's detail.
+pub(crate) const REPORT_BUILDER_DETAIL: Operation = op(
+    Method::Post,
+    "/api/v1/report-builder/run/detail",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// The field catalogue.
+pub(crate) const REPORT_BUILDER_FIELDS: Operation = read("/api/v1/report-builder/fields");
+/// The starters.
+pub(crate) const REPORT_BUILDER_STARTERS: Operation = read("/api/v1/report-builder/starters");
 /// The General Ledger and Transaction Detail by Account (U-14 exact).
 pub(crate) const REPORT_GENERAL_LEDGER: Operation = read("/api/v1/reports/general-ledger");
 /// Revenue by Category (U-14 exact).
@@ -1836,7 +1861,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 414] = [
+pub const OPERATIONS: [Operation; 418] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2234,6 +2259,11 @@ pub const OPERATIONS: [Operation; 414] = [
     REPORT_DEF_GROUPS_CREATE,
     REPORT_DEF_GROUP_PUT,
     REPORT_DEF_GROUP_DELETE,
+    // A07
+    REPORT_BUILDER_RUN,
+    REPORT_BUILDER_DETAIL,
+    REPORT_BUILDER_FIELDS,
+    REPORT_BUILDER_STARTERS,
     REPORT_GENERAL_LEDGER,
     REPORT_REVENUE_BY_CATEGORY,
     REPORT_EXPENSE_BY_CATEGORY,

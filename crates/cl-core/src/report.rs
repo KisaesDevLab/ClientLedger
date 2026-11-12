@@ -549,15 +549,46 @@ pub enum RowKind {
     Grand,
     /// A note line.
     Note,
+    /// A Report Builder group-by line (the engine's `line`, A07).
+    Group,
+    /// A Report Builder formula row (adds and subtracts earlier rows).
+    Formula,
+    /// A Report Builder text row (owner text, no amounts).
+    Text,
+    /// A Report Builder blank row.
+    Blank,
+    /// A Report Builder page break (a blank row on screen).
+    PageBreak,
+    /// "More rows": a capped path; its drill pages the rest (Q-311).
+    More,
+    /// A section the user's role can't see (Q-A07i).
+    Denied,
+    /// The engine's earnings or opening row inside a builder drill or
+    /// equity section (prior years' and this year's net income).
+    Earnings,
 }
 
 impl RowKind {
-    /// Totals stay where they are when rows are sorted (Q-P28k).
+    /// Totals stay where they are when rows are sorted (Q-P28k). Every
+    /// Report Builder kind is pinned too (sorting is off for them,
+    /// Q-A07o).
     #[must_use]
     pub const fn is_pinned(self) -> bool {
         matches!(
             self,
-            RowKind::Header | RowKind::Subtotal | RowKind::Total | RowKind::Grand | RowKind::Note
+            RowKind::Header
+                | RowKind::Subtotal
+                | RowKind::Total
+                | RowKind::Grand
+                | RowKind::Note
+                | RowKind::Group
+                | RowKind::Formula
+                | RowKind::Text
+                | RowKind::Blank
+                | RowKind::PageBreak
+                | RowKind::More
+                | RowKind::Denied
+                | RowKind::Earnings
         )
     }
 
@@ -574,6 +605,14 @@ impl RowKind {
             RowKind::Total => "total",
             RowKind::Grand => "grand",
             RowKind::Note => "note",
+            RowKind::Group => "group",
+            RowKind::Formula => "formula",
+            RowKind::Text => "text",
+            RowKind::Blank => "blank",
+            RowKind::PageBreak => "page_break",
+            RowKind::More => "more",
+            RowKind::Denied => "denied",
+            RowKind::Earnings => "earnings",
         }
     }
 }
@@ -728,6 +767,27 @@ pub enum Drill {
         /// The report's basis.
         basis: Option<Basis>,
     },
+    /// The detail behind a Report Builder subtotal, group line or total:
+    /// `POST /report-builder/run/detail` for one node and path, paged 500
+    /// at a time (A07). A column with its own dates narrows it to them.
+    BuilderDetail {
+        /// The section's node id.
+        node_id: String,
+        /// The engine path of the row (`n:<node>`, `<key>:<id>`...).
+        path: RowPath,
+        /// The column's dates (`None`: the run's dates).
+        range: Option<DateRange>,
+    },
+    /// The next page of a capped Report Builder path (a `more` row).
+    BuilderPage {
+        /// The section's node id.
+        node_id: String,
+        /// The engine path the page continues.
+        path: RowPath,
+        /// The engine's opaque cursor (`None`: page from the start, the
+        /// engine's `cursor: null` when a whole path was capped).
+        cursor: Option<String>,
+    },
 }
 
 impl Drill {
@@ -795,6 +855,12 @@ impl Drill {
                 adjusting: *adjusting,
                 tag_ids: tag_ids.clone(),
             },
+            // A period column's cell drills with that column's dates.
+            (Drill::BuilderDetail { node_id, path, .. }, Some(r)) => Drill::BuilderDetail {
+                node_id: node_id.clone(),
+                path: path.clone(),
+                range: Some(r),
+            },
             (Drill::Aging { contact, as_of, .. }, _) => match AgingBucket::of_column(&column.key) {
                 Some(bucket) => Drill::Aging {
                     contact: *contact,
@@ -844,7 +910,8 @@ pub struct ReportRow {
     /// Its place in the tree.
     pub path: RowPath,
     /// The first column's text. A caption starting with `@` is an i18n key
-    /// the window translates (fixed labels such as "Total"); anything else
+    /// the window translates (fixed labels such as "Total"); `@@` starts
+    /// owner text that begins with `@` ([`literal_caption`]); anything else
     /// is owner data shown as is.
     pub caption: String,
     /// One cell per [`ReportTable::columns`] entry.
@@ -1023,10 +1090,120 @@ pub fn display_percent(p: Option<Decimal>) -> String {
     }
 }
 
+/// Marks `s` as text to show as it is, never as an i18n key: a caption that
+/// starts with `@` gets a second `@` (`@@`), which the window and exports
+/// show as one (S-L2). Adapters pass every caption they didn't fix
+/// themselves (owner or engine text) through this.
+#[must_use]
+pub fn literal_caption(s: &str) -> String {
+    if s.starts_with('@') {
+        format!("@{s}")
+    } else {
+        s.to_string()
+    }
+}
+
+/// The keys a Report Builder definition (schema v1) has: the only words a
+/// definition error path may show as they are.
+const DEFINITION_KEYS: &[&str] = &[
+    "definition",
+    "schemaVersion",
+    "kind",
+    "title",
+    "dates",
+    "mode",
+    "preset",
+    "from",
+    "to",
+    "basis",
+    "adjusting",
+    "columns",
+    "detailFields",
+    "compare",
+    "base",
+    "amount",
+    "dollarChange",
+    "percentChange",
+    "percentOf",
+    "periods",
+    "agingBuckets",
+    "headers",
+    "nodes",
+    "children",
+    "type",
+    "id",
+    "caption",
+    "totalCaption",
+    "text",
+    "source",
+    "measure",
+    "polarity",
+    "filters",
+    "field",
+    "op",
+    "ids",
+    "values",
+    "value",
+    "groupBy",
+    "key",
+    "tagGroupId",
+    "display",
+    "defaultExpanded",
+    "showTotal",
+    "hideZero",
+    "terms",
+    "nodeId",
+    "sign",
+    "earnings",
+];
+
+/// A definition error path (`definition.nodes.0.caption`) with every
+/// segment that isn't an index or a schema key replaced by `<key>`: an
+/// object key in the input (a header's column key, a stray key under a too
+/// deep value) is the owner's text and never reaches a message or log
+/// (Q-119, S-L3).
+#[must_use]
+pub fn scrub_definition_path(path: &str) -> String {
+    path.split('.')
+        .map(|s| {
+            if (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                || DEFINITION_KEYS.contains(&s)
+            {
+                s
+            } else {
+                "<key>"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn a_literal_caption_doubles_a_leading_at_only() {
+        assert_eq!(literal_caption("@reports.row.total"), "@@reports.row.total");
+        assert_eq!(literal_caption("Home @ Depot"), "Home @ Depot");
+    }
+
+    #[test]
+    fn definition_paths_keep_schema_keys_and_indexes_only() {
+        assert_eq!(
+            scrub_definition_path("definition.nodes.0.children.12.totalCaption"),
+            "definition.nodes.0.children.12.totalCaption"
+        );
+        assert_eq!(
+            scrub_definition_path("definition.columns.headers.Rivera Remodel"),
+            "definition.columns.headers.<key>"
+        );
+        assert_eq!(
+            scrub_definition_path("definition.nodes.0.x.y"),
+            "definition.nodes.0.<key>.<key>"
+        );
+    }
 
     fn d(s: &str) -> Decimal {
         Decimal::from_str(s).expect("decimal")
@@ -1170,6 +1347,44 @@ mod tests {
             Drill::Lines { from, .. } => assert_eq!(from, None),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_period_column_narrows_a_builder_drill_and_builder_kinds_are_pinned() {
+        let drill = Drill::BuilderDetail {
+            node_id: "income".into(),
+            path: RowPath::of(["n:income", "account:x"]),
+            range: None,
+        };
+        let col = &table().columns[0];
+        match drill.at(col) {
+            Drill::BuilderDetail { range, path, .. } => {
+                assert_eq!(range, col.range);
+                assert_eq!(path.joined(), "n:income/account:x");
+            }
+            other => panic!("{other:?}"),
+        }
+        let page = Drill::BuilderPage {
+            node_id: "income".into(),
+            path: RowPath::of(["n:income"]),
+            cursor: Some("abc".into()),
+        };
+        assert_eq!(page.at(col), page, "a page keeps its cursor");
+        for k in [
+            RowKind::Group,
+            RowKind::Formula,
+            RowKind::Text,
+            RowKind::Blank,
+            RowKind::PageBreak,
+            RowKind::More,
+            RowKind::Denied,
+            RowKind::Earnings,
+        ] {
+            assert!(k.is_pinned(), "{k:?}");
+            let name = serde_json::to_value(k).expect("json");
+            assert_eq!(name, serde_json::Value::String(k.as_str().into()));
+        }
+        assert!(!RowKind::Detail.is_pinned());
     }
 
     #[test]

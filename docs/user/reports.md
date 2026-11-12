@@ -13,6 +13,17 @@ The list on the left groups the reports:
 
 Type in **Find a report** to narrow the list. A report shown in grey says **Needs an engine update**: it arrives with a later update of the accounting engine.
 
+## Report Builder reports
+
+Under **Report Builder** in the report list are ready-made reports built from your books, such as Profit & Loss and Transaction Detail by Account. They open in the same window, with the same dates, Accrual or Cash, printing and exporting.
+
+- Click **+** beside a line to open it, or **Collapse** (it reads **Expand all** when everything is closed) to open or close everything at once.
+- A long list stops at a **Load more** button: click it for the next lines.
+- Click an underlined amount to see the transactions behind it in a new tab, with their total at the bottom. Click a transaction's amount to open it.
+- A part of the report your role isn't allowed to see says so, and totals that need it show a dash (—).
+- If the books change while you look at the lines behind an amount, the report says so: click **Refresh**.
+- A report that takes too long stops after 30 seconds. Try fewer months or open fewer lines.
+
 ## Changing what a report shows
 
 - **Dates**: pick a range like *Last month* or *Year to date*, or type your own **From** and **To**. Reports that show a balance take one **As of** date.
@@ -21,7 +32,7 @@ Type in **Find a report** to narrow the list. A report shown in grey says **Need
 - **% of income** shows each line as a share of your total income. **Year to date** adds a column from the start of your fiscal year. **Prior period** and **Prior year** add a comparison and the change.
 - **Customize** changes the title and the run time on the header, and can split each account by the tags of a tag group (each tag on its own line, plus the lines with no tag and the account's total).
 
-The report runs again right away. **Collapse** folds the sub-accounts and sections; **Refresh** (`F5`) runs it again.
+The report runs again right away. **Collapse** folds the sub-accounts and sections and then reads **Expand all**; **Refresh** (`F5`) runs it again.
 
 ## Seeing the transactions behind a number
 
@@ -31,6 +42,7 @@ Click any underlined amount to open the transactions behind it in a new tab. The
 
 - **Memorize** (`Ctrl+M`) saves the report with its settings under a name you choose. It shows under **Memorized**; if you picked a range like *Last month*, the dates move with the calendar.
 - **Print** (`Ctrl+P`), **Save PDF**, **Export Excel** and **Export CSV** use the figures on screen. Excel and CSV files keep exact amounts.
+- A report too wide for an upright page prints sideways (landscape), in smaller type if needed; a very wide one continues its columns on the next pages, each repeating the row names. Amounts and dates are never cut off.
 - **Email** sends the report as a PDF, Excel or CSV file through your own mail server (set it up in **Preferences > Email**).
 
 ## Asking a question

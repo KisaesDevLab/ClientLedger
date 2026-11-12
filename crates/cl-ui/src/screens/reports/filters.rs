@@ -53,7 +53,10 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         if ui.button(t("reports.tool.customize")).clicked() {
             click = Some(Click::Customize);
         }
+        // A builder report isn't memorized from here (Q-A07t(1), S-L1):
+        // its definition would be saved as a standard report.
         if super::memorized::available(&w.link)
+            && w.builder.is_none()
             && ui
                 .button(t("reports.tool.memorize"))
                 .on_hover_text(t("reports.tool.memorize.key"))
@@ -89,7 +92,7 @@ pub(super) fn toolbar(w: &mut ReportWindow, ui: &mut Ui, _tokens: &Tokens) {
         // separator (QA-14).
         ui.add_space(12.0);
         if ui
-            .add_enabled(shown, egui::Button::new(t("reports.tool.collapse")))
+            .add_enabled(shown, egui::Button::new(t(w.collapse_label())))
             .clicked()
         {
             click = Some(Click::Collapse);
@@ -132,8 +135,11 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut next = w.options.clone();
     let spec = w.spec;
     let mut edit_budgets = false;
+    // A builder detail tab's dates, columns and basis are its run's (#14):
+    // the header says them; nothing here would change them.
+    let fixed = w.builder.as_ref().is_some_and(|b| b.is_detail());
     ui.horizontal_wrapped(|ui| {
-        if spec.dates != DateMode::None {
+        if spec.dates != DateMode::None && !fixed {
             let l = ui.label(RichText::new(t("reports.filter.dates")).size(12.0));
             egui::ComboBox::from_id_salt("report_dates")
                 .selected_text(preset_text(next.dates))
@@ -191,7 +197,7 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 edit_budgets = true;
             }
         }
-        if spec.columns.len() > 1 {
+        if spec.columns.len() > 1 && !fixed {
             let l = ui.label(RichText::new(t("reports.filter.columns")).size(12.0));
             egui::ComboBox::from_id_salt("report_columns")
                 .selected_text(t(next.columns.label()))
@@ -225,7 +231,9 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                 .response
                 .labelled_by(l.id);
         }
-        if spec.basis == BasisMode::Toggle {
+        if fixed {
+            // Nothing: the header shows the run's basis.
+        } else if spec.basis == BasisMode::Toggle {
             ui.separator();
             for (b, key) in [
                 (Basis::Accrual, "reports.basis.accrual"),

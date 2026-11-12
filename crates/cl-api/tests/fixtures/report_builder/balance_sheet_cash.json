@@ -1,0 +1,335 @@
+{
+  "request": {
+    "definition": "<starters/balance_sheet.json>",
+    "dates": {
+      "asOf": "2026-12-31"
+    },
+    "basis": "cash",
+    "fiscalYearStarts": [
+      "2025-01-01",
+      "2026-01-01"
+    ]
+  },
+  "response": {
+    "columns": [
+      {
+        "key": "f:date",
+        "caption": "Date",
+        "kind": "field",
+        "field": "date"
+      },
+      {
+        "key": "f:txn_type",
+        "caption": "Type",
+        "kind": "field",
+        "field": "txn_type"
+      },
+      {
+        "key": "f:number",
+        "caption": "Num",
+        "kind": "field",
+        "field": "number"
+      },
+      {
+        "key": "f:contact",
+        "caption": "Name",
+        "kind": "field",
+        "field": "contact"
+      },
+      {
+        "key": "f:memo",
+        "caption": "Memo",
+        "kind": "field",
+        "field": "memo"
+      },
+      {
+        "key": "f:description",
+        "caption": "Description",
+        "kind": "field",
+        "field": "description"
+      },
+      {
+        "key": "f:account",
+        "caption": "Account",
+        "kind": "field",
+        "field": "account"
+      },
+      {
+        "key": "total",
+        "caption": "Total",
+        "kind": "total",
+        "range": {
+          "from": null,
+          "to": "2026-12-31"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "assets",
+        "level": 0,
+        "path": [
+          "n:assets"
+        ],
+        "caption": "Assets",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "line",
+        "nodeId": "assets",
+        "level": 1,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "10100 Cash",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "566.6700"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "assets",
+          "path": [
+            "n:assets",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "total",
+        "nodeId": "assets",
+        "level": 0,
+        "path": [
+          "n:assets"
+        ],
+        "caption": "Total Assets",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "566.6700"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "assets",
+          "path": [
+            "n:assets"
+          ]
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "liabilities",
+        "level": 0,
+        "path": [
+          "n:liabilities"
+        ],
+        "caption": "Liabilities",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "total",
+        "nodeId": "liabilities",
+        "level": 0,
+        "path": [
+          "n:liabilities"
+        ],
+        "caption": "Total Liabilities",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "liabilities",
+          "path": [
+            "n:liabilities"
+          ]
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "equity",
+        "level": 0,
+        "path": [
+          "n:equity"
+        ],
+        "caption": "Equity",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "earnings",
+        "nodeId": "equity",
+        "level": 1,
+        "path": [
+          "n:equity",
+          "earnings:prior"
+        ],
+        "caption": "Prior years' net income",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "500.0000"
+        ],
+        "drill": {
+          "type": "profit_loss",
+          "from": "0001-01-01",
+          "to": "2025-12-31"
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "earnings",
+        "nodeId": "equity",
+        "level": 1,
+        "path": [
+          "n:equity",
+          "earnings:current"
+        ],
+        "caption": "Net income this year",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "66.6700"
+        ],
+        "drill": {
+          "type": "profit_loss",
+          "from": "2026-01-01",
+          "to": "2026-12-31"
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "total",
+        "nodeId": "equity",
+        "level": 0,
+        "path": [
+          "n:equity"
+        ],
+        "caption": "Total Equity",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "566.6700"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "equity",
+          "path": [
+            "n:equity"
+          ]
+        }
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "formula",
+        "nodeId": "liabilities_equity",
+        "level": 0,
+        "path": [
+          "n:liabilities_equity"
+        ],
+        "caption": "Total Liabilities and Equity",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "566.6700"
+        ],
+        "drill": null
+      }
+    ],
+    "meta": {
+      "basis": "cash",
+      "dates": {
+        "asOf": "2026-12-31"
+      },
+      "notes": [],
+      "truncated": false,
+      "hiddenNotice": null,
+      "denied": []
+    },
+    "fingerprint": "8729d6556d39387e9a565a20783b591cd0d665de0789648fcb2e166fb911e398",
+    "stamp": 9
+  }
+}

@@ -63,6 +63,7 @@ mod contract_reconcile;
 mod contract_refunds;
 mod contract_register;
 mod contract_register_property;
+mod contract_report_builder;
 mod contract_report_defs;
 mod contract_reports_exact;
 mod contract_reports_p28;
@@ -1350,6 +1351,18 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs::crud_conflicts_and_groups",
             contract_report_defs::crud_conflicts_and_groups,
+        ),
+        (
+            "report_builder::every_starter_runs_through_the_adapter",
+            contract_report_builder::every_starter_runs_through_the_adapter,
+        ),
+        (
+            "report_builder::detail_pages_echo_and_go_stale",
+            contract_report_builder::detail_pages_echo_and_go_stale,
+        ),
+        (
+            "report_builder::totals_and_columns_drill_to_their_lines",
+            contract_report_builder::totals_and_columns_drill_to_their_lines,
         ),
         (
             "budgets::hand_fixture_and_writes",

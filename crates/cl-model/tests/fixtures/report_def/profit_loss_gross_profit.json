@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "kind": "builder",
+  "title": "Profit & Loss with gross profit",
+  "dates": { "mode": "range", "preset": "this_year" },
+  "basis": "accrual",
+  "columns": {
+    "detailFields": ["date", "txn_type", "number", "contact", "memo", "amount"],
+    "periods": "month",
+    "compare": [
+      { "base": "prior_year", "amount": true, "dollarChange": true, "percentChange": true }
+    ],
+    "percentOf": "income",
+    "headers": { "total": "Year to date" }
+  },
+  "nodes": [
+    {
+      "type": "section",
+      "id": "income",
+      "caption": "Income",
+      "source": "gl",
+      "measure": "amount",
+      "polarity": "natural",
+      "filters": [
+        { "field": "account_type", "op": "in", "values": ["revenue", "other_revenue"] },
+        { "field": "tag", "op": "in", "ids": ["33333333-3333-4333-8333-333333333333"] }
+      ],
+      "groupBy": [
+        { "key": "account" },
+        { "key": "tag", "tagGroupId": "44444444-4444-4444-8444-444444444444" }
+      ],
+      "display": "expandable",
+      "defaultExpanded": false,
+      "showTotal": true,
+      "totalCaption": "Total income",
+      "hideZero": true
+    },
+    {
+      "type": "section",
+      "id": "cogs",
+      "caption": "Cost of goods sold",
+      "source": "gl",
+      "measure": "amount",
+      "filters": [{ "field": "account_type", "op": "in", "values": ["cogs"] }],
+      "groupBy": [{ "key": "account" }],
+      "display": "summary",
+      "defaultExpanded": false,
+      "showTotal": true,
+      "hideZero": true
+    },
+    {
+      "type": "formula",
+      "id": "gross_profit",
+      "caption": "Gross profit",
+      "terms": [
+        { "nodeId": "income", "sign": 1 },
+        { "nodeId": "cogs", "sign": -1 }
+      ]
+    },
+    { "type": "blank", "id": "b1" },
+    {
+      "type": "group",
+      "id": "spend",
+      "caption": "Spending",
+      "showTotal": true,
+      "children": [
+        {
+          "type": "section",
+          "id": "expenses",
+          "caption": "Expenses",
+          "source": "gl",
+          "measure": "amount",
+          "filters": [{ "field": "account_type", "op": "in", "values": ["expense", "other_expense"] }],
+          "groupBy": [{ "key": "account" }],
+          "display": "summary",
+          "defaultExpanded": false,
+          "showTotal": true,
+          "hideZero": true
+        }
+      ]
+    },
+    {
+      "type": "formula",
+      "id": "net_income",
+      "caption": "Net income",
+      "terms": [
+        { "nodeId": "gross_profit", "sign": 1 },
+        { "nodeId": "spend", "sign": -1 }
+      ]
+    },
+    { "type": "page_break", "id": "pb" },
+    { "type": "text", "id": "note", "text": "Prepared for the bank." }
+  ]
+}

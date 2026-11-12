@@ -1,0 +1,63 @@
+# Report Builder runs (A07) against `clientledger --demo`: the starters in
+# the report list run in the report window over the demo books. Sales and
+# purchases shows a section the demo's role can't see (the formula over it
+# shows a dash); Profit & Loss expands with Expand all, pages a capped
+# account with Load more, opens a transaction's form and a total's detail
+# tab; the slow starter says it took too long. Synthetic.
+name: reports-builder
+description: Report Builder starters - denied section, expand, Load more, open a form, subtotal detail, timeout note.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 400}
+  - assert_state: {key: screen.screen, equals: reports}
+  # --- A starter with a denied section -------------------------------------
+  - click: {label: Sales and purchases}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.builder.key, equals: sales_and_purchases}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_state: {key: screen.builder.denied, equals: 1}
+  # A builder report isn't memorized from the toolbar (Q-A07t(1), S-L1).
+  - assert_not_exists: {role: button, label: Memorize}
+  - screenshot: builder-denied
+  # --- Profit & Loss: Expand all, Load more --------------------------------
+  - click: {label: Profit & Loss, index: 1}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.builder.key, equals: profit_loss}
+  - assert_state: {key: screen.state, equals: shown}
+  - command: reports.collapse
+  - wait: {ms: 600}
+  - assert_state: {key: screen.builder.expand_all, equals: true}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: builder-expanded
+  - assert_state: {key: screen.builder.loaded, equals: 0}
+  - click: {role: button, label: Load more, index: 0}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.builder.paging, equals: false}
+  # The click put a page in place (not only "nothing in flight").
+  - assert_state: {key: screen.builder.loaded, equals: 1}
+  - screenshot: builder-load-more
+  # --- A line's amount opens its detail in a new tab ------------------------
+  - click: {role: link, index: 0}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.builder.key, equals: detail}
+  - assert_state: {key: screen.state, equals: shown}
+  - screenshot: builder-detail
+  # --- A detail line opens its form -------------------------------------------
+  - click: {role: link, index: 0}
+  - wait: {ms: 600}
+  # The transaction's own form opened (an income line's invoice).
+  - assert_state: {key: screen.screen, equals: create_invoice}
+  - command: file.close_window
+  - wait: {ms: 300}
+  - command: file.close_window
+  - wait: {ms: 300}
+  # --- The slow starter ----------------------------------------------------
+  - click: {label: Slow report}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.state, equals: failed}
+  - assert_state: {key: screen.problem, equals: took_too_long}
+  - screenshot: builder-timeout
+  - command: file.close_window
+  - wait: {ms: 300}

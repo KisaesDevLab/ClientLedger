@@ -27,6 +27,8 @@ pub(crate) struct Post {
     pub(crate) tag: Option<TagId>,
     pub(crate) txn: TransactionId,
     pub(crate) txn_type: String,
+    /// A check (an `expense` the engine's builder names `check`, A07 QA-2).
+    pub(crate) is_check: bool,
     pub(crate) number: String,
     pub(crate) contact: Option<String>,
     pub(crate) memo: String,
@@ -246,6 +248,7 @@ impl Books {
                     tag,
                     txn: txn_id(t.id),
                     txn_type: wire_type(&t.kind),
+                    is_check: t.kind == "check",
                     number: t.number.clone(),
                     contact: t.contact.clone(),
                     memo: l.memo.clone().unwrap_or_else(|| t.memo.clone()),

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "builder",
+  "title": "A/R Aging Summary",
+  "dates": { "mode": "asOf", "preset": "today" },
+  "columns": {
+    "detailFields": ["date", "number", "due_date", "days_past_due", "open_balance"],
+    "agingBuckets": true,
+    "compare": [],
+    "headers": {}
+  },
+  "nodes": [
+    {
+      "type": "section",
+      "id": "ar",
+      "caption": "Accounts receivable",
+      "source": "ar_open",
+      "measure": "open_balance",
+      "filters": [{ "field": "due_status", "op": "in", "values": ["overdue", "current"] }],
+      "groupBy": [{ "key": "contact" }],
+      "display": "expandable",
+      "defaultExpanded": false,
+      "showTotal": true,
+      "hideZero": true
+    }
+  ]
+}

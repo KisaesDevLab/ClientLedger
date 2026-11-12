@@ -1,0 +1,1193 @@
+{
+  "request": {
+    "definition": "<starters/transaction_detail_by_account.json>",
+    "dates": {
+      "from": "2026-01-01",
+      "to": "2026-12-31"
+    },
+    "fiscalYearStarts": [
+      "2025-01-01",
+      "2026-01-01"
+    ]
+  },
+  "response": {
+    "columns": [
+      {
+        "key": "f:date",
+        "caption": "Date",
+        "kind": "field",
+        "field": "date"
+      },
+      {
+        "key": "f:txn_type",
+        "caption": "Type",
+        "kind": "field",
+        "field": "txn_type"
+      },
+      {
+        "key": "f:number",
+        "caption": "Num",
+        "kind": "field",
+        "field": "number"
+      },
+      {
+        "key": "f:contact",
+        "caption": "Name",
+        "kind": "field",
+        "field": "contact"
+      },
+      {
+        "key": "f:memo",
+        "caption": "Memo",
+        "kind": "field",
+        "field": "memo"
+      },
+      {
+        "key": "f:description",
+        "caption": "Description",
+        "kind": "field",
+        "field": "description"
+      },
+      {
+        "key": "f:debit",
+        "caption": "Debit",
+        "kind": "field",
+        "field": "debit"
+      },
+      {
+        "key": "f:credit",
+        "caption": "Credit",
+        "kind": "field",
+        "field": "credit"
+      },
+      {
+        "key": "f:running_balance",
+        "caption": "Balance",
+        "kind": "field",
+        "field": "running_balance"
+      },
+      {
+        "key": "total",
+        "caption": "Total",
+        "kind": "total",
+        "range": {
+          "from": "2026-01-01",
+          "to": "2026-12-31"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "assets",
+        "level": 0,
+        "path": [
+          "n:assets"
+        ],
+        "caption": "Assets",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "assets",
+        "level": 1,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "10100 Cash",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "66.6700"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "assets",
+          "path": [
+            "n:assets",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "500.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-01",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          "20.0000",
+          null,
+          "520.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-02",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          "20.0000",
+          null,
+          "540.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-03",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          "20.0000",
+          null,
+          "560.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-04",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          "20.0000",
+          null,
+          "580.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-05",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          "20.0000",
+          null,
+          "600.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-10",
+          "Expense",
+          null,
+          "Cosmos Granite",
+          "expense",
+          null,
+          null,
+          "33.3300",
+          "566.6700",
+          "-33.3300"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "expense",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "expense"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "assets",
+        "level": 1,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "10200 Accounts Receivable",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "90.0000"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "assets",
+          "path": [
+            "n:assets",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "assets",
+        "level": 2,
+        "path": [
+          "n:assets",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-02-01",
+          "Invoice",
+          null,
+          "Rivera Remodel",
+          "invoice",
+          null,
+          "90.0000",
+          null,
+          "90.0000",
+          "90.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "liabilities",
+        "level": 0,
+        "path": [
+          "n:liabilities"
+        ],
+        "caption": "Liabilities",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "liabilities",
+        "level": 1,
+        "path": [
+          "n:liabilities",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "20100 Accounts Payable",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "45.0000"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "liabilities",
+          "path": [
+            "n:liabilities",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "liabilities",
+        "level": 2,
+        "path": [
+          "n:liabilities",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "liabilities",
+        "level": 2,
+        "path": [
+          "n:liabilities",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-12",
+          "Bill",
+          null,
+          "Cosmos Granite",
+          "bill",
+          null,
+          null,
+          "45.0000",
+          "45.0000",
+          "45.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "bill",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "bill"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "equity",
+        "level": 0,
+        "path": [
+          "n:equity"
+        ],
+        "caption": "Equity",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "income",
+        "level": 0,
+        "path": [
+          "n:income"
+        ],
+        "caption": "Income",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "income",
+        "level": 1,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "40100 Sales Revenue",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "200.0000"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "income",
+          "path": [
+            "n:income",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-02-01",
+          "Invoice",
+          null,
+          "Rivera Remodel",
+          "invoice",
+          null,
+          null,
+          "100.0000",
+          "100.0000",
+          "100.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-01",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          null,
+          "20.0000",
+          "120.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-02",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          null,
+          "20.0000",
+          "140.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-03",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          null,
+          "20.0000",
+          "160.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-04",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          null,
+          "20.0000",
+          "180.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "income",
+        "level": 2,
+        "path": [
+          "n:income",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-05",
+          "Cash Sale",
+          null,
+          "Rivera Remodel",
+          "cash_sale",
+          null,
+          null,
+          "20.0000",
+          "200.0000",
+          "20.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "cash_sale"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "cogs",
+        "level": 0,
+        "path": [
+          "n:cogs"
+        ],
+        "caption": "Cost of Goods Sold",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "expenses",
+        "level": 0,
+        "path": [
+          "n:expenses"
+        ],
+        "caption": "Expenses",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "expenses",
+        "level": 1,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "60100 Advertising",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "43.3300"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "expenses",
+          "path": [
+            "n:expenses",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "expenses",
+        "level": 2,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "expenses",
+        "level": 2,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-02-01",
+          "Invoice",
+          null,
+          "Rivera Remodel",
+          "invoice",
+          null,
+          "10.0000",
+          null,
+          "10.0000",
+          "10.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "invoice"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "expenses",
+        "level": 2,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-10",
+          "Expense",
+          null,
+          "Cosmos Granite",
+          "expense",
+          null,
+          "33.3300",
+          null,
+          "43.3300",
+          "33.3300"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "expense",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "expense"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": true,
+        "kind": "line",
+        "nodeId": "expenses",
+        "level": 1,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "60200 Bad Debt",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "45.0000"
+        ],
+        "drill": {
+          "type": "detail",
+          "nodeId": "expenses",
+          "path": [
+            "n:expenses",
+            "account:00000000-0000-4000-8000-000000000000"
+          ]
+        }
+      },
+      {
+        "kind": "opening",
+        "nodeId": "expenses",
+        "level": 2,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "Opening balance",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "0.0000",
+          null
+        ],
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "kind": "detail",
+        "nodeId": "expenses",
+        "level": 2,
+        "path": [
+          "n:expenses",
+          "account:00000000-0000-4000-8000-000000000000"
+        ],
+        "caption": "",
+        "cells": [
+          "2026-03-12",
+          "Bill",
+          null,
+          "Cosmos Granite",
+          "bill",
+          null,
+          "45.0000",
+          null,
+          "45.0000",
+          "45.0000"
+        ],
+        "fields": {
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "bill",
+          "lineId": "00000000-0000-4000-8000-000000000000"
+        },
+        "drill": {
+          "type": "transaction",
+          "txnId": "00000000-0000-4000-8000-000000000000",
+          "txnType": "bill"
+        },
+        "expandable": false,
+        "expanded": false
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "other_income",
+        "level": 0,
+        "path": [
+          "n:other_income"
+        ],
+        "caption": "Other Income",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "expandable": false,
+        "expanded": false,
+        "kind": "header",
+        "nodeId": "other_expenses",
+        "level": 0,
+        "path": [
+          "n:other_expenses"
+        ],
+        "caption": "Other Expenses",
+        "cells": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "meta": {
+      "basis": "accrual",
+      "dates": {
+        "from": "2026-01-01",
+        "to": "2026-12-31"
+      },
+      "notes": [],
+      "truncated": false,
+      "hiddenNotice": null,
+      "denied": []
+    },
+    "fingerprint": "e733369c14de7dbe004436d8ee822507524cfa9cc0848b967f7854a5daf88033",
+    "stamp": 9
+  }
+}

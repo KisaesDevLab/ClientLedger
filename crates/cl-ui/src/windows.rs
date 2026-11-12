@@ -203,6 +203,11 @@ pub enum OpenPayload {
     /// P28: a report window on this report and options (a drill-down,
     /// Home's chart month, a memorized report).
     Report(Box<crate::screens::reports::ReportOpen>),
+    /// A07: a report window on the Report Builder starter with this key
+    /// (the control channel and A08 open starters this way).
+    BuilderStarter(String),
+    /// A07: a Report Builder subtotal's detail in a new report tab.
+    BuilderDetail(Box<crate::screens::reports::BuilderDetailOpen>),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

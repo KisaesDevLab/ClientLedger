@@ -834,3 +834,145 @@ fn all_zero_rows_are_names_with_nothing_open() {
         vec![Cell::Text("x".into())]
     )));
 }
+
+/// A07: a starter runs in the window on the demo, expands, pages and
+/// drills; the denied section and the slow starter say so.
+#[test]
+fn a_builder_starter_runs_expands_pages_and_drills() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    assert!(w.open_with(crate::windows::OpenPayload::BuilderStarter(
+        "sales_and_purchases".into()
+    )));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown, "{:?}", w.problem);
+    let s = w.state_json_for_test();
+    assert_eq!(s["builder"]["key"], "sales_and_purchases");
+    let table = w.table.clone().expect("table");
+    assert!(table.rows.iter().any(|r| r.kind == RowKind::Denied));
+    let net = table
+        .rows
+        .iter()
+        .find(|r| r.kind == RowKind::Formula)
+        .expect("formula");
+    assert_eq!(
+        net.cells.last(),
+        Some(&Cell::Text("\u{2014}".into())),
+        "needs the denied section"
+    );
+    // Lines are expandable and start closed: no detail shown.
+    let opened = table
+        .rows
+        .iter()
+        .find(|r| r.kind == RowKind::Group && r.expandable)
+        .expect("a client line")
+        .path
+        .clone();
+    assert!(
+        w.shown_rows()
+            .iter()
+            .all(|&i| table.rows[i].kind != RowKind::Detail)
+    );
+    // Expand: the run follows after the debounce, with the line open.
+    let ctx = egui::Context::default();
+    let mut ran = false;
+    for frame in 0..40 {
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                time: Some(f64::from(frame) * 0.05),
+                ..Default::default()
+            },
+            |ui| {
+                if frame == 0 {
+                    super::builder_run::toggle(&mut w, &opened, ui);
+                }
+                super::builder_run::tick(&mut w, ui);
+            },
+        );
+        out.textures_delta.clear();
+        w.poll();
+        if w.table
+            .as_ref()
+            .is_some_and(|t| t.rows.iter().any(|r| r.kind == RowKind::Detail))
+        {
+            ran = true;
+            break;
+        }
+    }
+    assert!(ran, "the expand ran");
+    let table = w.table.clone().expect("table");
+    let detail = table
+        .rows
+        .iter()
+        .find(|r| r.kind == RowKind::Detail)
+        .expect("detail");
+    assert!(
+        matches!(detail.drill, Some(Drill::Transaction { .. })),
+        "opens its form"
+    );
+    // A more row pages the rest in place.
+    if let Some(more) = table.rows.iter().find(|r| r.kind == RowKind::More).cloned() {
+        let before = table
+            .rows
+            .iter()
+            .filter(|r| r.kind == RowKind::Detail)
+            .count();
+        super::drill::open(&mut w, more.drill.as_ref().expect("page"));
+        w.poll();
+        let after = w
+            .table
+            .as_ref()
+            .expect("table")
+            .rows
+            .iter()
+            .filter(|r| r.kind == RowKind::Detail)
+            .count();
+        assert!(after > before, "Load more added rows");
+    }
+    // The slow starter keeps nothing and says it took too long.
+    w.open_with(crate::windows::OpenPayload::BuilderStarter(
+        crate::company::demo::report_builder::SLOW.into(),
+    ));
+    w.poll();
+    assert_eq!(w.state, RunState::Failed);
+    assert_eq!(w.problem, Some("reports.builder.took_too_long"));
+}
+
+/// A07: a subtotal's detail tab pages the engine's lines and shows its
+/// echoed subtotal as the footer.
+#[test]
+fn a_builder_subtotal_opens_its_detail_tab() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    w.open_with(crate::windows::OpenPayload::BuilderStarter(
+        "profit_loss".into(),
+    ));
+    w.poll();
+    let table = w.table.clone().expect("table");
+    let total = table
+        .rows
+        .iter()
+        .find(|r| r.kind == RowKind::Total)
+        .expect("total");
+    let Some(Drill::BuilderDetail { node_id, path, .. }) = total.drill.clone() else {
+        panic!("a total drills to its detail");
+    };
+    // The drill pushes a new tab; open it here as the shell would.
+    super::drill::open(&mut w, total.drill.as_ref().expect("drill"));
+    let mut tab = window(&link);
+    tab.poll();
+    let open = super::builder_run::detail_open_for_test(&w, &node_id, &path);
+    assert!(tab.open_with(crate::windows::OpenPayload::BuilderDetail(Box::new(open))));
+    tab.poll();
+    assert_eq!(tab.state, RunState::Shown);
+    let t = tab.table.as_ref().expect("detail");
+    let footer = t.rows.last().expect("footer");
+    assert_eq!(footer.kind, RowKind::Total);
+    assert_eq!(
+        footer.cells.last(),
+        total.cells.last(),
+        "the echoed subtotal"
+    );
+}

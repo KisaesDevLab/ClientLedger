@@ -50,6 +50,7 @@ pub mod bank_import;
 pub mod feed_review;
 // P27: Reconcile (the mockup's October statement).
 pub mod reconcile;
+pub mod report_builder;
 pub mod report_store;
 pub mod reports;
 

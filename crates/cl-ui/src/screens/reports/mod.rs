@@ -13,6 +13,7 @@
 
 mod ask;
 mod budgets;
+mod builder_run;
 mod catalog;
 mod drill;
 mod email;
@@ -22,6 +23,8 @@ mod filters;
 mod memorized;
 mod window;
 
+#[cfg(test)]
+mod builder_tests;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +40,7 @@ use crate::company::CompanyLink;
 use crate::company::demo::DemoState;
 use crate::windows::Screen;
 
+pub use builder_run::BuilderDetailOpen;
 pub(crate) use drill::profit_loss_for;
 pub use window::ReportWindow;
 
@@ -128,12 +132,16 @@ pub(crate) fn request_runs(link: &CompanyLink, req: &ReportRequest) -> bool {
 /// Text for a caption: `@key` is an i18n key, `@key name` one that names
 /// an account (`Total {name}`), anything else owner data. Owner text that
 /// happens to start with `@` ("@Home Depot") is not a key the app knows,
-/// so it shows as typed (S3).
+/// so it shows as typed (S3). `@@` starts text an adapter marked as never a
+/// key (`cl_core::report::literal_caption`, S-L2): one `@` shows.
 #[must_use]
 pub(crate) fn label(s: &str) -> String {
     let Some(rest) = s.strip_prefix('@') else {
         return s.to_string();
     };
+    if rest.starts_with('@') {
+        return rest.to_string();
+    }
     let (key, name) = match rest.split_once(' ') {
         Some((key, name)) => (key, Some(name)),
         None => (rest, None),

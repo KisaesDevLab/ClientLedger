@@ -45,12 +45,15 @@ pub fn summary(r: &ArAgingSummary, as_of: CalendarDate) -> ReportTable {
         let key = c
             .contact_id
             .map_or_else(|| "none".to_string(), |id| id.to_string());
+        // The exact buckets (engine PR-B, Q-A07c), so the rows add up to
+        // the exact grand line.
+        let (buckets, total) = c.shown();
         let mut x = row(
             RowKind::Detail,
             1,
             RowPath::of(["clients", key.as_str()]),
             name_or(c.name.as_deref(), "@reports.row.no_client"),
-            cells(&c.buckets, c.total),
+            cells(buckets, total),
         );
         // Keep the engine's order; the index makes paths unique even if a
         // name repeats.
@@ -115,5 +118,31 @@ mod tests {
             }
         ));
         assert!(t.rows[2].drill.is_none(), "the grand line has no drill");
+    }
+
+    #[test]
+    fn a_clients_exact_buckets_win_over_the_legacy_ones() {
+        // Engine PR-B (Q-A07c): customers[] carry bucketsExact/totalExact.
+        let mut v: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/reports/ar_aging_summary.json"
+        ))
+        .expect("fixture");
+        v["customers"][1]["bucketsExact"] = serde_json::json!({"current": "0.1049",
+            "days1to30": "0.2000", "days31to60": "0.0000", "days61to90": "0.0000",
+            "over90": "0.0000"});
+        v["customers"][1]["totalExact"] = serde_json::json!("0.3049");
+        let r: ArAgingSummary = serde_json::from_value(v).expect("summary");
+        let t = summary(&r, CalendarDate::from_ymd(2026, 10, 31).expect("d"));
+        let csv = t.to_canonical_csv();
+        assert!(
+            csv.contains("clients/none/1,@reports.row.no_client,0.1049,0.2,0,0,0,0.3049\n"),
+            "{csv}"
+        );
+        // Without them (an older engine) the legacy buckets show.
+        assert!(
+            summary(&sample(), CalendarDate::from_ymd(2026, 10, 31).expect("d"))
+                .to_canonical_csv()
+                .contains("@reports.row.no_client,0.1,0.2,0,0,0,0.3\n")
+        );
     }
 }
