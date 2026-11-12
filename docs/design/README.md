@@ -1,7 +1,4 @@
 # docs/design — reference mockups
-| Transactions / attachments | 1,512 / 214 |
-| `ReportBuilder` | A08 | Outline (sections, groups, formulas, text, blank, page break) with row count, Row / Columns / Report properties tabs, live preview; Guided view (5 steps, Q-A08a). Approved by the owner 2026-11-12 (Q-A08b). **Duplicate in the outline is PROPOSED — do not build.** The top "Mockup only" strip is not part of the app.
-# docs/design — reference mockups
 
 These are the owner-approved visual references for ClientLedger's screens. Each screen exists twice:
 
@@ -43,6 +40,7 @@ All data in them is synthetic (Ozark Ridge Landscaping LLC, Shoal Creek Farm). T
 | `Reports` | P28 | Ask-a-question bar showing how the question was mapped, report catalog, filters, basis toggle, % of income and YTD columns, drill-down links |
 | `QBDImport` | P31 | Step list, three tie-out tiles, per-account comparison, Mark verified |
 | `SendToAccountant` | P32 | Three-step explainer, what's included, check totals, file save, history. **The "Send directly" panel is PROPOSED — do not build (Q-227).** |
+| `ReportBuilder` | A08 | Outline (sections, groups, formulas, text, blank, page break) with row count, Row / Columns / Report properties tabs, live preview; Guided view (5 steps, Q-A08a). Approved by the owner 2026-11-12 (Q-A08b). **Duplicate in the outline is PROPOSED — do not build.** The top "Mockup only" strip is not part of the app. |
 
 Screens without a mockup (Chart of Accounts, journal entries, lists, the setup interview, and others) follow `docs/DESIGN.md` and the shared shell from the Home mockup.
 
