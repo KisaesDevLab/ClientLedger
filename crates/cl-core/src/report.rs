@@ -1121,6 +1121,7 @@ const DEFINITION_KEYS: &[&str] = &[
     "detailFields",
     "compare",
     "base",
+    "amount",
     "dollarChange",
     "percentChange",
     "percentOf",

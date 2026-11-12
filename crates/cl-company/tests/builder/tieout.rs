@@ -12,9 +12,14 @@
 //! - the Balance Sheet's prior years' earnings row is required and folds
 //!   into the chart's designated Retained Earnings account only; the
 //!   current year's row is required whenever net income isn't zero;
-//! - detail starters (ledger, check register, agings, open items): each
-//!   group's total equals the standard's, and the open amounts or debits
-//!   and credits of the detail lines equal the standard's line for line.
+//! - detail starters: the ledger's and check register's accounts (net,
+//!   debits and credits of their lines) equal the standard's; the aging
+//!   details' open amounts equal the standard's line for line; Open
+//!   Invoices and Unpaid Bills (every open item, zero names hidden) equal the
+//!   balance summaries name by name (Q-A07u(8));
+//! - every starter's section Totals and first lines drill to detail whose
+//!   subtotal is the row and whose lines sum to it (debits less credits on
+//!   the Trial Balance).
 //!
 //! Every starter that names a standard report (`tiesTo`) must be tied
 //! here: a new starter fails until it is.

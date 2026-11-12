@@ -405,6 +405,13 @@ fn reference(
 
 /// Runs (Refresh, a date or basis change).
 pub(crate) fn run(w: &mut ReportWindow) {
+    // A memorized builder report on an engine without the drill contract
+    // says the engine needs an update, as a starter does (Q-A07u(6)).
+    if w.builder.is_some() && !available(w) {
+        w.table = None;
+        w.state = RunState::Unavailable;
+        return;
+    }
     let Some(b) = w.builder.as_mut() else {
         return;
     };

@@ -692,14 +692,25 @@ fn drill(
             path: path_in(d.get("path"), "drill path")?,
             range: None,
         },
-        // The run's lens travels with it. A tag-filtered Balance Sheet
-        // section's earnings drill carries no tags (Q-A07s).
+        // The run's lens travels with it; a tag-filtered section's earnings
+        // drill names its tags (U-119e `tagIds`, absent: none).
         Some("profit_loss") => Drill::ProfitLoss {
             from: earliest(d.get("from"))?,
             to: date(d.get("to"), "drill range")?,
             basis: lens.basis,
             adjusting: lens.adjusting,
-            tag_ids: Vec::new(),
+            tag_ids: match d.get("tagIds") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .map(|t| {
+                        t.as_str()
+                            .and_then(|s| s.parse().ok())
+                            .ok_or(shape("drill tags"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(_) => return Err(shape("drill tags")),
+            },
         },
         _ => return Err(shape("drill kind")),
     }))

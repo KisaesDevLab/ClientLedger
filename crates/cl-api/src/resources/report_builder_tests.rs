@@ -139,7 +139,7 @@ fn a_balance_sheet_as_of_column_and_earnings_rows() {
     let v = sample("balance_sheet_accrual");
     let r = read_run(&v, Some(Adjusting::Exclude)).expect("bs");
     let t = &r.table;
-    // `{from: null, to}`: the detail request takes no half range.
+    // The total column drills every column: no range (U-119e).
     assert_eq!(t.columns[0].range, None);
     assert_eq!(t.meta.dates, Some(ReportDates::AsOf(day(2026, 12, 31))));
     assert_eq!(t.rows[8].kind, RowKind::Earnings);
@@ -159,6 +159,21 @@ fn a_balance_sheet_as_of_column_and_earnings_rows() {
     assert!(matches!(
         t.rows[9].drill,
         Some(Drill::ProfitLoss { from, .. }) if from == day(2026, 1, 1)
+    ));
+    // A tag-filtered section's earnings drill names its tags (U-119e).
+    let tag = "33333333-3333-4333-8333-333333333333";
+    let mut tagged = v.clone();
+    tagged["rows"][8]["drill"]["tagIds"] = json!([tag]);
+    let r = read_run(&tagged, None).expect("tagged");
+    assert!(matches!(
+        &r.table.rows[8].drill,
+        Some(Drill::ProfitLoss { tag_ids, .. })
+            if tag_ids.len() == 1 && tag_ids[0].to_string() == tag
+    ));
+    tagged["rows"][8]["drill"]["tagIds"] = json!(["not a tag"]);
+    assert!(matches!(
+        read_run(&tagged, None),
+        Err(ApiError::ReportShape { .. })
     ));
     assert_eq!(t.rows[11].kind, RowKind::Formula);
     assert_eq!(t.rows[11].cells[0], Cell::Amount(d("656.6700")));
