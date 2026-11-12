@@ -187,7 +187,11 @@ pub fn to_xlsx(
         let Some(row) = t.rows.get(i) else { continue };
         let strong = matches!(
             row.kind,
-            RowKind::Total | RowKind::Grand | RowKind::Header | RowKind::Subtotal
+            RowKind::Total
+                | RowKind::Grand
+                | RowKind::Header
+                | RowKind::Subtotal
+                | RowKind::Formula
         );
         let caption = format!(
             "{}{}",
@@ -269,6 +273,9 @@ fn display_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {
     }
 }
 
+/// A text column whose every cell is at most this long prints whole.
+const SHORT_TEXT: usize = 14;
+
 /// The PDF/print layout: one table, captions indented by level.
 #[must_use]
 pub fn to_report(
@@ -282,13 +289,9 @@ pub fn to_report(
         heading: String::new(),
         share: 3.0,
         right: false,
+        whole: false,
     }];
-    columns.extend(t.columns.iter().map(|c| Column {
-        heading: label(tr, &c.caption),
-        share: 1.2,
-        right: c.kind.is_numeric(),
-    }));
-    let body = rows
+    let body: Vec<Vec<String>> = rows
         .iter()
         .filter_map(|&i| t.rows.get(i))
         .map(|r| {
@@ -301,6 +304,20 @@ pub fn to_report(
             line
         })
         .collect();
+    // Dates, and text columns of short codes (a type, a number), print
+    // whole; names and memos may be cut on a wide report (A07 QA-8).
+    columns.extend(t.columns.iter().enumerate().map(|(ci, c)| {
+        let short = body
+            .iter()
+            .filter_map(|r| r.get(ci + 1))
+            .all(|s| s.chars().count() <= SHORT_TEXT);
+        Column {
+            heading: label(tr, &c.caption),
+            share: 1.2,
+            right: c.kind.is_numeric(),
+            whole: c.kind == ColumnKind::Date || short,
+        }
+    }));
     Report {
         title: title.to_string(),
         subtitle,
@@ -532,6 +549,113 @@ mod tests {
             vec!["   4000 · Installation", "38,420.50", "63.7%"]
         );
         assert_eq!(rows[1], vec!["Net income", "-0.10", "0.0%"]);
+    }
+
+    fn heading(key: &str, kind: ColumnKind) -> ColumnHead {
+        ColumnHead {
+            key: key.into(),
+            caption: key.into(),
+            kind,
+            range: None,
+            drill: None,
+        }
+    }
+
+    /// The printed text of `r` (every page).
+    fn printed(r: &Report) -> Vec<String> {
+        crate::layout::resolve(&crate::reports::layout_report(r))
+            .expect("every figure fits")
+            .into_iter()
+            .flat_map(|p| p.runs.into_iter().map(|run| run.text))
+            .collect()
+    }
+
+    /// A07 QA-8: a 13-column monthly P&L (12 months and a Total) with
+    /// 6-figure negatives builds a PDF (it failed with `DoesNotFit`, shown
+    /// as "the file couldn't be saved"), every figure whole.
+    #[test]
+    fn a_thirteen_column_pl_builds_a_pdf() {
+        let mut columns: Vec<ColumnHead> = (1..=12)
+            .map(|m| heading(&format!("m{m}"), ColumnKind::Amount))
+            .collect();
+        columns.push(heading("total", ColumnKind::Amount));
+        let row = |caption: &str, figure: &str| ReportRow {
+            kind: RowKind::Account,
+            level: 1,
+            path: RowPath::of([caption]),
+            caption: caption.into(),
+            cells: (0..13).map(|_| Cell::Amount(d(figure))).collect(),
+            drill: None,
+            expandable: false,
+        };
+        let t = ReportTable {
+            columns,
+            rows: vec![
+                row("4000 · Service Income", "1140832.39"),
+                row("30170 · Owner's Draw", "-353267.44"),
+            ],
+            meta: ReportMeta::default(),
+        };
+        let r = to_report(&t, &[0, 1], "Profit and Loss by Month", vec![], &tr);
+        let text = printed(&r);
+        assert_eq!(text.iter().filter(|s| *s == "1,140,832.39").count(), 13);
+        assert_eq!(text.iter().filter(|s| *s == "-353,267.44").count(), 13);
+        assert!(crate::reports::render_report(&r).is_ok());
+    }
+
+    /// A07 QA-8: a long transaction detail builds a PDF; dates print as
+    /// MM/DD/YYYY (they were cut to "11/05/20") and short codes whole.
+    #[test]
+    fn a_long_transaction_detail_prints_whole_dates() {
+        let columns = vec![
+            heading("Date", ColumnKind::Date),
+            heading("Type", ColumnKind::Text),
+            heading("Num", ColumnKind::Text),
+            heading("Name", ColumnKind::Text),
+            heading("Memo", ColumnKind::Text),
+            heading("Account", ColumnKind::Text),
+            heading("Debit", ColumnKind::Amount),
+            heading("Credit", ColumnKind::Amount),
+            heading("Amount", ColumnKind::Amount),
+            heading("Balance", ColumnKind::Amount),
+        ];
+        let day = cl_core::CalendarDate::from_ymd(2026, 11, 5).expect("date");
+        let rows: Vec<ReportRow> = (0..400)
+            .map(|i| ReportRow {
+                kind: RowKind::Detail,
+                level: 2,
+                path: RowPath::of([format!("r{i}")]),
+                caption: String::new(),
+                cells: vec![
+                    Cell::Date(day),
+                    Cell::Text("Journal entry".into()),
+                    Cell::Text(format!("{}", 10_000 + i)),
+                    Cell::Text("Riverbend Table Rock Landscaping Partners".into()),
+                    Cell::Text("Plants and soil for the north lot, second delivery".into()),
+                    Cell::Text("5100 · Plants and Nursery Stock".into()),
+                    Cell::Amount(d("-26531.68")),
+                    Cell::Empty,
+                    Cell::Amount(d("-26531.68")),
+                    Cell::Amount(d("1186310.55")),
+                ],
+                drill: None,
+                expandable: false,
+            })
+            .collect();
+        let t = ReportTable {
+            columns,
+            rows,
+            meta: ReportMeta::default(),
+        };
+        let all: Vec<usize> = (0..400).collect();
+        let r = to_report(&t, &all, "Transaction Detail by Account", vec![], &tr);
+        let text = printed(&r);
+        assert_eq!(text.iter().filter(|s| *s == "11/05/2026").count(), 400);
+        assert_eq!(text.iter().filter(|s| *s == "Journal entry").count(), 400);
+        assert_eq!(text.iter().filter(|s| *s == "1,186,310.55").count(), 400);
+        assert!(!text.iter().any(|s| s == "11/05/20"));
+        let pdf = crate::reports::render_report(&r).expect("pdf");
+        assert!(pdf.starts_with(b"%PDF"));
     }
 
     #[test]

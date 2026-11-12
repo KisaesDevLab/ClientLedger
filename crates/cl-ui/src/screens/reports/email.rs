@@ -138,7 +138,7 @@ fn send(w: &mut ReportWindow) {
 /// The file is built: send it.
 fn built(w: &mut ReportWindow, form: Form, file: Option<Built>) {
     let Some((file, _)) = file else {
-        w.mailer.message = Some("reports.export.failed");
+        w.mailer.message = Some("reports.export.build_failed");
         return;
     };
     let ext = match w.mailer.kind {

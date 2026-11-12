@@ -184,18 +184,19 @@ fn has_sub_cents(t: &cl_core::report::ReportTable) -> bool {
 }
 
 impl Snapshot {
-    /// The file (pure; runs on any thread).
-    pub(crate) fn render(&self, kind: Kind) -> Option<Built> {
+    /// The file (pure; runs on any thread), or why it couldn't be made
+    /// (a short name for the log: no figures, names or text).
+    pub(crate) fn render(&self, kind: Kind) -> Result<Built, &'static str> {
         let table = &self.table;
         let rows: Vec<usize> = (0..table.rows.len()).collect();
         match kind {
-            Kind::Csv => Some((
+            Kind::Csv => Ok((
                 cl_print::report_export::to_csv(table, &rows, &self.head, &tr).into_bytes(),
                 0,
             )),
             Kind::Xlsx => cl_print::report_export::to_xlsx(table, &rows, &self.head, &tr)
-                .ok()
-                .map(|(b, n)| (b, usize::try_from(n).unwrap_or(usize::MAX))),
+                .map(|(b, n)| (b, usize::try_from(n).unwrap_or(usize::MAX)))
+                .map_err(|_| "xlsx"),
             Kind::Pdf => {
                 let mut subtitle: Vec<String> = self
                     .head
@@ -208,7 +209,15 @@ impl Snapshot {
                 }
                 let doc =
                     cl_print::report_export::to_report(table, &rows, &self.title, subtitle, &tr);
-                cl_print::reports::render_report(&doc).ok().map(|b| (b, 0))
+                cl_print::reports::render_report(&doc)
+                    .map(|b| (b, 0))
+                    .map_err(|e| match e {
+                        cl_print::PrintError::DoesNotFit(_) => "pdf: a figure does not fit",
+                        cl_print::PrintError::Font(_) => "pdf: font",
+                        cl_print::PrintError::Compress(_) => "pdf: compress",
+                        cl_print::PrintError::NoPages => "pdf: no pages",
+                        _ => "pdf: other",
+                    })
             }
         }
     }
@@ -217,8 +226,13 @@ impl Snapshot {
     pub(crate) fn spawn(self, kind: Kind) -> Receiver<Option<Built>> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
+            let built = self.render(kind).map_err(|why| {
+                // The real cause, in the log (A07 QA-8: a build failure was
+                // reported as a folder problem with nothing logged).
+                tracing::warn!(file = kind.name(), why, "a report file could not be built");
+            });
             // The window may have closed; nobody is waiting then.
-            let _ = tx.send(self.render(kind));
+            let _ = tx.send(built.ok());
         });
         rx
     }
@@ -227,7 +241,7 @@ impl Snapshot {
 /// The file's bytes for the rows on screen, built here (tests).
 #[cfg(test)]
 pub(crate) fn bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
-    snapshot(w)?.render(kind).map(|(b, _)| b)
+    snapshot(w)?.render(kind).ok().map(|(b, _)| b)
 }
 
 /// A message as if a file were just saved (tests).
@@ -358,6 +372,13 @@ pub(super) fn poll(w: &mut ReportWindow) {
     let ok = built
         .as_ref()
         .is_some_and(|(b, _)| cl_print::report_export::write_atomic(&path, b).is_ok());
+    // A file that couldn't be made says so; only a write is about the
+    // folder (A07 QA-8).
+    if built.is_none() {
+        w.export.message = Some(t("reports.export.build_failed"));
+        w.export.last = Some((kind, false));
+        return;
+    }
     // Another report is on screen now: the file is still written, and
     // only a failure is said (A07 QA-7).
     if view != w.view && ok {
@@ -398,7 +419,7 @@ fn poll_print(w: &mut ReportWindow) {
         return;
     };
     let Some((b, _)) = built else {
-        w.export.message = Some(t("reports.export.failed"));
+        w.export.message = Some(t("reports.export.build_failed"));
         return;
     };
     w.link.push(CompanyEvent::OpenWith(
