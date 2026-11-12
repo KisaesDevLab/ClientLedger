@@ -194,13 +194,14 @@ pub fn column_rules(def: &BuilderDefinition) -> ColumnRules {
 }
 
 /// The amount filter's value from what the owner typed (plan §4): read
-/// with the app's money rules (up to four decimals, grouping commas, `$`,
+/// with the app's money rules for an amount in dollars and cents (up to
+/// two decimals, as every money field takes, QA-8; grouping commas, `$`,
 /// a leading `-` or parentheses), then kept as the exact digits typed
-/// (`1,234.50` is `1234.50`), `^-?\d{1,15}(\.\d{1,4})?$`. `None`: not an
-/// amount (five decimals, `1e3`, letters, nothing).
+/// (`1,234.50` is `1234.50`), `^-?\d{1,15}(\.\d{1,2})?$`. `None`: not an
+/// amount (sub-cents such as `1449.999`, `1e3`, letters, nothing).
 #[must_use]
 pub fn amount_filter_value(text: &str) -> Option<String> {
-    Money::parse_user(text, UserInput::FULL).ok()?;
+    Money::parse_user(text, UserInput::MONEY).ok()?;
     let t = text.trim();
     let (neg, body) = if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
         (true, inner.trim())
@@ -219,7 +220,7 @@ pub fn amount_filter_value(text: &str) -> Option<String> {
         None => (body.as_str(), ""),
     };
     let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
-    if !(1..=15).contains(&int.len()) || !digits(int) || frac.len() > 4 || !digits(frac) {
+    if !(1..=15).contains(&int.len()) || !digits(int) || frac.len() > 2 || !digits(frac) {
         return None;
     }
     let mut out = String::with_capacity(int.len() + frac.len() + 2);
@@ -232,4 +233,96 @@ pub fn amount_filter_value(text: &str) -> Option<String> {
         out.push_str(frac);
     }
     Some(out)
+}
+
+/// The account types whose normal balance is a debit (the engine's
+/// `RB_DEBIT_NORMAL_TYPES`): their natural sign is debits positive.
+const DEBIT_NORMAL_TYPES: [&str; 4] = ["asset", "cogs", "expense", "other_expense"];
+
+/// True when `s` shows its figures with the other sign than its natural
+/// one ("Show as positive" set against the accounts' normal side), or may
+/// (a sign set where the natural side can't be told from its filters).
+#[must_use]
+pub fn sign_flipped(s: &Section) -> bool {
+    use crate::report_def::schema::Polarity;
+    let debit = match s.polarity {
+        None | Some(Polarity::Natural) => return false,
+        Some(Polarity::Debit) => true,
+        Some(Polarity::Credit) => false,
+    };
+    if s.source != SourceKey::Gl {
+        return true;
+    }
+    let types: Vec<&String> = s
+        .filters
+        .iter()
+        .filter(|f| f.field == "account_type" && f.op == FilterOp::In)
+        .flat_map(|f| f.values.iter().flatten())
+        .collect();
+    if types.is_empty() {
+        return true;
+    }
+    let debits = types
+        .iter()
+        .filter(|t| DEBIT_NORMAL_TYPES.contains(&t.as_str()))
+        .count();
+    let natural_debit = match debits {
+        0 => false,
+        n if n == types.len() => true,
+        _ => return true,
+    };
+    natural_debit != debit
+}
+
+/// The sections whose sign is flipped ([`sign_flipped`]) that formula
+/// `formula_id` adds up, directly, through a group or through another
+/// formula, in outline order. The engine adds formula terms as they are
+/// shown (polarity applied), so such a formula's result changes with the
+/// section's "Show as positive" (QA-12, Q-A08ai): the editor says so.
+#[must_use]
+pub fn flipped_terms(def: &BuilderDefinition, formula_id: &str) -> Vec<String> {
+    fn sections<'a>(node: &'a Node, out: &mut Vec<&'a Section>) {
+        match node {
+            Node::Section(s) => out.push(s),
+            Node::Group(g) => {
+                for c in &g.children {
+                    sections(c, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut seen: Vec<String> = Vec::new();
+    let mut todo = vec![formula_id.to_string()];
+    let mut found: Vec<String> = Vec::new();
+    while let Some(id) = todo.pop() {
+        if seen.contains(&id) {
+            continue;
+        }
+        seen.push(id.clone());
+        let Some(Node::Formula(f)) = outline::find(&def.nodes, &id) else {
+            continue;
+        };
+        for term in &f.terms {
+            match outline::find(&def.nodes, &term.node_id) {
+                Some(Node::Formula(_)) => todo.push(term.node_id.clone()),
+                Some(n) => {
+                    let mut list = Vec::new();
+                    sections(n, &mut list);
+                    for s in list {
+                        if sign_flipped(s) && !found.contains(&s.id) {
+                            found.push(s.id.clone());
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    let order: Vec<String> = outline::walk(&def.nodes)
+        .into_iter()
+        .map(|v| v.node.id().to_string())
+        .collect();
+    found.sort_by_key(|id| order.iter().position(|x| x == id));
+    found
 }

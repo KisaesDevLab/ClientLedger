@@ -87,6 +87,20 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, f: &Form
             next = Some(n);
         }
     }
+    // A row it adds shows the other sign than usual: the formula adds it
+    // as shown (Q-A08ai), so say so here (QA-12).
+    let flipped = cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &f.id);
+    if !flipped.is_empty() {
+        let names: Vec<String> = flipped
+            .iter()
+            .map(|id| super::outline::caption_of(s, id))
+            .collect();
+        crate::screens::company::form::inline_note(
+            ui,
+            tokens,
+            &t_with("builder.formula.sign_note", &[("rows", &names.join(", "))]),
+        );
+    }
     ui.add(
         egui::Label::new(
             RichText::new(t("builder.formula.hint"))

@@ -1688,3 +1688,67 @@ fn a_clicked_outline_row_takes_the_keyboard() {
     assert_eq!(s.ed.selection(), Some(inc.as_str()));
     assert!(s.outline_focused, "the clicked row has the keyboard");
 }
+
+/// QA-8: an amount filter refuses sub-cents with a message; the value
+/// stays as it was.
+#[test]
+fn the_amount_filter_refuses_sub_cents() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let sec = add(&mut s, RowKind::Section, "Expenses");
+    let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &sec).cloned() else {
+        panic!("section");
+    };
+    n.filters.push(Filter {
+        field: "amount".into(),
+        op: FilterOp::Gte,
+        ids: None,
+        values: None,
+        value: Some("1450.00".into()),
+    });
+    s.apply(Op::Edit(Node::Section(n)));
+    s.commit(&FieldKey::Amount(sec.clone(), 0), "1,449.999".into());
+    let value = match tree::find(&s.ed.definition().nodes, &sec) {
+        Some(Node::Section(x)) => x.filters[0].value.clone(),
+        _ => None,
+    };
+    assert_eq!(value.as_deref(), Some("1450.00"), "refused, unchanged");
+    assert!(
+        s.status
+            .as_deref()
+            .is_some_and(|m| m.contains("two decimals")),
+        "{:?}",
+        s.status
+    );
+}
+
+/// QA-12 (Q-A08ai): flipping a section's sign that a formula adds says so
+/// in the status line; the formula's Row tab shows the note.
+#[test]
+fn flipping_a_sign_a_formula_uses_says_so() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let (_inc, cogs, gp) = gross_profit(&mut s);
+    let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
+        panic!("section");
+    };
+    n.polarity = Some(cl_model::report_def::Polarity::Credit);
+    s.apply(Op::Edit(Node::Section(n)));
+    super::sources::sign_status(&mut s, &cogs);
+    let status = s.status.clone().expect("a status line");
+    assert!(
+        status.contains("Gross profit") && status.contains("Cost of goods sold"),
+        "{status}"
+    );
+    assert_eq!(
+        cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &gp),
+        [cogs.clone()]
+    );
+    // Back to the usual direction: no note.
+    let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
+        panic!("section");
+    };
+    n.polarity = None;
+    s.apply(Op::Edit(Node::Section(n)));
+    s.status = None;
+    super::sources::sign_status(&mut s, &cogs);
+    assert_eq!(s.status, None);
+}

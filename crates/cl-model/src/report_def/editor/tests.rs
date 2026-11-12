@@ -605,10 +605,22 @@ fn the_amount_filter_keeps_the_exact_digits_typed() {
     assert_eq!(amount_filter_value("1234.5").as_deref(), Some("1234.5"));
     assert_eq!(amount_filter_value("1,234.50").as_deref(), Some("1234.50"));
     assert_eq!(amount_filter_value(" $250 ").as_deref(), Some("250"));
-    assert_eq!(amount_filter_value("-12.0001").as_deref(), Some("-12.0001"));
+    assert_eq!(amount_filter_value("-12.01").as_deref(), Some("-12.01"));
     assert_eq!(amount_filter_value("(40)").as_deref(), Some("-40"));
     assert_eq!(amount_filter_value(".5").as_deref(), Some("0.5"));
-    for bad in ["1.23456", "1e3", "abc", "", "1,23", "--1", "NaN"] {
+    // Dollars and cents only (QA-8): a sub-cent amount is refused.
+    for bad in [
+        "1449.999",
+        "1,449.999",
+        "-12.0001",
+        "1.23456",
+        "1e3",
+        "abc",
+        "",
+        "1,23",
+        "--1",
+        "NaN",
+    ] {
         assert_eq!(amount_filter_value(bad), None, "{bad}");
     }
 }
@@ -698,4 +710,55 @@ proptest! {
         while e.redo() {}
         prop_assert_eq!(e.definition(), &end);
     }
+}
+
+fn gl_section(id: &str, types: &[&str], polarity: Option<crate::report_def::Polarity>) -> Node {
+    serde_json::from_value(serde_json::json!({
+        "type": "section", "id": id, "caption": id, "source": "gl", "measure": "amount",
+        "polarity": polarity,
+        "filters": if types.is_empty() { serde_json::json!([]) } else {
+            serde_json::json!([{"field": "account_type", "op": "in", "values": types}])
+        },
+        "groupBy": [], "display": "summary", "defaultExpanded": false,
+        "showTotal": true, "hideZero": false,
+    }))
+    .expect("section")
+}
+
+/// QA-12 (Q-A08ai): a formula that adds up a section shown with the other
+/// sign than its accounts' normal side (directly, through a group or
+/// another formula) is named; a sign set to the natural side is not.
+#[test]
+fn a_formula_over_a_flipped_section_is_named() {
+    use crate::report_def::Polarity;
+    use crate::report_def::editor::choices::{flipped_terms, sign_flipped};
+    let mut def = blank_definition();
+    let inc = gl_section("inc", &["revenue"], None);
+    let exp = gl_section("exp", &["expense"], Some(Polarity::Credit));
+    let Node::Section(e) = &exp else { panic!() };
+    assert!(sign_flipped(e), "expenses with credits positive");
+    let Node::Section(e2) = gl_section("e2", &["expense"], Some(Polarity::Debit)) else {
+        panic!()
+    };
+    assert!(
+        !sign_flipped(&e2),
+        "debits positive is an expense's own side"
+    );
+    let Node::Section(any) = gl_section("any", &[], Some(Polarity::Debit)) else {
+        panic!()
+    };
+    assert!(sign_flipped(&any), "unknown side: may be flipped");
+    def.nodes = serde_json::from_value(serde_json::json!([
+        inc, exp,
+        {"type": "formula", "id": "net", "caption": "Net", "terms": [
+            {"nodeId": "inc", "sign": 1}, {"nodeId": "exp", "sign": -1}]},
+        {"type": "formula", "id": "again", "caption": "Again", "terms": [
+            {"nodeId": "net", "sign": 1}]},
+        {"type": "formula", "id": "plain", "caption": "Plain", "terms": [
+            {"nodeId": "inc", "sign": 1}]},
+    ]))
+    .expect("nodes");
+    assert_eq!(flipped_terms(&def, "net"), ["exp"]);
+    assert_eq!(flipped_terms(&def, "again"), ["exp"], "through a formula");
+    assert!(flipped_terms(&def, "plain").is_empty());
 }
