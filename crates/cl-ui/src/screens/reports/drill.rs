@@ -161,6 +161,12 @@ pub(crate) fn target(source: Source, drill: &Drill) -> Target {
 /// True when clicking `drill` shows something now: a form, or a report the
 /// engine can run. Amounts with a dead-end drill are drawn without a link.
 pub(crate) fn live(link: &crate::company::CompanyLink, source: Source, drill: &Drill) -> bool {
+    if matches!(
+        drill,
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. }
+    ) {
+        return true;
+    }
     match target(source, drill) {
         Target::Form(..) | Target::Probe(_) => true,
         Target::Report(open) => {
@@ -175,6 +181,13 @@ pub(crate) fn live(link: &crate::company::CompanyLink, source: Source, drill: &D
 /// Opens what `drill` points at.
 pub(super) fn open(w: &mut ReportWindow, drill: &Drill) {
     w.notice = None;
+    if matches!(
+        drill,
+        Drill::BuilderDetail { .. } | Drill::BuilderPage { .. }
+    ) {
+        super::builder_run::drill(w, drill);
+        return;
+    }
     match target(w.spec.source, drill) {
         Target::Form(form, id) => w
             .link

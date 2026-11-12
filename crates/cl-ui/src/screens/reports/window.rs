@@ -168,6 +168,10 @@ pub struct ReportWindow {
     pub(super) catalog_open: Option<bool>,
     pub(super) drill_error: Option<ApiError>,
     bus: crate::data_bus::Subscription,
+    /// A Report Builder report shown under the stand-in spec (A07).
+    pub(super) builder: Option<Box<super::builder_run::Builder>>,
+    /// The Report Builder starters (catalog column).
+    pub(super) starters: super::builder_run::Starters,
 }
 
 impl ReportWindow {
@@ -250,6 +254,8 @@ impl ReportWindow {
             catalog_open: None,
             drill_error: None,
             bus: crate::data_bus::Subscription::detached(),
+            builder: None,
+            starters: super::builder_run::Starters::default(),
             link,
         };
         w.bus = w.link.bus().subscribe();
@@ -261,6 +267,7 @@ impl ReportWindow {
     /// Switches to `spec` with `options` (catalog click, drill-down,
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
+        self.builder = None;
         self.spec = spec;
         self.options = options;
         self.table = None;
@@ -365,6 +372,10 @@ impl ReportWindow {
         }
         if self.fiscal_job.is_some() {
             self.state = RunState::Empty;
+            return;
+        }
+        if self.builder.is_some() {
+            super::builder_run::run(self);
             return;
         }
         if !available(&self.link, self.spec) {
@@ -486,6 +497,7 @@ impl ReportWindow {
                 }
             }
         }
+        super::builder_run::poll(self);
         super::filter_lists::poll(self);
         super::drill::poll_probe(self);
         super::memorized::poll(self);
@@ -520,6 +532,9 @@ impl ReportWindow {
         let Some(table) = &self.table else {
             return Vec::new();
         };
+        if let Some(b) = &self.builder {
+            return super::builder_run::shown_rows(b, table);
+        }
         let mut rows = table.visible(&self.options.collapsed);
         // The tag split's account totals show only when asked for (Q-271).
         rows.retain(|&i| !cl_model::reports::hidden(&table.rows[i], &self.options));
@@ -550,6 +565,10 @@ impl ReportWindow {
 
     /// Collapse every expandable row, or expand all when any is collapsed.
     pub(crate) fn toggle_collapse_all(&mut self) {
+        if self.builder.is_some() {
+            super::builder_run::toggle_all(self);
+            return;
+        }
         let mut next = self.options.clone();
         if next.collapsed.is_empty() {
             next.collapsed = self
@@ -573,6 +592,14 @@ impl ReportWindow {
 
     /// The report's title as shown (the owner's rename first).
     pub(crate) fn title_text(&self) -> String {
+        if let Some(b) = &self.builder {
+            return self
+                .options
+                .header
+                .title
+                .clone()
+                .unwrap_or_else(|| b.title());
+        }
         self.options
             .header
             .title
@@ -778,6 +805,7 @@ impl ReportWindow {
         if let Some(p) = self.problem {
             form::inline_warning(ui, tokens, &t(p));
         }
+        super::builder_run::banner(self, ui, tokens);
         if let Some(e) = &self.error {
             form::inline_error_details(ui, tokens, e, "reports.run");
             if ui.button(t("reports.retry")).clicked() {
@@ -910,7 +938,10 @@ impl ReportWindow {
                                 ui.add_space(f32::from(r.level) * 16.0);
                                 let caption = self.caption_of(table, i);
                                 if r.expandable {
-                                    let open = !collapsed.contains(&r.path);
+                                    let open = match &self.builder {
+                                        Some(b) => b.state.is_open(&r.path),
+                                        None => !collapsed.contains(&r.path),
+                                    };
                                     let arrow = if open { "\u{2212}" } else { "+" };
                                     let key = if open {
                                         "reports.collapse_row"
@@ -929,6 +960,15 @@ impl ReportWindow {
                                     if resp.clicked() {
                                         action = Some(GridAction::Collapse(r.path.clone()));
                                     }
+                                }
+                                // A capped path's `more` row pages the rest.
+                                if r.kind == RowKind::More
+                                    && let Some(d) = &r.drill
+                                {
+                                    if ui.button(label(&r.caption)).clicked() {
+                                        action = Some(GridAction::Drill(d.clone()));
+                                    }
+                                    return;
                                 }
                                 let text = RichText::new(caption);
                                 ui.add(
@@ -1018,6 +1058,9 @@ impl ReportWindow {
         }
         self.h_offset = new_offset;
         match action {
+            Some(GridAction::Collapse(p)) if self.builder.is_some() => {
+                super::builder_run::toggle(self, &p, ui);
+            }
             Some(GridAction::Collapse(p)) => self.toggle_collapse(&p),
             Some(GridAction::Drill(d)) => super::drill::open(self, &d),
             Some(GridAction::Sort(ci)) => self.sort_by(ci),
@@ -1104,6 +1147,7 @@ impl ReportWindow {
             "ask": self.ask.state_json(),
             "email": self.mailer.state_json(),
             "email_available": super::email::available(self),
+            "builder": self.builder.as_deref().map(super::builder_run::state_json),
         })
     }
 }
@@ -1266,6 +1310,7 @@ impl Screen for ReportWindow {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
+        super::builder_run::tick(self, ui);
         if self.job.is_none() && !self.link.bus().take(&mut self.bus).is_empty() {
             self.run();
         }
@@ -1282,6 +1327,8 @@ impl Screen for ReportWindow {
             || self.mailer.busy()
             || self.filter_lists.busy()
             || self.drill_job.is_some()
+            || self.builder.as_ref().is_some_and(|b| b.busy())
+            || self.starters.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1318,7 +1365,7 @@ impl Screen for ReportWindow {
                 true
             }
             "reports.memorize" => {
-                if super::memorized::available(&self.link) {
+                if super::memorized::available(&self.link) && self.builder.is_none() {
                     super::memorized::open_dialog(self);
                 }
                 true
@@ -1337,8 +1384,17 @@ impl Screen for ReportWindow {
     }
 
     fn open_with(&mut self, payload: OpenPayload) -> bool {
-        let OpenPayload::Report(open) = payload else {
-            return false;
+        let open = match payload {
+            OpenPayload::Report(open) => open,
+            OpenPayload::BuilderStarter(key) => {
+                super::builder_run::open_starter(self, &key);
+                return true;
+            }
+            OpenPayload::BuilderDetail(open) => {
+                super::builder_run::open_detail(self, *open);
+                return true;
+            }
+            _ => return false,
         };
         let ReportOpen { key, options } = *open;
         let Some(spec) = cl_model::reports::find(&key) else {

@@ -589,6 +589,39 @@ pub static CATALOG: &[ReportSpec] = &[
     },
 ];
 
+/// The report window's stand-in spec for a Report Builder run over a range
+/// (A07): not in the catalog; the window takes its dates, basis and period
+/// columns from it and runs the definition instead of a catalog route.
+pub static BUILDER_RANGE: ReportSpec = ReportSpec {
+    key: "builder",
+    title: "reports.builder.title",
+    group: CatalogGroup::Company,
+    source: Source::ProfitLoss,
+    dates: DateMode::Range,
+    default_dates: DatePreset::ThisMonth,
+    basis: BasisMode::Toggle,
+    columns: &[
+        ColumnBy::Total,
+        ColumnBy::Month,
+        ColumnBy::Quarter,
+        ColumnBy::Year,
+    ],
+    default_extras: &[],
+    extras: &[],
+    filters: &[],
+    tag_split: false,
+    sort: SortMode::None,
+    drill: DrillRule::Lines,
+    capabilities: &[],
+    layout: Layout::Statement,
+};
+
+/// As [`BUILDER_RANGE`], for a definition dated as of one day.
+pub static BUILDER_AS_OF: ReportSpec = ReportSpec {
+    dates: DateMode::AsOf,
+    default_dates: DatePreset::Today,
+    ..BUILDER_RANGE
+};
 /// The report with `key`.
 #[must_use]
 pub fn find(key: &str) -> Option<&'static ReportSpec> {

@@ -13,6 +13,7 @@
 
 mod ask;
 mod budgets;
+mod builder_run;
 mod catalog;
 mod drill;
 mod email;
@@ -37,6 +38,7 @@ use crate::company::CompanyLink;
 use crate::company::demo::DemoState;
 use crate::windows::Screen;
 
+pub use builder_run::BuilderDetailOpen;
 pub(crate) use drill::profit_loss_for;
 pub use window::ReportWindow;
 

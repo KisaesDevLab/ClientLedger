@@ -61,6 +61,7 @@ pub(super) fn show(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
                     }
                 }
             }
+            super::builder_run::catalog(w, ui, tokens);
             // A memorized match is a match (QA-15).
             if hits.is_empty() && memorized == 0 {
                 ui.label(RichText::new(t("reports.find.none")).color(tokens.text_secondary));
