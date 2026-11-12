@@ -1361,6 +1361,10 @@ fn main() -> std::process::ExitCode {
             contract_report_builder::detail_pages_echo_and_go_stale,
         ),
         (
+            "report_builder::totals_and_columns_drill_to_their_lines",
+            contract_report_builder::totals_and_columns_drill_to_their_lines,
+        ),
+        (
             "budgets::hand_fixture_and_writes",
             contract_budgets::hand_fixture_and_writes,
         ),

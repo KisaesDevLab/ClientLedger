@@ -14,7 +14,9 @@ pub mod presets;
 pub mod resolve;
 pub mod spec;
 
-pub use catalog::{BUILDER_AS_OF, BUILDER_RANGE, CATALOG, find, search};
+pub use catalog::{
+    BUILDER_AS_OF, BUILDER_AS_OF_TOTAL, BUILDER_RANGE, BUILDER_RANGE_TOTAL, CATALOG, find, search,
+};
 pub use definition::{DefinitionError, SCHEMA_VERSION, StandardDefinition};
 pub use options::{
     AmountFilter, ColumnBy, DateChoice, HeaderOptions, ReportOptions, Sort, TagLabel, TagSplit,

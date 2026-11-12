@@ -24,11 +24,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cl_api::resources::report_builder::{RunDates, RunPurpose, RunRef, RunRequest, Starter};
+use cl_api::resources::report_builder::{
+    DetailRequest, RunDates, RunPurpose, RunRef, RunRequest, Starter,
+};
 use cl_api::{AccountFilter, Session};
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
-use cl_core::report::{Basis, Cell, ColumnKind, DateRange, ReportDates, ReportTable, RowKind};
+use cl_core::report::{
+    Basis, Cell, ColumnKind, DateRange, Drill, ReportDates, ReportTable, RowKind,
+};
 use cl_model::reports::{DateChoice, ReportOptions, find};
 use rust_decimal::Decimal;
 
@@ -248,17 +252,45 @@ async fn summary(
     totals: &[(&str, &str)],
     what: &str,
 ) {
-    let (req, std) = standard(s, std_key, set).await;
+    // `profit_loss/income,other_income`: only those sections of the
+    // standard report (Revenue by Category ties to the P&L, `tiesTo`).
+    let (std_key, sections) = match std_key.split_once('/') {
+        Some((k, s)) => (k, s.split(',').collect::<Vec<_>>()),
+        None => (std_key, Vec::new()),
+    };
+    let (req, mut std) = standard(s, std_key, set).await;
     let basis = req.basis.unwrap_or(Basis::Accrual);
     let (dates, periods) = dates_of(&req);
     let t = builder_run(s, st, dates, periods, basis).await;
     let (bc, sc) = (builder_cols(&t), std_cols(&std));
     // A % of income column is a percent: only amounts are compared.
     assert_eq!(bc.len(), sc.len(), "{what}: value columns line up");
+    if !sections.is_empty() {
+        let mut want = zeros(sc.len());
+        for sec in &sections {
+            if let Some(v) = std_total(&std, &format!("{sec}~total"), &sc) {
+                for (a, b) in want.iter_mut().zip(v) {
+                    *a += b;
+                }
+            }
+        }
+        let last = t
+            .rows
+            .iter()
+            .rfind(|r| r.kind == RowKind::Total)
+            .unwrap_or_else(|| panic!("{what}: a total"));
+        assert_eq!(values(last, &bc), want, "{what}: total of {sections:?}");
+        std.rows.retain(|r| {
+            r.path
+                .0
+                .first()
+                .is_some_and(|p| sections.iter().any(|s| p.split('/').next() == Some(*s)))
+        });
+    }
     let got = builder_lines(&t, &bc);
     assert!(!got.is_empty(), "{what}: builder lines");
     assert_eq!(got, std_lines(&std, &sc), "{what}: lines, both ways");
-    if totals.is_empty() {
+    if totals.is_empty() && sections.is_empty() {
         let last = t
             .rows
             .iter()
@@ -535,6 +567,149 @@ async fn open_items(s: &Session, st: &Starter, std_key: &str, at: CalendarDate, 
     }
 }
 
+/// The detail of `drill` paged to the end (waiting out the rate limit):
+/// its rows and its subtotal (equal on every page).
+async fn page_all(
+    s: &Session,
+    reference: &RunRef,
+    run: &cl_api::resources::report_builder::BuilderRun,
+    drill: &Drill,
+) -> (Vec<cl_core::report::ReportRow>, Vec<Cell>) {
+    let Drill::BuilderDetail {
+        node_id,
+        path,
+        range,
+    } = drill.clone()
+    else {
+        panic!("not a builder drill: {drill:?}");
+    };
+    let mut req = DetailRequest {
+        reference: reference.clone(),
+        node_id,
+        path,
+        range,
+        cursor: None,
+        fingerprint: run.fingerprint.clone(),
+        stamp: run.stamp,
+    };
+    let (mut rows, mut subtotal) = (Vec::new(), None);
+    loop {
+        let page = loop {
+            match s
+                .report_builder()
+                .detail(&req, &run.table.columns, &run.layout)
+                .await
+            {
+                Err(cl_api::ApiError::RateLimited { retry_after }) => {
+                    tokio::time::sleep(retry_after.unwrap_or(std::time::Duration::from_secs(15)))
+                        .await;
+                }
+                other => break other.unwrap_or_else(|e| panic!("drill {:?}: {e}", req.path)),
+            }
+        };
+        if let Some(sub) = &subtotal {
+            assert_eq!(sub, &page.subtotal, "every page echoes one subtotal");
+        }
+        subtotal = Some(page.subtotal);
+        rows.extend(page.rows);
+        match page.cursor {
+            Some(c) => req.cursor = Some(c),
+            None => return (rows, subtotal.unwrap_or_default()),
+        }
+    }
+}
+
+/// Every starter's section Totals and first lines drill to detail whose
+/// subtotal is the row and whose lines sum to it, in every value column
+/// (review #6, U-119e). The sum is the test's, never the app's.
+async fn drills_sum_to_their_cells(s: &Session, list: &[Starter]) {
+    for st in list {
+        let as_of = st.definition["dates"]["mode"] == "asOf";
+        let periods: Vec<DateRange> = if !as_of && st.definition["columns"]["periods"] == "month" {
+            [(10, 31), (11, 30), (12, 31)]
+                .iter()
+                .map(|&(m, last)| DateRange {
+                    from: d(2026, m, 1),
+                    to: d(2026, m, last),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let reference = RunRef {
+            definition: Some(st.definition.clone()),
+            definition_id: None,
+            version: None,
+            dates: if as_of {
+                RunDates::as_of(d(2026, 12, 31))
+            } else {
+                RunDates::range(DateRange {
+                    from: d(2026, 10, 1),
+                    to: d(2026, 12, 31),
+                })
+            },
+            period_ranges: periods,
+            compare_ranges: Vec::new(),
+            fiscal_year_starts: vec![d(2025, 1, 1), d(2026, 1, 1)],
+            basis: Some(Basis::Accrual),
+            adjusting: None,
+        };
+        let req = RunRequest {
+            reference: reference.clone(),
+            open: Vec::new(),
+            collapsed: Vec::new(),
+            expand_all: false,
+            purpose: RunPurpose::Screen,
+        };
+        let run = s
+            .report_builder()
+            .run(&req)
+            .await
+            .unwrap_or_else(|e| panic!("{}: {e}", st.key));
+        let cols = builder_cols(&run.table);
+        let mut drilled = 0;
+        let mut lines = 0;
+        for row in &run.table.rows {
+            let take = match row.kind {
+                RowKind::Total => true,
+                RowKind::Group if lines < 2 => {
+                    lines += 1;
+                    true
+                }
+                _ => false,
+            };
+            let Some(drill @ Drill::BuilderDetail { .. }) = row.drill.as_ref().filter(|_| take)
+            else {
+                continue;
+            };
+            let (rows, subtotal) = page_all(s, &reference, &run, drill).await;
+            for &c in &cols {
+                assert_eq!(
+                    subtotal[c], row.cells[c],
+                    "{}: {} subtotal ({})",
+                    st.key, row.caption, run.table.columns[c].key
+                );
+                let sum: Decimal = rows
+                    .iter()
+                    .filter(|x| x.kind == RowKind::Detail)
+                    .map(|x| amount(&x.cells[c]))
+                    .sum();
+                assert_eq!(
+                    sum,
+                    amount(&row.cells[c]),
+                    "{}: {} lines sum ({})",
+                    st.key,
+                    row.caption,
+                    run.table.columns[c].key
+                );
+            }
+            drilled += 1;
+        }
+        // The ledger and the check register have no Total; the Trial
+        // Balance's Total has no drill; every starter has drillable lines.
+        assert!(drilled > 0, "{}: something drills", st.key);
+    }
+}
 pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
     let list = s.report_builder().starters().await.expect("starters");
     let chart = s
@@ -570,7 +745,11 @@ pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
             for (key, std_key, totals) in [
                 ("profit_loss", "profit_loss", PL_TOTALS),
                 ("profit_loss_pct_income", "profit_loss", PL_TOTALS),
-                ("revenue_by_category", "revenue_by_category", &[][..]),
+                (
+                    "revenue_by_category",
+                    "profit_loss/income,other_income",
+                    &[][..],
+                ),
                 ("expenses_by_category", "expenses_by_category", &[][..]),
             ] {
                 let st = starter(&list, key);
@@ -652,6 +831,7 @@ pub(super) async fn starters_tie_out(s: &Session, bank: AccountId) {
             tied.insert(st.key.as_str());
         }
     }
+    drills_sum_to_their_cells(s, &list).await;
     let untied: Vec<&str> = list
         .iter()
         .filter(|s| s.ties_to.is_some() && !tied.contains(s.key.as_str()))

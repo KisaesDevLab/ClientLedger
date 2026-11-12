@@ -85,13 +85,8 @@ fn a_profit_and_loss_keeps_the_exact_strings() {
     assert_eq!(t.columns.len(), 1);
     assert_eq!(t.columns[0].key, "total");
     assert_eq!(t.columns[0].kind, ColumnKind::Amount);
-    assert_eq!(
-        t.columns[0].range,
-        Some(DateRange {
-            from: day(2026, 1, 1),
-            to: day(2026, 12, 31)
-        })
-    );
+    // The total drills every column: no range is sent (U-119e).
+    assert_eq!(t.columns[0].range, None);
     assert_eq!(t.meta.basis, Some(Basis::Accrual));
     let kinds: Vec<RowKind> = t.rows.iter().take(6).map(|r| r.kind).collect();
     assert_eq!(
@@ -128,10 +123,13 @@ fn a_profit_and_loss_keeps_the_exact_strings() {
         })
     );
     assert_eq!(t.rows[5].drill, None);
-    // The total column's dates narrow a cell's drill.
+    // The total column's cell drills every column's lines (no range).
     assert!(matches!(
-        t.rows[1].drill.as_ref().and_then(|x| x.for_cell(&t.columns[0])),
-        Some(Drill::BuilderDetail { range: Some(rg), .. }) if rg.from == day(2026, 1, 1)
+        t.rows[1]
+            .drill
+            .as_ref()
+            .and_then(|x| x.for_cell(&t.columns[0])),
+        Some(Drill::BuilderDetail { range: None, .. })
     ));
     assert_eq!(run("profit_loss_cash").table.meta.basis, Some(Basis::Cash));
 }
@@ -199,12 +197,16 @@ fn compare_columns_change_and_percent() {
     // Compare and change cells don't drill (plan §4).
     assert_eq!(drill.for_cell(&t.columns[1]), None);
     assert_eq!(drill.for_cell(&t.columns[2]), None);
-    // An as-of period column has no full range: it doesn't drill either.
+    // An as-of period column drills from the beginning (U-119e).
     let as_of = column(&json!({"key": "p1", "caption": "Mar", "kind": "period",
                                 "range": {"from": null, "to": "2026-03-31"}}))
     .expect("column")
     .expect("shown");
-    assert_eq!(drill.for_cell(&as_of), None);
+    assert!(matches!(
+        drill.for_cell(&as_of),
+        Some(Drill::BuilderDetail { range: Some(r), .. })
+            if r.from == CalendarDate::min() && r.to == day(2026, 3, 31)
+    ));
     let ranged = column(&json!({"key": "p1", "caption": "Mar", "kind": "period",
                                  "range": {"from": "2026-03-01", "to": "2026-03-31"}}))
     .expect("column")
@@ -658,16 +660,64 @@ fn starters_read_bare_or_wrapped() {
 }
 
 #[test]
-fn an_open_item_detail_row_without_a_path_takes_its_lines() {
-    // Engine 106ca6c5 sends `path: []` on open-item detail rows in `/run`.
+fn a_row_without_a_path_is_off_contract() {
+    // U-119e: open-item detail rows carry their line's path, so a row
+    // without one, detail or not, is a shape error (#12).
     let mut v = sample("transaction_detail_by_account");
     v["rows"][3]["path"] = json!([]);
-    let r = read_run(&v, None).expect("run");
-    assert_eq!(r.table.rows[3].path, r.table.rows[1].path);
-    // Anything else without a path is still off contract.
+    assert!(matches!(
+        read_run(&v, None),
+        Err(ApiError::ReportShape { .. })
+    ));
+    let mut v = sample("transaction_detail_by_account");
     v["rows"][1]["path"] = json!([]);
     assert!(matches!(
         read_run(&v, None),
         Err(ApiError::ReportShape { .. })
     ));
+}
+
+/// U-119e: a period column's range goes back as sent; an as-of column's
+/// as `from: null`; the total column sends none.
+#[test]
+fn a_column_drill_sends_the_columns_own_range() {
+    let as_of = DateRange {
+        from: CalendarDate::min(),
+        to: day(2026, 6, 30),
+    };
+    let mut req = DetailRequest {
+        reference: reference(),
+        node_id: "assets".into(),
+        path: RowPath::of(["n:assets"]),
+        range: Some(as_of),
+        cursor: None,
+        fingerprint: "f".repeat(64),
+        stamp: 1,
+    };
+    let v = serde_json::to_value(&req).expect("json");
+    assert_eq!(v["range"], json!({"from": null, "to": "2026-06-30"}));
+    req.range = Some(DateRange {
+        from: day(2026, 3, 1),
+        to: day(2026, 3, 31),
+    });
+    let v = serde_json::to_value(&req).expect("json");
+    assert_eq!(
+        v["range"],
+        json!({"from": "2026-03-01", "to": "2026-03-31"})
+    );
+    req.range = None;
+    assert!(
+        serde_json::to_value(&req)
+            .expect("json")
+            .get("range")
+            .is_none()
+    );
+    // The run's columns: an as-of balance column keeps its date; the total
+    // drills every column.
+    let r = run("balance_sheet_accrual");
+    for c in &r.table.columns {
+        if c.key == "total" {
+            assert_eq!(c.range, None);
+        }
+    }
 }

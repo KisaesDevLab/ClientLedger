@@ -246,3 +246,196 @@ pub fn detail_pages_echo_and_go_stale(h: &Harness) {
     let again = run(h, s, &request(reference, false)).expect("rerun");
     assert!(again.stamp > r.stamp);
 }
+
+/// Pages a drill to the end: its rows and the (equal on every page)
+/// subtotal.
+fn page_all(
+    h: &Harness,
+    s: &Session,
+    mut req: DetailRequest,
+    r: &BuilderRun,
+) -> (Vec<cl_core::report::ReportRow>, Vec<Cell>) {
+    let mut rows = Vec::new();
+    let mut subtotal = None;
+    loop {
+        let page = h
+            .run(s.report_builder().detail(&req, &r.table.columns, &r.layout))
+            .unwrap_or_else(|e| panic!("drill {:?}: {e}", req.path));
+        if let Some(sub) = &subtotal {
+            assert_eq!(sub, &page.subtotal, "every page echoes one subtotal");
+        }
+        subtotal = Some(page.subtotal);
+        rows.extend(page.rows);
+        match page.cursor {
+            Some(c) => req.cursor = Some(c),
+            None => return (rows, subtotal.unwrap_or_default()),
+        }
+    }
+}
+
+fn sum(rows: &[cl_core::report::ReportRow], col: usize) -> rust_decimal::Decimal {
+    rows.iter()
+        .filter(|x| x.kind == RowKind::Detail)
+        .map(|x| match x.cells[col] {
+            Cell::Amount(a) => a,
+            _ => rust_decimal::Decimal::ZERO,
+        })
+        .sum()
+}
+
+/// U-119e (`report-builder-drill-v1`): a section Total drills to every line
+/// of the section and a period column, range or as-of, to that column's
+/// lines; the subtotal shows that column and the total, and the lines sum
+/// to the cell.
+pub fn totals_and_columns_drill_to_their_lines(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::REPORT_BUILDER_DRILL, "U-119e") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbDrillBank");
+    let fuel = account(h, s, AccountType::Expense, "RbDrillFuel");
+    let tools = account(h, s, AccountType::Expense, "RbDrillTools");
+    for (m, d, acct, amt) in [
+        (3, 2, fuel.id, "12.3456"),
+        (3, 9, tools.id, "40.00"),
+        (4, 1, fuel.id, "7.01"),
+        (6, 5, tools.id, "0.0050"),
+    ] {
+        post(h, s, &je2(date(YEAR, m, d), "rbd", acct, bank.id, amt));
+    }
+    let section = |measure: &str, ids: &[String], display: &str| {
+        json!({
+            "type": "section", "id": "sec", "caption": "Section", "source": "gl",
+            "measure": measure, "polarity": "debit",
+            "filters": [{"field": "account", "op": "in", "ids": ids}],
+            "groupBy": [{"key": "account"}], "display": display,
+            "defaultExpanded": false, "showTotal": true, "hideZero": true
+        })
+    };
+    let def = |mode: &str, measure: &str, ids: &[String]| {
+        json!({
+            "schemaVersion": 1, "kind": "builder", "dates": {"mode": mode},
+            "columns": {"detailFields": ["date", "amount"], "periods": "month",
+                        "compare": [], "headers": {}},
+            "nodes": [section(measure, ids, "summary")]
+        })
+    };
+    // Range: monthly P&L-style columns over two expense accounts.
+    let expenses = def(
+        "range",
+        "amount",
+        &[fuel.id.to_string(), tools.id.to_string()],
+    );
+    let reference_r = reference(&expenses);
+    let r = run(h, s, &request(reference_r.clone(), false)).expect("run");
+    let total = r
+        .table
+        .rows
+        .iter()
+        .find(|x| x.kind == RowKind::Total)
+        .expect("the section total");
+    let Some(drill @ Drill::BuilderDetail { .. }) = total.drill.clone() else {
+        panic!("the Total drills: {:?}", total.drill);
+    };
+    let cols = &r.table.columns;
+    let tcol = cols.iter().position(|c| c.key == "total").expect("total");
+    let detail = |d: &Drill| {
+        let Drill::BuilderDetail {
+            node_id,
+            path,
+            range,
+        } = d.clone()
+        else {
+            panic!("{d:?}")
+        };
+        DetailRequest {
+            reference: reference_r.clone(),
+            node_id,
+            path,
+            range,
+            cursor: None,
+            fingerprint: r.fingerprint.clone(),
+            stamp: r.stamp,
+        }
+    };
+    // The Total (its total column has no range: every column's lines).
+    let (rows, subtotal) = page_all(h, s, detail(&drill.at(&cols[tcol])), &r);
+    assert_eq!(subtotal, total.cells, "the Total's subtotal is its row");
+    assert_eq!(
+        Cell::Amount(sum(&rows, tcol)),
+        total.cells[tcol],
+        "the lines sum to the Total"
+    );
+    // March only.
+    let march = cols
+        .iter()
+        .position(|c| c.range.is_some_and(|x| x.from == date(YEAR, 3, 1)))
+        .expect("the March column");
+    let (rows, subtotal) = page_all(h, s, detail(&drill.at(&cols[march])), &r);
+    assert_eq!(rows.iter().filter(|x| x.kind == RowKind::Detail).count(), 2);
+    assert_eq!(subtotal[march], total.cells[march], "March's cell");
+    assert_eq!(subtotal[tcol], total.cells[march], "the total holds March");
+    assert_eq!(Cell::Amount(sum(&rows, march)), total.cells[march]);
+    for (i, c) in subtotal.iter().enumerate() {
+        if i != march && i != tcol && cols[i].kind == cl_core::report::ColumnKind::Amount {
+            assert_eq!(*c, Cell::Empty, "{} is not March", cols[i].key);
+        }
+    }
+    // A range that matches no column is refused.
+    let mut bad = detail(&drill);
+    bad.range = Some(DateRange {
+        from: date(YEAR, 3, 2),
+        to: date(YEAR, 3, 31),
+    });
+    let e = h
+        .run(s.report_builder().detail(&bad, cols, &r.layout))
+        .expect_err("no such column");
+    assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+
+    // As of: month-end balances of the bank; the April column drills.
+    let balances = def("asOf", "balance", &[bank.id.to_string()]);
+    let reference_a = reference(&balances);
+    let a = run(h, s, &request(reference_a.clone(), false)).expect("as-of run");
+    let line = a
+        .table
+        .rows
+        .iter()
+        .find(|x| x.kind == RowKind::Group)
+        .expect("the bank line");
+    let april = a
+        .table
+        .columns
+        .iter()
+        .position(|c| c.range.is_some_and(|x| x.to == date(YEAR, 4, 30)))
+        .expect("the April column");
+    assert_eq!(
+        a.table.columns[april].range.map(|x| x.from),
+        Some(CalendarDate::min()),
+        "an as-of column runs from the beginning"
+    );
+    let Some(Drill::BuilderDetail {
+        node_id,
+        path,
+        range,
+    }) = line.drill.as_ref().map(|d| d.at(&a.table.columns[april]))
+    else {
+        panic!("the bank line drills");
+    };
+    let req = DetailRequest {
+        reference: reference_a,
+        node_id,
+        path,
+        range,
+        cursor: None,
+        fingerprint: a.fingerprint.clone(),
+        stamp: a.stamp,
+    };
+    let (rows, subtotal) = page_all(h, s, req, &a);
+    assert_eq!(subtotal[april], line.cells[april], "April's balance");
+    assert_eq!(
+        rows.iter().filter(|x| x.kind == RowKind::Detail).count(),
+        3,
+        "the lines through April"
+    );
+    assert_eq!(Cell::Amount(sum(&rows, april)), line.cells[april]);
+}

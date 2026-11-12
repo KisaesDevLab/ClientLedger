@@ -622,6 +622,20 @@ pub static BUILDER_AS_OF: ReportSpec = ReportSpec {
     default_dates: DatePreset::Today,
     ..BUILDER_RANGE
 };
+
+/// As [`BUILDER_AS_OF`] with no Columns choice: aging buckets refuse period
+/// and compare ranges (U-119e, review #2).
+pub static BUILDER_AS_OF_TOTAL: ReportSpec = ReportSpec {
+    columns: &[ColumnBy::Total],
+    ..BUILDER_AS_OF
+};
+
+/// As [`BUILDER_RANGE`] with no Columns choice: a running balance takes no
+/// period columns (`RUNNING_BALANCE`).
+pub static BUILDER_RANGE_TOTAL: ReportSpec = ReportSpec {
+    columns: &[ColumnBy::Total],
+    ..BUILDER_RANGE
+};
 /// The report with `key`.
 #[must_use]
 pub fn find(key: &str) -> Option<&'static ReportSpec> {

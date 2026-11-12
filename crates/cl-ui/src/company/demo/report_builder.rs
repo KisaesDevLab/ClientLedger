@@ -478,6 +478,30 @@ pub fn detail(
         .and_then(|n| n.iter().find(|x| x["id"] == req.node_id.as_str()))
         .cloned()
         .unwrap_or(Value::Null);
+    // The engine's path rule (U-119e): the section (its Total) or a prefix
+    // of its group-bys; anything else is 400 `INVALID_PARAM`. The demo's
+    // runs have one total column with no range, so any `range` matches no
+    // column and is refused too.
+    let keys: Vec<&str> = node["groupBy"]
+        .as_array()
+        .map(|g| g.iter().filter_map(|k| k["key"].as_str()).collect())
+        .unwrap_or_default();
+    let path_ok = req
+        .path
+        .0
+        .first()
+        .is_some_and(|p| *p == format!("n:{}", req.node_id))
+        && req.path.0.len() <= keys.len() + 1
+        && req.path.0[1..]
+            .iter()
+            .zip(&keys)
+            .all(|(seg, k)| seg.split_once(':').is_some_and(|(sk, _)| sk == *k));
+    if !path_ok || req.range.is_some() {
+        return Err(engine_refusal(
+            400,
+            &json!({"error": {"message": "That part of the report can't be opened.", "code": "INVALID_PARAM"}}),
+        ));
+    }
     let (from, to) = span(&req.reference.dates);
     let s = section_lines(&books, &node, from, to);
     if s.denied {

@@ -342,3 +342,44 @@ fn a_literal_caption_shows_one_at() {
         crate::i18n::t("reports.builder.denied")
     );
 }
+
+/// #16: the demo refuses a drill path that isn't the section or a prefix
+/// of its group-bys, as the engine does (400 `INVALID_PARAM`).
+#[test]
+fn the_demo_refuses_a_path_the_engine_refuses() {
+    let (_d, link) = demo();
+    let w = starter(&link, "profit_loss");
+    let open =
+        super::builder_run::detail_open_for_test(&w, "income", &RowPath::of(["n:income", "tag:x"]));
+    let mut tab = window(&link);
+    tab.poll();
+    tab.open_with(OpenPayload::BuilderDetail(Box::new(open)));
+    tab.poll();
+    assert_eq!(tab.state, RunState::Failed);
+    assert!(tab.error.is_some());
+}
+
+/// #2: an aging definition offers no Columns choice (the engine refuses
+/// period and compare ranges with aging buckets).
+#[test]
+fn an_aging_definition_has_no_columns_choice() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    let definition = serde_json::json!({"schemaVersion": 1, "kind": "builder",
+        "dates": {"mode": "asOf", "preset": "today"},
+        "columns": {"detailFields": [], "compare": [], "headers": {}, "agingBuckets": true},
+        "nodes": [{"type": "section", "id": "receivables", "caption": "Accounts Receivable",
+            "source": "ar_open", "measure": "open_balance", "filters": [],
+            "groupBy": [{"key": "contact"}], "display": "summary", "defaultExpanded": false,
+            "showTotal": true, "totalCaption": "Total", "hideZero": true}]});
+    let st = cl_api::resources::report_builder::Starter {
+        key: "aging".into(),
+        title: "Aging".into(),
+        ties_to: None,
+        definition,
+    };
+    super::builder_run::show_starter(&mut w, &st);
+    assert_eq!(w.spec.columns, &[cl_model::reports::ColumnBy::Total]);
+    assert_eq!(w.options.columns, cl_model::reports::ColumnBy::Total);
+}

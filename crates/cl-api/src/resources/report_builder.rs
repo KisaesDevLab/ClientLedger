@@ -162,8 +162,10 @@ pub struct DetailRequest {
     pub node_id: String,
     /// The engine path (the innermost group-by line, or `n:<id>`).
     pub path: RowPath,
-    /// A period column's dates (range reports only).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// One period column's dates: its lines only (U-119e). An as-of
+    /// column's `from` is [`CalendarDate::min`], sent as `null`. `None`:
+    /// every base column.
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "wire_range")]
     pub range: Option<DateRange>,
     /// The page after this cursor (`None`: the first page).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -454,22 +456,43 @@ fn date(v: Option<&Value>, what: &'static str) -> Result<CalendarDate, ApiError>
 }
 
 /// A column's `range`: `{from, to}`, or `{from: null, to}` for an as-of
-/// column. The detail request takes only full ranges, so an as-of column
-/// carries none (its cells drill over the run's dates, Q-A07s).
+/// column, read as from [`CalendarDate::min`] (a balance from the
+/// beginning) and sent back as `from: null` (U-119e: `/run/detail` matches
+/// an as-of column on `to`).
 fn column_range(v: Option<&Value>) -> Result<Option<DateRange>, ApiError> {
     match v {
         None | Some(Value::Null) => Ok(None),
         Some(r @ Value::Object(_)) => {
             let to = date(r.get("to"), "range")?;
-            match r.get("from") {
-                None | Some(Value::Null) => Ok(None),
-                from => Ok(Some(DateRange {
-                    from: date(from, "range")?,
-                    to,
-                })),
-            }
+            let from = match r.get("from") {
+                None | Some(Value::Null) => CalendarDate::min(),
+                from => date(from, "range")?,
+            };
+            Ok(Some(DateRange { from, to }))
         }
         Some(_) => Err(shape("range")),
+    }
+}
+
+/// A detail request's `range`: the column's own, `from: null` for an as-of
+/// column.
+#[allow(
+    clippy::ref_option,
+    reason = "serde's serialize_with hands the field by reference"
+)]
+fn wire_range<S: serde::Serializer>(r: &Option<DateRange>, s: S) -> Result<S::Ok, S::Error> {
+    #[derive(Serialize)]
+    struct Wire {
+        from: Option<CalendarDate>,
+        to: CalendarDate,
+    }
+    match r {
+        Some(r) => Wire {
+            from: (r.from != CalendarDate::min()).then_some(r.from),
+            to: r.to,
+        }
+        .serialize(s),
+        None => s.serialize_none(),
     }
 }
 
@@ -489,22 +512,25 @@ fn field_kind(field: &str) -> Result<ColumnKind, ApiError> {
 
 /// One wire column: `None` for a `hidden` one.
 fn column(c: &Value) -> Result<Option<ColumnHead>, ApiError> {
-    let range = column_range(c.get("range"))?;
+    let mut range = column_range(c.get("range"))?;
     let (kind, drill) = match c.get("kind").and_then(Value::as_str).unwrap_or("") {
         "hidden" => return Ok(None),
         "field" => (
             field_kind(c.get("field").and_then(Value::as_str).unwrap_or(""))?,
             None,
         ),
-        // The total's lines are the run's.
-        "total" | "total_debit" | "total_credit" => (ColumnKind::Amount, None),
-        // A period column drills over its own dates; an as-of period has
-        // no full range the detail takes, so it doesn't drill (Q-A07s).
+        // The total's lines are every base column's: sent with no range
+        // (aging columns refuse any range, U-119e).
+        "total" | "total_debit" | "total_credit" => {
+            range = None;
+            (ColumnKind::Amount, None)
+        }
+        // A period column drills to its own lines (U-119e), as-of ones too.
         "period" | "period_debit" | "period_credit" if range.is_some() => {
             (ColumnKind::Amount, None)
         }
         // Compare and change cells don't drill (plan §4), nor do aging
-        // buckets (the detail can't narrow to a bucket) or as-of periods.
+        // buckets (the detail can't narrow to a bucket).
         "period" | "period_debit" | "period_credit" | "prior" | "prior_debit" | "prior_credit"
         | "change" | "bucket" => (ColumnKind::Amount, Some(ColumnDrill::None)),
         "pct_change" | "percent" => (ColumnKind::Percent, Some(ColumnDrill::None)),
@@ -703,13 +729,8 @@ fn row(
         .and_then(Value::as_str)
         .ok_or(shape("node id"))?
         .to_string();
-    // Engine bc41f48d..106ca6c5: an open-item section's detail rows in
-    // `/run` carry `path: []` (run.ts keeps the page's path only on
-    // `/run/detail`); `read_run` gives them their line's path.
-    let path = match r.get("path").and_then(Value::as_array) {
-        Some(a) if a.is_empty() && wire_kind == "detail" => RowPath::default(),
-        _ => path_in(r.get("path"), "path")?,
-    };
+    // Every row carries its path (U-119e gave open-item detail rows theirs).
+    let path = path_in(r.get("path"), "path")?;
     let level = r
         .get("level")
         .and_then(Value::as_u64)
@@ -817,14 +838,6 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
         .iter()
         .map(|r| row(r, &cols, &layout, lens))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut line = RowPath::default();
-    for r in &mut rows {
-        if r.kind == RowKind::Detail && r.path.0.is_empty() {
-            r.path = line.clone();
-        } else if r.kind != RowKind::Detail {
-            line = r.path.clone();
-        }
-    }
     // A section the role can't see shows nothing, whatever was sent
     // (S-L5): its denied row is blanked here, and any other row of it with
     // a figure is off contract.

@@ -32,7 +32,8 @@ use cl_model::report_def::{
     BuilderDefinition, apply_units, apply_units_to_cells, apply_units_to_rows,
 };
 use cl_model::reports::{
-    BUILDER_AS_OF, BUILDER_RANGE, ColumnBy, DateChoice, DatePreset, ReportOptions,
+    BUILDER_AS_OF, BUILDER_AS_OF_TOTAL, BUILDER_RANGE, BUILDER_RANGE_TOTAL, ColumnBy, DateChoice,
+    DatePreset, ReportOptions,
 };
 use eframe::egui::{RichText, Ui};
 use serde_json::{Value, json};
@@ -183,7 +184,13 @@ pub(crate) fn available(w: &ReportWindow) -> bool {
             .has(cl_api::Capabilities::REPORT_BUILDER)
             && w.link
                 .capabilities()
-                .has(cl_api::Capabilities::REPORT_BUILDER_STARTERS))
+                .has(cl_api::Capabilities::REPORT_BUILDER_STARTERS)
+            // Every drill path a run gives and rows that keep their paths
+            // (U-119e): the adapter refuses an older engine's rows.
+            && w
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::REPORT_BUILDER_DRILL))
 }
 
 /// Starts reading the starters (once).
@@ -226,19 +233,29 @@ pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
         Ok(def) => {
             b.title = def.title.clone().unwrap_or_else(|| starter.title.clone());
             let as_of = starter.definition["dates"]["mode"] == "asOf";
-            let spec = if as_of {
-                &BUILDER_AS_OF
-            } else {
-                &BUILDER_RANGE
+            // Aging buckets refuse period and compare ranges (U-119e) and a
+            // running balance takes no period columns: no Columns choice
+            // for them (#2).
+            let fixed = def.columns.aging_buckets == Some(true)
+                || def
+                    .columns
+                    .detail_fields
+                    .iter()
+                    .any(|f| f == "running_balance");
+            let spec = match (as_of, fixed) {
+                (true, true) => &BUILDER_AS_OF_TOTAL,
+                (true, false) => &BUILDER_AS_OF,
+                (false, true) => &BUILDER_RANGE_TOTAL,
+                (false, false) => &BUILDER_RANGE,
             };
             let mut o = ReportOptions::for_spec(spec);
             if let Some(p) = preset(starter.definition["dates"]["preset"].as_str()) {
                 o.dates = DateChoice::Preset(p);
             }
             o.columns = match starter.definition["columns"]["periods"].as_str() {
-                Some("month") => ColumnBy::Month,
-                Some("quarter") => ColumnBy::Quarter,
-                Some("year") => ColumnBy::Year,
+                Some("month") if !fixed => ColumnBy::Month,
+                Some("quarter") if !fixed => ColumnBy::Quarter,
+                Some("year") if !fixed => ColumnBy::Year,
                 _ => ColumnBy::Total,
             };
             o.basis = match starter.definition["basis"].as_str() {
@@ -1137,8 +1154,16 @@ fn poll_detail(w: &mut ReportWindow) {
         expandable: false,
     });
     let reference = &d.open.reference;
-    // A period column's drill covers that period: the header says so (#5).
-    let dates = d.open.range.map(ReportDates::Range).or_else(|| {
+    // A column's drill covers that column: the header says so (#5); an
+    // as-of column's from the beginning is its date.
+    let column = d.open.range.map(|r| {
+        if r.from == cl_core::CalendarDate::min() {
+            ReportDates::AsOf(r.to)
+        } else {
+            ReportDates::Range(r)
+        }
+    });
+    let dates = column.or_else(|| {
         reference.dates.as_of.map(ReportDates::AsOf).or_else(|| {
             reference
                 .dates
