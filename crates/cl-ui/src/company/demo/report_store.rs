@@ -112,6 +112,7 @@ impl DemoReportStore {
                 created_by: None,
                 created_by_name: Some("Kurt".into()),
                 updated_at: Some(DemoState::now()),
+                can_edit: true,
             });
         }
         let mut lines = BTreeMap::new();
@@ -256,6 +257,7 @@ pub fn save_definition(
             created_by: None,
             created_by_name: Some("Kurt".into()),
             updated_at: Some(DemoState::now()),
+            can_edit: true,
         };
         s.definitions.push(row.clone());
         Ok(row)

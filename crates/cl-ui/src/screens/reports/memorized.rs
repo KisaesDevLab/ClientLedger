@@ -136,7 +136,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
                         Some(DefinitionRefusal::NotAuthor) => {
                             d.problem = Some("reports.memorize.not_author");
                         }
-                        Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid) => {
+                        Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid { .. }) => {
                             d.problem = Some("reports.memorize.invalid");
                         }
                         None => d.problem = Some("reports.memorize.failed"),
@@ -260,6 +260,9 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
         SaveAs::Changes => w.memo.current.as_ref().map(|c| (c.id.clone(), c.version)),
         SaveAs::New => None,
     };
+    // One key per Memorize press: the engine stores one row however often
+    // the transport retries it.
+    let key = cl_api::IdempotencyKey::new();
     w.memo.save = Some(engine::write(
         &w.link,
         w.group.as_ref(),
@@ -275,7 +278,7 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
             let d = s.report_definitions();
             match target {
                 Some((id, version)) => d.update(&id, version, &write).await,
-                None => d.create(&write).await,
+                None => d.create(&write, key).await,
             }
         },
     ));
@@ -558,6 +561,7 @@ mod tag_tests {
             created_by: None,
             created_by_name: None,
             updated_at: None,
+            can_edit: true,
         };
         super::open_row(&mut w, &row);
         assert_eq!(

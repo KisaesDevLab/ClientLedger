@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, ConflictReason, LocalValidation};
+use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::{
     REPORT_DEF_DELETE, REPORT_DEF_GET, REPORT_DEF_GROUP_DELETE, REPORT_DEF_GROUP_PUT,
     REPORT_DEF_GROUPS_CREATE, REPORT_DEF_GROUPS_LIST, REPORT_DEF_PUT, REPORT_DEFS_CREATE,
@@ -62,6 +63,11 @@ pub struct DefinitionRow {
     /// Last change.
     #[serde(default)]
     pub updated_at: Option<Timestamp>,
+    /// The user may change or delete it (its author, an owner or a super
+    /// admin, Q-310). `false` when an older engine doesn't say: Save
+    /// changes then stays off and a refusal is never invited (A08).
+    #[serde(default)]
+    pub can_edit: bool,
 }
 
 /// One group of memorized reports.
@@ -94,7 +100,7 @@ pub struct DefinitionWrite {
 }
 
 /// Why the engine refused a memorized-report change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DefinitionRefusal {
     /// Someone changed it since it was read (409 `STALE_VERSION`).
     Stale,
@@ -103,8 +109,15 @@ pub enum DefinitionRefusal {
     /// Only its author, an owner or a super-admin may change it (403
     /// `NOT_AUTHOR`, Q-310).
     NotAuthor,
-    /// The body is malformed (400 `DEFINITION_INVALID`).
-    Invalid,
+    /// The body is malformed (400 `DEFINITION_INVALID {path, code}`; a
+    /// builder body says where, which the editor shows as a problem, A08).
+    Invalid {
+        /// Where, from `definition`, scrubbed: an input key is `<key>`
+        /// (S-L3).
+        path: Option<String>,
+        /// The rule's code.
+        code: Option<String>,
+    },
     /// Over 64 KB (413 `DEFINITION_TOO_LARGE`).
     TooLarge,
 }
@@ -120,6 +133,15 @@ pub fn definition_refusal(e: &ApiError) -> Option<DefinitionRefusal> {
         ApiError::Conflict { code: Some(c), .. } | ApiError::Forbidden { code: Some(c) } => {
             c.as_str()
         }
+        ApiError::Validation(v) if v.code().is_some_and(|c| c.as_str() == "DEFINITION_INVALID") => {
+            return Some(DefinitionRefusal::Invalid {
+                path: v
+                    .details()
+                    .text("path")
+                    .map(cl_core::report::scrub_definition_path),
+                code: v.details().text("code").map(str::to_string),
+            });
+        }
         ApiError::Validation(v) => v.code().map_or("", |c| c.as_str()),
         ApiError::PayloadTooLarge => return Some(DefinitionRefusal::TooLarge),
         _ => return None,
@@ -128,7 +150,6 @@ pub fn definition_refusal(e: &ApiError) -> Option<DefinitionRefusal> {
         "STALE_VERSION" => DefinitionRefusal::Stale,
         "NAME_TAKEN" => DefinitionRefusal::NameTaken,
         "NOT_AUTHOR" => DefinitionRefusal::NotAuthor,
-        "DEFINITION_INVALID" => DefinitionRefusal::Invalid,
         "DEFINITION_TOO_LARGE" => DefinitionRefusal::TooLarge,
         _ => return None,
     })
@@ -235,15 +256,21 @@ impl ReportDefinitions<'_> {
         one(&reply.body, "memorized report")
     }
 
-    /// Memorizes a report.
+    /// Memorizes a report. `key` is made once per owner action (a retry of
+    /// the same Memorize sends the same key, so the engine stores one row).
     ///
     /// # Errors
-    /// `PayloadTooLarge` over 64 KB (nothing sent); [`definition_refusal`]
-    /// for the engine's refusals; any [`ApiError`].
-    pub async fn create(&self, w: &DefinitionWrite) -> Result<DefinitionRow, ApiError> {
+    /// `PayloadTooLarge` over the kind's cap (nothing sent);
+    /// [`definition_refusal`] for the engine's refusals; any [`ApiError`].
+    pub async fn create(
+        &self,
+        w: &DefinitionWrite,
+        key: IdempotencyKey,
+    ) -> Result<DefinitionRow, ApiError> {
         self.require_kind(&w.kind)?;
         let mut call = Call::at(Method::Post, REPORT_DEFS_CREATE.route());
         call = call.json_body(body(w, max_bytes(&w.kind))?);
+        call.idempotency_key = Some(key);
         let reply = self.0.send(&REPORT_DEFS_CREATE, call, None).await?;
         one(&reply.body, "memorized report")
     }
@@ -409,6 +436,37 @@ mod tests {
             Some(DefinitionRefusal::NotAuthor)
         );
         assert_eq!(definition_refusal(&ApiError::Timeout), None);
+        let invalid = crate::engine_refusal(
+            400,
+            &serde_json::json!({"error": {"message": "x", "code": "DEFINITION_INVALID",
+                "details": {"path": "definition.nodes.2.terms.0.nodeId", "code": "FORMULA_FORWARD_REF"}}}),
+        );
+        assert_eq!(
+            definition_refusal(&invalid),
+            Some(DefinitionRefusal::Invalid {
+                path: Some("definition.nodes.2.terms.0.nodeId".into()),
+                code: Some("FORMULA_FORWARD_REF".into()),
+            })
+        );
+        // An input key in the path is scrubbed (S-L3).
+        let header = crate::engine_refusal(
+            400,
+            &serde_json::json!({"error": {"message": "x", "code": "DEFINITION_INVALID",
+                "details": {"path": "definition.columns.headers.Rivera Remodel", "code": "SCHEMA"}}}),
+        );
+        assert!(matches!(
+            definition_refusal(&header),
+            Some(DefinitionRefusal::Invalid { path: Some(p), .. }) if !p.contains("Rivera")
+        ));
+    }
+
+    #[test]
+    fn can_edit_is_read_and_defaults_to_false() {
+        let r: DefinitionRow = one(ROW.as_bytes(), "x").expect("row");
+        assert!(!r.can_edit);
+        let with = ROW.replace("\"version\": 3,", "\"version\": 3, \"canEdit\": true,");
+        let r: DefinitionRow = one(with.as_bytes(), "x").expect("row");
+        assert!(r.can_edit);
     }
 
     #[test]

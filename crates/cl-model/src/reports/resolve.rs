@@ -371,7 +371,7 @@ fn days_before(r: DateRange) -> Option<DateRange> {
 /// of), else the same number of days before. A balance sheet compares each
 /// date with the end of the previous whole period. `None` when a date
 /// falls outside the calendar: the engine's own rule then applies.
-fn prior_ranges(
+pub(crate) fn prior_ranges(
     dates: &ReportDates,
     columns: ColumnBy,
     span: DateRange,

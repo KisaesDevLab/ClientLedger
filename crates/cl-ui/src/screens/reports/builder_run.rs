@@ -17,8 +17,8 @@ use std::cell::RefCell;
 
 use cl_api::ApiError;
 use cl_api::resources::report_builder::{
-    BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, RunDates, RunPurpose,
-    RunRef, RunRequest, Starter, builder_refusal,
+    BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, RunPurpose, RunRef,
+    RunRequest, Starter, builder_refusal,
 };
 use cl_core::report::{
     Cell, ColumnHead, DateRange, Drill, ReportDates, ReportMeta, ReportRow, ReportTable, RowKind,
@@ -31,10 +31,7 @@ use cl_model::report_def::run_state::{
 use cl_model::report_def::{
     BuilderDefinition, apply_units, apply_units_to_cells, apply_units_to_rows,
 };
-use cl_model::reports::{
-    BUILDER_AS_OF, BUILDER_AS_OF_TOTAL, BUILDER_RANGE, BUILDER_RANGE_TOTAL, ColumnBy, DateChoice,
-    DatePreset, ReportOptions,
-};
+use cl_model::reports::{BUILDER_RANGE, ColumnBy, DateChoice, DatePreset, ReportOptions};
 use eframe::egui::{RichText, Ui};
 use serde_json::{Value, json};
 
@@ -242,22 +239,11 @@ pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
     match cl_model::report_def::parse(&text) {
         Ok(def) => {
             b.title = def.title.clone().unwrap_or_else(|| starter.title.clone());
-            let as_of = starter.definition["dates"]["mode"] == "asOf";
             // Aging buckets refuse period and compare ranges (U-119e) and a
             // running balance takes no period columns: no Columns choice
             // for them (#2).
-            let fixed = def.columns.aging_buckets == Some(true)
-                || def
-                    .columns
-                    .detail_fields
-                    .iter()
-                    .any(|f| f == "running_balance");
-            let spec = match (as_of, fixed) {
-                (true, true) => &BUILDER_AS_OF_TOTAL,
-                (true, false) => &BUILDER_AS_OF,
-                (false, true) => &BUILDER_RANGE_TOTAL,
-                (false, false) => &BUILDER_RANGE,
-            };
+            let spec = super::builder_ref::spec_for(&def);
+            let fixed = spec.columns.len() == 1;
             let mut o = ReportOptions::for_spec(spec);
             if let Some(p) = preset(starter.definition["dates"]["preset"].as_str()) {
                 o.dates = DateChoice::Preset(p);
@@ -337,79 +323,20 @@ pub(crate) fn open_detail(w: &mut ReportWindow, open: BuilderDetailOpen) {
     next_detail_page(w);
 }
 
-/// The run's reference from the window's dates and basis, and the
-/// definition's adjusting lens (sent, so an earnings drill keeps it, #13).
-/// Compare ranges are left to the engine's calendar shift until A08 offers
-/// compare columns (Q-A07u).
+/// The run's reference ([`super::builder_ref::run_ref`], the one the
+/// editor's preview sends too, AC8).
 fn reference(
     w: &ReportWindow,
+    def: &BuilderDefinition,
     json: &Value,
-    adjusting: Option<cl_core::report::Adjusting>,
 ) -> Result<RunRef, &'static str> {
-    let req = cl_model::reports::resolve(w.spec, &w.options, &w.fiscal, w.today)
-        .map_err(|_| "reports.problem.fiscal")?;
-    let as_of = w.spec.dates == cl_model::reports::DateMode::AsOf;
-    let (dates, period_ranges) = match req.dates {
-        ReportDates::Range(r) => (RunDates::range(r), Vec::new()),
-        ReportDates::AsOf(d) => (RunDates::as_of(d), Vec::new()),
-        ReportDates::Ranges(v) => {
-            let (Some(first), Some(last)) = (v.first(), v.last()) else {
-                return Err("reports.problem.fiscal");
-            };
-            let dates = if as_of {
-                RunDates::as_of(last.to)
-            } else {
-                RunDates::range(DateRange {
-                    from: first.from,
-                    to: last.to,
-                })
-            };
-            (dates, if v.len() > 1 { v } else { Vec::new() })
-        }
-        ReportDates::None => return Err("reports.problem.fiscal"),
-    };
-    let to = dates.to.or(dates.as_of).ok_or("reports.problem.fiscal")?;
-    let from = dates.from.unwrap_or(to);
-    // Every fiscal year the run touches, from the year before (compare and
-    // prior-years' earnings) through the last.
-    let mut starts = Vec::new();
-    let first = w
-        .fiscal
-        .year_containing(from)
-        .map_err(|_| "reports.problem.fiscal")?;
-    let mut year = first
-        .start
-        .add_days(-1)
-        .ok()
-        .and_then(|d| w.fiscal.year_containing(d).ok())
-        .unwrap_or(first);
-    loop {
-        starts.push(year.start);
-        if year.end >= to
-            || starts.len() >= cl_api::resources::report_builder::MAX_FISCAL_YEAR_STARTS
-        {
-            break;
-        }
-        match year
-            .end
-            .add_days(1)
-            .ok()
-            .and_then(|d| w.fiscal.year_containing(d).ok())
-        {
-            Some(next) => year = next,
-            None => break,
-        }
-    }
-    Ok(RunRef {
-        definition: Some(json.clone()),
-        definition_id: None,
-        version: None,
-        dates,
-        period_ranges,
-        compare_ranges: Vec::new(),
-        fiscal_year_starts: starts,
-        basis: w.options.basis,
-        adjusting,
+    super::builder_ref::run_ref(&super::builder_ref::RunInput {
+        def,
+        json,
+        spec: w.spec,
+        options: &w.options,
+        fiscal: &w.fiscal,
+        today: w.today,
     })
 }
 
@@ -441,8 +368,10 @@ pub(crate) fn run(w: &mut ReportWindow) {
         return;
     }
     let json = b.json.clone();
-    let adjusting = b.def.as_ref().and_then(|d| d.adjusting);
-    match reference(w, &json, adjusting) {
+    let Some(def) = b.def.clone() else {
+        return;
+    };
+    match reference(w, &def, &json) {
         Ok(r) => {
             if let Some(b) = w.builder.as_mut() {
                 b.reference = Some(r);
@@ -508,14 +437,26 @@ fn start_run(
         purpose: RunPurpose::Screen,
     };
     let slow = b.key == crate::company::demo::report_builder::SLOW;
+    let job = run_job(&w.link, w.group.as_ref(), req, slow);
+    b.job = Some((generation, job));
+}
+
+/// A builder run on the engine (the demo plays it in demo mode); `slow`
+/// makes the demo take its time (the control channel's cancel checks).
+/// The editor's preview runs through it too (AC8).
+pub(crate) fn run_job(
+    link: &crate::company::CompanyLink,
+    group: Option<&cl_api::RequestGroup>,
+    req: RunRequest,
+    slow: bool,
+) -> Job<BuilderRun> {
     let live = req.clone();
-    let job = engine::read(
-        &w.link,
-        w.group.as_ref(),
+    engine::read(
+        link,
+        group,
         move |d| crate::company::demo::report_builder::run(d, &req, slow),
         move |s| async move { s.report_builder().run(&live).await },
-    );
-    b.job = Some((generation, job));
+    )
 }
 
 fn start_page(
@@ -562,8 +503,8 @@ fn detail_job(
     )
 }
 
-/// What the window says for an engine refusal.
-fn failure(e: &ApiError) -> Failure {
+/// What the window (and the editor's preview) says for an engine refusal.
+pub(crate) fn failure(e: &ApiError) -> Failure {
     match builder_refusal(e) {
         Some(BuilderRefusal::BooksChanged) => Failure::BooksChanged,
         Some(BuilderRefusal::ParamsChanged) => Failure::ParamsChanged,
@@ -675,8 +616,8 @@ fn dress_types(columns: &[ColumnHead], rows: &mut [cl_core::report::ReportRow]) 
 }
 
 /// Column headings in the app's words (the definition's own headers kept).
-fn dress_columns(b: &Builder, columns: &mut [ColumnHead]) {
-    let Some(def) = &b.def else { return };
+fn dress_columns(def: Option<&BuilderDefinition>, columns: &mut [ColumnHead]) {
+    let Some(def) = def else { return };
     for c in columns {
         if !def.columns.headers.contains_key(&c.key)
             && let Some(k) = column_key(c).or_else(|| period_caption(c))
@@ -686,12 +627,18 @@ fn dress_columns(b: &Builder, columns: &mut [ColumnHead]) {
     }
 }
 
-/// The table as the window shows it: units, i18n captions, the dash.
-fn dress(b: &Builder, mut table: ReportTable, denied: bool) -> ReportTable {
-    if let Some(def) = &b.def {
+/// The table as the window shows it: units, i18n captions, the dash. The
+/// editor's preview dresses its rows here too, so they equal the result
+/// tab's (AC8).
+pub(crate) fn dress(
+    def: Option<&BuilderDefinition>,
+    mut table: ReportTable,
+    denied: bool,
+) -> ReportTable {
+    if let Some(def) = def {
         apply_units(def, &mut table);
     }
-    dress_columns(b, &mut table.columns);
+    dress_columns(def, &mut table.columns);
     dress_types(&table.columns, &mut table.rows);
     for r in &mut table.rows {
         if let Some(k) = caption_key(&r.caption) {
@@ -770,9 +717,9 @@ fn poll_run(w: &mut ReportWindow) {
                 return;
             }
             let denied = !run.denied.is_empty();
-            let table = dress(b, run.table, denied);
+            let table = dress(b.def.as_ref(), run.table, denied);
             let mut detail_columns = run.detail_columns;
-            dress_columns(b, &mut detail_columns);
+            dress_columns(b.def.as_ref(), &mut detail_columns);
             b.shown = b.reference.clone().map(|reference| Shown {
                 reference,
                 layout: run.layout,
