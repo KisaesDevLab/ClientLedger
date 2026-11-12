@@ -1380,7 +1380,7 @@ fn an_add_picker_reaches_the_third_match_by_keys() {
         repeat: false,
         modifiers: egui::Modifiers::NONE,
     };
-    let mut run = |events: Vec<egui::Event>| {
+    let run = |events: Vec<egui::Event>| {
         let mut out = ctx.run_ui(
             egui::RawInput {
                 events,
