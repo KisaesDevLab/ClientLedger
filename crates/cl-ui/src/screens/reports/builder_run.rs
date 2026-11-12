@@ -583,6 +583,11 @@ fn caption_key(s: &str) -> Option<&'static str> {
         "Prior years' net income" => "@reports.builder.earnings.prior",
         "Net income this year" => "@reports.builder.earnings.current",
         "Retained Earnings (Prior Years)" => "@reports.builder.earnings.retained",
+        // Aging-bucket groups, as the aging columns head them (A07 QA-6).
+        "1 - 30" => "@reports.col.days_1_30",
+        "31 - 60" => "@reports.col.days_31_60",
+        "61 - 90" => "@reports.col.days_61_90",
+        "Over 90" => "@reports.col.over_90",
         _ => return None,
     })
 }
@@ -618,18 +623,61 @@ fn column_key(c: &ColumnHead) -> Option<String> {
     )
 }
 
+/// A period column's heading as the standard reports write it ("Jan
+/// 2026", "2026"); other ranges keep the engine's caption (A07 QA-6).
+fn period_caption(c: &ColumnHead) -> Option<String> {
+    let base = c.key.split(':').next().unwrap_or_default();
+    let period = base.len() > 1
+        && base.starts_with('p')
+        && base[1..].bytes().all(|b| b.is_ascii_digit())
+        && base == c.key;
+    let r = c.range.filter(|_| period)?;
+    let caption = crate::company::demo::reports::caption_of(r);
+    (!caption.contains(" - ")).then_some(caption)
+}
+
+/// A detail row's type cell in the app's words ("Journal entry", "Check"),
+/// from the row's own transaction type (A07 QA-6).
+fn type_cell(r: &cl_core::report::ReportRow) -> Option<Cell> {
+    let Some(cl_core::report::Drill::Transaction { txn_type, .. }) = &r.drill else {
+        return None;
+    };
+    let t = if txn_type == "check" {
+        "expense"
+    } else {
+        txn_type
+    };
+    let key = cl_api::resources::reports::adapters::ledger::type_label(t);
+    key.starts_with('@').then_some(Cell::Text(key))
+}
+
+/// Every detail row's type cell in the app's words.
+fn dress_types(columns: &[ColumnHead], rows: &mut [cl_core::report::ReportRow]) {
+    let Some(ci) = columns.iter().position(|c| c.key == "f:txn_type") else {
+        return;
+    };
+    for r in rows.iter_mut().filter(|r| r.kind == RowKind::Detail) {
+        if let Some(cell) = type_cell(r)
+            && let Some(slot) = r.cells.get_mut(ci)
+        {
+            *slot = cell;
+        }
+    }
+}
+
 /// The table as the window shows it: units, i18n captions, the dash.
 fn dress(b: &Builder, mut table: ReportTable, denied: bool) -> ReportTable {
     if let Some(def) = &b.def {
         apply_units(def, &mut table);
         for c in &mut table.columns {
             if !def.columns.headers.contains_key(&c.key)
-                && let Some(k) = column_key(c)
+                && let Some(k) = column_key(c).or_else(|| period_caption(c))
             {
                 c.caption = k;
             }
         }
     }
+    dress_types(&table.columns, &mut table.rows);
     for r in &mut table.rows {
         if let Some(k) = caption_key(&r.caption) {
             r.caption = k.to_string();
@@ -778,6 +826,7 @@ fn poll_page(w: &mut ReportWindow) {
             if let Some(def) = &b.def {
                 apply_units_to_rows(def, &table.columns, &mut rows);
             }
+            dress_types(&table.columns, &mut rows);
             splice(&mut table, &path, rows, page.cursor);
             b.loaded += 1;
             w.set_table(table);
@@ -1137,6 +1186,7 @@ fn poll_detail(w: &mut ReportWindow) {
         apply_units_to_rows(def, &d.open.columns, &mut rows);
         apply_units_to_cells(def, &d.open.columns, &d.open.node_id, &mut subtotal);
     }
+    dress_types(&d.open.columns, &mut rows);
     d.paging.page(page.cursor, subtotal);
     if d.paging.books_changed {
         d.banner = Some(Banner::BooksChanged);
@@ -1320,5 +1370,58 @@ mod tests {
             Some("@reports.builder.field.memo")
         );
         assert_eq!(column_key(&col("p0", "Jan 2026")), None);
+    }
+
+    /// A07 QA-6: period columns head like the standard reports' ("Jan
+    /// 2026", "2026"), a part-month keeps the engine's range; aging groups
+    /// read as the aging columns; types in the app's words.
+    #[test]
+    fn builder_text_follows_the_app() {
+        let day = |m, d| cl_core::CalendarDate::from_ymd(2026, m, d).expect("date");
+        let col = |key: &str, from, to| ColumnHead {
+            key: key.into(),
+            caption: "Jan 1, 2026 - Jan 31, 2026".into(),
+            kind: cl_core::report::ColumnKind::Amount,
+            range: Some(cl_core::report::DateRange { from, to }),
+            drill: None,
+        };
+        assert_eq!(
+            period_caption(&col("p0", day(1, 1), day(1, 31))).as_deref(),
+            Some("Jan 2026")
+        );
+        assert_eq!(
+            period_caption(&col("p11", day(1, 1), day(12, 31))).as_deref(),
+            Some("2026")
+        );
+        assert_eq!(period_caption(&col("p0", day(1, 1), day(1, 15))), None);
+        // The Total and compare columns keep theirs.
+        assert_eq!(period_caption(&col("total", day(1, 1), day(1, 31))), None);
+        assert_eq!(period_caption(&col("p0:c0", day(1, 1), day(1, 31))), None);
+        assert_eq!(caption_key("1 - 30"), Some("@reports.col.days_1_30"));
+        assert_eq!(caption_key("Over 90"), Some("@reports.col.over_90"));
+        let row = |txn_type: &str| cl_core::report::ReportRow {
+            kind: RowKind::Detail,
+            level: 0,
+            path: cl_core::report::RowPath::of(["n:a"]),
+            caption: String::new(),
+            cells: vec![Cell::Text("Journal Entry".into())],
+            drill: Some(cl_core::report::Drill::Transaction {
+                id: "d0000000-0000-4000-8000-b00000000001".parse().expect("id"),
+                txn_type: txn_type.into(),
+            }),
+            expandable: false,
+        };
+        let mut rows = vec![row("journal_entry"), row("check"), row("something_new")];
+        let mut type_col = col("f:txn_type", day(1, 1), day(1, 1));
+        type_col.kind = cl_core::report::ColumnKind::Text;
+        dress_types(&[type_col], &mut rows);
+        assert_eq!(
+            rows[0].cells[0],
+            Cell::Text("@reports.txn.journal_entry".into())
+        );
+        assert_eq!(rows[1].cells[0], Cell::Text("@reports.txn.expense".into()));
+        // A type the app doesn't know keeps the engine's words.
+        assert_eq!(rows[2].cells[0], Cell::Text("Journal Entry".into()));
+        assert_eq!(crate::i18n::t("reports.txn.expense"), "Check");
     }
 }

@@ -971,7 +971,11 @@ impl ReportWindow {
                         ui.set_height(ROW_H);
                         let strong = matches!(
                             r.kind,
-                            RowKind::Header | RowKind::Total | RowKind::Grand | RowKind::Subtotal
+                            RowKind::Header
+                                | RowKind::Total
+                                | RowKind::Grand
+                                | RowKind::Subtotal
+                                | RowKind::Formula
                         );
                         fixed_box(
                             ui,
@@ -1035,7 +1039,14 @@ impl ReportWindow {
                                 cell_text(cell, style)
                             };
                             cell_box(ui, width_of(ci), col.kind.is_numeric(), |ui| {
-                                let rich = RichText::new(&text).family(egui::FontFamily::Monospace);
+                                // Figures and dates in the figure font; names,
+                                // types and memos in the text font (A07 QA-6).
+                                let rich = RichText::new(&text);
+                                let rich = if matches!(cell, Cell::Text(_)) {
+                                    rich
+                                } else {
+                                    rich.family(egui::FontFamily::Monospace)
+                                };
                                 let rich = if strong { rich.strong() } else { rich };
                                 let drill = r
                                     .drill

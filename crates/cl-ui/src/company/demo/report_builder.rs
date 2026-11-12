@@ -557,8 +557,8 @@ mod tests {
     /// engine sends it; other expenses stay `expense`.
     #[test]
     fn checks_are_named_check_in_builder_rows() {
-        let mut d = DemoState::default();
-        let books = Books::load(&mut d);
+        let d = DemoState::default();
+        let books = Books::load(&d);
         let check = books
             .posts
             .iter()
