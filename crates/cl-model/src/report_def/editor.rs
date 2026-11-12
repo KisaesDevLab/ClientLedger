@@ -788,8 +788,23 @@ impl BuilderEditor {
                 }
             }
             Op::Edit(node) => {
-                if !outline::replace(nodes, tidy_node(node)?) {
+                let node = tidy_node(node)?;
+                // A section that starts showing its transactions while the
+                // report has no transaction columns gets the usual ones in
+                // the same step, so each line says what it is (QA-7).
+                let shows_lines = |n: &Node| matches!(n, Node::Section(x) if x.display != crate::report_def::Display::Summary);
+                let first_lines = shows_lines(&node)
+                    && !outline::find(nodes, node.id()).is_some_and(shows_lines)
+                    && s.def.columns.detail_fields.is_empty();
+                let source = match &node {
+                    Node::Section(x) => Some(x.source),
+                    _ => None,
+                };
+                if !outline::replace(nodes, node) {
                     return Err(Refusal::NotFound);
+                }
+                if first_lines && let Some(source) = source {
+                    s.def.columns.detail_fields = super::guided::default_detail_fields(source);
                 }
             }
             Op::Columns(mut c) => {

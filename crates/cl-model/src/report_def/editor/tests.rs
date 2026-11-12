@@ -762,3 +762,34 @@ fn a_formula_over_a_flipped_section_is_named() {
     assert_eq!(flipped_terms(&def, "again"), ["exp"], "through a formula");
     assert!(flipped_terms(&def, "plain").is_empty());
 }
+
+/// QA-7: the first section that shows its transactions gets the usual
+/// transaction columns in the same undo step, when the report has none; a
+/// report that has some keeps them.
+#[test]
+fn showing_transactions_brings_the_usual_columns() {
+    let mut e = BuilderEditor::blank();
+    e.apply(Op::Add {
+        kind: RowKind::Section,
+        caption: "Cost of goods sold".into(),
+    })
+    .expect("added");
+    let id = e.selection().expect("selected").to_string();
+    let Some(Node::Section(mut sec)) = outline::find(&e.definition().nodes, &id).cloned() else {
+        panic!("section");
+    };
+    sec.display = crate::report_def::Display::Detail;
+    e.apply(Op::Edit(Node::Section(sec.clone())))
+        .expect("edited");
+    let fields = e.definition().columns.detail_fields.clone();
+    assert!(fields.contains(&"date".to_string()), "{fields:?}");
+    assert!(fields.contains(&"txn_type".to_string()));
+    assert!(e.undo(), "one step");
+    assert!(e.definition().columns.detail_fields.is_empty());
+    // Columns picked first are kept.
+    let mut c = e.definition().columns.clone();
+    c.detail_fields = vec!["memo".into()];
+    e.apply(Op::Columns(c)).expect("columns");
+    e.apply(Op::Edit(Node::Section(sec))).expect("edited");
+    assert_eq!(e.definition().columns.detail_fields, ["memo"]);
+}
