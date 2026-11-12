@@ -334,6 +334,8 @@ pub struct BuilderScreen {
     pub(crate) starter_menu_new: bool,
     /// Where Guided's Next button was drawn (tests click it).
     pub(crate) next_at: Option<egui::Rect>,
+    /// Where each outline row was drawn last frame (tests click them).
+    pub(crate) row_at: HashMap<String, egui::Rect>,
 }
 
 impl BuilderScreen {
@@ -394,6 +396,7 @@ impl BuilderScreen {
             starter_menu: false,
             starter_menu_new: false,
             next_at: None,
+            row_at: HashMap::new(),
         }
     }
 
@@ -931,6 +934,9 @@ impl BuilderScreen {
             "guided_step": self.guided.as_ref().map(|g| format!("{:?}", g.step).to_lowercase()),
             "rows": self.ed.row_count(),
             "selected": self.ed.selection(),
+            "selected_depth": self.ed.selection().and_then(|id| {
+                self.ed.visible_rows().into_iter().find(|r| r.id == id).map(|r| r.depth)
+            }),
             "tab": format!("{:?}", self.tab).to_lowercase(),
             "pane": self.pane.name(),
             "layout": self.layout.name(),
@@ -1208,6 +1214,13 @@ impl Screen for BuilderScreen {
 
     fn save_in_progress(&self) -> bool {
         self.save.closing()
+    }
+
+    /// Only a text field keeps Delete (and Ctrl+A, C, V, X): a focused
+    /// outline row is not one, so Delete removes it (QA-11).
+    fn keeps_text_key(&self, ctx: &egui::Context, s: cl_model::Shortcut) -> bool {
+        let _ = s;
+        ctx.text_edit_focused()
     }
 
     fn takes_in_place(&self, payload: &OpenPayload) -> bool {

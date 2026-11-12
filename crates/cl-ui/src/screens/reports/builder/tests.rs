@@ -1624,3 +1624,67 @@ fn guided_next_by_click_keeps_the_keyboard() {
         "the next step's question has the keyboard"
     );
 }
+
+/// QA-11: with an outline row focused, Delete is not kept as a text key:
+/// the shell runs Remove the Row. A caption field keeps it.
+#[test]
+fn delete_on_a_focused_outline_row_reaches_remove() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    let ctx = themed();
+    s.focus_to = Some(Pane::Outline);
+    frames(&ctx, &mut s);
+    s.focus_to = Some(Pane::Outline);
+    frame(&ctx, &mut s, 7.0);
+    assert!(s.outline_focused, "a row has the keyboard");
+    let del = Shortcut::new(Mods::NONE, Key::Delete);
+    assert!(ctx.egui_wants_keyboard_input());
+    assert!(!s.keeps_text_key(&ctx, del), "not a text field");
+    let km = Keymap::new(COMMANDS).expect("keymap");
+    assert_eq!(
+        km.resolve(s.scope(), del).map(|c| c.as_str()),
+        Some("builder.remove")
+    );
+    // In a caption field Delete deletes text.
+    let row = s.ed.selection().expect("selected").to_string();
+    s.focus_to = None;
+    let field = super::picker::text_id(s.id, &FieldKey::Caption(row));
+    ctx.memory_mut(|m| m.request_focus(field));
+    frame(&ctx, &mut s, 7.1);
+    assert!(s.keeps_text_key(&ctx, del));
+}
+
+/// QA-9: a click on an outline row selects it and gives it the keyboard.
+#[test]
+fn a_clicked_outline_row_takes_the_keyboard() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let (inc, _, _) = gross_profit(&mut s);
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    frame(&ctx, &mut s, 8.0);
+    assert!(!s.outline_focused);
+    // The first row ("Income") is at the top of the outline's list.
+    let at = s
+        .row_at
+        .get(&inc)
+        .copied()
+        .expect("Income is drawn")
+        .center();
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame_with(&ctx, &mut s, 8.1, vec![egui::Event::PointerMoved(at)]);
+    frame_with(&ctx, &mut s, 8.2, vec![click(true)]);
+    frame_with(&ctx, &mut s, 8.3, vec![click(false)]);
+    frame(&ctx, &mut s, 8.4);
+    assert_eq!(s.ed.selection(), Some(inc.as_str()));
+    assert!(s.outline_focused, "the clicked row has the keyboard");
+}

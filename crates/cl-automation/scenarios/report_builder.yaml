@@ -253,6 +253,41 @@ steps:
   - key: Ctrl+Z
   - assert_state: {key: screen.can_run, equals: true}
   - assert_state: {key: screen.dirty, equals: false}
+  # --- Outline keys as plain key presses (QA-11): Alt+Up/Down move, Tab
+  # indents into the group above, Shift+Tab outdents, Delete removes ------
+  - focus: {role: tree_item, label: Section Cost of goods sold}
+  - key: Alt+Up
+  - assert_focused: {role: tree_item, label: Section Cost of goods sold}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+Down
+  - assert_focused: {role: tree_item, label: Section Cost of goods sold}
+  - assert_state: {key: screen.dirty, equals: false}
+  - key: Down
+  - assert_focused: {role: tree_item, label: Formula Gross profit}
+  - key: Insert
+  - key: Down
+  - assert_focused: {role: button, label: Group}
+  - key: Space
+  - assert_state: {key: screen.rows, equals: 4}
+  - key: Insert
+  - key: Down
+  - key: Down
+  - key: Down
+  - assert_focused: {role: button, label: Text}
+  - key: Space
+  - assert_state: {key: screen.rows, equals: 5}
+  - assert_state: {key: screen.selected_depth, equals: 1}
+  - key: Tab
+  - assert_state: {key: screen.selected_depth, equals: 2}
+  - assert_state: {key: screen.outline_focused, equals: true}
+  - key: Shift+Tab
+  - assert_state: {key: screen.selected_depth, equals: 1}
+  - key: Delete
+  - assert_state: {key: screen.rows, equals: 4}
+  - assert_state: {key: screen.outline_focused, equals: true}
+  - key: Delete
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_state: {key: screen.dirty, equals: false}
   - command: file.close_window
   # --- Guided: who owes me, by name, as of today --------------------------------
   - command: reports.builder_editor

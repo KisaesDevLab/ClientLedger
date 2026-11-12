@@ -317,6 +317,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let selected = s.ed.selection().map(str::to_string);
     let mut any_focus = false;
     let mut click = None;
+    s.row_at.clear();
     let mut toggle = None;
     for row in &list {
         let is_sel = selected.as_deref() == Some(row.id.as_str());
@@ -332,6 +333,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         }
         let width = ui.available_width();
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, ROW_H), Sense::click());
+        s.row_at.insert(row.id.clone(), rect);
         let caption = caption_of(s, &row.id);
         let sub = sub_caption(s, &node);
         resp.widget_info(|| {
@@ -444,6 +446,9 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         }
         if resp.clicked() {
             click = Some(row.id.clone());
+            // The clicked row takes the keyboard: Delete, Insert and F2
+            // then act on it (QA-9).
+            resp.request_focus();
             if row.has_children
                 && resp
                     .interact_pointer_pos()
