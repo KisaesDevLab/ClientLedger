@@ -41,6 +41,9 @@ pub(crate) struct MemoDialog {
     pub(crate) group: Option<String>,
     /// A problem said at the name (an i18n key).
     pub(crate) problem: Option<&'static str>,
+    /// The name has had the keyboard once (it takes it when the dialog
+    /// opens, from wherever Ctrl+M was pressed).
+    pub(crate) focused: bool,
 }
 
 /// Saves under way and their dialogs.
@@ -107,6 +110,7 @@ pub(crate) fn open_memorize(s: &mut BuilderScreen, closing: bool) {
         name: s.ed.name().to_string(),
         group: s.ed.group_id().map(str::to_string),
         problem: None,
+        focused: false,
     });
     if s.save.groups.is_none() && s.save.groups_job.is_none() {
         s.save.groups_job = Some(engine::read(
@@ -364,8 +368,9 @@ pub(crate) fn dialogs(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 let r = ui
                     .add(egui::TextEdit::singleline(&mut d.name).desired_width(340.0))
                     .labelled_by(l.id);
-                if ui.memory(|m| m.focused().is_none()) {
+                if !d.focused || ui.memory(|m| m.focused().is_none()) {
                     r.request_focus();
+                    d.focused = true;
                 }
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     submit = true;

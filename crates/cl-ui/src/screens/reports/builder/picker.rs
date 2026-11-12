@@ -37,6 +37,7 @@ pub(crate) fn pick(
     current: Option<usize>,
     width: f32,
 ) -> Option<usize> {
+    let key = format!("{salt:?}");
     let id = ui.make_persistent_id(("builder.pick", salt));
     let l = caption(ui, label);
     let mut picked = None;
@@ -62,6 +63,12 @@ pub(crate) fn pick(
             }
         });
     let resp = inner.response.labelled_by(l.id);
+    // A control that was just added asks for the keyboard by its salt
+    // ([`want_focus`]): ids of widgets after an added row move.
+    if ui.data(|d| d.get_temp::<String>(want_id())).as_deref() == Some(key.as_str()) {
+        resp.request_focus();
+        ui.data_mut(|d| d.remove::<String>(want_id()));
+    }
     if resp.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
@@ -106,6 +113,17 @@ pub(crate) fn pick(
         }
     }
     picked.filter(|p| Some(*p) != current)
+}
+
+fn want_id() -> egui::Id {
+    egui::Id::unique("builder.pick.want_focus")
+}
+
+/// Gives the keyboard to the picker drawn with `salt` (the next time it is
+/// drawn): the first control of a row just added (AC6).
+pub(crate) fn want_focus(ui: &Ui, salt: impl std::fmt::Debug) {
+    ui.data_mut(|d| d.insert_temp(want_id(), format!("{salt:?}")));
+    ui.ctx().request_repaint();
 }
 
 /// Segmented buttons (one choice of a few). Returns the index picked.

@@ -151,6 +151,8 @@ fn compare(
         };
         if r.clicked() {
             let mut n = c.clone();
+            // The new comparison's "Compare with" takes the keyboard.
+            picker::want_focus(ui, ("cmp", s.id.0, n.compare.len()));
             n.compare.push(CompareSet {
                 base: CompareBase::PriorPeriod,
                 amount: true,

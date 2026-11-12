@@ -187,6 +187,8 @@ fn filters(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, sec: &Section) {
     {
         let mut n = sec.clone();
         n.filters.push(new_filter(field));
+        // The new filter's "Filter on" takes the keyboard.
+        picker::want_focus(ui, ("ffield", &sec.id, n.filters.len() - 1));
         edit(s, n);
     }
     let names: Vec<String> = offered
