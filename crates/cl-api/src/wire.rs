@@ -597,6 +597,9 @@ impl Capabilities {
     pub const REPORT_BUILDER: &'static str = "report-builder-v1";
     /// PR-D: `GET /report-builder/starters`.
     pub const REPORT_BUILDER_STARTERS: &'static str = "report-builder-starters-v1";
+    /// PR-E (U-119e): section Total, outer-line and earnings drills, one
+    /// column's `range` (as-of columns too), open-item rows with paths.
+    pub const REPORT_BUILDER_DRILL: &'static str = "report-builder-drill-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
