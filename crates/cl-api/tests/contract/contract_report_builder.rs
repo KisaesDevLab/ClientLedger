@@ -27,6 +27,7 @@ const YEAR: i32 = 2034;
 fn caps(h: &Harness) -> bool {
     h.require_cap(Capabilities::REPORT_BUILDER, "U-119c")
         && h.require_cap(Capabilities::REPORT_BUILDER_STARTERS, "U-119d")
+        && h.require_cap(Capabilities::REPORT_BUILDER_STARTERS_V2, "U-119f")
 }
 
 fn last_day(month: u32) -> CalendarDate {

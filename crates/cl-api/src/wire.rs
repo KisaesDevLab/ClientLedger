@@ -600,6 +600,10 @@ impl Capabilities {
     /// PR-E (U-119e): section Total, outer-line and earnings drills, one
     /// column's `range` (as-of columns too), open-item rows with paths.
     pub const REPORT_BUILDER_DRILL: &'static str = "report-builder-drill-v1";
+    /// PR-F (U-119f): starters v2 (detail fields on every starter, natural
+    /// signs in Transaction Detail, Open Invoices/Unpaid Bills by document
+    /// type) and opening-balance-only accounts in running-balance runs.
+    pub const REPORT_BUILDER_STARTERS_V2: &'static str = "report-builder-starters-v2";
 
     /// True when the engine advertises `name`.
     #[must_use]

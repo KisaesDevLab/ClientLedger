@@ -195,8 +195,13 @@ pub struct BuilderRun {
     /// [`Cell::Amount`]; a count or quantity section's unit is the
     /// definition's to apply (`cl_model::report_def::apply_units`).
     pub table: ReportTable,
-    /// The wire columns behind the table's (detail pages use it).
+    /// The wire columns behind the table's (Load more pages use it).
     pub layout: ColumnLayout,
+    /// Every shown column, the field columns with no value in this run
+    /// included: a drill tab's `/run/detail` cells fill them (U-119f).
+    pub detail_columns: Vec<ColumnHead>,
+    /// The wire columns behind [`Self::detail_columns`].
+    pub detail_layout: ColumnLayout,
     /// Hash of every parameter but the open paths and purpose.
     pub fingerprint: String,
     /// The ledger stamp the run read.
@@ -891,6 +896,8 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
         .get("stamp")
         .and_then(Value::as_u64)
         .ok_or(shape("stamp"))?;
+    let (detail_columns, detail_layout) = (cols.clone(), layout.clone());
+    let (cols, layout) = drop_empty_fields(cols, layout, &mut rows);
     Ok(BuilderRun {
         table: ReportTable {
             columns: cols,
@@ -898,12 +905,64 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
             meta,
         },
         layout,
+        detail_columns,
+        detail_layout,
         fingerprint,
         stamp,
         denied,
         expanded,
         truncated,
     })
+}
+
+/// Field columns are definition-wide (U-119f): a summary run carries
+/// them with every cell empty. Such a column isn't shown (screen, files,
+/// print); the drill tabs keep it.
+fn drop_empty_fields(
+    cols: Vec<ColumnHead>,
+    layout: ColumnLayout,
+    rows: &mut [cl_core::report::ReportRow],
+) -> (Vec<ColumnHead>, ColumnLayout) {
+    let keep: Vec<bool> = cols
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            !c.key.starts_with("f:")
+                || rows
+                    .iter()
+                    .any(|r| r.cells.get(i).is_some_and(|x| !matches!(x, Cell::Empty)))
+        })
+        .collect();
+    if keep.iter().all(|k| *k) {
+        return (cols, layout);
+    }
+    for r in rows.iter_mut() {
+        let mut i = 0;
+        r.cells.retain(|_| {
+            i += 1;
+            keep.get(i - 1).copied().unwrap_or(true)
+        });
+    }
+    let shown = layout
+        .shown
+        .iter()
+        .zip(&keep)
+        .filter(|(_, k)| **k)
+        .map(|(w, _)| *w)
+        .collect();
+    let cols = cols
+        .into_iter()
+        .zip(&keep)
+        .filter(|(_, k)| **k)
+        .map(|(c, _)| c)
+        .collect();
+    (
+        cols,
+        ColumnLayout {
+            wire: layout.wire,
+            shown,
+        },
+    )
 }
 
 /// Reads a `/run/detail` answer (`{rows, cursor, subtotal}`): its cells

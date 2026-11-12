@@ -69,6 +69,9 @@ impl Eq for BuilderDetailOpen {}
 struct Shown {
     reference: RunRef,
     layout: ColumnLayout,
+    /// Every column, empty field columns too, for a drill tab (U-119f).
+    detail_columns: Vec<ColumnHead>,
+    detail_layout: ColumnLayout,
     fingerprint: String,
     stamp: u64,
 }
@@ -190,7 +193,13 @@ pub(crate) fn available(w: &ReportWindow) -> bool {
             && w
                 .link
                 .capabilities()
-                .has(cl_api::Capabilities::REPORT_BUILDER_DRILL))
+                .has(cl_api::Capabilities::REPORT_BUILDER_DRILL)
+            // Starters v2 (U-119f): an older engine's starters show bare
+            // drills and debit-signed ledgers; it needs an update.
+            && w
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::REPORT_BUILDER_STARTERS_V2))
 }
 
 /// Starts reading the starters (once).
@@ -665,18 +674,24 @@ fn dress_types(columns: &[ColumnHead], rows: &mut [cl_core::report::ReportRow]) 
     }
 }
 
+/// Column headings in the app's words (the definition's own headers kept).
+fn dress_columns(b: &Builder, columns: &mut [ColumnHead]) {
+    let Some(def) = &b.def else { return };
+    for c in columns {
+        if !def.columns.headers.contains_key(&c.key)
+            && let Some(k) = column_key(c).or_else(|| period_caption(c))
+        {
+            c.caption = k;
+        }
+    }
+}
+
 /// The table as the window shows it: units, i18n captions, the dash.
 fn dress(b: &Builder, mut table: ReportTable, denied: bool) -> ReportTable {
     if let Some(def) = &b.def {
         apply_units(def, &mut table);
-        for c in &mut table.columns {
-            if !def.columns.headers.contains_key(&c.key)
-                && let Some(k) = column_key(c).or_else(|| period_caption(c))
-            {
-                c.caption = k;
-            }
-        }
     }
+    dress_columns(b, &mut table.columns);
     dress_types(&table.columns, &mut table.rows);
     for r in &mut table.rows {
         if let Some(k) = caption_key(&r.caption) {
@@ -756,9 +771,13 @@ fn poll_run(w: &mut ReportWindow) {
             }
             let denied = !run.denied.is_empty();
             let table = dress(b, run.table, denied);
+            let mut detail_columns = run.detail_columns;
+            dress_columns(b, &mut detail_columns);
             b.shown = b.reference.clone().map(|reference| Shown {
                 reference,
                 layout: run.layout,
+                detail_columns,
+                detail_layout: run.detail_layout,
                 fingerprint: run.fingerprint,
                 stamp: run.stamp,
             });
@@ -1006,13 +1025,14 @@ fn detail_open(
     range: Option<DateRange>,
 ) -> Option<BuilderDetailOpen> {
     let b = w.builder.as_ref()?;
-    let (shown, table) = (b.shown.as_ref()?, w.table.as_ref()?);
+    let shown = b.shown.as_ref()?;
+    w.table.as_ref()?;
     Some(BuilderDetailOpen {
         title: format!("{} \u{2014} {}", b.title(), t("reports.builder.detail")),
         definition: b.json.clone(),
         reference: shown.reference.clone(),
-        columns: table.columns.clone(),
-        layout: shown.layout.clone(),
+        columns: shown.detail_columns.clone(),
+        layout: shown.detail_layout.clone(),
         node_id: node_id.to_string(),
         path: path.clone(),
         range,
@@ -1113,7 +1133,7 @@ fn poll_detail_rerun(w: &mut ReportWindow) {
         Ok(run) => {
             d.open.fingerprint = run.fingerprint;
             d.open.stamp = run.stamp;
-            d.open.layout = run.layout;
+            d.open.layout = run.detail_layout;
             next_detail_page(w);
         }
         Err(e) => detail_failed(w, e),

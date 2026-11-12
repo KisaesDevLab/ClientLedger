@@ -35,7 +35,9 @@ pub const SLOW: &str = "demo_slow";
 
 const PROFIT_LOSS: &str = r#"{"schemaVersion":1,"kind":"builder","dates":{"mode":"range","preset":"this_year_to_date"},"columns":{"detailFields":["date","txn_type","contact","memo"],"compare":[],"headers":{}},"nodes":[{"type":"section","id":"income","caption":"Income","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["revenue"]}],"groupBy":[{"key":"account"}],"display":"summary","defaultExpanded":false,"showTotal":true,"totalCaption":"Total Income","hideZero":true},{"type":"section","id":"expenses","caption":"Expenses","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["expense"]}],"groupBy":[{"key":"account"}],"display":"expandable","defaultExpanded":false,"showTotal":true,"totalCaption":"Total Expenses","hideZero":true},{"type":"formula","id":"net_income","caption":"Net Income","terms":[{"nodeId":"income","sign":1},{"nodeId":"expenses","sign":-1}]}]}"#;
 
-const LEDGER: &str = r#"{"schemaVersion":1,"kind":"builder","dates":{"mode":"range","preset":"this_year_to_date"},"columns":{"detailFields":["date","txn_type","number","contact","memo","amount"],"compare":[],"headers":{}},"nodes":[{"type":"section","id":"ledger","caption":"Transaction Detail by Account","source":"gl","measure":"amount","polarity":"debit","filters":[],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true}]}"#;
+/// Transaction Detail by Account as the engine's starters v2 (U-119f):
+/// one natural-sign section per account type.
+const LEDGER: &str = r#"{"schemaVersion":1,"kind":"builder","dates":{"mode":"range","preset":"this_year_to_date"},"columns":{"detailFields":["date","txn_type","number","contact","memo","debit","credit"],"compare":[],"headers":{}},"nodes":[{"type":"section","id":"assets","caption":"Assets","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["asset"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"liabilities","caption":"Liabilities","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["liability"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"equity","caption":"Equity","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["equity"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"income","caption":"Income","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["revenue"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"cogs","caption":"Cost of Goods Sold","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["cogs"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"expenses","caption":"Expenses","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["expense"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"other_income","caption":"Other Income","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["other_revenue"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true},{"type":"section","id":"other_expenses","caption":"Other Expenses","source":"gl","measure":"amount","filters":[{"field":"account_type","op":"in","values":["other_expense"]}],"groupBy":[{"key":"account"}],"display":"detail","defaultExpanded":true,"showTotal":false,"hideZero":true}]}"#;
 
 const SALES_AND_PURCHASES: &str = r#"{"schemaVersion":1,"kind":"builder","title":"Sales and purchases","dates":{"mode":"range","preset":"this_year_to_date"},"columns":{"detailFields":["date","txn_type","number","amount"],"compare":[],"headers":{}},"nodes":[{"type":"text","id":"intro","text":"Sales by client, then purchases."},{"type":"section","id":"sales","caption":"Sales","source":"sales","measure":"amount","filters":[],"groupBy":[{"key":"contact"}],"display":"expandable","defaultExpanded":false,"showTotal":true,"hideZero":true},{"type":"blank","id":"gap"},{"type":"section","id":"purchases","caption":"Purchases","source":"purchases","measure":"amount","filters":[],"groupBy":[{"key":"contact"}],"display":"summary","defaultExpanded":false,"showTotal":true,"hideZero":true},{"type":"formula","id":"net","caption":"Sales less purchases","terms":[{"nodeId":"sales","sign":1},{"nodeId":"purchases","sign":-1}]}]}"#;
 
@@ -181,9 +183,14 @@ fn natural_credit(section: &Value) -> bool {
         || section["filters"].as_array().is_some_and(|f| {
             f.iter().any(|x| {
                 x["field"] == "account_type"
-                    && x["values"]
-                        .as_array()
-                        .is_some_and(|v| v.iter().any(|t| t == "revenue" || t == "other_revenue"))
+                    && x["values"].as_array().is_some_and(|v| {
+                        v.iter().any(|t| {
+                            matches!(
+                                t.as_str(),
+                                Some("revenue" | "other_revenue" | "liability" | "equity")
+                            )
+                        })
+                    })
             })
         })
 }
@@ -284,6 +291,8 @@ fn detail_cells(cols: &[Value], section: &Value, p: &Post) -> Vec<Value> {
             Some("number") => json!(p.number),
             Some("contact") => p.contact.as_ref().map_or(Value::Null, |c| json!(c)),
             Some("memo") => json!(p.memo),
+            Some("debit") if !p.debit.is_zero() => json!(exact(p.debit)),
+            Some("credit") if !p.credit.is_zero() => json!(exact(p.credit)),
             Some("amount") | None => json!(exact(v)),
             Some(_) => Value::Null,
         })

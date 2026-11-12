@@ -82,8 +82,13 @@ fn every_engine_sample_reads() {
 fn a_profit_and_loss_keeps_the_exact_strings() {
     let r = run("profit_loss_accrual");
     let t = &r.table;
+    // U-119f: the starter's 7 field columns have no value in a summary run
+    // and aren't shown; a drill tab keeps them (wire 0..7, total at 7).
     assert_eq!(t.columns.len(), 1);
     assert_eq!(t.columns[0].key, "total");
+    assert_eq!(r.layout.shown, [7]);
+    assert_eq!(r.detail_columns.len(), 8);
+    assert_eq!(r.detail_layout.shown, [0, 1, 2, 3, 4, 5, 6, 7]);
     assert_eq!(t.columns[0].kind, ColumnKind::Amount);
     // The total drills every column: no range is sent (U-119e).
     assert_eq!(t.columns[0].range, None);
@@ -234,21 +239,26 @@ fn compare_columns_change_and_percent() {
 fn a_hidden_compare_column_keeps_its_wire_place() {
     let mut v = sample("profit_loss_compare_prior_year");
     // `amount: false` with a change: the engine sends the prior column as
-    // `hidden` with null cells.
-    v["columns"][1]["kind"] = json!("hidden");
+    // `hidden` with null cells. The 7 field columns (wire 0..7) have no
+    // value in a summary run, so they aren't shown either (U-119f).
+    v["columns"][8]["kind"] = json!("hidden");
     for row in v["rows"].as_array_mut().expect("rows") {
-        row["cells"][1] = Value::Null;
+        row["cells"][8] = Value::Null;
     }
     let r = read_run(&v, None).expect("run");
-    assert_eq!(r.layout.wire, 4);
-    assert_eq!(r.layout.shown, [0, 2, 3]);
+    assert_eq!(r.layout.wire, 11);
+    assert_eq!(r.layout.shown, [7, 9, 10]);
+    // A drill tab keeps the field columns.
+    assert_eq!(r.detail_layout.shown, [0, 1, 2, 3, 4, 5, 6, 7, 9, 10]);
+    assert_eq!(r.detail_columns.len(), 10);
     let t = &r.table;
     assert_eq!(t.columns.len(), 3);
     assert_eq!(t.columns[1].key, "total:c0:change");
     assert_eq!(t.rows[1].cells[1], Cell::Amount(d("-300.0000")));
     // A detail page carries the hidden cell too.
     let page = json!({"rows": [], "cursor": null,
-                      "subtotal": ["1.0000", null, "2.0000", "3.0"]});
+                      "subtotal": [null, null, null, null, null, null, null,
+                                   "1.0000", null, "2.0000", "3.0"]});
     let p = read_detail(&page, &t.columns, &r.layout).expect("page");
     assert_eq!(
         p.subtotal,
@@ -264,6 +274,23 @@ fn a_hidden_compare_column_keeps_its_wire_place() {
 fn a_detail_section_types_its_field_columns() {
     let r = run("transaction_detail_by_account");
     let t = &r.table;
+    // Num and Description have no value in this run: not shown (U-119f);
+    // a drill tab keeps all ten.
+    let keys: Vec<&str> = t.columns.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "f:date",
+            "f:txn_type",
+            "f:contact",
+            "f:memo",
+            "f:debit",
+            "f:credit",
+            "f:running_balance",
+            "total"
+        ]
+    );
+    assert_eq!(r.detail_columns.len(), 10);
     let kinds: Vec<ColumnKind> = t.columns.iter().map(|c| c.kind).collect();
     assert_eq!(
         kinds,
@@ -272,25 +299,23 @@ fn a_detail_section_types_its_field_columns() {
             ColumnKind::Text,
             ColumnKind::Text,
             ColumnKind::Text,
-            ColumnKind::Text,
-            ColumnKind::Amount,
             ColumnKind::Amount,
             ColumnKind::Amount,
             ColumnKind::Amount,
             ColumnKind::Amount,
         ]
     );
-    assert_eq!(t.columns[0].key, "f:date");
     let opening = &t.rows[2];
     assert_eq!(opening.kind, RowKind::Earnings);
     assert_eq!(opening.caption, "@reports.builder.opening");
-    assert_eq!(opening.cells[8], Cell::Amount(d("500.0000")));
+    assert_eq!(opening.cells[6], Cell::Amount(d("500.0000")));
     let detail = &t.rows[3];
     assert_eq!(detail.kind, RowKind::Detail);
     assert_eq!(detail.cells[0], Cell::Date(day(2026, 3, 1)));
     assert_eq!(detail.cells[1], Cell::Text("Cash Sale".into()));
-    assert_eq!(detail.cells[2], Cell::Empty);
-    assert_eq!(detail.cells[8], Cell::Amount(d("520.0000")));
+    assert_eq!(detail.cells[2], Cell::Text("Rivera Remodel".into()));
+    assert_eq!(detail.cells[6], Cell::Amount(d("520.0000")));
+    assert_eq!(detail.cells[7], Cell::Amount(d("20.0000")));
     assert!(matches!(
         &detail.drill,
         Some(Drill::Transaction { txn_type, .. }) if txn_type == "cash_sale"
@@ -327,7 +352,7 @@ fn passed_through_text_that_looks_like_a_key_stays_text() {
 #[test]
 fn a_denied_section_never_shows_a_figure() {
     let mut v = sample("denied_section");
-    v["rows"][3]["cells"][0] = json!("12.0000");
+    v["rows"][3]["cells"][7] = json!("12.0000");
     v["rows"][3]["drill"] = json!({"type": "detail", "nodeId": "purch", "path": ["n:purch"]});
     let t = read_run(&v, None).expect("run").table;
     assert_eq!(t.rows[3].cells, [Cell::Empty]);
@@ -337,7 +362,7 @@ fn a_denied_section_never_shows_a_figure() {
     leak["nodeId"] = json!("purch");
     leak["kind"] = json!("subtotal");
     leak["path"] = json!(["n:purch"]);
-    leak["cells"] = json!(["5.0000"]);
+    leak["cells"] = json!([null, null, null, null, null, null, null, "5.0000"]);
     v["rows"].as_array_mut().expect("rows").push(leak);
     assert_eq!(
         read_run(&v, None).expect_err("a leak"),
@@ -374,7 +399,13 @@ fn a_denied_section_and_the_formula_over_it() {
 #[test]
 fn a_detail_page_reads_against_the_runs_columns() {
     let r = run("transaction_detail_by_account");
-    let p = read_detail(&sample("run_detail_page"), &r.table.columns, &r.layout).expect("page");
+    // A drill tab reads against every column (the empty ones too).
+    let p = read_detail(
+        &sample("run_detail_page"),
+        &r.detail_columns,
+        &r.detail_layout,
+    )
+    .expect("page");
     assert_eq!(p.rows.len(), 2);
     assert_eq!(p.rows[0].kind, RowKind::Earnings, "the opening row");
     assert_eq!(p.rows[0].level, 0);
@@ -387,7 +418,7 @@ fn a_detail_page_reads_against_the_runs_columns() {
     let mut next = sample("run_detail_page");
     next["cursor"] = json!("eyJrIjoibGluZSJ9");
     assert_eq!(
-        read_detail(&next, &r.table.columns, &r.layout)
+        read_detail(&next, &r.detail_columns, &r.detail_layout)
             .expect("page")
             .cursor
             .as_deref(),
@@ -401,7 +432,7 @@ fn a_more_row_pages_with_its_cursor_or_from_the_start() {
     let more = |cursor: Value| {
         json!({"kind": "more", "nodeId": "sales", "level": 2,
                "path": ["n:sales", "contact:x"], "caption": "More rows",
-               "cells": [null], "cursor": cursor,
+               "cells": [null, null, null, null, null, null, null, null], "cursor": cursor,
                "expandable": false, "expanded": false})
     };
     let rows = v["rows"].as_array_mut().expect("rows");
