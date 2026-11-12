@@ -105,17 +105,13 @@ pub(crate) fn pick_tip(
                 },
             );
         });
-        let (down, up, typed) = ui.input(|i| {
-            let typed = i.events.iter().find_map(|ev| match ev {
-                egui::Event::Text(s) => s.chars().next(),
-                _ => None,
-            });
+        let (down, up) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowUp),
-                typed,
             )
         });
+        let typed = typed_prefix(ui, id, down || up);
         let usable = |i: &usize| choices[*i].1.is_available();
         let n = choices.len();
         if down {
@@ -126,16 +122,8 @@ pub(crate) fn pick_tip(
             let to = current.unwrap_or(n);
             picked = (0..to).rev().find(usable).or(picked);
         }
-        if let Some(ch) = typed
-            && n > 0
-        {
-            let ch = ch.to_lowercase().to_string();
-            let start = current.map_or(0, |c| c + 1);
-            picked = (0..n)
-                .map(|k| (start + k) % n)
-                .filter(usable)
-                .find(|i| choices[*i].0.to_lowercase().starts_with(&ch))
-                .or(picked);
+        if let Some(prefix) = typed {
+            picked = find_prefix(choices, current, &prefix).or(picked);
         }
     }
     picked.filter(|p| Some(*p) != current)
@@ -194,18 +182,14 @@ pub(crate) fn pick_add(
                 },
             );
         });
-        let (down, up, enter, typed) = ui.input(|i| {
-            let typed = i.events.iter().find_map(|ev| match ev {
-                egui::Event::Text(s) => s.chars().next(),
-                _ => None,
-            });
+        let (down, up, enter) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::Enter),
-                typed,
             )
         });
+        let typed = typed_prefix(ui, id, down || up || enter);
         let usable = |i: &usize| choices[*i].1.is_available();
         let n = choices.len();
         if down {
@@ -216,16 +200,8 @@ pub(crate) fn pick_add(
             let to = hl.unwrap_or(n);
             hl = (0..to).rev().find(usable).or(hl);
         }
-        if let Some(ch) = typed
-            && n > 0
-        {
-            let ch = ch.to_lowercase().to_string();
-            let start = hl.map_or(0, |c| c + 1);
-            hl = (0..n)
-                .map(|k| (start + k) % n)
-                .filter(usable)
-                .find(|i| choices[*i].0.to_lowercase().starts_with(&ch))
-                .or(hl);
+        if let Some(prefix) = typed {
+            hl = find_prefix(choices, hl, &prefix).or(hl);
         }
         if enter && let Some(i) = hl {
             added = Some(i);
@@ -243,6 +219,69 @@ pub(crate) fn pick_add(
         None => d.remove::<usize>(hid),
     });
     added
+}
+
+/// How long a pause ends a type-ahead: letters typed closer together than
+/// this make one prefix ("cu" reaches Custom dates, QA-5).
+const TYPE_AHEAD_SECS: f64 = 1.0;
+
+/// The type-ahead prefix after this frame's typing, when something was
+/// typed: letters typed within [`TYPE_AHEAD_SECS`] of the last add to it;
+/// an arrow or Enter (`reset`) starts a new one.
+fn typed_prefix(ui: &Ui, id: egui::Id, reset: bool) -> Option<String> {
+    let (text, now) = ui.input(|i| {
+        let text: String = i
+            .events
+            .iter()
+            .filter_map(|ev| match ev {
+                egui::Event::Text(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        (text, i.time)
+    });
+    let bid = id.with("type-ahead");
+    if reset {
+        ui.data_mut(|d| d.remove::<(String, f64)>(bid));
+    }
+    if text.is_empty() {
+        return None;
+    }
+    let before = ui
+        .data(|d| d.get_temp::<(String, f64)>(bid))
+        .filter(|(_, at)| now - at <= TYPE_AHEAD_SECS)
+        .map(|(s, _)| s)
+        .unwrap_or_default();
+    let prefix = format!("{before}{}", text.to_lowercase());
+    ui.data_mut(|d| d.insert_temp(bid, (prefix.clone(), now)));
+    Some(prefix)
+}
+
+/// The choice `prefix` reaches from `current`: one letter moves to the
+/// next choice starting with it (repeating it cycles); more letters keep
+/// the current choice while it still matches, else the first that does.
+fn find_prefix(choices: &[Choice], current: Option<usize>, prefix: &str) -> Option<usize> {
+    let n = choices.len();
+    let Some(first) = prefix.chars().next() else {
+        return None;
+    };
+    if n == 0 {
+        return None;
+    }
+    // "aaa" is "a" three times: it cycles through the A's.
+    let same = prefix.chars().all(|ch| ch == first);
+    let single = first.to_string();
+    let prefix = if same { single.as_str() } else { prefix };
+    let matches = |i: &usize| {
+        choices[*i].1.is_available() && choices[*i].0.to_lowercase().starts_with(prefix)
+    };
+    let one = prefix.chars().count() == 1;
+    let start = match current {
+        Some(c) if one => c + 1,
+        Some(c) => c,
+        None => 0,
+    };
+    (0..n).map(|k| (start + k) % n).find(matches)
 }
 
 fn want_id() -> egui::Id {
@@ -368,4 +407,75 @@ pub(crate) fn text_id(editor: super::EditorId, key: &FieldKey) -> egui::Id {
 pub(crate) fn check(ui: &mut Ui, value: bool, label: &str) -> Option<bool> {
     let mut v = value;
     ui.checkbox(&mut v, label).changed().then_some(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(v: &[&str]) -> Vec<Choice> {
+        v.iter().map(|s| on((*s).to_string())).collect()
+    }
+
+    /// QA-5: more than one letter reaches a choice by its start; one
+    /// letter, typed again, cycles through the choices with it.
+    #[test]
+    fn type_ahead_matches_more_than_the_first_letter() {
+        let c = names(&[
+            "This month",
+            "Choose each time it runs",
+            "Custom dates",
+            "Cash",
+        ]);
+        assert_eq!(find_prefix(&c, Some(0), "c"), Some(1));
+        assert_eq!(find_prefix(&c, Some(1), "cu"), Some(2));
+        assert_eq!(find_prefix(&c, Some(0), "cu"), Some(2));
+        assert_eq!(
+            find_prefix(&c, Some(2), "cu"),
+            Some(2),
+            "stays while it matches"
+        );
+        assert_eq!(find_prefix(&c, Some(1), "cc"), Some(2), "cycles");
+        assert_eq!(find_prefix(&c, Some(2), "ca"), Some(3));
+        assert_eq!(find_prefix(&c, Some(0), "x"), None);
+    }
+
+    /// QA-5: "cu" typed in a picker picks Custom dates, through egui.
+    #[test]
+    fn a_picker_takes_two_letters() {
+        let ctx = egui::Context::default();
+        let c = names(&["This month", "Choose each time it runs", "Custom dates"]);
+        let mut current = Some(0);
+        let run = |events: Vec<egui::Event>, time: f64, current: &mut Option<usize>| {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    if let Some(i) = pick(ui, "dates", "Dates", &c, *current, 160.0) {
+                        *current = Some(i);
+                    }
+                },
+            );
+            out.textures_delta.clear();
+        };
+        run(Vec::new(), 0.0, &mut current);
+        let tab = egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run(vec![tab], 0.1, &mut current);
+        run(vec![egui::Event::Text("c".into())], 0.2, &mut current);
+        assert_eq!(current, Some(1));
+        run(vec![egui::Event::Text("u".into())], 0.3, &mut current);
+        assert_eq!(current, Some(2), "Custom dates");
+        // After a pause a letter starts again.
+        run(vec![egui::Event::Text("t".into())], 2.0, &mut current);
+        assert_eq!(current, Some(0));
+    }
 }
