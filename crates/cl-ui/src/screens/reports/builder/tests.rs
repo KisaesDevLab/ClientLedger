@@ -924,3 +924,40 @@ fn the_preview_cut_is_on_screen_without_the_engine_preview() {
     assert!(cut, "the line's more row says the engine cut it");
     assert_eq!(all.len(), table.rows.len());
 }
+
+/// The widget with the keyboard, by its accessible role (tests: AC6).
+fn focused_role(ctx: &egui::Context) -> bool {
+    ctx.memory(egui::Memory::focused).is_some()
+}
+
+/// AC6 (WP-B5): a new editor takes the keyboard (Guided's question); Next
+/// moves it into the next step; Blank report in Advanced hands it to the
+/// outline (the Add menu on an empty report) on the next frame.
+#[test]
+fn the_editor_takes_the_keyboard_and_keeps_it_across_modes() {
+    let ctx = themed();
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = BuilderScreen::new(Arc::clone(&link), None, today());
+    frame(&ctx, &mut s, 0.0);
+    assert!(focused_role(&ctx), "Guided's question has the keyboard");
+    ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    if let Some(g) = s.guided.as_mut() {
+        g.set_source(cl_model::report_def::SourceKey::ArOpen);
+    }
+    assert_eq!(
+        press(&mut s, Mods::ALT, Key::Letter('N')),
+        Some("builder.guided_next")
+    );
+    frame(&ctx, &mut s, 0.1);
+    assert!(focused_role(&ctx), "the next step's question has it");
+    // Open in Advanced: the outline takes it on the next frame.
+    s.open_in_advanced();
+    frame(&ctx, &mut s, 0.2);
+    frame(&ctx, &mut s, 0.3);
+    assert!(s.outline_focused, "the outline row has the keyboard");
+}
