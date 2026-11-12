@@ -421,6 +421,35 @@ fn dirty_compares_structure_and_save_changes_needs_the_right() {
     assert!(std.saved().is_none() && std.dirty());
 }
 
+/// Q-A08r (R8): the Report name is the title everywhere: on open (the
+/// baseline too, so a row stored with another title opens clean), on Load,
+/// and on a rename.
+#[test]
+fn the_title_is_always_the_name() {
+    let (e, ..) = gross_profit();
+    let mut stored = e.definition().clone();
+    stored.title = Some("An older title".into());
+    let saved = Saved {
+        def: stored.clone(),
+        name: "Sales report".into(),
+        ..saved_from(&e, SavedKind::Builder, true)
+    };
+    let opened = BuilderEditor::new(stored, "Sales report", Origin::Memorized, Some(saved));
+    assert_eq!(opened.definition().title.as_deref(), Some("Sales report"));
+    assert!(!opened.dirty(), "the stored title is not a change");
+    let mut e = opened;
+    e.apply(Op::Load {
+        def: Box::new(blank_definition()),
+        name: " Theirs ".into(),
+        group_id: None,
+    })
+    .unwrap();
+    assert_eq!(e.definition().title.as_deref(), Some("Theirs"));
+    e.apply(Op::Name(String::new())).unwrap();
+    assert_eq!(e.definition().title, None);
+    assert_eq!(titled(blank_definition(), "  ").title, None);
+}
+
 #[test]
 fn load_is_one_undo_step() {
     let (mut e, ..) = gross_profit();

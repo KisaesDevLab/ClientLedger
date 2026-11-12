@@ -1038,3 +1038,201 @@ fn the_editor_takes_the_keyboard_and_keeps_it_across_modes() {
     frame(&ctx, &mut s, 0.3);
     assert!(s.outline_focused, "the outline row has the keyboard");
 }
+
+// ---- Fix pass (review R2, R3, R5, R7) ----
+
+/// The result tab of the editor's Run report, as the shell would open it.
+fn result_tab(link: &Arc<CompanyLink>, s: &mut BuilderScreen) -> super::super::ReportWindow {
+    let _ = link.drain();
+    s.run_report();
+    let payload = run_payload(link);
+    let spec = cl_model::reports::find("profit_loss").expect("p&l");
+    let mut w = super::super::ReportWindow::new(
+        Arc::clone(link),
+        CommandId::new(super::super::KIND),
+        None,
+        spec,
+        today(),
+    );
+    w.poll();
+    assert!(w.open_with(payload));
+    w.poll();
+    w
+}
+
+/// The editor seed a window's Customize pushed.
+fn customize_payload(link: &CompanyLink) -> OpenPayload {
+    link.drain()
+        .into_iter()
+        .rev()
+        .find_map(|e| match e {
+            CompanyEvent::OpenWith(_, p) if matches!(*p, OpenPayload::BuilderEditor(_)) => Some(*p),
+            _ => None,
+        })
+        .expect("Customize opened the editor")
+}
+
+/// R2: Customize from the editor's own result tab brings the editor back
+/// as it is: later edits, undo and the saved row all stay.
+#[test]
+fn customize_from_its_own_result_tab_keeps_the_editor() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    memorize_as(&ctx, &mut s, "Mine");
+    let saved = s.ed.saved().cloned().expect("memorized");
+    let mut w = result_tab(&link, &mut s);
+    // Edits after Run report.
+    rename_first(&mut s, "Sales");
+    let def = s.ed.definition().clone();
+    assert!(s.ed.dirty() && s.ed.can_undo());
+    super::super::builder_run::customize(&mut w);
+    let payload = customize_payload(&link);
+    assert!(s.takes_in_place(&payload), "the same editor takes it");
+    assert!(s.open_with(payload));
+    assert_eq!(s.ed.definition(), &def, "the later edits stay");
+    assert_eq!(
+        s.ed.saved().map(|x| (&x.id, x.version)),
+        Some((&saved.id, saved.version))
+    );
+    assert!(s.ed.dirty() && s.ed.can_undo());
+    // Saving now updates its own row: no "name taken".
+    assert!(s.command(CommandId::new("builder.save_changes")));
+    frames(&ctx, &mut s);
+    assert!(!s.ed.dirty(), "saved: {:?}", s.status);
+    assert_eq!(s.ed.saved().map(|x| x.version), Some(saved.version + 1));
+}
+
+/// R2: a tab memorized as a new report is that report: its Customize opens
+/// a new editor, never the one that ran it.
+#[test]
+fn a_result_tab_memorized_as_a_new_report_opens_a_new_editor() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    let other = Saved {
+        id: "someone-else".into(),
+        version: 1,
+        kind: SavedKind::Builder,
+        can_edit: true,
+        def: s.ed.definition().clone(),
+        name: "Other".into(),
+        group_id: None,
+        author: None,
+        updated_at: None,
+    };
+    let seed = BuilderSeed::Customize(Box::new(CustomizeSeed {
+        def: s.ed.definition().clone(),
+        title: "Other".into(),
+        origin: Origin::Memorized,
+        saved: Some(other),
+        dates: None,
+        basis: None,
+        adjusting: None,
+        filters_dropped: false,
+        editor: Some(s.id),
+    }));
+    assert!(!s.takes_in_place(&OpenPayload::BuilderEditor(Box::new(seed))));
+}
+
+/// R3: the saved baseline is what was sent; an edit made while the save
+/// was under way stays a change.
+#[test]
+fn an_edit_made_while_saving_stays_unsaved() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    super::save::open_memorize(&mut s, false);
+    if let Some(d) = s.save.memorize.as_mut() {
+        d.name = "Mine".into();
+    }
+    super::save::memorize_for_test(&mut s);
+    assert_eq!(s.save.state_name(), "saving");
+    // The answer is read at the next frame; the owner types first.
+    rename_first(&mut s, "Sales");
+    frames(&ctx, &mut s);
+    let saved = s.ed.saved().cloned().expect("memorized");
+    assert_eq!(saved.name, "Mine");
+    assert_eq!(saved.def.title.as_deref(), Some("Mine"), "Q-A08r");
+    assert!(Screen::dirty(&s), "the rename is still a change");
+    assert!(s.ed.can_save_changes());
+}
+
+/// R5: pressing Memorize again for the same write sends the same key; a
+/// new name is a new action; a success forgets the key.
+#[test]
+fn a_memorize_retry_sends_the_same_key() {
+    let (_d, link, mut first) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut first);
+    memorize_as(&ctx, &mut first, "Taken");
+    assert_eq!(super::save::memo_key_for_test(&first), None, "done");
+    let mut s = BuilderScreen::new(Arc::clone(&link), None, today());
+    assert!(s.open_with(OpenPayload::BuilderEditor(Box::new(BuilderSeed::Blank))));
+    gross_profit(&mut s);
+    memorize_as(&ctx, &mut s, "Taken");
+    let k1 = super::save::memo_key_for_test(&s).expect("kept after a refusal");
+    super::save::memorize_for_test(&mut s);
+    frames(&ctx, &mut s);
+    assert_eq!(
+        super::save::memo_key_for_test(&s),
+        Some(k1.clone()),
+        "same write, same key"
+    );
+    if let Some(d) = s.save.memorize.as_mut() {
+        d.name = "Free".into();
+    }
+    super::save::memorize_for_test(&mut s);
+    frames(&ctx, &mut s);
+    assert!(s.ed.saved().is_some(), "memorized under the new name");
+    assert_eq!(super::save::memo_key_for_test(&s), None);
+}
+
+/// R7: Customize on a memorized standard report carries the window's
+/// dates and basis into the report and its baseline alike: untouched, it
+/// has nothing to save.
+#[test]
+fn an_untouched_customize_of_a_memorized_standard_report_is_clean() {
+    let (_d, _l, base) = editor(BuilderSeed::Blank);
+    let mut def = base.ed.definition().clone();
+    def.nodes = {
+        let (_d2, _l2, mut g) = editor(BuilderSeed::Blank);
+        gross_profit(&mut g);
+        g.ed.definition().nodes.clone()
+    };
+    def.title = Some("Profit and Loss".into());
+    let saved = Saved {
+        id: "std1".into(),
+        version: 1,
+        kind: SavedKind::Standard,
+        can_edit: true,
+        def: def.clone(),
+        name: "My P&L".into(),
+        group_id: None,
+        author: None,
+        updated_at: None,
+    };
+    let seed = BuilderSeed::Customize(Box::new(CustomizeSeed {
+        def,
+        title: "My P&L".into(),
+        origin: Origin::Standard("profit_loss".into()),
+        saved: Some(saved),
+        dates: Some(cl_model::reports::DateChoice::Preset(
+            cl_model::reports::DatePreset::LastQuarter,
+        )),
+        basis: Some(cl_core::report::Basis::Cash),
+        adjusting: None,
+        filters_dropped: false,
+        editor: None,
+    }));
+    let (_d, _l, s) = editor(seed);
+    assert_eq!(
+        s.ed.definition().dates.preset.as_deref(),
+        Some("last_quarter")
+    );
+    assert_eq!(s.ed.definition().title.as_deref(), Some("My P&L"));
+    assert!(!Screen::dirty(&s), "nothing to save on close");
+    assert!(
+        !s.ed.can_save_changes(),
+        "a standard row's kind can't change"
+    );
+}

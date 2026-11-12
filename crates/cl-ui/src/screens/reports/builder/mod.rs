@@ -329,8 +329,47 @@ impl BuilderScreen {
         }
     }
 
+    /// Customize from this editor's own result tab (Q-A08x): the editor
+    /// comes forward as it is, its undo, its later edits and its saved row
+    /// kept (R2). Only what the owner changed in the tab comes along: its
+    /// date preset or basis, each one undo step; fixed From/To dates for
+    /// the session.
+    fn come_back(&mut self, c: &CustomizeSeed) {
+        self.commit_pending();
+        match c.dates {
+            Some(DateChoice::Preset(p)) => {
+                let mut d = self.ed.definition().dates.clone();
+                d.preset = Some(preset_name(p).into());
+                self.apply(Op::Dates(d));
+                self.band.custom = None;
+            }
+            Some(fixed) => self.band.custom = Some(fixed),
+            None => {}
+        }
+        if c.basis.is_some() && c.basis != self.ed.definition().basis {
+            self.apply(Op::Basis(c.basis));
+        }
+        self.preview.edited(&self.ed);
+    }
+
+    /// The seed is a Customize from this editor's own result tab, on the
+    /// report this editor holds (a tab memorized as a new report opens a
+    /// new editor on that report).
+    fn is_mine(&self, c: &CustomizeSeed) -> bool {
+        c.editor == Some(self.id)
+            && c.saved
+                .as_ref()
+                .is_none_or(|x| self.ed.saved().is_some_and(|m| m.id == x.id))
+    }
+
     /// Opens on `seed`.
     fn seed(&mut self, seed: BuilderSeed) {
+        if let BuilderSeed::Customize(c) = &seed
+            && self.is_mine(c)
+        {
+            self.come_back(c);
+            return;
+        }
         self.guided = None;
         self.status = None;
         self.band.custom = None;
@@ -351,19 +390,20 @@ impl BuilderScreen {
             }
             BuilderSeed::Customize(c) => {
                 let c = *c;
-                let mut def = c.def;
-                match c.dates {
-                    Some(DateChoice::Preset(p)) => def.dates.preset = Some(preset_name(p).into()),
-                    Some(fixed) => self.band.custom = Some(fixed),
-                    None => {}
+                let def = customized(c.def.clone(), &c);
+                if let Some(fixed) = c.dates.filter(|d| !matches!(d, DateChoice::Preset(_))) {
+                    self.band.custom = Some(fixed);
                 }
-                if c.basis.is_some() {
-                    def.basis = c.basis;
-                }
-                if c.adjusting.is_some() {
-                    def.adjusting = c.adjusting;
-                }
-                self.ed = BuilderEditor::new(def, &c.title, c.origin, c.saved);
+                // A memorized standard report: its baseline is the starter
+                // as the window showed it, so an untouched Customize has no
+                // changes to save (R7).
+                let saved = c.saved.clone().map(|mut s| {
+                    if s.kind == cl_model::report_def::editor::SavedKind::Standard {
+                        s.def = customized(s.def.clone(), &c);
+                    }
+                    s
+                });
+                self.ed = BuilderEditor::new(def, &c.title, c.origin, saved);
                 if c.filters_dropped {
                     self.status = Some(t("builder.status.filters_dropped"));
                 }
@@ -707,6 +747,22 @@ impl BuilderScreen {
     }
 }
 
+/// A Customize seed's definition with the window's date preset, basis and
+/// adjusting lens (Q-A08k). One rule for the report and, for a memorized
+/// standard report, its baseline (R7).
+fn customized(mut def: BuilderDefinition, c: &CustomizeSeed) -> BuilderDefinition {
+    if let Some(DateChoice::Preset(p)) = c.dates {
+        def.dates.preset = Some(preset_name(p).into());
+    }
+    if c.basis.is_some() {
+        def.basis = c.basis;
+    }
+    if c.adjusting.is_some() {
+        def.adjusting = c.adjusting;
+    }
+    def
+}
+
 /// The status line after a removal (Q-A08o).
 fn removed_text(r: cl_model::report_def::editor::Removed) -> String {
     let mut s = crate::i18n::t_count("builder.status.removed_rows", r.rows, &[]);
@@ -925,7 +981,7 @@ impl Screen for BuilderScreen {
         matches!(
             payload,
             OpenPayload::BuilderEditor(seed)
-                if matches!(&**seed, BuilderSeed::Customize(c) if c.editor == Some(self.id))
+                if matches!(&**seed, BuilderSeed::Customize(c) if self.is_mine(c))
         )
     }
 }

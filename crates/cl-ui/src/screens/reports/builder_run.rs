@@ -1589,12 +1589,19 @@ fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
         return;
     };
     let base = b.baseline.as_ref();
+    // Back to its editor (Q-A08x), only dates changed in this tab come
+    // along: the editor may have moved on since its Run report (R2).
+    let dates = if b.editor.is_some() && base.is_some_and(|x| x.dates == w.options.dates) {
+        None
+    } else {
+        Some(w.options.dates)
+    };
     let seed = CustomizeSeed {
         title: saved.as_ref().map_or_else(|| b.title(), |s| s.name.clone()),
         def,
         origin,
         saved,
-        dates: Some(w.options.dates),
+        dates,
         // The definition's own basis unless the owner changed it here.
         basis: if base.is_some_and(|x| x.basis == w.options.basis) {
             None

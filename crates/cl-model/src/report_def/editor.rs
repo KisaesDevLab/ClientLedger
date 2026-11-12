@@ -383,6 +383,16 @@ fn tidy_text(s: &str) -> String {
     s.trim().to_string()
 }
 
+/// `def` with its title set to the Report name (Q-A08r): the name is the
+/// memorized name and `definition.title`, so the two never differ in the
+/// editor or in what it saves. An empty name leaves no title.
+#[must_use]
+pub fn titled(mut def: BuilderDefinition, name: &str) -> BuilderDefinition {
+    let name = tidy_text(name);
+    def.title = (!name.is_empty()).then_some(name);
+    def
+}
+
 /// A row's settings with its owner text trimmed.
 ///
 /// # Errors
@@ -473,6 +483,13 @@ impl BuilderEditor {
     ) -> BuilderEditor {
         let group_id = saved.as_ref().and_then(|s| s.group_id.clone());
         let selection = def.nodes.first().map(|n| n.id().to_string());
+        // The title is the name (Q-A08r), in the baseline too: a row saved
+        // with another title does not open with changes.
+        let def = titled(def, name);
+        let saved = saved.map(|mut s| {
+            s.def = titled(s.def, &s.name);
+            s
+        });
         let mut e = BuilderEditor {
             def,
             name: tidy_text(name),
@@ -801,7 +818,7 @@ impl BuilderEditor {
                 name,
                 group_id,
             } => {
-                s.def = *def;
+                s.def = titled(*def, &name);
                 s.name = tidy_text(&name);
                 s.group_id = group_id;
             }

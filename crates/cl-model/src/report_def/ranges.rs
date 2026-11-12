@@ -113,24 +113,37 @@ pub fn run_ranges(
         // Calendar-month columns go back twelve calendar months (on a
         // 52/53-week year their months aren't fiscal periods).
         let months = columns == ColumnBy::Month && !period_ranges.is_empty();
-        def.columns
+        // A prior period the desktop can't place (a date outside the
+        // fiscal calendar): no compare ranges are sent at all, and the
+        // engine's own rule applies to every compare (R9; the arrays are
+        // one per compare entry, so one can't be left out alone).
+        let prior = def
+            .columns
             .compare
             .iter()
-            .map(|c| match c.base {
-                CompareBase::PriorPeriod => prior_ranges(&req.dates, columns, span, *fiscal, as_of)
-                    .ok_or(ResolveError::Fiscal(FiscalError::OutOfRange)),
-                CompareBase::PriorYear => base
-                    .iter()
-                    .map(|r| {
-                        Ok(DateRange {
-                            from: year_back(r.from, as_of, months, *fiscal)?,
-                            to: year_back(r.to, true, months, *fiscal)?,
+            .any(|c| c.base == CompareBase::PriorPeriod)
+            .then(|| prior_ranges(&req.dates, columns, span, *fiscal, as_of));
+        if matches!(prior, Some(None)) {
+            Vec::new()
+        } else {
+            def.columns
+                .compare
+                .iter()
+                .map(|c| match c.base {
+                    CompareBase::PriorPeriod => Ok(prior.clone().flatten().unwrap_or_default()),
+                    CompareBase::PriorYear => base
+                        .iter()
+                        .map(|r| {
+                            Ok(DateRange {
+                                from: year_back(r.from, as_of, months, *fiscal)?,
+                                to: year_back(r.to, true, months, *fiscal)?,
+                            })
                         })
-                    })
-                    .collect::<Result<Vec<_>, FiscalError>>()
-                    .map_err(ResolveError::from),
-            })
-            .collect::<Result<Vec<_>, _>>()?
+                        .collect::<Result<Vec<_>, FiscalError>>()
+                        .map_err(ResolveError::from),
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
     };
     if compare_ranges.iter().any(|c| c.len() != base.len()) {
         return Err(FiscalError::OutOfRange.into());

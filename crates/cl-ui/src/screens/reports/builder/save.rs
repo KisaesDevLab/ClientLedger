@@ -15,8 +15,8 @@ use cl_api::OrphanLabel;
 use cl_api::resources::reports::definitions::{
     DefinitionRefusal, DefinitionRow, DefinitionWrite, definition_refusal,
 };
-use cl_model::report_def::editor::{Op, Saved, SavedKind};
-use cl_model::report_def::{MAX_BYTES, to_text};
+use cl_model::report_def::editor::{Op, Saved, SavedKind, titled};
+use cl_model::report_def::{BuilderDefinition, MAX_BYTES, to_text};
 use eframe::egui::{self, Ui};
 
 use super::BuilderScreen;
@@ -46,13 +46,26 @@ pub(crate) struct MemoDialog {
     pub(crate) focused: bool,
 }
 
+/// What a save sent: the baseline once it is saved (R3). Edits made while
+/// it was under way stay changes.
+#[derive(Clone, Debug)]
+struct Sent {
+    def: BuilderDefinition,
+    name: String,
+    group_id: Option<String>,
+}
+
 /// Saves under way and their dialogs.
 #[derive(Default)]
 pub(crate) struct SaveState {
     pub(crate) memorize: Option<MemoDialog>,
     /// 409: someone changed the report since it was read.
     pub(crate) conflict: bool,
-    job: Option<(Kind, Job<DefinitionRow>)>,
+    job: Option<(Kind, Sent, Job<DefinitionRow>)>,
+    /// The Memorize key and the write it was for: a retry of the same write
+    /// (after a timeout the engine may have committed) sends the same key,
+    /// so it never comes back as "name taken" on its own report (R5).
+    memo_key: Option<(cl_api::IdempotencyKey, DefinitionWrite)>,
     theirs: Option<Job<DefinitionRow>>,
     groups: Option<Vec<(String, String)>>,
     groups_job: Option<Job<Vec<(String, String)>>>,
@@ -84,15 +97,29 @@ impl SaveState {
     }
 }
 
-/// The write for the editor's report under `name`.
-fn write_of(s: &BuilderScreen, name: &str, group: Option<String>) -> Option<DefinitionWrite> {
-    let definition = serde_json::to_value(s.ed.definition()).ok()?;
-    Some(DefinitionWrite {
-        name: name.trim().to_string(),
-        group_id: group,
-        kind: "builder".into(),
-        definition,
-    })
+/// The write for the editor's report under `name`, and what it sends: the
+/// title is the name (Q-A08r).
+fn write_of(
+    s: &BuilderScreen,
+    name: &str,
+    group: Option<String>,
+) -> Option<(DefinitionWrite, Sent)> {
+    let def = titled(s.ed.definition().clone(), name);
+    let definition = serde_json::to_value(&def).ok()?;
+    let name = name.trim().to_string();
+    Some((
+        DefinitionWrite {
+            name: name.clone(),
+            group_id: group.clone(),
+            kind: "builder".into(),
+            definition,
+        },
+        Sent {
+            def,
+            name,
+            group_id: group,
+        },
+    ))
 }
 
 /// True when the definition fits the engine's 256 KB.
@@ -162,14 +189,23 @@ fn memorize(s: &mut BuilderScreen) {
     if d.group.as_deref() != s.ed.group_id() {
         s.apply(Op::MemorizedGroup(d.group.clone()));
     }
-    let Some(w) = write_of(s, &d.name, d.group) else {
+    let Some((w, sent)) = write_of(s, &d.name, d.group) else {
         return;
     };
     let live = w.clone();
-    // One key per owner action: a retry of this Memorize is the same one.
-    let key = cl_api::IdempotencyKey::new();
+    // One key per write: pressing Memorize again for the same report (after
+    // a failure) is the same action; a new name or definition is a new one.
+    let key = match &s.save.memo_key {
+        Some((k, was)) if *was == w => k.clone(),
+        _ => {
+            let k = cl_api::IdempotencyKey::new();
+            s.save.memo_key = Some((k.clone(), w.clone()));
+            k
+        }
+    };
     s.save.job = Some((
         Kind::Memorize,
+        sent,
         engine::write(
             &s.link,
             s.group.as_ref(),
@@ -184,6 +220,12 @@ fn memorize(s: &mut BuilderScreen) {
 #[cfg(test)]
 pub(crate) fn memorize_for_test(s: &mut BuilderScreen) {
     memorize(s);
+}
+
+/// The Memorize key kept for a retry (tests).
+#[cfg(test)]
+pub(crate) fn memo_key_for_test(s: &BuilderScreen) -> Option<String> {
+    s.save.memo_key.as_ref().map(|(k, _)| k.as_header())
 }
 
 fn set_problem(s: &mut BuilderScreen, key: &'static str) {
@@ -205,7 +247,7 @@ pub(crate) fn save_changes(s: &mut BuilderScreen, closing: bool) {
         return;
     }
     s.save.close_after = closing;
-    let Some(w) = write_of(s, s.ed.name(), s.ed.group_id().map(str::to_string)) else {
+    let Some((w, sent)) = write_of(s, s.ed.name(), s.ed.group_id().map(str::to_string)) else {
         return;
     };
     let live = w.clone();
@@ -213,6 +255,7 @@ pub(crate) fn save_changes(s: &mut BuilderScreen, closing: bool) {
     let id2 = id.clone();
     s.save.job = Some((
         Kind::Update,
+        sent,
         engine::write(
             &s.link,
             s.group.as_ref(),
@@ -225,16 +268,17 @@ pub(crate) fn save_changes(s: &mut BuilderScreen, closing: bool) {
     ));
 }
 
-/// The saved row as the editor's baseline, with the engine's `canEdit`.
-fn saved_of(s: &BuilderScreen, row: &DefinitionRow) -> Saved {
+/// The saved row as the editor's baseline, with the engine's `canEdit`:
+/// what was sent, not the editor as it is when the answer comes (R3).
+fn saved_of(sent: Sent, row: &DefinitionRow) -> Saved {
     Saved {
         id: row.id.clone(),
         version: row.version,
         kind: SavedKind::Builder,
         can_edit: row.can_edit,
-        def: s.ed.definition().clone(),
-        name: row.name.clone(),
-        group_id: row.group_id.clone(),
+        def: sent.def,
+        name: sent.name,
+        group_id: sent.group_id,
         author: row.created_by_name.clone(),
         updated_at: row.updated_at,
     }
@@ -251,18 +295,22 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
             Err(_) => s.status = Some(t("builder.save.failed")),
         }
     }
-    let Some((kind, job)) = s.save.job.as_mut() else {
+    let Some((kind, _, job)) = s.save.job.as_mut() else {
         return;
     };
     let kind = *kind;
     let Some(r) = job.take() else {
         return;
     };
-    s.save.job = None;
+    let Some((_, sent, _)) = s.save.job.take() else {
+        return;
+    };
     match r {
         Ok(row) => {
-            let saved = saved_of(s, &row);
-            s.ed.mark_saved(saved);
+            if kind == Kind::Memorize {
+                s.save.memo_key = None;
+            }
+            s.ed.mark_saved(saved_of(sent, &row));
             s.save.memorize = None;
             s.save.conflict = false;
             s.status = Some(t("builder.save.saved"));
@@ -323,13 +371,17 @@ fn load_theirs(s: &mut BuilderScreen, row: &DefinitionRow) {
         s.status = Some(t("reports.builder.unreadable"));
         return;
     };
+    let sent = Sent {
+        def: titled(def.clone(), &row.name),
+        name: row.name.trim().to_string(),
+        group_id: row.group_id.clone(),
+    };
     s.apply(Op::Load {
         def: Box::new(def),
         name: row.name.clone(),
         group_id: row.group_id.clone(),
     });
-    let saved = saved_of(s, row);
-    s.ed.mark_saved(saved);
+    s.ed.mark_saved(saved_of(sent, row));
     s.save.conflict = false;
 }
 

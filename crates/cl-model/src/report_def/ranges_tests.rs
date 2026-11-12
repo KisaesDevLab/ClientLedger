@@ -285,59 +285,197 @@ fn spec_strategy() -> impl Strategy<Value = FiscalYearSpec> {
     ]
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+/// One random case: fiscal calendar, start offset, length, columns, as of,
+/// compare bases.
+type Case = (FiscalYearSpec, i64, i64, ColumnBy, bool, Vec<CompareBase>);
 
-    /// The engine's own checks on what is sent: every compare array is as
-    /// long as the base columns; periods and each compare array ascend
-    /// without overlap; every range runs forward; every date has a fiscal
-    /// year start on or before it, within 371 days.
-    #[test]
-    fn ranges_are_what_the_engine_accepts(
-        fiscal in spec_strategy(),
-        start in 0i64..2_000,
-        len in 0i64..400,
-        columns in prop_oneof![Just(ColumnBy::Total), Just(ColumnBy::Month), Just(ColumnBy::Quarter), Just(ColumnBy::Year)],
-        as_of in any::<bool>(),
-        bases in prop::collection::vec(prop_oneof![Just(CompareBase::PriorPeriod), Just(CompareBase::PriorYear)], 0..=2),
-    ) {
-        let from = d(2022, 1, 1).add_days(start).expect("from");
-        let to = from.add_days(len).expect("to");
-        let def = def(as_of, &bases, false);
-        let spec = if as_of { &BUILDER_AS_OF } else { &BUILDER_RANGE };
-        let dates = if as_of { DateChoice::AsOf(to) } else { DateChoice::Fixed { from, to } };
-        let o = opts(spec, dates, columns);
-        let Ok(got) = run_ranges(&def, spec, &o, &fiscal, to) else {
-            // Too many columns is the only refusal for these dates.
-            return Ok(());
-        };
-        let base_len = got.period_ranges.len().max(1);
-        prop_assert_eq!(got.compare_ranges.len(), bases.len());
-        for c in &got.compare_ranges {
-            prop_assert_eq!(c.len(), base_len);
-        }
-        for v in std::iter::once(&got.period_ranges).chain(got.compare_ranges.iter()) {
-            for x in v {
-                prop_assert!(x.from <= x.to);
+fn case_strategy() -> impl Strategy<Value = Case> {
+    (
+        spec_strategy(),
+        0i64..2_000,
+        0i64..400,
+        prop_oneof![
+            Just(ColumnBy::Total),
+            Just(ColumnBy::Month),
+            Just(ColumnBy::Quarter),
+            Just(ColumnBy::Year)
+        ],
+        any::<bool>(),
+        prop::collection::vec(
+            prop_oneof![Just(CompareBase::PriorPeriod), Just(CompareBase::PriorYear)],
+            0..=2,
+        ),
+    )
+}
+
+/// The engine's own checks on what is sent: every compare array is as long
+/// as the base columns; periods and each compare array ascend without
+/// overlap; every range runs forward; every date has a fiscal year start on
+/// or before it, within 371 days. The only refusal allowed is the column
+/// cap (R10), and most cases are accepted, so the checks really ran.
+#[test]
+fn ranges_are_what_the_engine_accepts() {
+    use proptest::test_runner::{TestCaseError, TestRunner};
+    let accepted = std::cell::Cell::new(0usize);
+    let capped = std::cell::Cell::new(0usize);
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(256));
+    let result = runner.run(
+        &case_strategy(),
+        |(fiscal, start, len, columns, as_of, bases)| {
+            let from = d(2022, 1, 1).add_days(start).expect("from");
+            let to = from.add_days(len).expect("to");
+            let def = def(as_of, &bases, false);
+            let spec = if as_of {
+                &BUILDER_AS_OF
+            } else {
+                &BUILDER_RANGE
+            };
+            let dates = if as_of {
+                DateChoice::AsOf(to)
+            } else {
+                DateChoice::Fixed { from, to }
+            };
+            let o = opts(spec, dates, columns);
+            let got = match run_ranges(&def, spec, &o, &fiscal, to) {
+                Ok(got) => got,
+                Err(ResolveError::TooManyColumns) => {
+                    capped.set(capped.get() + 1);
+                    return Ok(());
+                }
+                Err(e) => return Err(TestCaseError::fail(format!("refused: {e:?}"))),
+            };
+            accepted.set(accepted.get() + 1);
+            let base_len = got.period_ranges.len().max(1);
+            // Empty only when a prior period can't be placed: the engine's
+            // own rule then applies (R9).
+            if got.compare_ranges.is_empty() {
+                prop_assert!(bases.is_empty() || bases.contains(&CompareBase::PriorPeriod));
+            } else {
+                prop_assert_eq!(got.compare_ranges.len(), bases.len());
             }
-            for w in v.windows(2) {
-                prop_assert!(w[0].to < w[1].from);
+            for c in &got.compare_ranges {
+                prop_assert_eq!(c.len(), base_len);
             }
-        }
-        let starts = &got.fiscal_year_starts;
-        prop_assert!(!starts.is_empty() && starts.len() <= MAX_FISCAL_YEAR_STARTS);
-        prop_assert!(starts.windows(2).all(|w| w[0] < w[1]));
-        let mut days: Vec<CalendarDate> = match got.dates {
-            RunSpan::Range(r) => vec![r.from, r.to],
-            RunSpan::AsOf(d) => vec![d],
-        };
-        for x in got.period_ranges.iter().chain(got.compare_ranges.iter().flatten()) {
-            days.push(x.from);
-            days.push(x.to);
-        }
-        for day in days {
-            let s = starts.iter().rev().find(|s| **s <= day);
-            prop_assert!(s.is_some_and(|s| s.days_until(day) <= 371), "no start for {:?}", day);
-        }
+            for v in std::iter::once(&got.period_ranges).chain(got.compare_ranges.iter()) {
+                for x in v {
+                    prop_assert!(x.from <= x.to);
+                }
+                for w in v.windows(2) {
+                    prop_assert!(w[0].to < w[1].from);
+                }
+            }
+            let starts = &got.fiscal_year_starts;
+            prop_assert!(!starts.is_empty() && starts.len() <= MAX_FISCAL_YEAR_STARTS);
+            prop_assert!(starts.windows(2).all(|w| w[0] < w[1]));
+            let mut days: Vec<CalendarDate> = match got.dates {
+                RunSpan::Range(r) => vec![r.from, r.to],
+                RunSpan::AsOf(d) => vec![d],
+            };
+            for x in got
+                .period_ranges
+                .iter()
+                .chain(got.compare_ranges.iter().flatten())
+            {
+                days.push(x.from);
+                days.push(x.to);
+            }
+            for day in days {
+                let s = starts.iter().rev().find(|s| **s <= day);
+                prop_assert!(
+                    s.is_some_and(|s| s.days_until(day) <= 371),
+                    "no start for {:?}",
+                    day
+                );
+            }
+            Ok(())
+        },
+    );
+    assert!(result.is_ok(), "{result:?}");
+    assert!(
+        accepted.get() >= 200,
+        "only {} of 256 cases ran the checks ({} capped)",
+        accepted.get(),
+        capped.get()
+    );
+}
+
+/// R9: a prior period the desktop can't place sends no compare ranges (the
+/// engine's rule), never a refusal. A one-day custom range on a 4-4-5
+/// calendar at its first day still resolves, and whatever is sent is
+/// parallel.
+#[test]
+fn an_unplaceable_prior_period_leaves_the_engines_rule() {
+    let def = def(
+        false,
+        &[CompareBase::PriorPeriod, CompareBase::PriorYear],
+        false,
+    );
+    let o = opts(
+        &BUILDER_RANGE,
+        DateChoice::Fixed {
+            from: d(2026, 10, 1),
+            to: d(2026, 10, 31),
+        },
+        ColumnBy::Total,
+    );
+    let got = run_ranges(&def, &BUILDER_RANGE, &o, &CAL, d(2026, 11, 12)).expect("ranges");
+    assert_eq!(got.compare_ranges.len(), 2, "both placed");
+    assert!(
+        prior_ranges(
+            &ReportDates::Ranges(vec![r(d(2026, 10, 1), d(2026, 10, 31))]),
+            ColumnBy::Total,
+            r(d(2026, 10, 1), d(2026, 10, 31)),
+            CAL,
+            false,
+        )
+        .is_none(),
+        "Total columns over a split range have no unit: the engine's rule"
+    );
+}
+/// R12: the contract tests (`cl-api` tests/contract, which can't depend on
+/// cl-model) send the ranges in `fixtures/report_builder/compare_ranges.json`;
+/// this checks they are exactly what the desktop computes for those runs.
+#[test]
+fn the_contract_tests_send_what_the_desktop_computes() {
+    let year = 2034;
+    let cases = [
+        (
+            "prior_period_october",
+            def(false, &[CompareBase::PriorPeriod], false),
+            &BUILDER_RANGE,
+            DateChoice::Fixed {
+                from: d(year, 10, 1),
+                to: d(year, 10, 31),
+            },
+        ),
+        (
+            "prior_year_as_of",
+            def(true, &[CompareBase::PriorYear], false),
+            &BUILDER_AS_OF,
+            DateChoice::AsOf(d(year + 1, 3, 31)),
+        ),
+    ];
+    let mut computed = serde_json::Map::new();
+    for (name, def, spec, dates) in cases {
+        let o = opts(spec, dates, ColumnBy::Total);
+        let got = run_ranges(&def, spec, &o, &CAL, d(year + 1, 4, 1)).expect("ranges");
+        computed.insert(
+            name.into(),
+            serde_json::json!({
+                "compareRanges": got.compare_ranges,
+                "fiscalYearStarts": got.fiscal_year_starts,
+            }),
+        );
     }
+    let computed = serde_json::Value::Object(computed);
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/report_builder/compare_ranges.json"
+    ))
+    .expect("fixture");
+    assert_eq!(
+        fixture,
+        computed,
+        "update the fixture to:\n{}",
+        serde_json::to_string_pretty(&computed).unwrap_or_default()
+    );
 }

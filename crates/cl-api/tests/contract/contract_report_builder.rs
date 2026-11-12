@@ -492,6 +492,22 @@ fn cells_by_path(r: &BuilderRun, key: &str) -> Vec<(cl_core::report::RowPath, Ce
         .collect()
 }
 
+/// The compare ranges and fiscal year starts the desktop sends for the run
+/// `name` of `fixtures/report_builder/compare_ranges.json` (cl-model's
+/// `ranges::run_ranges` output, checked there; cl-api can't depend on
+/// cl-model).
+fn desktop_ranges(name: &str) -> (Vec<Vec<DateRange>>, Vec<cl_core::CalendarDate>) {
+    let all: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/report_builder/compare_ranges.json"
+    ))
+    .expect("fixture");
+    let case = &all[name];
+    (
+        serde_json::from_value(case["compareRanges"].clone()).expect("compare ranges"),
+        serde_json::from_value(case["fiscalYearStarts"].clone()).expect("starts"),
+    )
+}
+
 /// A08 (Q-A07u(2)): the desktop's `compareRanges` are what the engine
 /// compares with. October's prior period is September 1-30 (not the
 /// engine's same-length shift, August 31 - September 30): the compare
@@ -513,7 +529,9 @@ pub fn prior_period_compare_ranges_are_used(h: &Harness) {
         post(h, s, &je2(date(YEAR, m, d), "rb", rent.id, bank.id, amt));
     }
     let ids = [rent.id.to_string(), bank.id.to_string()];
-    let starts = vec![date(YEAR - 1, 1, 1), date(YEAR, 1, 1)];
+    // What the desktop computes for this run (cl-model ranges::run_ranges,
+    // checked against the fixture there, R12).
+    let (compare_ranges, starts) = desktop_ranges("prior_period_october");
     let mut october = plain(
         compared(&ids, false, Some("prior_period")),
         RunDates::range(DateRange {
@@ -522,10 +540,7 @@ pub fn prior_period_compare_ranges_are_used(h: &Harness) {
         }),
         starts.clone(),
     );
-    october.compare_ranges = vec![vec![DateRange {
-        from: date(YEAR, 9, 1),
-        to: date(YEAR, 9, 30),
-    }]];
+    october.compare_ranges = compare_ranges;
     let a = run(h, s, &request(october, false)).expect("october with compare");
     let september = plain(
         compared(&ids, false, None),
@@ -572,16 +587,13 @@ pub fn prior_year_as_of_compare_ranges_are_used(h: &Harness) {
         post(h, s, &je2(date(YEAR, m, d), "rb", savings.id, bank.id, amt));
     }
     let ids = [savings.id.to_string(), bank.id.to_string()];
-    let starts = vec![date(YEAR - 1, 1, 1), date(YEAR, 1, 1), date(YEAR + 1, 1, 1)];
+    let (compare_ranges, starts) = desktop_ranges("prior_year_as_of");
     let mut now = plain(
         compared(&ids, true, Some("prior_year")),
         RunDates::as_of(date(YEAR + 1, 3, 31)),
         starts.clone(),
     );
-    now.compare_ranges = vec![vec![DateRange {
-        from: date(YEAR, 3, 31),
-        to: date(YEAR, 3, 31),
-    }]];
+    now.compare_ranges = compare_ranges;
     let a = run(h, s, &request(now, false)).expect("as of with compare");
     let then = plain(
         compared(&ids, true, None),

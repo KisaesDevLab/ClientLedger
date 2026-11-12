@@ -258,7 +258,7 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
     let Some(d) = w.memo.dialog.as_mut() else {
         return;
     };
-    let Some(body) = body else {
+    let Some(mut body) = body else {
         d.problem = Some("reports.memorize.invalid");
         return;
     };
@@ -272,6 +272,12 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
         return;
     }
     d.problem = None;
+    // A builder report's name is its title too (Q-A08r).
+    if kind == "builder"
+        && let Some(obj) = body.as_object_mut()
+    {
+        obj.insert("title".into(), serde_json::Value::from(name.clone()));
+    }
     w.memo.sending = Some(w.options.clone());
     let write = DefinitionWrite {
         name,
