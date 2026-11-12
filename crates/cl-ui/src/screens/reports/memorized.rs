@@ -254,6 +254,20 @@ fn save(w: &mut ReportWindow, how: SaveAs) {
 
 /// Opens a memorized report: its catalog report with its options.
 fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
+    // A Report Builder definition runs as a builder report (A07). It is
+    // sent inline at the version read (Q-A07t).
+    if row.definition["kind"] == "builder" {
+        let s = cl_api::resources::report_builder::Starter {
+            key: row.id.clone(),
+            title: row.name.clone(),
+            ties_to: None,
+            definition: row.definition.clone(),
+        };
+        super::builder_run::show_starter(w, &s);
+        w.memo.saved = Some(w.options.clone());
+        w.memo.current = Some(row.clone());
+        return;
+    }
     let def: Result<StandardDefinition, _> = serde_json::from_value(row.definition.clone());
     let Some((spec, def)) = def
         .ok()

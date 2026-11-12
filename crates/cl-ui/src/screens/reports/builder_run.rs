@@ -1077,9 +1077,13 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
 }
 
 /// The control channel's view.
-pub(crate) fn state_json(b: &Builder) -> Value {
+pub(crate) fn state_json(b: &Builder, table: Option<&ReportTable>) -> Value {
+    let count = |k: RowKind| table.map_or(0, |t| t.rows.iter().filter(|r| r.kind == k).count());
     json!({
         "key": b.key,
+        "denied": count(RowKind::Denied),
+        "detail_rows": count(RowKind::Detail),
+        "more": count(RowKind::More),
         "phase": b.state.phase().name(),
         "generation": b.state.generation(),
         "open": b.state.open_paths().len(),

@@ -45,6 +45,9 @@ use cl_model::reports::{DateChoice, ReportOptions, find, resolve};
 use cl_settings::RecentStore;
 use rust_decimal::Decimal;
 
+#[path = "builder/tieout.rs"]
+mod builder_tieout;
+
 const OWNER: &str = "owner@example.com";
 
 fn require() -> bool {
@@ -914,6 +917,12 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             let (_, t) = run(&s, "profit_loss", &o).await;
             drilled += every_pl_cell_drills_to_its_amount(&s, &t).await;
         }
+    }
+    // A07: the Report Builder starters tie out to these reports.
+    if caps.has(cl_api::Capabilities::REPORT_BUILDER_STARTERS) {
+        builder_tieout::starters_tie_out(&s).await;
+    } else {
+        pending("U-119d", "Report Builder starters tie out to the standard reports");
     }
     assert!(
         drilled > 100,

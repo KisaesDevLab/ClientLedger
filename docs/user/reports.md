@@ -13,6 +13,17 @@ The list on the left groups the reports:
 
 Type in **Find a report** to narrow the list. A report shown in grey says **Needs an engine update**: it arrives with a later update of the accounting engine.
 
+## Report Builder reports
+
+Under **Report Builder** in the report list are ready-made reports built from your books, such as Profit & Loss and Transaction Detail by Account. They open in the same window, with the same dates, Accrual or Cash, printing and exporting.
+
+- Click **+** beside a line to open it, or **Collapse** to open or close everything at once.
+- A long list stops at a **Load more** button: click it for the next lines.
+- Click an underlined amount to see the transactions behind it in a new tab, with their total at the bottom. Click a transaction's amount to open it.
+- A part of the report your role isn't allowed to see says so, and totals that need it show a dash (—).
+- If the books change while you look at the lines behind an amount, the report says so: click **Refresh**.
+- A report that takes too long stops after 30 seconds. Try fewer months or open fewer lines.
+
 ## Changing what a report shows
 
 - **Dates**: pick a range like *Last month* or *Year to date*, or type your own **From** and **To**. Reports that show a balance take one **As of** date.

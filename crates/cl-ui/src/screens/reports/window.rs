@@ -375,6 +375,7 @@ impl ReportWindow {
             return;
         }
         if self.builder.is_some() {
+            self.sync_dates();
             super::builder_run::run(self);
             return;
         }
@@ -1147,7 +1148,7 @@ impl ReportWindow {
             "ask": self.ask.state_json(),
             "email": self.mailer.state_json(),
             "email_available": super::email::available(self),
-            "builder": self.builder.as_deref().map(super::builder_run::state_json),
+            "builder": self.builder.as_deref().map(|b| super::builder_run::state_json(b, self.table.as_ref())),
         })
     }
 }
