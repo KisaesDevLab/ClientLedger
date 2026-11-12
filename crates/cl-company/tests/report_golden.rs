@@ -922,7 +922,10 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     if caps.has(cl_api::Capabilities::REPORT_BUILDER_STARTERS) {
         builder_tieout::starters_tie_out(&s).await;
     } else {
-        pending("U-119d", "Report Builder starters tie out to the standard reports");
+        pending(
+            "U-119d",
+            "Report Builder starters tie out to the standard reports",
+        );
     }
     assert!(
         drilled > 100,

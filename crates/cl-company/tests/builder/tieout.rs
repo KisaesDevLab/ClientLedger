@@ -27,9 +27,14 @@ fn lines(t: &ReportTable) -> BTreeMap<String, Decimal> {
     t.rows
         .iter()
         .filter(|r| r.kind == RowKind::Group)
-        .filter_map(|r| {
-            let n = r.caption.split(' ').next()?.to_string();
-            Some((n, amount(&r.cells[0])))
+        .map(|r| {
+            // `<number> <name>`, or the name alone (as the standard
+            // report's key) for an account without a number.
+            let n = match r.caption.split_once(' ') {
+                Some((num, _)) if num.chars().all(|c| c.is_ascii_digit()) => num.to_string(),
+                _ => r.caption.clone(),
+            };
+            (n, amount(&r.cells[0]))
         })
         .collect()
 }
@@ -112,15 +117,34 @@ pub(super) async fn starters_tie_out(s: &Session) {
         o.basis = Some(basis);
         let (_, std) = run(s, "balance_sheet", &o).await;
         let want = by_number(&std, 0);
+        let earnings = |which: &str| {
+            t.rows
+                .iter()
+                .find(|r| {
+                    r.kind == RowKind::Earnings && r.path.0.last().is_some_and(|p| p == which)
+                })
+                .map_or(Decimal::ZERO, |r| amount(&r.cells[0]))
+        };
+        let prior = earnings("earnings:prior");
+        // The builder doesn't fold prior years' net income into the
+        // Retained Earnings account (engine PR-C): that one account is its
+        // own line plus the prior-years row; every other account is equal.
+        let mut folded = 0;
         for (n, v) in lines(&t) {
-            assert_eq!(want.get(&n), Some(&v), "{basis:?}: builder BS account {n}");
+            let w = *want
+                .get(&n)
+                .unwrap_or_else(|| panic!("{basis:?}: standard BS has account {n}"));
+            if w != v {
+                assert_eq!(w, v + prior, "{basis:?}: builder BS account {n}");
+                folded += 1;
+            }
         }
+        assert!(folded <= 1, "{basis:?}: only Retained Earnings folds");
         // The two earnings rows are the year's and the prior years' net
         // income (engine PR-C: not folded into a Retained Earnings row).
-        let current = t
-            .rows
-            .iter()
-            .find(|r| r.kind == RowKind::Earnings && r.path.0.last().is_some_and(|p| p == "earnings:current"));
+        let current = t.rows.iter().find(|r| {
+            r.kind == RowKind::Earnings && r.path.0.last().is_some_and(|p| p == "earnings:current")
+        });
         if let Some(c) = current {
             assert_eq!(
                 amount(&c.cells[0]),
