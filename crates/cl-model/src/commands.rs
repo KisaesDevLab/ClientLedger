@@ -887,11 +887,26 @@ mod tests {
             assert_eq!(at(Scope::Builder, m, k), Some(id), "{id}");
         }
         // Elsewhere F6, Ctrl+Enter, Ctrl+Z and Alt+N keep their meaning.
-        assert_eq!(at(Scope::Form, Mods::NONE, Key::F(6)), Some("view.focus_doc"));
-        assert_eq!(at(Scope::Window, Mods::NONE, Key::F(6)), Some("view.focus_doc"));
-        assert_eq!(at(Scope::Form, Mods::CMD, Key::Letter('Z')), Some("edit.undo"));
-        assert_eq!(at(Scope::Form, Mods::ALT, Key::Letter('N')), Some("form.save_new"));
-        assert_eq!(at(Scope::Feed, Mods::CMD, Key::Enter), Some("feed.accept_selected"));
+        assert_eq!(
+            at(Scope::Form, Mods::NONE, Key::F(6)),
+            Some("view.focus_doc")
+        );
+        assert_eq!(
+            at(Scope::Window, Mods::NONE, Key::F(6)),
+            Some("view.focus_doc")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::CMD, Key::Letter('Z')),
+            Some("edit.undo")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::ALT, Key::Letter('N')),
+            Some("form.save_new")
+        );
+        assert_eq!(
+            at(Scope::Feed, Mods::CMD, Key::Enter),
+            Some("feed.accept_selected")
+        );
         let km2 = Keymap::with_mode(COMMANDS, crate::keymap::EnterMode::MoveBetweenFields)
             .expect("no clashes in either Enter mode");
         assert_eq!(
@@ -905,8 +920,14 @@ mod tests {
             Some("form.save_new")
         );
         // Ctrl+M (Memorize) and Ctrl+P (Print) reach the editor.
-        assert_eq!(at(Scope::Builder, Mods::CMD, Key::Letter('M')), Some("reports.memorize"));
-        assert_eq!(at(Scope::Outline, Mods::CMD, Key::Letter('P')), Some("file.print"));
+        assert_eq!(
+            at(Scope::Builder, Mods::CMD, Key::Letter('M')),
+            Some("reports.memorize")
+        );
+        assert_eq!(
+            at(Scope::Outline, Mods::CMD, Key::Letter('P')),
+            Some("file.print")
+        );
         assert_eq!(Scope::Builder.title(), "In the Report Builder");
         assert_eq!(Scope::Outline.title(), "In the report outline");
     }

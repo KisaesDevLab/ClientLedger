@@ -104,12 +104,7 @@ impl Scope {
             Scope::Feed => &[Scope::Feed, Scope::Window, Scope::Global],
             Scope::Reconcile => &[Scope::Reconcile, Scope::Window, Scope::Global],
             Scope::Builder => &[Scope::Builder, Scope::Window, Scope::Global],
-            Scope::Outline => &[
-                Scope::Outline,
-                Scope::Builder,
-                Scope::Window,
-                Scope::Global,
-            ],
+            Scope::Outline => &[Scope::Outline, Scope::Builder, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -632,7 +627,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 8);
+        assert_eq!(Scope::ALL.len(), 10);
     }
 
     #[test]
@@ -768,8 +763,9 @@ mod tests {
             Some("viewer.fill_word")
         );
         // T18: arrows bind nothing elsewhere, so grids, registers and text
-        // fields keep them; plain arrows bind nothing anywhere.
-        for scope in Scope::ALL {
+        // fields keep them; plain arrows bind nothing anywhere but the
+        // Report Builder's outline tree (A08: Left/Right fold a group).
+        for scope in Scope::ALL.iter().filter(|s| **s != Scope::Outline) {
             for k in [Key::Left, Key::Right] {
                 assert_eq!(at(*scope, Mods::NONE, k), None, "{scope:?}");
                 assert_eq!(at(*scope, Mods::SHIFT, k), None, "{scope:?}");
