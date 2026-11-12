@@ -1008,6 +1008,9 @@ impl Screen for BuilderScreen {
                             chrome::band(self, ui, &tokens);
                             ui.separator();
                             self.panes(ui, &tokens, room);
+                            // Tab and F6 bring the field into view (the
+                            // shell does this for screens it scrolls).
+                            crate::layout::keep_focus_in_view(ui);
                         });
                 } else {
                     chrome::toolbar(self, ui, &tokens);

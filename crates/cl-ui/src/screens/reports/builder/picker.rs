@@ -141,6 +141,110 @@ pub(crate) fn pick_tip(
     picked.filter(|p| Some(*p) != current)
 }
 
+/// A picker that adds one of `choices` (names to a filter, rows to a
+/// formula, columns): with the keyboard, Up/Down and letters move a
+/// highlight shown in the closed box, and Enter adds it, so any choice can
+/// be reached, not only the first match (AC6, plan §6); a click on the
+/// list adds at once. Returns the index added.
+pub(crate) fn pick_add(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    label: &str,
+    placeholder: &str,
+    choices: &[Choice],
+    width: f32,
+) -> Option<usize> {
+    let id = ui.make_persistent_id(("builder.pick_add", salt));
+    let hid = id.with("highlight");
+    let mut hl: Option<usize> = ui
+        .data(|d| d.get_temp::<usize>(hid))
+        .filter(|i| choices.get(*i).is_some_and(|c| c.1.is_available()));
+    let l = caption(ui, label);
+    let mut added = None;
+    let shown = hl
+        .and_then(|i| choices.get(i))
+        .map_or_else(|| placeholder.to_string(), |c| c.0.clone());
+    let inner = egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(width)
+        .show_ui(ui, |ui| {
+            for (i, (text, a)) in choices.iter().enumerate() {
+                match a {
+                    Availability::Available => {
+                        if ui.selectable_label(hl == Some(i), text).clicked() {
+                            added = Some(i);
+                        }
+                    }
+                    Availability::Greyed(why) => {
+                        let text = format!("{text} \u{2014} {}", t(why));
+                        ui.add_enabled(false, egui::Button::selectable(false, text))
+                            .on_disabled_hover_text(t(why));
+                    }
+                }
+            }
+        });
+    let resp = inner.response.labelled_by(l.id);
+    if resp.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                resp.id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..egui::EventFilter::default()
+                },
+            );
+        });
+        let (down, up, enter, typed) = ui.input(|i| {
+            let typed = i.events.iter().find_map(|ev| match ev {
+                egui::Event::Text(s) => s.chars().next(),
+                _ => None,
+            });
+            (
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::Enter),
+                typed,
+            )
+        });
+        let usable = |i: &usize| choices[*i].1.is_available();
+        let n = choices.len();
+        if down {
+            let from = hl.map_or(0, |c| c + 1);
+            hl = (from..n).find(usable).or(hl);
+        }
+        if up {
+            let to = hl.unwrap_or(n);
+            hl = (0..to).rev().find(usable).or(hl);
+        }
+        if let Some(ch) = typed
+            && n > 0
+        {
+            let ch = ch.to_lowercase().to_string();
+            let start = hl.map_or(0, |c| c + 1);
+            hl = (0..n)
+                .map(|k| (start + k) % n)
+                .filter(usable)
+                .find(|i| choices[*i].0.to_lowercase().starts_with(&ch))
+                .or(hl);
+        }
+        if enter && let Some(i) = hl {
+            added = Some(i);
+        }
+    }
+    if added.is_some() {
+        hl = None;
+        // The picker keeps the keyboard for the next one.
+        resp.request_focus();
+    }
+    ui.data_mut(|d| match hl {
+        Some(i) => {
+            d.insert_temp(hid, i);
+        }
+        None => d.remove::<usize>(hid),
+    });
+    added
+}
+
 fn want_id() -> egui::Id {
     egui::Id::unique("builder.pick.want_focus")
 }

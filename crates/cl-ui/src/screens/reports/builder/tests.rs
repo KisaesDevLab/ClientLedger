@@ -1302,8 +1302,13 @@ fn guided_done_memorize_then_close_is_clean_and_saves_in_place() {
     assert!(s.ed.saved().is_some(), "{:?}", s.save.memorize);
     assert!(!Screen::dirty(&s), "closing asks nothing");
     let id = s.ed.saved().map(|x| x.id.clone());
+    // A later answer (the name memorized is Guided's name too).
+    assert_eq!(
+        s.guided.as_ref().map(|g| g.name.as_str()),
+        Some("Who owes me")
+    );
     if let Some(g) = s.guided.as_mut() {
-        g.name = "Who owes me now".into();
+        g.percent_of_total = !g.percent_of_total;
     }
     s.guided_changed();
     assert!(Screen::dirty(&s) && s.ed.can_save_changes());
@@ -1355,4 +1360,49 @@ fn badge_letters_meet_contrast_in_both_themes() {
             assert!(c >= 4.5, "{theme:?} {kind:?}: {c}");
         }
     }
+}
+
+/// Review "not covered" (AC6): an add picker (filter names, formula rows,
+/// columns) reaches any choice by keys, not only the first match: letters
+/// and arrows move a highlight, Enter adds it.
+#[test]
+fn an_add_picker_reaches_the_third_match_by_keys() {
+    let ctx = themed();
+    let choices: Vec<super::picker::Choice> = ["Alpha", "Apple", "Avocado", "Bean"]
+        .iter()
+        .map(|s| super::picker::on((*s).to_string()))
+        .collect();
+    let added = std::cell::Cell::new(None);
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let mut run = |events: Vec<egui::Event>| {
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let r = super::picker::pick_add(ui, "t", "Add", "Add a name", &choices, 200.0);
+                if r.is_some() {
+                    added.set(r);
+                }
+            },
+        );
+        out.textures_delta.clear();
+    };
+    run(Vec::new());
+    // Tab: the picker takes the keyboard.
+    run(vec![key(egui::Key::Tab)]);
+    run(Vec::new());
+    for _ in 0..3 {
+        run(vec![egui::Event::Text("a".into())]);
+    }
+    assert_eq!(added.get(), None, "letters only move the highlight");
+    run(vec![key(egui::Key::Enter)]);
+    assert_eq!(added.get(), Some(2), "the third A: Avocado");
 }

@@ -328,18 +328,15 @@ fn filter_row(
         } else {
             let left: Vec<&(String, String)> =
                 list.iter().filter(|(x, _)| !ids.contains(x)).collect();
-            let mut choices: Vec<Choice> =
-                left.iter().map(|(_, n)| picker::on(n.clone())).collect();
-            choices.insert(0, picker::on(t("builder.filter.add_name")));
-            if let Some(k) = picker::pick(
+            let choices: Vec<Choice> = left.iter().map(|(_, n)| picker::on(n.clone())).collect();
+            if let Some(k) = picker::pick_add(
                 ui,
                 ("fids", &sec.id, i),
                 &t("builder.filter.names"),
+                &t("builder.filter.add_name"),
                 &choices,
-                Some(0),
                 W - 20.0,
-            ) && k > 0
-                && let Some((id, _)) = left.get(k - 1)
+            ) && let Some((id, _)) = left.get(k)
             {
                 let mut n = sec.clone();
                 n.filters[i]
@@ -368,20 +365,18 @@ fn filter_row(
             .iter()
             .filter(|v| !values.iter().any(|x| x == **v))
             .collect();
-        let mut choices: Vec<Choice> = left
+        let choices: Vec<Choice> = left
             .iter()
             .map(|v| picker::on(value_text(&f.field, v)))
             .collect();
-        choices.insert(0, picker::on(t("builder.filter.add_value")));
-        if let Some(k) = picker::pick(
+        if let Some(k) = picker::pick_add(
             ui,
             ("fvals", &sec.id, i),
             &t("builder.filter.values"),
+            &t("builder.filter.add_value"),
             &choices,
-            Some(0),
             W - 20.0,
-        ) && k > 0
-            && let Some(v) = left.get(k - 1)
+        ) && let Some(v) = left.get(k)
         {
             let mut n = sec.clone();
             n.filters[i]

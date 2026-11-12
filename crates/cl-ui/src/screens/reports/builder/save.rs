@@ -328,6 +328,13 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
                 s.save.memo_key = None;
             }
             s.ed.mark_saved(saved_of(sent, &row));
+            // Memorized from Guided: its name is Guided's too, so a later
+            // answer keeps it (it was left empty, and Save changes sent an
+            // empty name).
+            let name = s.ed.name().to_string();
+            if let Some(g) = s.guided.as_mut() {
+                g.name = name;
+            }
             s.save.memorize = None;
             s.save.conflict = false;
             s.status = Some(t("builder.save.saved"));

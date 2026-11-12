@@ -66,20 +66,18 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, f: &Form
             .iter()
             .filter(|c| !f.terms.iter().any(|t| t.node_id == c.id))
             .collect();
-        let mut choices: Vec<Choice> = left
+        let choices: Vec<Choice> = left
             .iter()
             .map(|c| (super::outline::caption_of(s, &c.id), c.availability))
             .collect();
-        choices.insert(0, picker::on(t("builder.formula.add")));
-        if let Some(k) = picker::pick(
+        if let Some(k) = picker::pick_add(
             ui,
             ("terms", &f.id),
             &t("builder.formula.add_label"),
+            &t("builder.formula.add"),
             &choices,
-            Some(0),
             260.0,
-        ) && k > 0
-            && let Some(c) = left.get(k - 1)
+        ) && let Some(c) = left.get(k)
         {
             let mut n = f.clone();
             n.terms.push(Term {

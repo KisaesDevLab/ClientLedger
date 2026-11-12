@@ -710,7 +710,8 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                         | RowKind::Formula
                         | RowKind::Header
                 );
-                let text = RichText::new(caption).color(ink);
+                let text = RichText::new(caption);
+                let text = if dim { text.color(ink) } else { text };
                 let text = if strong { text.strong() } else { text };
                 // Captions start at the left, amounts end at the right
                 // (the mockup's statement layout).
@@ -749,7 +750,10 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                         .filter(|_| matches!(cell, Some(Cell::Amount(_))) && !text.is_empty())
                         .and_then(|d| d.for_cell(&table.columns[ci]))
                         .filter(|d| super::super::drill::live(&s.link, source, d));
-                    let rich = RichText::new(text).monospace().color(ink);
+                    // Colored only when dimmed: a drill keeps the link's
+                    // look (underlined, the accent).
+                    let rich = RichText::new(text).monospace();
+                    let rich = if dim { rich.color(ink) } else { rich };
                     let rich = if strong { rich.strong() } else { rich };
                     row.allocate_ui_with_layout(
                         egui::vec2(CELL_W, ROW_H),

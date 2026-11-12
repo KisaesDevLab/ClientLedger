@@ -66,6 +66,7 @@ steps:
   - assert_focused: {role: combo_box, label: Add}
   # "i": Income, the first value starting with I.
   - type: {text: i}
+  - key: Enter
   - assert_exists: {role: button, label_contains: "Income", index: 0}
   - assert_state: {key: screen.can_run, equals: true}
   # --- Section "Cost of goods sold" --------------------------------------------
@@ -94,6 +95,7 @@ steps:
   - key: Tab
   - key: Tab
   - type: {text: c}
+  - key: Enter
   - assert_state: {key: screen.can_run, equals: true}
   # --- Formula "Gross profit" = Income - Cost of goods sold ----------------------
   - key: Shift+F6
@@ -115,7 +117,9 @@ steps:
   - key: Tab
   - assert_focused: {role: combo_box, label: Add a row}
   - type: {text: i}
+  - key: Enter
   - type: {text: c}
+  - key: Enter
   - key: Shift+Tab
   - key: Shift+Tab
   - assert_focused: {role: radio_button, label_contains: "Cost of goods sold: −"}
@@ -158,6 +162,8 @@ steps:
   # credit memo yet (the light pass runs first; Q-A08ac): the tie-out is
   # unit-tested (`a_builder_pnl_ties_to_the_standard_profit_and_loss`).
   - assert_exists: {label: "43,561.29", index: 0}
+  # Underlined amounts drill (plan §3.4).
+  - assert_exists: {role: link, label: "3,099.38", index: 0}
   - screenshot: gross-profit
   # --- Columns: the period before with $ change --------------------------------
   - key: F6
@@ -222,6 +228,18 @@ steps:
   - assert_focused: {label: PREVIEW}
   - key: Shift+F6
   - assert_state: {key: screen.pane, equals: properties}
+  # --- Problems to fix: the formula above its rows (AC13) ------------------------
+  - key: Shift+F6
+  - assert_state: {key: screen.pane, equals: outline}
+  - key: Alt+Up
+  - key: Alt+Up
+  - assert_state: {key: screen.can_run, equals: false}
+  - assert_exists: {role: button, label: Go to row, index: 0}
+  - screenshot: problems
+  - key: Ctrl+Z
+  - key: Ctrl+Z
+  - assert_state: {key: screen.can_run, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
   # --- The panes reflow (UI review H1, README rule 6) ---------------------------
   - resize: {width: 960, height: 640}
   - wait: {ms: 300}
@@ -261,6 +279,13 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.guided_step, equals: done}
   - screenshot: guided-done
+  # Guided on a narrow window: the preview moves below the steps (H1).
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.layout, equals: stacked}
+  - screenshot: guided-narrow
+  - resize: {width: 1440, height: 940}
+  - wait: {ms: 300}
   # Run report: its button, by keys (review R11).
   - key: Tab
   - key: Tab
@@ -317,6 +342,7 @@ compare:
   - key: Tab
   - key: Tab
   - type: {text: i}
+  - key: Enter
   - key: Shift+F6
   - key: Insert
   - key: Space
@@ -337,6 +363,7 @@ compare:
   - key: Tab
   - key: Tab
   - type: {text: c}
+  - key: Enter
   - key: Shift+F6
   - key: Insert
   - key: Down
@@ -352,7 +379,9 @@ compare:
   - key: Tab
   - key: Tab
   - type: {text: i}
+  - key: Enter
   - type: {text: c}
+  - key: Enter
   - key: Shift+Tab
   - key: Shift+Tab
   - key: Space

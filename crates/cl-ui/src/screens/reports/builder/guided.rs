@@ -45,22 +45,21 @@ fn detail_chips(s: &mut BuilderScreen, ui: &mut Ui, g: &GuidedState) {
         .filter(|f| *f != "running_balance" && !g.detail_fields.iter().any(|x| x == f))
         .collect();
     if g.detail_fields.len() < limits::DETAIL_FIELDS && !left.is_empty() {
-        let mut choices: Vec<Choice> = vec![picker::on(t("builder.guided.detail_add"))];
-        choices.extend(
-            left.iter()
-                .map(|f| picker::on(t(&format!("reports.builder.field.{f}")))),
-        );
-        if let Some(k) = picker::pick(
+        let choices: Vec<Choice> = left
+            .iter()
+            .map(|f| picker::on(t(&format!("reports.builder.field.{f}"))))
+            .collect();
+        if let Some(k) = picker::pick_add(
             ui,
             ("g-detail", s.id.0),
             &t("builder.guided.detail_add_label"),
+            &t("builder.guided.detail_add"),
             &choices,
-            Some(0),
             200.0,
-        ) && k > 0
+        ) && let Some(f) = left.get(k)
         {
             let mut v = g.detail_fields.clone();
-            v.push(left[k - 1].to_string());
+            v.push((*f).to_string());
             next = Some(v);
         }
     }
@@ -110,7 +109,10 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                     egui::ScrollArea::vertical()
                         .id_salt(("guided", s.id.0))
                         .auto_shrink([false, false])
-                        .show(ui, |ui| steps(s, ui, tokens));
+                        .show(ui, |ui| {
+                            steps(s, ui, tokens);
+                            crate::layout::keep_focus_in_view(ui);
+                        });
                 },
             );
             ui.separator();
@@ -137,6 +139,7 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                         super::preview::draw(s, ui, tokens);
                     },
                 );
+                crate::layout::keep_focus_in_view(ui);
             });
     }
 }
