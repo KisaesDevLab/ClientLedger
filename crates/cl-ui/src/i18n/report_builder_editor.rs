@@ -278,6 +278,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.preview.subtitle", "{dates} \u{b7} {basis} \u{b7} Preview"),
     ("builder.preview.open_line", "Open this line"),
     ("builder.preview.close_line", "Close this line"),
+    ("builder.preview.last_good", "These figures are from before your last change."),
+    ("builder.preview.drill_failed", "That transaction couldn't be opened right now. Try again."),
     ("builder.preview.cant_reach", "ClientLedger can't reach the books right now. Your changes are kept; the preview tries again after your next change."),
     ("builder.problems.title", "Problems to fix"),
     ("builder.problem.the_report", "the report"),

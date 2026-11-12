@@ -1007,6 +1007,63 @@ fn detail_open(
     })
 }
 
+/// What a drill on the editor's preview needs from its run: the same as a
+/// run window's (plan §3.4, "underlined amounts drill as in A07").
+#[derive(Clone, Debug)]
+pub(crate) struct DrillBase {
+    title: String,
+    definition: Value,
+    reference: RunRef,
+    detail_columns: Vec<ColumnHead>,
+    detail_layout: ColumnLayout,
+    fingerprint: String,
+    stamp: u64,
+}
+
+impl DrillBase {
+    /// The drill base of a preview `run` of `def` (titled `title`) sent as
+    /// `reference`.
+    pub(crate) fn of(
+        title: String,
+        def: &BuilderDefinition,
+        reference: RunRef,
+        run: &BuilderRun,
+    ) -> DrillBase {
+        let mut detail_columns = run.detail_columns.clone();
+        dress_columns(Some(def), &mut detail_columns);
+        DrillBase {
+            title,
+            definition: serde_json::to_value(def).unwrap_or(Value::Null),
+            reference,
+            detail_columns,
+            detail_layout: run.detail_layout.clone(),
+            fingerprint: run.fingerprint.clone(),
+            stamp: run.stamp,
+        }
+    }
+
+    /// The detail tab of `node_id` at `path` (a subtotal's transactions).
+    pub(crate) fn detail(
+        &self,
+        node_id: &str,
+        path: &RowPath,
+        range: Option<DateRange>,
+    ) -> BuilderDetailOpen {
+        BuilderDetailOpen {
+            title: format!("{} \u{2014} {}", self.title, t("reports.builder.detail")),
+            definition: self.definition.clone(),
+            reference: self.reference.clone(),
+            columns: self.detail_columns.clone(),
+            layout: self.detail_layout.clone(),
+            node_id: node_id.to_string(),
+            path: path.clone(),
+            range,
+            fingerprint: self.fingerprint.clone(),
+            stamp: self.stamp,
+        }
+    }
+}
+
 /// [`detail_open`] for tests.
 #[cfg(test)]
 pub(crate) fn detail_open_for_test(

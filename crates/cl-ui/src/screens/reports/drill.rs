@@ -242,11 +242,42 @@ pub(crate) fn route(
 
 /// Reads the transaction behind a drill, then opens it where it belongs.
 fn probe(w: &mut ReportWindow, id: cl_core::ids::TransactionId) {
-    use crate::screens::invoice::engine;
     w.drill_error = None;
-    let job = engine::read(
-        &w.link,
-        w.group.as_ref(),
+    let job = probe_job(&w.link, w.group.as_ref(), id);
+    w.drill_id = Some(id);
+    w.drill_job = Some(job);
+    poll_probe(w);
+}
+
+/// Opens what a finished probe of `id` found: the notice to show, if any.
+pub(crate) fn opened(
+    link: &crate::company::CompanyLink,
+    id: cl_core::ids::TransactionId,
+    found: Opens,
+) -> Option<&'static str> {
+    match found {
+        Opens::Form(f) => {
+            link.push(CompanyEvent::OpenRecord(CommandId::new(f), id));
+            None
+        }
+        Opens::Register(a) => {
+            link.push(CompanyEvent::OpenRegister(a));
+            Some("reports.drill.in_register")
+        }
+        Opens::Nothing => Some("reports.drill.no_form"),
+    }
+}
+
+/// The read behind a drill on an `expense` or `deposit` (QA-1).
+pub(crate) fn probe_job(
+    link: &crate::company::CompanyLink,
+    group: Option<&cl_api::RequestGroup>,
+    id: cl_core::ids::TransactionId,
+) -> crate::screens::invoice::engine::Job<Opens> {
+    use crate::screens::invoice::engine;
+    engine::read(
+        link,
+        group,
         move |d| {
             let chart = d
                 .chart
@@ -276,10 +307,7 @@ fn probe(w: &mut ReportWindow, id: cl_core::ids::TransactionId) {
                 .await?;
             Ok(route(&v.record, check, &accounts))
         },
-    );
-    w.drill_id = Some(id);
-    w.drill_job = Some(job);
-    poll_probe(w);
+    )
 }
 
 /// Opens what a finished read found.
@@ -291,12 +319,11 @@ pub(super) fn poll_probe(w: &mut ReportWindow) {
         return;
     };
     match r {
-        Ok(Opens::Form(f)) => w.link.push(CompanyEvent::OpenRecord(CommandId::new(f), id)),
-        Ok(Opens::Register(a)) => {
-            w.notice = Some(t("reports.drill.in_register"));
-            w.link.push(CompanyEvent::OpenRegister(a));
+        Ok(found) => {
+            if let Some(key) = opened(&w.link, id, found) {
+                w.notice = Some(t(key));
+            }
         }
-        Ok(Opens::Nothing) => w.notice = Some(t("reports.drill.no_form")),
         Err(e) => w.drill_error = Some(e),
     }
 }

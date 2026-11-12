@@ -132,6 +132,28 @@ fn a_superseded_run_is_cancelled_and_its_answer_dropped() {
 }
 
 #[test]
+fn a_cancelled_run_waits_for_nothing_and_its_answer_is_dropped() {
+    let mut s = shown();
+    s.refresh();
+    assert_eq!(s.phase(), Phase::Running);
+    let asked = s.generation();
+    s.cancel();
+    assert_eq!(s.phase(), Phase::Shown, "the table shown stays");
+    assert!(!s.run_ok(asked, 7, &[]), "the old answer is dropped");
+    s.run_failed(asked, Failure::Timeout);
+    assert_eq!(s.banner(), None, "and so is its failure");
+    // Nothing in flight: cancel changes nothing.
+    let g = s.generation();
+    s.cancel();
+    assert_eq!(s.generation(), g);
+    // Before any table: back to empty.
+    let mut fresh = BuilderRunState::new();
+    fresh.refresh();
+    fresh.cancel();
+    assert_eq!(fresh.phase(), Phase::Empty);
+}
+
+#[test]
 fn more_pages_then_replaces_the_more_row() {
     let mut s = shown();
     let line = p(&["n:a", "account:1"]);

@@ -19,7 +19,7 @@
 //!   exist nothing is sent and the last good table stays under them.
 
 use cl_api::resources::report_builder::{BuilderRun, RunPurpose, RunRef, RunRequest};
-use cl_core::report::{Cell, ReportTable, RowKind, RowPath};
+use cl_core::report::{Cell, Drill, ReportTable, RowKind, RowPath};
 use cl_model::report_def::BuilderDefinition;
 use cl_model::report_def::editor::BuilderEditor;
 use cl_model::report_def::problems::{Anchor, Problem};
@@ -63,19 +63,37 @@ pub(crate) struct Preview {
     pub(crate) asked_count: u64,
     /// The engine cut [`Self::table`] per line (a preview run, U-217).
     pub(crate) engine_cut: bool,
+    /// What a drill on [`Self::table`] opens from (plan §3.4).
+    pub(crate) drill_base: Option<super::super::builder_run::DrillBase>,
+    /// A drill's read of the transaction it opens (an expense or deposit).
+    drill_job: Option<(cl_core::ids::TransactionId, Job<super::super::drill::Opens>)>,
+    /// A drill that opened nothing says why (an i18n key).
+    pub(crate) drill_note: Option<&'static str>,
 }
 
 impl Preview {
     /// True while a run is awaited or due.
     pub(crate) fn busy(&self) -> bool {
-        self.job.is_some() || self.stale || self.state.phase() == Phase::Running
+        self.job.is_some()
+            || self.stale
+            || self.state.due_at().is_some()
+            || self.drill_job.is_some()
     }
 
     /// The report changed: a run is due after the debounce, and the run in
-    /// flight no longer matters.
+    /// flight no longer matters: it is dropped now, so its answer (made for
+    /// the report before the edit) never lands on the edited one (R1).
     pub(crate) fn edited(&mut self, _ed: &BuilderEditor) {
         self.stale = true;
         self.due = None;
+        self.job = None;
+        self.state.cancel();
+    }
+
+    /// A run was sent and its answer not yet taken (tests).
+    #[cfg(test)]
+    pub(crate) fn in_flight(&self) -> bool {
+        self.job.is_some()
     }
 
     /// Ctrl+Enter.
@@ -108,16 +126,16 @@ pub(crate) fn node_of(path: &RowPath) -> Option<&str> {
 }
 
 /// The rows shown, in engine order, and whether the 50-row cut hid some.
-/// `engine_cut`: the engine already cut each line (a preview run); every
-/// row is shown and a line's "more" row says it was cut.
+///
+/// Both paths cut the same way (R4): after the 50th transaction row in
+/// display order, later transaction and "more" rows are not shown, so the
+/// preview shows at most 50 transactions in all and its caption is true.
+/// `engine_cut`: the engine already cut each line at 50 (a preview run,
+/// U-217); a line's "more" row then also says rows were cut.
 pub(crate) fn shown(table: &ReportTable, engine_cut: bool) -> (Vec<usize>, bool) {
-    if engine_cut {
-        let cut = table.rows.iter().any(|r| r.kind == RowKind::More);
-        return ((0..table.rows.len()).collect(), cut);
-    }
     let mut out = Vec::new();
     let mut details = 0usize;
-    let mut cut = false;
+    let mut cut = engine_cut && table.rows.iter().any(|r| r.kind == RowKind::More);
     for (i, r) in table.rows.iter().enumerate() {
         let detail = matches!(r.kind, RowKind::Detail | RowKind::More);
         if detail && details >= PREVIEW_DETAIL_ROWS {
@@ -259,6 +277,16 @@ fn apply(s: &mut BuilderScreen, fx: Vec<Effect>) {
 }
 
 fn poll(s: &mut BuilderScreen) {
+    if let Some((id, job)) = s.preview.drill_job.as_mut()
+        && let Some(r) = job.take()
+    {
+        let id = *id;
+        s.preview.drill_job = None;
+        s.preview.drill_note = match r {
+            Ok(found) => super::super::drill::opened(&s.link, id, found),
+            Err(_) => Some("builder.preview.drill_failed"),
+        };
+    }
     let Some((generation, job)) = s.preview.job.as_mut() else {
         return;
     };
@@ -267,6 +295,15 @@ fn poll(s: &mut BuilderScreen) {
         return;
     };
     s.preview.job = None;
+    // Only an answer for the report as it is now counts (R1): the session
+    // dates or the fiscal year can move the run without an edit.
+    let now = reference(s).ok();
+    if s.preview.asked.as_ref().map(|(r, _)| r) != now.as_ref() {
+        s.preview.state.cancel();
+        s.preview.stale = true;
+        return;
+    }
+    let title = s.report_title();
     let p = &mut s.preview;
     match r {
         Ok(run) => {
@@ -276,6 +313,10 @@ fn poll(s: &mut BuilderScreen) {
             let denied = !run.denied.is_empty();
             p.engine_cut = run.preview_rows.is_some();
             let def = p.asked.as_ref().map(|(_, d)| d.clone());
+            p.drill_base = p
+                .asked
+                .as_ref()
+                .map(|(r, d)| super::super::builder_run::DrillBase::of(title, d, r.clone(), &run));
             p.table = Some(super::super::builder_run::dress(
                 def.as_ref(),
                 run.table,
@@ -303,17 +344,26 @@ fn poll(s: &mut BuilderScreen) {
             }
             let why = super::super::builder_run::failure(&e);
             p.state.run_failed(generation, why);
-            p.failed = Some(match p.state.phase() {
-                Phase::TimedOut => "reports.builder.took_too_long",
-                Phase::Unavailable(_) => "reports.builder.too_large",
-                Phase::Deleted => "reports.builder.deleted",
-                _ => match e {
-                    cl_api::ApiError::Timeout => "reports.builder.took_too_long",
-                    _ => "builder.preview.cant_reach",
-                },
-            });
+            p.failed = failed_key(p.state.phase(), p.state.banner());
         }
     }
+}
+
+/// The message for a failed run with no table to keep (R6). With a table
+/// the run state's banner says it ([`banner_key`]), over the dimmed table.
+pub(crate) fn failed_key(phase: Phase, banner: Option<Banner>) -> Option<&'static str> {
+    use cl_model::report_def::run_state::Cap;
+    if banner.is_some() {
+        return None;
+    }
+    Some(match phase {
+        Phase::TimedOut => "reports.builder.took_too_long",
+        Phase::Unavailable(Cap::TooLarge) => "reports.builder.too_large",
+        Phase::Unavailable(Cap::NeedsEngineUpdate) => "reports.needs_update",
+        Phase::Deleted => "reports.builder.deleted",
+        Phase::Shown | Phase::Running | Phase::Empty => return None,
+        Phase::Failed => "builder.preview.cant_reach",
+    })
 }
 
 /// Opens or closes a preview line (open paths are session state).
@@ -421,7 +471,12 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         });
         return;
     }
-    let dim = !s.ed.client_problems().is_empty() || s.preview.failed.is_some();
+    let dim = !s.ed.client_problems().is_empty()
+        || s.preview.failed.is_some()
+        || s.preview
+            .state
+            .banner()
+            .is_some_and(|b| b != Banner::TooManyOpen);
     let Some(table) = s.preview.table.clone() else {
         if s.preview.busy() {
             form::progress_line(ui, tokens, &t("builder.preview.running"));
@@ -429,15 +484,7 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         return;
     };
     header(s, ui, tokens);
-    egui::ScrollArea::both()
-        .id_salt(("builder-preview", s.id.0))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if dim {
-                ui.multiply_opacity(0.5);
-            }
-            rows(s, ui, tokens, &table);
-        });
+    rows(s, ui, tokens, &table, dim);
 }
 
 fn banner_key(b: Banner) -> &'static str {
@@ -445,7 +492,8 @@ fn banner_key(b: Banner) -> &'static str {
         Banner::BooksChanged => "reports.builder.books_changed",
         Banner::TookTooLong => "reports.builder.took_too_long",
         Banner::TooLarge => "reports.builder.too_large",
-        Banner::TooManyOpen | Banner::TryAgain => "builder.preview.cant_reach",
+        Banner::TooManyOpen => "reports.builder.too_many_open",
+        Banner::TryAgain => "builder.preview.cant_reach",
     }
 }
 
@@ -488,11 +536,24 @@ fn header(s: &BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 
 const CAPTION_W: f32 = 260.0;
 const CELL_W: f32 = 96.0;
+/// Every preview row is this tall: the rows are virtualized (R4).
+const ROW_H: f32 = 20.0;
 /// Opened-line detail rows: date · type · number · name · memo in the
 /// label column, those columns hidden (Q-A08f).
 const COMPOSED: [&str; 5] = ["f:date", "f:txn_type", "f:number", "f:contact", "f:memo"];
 
-fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable) {
+/// What a click in the preview asked for.
+enum Act {
+    Toggle(RowPath, bool),
+    Pick(String),
+    Drill(Drill),
+}
+
+/// The table: headings, then only the rows in view (`show_rows`). While
+/// problems or a failure stand, the last good table is drawn in the
+/// secondary text color with a line saying so (never by opacity, which
+/// would put the text under 4.5:1).
+fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable, dim: bool) {
     let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
     let composed: Vec<usize> = table
         .columns
@@ -504,25 +565,23 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
     let shown_cols: Vec<usize> = (0..table.columns.len())
         .filter(|i| !composed.contains(i))
         .collect();
-    // Headings.
-    ui.horizontal(|ui| {
-        ui.add_sized([CAPTION_W, 18.0], egui::Label::new(""));
-        for &ci in &shown_cols {
-            let c = &table.columns[ci];
-            let text =
-                s.ed.definition()
-                    .columns
-                    .headers
-                    .get(&c.key)
-                    .cloned()
-                    .unwrap_or_else(|| super::super::label(&c.caption));
-            right(
-                ui,
-                CELL_W,
-                egui::Label::new(RichText::new(text).size(12.0).strong()),
-            );
-        }
-    });
+    let ink = if dim {
+        tokens.text_secondary
+    } else {
+        tokens.text_primary
+    };
+    if dim {
+        ui.label(
+            RichText::new(t("builder.preview.last_good"))
+                .size(12.0)
+                .italics()
+                .color(tokens.text_secondary),
+        );
+    }
+    if let Some(key) = s.preview.drill_note {
+        form::inline_note(ui, tokens, &t(key));
+    }
+    let width = CAPTION_W + CELL_W * shown_cols.len() as f32;
     let rows_of: Vec<(RowPath, bool, bool)> = table
         .rows
         .iter()
@@ -533,43 +592,72 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
         .collect();
     let hidden = s.preview.state.hidden(&rows_of);
     let (order, cut) = shown(table, s.preview.engine_cut);
+    let visible: Vec<usize> = order
+        .into_iter()
+        .filter(|&i| !hidden.get(i).copied().unwrap_or(false))
+        .filter(|&i| table.rows[i].kind != RowKind::More)
+        .collect();
     let selected = s.ed.selection().map(str::to_string);
-    let mut toggles = Vec::new();
-    let mut picks = Vec::new();
-    for &i in &order {
-        if hidden.get(i).copied().unwrap_or(false) {
-            continue;
-        }
-        let r = &table.rows[i];
-        if r.kind == RowKind::More {
-            continue;
-        }
-        let node = node_of(&r.path).map(str::to_string);
-        let tinted = node.is_some() && node == selected;
-        let frame = egui::Frame::new().fill(if tinted {
-            tokens.accent_tint
-        } else {
-            egui::Color32::TRANSPARENT
-        });
-        frame.show(ui, |ui| {
-            ui.horizontal(|ui| {
+    let source = super::super::builder_ref::spec_for(s.ed.definition()).source;
+    let mut acts = Vec::new();
+    let total = visible.len() + usize::from(cut);
+    egui::ScrollArea::both()
+        .id_salt(("builder-preview", s.id.0))
+        .auto_shrink([false, false])
+        .show_rows(ui, ROW_H, total + 1, |ui, range| {
+            ui.set_min_width(width);
+            for k in range {
+                // Row 0: the headings (they scroll across with the figures).
+                if k == 0 {
+                    headings(s, ui, table, &shown_cols);
+                    continue;
+                }
+                let Some(&i) = visible.get(k - 1) else {
+                    // The info row after the cut.
+                    ui.add_sized(
+                        [width, ROW_H],
+                        egui::Label::new(
+                            RichText::new(t("builder.preview.cut"))
+                                .italics()
+                                .color(tokens.text_secondary),
+                        )
+                        .truncate(),
+                    );
+                    continue;
+                };
+                let r = &table.rows[i];
+                let node = node_of(&r.path).map(str::to_string);
+                let tinted = node.is_some() && node == selected;
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                if tinted {
+                    ui.painter().rect_filled(rect, 0.0, tokens.accent_tint);
+                }
+                let mut row = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                let row = &mut row;
                 let indent = f32::from(r.level) * 14.0;
-                ui.add_space(indent);
+                row.add_space(indent);
                 if r.expandable {
                     let open = s.preview.state.is_open(&r.path);
                     let mark = if open { "\u{2212}" } else { "+" };
-                    let b = ui.small_button(mark);
                     let name = t(if open {
                         "builder.preview.close_line"
                     } else {
                         "builder.preview.open_line"
                     });
-                    let b = b.on_hover_text(&name);
-                    if b.clicked() {
-                        toggles.push((r.path.clone(), !open));
+                    let b = row.small_button(mark);
+                    // The +/− is named for screen readers and the control
+                    // channel, not only on hover (AC7).
+                    b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                    if b.on_hover_text(&name).clicked() {
+                        acts.push(Act::Toggle(r.path.clone(), !open));
                     }
                 } else {
-                    ui.add_space(18.0);
+                    row.add_space(18.0);
                 }
                 let mut caption = super::super::label(&r.caption);
                 if r.kind == RowKind::Detail && !composed.is_empty() {
@@ -589,19 +677,17 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                         | RowKind::Formula
                         | RowKind::Header
                 );
-                let text = if strong {
-                    RichText::new(caption).strong()
-                } else {
-                    RichText::new(caption)
-                };
+                let text = RichText::new(caption).color(ink);
+                let text = if strong { text.strong() } else { text };
                 // Captions start at the left, amounts end at the right
                 // (the mockup's statement layout).
-                let l = ui
+                let cw = (CAPTION_W - indent - 18.0).max(40.0);
+                let l = row
                     .allocate_ui_with_layout(
-                        egui::vec2(CAPTION_W - indent - 18.0, 18.0),
+                        egui::vec2(cw, ROW_H),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            ui.set_min_width(CAPTION_W - indent - 18.0);
+                            ui.set_min_width(cw);
                             ui.add(
                                 egui::Label::new(text)
                                     .truncate()
@@ -613,42 +699,131 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                 if l.clicked()
                     && let Some(n) = node.clone()
                 {
-                    picks.push(n);
+                    acts.push(Act::Pick(n));
                 }
                 for &ci in &shown_cols {
-                    let text = r
-                        .cells
-                        .get(ci)
+                    let cell = r.cells.get(ci);
+                    let text = cell
                         .map(|c| match c {
                             Cell::Empty => String::new(),
                             other => super::super::window::cell_text(other, style),
                         })
                         .unwrap_or_default();
-                    right(
-                        ui,
-                        CELL_W,
-                        egui::Label::new(RichText::new(text).monospace()),
+                    // Underlined amounts drill as in A07 (plan §3.4).
+                    let drill = r
+                        .drill
+                        .as_ref()
+                        .filter(|_| matches!(cell, Some(Cell::Amount(_))) && !text.is_empty())
+                        .and_then(|d| d.for_cell(&table.columns[ci]))
+                        .filter(|d| super::super::drill::live(&s.link, source, d));
+                    let rich = RichText::new(text).monospace().color(ink);
+                    let rich = if strong { rich.strong() } else { rich };
+                    row.allocate_ui_with_layout(
+                        egui::vec2(CELL_W, ROW_H),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(CELL_W);
+                            match drill {
+                                Some(d) => {
+                                    let resp = ui.link(rich).on_hover_text(t("reports.drill.hint"));
+                                    if resp.clicked() {
+                                        acts.push(Act::Drill(d));
+                                    }
+                                }
+                                None => {
+                                    ui.label(rich);
+                                }
+                            }
+                        },
                     );
                 }
-            });
+            }
         });
+    for a in acts {
+        match a {
+            Act::Toggle(path, open) => toggle(s, &path, open, ui),
+            Act::Pick(n) => {
+                s.ed.select(Some(&n));
+                s.tab = PropTab::Row;
+            }
+            Act::Drill(d) => drill(s, &d),
+        }
     }
-    if cut {
-        form::inline_note(ui, tokens, &t("builder.preview.cut"));
-    }
-    for (path, open) in toggles {
-        toggle(s, &path, open, ui);
-    }
-    if let Some(n) = picks.pop() {
-        s.ed.select(Some(&n));
-        s.tab = PropTab::Row;
+}
+
+/// The column headings (a renamed header shows its new name).
+fn headings(s: &BuilderScreen, ui: &mut Ui, table: &ReportTable, shown_cols: &[usize]) {
+    ui.horizontal(|ui| {
+        ui.set_height(ROW_H);
+        ui.add_sized([CAPTION_W, ROW_H], egui::Label::new(""));
+        for &ci in shown_cols {
+            let c = &table.columns[ci];
+            let text =
+                s.ed.definition()
+                    .columns
+                    .headers
+                    .get(&c.key)
+                    .cloned()
+                    .unwrap_or_else(|| super::super::label(&c.caption));
+            right(
+                ui,
+                CELL_W,
+                egui::Label::new(RichText::new(text).size(12.0).strong()).truncate(),
+            );
+        }
+    });
+}
+
+/// A drill on the preview: a subtotal's transactions in a detail tab, a
+/// transaction in its form (plan §3.4, as A07's run window does).
+pub(crate) fn drill(s: &mut BuilderScreen, d: &Drill) {
+    s.preview.drill_note = None;
+    match d {
+        Drill::BuilderDetail {
+            node_id,
+            path,
+            range,
+        } => {
+            let Some(base) = s.preview.drill_base.as_ref() else {
+                return;
+            };
+            let open = base.detail(node_id, path, *range);
+            s.link.push(crate::company::CompanyEvent::OpenWith(
+                cl_model::CommandId::new(super::super::KIND),
+                Box::new(crate::windows::OpenPayload::BuilderDetail(Box::new(open))),
+            ));
+        }
+        // The preview pages nothing: Run report shows every transaction.
+        Drill::BuilderPage { .. } => s.preview.drill_note = Some("builder.preview.cut"),
+        other => {
+            let source = super::super::builder_ref::spec_for(s.ed.definition()).source;
+            match super::super::drill::target(source, other) {
+                super::super::drill::Target::Form(form, id) => {
+                    s.link.push(crate::company::CompanyEvent::OpenRecord(
+                        cl_model::CommandId::new(form),
+                        id,
+                    ));
+                }
+                super::super::drill::Target::Probe(id) => {
+                    let job = super::super::drill::probe_job(&s.link, s.group.as_ref(), id);
+                    s.preview.drill_job = Some((id, job));
+                }
+                super::super::drill::Target::Report(open) => {
+                    s.link.push(crate::company::CompanyEvent::OpenWith(
+                        cl_model::CommandId::new(super::super::KIND),
+                        Box::new(crate::windows::OpenPayload::Report(open)),
+                    ));
+                }
+                super::super::drill::Target::Nothing(key) => s.preview.drill_note = Some(key),
+            }
+        }
     }
 }
 
 /// A label in a cell `width` wide, against its right edge.
 fn right(ui: &mut Ui, width: f32, label: egui::Label) {
     ui.allocate_ui_with_layout(
-        egui::vec2(width, 18.0),
+        egui::vec2(width, ROW_H),
         egui::Layout::right_to_left(egui::Align::Center),
         |ui| {
             ui.set_min_width(width);

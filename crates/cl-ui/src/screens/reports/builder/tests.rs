@@ -887,6 +887,62 @@ fn a_name_no_longer_in_the_company_is_a_problem_until_the_next_edit() {
     assert!(s.preview.asked_count > asked);
 }
 
+/// R1: an answer made for the report before an edit never lands on the
+/// edited one: the engine's problem for a filter just removed is not
+/// shown, and the edited report runs.
+#[test]
+fn an_edit_while_the_preview_runs_drops_that_runs_answer() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    let (inc, ..) = gross_profit(&mut s);
+    let before = tree::find(&s.ed.definition().nodes, &inc).cloned();
+    let Some(Node::Section(mut sec)) = before.clone() else {
+        panic!("section");
+    };
+    sec.filters.push(Filter {
+        field: "account".into(),
+        op: FilterOp::In,
+        ids: Some(vec![crate::company::demo::report_builder::STALE_ID.into()]),
+        values: None,
+        value: None,
+    });
+    s.apply(Op::Edit(Node::Section(sec)));
+    // The debounce starts, then the run is sent; its answer waits for the
+    // next frame.
+    frame(&ctx, &mut s, 1.0);
+    frame(&ctx, &mut s, 1.5);
+    assert!(s.preview.in_flight(), "the run was sent");
+    let asked = s.preview.asked_count;
+    // The owner takes the filter out before the answer is read.
+    let Some(Node::Section(back)) = before else {
+        panic!("section");
+    };
+    s.apply(Op::Edit(Node::Section(back)));
+    assert!(!s.preview.in_flight(), "the old run is dropped");
+    let _ = settle(&ctx, &mut s, 2.0);
+    assert!(s.ed.engine_problem().is_none(), "{:?}", s.ed.problems());
+    assert!(s.ed.can_run());
+    assert_eq!(s.preview.asked_count, asked + 1, "the edited report ran");
+    assert!(s.preview.table.is_some());
+    assert_eq!(s.preview.state_json()["phase"], "shown");
+    // A late success for a run superseded by session dates is dropped too
+    // (the reference is checked, not only the definition).
+    frame(&ctx, &mut s, 10.0);
+    s.preview.run_now();
+    frame(&ctx, &mut s, 10.1);
+    assert!(s.preview.in_flight());
+    s.band.custom = Some(cl_model::reports::DateChoice::Fixed {
+        from: CalendarDate::from_ymd(2026, 1, 1).expect("date"),
+        to: CalendarDate::from_ymd(2026, 1, 31).expect("date"),
+    });
+    let shown_before = s.preview.shown_ref.clone();
+    frame(&ctx, &mut s, 10.2);
+    assert_eq!(
+        s.preview.shown_ref, shown_before,
+        "the answer for the old dates was not shown"
+    );
+}
+
 /// U-217 fallback: an engine without `report-builder-preview-v1` gets the
 /// screen run, and the preview cuts it on screen after 50 transactions in
 /// display order; a preview run (the engine's own cut) shows every row.
@@ -920,9 +976,30 @@ fn the_preview_cut_is_on_screen_without_the_engine_preview() {
     assert_eq!(details, super::preview::PREVIEW_DETAIL_ROWS);
     assert!(order.iter().all(|&i| table.rows[i].kind != K::More));
     assert_eq!(order.last().map(|&i| table.rows[i].kind), Some(K::Total));
-    let (all, cut) = super::preview::shown(&table, true);
+    // A preview run (the engine's cut per line) is cut the same way on
+    // screen: at most 50 transactions in all (R4).
+    let (engine, cut) = super::preview::shown(&table, true);
     assert!(cut, "the line's more row says the engine cut it");
-    assert_eq!(all.len(), table.rows.len());
+    assert_eq!(engine, order);
+    // Two lines of 30 from the engine: 50 shown in display order.
+    let mut rows = vec![row(K::Group)];
+    rows.extend((0..30).map(|_| row(K::Detail)));
+    rows.push(row(K::Subtotal));
+    rows.extend((0..30).map(|_| row(K::Detail)));
+    rows.push(row(K::Total));
+    let two = ReportTable {
+        columns: Vec::new(),
+        rows,
+        meta: ReportMeta::default(),
+    };
+    let (order, cut) = super::preview::shown(&two, true);
+    assert!(cut);
+    let details = order
+        .iter()
+        .filter(|&&i| two.rows[i].kind == K::Detail)
+        .count();
+    assert_eq!(details, super::preview::PREVIEW_DETAIL_ROWS);
+    assert_eq!(order.last().map(|&i| two.rows[i].kind), Some(K::Total));
 }
 
 /// The widget with the keyboard, by its accessible role (tests: AC6).
