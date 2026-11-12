@@ -21,7 +21,7 @@ steps:
   - wait: {ms: 800}
   - focus: {role: text_input, label: Find a report}
   - key: Ctrl+A
-  - type: {text: Sales and purchases}
+  - type: {text: new report}
   - key: Tab
   - assert_focused: {role: button, label: "New report…"}
   - key: Space

@@ -1331,7 +1331,8 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             words.iter().all(|x| title.contains(x.as_str()))
         })
         .collect();
-    if shown.is_empty() {
+    let new_report = new_report_matches(&words);
+    if shown.is_empty() && !new_report {
         return;
     }
     ui.add_space(6.0);
@@ -1341,10 +1342,11 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             .color(tokens.text_secondary),
     );
     // A08: a new report starts in Guided mode (Q-A08a).
-    if ui
-        .selectable_label(false, t("reports.builder.new_report"))
-        .on_hover_text(t("reports.builder.new_report.hint"))
-        .clicked()
+    if new_report
+        && ui
+            .selectable_label(false, t("reports.builder.new_report"))
+            .on_hover_text(t("reports.builder.new_report.hint"))
+            .clicked()
     {
         super::builder::open(&w.link, BuilderSeed::Guided);
     }
@@ -1363,6 +1365,20 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     if let Some(s) = pick {
         show_starter(w, &s);
     }
+}
+
+/// True when Find a report's words find "New report…": its name, the
+/// group's ("Report Builder") and words owners look for it by ("custom",
+/// "create"), each word a part of one of them (QA-3). No words: shown.
+pub(crate) fn new_report_matches(words: &[String]) -> bool {
+    let names = format!(
+        "{} {} {}",
+        t("reports.builder.new_report"),
+        t("reports.group.builder"),
+        t("reports.builder.new_report.words")
+    )
+    .to_lowercase();
+    words.iter().all(|x| names.contains(x.as_str()))
 }
 
 /// The control channel's view.

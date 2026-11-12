@@ -1752,3 +1752,42 @@ fn flipping_a_sign_a_formula_uses_says_so() {
     super::sources::sign_status(&mut s, &cogs);
     assert_eq!(s.status, None);
 }
+
+/// QA-16: a report memorized in an editor shows in an open report
+/// window's Memorized list without reopening it.
+#[test]
+fn an_open_report_window_lists_a_report_memorized_in_the_editor() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    let mut w = super::super::window::ReportWindow::new(
+        Arc::clone(&link),
+        CommandId::new(super::super::KIND),
+        None,
+        cl_model::reports::find("profit_loss").expect("p&l"),
+        today(),
+    );
+    let draw = |w: &mut super::super::window::ReportWindow, t: f64| {
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                time: Some(t),
+                ..Default::default()
+            },
+            |ui| w.ui(ui),
+        );
+        out.textures_delta.clear();
+    };
+    for i in 0..3 {
+        draw(&mut w, f64::from(i));
+        w.poll();
+    }
+    let before = w.memo.list.len();
+    gross_profit(&mut s);
+    memorize_as(&ctx, &mut s, "Listed at once");
+    assert!(s.ed.saved().is_some(), "memorized");
+    for i in 3..8 {
+        draw(&mut w, f64::from(i));
+        w.poll();
+    }
+    assert_eq!(w.memo.list.len(), before + 1);
+    assert!(w.memo.list.iter().any(|r| r.name == "Listed at once"));
+}

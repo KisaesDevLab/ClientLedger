@@ -7,6 +7,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.builder.title", "Report Builder"),
     ("reports.builder.new_report", "New report\u{2026}"),
     ("reports.builder.new_report.hint", "Build your own report, one question at a time"),
+    // Words Find a report also finds "New report…" by (not shown).
+    ("reports.builder.new_report.words", "custom create build blank own"),
     ("reports.tool.builder_customize", "Edit in Report Builder"),
     ("reports.tool.builder_customize.hint", "Change this report's rows and columns in the Report Builder"),
     ("reports.customize.no_starter", "This report can't be changed in the Report Builder yet"),

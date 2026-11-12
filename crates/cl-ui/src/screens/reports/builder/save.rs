@@ -328,6 +328,8 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
                 s.save.memo_key = None;
             }
             s.ed.mark_saved(saved_of(sent, &row));
+            // Open report windows list it (QA-16).
+            s.link.bus().publish(crate::data_bus::Change::Reports);
             // Memorized from Guided: its name is Guided's too, so a later
             // answer keeps it (it was left empty, and Save changes sent an
             // empty name).

@@ -124,6 +124,10 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 w.memo.current = Some(row);
                 w.memo.dialog = None;
                 load(w);
+                // Other open report windows list it too (QA-16).
+                w.link
+                    .bus()
+                    .publish_from(&w.bus, crate::data_bus::Change::Reports);
             }
             Err(e) => {
                 w.memo.sending = None;
@@ -160,6 +164,9 @@ fn poll_remove(w: &mut ReportWindow) {
                 w.memo.dialog = None;
                 w.notice = Some(t("reports.memorize.deleted"));
                 load(w);
+                w.link
+                    .bus()
+                    .publish_from(&w.bus, crate::data_bus::Change::Reports);
             }
             Err(e) => {
                 if let Some(d) = w.memo.dialog.as_mut() {

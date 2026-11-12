@@ -684,3 +684,27 @@ fn an_export_pressed_while_the_report_runs_waits_for_it() {
     assert!(text.contains("2025"), "the new run's dates: {text}");
     assert!(w.export.message().is_some_and(|m| m.contains("pl.csv")));
 }
+
+/// QA-3: Find a report finds "New report…" by "new", "report builder" and
+/// "custom", whatever the ready-made reports are called.
+#[test]
+fn new_report_is_found_by_its_own_words() {
+    let words = |s: &str| -> Vec<String> { s.split_whitespace().map(str::to_lowercase).collect() };
+    for hit in [
+        "",
+        "new",
+        "New report",
+        "report builder",
+        "builder",
+        "custom",
+        "create",
+    ] {
+        assert!(super::builder_run::new_report_matches(&words(hit)), "{hit}");
+    }
+    for miss in ["sales and purchases", "aging", "new aging"] {
+        assert!(
+            !super::builder_run::new_report_matches(&words(miss)),
+            "{miss}"
+        );
+    }
+}

@@ -170,7 +170,7 @@ pub struct ReportWindow {
     /// The Report Builder editor's Export or Print, done once this tab's
     /// run is shown (Q-A08m).
     pub(super) after_run: Option<super::builder_ref::AfterRun>,
-    bus: crate::data_bus::Subscription,
+    pub(super) bus: crate::data_bus::Subscription,
     /// A Report Builder report shown under the stand-in spec (A07).
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
     /// The Report Builder starters (catalog column).
@@ -1404,8 +1404,16 @@ impl Screen for ReportWindow {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         super::builder_run::tick(self, ui);
-        if self.job.is_none() && !self.link.bus().take(&mut self.bus).is_empty() {
-            self.run();
+        if self.job.is_none() {
+            let mut changed = self.link.bus().take(&mut self.bus);
+            // A report memorized elsewhere (an editor, another window): the
+            // Memorized list reads again; the figures stand (QA-16).
+            if std::mem::take(&mut changed.reports) {
+                super::memorized::load(self);
+            }
+            if !changed.is_empty() {
+                self.run();
+            }
         }
         super::export::poll(self);
         self.do_after_run(ui.ctx());
