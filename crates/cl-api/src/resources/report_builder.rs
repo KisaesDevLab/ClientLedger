@@ -21,7 +21,7 @@ use cl_core::CalendarDate;
 use cl_core::ids::TransactionId;
 use cl_core::report::{
     Adjusting, Basis, Cell, ColumnDrill, ColumnHead, ColumnKind, DateRange, Drill, ReportDates,
-    ReportMeta, ReportRow, ReportTable, RowKind, RowPath,
+    ReportMeta, ReportRow, ReportTable, RowKind, RowPath, literal_caption,
 };
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -120,7 +120,8 @@ pub struct RunRef {
     pub compare_ranges: Vec<Vec<DateRange>>,
     /// The first day of each fiscal year the run touches.
     pub fiscal_year_starts: Vec<CalendarDate>,
-    /// Basis (`None`: the definition's, else the company's).
+    /// Basis (`None`: the definition's, else accrual — the engine's
+    /// fallback, not the company's preference).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basis: Option<Basis>,
     /// Adjusting lens.
@@ -247,7 +248,8 @@ pub enum BuilderRefusal {
     /// The definition breaks a rule (400 `DEFINITION_INVALID {path, code}`;
     /// the run adds `NOT_ON_CASH` and `NOT_IN_COMPANY`).
     Invalid {
-        /// Where, from `definition` (when sent).
+        /// Where, from `definition` (when sent), scrubbed: an input key is
+        /// `<key>` (S-L3).
         path: Option<String>,
         /// The rule's code (when sent).
         code: Option<String>,
@@ -290,7 +292,10 @@ pub fn builder_refusal(e: &ApiError) -> Option<BuilderRefusal> {
             // parameters.
             Some("CURSOR_INVALID") => BuilderRefusal::ParamsChanged,
             Some("DEFINITION_INVALID") => BuilderRefusal::Invalid {
-                path: v.details().text("path").map(str::to_string),
+                path: v
+                    .details()
+                    .text("path")
+                    .map(cl_core::report::scrub_definition_path),
                 code: v.details().text("code").map(str::to_string),
             },
             _ => return None,
@@ -511,11 +516,8 @@ fn column(c: &Value) -> Result<Option<ColumnHead>, ApiError> {
             .and_then(Value::as_str)
             .ok_or(shape("column key"))?
             .to_string(),
-        caption: c
-            .get("caption")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        // Owner or engine text, never a key (S-L2).
+        caption: literal_caption(c.get("caption").and_then(Value::as_str).unwrap_or_default()),
         kind,
         range,
         drill,
@@ -582,7 +584,8 @@ fn cell(col: &ColumnHead, raw: &Value) -> Result<Cell, ApiError> {
         ColumnKind::Date => {
             Cell::Date(CalendarDate::parse_wire(s).map_err(|_| shape("date cell"))?)
         }
-        ColumnKind::Text => Cell::Text(s.to_string()),
+        // A memo or name, never a key (S-L2).
+        ColumnKind::Text => Cell::Text(literal_caption(s)),
     })
 }
 
@@ -675,13 +678,15 @@ fn drill(
     }))
 }
 
-/// Fixed engine captions the window translates.
+/// The row's caption: the fixed ones as i18n keys (the only `@` captions
+/// this adapter makes); any other, owner or engine text, marked literal so
+/// a caption typed as `@reports.builder.denied` shows as typed (S-L2).
 fn caption_of(kind: RowKind, wire_kind: &str, caption: Option<&str>) -> String {
     match (kind, wire_kind) {
         (RowKind::Denied, _) => "@reports.builder.denied".into(),
         (RowKind::More, _) => "@reports.builder.more".into(),
         (_, "opening") => "@reports.builder.opening".into(),
-        _ => caption.unwrap_or_default().to_string(),
+        _ => literal_caption(caption.unwrap_or_default()),
     }
 }
 
@@ -738,7 +743,7 @@ fn row(
 fn note_key(note: &str) -> String {
     match note {
         "No activity for these dates" => "@reports.builder.no_activity".into(),
-        other => other.to_string(),
+        other => literal_caption(other),
     }
 }
 
@@ -820,10 +825,36 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
             line = r.path.clone();
         }
     }
+    // A section the role can't see shows nothing, whatever was sent
+    // (S-L5): its denied row is blanked here, and any other row of it with
+    // a figure is off contract.
+    for (r, x) in raw.iter().zip(rows.iter_mut()) {
+        let of_denied = r
+            .get("nodeId")
+            .and_then(Value::as_str)
+            .is_some_and(|n| denied.iter().any(|d| d == n));
+        if x.kind == RowKind::Denied {
+            for c in &mut x.cells {
+                *c = match c {
+                    Cell::Percent(_) => Cell::Percent(None),
+                    _ => Cell::Empty,
+                };
+            }
+            x.drill = None;
+        } else if of_denied
+            && x.cells
+                .iter()
+                .any(|c| !matches!(c, Cell::Empty | Cell::Percent(None)))
+        {
+            return Err(shape("denied section"));
+        }
+    }
+    // Only a row that can close is open (#11): a detail or summary line
+    // the engine marks `expanded` would make Collapse all the only choice.
     let expanded = raw
         .iter()
         .zip(&rows)
-        .filter(|(r, _)| r.get("expanded") == Some(&Value::Bool(true)))
+        .filter(|(r, x)| x.expandable && r.get("expanded") == Some(&Value::Bool(true)))
         .map(|(_, x)| x.path.clone())
         .collect();
     let fingerprint = v

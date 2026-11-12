@@ -232,6 +232,38 @@ fn the_byte_cap_counts_compact_utf8_bytes() {
     parse(&pretty).expect("under the cap");
 }
 
+/// S-L4: text far over the cap is refused before it is parsed (a newer
+/// version can't hide it either).
+#[test]
+fn text_four_times_the_cap_is_refused_unread() {
+    let mut text = String::from(r#"{"schemaVersion":99,"kind":"builder","x":""#);
+    text.push_str(&" ".repeat(4 * crate::report_def::MAX_BYTES));
+    text.push_str(r#""}"#);
+    assert_eq!(parse(&text), Err(DefinitionError::TooLarge));
+}
+
+/// S-L3: an input object key in an error path stays exact for the parity
+/// test, and never reaches the message.
+#[test]
+fn an_error_message_never_shows_an_input_key() {
+    let mut v = pnl();
+    v["columns"]["headers"] = json!({"Rivera Remodel": "Owner text"});
+    let e = parse_value(&v).expect_err("a bad header key");
+    assert_eq!(
+        code_of(Err(e.clone())),
+        (
+            "definition.columns.headers.Rivera Remodel".into(),
+            Code::Schema
+        )
+    );
+    let shown = e.to_string();
+    assert!(!shown.contains("Rivera"), "{shown}");
+    assert!(
+        shown.contains("definition.columns.headers.<key>"),
+        "{shown}"
+    );
+}
+
 #[test]
 fn lengths_count_utf16_units_and_edges_are_kept() {
     let mut v = pnl();

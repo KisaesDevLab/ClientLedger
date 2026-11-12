@@ -41,8 +41,11 @@ pub const AMOUNT_FORMAT: &str = "#,##0.00;-#,##0.00";
 /// The percent format of the workbook.
 pub const PERCENT_FORMAT: &str = "0.0\"%\"";
 
+/// `@key` is translated; `@@text` is text that starts with `@`
+/// (`cl_core::report::literal_caption`); anything else is shown as is.
 fn label(tr: &dyn Fn(&str) -> String, s: &str) -> String {
     match s.strip_prefix('@') {
+        Some(lit) if lit.starts_with('@') => lit.to_string(),
         Some(key) => tr(key),
         None => s.to_string(),
     }

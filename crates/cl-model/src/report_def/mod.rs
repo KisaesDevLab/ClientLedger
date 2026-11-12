@@ -82,9 +82,15 @@ pub enum DefinitionError {
         column: usize,
     },
     /// A rule is broken (`DEFINITION_INVALID {path, code}`).
-    #[error("this report definition breaks a rule ({}) at {path}", code.as_str())]
+    #[error(
+        "this report definition breaks a rule ({}) at {}",
+        code.as_str(),
+        cl_core::report::scrub_definition_path(path)
+    )]
     Invalid {
-        /// Where.
+        /// Where, exactly as the engine says it (the parity test compares
+        /// it). It may hold an input object key: the message shows it
+        /// scrubbed (S-L3).
         path: String,
         /// Which rule.
         code: Code,
@@ -110,9 +116,13 @@ fn too_deep(v: &serde_json::Value, path: &str, depth: usize) -> Option<String> {
     }
 }
 
-/// Reads a definition from its JSON text, in the engine's order with one
-/// change: a newer `schemaVersion` is refused first (the owner is asked to update the app,
-/// before any strict check could call a new field unknown). Then the size
+/// Reads a definition from its JSON text, in the engine's order with two
+/// changes: text over four times the cap is refused before it is parsed at
+/// all (S-L4: no definition within the cap is that long, even
+/// pretty-printed, and a huge file shouldn't be read into a tree first);
+/// then a newer `schemaVersion` is refused (the owner is asked to update
+/// the app, before any strict check could call a new field unknown). Then
+/// the size
 /// (UTF-8 bytes of the compact JSON, as the engine measures it), the
 /// nesting bound, the strict parse (unknown and repeated keys refused at
 /// every depth, which the engine's `JSON.parse` can't see) and the rules.
@@ -120,6 +130,9 @@ fn too_deep(v: &serde_json::Value, path: &str, depth: usize) -> Option<String> {
 /// # Errors
 /// Any [`DefinitionError`].
 pub fn parse(text: &str) -> Result<BuilderDefinition, DefinitionError> {
+    if text.len() > 4 * MAX_BYTES {
+        return Err(DefinitionError::TooLarge);
+    }
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| malformed(&e))?;
     let version = value
         .get("schemaVersion")

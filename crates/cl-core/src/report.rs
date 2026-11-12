@@ -910,7 +910,8 @@ pub struct ReportRow {
     /// Its place in the tree.
     pub path: RowPath,
     /// The first column's text. A caption starting with `@` is an i18n key
-    /// the window translates (fixed labels such as "Total"); anything else
+    /// the window translates (fixed labels such as "Total"); `@@` starts
+    /// owner text that begins with `@` ([`literal_caption`]); anything else
     /// is owner data shown as is.
     pub caption: String,
     /// One cell per [`ReportTable::columns`] entry.
@@ -1089,10 +1090,119 @@ pub fn display_percent(p: Option<Decimal>) -> String {
     }
 }
 
+/// Marks `s` as text to show as it is, never as an i18n key: a caption that
+/// starts with `@` gets a second `@` (`@@`), which the window and exports
+/// show as one (S-L2). Adapters pass every caption they didn't fix
+/// themselves (owner or engine text) through this.
+#[must_use]
+pub fn literal_caption(s: &str) -> String {
+    if s.starts_with('@') {
+        format!("@{s}")
+    } else {
+        s.to_string()
+    }
+}
+
+/// The keys a Report Builder definition (schema v1) has: the only words a
+/// definition error path may show as they are.
+const DEFINITION_KEYS: &[&str] = &[
+    "definition",
+    "schemaVersion",
+    "kind",
+    "title",
+    "dates",
+    "mode",
+    "preset",
+    "from",
+    "to",
+    "basis",
+    "adjusting",
+    "columns",
+    "detailFields",
+    "compare",
+    "base",
+    "dollarChange",
+    "percentChange",
+    "percentOf",
+    "periods",
+    "agingBuckets",
+    "headers",
+    "nodes",
+    "children",
+    "type",
+    "id",
+    "caption",
+    "totalCaption",
+    "text",
+    "source",
+    "measure",
+    "polarity",
+    "filters",
+    "field",
+    "op",
+    "ids",
+    "values",
+    "value",
+    "groupBy",
+    "key",
+    "tagGroupId",
+    "display",
+    "defaultExpanded",
+    "showTotal",
+    "hideZero",
+    "terms",
+    "nodeId",
+    "sign",
+    "earnings",
+];
+
+/// A definition error path (`definition.nodes.0.caption`) with every
+/// segment that isn't an index or a schema key replaced by `<key>`: an
+/// object key in the input (a header's column key, a stray key under a too
+/// deep value) is the owner's text and never reaches a message or log
+/// (Q-119, S-L3).
+#[must_use]
+pub fn scrub_definition_path(path: &str) -> String {
+    path.split('.')
+        .map(|s| {
+            if (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                || DEFINITION_KEYS.contains(&s)
+            {
+                s
+            } else {
+                "<key>"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn a_literal_caption_doubles_a_leading_at_only() {
+        assert_eq!(literal_caption("@reports.row.total"), "@@reports.row.total");
+        assert_eq!(literal_caption("Home @ Depot"), "Home @ Depot");
+    }
+
+    #[test]
+    fn definition_paths_keep_schema_keys_and_indexes_only() {
+        assert_eq!(
+            scrub_definition_path("definition.nodes.0.children.12.totalCaption"),
+            "definition.nodes.0.children.12.totalCaption"
+        );
+        assert_eq!(
+            scrub_definition_path("definition.columns.headers.Rivera Remodel"),
+            "definition.columns.headers.<key>"
+        );
+        assert_eq!(
+            scrub_definition_path("definition.nodes.0.x.y"),
+            "definition.nodes.0.<key>.<key>"
+        );
+    }
 
     fn d(s: &str) -> Decimal {
         Decimal::from_str(s).expect("decimal")

@@ -279,9 +279,55 @@ fn a_detail_section_types_its_field_columns() {
         Some(Drill::Transaction { txn_type, .. }) if txn_type == "cash_sale"
     ));
     // Detail rows share their line's path (the window places them under
-    // it); the lines are expanded.
+    // it). The lines are always open and can't close, so none is in the
+    // open set (#11: Expand all stays on offer).
     assert_eq!(detail.path, t.rows[1].path);
-    assert!(r.expanded.contains(&t.rows[1].path));
+    assert!(!t.rows[1].expandable);
+    assert_eq!(r.expanded, Vec::<RowPath>::new());
+}
+
+/// S-L2: a caption, header, note or text cell from the engine or the owner
+/// is never read as an i18n key, even when it looks like one.
+#[test]
+fn passed_through_text_that_looks_like_a_key_stays_text() {
+    let mut v = sample("transaction_detail_by_account");
+    v["rows"][1]["caption"] = json!("@reports.builder.denied");
+    v["columns"][1]["caption"] = json!("@reports.col.total");
+    v["rows"][3]["cells"][1] = json!("@reports.row.total");
+    v["meta"]["notes"] = json!(["@reports.builder.no_activity"]);
+    let t = read_run(&v, None).expect("run").table;
+    assert_eq!(t.rows[1].caption, "@@reports.builder.denied");
+    assert_eq!(t.columns[1].caption, "@@reports.col.total");
+    assert_eq!(t.rows[3].cells[1], Cell::Text("@@reports.row.total".into()));
+    assert_eq!(
+        t.meta.note.as_deref(),
+        Some("@@reports.builder.no_activity")
+    );
+}
+
+/// S-L5: the denied row shows nothing whatever it carries; a figure in a
+/// denied section's other rows is off contract.
+#[test]
+fn a_denied_section_never_shows_a_figure() {
+    let mut v = sample("denied_section");
+    v["rows"][3]["cells"][0] = json!("12.0000");
+    v["rows"][3]["drill"] = json!({"type": "detail", "nodeId": "purch", "path": ["n:purch"]});
+    let t = read_run(&v, None).expect("run").table;
+    assert_eq!(t.rows[3].cells, [Cell::Empty]);
+    assert_eq!(t.rows[3].drill, None);
+    let mut v = sample("denied_section");
+    let mut leak = v["rows"][2].clone();
+    leak["nodeId"] = json!("purch");
+    leak["kind"] = json!("subtotal");
+    leak["path"] = json!(["n:purch"]);
+    leak["cells"] = json!(["5.0000"]);
+    v["rows"].as_array_mut().expect("rows").push(leak);
+    assert_eq!(
+        read_run(&v, None).expect_err("a leak"),
+        ApiError::ReportShape {
+            what: "denied section"
+        }
+    );
 }
 
 #[test]
@@ -574,6 +620,12 @@ fn refusals_are_recognised() {
         r(400, err("DEFINITION_INVALID", json!({"path": "definition.nodes.0.polarity", "code": "MIXED_POLARITY"}))),
         Some(BuilderRefusal::Invalid { path: Some(p), code: Some(c) })
             if p == "definition.nodes.0.polarity" && c == "MIXED_POLARITY"
+    ));
+    // S-L3: an input key in the engine's path is scrubbed.
+    assert!(matches!(
+        r(400, err("DEFINITION_INVALID", json!({"path": "definition.columns.headers.Rivera Remodel", "code": "SCHEMA"}))),
+        Some(BuilderRefusal::Invalid { path: Some(p), .. })
+            if p == "definition.columns.headers.<key>"
     ));
     assert_eq!(
         r(409, err("STALE_VERSION", json!({"current": 4}))),
