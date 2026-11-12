@@ -642,3 +642,45 @@ fn the_collapse_button_says_what_it_does() {
     assert_eq!(w.state_json_for_test()["collapse_label"], "expand_all");
     assert!(crate::i18n::has("reports.tool.expand_all"));
 }
+
+/// A08 QA (export): Export CSV pressed right after a dates change waits
+/// for the new run, then asks where to save once and writes the file; the
+/// Save dialog's answer is never left for the next export.
+#[test]
+fn an_export_pressed_while_the_report_runs_waits_for_it() {
+    let (_d, link) = demo();
+    let dir = tempfile::tempdir().expect("tmp");
+    let mut w = window(&link);
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let ctx = egui::Context::default();
+    let hook = crate::widgets::file_picker::PickerHook::install(&ctx);
+    let path = dir.path().join("pl.csv");
+    hook.answer(crate::widgets::file_picker::Answer::Paths(vec![
+        path.clone(),
+    ]));
+    let mut o = w.options.clone();
+    o.dates = cl_model::reports::DateChoice::Preset(cl_model::reports::DatePreset::LastYear);
+    w.set_options(o);
+    // The demo answers at once; the engine takes a moment: the run is
+    // still on its way when Export is pressed.
+    w.state = RunState::Running;
+    super::export::start(&mut w, &ctx, super::export::Kind::Csv);
+    assert_eq!(hook.asked(), 0, "no dialog before the rows are in");
+    assert!(w.export.message().is_none(), "no failure said");
+    w.state = RunState::Shown;
+    for _ in 0..200 {
+        w.poll();
+        w.do_after_run(&ctx);
+        super::export::poll(&mut w);
+        if path.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(path.exists(), "the file is written");
+    assert_eq!(hook.asked(), 1, "asked once");
+    let text = std::fs::read_to_string(&path).expect("csv");
+    assert!(text.contains("2025"), "the new run's dates: {text}");
+    assert!(w.export.message().is_some_and(|m| m.contains("pl.csv")));
+}

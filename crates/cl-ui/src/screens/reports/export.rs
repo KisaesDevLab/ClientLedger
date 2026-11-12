@@ -274,6 +274,13 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
     if w.export.pending.is_some() {
         return;
     }
+    // A run is on its way (a dates or basis change a moment ago): the
+    // export waits for it and starts with its rows, never failing or
+    // saving nothing on the first click (A08 QA export).
+    if waits_for_run(w) {
+        w.after_run = Some(super::builder_ref::AfterRun::Export(kind));
+        return;
+    }
     let Some(snap) = snapshot(w) else {
         w.export.message = Some(t("reports.export.failed"));
         w.export.last = Some((kind, false));
@@ -299,6 +306,16 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
         path: Slot::Waiting,
         view: w.view,
     });
+}
+
+/// True when the report's next table is on its way (asked, or options
+/// changed since the one on screen): an export or print then waits for it.
+fn waits_for_run(w: &ReportWindow) -> bool {
+    use super::window::RunState;
+    matches!(
+        w.state,
+        RunState::Running | RunState::Stale | RunState::Empty
+    )
 }
 
 /// An answer from another thread.
@@ -399,6 +416,10 @@ pub(super) fn poll(w: &mut ReportWindow) {
 /// Print (Ctrl+P): the PDF in the document tab, which prints it.
 pub(super) fn print(w: &mut ReportWindow) {
     if w.export.printing.is_some() {
+        return;
+    }
+    if waits_for_run(w) {
+        w.after_run = Some(super::builder_ref::AfterRun::Print);
         return;
     }
     let Some(snap) = snapshot(w) else {
