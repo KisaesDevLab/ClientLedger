@@ -81,6 +81,12 @@ impl SaveState {
         self.job.is_some() || self.theirs.is_some() || self.groups_job.is_some()
     }
 
+    /// A save the close prompt started is under way, or done and closing.
+    pub(crate) fn closing(&self) -> bool {
+        (self.close_after && (self.job.is_some() || self.memorize.is_some() || self.conflict))
+            || self.close_now
+    }
+
     /// The groups read so far (none until read).
     pub(crate) fn groups(&self) -> &[(String, String)] {
         self.groups.as_deref().unwrap_or_default()

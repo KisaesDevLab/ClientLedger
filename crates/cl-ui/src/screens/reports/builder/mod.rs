@@ -994,6 +994,10 @@ impl Screen for BuilderScreen {
         std::mem::take(&mut self.save.close_now)
     }
 
+    fn save_in_progress(&self) -> bool {
+        self.save.closing()
+    }
+
     fn takes_in_place(&self, payload: &OpenPayload) -> bool {
         matches!(
             payload,

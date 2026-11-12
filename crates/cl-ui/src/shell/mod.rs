@@ -464,6 +464,10 @@ impl Shell {
         for id in closing {
             self.windows.close_now(id);
         }
+        // A quit that waited for a window's own save goes on (R14).
+        if self.windows.resume_quit() == Some(QuitProgress::Ready) {
+            self.finish_quit(ctx);
+        }
         for event in link.drain() {
             match event {
                 CompanyEvent::SignedIn { user } => {

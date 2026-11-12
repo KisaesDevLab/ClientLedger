@@ -100,6 +100,12 @@ pub trait Screen {
         false
     }
 
+    /// True while a save the close prompt started is still under way (a
+    /// dialog open, an answer awaited): a quit waits for it (A08 R14).
+    fn save_in_progress(&self) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {
@@ -425,6 +431,9 @@ pub struct Windows {
     next_id: u64,
     prompt: Option<Prompt>,
     quitting: bool,
+    /// A quit waits for this window's own save (the close prompt's Save
+    /// opened its Memorize, A08 R14): it goes on when the window closes.
+    quit_waits_for: Option<WindowId>,
 }
 
 impl Windows {
@@ -636,6 +645,15 @@ impl Windows {
                 let saved = self.get_mut(prompt.window).is_none_or(|w| w.screen.save());
                 if saved {
                     self.close_now(prompt.window);
+                } else if prompt.quitting
+                    && self
+                        .get(prompt.window)
+                        .is_some_and(|w| w.screen.save_in_progress())
+                {
+                    // Its save finishes later (a dialog, the engine): the
+                    // quit goes on once the window closes itself (R14).
+                    self.quit_waits_for = Some(prompt.window);
+                    return None;
                 } else {
                     // Could not save: stay open, and a quit is called off.
                     self.quitting = false;
@@ -644,6 +662,30 @@ impl Windows {
             }
         }
         prompt.quitting.then(|| self.continue_quit())
+    }
+
+    /// A quit waiting for a window's own save: once that window closed, the
+    /// quit goes on; if its save was called off (the window is still open
+    /// and no longer saving), the quit is called off too. Call each frame,
+    /// after closing the windows that asked.
+    pub fn resume_quit(&mut self) -> Option<QuitProgress> {
+        let id = self.quit_waits_for?;
+        match self.get(id) {
+            None => {
+                self.quit_waits_for = None;
+                if self.quitting {
+                    Some(self.continue_quit())
+                } else {
+                    None
+                }
+            }
+            Some(w) if !w.screen.save_in_progress() => {
+                self.quit_waits_for = None;
+                self.quitting = false;
+                None
+            }
+            Some(_) => None,
+        }
     }
 
     /// Start quitting: prompt for each dirty window in turn.
@@ -899,6 +941,61 @@ mod tests {
         assert_eq!(w.request_close(x), CloseOutcome::Prompt);
         w.answer_prompt(PromptAnswer::Save);
         assert!(w.get(x).is_some());
+    }
+
+    /// A window whose save finishes later (the Report Builder's Memorize):
+    /// `saving` is shared so the test can finish or cancel it.
+    struct Later {
+        saving: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl Screen for Later {
+        fn title(&self) -> String {
+            "later".into()
+        }
+        fn ui(&mut self, _ui: &mut eframe::egui::Ui) {}
+        fn dirty(&self) -> bool {
+            true
+        }
+        fn can_save(&self) -> bool {
+            true
+        }
+        fn save(&mut self) -> bool {
+            self.saving.set(true);
+            false
+        }
+        fn save_in_progress(&self) -> bool {
+            self.saving.get()
+        }
+    }
+
+    /// R14: a quit whose prompt Save starts a save that finishes later goes
+    /// on once that window closes; a cancelled save calls the quit off.
+    #[test]
+    fn a_quit_waits_for_a_save_that_finishes_later() {
+        for finish in [true, false] {
+            let mut w = Windows::new();
+            let saving = std::rc::Rc::new(std::cell::Cell::new(false));
+            let x = w.open_new(
+                id("reports.builder_editor"),
+                Box::new(Later {
+                    saving: std::rc::Rc::clone(&saving),
+                }),
+            );
+            assert!(matches!(w.begin_quit(), QuitProgress::Prompt(_)));
+            assert_eq!(w.answer_prompt(PromptAnswer::Save), None);
+            assert!(w.is_quitting(), "still quitting while it saves");
+            assert_eq!(w.resume_quit(), None, "waits");
+            if finish {
+                w.close_now(x);
+                assert_eq!(w.resume_quit(), Some(QuitProgress::Ready));
+            } else {
+                saving.set(false);
+                assert_eq!(w.resume_quit(), None);
+                assert!(!w.is_quitting(), "a cancelled save calls the quit off");
+                assert!(w.get(x).is_some());
+            }
+        }
     }
 
     #[test]
