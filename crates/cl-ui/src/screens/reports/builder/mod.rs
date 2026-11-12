@@ -610,10 +610,7 @@ impl BuilderScreen {
             saved: self.ed.saved().cloned(),
             origin: self.ed.origin().clone(),
         };
-        self.link.push(CompanyEvent::OpenWith(
-            CommandId::new(super::KIND),
-            Box::new(OpenPayload::BuilderDefinition(Box::new(open))),
-        ));
+        super::builder_run::show_result(&self.link, open);
     }
 
     /// The report's title: its name, else "Report Builder".

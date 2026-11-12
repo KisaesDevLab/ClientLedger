@@ -434,18 +434,24 @@ pub(crate) fn dialogs(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                     }
                 });
             });
-        match pick {
-            Some(0) => {
-                s.save.conflict = false;
-                open_memorize(s, false);
-                if let Some(d) = s.save.memorize.as_mut() {
-                    d.name =
-                        crate::i18n::t_with("builder.save.copy_name", &[("name", s.ed.name())]);
-                }
-            }
-            Some(1) => read_theirs(s),
-            Some(_) => s.save.conflict = false,
-            None => {}
+        if let Some(i) = pick {
+            conflict_choice(s, i);
         }
+    }
+}
+
+/// The "someone changed it" dialog's choice: 0 Memorize yours as a copy,
+/// 1 Load their version, else Cancel.
+pub(crate) fn conflict_choice(s: &mut BuilderScreen, i: usize) {
+    match i {
+        0 => {
+            s.save.conflict = false;
+            open_memorize(s, false);
+            if let Some(d) = s.save.memorize.as_mut() {
+                d.name = crate::i18n::t_with("builder.save.copy_name", &[("name", s.ed.name())]);
+            }
+        }
+        1 => read_theirs(s),
+        _ => s.save.conflict = false,
     }
 }

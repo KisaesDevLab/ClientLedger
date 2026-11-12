@@ -662,3 +662,218 @@ fn every_screen_draws_in_light_and_dark() {
         frame(&ctx, &mut g, 0.0);
     }
 }
+
+// ---- WP-A3: against the demo's Report Builder (B4) ----
+
+/// Adds a section listing every bank and asset transaction this year (a
+/// demo line has more than 50).
+fn every_expense(s: &mut BuilderScreen) -> String {
+    let mut dates = s.ed.definition().dates.clone();
+    dates.preset = Some("this_year".into());
+    s.apply(Op::Dates(dates));
+    let id = add(s, RowKind::Section, "Every asset transaction");
+    let Some(Node::Section(mut sec)) = tree::find(&s.ed.definition().nodes, &id).cloned() else {
+        panic!("section");
+    };
+    sec.filters.push(types_filter("asset"));
+    sec.polarity = Some(cl_model::report_def::Polarity::Debit);
+    sec.default_expanded = true;
+    sec.display = cl_model::report_def::Display::Detail;
+    s.apply(Op::Edit(Node::Section(sec)));
+    id
+}
+
+/// The Run report payload the editor pushed.
+fn run_payload(link: &CompanyLink) -> OpenPayload {
+    link.drain()
+        .into_iter()
+        .rev()
+        .find_map(|e| match e {
+            CompanyEvent::OpenWith(_, p) if matches!(*p, OpenPayload::BuilderDefinition(_)) => {
+                Some(*p)
+            }
+            _ => None,
+        })
+        .expect("Run report opened its tab")
+}
+
+#[test]
+fn the_preview_rows_equal_the_result_tabs_up_to_the_cut() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    every_expense(&mut s);
+    assert!(s.ed.can_run(), "{:?}", s.ed.problems());
+    settle(&ctx, &mut s, 1.0);
+    let preview = s.preview.table.clone().expect("a preview");
+    let (order, cut) = super::preview::shown(&preview);
+    // The 50-row cut: display only, counted in rows.
+    assert!(cut, "the demo line has more than 50 transactions");
+    let details = order
+        .iter()
+        .filter(|&&i| preview.rows[i].kind == cl_core::report::RowKind::Detail)
+        .count();
+    assert_eq!(details, super::preview::PREVIEW_DETAIL_ROWS);
+    assert_eq!(s.state()["preview"]["cut"], true);
+    // The full run in its result tab.
+    let _ = link.drain();
+    s.run_report();
+    let payload = run_payload(&link);
+    let spec = cl_model::reports::find("profit_loss").expect("p&l");
+    let mut w = super::super::ReportWindow::new(
+        Arc::clone(&link),
+        CommandId::new(super::super::KIND),
+        None,
+        spec,
+        today(),
+    );
+    w.poll();
+    assert!(w.open_with(payload));
+    w.poll();
+    let tab = w.table.clone().expect("the full run");
+    assert!(tab.rows.len() >= preview.rows.len());
+    assert_eq!(tab.columns, preview.columns);
+    for &i in &order {
+        let (a, b) = (&preview.rows[i], &tab.rows[i]);
+        assert_eq!(
+            (a.kind, &a.path, &a.cells),
+            (b.kind, &b.path, &b.cells),
+            "row {i}"
+        );
+    }
+}
+
+/// Memorizes the editor's report under `name`, frames until done.
+fn memorize_as(ctx: &egui::Context, s: &mut BuilderScreen, name: &str) {
+    super::save::open_memorize(s, false);
+    if let Some(d) = s.save.memorize.as_mut() {
+        d.name = name.into();
+    }
+    super::save::memorize_for_test(s);
+    for t in 0..4 {
+        frame(ctx, s, f64::from(t));
+    }
+}
+
+fn rename_first(s: &mut BuilderScreen, text: &str) {
+    let first = s.ed.definition().nodes[0].id().to_string();
+    s.apply(Op::Rename {
+        id: first,
+        text: text.into(),
+    });
+}
+
+fn frames(ctx: &egui::Context, s: &mut BuilderScreen) {
+    for t in 0..4 {
+        frame(ctx, s, f64::from(t));
+    }
+}
+
+#[test]
+fn someone_elses_change_offers_a_copy_or_their_version() {
+    let (_d, link, mut mine) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut mine);
+    memorize_as(&ctx, &mut mine, "Shared report");
+    let saved = mine.ed.saved().cloned().expect("memorized");
+    assert!(saved.can_edit, "the author may change it");
+    // Someone else opens it and saves a change.
+    let mut theirs = BuilderScreen::new(Arc::clone(&link), None, today());
+    let seed = BuilderSeed::Customize(Box::new(CustomizeSeed {
+        def: mine.ed.definition().clone(),
+        title: "Shared report".into(),
+        origin: Origin::Memorized,
+        saved: Some(saved),
+        dates: None,
+        basis: None,
+        adjusting: None,
+        filters_dropped: false,
+        editor: None,
+    }));
+    assert!(theirs.open_with(OpenPayload::BuilderEditor(Box::new(seed))));
+    rename_first(&mut theirs, "Sales");
+    assert!(theirs.command(CommandId::new("builder.save_changes")));
+    frames(&ctx, &mut theirs);
+    assert_eq!(theirs.ed.saved().map(|x| x.version), Some(2));
+    // Mine, at version 1: someone changed it.
+    rename_first(&mut mine, "Revenue");
+    assert!(mine.command(CommandId::new("builder.save_changes")));
+    frames(&ctx, &mut mine);
+    assert!(mine.save.conflict, "the 409 dialog");
+    assert_eq!(mine.state()["save"], "conflict");
+    // Load their version: one undo step, the new baseline.
+    super::save::conflict_choice(&mut mine, 1);
+    frames(&ctx, &mut mine);
+    assert!(!mine.save.conflict);
+    assert_eq!(mine.ed.definition(), theirs.ed.definition());
+    assert_eq!(mine.ed.saved().map(|x| x.version), Some(2));
+    assert!(!Screen::dirty(&mine));
+    assert!(mine.ed.undo(), "loading theirs is undoable");
+    assert!(Screen::dirty(&mine));
+    // Or a copy of mine.
+    rename_first(&mut theirs, "Takings");
+    theirs.command(CommandId::new("builder.save_changes"));
+    frames(&ctx, &mut theirs);
+    mine.command(CommandId::new("builder.save_changes"));
+    frames(&ctx, &mut mine);
+    assert!(mine.save.conflict);
+    super::save::conflict_choice(&mut mine, 0);
+    assert_eq!(
+        mine.save.memorize.as_ref().map(|d| d.name.as_str()),
+        Some("Shared report (copy)")
+    );
+}
+
+#[test]
+fn a_taken_name_is_said_at_the_name() {
+    let (_d, link, mut first) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut first);
+    memorize_as(&ctx, &mut first, "Gross profit");
+    let mut second = BuilderScreen::new(Arc::clone(&link), None, today());
+    assert!(second.open_with(OpenPayload::BuilderEditor(Box::new(BuilderSeed::Blank))));
+    gross_profit(&mut second);
+    memorize_as(&ctx, &mut second, "Gross profit");
+    let d = second
+        .save
+        .memorize
+        .as_ref()
+        .expect("the dialog stays open");
+    assert_eq!(d.problem, Some("builder.save.name_taken"));
+    assert!(second.ed.saved().is_none());
+}
+
+#[test]
+fn a_name_no_longer_in_the_company_is_a_problem_until_the_next_edit() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    let (inc, ..) = gross_profit(&mut s);
+    let Some(Node::Section(mut sec)) = tree::find(&s.ed.definition().nodes, &inc).cloned() else {
+        panic!("section");
+    };
+    sec.filters.push(Filter {
+        field: "account".into(),
+        op: FilterOp::In,
+        ids: Some(vec![crate::company::demo::report_builder::STALE_ID.into()]),
+        values: None,
+        value: None,
+    });
+    s.apply(Op::Edit(Node::Section(sec)));
+    assert!(s.ed.client_problems().is_empty(), "the desktop can't tell");
+    let t = settle(&ctx, &mut s, 1.0);
+    let p = s.ed.engine_problem().cloned().expect("the engine said so");
+    assert_eq!(
+        p.code,
+        cl_model::report_def::problems::ProblemCode::NotInCompany
+    );
+    assert_eq!(p.node_id.as_deref(), Some(inc.as_str()));
+    assert!(s.ed.row_has_problem(&inc) && !s.ed.can_run());
+    let asked = s.preview.asked_count;
+    let t = settle(&ctx, &mut s, t);
+    assert_eq!(s.preview.asked_count, asked, "not sent again until an edit");
+    // The next edit clears it (and runs again).
+    s.apply(Op::Name("Renamed".into()));
+    assert!(s.ed.engine_problem().is_none());
+    settle(&ctx, &mut s, t + 1.0);
+    assert!(s.preview.asked_count > asked);
+}

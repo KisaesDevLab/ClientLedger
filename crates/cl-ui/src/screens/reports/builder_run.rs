@@ -1374,7 +1374,6 @@ pub(crate) fn open_definition(w: &mut ReportWindow, open: BuilderRunOpen) {
 
 /// Shows an editor's Run report in its result tab (a new report window the
 /// first time, the same tab after, Q-A08x).
-#[allow(dead_code, reason = "A08: WP-A2's Run report calls it")]
 pub(crate) fn show_result(link: &crate::company::CompanyLink, open: BuilderRunOpen) {
     link.push(CompanyEvent::OpenWith(
         CommandId::new(KIND),
