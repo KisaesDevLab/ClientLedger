@@ -13,6 +13,8 @@
 //! dropped (the POST may still finish on the engine, which cancels its own
 //! work when the client goes away).
 
+use std::cell::RefCell;
+
 use cl_api::ApiError;
 use cl_api::resources::report_builder::{
     BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, RunDates, RunPurpose,
@@ -74,8 +76,20 @@ struct DetailTab {
     open: BuilderDetailOpen,
     paging: DetailPaging,
     rows: Vec<ReportRow>,
-    job: Option<Job<DetailPage>>,
+    /// Bumped by every Refresh: a page or rerun of an older one is dropped
+    /// (#15).
+    generation: u64,
+    job: Option<(u64, Job<DetailPage>)>,
+    /// Refresh runs the parent report again first, for a fresh fingerprint
+    /// and stamp (#4): resending the old ones would be refused forever.
+    rerun: Option<(u64, Job<BuilderRun>)>,
     banner: Option<Banner>,
+}
+
+impl DetailTab {
+    fn busy(&self) -> bool {
+        self.job.is_some() || self.rerun.is_some()
+    }
 }
 
 /// The starters list beside the catalog.
@@ -107,6 +121,12 @@ pub(crate) struct Builder {
     /// A starter asked for by key, waiting for the list.
     wanted: Option<String>,
     problem: Option<&'static str>,
+    /// Pages put in place by Load more (the control channel's proof that a
+    /// click did something, #17).
+    loaded: usize,
+    /// The rows shown, for (table serial, run-state revision): rebuilt only
+    /// when either moves, not every frame (S-L6).
+    visible: RefCell<Option<(u64, u64, Vec<usize>)>>,
 }
 
 impl Builder {
@@ -124,7 +144,14 @@ impl Builder {
             detail: None,
             wanted: None,
             problem: None,
+            loaded: 0,
+            visible: RefCell::new(None),
         }
+    }
+
+    /// A subtotal's detail tab (its dates and basis are its run's).
+    pub(crate) fn is_detail(&self) -> bool {
+        self.detail.is_some()
     }
 
     /// The window's title.
@@ -136,12 +163,14 @@ impl Builder {
         }
     }
 
-    /// True while an answer is awaited (the window repaints).
+    /// True while an answer is awaited or a debounced run is due: the
+    /// window keeps asking for frames, so the run goes without input (#7).
     pub(crate) fn busy(&self) -> bool {
         self.job.is_some()
             || self.page.is_some()
-            || self.detail.as_ref().is_some_and(|d| d.job.is_some())
+            || self.detail.as_ref().is_some_and(DetailTab::busy)
             || self.state.phase() == Phase::Running
+            || self.state.due_at().is_some()
     }
 }
 
@@ -222,6 +251,11 @@ pub(crate) fn show_starter(w: &mut ReportWindow, starter: &Starter) {
             w.spec = spec;
             w.options = o;
         }
+        // Saved by a newer build (a LAN host, a restore): say to update,
+        // never a blank window (#8).
+        Err(cl_model::report_def::DefinitionError::Newer) => {
+            b.problem = Some("reports.builder.newer");
+        }
         Err(_) => b.problem = Some("reports.builder.unreadable"),
     }
     w.builder = Some(Box::new(b));
@@ -256,22 +290,35 @@ pub(crate) fn open_detail(w: &mut ReportWindow, open: BuilderDetailOpen) {
     b.def = serde_json::to_string(&open.definition)
         .ok()
         .and_then(|s| cl_model::report_def::parse(&s).ok());
+    // The window's options follow the run's basis; the filter bar hides
+    // the dates and basis of a detail tab (#14).
+    let mut o = ReportOptions::for_spec(&BUILDER_RANGE);
+    o.basis = open.reference.basis.or(o.basis);
     b.detail = Some(DetailTab {
         open,
         paging: DetailPaging::default(),
         rows: Vec::new(),
+        generation: 0,
         job: None,
+        rerun: None,
         banner: None,
     });
     w.spec = &BUILDER_RANGE;
-    w.options = ReportOptions::for_spec(&BUILDER_RANGE);
+    w.options = o;
     w.builder = Some(Box::new(b));
     w.table = None;
     next_detail_page(w);
 }
 
-/// The run's reference from the window's dates and basis.
-fn reference(w: &ReportWindow, json: &Value) -> Result<RunRef, &'static str> {
+/// The run's reference from the window's dates and basis, and the
+/// definition's adjusting lens (sent, so an earnings drill keeps it, #13).
+/// Compare ranges are left to the engine's calendar shift until A08 offers
+/// compare columns (Q-A07u).
+fn reference(
+    w: &ReportWindow,
+    json: &Value,
+    adjusting: Option<cl_core::report::Adjusting>,
+) -> Result<RunRef, &'static str> {
     let req = cl_model::reports::resolve(w.spec, &w.options, &w.fiscal, w.today)
         .map_err(|_| "reports.problem.fiscal")?;
     let as_of = w.spec.dates == cl_model::reports::DateMode::AsOf;
@@ -335,7 +382,7 @@ fn reference(w: &ReportWindow, json: &Value) -> Result<RunRef, &'static str> {
         compare_ranges: Vec::new(),
         fiscal_year_starts: starts,
         basis: w.options.basis,
-        adjusting: None,
+        adjusting,
     })
 }
 
@@ -345,15 +392,13 @@ pub(crate) fn run(w: &mut ReportWindow) {
         return;
     };
     if b.detail.is_some() {
-        if let Some(d) = b.detail.as_mut() {
-            d.rows.clear();
-            d.paging = DetailPaging::default();
-            d.banner = None;
-        }
-        next_detail_page(w);
+        refresh_detail(w);
         return;
     }
     if b.def.is_none() {
+        // The window cleared its problem before this run: say it again
+        // (#8), with no table and no Retry.
+        w.problem = b.problem;
         w.state = if b.problem.is_some() {
             RunState::Failed
         } else {
@@ -362,7 +407,8 @@ pub(crate) fn run(w: &mut ReportWindow) {
         return;
     }
     let json = b.json.clone();
-    match reference(w, &json) {
+    let adjusting = b.def.as_ref().and_then(|d| d.adjusting);
+    match reference(w, &json, adjusting) {
         Ok(r) => {
             if let Some(b) = w.builder.as_mut() {
                 b.reference = Some(r);
@@ -403,15 +449,6 @@ fn apply(w: &mut ReportWindow, fx: Vec<Effect>) {
                 path,
                 cursor,
             } => start_page(w, generation, node_id, path, cursor),
-            // Pages loaded before a rerun on the same books come back as
-            // the run's `more` rows; Load more pages them again.
-            Effect::Repage { .. } => {}
-            Effect::ReloadDefinition => {
-                if let Some(b) = w.builder.as_mut() {
-                    let fx = b.state.definition_reloaded();
-                    apply(w, fx);
-                }
-            }
         }
     }
 }
@@ -500,6 +537,7 @@ fn failure(e: &ApiError) -> Failure {
         Some(BuilderRefusal::TooLarge) => Failure::TooLarge,
         Some(BuilderRefusal::StaleDefinition) => Failure::StaleDefinition,
         Some(BuilderRefusal::Deleted) => Failure::Deleted,
+        Some(BuilderRefusal::Denied) => Failure::Denied,
         _ => match e {
             ApiError::Timeout => Failure::Timeout,
             ApiError::Local(cl_api::LocalValidation::Unsupported) => Failure::NeedsEngineUpdate,
@@ -640,8 +678,7 @@ fn poll_run(w: &mut ReportWindow) {
     b.job = None;
     match r {
         Ok(run) => {
-            let fx = b.state.run_ok(generation, run.stamp, &run.expanded);
-            if b.state.generation() != generation {
+            if !b.state.run_ok(generation, run.stamp, &run.expanded) {
                 return;
             }
             let denied = !run.denied.is_empty();
@@ -660,23 +697,27 @@ fn poll_run(w: &mut ReportWindow) {
                     .format("%m/%d/%Y %-I:%M %p")
                     .to_string(),
             );
-            apply(w, fx);
         }
         Err(e) => {
             let why = failure(&e);
-            let fx = b.state.run_failed(generation, why);
+            if b.state.generation() != generation {
+                return;
+            }
+            b.state.run_failed(generation, why);
             match b.state.phase() {
                 Phase::Shown => w.state = RunState::Shown,
                 Phase::Unavailable(cl_model::report_def::run_state::Cap::NeedsEngineUpdate) => {
                     w.state = RunState::Unavailable;
                 }
-                Phase::Running => {}
                 _ => {
                     w.state = RunState::Failed;
-                    w.problem = match b.state.phase() {
-                        Phase::TimedOut => Some("reports.builder.took_too_long"),
-                        Phase::Unavailable(_) => Some("reports.builder.too_large"),
-                        Phase::Deleted => Some("reports.builder.deleted"),
+                    w.problem = match (b.state.phase(), why) {
+                        (Phase::TimedOut, _) => Some("reports.builder.took_too_long"),
+                        (Phase::Unavailable(_), _) => Some("reports.builder.too_large"),
+                        (Phase::Deleted, _) => Some("reports.builder.deleted"),
+                        // A message, not "Try again": it would be refused
+                        // again (S-L7).
+                        (_, Failure::Denied) => Some("reports.builder.denied"),
                         _ => None,
                     };
                     if w.problem.is_none() {
@@ -684,7 +725,6 @@ fn poll_run(w: &mut ReportWindow) {
                     }
                 }
             }
-            apply(w, fx);
         }
     }
 }
@@ -714,6 +754,7 @@ fn poll_page(w: &mut ReportWindow) {
                 apply_units_to_rows(def, &table.columns, &mut rows);
             }
             splice(&mut table, &path, rows, page.cursor);
+            b.loaded += 1;
             w.set_table(table);
         }
         Err(e) => {
@@ -756,8 +797,17 @@ fn splice(table: &mut ReportTable, path: &RowPath, rows: Vec<ReportRow>, cursor:
     table.rows.splice(at..at, new);
 }
 
-/// The rows shown: the engine's, less those under a closed line.
-pub(crate) fn shown_rows(b: &Builder, table: &ReportTable) -> Vec<usize> {
+/// The rows shown: the engine's, less those under a closed line. Worked
+/// out once per table (`serial`) and run-state revision, not every frame
+/// (S-L6: up to 100,000 rows).
+pub(crate) fn shown_rows(b: &Builder, table: &ReportTable, serial: u64) -> Vec<usize> {
+    let revision = b.state.revision();
+    if let Some((s, r, rows)) = b.visible.borrow().as_ref()
+        && *s == serial
+        && *r == revision
+    {
+        return rows.clone();
+    }
     let rows: Vec<(RowPath, bool, bool)> = table
         .rows
         .iter()
@@ -766,13 +816,16 @@ pub(crate) fn shown_rows(b: &Builder, table: &ReportTable) -> Vec<usize> {
             (r.path.clone(), r.expandable, leaf)
         })
         .collect();
-    b.state
+    let shown: Vec<usize> = b
+        .state
         .hidden(&rows)
         .into_iter()
         .enumerate()
         .filter(|(_, h)| !h)
         .map(|(i, _)| i)
-        .collect()
+        .collect();
+    *b.visible.borrow_mut() = Some((serial, revision, shown.clone()));
+    shown
 }
 
 fn now_ms(ui: &Ui) -> u64 {
@@ -796,6 +849,12 @@ pub(crate) fn toggle(w: &mut ReportWindow, path: &RowPath, ui: &Ui) {
             b.state.expand(path, now)
         };
         apply(w, fx);
+        // No input may follow (a keyboard Enter): a frame must come when
+        // the debounce ends, or the run is never sent (#7).
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(
+                cl_model::report_def::run_state::DEBOUNCE_MS,
+            ));
     }
 }
 
@@ -892,13 +951,47 @@ pub(crate) fn detail_open_for_test(
     detail_open(w, node_id, path, None).expect("a run on screen")
 }
 
+/// Refresh in a detail tab (the button, F5, any posting): drops whatever
+/// is in flight, then runs the parent report again with the same reference
+/// for a fresh fingerprint and stamp, and pages from the start (#4, #15).
+fn refresh_detail(w: &mut ReportWindow) {
+    let Some(d) = w.builder.as_mut().and_then(|b| b.detail.as_mut()) else {
+        return;
+    };
+    d.generation += 1;
+    d.job = None;
+    d.rows.clear();
+    d.paging = DetailPaging::default();
+    d.banner = None;
+    let generation = d.generation;
+    let req = RunRequest {
+        reference: d.open.reference.clone(),
+        open: Vec::new(),
+        collapsed: Vec::new(),
+        expand_all: false,
+        purpose: RunPurpose::Screen,
+    };
+    let live = req.clone();
+    let job = engine::read(
+        &w.link,
+        w.group.as_ref(),
+        move |demo| crate::company::demo::report_builder::run(demo, &req, false),
+        move |s| async move { s.report_builder().run(&live).await },
+    );
+    if let Some(d) = w.builder.as_mut().and_then(|b| b.detail.as_mut()) {
+        d.rerun = Some((generation, job));
+    }
+    w.state = RunState::Running;
+}
+
 fn next_detail_page(w: &mut ReportWindow) {
     let Some(d) = w.builder.as_ref().and_then(|b| b.detail.as_ref()) else {
         return;
     };
-    if d.job.is_some() {
+    if d.busy() {
         return;
     }
+    let generation = d.generation;
     let o = &d.open;
     let req = DetailRequest {
         reference: o.reference.clone(),
@@ -911,10 +1004,67 @@ fn next_detail_page(w: &mut ReportWindow) {
     };
     let job = detail_job(w, req, o.columns.clone(), o.layout.clone());
     if let Some(d) = w.builder.as_mut().and_then(|b| b.detail.as_mut()) {
-        d.job = Some(job);
+        d.job = Some((generation, job));
     }
     if w.table.is_none() {
         w.state = RunState::Running;
+    }
+}
+
+/// The parent run for a detail tab's Refresh answered: page with its
+/// fingerprint and stamp. A refusal shows a banner only; nothing retries
+/// by itself.
+fn poll_detail_rerun(w: &mut ReportWindow) {
+    let Some(d) = w.builder.as_mut().and_then(|b| b.detail.as_mut()) else {
+        return;
+    };
+    let Some((generation, job)) = d.rerun.as_mut() else {
+        return;
+    };
+    let generation = *generation;
+    let Some(r) = job.take() else {
+        return;
+    };
+    d.rerun = None;
+    if generation != d.generation {
+        return;
+    }
+    match r {
+        Ok(run) => {
+            d.open.fingerprint = run.fingerprint;
+            d.open.stamp = run.stamp;
+            d.open.layout = run.layout;
+            next_detail_page(w);
+        }
+        Err(e) => detail_failed(w, e),
+    }
+}
+
+/// A detail tab's page or rerun failed.
+fn detail_failed(w: &mut ReportWindow, e: ApiError) {
+    let Some(d) = w.builder.as_mut().and_then(|b| b.detail.as_mut()) else {
+        return;
+    };
+    match failure(&e) {
+        Failure::BooksChanged | Failure::ParamsChanged => {
+            d.banner = Some(Banner::BooksChanged);
+        }
+        // The role can't see it: a message, never "Try again" (S-L7).
+        Failure::Denied => {
+            d.banner = None;
+            w.problem = Some("reports.builder.denied");
+            if w.table.is_none() {
+                w.state = RunState::Failed;
+            }
+            return;
+        }
+        _ => d.banner = Some(Banner::TryAgain),
+    }
+    if w.table.is_none() {
+        w.error = Some(e);
+        w.state = RunState::Failed;
+    } else {
+        w.state = RunState::Shown;
     }
 }
 
@@ -923,6 +1073,7 @@ fn next_detail_page(w: &mut ReportWindow) {
     reason = "window, builder, detail tab, page, rows"
 )]
 fn poll_detail(w: &mut ReportWindow) {
+    poll_detail_rerun(w);
     let Some(b) = w.builder.as_mut() else {
         return;
     };
@@ -930,85 +1081,83 @@ fn poll_detail(w: &mut ReportWindow) {
     let Some(d) = b.detail.as_mut() else {
         return;
     };
-    let Some(r) = engine::poll(&mut d.job) else {
+    let Some((generation, job)) = d.job.as_mut() else {
         return;
     };
-    match r {
-        Ok(page) => {
-            let mut rows = page.rows;
-            let mut subtotal = page.subtotal;
-            if let Some(def) = &def {
-                apply_units_to_rows(def, &d.open.columns, &mut rows);
-                apply_units_to_cells(def, &d.open.columns, &d.open.node_id, &mut subtotal);
-            }
-            d.paging.page(page.cursor, subtotal);
-            if d.paging.books_changed {
-                d.banner = Some(Banner::BooksChanged);
-            }
-            d.rows.extend(rows);
-            let mut table_rows = d.rows.clone();
-            if let Some(c) = d.paging.cursor.clone() {
-                table_rows.push(ReportRow {
-                    kind: RowKind::More,
-                    level: 0,
-                    path: d.open.path.clone(),
-                    caption: "@reports.builder.more".into(),
-                    cells: vec![Cell::Empty; d.open.columns.len()],
-                    drill: Some(Drill::BuilderPage {
-                        node_id: d.open.node_id.clone(),
-                        path: d.open.path.clone(),
-                        cursor: Some(c),
-                    }),
-                    expandable: false,
-                });
-            }
-            table_rows.push(ReportRow {
-                kind: RowKind::Total,
-                level: 0,
-                path: d.open.path.clone(),
-                caption: "@reports.builder.subtotal".into(),
-                cells: d.paging.subtotal.clone().unwrap_or_default(),
-                drill: None,
-                expandable: false,
-            });
-            let table = ReportTable {
-                columns: d.open.columns.clone(),
-                rows: table_rows,
-                meta: ReportMeta {
-                    dates: d
-                        .open
-                        .reference
-                        .dates
-                        .as_of
-                        .map(ReportDates::AsOf)
-                        .or_else(|| {
-                            d.open
-                                .reference
-                                .dates
-                                .from
-                                .zip(d.open.reference.dates.to)
-                                .map(|(from, to)| ReportDates::Range(DateRange { from, to }))
-                        }),
-                    basis: d.open.reference.basis,
-                    ..ReportMeta::default()
-                },
-            };
-            w.set_table(table);
-            w.state = RunState::Shown;
-        }
-        Err(e) => {
-            match failure(&e) {
-                Failure::BooksChanged | Failure::ParamsChanged => {
-                    d.banner = Some(Banner::BooksChanged);
-                }
-                _ => d.banner = Some(Banner::TryAgain),
-            }
-            if w.table.is_none() {
-                w.error = Some(e);
-                w.state = RunState::Failed;
-            }
-        }
+    let generation = *generation;
+    let Some(r) = job.take() else {
+        return;
+    };
+    d.job = None;
+    // A page asked before a Refresh is dropped (#15).
+    if generation != d.generation {
+        return;
     }
+    let page = match r {
+        Ok(page) => page,
+        Err(e) => {
+            detail_failed(w, e);
+            return;
+        }
+    };
+    let mut rows = page.rows;
+    let mut subtotal = page.subtotal;
+    if let Some(def) = &def {
+        apply_units_to_rows(def, &d.open.columns, &mut rows);
+        apply_units_to_cells(def, &d.open.columns, &d.open.node_id, &mut subtotal);
+    }
+    d.paging.page(page.cursor, subtotal);
+    if d.paging.books_changed {
+        d.banner = Some(Banner::BooksChanged);
+    }
+    d.rows.extend(rows);
+    let mut table_rows = d.rows.clone();
+    if let Some(c) = d.paging.cursor.clone() {
+        table_rows.push(ReportRow {
+            kind: RowKind::More,
+            level: 0,
+            path: d.open.path.clone(),
+            caption: "@reports.builder.more".into(),
+            cells: vec![Cell::Empty; d.open.columns.len()],
+            drill: Some(Drill::BuilderPage {
+                node_id: d.open.node_id.clone(),
+                path: d.open.path.clone(),
+                cursor: Some(c),
+            }),
+            expandable: false,
+        });
+    }
+    table_rows.push(ReportRow {
+        kind: RowKind::Total,
+        level: 0,
+        path: d.open.path.clone(),
+        caption: "@reports.builder.subtotal".into(),
+        cells: d.paging.subtotal.clone().unwrap_or_default(),
+        drill: None,
+        expandable: false,
+    });
+    let reference = &d.open.reference;
+    // A period column's drill covers that period: the header says so (#5).
+    let dates = d.open.range.map(ReportDates::Range).or_else(|| {
+        reference.dates.as_of.map(ReportDates::AsOf).or_else(|| {
+            reference
+                .dates
+                .from
+                .zip(reference.dates.to)
+                .map(|(from, to)| ReportDates::Range(DateRange { from, to }))
+        })
+    });
+    let table = ReportTable {
+        columns: d.open.columns.clone(),
+        rows: table_rows,
+        meta: ReportMeta {
+            dates,
+            basis: reference.basis,
+            ..ReportMeta::default()
+        },
+    };
+    w.set_table(table);
+    w.state = RunState::Shown;
 }
 
 /// The message over the table.
@@ -1027,7 +1176,7 @@ pub(crate) fn banner(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     };
     form::inline_warning(ui, tokens, &t(key));
     if matches!(banner, Some(Banner::BooksChanged | Banner::TryAgain))
-        && ui.button(t("reports.refresh")).clicked()
+        && ui.button(t("reports.tool.refresh")).clicked()
     {
         w.run();
     }
@@ -1091,6 +1240,7 @@ pub(crate) fn state_json(b: &Builder, table: Option<&ReportTable>) -> Value {
         "banner": b.detail.as_ref().map_or(b.state.banner(), |d| d.banner).map(|x| format!("{x:?}")),
         "detail": b.detail.as_ref().map(|d| json!({"pages": d.paging.pages, "more": d.paging.has_more()})),
         "paging": b.page.is_some(),
+        "loaded": b.loaded,
     })
 }
 

@@ -116,6 +116,14 @@ pub(crate) struct Snapshot {
     head: Vec<String>,
 }
 
+#[cfg(test)]
+impl Snapshot {
+    /// The rows a file is made from (tests).
+    pub(crate) fn table(&self) -> &cl_core::report::ReportTable {
+        &self.table
+    }
+}
+
 /// The rows on screen, or `None` when the table on screen isn't the
 /// answer to the options on screen (B2).
 pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
@@ -125,7 +133,17 @@ pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
     // What the window shows: its rows in order, tag rows in the owner's
     // label style, hidden account totals left out (Q-271, AC5).
     let source = w.table.as_ref()?;
-    let table = cl_model::reports::present(source, &w.shown_rows(), &w.options);
+    let mut table = cl_model::reports::present(source, &w.shown_rows(), &w.options);
+    // A builder `more` row is a button on screen; on paper it says rows
+    // are missing (#10, plan §4 N8).
+    if w.builder.is_some() {
+        for r in &mut table.rows {
+            if r.kind == cl_core::report::RowKind::More {
+                r.caption = "@reports.builder.not_loaded".into();
+                r.drill = None;
+            }
+        }
+    }
     let title = w.title_text();
     let mut head = Vec::new();
     if !w.company.is_empty() {

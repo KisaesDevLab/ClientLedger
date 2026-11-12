@@ -158,6 +158,24 @@ fn stamp(books: &Books) -> u64 {
     h >> 12
 }
 
+/// The demo's run fingerprint: a hash of everything in the reference
+/// (definition, dates, ranges, basis, lens), not the open lists or the
+/// purpose, as 64 hex digits like the engine's. A detail request with
+/// another one is refused 409 `RUN_CHANGED {reason:'params'}`.
+fn fingerprint(r: &cl_api::resources::report_builder::RunRef) -> String {
+    let text = serde_json::to_string(r).unwrap_or_default();
+    let mut out = String::with_capacity(64);
+    for seed in 0..4u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ seed;
+        for b in text.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{h:016x}"));
+    }
+    out
+}
+
 fn natural_credit(section: &Value) -> bool {
     section["source"] == "sales"
         || section["filters"].as_array().is_some_and(|f| {
@@ -361,7 +379,10 @@ pub fn run(d: &mut DemoState, req: &RunRequest, slow: bool) -> Result<BuilderRun
                 let mut total = Decimal::ZERO;
                 for (seg, caption, posts) in &s.lines {
                     let line_total: Decimal = posts.iter().map(|p| value(node, p)).sum();
-
+                    // `hideZero`: a line whose figure is zero isn't shown.
+                    if node["hideZero"] == true && line_total.is_zero() {
+                        continue;
+                    }
                     total += line_total;
                     let path = vec![np[0].clone(), seg.clone()];
                     let open = display == "detail"
@@ -416,7 +437,7 @@ pub fn run(d: &mut DemoState, req: &RunRequest, slow: bool) -> Result<BuilderRun
         "columns": cols, "rows": rows,
         "meta": {"basis": req.reference.basis.map_or("accrual", cl_core::report::Basis::as_str),
                  "dates": dates, "notes": notes, "truncated": false, "hiddenNotice": null, "denied": denied},
-        "fingerprint": "d".repeat(64),
+        "fingerprint": fingerprint(&req.reference),
         "stamp": stamp(&books),
     });
     read_run(&v, req.reference.adjusting)
@@ -434,6 +455,12 @@ pub fn detail(
     columns: &[ColumnHead],
     layout: &ColumnLayout,
 ) -> Result<DetailPage, ApiError> {
+    if req.fingerprint != fingerprint(&req.reference) {
+        return Err(engine_refusal(
+            409,
+            &json!({"error": {"message": "The report changed.", "code": "RUN_CHANGED", "details": {"reason": "params"}}}),
+        ));
+    }
     let books = Books::load(d);
     if req.stamp != stamp(&books) {
         return Err(engine_refusal(

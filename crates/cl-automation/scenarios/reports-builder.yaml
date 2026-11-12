@@ -18,6 +18,8 @@ steps:
   - assert_state: {key: screen.builder.key, equals: sales_and_purchases}
   - assert_state: {key: screen.state, equals: shown}
   - assert_state: {key: screen.builder.denied, equals: 1}
+  # A builder report isn't memorized from the toolbar (Q-A07t(1), S-L1).
+  - assert_not_exists: {role: button, label: Memorize}
   - screenshot: builder-denied
   # --- Profit & Loss: Expand all, Load more --------------------------------
   - click: {label: Profit & Loss, index: 1}
@@ -29,9 +31,12 @@ steps:
   - assert_state: {key: screen.builder.expand_all, equals: true}
   - assert_state: {key: screen.state, equals: shown}
   - screenshot: builder-expanded
+  - assert_state: {key: screen.builder.loaded, equals: 0}
   - click: {role: button, label: Load more, index: 0}
   - wait: {ms: 400}
   - assert_state: {key: screen.builder.paging, equals: false}
+  # The click put a page in place (not only "nothing in flight").
+  - assert_state: {key: screen.builder.loaded, equals: 1}
   - screenshot: builder-load-more
   # --- A line's amount opens its detail in a new tab ------------------------
   - click: {role: link, index: 0}

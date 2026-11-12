@@ -13,6 +13,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.builder.subtotal", "Total"),
     ("reports.builder.no_activity", "No activity for these dates."),
     ("reports.builder.unreadable", "This report can't be read by this version of ClientLedger."),
+    ("reports.builder.newer", "This report was saved by a newer version of ClientLedger. Update ClientLedger to open it."),
+    ("reports.builder.not_loaded", "More rows were not loaded"),
     ("reports.builder.no_starter", "That ready-made report isn't available on this company."),
     ("reports.builder.books_changed", "The books changed since this report ran. Refresh to see the latest."),
     ("reports.builder.try_again", "That part of the report didn't load. The figures shown are from before. Try again."),

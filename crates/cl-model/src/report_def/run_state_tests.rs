@@ -127,7 +127,7 @@ fn a_superseded_run_is_cancelled_and_its_answer_dropped() {
     let fx = s.tick(200 + DEBOUNCE_MS);
     assert!(fx.contains(&Effect::Cancel { generation: 2 }));
     assert_eq!(run_of(&fx).expect("run").0, 3);
-    assert_eq!(s.run_ok(2, 7, &[]), []);
+    assert!(!s.run_ok(2, 7, &[]));
     assert_eq!(s.phase(), Phase::Running, "the old answer changed nothing");
 }
 
@@ -227,40 +227,41 @@ fn a_first_run_that_fails_has_no_table_to_keep() {
 }
 
 #[test]
-fn a_rerun_on_the_same_stamp_reloads_the_pages_loaded() {
+fn the_debounce_is_visible_and_every_change_moves_the_revision() {
     let mut s = shown();
-    let line = p(&["n:a", "account:1"]);
-    s.more("a", &line, Some("c1"));
-    s.page_ok(1, &line);
-    s.more("a", &line, Some("c2"));
-    s.page_ok(1, &line);
-    s.expand(&p(&["n:b", "account:9"]), 0);
-    s.tick(DEBOUNCE_MS);
-    let fx = s.run_ok(2, 7, std::slice::from_ref(&line));
+    let r0 = s.revision();
+    assert_eq!(s.due_at(), None);
+    s.expand(&p(&["n:b", "account:9"]), 40);
     assert_eq!(
-        fx,
-        [Effect::Repage {
-            generation: 2,
-            path: line.clone(),
-            pages: 2
-        }]
+        s.due_at(),
+        Some(40 + DEBOUNCE_MS),
+        "the window asks a frame then"
     );
-    // New books: the pages start again.
-    s.refresh();
-    assert_eq!(s.run_ok(3, 8, &[]), []);
+    assert!(s.revision() > r0, "an expand changes the rows shown");
+    let r1 = s.revision();
+    s.tick(40 + DEBOUNCE_MS);
+    assert_eq!(s.due_at(), None);
+    s.run_failed(2, Failure::Other);
+    assert!(s.revision() > r1, "a rollback changes the rows shown");
 }
 
+/// S-M1: a stale memorized version is refused again on every rerun, so the
+/// state never reruns by itself; the owner's Refresh does.
 #[test]
-fn a_stale_definition_reloads_then_runs_and_a_deleted_one_says_so() {
+fn a_stale_definition_waits_for_refresh_and_a_deleted_one_says_so() {
     let mut s = shown();
     s.refresh();
-    assert_eq!(
-        s.run_failed(2, Failure::StaleDefinition),
-        [Effect::ReloadDefinition]
-    );
-    let fx = s.definition_reloaded();
-    assert_eq!(run_of(&fx).expect("run").0, 3);
-    s.run_failed(3, Failure::Deleted);
+    s.run_failed(2, Failure::StaleDefinition);
+    assert_eq!(s.phase(), Phase::Shown);
+    assert_eq!(s.banner(), Some(Banner::TryAgain));
+    assert_eq!(s.tick(u64::MAX), [], "nothing is sent by itself");
+    let mut s = BuilderRunState::new();
+    s.refresh();
+    s.run_failed(1, Failure::StaleDefinition);
+    assert_eq!(s.phase(), Phase::Failed);
+    let mut s = shown();
+    s.refresh();
+    s.run_failed(2, Failure::Deleted);
     assert_eq!(s.phase(), Phase::Deleted);
 }
 

@@ -534,7 +534,7 @@ impl ReportWindow {
             return Vec::new();
         };
         if let Some(b) = &self.builder {
-            return super::builder_run::shown_rows(b, table);
+            return super::builder_run::shown_rows(b, table, self.table_serial);
         }
         let mut rows = table.visible(&self.options.collapsed);
         // The tag split's account totals show only when asked for (Q-271).

@@ -13,8 +13,8 @@
 //!   409 RUN_CHANGED -> banner (books) | rerun (params)
 //! Running failed/timed out after expand --> keep last table, revert the
 //!   lists and the shown set, "Try again"
-//! Rerun with same stamp --> re-request loaded pages per path
-//! definitionId 409 STALE_VERSION --> reload definition, rerun; 404 --> deleted
+//! Rerun --> pages loaded by "Load more" come back as the run's `more` rows
+//! 409 STALE_VERSION --> "Try again", never a rerun (Q-A07u); 404 --> deleted
 //! Expand all --> expandAll; Collapse all --> open = [], collapsed = shown
 //! ```
 //!
@@ -23,7 +23,7 @@
 //! (engine PR-C, Q-A07r). The window keeps the two lists it sends and takes
 //! the engine's `expanded` rows as the shown open set after every run.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use cl_core::report::{Cell, RowPath};
 
@@ -50,6 +50,8 @@ pub enum Failure {
     StaleDefinition,
     /// The memorized definition was deleted (404).
     Deleted,
+    /// The role can't see this section (403).
+    Denied,
     /// The engine can't run builder reports yet (Q-220).
     NeedsEngineUpdate,
     /// Anything else (offline engine, a shape error...).
@@ -149,18 +151,6 @@ pub enum Effect {
         /// The cursor (`None`: from the start).
         cursor: Option<String>,
     },
-    /// After a rerun on the same stamp: load `pages` pages under `path`
-    /// again, so "Load more" isn't lost.
-    Repage {
-        /// The generation.
-        generation: u64,
-        /// The path.
-        path: RowPath,
-        /// How many pages were loaded.
-        pages: usize,
-    },
-    /// Read the memorized definition again (409 `STALE_VERSION`), then run.
-    ReloadDefinition,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,8 +188,11 @@ pub struct BuilderRunState {
     has_table: bool,
     stamp: Option<u64>,
     paging: Option<Paging>,
-    pages: BTreeMap<RowPath, usize>,
     banner: Option<Banner>,
+    /// Moves whenever the rows shown could change without a new table
+    /// (an expand, a collapse, a rollback): the window's visible-row cache
+    /// key (S-L6).
+    revision: u64,
 }
 
 impl Default for BuilderRunState {
@@ -238,8 +231,8 @@ impl BuilderRunState {
             has_table: false,
             stamp: None,
             paging: None,
-            pages: BTreeMap::new(),
             banner: None,
+            revision: 0,
         }
     }
 
@@ -259,6 +252,20 @@ impl BuilderRunState {
     #[must_use]
     pub const fn banner(&self) -> Option<Banner> {
         self.banner
+    }
+
+    /// Moves whenever [`BuilderRunState::hidden`] could answer differently
+    /// for the same rows.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// When the debounced run is due (milliseconds on the window's clock):
+    /// the window must ask for a frame then, or the run never goes (#7).
+    #[must_use]
+    pub const fn due_at(&self) -> Option<u64> {
+        self.due_at
     }
 
     /// The ledger stamp of the table shown.
@@ -318,6 +325,7 @@ impl BuilderRunState {
 
     fn next_run(&mut self) -> Vec<Effect> {
         let mut fx = Vec::new();
+        self.revision += 1;
         if let Some(old) = self.in_flight.take() {
             fx.push(Effect::Cancel { generation: old });
         }
@@ -376,8 +384,8 @@ impl BuilderRunState {
             {
                 self.paging = None;
             }
-            self.pages.retain(|p, _| !gone(p));
         }
+        self.revision += 1;
         self.pending = Some(set);
         self.due_at = Some(now_ms + DEBOUNCE_MS);
         self.banner = None;
@@ -407,7 +415,6 @@ impl BuilderRunState {
     pub fn collapse_all(&mut self) -> Vec<Effect> {
         let shown = self.open_paths().clone();
         self.lists.expand_all = false;
-        self.pages.clear();
         self.lists.open.clear();
         self.lists.collapsed.extend(shown);
         self.pending = Some(BTreeSet::new());
@@ -423,11 +430,14 @@ impl BuilderRunState {
     }
 
     /// The run of `generation` answered with `stamp` and the paths the
-    /// engine shows expanded: they are the open set from now on.
-    pub fn run_ok(&mut self, generation: u64, stamp: u64, expanded: &[RowPath]) -> Vec<Effect> {
+    /// engine shows expanded: they are the open set from now on. Pages
+    /// loaded with "Load more" before come back as the run's `more` rows
+    /// (Q-A07u). False for a superseded answer.
+    pub fn run_ok(&mut self, generation: u64, stamp: u64, expanded: &[RowPath]) -> bool {
         if generation != self.generation {
-            return Vec::new(); // a superseded answer
+            return false; // a superseded answer
         }
+        self.revision += 1;
         self.in_flight = None;
         if let Some(asked) = self.asked.take() {
             self.committed = asked;
@@ -439,28 +449,18 @@ impl BuilderRunState {
         }
         self.phase = Phase::Shown;
         self.has_table = true;
-        let same_books = self.stamp == Some(stamp);
         self.stamp = Some(stamp);
-        if !same_books {
-            self.pages.clear();
-            return Vec::new();
-        }
-        // Collapse already dropped the pages under a closed path.
-        self.pages
-            .iter()
-            .map(|(path, pages)| Effect::Repage {
-                generation,
-                path: path.clone(),
-                pages: *pages,
-            })
-            .collect()
+        true
     }
 
-    /// The run of `generation` failed.
-    pub fn run_failed(&mut self, generation: u64, why: Failure) -> Vec<Effect> {
+    /// The run of `generation` failed. Nothing is rerun from here: a
+    /// refusal that would come again (a stale memorized version, S-M1)
+    /// waits for the owner's Refresh.
+    pub fn run_failed(&mut self, generation: u64, why: Failure) {
         if generation != self.generation {
-            return Vec::new();
+            return;
         }
+        self.revision += 1;
         self.in_flight = None;
         self.asked = None;
         if self.due_at.is_none() {
@@ -469,10 +469,6 @@ impl BuilderRunState {
             self.lists = self.committed.clone();
         }
         match why {
-            Failure::StaleDefinition => {
-                self.phase = Phase::Running;
-                return vec![Effect::ReloadDefinition];
-            }
             Failure::Deleted => self.phase = Phase::Deleted,
             // Expand all is what usually trips the cap: keep the table.
             Failure::TooLarge if self.has_table => {
@@ -494,12 +490,6 @@ impl BuilderRunState {
             }
             _ => self.phase = Phase::Failed,
         }
-        Vec::new()
-    }
-
-    /// The definition was read again after `STALE_VERSION`: run it.
-    pub fn definition_reloaded(&mut self) -> Vec<Effect> {
-        self.next_run()
     }
 
     /// "Load more" on a `more` row of `node_id` at `path` (`cursor`
@@ -532,7 +522,6 @@ impl BuilderRunState {
             return false;
         }
         self.paging = None;
-        *self.pages.entry(path.clone()).or_insert(0) += 1;
         true
     }
 
