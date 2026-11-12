@@ -494,6 +494,11 @@ jobs:
         env:
           CL_API_REQUIRE: "1"
         run: cargo test -p cl-company --test practice_live -- --nocapture
+      - name: Report Builder definitions read as the engine's schema reads them (zod and serde parity, R-T14)
+        env:
+          # Fails instead of printing PENDING when the shared fixtures are missing.
+          CL_API_REQUIRE_CAPS: "report-defs-builder-v1"
+        run: cargo test -p cl-model --test report_def_fixtures
 
       # Network-blocked run (plan B3, Linux only). The tests run as a dedicated
       # non-root user (initdb, pg_ctl and postgres refuse to run as root) whose

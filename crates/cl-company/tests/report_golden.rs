@@ -918,15 +918,6 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             drilled += every_pl_cell_drills_to_its_amount(&s, &t).await;
         }
     }
-    // A07: the Report Builder starters tie out to these reports.
-    if caps.has(cl_api::Capabilities::REPORT_BUILDER_STARTERS) {
-        builder_tieout::starters_tie_out(&s).await;
-    } else {
-        pending(
-            "U-119d",
-            "Report Builder starters tie out to the standard reports",
-        );
-    }
     assert!(
         drilled > 100,
         "account, parent total and subtotal cells drill"
@@ -1035,6 +1026,15 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let bank = id_named("acct:1010")
         .and_then(|i| cl_core::ids::AccountId::parse(&i).ok())
         .expect("bank");
+    // A07: every Report Builder starter ties out to its standard report.
+    if caps.has(cl_api::Capabilities::REPORT_BUILDER_STARTERS) {
+        builder_tieout::starters_tie_out(&s, bank).await;
+    } else {
+        pending(
+            "U-119d",
+            "Report Builder starters tie out to the standard reports",
+        );
+    }
     if caps.has("open-balances-asof-v1") && caps.has("ap-aging-exact-v1") {
         who_owes_what_ties(&s).await;
         all.extend(list_goldens(vendor, bank));
