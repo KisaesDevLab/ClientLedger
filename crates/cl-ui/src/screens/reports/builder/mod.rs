@@ -351,6 +351,9 @@ pub struct BuilderScreen {
     pub(crate) next_at: Option<egui::Rect>,
     /// Where each outline row was drawn last frame (tests click them).
     pub(crate) row_at: HashMap<String, egui::Rect>,
+    /// An outline key (Tab, Shift+Tab, an arrow) acted on the tree this
+    /// frame: egui must not also move the focus with it (QA-11).
+    pub(crate) keep_focus: bool,
 }
 
 impl BuilderScreen {
@@ -413,6 +416,7 @@ impl BuilderScreen {
             starter_menu_new: false,
             next_at: None,
             row_at: HashMap::new(),
+            keep_focus: false,
         }
     }
 
@@ -924,8 +928,12 @@ impl BuilderScreen {
 
     fn row_op(&mut self, make: impl FnOnce(String) -> Op) {
         if let Some(id) = self.selected() {
-            self.apply(make(id));
+            let changed = self.apply(make(id)).is_some_and(|a| a.changed);
             self.focus_to = Some(Pane::Outline);
+            // A key that changed the tree is the tree's; one that did
+            // nothing (Shift+Tab on a top-level row) still moves on, so the
+            // keyboard can leave the outline.
+            self.keep_focus |= changed;
         }
     }
 
@@ -1034,6 +1042,12 @@ impl Screen for BuilderScreen {
     fn ui(&mut self, ui: &mut Ui) {
         if let Some(p) = self.focus_next.take() {
             self.focus_to = Some(p);
+        }
+        // egui read Tab / the arrows as a focus move before the shell ran
+        // the outline's command for them: that move is cancelled (QA-11).
+        if std::mem::take(&mut self.keep_focus) {
+            ui.ctx()
+                .memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
         self.poll();
         let tokens = Tokens::of(ui.ctx());
@@ -1151,10 +1165,12 @@ impl Screen for BuilderScreen {
             "builder.next_row" if advanced => {
                 self.ed.select_step(true);
                 self.focus_to = Some(Pane::Outline);
+                self.keep_focus = true;
             }
             "builder.prev_row" if advanced => {
                 self.ed.select_step(false);
                 self.focus_to = Some(Pane::Outline);
+                self.keep_focus = true;
             }
             "builder.fold" if advanced => {
                 self.ed.fold_or_parent();

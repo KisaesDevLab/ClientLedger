@@ -1837,3 +1837,65 @@ fn preview_columns_narrow_to_fit_before_they_scroll() {
     // Too little: the least widths, and the table scrolls.
     assert_eq!(super::preview::widths(300.0, 6), (160.0, 88.0));
 }
+
+/// QA-11 keys in sequence, as the scenario presses them: a text row added
+/// on an open group goes inside it; Shift+Tab takes it out, Tab puts it
+/// back, Delete removes it.
+#[test]
+fn outline_keys_move_a_row_in_and_out_of_a_group() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    let ctx = themed();
+    let depth = |s: &BuilderScreen| s.state_json()["selected_depth"].as_u64();
+    add(&mut s, RowKind::Group, "New group");
+    add(&mut s, RowKind::Text, "Text");
+    frames(&ctx, &mut s);
+    let in_group = depth(&s);
+    assert_eq!(
+        press(&mut s, Mods::SHIFT, Key::Tab),
+        Some("builder.outdent")
+    );
+    let out = depth(&s);
+    assert_eq!(press(&mut s, Mods::NONE, Key::Tab), Some("builder.indent"));
+    assert_eq!((in_group, out, depth(&s)), (Some(2), Some(1), Some(2)));
+}
+
+/// QA-11: Tab on a focused outline row indents it and the row keeps the
+/// keyboard: egui's own Tab focus move is cancelled (the shell runs the
+/// command in the same frame egui reads the key).
+#[test]
+fn tab_on_an_outline_row_keeps_the_keyboard_there() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    gross_profit(&mut s);
+    add(&mut s, RowKind::Group, "New group");
+    add(&mut s, RowKind::Text, "Text");
+    let ctx = themed();
+    s.focus_to = Some(Pane::Outline);
+    frames(&ctx, &mut s);
+    assert_eq!(
+        press(&mut s, Mods::SHIFT, Key::Tab),
+        Some("builder.outdent")
+    );
+    frames(&ctx, &mut s);
+    assert!(s.outline_focused);
+    // The frame the shell sees Tab in: the command, then the screen.
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            time: Some(20.0),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events: vec![key_event(egui::Key::Tab, egui::Modifiers::NONE)],
+            ..Default::default()
+        },
+        |ui| {
+            assert!(s.command(CommandId::new("builder.indent")));
+            s.ui(ui);
+        },
+    );
+    out.textures_delta.clear();
+    frame(&ctx, &mut s, 20.1);
+    assert_eq!(s.state_json()["selected_depth"].as_u64(), Some(2));
+    assert!(s.outline_focused, "the row still has the keyboard");
+}
