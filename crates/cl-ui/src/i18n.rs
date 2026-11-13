@@ -277,6 +277,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("window.prompt.close_anyway", "Close anyway"),
     // Status bar
     ("status.not_signed_in", "Not signed in"),
+    // A09 QA-9: the signed-in user's role in the open company.
+    ("status.role.admin", "Admin"),
+    ("status.role.accountant", "Accountant"),
+    ("status.role.bookkeeper", "Bookkeeper"),
+    ("status.role.readonly", "View only"),
     ("status.engine.starting", "Books engine: starting"),
     ("status.engine.running", "Books engine: running"),
     ("status.engine.restarting", "Books engine: restarting"),

@@ -148,6 +148,8 @@ pub struct Shell {
     pub counts: RailCounts,
     /// Status bar text.
     pub status: StatusInfo,
+    /// The signed-in user's display name; the role is the open company's.
+    signed_in_name: Option<String>,
     host: Option<Arc<dyn HostProbe>>,
     /// Command palette state.
     pub palette: palette::State,
@@ -259,6 +261,7 @@ impl Shell {
             company: None,
             counts: RailCounts::default(),
             status: StatusInfo::default(),
+            signed_in_name: None,
             host: options.host,
             palette: palette::State::default(),
             shortcuts_open: false,
@@ -471,7 +474,14 @@ impl Shell {
         for event in link.drain() {
             match event {
                 CompanyEvent::SignedIn { user } => {
+                    // The name alone until a company says the role (QA-9).
+                    self.signed_in_name = Some(user.clone());
                     self.status.user = Some(user);
+                }
+                CompanyEvent::CompanyRole(role) => {
+                    if let Some(name) = &self.signed_in_name {
+                        self.status.user = Some(crate::company::user_text(name, &role));
+                    }
                 }
                 CompanyEvent::Opened {
                     tenant_id,
@@ -519,6 +529,10 @@ impl Shell {
                     link.lost_saves().set_company(Some(tenant_id));
                 }
                 CompanyEvent::Closed => {
+                    // No company: the name alone again (QA-9).
+                    if let Some(name) = &self.signed_in_name {
+                        self.status.user = Some(name.clone());
+                    }
                     self.runner.closed(&link);
                     self.doc_viewer.close_window();
                     link.lost_saves().set_company(None);

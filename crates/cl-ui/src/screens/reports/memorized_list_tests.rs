@@ -456,7 +456,7 @@ fn a_refused_name_keeps_the_keyboard_in_the_field() {
     frame(&ctx, &mut s, 1440.0, 940.0);
     assert!(ctx.text_edit_focused(), "the card's field starts focused");
     // Enter in the field gives up the focus, as a singleline field does.
-    ctx.memory_mut(|m| m.stop_text_input());
+    ctx.memory_mut(egui::Memory::stop_text_input);
     frame(&ctx, &mut s, 1440.0, 940.0);
     assert!(!ctx.text_edit_focused());
     if let Some(Edit::Rename { name, .. }) = s.edit.as_mut() {
@@ -482,7 +482,7 @@ fn a_refused_name_keeps_the_keyboard_in_the_field() {
     s.poll();
     s.ask_new_group();
     frame(&ctx, &mut s, 1440.0, 940.0);
-    ctx.memory_mut(|m| m.stop_text_input());
+    ctx.memory_mut(egui::Memory::stop_text_input);
     frame(&ctx, &mut s, 1440.0, 940.0);
     assert!(!ctx.text_edit_focused());
     if let Some(Edit::NewGroup { name }) = s.edit.as_mut() {
