@@ -58,6 +58,12 @@ pub struct Scenario {
     /// screenshot). Optional.
     #[serde(default, with = "serde_yaml_ng::with::singleton_map_recursive")]
     pub compare: Vec<Step>,
+    /// The YAML the steps came from, when it names `{theme}` anywhere: each
+    /// theme's run reads its steps again with `{theme}` replaced, so labels,
+    /// assertions and Save-dialog paths follow the theme like typed text
+    /// does (A09).
+    #[serde(skip)]
+    themed_source: Option<String>,
 }
 
 fn default_themes() -> Vec<String> {
@@ -494,8 +500,11 @@ impl Scenario {
     /// # Errors
     /// [`ScenarioError::Parse`] with the YAML error and its position.
     pub fn parse(text: &str) -> Result<Scenario, ScenarioError> {
-        let s: Scenario =
+        let mut s: Scenario =
             serde_yaml_ng::from_str(text).map_err(|e| ScenarioError::Parse(e.to_string()))?;
+        if text.contains("{theme}") {
+            s.themed_source = Some(text.to_string());
+        }
         if s.steps.is_empty() {
             return Err(ScenarioError::Parse(
                 "a scenario needs at least one step".into(),
@@ -523,6 +532,16 @@ impl Scenario {
         Ok(s)
     }
 
+    /// The steps for `theme`: `{theme}` replaced everywhere in them (a
+    /// label, an assertion, a Save-dialog path), as in typed text.
+    #[must_use]
+    pub fn steps_for(&self, theme: &str) -> Vec<Step> {
+        self.themed_source
+            .as_deref()
+            .and_then(|text| Scenario::parse(&themed(text, theme)).ok())
+            .map_or_else(|| self.steps.clone(), |s| s.steps)
+    }
+
     /// The `compare` steps as a scenario of their own (light theme only);
     /// `None` when the scenario has none.
     #[must_use]
@@ -532,6 +551,7 @@ impl Scenario {
             description: self.description.clone(),
             themes: vec!["light".into()],
             steps: self.compare.clone(),
+            themed_source: None,
             compare: Vec::new(),
         })
     }
@@ -1036,7 +1056,8 @@ pub fn run(t: &mut dyn Transport, scenario: &Scenario, out_dir: &Path) -> Report
             report.outcomes.push(outcome);
             continue;
         }
-        for (i, step) in scenario.steps.iter().enumerate() {
+        let themed_steps = scenario.steps_for(theme);
+        for (i, step) in themed_steps.iter().enumerate() {
             match run_step(t, step, theme, out_dir, &mut report.screenshots) {
                 Ok(()) => outcome.steps_passed += 1,
                 Err(message) => {
@@ -1478,6 +1499,16 @@ mod tests {
     fn typed_text_names_the_theme() {
         assert_eq!(themed("Leaf Removal {theme}", "dark"), "Leaf Removal dark");
         assert_eq!(themed("plain", "light"), "plain");
+        // A09: labels, assertions and Save-dialog paths follow the theme.
+        let s = Scenario::parse(
+            "name: x\nsteps:\n  - assert_exists: {label: \"Board {theme}\"}\n  - dialog_answer: {paths: [\"out-{theme}.csv\"]}\n",
+        )
+        .expect("parse");
+        let dark = s.steps_for("dark");
+        assert!(format!("{dark:?}").contains("Board dark"), "{dark:?}");
+        assert!(format!("{dark:?}").contains("out-dark.csv"), "{dark:?}");
+        let plain = Scenario::parse("name: x\nsteps:\n  - wait: {ms: 1}\n").expect("parse");
+        assert_eq!(plain.steps_for("dark"), plain.steps);
         let p = Path::new("some/where/s.yaml");
         let out = with_scenario_dir("type: {scenario_dir}/x.csv", p);
         assert!(out.ends_with("some/where/x.csv"), "{out}");
