@@ -154,7 +154,8 @@ fn print_fills_then_opens_the_pdf() {
     let mut w = ledger(&link);
     let _ = link.drain();
     assert!(w.command(CommandId::new("file.print")));
-    for _ in 0..200 {
+    // The PDF is built on a worker thread: up to 30 s on a busy machine.
+    for _ in 0..3000 {
         crate::screens::reports::export::poll(&mut w);
         if !w.export.busy() {
             break;

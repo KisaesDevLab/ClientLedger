@@ -825,6 +825,7 @@ dependencies = [
  "cl-host",
  "cl-model",
  "cl-pg",
+ "cl-print",
  "cl-settings",
  "libc",
  "proptest",
