@@ -660,6 +660,64 @@ mod tests {
     /// A07 QA-8: a 13-column monthly P&L (12 months and a Total) with
     /// 6-figure negatives builds a PDF (it failed with `DoesNotFit`, shown
     /// as "the file couldn't be saved"), every figure whole.
+    /// P28-4 re-check (A09): a wide table splits its columns across pages
+    /// and every figure prints: a 52-column Budget vs. Actual (13 periods ×
+    /// actual, budget, over, %) and a 36-period builder report.
+    #[test]
+    fn very_wide_reports_build_a_pdf_with_every_figure() {
+        for (name, cols, pct_every) in [
+            ("Budget vs. Actual", 52usize, 4usize),
+            ("Builder by month", 37, 0),
+        ] {
+            let columns: Vec<ColumnHead> = (0..cols)
+                .map(|i| {
+                    let pct = pct_every > 0 && i % pct_every == pct_every - 1;
+                    heading(
+                        &format!("c{i}"),
+                        if pct {
+                            ColumnKind::Percent
+                        } else {
+                            ColumnKind::Amount
+                        },
+                    )
+                })
+                .collect();
+            let cells: Vec<Cell> = columns
+                .iter()
+                .map(|c| match c.kind {
+                    ColumnKind::Percent => Cell::Percent(Some(d("104.5"))),
+                    _ => Cell::Amount(d("-1234567.89")),
+                })
+                .collect();
+            let amounts = cells
+                .iter()
+                .filter(|c| matches!(c, Cell::Amount(_)))
+                .count();
+            let t = ReportTable {
+                columns,
+                rows: vec![ReportRow {
+                    kind: RowKind::Account,
+                    level: 1,
+                    path: RowPath::of(["6100"]),
+                    caption: "6100 · Fuel".into(),
+                    cells,
+                    drill: None,
+                    expandable: false,
+                }],
+                meta: ReportMeta::default(),
+            };
+            let r = to_report(&t, &[0], name, vec![], &tr);
+            let text = printed(&r);
+            assert_eq!(
+                text.iter().filter(|s| *s == "-1,234,567.89").count(),
+                amounts,
+                "{name}: every amount prints"
+            );
+            let pdf = crate::reports::render_report(&r).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(pdf.starts_with(b"%PDF"), "{name}");
+        }
+    }
+
     #[test]
     fn a_thirteen_column_pl_builds_a_pdf() {
         let mut columns: Vec<ColumnHead> = (1..=12)

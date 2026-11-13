@@ -242,3 +242,32 @@ fn the_list_renames_moves_and_manages_groups_by_the_engines_rules() {
     assert_eq!(groups, Vec::<DefinitionGroup>::new());
     assert!(list.iter().all(|r| r.group_id.is_none()));
 }
+
+/// P28-4 re-check (A09): the full-year Budget vs. Actual by month (13
+/// groups of four: 52 columns) builds a PDF, the file Email attaches.
+#[test]
+fn a_full_year_budget_vs_actual_builds_a_pdf() {
+    let mut d = DemoState::new();
+    let id = budgets(&mut d)[0].id.clone();
+    let months: Vec<DateRange> = (1..=12)
+        .map(|m| {
+            let from = day(2026, m, 1);
+            let to = if m == 12 {
+                day(2026, 12, 31)
+            } else {
+                day(2026, m + 1, 1).add_days(-1).expect("day")
+            };
+            DateRange { from, to }
+        })
+        .collect();
+    let mut req = ReportRequest::new(Source::BudgetVsActual, ReportDates::Ranges(months));
+    req.budget_id = Some(id);
+    req.first_period = Some(1);
+    let t = budget_vs_actual(&mut d, &req).expect("bva");
+    assert_eq!(t.columns.len(), 52);
+    let tr = |k: &str| crate::screens::reports::label(&format!("@{k}"));
+    let rows: Vec<usize> = (0..t.rows.len()).collect();
+    let r = cl_print::report_export::to_report(&t, &rows, "Budget vs. Actual", vec![], &tr);
+    let pdf = cl_print::reports::render_report(&r).expect("a 52-column PDF");
+    assert!(pdf.starts_with(b"%PDF"));
+}
