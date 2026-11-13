@@ -718,6 +718,14 @@ pub(crate) fn dress(
         if let Some(k) = caption_key(&r.caption) {
             r.caption = k.to_string();
         }
+        // Rows without figures are empty across, never "—" in a % column
+        // (A08 QA-13).
+        if matches!(
+            r.kind,
+            RowKind::Text | RowKind::Blank | RowKind::PageBreak | RowKind::Header
+        ) {
+            r.cells.fill(Cell::Empty);
+        }
         // A figure that needs a section the role can't see (Q-A07i).
         if denied
             && matches!(r.kind, RowKind::Formula | RowKind::Subtotal)

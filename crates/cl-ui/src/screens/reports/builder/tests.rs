@@ -1412,14 +1412,14 @@ fn an_add_picker_reaches_the_third_match_by_keys() {
 /// changes off, no prompt on close.
 #[test]
 fn an_unchanged_memorized_builder_report_opens_clean() {
-    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let (_dir, link, mut s) = editor(BuilderSeed::Blank);
     let ctx = themed();
     gross_profit(&mut s);
     // Saved with "Choose each time it runs" and the company's basis: the
     // window runs it on its own defaults, which are not changes.
-    let mut d = s.ed.definition().dates.clone();
-    d.preset = None;
-    s.apply(Op::Dates(d));
+    let mut dates = s.ed.definition().dates.clone();
+    dates.preset = None;
+    s.apply(Op::Dates(dates));
     memorize_as(&ctx, &mut s, "QA P&L built");
     assert!(!Screen::dirty(&s), "saved");
     let id = s.ed.saved().map(|x| x.id.clone()).expect("memorized");
@@ -1427,21 +1427,21 @@ fn an_unchanged_memorized_builder_report_opens_clean() {
         let mut st = link.demo_state().expect("demo");
         crate::company::demo::report_store::definition(&mut st, &id).expect("row")
     };
-    let mut w = super::super::window::ReportWindow::new(
+    let mut win = super::super::window::ReportWindow::new(
         Arc::clone(&link),
         CommandId::new(super::super::KIND),
         None,
         cl_model::reports::find("profit_loss").expect("p&l"),
         today(),
     );
-    w.poll();
-    super::super::memorized::open_row(&mut w, &row);
-    w.poll();
+    win.poll();
+    super::super::memorized::open_row(&mut win, &row);
+    win.poll();
     let _ = link.drain();
-    super::super::builder_run::customize(&mut w);
+    super::super::builder_run::customize(&mut win);
     let mut seed = None;
     for _ in 0..200 {
-        w.poll();
+        win.poll();
         seed = link.drain().into_iter().find_map(|e| match e {
             CompanyEvent::OpenWith(_, p) => match *p {
                 OpenPayload::BuilderEditor(b) => Some(*b),
@@ -1642,7 +1642,7 @@ fn delete_on_a_focused_outline_row_reaches_remove() {
     assert!(!s.keeps_text_key(&ctx, del), "not a text field");
     let km = Keymap::new(COMMANDS).expect("keymap");
     assert_eq!(
-        km.resolve(s.scope(), del).map(|c| c.as_str()),
+        km.resolve(s.scope(), del).map(cl_model::CommandId::as_str),
         Some("builder.remove")
     );
     // In a caption field Delete deletes text.
@@ -1740,7 +1740,7 @@ fn flipping_a_sign_a_formula_uses_says_so() {
     );
     assert_eq!(
         cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &gp),
-        [cogs.clone()]
+        std::slice::from_ref(&cogs)
     );
     // Back to the usual direction: no note.
     let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {

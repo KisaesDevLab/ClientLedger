@@ -760,7 +760,7 @@ fn a_formula_over_a_flipped_section_is_named() {
     .expect("nodes");
     assert_eq!(flipped_terms(&def, "net"), ["exp"]);
     assert_eq!(flipped_terms(&def, "again"), ["exp"], "through a formula");
-    assert!(flipped_terms(&def, "plain").is_empty());
+    assert_eq!(flipped_terms(&def, "plain"), Vec::<String>::new());
 }
 
 /// QA-7: the first section that shows its transactions gets the usual
@@ -785,7 +785,7 @@ fn showing_transactions_brings_the_usual_columns() {
     assert!(fields.contains(&"date".to_string()), "{fields:?}");
     assert!(fields.contains(&"txn_type".to_string()));
     assert!(e.undo(), "one step");
-    assert!(e.definition().columns.detail_fields.is_empty());
+    assert_eq!(e.definition().columns.detail_fields, Vec::<String>::new());
     // Columns picked first are kept.
     let mut c = e.definition().columns.clone();
     c.detail_fields = vec!["memo".into()];

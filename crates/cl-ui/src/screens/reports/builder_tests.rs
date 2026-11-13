@@ -742,3 +742,48 @@ fn compare_headings_are_distinct() {
         Some("$ change")
     );
 }
+
+/// QA-13: text, blank, page-break and section header rows are empty across
+/// after dressing, never "—" in a % column.
+#[test]
+fn rows_without_figures_are_empty_across() {
+    use cl_core::report::{Cell, ColumnHead, ColumnKind, ReportRow, ReportTable, RowPath};
+    let row = |kind| ReportRow {
+        kind,
+        level: 0,
+        path: RowPath::of(["n:x"]),
+        caption: "Prepared for the bank".into(),
+        cells: vec![Cell::Empty, Cell::Percent(None)],
+        drill: None,
+        expandable: false,
+    };
+    let table = ReportTable {
+        columns: vec![
+            ColumnHead {
+                key: "total".into(),
+                caption: "Total".into(),
+                kind: ColumnKind::Amount,
+                range: None,
+                drill: None,
+            },
+            ColumnHead {
+                key: "total:pct".into(),
+                caption: "%".into(),
+                kind: ColumnKind::Percent,
+                range: None,
+                drill: None,
+            },
+        ],
+        rows: vec![
+            row(RowKind::Text),
+            row(RowKind::Blank),
+            row(RowKind::PageBreak),
+            row(RowKind::Header),
+        ],
+        ..ReportTable::default()
+    };
+    let t = super::builder_run::dress(None, table, false);
+    for r in &t.rows {
+        assert!(r.cells.iter().all(|c| *c == Cell::Empty), "{:?}", r.kind);
+    }
+}

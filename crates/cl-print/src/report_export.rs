@@ -291,19 +291,23 @@ pub fn to_report(
         right: false,
         whole: false,
     }];
-    let body: Vec<Vec<String>> = rows
-        .iter()
-        .filter_map(|&i| t.rows.get(i))
-        .map(|r| {
-            let mut line = vec![format!(
-                "{}{}",
-                "   ".repeat(usize::from(r.level)),
-                label(tr, &r.caption)
-            )];
-            line.extend(r.cells.iter().map(|c| display_cell(c, tr)));
-            line
-        })
-        .collect();
+    // A Report Builder page break starts a new page (A08 QA-13); it is not
+    // a line of its own.
+    let mut body: Vec<Vec<String>> = Vec::new();
+    let mut breaks = Vec::new();
+    for r in rows.iter().filter_map(|&i| t.rows.get(i)) {
+        if r.kind == cl_core::report::RowKind::PageBreak {
+            breaks.push(body.len());
+            continue;
+        }
+        let mut line = vec![format!(
+            "{}{}",
+            "   ".repeat(usize::from(r.level)),
+            label(tr, &r.caption)
+        )];
+        line.extend(r.cells.iter().map(|c| display_cell(c, tr)));
+        body.push(line);
+    }
     // Dates, and text columns of short codes (a type, a number), print
     // whole; names and memos may be cut on a wide report (A07 QA-8).
     columns.extend(t.columns.iter().enumerate().map(|(ci, c)| {
@@ -326,6 +330,7 @@ pub fn to_report(
             columns,
             rows: body,
             empty: tr("reports.empty"),
+            breaks,
         }],
         footer: String::new(),
         page_label: tr("reports.page_label"),
@@ -668,5 +673,34 @@ mod tests {
         // Into a folder that doesn't exist: an error, nothing left behind.
         let bad = dir.path().join("missing").join("x.csv");
         assert!(write_atomic(&bad, b"x").is_err());
+    }
+
+    /// A08 QA-13: a Report Builder page break starts a new PDF page and is
+    /// not a line of its own.
+    #[test]
+    fn a_page_break_row_starts_a_new_page() {
+        let mut t = table();
+        let at = t.rows.len();
+        let mut br = t.rows[0].clone();
+        br.kind = cl_core::report::RowKind::PageBreak;
+        br.caption = String::new();
+        br.cells = vec![Cell::Empty, Cell::Empty];
+        t.rows.push(br);
+        let after = t.rows[0].clone();
+        t.rows.push(after);
+        let all: Vec<usize> = (0..t.rows.len()).collect();
+        let r = to_report(&t, &all, "Title", Vec::new(), &tr);
+        let Section::Table { rows, breaks, .. } = &r.sections[0] else {
+            panic!("table");
+        };
+        assert_eq!(rows.len(), t.rows.len() - 1, "the break is no line");
+        assert_eq!(breaks, &[at]);
+        let doc = crate::reports::layout_report(&r);
+        assert_eq!(doc.pages.len(), 2, "the row after it is on page 2");
+        let mut none = r.clone();
+        if let Section::Table { breaks, .. } = &mut none.sections[0] {
+            breaks.clear();
+        }
+        assert_eq!(crate::reports::layout_report(&none).pages.len(), 1);
     }
 }

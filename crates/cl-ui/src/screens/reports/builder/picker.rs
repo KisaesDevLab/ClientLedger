@@ -262,9 +262,7 @@ fn typed_prefix(ui: &Ui, id: egui::Id, reset: bool) -> Option<String> {
 /// the current choice while it still matches, else the first that does.
 fn find_prefix(choices: &[Choice], current: Option<usize>, prefix: &str) -> Option<usize> {
     let n = choices.len();
-    let Some(first) = prefix.chars().next() else {
-        return None;
-    };
+    let first = prefix.chars().next()?;
     if n == 0 {
         return None;
     }
