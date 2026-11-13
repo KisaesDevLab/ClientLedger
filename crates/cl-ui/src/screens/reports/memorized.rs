@@ -328,6 +328,8 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
 
 /// Opens a memorized report: its catalog report with its options.
 pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
+    // A memorized report is not an import (A09 WP-A).
+    w.memo.origin = None;
     let read = cl_model::reports::definition::read_memorized(&row.definition);
     // A Report Builder definition runs as a builder report (A07). It is
     // sent inline at the version read (Q-A07t). One that can't be read

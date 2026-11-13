@@ -242,6 +242,12 @@ pub enum OpenPayload {
     /// A09: a memorized report from the Memorized Reports list, shown as
     /// memorized (Ctrl+M there offers Save changes).
     Memorized(Box<crate::screens::reports::memorized_list::MemorizedOpen>),
+    /// A09 WP-A: the Report File window (`reports.report_file`) on an
+    /// export or an import of a `.clreport` file.
+    ReportFile(Box<crate::screens::reports::clreport::Start>),
+    /// A09 WP-A: a standard report read from a `.clreport` file, shown
+    /// unsaved in a report window (`reports.center`).
+    ImportedReport(Box<crate::screens::reports::clreport::ImportedOpen>),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

@@ -500,3 +500,6 @@ POST    /api/v1/budgets/{id}/adjust-by-percent  keyable-budgets
 GET     /api/v1/budgets/{id}/vs-actual          idempotent
 POST    /api/v1/reports/email                   keyable-reports-email
 POST    /api/v1/reports/ask                     pre-handler-only
+# A09: .clreport files (U-220 report-defs-transfer-v1; export audits a download row per report, the preview writes nothing)
+POST    /api/v1/report-builder/definitions/export pre-handler-only
+POST    /api/v1/report-builder/definitions/import/preview pre-handler-only

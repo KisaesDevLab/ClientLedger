@@ -281,6 +281,8 @@ impl ReportWindow {
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
         self.new_view();
+        // Another report on screen is not the imported one (A09 WP-A).
+        self.memo.origin = None;
         self.builder = None;
         self.spec = spec;
         self.options = options;
@@ -1496,6 +1498,9 @@ impl Screen for ReportWindow {
     }
 
     fn open_with(&mut self, payload: OpenPayload) -> bool {
+        // Whatever opens now is not an earlier import (A09 WP-A); an
+        // ImportedReport sets it again.
+        self.memo.origin = None;
         let open = match payload {
             OpenPayload::Report(open) => open,
             OpenPayload::BuilderStarter(key) => {
@@ -1513,6 +1518,10 @@ impl Screen for ReportWindow {
             OpenPayload::Memorized(open) => {
                 super::memorized::open_row(self, &open.0);
                 return true;
+            }
+            // A09 WP-A: a standard report from a `.clreport` file.
+            OpenPayload::ImportedReport(open) => {
+                return super::clreport::open_imported(self, *open);
             }
             _ => return false,
         };

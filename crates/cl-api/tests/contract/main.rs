@@ -1359,6 +1359,18 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs::crud_conflicts_and_groups",
             contract_report_defs::crud_conflicts_and_groups,
+        ), // A09 WP-A: `.clreport` (U-220, report-defs-transfer-v1).
+        (
+            "report_defs_transfer::export_and_preview_in_the_same_company",
+            contract_report_defs_transfer::export_and_preview_in_the_same_company,
+        ),
+        (
+            "report_defs_transfer::a_second_company_remaps_and_resolves_references",
+            contract_report_defs_transfer::a_second_company_remaps_and_resolves_references,
+        ),
+        (
+            "report_defs_transfer::replace_is_refused_for_a_non_author_and_a_kind_change",
+            contract_report_defs_transfer::replace_is_refused_for_a_non_author_and_a_kind_change,
         ),
         (
             "report_builder::every_starter_runs_through_the_adapter",

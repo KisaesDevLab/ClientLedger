@@ -1,0 +1,65 @@
+# A09 WP-A: `.clreport` report files on the demo engine (U-220 parity).
+# Import the synthetic `fixtures/report_files/from_accountant.clreport`
+# (two Report Builder reports): one account under a number this company
+# lacks is resolved by picking the same-name account, a tag group it lacks
+# is left out, and a name clash is answered with Rename; Memorize all
+# creates the file's group. Then that group is exported to a file, and a
+# single report imports into the Report Builder, unsaved.
+name: report_file
+description: Import a report file (pick, leave out, rename, Memorize all), export a group, import one report into the builder.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- Import two reports --------------------------------------------------
+  - command: reports.memorized_list
+  - wait: {ms: 400}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/report_files/from_accountant.clreport"]}
+  - click: {role: button, label: "Import Report File…"}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.screen, equals: report_file}
+  - assert_state: {key: screen.stage, equals: review}
+  - assert_state: {key: screen.reports, equals: 2}
+  - assert_state: {key: screen.unresolved, equals: 2}
+  - assert_state: {key: screen.ready, equals: false}
+  - screenshot: review
+  - click: {role: combo_box, label: Use instead, index: 0}
+  - wait: {ms: 200}
+  - click: {label_contains: "6350", index: 0}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.unresolved, equals: 1}
+  - click: {role: button, label: Leave out, index: 0}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.unresolved, equals: 0}
+  - assert_state: {key: screen.dropped, equals: 1}
+  - assert_state: {key: screen.ready, equals: true}
+  - screenshot: review-ready
+  - click: {role: button, label: Memorize all}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.stage, equals: done}
+  - assert_state: {key: screen.saved, equals: 2}
+  - screenshot: imported
+  - click: {role: button, label: Close}
+  - wait: {ms: 300}
+  # --- Export the file's group -----------------------------------------------
+  - command: reports.memorized_list
+  - wait: {ms: 400}
+  - click: {label: From the accountant, index: 0}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/report_file/from-the-accountant-{theme}.clreport"]}
+  - click: {role: button, label: "Export Report File…"}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.screen, equals: report_file}
+  - assert_state: {key: screen.last, equals: exported}
+  - screenshot: exported
+  - click: {role: button, label: Close}
+  - wait: {ms: 300}
+  # --- One report opens in the builder, unsaved -------------------------------
+  - command: reports.memorized_list
+  - wait: {ms: 400}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/report_files/one_report.clreport"]}
+  - click: {role: button, label: "Import Report File…"}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.ready, equals: true}
+  - click: {role: button, label: Continue}
+  - wait: {ms: 800}
+  - assert_exists: {label_contains: "Imported from a report file", index: 0}
+  - screenshot: builder

@@ -1,0 +1,128 @@
+{
+  "format": "clientledger-report",
+  "schemaVersion": 1,
+  "app": "ClientLedger 0.9.0",
+  "exportedAt": "2026-11-12T21:00:00Z",
+  "reports": [
+    {
+      "name": "Truck costs",
+      "group": "From the accountant",
+      "kind": "builder",
+      "definition": {
+        "schemaVersion": 1,
+        "kind": "builder",
+        "title": "Truck costs",
+        "dates": {
+          "mode": "range"
+        },
+        "columns": {
+          "detailFields": [],
+          "compare": [],
+          "headers": {}
+        },
+        "nodes": [
+          {
+            "type": "section",
+            "id": "s1",
+            "caption": "Truck costs",
+            "source": "gl",
+            "measure": "amount",
+            "polarity": "debit",
+            "filters": [
+              {
+                "field": "account",
+                "op": "in",
+                "ids": [
+                  "$ref:0",
+                  "$ref:1"
+                ]
+              }
+            ],
+            "display": "summary",
+            "defaultExpanded": false,
+            "showTotal": true,
+            "hideZero": false,
+            "groupBy": [
+              {
+                "key": "tag",
+                "tagGroupId": "$ref:2"
+              }
+            ]
+          }
+        ]
+      },
+      "references": [
+        {
+          "kind": "account",
+          "number": "6100",
+          "name": "Fuel",
+          "accountType": "expense"
+        },
+        {
+          "kind": "account",
+          "number": "6390",
+          "name": "Repairs and Maintenance",
+          "accountType": "expense"
+        },
+        {
+          "kind": "tagGroup",
+          "name": "Job site"
+        }
+      ]
+    },
+    {
+      "name": "Monthly P&L for the bank",
+      "group": "From the accountant",
+      "kind": "builder",
+      "definition": {
+        "schemaVersion": 1,
+        "kind": "builder",
+        "title": "Monthly P&L for the bank",
+        "dates": {
+          "mode": "range"
+        },
+        "columns": {
+          "detailFields": [],
+          "compare": [],
+          "headers": {}
+        },
+        "nodes": [
+          {
+            "type": "section",
+            "id": "s1",
+            "caption": "Monthly P&L for the bank",
+            "source": "gl",
+            "measure": "amount",
+            "polarity": "debit",
+            "filters": [
+              {
+                "field": "account",
+                "op": "in",
+                "ids": [
+                  "$ref:0"
+                ]
+              }
+            ],
+            "display": "summary",
+            "defaultExpanded": false,
+            "showTotal": true,
+            "hideZero": false,
+            "groupBy": [
+              {
+                "key": "account"
+              }
+            ]
+          }
+        ]
+      },
+      "references": [
+        {
+          "kind": "account",
+          "number": "6100",
+          "name": "Fuel",
+          "accountType": "expense"
+        }
+      ]
+    }
+  ]
+}
