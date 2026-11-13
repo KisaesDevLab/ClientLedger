@@ -578,6 +578,10 @@ impl Capabilities {
     pub const REPORTS_EXACT: &'static str = "reports-exact-v1";
     /// U-118 (PR-F): memorized reports, `kind:'standard'`.
     pub const REPORT_DEFS: &'static str = "report-defs-v1";
+    /// U-220 (A09): `POST /report-builder/definitions/export` and
+    /// `/import/preview` (`.clreport` files), `origin: 'import'` on a
+    /// definition create or update.
+    pub const REPORT_DEFS_TRANSFER: &'static str = "report-defs-transfer-v1";
     /// U-203 (PR-C): company-scoped, versioned, validated budgets and the
     /// exact Budget vs. Actual.
     pub const BUDGETS_EXACT: &'static str = "budgets-exact-v1";

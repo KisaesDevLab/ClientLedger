@@ -416,5 +416,7 @@
   {"method":"POST","path":"/api/v1/budgets/{id}/adjust-by-percent","inSpec":true,"fragmentHash":"7f82ff357fe843532064269ba873daf6cc49d4a34eee76136b36ffed3bb301f0"},
   {"method":"GET","path":"/api/v1/budgets/{id}/vs-actual","inSpec":true,"fragmentHash":"a308a2199f40852a4e1ab493d4ef1111ba84737a1be3123f21df104c866501fa"},
   {"method":"POST","path":"/api/v1/reports/email","inSpec":true,"fragmentHash":"254bcec1125d2087bfcaf35db39d3a167b0ad4a60c5251a813467a01351cbd74"},
-  {"method":"POST","path":"/api/v1/reports/ask","inSpec":true,"fragmentHash":"18e329f3d46ad78f9c7b8000a962479fbc55a3567eeccdcd7c7817945ea771ce"}
+  {"method":"POST","path":"/api/v1/reports/ask","inSpec":true,"fragmentHash":"18e329f3d46ad78f9c7b8000a962479fbc55a3567eeccdcd7c7817945ea771ce"},
+  {"method":"POST","path":"/api/v1/report-builder/definitions/export","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/report-builder/definitions/import/preview","inSpec":false,"fragmentHash":null}
 ]
