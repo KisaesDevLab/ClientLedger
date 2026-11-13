@@ -144,11 +144,6 @@ fn preset_text(choice: DateChoice) -> String {
     }
 }
 
-#[allow(
-    clippy::many_single_char_names,
-    clippy::too_many_lines,
-    reason = "one bar, in mockup order"
-)]
 /// A builder detail tab's dates as read-only text (A07-11, Q-A09n): the
 /// drill fixed them, so they show without controls. `None` outside a
 /// detail tab or before its table.
@@ -179,6 +174,22 @@ pub(super) fn detail_dates_text(w: &ReportWindow) -> Option<String> {
     )
 }
 
+/// The detail tab's dates, as text.
+fn fixed_dates_ui(ui: &mut Ui, tokens: &Tokens, text: &str) {
+    ui.label(RichText::new(t("reports.filter.dates")).size(12.0));
+    ui.label(RichText::new(text).strong());
+    ui.label(
+        RichText::new(t("reports.detail.dates_fixed"))
+            .size(12.0)
+            .color(tokens.text_secondary),
+    );
+}
+
+#[allow(
+    clippy::many_single_char_names,
+    clippy::too_many_lines,
+    reason = "one bar, in mockup order"
+)]
 pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let mut next = w.options.clone();
     let spec = w.spec;
@@ -189,13 +200,7 @@ pub(super) fn filter_bar(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     let fixed_dates = detail_dates_text(w);
     ui.horizontal_wrapped(|ui| {
         if let Some(text) = &fixed_dates {
-            ui.label(RichText::new(t("reports.filter.dates")).size(12.0));
-            ui.label(RichText::new(text).strong());
-            ui.label(
-                RichText::new(t("reports.detail.dates_fixed"))
-                    .size(12.0)
-                    .color(tokens.text_secondary),
-            );
+            fixed_dates_ui(ui, tokens, text);
         }
         if spec.dates != DateMode::None && !fixed {
             let l = ui.label(RichText::new(t("reports.filter.dates")).size(12.0));
