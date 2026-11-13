@@ -7,6 +7,8 @@
 //!
 //! No egui, no I/O, no money arithmetic: the engine computes every figure.
 
+// A09 WP-A: `.clreport` report files (Q-A09a).
+pub mod clreport;
 pub mod editor;
 pub mod fields;
 pub mod guided;
