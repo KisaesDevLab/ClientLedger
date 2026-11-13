@@ -124,6 +124,7 @@ fn write_of(
             group_id: group.clone(),
             kind: "builder".into(),
             definition,
+            origin: None,
         },
         Sent {
             def,

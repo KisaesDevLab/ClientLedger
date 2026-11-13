@@ -640,6 +640,7 @@ impl MemorizedList {
             name,
             group_id: row.group_id.clone(),
             kind: row.kind.clone(),
+            origin: None,
         };
         // One key per press: a retried send stores one copy.
         let key = IdempotencyKey::new();
@@ -764,6 +765,38 @@ impl MemorizedList {
         self.poll();
     }
 
+    /// Export report file (WP-A): the selected report, or the selected
+    /// group with its reports.
+    pub(crate) fn export_file(&mut self) {
+        let target = if let Some(r) = self.selected_row() {
+            super::clreport::Target::Report(Box::new(r.clone()))
+        } else if let Some(g) = self.selected_group() {
+            let mut reports: Vec<DefinitionRow> = self
+                .rows
+                .iter()
+                .filter(|r| r.group_id.as_deref() == Some(g.id.as_str()))
+                .cloned()
+                .collect();
+            reports.sort_by_key(|r| r.name.to_lowercase());
+            super::clreport::Target::Group {
+                group: g.clone(),
+                reports,
+            }
+        } else {
+            return;
+        };
+        if let Some(k) = super::clreport::start_export(&self.link, target) {
+            self.notice = Some(t(k));
+        }
+    }
+
+    /// Import report file (WP-A).
+    pub(crate) fn import_file(&mut self) {
+        if let Some(k) = super::clreport::start_import(&self.link) {
+            self.notice = Some(t(k));
+        }
+    }
+
     // ------------------------------------------------------------ drawing
 
     fn draw(&mut self, ui: &mut Ui) {
@@ -865,6 +898,21 @@ impl MemorizedList {
                 &t("reports.memorized.new_group.tip"),
                 "",
             );
+            ui.separator();
+            b(
+                ui,
+                "cmd.reports.export_report_file",
+                some || group,
+                &t("reports.memorized.export.tip"),
+                "",
+            );
+            b(
+                ui,
+                "cmd.reports.import_report_file",
+                true,
+                &t("reports.memorized.import.tip"),
+                "",
+            );
             None::<()>
         });
         match click {
@@ -875,6 +923,8 @@ impl MemorizedList {
             Some("reports.memorized.delete") => self.ask_delete(),
             Some("reports.memorized.copy") => self.memorize_copy(),
             Some("reports.memorized.new_group") => self.ask_new_group(),
+            Some("cmd.reports.export_report_file") => self.export_file(),
+            Some("cmd.reports.import_report_file") => self.import_file(),
             _ => {}
         }
         let find = t("reports.find");
@@ -1241,6 +1291,18 @@ impl Screen for MemorizedList {
             "list.new" => {
                 if self.edit.is_none() {
                     self.ask_new_group();
+                }
+                true
+            }
+            "reports.export_report_file" => {
+                if self.edit.is_none() && !self.busy() {
+                    self.export_file();
+                }
+                true
+            }
+            "reports.import_report_file" => {
+                if self.edit.is_none() && !self.busy() {
+                    self.import_file();
                 }
                 true
             }

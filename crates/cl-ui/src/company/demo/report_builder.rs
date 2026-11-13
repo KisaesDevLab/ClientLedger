@@ -1602,6 +1602,7 @@ mod tests {
             group_id: None,
             kind: "builder".into(),
             definition: gross_profit(&plain_columns()),
+            origin: None,
         };
         let row = save_definition(&mut d, None, &w).expect("create");
         assert!(row.can_edit);

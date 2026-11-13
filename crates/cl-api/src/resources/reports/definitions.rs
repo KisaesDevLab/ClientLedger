@@ -97,6 +97,11 @@ pub struct DefinitionWrite {
     pub kind: String,
     /// The body.
     pub definition: Value,
+    /// Where it came from, for the engine's audit row: `Some("import")`
+    /// for a report read from a `.clreport` file (A09, U-220); `None`
+    /// otherwise (not sent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// A change to some fields of a memorized report (A09: the Memorized
@@ -543,6 +548,7 @@ mod tests {
             group_id: None,
             kind: "standard".into(),
             definition: Value::String("x".repeat(MAX_DEFINITION_BYTES)),
+            origin: None,
         };
         assert!(matches!(
             body(&w, max_bytes(&w.kind)),
@@ -557,6 +563,7 @@ mod tests {
             group_id: None,
             kind: "builder".into(),
             definition: Value::String("x".repeat(MAX_DEFINITION_BYTES)),
+            origin: None,
         };
         assert!(body(&w, max_bytes(&w.kind)).is_ok());
         w.definition = Value::String("x".repeat(MAX_BUILDER_DEFINITION_BYTES));

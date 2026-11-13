@@ -47,6 +47,7 @@ fn add_builder(link: &CompanyLink, name: &str) -> DefinitionRow {
             group_id: None,
             kind: "builder".into(),
             definition: titled(&pl_builder(), name),
+            origin: None,
         },
     )
     .expect("saved")

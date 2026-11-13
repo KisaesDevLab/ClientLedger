@@ -32,6 +32,7 @@ fn memorize_saves_renames_and_refuses_a_taken_name_or_stale_version() {
         group_id: None,
         kind: "standard".into(),
         definition: json!({}),
+        origin: None,
     };
     let row = save_definition(&mut d, None, &w).expect("new");
     assert_eq!(row.version, 1);

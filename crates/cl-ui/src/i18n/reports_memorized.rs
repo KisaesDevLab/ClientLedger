@@ -27,6 +27,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.memorized.copy.tip", "Save a copy of this report under your name, in the same group, so you can change it."),
     ("reports.memorized.new_group", "New group"),
     ("reports.memorized.new_group.tip", "A group is a folder for memorized reports (Ctrl+N)."),
+    ("reports.memorized.export.tip", "Save the selected report, or the selected group's reports, as a report file another company can use. No amounts are saved."),
+    ("reports.memorized.import.tip", "Add reports from a report file. You'll check which accounts and names they use before they're saved."),
     // Columns and rows.
     ("reports.memorized.col.name", "Name"),
     ("reports.memorized.col.report", "Report"),

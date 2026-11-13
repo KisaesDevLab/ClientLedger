@@ -486,6 +486,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("reports.memorized_open", "Open the Memorized Report", None, 13, key(Mods::NONE, Key::Enter), Scope::ReportList),
     cmd("reports.memorized_rename", "Rename the Memorized Report", None, 13, key(Mods::NONE, Key::F(2)), Scope::ReportList),
     cmd("reports.memorized_delete", "Delete the Memorized Report\u{2026}", None, 13, key(Mods::CMD, Key::Delete), Scope::ReportList),
+    // A09 `.clreport` (Q-A09a, Q-A09e): from the list and the builder's
+    // Report tab; no shortcut.
+    cmd("reports.export_report_file", "Export Report File\u{2026}", None, 13, None, Scope::Window),
+    cmd("reports.import_report_file", "Import Report File\u{2026}", None, 13, None, Scope::Window),
     // A08: the Report Builder editor, one window per report; opened from the
     // Reports list ("New report...") and Customize, no menu entry.
     built("reports.builder_editor", "Report Builder", None, 3, None),

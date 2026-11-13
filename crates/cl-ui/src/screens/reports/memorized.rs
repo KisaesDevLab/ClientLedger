@@ -59,6 +59,10 @@ pub(crate) struct Memo {
     pub(crate) saved: Option<ReportOptions>,
     /// The `save` job is a Reload after a 409.
     reloading: bool,
+    /// Where the report shown came from, sent with its next Memorize for
+    /// the engine's audit (`Some("import")`: read from a `.clreport` file,
+    /// A09 WP-A). Cleared once it is memorized.
+    pub(crate) origin: Option<String>,
 }
 
 #[cfg(test)]
@@ -117,6 +121,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 open_row(w, &row);
             }
             Ok(row) => {
+                w.memo.origin = None;
                 w.memo.saved = w.memo.sending.take().or_else(|| Some(w.options.clone()));
                 if row.kind == "builder" {
                     super::builder_run::memorized(w, &row);
@@ -291,6 +296,7 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
         group_id: d.group.clone(),
         kind: kind.into(),
         definition: body,
+        origin: w.memo.origin.clone(),
     };
     let target = match how {
         SaveAs::Changes => w.memo.current.as_ref().map(|c| (c.id.clone(), c.version)),

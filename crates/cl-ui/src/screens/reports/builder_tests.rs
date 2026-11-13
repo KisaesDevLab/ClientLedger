@@ -210,6 +210,7 @@ fn memorize_on_a_builder_run_saves_a_builder_row() {
             cl_model::reports::ReportOptions::for_spec(find("profit_loss").expect("p&l")),
         ))
         .expect("json"),
+        origin: None,
     };
     let mut st = link.demo_state().expect("demo");
     assert!(

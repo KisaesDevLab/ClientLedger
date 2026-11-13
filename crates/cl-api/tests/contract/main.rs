@@ -79,6 +79,10 @@ mod contract_sales_tax_ssuta;
 mod contract_session;
 mod contract_tags;
 mod contract_templates;
+// A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
+// trip of memorized reports (AC3, WP-B).
+mod contract_report_defs_archive;
+mod contract_report_defs_transfer;
 mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};

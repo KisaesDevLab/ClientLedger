@@ -626,6 +626,7 @@ pub fn builder_definitions_save_and_refuse(h: &Harness) {
         group_id: None,
         kind: "builder".into(),
         definition: body.clone(),
+        origin: None,
     };
     let key = cl_api::IdempotencyKey::new();
     let row = h.run(defs.create(&w, key.clone())).expect("create");
@@ -664,6 +665,7 @@ pub fn builder_definitions_save_and_refuse(h: &Harness) {
         kind: "standard".into(),
         definition: json!({"schemaVersion": 1, "kind": "standard", "reportKey": "profit_loss",
                            "options": {"dates": {"preset": "last_month"}}}),
+        origin: None,
     };
     h.run(defs.update(&row.id, next.version, &standard))
         .expect_err("a kind change is refused");
