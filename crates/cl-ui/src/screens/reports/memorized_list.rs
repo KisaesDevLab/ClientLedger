@@ -945,7 +945,7 @@ impl MemorizedList {
         }
         // Keyboard users can't hover a disabled button: the reason shows
         // for the selected row too (Q-310).
-        if let Some(g) = self.gate() {
+        if let Some(g) = self.gate().filter(|g| self.notice.as_ref() != Some(g)) {
             form::hint(ui, tokens, &g);
         }
         if self.busy() && self.change.is_some() {
@@ -968,7 +968,9 @@ impl MemorizedList {
                     if focus {
                         r.request_focus();
                     }
-                    if form::activated(&r) {
+                    // Enter in the field sends it (a singleline field gives
+                    // up the focus on Enter); Space is only typing.
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         answer = Some(true);
                     }
                 });
