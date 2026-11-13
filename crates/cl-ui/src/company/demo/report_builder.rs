@@ -1443,9 +1443,9 @@ mod tests {
             .table;
         let gp = |t: &ReportTable| amount(&cell(t, RowKind::Formula, "gp", "total"));
         assert_eq!(gp(&t1), gp(&t2));
-        let cogs = |t: &ReportTable| amount(&cell(t, RowKind::Total, "cogs", "total"));
-        assert_ne!(cogs(&t1), Decimal::ZERO, "the demo has cost of goods");
-        assert_eq!(cogs(&t2), -cogs(&t1));
+        let cost = |t: &ReportTable| amount(&cell(t, RowKind::Total, "cogs", "total"));
+        assert_ne!(cost(&t1), Decimal::ZERO, "the demo has cost of goods");
+        assert_eq!(cost(&t2), -cost(&t1));
         // % of Gross profit: the base is the same, so the income row's
         // percent is unchanged.
         let pct = |t: &ReportTable| cell(t, RowKind::Total, "income", "total:pct");
