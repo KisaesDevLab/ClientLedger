@@ -39,10 +39,15 @@ pub const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_REPORTS: usize = 200;
 /// The most references one report may carry (the engine's cap).
 pub const MAX_REFERENCES: usize = 5000;
+/// The most references a whole file may carry (A09 S-L4): the engine
+/// matches each one, and the review draws each unresolved one.
+pub const MAX_FILE_REFERENCES: usize = 5000;
 /// The deepest JSON nesting read.
 pub const MAX_DEPTH: usize = 64;
-/// The longest report or group name (the engine's cap).
+/// The longest report name (the engine's cap).
 pub const MAX_NAME_CHARS: usize = 200;
+/// The longest group name (the engine's cap, A09 S-L1).
+pub const MAX_GROUP_CHARS: usize = 100;
 
 /// Why a report file can't be read or written. Holds no text from the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -217,7 +222,14 @@ fn check(file: &ReportFile) -> Result<(), FileError> {
     if file.reports.is_empty() {
         return Err(FileError::Empty);
     }
-    if file.reports.len() > MAX_REPORTS {
+    if file.reports.len() > MAX_REPORTS
+        || file
+            .reports
+            .iter()
+            .map(|r| r.references.len())
+            .sum::<usize>()
+            > MAX_FILE_REFERENCES
+    {
         return Err(FileError::TooLarge);
     }
     for r in &file.reports {
@@ -232,7 +244,11 @@ fn check(file: &ReportFile) -> Result<(), FileError> {
             Some(v) if v >= 1 => {}
             _ => return Err(FileError::NotReportFile),
         }
-        if !name_ok(&r.name) || r.group.as_deref().is_some_and(|g| !name_ok(g)) {
+        if !name_ok(&r.name, MAX_NAME_CHARS)
+            || r.group
+                .as_deref()
+                .is_some_and(|g| !name_ok(g, MAX_GROUP_CHARS))
+        {
             return Err(FileError::NotReportFile);
         }
         if r.references.len() > MAX_REFERENCES || !r.references.iter().all(Value::is_object) {
@@ -248,10 +264,10 @@ fn check(file: &ReportFile) -> Result<(), FileError> {
     Ok(())
 }
 
-/// A name the engine takes: not blank, at most [`MAX_NAME_CHARS`].
-fn name_ok(name: &str) -> bool {
+/// A name the engine takes: not blank, at most `max` characters.
+fn name_ok(name: &str, max: usize) -> bool {
     let n = name.trim();
-    !n.is_empty() && n.chars().count() <= MAX_NAME_CHARS
+    !n.is_empty() && n.chars().count() <= max
 }
 
 /// Keys that hold run figures, never part of a definition.
@@ -272,25 +288,7 @@ fn holds_company_data(v: &Value) -> bool {
 /// True when `s` contains a uuid-shaped run (`8-4-4-4-12` hex digits).
 #[must_use]
 pub fn has_uuid(s: &str) -> bool {
-    const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
-    let b = s.as_bytes();
-    if b.len() < 36 {
-        return false;
-    }
-    (0..=b.len() - 36).any(|start| {
-        let mut i = start;
-        GROUPS.iter().enumerate().all(|(n, &len)| {
-            let ok = b[i..i + len].iter().all(u8::is_ascii_hexdigit);
-            i += len;
-            if n < GROUPS.len() - 1 {
-                let dash = b.get(i) == Some(&b'-');
-                i += 1;
-                ok && dash
-            } else {
-                ok
-            }
-        })
-    })
+    super::validate::contains_uuid(s)
 }
 
 /// The file's bytes (pretty-printed UTF-8 JSON), after the same checks a

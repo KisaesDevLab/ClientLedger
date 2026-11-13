@@ -223,3 +223,37 @@ fn references_read_for_display() {
     // Debug names no row.
     assert!(!format!("{a:?}").contains("Shop"));
 }
+
+/// A09 S-L1: a group name over the engine's 100 characters is refused
+/// locally (a report name may have 200).
+#[test]
+fn a_group_name_over_100_characters_is_refused() {
+    let mut f = file();
+    f.reports[0].group = Some("g".repeat(MAX_GROUP_CHARS));
+    f.reports[0].name = "n".repeat(MAX_NAME_CHARS);
+    assert!(write(&f).is_ok());
+    f.reports[0].group = Some("g".repeat(MAX_GROUP_CHARS + 1));
+    assert_eq!(write(&f), Err(FileError::NotReportFile));
+}
+
+/// A09 S-L4: the references of the whole file are capped, so a file of
+/// many reports can't ask the engine (and the review) for 200 × 5,000.
+#[test]
+fn the_references_of_a_whole_file_are_capped() {
+    let mut f = file();
+    let r = f.reports[1].clone();
+    f.reports = (0..3)
+        .map(|n| {
+            let mut x = r.clone();
+            x.name = format!("Report {n}");
+            x.references =
+                vec![json!({"kind": "account", "name": "Sales"}); MAX_FILE_REFERENCES / 2];
+            x
+        })
+        .collect();
+    let bytes = serde_json::to_vec(&f).expect("json");
+    assert_eq!(read(&bytes), Err(FileError::TooLarge));
+    assert_eq!(write(&f), Err(FileError::TooLarge), "export refuses too");
+    f.reports.truncate(2);
+    assert!(read(&serde_json::to_vec(&f).expect("json")).is_ok());
+}
