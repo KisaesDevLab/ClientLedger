@@ -508,6 +508,11 @@ impl ReportFileWindow {
         }
     }
 
+    /// Done or failed: nothing in flight, nothing to choose.
+    fn is_finished(&self) -> bool {
+        matches!(self.stage, Stage::Done { .. } | Stage::Failed { .. })
+    }
+
     fn fail(&mut self, key: &'static str, import: bool) {
         self.message = Some(t(key));
         self.last = Some(key);
@@ -1760,6 +1765,17 @@ impl Screen for ReportFileWindow {
         if matches!(self.stage, Stage::Idle) {
             self.stage = Stage::Pick(None);
         }
+        // Esc: the window has no form scope, so it reads the key itself
+        // (A09 QA-3): a finished window closes, a review cancels (nothing
+        // is written), an open Replace confirm closes first. A text field
+        // or an open list keeps its own Esc. Read before drawing, while an
+        // open list is still open.
+        let esc = !ui.ctx().text_edit_focused()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if esc {
+            self.cancel();
+        }
         self.poll_export();
         self.poll_import();
         self.draw(ui);
@@ -1776,11 +1792,23 @@ impl Screen for ReportFileWindow {
         let OpenPayload::ReportFile(start) = payload else {
             return false;
         };
+        // A finished window starts over (A09 QA-3): nothing of the last
+        // result stays.
+        self.message = None;
+        self.last = None;
+        self.close = false;
         match *start {
             Start::Export(target) => self.begin_export(&target),
             Start::Import => self.stage = Stage::Pick(None),
         }
         true
+    }
+
+    /// A finished Report File window takes the next export or import, so
+    /// one tab is reused instead of a new one each time (A09 QA-3). One
+    /// still busy (a review, a save) keeps its work; the next opens beside.
+    fn takes_in_place(&self, payload: &OpenPayload) -> bool {
+        matches!(payload, OpenPayload::ReportFile(_)) && self.is_finished()
     }
 
     fn command(&mut self, id: CommandId) -> bool {

@@ -1011,3 +1011,57 @@ fn an_account_by_number_says_under_that_number() {
     assert_eq!(unresolved_key(tag.as_ref()), "report_file.card.unresolved");
     assert!(crate::i18n::has("report_file.card.unresolved_number"));
 }
+
+/// A09 QA-3: a finished Report File window takes the next export (one tab,
+/// reused), a busy one doesn't, and Esc closes a finished one.
+#[test]
+fn a_finished_window_is_reused_and_esc_closes_it() {
+    let (dir, link) = demo();
+    let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
+    let target = || Target::Saved {
+        id: row.id.clone(),
+        name: row.name.clone(),
+    };
+    let next = || OpenPayload::ReportFile(Box::new(Start::Export(target())));
+    let mut w = ReportFileWindow::new(Arc::clone(&link));
+    assert!(w.open_with(next()));
+    // Busy (the Save dialog is up): the next export opens beside it.
+    assert!(!w.takes_in_place(&next()));
+    w.answer_save(Some(dir.path().join("one.clreport")));
+    w.poll_export();
+    assert_eq!(w.stage_name(), "done");
+    // Done: it takes the next one and starts over, last result gone.
+    assert!(w.takes_in_place(&next()));
+    assert!(w.takes_in_place(&OpenPayload::ReportFile(Box::new(Start::Import))));
+    assert!(w.open_with(next()));
+    assert_eq!(w.stage_name(), "exporting");
+    assert!(w.message.is_none());
+    assert!(w.last.is_none());
+    w.answer_save(Some(dir.path().join("two.clreport")));
+    w.poll_export();
+    assert_eq!(w.stage_name(), "done");
+
+    // Esc on the finished window closes it.
+    let ctx = egui::Context::default();
+    let esc = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        ..Default::default()
+    };
+    ctx.run_ui(esc.clone(), |ui| w.ui(ui))
+        .textures_delta
+        .clear();
+    assert!(w.take_close_request(), "Esc closes a finished window");
+
+    // A failed one is finished too.
+    let mut f = ReportFileWindow::new(Arc::clone(&link));
+    f.fail("report_file.error.invalid", true);
+    assert!(f.takes_in_place(&next()));
+    ctx.run_ui(esc, |ui| f.ui(ui)).textures_delta.clear();
+    assert!(f.take_close_request());
+}
