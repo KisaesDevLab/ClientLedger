@@ -991,3 +991,23 @@ fn the_review_counts_what_it_doesnt_draw() {
     r.take(vec![p]);
     assert_eq!(r.unresolved_total() - MAX_DRAWN_UNRESOLVED, 7);
 }
+
+/// Q-A09v: an account the file names by number says "under that number";
+/// other references say "under that name".
+#[test]
+fn an_account_by_number_says_under_that_number() {
+    use cl_model::report_def::clreport::Reference;
+    let acct = Reference::of(&json!({"kind": "account", "number": "6287", "name": "Bank fees"}));
+    assert_eq!(
+        unresolved_key(acct.as_ref()),
+        "report_file.card.unresolved_number"
+    );
+    let plain = Reference::of(&json!({"kind": "account", "name": "Bank fees"}));
+    assert_eq!(
+        unresolved_key(plain.as_ref()),
+        "report_file.card.unresolved"
+    );
+    let tag = Reference::of(&json!({"kind": "tagGroup", "name": "Region"}));
+    assert_eq!(unresolved_key(tag.as_ref()), "report_file.card.unresolved");
+    assert!(crate::i18n::has("report_file.card.unresolved_number"));
+}

@@ -1925,8 +1925,14 @@ fn an_imported_report_is_memorized_as_an_import_once() {
 #[test]
 fn export_says_it_writes_the_memorized_version() {
     use super::properties::export_note;
-    assert_eq!(export_note(false, true), Some("report_file.export.memorize_first"));
-    assert_eq!(export_note(true, true), Some("report_file.export.memorized_version"));
+    assert_eq!(
+        export_note(false, true),
+        Some("report_file.export.memorize_first")
+    );
+    assert_eq!(
+        export_note(true, true),
+        Some("report_file.export.memorized_version")
+    );
     assert_eq!(export_note(true, false), None);
     assert!(crate::i18n::has("report_file.export.memorized_version"));
 }

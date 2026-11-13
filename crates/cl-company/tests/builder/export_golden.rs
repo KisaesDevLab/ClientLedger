@@ -13,10 +13,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use cl_api::Session;
-use cl_api::resources::report_builder::{
-    BuilderRun, DetailRequest, RunDates, RunPurpose, RunRef, RunRequest,
-};
-use cl_core::report::{Basis, Cell, ColumnKind, DateRange, Drill, ReportTable, RowKind, RowPath};
+use cl_api::resources::report_builder::fill::{ExportFill, MAX_EXPORT_ROWS};
+use cl_api::resources::report_builder::{BuilderRun, RunDates, RunPurpose, RunRef, RunRequest};
+use cl_core::report::{Basis, Cell, ColumnKind, DateRange, ReportTable, RowKind, RowPath};
 use cl_model::reports::{ReportOptions, find};
 use rust_decimal::Decimal;
 
@@ -68,10 +67,11 @@ fn reference(def: &serde_json::Value) -> RunRef {
     }
 }
 
-/// An export run with its `more` rows filled, as the desktop does it.
+/// An export run with its `more` rows filled by the desktop's own fill
+/// (`cl_api::resources::report_builder::fill::ExportFill`, A09 #2).
 async fn export(s: &Session, req: &RunRequest) -> BuilderRun {
     let rb = s.report_builder();
-    let mut run = loop {
+    let run = loop {
         match rb.run(req).await {
             Err(cl_api::ApiError::RateLimited { retry_after }) => {
                 tokio::time::sleep(retry_after.unwrap_or(std::time::Duration::from_secs(15))).await;
@@ -79,36 +79,11 @@ async fn export(s: &Session, req: &RunRequest) -> BuilderRun {
             other => break other.expect("export run"),
         }
     };
-    loop {
-        let next = run
-            .table
-            .rows
-            .iter()
-            .find_map(|r| match (&r.kind, &r.drill) {
-                (
-                    RowKind::More,
-                    Some(Drill::BuilderPage {
-                        node_id,
-                        path,
-                        cursor: Some(c),
-                    }),
-                ) => Some((node_id.clone(), path.clone(), c.clone())),
-                _ => None,
-            });
-        let Some((node_id, path, cursor)) = next else {
-            break;
-        };
-        let dr = DetailRequest {
-            reference: req.reference.clone(),
-            node_id,
-            path: path.clone(),
-            range: None,
-            cursor: Some(cursor),
-            fingerprint: run.fingerprint.clone(),
-            stamp: run.stamp,
-        };
+    let mut fill = ExportFill::new(req, run, MAX_EXPORT_ROWS);
+    while let Some(dr) = fill.next_request() {
         let page = loop {
-            match rb.detail(&dr, &run.table.columns, &run.layout).await {
+            let r = fill.run();
+            match rb.detail(&dr, &r.table.columns, &r.layout).await {
                 Err(cl_api::ApiError::RateLimited { retry_after }) => {
                     tokio::time::sleep(retry_after.unwrap_or(std::time::Duration::from_secs(15)))
                         .await;
@@ -116,34 +91,12 @@ async fn export(s: &Session, req: &RunRequest) -> BuilderRun {
                 other => break other.expect("detail page"),
             }
         };
-        // The desktop's splice: the page's rows where the `more` row was.
-        let at = run
-            .table
-            .rows
-            .iter()
-            .position(|r| r.kind == RowKind::More && r.path == path)
-            .expect("the more row");
-        let more = run.table.rows.remove(at);
-        let mut rows: Vec<_> = page
-            .rows
-            .into_iter()
-            .map(|mut r| {
-                r.level = more.level;
-                r
-            })
-            .collect();
-        if let Some(c) = page.cursor {
-            let mut m = more;
-            if let Some(Drill::BuilderPage { cursor, .. }) = m.drill.as_mut() {
-                *cursor = Some(c);
-            }
-            rows.push(m);
-        }
-        run.table.rows.splice(at..at, rows);
+        fill.take(page);
     }
-    run
+    let filled = fill.finish();
+    assert!(!filled.cut, "the golden company is under the cap");
+    filled.run
 }
-
 /// Every opened line's detail rows sum to it; no `more` row is left.
 fn opened_lines_tie(name: &str, run: &BuilderRun) {
     let t = &run.table;

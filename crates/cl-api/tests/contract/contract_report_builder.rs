@@ -827,3 +827,87 @@ pub fn a_flipped_section_leaves_its_formula_alone(h: &Harness) {
         "the flipped section's own total shows the other sign"
     );
 }
+
+/// A09 #2: an export of a line with more than 5,000 detail rows (the
+/// engine's rows per line in an export run) pages the rest through
+/// `run/detail` with the desktop's own fill: no `more` row is left, every
+/// row is there once, and the detail rows tie to their line. Its own fresh
+/// accounts, so no other test's postings count.
+pub fn an_export_pages_a_line_over_five_thousand_rows(h: &Harness) {
+    const ENTRIES: usize = 11;
+    const LINES: usize = 499;
+    use cl_api::resources::report_builder::fill::{ExportFill, MAX_EXPORT_ROWS};
+    use cl_api::{NewJournalEntry, Side};
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbBigBank");
+    let fuel = account(h, s, AccountType::Expense, "RbBigFuel");
+    // 11 entries of 499 one-dollar fuel lines: 5,489 detail rows.
+    for e in 0..ENTRIES {
+        let day = date(YEAR, 8, 1 + u32::try_from(e).expect("day"));
+        let mut lines: Vec<_> = (0..LINES)
+            .map(|_| crate::common::line(fuel.id, Side::Debit(crate::common::m("1.00"))))
+            .collect();
+        lines.push(crate::common::line(
+            bank.id,
+            Side::Credit(crate::common::m("499.00")),
+        ));
+        let entry = NewJournalEntry::new(day, Some("rb big".into()), cl_api::Basis::Both, lines)
+            .expect("balanced");
+        post(h, s, &entry);
+    }
+    let mut def = ledger(&[fuel.id.to_string()]);
+    def["columns"]["detailFields"] = json!(["date", "memo", "amount"]);
+    let mut req = request(reference(&def), true);
+    req.purpose = RunPurpose::Export;
+    let first = run(h, s, &req).expect("export run");
+    assert!(
+        first.table.rows.iter().any(|r| r.kind == RowKind::More),
+        "the run cuts the line at 5,000 rows"
+    );
+    let mut fill = ExportFill::new(&req, first, MAX_EXPORT_ROWS);
+    let mut pages = 0;
+    while let Some(dr) = fill.next_request() {
+        let r = fill.run();
+        let page = h
+            .run(s.report_builder().detail(&dr, &r.table.columns, &r.layout))
+            .expect("detail page");
+        fill.take(page);
+        pages += 1;
+        assert!(pages < 100, "no loop");
+    }
+    assert!(pages >= 1, "the engine's cursor paging was used");
+    let filled = fill.finish();
+    assert!(!filled.cut);
+    let t = &filled.run.table;
+    assert!(
+        t.rows.iter().all(|r| r.kind != RowKind::More),
+        "no more row left"
+    );
+    let line = t.rows.iter().find(|r| r.expandable).expect("the fuel line");
+    let details: Vec<_> = t
+        .rows
+        .iter()
+        .filter(|r| r.kind == RowKind::Detail && r.path == line.path)
+        .collect();
+    assert_eq!(details.len(), ENTRIES * LINES, "every row, once");
+    let col = t
+        .columns
+        .iter()
+        .position(|c| c.kind == cl_core::report::ColumnKind::Amount && !c.key.starts_with("f:"))
+        .expect("a value column");
+    let amount = |c: &Cell| match c {
+        Cell::Amount(x) => *x,
+        _ => rust_decimal::Decimal::ZERO,
+    };
+    // The test adds up (as Decimal) to check the tie; the app never does.
+    let sum: rust_decimal::Decimal = details.iter().map(|r| amount(&r.cells[col])).sum();
+    assert_eq!(
+        sum,
+        amount(&line.cells[col]),
+        "the detail rows tie to the line"
+    );
+    assert_eq!(sum, rust_decimal::Decimal::from(ENTRIES * LINES));
+}

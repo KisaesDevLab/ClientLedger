@@ -15,26 +15,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use cl_api::ApiError;
+use cl_api::resources::report_builder::fill::ExportFill;
+pub(crate) use cl_api::resources::report_builder::fill::{Filled, MAX_EXPORT_ROWS};
 use cl_api::resources::report_builder::{
     BuilderRun, DetailPage, DetailRequest, RunPurpose, RunRequest,
 };
-use cl_core::report::{Drill, ReportTable, RowKind, RowPath};
+use cl_core::report::{ReportTable, RowKind};
+use cl_model::report_def::BuilderDefinition;
+use cl_model::reports::ReportOptions;
 
-use super::{ReportWindow, splice};
+use super::ReportWindow;
 use crate::screens::invoice::engine::{self, Job};
-
-/// The most detail rows an export carries (Q-311, the engine's
-/// `MAX_DETAIL_ROWS_EXPORT`).
-pub(crate) const MAX_EXPORT_ROWS: usize = 100_000;
-
-/// An export run with its `more` rows filled.
-#[derive(Clone, Debug)]
-pub(crate) struct Filled {
-    /// The run, its table spliced (not dressed yet).
-    pub(crate) run: BuilderRun,
-    /// A `more` row is left: the file is cut.
-    pub(crate) cut: bool,
-}
 
 /// An export fill on its way, and its Cancel.
 pub(crate) struct FillJob {
@@ -68,80 +59,28 @@ pub(crate) fn export_request(w: &ReportWindow) -> Option<RunRequest> {
     })
 }
 
-/// The first `more` row that can be paged: its node, path and cursor.
-fn next_more(t: &ReportTable) -> Option<(String, RowPath, String)> {
-    t.rows.iter().find_map(|r| match (&r.kind, &r.drill) {
-        (
-            RowKind::More,
-            Some(Drill::BuilderPage {
-                node_id,
-                path,
-                cursor: Some(c),
-            }),
-        ) => Some((node_id.clone(), path.clone(), c.clone())),
-        _ => None,
-    })
-}
-
-fn details(t: &ReportTable) -> usize {
-    t.rows.iter().filter(|r| r.kind == RowKind::Detail).count()
-}
-
-/// The detail request for a `more` row of `run`.
-fn page_request(
-    req: &RunRequest,
-    run: &BuilderRun,
-    node_id: String,
-    path: RowPath,
-    cursor: String,
-) -> DetailRequest {
-    DetailRequest {
-        reference: req.reference.clone(),
-        node_id,
-        path,
-        range: None,
-        cursor: Some(cursor),
-        fingerprint: run.fingerprint.clone(),
-        stamp: run.stamp,
-    }
-}
-
-/// A `more` row's cursor is spent once: a page that brought nothing new
-/// for it (an engine that answered the same cursor) ends the fill there
-/// rather than looping.
-fn stuck(before: &ReportTable, after: &ReportTable) -> bool {
-    next_more(before) == next_more(after) && details(before) == details(after)
-}
-
 /// Fills `run`'s `more` rows with pages from `fetch` up to `max` detail
-/// rows (the demo answers at once; tests pass a stub).
+/// rows, through the one fill ([`ExportFill`]) the engine path awaits too
+/// (the demo answers at once; tests pass a stub).
 ///
 /// # Errors
-/// The first page's refusal: the whole file fails.
+/// The first page's refusal: the whole file fails; `Cancelled`.
 pub(crate) fn fill_with(
     req: &RunRequest,
-    mut run: BuilderRun,
+    run: BuilderRun,
     max: usize,
     cancel: &AtomicBool,
     mut fetch: impl FnMut(&DetailRequest, &BuilderRun) -> Result<DetailPage, ApiError>,
 ) -> Result<Filled, ApiError> {
-    while details(&run.table) < max {
+    let mut fill = ExportFill::new(req, run, max);
+    while let Some(dr) = fill.next_request() {
         if cancel.load(Ordering::Relaxed) {
             return Err(ApiError::Cancelled);
         }
-        let Some((node_id, path, cursor)) = next_more(&run.table) else {
-            break;
-        };
-        let dr = page_request(req, &run, node_id, path.clone(), cursor);
-        let page = fetch(&dr, &run)?;
-        let before = run.table.clone();
-        splice(&mut run.table, &path, page.rows, page.cursor);
-        if stuck(&before, &run.table) {
-            break;
-        }
+        let page = fetch(&dr, fill.run())?;
+        fill.take(page);
     }
-    let cut = run.table.rows.iter().any(|r| r.kind == RowKind::More);
-    Ok(Filled { run, cut })
+    Ok(fill.finish())
 }
 
 /// Starts the export run and its fill.
@@ -162,40 +101,49 @@ pub(crate) fn start(w: &ReportWindow) -> Option<FillJob> {
         },
         move |s| async move {
             let rb = s.report_builder();
-            let mut run = rb.run(&live_req).await?;
-            // The same loop as `fill_with`, with the engine's awaits.
-            while details(&run.table) < MAX_EXPORT_ROWS {
+            let run = rb.run(&live_req).await?;
+            // The same fill as `fill_with`, with the engine's awaits.
+            let mut fill = ExportFill::new(&live_req, run, MAX_EXPORT_ROWS);
+            while let Some(dr) = fill.next_request() {
                 if live_cancel.load(Ordering::Relaxed) {
                     return Err(ApiError::Cancelled);
                 }
-                let Some((node_id, path, cursor)) = next_more(&run.table) else {
-                    break;
-                };
-                let dr = page_request(&live_req, &run, node_id, path.clone(), cursor);
-                let page = rb.detail(&dr, &run.table.columns, &run.layout).await?;
-                let before = run.table.clone();
-                splice(&mut run.table, &path, page.rows, page.cursor);
-                if stuck(&before, &run.table) {
-                    break;
-                }
+                let r = fill.run();
+                let page = rb.detail(&dr, &r.table.columns, &r.layout).await?;
+                fill.take(page);
             }
-            let cut = run.table.rows.iter().any(|r| r.kind == RowKind::More);
-            Ok(Filled { run, cut })
+            Ok(fill.finish())
         },
     );
     Some(FillJob { job, cancel })
 }
 
+/// What turns a filled run into the file's table, copied from the window
+/// so it runs on the file's worker thread (A09 #3).
+#[derive(Clone)]
+pub(crate) struct FileCtx {
+    def: Option<BuilderDefinition>,
+    options: ReportOptions,
+}
+
+impl FileCtx {
+    /// The window's definition and options.
+    pub(crate) fn of(w: &ReportWindow) -> FileCtx {
+        FileCtx {
+            def: w.builder.as_ref().and_then(|b| b.def.clone()),
+            options: w.options.clone(),
+        }
+    }
+}
 /// The filled run as the file's table: dressed as the screen dresses its
 /// rows, every row in engine order (the engine already applied the open
 /// and collapsed lists), and a `more` row left over saying rows are
 /// missing.
-pub(crate) fn file_table(w: &ReportWindow, f: Filled) -> ReportTable {
-    let def = w.builder.as_ref().and_then(|b| b.def.as_ref());
+pub(crate) fn file_table(ctx: &FileCtx, f: Filled) -> ReportTable {
     let denied = !f.run.denied.is_empty();
-    let table = super::dress(def, f.run.table, denied);
+    let table = super::dress(ctx.def.as_ref(), f.run.table, denied);
     let rows: Vec<usize> = (0..table.rows.len()).collect();
-    let mut out = cl_model::reports::present(&table, &rows, &w.options);
+    let mut out = cl_model::reports::present(&table, &rows, &ctx.options);
     for r in &mut out.rows {
         if r.kind == RowKind::More {
             r.caption = "@reports.builder.not_loaded".into();

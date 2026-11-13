@@ -102,6 +102,7 @@ impl std::fmt::Debug for Review {
             .field("reports", &self.reports)
             .field("clashes", &self.clashes)
             .field("names", &self.names.len())
+            .field("several", &self.several)
             .finish()
     }
 }

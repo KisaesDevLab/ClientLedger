@@ -375,6 +375,11 @@ struct Exporting {
     asked: bool,
 }
 
+/// A choice to take back: its key and what it held before (None: no
+/// choice; Some(None): left out).
+#[allow(clippy::option_option, reason = "the choices map holds Option<String>")]
+type Undo = (String, Option<Option<String>>);
+
 /// The review and its jobs.
 #[derive(Default)]
 struct Reviewing {
@@ -391,7 +396,7 @@ struct Reviewing {
     error: Option<&'static str>,
     /// The last choice (its key and the value before it), taken back when
     /// the preview it asked for fails.
-    undo: Option<(String, Option<Option<String>>)>,
+    undo: Option<Undo>,
 }
 
 /// One step of saving the reviewed reports.
@@ -1515,6 +1520,21 @@ async fn live_list(s: &cl_api::Session, kind: &str) -> Result<PickList, ApiError
     Ok(v)
 }
 
+/// The card's words for an unresolved reference: an account the file names
+/// by number wasn't found under that number (Q-A09v); anything else wasn't
+/// found under its name.
+fn unresolved_key(r: Option<&cl_model::report_def::clreport::Reference>) -> &'static str {
+    match r {
+        Some(x)
+            if x.kind == cl_model::report_def::clreport::RefKind::Account
+                && x.number.as_deref().is_some_and(|n| !n.trim().is_empty()) =>
+        {
+            "report_file.card.unresolved_number"
+        }
+        _ => "report_file.card.unresolved",
+    }
+}
+
 /// The wire kind of a reference kind.
 const fn wire_kind(k: cl_model::report_def::clreport::RefKind) -> &'static str {
     use cl_model::report_def::clreport::RefKind;
@@ -1591,7 +1611,10 @@ fn card(
                 None => (t("report_file.ref.unknown"), None),
             };
             ui.add_space(4.0);
-            ui.label(t_with("report_file.card.unresolved", &[("what", &what)]));
+            ui.label(t_with(
+                unresolved_key(reference.as_ref()),
+                &[("what", &what)],
+            ));
             ui.horizontal_wrapped(|ui| {
                 let combo_label = t("report_file.card.pick");
                 let l = ui.label(combo_label.as_str());

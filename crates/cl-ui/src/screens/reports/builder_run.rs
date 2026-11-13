@@ -51,6 +51,7 @@ use crate::screens::company::form;
 use crate::screens::invoice::engine::{self, Job};
 use crate::theme::Tokens;
 use crate::windows::OpenPayload;
+use cl_api::resources::report_builder::fill::splice;
 use cl_model::report_def::editor::{Origin, Saved, SavedKind};
 
 /// A subtotal's detail, opened in a new report tab.
@@ -892,39 +893,6 @@ fn poll_page(w: &mut ReportWindow) {
     }
 }
 
-/// Puts a page's rows where the `more` row at `path` was, one level under
-/// its line, and a new `more` row after them while pages remain.
-fn splice(table: &mut ReportTable, path: &RowPath, rows: Vec<ReportRow>, cursor: Option<String>) {
-    let Some(at) = table
-        .rows
-        .iter()
-        .position(|r| r.kind == RowKind::More && &r.path == path)
-    else {
-        return;
-    };
-    let more = table.rows.remove(at);
-    let level = more.level;
-    let mut new: Vec<ReportRow> = rows
-        .into_iter()
-        .map(|mut r| {
-            r.level = level;
-            r
-        })
-        .collect();
-    if let Some(c) = cursor
-        && let Some(Drill::BuilderPage { node_id, path, .. }) = more.drill.clone()
-    {
-        let mut m = more;
-        m.drill = Some(Drill::BuilderPage {
-            node_id,
-            path,
-            cursor: Some(c),
-        });
-        new.push(m);
-    }
-    table.rows.splice(at..at, new);
-}
-
 /// The rows shown: the engine's, less those under a closed line. Worked
 /// out once per table (`serial`) and run-state revision, not every frame
 /// (S-L6: up to 100,000 rows).
@@ -1499,6 +1467,7 @@ pub(crate) fn open_definition(w: &mut ReportWindow, open: BuilderRunOpen) {
     b.title.clone_from(&open.title);
     b.json = serde_json::to_value(&open.def).unwrap_or(Value::Null);
     b.editor = Some(open.editor);
+    let imported = matches!(open.origin, Origin::Imported);
     b.origin = Some(open.origin);
     b.saved = open.saved;
     b.baseline = Some(open.options.clone());
@@ -1509,9 +1478,13 @@ pub(crate) fn open_definition(w: &mut ReportWindow, open: BuilderRunOpen) {
     w.table = None;
     w.error = None;
     // Memorize in the result tab makes a new report; the editor's own
-    // Save changes updates its row.
+    // Save changes updates its row. A report from a file is still an
+    // import there (Ctrl+M audits `origin: 'import'`, A09 #5).
     w.memo.current = None;
     w.memo.saved = None;
+    if imported {
+        w.memo.origin = Some("import".into());
+    }
     w.run();
 }
 

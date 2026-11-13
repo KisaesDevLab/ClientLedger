@@ -1405,6 +1405,10 @@ fn main() -> std::process::ExitCode {
             contract_report_builder::a_flipped_section_leaves_its_formula_alone,
         ),
         (
+            "report_builder::an_export_pages_a_line_over_five_thousand_rows",
+            contract_report_builder::an_export_pages_a_line_over_five_thousand_rows,
+        ),
+        (
             "budgets::hand_fixture_and_writes",
             contract_budgets::hand_fixture_and_writes,
         ),

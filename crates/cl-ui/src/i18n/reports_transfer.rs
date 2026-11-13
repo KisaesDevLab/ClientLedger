@@ -46,6 +46,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("report_file.card.matched", "{n} items matched in this company"),
     ("report_file.card.matched.one", "1 item matched in this company"),
     ("report_file.card.unresolved", "The file uses {what}, which this company doesn't have under that name."),
+    ("report_file.card.unresolved_number", "The file uses {what}, which this company doesn't have under that number. Pick the account to use instead."),
     ("report_file.card.pick", "Use instead"),
     ("report_file.card.pick_one", "Choose\u{2026}"),
     ("report_file.card.leave_out", "Leave out"),

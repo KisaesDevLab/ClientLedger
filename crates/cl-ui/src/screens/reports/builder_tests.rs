@@ -339,6 +339,34 @@ fn an_editors_run_report_has_one_tab_that_returns_to_it() {
     assert_eq!(seed.def, open.def);
 }
 
+/// A09 #5: an imported report's Run report tab keeps the import origin, so
+/// Ctrl+M there is audited as an import; another editor's tab is not.
+#[test]
+fn an_imported_reports_run_tab_memorizes_as_an_import() {
+    let (_d, link) = demo();
+    let def = cl_model::report_def::parse(&pl_starter().to_string()).expect("def");
+    let spec = super::builder_ref::spec_for(&def);
+    let open = |origin| super::builder_ref::BuilderRunOpen {
+        editor: super::builder::EditorId::next(),
+        title: "From the file".into(),
+        def: def.clone(),
+        options: cl_model::reports::ReportOptions::for_spec(spec),
+        saved: None,
+        origin,
+        then: None,
+    };
+    let mut w = window(&link);
+    w.poll();
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open(
+        cl_model::report_def::editor::Origin::Imported
+    )))));
+    assert_eq!(w.memo.origin.as_deref(), Some("import"));
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open(
+        cl_model::report_def::editor::Origin::Blank
+    )))));
+    assert_eq!(w.memo.origin, None);
+}
+
 /// R13 (Q-A08m): the editor's Print runs the full report in its tab, then
 /// prints that tab (its PDF in the document tab), never the preview.
 #[test]
