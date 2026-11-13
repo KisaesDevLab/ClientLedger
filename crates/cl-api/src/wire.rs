@@ -615,6 +615,11 @@ impl Capabilities {
     /// percent-of bases use each section's normal sign; "Show as positive"
     /// changes only the section's own rows (Q-A08ai).
     pub const REPORT_BUILDER_FORMULA_SIGN: &'static str = "report-builder-formula-sign-v1";
+    /// U-219 (engine PR #53): the Assets, Liabilities and Equity by Account
+    /// summaries total each account's balance at the end date (Q-A09b);
+    /// Equity by Account shows posted balances only (no computed earnings).
+    /// No desktop screen calls these routes yet.
+    pub const REPORTS_BY_ACCOUNT_BALANCE: &'static str = "reports-by-account-balance-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
