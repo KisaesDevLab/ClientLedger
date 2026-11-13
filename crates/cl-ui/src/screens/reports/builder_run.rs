@@ -1645,6 +1645,37 @@ fn read_def(w: &mut ReportWindow, v: &Value) -> Option<BuilderDefinition> {
     }
 }
 
+/// The Memorized Reports list's "Edit in Report Builder" on a builder row
+/// (A09): the editor on the row as listed (its version guards Save
+/// changes). `Err` is the i18n key of why it can't be read.
+pub(crate) fn edit_row(
+    link: &crate::company::CompanyLink,
+    row: &DefinitionRow,
+) -> Result<(), &'static str> {
+    let text = serde_json::to_string(&row.definition).unwrap_or_default();
+    let def = cl_model::report_def::parse(&text).map_err(|e| {
+        if matches!(e, cl_model::report_def::DefinitionError::Newer) {
+            "reports.builder.newer"
+        } else {
+            "reports.builder.unreadable"
+        }
+    })?;
+    let saved = saved_of(row, def.clone(), SavedKind::Builder);
+    let seed = CustomizeSeed {
+        title: row.name.clone(),
+        def,
+        origin: Origin::Memorized,
+        saved: Some(saved),
+        dates: None,
+        basis: None,
+        adjusting: None,
+        filters_dropped: false,
+        editor: None,
+    };
+    super::builder::open(link, BuilderSeed::Customize(Box::new(seed)));
+    Ok(())
+}
+
 /// Customize on a builder report (`row`: its memorized row, as re-read).
 fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
     let (def, saved, origin) = if let Some(row) = row {

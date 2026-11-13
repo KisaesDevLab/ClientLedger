@@ -25,6 +25,8 @@ mod export;
 mod filter_lists;
 mod filters;
 mod memorized;
+// A09: the Memorized Reports list.
+pub mod memorized_list;
 mod window;
 
 #[cfg(test)]
@@ -80,6 +82,9 @@ pub fn make(
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
+    if kind.as_str() == memorized_list::KIND {
+        return memorized_list::make(kind, link, open);
+    }
     if kind.as_str() == builder::KIND {
         return Some(Box::new(builder::BuilderScreen::new(
             Arc::clone(link),

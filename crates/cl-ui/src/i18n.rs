@@ -152,9 +152,11 @@ mod report_builder;
 // A08: the Report Builder editor.
 mod report_builder_editor;
 mod reports;
+// A09: the Memorized Reports list.
+mod reports_memorized;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 53] = [
+const TABLES: [&[(&str, &str)]; 54] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -208,6 +210,7 @@ const TABLES: [&[(&str, &str)]; 53] = [
     reports::ENGLISH,
     report_builder::ENGLISH,
     report_builder_editor::ENGLISH,
+    reports_memorized::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

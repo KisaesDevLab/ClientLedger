@@ -99,6 +99,24 @@ pub struct DefinitionWrite {
     pub definition: Value,
 }
 
+/// A change to some fields of a memorized report (A09: the Memorized
+/// Reports list renames and moves without resending what it doesn't
+/// change; the engine's PUT takes every field but `version` as optional).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionPatch {
+    /// A new name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A new group (`Some(None)`: no group).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Option<String>>,
+    /// A new body, of the row's own kind (a builder rename sends its body
+    /// with `title` = the new name, Q-A08r).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition: Option<Value>,
+}
+
 /// Why the engine refused a memorized-report change.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DefinitionRefusal {
@@ -301,6 +319,35 @@ impl ReportDefinitions<'_> {
         one(&reply.body, "memorized report")
     }
 
+    /// Changes some fields of the report read at `version` (rename, move
+    /// to a group). `kind` is the row's own kind: it sets the size cap and
+    /// the builder capability check, and is not sent.
+    ///
+    /// # Errors
+    /// As [`ReportDefinitions::update`].
+    pub async fn patch(
+        &self,
+        id: &str,
+        version: u64,
+        kind: &str,
+        p: &DefinitionPatch,
+    ) -> Result<DefinitionRow, ApiError> {
+        self.require_kind(kind)?;
+        let mut v =
+            serde_json::to_value(p).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?;
+        if let Value::Object(m) = &mut v {
+            m.insert("version".into(), Value::from(version));
+        }
+        let mut call = Call::new(
+            Method::Put,
+            REPORT_DEF_PUT.route(),
+            REPORT_DEF_PUT.route().replace("{id}", id),
+        );
+        call = call.json_body(body(&v, max_bytes(kind))?);
+        let reply = self.0.send(&REPORT_DEF_PUT, call, None).await?;
+        one(&reply.body, "memorized report")
+    }
+
     /// Deletes the report read at `version` (soft delete).
     ///
     /// # Errors
@@ -397,6 +444,26 @@ mod tests {
         "version": 3, "createdBy": null, "createdByName": "Kurt",
         "updatedAt": "2026-11-04T15:41:00.000Z"
     }"#;
+
+    #[test]
+    fn a_patch_sends_only_what_changes() {
+        let rename = DefinitionPatch {
+            name: Some("For the bank".into()),
+            ..DefinitionPatch::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&rename).expect("json"),
+            serde_json::json!({"name": "For the bank"})
+        );
+        let ungroup = DefinitionPatch {
+            group_id: Some(None),
+            ..DefinitionPatch::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&ungroup).expect("json"),
+            serde_json::json!({"groupId": null})
+        );
+    }
 
     #[test]
     fn rows_read_bare_or_wrapped() {

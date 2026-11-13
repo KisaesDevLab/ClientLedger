@@ -12,13 +12,16 @@ fn day(y: i32, m: u32, d: u32) -> CalendarDate {
 fn the_mockups_memorized_report_and_a_budget_are_there_once() {
     let mut d = DemoState::new();
     let (list, _) = definitions(&mut d);
-    assert_eq!(list.len(), 1);
+    assert_eq!(list.len(), 2);
     assert_eq!(list[0].name, "Monthly P&L for the bank");
+    // A09: another user's report, which this user can't change.
+    assert_eq!(list[1].created_by_name.as_deref(), Some("Dana"));
+    assert!(!list[1].can_edit);
     let def: cl_model::reports::StandardDefinition =
         serde_json::from_value(list[0].definition.clone()).expect("definition");
     assert!(def.check().is_ok());
     assert_eq!(budgets(&mut d).len(), 1);
-    assert_eq!(definitions(&mut d).0.len(), 1, "seeded once");
+    assert_eq!(definitions(&mut d).0.len(), 2, "seeded once");
 }
 
 #[test]
@@ -176,4 +179,65 @@ fn the_stub_mapper_maps_the_mockups_question_and_refuses_others() {
     assert!(matches!(ask(&other), Err(ApiError::ReportShape { .. })));
     let owe = crate::screens::reports::ask_request_for_test("Who owes me money?", day(2026, 11, 4));
     assert_eq!(ask(&owe).expect("aging").report_key, "ar_aging_summary");
+}
+
+#[test]
+fn the_list_renames_moves_and_manages_groups_by_the_engines_rules() {
+    use cl_api::resources::reports::definitions::{DefinitionRefusal, definition_refusal};
+    let mut d = DemoState::new();
+    let (list, _) = definitions(&mut d);
+    let (mine, theirs) = (list[0].clone(), list[1].clone());
+    let g = create_group(&mut d, "For the bank").expect("group");
+    assert_eq!(
+        definition_refusal(&create_group(&mut d, " for the BANK ").expect_err("taken")),
+        Some(DefinitionRefusal::NameTaken)
+    );
+    let moved = patch_definition(
+        &mut d,
+        &mine.id,
+        mine.version,
+        &DefinitionPatch {
+            name: Some("Bank P&L".into()),
+            group_id: Some(Some(g.id.clone())),
+            definition: None,
+        },
+    )
+    .expect("rename and move");
+    assert_eq!(
+        (
+            moved.name.as_str(),
+            moved.group_id.as_deref(),
+            moved.version
+        ),
+        ("Bank P&L", Some(g.id.as_str()), mine.version + 1)
+    );
+    // The old version is stale; another user's report is refused.
+    let stale = patch_definition(&mut d, &mine.id, mine.version, &DefinitionPatch::default());
+    assert_eq!(
+        definition_refusal(&stale.expect_err("stale")),
+        Some(DefinitionRefusal::Stale)
+    );
+    let not_mine = patch_definition(
+        &mut d,
+        &theirs.id,
+        theirs.version,
+        &DefinitionPatch {
+            name: Some("Mine now".into()),
+            ..DefinitionPatch::default()
+        },
+    );
+    assert_eq!(
+        definition_refusal(&not_mine.expect_err("not author")),
+        Some(DefinitionRefusal::NotAuthor)
+    );
+    // Renaming the group, then deleting it moves its report to no group.
+    let g2 = rename_group(&mut d, &g.id, g.version, "Bank").expect("renamed");
+    assert!(
+        rename_group(&mut d, &g.id, g.version, "Again").is_err(),
+        "stale"
+    );
+    delete_group(&mut d, &g.id, g2.version).expect("deleted");
+    let (list, groups) = definitions(&mut d);
+    assert_eq!(groups, Vec::<DefinitionGroup>::new());
+    assert!(list.iter().all(|r| r.group_id.is_none()));
 }

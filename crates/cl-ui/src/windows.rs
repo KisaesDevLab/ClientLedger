@@ -239,6 +239,9 @@ pub enum OpenPayload {
     /// (`reports.center`), one result tab per editor refreshed in place
     /// (Q-A08x).
     BuilderDefinition(Box<crate::screens::reports::builder_ref::BuilderRunOpen>),
+    /// A09: a memorized report from the Memorized Reports list, shown as
+    /// memorized (Ctrl+M there offers Save changes).
+    Memorized(Box<crate::screens::reports::memorized_list::MemorizedOpen>),
 }
 
 /// The name a Quick Add prompt hands to Set Up (Q-PR4d). `Debug` shows no

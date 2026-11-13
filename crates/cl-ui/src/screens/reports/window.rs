@@ -1501,6 +1501,10 @@ impl Screen for ReportWindow {
                 super::builder_run::open_definition(self, *open);
                 return true;
             }
+            OpenPayload::Memorized(open) => {
+                super::memorized::open_row(self, &open.0);
+                return true;
+            }
             _ => return false,
         };
         let ReportOpen { key, options } = *open;

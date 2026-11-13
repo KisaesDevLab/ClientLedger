@@ -1,0 +1,62 @@
+//! English text for the Memorized Reports list (A09 S1, Q-310, Q-A09e/f/k).
+
+/// The Memorized Reports list's part of the English catalog.
+#[rustfmt::skip]
+pub const ENGLISH: &[(&str, &str)] = &[
+    ("shortcuts.scope.report_list", "In Memorized Reports"),
+    ("reports.memorized.title", "Memorized Reports"),
+    ("reports.memorized.loading", "Loading memorized reports\u{2026}"),
+    ("reports.memorized.load_failed", "The memorized reports couldn't be read. Close this window and open it again."),
+    ("reports.memorized.unavailable", "Memorized reports need an engine update. Install the latest ClientLedger to use them."),
+    ("reports.memorized.empty", "No memorized reports yet. Open a report and press Ctrl+M to memorize it."),
+    ("reports.memorized.saving", "Saving\u{2026}"),
+    ("reports.memorized.manage", "Manage\u{2026}"),
+    ("reports.memorized.manage.tip", "Rename, group, copy or delete memorized reports."),
+    // Toolbar.
+    ("reports.memorized.open", "Open"),
+    ("reports.memorized.open.tip", "Show this report with its saved settings (Enter)."),
+    ("reports.memorized.edit", "Edit in Report Builder"),
+    ("reports.memorized.edit.tip", "Change this report's rows and columns in the Report Builder."),
+    ("reports.memorized.rename", "Rename"),
+    ("reports.memorized.rename.tip", "Give this report or group another name (F2)."),
+    ("reports.memorized.move", "Move to group"),
+    ("reports.memorized.move.tip", "Put this report in another group, or in no group."),
+    ("reports.memorized.delete", "Delete"),
+    ("reports.memorized.delete.tip", "Delete this memorized report or group (Ctrl+Delete). You'll be asked first."),
+    ("reports.memorized.copy", "Memorize a copy"),
+    ("reports.memorized.copy.tip", "Save a copy of this report under your name, in the same group, so you can change it."),
+    ("reports.memorized.new_group", "New group"),
+    ("reports.memorized.new_group.tip", "A group is a folder for memorized reports (Ctrl+N)."),
+    // Columns and rows.
+    ("reports.memorized.col.name", "Name"),
+    ("reports.memorized.col.report", "Report"),
+    ("reports.memorized.col.author", "Author"),
+    ("reports.memorized.col.changed", "Last changed"),
+    ("reports.memorized.no_group", "No group"),
+    ("reports.memorized.kind.builder", "Report Builder"),
+    ("reports.memorized.kind.standard", "Report"),
+    // Cards.
+    ("reports.memorized.name", "Name"),
+    ("reports.memorized.group_name", "Group name"),
+    ("reports.memorized.rename_ok", "Rename"),
+    ("reports.memorized.move_ok", "Move"),
+    ("reports.memorized.new_group_ok", "Add group"),
+    ("reports.memorized.cancel", "Cancel"),
+    ("reports.memorized.delete_question", "Delete the memorized report \u{201c}{name}\u{201d}? Only these saved settings go; the report itself stays in the list."),
+    ("reports.memorized.delete_ok", "Delete it"),
+    ("reports.memorized.delete_group_question", "Delete the group \u{201c}{name}\u{201d}? Its {n} reports move to no group."),
+    ("reports.memorized.delete_group_question.one", "Delete the group \u{201c}{name}\u{201d}? Its 1 report moves to no group."),
+    ("reports.memorized.delete_group_ok", "Delete group"),
+    ("reports.memorized.group_name_needed", "Type a name for the group."),
+    ("reports.memorized.group_taken", "Another group has that name. Choose another."),
+    // Copy names: "<name> (copy)", "<name> (copy 2)".
+    ("reports.memorized.copy_suffix", "(copy)"),
+    ("reports.memorized.copy_suffix_n", "(copy {n})"),
+    // Q-310 and refusals.
+    ("reports.memorized.gated", "Only {author}, an owner or an administrator can change this report. Memorize a copy instead."),
+    ("reports.memorized.its_author", "the person who memorized it"),
+    ("reports.memorized.not_author", "Only the person who memorized this report, an owner or an administrator can change it. Memorize a copy instead."),
+    ("reports.memorized.stale", "Someone changed this report since the list was read. The list is refreshed; try again."),
+    ("reports.memorized.gone", "That report or group was deleted in another window. The list is refreshed."),
+    ("reports.memorized.failed", "The change wasn't saved. Try again."),
+];

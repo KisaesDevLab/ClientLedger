@@ -392,11 +392,23 @@ pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usi
         return 0;
     }
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(t("reports.group.memorized").to_uppercase())
-            .size(11.0)
-            .color(tokens.text_secondary),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(t("reports.group.memorized").to_uppercase())
+                .size(11.0)
+                .color(tokens.text_secondary),
+        );
+        // A09 (Q-A09k): the Memorized Reports list.
+        if ui
+            .link(RichText::new(t("reports.memorized.manage")).size(11.0))
+            .on_hover_text(t("reports.memorized.manage.tip"))
+            .clicked()
+        {
+            w.link.push(crate::company::CompanyEvent::OpenWindow(
+                cl_model::CommandId::new(super::memorized_list::KIND),
+            ));
+        }
+    });
     if w.memo.list.is_empty() {
         ui.label(
             RichText::new(t("reports.memorize.none"))
