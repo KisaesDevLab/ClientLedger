@@ -238,15 +238,18 @@ fn print_fills_then_opens_the_pdf() {
     let mut w = ledger(&link);
     let _ = link.drain();
     assert!(w.command(CommandId::new("file.print")));
-    // The PDF is built on a worker thread: up to 30 s on a busy machine.
-    for _ in 0..3000 {
+    // The pages are read and the PDF built on worker threads. The run alone
+    // takes ~40 s in a debug build, so wait on a wall-clock deadline (a
+    // loaded CI runner is several times slower), not a fixed poll count.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    while std::time::Instant::now() < deadline {
         crate::screens::reports::export::poll(&mut w);
         if !w.export.busy() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert!(!w.export.filling());
+    assert!(!w.export.busy(), "the print finished");
     assert!(link.drain().into_iter().any(|e| matches!(
         e,
         crate::company::CompanyEvent::OpenWith(k, _)
