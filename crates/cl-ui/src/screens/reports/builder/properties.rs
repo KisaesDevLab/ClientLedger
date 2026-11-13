@@ -184,4 +184,51 @@ fn report_tab(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         s.commit_pending();
         super::save::open_memorize(s, false);
     }
+    report_file_buttons(s, ui, tokens);
+}
+
+/// Export report file / Import report file (A09 WP-A; the mockup draws
+/// Export, Import sits beside it, Q-A09e). Only a memorized report exports
+/// (Q-A09l); its saved version is what the file holds.
+fn report_file_buttons(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
+    if !crate::screens::reports::clreport::available(&s.link) {
+        return;
+    }
+    ui.add_space(8.0);
+    let saved = s.ed.saved().map(|x| (x.id.clone(), x.name.clone()));
+    let mut note = None;
+    ui.horizontal(|ui| {
+        let export = ui
+            .add_enabled(
+                saved.is_some(),
+                egui::Button::new(t("cmd.reports.export_report_file")),
+            )
+            .on_hover_text(t("report_file.export.tip"))
+            .on_disabled_hover_text(t("report_file.export.memorize_first"));
+        if export.clicked()
+            && let Some((id, name)) = saved.clone()
+        {
+            note = crate::screens::reports::clreport::start_export(
+                &s.link,
+                crate::screens::reports::clreport::Target::Saved { id, name },
+            );
+        }
+        if ui
+            .button(t("cmd.reports.import_report_file"))
+            .on_hover_text(t("report_file.import.tip"))
+            .clicked()
+        {
+            note = crate::screens::reports::clreport::start_import(&s.link);
+        }
+    });
+    if saved.is_none() {
+        ui.label(
+            RichText::new(t("report_file.export.memorize_first"))
+                .size(12.0)
+                .color(tokens.text_tertiary),
+        );
+    }
+    if let Some(k) = note {
+        s.status = Some(t(k));
+    }
 }

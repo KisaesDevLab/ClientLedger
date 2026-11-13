@@ -47,9 +47,7 @@ use sha2::{Digest, Sha256};
 /// report, reorder and unit-set routes are.
 /// P28 (Q-220): the memorized-report routes (U-118, engine PR-F) are outside
 /// the pinned spec until PR-F merges and the pin moves; remove them then.
-/// A09 (Q-220): the `.clreport` routes (U-220) are outside the pinned spec
-/// until U-220 merges and the pin moves; remove them then.
-pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -59,9 +57,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // A09: U-220.
-    ("POST", "/api/v1/report-builder/definitions/export"),
-    ("POST", "/api/v1/report-builder/definitions/import/preview"),
 ];
 
 /// Lowercase hex of a SHA-256.

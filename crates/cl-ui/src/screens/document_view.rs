@@ -204,6 +204,8 @@ impl Screen for DocumentViewScreen {
             | OpenPayload::BuilderEditor(_)
             | OpenPayload::BuilderDefinition(_)
             | OpenPayload::Memorized(_)
+            | OpenPayload::ReportFile(_)
+            | OpenPayload::ImportedReport(_)
             | OpenPayload::CardPayment(_)
             | OpenPayload::FeedAt(_) => false,
         }

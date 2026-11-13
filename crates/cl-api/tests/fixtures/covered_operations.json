@@ -371,9 +371,9 @@
   {"method":"GET","path":"/api/v1/reports/reconciliation-detail","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/reconciliation-discrepancy","inSpec":true,"fragmentHash":"eeb1734297825e81940a31da8603fbd2dcf7b06f89624f6591bca24497931446"},
   {"method":"GET","path":"/api/v1/report-builder/definitions","inSpec":true,"fragmentHash":"2a6ef45549c30f80d1f2674aee3e9e94f222244e57259fadf0a0e6e8631cdff2"},
-  {"method":"POST","path":"/api/v1/report-builder/definitions","inSpec":true,"fragmentHash":"73b72a3737682ce71390b53d0735363b054d0f8074b75e266c2e43a25af5a68b"},
+  {"method":"POST","path":"/api/v1/report-builder/definitions","inSpec":true,"fragmentHash":"e135af0655974db8aede59f2d9f5d6718c9a27967c6fab5c0b2f9c8d0704ec09"},
   {"method":"GET","path":"/api/v1/report-builder/definitions/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
-  {"method":"PUT","path":"/api/v1/report-builder/definitions/{id}","inSpec":true,"fragmentHash":"5833e52a055531ac698f387060a4a4822f60f029906256a90b46aa80bee506c2"},
+  {"method":"PUT","path":"/api/v1/report-builder/definitions/{id}","inSpec":true,"fragmentHash":"ed7e75f36eb7be55d1ac4d5b813fbb84a57c7202238f009edb6729cea876c7db"},
   {"method":"DELETE","path":"/api/v1/report-builder/definitions/{id}","inSpec":true,"fragmentHash":"5bf8658582507688f5dfa4c252139798a61939cff700b2bcd3b78b39ef02fc89"},
   {"method":"GET","path":"/api/v1/report-builder/definition-groups","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/report-builder/definition-groups","inSpec":true,"fragmentHash":"313e1d26239061c0cb82280978168a119e8737e705841b75ad90b1a0df784477"},
@@ -417,6 +417,6 @@
   {"method":"GET","path":"/api/v1/budgets/{id}/vs-actual","inSpec":true,"fragmentHash":"a308a2199f40852a4e1ab493d4ef1111ba84737a1be3123f21df104c866501fa"},
   {"method":"POST","path":"/api/v1/reports/email","inSpec":true,"fragmentHash":"254bcec1125d2087bfcaf35db39d3a167b0ad4a60c5251a813467a01351cbd74"},
   {"method":"POST","path":"/api/v1/reports/ask","inSpec":true,"fragmentHash":"18e329f3d46ad78f9c7b8000a962479fbc55a3567eeccdcd7c7817945ea771ce"},
-  {"method":"POST","path":"/api/v1/report-builder/definitions/export","inSpec":false,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/report-builder/definitions/import/preview","inSpec":false,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/report-builder/definitions/export","inSpec":true,"fragmentHash":"e07ab655b3078a8f61288a6f03749be3a09af5a99079ab208f595cbca28d02cb"},
+  {"method":"POST","path":"/api/v1/report-builder/definitions/import/preview","inSpec":true,"fragmentHash":"7d2fcf3470a5bceea039bd2355334891c08ed51aaf11b9aea224dc69a0820591"}
 ]

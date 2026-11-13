@@ -99,6 +99,16 @@ pub enum BuilderSeed {
     },
     /// Customize on a report window (Q-A08g, Q-A08k).
     Customize(Box<CustomizeSeed>),
+    /// A09 WP-A: a report read from a `.clreport` file, not memorized yet:
+    /// its Memorize is sent with `origin: 'import'`.
+    Imported {
+        /// The definition (this company's ids).
+        def: Box<BuilderDefinition>,
+        /// The name from the file (or the review's Rename).
+        name: String,
+        /// The matched group, for the Memorize dialog.
+        group_id: Option<String>,
+    },
 }
 
 /// Customize on a standard report (its mapped starter), a builder run or a
@@ -137,6 +147,10 @@ impl std::fmt::Debug for BuilderSeed {
             BuilderSeed::Starter { key, .. } => f
                 .debug_struct("Starter")
                 .field("key", key)
+                .finish_non_exhaustive(),
+            BuilderSeed::Imported { group_id, .. } => f
+                .debug_struct("Imported")
+                .field("grouped", &group_id.is_some())
                 .finish_non_exhaustive(),
             BuilderSeed::Customize(c) => f
                 .debug_struct("Customize")
@@ -478,6 +492,17 @@ impl BuilderScreen {
             BuilderSeed::Starter { key, def, title } => {
                 let name = def.title.clone().unwrap_or(title);
                 self.ed = BuilderEditor::new(*def, &name, Origin::Starter(key), None);
+            }
+            BuilderSeed::Imported {
+                def,
+                name,
+                group_id,
+            } => {
+                self.ed = BuilderEditor::new(*def, &name, Origin::Imported, None);
+                if group_id.is_some() {
+                    let _ = self.ed.apply(Op::MemorizedGroup(group_id));
+                }
+                self.status = Some(t("report_file.builder.imported"));
             }
             BuilderSeed::Customize(c) => {
                 let c = *c;

@@ -15,7 +15,7 @@ use cl_api::OrphanLabel;
 use cl_api::resources::reports::definitions::{
     DefinitionRefusal, DefinitionRow, DefinitionWrite, definition_refusal,
 };
-use cl_model::report_def::editor::{Op, Saved, SavedKind, titled};
+use cl_model::report_def::editor::{Op, Origin, Saved, SavedKind, titled};
 use cl_model::report_def::{BuilderDefinition, MAX_BYTES, to_text};
 use eframe::egui::{self, Ui};
 
@@ -124,7 +124,9 @@ fn write_of(
             group_id: group.clone(),
             kind: "builder".into(),
             definition,
-            origin: None,
+            // A report read from a `.clreport` file is audited as an import
+            // (A09 WP-A, U-220); memorized, it is `Memorized` again.
+            origin: matches!(s.ed.origin(), Origin::Imported).then(|| "import".to_string()),
         },
         Sent {
             def,

@@ -1505,6 +1505,10 @@ impl Screen for ReportWindow {
                 super::memorized::open_row(self, &open.0);
                 return true;
             }
+            // A09 WP-A: a standard report from a `.clreport` file.
+            OpenPayload::ImportedReport(open) => {
+                return super::clreport::open_imported(self, *open);
+            }
             _ => return false,
         };
         let ReportOpen { key, options } = *open;

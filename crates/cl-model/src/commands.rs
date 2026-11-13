@@ -490,6 +490,8 @@ pub const COMMANDS: &[Command] = &[
     // Report tab; no shortcut.
     cmd("reports.export_report_file", "Export Report File\u{2026}", None, 13, None, Scope::Window),
     cmd("reports.import_report_file", "Import Report File\u{2026}", None, 13, None, Scope::Window),
+    // A09 WP-A: the window an export or import of a report file opens in.
+    built("reports.report_file", "Report File", None, 3, None),
     // A08: the Report Builder editor, one window per report; opened from the
     // Reports list ("New report...") and Customize, no menu entry.
     built("reports.builder_editor", "Report Builder", None, 3, None),
@@ -848,6 +850,7 @@ mod tests {
             "reports.builder_editor",
             // A09
             "reports.memorized_list",
+            "reports.report_file",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
