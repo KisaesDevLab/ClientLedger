@@ -988,6 +988,10 @@ fn main() -> std::process::ExitCode {
             "bills::backup_restore_keeps_the_bill_file_live",
             contract_bills::backup_restore_keeps_the_bill_file_live,
         ),
+        (
+            "report_defs_archive::memorized_reports_survive_an_archive_round_trip",
+            contract_report_defs_archive::memorized_reports_survive_an_archive_round_trip,
+        ),
         // P23 WP-4: sales tax, in one company of its own. The cash-basis
         // tests run last, on the fullest company (U-155: cash reports stay
         // fast as the company fills).
