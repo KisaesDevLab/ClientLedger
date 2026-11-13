@@ -37,6 +37,11 @@ use eframe::egui::{RichText, Ui};
 use serde_json::{Value, json};
 
 use super::KIND;
+
+// A09: Export and Print of a builder report (a fresh export run, its
+// `more` rows filled).
+#[path = "builder_export.rs"]
+pub(crate) mod export;
 use super::builder::{BuilderSeed, CustomizeSeed, EditorId};
 use super::builder_ref::BuilderRunOpen;
 use super::window::{ReportWindow, RunState};

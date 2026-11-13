@@ -831,6 +831,15 @@ impl ReportWindow {
         if let Some(n) = self.export.message() {
             form::hint(ui, tokens, &n);
         }
+        // A09: a builder export reads every row first; Cancel stops it.
+        if self.export.filling() {
+            ui.horizontal(|ui| {
+                form::progress_line(ui, tokens, &t("reports.export.filling"));
+                if ui.button(t("reports.export.cancel")).clicked() {
+                    self.export.cancel();
+                }
+            });
+        }
         if let Some(e) = &self.drill_error {
             form::inline_error_details(ui, tokens, e, "reports.drill");
         }

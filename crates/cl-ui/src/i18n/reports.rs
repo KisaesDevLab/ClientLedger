@@ -265,6 +265,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.customize.done", "Done"),
     ("reports.export.saved", "Saved {file}."),
     ("reports.export.saved_with_text", "Saved {file}. {n} amounts were too long for Excel numbers and were written as text; the workbook says which."),
+    // A09 (Q-A09h): a builder report's export run with every opened line's rows.
+    ("reports.export.filling", "Reading every row for the file\u{2026}"),
+    ("reports.export.cancel", "Cancel"),
+    ("reports.export.cancelled", "The file wasn't made: you cancelled it."),
+    ("reports.export.fill_failed", "The file wasn't made: the report couldn't be read in full. Nothing was saved. Try again."),
+    ("reports.export.cut", "This file stops at {n} transaction rows; lines marked \u{201c}rows not loaded\u{201d} have more."),
     ("reports.export.build_failed", "This report couldn't be made into a file. Try fewer columns or a shorter date range, then try again."),
     ("reports.export.failed", "The file couldn't be saved. Check that the folder exists and you can write to it, then try again."),
     ("reports.export.text_fallback", "{n} values were too long for Excel numbers and were written as text."),
