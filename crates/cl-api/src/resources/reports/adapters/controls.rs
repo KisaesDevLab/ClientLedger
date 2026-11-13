@@ -239,7 +239,7 @@ pub fn field_label(k: &str) -> String {
 }
 
 /// Records the trail names in plain words (`@reports.audit.entity.*`).
-pub const AUDIT_ENTITIES: [&str; 14] = [
+pub const AUDIT_ENTITIES: [&str; 15] = [
     "transaction",
     "account",
     "contact",
@@ -253,6 +253,7 @@ pub const AUDIT_ENTITIES: [&str; 14] = [
     "closing_date_override",
     "report_email",
     "report_definition",
+    "report_definition_group",
     "payment_applications",
 ];
 
@@ -264,6 +265,41 @@ pub fn entity_label(e: &str) -> String {
         format!("@reports.audit.entity.{e}")
     } else {
         e.replace('_', " ")
+    }
+}
+
+/// A09 QA-4: a memorized report's trip through a report file in plain
+/// words. The engine audits an export as `download` with `format:
+/// 'clreport'`, and a save from a file as `create` / `update` with
+/// `after.origin = 'import'`.
+fn report_file_action(e: &Value, entity: &str) -> Option<&'static str> {
+    if !matches!(entity, "report_definition" | "report_definition_group") {
+        return None;
+    }
+    let imported = e.pointer("/after_data/origin").and_then(Value::as_str) == Some("import");
+    match text(e, "action").unwrap_or("") {
+        "download" => Some("@reports.audit.action.exported"),
+        "create" if imported => Some("@reports.audit.action.imported"),
+        "update" if imported => Some("@reports.audit.action.imported_replace"),
+        _ => None,
+    }
+}
+
+/// The Record cell: the record kind, with its name when the audit row
+/// carries one (`after.name`, else `before.name`) for a memorized report
+/// or a report group (A09 QA-4). Engine cf0cb239 doesn't put the name in
+/// these rows yet, so today this is the kind alone.
+fn record_label(e: &Value, entity: &str) -> String {
+    let name = ["/after_data/name", "/before_data/name"]
+        .iter()
+        .find_map(|p| e.pointer(p).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
+    match (entity, name) {
+        ("report_definition" | "report_definition_group", Some(n)) => {
+            format!("@reports.audit.entity.{entity}_named {n}")
+        }
+        _ => entity_label(entity),
     }
 }
 
@@ -295,8 +331,11 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             vec![
                 read(e, F::Date("created_at"))?,
                 read(e, F::Text("userName"))?,
-                read(e, F::Code("reports.audit.action", "action"))?,
-                Cell::Text(entity_label(entity)),
+                match report_file_action(e, entity) {
+                    Some(key) => Cell::Text(key.into()),
+                    None => read(e, F::Code("reports.audit.action", "action"))?,
+                },
+                Cell::Text(record_label(e, entity)),
                 Cell::Empty,
                 Cell::Empty,
             ],
@@ -312,6 +351,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
                 .map(|id| Drill::Transaction { id, txn_type });
         }
         head.expandable = true;
+        let report_row = matches!(entity, "report_definition" | "report_definition_group");
         rows.push(head);
         let before = e.get("before_data").and_then(Value::as_object);
         let after = e.get("after_data").and_then(Value::as_object);
@@ -328,6 +368,9 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             // An update lists what changed; a create or delete what it had.
             if (before.is_some() && after.is_some() && a == b)
                 || QUIET.contains(&key.as_str())
+                // A memorized report's action already says it came from a
+                // file (A09 QA-4: "Imported").
+                || (report_row && key == "origin")
                 || secret(key)
             {
                 continue;
@@ -422,6 +465,76 @@ mod tests {
         ));
         assert_eq!(t.meta.truncated.map(|x| x.total), Some(3));
         assert_eq!(field_label("txn_number"), "@reports.audit.field.txnNumber");
+    }
+
+    /// A09 QA-4: report-file exports read "Exported", saves from a file
+    /// "Imported", groups "Report group", and the report is named when the
+    /// row carries a name. The rows are the engine's (cf0cb239) shapes.
+    #[test]
+    fn report_file_rows_read_in_plain_words() {
+        let row = |action: &str, entity: &str, before: Value, after: Value| {
+            json!({"id": "a", "action": action, "entity_type": entity,
+                   "entity_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60", "userName": "Owner",
+                   "created_at": "2026-11-13T10:00:00.000Z",
+                   "before_data": before, "after_data": after})
+        };
+        let v = json!({"data": [
+            row("download", "report_definition", Value::Null,
+                json!({"kind": "builder", "reportKey": null, "format": "clreport"})),
+            row("create", "report_definition", Value::Null,
+                json!({"kind": "builder", "reportKey": null, "groupId": null, "version": 1, "origin": "import"})),
+            row("update", "report_definition", json!({"kind": "builder", "version": 2}),
+                json!({"kind": "builder", "version": 3, "origin": "import"})),
+            row("create", "report_definition", Value::Null,
+                json!({"kind": "standard", "version": 1})),
+            row("create", "report_definition_group", Value::Null, json!({"sort": 0, "version": 1})),
+            row("update", "report_definition", json!({"name": "Old"}),
+                json!({"name": "Bank pack", "version": 2})),
+            row("download", "attachment", Value::Null, json!({"fileName": "x"})),
+        ], "total": 7});
+        let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+        let heads: Vec<(String, String)> = t
+            .rows
+            .iter()
+            .filter(|r| r.kind == RowKind::Header)
+            .map(|r| match (&r.cells[2], &r.cells[3]) {
+                (Cell::Text(a), Cell::Text(b)) => (a.clone(), b.clone()),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(
+            heads,
+            [
+                s(
+                    "@reports.audit.action.exported",
+                    "@reports.audit.entity.report_definition"
+                ),
+                s(
+                    "@reports.audit.action.imported",
+                    "@reports.audit.entity.report_definition"
+                ),
+                s(
+                    "@reports.audit.action.imported_replace",
+                    "@reports.audit.entity.report_definition"
+                ),
+                s(
+                    "@reports.audit.action.create",
+                    "@reports.audit.entity.report_definition"
+                ),
+                s(
+                    "@reports.audit.action.create",
+                    "@reports.audit.entity.report_definition_group"
+                ),
+                s(
+                    "@reports.audit.action.update",
+                    "@reports.audit.entity.report_definition_named Bank pack"
+                ),
+                s("@reports.audit.action.download", "attachment"),
+            ]
+        );
+        // The origin is the action's word, not a field line.
+        assert!(t.rows.iter().all(|r| r.caption != "origin"));
     }
 }
 

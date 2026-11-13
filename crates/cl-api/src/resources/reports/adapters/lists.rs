@@ -716,7 +716,7 @@ const CODES: [(&str, &[&str]); 4] = [
     ),
     (
         "reports.audit.action",
-        &["create", "update", "void", "delete", "override"],
+        &["create", "update", "void", "delete", "override", "download"],
     ),
     ("reports.closing.method", &["password", "confirmed"]),
 ];
