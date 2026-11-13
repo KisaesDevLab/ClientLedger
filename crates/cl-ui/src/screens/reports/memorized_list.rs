@@ -31,7 +31,7 @@ use cl_api::{ApiError, IdempotencyKey, OrphanLabel, RequestGroup};
 use cl_core::CalendarDate;
 use cl_core::ids::TenantId;
 use cl_model::{CommandId, Scope};
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Response, RichText, Ui};
 use serde_json::{Value, json};
 
 use crate::company::{CompanyEvent, CompanyLink};
@@ -183,6 +183,9 @@ pub struct MemorizedList {
     pub(crate) last_action: Option<&'static str>,
     /// The edit card's field takes the focus once.
     focus_edit: bool,
+    /// The table's columns all ended inside the window on the last frame
+    /// (A09 QA-2; scenarios and tests).
+    pub(crate) table_fits: Option<bool>,
     bus: crate::data_bus::Subscription,
     layout: crate::layout::FrameReport,
 }
@@ -209,6 +212,7 @@ impl MemorizedList {
             notice: None,
             last_action: None,
             focus_edit: false,
+            table_fits: None,
             layout: crate::layout::FrameReport::default(),
         };
         s.reload();
@@ -291,7 +295,7 @@ impl MemorizedList {
                         )
                     )
                 {
-                    self.problem = Some(if matches!(self.edit, Some(Edit::Rename { .. })) {
+                    self.refuse(if matches!(self.edit, Some(Edit::Rename { .. })) {
                         key
                     } else {
                         "reports.memorized.group_taken"
@@ -307,6 +311,14 @@ impl MemorizedList {
                 self.reload();
             }
         }
+    }
+
+    /// The card stays open with `key` shown, and its field takes the
+    /// keyboard back so the owner can fix the name at once (A09 QA-1:
+    /// Enter had left nothing focused, so Ctrl+A opened Chart of Accounts).
+    fn refuse(&mut self, key: &'static str) {
+        self.problem = Some(key);
+        self.focus_edit = true;
     }
 
     fn selection_exists(&self) -> bool {
@@ -558,13 +570,13 @@ impl MemorizedList {
         };
         let name = name.trim().to_string();
         if name.is_empty() {
-            self.problem = Some("reports.memorize.name_needed");
+            self.refuse("reports.memorize.name_needed");
             return;
         }
         // The engine's cap, checked here so the card stays open with the
         // reason (A09 #16).
         if name.chars().count() > cl_model::report_def::clreport::MAX_NAME_CHARS {
-            self.problem = Some("reports.memorized.name_too_long");
+            self.refuse("reports.memorized.name_too_long");
             return;
         }
         // A builder row's title follows its name (Q-A08r); a standard row
@@ -679,11 +691,11 @@ impl MemorizedList {
     fn create_group(&mut self, name: &str) {
         let name = name.trim().to_string();
         if name.is_empty() {
-            self.problem = Some("reports.memorized.group_name_needed");
+            self.refuse("reports.memorized.group_name_needed");
             return;
         }
         if name.chars().count() > cl_model::report_def::clreport::MAX_GROUP_CHARS {
-            self.problem = Some("reports.memorized.group_name_too_long");
+            self.refuse("reports.memorized.group_name_too_long");
             return;
         }
         let job = engine::write(
@@ -717,11 +729,11 @@ impl MemorizedList {
         };
         let name = name.trim().to_string();
         if name.is_empty() {
-            self.problem = Some("reports.memorized.group_name_needed");
+            self.refuse("reports.memorized.group_name_needed");
             return;
         }
         if name.chars().count() > cl_model::report_def::clreport::MAX_GROUP_CHARS {
-            self.problem = Some("reports.memorized.group_name_too_long");
+            self.refuse("reports.memorized.group_name_too_long");
             return;
         }
         let job = engine::write(
@@ -1024,14 +1036,10 @@ impl MemorizedList {
                     ("reports.memorized.move_ok", false)
                 }
                 Edit::Delete { id } => {
-                    let name = self
-                        .rows
-                        .iter()
-                        .find(|r| r.id == *id)
-                        .map(|r| r.name.clone())
-                        .unwrap_or_default();
+                    let row = self.rows.iter().find(|r| r.id == *id);
+                    let name = row.map(|r| r.name.clone()).unwrap_or_default();
                     ui.label(t_with(
-                        "reports.memorized.delete_question",
+                        delete_question_key(row.map(|r| r.kind.as_str())),
                         &[("name", &name)],
                     ));
                     ("reports.memorized.delete_ok", true)
@@ -1097,7 +1105,8 @@ impl MemorizedList {
         }
         let mut picked = None;
         let mut opened = None;
-        egui::Grid::new("memorized_list/table")
+        let name_w = name_column_width(ui.available_width());
+        let grid = egui::Grid::new("memorized_list/table")
             .num_columns(4)
             .striped(true)
             .spacing([16.0, 6.0])
@@ -1116,9 +1125,14 @@ impl MemorizedList {
                         Some(g) => {
                             let sel = Selected::Group(g.id.clone());
                             let on = self.selected.as_ref() == Some(&sel);
-                            if ui
-                                .selectable_label(on, RichText::new(&g.name).strong())
-                                .clicked()
+                            if cut_selectable(
+                                ui,
+                                name_w,
+                                on,
+                                RichText::new(&g.name).strong(),
+                                &g.name,
+                            )
+                            .clicked()
                             {
                                 picked = Some(sel);
                             }
@@ -1135,24 +1149,36 @@ impl MemorizedList {
                     for r in rows {
                         let sel = Selected::Report(r.id.clone());
                         let on = self.selected.as_ref() == Some(&sel);
-                        let resp = ui.selectable_label(on, format!("    {}", r.name));
+                        let resp = ui
+                            .horizontal(|ui| {
+                                ui.add_space(INDENT);
+                                cut_selectable(
+                                    ui,
+                                    name_w - INDENT,
+                                    on,
+                                    RichText::new(&r.name),
+                                    &r.name,
+                                )
+                            })
+                            .inner;
                         if resp.clicked() {
                             picked = Some(sel.clone());
                         }
                         if resp.double_clicked() {
                             opened = Some(sel);
                         }
-                        ui.label(report_title(r));
-                        ui.label(
-                            r.created_by_name
-                                .clone()
-                                .unwrap_or_else(|| "\u{2014}".into()),
+                        cut_label(ui, REPORT_COLUMN_WIDTH, &report_title(r));
+                        cut_label(
+                            ui,
+                            AUTHOR_COLUMN_WIDTH,
+                            r.created_by_name.as_deref().unwrap_or("\u{2014}"),
                         );
                         ui.label(r.updated_at.map(changed_text).unwrap_or_default());
                         ui.end_row();
                     }
                 }
             });
+        self.table_fits = Some(grid.response.rect.right() <= ui.clip_rect().right() + 0.5);
         if let Some(s) = picked {
             self.selected = Some(s);
         }
@@ -1230,6 +1256,7 @@ impl MemorizedList {
             "problem": self.problem,
             "notice": self.notice,
             "last_action": self.last_action,
+            "table_fits": self.table_fits,
             "empty": self.loaded && self.rows.is_empty() && self.groups.is_empty(),
             "busy": self.busy(),
         })
@@ -1252,6 +1279,60 @@ fn report_title(r: &DefinitionRow) -> String {
 fn changed_text(ts: cl_core::Timestamp) -> String {
     let d = ts.as_utc().with_timezone(&chrono::Local).date_naive();
     CalendarDate::from_naive(d).map_or_else(|_| String::new(), crate::shell::us_date)
+}
+
+/// The delete card's question: a standard report keeps its catalog entry
+/// (only the saved settings go); a Report Builder report is gone for good
+/// (A09 QA-8).
+fn delete_question_key(kind: Option<&str>) -> &'static str {
+    if kind == Some("builder") {
+        "reports.memorized.delete_builder_question"
+    } else {
+        "reports.memorized.delete_question"
+    }
+}
+
+/// The widest the Name column may grow: what the window leaves after the
+/// other three columns, never under 160 points (A09 QA-2). A longer name is
+/// cut with an ellipsis and shows in full on hover and to screen readers.
+fn name_column_width(available: f32) -> f32 {
+    (available - OTHER_COLUMNS_WIDTH).clamp(160.0, 560.0)
+}
+
+/// Room the Report, Author and Last changed columns (with the grid's
+/// spacing) keep at the right of the Name column.
+const OTHER_COLUMNS_WIDTH: f32 = REPORT_COLUMN_WIDTH + AUTHOR_COLUMN_WIDTH + 140.0 + 3.0 * 16.0;
+/// The Report column's cap.
+const REPORT_COLUMN_WIDTH: f32 = 200.0;
+/// The Author column's cap (a long display name is cut the same way).
+const AUTHOR_COLUMN_WIDTH: f32 = 160.0;
+/// A report's indent under its group heading.
+const INDENT: f32 = 16.0;
+
+/// A selectable cell no wider than `w`: a longer text ends in an ellipsis,
+/// and the full text shows on hover; the AccessKit label is always the
+/// full text (A09 QA-2).
+fn cut_selectable(ui: &mut Ui, w: f32, on: bool, text: RichText, full: &str) -> Response {
+    let r = ui
+        .scope(|ui| {
+            ui.set_max_width(w);
+            ui.add(egui::Button::selectable(on, text).truncate())
+        })
+        .inner;
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, full));
+    if r.rect.width() >= w - 1.0 {
+        r.on_hover_text(full)
+    } else {
+        r
+    }
+}
+
+/// A label no wider than `w`, cut with an ellipsis (full text on hover).
+fn cut_label(ui: &mut Ui, w: f32, text: &str) {
+    ui.scope(|ui| {
+        ui.set_max_width(w);
+        ui.add(egui::Label::new(text).truncate());
+    });
 }
 
 impl Screen for MemorizedList {

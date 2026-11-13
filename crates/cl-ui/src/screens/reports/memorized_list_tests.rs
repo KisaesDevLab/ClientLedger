@@ -421,3 +421,130 @@ fn the_window_is_made_from_its_command() {
     assert_eq!(w.title(), "Memorized Reports");
     assert_eq!(w.state()["screen"], "memorized_reports");
 }
+
+/// One frame of the list in a `w`×`h` window with the app's theme.
+fn frame(ctx: &egui::Context, s: &mut MemorizedList, w: f32, h: f32) {
+    let mut out = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(w, h),
+            )),
+            ..Default::default()
+        },
+        |ui| s.ui(ui),
+    );
+    out.textures_delta.clear();
+}
+
+fn themed() -> egui::Context {
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    ctx
+}
+
+/// A09 QA-1: after a refused rename (too long, or a taken name) the Name
+/// field has the keyboard again, so Ctrl+A selects its text instead of
+/// opening Chart of Accounts.
+#[test]
+fn a_refused_name_keeps_the_keyboard_in_the_field() {
+    let (_d, link) = demo();
+    let mut s = list(&link);
+    let ctx = themed();
+    select(&mut s, "Monthly P&L for the bank");
+    s.ask_rename();
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    assert!(ctx.text_edit_focused(), "the card's field starts focused");
+    // Enter in the field gives up the focus, as a singleline field does.
+    ctx.memory_mut(|m| m.stop_text_input());
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    assert!(!ctx.text_edit_focused());
+    if let Some(Edit::Rename { name, .. }) = s.edit.as_mut() {
+        *name = "n".repeat(201);
+    }
+    s.confirm();
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    assert_eq!(s.problem, Some("reports.memorized.name_too_long"));
+    assert!(ctx.text_edit_focused(), "too long: back in the field");
+    assert_eq!(
+        s.scope(),
+        Scope::Window,
+        "the card keeps the keys, not the list"
+    );
+
+    // A group name that is taken (the engine's refusal) does the same.
+    let mut s = list(&link);
+    s.ask_new_group();
+    if let Some(Edit::NewGroup { name }) = s.edit.as_mut() {
+        *name = "For the bank".into();
+    }
+    s.confirm();
+    s.poll();
+    s.ask_new_group();
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    ctx.memory_mut(|m| m.stop_text_input());
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    assert!(!ctx.text_edit_focused());
+    if let Some(Edit::NewGroup { name }) = s.edit.as_mut() {
+        *name = "for the BANK".into();
+    }
+    s.confirm();
+    s.poll();
+    frame(&ctx, &mut s, 1440.0, 940.0);
+    assert_eq!(s.problem, Some("reports.memorized.group_taken"));
+    assert!(ctx.text_edit_focused(), "taken: back in the field");
+}
+
+/// A09 QA-2: a 200-character name is cut with an ellipsis; Report, Author
+/// and Last changed stay inside the window at 960x640 and at 1440.
+#[test]
+fn a_long_name_keeps_every_column_in_the_window() {
+    let (_d, link) = demo();
+    let long = format!(
+        "{} end",
+        "Quarterly fuel and repairs for the bank ".repeat(5)
+    )
+    .chars()
+    .take(200)
+    .collect::<String>();
+    // The name only (a builder title has its own, shorter cap).
+    let row = add_builder(&link, "Long");
+    report_store::patch_definition(
+        &mut link.demo_state().expect("demo"),
+        &row.id,
+        row.version,
+        &DefinitionPatch {
+            name: Some(long),
+            ..DefinitionPatch::default()
+        },
+    )
+    .expect("renamed");
+    for (w, h) in [(960.0, 640.0), (1440.0, 940.0)] {
+        let mut s = list(&link);
+        let ctx = themed();
+        frame(&ctx, &mut s, w, h);
+        frame(&ctx, &mut s, w, h);
+        assert_eq!(s.table_fits, Some(true), "{w}x{h}");
+        assert_eq!(s.state()["table_fits"], true);
+    }
+    assert!(name_column_width(700.0) >= 160.0);
+    assert!(name_column_width(1440.0) <= 560.0);
+}
+
+/// A09 QA-8: a Report Builder report is gone for good once deleted; only a
+/// standard report's entry stays in the Reports list.
+#[test]
+fn the_delete_question_fits_the_kind_of_report() {
+    assert_eq!(
+        delete_question_key(Some("builder")),
+        "reports.memorized.delete_builder_question"
+    );
+    assert_eq!(
+        delete_question_key(Some("standard")),
+        "reports.memorized.delete_question"
+    );
+    let builder = t("reports.memorized.delete_builder_question");
+    assert!(!builder.contains("stays in the list"), "{builder}");
+    assert!(builder.contains("for good"), "{builder}");
+    assert!(t("reports.memorized.delete_question").contains("stays in the list"));
+}

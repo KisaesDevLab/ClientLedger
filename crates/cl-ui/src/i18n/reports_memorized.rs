@@ -45,6 +45,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.memorized.new_group_ok", "Add group"),
     ("reports.memorized.cancel", "Cancel"),
     ("reports.memorized.delete_question", "Delete the memorized report \u{201c}{name}\u{201d}? Only these saved settings go; the report itself stays in the list."),
+    ("reports.memorized.delete_builder_question", "Delete the Report Builder report \u{201c}{name}\u{201d}? It's removed from the list and the Reports page for good. To keep a copy, export it to a report file first."),
     ("reports.memorized.delete_ok", "Delete it"),
     ("reports.memorized.delete_group_question", "Delete the group \u{201c}{name}\u{201d}? Its {n} reports move to no group."),
     ("reports.memorized.delete_group_question.one", "Delete the group \u{201c}{name}\u{201d}? Its 1 report moves to no group."),
