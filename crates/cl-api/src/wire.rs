@@ -611,6 +611,10 @@ impl Capabilities {
     /// U-217 (engine PR #51): `purpose: 'preview'` on `/report-builder/run`
     /// (the screen run cut at 50 detail rows per line, `meta.preview`).
     pub const REPORT_BUILDER_PREVIEW: &'static str = "report-builder-preview-v1";
+    /// U-218 (engine PR #52): formulas, their $ / % change and named
+    /// percent-of bases use each section's normal sign; "Show as positive"
+    /// changes only the section's own rows (Q-A08ai).
+    pub const REPORT_BUILDER_FORMULA_SIGN: &'static str = "report-builder-formula-sign-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

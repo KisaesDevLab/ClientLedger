@@ -755,3 +755,71 @@ pub fn a_preview_run_is_the_screen_run_cut_at_fifty(h: &Harness) {
     };
     assert_eq!(total(&cut), total(&whole));
 }
+
+/// U-218 (`report-builder-formula-sign-v1`, Q-A08ai): a formula over an
+/// Expenses section shown "Credits as positive" equals the same formula
+/// with the natural sign; only the Expenses rows change sign (A09 E1).
+pub fn a_flipped_section_leaves_its_formula_alone(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::REPORT_BUILDER_FORMULA_SIGN, "U-218") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbSignBank");
+    let sales = account(h, s, AccountType::Revenue, "RbSignSales");
+    let rent = account(h, s, AccountType::Expense, "RbSignRent");
+    post(
+        h,
+        s,
+        &je2(date(YEAR, 6, 3), "rb", bank.id, sales.id, "900.00"),
+    );
+    post(
+        h,
+        s,
+        &je2(date(YEAR, 6, 9), "rb", rent.id, bank.id, "350.25"),
+    );
+    let section = |id: &str, acct: String, polarity: Option<&str>| {
+        json!({
+            "type": "section", "id": id, "caption": id, "source": "gl",
+            "measure": "amount", "polarity": polarity,
+            "filters": [{"field": "account", "op": "in", "ids": [acct]}],
+            "groupBy": [{"key": "account"}], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false
+        })
+    };
+    let def = |flip: bool| {
+        json!({
+            "schemaVersion": 1, "kind": "builder",
+            "dates": {"mode": "range"},
+            "columns": {"detailFields": [], "compare": [], "headers": {}},
+            "nodes": [
+                section("income", sales.id.to_string(), None),
+                section("expenses", rent.id.to_string(), flip.then_some("credit")),
+                {"type": "formula", "id": "net", "caption": "Net",
+                 "terms": [{"nodeId": "income", "sign": 1}, {"nodeId": "expenses", "sign": -1}]}
+            ]
+        })
+    };
+    let total = |r: &BuilderRun, kind: RowKind, node: &str| {
+        r.table
+            .rows
+            .iter()
+            .find(|x| x.kind == kind && x.path.0.first().is_some_and(|p| p == &format!("n:{node}")))
+            .map_or_else(|| panic!("{node} {kind:?}"), |x| x.cells[0].clone())
+    };
+    let natural = run(h, s, &request(reference(&def(false)), false)).expect("natural");
+    let flipped = run(h, s, &request(reference(&def(true)), false)).expect("flipped");
+    assert_eq!(
+        total(&natural, RowKind::Formula, "net"),
+        total(&flipped, RowKind::Formula, "net"),
+        "the formula ignores display polarity"
+    );
+    let amount = |c: Cell| match c {
+        Cell::Amount(d) => d,
+        other => panic!("not an amount: {other:?}"),
+    };
+    assert_eq!(
+        amount(total(&flipped, RowKind::Total, "expenses")),
+        -amount(total(&natural, RowKind::Total, "expenses")),
+        "the flipped section's own total shows the other sign"
+    );
+}

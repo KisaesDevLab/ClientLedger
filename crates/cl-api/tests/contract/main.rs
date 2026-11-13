@@ -1385,6 +1385,10 @@ fn main() -> std::process::ExitCode {
             contract_report_builder::a_preview_run_is_the_screen_run_cut_at_fifty,
         ),
         (
+            "report_builder::a_flipped_section_leaves_its_formula_alone",
+            contract_report_builder::a_flipped_section_leaves_its_formula_alone,
+        ),
+        (
             "budgets::hand_fixture_and_writes",
             contract_budgets::hand_fixture_and_writes,
         ),
