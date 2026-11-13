@@ -109,7 +109,7 @@ fn audit_rows(h: &Harness, s: &Session, id: &str) -> Vec<Value> {
         .run(s.raw(
             Method::Get,
             "/api/v1/audit-log",
-            &[("entity_type", "report_definition"), ("search", id)],
+            &[("entity_type", "report_definition"), ("entity_id", id)],
             None,
         ))
         .expect("audit log");
