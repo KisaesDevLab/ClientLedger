@@ -52,6 +52,14 @@ pub enum Scope {
     /// While the Reconcile window's panes have focus (P27): Space ticks,
     /// Tab switches pane, Up/Down move. Innermost, on the window.
     Reconcile,
+    /// Anywhere in a Report Builder editor tab (A08): Ctrl+Enter runs the
+    /// preview, Ctrl+Z/Y undo and redo, F6 moves between the panes. On the
+    /// window, so form keys never apply there.
+    Builder,
+    /// While the Report Builder's outline tree has focus (A08): Insert,
+    /// Delete, Tab, F2 and the arrows act on its rows. Never active inside
+    /// a text field, so Tab there moves on and Delete deletes text.
+    Outline,
 }
 
 impl Scope {
@@ -65,6 +73,8 @@ impl Scope {
         Scope::List,
         Scope::Feed,
         Scope::Reconcile,
+        Scope::Builder,
+        Scope::Outline,
     ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
@@ -79,6 +89,8 @@ impl Scope {
             Scope::List => "In a work list",
             Scope::Feed => "In the Bank Feed",
             Scope::Reconcile => "In Reconcile",
+            Scope::Builder => "In the Report Builder",
+            Scope::Outline => "In the report outline",
         }
     }
 
@@ -91,6 +103,8 @@ impl Scope {
             Scope::List => &[Scope::List, Scope::Window, Scope::Global],
             Scope::Feed => &[Scope::Feed, Scope::Window, Scope::Global],
             Scope::Reconcile => &[Scope::Reconcile, Scope::Window, Scope::Global],
+            Scope::Builder => &[Scope::Builder, Scope::Window, Scope::Global],
+            Scope::Outline => &[Scope::Outline, Scope::Builder, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -613,7 +627,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 8);
+        assert_eq!(Scope::ALL.len(), 10);
     }
 
     #[test]
@@ -726,7 +740,7 @@ mod tests {
             Scope::List.active_from(),
             &[Scope::List, Scope::Window, Scope::Global]
         );
-        assert_eq!(Scope::ALL.last(), Some(&Scope::Reconcile));
+        assert_eq!(Scope::ALL.last(), Some(&Scope::Outline));
     }
 
     #[test]
@@ -749,8 +763,9 @@ mod tests {
             Some("viewer.fill_word")
         );
         // T18: arrows bind nothing elsewhere, so grids, registers and text
-        // fields keep them; plain arrows bind nothing anywhere.
-        for scope in Scope::ALL {
+        // fields keep them; plain arrows bind nothing anywhere but the
+        // Report Builder's outline tree (A08: Left/Right fold a group).
+        for scope in Scope::ALL.iter().filter(|s| **s != Scope::Outline) {
             for k in [Key::Left, Key::Right] {
                 assert_eq!(at(*scope, Mods::NONE, k), None, "{scope:?}");
                 assert_eq!(at(*scope, Mods::SHIFT, k), None, "{scope:?}");

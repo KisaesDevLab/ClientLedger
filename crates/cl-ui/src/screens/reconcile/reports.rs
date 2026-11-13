@@ -234,6 +234,7 @@ pub(crate) fn report(r: &ReconReport, kind: Kind) -> Report {
             columns: columns(),
             rows: rows(&r.cleared),
             empty: t("reconcile.report.none"),
+            breaks: Vec::new(),
         });
     }
     sections.push(Section::Table {
@@ -241,6 +242,7 @@ pub(crate) fn report(r: &ReconReport, kind: Kind) -> Report {
         columns: columns(),
         rows: rows(&r.uncleared),
         empty: t("reconcile.report.none"),
+        breaks: Vec::new(),
     });
     let title = match kind {
         Kind::Summary => t("reconcile.report.summary_title"),
@@ -515,6 +517,7 @@ pub(crate) fn discrepancy_doc(
             ],
             rows,
             empty: t("reconcile.discrepancy.none"),
+            breaks: Vec::new(),
         }],
         footer: t("reconcile.report.as_of_today"),
         page_label: t("reconcile.report.page"),

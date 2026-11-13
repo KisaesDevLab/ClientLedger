@@ -118,9 +118,16 @@ pub(super) fn poll(w: &mut ReportWindow) {
             }
             Ok(row) => {
                 w.memo.saved = w.memo.sending.take().or_else(|| Some(w.options.clone()));
+                if row.kind == "builder" {
+                    super::builder_run::memorized(w, &row);
+                }
                 w.memo.current = Some(row);
                 w.memo.dialog = None;
                 load(w);
+                // Other open report windows list it too (QA-16).
+                w.link
+                    .bus()
+                    .publish_from(&w.bus, crate::data_bus::Change::Reports);
             }
             Err(e) => {
                 w.memo.sending = None;
@@ -136,7 +143,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
                         Some(DefinitionRefusal::NotAuthor) => {
                             d.problem = Some("reports.memorize.not_author");
                         }
-                        Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid) => {
+                        Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid { .. }) => {
                             d.problem = Some("reports.memorize.invalid");
                         }
                         None => d.problem = Some("reports.memorize.failed"),
@@ -157,6 +164,9 @@ fn poll_remove(w: &mut ReportWindow) {
                 w.memo.dialog = None;
                 w.notice = Some(t("reports.memorize.deleted"));
                 load(w);
+                w.link
+                    .bus()
+                    .publish_from(&w.bus, crate::data_bus::Change::Reports);
             }
             Err(e) => {
                 if let Some(d) = w.memo.dialog.as_mut() {
@@ -192,12 +202,14 @@ fn remove(w: &mut ReportWindow) {
     ));
 }
 
-/// Opens the dialog on the report shown (Ctrl+M).
+/// Opens the dialog on the report shown (Ctrl+M). A builder report (a
+/// starter, a memorized builder report, an editor's Run report) is
+/// memorized as a builder report (A08 lifts Q-A07t(1)); a detail tab or an
+/// unreadable definition has nothing to memorize.
 pub(super) fn open_dialog(w: &mut ReportWindow) {
-    // A builder report (a starter, a memorized builder report) can't be
-    // saved from here: the dialog writes a standard definition (S-L1,
-    // Q-A07t(1)).
-    if !available(&w.link) || w.builder.is_some() {
+    if !available(&w.link)
+        || (w.builder.is_some() && super::builder_run::memorize_body(w).is_none())
+    {
         return;
     }
     let (name, group) = match &w.memo.current {
@@ -214,52 +226,79 @@ pub(super) fn open_dialog(w: &mut ReportWindow) {
     });
 }
 
-/// The options changed since the memorized report was read. Never for a
-/// builder report: it has no save path here, so the tab is never dirty
-/// (#3).
+/// The kind of report the window shows: `builder` or `standard`.
+fn shown_kind(w: &ReportWindow) -> &'static str {
+    if w.builder.is_some() {
+        "builder"
+    } else {
+        "standard"
+    }
+}
+
+/// The memorized report shown changed since it was read: its options, and
+/// so the definition Memorize would save (a builder report's date preset,
+/// basis or period columns, `builder_run::memorize_body`). Only for a row
+/// of the kind shown.
 pub(crate) fn changed(w: &ReportWindow) -> bool {
-    w.builder.is_none() && w.memo.current.is_some() && w.memo.saved.as_ref() != Some(&w.options)
+    w.memo
+        .current
+        .as_ref()
+        .is_some_and(|c| c.kind == shown_kind(w))
+        && w.memo.saved.as_ref() != Some(&w.options)
 }
 
 pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
-    // Belt and braces for S-L1: a builder definition is never overwritten
-    // by a standard one.
-    if w.builder.is_some()
-        || w.memo
-            .current
-            .as_ref()
-            .is_some_and(|c| c.kind != "standard" || c.definition["kind"] != "standard")
-    {
-        if let Some(d) = w.memo.dialog.as_mut() {
-            d.problem = Some("reports.memorize.invalid");
-        }
-        return;
-    }
+    let kind = shown_kind(w);
+    // The definition to save. A builder report saves its own definition; a
+    // row is never overwritten by another kind (S-L1; the engine refuses a
+    // kind change too).
+    let body = if kind == "builder" {
+        super::builder_run::memorize_body(w)
+    } else {
+        serde_json::to_value(StandardDefinition::new(w.spec.key, w.options.clone())).ok()
+    };
+    let same_kind = w
+        .memo
+        .current
+        .as_ref()
+        .is_none_or(|c| c.kind == kind && c.definition["kind"].as_str() == Some(kind));
     let Some(d) = w.memo.dialog.as_mut() else {
         return;
     };
+    let Some(mut body) = body else {
+        d.problem = Some("reports.memorize.invalid");
+        return;
+    };
+    if how == SaveAs::Changes && !same_kind {
+        d.problem = Some("reports.memorize.invalid");
+        return;
+    }
     let name = d.name.trim().to_string();
     if name.is_empty() {
         d.problem = Some("reports.memorize.name_needed");
         return;
     }
     d.problem = None;
+    // A builder report's name is its title too (Q-A08r).
+    if kind == "builder"
+        && let Some(obj) = body.as_object_mut()
+    {
+        obj.insert("title".into(), serde_json::Value::from(name.clone()));
+    }
     w.memo.sending = Some(w.options.clone());
-    let def = StandardDefinition::new(w.spec.key, w.options.clone());
-    let Ok(body) = serde_json::to_value(&def) else {
-        d.problem = Some("reports.memorize.invalid");
-        return;
-    };
     let write = DefinitionWrite {
         name,
         group_id: d.group.clone(),
-        kind: "standard".into(),
+        kind: kind.into(),
         definition: body,
     };
     let target = match how {
         SaveAs::Changes => w.memo.current.as_ref().map(|c| (c.id.clone(), c.version)),
         SaveAs::New => None,
     };
+    // One key per Memorize press: the engine stores one row however often
+    // the transport retries it.
+    let key = cl_api::IdempotencyKey::new();
     w.memo.save = Some(engine::write(
         &w.link,
         w.group.as_ref(),
@@ -275,7 +314,7 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
             let d = s.report_definitions();
             match target {
                 Some((id, version)) => d.update(&id, version, &write).await,
-                None => d.create(&write).await,
+                None => d.create(&write, key).await,
             }
         },
     ));
@@ -404,7 +443,13 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         Delete,
     }
     poll_remove(w);
-    let changes = w.memo.current.is_some();
+    // Save changes only over a row of the kind shown (a standard row
+    // customized into a builder report is memorized new).
+    let changes = w
+        .memo
+        .current
+        .as_ref()
+        .is_some_and(|c| c.kind == shown_kind(w));
     let saving = w.memo.save.is_some() || w.memo.remove.is_some();
     let groups = w.memo.groups.clone();
     let Some(d) = w.memo.dialog.as_mut() else {
@@ -558,6 +603,7 @@ mod tag_tests {
             created_by: None,
             created_by_name: None,
             updated_at: None,
+            can_edit: true,
         };
         super::open_row(&mut w, &row);
         assert_eq!(

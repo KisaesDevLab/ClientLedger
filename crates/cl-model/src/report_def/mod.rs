@@ -1,11 +1,18 @@
 //! Report Builder definitions (ADD-03 A07, plan §3): schema v1 as strict
 //! serde, the field catalogue, the pre-order outline and the validation
-//! rules, plus the pure run state of a builder report window.
+//! rules, plus the pure run state of a builder report window. A08 adds the
+//! editor's state ([`editor`]), Guided mode ([`guided`]), owner-language
+//! problems ([`problems`]) and the period and compare ranges a run sends
+//! ([`ranges`]).
 //!
 //! No egui, no I/O, no money arithmetic: the engine computes every figure.
 
+pub mod editor;
 pub mod fields;
+pub mod guided;
 pub mod outline;
+pub mod problems;
+pub mod ranges;
 pub mod run_state;
 pub mod schema;
 pub mod units;

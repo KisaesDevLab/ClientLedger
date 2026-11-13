@@ -364,6 +364,28 @@ pub const COMMANDS: &[Command] = &[
     cmd("reconcile.unmark_all", "Unmark All", None, 11, ctrl_shift('U'), Scope::Reconcile),
     cmd("reconcile.finish", "Reconcile Now", None, 11, key(Mods::CMD, Key::Enter), Scope::Reconcile),
     cmd("reconcile.leave", "Leave for Now", None, 11, None, Scope::Reconcile),
+    // A08 Report Builder editor (plan §3.3, Q-A08d): the outline's keys act
+    // only while the tree has focus; the editor's keys anywhere in its tab.
+    cmd("builder.add", "Add a Row\u{2026}", None, 12, key(Mods::NONE, Key::Insert), Scope::Outline),
+    cmd("builder.remove", "Remove the Row", None, 12, key(Mods::NONE, Key::Delete), Scope::Outline),
+    cmd("builder.move_up", "Move the Row Up", None, 12, key(Mods::ALT, Key::Up), Scope::Outline),
+    cmd("builder.move_down", "Move the Row Down", None, 12, key(Mods::ALT, Key::Down), Scope::Outline),
+    cmd("builder.indent", "Put the Row in the Group Above", None, 12, key(Mods::NONE, Key::Tab), Scope::Outline),
+    cmd("builder.outdent", "Take the Row out of Its Group", None, 12, key(Mods::SHIFT, Key::Tab), Scope::Outline),
+    cmd("builder.rename", "Rename the Row", None, 12, key(Mods::NONE, Key::F(2)), Scope::Outline),
+    cmd("builder.next_row", "Next Row", None, 12, key(Mods::NONE, Key::Down), Scope::Outline),
+    cmd("builder.prev_row", "Previous Row", None, 12, key(Mods::NONE, Key::Up), Scope::Outline),
+    cmd("builder.fold", "Fold the Group", None, 12, key(Mods::NONE, Key::Left), Scope::Outline),
+    cmd("builder.unfold", "Unfold the Group", None, 12, key(Mods::NONE, Key::Right), Scope::Outline),
+    cmd("builder.refresh_preview", "Update the Preview", None, 12, key(Mods::CMD, Key::Enter), Scope::Builder),
+    cmd("builder.undo", "Undo the Last Change", None, 12, ctrl('Z'), Scope::Builder),
+    cmd("builder.redo", "Redo", None, 12, ctrl('Y'), Scope::Builder),
+    cmd("builder.next_pane", "Next Pane", None, 12, key(Mods::NONE, Key::F(6)), Scope::Builder),
+    cmd("builder.prev_pane", "Previous Pane", None, 12, key(Mods::SHIFT, Key::F(6)), Scope::Builder),
+    cmd("builder.guided_back", "Back a Step", None, 12, alt('B'), Scope::Builder),
+    cmd("builder.guided_next", "Next Step", None, 12, alt('N'), Scope::Builder),
+    cmd("builder.run_report", "Run Report", None, 12, None, Scope::Builder),
+    cmd("builder.save_changes", "Save Changes", None, 12, None, Scope::Builder),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -458,6 +480,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("reports.refresh", "Refresh Report", None, 3, key(Mods::NONE, Key::F(5)), Scope::Window),
     cmd("reports.memorize", "Memorize Report", None, 3, ctrl('M'), Scope::Window),
     cmd("reports.collapse", "Collapse or Expand Rows", None, 3, None, Scope::Window),
+    // A08: the Report Builder editor, one window per report; opened from the
+    // Reports list ("New report...") and Customize, no menu entry.
+    built("reports.builder_editor", "Report Builder", None, 3, None),
     // P24 (Q-P24n): the inventory reports; print and export come with P28.
     built("reports.inventory_value", "Inventory Value", Some(Menu::Reports), 2, None),
     built("reports.inventory_value_detail", "Inventory Value Detail", Some(Menu::Reports), 2, None),
@@ -809,6 +834,8 @@ mod tests {
             "reports.balance_sheet",
             "reports.trial_balance",
             "reports.ar_aging",
+            // A08
+            "reports.builder_editor",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -820,6 +847,90 @@ mod tests {
         }
     }
 
+    #[test]
+    fn report_builder_keys() {
+        use crate::keymap::Keymap;
+        let km = Keymap::new(COMMANDS).expect("no key clashes");
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        let outline = [
+            (Mods::NONE, Key::Insert, "builder.add"),
+            (Mods::NONE, Key::Delete, "builder.remove"),
+            (Mods::ALT, Key::Up, "builder.move_up"),
+            (Mods::ALT, Key::Down, "builder.move_down"),
+            (Mods::NONE, Key::Tab, "builder.indent"),
+            (Mods::SHIFT, Key::Tab, "builder.outdent"),
+            (Mods::NONE, Key::F(2), "builder.rename"),
+            (Mods::NONE, Key::Down, "builder.next_row"),
+            (Mods::NONE, Key::Up, "builder.prev_row"),
+            (Mods::NONE, Key::Left, "builder.fold"),
+            (Mods::NONE, Key::Right, "builder.unfold"),
+        ];
+        let editor = [
+            (Mods::CMD, Key::Enter, "builder.refresh_preview"),
+            (Mods::CMD, Key::Letter('Z'), "builder.undo"),
+            (Mods::CMD, Key::Letter('Y'), "builder.redo"),
+            (Mods::NONE, Key::F(6), "builder.next_pane"),
+            (Mods::SHIFT, Key::F(6), "builder.prev_pane"),
+            (Mods::ALT, Key::Letter('B'), "builder.guided_back"),
+            (Mods::ALT, Key::Letter('N'), "builder.guided_next"),
+        ];
+        for (m, k, id) in outline {
+            assert_eq!(at(Scope::Outline, m, k), Some(id), "{id}");
+            // Outside the tree (a text field in the editor) they don't act.
+            assert_ne!(at(Scope::Builder, m, k), Some(id), "{id}");
+        }
+        for (m, k, id) in editor {
+            assert_eq!(at(Scope::Outline, m, k), Some(id), "{id} in the tree");
+            assert_eq!(at(Scope::Builder, m, k), Some(id), "{id}");
+        }
+        // Elsewhere F6, Ctrl+Enter, Ctrl+Z and Alt+N keep their meaning.
+        assert_eq!(
+            at(Scope::Form, Mods::NONE, Key::F(6)),
+            Some("view.focus_doc")
+        );
+        assert_eq!(
+            at(Scope::Window, Mods::NONE, Key::F(6)),
+            Some("view.focus_doc")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::CMD, Key::Letter('Z')),
+            Some("edit.undo")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::ALT, Key::Letter('N')),
+            Some("form.save_new")
+        );
+        assert_eq!(
+            at(Scope::Feed, Mods::CMD, Key::Enter),
+            Some("feed.accept_selected")
+        );
+        let km2 = Keymap::with_mode(COMMANDS, crate::keymap::EnterMode::MoveBetweenFields)
+            .expect("no clashes in either Enter mode");
+        assert_eq!(
+            km2.resolve(Scope::Builder, Shortcut::new(Mods::CMD, Key::Enter))
+                .map(CommandId::as_str),
+            Some("builder.refresh_preview")
+        );
+        assert_eq!(
+            km2.resolve(Scope::Form, Shortcut::new(Mods::CMD, Key::Enter))
+                .map(CommandId::as_str),
+            Some("form.save_new")
+        );
+        // Ctrl+M (Memorize) and Ctrl+P (Print) reach the editor.
+        assert_eq!(
+            at(Scope::Builder, Mods::CMD, Key::Letter('M')),
+            Some("reports.memorize")
+        );
+        assert_eq!(
+            at(Scope::Outline, Mods::CMD, Key::Letter('P')),
+            Some("file.print")
+        );
+        assert_eq!(Scope::Builder.title(), "In the Report Builder");
+        assert_eq!(Scope::Outline.title(), "In the report outline");
+    }
     #[test]
     fn register_keys() {
         use crate::keymap::Keymap;

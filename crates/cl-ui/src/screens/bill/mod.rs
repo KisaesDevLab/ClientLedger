@@ -1365,6 +1365,8 @@ impl Screen for EnterBillScreen {
             | OpenPayload::Report(_)
             | OpenPayload::BuilderStarter(_)
             | OpenPayload::BuilderDetail(_)
+            | OpenPayload::BuilderEditor(_)
+            | OpenPayload::BuilderDefinition(_)
             | OpenPayload::FeedAt(_) => false,
         }
     }

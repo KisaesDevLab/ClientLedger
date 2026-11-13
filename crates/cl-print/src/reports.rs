@@ -74,6 +74,9 @@ pub enum Section {
         rows: Vec<Vec<String>>,
         /// The words shown when there are no rows.
         empty: String,
+        /// Rows that start a new page (a Report Builder page break), by
+        /// index into `rows`; the header row repeats there.
+        breaks: Vec<usize>,
     },
 }
 
@@ -427,6 +430,7 @@ pub fn layout_report(r: &Report) -> Document {
                 columns,
                 rows,
                 empty,
+                breaks,
             } => {
                 let plan =
                     plan_on(columns, rows, full).unwrap_or_else(|| split_plan(columns, rows, full));
@@ -445,8 +449,8 @@ pub fn layout_report(r: &Report) -> Document {
                         c.text(MARGIN, full, plan.pt, Font::Sans, Align::Left, empty);
                         c.y += line;
                     }
-                    for row in rows {
-                        if c.y + line > c.bottom() {
+                    for (ri, row) in rows.iter().enumerate() {
+                        if c.y + line > c.bottom() || (ri > 0 && breaks.contains(&ri)) {
                             c.break_page();
                             table_header(&mut c, &plan, columns, part);
                         }
@@ -565,6 +569,7 @@ mod tests {
                         "2,744.67".into(),
                     ]],
                     empty: "None".into(),
+                    breaks: Vec::new(),
                 },
             ],
             footer: "Figures as of today".into(),
@@ -654,6 +659,7 @@ mod tests {
                 columns,
                 rows: vec![row("   30170 · Owner's Draw"), row("Net income")],
                 empty: "None".into(),
+                breaks: Vec::new(),
             }],
             footer: String::new(),
             page_label: "Page {n} of {m}".into(),
@@ -733,6 +739,7 @@ mod tests {
                 columns,
                 rows: vec![row; 80],
                 empty: String::new(),
+                breaks: Vec::new(),
             }],
             footer: String::new(),
             page_label: "Page {n} of {m}".into(),

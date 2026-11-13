@@ -351,6 +351,25 @@ impl BuilderRunState {
         fx
     }
 
+    /// The run in flight no longer matters (the report changed under it):
+    /// its answer will be dropped and nothing waits for it. The table shown
+    /// stays.
+    pub fn cancel(&mut self) {
+        if self.in_flight.take().is_none() {
+            return;
+        }
+        self.generation += 1;
+        self.revision += 1;
+        self.asked = None;
+        if self.phase == Phase::Running {
+            self.phase = if self.has_table {
+                Phase::Shown
+            } else {
+                Phase::Empty
+            };
+        }
+    }
+
     /// The first run, or Refresh (F5): runs now.
     pub fn refresh(&mut self) -> Vec<Effect> {
         self.banner = None;

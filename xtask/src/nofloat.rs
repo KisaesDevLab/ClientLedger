@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
-/// Directories scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 7] = [
+/// Directories (and single files) scanned, relative to the repo root.
+pub const SCAN_DIRS: [&str; 8] = [
     "crates/cl-core/src",
     "crates/cl-api/src",
     // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
@@ -33,6 +33,9 @@ pub const SCAN_DIRS: [&str; 7] = [
     "crates/cl-ui/src/widgets/compare",
     // Bank file readers (P25 review S12).
     "crates/cl-import/src",
+    // The one RunRef every Report Builder run sends (A08 plan §4); a file,
+    // not a directory: the editor's screens draw with egui's float geometry.
+    "crates/cl-ui/src/screens/reports/builder_ref.rs",
 ];
 
 /// Files inside [`SCAN_DIRS`] that may use floating point for page geometry
@@ -282,11 +285,14 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for dir in SCAN_DIRS {
         let base = root.join(dir);
-        if !base.is_dir() {
+        let mut files = Vec::new();
+        if base.is_file() {
+            files.push(base);
+        } else if base.is_dir() {
+            rust_files(&base, &mut files)?;
+        } else {
             continue;
         }
-        let mut files = Vec::new();
-        rust_files(&base, &mut files)?;
         files.sort();
         for f in files {
             let rel = f
@@ -424,6 +430,11 @@ mod tests {
     fn entry_rules_and_grid_core_are_scanned() {
         assert!(SCAN_DIRS.contains(&"crates/cl-model/src"));
         assert!(SCAN_DIRS.contains(&"crates/cl-grid/src/core"));
+    }
+
+    #[test]
+    fn the_builder_run_ref_is_scanned() {
+        assert!(SCAN_DIRS.contains(&"crates/cl-ui/src/screens/reports/builder_ref.rs"));
     }
 
     #[test]

@@ -604,6 +604,13 @@ impl Capabilities {
     /// signs in Transaction Detail, Open Invoices/Unpaid Bills by document
     /// type) and opening-balance-only accounts in running-balance runs.
     pub const REPORT_BUILDER_STARTERS_V2: &'static str = "report-builder-starters-v2";
+    /// U-216 (engine PR #50): Revenue by Category and the Assets,
+    /// Liabilities and Equity by Account summaries total the period net
+    /// (credit memos and refunds reduce revenue; it ties to the P&L).
+    pub const REPORTS_REVENUE_NET: &'static str = "reports-revenue-net-v1";
+    /// U-217 (engine PR #51): `purpose: 'preview'` on `/report-builder/run`
+    /// (the screen run cut at 50 detail rows per line, `meta.preview`).
+    pub const REPORT_BUILDER_PREVIEW: &'static str = "report-builder-preview-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

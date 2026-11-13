@@ -767,3 +767,19 @@ fn a_column_drill_sends_the_columns_own_range() {
         }
     }
 }
+
+/// U-217: a preview run says its cut in `meta.preview`; screen runs don't.
+#[test]
+fn a_preview_run_reads_its_cut() {
+    let mut v = sample("transaction_detail_by_account");
+    assert_eq!(read_run(&v, None).expect("screen").preview_rows, None);
+    v["meta"]["preview"] = serde_json::json!({"detailRowsPerLine": 50});
+    let r = read_run(&v, None).expect("preview");
+    assert_eq!(r.preview_rows, Some(PREVIEW_DETAIL_ROWS));
+    v["meta"]["preview"] = serde_json::json!({"detailRowsPerLine": "50"});
+    assert!(read_run(&v, None).is_err(), "off contract");
+    assert_eq!(
+        serde_json::to_value(RunPurpose::Preview).expect("json"),
+        serde_json::json!("preview")
+    );
+}

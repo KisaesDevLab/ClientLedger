@@ -149,10 +149,12 @@ mod bank_import;
 mod reconcile;
 // P28: the report window.
 mod report_builder;
+// A08: the Report Builder editor.
+mod report_builder_editor;
 mod reports;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 52] = [
+const TABLES: [&[(&str, &str)]; 53] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -205,6 +207,7 @@ const TABLES: [&[(&str, &str)]; 52] = [
     reconcile::ENGLISH,
     reports::ENGLISH,
     report_builder::ENGLISH,
+    report_builder_editor::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

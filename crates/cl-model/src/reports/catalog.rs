@@ -636,6 +636,85 @@ pub static BUILDER_RANGE_TOTAL: ReportSpec = ReportSpec {
     columns: &[ColumnBy::Total],
     ..BUILDER_RANGE
 };
+/// Customize on a standard report opens the Report Builder on this starter
+/// (A08, Q-A08g, Q-A08k): catalog key to `/starters` key. An explicit table,
+/// not the starters' `tiesTo` (many to one: three P&L starters and Revenue
+/// by Category all tie to the P&L).
+pub static REPORT_STARTERS: &[(&str, &str)] = &[
+    ("profit_loss", "profit_loss"),
+    ("profit_loss_by_month", "profit_loss_by_month"),
+    ("balance_sheet", "balance_sheet"),
+    ("trial_balance", "trial_balance"),
+    ("general_ledger", "transaction_detail_by_account"),
+    (
+        "transaction_detail_by_account",
+        "transaction_detail_by_account",
+    ),
+    ("ar_aging_summary", "ar_aging_summary"),
+    ("ar_aging_detail", "ar_aging_detail"),
+    ("open_invoices", "open_invoices"),
+    ("customer_balance_summary", "customer_balance_summary"),
+    ("vendor_balance_summary", "vendor_balance_summary"),
+    ("ap_aging_summary", "ap_aging_summary"),
+    ("ap_aging_detail", "ap_aging_detail"),
+    ("unpaid_bills", "unpaid_bills"),
+    ("sales_by_client", "sales_by_client"),
+    ("sales_by_item", "sales_by_item"),
+    ("revenue_by_category", "revenue_by_category"),
+    ("expenses_by_category", "expenses_by_category"),
+    ("check_register", "check_register"),
+    ("bank_balances", "bank_balances"),
+];
+
+/// Catalog reports with no starter yet (Q-A07h): Customize is off for them,
+/// with "This report can't be changed in the Report Builder yet".
+pub static NO_STARTER: &[&str] = &[
+    "profit_loss_by_fiscal_period",
+    "profit_loss_comparative",
+    "profit_loss_ytd",
+    "profit_loss_by_tag_group",
+    "profit_loss_by_client",
+    "balance_sheet_comparative",
+    "journal",
+    "budget_vs_actual",
+    "invoice_list",
+    "customer_balance_detail",
+    "vendor_balance_detail",
+    "vendor_statement",
+    "expenses_by_vendor",
+    "transactions_by_vendor",
+    "bill_payment_history",
+    "sales_tax_liability",
+    "vendor_1099_summary",
+    "ap_1099_prep",
+    "deposit_detail",
+    "account_activity_summary",
+    "inventory_valuation",
+    "inventory_valuation_detail",
+    "inventory_stock_status",
+    "audit_trail",
+    "closing_date_exceptions",
+    "duplicate_finder",
+];
+
+/// The starter Customize opens for the catalog report `key`, if any.
+#[must_use]
+pub fn starter_for(key: &str) -> Option<&'static str> {
+    REPORT_STARTERS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, s)| *s)
+}
+
+/// Every starter key the table names (each once).
+#[must_use]
+pub fn mapped_starters() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = REPORT_STARTERS.iter().map(|(_, s)| *s).collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 /// The report with `key`.
 #[must_use]
 pub fn find(key: &str) -> Option<&'static ReportSpec> {
@@ -678,6 +757,32 @@ pub const fn extra_capability(_: Extra) -> &'static str {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn every_catalog_report_has_a_starter_or_is_listed_without_one() {
+        for spec in CATALOG {
+            let mapped = starter_for(spec.key).is_some();
+            let without = NO_STARTER.contains(&spec.key);
+            assert!(
+                mapped != without,
+                "{}: exactly one of the two lists",
+                spec.key
+            );
+        }
+        for (k, _) in REPORT_STARTERS {
+            assert!(find(k).is_some(), "{k} is a catalog report");
+        }
+        for k in NO_STARTER {
+            assert!(find(k).is_some(), "{k} is a catalog report");
+        }
+        let keys: HashSet<&str> = REPORT_STARTERS.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys.len(), REPORT_STARTERS.len(), "each report once");
+        assert_eq!(
+            starter_for("general_ledger"),
+            Some("transaction_detail_by_account")
+        );
+        assert_eq!(starter_for("invoice_list"), None);
+    }
 
     #[test]
     fn keys_are_unique_and_follow_the_engine_pattern() {

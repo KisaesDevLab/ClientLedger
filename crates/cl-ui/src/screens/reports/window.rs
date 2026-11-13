@@ -167,11 +167,16 @@ pub struct ReportWindow {
     /// width (hidden when narrow, as at 200% zoom, QA-14).
     pub(super) catalog_open: Option<bool>,
     pub(super) drill_error: Option<ApiError>,
-    bus: crate::data_bus::Subscription,
+    /// The Report Builder editor's Export or Print, done once this tab's
+    /// run is shown (Q-A08m).
+    pub(super) after_run: Option<super::builder_ref::AfterRun>,
+    pub(super) bus: crate::data_bus::Subscription,
     /// A Report Builder report shown under the stand-in spec (A07).
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
     /// The Report Builder starters (catalog column).
     pub(super) starters: super::builder_run::Starters,
+    /// A Customize in waiting (A08).
+    pub(super) edit: super::builder_run::Edit,
     /// Which report is on screen: unique per window and per report shown
     /// (A07 QA-7, QA-11). Scroll positions and the export message belong
     /// to it, so a new report or a new tab opens at the top with no
@@ -197,15 +202,8 @@ impl ReportWindow {
         today: CalendarDate,
     ) -> ReportWindow {
         let group = link.group().and_then(Result::ok);
-        let calendar = open
-            .as_ref()
-            .and_then(|(id, _)| {
-                link.store()
-                    .load()
-                    .ok()
-                    .and_then(|list| list.get(*id).map(|r| r.flags.fiscal_calendar))
-            })
-            .unwrap_or_default();
+        let calendar = company_calendar(&link, open.as_ref());
+
         let fiscal_job = Some(fiscal_read(&link, group.as_ref()));
         let tag_groups_job = Some(engine::read(
             &link,
@@ -265,9 +263,11 @@ impl ReportWindow {
             h_offset: 0.0,
             catalog_open: None,
             drill_error: None,
+            after_run: None,
             bus: crate::data_bus::Subscription::detached(),
             builder: None,
             starters: super::builder_run::Starters::default(),
+            edit: super::builder_run::Edit::default(),
             view: next_view(),
             link,
         };
@@ -1193,6 +1193,8 @@ impl ReportWindow {
             "columns_by": self.options.columns,
             "extras": self.options.extras.len(),
             "customize": self.customize,
+            // A08: why "Edit in Report Builder" is off (`null`: it works).
+            "builder_customize_off": super::builder_run::customize_off(self),
             "memorize_available": super::memorized::available(&self.link),
             "memorize_dialog": self.memo.dialog_open(),
             "memorized_changed": super::memorized::changed(self),
@@ -1274,8 +1276,25 @@ fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
 /// The caption column's smallest width when the table must fit.
 const CAPTION_FIT_MIN: f32 = 120.0;
 
-/// The company's fiscal start month.
-fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
+/// The open company's fiscal calendar (4-4-5 and the like), kept on this
+/// computer (Q-P08c); the report window and the Report Builder editor read
+/// it the same way, so their runs match (A08 AC8).
+pub(super) fn company_calendar(
+    link: &CompanyLink,
+    open: Option<&(cl_core::ids::TenantId, String)>,
+) -> cl_settings::FiscalCalendar {
+    open.and_then(|(id, _)| {
+        link.store()
+            .load()
+            .ok()
+            .and_then(|list| list.get(*id).map(|r| r.flags.fiscal_calendar))
+    })
+    .unwrap_or_default()
+}
+
+/// The company's fiscal start month (the window and the A08 editor; the
+/// answer becomes a spec through `home::charts::spec(start, calendar)`).
+pub(super) fn fiscal_read(link: &CompanyLink, group: Option<&RequestGroup>) -> Job<Option<u8>> {
     engine::read(
         link,
         group,
@@ -1360,6 +1379,23 @@ fn problem_key(e: &cl_model::reports::ResolveError) -> &'static str {
     }
 }
 
+impl ReportWindow {
+    /// The editor's Export or Print, once the full run is on screen; a run
+    /// that failed drops it (the tab says why).
+    pub(super) fn do_after_run(&mut self, ctx: &egui::Context) {
+        use super::builder_ref::AfterRun;
+        match self.state {
+            RunState::Shown if self.table.is_some() => match self.after_run.take() {
+                Some(AfterRun::Print) => super::export::print(self),
+                Some(AfterRun::Export(kind)) => super::export::start(self, ctx, kind),
+                None => {}
+            },
+            RunState::Failed | RunState::Unavailable => self.after_run = None,
+            _ => {}
+        }
+    }
+}
+
 impl Screen for ReportWindow {
     fn title(&self) -> String {
         self.title_text()
@@ -1368,10 +1404,19 @@ impl Screen for ReportWindow {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         super::builder_run::tick(self, ui);
-        if self.job.is_none() && !self.link.bus().take(&mut self.bus).is_empty() {
-            self.run();
+        if self.job.is_none() {
+            let mut changed = self.link.bus().take(&mut self.bus);
+            // A report memorized elsewhere (an editor, another window): the
+            // Memorized list reads again; the figures stand (QA-16).
+            if std::mem::take(&mut changed.reports) {
+                super::memorized::load(self);
+            }
+            if !changed.is_empty() {
+                self.run();
+            }
         }
         super::export::poll(self);
+        self.do_after_run(ui.ctx());
         egui::ScrollArea::vertical()
             .id_salt(("report_window", self.view))
             .show(ui, |ui| self.draw(ui));
@@ -1386,6 +1431,7 @@ impl Screen for ReportWindow {
             || self.drill_job.is_some()
             || self.builder.as_ref().is_some_and(|b| b.busy())
             || self.starters.busy()
+            || self.edit.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1422,7 +1468,7 @@ impl Screen for ReportWindow {
                 true
             }
             "reports.memorize" => {
-                if super::memorized::available(&self.link) && self.builder.is_none() {
+                if super::memorized::available(&self.link) {
                     super::memorized::open_dialog(self);
                 }
                 true
@@ -1451,6 +1497,10 @@ impl Screen for ReportWindow {
                 super::builder_run::open_detail(self, *open);
                 return true;
             }
+            OpenPayload::BuilderDefinition(open) => {
+                super::builder_run::open_definition(self, *open);
+                return true;
+            }
             _ => return false,
         };
         let ReportOpen { key, options } = *open;
@@ -1464,6 +1514,11 @@ impl Screen for ReportWindow {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    /// An editor's next Run report refreshes its result tab (Q-A08x).
+    fn takes_in_place(&self, payload: &OpenPayload) -> bool {
+        super::builder_run::takes(self, payload)
     }
 }
 

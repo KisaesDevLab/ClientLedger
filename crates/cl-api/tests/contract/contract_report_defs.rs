@@ -32,7 +32,9 @@ pub fn crud_conflicts_and_groups(h: &Harness) {
         kind: "standard".into(),
         definition: standard("profit_loss", "last_month"),
     };
-    let row = h.run(defs.create(&w)).expect("create");
+    let row = h
+        .run(defs.create(&w, cl_api::IdempotencyKey::new()))
+        .expect("create");
     assert_eq!(row.name, name);
     assert_eq!(row.group_id.as_deref(), Some(group.id.as_str()));
     assert_eq!(row.definition["reportKey"], "profit_loss");
@@ -47,7 +49,9 @@ pub fn crud_conflicts_and_groups(h: &Harness) {
     assert_eq!(read.version, row.version);
 
     // The same name again: 409 NAME_TAKEN.
-    let again = h.run(defs.create(&w)).expect_err("name taken");
+    let again = h
+        .run(defs.create(&w, cl_api::IdempotencyKey::new()))
+        .expect_err("name taken");
     assert_eq!(
         definition_refusal(&again),
         Some(DefinitionRefusal::NameTaken)
@@ -70,8 +74,13 @@ pub fn crud_conflicts_and_groups(h: &Harness) {
     bad.name = unique("Bad");
     bad.definition =
         json!({"schemaVersion": 1, "kind": "standard", "reportKey": "NOT A KEY", "options": {}});
-    let e = h.run(defs.create(&bad)).expect_err("invalid");
-    assert_eq!(definition_refusal(&e), Some(DefinitionRefusal::Invalid));
+    let e = h
+        .run(defs.create(&bad, cl_api::IdempotencyKey::new()))
+        .expect_err("invalid");
+    assert!(matches!(
+        definition_refusal(&e),
+        Some(DefinitionRefusal::Invalid { .. })
+    ));
 
     // Deleting the group keeps the report, ungrouped.
     let groups = h.run(defs.groups()).expect("groups");

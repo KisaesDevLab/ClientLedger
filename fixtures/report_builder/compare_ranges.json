@@ -1,0 +1,32 @@
+
+{
+  "prior_period_october": {
+    "compareRanges": [
+      [
+        {
+          "from": "2034-09-01",
+          "to": "2034-09-30"
+        }
+      ]
+    ],
+    "fiscalYearStarts": [
+      "2033-01-01",
+      "2034-01-01"
+    ]
+  },
+  "prior_year_as_of": {
+    "compareRanges": [
+      [
+        {
+          "from": "2034-03-31",
+          "to": "2034-03-31"
+        }
+      ]
+    ],
+    "fiscalYearStarts": [
+      "2033-01-01",
+      "2034-01-01",
+      "2035-01-01"
+    ]
+  }
+}

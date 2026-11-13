@@ -146,6 +146,34 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Shift+U` | Unmark All | `reconcile.unmark_all` |
 | `Ctrl+Enter` | Reconcile Now | `reconcile.finish` |
 
+## In the Report Builder
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `Ctrl+Enter` | Update the Preview | `builder.refresh_preview` |
+| `Ctrl+Z` | Undo the Last Change | `builder.undo` |
+| `Ctrl+Y` | Redo | `builder.redo` |
+| `F6` | Next Pane | `builder.next_pane` |
+| `Shift+F6` | Previous Pane | `builder.prev_pane` |
+| `Alt+B` | Back a Step | `builder.guided_back` |
+| `Alt+N` | Next Step | `builder.guided_next` |
+
+## In the report outline
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `Insert` | Add a Row… | `builder.add` |
+| `Delete` | Remove the Row | `builder.remove` |
+| `Alt+Up` | Move the Row Up | `builder.move_up` |
+| `Alt+Down` | Move the Row Down | `builder.move_down` |
+| `Tab` | Put the Row in the Group Above | `builder.indent` |
+| `Shift+Tab` | Take the Row out of Its Group | `builder.outdent` |
+| `F2` | Rename the Row | `builder.rename` |
+| `Down` | Next Row | `builder.next_row` |
+| `Up` | Previous Row | `builder.prev_row` |
+| `Left` | Fold the Group | `builder.fold` |
+| `Right` | Unfold the Group | `builder.unfold` |
+
 ## Always the same in forms and grids
 
 | Keys | Action |

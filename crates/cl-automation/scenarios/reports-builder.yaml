@@ -3,7 +3,8 @@
 # purchases shows a section the demo's role can't see (the formula over it
 # shows a dash); Profit & Loss expands with Expand all, pages a capped
 # account with Load more, opens a transaction's form and a total's detail
-# tab; the slow starter says it took too long. Synthetic.
+# tab; the slow starter says it took too long. A08: Memorize saves a
+# builder report. Synthetic.
 name: reports-builder
 description: Report Builder starters - denied section, expand, Load more, open a form, subtotal detail, timeout note.
 steps:
@@ -18,9 +19,21 @@ steps:
   - assert_state: {key: screen.builder.key, equals: sales_and_purchases}
   - assert_state: {key: screen.state, equals: shown}
   - assert_state: {key: screen.builder.denied, equals: 1}
-  # A builder report isn't memorized from the toolbar (Q-A07t(1), S-L1).
-  - assert_not_exists: {role: button, label: Memorize}
   - screenshot: builder-denied
+  # A08: a builder report is memorized as a builder report (lifts
+  # Q-A07t(1)); it then lists under Memorized.
+  - assert_exists: {role: button, label: Memorize}
+  - assert_exists: {role: button, label: Edit in Report Builder}
+  - command: reports.memorize
+  - assert_state: {key: screen.memorize_dialog, equals: true}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: "Sales and purchases kept {theme}"}
+  - click: {role: button, label: Memorize, index: 1}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.memorize_dialog, equals: false}
+  - assert_state: {key: screen.memorized_changed, equals: false}
+  - assert_exists: {label_contains: "Sales and purchases kept", index: 0}
   # --- Profit & Loss: Expand all, Load more --------------------------------
   - click: {label: Profit & Loss, index: 1}
   - wait: {ms: 400}

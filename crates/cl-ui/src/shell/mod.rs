@@ -386,6 +386,26 @@ impl Shell {
                 return;
             }
         }
+        // A08 (Q-A08x): an open window that answers for this payload takes
+        // it (an editor's result tab, an editor's Customize return).
+        let in_place = self
+            .windows
+            .all()
+            .iter()
+            .find(|w| w.screen.takes_in_place(&payload))
+            .map(|w| w.id);
+        if let Some(id) = in_place {
+            let taken = self
+                .windows
+                .all_mut()
+                .iter_mut()
+                .find(|w| w.id == id)
+                .is_some_and(|w| w.screen.open_with(payload.clone()));
+            if taken {
+                self.windows.activate(id);
+                return;
+            }
+        }
         let back = self.windows.active().map(|w| w.id);
         let mut screen = self.make_screen(kind);
         if screen.open_with(payload) {
@@ -433,6 +453,21 @@ impl Shell {
         };
         link.set_dirty_windows(self.windows.dirty_ids().len());
         self.poll_closing(&link, ctx);
+        // A08: a window whose own save finished asks to close (that window,
+        // never another of its kind).
+        let closing: Vec<WindowId> = self
+            .windows
+            .all_mut()
+            .iter_mut()
+            .filter_map(|w| w.screen.take_close_request().then_some(w.id))
+            .collect();
+        for id in closing {
+            self.windows.close_now(id);
+        }
+        // A quit that waited for a window's own save goes on (R14).
+        if self.windows.resume_quit() == Some(QuitProgress::Ready) {
+            self.finish_quit(ctx);
+        }
         for event in link.drain() {
             match event {
                 CompanyEvent::SignedIn { user } => {
@@ -847,6 +882,13 @@ impl Shell {
     /// Run a command now (outside a frame; tests and start-up).
     pub fn dispatch_now(&mut self, id: CommandId) {
         self.run(None, id);
+        self.apply_company_events(None);
+    }
+
+    /// Applies what the company screens reported, without a frame (tests:
+    /// a screen's `OpenWith` reaching the shell).
+    #[cfg(test)]
+    pub(crate) fn apply_events_now(&mut self) {
         self.apply_company_events(None);
     }
 

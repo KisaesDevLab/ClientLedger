@@ -1365,6 +1365,22 @@ fn main() -> std::process::ExitCode {
             contract_report_builder::totals_and_columns_drill_to_their_lines,
         ),
         (
+            "report_builder::prior_period_compare_ranges_are_used",
+            contract_report_builder::prior_period_compare_ranges_are_used,
+        ),
+        (
+            "report_builder::prior_year_as_of_compare_ranges_are_used",
+            contract_report_builder::prior_year_as_of_compare_ranges_are_used,
+        ),
+        (
+            "report_builder::builder_definitions_save_and_refuse",
+            contract_report_builder::builder_definitions_save_and_refuse,
+        ),
+        (
+            "report_builder::a_preview_run_is_the_screen_run_cut_at_fifty",
+            contract_report_builder::a_preview_run_is_the_screen_run_cut_at_fifty,
+        ),
+        (
             "budgets::hand_fixture_and_writes",
             contract_budgets::hand_fixture_and_writes,
         ),

@@ -112,6 +112,7 @@ impl DemoReportStore {
                 created_by: None,
                 created_by_name: Some("Kurt".into()),
                 updated_at: Some(DemoState::now()),
+                can_edit: true,
             });
         }
         let mut lines = BTreeMap::new();
@@ -198,8 +199,45 @@ pub fn delete_definition(d: &mut DemoState, id: &str, version: u64) -> Result<()
     if s.definitions[i].version != version {
         return Err(refusal(409, "STALE_VERSION"));
     }
+    if !s.definitions[i].can_edit {
+        return Err(refusal(403, "NOT_AUTHOR"));
+    }
     s.definitions.remove(i);
     Ok(())
+}
+
+/// The engine's checks on a builder body.
+fn check_builder(body: &Value) -> Result<(), ApiError> {
+    let text = serde_json::to_string(body).map_err(|_| invalid())?;
+    if text.len() > cl_api::resources::reports::definitions::MAX_BUILDER_DEFINITION_BYTES {
+        return Err(ApiError::PayloadTooLarge);
+    }
+    match cl_model::report_def::parse(&text) {
+        Ok(_) => Ok(()),
+        Err(cl_model::report_def::DefinitionError::Invalid { path, code }) => {
+            Err(cl_api::engine_refusal(
+                400,
+                &json!({"error": {"message": "refused", "code": "DEFINITION_INVALID",
+                                  "details": {"path": path, "code": code.as_str()}}}),
+            ))
+        }
+        Err(cl_model::report_def::DefinitionError::TooLarge) => Err(ApiError::PayloadTooLarge),
+        Err(_) => Err(cl_api::engine_refusal(
+            400,
+            &json!({"error": {"message": "refused", "code": "DEFINITION_INVALID",
+                              "details": {"path": "definition", "code": "SCHEMA"}}}),
+        )),
+    }
+}
+
+/// Makes the memorized report `id` another user's (tests: Save changes is
+/// refused `NOT_AUTHOR`, and the row reads `canEdit: false`).
+#[cfg(test)]
+pub(crate) fn author_only(d: &mut DemoState, id: &str) {
+    if let Some(r) = store(d).definitions.iter_mut().find(|r| r.id == id) {
+        r.can_edit = false;
+        r.created_by_name = Some("Dana".into());
+    }
 }
 
 /// Saves a memorized report: new (`target` is `None`) or over `target`'s
@@ -213,10 +251,20 @@ pub fn save_definition(
     target: Option<(String, u64)>,
     w: &DefinitionWrite,
 ) -> Result<DefinitionRow, ApiError> {
+    // A builder body is checked as the engine checks it (A08): its rules
+    // (`DEFINITION_INVALID {path, code}`) and its size (413).
+    if w.kind == "builder" {
+        check_builder(&w.definition)?;
+    }
     let s = store(d);
     let name = w.name.trim();
     if name.is_empty() {
         return Err(invalid());
+    }
+    if let Some((id, _)) = &target
+        && !s.definitions.iter().any(|r| r.id == *id)
+    {
+        return Err(ApiError::NotFound { code: None });
     }
     let taken = s.definitions.iter().any(|r| {
         r.name.eq_ignore_ascii_case(name) && target.as_ref().is_none_or(|(id, _)| *id != r.id)
@@ -225,13 +273,19 @@ pub fn save_definition(
         return Err(refusal(409, "NAME_TAKEN"));
     }
     if let Some((id, version)) = target {
+        // Deleted meanwhile: 404, as the engine (the editor offers
+        // Memorize as new, Q-A08n).
         let r = s
             .definitions
             .iter_mut()
             .find(|r| r.id == id)
-            .ok_or_else(not_found)?;
+            .ok_or(ApiError::NotFound { code: None })?;
         if r.version != version {
             return Err(refusal(409, "STALE_VERSION"));
+        }
+        // Only its author, an owner or a super admin changes it (Q-310).
+        if !r.can_edit {
+            return Err(refusal(403, "NOT_AUTHOR"));
         }
         // The engine refuses a kind change (report-definitions.service.ts):
         // a builder report is never overwritten by a standard one (#3).
@@ -256,6 +310,7 @@ pub fn save_definition(
             created_by: None,
             created_by_name: Some("Kurt".into()),
             updated_at: Some(DemoState::now()),
+            can_edit: true,
         };
         s.definitions.push(row.clone());
         Ok(row)

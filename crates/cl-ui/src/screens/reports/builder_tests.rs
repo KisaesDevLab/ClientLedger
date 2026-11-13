@@ -168,45 +168,38 @@ fn load_more_adds_rows_and_a_file_says_rows_were_not_loaded() {
 
 /// #3, S-L1: a builder report can't be memorized from the toolbar or the
 /// dialog, never marks the tab dirty, and the demo refuses a kind change.
+/// A08 (lifts Q-A07t(1)): Memorize on a builder run saves a builder row;
+/// a changed date preset makes it dirty and Save changes writes it into
+/// the definition; a builder row is never turned standard.
 #[test]
-fn a_builder_report_is_never_memorized_as_a_standard_one() {
+fn memorize_on_a_builder_run_saves_a_builder_row() {
     let (_d, link) = demo();
     let mut w = starter(&link, "profit_loss");
-    super::memorized::open_dialog(&mut w);
-    assert!(!w.memo.dialog_open(), "the dialog doesn't open");
     assert!(w.command(CommandId::new("reports.memorize")));
-    assert!(!w.memo.dialog_open());
-    // A memorized builder report: no dirty dot, and a forced save is
-    // refused before anything is sent.
-    let body = crate::company::demo::report_builder::starters()
-        .expect("starters")
-        .into_iter()
-        .find(|s| s.key == "profit_loss")
-        .expect("p&l")
-        .definition;
-    let write = cl_api::resources::reports::definitions::DefinitionWrite {
-        name: "My P&L".into(),
-        group_id: None,
-        kind: "builder".into(),
-        definition: body,
-    };
-    let row = {
-        let mut st = link.demo_state().expect("demo");
-        crate::company::demo::report_store::save_definition(&mut st, None, &write).expect("saved")
-    };
-    super::memorized::open_row(&mut w, &row);
+    assert!(w.memo.dialog_open(), "the dialog opens on a builder run");
+    w.memo.dialog = Some(super::memorized::Dialog::named("My P&L"));
+    super::memorized::save(&mut w, super::memorized::SaveAs::New);
     w.poll();
-    assert!(w.builder.is_some());
+    let row = w.memo.current.clone().expect("saved");
+    assert_eq!(row.kind, "builder");
+    assert_eq!(row.definition["kind"], "builder");
+    assert!(!super::memorized::changed(&w));
+    // Last year instead: dirty, and Save changes updates the same row.
     let mut o = w.options.clone();
     o.dates = cl_model::reports::DateChoice::Preset(cl_model::reports::DatePreset::LastYear);
     w.set_options(o);
-    assert!(!super::memorized::changed(&w), "never dirty");
-    w.memo.dialog = Some(super::memorized::Dialog::named("My P&L"));
-    super::memorized::save(&mut w, super::memorized::SaveAs::Changes);
-    assert_eq!(
-        w.memo.dialog.as_ref().and_then(|d| d.problem),
-        Some("reports.memorize.invalid")
+    assert!(
+        super::memorized::changed(&w),
+        "a changed preset is a change"
     );
+    super::memorized::open_dialog(&mut w);
+    super::memorized::save(&mut w, super::memorized::SaveAs::Changes);
+    w.poll();
+    let next = w.memo.current.clone().expect("saved");
+    assert_eq!(next.id, row.id);
+    assert!(next.version > row.version);
+    assert_eq!(next.definition["dates"]["preset"], "last_year");
+    assert!(!super::memorized::changed(&w));
     // The demo store, like the engine, refuses to turn it standard.
     let standard = cl_api::resources::reports::definitions::DefinitionWrite {
         name: "My P&L".into(),
@@ -222,11 +215,189 @@ fn a_builder_report_is_never_memorized_as_a_standard_one() {
     assert!(
         crate::company::demo::report_store::save_definition(
             &mut st,
-            Some((row.id.clone(), row.version)),
+            Some((next.id.clone(), next.version)),
             &standard
         )
         .is_err()
     );
+}
+
+/// The Customize seed the window pushed, if any.
+fn pushed_seed(link: &CompanyLink) -> Option<super::builder::CustomizeSeed> {
+    link.drain().into_iter().find_map(|e| match e {
+        crate::company::CompanyEvent::OpenWith(kind, payload)
+            if kind.as_str() == super::builder::KIND =>
+        {
+            match *payload {
+                OpenPayload::BuilderEditor(seed) => match *seed {
+                    super::builder::BuilderSeed::Customize(c) => Some(*c),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    })
+}
+
+fn pl_starter() -> serde_json::Value {
+    crate::company::demo::report_builder::starters()
+        .expect("starters")
+        .into_iter()
+        .find(|s| s.key == "profit_loss")
+        .expect("p&l")
+        .definition
+}
+
+/// A08 (Q-A08g, Q-A08k): Edit in Report Builder on the P&L opens the
+/// editor on the `profit_loss` starter with the window's dates and basis.
+#[test]
+fn customize_on_the_pl_opens_its_starter() {
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    let _ = link.drain();
+    assert_eq!(super::builder_run::customize_off(&w), None);
+    super::builder_run::customize(&mut w);
+    w.poll();
+    let seed = pushed_seed(&link).expect("the editor opens");
+    assert_eq!(serde_json::to_value(&seed.def).expect("json"), pl_starter());
+    assert_eq!(
+        seed.origin,
+        cl_model::report_def::editor::Origin::Standard("profit_loss".into())
+    );
+    assert_eq!(seed.dates, Some(w.options.dates));
+    assert_eq!(seed.basis, w.options.basis);
+    assert!(seed.saved.is_none());
+    assert!(!seed.filters_dropped);
+    assert_eq!(seed.editor, None);
+}
+
+/// A08 (Q-A08k): a report with no starter has Customize off, with the
+/// reason, and nothing opens.
+#[test]
+fn a_report_with_no_starter_has_customize_off() {
+    let (_d, link) = demo();
+    let mut w = ReportWindow::new(
+        Arc::clone(&link),
+        CommandId::new(KIND),
+        None,
+        find("journal").expect("journal"),
+        today(),
+    );
+    w.poll();
+    let _ = link.drain();
+    assert_eq!(
+        super::builder_run::customize_off(&w),
+        Some("reports.customize.no_starter")
+    );
+    super::builder_run::customize(&mut w);
+    w.poll();
+    assert!(pushed_seed(&link).is_none(), "nothing opens");
+    assert_eq!(
+        w.state()["builder_customize_off"],
+        serde_json::json!("reports.customize.no_starter")
+    );
+}
+
+/// A08 (Q-A08x): an editor's Run report opens in a report window, its
+/// next run refreshes the same tab, and Customize from it returns to the
+/// same editor.
+#[test]
+fn an_editors_run_report_has_one_tab_that_returns_to_it() {
+    let (_d, link) = demo();
+    let def = cl_model::report_def::parse(&pl_starter().to_string()).expect("def");
+    let editor = super::builder::EditorId::next();
+    let spec = super::builder_ref::spec_for(&def);
+    let open = super::builder_ref::BuilderRunOpen {
+        editor,
+        title: "My report".into(),
+        def,
+        options: cl_model::reports::ReportOptions::for_spec(spec),
+        saved: None,
+        origin: cl_model::report_def::editor::Origin::Blank,
+        then: None,
+    };
+    let mut w = window(&link);
+    w.poll();
+    let payload = OpenPayload::BuilderDefinition(Box::new(open.clone()));
+    assert!(!w.takes_in_place(&payload), "not yet its tab");
+    assert!(w.open_with(payload));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown, "{:?}", w.error);
+    let again = OpenPayload::BuilderDefinition(Box::new(open.clone()));
+    assert!(w.takes_in_place(&again), "the editor's tab");
+    let mut other = open.clone();
+    other.editor = super::builder::EditorId::next();
+    assert!(!w.takes_in_place(&OpenPayload::BuilderDefinition(Box::new(other))));
+    let _ = link.drain();
+    super::builder_run::customize(&mut w);
+    let seed = pushed_seed(&link).expect("customize");
+    assert_eq!(seed.editor, Some(editor));
+    assert_eq!(seed.origin, cl_model::report_def::editor::Origin::Blank);
+    assert_eq!(seed.def, open.def);
+}
+
+/// R13 (Q-A08m): the editor's Print runs the full report in its tab, then
+/// prints that tab (its PDF in the document tab), never the preview.
+#[test]
+fn the_editors_print_prints_its_result_tab() {
+    let (_d, link) = demo();
+    let def = cl_model::report_def::parse(&pl_starter().to_string()).expect("def");
+    let spec = super::builder_ref::spec_for(&def);
+    let open = super::builder_ref::BuilderRunOpen {
+        editor: super::builder::EditorId::next(),
+        title: "My report".into(),
+        def,
+        options: cl_model::reports::ReportOptions::for_spec(spec),
+        saved: None,
+        origin: cl_model::report_def::editor::Origin::Blank,
+        then: Some(super::builder_ref::AfterRun::Print),
+    };
+    let mut w = window(&link);
+    w.poll();
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open))));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown, "{:?}", w.error);
+    let _ = link.drain();
+    w.do_after_run(&egui::Context::default());
+    assert!(w.after_run.is_none(), "done once");
+    let mut opened = false;
+    for _ in 0..200 {
+        super::export::poll(&mut w);
+        opened = link.drain().into_iter().any(|e| {
+            matches!(e, crate::company::CompanyEvent::OpenWith(_, p)
+                if matches!(*p, OpenPayload::Document(_)))
+        });
+        if opened {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(opened, "the full run's PDF opened to print");
+}
+
+/// A08 (Q-A07u(1)): Customize on a memorized builder report re-reads its
+/// row: the editor gets the row's version and `canEdit`.
+#[test]
+fn customize_on_a_memorized_builder_report_rereads_its_row() {
+    let (_d, link) = demo();
+    let mut w = starter(&link, "profit_loss");
+    w.memo.dialog = Some(super::memorized::Dialog::named("Saved P&L"));
+    super::memorized::save(&mut w, super::memorized::SaveAs::New);
+    w.poll();
+    let row = w.memo.current.clone().expect("saved");
+    let _ = link.drain();
+    super::builder_run::customize(&mut w);
+    w.poll();
+    let seed = pushed_seed(&link).expect("customize");
+    let saved = seed.saved.expect("its row");
+    assert_eq!(saved.id, row.id);
+    assert_eq!(saved.version, row.version);
+    assert_eq!(saved.kind, cl_model::report_def::editor::SavedKind::Builder);
+    assert!(saved.can_edit);
+    assert_eq!(seed.origin, cl_model::report_def::editor::Origin::Memorized);
+    assert_eq!(seed.title, "Saved P&L");
 }
 
 /// #4, #15: after the books change, a detail tab's Refresh runs the
@@ -290,6 +461,7 @@ fn an_unreadable_memorized_builder_report_says_why() {
             created_by: None,
             created_by_name: None,
             updated_at: None,
+            can_edit: true,
         };
     super::memorized::open_row(
         &mut w,
@@ -469,4 +641,149 @@ fn the_collapse_button_says_what_it_does() {
     assert_eq!(w.collapse_label(), "reports.tool.expand_all");
     assert_eq!(w.state_json_for_test()["collapse_label"], "expand_all");
     assert!(crate::i18n::has("reports.tool.expand_all"));
+}
+
+/// A08 QA (export): Export CSV pressed right after a dates change waits
+/// for the new run, then asks where to save once and writes the file; the
+/// Save dialog's answer is never left for the next export.
+#[test]
+fn an_export_pressed_while_the_report_runs_waits_for_it() {
+    let (_d, link) = demo();
+    let dir = tempfile::tempdir().expect("tmp");
+    let mut w = window(&link);
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let ctx = egui::Context::default();
+    let hook = crate::widgets::file_picker::PickerHook::install(&ctx);
+    let path = dir.path().join("pl.csv");
+    hook.answer(crate::widgets::file_picker::Answer::Paths(vec![
+        path.clone(),
+    ]));
+    let mut o = w.options.clone();
+    o.dates = cl_model::reports::DateChoice::Preset(cl_model::reports::DatePreset::LastYear);
+    w.set_options(o);
+    // The demo answers at once; the engine takes a moment: the run is
+    // still on its way when Export is pressed.
+    w.state = RunState::Running;
+    super::export::start(&mut w, &ctx, super::export::Kind::Csv);
+    assert_eq!(hook.asked(), 0, "no dialog before the rows are in");
+    assert!(w.export.message().is_none(), "no failure said");
+    w.state = RunState::Shown;
+    for _ in 0..200 {
+        w.poll();
+        w.do_after_run(&ctx);
+        super::export::poll(&mut w);
+        if path.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(path.exists(), "the file is written");
+    assert_eq!(hook.asked(), 1, "asked once");
+    let text = std::fs::read_to_string(&path).expect("csv");
+    assert!(text.contains("2025"), "the new run's dates: {text}");
+    assert!(w.export.message().is_some_and(|m| m.contains("pl.csv")));
+}
+
+/// QA-3: Find a report finds "New report…" by "new", "report builder" and
+/// "custom", whatever the ready-made reports are called.
+#[test]
+fn new_report_is_found_by_its_own_words() {
+    let words = |s: &str| -> Vec<String> { s.split_whitespace().map(str::to_lowercase).collect() };
+    for hit in [
+        "",
+        "new",
+        "New report",
+        "report builder",
+        "builder",
+        "custom",
+        "create",
+    ] {
+        assert!(super::builder_run::new_report_matches(&words(hit)), "{hit}");
+    }
+    for miss in ["sales and purchases", "aging", "new aging"] {
+        assert!(
+            !super::builder_run::new_report_matches(&words(miss)),
+            "{miss}"
+        );
+    }
+}
+
+/// QA-10: two compares and a `% of` give distinct, sentence-case
+/// headings; one compare keeps the short ones.
+#[test]
+fn compare_headings_are_distinct() {
+    let def: cl_model::report_def::BuilderDefinition = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+        "columns": {"detailFields": [], "headers": {}, "percentOf": "inc",
+            "compare": [
+                {"base": "prior_period", "amount": true, "dollarChange": true, "percentChange": true},
+                {"base": "prior_year", "amount": true, "dollarChange": true, "percentChange": false}
+            ]},
+        "nodes": [{"type": "section", "id": "inc", "caption": "Income", "source": "gl",
+            "measure": "amount", "filters": [], "groupBy": [], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false}]
+    }))
+    .expect("def");
+    let cap = |k: &str| super::builder_run::compare_caption(&def, k);
+    assert_eq!(cap("total:c0").as_deref(), Some("Prior period"));
+    assert_eq!(cap("total:c1").as_deref(), Some("Prior year"));
+    let a = cap("total:c0:change").expect("change");
+    let b = cap("total:c1:change").expect("change");
+    assert_ne!(a, b, "two $ columns are told apart");
+    assert_eq!(cap("total:pct").as_deref(), Some("% of Income"));
+    assert_eq!(cap("p3:pct").as_deref(), Some("% of Income"));
+    assert_eq!(cap("bucket:current"), None, "not a compare");
+    assert_eq!(cap("total:c0:debit"), None);
+    let mut one = def.clone();
+    one.columns.compare.truncate(1);
+    assert_eq!(
+        super::builder_run::compare_caption(&one, "total:c0:change").as_deref(),
+        Some("$ change")
+    );
+}
+
+/// QA-13: text, blank, page-break and section header rows are empty across
+/// after dressing, never "—" in a % column.
+#[test]
+fn rows_without_figures_are_empty_across() {
+    use cl_core::report::{Cell, ColumnHead, ColumnKind, ReportRow, ReportTable, RowPath};
+    let row = |kind| ReportRow {
+        kind,
+        level: 0,
+        path: RowPath::of(["n:x"]),
+        caption: "Prepared for the bank".into(),
+        cells: vec![Cell::Empty, Cell::Percent(None)],
+        drill: None,
+        expandable: false,
+    };
+    let table = ReportTable {
+        columns: vec![
+            ColumnHead {
+                key: "total".into(),
+                caption: "Total".into(),
+                kind: ColumnKind::Amount,
+                range: None,
+                drill: None,
+            },
+            ColumnHead {
+                key: "total:pct".into(),
+                caption: "%".into(),
+                kind: ColumnKind::Percent,
+                range: None,
+                drill: None,
+            },
+        ],
+        rows: vec![
+            row(RowKind::Text),
+            row(RowKind::Blank),
+            row(RowKind::PageBreak),
+            row(RowKind::Header),
+        ],
+        ..ReportTable::default()
+    };
+    let t = super::builder_run::dress(None, table, false);
+    for r in &t.rows {
+        assert!(r.cells.iter().all(|c| *c == Cell::Empty), "{:?}", r.kind);
+    }
 }

@@ -50,6 +50,9 @@ pub enum Change {
     /// Bank file rows were added to or taken out of the Bank Feed (P25):
     /// Home's waiting count and the Bank Feed read again.
     BankFeed,
+    /// Memorized reports were saved, changed or deleted (A08 QA-16): an
+    /// open report window's Memorized list reads them again.
+    Reports,
 }
 
 impl Change {
@@ -96,6 +99,8 @@ pub struct Changes {
     pub printing: bool,
     /// The Bank Feed (P25).
     pub bank_feed: bool,
+    /// Memorized reports (A08 QA-16).
+    pub reports: bool,
 }
 
 impl Changes {
@@ -113,6 +118,7 @@ impl Changes {
             bills_all: true,
             printing: true,
             bank_feed: true,
+            reports: true,
         }
     }
 
@@ -167,6 +173,7 @@ impl Changes {
             Change::Templates => self.templates = true,
             Change::Printing => self.printing = true,
             Change::BankFeed => self.bank_feed = true,
+            Change::Reports => self.reports = true,
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }
