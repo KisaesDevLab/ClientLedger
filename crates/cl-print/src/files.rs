@@ -40,12 +40,15 @@ pub fn pdf_file_name(kind: &str, number: &str, name: &str) -> String {
 const MAX_STEM: usize = 120;
 
 /// One path component safe on Windows, macOS and Linux: `< > : " / \ | ? *`
-/// and control characters become `_`; leading and trailing dots and spaces
-/// are dropped; Windows device names get a trailing `_`.
+/// and control characters become `_`; bidirectional controls (which can
+/// make `report<RLO>fdp.exe` read as `reportexe.pdf`, A09 S-L7) are dropped;
+/// leading and trailing dots and spaces are dropped; Windows device names
+/// get a trailing `_`.
 #[must_use]
 pub fn safe_component(s: &str) -> String {
     let mut out: String = s
         .chars()
+        .filter(|c| !is_bidi_control(*c))
         .map(|c| {
             if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
                 '_'
@@ -79,9 +82,30 @@ pub fn safe_component(s: &str) -> String {
     out
 }
 
+/// The Unicode bidirectional formatting characters: LRM/RLM, ALM, the
+/// embeddings and overrides, and the isolates.
+const fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bidi_controls_are_dropped_from_file_names() {
+        assert_eq!(safe_component("report\u{202E}fdp.exe"), "reportfdp.exe");
+        for c in [
+            '\u{200E}', '\u{200F}', '\u{061C}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+            '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            assert_eq!(safe_component(&format!("a{c}b")), "ab", "{:?}", c);
+        }
+        assert_eq!(safe_component("\u{2067}Shop costs\u{2069}"), "Shop costs");
+    }
 
     #[test]
     fn file_names_combine_kind_number_and_name_safely() {
