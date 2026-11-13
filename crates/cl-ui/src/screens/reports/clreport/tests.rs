@@ -1062,6 +1062,16 @@ fn a_finished_window_is_reused_and_esc_closes_it() {
     let mut f = ReportFileWindow::new(Arc::clone(&link));
     f.fail("report_file.error.invalid", true);
     assert!(f.takes_in_place(&next()));
-    ctx.run_ui(esc, |ui| f.ui(ui)).textures_delta.clear();
+    ctx.run_ui(esc.clone(), |ui| f.ui(ui))
+        .textures_delta
+        .clear();
     assert!(f.take_close_request());
+
+    // A review in progress is work: Esc leaves it, and it isn't reused.
+    let mut r = import(&link, &dir.path().join("two.clreport"));
+    assert_eq!(r.stage_name(), "review");
+    assert!(!r.takes_in_place(&next()));
+    ctx.run_ui(esc, |ui| r.ui(ui)).textures_delta.clear();
+    assert!(!r.take_close_request(), "Esc doesn't drop a review");
+    assert_eq!(r.stage_name(), "review");
 }

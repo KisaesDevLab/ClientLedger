@@ -1766,14 +1766,15 @@ impl Screen for ReportFileWindow {
             self.stage = Stage::Pick(None);
         }
         // Esc: the window has no form scope, so it reads the key itself
-        // (A09 QA-3): a finished window closes, a review cancels (nothing
-        // is written), an open Replace confirm closes first. A text field
-        // or an open list keeps its own Esc. Read before drawing, while an
-        // open list is still open.
+        // (A09 QA-3): a finished window closes, and an open Replace confirm
+        // closes. A review in progress stays (its choices are work; Cancel
+        // is its button). A text field or an open list keeps its own Esc.
+        // Read before drawing, while an open list is still open.
         let esc = !ui.ctx().text_edit_focused()
             && !egui::Popup::is_any_open(ui.ctx())
             && ui.input(|i| i.key_pressed(egui::Key::Escape));
-        if esc {
+        let confirm_open = matches!(&self.stage, Stage::Review(rv) if rv.confirm);
+        if esc && (self.is_finished() || confirm_open) {
             self.cancel();
         }
         self.poll_export();
