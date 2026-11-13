@@ -1718,7 +1718,7 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
 );
 // A09 (U-220, `report-defs-transfer-v1`): `.clreport` files. Not keyed:
 // export only reads (and writes a `download` audit row per report); the
-// preview writes nothing. Outside the pinned spec until U-220's pin bump.
+// preview writes nothing. In the spec since pin cf0cb239.
 /// Memorized reports without ids (`"$ref:N"` tokens and references).
 pub(crate) const REPORT_DEFS_EXPORT: Operation =
     write(Method::Post, "/api/v1/report-builder/definitions/export");

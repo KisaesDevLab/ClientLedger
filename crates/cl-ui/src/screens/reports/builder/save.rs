@@ -136,6 +136,12 @@ fn write_of(
     ))
 }
 
+/// The `origin` a Memorize would send now (tests).
+#[cfg(test)]
+pub(crate) fn origin_for_test(s: &BuilderScreen) -> Option<String> {
+    write_of(s, s.ed.name(), None).and_then(|(w, _)| w.origin)
+}
+
 /// True when the definition fits the engine's 256 KB.
 fn fits(s: &BuilderScreen) -> bool {
     to_text(s.ed.definition()).is_ok_and(|t| t.len() <= MAX_BYTES)

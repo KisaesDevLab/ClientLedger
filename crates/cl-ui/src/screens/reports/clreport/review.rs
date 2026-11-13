@@ -165,6 +165,19 @@ impl Review {
         self.choices.insert(choice_key(i, token), id);
     }
 
+    /// Takes back every choice for report `i` (Start over): its references
+    /// are matched by the engine again.
+    pub(crate) fn start_over(&mut self, i: usize) {
+        let prefix = format!("{i}:");
+        self.choices.retain(|k, _| !k.starts_with(&prefix));
+    }
+
+    /// True when the owner made a choice for report `i`.
+    pub(crate) fn has_choices(&self, i: usize) -> bool {
+        let prefix = format!("{i}:");
+        self.choices.keys().any(|k| k.starts_with(&prefix))
+    }
+
     /// The owner's answer to report `i`'s clash.
     pub(crate) fn set_clash(&mut self, i: usize, c: Clash) {
         if c == Clash::Replace

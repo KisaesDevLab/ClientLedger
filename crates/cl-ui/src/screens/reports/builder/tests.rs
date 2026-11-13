@@ -1899,3 +1899,39 @@ fn tab_on_an_outline_row_keeps_the_keyboard_there() {
     assert_eq!(s.state_json()["selected_depth"].as_u64(), Some(2));
     assert!(s.outline_focused, "the row still has the keyboard");
 }
+
+/// A09 WP-A: a report read from a `.clreport` file is memorized with
+/// `origin: 'import'` once; after that it is an ordinary memorized report.
+#[test]
+fn an_imported_report_is_memorized_as_an_import_once() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+    let mut s = super::BuilderScreen::new(
+        Arc::clone(&link),
+        None,
+        cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("day"),
+    );
+    let def = crate::company::demo::report_builder::starters()
+        .expect("starters")
+        .into_iter()
+        .find(|x| x.key == "profit_loss")
+        .expect("p&l")
+        .definition;
+    let def = cl_model::report_def::parse(&def.to_string()).expect("definition");
+    let seed = BuilderSeed::Imported {
+        def: Box::new(def),
+        name: "From the file".into(),
+        group_id: None,
+    };
+    assert!(crate::windows::Screen::open_with(
+        &mut s,
+        OpenPayload::BuilderEditor(Box::new(seed))
+    ));
+    assert_eq!(s.ed.origin(), &Origin::Imported);
+    assert_eq!(super::save::origin_for_test(&s).as_deref(), Some("import"));
+    super::save::open_memorize(&mut s, false);
+    super::save::memorize_for_test(&mut s);
+    super::save::poll(&mut s);
+    assert!(s.ed.saved().is_some(), "memorized");
+    assert_eq!(super::save::origin_for_test(&s), None);
+}

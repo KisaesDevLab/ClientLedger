@@ -1355,7 +1355,7 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs::crud_conflicts_and_groups",
             contract_report_defs::crud_conflicts_and_groups,
-        ), // A09 WP-A: `.clreport` (U-220; PENDING until the pin has it).
+        ), // A09 WP-A: `.clreport` (U-220, report-defs-transfer-v1).
         (
             "report_defs_transfer::export_and_preview_in_the_same_company",
             contract_report_defs_transfer::export_and_preview_in_the_same_company,

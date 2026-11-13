@@ -689,6 +689,17 @@ impl ReportFileWindow {
         self.stage = Stage::Review(rv);
     }
 
+    /// Start over on report `i`: its choices go, the preview is asked again.
+    pub(crate) fn start_over(&mut self, i: usize) {
+        let Stage::Review(rv) = &mut self.stage else {
+            return;
+        };
+        rv.review.start_over(i);
+        let mut rv = std::mem::take(rv);
+        self.send_preview(&mut rv);
+        self.stage = Stage::Review(rv);
+    }
+
     /// The review (tests and the control channel).
     pub(crate) fn review(&self) -> Option<&Review> {
         match &self.stage {
@@ -1154,6 +1165,7 @@ impl ReportFileWindow {
             return;
         };
         let mut chosen: Vec<(usize, String, Option<String>)> = Vec::new();
+        let mut again: Vec<usize> = Vec::new();
         let mut want_lists: Vec<&'static str> = Vec::new();
         let busy = rv.preview.is_some();
         let n = rv.review.reports.len();
@@ -1167,7 +1179,9 @@ impl ReportFileWindow {
             .max_height(ui.available_height() - 48.0)
             .show(ui, |ui| {
                 for i in 0..n {
-                    card(ui, tokens, rv, i, &mut chosen, &mut want_lists);
+                    if card(ui, tokens, rv, i, &mut chosen, &mut want_lists) {
+                        again.push(i);
+                    }
                     ui.add_space(8.0);
                 }
             });
@@ -1224,6 +1238,9 @@ impl ReportFileWindow {
         }
         for (i, token, id) in chosen {
             self.choose(i, &token, id);
+        }
+        for i in again {
+            self.start_over(i);
         }
         if yes {
             self.finish(true);
@@ -1329,7 +1346,7 @@ const fn wire_kind(k: cl_model::report_def::clreport::RefKind) -> &'static str {
     }
 }
 
-/// One report's card.
+/// One report's card. True when the owner pressed Start over.
 fn card(
     ui: &mut Ui,
     tokens: &Tokens,
@@ -1337,10 +1354,11 @@ fn card(
     i: usize,
     chosen: &mut Vec<(usize, String, Option<String>)>,
     want_lists: &mut Vec<&'static str>,
-) {
+) -> bool {
     let Some(r) = rv.review.reports.get(i).cloned() else {
-        return;
+        return false;
     };
+    let mut again = false;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
@@ -1454,8 +1472,19 @@ fn card(
                 ),
             );
         }
+        // Every choice can be taken back (a leave-out the save check
+        // refuses, a wrong pick).
+        if rv.review.has_choices(i)
+            && ui
+                .button(t("report_file.card.start_over"))
+                .on_hover_text(t("report_file.card.start_over.tip"))
+                .clicked()
+        {
+            again = true;
+        }
         clash_row(ui, tokens, rv, i, &r);
     });
+    again
 }
 
 /// The name clash's Rename / Replace choice.
@@ -1516,6 +1545,10 @@ impl Screen for ReportFileWindow {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
+        // Opened without a payload (Go to, a restored layout): an import.
+        if matches!(self.stage, Stage::Idle) {
+            self.stage = Stage::Pick(None);
+        }
         self.poll_export();
         self.poll_import();
         self.draw(ui);

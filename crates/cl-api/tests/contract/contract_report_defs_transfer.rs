@@ -1,6 +1,6 @@
 //! `.clreport` export, import preview and audit against a live engine (A09
-//! AC4, U-220 `report-defs-transfer-v1`; WP-A). PENDING(U-220) until the
-//! pin advertises the capability (Q-220).
+//! AC4, U-220 `report-defs-transfer-v1`, engine cf0cb239; WP-A). CI requires
+//! the capability (`CL_API_REQUIRE_CAPS`).
 //!
 //! - Export then preview into the same company gives the stored
 //!   definitions back, ready, with the group and the name clash found; the

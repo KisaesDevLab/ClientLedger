@@ -542,3 +542,121 @@ fn the_scenario_fixture_reviews_as_the_scenario_expects() {
     let r = w.review().expect("review");
     assert!(r.can_continue(), "{:?}", r.reports);
 }
+
+#[test]
+fn start_over_takes_back_a_leave_out_the_save_check_refuses() {
+    let (_d, link) = demo();
+    let mut w = import(&link, &fixture("from_accountant.clreport"));
+    w.choose(0, "$ref:2", None);
+    w.poll_import();
+    assert!(w.review().expect("review").has_choices(0));
+    assert_eq!(w.review().expect("review").reports[0].dropped.len(), 1);
+    w.start_over(0);
+    w.poll_import();
+    let r = w.review().expect("review");
+    assert!(!r.has_choices(0));
+    assert_eq!(r.reports[0].dropped.len(), 0);
+    assert_eq!(
+        r.reports[0].unresolved.len(),
+        2,
+        "matched again by the engine"
+    );
+}
+
+#[test]
+fn a_standard_import_opens_with_the_import_origin_and_its_name() {
+    let (_d, link) = demo();
+    let def = {
+        let mut d = link.demo_state().expect("demo");
+        report_store::definitions(&mut d).0[0].definition.clone()
+    };
+    let spec = cl_model::reports::find("profit_loss").expect("spec");
+    let mut w = super::super::ReportWindow::new(
+        Arc::clone(&link),
+        CommandId::new(super::super::KIND),
+        None,
+        spec,
+        cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("day"),
+    );
+    assert!(
+        w.open_with(OpenPayload::ImportedReport(Box::new(ImportedOpen {
+            definition: def,
+            name: "From the file".into(),
+            group_id: Some("g1".into()),
+        })))
+    );
+    assert_eq!(w.memo.origin.as_deref(), Some("import"));
+    let d = w.memo.dialog.as_ref().expect("Memorize dialog");
+    assert_eq!(
+        (d.name.as_str(), d.group.as_deref()),
+        ("From the file", Some("g1"))
+    );
+    // Another report in that window is not an import.
+    assert!(
+        w.open_with(OpenPayload::Report(Box::new(super::super::ReportOpen {
+            key: "balance_sheet".into(),
+            options: None,
+        })))
+    );
+    assert_eq!(w.memo.origin, None);
+}
+
+#[test]
+fn a_replace_whose_copy_cant_be_written_replaces_nothing() {
+    let (dir, link) = demo();
+    let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
+    let path = dir.path().join("one.clreport");
+    export_to(&link, Target::Report(Box::new(row.clone())), &path);
+    // The backup folder can't be made: a file has its name.
+    std::fs::write(dir.path().join("Backups"), b"x").expect("block");
+    let mut w = import(&link, &path);
+    w.set_clash(0, Clash::Replace);
+    w.finish(false);
+    w.finish(true);
+    for _ in 0..10 {
+        w.poll_import();
+    }
+    assert_eq!(w.stage_name(), "done");
+    assert_eq!(w.last, Some("stopped"));
+    assert!(
+        w.message
+            .as_deref()
+            .is_some_and(|m| m.contains("backup folder"))
+    );
+    let mut d = link.demo_state().expect("demo");
+    let now = report_store::definition(&mut d, &row.id).expect("row");
+    assert_eq!(now.version, row.version, "not replaced");
+}
+
+/// The write check never refuses a real report: every builder starter and
+/// every catalog report's default definition writes.
+#[test]
+fn every_starter_and_standard_report_writes_as_a_file() {
+    let mut reports: Vec<TransferReport> = crate::company::demo::report_builder::starters()
+        .expect("starters")
+        .into_iter()
+        .map(|s| TransferReport {
+            name: s.key.clone(),
+            group_name: None,
+            kind: "builder".into(),
+            definition: serde_json::to_value(&s.definition).expect("json"),
+            references: Vec::new(),
+        })
+        .collect();
+    for spec in cl_model::reports::CATALOG {
+        reports.push(TransferReport {
+            name: spec.key.into(),
+            group_name: None,
+            kind: "standard".into(),
+            definition: serde_json::to_value(cl_model::reports::StandardDefinition::new(
+                spec.key,
+                cl_model::reports::ReportOptions::for_spec(spec),
+            ))
+            .expect("json"),
+            references: Vec::new(),
+        });
+    }
+    for r in &reports {
+        assert!(file_bytes(std::slice::from_ref(r)).is_ok(), "{}", r.name);
+    }
+}
