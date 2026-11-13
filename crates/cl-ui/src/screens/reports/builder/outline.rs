@@ -336,6 +336,18 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         s.row_at.insert(row.id.clone(), rect);
         let caption = caption_of(s, &row.id);
         let sub = sub_caption(s, &node);
+        // A formula over a row shown with the other sign says so on its
+        // row too (QA-12, Q-A08ai): its sub-caption in the warning color,
+        // the note on hover and in its accessible name.
+        let sign_note = matches!(node, Node::Formula(_))
+            .then(|| {
+                cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &row.id)
+            })
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                let names: Vec<String> = v.iter().map(|id| caption_of(s, id)).collect();
+                t_with("builder.formula.sign_note", &[("rows", &names.join(", "))])
+            });
         resp.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::Role::TreeItem,
@@ -344,6 +356,10 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 format!("{} {caption}", t(kind_key(row.kind))),
             )
         });
+        let resp = match &sign_note {
+            Some(n) => resp.on_hover_text(n),
+            None => resp,
+        };
         if ui.is_rect_visible(rect) {
             let p = ui.painter();
             let fill = if warn {
@@ -416,13 +432,12 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 tokens.text_primary,
             );
             if !sub.is_empty() {
-                let g = elided(
-                    ui,
-                    &sub,
-                    egui::FontId::proportional(11.0),
-                    tokens.text_secondary,
-                    sub_w,
-                );
+                let sub_ink = if sign_note.is_some() {
+                    tokens.warn_text
+                } else {
+                    tokens.text_secondary
+                };
+                let g = elided(ui, &sub, egui::FontId::proportional(11.0), sub_ink, sub_w);
                 p.galley(
                     egui::pos2(
                         rect.right() - 4.0 - g.size().x,

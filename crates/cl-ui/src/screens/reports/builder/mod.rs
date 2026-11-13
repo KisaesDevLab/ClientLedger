@@ -288,6 +288,9 @@ pub(crate) struct Band {
     pub(crate) typing: bool,
     /// The From field's widget (tests focus it).
     pub(crate) from_id: Option<egui::Id>,
+    /// When the Dates list last changed the report's date choice (a
+    /// type-ahead passing through it is taken back for Custom dates).
+    pub(crate) picked_at: Option<f64>,
 }
 
 /// The editor window.
@@ -398,6 +401,7 @@ impl BuilderScreen {
                 to: date,
                 typing: false,
                 from_id: None,
+                picked_at: None,
             },
             lists: lists::Lists::default(),
             save: save::SaveState::default(),

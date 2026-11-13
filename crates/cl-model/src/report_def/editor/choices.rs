@@ -250,8 +250,12 @@ pub fn sign_flipped(s: &Section) -> bool {
         Some(Polarity::Debit) => true,
         Some(Polarity::Credit) => false,
     };
-    if s.source != SourceKey::Gl {
-        return true;
+    // A source with a fixed sign: flipped when set to the other one.
+    match fields::of(s.source).sign {
+        fields::Sign::DebitMinusCredit => return !debit,
+        fields::Sign::CreditMinusDebit => return debit,
+        fields::Sign::OwedPositive => return false,
+        fields::Sign::Natural => {}
     }
     let types: Vec<&String> = s
         .filters

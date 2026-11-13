@@ -275,16 +275,20 @@ steps:
   - key: Down
   - assert_focused: {role: button, label: Text}
   - key: Space
+  # Added on an open group, the text row goes inside it.
   - assert_state: {key: screen.rows, equals: 5}
+  - assert_state: {key: screen.selected_depth, equals: 2}
+  - key: Shift+Tab
   - assert_state: {key: screen.selected_depth, equals: 1}
+  - assert_state: {key: screen.outline_focused, equals: true}
   - key: Tab
   - assert_state: {key: screen.selected_depth, equals: 2}
-  - assert_state: {key: screen.outline_focused, equals: true}
   - key: Shift+Tab
   - assert_state: {key: screen.selected_depth, equals: 1}
   - key: Delete
   - assert_state: {key: screen.rows, equals: 4}
   - assert_state: {key: screen.outline_focused, equals: true}
+  - focus: {role: tree_item, label: Group New group}
   - key: Delete
   - assert_state: {key: screen.rows, equals: 3}
   - assert_state: {key: screen.dirty, equals: false}

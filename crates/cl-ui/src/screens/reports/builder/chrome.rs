@@ -375,17 +375,26 @@ fn dates(s: &mut BuilderScreen, ui: &mut Ui, d: &Dates) {
         Some(current),
         160.0,
     ) {
+        let now = ui.input(|x| x.time);
         if i < PRESETS.len() {
             s.band.custom = None;
             let mut nd = d.clone();
             nd.preset = Some(preset_name(PRESETS[i].0).into());
             s.apply(Op::Dates(nd));
+            s.band.picked_at = Some(now);
         } else if i == custom_at - 1 {
             s.band.custom = None;
             let mut nd = d.clone();
             nd.preset = None;
             s.apply(Op::Dates(nd));
+            s.band.picked_at = Some(now);
         } else {
+            // "cu" passes "Choose each time it runs" on its way to Custom
+            // dates: that passing pick is taken back, so Custom never
+            // changes the report's date choice (QA-5, Q-A08q).
+            if s.band.picked_at.take().is_some_and(|at| now - at <= 1.0) {
+                s.ed.undo();
+            }
             s.choose_custom_dates();
         }
     }
