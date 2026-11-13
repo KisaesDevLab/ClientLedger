@@ -51,7 +51,7 @@ fn builder_def(link: &CompanyLink) -> Value {
             "type": "section", "id": "s1", "caption": "Shop costs", "source": "gl",
             "measure": "amount", "polarity": "debit",
             "filters": [{"field": "account", "op": "in", "ids": expenses},
-                        {"field": "amount", "op": "gte", "value": "1250.5000"}],
+                        {"field": "amount", "op": "gte", "value": "1250.50"}],
             "groupBy": [{"key": "tag", "tagGroupId": tg}], "display": "summary",
             "defaultExpanded": false, "showTotal": true, "hideZero": false
         }]
@@ -247,7 +247,7 @@ fn an_export_writes_a_file_with_no_ids_that_reads_back() {
     assert_eq!(file.reports[0].name, "Shop costs");
     assert_eq!(
         file.reports[0].definition["nodes"][0]["filters"][1]["value"],
-        "1250.5000"
+        "1250.50"
     );
 }
 
@@ -862,6 +862,7 @@ fn a_short_backup_answer_replaces_nothing() {
         )),
         saved: Vec::new(),
         single: false,
+        open_unsaved: false,
         review: Review::default(),
     };
     let mut outcome = Advance::Waiting;
@@ -1074,4 +1075,218 @@ fn a_finished_window_is_reused_and_esc_closes_it() {
     ctx.run_ui(esc, |ui| r.ui(ui)).textures_delta.clear();
     assert!(!r.take_close_request(), "Esc doesn't drop a review");
     assert_eq!(r.stage_name(), "review");
+}
+
+/// A09 QA-6: a file whose amount filter isn't a dollar amount ("1e3",
+/// "100.015") is refused when it is read, naming the report, before any
+/// review or pick; nothing is written.
+#[test]
+fn a_bad_amount_filter_is_refused_when_read_naming_the_report() {
+    let (dir, link) = demo();
+    let before = count(&link);
+    for bad in ["1e3", "100.015"] {
+        // No ids in a file: a section over every account, amount only.
+        let def_with = |value: &str| {
+            json!({
+                "schemaVersion": 1, "kind": "builder", "title": "Fuel",
+                "nodes": [{"type": "section", "id": "s1", "caption": "Fuel", "source": "gl",
+                           "measure": "amount", "polarity": "debit",
+                           "filters": [{"field": "amount", "op": "gte", "value": value}]}]
+            })
+        };
+        let def = def_with(bad);
+        let file = ReportFile::new(
+            "ClientLedger 0.9.0",
+            "2026-11-13T00:00:00Z",
+            vec![
+                clreport::FileReport {
+                    name: "Fine one".into(),
+                    group: None,
+                    kind: "builder".into(),
+                    definition: def_with("100.01"),
+                    references: Vec::new(),
+                },
+                clreport::FileReport {
+                    name: "Fuel over 100".into(),
+                    group: Some("For the bank".into()),
+                    kind: "builder".into(),
+                    definition: def,
+                    references: Vec::new(),
+                },
+            ],
+        );
+        let path = dir.path().join("bad.clreport");
+        std::fs::write(&path, clreport::write(&file).expect("written")).expect("saved");
+        let w = import(&link, &path);
+        assert_eq!(w.stage_name(), "failed", "{bad}");
+        assert_eq!(w.last, Some("report_file.error.bad_amount"));
+        let msg = w.message.clone().unwrap_or_default();
+        assert!(msg.contains("\u{201c}Fuel over 100\u{201d}"), "{msg}");
+        assert!(w.review().is_none(), "no review, no picks");
+        assert!(
+            !format!("{:?}", read_file_named(&path)).contains("Fuel"),
+            "Debug names no report"
+        );
+    }
+    assert_eq!(count(&link), before, "nothing written");
+}
+
+/// Q-A09z (A09 QA-5): in a file of several reports, a report that can't be
+/// made ready is skipped and Memorize all saves the others; the skipped one
+/// is listed as not imported, and nothing of it is written.
+#[test]
+fn a_skipped_report_doesnt_hold_up_the_others() {
+    let (_d, link) = demo();
+    let before = count(&link);
+    let mut w = import(&link, &fixture("from_accountant.clreport"));
+    let r = w.review().expect("review");
+    assert!(!r.reports[0].ready, "report 0 needs choices");
+    assert!(!r.can_continue());
+    let skipped_name = r.file[0].name.clone();
+    if let Stage::Review(rv) = &mut w.stage {
+        rv.review.set_skipped(0, true);
+    }
+    let r = w.review().expect("review");
+    assert!(r.can_continue(), "the others are ready");
+    assert_eq!(w.state()["skipped"], 1);
+    let plan = r.plan().expect("plan");
+    assert_eq!(plan.iter().map(|p| p.index).collect::<Vec<_>>(), [1]);
+    w.finish(false);
+    for _ in 0..10 {
+        w.poll_import();
+    }
+    assert_eq!(w.stage_name(), "done", "{:?}", w.message);
+    assert_eq!(count(&link), before + 1, "only the other report");
+    assert!(matches!(
+        &w.stage,
+        Stage::Done { not_imported, .. } if *not_imported == vec![skipped_name.clone()]
+    ));
+    assert_eq!(w.state()["not_imported"], 1);
+    let mut d = link.demo_state().expect("demo");
+    assert!(
+        report_store::definitions(&mut d)
+            .0
+            .iter()
+            .all(|r| r.name != skipped_name)
+    );
+}
+
+/// The skip rules on the review alone: every report skipped can't go on; a
+/// skipped report's name is free for a Rename and its Replace doesn't count;
+/// a single report can't be skipped; a stop re-keys the skips.
+#[test]
+fn skips_follow_the_review_rules() {
+    let mut r = review_of(&["Shop costs", "Fuel", "Rent"]);
+    r.take(vec![
+        preview("Shop costs", true, None),
+        preview("Fuel", false, None),
+        preview("Rent", true, Some((true, "builder"))),
+    ]);
+    assert!(!r.can_continue());
+    r.set_skipped(1, true);
+    assert!(r.can_continue());
+    r.set_skipped(0, true);
+    r.set_skipped(2, true);
+    assert!(!r.can_continue(), "one must be left");
+    assert!(r.plan().is_none());
+    r.set_skipped(2, false);
+    r.set_clash(2, Clash::Replace);
+    r.set_skipped(2, true);
+    assert!(!r.replaces(), "a skipped Replace asks nothing");
+    r.set_skipped(2, false);
+    assert!(r.replaces());
+    // A Rename may take the name of a skipped report.
+    r.set_clash(2, Clash::Rename("Fuel".into()));
+    assert_eq!(r.clash_problem(2), None, "Fuel is skipped");
+    r.set_skipped(1, false);
+    assert_eq!(r.clash_problem(2), Some("report_file.rename.taken"));
+    r.set_skipped(1, true);
+    // A stop after report 0 was saved: the skip moves with report 1.
+    r.remove(&[0]);
+    assert_eq!(r.skipped, vec![true, false]);
+    assert_eq!(r.skipped_names(), ["Fuel"]);
+    // One report: nothing to skip (Cancel is the way out).
+    let mut one = review_of(&["Shop costs"]);
+    one.set_skipped(0, true);
+    assert!(!one.is_skipped(0));
+}
+/// Q-A09aa (A09 QA-7): one report whose file group this company lacks: at
+/// Continue the group is made (as Memorize all makes it), then the report
+/// opens unsaved in it, for the builder and for a standard report alike.
+/// A group that is already here is matched, and nothing new is made.
+#[test]
+fn a_single_report_import_makes_its_missing_group() {
+    let (dir, link) = demo();
+    let groups = |link: &CompanyLink| {
+        let mut d = link.demo_state().expect("demo");
+        report_store::definitions(&mut d).1
+    };
+    let std_def = {
+        let mut d = link.demo_state().expect("demo");
+        report_store::definitions(&mut d).0[0].definition.clone()
+    };
+    for (kind, def, open_kind) in [
+        ("builder", builder_def(&link), super::super::builder::KIND),
+        ("standard", std_def, super::super::KIND),
+    ] {
+        let name = format!("Grouped {kind}");
+        let row = memorize(&link, &name, kind, def, None);
+        let path = dir.path().join(format!("{kind}.clreport"));
+        {
+            let mut d = link.demo_state().expect("demo");
+            let mut out = crate::company::demo::report_transfer::export(
+                &mut d,
+                &ExportWhat::Ids(vec![row.id.clone()]),
+            )
+            .expect("export");
+            out[0].name = format!("{name} elsewhere");
+            if let Some(m) = out[0].definition.as_object_mut()
+                && m.contains_key("title")
+            {
+                m.insert("title".into(), json!(format!("{name} elsewhere")));
+            }
+            out[0].group_name = Some(format!("For the bank {kind}"));
+            std::fs::write(&path, file_bytes(&out).expect("bytes")).expect("write");
+        }
+        let before = count(&link);
+        let mut w = import(&link, &path);
+        assert!(w.review().expect("review").can_continue());
+        let _ = link.drain();
+        w.finish(false);
+        for _ in 0..10 {
+            w.poll_import();
+        }
+        let made = groups(&link)
+            .into_iter()
+            .find(|g| g.name == format!("For the bank {kind}"))
+            .expect("the file's group made");
+        assert_eq!(count(&link), before, "the report itself waits for Memorize");
+        let events = link.drain();
+        let group_id = events.iter().find_map(|e| match e {
+            CompanyEvent::OpenWith(k, p) if k.as_str() == open_kind => match &**p {
+                OpenPayload::BuilderEditor(s) => match &**s {
+                    super::super::builder::BuilderSeed::Imported { group_id, .. } => {
+                        Some(group_id.clone())
+                    }
+                    _ => None,
+                },
+                OpenPayload::ImportedReport(o) => Some(o.group_id.clone()),
+                _ => None,
+            },
+            _ => None,
+        });
+        assert_eq!(group_id, Some(Some(made.id.clone())), "{kind}: opens in it");
+        assert_eq!(w.last, Some("opened"));
+        assert!(w.take_close_request());
+
+        // Again: the group is here now, matched, and none is added.
+        let n = groups(&link).len();
+        let mut w = import(&link, &path);
+        let _ = link.drain();
+        w.finish(false);
+        for _ in 0..10 {
+            w.poll_import();
+        }
+        assert_eq!(groups(&link).len(), n);
+    }
 }

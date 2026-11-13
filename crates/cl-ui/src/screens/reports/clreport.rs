@@ -302,6 +302,46 @@ fn read_file(path: &Path) -> Result<ReportFile, FileError> {
     clreport::read(&bytes)
 }
 
+/// Why a picked file can't be used: the refusal, and the report it is
+/// about when it is one report's (A09 QA-6). The name is owner data:
+/// `Debug` leaves it out.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Refusal {
+    pub(crate) error: FileError,
+    pub(crate) report: Option<String>,
+}
+
+impl std::fmt::Debug for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Refusal")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+/// [`read_file`], with the name of the report a refusal is about.
+fn read_file_named(path: &Path) -> Result<ReportFile, Refusal> {
+    read_file(path).map_err(|error| Refusal {
+        error,
+        report: match error {
+            FileError::BadAmount { report } => std::fs::read(path)
+                .ok()
+                .and_then(|b| clreport::report_name(&b, report)),
+            _ => None,
+        },
+    })
+}
+
+/// The message for a refused file, naming the report when there is one.
+fn refusal_text(r: &Refusal) -> String {
+    match (&r.error, &r.report) {
+        (FileError::BadAmount { .. }, Some(name)) => {
+            t_with("report_file.error.bad_amount_named", &[("name", name)])
+        }
+        (e, _) => t(file_error_key(*e)),
+    }
+}
+
 /// The owner's words for a file problem.
 const fn file_error_key(e: FileError) -> &'static str {
     match e {
@@ -310,6 +350,7 @@ const fn file_error_key(e: FileError) -> &'static str {
         FileError::Newer => "report_file.error.newer",
         FileError::Empty => "report_file.error.empty",
         FileError::CompanyData => "report_file.error.company_data",
+        FileError::BadAmount { .. } => "report_file.error.bad_amount",
     }
 }
 
@@ -425,6 +466,9 @@ struct Saving {
     saved: Vec<DefinitionRow>,
     /// Open the result after: the review had one report.
     single: bool,
+    /// One report that opens unsaved once its file group is made
+    /// (Q-A09aa): no report is saved here.
+    open_unsaved: bool,
     /// The review, to go back to when a name was taken meanwhile (#7).
     review: Review,
 }
@@ -437,7 +481,7 @@ enum Stage {
     /// The Open dialog is up.
     Pick(Option<Receiver<Vec<PathBuf>>>),
     /// The file is being read (off the UI thread).
-    Reading(Receiver<Result<ReportFile, FileError>>),
+    Reading(Receiver<Result<ReportFile, Refusal>>),
     /// The memorized names are read, then the first preview.
     Starting(Box<Reviewing>, Option<Job<Vec<String>>>),
     Review(Box<Reviewing>),
@@ -608,7 +652,7 @@ impl ReportFileWindow {
     pub(crate) fn read_path(&mut self, path: PathBuf) {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(read_file(&path));
+            let _ = tx.send(read_file_named(&path));
         });
         self.stage = Stage::Reading(rx);
     }
@@ -628,13 +672,17 @@ impl ReportFileWindow {
                 let r = match rx.try_recv() {
                     Ok(r) => r,
                     Err(std::sync::mpsc::TryRecvError::Empty) => return,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        Err(FileError::NotReportFile)
-                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(Refusal {
+                        error: FileError::NotReportFile,
+                        report: None,
+                    }),
                 };
                 match r {
                     Ok(file) => self.begin_review(&file),
-                    Err(e) => self.fail(file_error_key(e), true),
+                    Err(e) => {
+                        self.fail(file_error_key(e.error), true);
+                        self.message = Some(refusal_text(&e));
+                    }
                 }
             }
             Stage::Starting(rv, names) => {
@@ -819,7 +867,11 @@ impl ReportFileWindow {
         }
         rv.confirm = false;
         let single = rv.review.single();
-        if single && plan[0].replace.is_none() {
+        // One report opens unsaved. When the file's group is missing here
+        // it is made first, as Memorize all makes it (Q-A09aa), so the
+        // Memorize dialog offers it.
+        let open_unsaved = single && plan[0].replace.is_none();
+        if open_unsaved && (plan[0].new_group.is_none() || !Self::opens(&plan[0])) {
             self.open_unsaved(&plan[0]);
             return;
         }
@@ -831,6 +883,7 @@ impl ReportFileWindow {
             step: None,
             saved: Vec::new(),
             single,
+            open_unsaved,
             review: rv.review.clone(),
         };
         self.next_step(&mut s);
@@ -847,6 +900,16 @@ impl ReportFileWindow {
         }
         if !matches!(self.stage, Stage::Saving(_)) {
             self.close = true;
+        }
+    }
+
+    /// True when report `p` can open unsaved (its body reads as a builder
+    /// or a standard report), checked before anything is written.
+    fn opens(p: &Planned) -> bool {
+        if p.kind == "builder" {
+            cl_model::report_def::parse(&p.definition.to_string()).is_ok()
+        } else {
+            standard_of(&p.definition).is_some()
         }
     }
 
@@ -913,8 +976,8 @@ impl ReportFileWindow {
             s.backed_up = true;
         }
         // 2. Groups the file names that this company lacks (several
-        // reports only: one report opens with the matched group).
-        if !s.single
+        // reports, or one that opens unsaved, Q-A09aa).
+        if (!s.single || s.open_unsaved)
             && let Some(name) = s
                 .plan
                 .iter()
@@ -935,7 +998,12 @@ impl ReportFileWindow {
             ));
             return;
         }
-        // 3. The reports, one at a time.
+        // 3. The reports, one at a time (one that opens unsaved is saved by
+        // its own Memorize).
+        if s.open_unsaved {
+            s.step = None;
+            return;
+        }
         let Some(p) = s.plan.get(s.next).cloned() else {
             s.step = None;
             return;
@@ -1013,6 +1081,7 @@ impl ReportFileWindow {
                 step: None,
                 saved: Vec::new(),
                 single: false,
+                open_unsaved: false,
                 review: Review::default(),
             }),
         );
@@ -1160,6 +1229,23 @@ impl ReportFileWindow {
 
     /// Ends the save: one report opens; several are listed.
     fn finished(&mut self, s: Saving, stopped: Option<&(String, &'static str)>) {
+        // One report whose group was made (Q-A09aa): it opens unsaved in
+        // that group.
+        if s.open_unsaved
+            && stopped.is_none()
+            && let Some(p) = s.plan.first()
+        {
+            let mut p = p.clone();
+            if let Some(g) = p.new_group.take() {
+                p.group_id = s.groups.get(&g.to_lowercase()).cloned();
+            }
+            self.stage = Stage::Done {
+                saved: Vec::new(),
+                not_imported: Vec::new(),
+            };
+            self.open_unsaved(&p);
+            return;
+        }
         if s.single
             && stopped.is_none()
             && let Some(row) = s.saved.first()
@@ -1178,11 +1264,13 @@ impl ReportFileWindow {
             };
             return;
         }
+        // Those not reached, then those the owner skipped (Q-A09z).
         let not_imported: Vec<String> = s
             .plan
             .iter()
             .skip(s.saved.len())
             .map(|p| p.name.clone())
+            .chain(s.review.skipped_names())
             .collect();
         self.last = Some(if stopped.is_some() {
             "stopped"
@@ -1582,17 +1670,40 @@ fn card(
                 t("report_file.kind.standard")
             };
             ui.label(RichText::new(kind).size(12.0).color(tokens.text_secondary));
-            let state = if r.ready {
+            let skipped = rv.review.is_skipped(i);
+            let state = if skipped {
+                t("report_file.card.skipped")
+            } else if r.ready {
                 t("report_file.card.ready")
             } else {
                 t("report_file.card.needs_you")
             };
-            ui.label(RichText::new(state).size(12.0).color(if r.ready {
-                tokens.text_secondary
-            } else {
-                tokens.warn_text
-            }));
+            ui.label(
+                RichText::new(state)
+                    .size(12.0)
+                    .color(if r.ready || skipped {
+                        tokens.text_secondary
+                    } else {
+                        tokens.warn_text
+                    }),
+            );
+            // Q-A09z: in a file of several reports, one that can't be
+            // made ready (a budget this company lacks) doesn't hold up the
+            // rest.
+            if !rv.review.single() {
+                let (label, tip) = if skipped {
+                    ("report_file.card.unskip", "report_file.card.unskip.tip")
+                } else {
+                    ("report_file.card.skip", "report_file.card.skip.tip")
+                };
+                if ui.button(t(label)).on_hover_text(t(tip)).clicked() {
+                    rv.review.set_skipped(i, !skipped);
+                }
+            }
         });
+        if rv.review.is_skipped(i) {
+            return;
+        }
         let matched = rv.review.matched(i);
         if matched > 0 {
             ui.label(
@@ -1659,9 +1770,13 @@ fn card(
                     }
                 } else {
                     ui.label(
-                        RichText::new(t("report_file.card.budget_needed"))
-                            .size(12.0)
-                            .color(tokens.text_secondary),
+                        RichText::new(t(if rv.review.single() {
+                            "report_file.card.budget_needed"
+                        } else {
+                            "report_file.card.budget_needed_skip"
+                        }))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
                     );
                 }
             });
@@ -1839,6 +1954,11 @@ impl Screen for ReportFileWindow {
             "clashes": review.map(|r| r.clashes.iter().filter(|c| **c != Clash::None).count()),
             "saved": match &self.stage {
                 Stage::Done { saved, .. } => Some(saved.len()),
+                _ => None,
+            },
+            "skipped": review.map(Review::skipped_count),
+            "not_imported": match &self.stage {
+                Stage::Done { not_imported, .. } => Some(not_imported.len()),
                 _ => None,
             },
         })

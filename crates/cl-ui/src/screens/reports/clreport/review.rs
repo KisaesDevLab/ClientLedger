@@ -9,6 +9,10 @@
 //!   is offered only when the report there may be changed by this user and
 //!   is of the same kind (the engine refuses a kind change).
 //! - A budget can't be left out (the engine keeps it unresolved).
+//! - In a file of several reports the owner may skip one ("Don't import
+//!   this report", Q-A09z): Memorize all then needs every other report
+//!   ready and at least one left; a skipped report is listed as not
+//!   imported.
 
 use cl_api::resources::reports::definitions::{Choices, PreviewReport, TransferReport, choice_key};
 use cl_model::report_def::clreport::{FileReport, RefKind, Reference, free_name};
@@ -92,6 +96,8 @@ pub(crate) struct Review {
     /// The file had several reports: it ends with Memorize all, even when
     /// one is left after a stop (#7).
     pub(crate) several: bool,
+    /// Reports the owner chose not to import (file order, Q-A09z).
+    pub(crate) skipped: Vec<bool>,
 }
 
 impl std::fmt::Debug for Review {
@@ -103,6 +109,7 @@ impl std::fmt::Debug for Review {
             .field("clashes", &self.clashes)
             .field("names", &self.names.len())
             .field("several", &self.several)
+            .field("skipped", &self.skipped_count())
             .finish()
     }
 }
@@ -152,7 +159,38 @@ impl Review {
             clashes: vec![Clash::None; file.len()],
             names,
             several: file.len() > 1,
+            skipped: vec![false; file.len()],
         }
+    }
+
+    /// True when report `i` is skipped.
+    pub(crate) fn is_skipped(&self, i: usize) -> bool {
+        self.skipped.get(i).copied().unwrap_or(false)
+    }
+
+    /// Skips report `i` (or takes it back). Only a file of several reports
+    /// offers it: a single report is the whole import (Cancel).
+    pub(crate) fn set_skipped(&mut self, i: usize, on: bool) {
+        if self.single() || i >= self.file.len() {
+            return;
+        }
+        self.skipped.resize(self.file.len(), false);
+        self.skipped[i] = on;
+    }
+
+    /// How many reports are skipped.
+    pub(crate) fn skipped_count(&self) -> usize {
+        self.skipped.iter().filter(|s| **s).count()
+    }
+
+    /// The names of the skipped reports, in file order.
+    pub(crate) fn skipped_names(&self) -> Vec<String> {
+        self.file
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.is_skipped(*i))
+            .map(|(_, r)| r.name.clone())
+            .collect()
     }
 
     /// True for a file of one report (it opens unsaved, Q-A09j).
@@ -190,7 +228,8 @@ impl Review {
     fn taken_names(&self, i: usize) -> Vec<String> {
         let mut v = self.names.clone();
         for (j, r) in self.file.iter().enumerate() {
-            if j == i {
+            // A skipped report is not saved, so its name stays free.
+            if j == i || self.is_skipped(j) {
                 continue;
             }
             v.push(match self.clashes.get(j) {
@@ -249,6 +288,9 @@ impl Review {
 
     /// The report that report `i` would Replace (its id), if any.
     fn replace_target(&self, i: usize) -> Option<&str> {
+        if self.is_skipped(i) {
+            return None;
+        }
         match self.clashes.get(i)? {
             Clash::Replace => self
                 .reports
@@ -262,6 +304,9 @@ impl Review {
 
     /// A problem with report `i`'s clash answer (an i18n key), if any.
     pub(crate) fn clash_problem(&self, i: usize) -> Option<&'static str> {
+        if self.is_skipped(i) {
+            return None;
+        }
         match self.clashes.get(i)? {
             Clash::None => None,
             // Two reports of the file can't Replace the same one (I2): the
@@ -285,11 +330,17 @@ impl Review {
         }
     }
 
-    /// True when Continue (or Memorize all) may go on.
+    /// True when Continue (or Memorize all) may go on: every report not
+    /// skipped is ready with a usable clash answer, and one is left.
     pub(crate) fn can_continue(&self) -> bool {
         !self.reports.is_empty()
             && self.reports.len() == self.file.len()
-            && self.reports.iter().all(|r| r.ready)
+            && (0..self.reports.len()).any(|i| !self.is_skipped(i))
+            && self
+                .reports
+                .iter()
+                .enumerate()
+                .all(|(i, r)| r.ready || self.is_skipped(i))
             && (0..self.reports.len()).all(|i| self.clash_problem(i).is_none())
     }
 
@@ -335,6 +386,9 @@ impl Review {
         }
         self.file = keep_only(std::mem::take(&mut self.file), &keep);
         self.clashes = keep_only(std::mem::take(&mut self.clashes), &keep);
+        let mut skipped = std::mem::take(&mut self.skipped);
+        skipped.resize(keep.last().map_or(0, |m| m + 1).max(skipped.len()), false);
+        self.skipped = keep_only(skipped, &keep);
         // The preview is asked again; until then nothing is ready.
         self.reports.clear();
         self.choices = choices;
@@ -345,9 +399,12 @@ impl Review {
         self.reports.iter().map(|r| r.unresolved.len()).sum()
     }
 
-    /// True when any answer is Replace.
+    /// True when any report to be saved answers Replace.
     pub(crate) fn replaces(&self) -> bool {
-        self.clashes.contains(&Clash::Replace)
+        self.clashes
+            .iter()
+            .enumerate()
+            .any(|(i, c)| *c == Clash::Replace && !self.is_skipped(i))
     }
 
     /// What Continue saves, in file order; `None` until it may go on.
@@ -359,6 +416,7 @@ impl Review {
             self.reports
                 .iter()
                 .enumerate()
+                .filter(|(i, _)| !self.is_skipped(*i))
                 .map(|(i, r)| {
                     let replace = match self.clashes[i] {
                         Clash::Replace => r.name_taken.as_ref().map(|t| (t.id.clone(), t.version)),

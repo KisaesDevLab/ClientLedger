@@ -7,7 +7,7 @@ fn builder_def() -> Value {
         "schemaVersion": 1, "kind": "builder", "title": "Shop costs",
         "nodes": [{"type": "section", "id": "s1", "caption": "Supplies",
                    "filters": [{"field": "account", "op": "in", "ids": ["$ref:0"]},
-                               {"field": "amount", "op": "gte", "value": "1250.5000"}],
+                               {"field": "amount", "op": "gte", "value": "1250.50"}],
                    "groupBy": [{"key": "tag", "tagGroupId": "$ref:1"}]}]
     })
 }
@@ -65,9 +65,9 @@ fn an_amount_filter_value_is_kept_exactly_as_typed() {
     let bytes = write(&file()).expect("write");
     let back = read(&bytes).expect("read");
     let value = &back.reports[0].definition["nodes"][0]["filters"][1]["value"];
-    assert_eq!(value, &Value::String("1250.5000".into()));
+    assert_eq!(value, &Value::String("1250.50".into()));
     let text = String::from_utf8(bytes).expect("utf8");
-    assert!(text.contains("\"1250.5000\""), "trailing zeros kept");
+    assert!(text.contains("\"1250.50\""), "the trailing zero is kept");
 }
 
 #[test]
@@ -256,4 +256,49 @@ fn the_references_of_a_whole_file_are_capped() {
     assert_eq!(write(&f), Err(FileError::TooLarge), "export refuses too");
     f.reports.truncate(2);
     assert!(read(&serde_json::to_vec(&f).expect("json")).is_ok());
+}
+
+/// A09 QA-6: an amount filter's value is a plain dollar amount, checked
+/// when the file is read (before any pick), naming the report.
+#[test]
+fn an_amount_filter_that_isnt_a_dollar_amount_is_refused_when_read() {
+    for bad in [
+        json!("1e3"),
+        json!("100.015"),
+        json!("1250.5000"),
+        json!("1,000"),
+        json!("$100"),
+        json!(" 100"),
+        json!(""),
+        json!("."),
+        json!("1."),
+        json!(100),
+        json!(null),
+    ] {
+        let mut v = serde_json::to_value(file()).expect("v");
+        v["reports"][1]["definition"] = v["reports"][0]["definition"].clone();
+        v["reports"][1]["kind"] = json!("builder");
+        v["reports"][1]["definition"]["nodes"][0]["filters"][1]["value"] = bad.clone();
+        let bytes = bytes_of(&v);
+        assert_eq!(
+            read(&bytes),
+            Err(FileError::BadAmount { report: 1 }),
+            "{bad}"
+        );
+        assert_eq!(
+            report_name(&bytes, 1).as_deref(),
+            v["reports"][1]["name"].as_str(),
+        );
+    }
+    for good in ["100", "-12.5", "100.01", "0.10", "999999999999999.99"] {
+        let mut v = serde_json::to_value(file()).expect("v");
+        v["reports"][0]["definition"]["nodes"][0]["filters"][1]["value"] = json!(good);
+        assert!(read(&bytes_of(&v)).is_ok(), "{good}");
+    }
+    assert!(!dollar_amount("1000000000000000"), "16 digits");
+    // The error holds no text from the file.
+    assert_eq!(
+        format!("{:?}", FileError::BadAmount { report: 3 }),
+        "BadAmount { report: 3 }"
+    );
 }

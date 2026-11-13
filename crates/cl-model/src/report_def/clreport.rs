@@ -69,6 +69,15 @@ pub enum FileError {
     /// (a second check behind the engine's).
     #[error("this report file would hold company data")]
     CompanyData,
+    /// Reading only: report `report` (its index in the file) has an amount
+    /// filter whose value isn't a plain dollar amount: an optional `-`,
+    /// 1–15 digits, and at most 2 decimal places, as a JSON string (A09
+    /// QA-6). The caller names the report ([`report_name`]).
+    #[error("a report in this file has an amount filter that isn't a dollar amount")]
+    BadAmount {
+        /// The report's index in `reports`.
+        report: usize,
+    },
 }
 
 /// A report file.
@@ -214,7 +223,61 @@ pub fn read(bytes: &[u8]) -> Result<ReportFile, FileError> {
         return Err(FileError::NotReportFile);
     }
     check(&file)?;
+    if let Some(report) = file.reports.iter().position(|r| !amounts_ok(&r.definition)) {
+        return Err(FileError::BadAmount { report });
+    }
     Ok(file)
+}
+
+/// True when every amount filter in `v` (an object whose `field` is a
+/// scalar filter field and that has a `value`) holds a plain dollar amount
+/// (A09 QA-6). The value is checked as text, the way the editor takes it
+/// (`editor::amount_filter_value`); nothing is converted or computed.
+fn amounts_ok(v: &Value) -> bool {
+    match v {
+        Value::Array(a) => a.iter().all(amounts_ok),
+        Value::Object(m) => {
+            let scalar = m
+                .get("field")
+                .and_then(Value::as_str)
+                .is_some_and(|f| super::fields::SCALAR_FILTER_FIELDS.contains(&f));
+            let value_ok = !scalar
+                || m.get("value")
+                    .is_none_or(|x| x.as_str().is_some_and(dollar_amount));
+            value_ok && m.values().all(amounts_ok)
+        }
+        _ => true,
+    }
+}
+
+/// An optional `-`, 1–15 digits, then optionally `.` and 1–2 digits: no
+/// exponent, no grouping, no third decimal place.
+#[must_use]
+pub fn dollar_amount(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    let (int, frac) = match s.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (s, None),
+    };
+    let digits =
+        |x: &str, max: usize| (1..=max).contains(&x.len()) && x.bytes().all(|b| b.is_ascii_digit());
+    digits(int, 15) && frac.is_none_or(|f| digits(f, 2))
+}
+
+/// The name of report `index` in a file's bytes, read leniently, for a
+/// message about that report after [`read`] refused the file
+/// ([`FileError::BadAmount`]). Owner data: show it, never log it.
+#[must_use]
+pub fn report_name(bytes: &[u8], index: usize) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let v: Value = serde_json::from_str(text).ok()?;
+    v.get("reports")?
+        .get(index)?
+        .get("name")?
+        .as_str()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
 }
 
 /// The checks both reading and writing make on every report.
