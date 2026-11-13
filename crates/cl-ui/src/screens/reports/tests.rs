@@ -976,3 +976,32 @@ fn a_builder_subtotal_opens_its_detail_tab() {
         "the echoed subtotal"
     );
 }
+
+/// A09 QA-4: the Audit Trail's words for report files and report groups
+/// exist, and a named row reads "Memorized report: <name>".
+#[test]
+fn audit_words_for_report_files_read_plainly() {
+    for (key, text) in [
+        ("@reports.audit.action.exported", "Exported"),
+        ("@reports.audit.action.imported", "Imported"),
+        (
+            "@reports.audit.action.imported_replace",
+            "Imported (replaced)",
+        ),
+        ("@reports.audit.action.download", "Downloaded"),
+        (
+            "@reports.audit.entity.report_definition_group",
+            "Report group",
+        ),
+        (
+            "@reports.audit.entity.report_definition_named Bank pack",
+            "Memorized report: Bank pack",
+        ),
+        (
+            "@reports.audit.entity.report_definition_group_named For the bank",
+            "Report group: For the bank",
+        ),
+    ] {
+        assert_eq!(super::label(key), text);
+    }
+}

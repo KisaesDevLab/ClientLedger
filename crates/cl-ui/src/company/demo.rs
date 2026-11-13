@@ -52,6 +52,8 @@ pub mod feed_review;
 pub mod reconcile;
 pub mod report_builder;
 pub mod report_store;
+// A09 WP-A: `.clreport` export and import preview (U-220 parity).
+pub mod report_transfer;
 pub mod reports;
 
 /// One demo company card.

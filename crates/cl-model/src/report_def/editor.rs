@@ -45,6 +45,9 @@ pub enum Origin {
     Standard(String),
     /// A memorized Report Builder report.
     Memorized,
+    /// A report read from a `.clreport` file, not memorized yet (A09
+    /// WP-A): its Memorize is sent with `origin: 'import'`.
+    Imported,
 }
 
 /// The kind of the memorized row an editor came from. The engine never

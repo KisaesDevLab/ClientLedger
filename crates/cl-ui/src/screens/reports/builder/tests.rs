@@ -1721,35 +1721,19 @@ fn the_amount_filter_refuses_sub_cents() {
     );
 }
 
-/// QA-12 (Q-A08ai): flipping a section's sign that a formula adds says so
-/// in the status line; the formula's Row tab shows the note.
+/// U-218 (Q-A08ai, Q-A09o): formulas use each section's normal sign, so
+/// flipping "Show as positive" on a section a formula adds says nothing
+/// about the formula (the warning is gone with the engine change).
 #[test]
-fn flipping_a_sign_a_formula_uses_says_so() {
+fn flipping_a_sign_a_formula_uses_needs_no_warning() {
     let (_d, _l, mut s) = editor(BuilderSeed::Blank);
-    let (_inc, cogs, gp) = gross_profit(&mut s);
+    let (_inc, cogs, _gp) = gross_profit(&mut s);
     let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
         panic!("section");
     };
     n.polarity = Some(cl_model::report_def::Polarity::Credit);
-    s.apply(Op::Edit(Node::Section(n)));
-    super::sources::sign_status(&mut s, &cogs);
-    let status = s.status.clone().expect("a status line");
-    assert!(
-        status.contains("Gross profit") && status.contains("Cost of goods sold"),
-        "{status}"
-    );
-    assert_eq!(
-        cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &gp),
-        std::slice::from_ref(&cogs)
-    );
-    // Back to the usual direction: no note.
-    let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
-        panic!("section");
-    };
-    n.polarity = None;
-    s.apply(Op::Edit(Node::Section(n)));
     s.status = None;
-    super::sources::sign_status(&mut s, &cogs);
+    s.apply(Op::Edit(Node::Section(n)));
     assert_eq!(s.status, None);
 }
 
@@ -1898,4 +1882,57 @@ fn tab_on_an_outline_row_keeps_the_keyboard_there() {
     frame(&ctx, &mut s, 20.1);
     assert_eq!(s.state_json()["selected_depth"].as_u64(), Some(2));
     assert!(s.outline_focused, "the row still has the keyboard");
+}
+
+/// A09 WP-A: a report read from a `.clreport` file is memorized with
+/// `origin: 'import'` once; after that it is an ordinary memorized report.
+#[test]
+fn an_imported_report_is_memorized_as_an_import_once() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+    let mut s = super::BuilderScreen::new(
+        Arc::clone(&link),
+        None,
+        cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("day"),
+    );
+    let def = crate::company::demo::report_builder::starters()
+        .expect("starters")
+        .into_iter()
+        .find(|x| x.key == "profit_loss")
+        .expect("p&l")
+        .definition;
+    let def = cl_model::report_def::parse(&def.to_string()).expect("definition");
+    let seed = BuilderSeed::Imported {
+        def: Box::new(def),
+        name: "From the file".into(),
+        group_id: None,
+    };
+    assert!(crate::windows::Screen::open_with(
+        &mut s,
+        OpenPayload::BuilderEditor(Box::new(seed))
+    ));
+    assert_eq!(s.ed.origin(), &Origin::Imported);
+    assert_eq!(super::save::origin_for_test(&s).as_deref(), Some("import"));
+    super::save::open_memorize(&mut s, false);
+    super::save::memorize_for_test(&mut s);
+    super::save::poll(&mut s);
+    assert!(s.ed.saved().is_some(), "memorized");
+    assert_eq!(super::save::origin_for_test(&s), None);
+}
+
+/// A09 #17: with unsaved changes the Report tab says Export writes the
+/// memorized version; unsaved reports say memorize first.
+#[test]
+fn export_says_it_writes_the_memorized_version() {
+    use super::properties::export_note;
+    assert_eq!(
+        export_note(false, true),
+        Some("report_file.export.memorize_first")
+    );
+    assert_eq!(
+        export_note(true, true),
+        Some("report_file.export.memorized_version")
+    );
+    assert_eq!(export_note(true, false), None);
+    assert!(crate::i18n::has("report_file.export.memorized_version"));
 }

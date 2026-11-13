@@ -210,6 +210,7 @@ fn memorize_on_a_builder_run_saves_a_builder_row() {
             cl_model::reports::ReportOptions::for_spec(find("profit_loss").expect("p&l")),
         ))
         .expect("json"),
+        origin: None,
     };
     let mut st = link.demo_state().expect("demo");
     assert!(
@@ -336,6 +337,34 @@ fn an_editors_run_report_has_one_tab_that_returns_to_it() {
     assert_eq!(seed.editor, Some(editor));
     assert_eq!(seed.origin, cl_model::report_def::editor::Origin::Blank);
     assert_eq!(seed.def, open.def);
+}
+
+/// A09 #5: an imported report's Run report tab keeps the import origin, so
+/// Ctrl+M there is audited as an import; another editor's tab is not.
+#[test]
+fn an_imported_reports_run_tab_memorizes_as_an_import() {
+    let (_d, link) = demo();
+    let def = cl_model::report_def::parse(&pl_starter().to_string()).expect("def");
+    let spec = super::builder_ref::spec_for(&def);
+    let open = |origin| super::builder_ref::BuilderRunOpen {
+        editor: super::builder::EditorId::next(),
+        title: "From the file".into(),
+        def: def.clone(),
+        options: cl_model::reports::ReportOptions::for_spec(spec),
+        saved: None,
+        origin,
+        then: None,
+    };
+    let mut w = window(&link);
+    w.poll();
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open(
+        cl_model::report_def::editor::Origin::Imported
+    )))));
+    assert_eq!(w.memo.origin.as_deref(), Some("import"));
+    assert!(w.open_with(OpenPayload::BuilderDefinition(Box::new(open(
+        cl_model::report_def::editor::Origin::Blank
+    )))));
+    assert_eq!(w.memo.origin, None);
 }
 
 /// R13 (Q-A08m): the editor's Print runs the full report in its tab, then
@@ -786,4 +815,55 @@ fn rows_without_figures_are_empty_across() {
     for r in &t.rows {
         assert!(r.cells.iter().all(|c| *c == Cell::Empty), "{:?}", r.kind);
     }
+}
+
+/// A07-10 (A09): Load more after a Refresh on the same books fetches
+/// again: the refreshed run brings its `more` rows back, and Load more on
+/// one adds the page's rows once more.
+#[test]
+fn load_more_after_a_refresh_on_the_same_books_fetches_again() {
+    let (_d, link) = demo();
+    let mut w = starter(&link, "transaction_detail_by_account");
+    let first = w.table.clone().expect("table");
+    let load_more = |w: &mut ReportWindow| {
+        let more = w
+            .table
+            .as_ref()
+            .and_then(|t| t.rows.iter().find(|r| r.kind == RowKind::More).cloned())
+            .expect("a more row");
+        super::drill::open(w, more.drill.as_ref().expect("page"));
+        w.poll();
+    };
+    load_more(&mut w);
+    let paged = count(w.table.as_ref().expect("table"), RowKind::Detail);
+    assert!(paged > count(&first, RowKind::Detail));
+    assert!(w.command(CommandId::new("reports.refresh")));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let again = w.table.clone().expect("table");
+    assert_eq!(
+        count(&again, RowKind::Detail),
+        count(&first, RowKind::Detail),
+        "the rerun shows its first page"
+    );
+    load_more(&mut w);
+    assert_eq!(
+        count(w.table.as_ref().expect("table"), RowKind::Detail),
+        paged,
+        "the page was fetched again"
+    );
+}
+
+/// A07-11 (Q-A09n): a detail tab shows its dates as text, with why they
+/// can't change; a report tab has no such line.
+#[test]
+fn a_detail_tab_shows_its_dates_read_only() {
+    let (_d, link) = demo();
+    let (w, tab) = ledger_line_tab(&link);
+    assert_eq!(super::filters::detail_dates_text(&w), None);
+    let text = super::filters::detail_dates_text(&tab).expect("dates");
+    assert!(
+        text.contains('/') && (text.contains(" to ") || text.starts_with("As of")),
+        "{text}"
+    );
 }

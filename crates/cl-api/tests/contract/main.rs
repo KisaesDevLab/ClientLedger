@@ -79,6 +79,10 @@ mod contract_sales_tax_ssuta;
 mod contract_session;
 mod contract_tags;
 mod contract_templates;
+// A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
+// trip of memorized reports (AC3, WP-B).
+mod contract_report_defs_archive;
+mod contract_report_defs_transfer;
 mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
@@ -984,6 +988,10 @@ fn main() -> std::process::ExitCode {
             "bills::backup_restore_keeps_the_bill_file_live",
             contract_bills::backup_restore_keeps_the_bill_file_live,
         ),
+        (
+            "report_defs_archive::memorized_reports_survive_an_archive_round_trip",
+            contract_report_defs_archive::memorized_reports_survive_an_archive_round_trip,
+        ),
         // P23 WP-4: sales tax, in one company of its own. The cash-basis
         // tests run last, on the fullest company (U-155: cash reports stay
         // fast as the company fills).
@@ -1351,6 +1359,18 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs::crud_conflicts_and_groups",
             contract_report_defs::crud_conflicts_and_groups,
+        ), // A09 WP-A: `.clreport` (U-220, report-defs-transfer-v1).
+        (
+            "report_defs_transfer::export_and_preview_in_the_same_company",
+            contract_report_defs_transfer::export_and_preview_in_the_same_company,
+        ),
+        (
+            "report_defs_transfer::a_second_company_remaps_and_resolves_references",
+            contract_report_defs_transfer::a_second_company_remaps_and_resolves_references,
+        ),
+        (
+            "report_defs_transfer::replace_is_refused_for_a_non_author_and_a_kind_change",
+            contract_report_defs_transfer::replace_is_refused_for_a_non_author_and_a_kind_change,
         ),
         (
             "report_builder::every_starter_runs_through_the_adapter",
@@ -1379,6 +1399,14 @@ fn main() -> std::process::ExitCode {
         (
             "report_builder::a_preview_run_is_the_screen_run_cut_at_fifty",
             contract_report_builder::a_preview_run_is_the_screen_run_cut_at_fifty,
+        ),
+        (
+            "report_builder::a_flipped_section_leaves_its_formula_alone",
+            contract_report_builder::a_flipped_section_leaves_its_formula_alone,
+        ),
+        (
+            "report_builder::an_export_pages_a_line_over_five_thousand_rows",
+            contract_report_builder::an_export_pages_a_line_over_five_thousand_rows,
         ),
         (
             "budgets::hand_fixture_and_writes",

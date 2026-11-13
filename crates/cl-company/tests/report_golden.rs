@@ -47,6 +47,9 @@ use rust_decimal::Decimal;
 
 #[path = "builder/tieout.rs"]
 mod builder_tieout;
+// A09: Report Builder exports with every opened line filled.
+#[path = "builder/export_golden.rs"]
+mod builder_export_golden;
 
 const OWNER: &str = "owner@example.com";
 
@@ -1034,6 +1037,13 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
             "U-119d",
             "Report Builder starters tie out to the standard reports",
         );
+    }
+    // A09 AC1/AC2: the builder P&L exported collapsed, with Expenses opened
+    // and with every line opened.
+    if caps.has(cl_api::Capabilities::REPORT_BUILDER_STARTERS_V2) {
+        mismatched.extend(builder_export_golden::export_goldens(&s, &names).await);
+    } else {
+        pending("U-119f", "Report Builder export goldens");
     }
     // Q-A08h: Revenue by Category nets an income account's debits (a
     // credit memo) as the P&L does; before the engine fix it summed credits

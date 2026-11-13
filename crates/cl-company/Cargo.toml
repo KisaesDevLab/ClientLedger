@@ -33,6 +33,8 @@ cl-api = { path = "../cl-api", features = ["test-support"] }
 cl-host = { path = "../cl-host" }
 # The golden-report harness (tests/report_golden.rs): options to requests.
 cl-model = { path = "../cl-model" }
+# A09: builder export goldens are written as the desktop writes the file.
+cl-print = { path = "../cl-print" }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"

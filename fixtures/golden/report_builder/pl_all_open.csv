@@ -1,0 +1,132 @@
+Profit and Loss
+10/01/2026 to 10/31/2026
+
+,Date,Type,Num,Name,Memo,Description,Account,Total
+Income,,,,,,,,
+  4000 Service Income,,,,,,,,88487.67
+    ,10/01/2026,Journal Entry,,,invoice INV-1309 · Maple Street Bakery · Landscaping services,,4000 Service Income,4738.47
+    ,10/01/2026,Journal Entry,,,invoice INV-1315 · Walnut Shade Farmhouse · Landscaping services,,4000 Service Income,1556.38
+    ,10/01/2026,Journal Entry,,,invoice INV-1324 · Forsyth Public Library · Landscaping services,,4000 Service Income,1877.49
+    ,10/01/2026,Journal Entry,,,invoice INV-1330 · Lampe Country Store · Landscaping services,,4000 Service Income,1956.61
+    ,10/03/2026,Journal Entry,,,invoice INV-1316 · Pine Ridge Storage · Landscaping services,,4000 Service Income,3660.71
+    ,10/03/2026,Journal Entry,,,invoice INV-1336 · Hollister Family Trust · Landscaping services,,4000 Service Income,3108.92
+    ,10/03/2026,Journal Entry,,,invoice INV-1338 · Lampe Country Store · Landscaping services,,4000 Service Income,4553.45
+    ,10/04/2026,Journal Entry,,,invoice INV-1320 · Hickory Ridge Apartments · Landscaping services,,4000 Service Income,4008.35
+    ,10/04/2026,Journal Entry,,,invoice INV-1329 · Shepherd Hills Clinic · Landscaping services,,4000 Service Income,669.38
+    ,10/05/2026,Journal Entry,,,invoice INV-1313 · Cedar Hollow Church · Landscaping services,,4000 Service Income,2032.91
+    ,10/06/2026,Journal Entry,,,invoice INV-1319 · Timber Lake Lodge · Landscaping services,,4000 Service Income,500.70
+    ,10/06/2026,Journal Entry,,,invoice INV-1323 · Sugar Creek Bakery · Landscaping services,,4000 Service Income,2501.05
+    ,10/06/2026,Journal Entry,,,invoice INV-1325 · Wildwood Pediatrics · Landscaping services,,4000 Service Income,928.88
+    ,10/06/2026,Journal Entry,,,invoice INV-1332 · Pine Ridge Storage · Landscaping services,,4000 Service Income,4081.59
+    ,10/06/2026,Journal Entry,,,invoice INV-1335 · Reeds Spring Hardware · Landscaping services,,4000 Service Income,1894.46
+    ,10/06/2026,Journal Entry,,,invoice INV-1340 · Tri-Lakes Insurance · Landscaping services,,4000 Service Income,3382.61
+    ,10/07/2026,Journal Entry,,,invoice INV-1308 · Ridgedale Chapel · Landscaping services,,4000 Service Income,4188.16
+    ,10/08/2026,Journal Entry,,,invoice INV-1328 · Roark Creek Dentistry · Landscaping services,,4000 Service Income,3117.50
+    ,10/12/2026,Journal Entry,,,invoice INV-1310 · Rockaway Beach Diner · Landscaping services,,4000 Service Income,4089.59
+    ,10/14/2026,Journal Entry,,,invoice INV-1311 · Reeds Spring Hardware · Landscaping services,,4000 Service Income,902.56
+    ,10/14/2026,Journal Entry,,,invoice INV-1318 · Pine Ridge Storage · Landscaping services,,4000 Service Income,539.56
+    ,10/17/2026,Journal Entry,,,invoice INV-1337 · Maple Street Bakery · Landscaping services,,4000 Service Income,2610.02
+    ,10/19/2026,Journal Entry,,,invoice INV-1327 · Indian Point Resort · Landscaping services,,4000 Service Income,2954.63
+    ,10/21/2026,Journal Entry,,,invoice INV-1331 · Riverbend HOA · Landscaping services,,4000 Service Income,2950.74
+    ,10/23/2026,Journal Entry,,,invoice INV-1322 · Stone Mill Bistro · Landscaping services,,4000 Service Income,4759.66
+    ,10/23/2026,Journal Entry,,,invoice INV-1326 · Indian Point Resort · Landscaping services,,4000 Service Income,2080.86
+    ,10/24/2026,Journal Entry,,,invoice INV-1333 · Wildwood Pediatrics · Landscaping services,,4000 Service Income,3073.95
+    ,10/26/2026,Journal Entry,,,invoice INV-1321 · Hollister Family Trust · Landscaping services,,4000 Service Income,2757.28
+    ,10/26/2026,Journal Entry,,,invoice INV-1339 · Forsyth Public Library · Landscaping services,,4000 Service Income,1612.22
+    ,10/28/2026,Journal Entry,,,invoice INV-1307 · Copper Kettle Coffee · Landscaping services,,4000 Service Income,1002.55
+    ,10/28/2026,Journal Entry,,,invoice INV-1317 · Copper Kettle Coffee · Landscaping services,,4000 Service Income,4398.34
+    ,10/30/2026,Journal Entry,,,invoice INV-1312 · Northfork Veterinary · Landscaping services,,4000 Service Income,3946.03
+    ,10/31/2026,Journal Entry,,,invoice INV-1314 · Bear Creek Campground · Landscaping services,,4000 Service Income,720.31
+    ,10/31/2026,Journal Entry,,,invoice INV-1334 · Ridgedale Chapel · Landscaping services,,4000 Service Income,1331.75
+Total Income,,,,,,,,88487.67
+Cost of Goods Sold,,,,,,,,
+  5000 Subcontractors,,,,,,,,3099.38
+    ,10/08/2026,Journal Entry,,,bill B-184 · Oak Grove Uniforms · Vendor bill,,5000 Subcontractors,3099.38
+  5100 Plants,,,,,,,,6244.50
+    ,10/02/2026,Check,4401,Ozark Feed & Seed,Plants and mulch,Perennials,5100 Plants,1487.35
+    ,10/06/2026,Journal Entry,,,bill B-193 · Ozark Feed & Seed · Fall bed plants and mulch,Perennials,5100 Plants,842.15
+    ,10/12/2026,Journal Entry,,,bill B-197 · Table Rock Nursery · Vendor bill,,5100 Plants,3915.00
+  5110 Mulch & stone,,,,,,,,1275.50
+    ,10/02/2026,Check,4401,Ozark Feed & Seed,Plants and mulch,Hardwood mulch,5110 Mulch & stone,831.25
+    ,10/06/2026,Journal Entry,,,bill B-193 · Ozark Feed & Seed · Fall bed plants and mulch,Hardwood mulch,5110 Mulch & stone,444.25
+  5200 Project Supplies and Materials,,,,,,,,32941.91
+    ,10/07/2026,Journal Entry,,,card charge  · Copper Kettle Catering · Card charge,,5200 Project Supplies and Materials,119.40
+    ,10/08/2026,Journal Entry,,,expense  · Crane Creek Tree Service · Check,,5200 Project Supplies and Materials,591.75
+    ,10/09/2026,Journal Entry,,,bill B-178 · Shepherd Hills Office Supply · Vendor bill,,5200 Project Supplies and Materials,2387.42
+    ,10/11/2026,Journal Entry,,,expense  · Oak Grove Uniforms · Check,,5200 Project Supplies and Materials,535.54
+    ,10/13/2026,Journal Entry,,,bill B-180 · Riverbend Fuel · Vendor bill,,5200 Project Supplies and Materials,1017.53
+    ,10/17/2026,Journal Entry,,,bill B-182 · Cedar Hollow Signs · Vendor bill,,5200 Project Supplies and Materials,449.01
+    ,10/20/2026,Journal Entry,,,expense  · Mountain Software Co · Check,,5200 Project Supplies and Materials,334.10
+    ,10/30/2026,Journal Entry,,,bill B-177 · Taney County Landfill · Vendor bill,,5200 Project Supplies and Materials,975.48
+    ,10/30/2026,Journal Entry,,,invoice INV-1345 · Riverbend HOA · Credit for returned materials,,5200 Project Supplies and Materials,26531.68
+Total Cost of Goods Sold,,,,,,,,43561.29
+Gross Profit,,,,,,,,44926.38
+Expenses,,,,,,,,
+  6000 Advertising and Marketing,,,,,,,,701.56
+    ,10/09/2026,Journal Entry,,,card charge  · Mountain Software Co · Card charge,,6000 Advertising and Marketing,179.23
+    ,10/12/2026,Check,4407,Pine Ridge Storage Units,Check,,6000 Advertising and Marketing,415.27
+    ,10/25/2026,Journal Entry,,,card charge  · Table Rock Small Engine · Card charge,,6000 Advertising and Marketing,107.06
+  6100 Fuel,,,,,,,,2241.84
+    ,10/07/2026,Journal Entry,,,expense  · Thunder Ridge Subcontracting · Check,,6100 Fuel,77.13
+    ,10/07/2026,Journal Entry,,,expense  · White River Stone Yard · Check,,6100 Fuel,126.39
+    ,10/07/2026,Journal Entry,,,bill B-194 · Riverbend Fuel · Vendor bill,,6100 Fuel,1412.06
+    ,10/10/2026,Journal Entry,,,card charge  · Lakeside Insurance Agency · Card charge,,6100 Fuel,311.86
+    ,10/12/2026,Journal Entry,,,expense  · Monett Tire & Lube · Check,,6100 Fuel,224.76
+    ,10/26/2026,Journal Entry,,,expense  · Midwest Irrigation Parts · Check,,6100 Fuel,89.64
+  6250 Office Supplies and Software,,,,,,,,937.75
+    ,10/05/2026,Check,4402,Mountain Software Co,Check,,6250 Office Supplies and Software,191.27
+    ,10/08/2026,Check,4404,Persimmon Hill Plants,Check,,6250 Office Supplies and Software,118.03
+    ,10/14/2026,Journal Entry,,,card charge  · Stone County Permits · Card charge,,6250 Office Supplies and Software,197.03
+    ,10/26/2026,Journal Entry,,,bill B-196 · Ozark Office Supply · Vendor bill,,6250 Office Supplies and Software,218.44
+    ,10/27/2026,Check,4415,Stone County Permits,Check,,6250 Office Supplies and Software,75.65
+    ,10/31/2026,Journal Entry,,,card charge  · Ozark Office Supply · Card charge,,6250 Office Supplies and Software,137.33
+  6300 Rent,,,,,,,,4350.00
+    ,10/07/2026,Journal Entry,,,bill B-172 · Riverbend Hardware · Vendor bill,,6300 Rent,1450.00
+    ,10/09/2026,Journal Entry,,,bill B-176 · Persimmon Hill Plants · Vendor bill,,6300 Rent,1450.00
+    ,10/31/2026,Journal Entry,,,bill B-183 · Persimmon Hill Plants · Vendor bill,,6300 Rent,1450.00
+  6350 Repairs and Maintenance,,,,,,,,5101.23
+    ,10/03/2026,Journal Entry,,,card charge  · Table Rock Small Engine · Card charge,,6350 Repairs and Maintenance,262.60
+    ,10/06/2026,Journal Entry,,,card charge  · Thunder Ridge Subcontracting · Card charge,,6350 Repairs and Maintenance,160.63
+    ,10/07/2026,Check,4403,Taney County Landfill,Check,,6350 Repairs and Maintenance,357.38
+    ,10/12/2026,Journal Entry,,,expense  · Ozark Office Supply · Check,,6350 Repairs and Maintenance,348.51
+    ,10/12/2026,Journal Entry,,,bill B-187 · Crane Creek Tree Service · Vendor bill,,6350 Repairs and Maintenance,984.69
+    ,10/15/2026,Check,4409,Riverbend Fuel,Check,,6350 Repairs and Maintenance,463.83
+    ,10/20/2026,Check,4411,Oak Grove Uniforms,Check,,6350 Repairs and Maintenance,222.97
+    ,10/22/2026,Journal Entry,,,bill B-173 · Sycamore Fence Co · Vendor bill,,6350 Repairs and Maintenance,237.01
+    ,10/29/2026,Journal Entry,,,card charge  · Cedar Hollow Signs · Card charge,,6350 Repairs and Maintenance,247.57
+    ,10/29/2026,Check,4416,Taney County Landfill,Check,,6350 Repairs and Maintenance,855.52
+    ,10/31/2026,Journal Entry,,,bill B-188 · Table Rock Nursery · Vendor bill,,6350 Repairs and Maintenance,960.52
+  6400 Telephone and Internet,,,,,,,,617.98
+    ,10/01/2026,Journal Entry,,,bill B-185 · Lakeside Insurance Agency · Vendor bill,,6400 Telephone and Internet,233.44
+    ,10/06/2026,Journal Entry,,,bill B-190 · Persimmon Hill Plants · Vendor bill,,6400 Telephone and Internet,183.26
+    ,10/08/2026,Journal Entry,,,bill B-179 · Pine Ridge Storage Units · Vendor bill,,6400 Telephone and Internet,104.84
+    ,10/23/2026,Journal Entry,,,bill B-181 · White River Stone Yard · Vendor bill,,6400 Telephone and Internet,96.44
+  6500 Utilities,,,,,,,,917.74
+    ,10/08/2026,Journal Entry,,,bill B-174 · Sycamore Fence Co · Vendor bill,,6500 Utilities,136.56
+    ,10/18/2026,Journal Entry,,,bill B-175 · Bluff View Trucking · Vendor bill,,6500 Utilities,284.74
+    ,10/22/2026,Journal Entry,,,bill B-189 · Riverbend Fuel · Vendor bill,,6500 Utilities,232.70
+    ,10/29/2026,Journal Entry,,,bill B-186 · Midwest Irrigation Parts · Vendor bill,,6500 Utilities,263.74
+  6550 Wages,,,,,,,,12091.30
+    ,10/08/2026,Journal Entry,,,journal entry PR-10-8 · Payroll,,6550 Wages,6051.13
+    ,10/22/2026,Journal Entry,,,journal entry PR-10-22 · Payroll,,6550 Wages,6040.17
+  6560 Payroll Taxes,,,,,,,,1088.21
+    ,10/08/2026,Journal Entry,,,journal entry PR-10-8 · Payroll,,6560 Payroll Taxes,544.60
+    ,10/22/2026,Journal Entry,,,journal entry PR-10-22 · Payroll,,6560 Payroll Taxes,543.61
+  6700 Vehicle Expenses,,,,,,,,2801.63
+    ,10/03/2026,Journal Entry,,,card charge  · Lakeside Insurance Agency · Card charge,,6700 Vehicle Expenses,80.83
+    ,10/04/2026,Journal Entry,,,expense  · Stone County Permits · Check,,6700 Vehicle Expenses,246.58
+    ,10/09/2026,Journal Entry,,,bill B-195 · Monett Tire & Lube · Vendor bill,,6700 Vehicle Expenses,640.00
+    ,10/11/2026,Journal Entry,,,card charge  · Lakeside Insurance Agency · Card charge,,6700 Vehicle Expenses,213.38
+    ,10/15/2026,Journal Entry,,,expense  · Cedar Hollow Signs · Check,,6700 Vehicle Expenses,280.56
+    ,10/17/2026,Check,4410,Blue Eye Lumber,Check,,6700 Vehicle Expenses,320.43
+    ,10/24/2026,Journal Entry,,,expense  · Empire Electric Cooperative · Check,,6700 Vehicle Expenses,510.28
+    ,10/28/2026,Journal Entry,,,expense  · Stone County Permits · Check,,6700 Vehicle Expenses,509.57
+Total Expenses,,,,,,,,30849.24
+Net Operating Income,,,,,,,,14077.14
+Other Income,,,,,,,,
+Total Other Income,,,,,,,,0.00
+Other Expenses,,,,,,,,
+  8000 Interest Expense,,,,,,,,212.00
+    ,10/15/2026,Journal Entry,,,expense  · Lakeview Credit Union · Truck loan payment,,8000 Interest Expense,212.00
+Total Other Expenses,,,,,,,,212.00
+Net Income,,,,,,,,13865.14

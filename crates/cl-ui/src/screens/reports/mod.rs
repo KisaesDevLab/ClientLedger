@@ -19,12 +19,16 @@ pub mod builder;
 pub mod builder_ref;
 mod builder_run;
 mod catalog;
+// A09 WP-A: `.clreport` export and import (Q-A09a).
+pub mod clreport;
 mod drill;
 mod email;
 mod export;
 mod filter_lists;
 mod filters;
 mod memorized;
+// A09: the Memorized Reports list.
+pub mod memorized_list;
 mod window;
 
 #[cfg(test)]
@@ -80,6 +84,12 @@ pub fn make(
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
+    if kind.as_str() == clreport::KIND {
+        return Some(clreport::make(link));
+    }
+    if kind.as_str() == memorized_list::KIND {
+        return memorized_list::make(kind, link, open);
+    }
     if kind.as_str() == builder::KIND {
         return Some(Box::new(builder::BuilderScreen::new(
             Arc::clone(link),

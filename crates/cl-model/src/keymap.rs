@@ -60,6 +60,11 @@ pub enum Scope {
     /// Delete, Tab, F2 and the arrows act on its rows. Never active inside
     /// a text field, so Tab there moves on and Delete deletes text.
     Outline,
+    /// While the Memorized Reports list has focus (A09, Q-A09k): Enter
+    /// opens, F2 renames and Ctrl+Delete deletes the selected report. Its
+    /// own scope, like the Bank Feed's, so the Review Documents queue's
+    /// Enter/J/K/Delete never act on it. Innermost, on the window.
+    ReportList,
 }
 
 impl Scope {
@@ -75,6 +80,7 @@ impl Scope {
         Scope::Reconcile,
         Scope::Builder,
         Scope::Outline,
+        Scope::ReportList,
     ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
@@ -91,6 +97,7 @@ impl Scope {
             Scope::Reconcile => "In Reconcile",
             Scope::Builder => "In the Report Builder",
             Scope::Outline => "In the report outline",
+            Scope::ReportList => "In Memorized Reports",
         }
     }
 
@@ -105,6 +112,7 @@ impl Scope {
             Scope::Reconcile => &[Scope::Reconcile, Scope::Window, Scope::Global],
             Scope::Builder => &[Scope::Builder, Scope::Window, Scope::Global],
             Scope::Outline => &[Scope::Outline, Scope::Builder, Scope::Window, Scope::Global],
+            Scope::ReportList => &[Scope::ReportList, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -627,7 +635,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 10);
+        assert_eq!(Scope::ALL.len(), 11);
     }
 
     #[test]
@@ -740,7 +748,7 @@ mod tests {
             Scope::List.active_from(),
             &[Scope::List, Scope::Window, Scope::Global]
         );
-        assert_eq!(Scope::ALL.last(), Some(&Scope::Outline));
+        assert_eq!(Scope::ALL.last(), Some(&Scope::ReportList));
     }
 
     #[test]

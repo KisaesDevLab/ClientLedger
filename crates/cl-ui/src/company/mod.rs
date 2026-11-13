@@ -24,9 +24,15 @@ use cl_settings::{Accent, RecentStore, SecretStore};
 pub enum CompanyEvent {
     /// The owner signed in.
     SignedIn {
-        /// Display text for the status bar (`Kurt · Admin`).
+        /// The signed-in user's display name (no email). The role comes
+        /// with the company ([`CompanyEvent::CompanyRole`]).
         user: String,
     },
+    /// The signed-in user's role in the company being opened (the engine's
+    /// word: `owner`, `admin`, `bookkeeper`, …), sent just before
+    /// [`CompanyEvent::Opened`] (A09 QA-9: the status bar said "Admin" for
+    /// every user).
+    CompanyRole(String),
     /// A company was opened or switched to.
     Opened {
         /// The tenant.
@@ -493,12 +499,25 @@ where
     Ok(Task::Pending(pending))
 }
 
-/// Status-bar text for the signed-in owner (name and role; no email).
+/// Status-bar text for the signed-in user in a company (name and role; no
+/// email). An owner or administrator reads "Admin"; the other engine roles
+/// have plain words, and a role this build doesn't know is shown as its
+/// words (A09 QA-9).
 #[must_use]
 pub fn user_text(display_name: &str, role: &str) -> String {
-    let role = match role {
-        "owner" | "super_admin" | "admin" => "Admin",
-        other => other,
+    let role = match role.trim() {
+        "owner" | "super_admin" | "admin" => crate::i18n::t("status.role.admin"),
+        "" => return display_name.to_string(),
+        r if crate::i18n::has(&format!("status.role.{r}")) => {
+            crate::i18n::t(&format!("status.role.{r}"))
+        }
+        other => {
+            let words = other.replace('_', " ");
+            let mut c = words.chars();
+            c.next().map_or_else(String::new, |f| {
+                f.to_uppercase().collect::<String>() + c.as_str()
+            })
+        }
     };
     format!("{display_name} \u{b7} {role}")
 }
@@ -525,5 +544,16 @@ mod tests {
         assert_eq!(t.try_take().map(Result::ok), Some(Some(7)));
         assert!(t.try_take().is_none());
         assert_eq!(user_text("Kurt", "owner"), "Kurt \u{b7} Admin");
+    }
+
+    /// A09 QA-9: a bookkeeper is not called "Admin".
+    #[test]
+    fn the_status_bar_names_each_role() {
+        assert_eq!(user_text("Kurt", "admin"), "Kurt \u{b7} Admin");
+        assert_eq!(user_text("bk", "bookkeeper"), "bk \u{b7} Bookkeeper");
+        assert_eq!(user_text("acct", "accountant"), "acct \u{b7} Accountant");
+        assert_eq!(user_text("v", "readonly"), "v \u{b7} View only");
+        assert_eq!(user_text("x", "client_viewer"), "x \u{b7} Client viewer");
+        assert_eq!(user_text("x", ""), "x");
     }
 }

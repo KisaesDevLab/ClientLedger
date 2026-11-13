@@ -578,6 +578,10 @@ impl Capabilities {
     pub const REPORTS_EXACT: &'static str = "reports-exact-v1";
     /// U-118 (PR-F): memorized reports, `kind:'standard'`.
     pub const REPORT_DEFS: &'static str = "report-defs-v1";
+    /// U-220 (A09): `POST /report-builder/definitions/export` and
+    /// `/import/preview` (`.clreport` files), `origin: 'import'` on a
+    /// definition create or update.
+    pub const REPORT_DEFS_TRANSFER: &'static str = "report-defs-transfer-v1";
     /// U-203 (PR-C): company-scoped, versioned, validated budgets and the
     /// exact Budget vs. Actual.
     pub const BUDGETS_EXACT: &'static str = "budgets-exact-v1";
@@ -611,6 +615,15 @@ impl Capabilities {
     /// U-217 (engine PR #51): `purpose: 'preview'` on `/report-builder/run`
     /// (the screen run cut at 50 detail rows per line, `meta.preview`).
     pub const REPORT_BUILDER_PREVIEW: &'static str = "report-builder-preview-v1";
+    /// U-218 (engine PR #52): formulas, their $ / % change and named
+    /// percent-of bases use each section's normal sign; "Show as positive"
+    /// changes only the section's own rows (Q-A08ai).
+    pub const REPORT_BUILDER_FORMULA_SIGN: &'static str = "report-builder-formula-sign-v1";
+    /// U-219 (engine PR #53): the Assets, Liabilities and Equity by Account
+    /// summaries total each account's balance at the end date (Q-A09b);
+    /// Equity by Account shows posted balances only (no computed earnings).
+    /// No desktop screen calls these routes yet.
+    pub const REPORTS_BY_ACCOUNT_BALANCE: &'static str = "reports-by-account-balance-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

@@ -1716,6 +1716,17 @@ pub(crate) const REPORT_DEF_GROUP_DELETE: Operation = write(
     Method::Delete,
     "/api/v1/report-builder/definition-groups/{id}",
 );
+// A09 (U-220, `report-defs-transfer-v1`): `.clreport` files. Not keyed:
+// export only reads (and writes a `download` audit row per report); the
+// preview writes nothing. In the spec since pin cf0cb239.
+/// Memorized reports without ids (`"$ref:N"` tokens and references).
+pub(crate) const REPORT_DEFS_EXPORT: Operation =
+    write(Method::Post, "/api/v1/report-builder/definitions/export");
+/// Matches a file's references in this company (no writes).
+pub(crate) const REPORT_DEFS_IMPORT_PREVIEW: Operation = write(
+    Method::Post,
+    "/api/v1/report-builder/definitions/import/preview",
+);
 // A07: Report Builder runs (U-119, `report-builder-v1`). Read-only POSTs,
 // never blind-retried (a 503 `REPORT_TIMEOUT` already took 30 s), with the
 // long timeout.
@@ -1861,7 +1872,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 418] = [
+pub const OPERATIONS: [Operation; 420] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2298,6 +2309,9 @@ pub const OPERATIONS: [Operation; 418] = [
     BUDGET_VS_ACTUAL,
     REPORT_EMAIL,
     REPORT_ASK,
+    // A09 (U-220)
+    REPORT_DEFS_EXPORT,
+    REPORT_DEFS_IMPORT_PREVIEW,
 ];
 
 /// Looks up a covered operation.

@@ -31,6 +31,7 @@ pub fn crud_conflicts_and_groups(h: &Harness) {
         group_id: Some(group.id.clone()),
         kind: "standard".into(),
         definition: standard("profit_loss", "last_month"),
+        origin: None,
     };
     let row = h
         .run(defs.create(&w, cl_api::IdempotencyKey::new()))

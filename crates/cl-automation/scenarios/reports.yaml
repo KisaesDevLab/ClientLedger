@@ -34,7 +34,8 @@ steps:
   - assert_state: {key: screen.basis, equals: cash}
   - assert_state: {key: screen.state, equals: shown}
   # A drill from a cash report opens its ledger on cash (PR6-QA-3).
-  - click: {role: link, index: 0}
+  # Index 1: link 0 is the catalog's Memorized "Manage…" link (A09).
+  - click: {role: link, index: 1}
   - wait: {ms: 500}
   - assert_state: {key: screen.report, equals: transaction_detail_by_account}
   - assert_state: {key: screen.basis, equals: cash}
@@ -56,7 +57,8 @@ steps:
   # --- A ledger amount opens where the register would (QA-1): this demo
   # expense has no check number, so it isn't a check and opens in its
   # register, never as a blank Write Check -------------------------------
-  - click: {role: link, index: 0}
+  # Index 1: link 0 is the catalog's Memorized "Manage…" link (A09).
+  - click: {role: link, index: 1}
   - wait: {ms: 600}
   - assert_state: {key: screen.screen, equals: register}
   - screenshot: open-form

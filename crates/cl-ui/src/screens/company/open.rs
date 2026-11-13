@@ -19,7 +19,7 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Ui, Ve
 use serde_json::{Value, json};
 
 use super::form::{self, DateInput};
-use crate::company::{CompanyEvent, CompanyLink, Task, spawn_lifecycle, user_text};
+use crate::company::{CompanyEvent, CompanyLink, Task, spawn_lifecycle};
 use crate::i18n::{t, t_with};
 use crate::theme::Tokens;
 use crate::widgets::{eyebrow, kbd, primary_button};
@@ -86,6 +86,8 @@ pub struct OpenCompanyScreen {
     /// asked for before it could run: it runs once signed in, the list is
     /// read and no window has unsaved changes (Q-P19ao).
     practice_pending: bool,
+    /// The role of the company being opened, sent with its Opened.
+    opening_role: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +98,8 @@ struct Row {
     meta: String,
     is_sample: bool,
     closed_through: Option<cl_core::CalendarDate>,
+    /// The user's role here (the engine's word; A09 QA-9).
+    role: String,
 }
 
 /// What opening a company learned (tenant, name, colour, closing date).
@@ -146,6 +150,7 @@ impl OpenCompanyScreen {
             loaded_once: false,
             retry_open: None,
             practice_pending: false,
+            opening_role: None,
         }
     }
 
@@ -169,6 +174,7 @@ impl OpenCompanyScreen {
                     meta: c.meta.clone(),
                     is_sample: c.is_sample,
                     closed_through: c.closed_through,
+                    role: "owner".into(),
                 })
                 .collect();
             return;
@@ -252,7 +258,7 @@ impl OpenCompanyScreen {
             match client.login(&email, &password).await? {
                 LoginOutcome::Session(session) => Ok(SignedIn {
                     session,
-                    user: user_text(&display, "owner"),
+                    user: display.clone(),
                     recovery_key: made
                         .recovery_key
                         .map(|k| Secret::new(k.expose().to_string())),
@@ -276,7 +282,7 @@ impl OpenCompanyScreen {
                     let display = email.split('@').next().unwrap_or("Owner").to_string();
                     Ok(SignedIn {
                         session,
-                        user: user_text(&display, "owner"),
+                        user: display.clone(),
                         recovery_key: None,
                     })
                 }
@@ -305,6 +311,7 @@ impl OpenCompanyScreen {
         if let Some(mut demo) = self.link.demo_state() {
             demo.open = Some(row.tenant_id);
             drop(demo);
+            self.link.push(CompanyEvent::CompanyRole(row.role.clone()));
             self.link.push(CompanyEvent::Opened {
                 tenant_id: row.tenant_id,
                 name: row.name,
@@ -319,6 +326,7 @@ impl OpenCompanyScreen {
         let store = self.link.store().clone();
         let secrets = self.link.secrets();
         self.busy = Some("open.opening");
+        self.opening_role = Some(row.role.clone());
         self.open_task = spawn_lifecycle(&self.link, group, move || async move {
             cl_company::open_company(&session, &store, row.tenant_id).await?;
             // The session's secrets (SMTP password, the AI key or Ollama
@@ -488,6 +496,9 @@ impl OpenCompanyScreen {
             self.busy = None;
             match r {
                 Ok((tenant_id, name, accent, closed_through)) => {
+                    if let Some(role) = self.opening_role.take() {
+                        self.link.push(CompanyEvent::CompanyRole(role));
+                    }
                     self.link.push(CompanyEvent::Opened {
                         tenant_id,
                         name,
@@ -505,6 +516,8 @@ impl OpenCompanyScreen {
             self.busy = None;
             match r {
                 Ok(c) => {
+                    // Made by this user, who owns it.
+                    self.link.push(CompanyEvent::CompanyRole("owner".into()));
                     self.link.push(CompanyEvent::Opened {
                         tenant_id: c.tenant_id,
                         name: cl_company::SAMPLE_NAME.into(),
@@ -823,6 +836,7 @@ fn row_from_entry(e: CompanyEntry) -> Row {
         meta: parts.join(" \u{b7} "),
         is_sample: e.is_sample,
         closed_through: None,
+        role: e.role,
     }
 }
 

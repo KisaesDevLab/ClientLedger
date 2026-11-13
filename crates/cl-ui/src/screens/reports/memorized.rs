@@ -59,6 +59,10 @@ pub(crate) struct Memo {
     pub(crate) saved: Option<ReportOptions>,
     /// The `save` job is a Reload after a 409.
     reloading: bool,
+    /// Where the report shown came from, sent with its next Memorize for
+    /// the engine's audit (`Some("import")`: read from a `.clreport` file,
+    /// A09 WP-A). Cleared once it is memorized.
+    pub(crate) origin: Option<String>,
 }
 
 #[cfg(test)]
@@ -117,6 +121,7 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 open_row(w, &row);
             }
             Ok(row) => {
+                w.memo.origin = None;
                 w.memo.saved = w.memo.sending.take().or_else(|| Some(w.options.clone()));
                 if row.kind == "builder" {
                     super::builder_run::memorized(w, &row);
@@ -291,6 +296,7 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
         group_id: d.group.clone(),
         kind: kind.into(),
         definition: body,
+        origin: w.memo.origin.clone(),
     };
     let target = match how {
         SaveAs::Changes => w.memo.current.as_ref().map(|c| (c.id.clone(), c.version)),
@@ -322,6 +328,8 @@ pub(super) fn save(w: &mut ReportWindow, how: SaveAs) {
 
 /// Opens a memorized report: its catalog report with its options.
 pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
+    // A memorized report is not an import (A09 WP-A).
+    w.memo.origin = None;
     let read = cl_model::reports::definition::read_memorized(&row.definition);
     // A Report Builder definition runs as a builder report (A07). It is
     // sent inline at the version read (Q-A07t). One that can't be read
@@ -392,11 +400,23 @@ pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usi
         return 0;
     }
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(t("reports.group.memorized").to_uppercase())
-            .size(11.0)
-            .color(tokens.text_secondary),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(t("reports.group.memorized").to_uppercase())
+                .size(11.0)
+                .color(tokens.text_secondary),
+        );
+        // A09 (Q-A09k): the Memorized Reports list.
+        if ui
+            .link(RichText::new(t("reports.memorized.manage")).size(11.0))
+            .on_hover_text(t("reports.memorized.manage.tip"))
+            .clicked()
+        {
+            w.link.push(crate::company::CompanyEvent::OpenWindow(
+                cl_model::CommandId::new(super::memorized_list::KIND),
+            ));
+        }
+    });
     if w.memo.list.is_empty() {
         ui.label(
             RichText::new(t("reports.memorize.none"))

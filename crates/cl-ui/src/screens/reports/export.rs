@@ -60,7 +60,19 @@ struct Pending {
     /// The report it was made from ([`ReportWindow::view`]): once another
     /// report is shown, "Saved ..." isn't said over it (A07 QA-7).
     view: u64,
+    /// A builder report's export run and its pages, then the file's title
+    /// and head lines (Q-A09h): the file is built once it is in.
+    fill: Option<Fill>,
 }
+
+/// A builder report's export run and its pages, then what the file is made
+/// of: its title, head lines and the window's definition and options.
+type Fill = (
+    super::builder_run::export::FillJob,
+    String,
+    Vec<String>,
+    super::builder_run::export::FileCtx,
+);
 
 /// A finished file and how many values it wrote as text (xlsx).
 pub(crate) type Built = (Vec<u8>, usize);
@@ -71,6 +83,8 @@ pub(crate) struct Exporter {
     pending: Option<Pending>,
     /// Print: the PDF being built.
     printing: Option<(String, Receiver<Option<Built>>)>,
+    /// Print of a builder report: its export run and pages first.
+    print_fill: Option<Fill>,
     message: Option<String>,
     last: Option<(Kind, bool)>,
 }
@@ -85,7 +99,28 @@ impl std::fmt::Debug for Exporter {
 
 impl Exporter {
     pub(crate) fn busy(&self) -> bool {
-        self.pending.is_some() || self.printing.is_some()
+        self.pending.is_some() || self.printing.is_some() || self.print_fill.is_some()
+    }
+
+    /// A builder report's export run or its pages are on their way.
+    pub(crate) fn filling(&self) -> bool {
+        self.print_fill.is_some() || self.pending.as_ref().is_some_and(|p| p.fill.is_some())
+    }
+
+    /// Cancel: stops the export run between pages; nothing is written.
+    pub(crate) fn cancel(&mut self) {
+        // Only a filling export is cancelled here: one waiting at its Save
+        // dialog (nothing to stop) is left alone (A09 #12).
+        if self.pending.as_ref().is_some_and(|p| p.fill.is_some()) {
+            if let Some((f, ..)) = self.pending.take().and_then(|p| p.fill) {
+                f.cancel();
+            }
+        } else if let Some((f, ..)) = self.print_fill.take() {
+            f.cancel();
+        } else {
+            return;
+        }
+        self.message = Some(t("reports.export.cancelled"));
     }
 
     pub(crate) fn message(&self) -> Option<String> {
@@ -99,6 +134,7 @@ impl Exporter {
     pub(crate) fn state(&self) -> serde_json::Value {
         serde_json::json!({
             "busy": self.busy(),
+            "filling": self.filling(),
             "last": self.last.map(|(k, _)| k.name()),
             "ok": self.last.map(|(_, ok)| ok),
         })
@@ -147,6 +183,13 @@ pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
             }
         }
     }
+    let (title, head) = head_lines(w, source);
+    Some(Snapshot { table, title, head })
+}
+
+/// The file's title and head lines: company, title, dates and basis, then
+/// the report's notes.
+fn head_lines(w: &ReportWindow, source: &cl_core::report::ReportTable) -> (String, Vec<String>) {
     let title = w.title_text();
     let mut head = Vec::new();
     if !w.company.is_empty() {
@@ -169,7 +212,61 @@ pub(crate) fn snapshot(w: &ReportWindow) -> Option<Snapshot> {
             ],
         ));
     }
-    Some(Snapshot { table, title, head })
+    (title, head)
+}
+
+/// The builder export run for the report on screen, with the file's title
+/// and head lines (`None`: not a builder report, or not exportable).
+fn start_fill(w: &ReportWindow) -> Option<Fill> {
+    if !w.exportable() {
+        return None;
+    }
+    let source = w.table.as_ref()?;
+    let (title, head) = head_lines(w, source);
+    let job = super::builder_run::export::start(w)?;
+    Some((job, title, head, super::builder_run::export::FileCtx::of(w)))
+}
+
+/// The snapshot of a filled export run (`cut`: the head says rows are
+/// missing). Pure: it runs on the file's worker thread (dressing and
+/// presenting up to 100,000 rows never on the egui thread, A09 #3).
+fn filled_snapshot(
+    ctx: &super::builder_run::export::FileCtx,
+    f: super::builder_run::export::Filled,
+    title: String,
+    mut head: Vec<String>,
+) -> Snapshot {
+    if f.cut {
+        head.push(t_with(
+            "reports.export.cut",
+            &[(
+                "n",
+                &crate::i18n::count_text(super::builder_run::export::MAX_EXPORT_ROWS as u64),
+            )],
+        ));
+    }
+    let table = super::builder_run::export::file_table(ctx, f);
+    Snapshot { table, title, head }
+}
+
+/// Builds a filled export's file on a worker thread: its table, then the
+/// bytes.
+fn spawn_filled(
+    ctx: super::builder_run::export::FileCtx,
+    f: super::builder_run::export::Filled,
+    title: String,
+    head: Vec<String>,
+    kind: Kind,
+) -> Receiver<Option<Built>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let snap = filled_snapshot(&ctx, f, title, head);
+        let built = snap.render(kind).map_err(|why| {
+            tracing::warn!(file = kind.name(), why, "a report file could not be built");
+        });
+        let _ = tx.send(built.ok());
+    });
+    rx
 }
 
 /// True when a shown amount has more than two decimal places (imports,
@@ -244,6 +341,73 @@ pub(crate) fn bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
     snapshot(w)?.render(kind).ok().map(|(b, _)| b)
 }
 
+/// A builder report's file as Export makes it: the export run, its pages
+/// filled, then the bytes (tests; the demo answers at once).
+#[cfg(test)]
+pub(crate) fn filled_bytes(w: &ReportWindow, kind: Kind) -> Option<Vec<u8>> {
+    let (mut job, title, head, ctx) = start_fill(w)?;
+    let f = super::builder_run::export::poll(&mut job)?.ok()?;
+    filled_snapshot(&ctx, f, title, head)
+        .render(kind)
+        .ok()
+        .map(|(b, _)| b)
+}
+
+/// A filled run's file as Export writes it, with the window's head lines
+/// (tests).
+#[cfg(test)]
+pub(crate) fn filled_file(
+    w: &ReportWindow,
+    f: super::builder_run::export::Filled,
+    kind: Kind,
+) -> Option<Vec<u8>> {
+    let source = w.table.as_ref()?;
+    let (title, head) = head_lines(w, source);
+    filled_snapshot(&super::builder_run::export::FileCtx::of(w), f, title, head)
+        .render(kind)
+        .ok()
+        .map(|(b, _)| b)
+}
+
+/// An Export of the builder report on screen to `path` whose Save dialog
+/// already answered, its pages answered by `fetch` on the demo (tests).
+#[cfg(test)]
+pub(crate) fn fill_for_test(
+    w: &mut ReportWindow,
+    path: PathBuf,
+    fetch: fn(
+        &cl_api::resources::report_builder::DetailRequest,
+        &cl_api::resources::report_builder::BuilderRun,
+    ) -> Result<cl_api::resources::report_builder::DetailPage, cl_api::ApiError>,
+) {
+    use super::builder_run::export as bx;
+    let req = bx::export_request(w).expect("a builder report");
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let c2 = Arc::clone(&cancel);
+    let job = crate::screens::invoice::engine::read(
+        &w.link,
+        w.group.as_ref(),
+        move |d| {
+            let run = crate::company::demo::report_builder::run(d, &req, false)?;
+            bx::fill_with(&req, run, bx::MAX_EXPORT_ROWS, &c2, fetch)
+        },
+        |_s| async { Err(cl_api::ApiError::Cancelled) },
+    );
+    let source = w.table.as_ref().expect("a table");
+    let (title, head) = head_lines(w, source);
+    let (dtx, dialog) = std::sync::mpsc::channel();
+    let _ = dtx.send(Some(path));
+    w.export.pending = Some(Pending {
+        kind: Kind::Csv,
+        build: None,
+        built: Slot::Waiting,
+        dialog,
+        path: Slot::Waiting,
+        view: w.view,
+        fill: Some((bx::FillJob { job, cancel }, title, head, bx::FileCtx::of(w))),
+    });
+}
+
 /// A message as if a file were just saved (tests).
 #[cfg(test)]
 pub(crate) fn set_message_for_test(w: &mut ReportWindow, m: &str) {
@@ -265,6 +429,7 @@ pub(crate) fn pending_for_test(w: &mut ReportWindow, bytes: Vec<u8>, path: PathB
         dialog,
         path: Slot::Waiting,
         view: w.view,
+        fill: None,
     });
 }
 
@@ -281,11 +446,13 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
         w.after_run = Some(super::builder_ref::AfterRun::Export(kind));
         return;
     }
-    let Some(snap) = snapshot(w) else {
+    let fill = start_fill(w);
+    let snap = if fill.is_some() { None } else { snapshot(w) };
+    if fill.is_none() && snap.is_none() {
         w.export.message = Some(t("reports.export.failed"));
         w.export.last = Some((kind, false));
         return;
-    };
+    }
     let name = format!(
         "{}.{}",
         cl_print::files::safe_component(&w.title_text()),
@@ -300,11 +467,12 @@ pub(super) fn start(w: &mut ReportWindow, ctx: &Context, kind: Kind) {
     );
     w.export.pending = Some(Pending {
         kind,
-        build: Some(snap.spawn(kind)),
+        build: snap.map(|s| s.spawn(kind)),
         built: Slot::Waiting,
         dialog,
         path: Slot::Waiting,
         view: w.view,
+        fill,
     });
 }
 
@@ -344,7 +512,9 @@ fn take<T>(rx: &Receiver<Option<T>>) -> Slot<T> {
 /// Writes the file once it is built and the dialog answered; opens a
 /// printed PDF once built.
 pub(super) fn poll(w: &mut ReportWindow) {
+    poll_print_fill(w);
     poll_print(w);
+    poll_fill(w);
     let Some(p) = w.export.pending.as_mut() else {
         return;
     };
@@ -363,6 +533,9 @@ pub(super) fn poll(w: &mut ReportWindow) {
     }
     // Cancelled: nothing to write, whatever the build.
     if matches!(p.path, Slot::Done(None)) {
+        if let Some((f, ..)) = &p.fill {
+            f.cancel();
+        }
         w.export.pending = None;
         return;
     }
@@ -422,11 +595,79 @@ pub(super) fn print(w: &mut ReportWindow) {
         w.after_run = Some(super::builder_ref::AfterRun::Print);
         return;
     }
+    if w.export.print_fill.is_some() {
+        return;
+    }
+    if let Some(fill) = start_fill(w) {
+        w.export.print_fill = Some(fill);
+        poll_print_fill(w);
+        return;
+    }
     let Some(snap) = snapshot(w) else {
         return;
     };
     w.export.printing = Some((w.title_text(), snap.spawn(Kind::Pdf)));
     poll_print(w);
+}
+
+/// The words for an export run that failed: the engine's own message for
+/// a timeout, else a plain "try again" (nothing is written either way).
+fn fill_failed(e: &cl_api::ApiError) -> String {
+    match e {
+        cl_api::ApiError::Cancelled => t("reports.export.cancelled"),
+        e if super::builder_run::export::is_timeout(e) => t("reports.builder.took_too_long"),
+        _ => t("reports.export.fill_failed"),
+    }
+}
+
+/// A builder export's run and pages: once in, the file is built (or the
+/// export ends with why, and nothing is written).
+fn poll_fill(w: &mut ReportWindow) {
+    let answer = match w.export.pending.as_mut().and_then(|p| p.fill.as_mut()) {
+        Some((job, ..)) => super::builder_run::export::poll(job),
+        None => return,
+    };
+    let Some(answer) = answer else {
+        return;
+    };
+    let Some((_, title, head, ctx)) = w.export.pending.as_mut().and_then(|p| p.fill.take()) else {
+        return;
+    };
+    match answer {
+        Ok(f) => {
+            if let Some(p) = w.export.pending.as_mut() {
+                p.build = Some(spawn_filled(ctx, f, title, head, p.kind));
+            }
+        }
+        Err(e) => {
+            let kind = w.export.pending.take().map(|p| p.kind);
+            w.export.message = Some(fill_failed(&e));
+            if let Some(k) = kind {
+                w.export.last = Some((k, false));
+            }
+        }
+    }
+}
+
+/// Print of a builder report: its run and pages, then the PDF.
+fn poll_print_fill(w: &mut ReportWindow) {
+    let answer = match w.export.print_fill.as_mut() {
+        Some((job, ..)) => super::builder_run::export::poll(job),
+        None => return,
+    };
+    let Some(answer) = answer else {
+        return;
+    };
+    let Some((_, title, head, ctx)) = w.export.print_fill.take() else {
+        return;
+    };
+    match answer {
+        Ok(f) => {
+            let rx = spawn_filled(ctx, f, title.clone(), head, Kind::Pdf);
+            w.export.printing = Some((title, rx));
+        }
+        Err(e) => w.export.message = Some(fill_failed(&e)),
+    }
 }
 
 fn poll_print(w: &mut ReportWindow) {

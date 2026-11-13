@@ -281,6 +281,8 @@ impl ReportWindow {
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
         self.new_view();
+        // Another report on screen is not the imported one (A09 WP-A).
+        self.memo.origin = None;
         self.builder = None;
         self.spec = spec;
         self.options = options;
@@ -830,6 +832,15 @@ impl ReportWindow {
         }
         if let Some(n) = self.export.message() {
             form::hint(ui, tokens, &n);
+        }
+        // A09: a builder export reads every row first; Cancel stops it.
+        if self.export.filling() {
+            ui.horizontal(|ui| {
+                form::progress_line(ui, tokens, &t("reports.export.filling"));
+                if ui.button(t("reports.export.cancel")).clicked() {
+                    self.export.cancel();
+                }
+            });
         }
         if let Some(e) = &self.drill_error {
             form::inline_error_details(ui, tokens, e, "reports.drill");
@@ -1487,6 +1498,9 @@ impl Screen for ReportWindow {
     }
 
     fn open_with(&mut self, payload: OpenPayload) -> bool {
+        // Whatever opens now is not an earlier import (A09 WP-A); an
+        // ImportedReport sets it again.
+        self.memo.origin = None;
         let open = match payload {
             OpenPayload::Report(open) => open,
             OpenPayload::BuilderStarter(key) => {
@@ -1500,6 +1514,14 @@ impl Screen for ReportWindow {
             OpenPayload::BuilderDefinition(open) => {
                 super::builder_run::open_definition(self, *open);
                 return true;
+            }
+            OpenPayload::Memorized(open) => {
+                super::memorized::open_row(self, &open.0);
+                return true;
+            }
+            // A09 WP-A: a standard report from a `.clreport` file.
+            OpenPayload::ImportedReport(open) => {
+                return super::clreport::open_imported(self, *open);
             }
             _ => return false,
         };

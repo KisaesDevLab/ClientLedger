@@ -13,7 +13,9 @@ use cl_api::resources::reports::budgets::{
     Budget, BudgetLine, BudgetLineWrite, BudgetLines, BudgetTotals, NewBudget, PERIODS,
     PeriodTotals,
 };
-use cl_api::resources::reports::definitions::{DefinitionGroup, DefinitionRow, DefinitionWrite};
+use cl_api::resources::reports::definitions::{
+    DefinitionGroup, DefinitionPatch, DefinitionRow, DefinitionWrite,
+};
 use cl_api::resources::reports::email::{EmailSent, ReportEmail};
 use cl_api::{Account, AccountType, ApiError, LocalValidation};
 use cl_core::ids::AccountId;
@@ -113,6 +115,29 @@ impl DemoReportStore {
                 created_by_name: Some("Kurt".into()),
                 updated_at: Some(DemoState::now()),
                 can_edit: true,
+            });
+        }
+        // Another user's report (A09): the Memorized Reports list shows
+        // its author and offers only Open and Memorize a copy (Q-310).
+        if let Some(spec) = cl_model::reports::find("balance_sheet") {
+            let o = cl_model::reports::ReportOptions::for_spec(spec);
+            let body = serde_json::to_value(cl_model::reports::StandardDefinition::new(
+                "balance_sheet",
+                o,
+            ))
+            .unwrap_or(Value::Null);
+            let id = self.id("report");
+            self.definitions.push(DefinitionRow {
+                id,
+                group_id: None,
+                name: "Balance sheet for the board".into(),
+                kind: "standard".into(),
+                definition: body,
+                version: 1,
+                created_by: None,
+                created_by_name: Some("Dana".into()),
+                updated_at: Some(DemoState::now()),
+                can_edit: false,
             });
         }
         let mut lines = BTreeMap::new();
@@ -315,6 +340,153 @@ pub fn save_definition(
         s.definitions.push(row.clone());
         Ok(row)
     }
+}
+
+/// Renames or moves memorized report `id` at `version` (A09: the
+/// Memorized Reports list), with the engine's rules: name taken, stale,
+/// not the author, an unknown group, a body of another kind.
+///
+/// # Errors
+/// As [`save_definition`].
+pub fn patch_definition(
+    d: &mut DemoState,
+    id: &str,
+    version: u64,
+    p: &DefinitionPatch,
+) -> Result<DefinitionRow, ApiError> {
+    if let Some(body) = &p.definition
+        && body["kind"] == "builder"
+    {
+        check_builder(body)?;
+    }
+    let s = store(d);
+    if let Some(Some(g)) = &p.group_id
+        && !s.groups.iter().any(|x| x.id == *g)
+    {
+        return Err(invalid());
+    }
+    let name = p.name.as_deref().map(str::trim);
+    if name.is_some_and(str::is_empty) {
+        return Err(invalid());
+    }
+    if let Some(name) = name
+        && s.definitions
+            .iter()
+            .any(|r| r.name.eq_ignore_ascii_case(name) && r.id != id)
+    {
+        return Err(refusal(409, "NAME_TAKEN"));
+    }
+    let r = s
+        .definitions
+        .iter_mut()
+        .find(|r| r.id == id)
+        .ok_or(ApiError::NotFound { code: None })?;
+    if r.version != version {
+        return Err(refusal(409, "STALE_VERSION"));
+    }
+    if !r.can_edit {
+        return Err(refusal(403, "NOT_AUTHOR"));
+    }
+    if let Some(body) = &p.definition
+        && body["kind"] != r.definition["kind"]
+    {
+        return Err(invalid());
+    }
+    if let Some(name) = name {
+        r.name = name.to_string();
+    }
+    if let Some(g) = &p.group_id {
+        r.group_id.clone_from(g);
+    }
+    if let Some(body) = &p.definition {
+        r.definition = body.clone();
+    }
+    r.version += 1;
+    r.updated_at = Some(DemoState::now());
+    Ok(r.clone())
+}
+
+/// Adds a group (A09); names are unique, as in the engine.
+///
+/// # Errors
+/// `InvalidValue` for an empty name; `NAME_TAKEN`.
+pub fn create_group(d: &mut DemoState, name: &str) -> Result<DefinitionGroup, ApiError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(invalid());
+    }
+    let s = store(d);
+    if s.groups.iter().any(|g| g.name.eq_ignore_ascii_case(name)) {
+        return Err(refusal(409, "NAME_TAKEN"));
+    }
+    let sort = s.groups.iter().map(|g| g.sort).max().map_or(0, |m| m + 1);
+    let g = DefinitionGroup {
+        id: s.id("group"),
+        name: name.to_string(),
+        sort,
+        version: 1,
+    };
+    s.groups.push(g.clone());
+    Ok(g)
+}
+
+/// Renames group `id` at `version` (A09).
+///
+/// # Errors
+/// `NotFound`; `STALE_VERSION`; `NAME_TAKEN`; `InvalidValue`.
+pub fn rename_group(
+    d: &mut DemoState,
+    id: &str,
+    version: u64,
+    name: &str,
+) -> Result<DefinitionGroup, ApiError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(invalid());
+    }
+    let s = store(d);
+    if s.groups
+        .iter()
+        .any(|g| g.name.eq_ignore_ascii_case(name) && g.id != id)
+    {
+        return Err(refusal(409, "NAME_TAKEN"));
+    }
+    let g = s
+        .groups
+        .iter_mut()
+        .find(|g| g.id == id)
+        .ok_or(ApiError::NotFound { code: None })?;
+    if g.version != version {
+        return Err(refusal(409, "STALE_VERSION"));
+    }
+    g.name = name.to_string();
+    g.version += 1;
+    Ok(g.clone())
+}
+
+/// Deletes group `id` at `version`; its reports move to no group, as in
+/// the engine (A09, Q-A09f).
+///
+/// # Errors
+/// `NotFound`; `STALE_VERSION`.
+pub fn delete_group(d: &mut DemoState, id: &str, version: u64) -> Result<(), ApiError> {
+    let s = store(d);
+    let i = s
+        .groups
+        .iter()
+        .position(|g| g.id == id)
+        .ok_or(ApiError::NotFound { code: None })?;
+    if s.groups[i].version != version {
+        return Err(refusal(409, "STALE_VERSION"));
+    }
+    s.groups.remove(i);
+    for r in &mut s.definitions {
+        if r.group_id.as_deref() == Some(id) {
+            r.group_id = None;
+            r.version += 1;
+        }
+    }
+    Ok(())
 }
 
 // --- Budgets -----------------------------------------------------------------

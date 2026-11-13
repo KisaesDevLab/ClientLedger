@@ -480,6 +480,18 @@ pub const COMMANDS: &[Command] = &[
     cmd("reports.refresh", "Refresh Report", None, 3, key(Mods::NONE, Key::F(5)), Scope::Window),
     cmd("reports.memorize", "Memorize Report", None, 3, ctrl('M'), Scope::Window),
     cmd("reports.collapse", "Collapse or Expand Rows", None, 3, None, Scope::Window),
+    // A09 (Q-A09k): the Memorized Reports list, and its own keys while it
+    // has focus. Memorize a copy has no key: Ctrl+M stays Memorize Report.
+    built("reports.memorized_list", "Memorized Reports\u{2026}", Some(Menu::Reports), 3, None),
+    cmd("reports.memorized_open", "Open the Memorized Report", None, 13, key(Mods::NONE, Key::Enter), Scope::ReportList),
+    cmd("reports.memorized_rename", "Rename the Memorized Report", None, 13, key(Mods::NONE, Key::F(2)), Scope::ReportList),
+    cmd("reports.memorized_delete", "Delete the Memorized Report\u{2026}", None, 13, key(Mods::CMD, Key::Delete), Scope::ReportList),
+    // A09 `.clreport` (Q-A09a, Q-A09e): from the list and the builder's
+    // Report tab; no shortcut.
+    cmd("reports.export_report_file", "Export Report File\u{2026}", None, 13, None, Scope::Window),
+    cmd("reports.import_report_file", "Import Report File\u{2026}", None, 13, None, Scope::Window),
+    // A09 WP-A: the window an export or import of a report file opens in.
+    built("reports.report_file", "Report File", None, 3, None),
     // A08: the Report Builder editor, one window per report; opened from the
     // Reports list ("New report...") and Customize, no menu entry.
     built("reports.builder_editor", "Report Builder", None, 3, None),
@@ -836,6 +848,9 @@ mod tests {
             "reports.ar_aging",
             // A08
             "reports.builder_editor",
+            // A09
+            "reports.memorized_list",
+            "reports.report_file",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -845,6 +860,42 @@ mod tests {
             let p = c.arrives.expect("window commands name a phase");
             assert!(p.starts_with('P'), "{p}");
         }
+    }
+
+    #[test]
+    fn memorized_list_keys() {
+        use crate::keymap::Keymap;
+        let km = Keymap::new(COMMANDS).expect("no key clashes");
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        let list = find("reports.memorized_list").expect("list");
+        assert_eq!((list.menu, list.shortcut), (Some(Menu::Reports), None));
+        assert!(list.opens && list.arrives.is_none());
+        for (m, k, id) in [
+            (Mods::NONE, Key::Enter, "reports.memorized_open"),
+            (Mods::NONE, Key::F(2), "reports.memorized_rename"),
+            (Mods::CMD, Key::Delete, "reports.memorized_delete"),
+        ] {
+            assert_eq!(at(Scope::ReportList, m, k), Some(id), "{id}");
+            // Nowhere else.
+            for s in Scope::ALL.iter().filter(|s| **s != Scope::ReportList) {
+                assert_ne!(at(*s, m, k), Some(id), "{id} in {s:?}");
+            }
+        }
+        // The queue's keys never act on it; Delete is the lists' own
+        // Delete (the list asks first too); Ctrl+M stays Memorize Report.
+        assert_eq!(at(Scope::ReportList, Mods::NONE, Key::Letter('J')), None);
+        assert_eq!(
+            at(Scope::ReportList, Mods::NONE, Key::Delete),
+            Some("list.delete")
+        );
+        assert_eq!(
+            at(Scope::ReportList, Mods::CMD, Key::Letter('M')),
+            Some("reports.memorize")
+        );
+        assert_eq!(Scope::ReportList.title(), "In Memorized Reports");
     }
 
     #[test]

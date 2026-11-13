@@ -1075,3 +1075,6 @@ fn read_starters(v: &Value) -> Result<Vec<Starter>, ApiError> {
 #[cfg(test)]
 #[path = "report_builder_tests.rs"]
 mod tests;
+
+#[path = "report_builder_fill.rs"]
+pub mod fill;

@@ -626,6 +626,7 @@ pub fn builder_definitions_save_and_refuse(h: &Harness) {
         group_id: None,
         kind: "builder".into(),
         definition: body.clone(),
+        origin: None,
     };
     let key = cl_api::IdempotencyKey::new();
     let row = h.run(defs.create(&w, key.clone())).expect("create");
@@ -664,6 +665,7 @@ pub fn builder_definitions_save_and_refuse(h: &Harness) {
         kind: "standard".into(),
         definition: json!({"schemaVersion": 1, "kind": "standard", "reportKey": "profit_loss",
                            "options": {"dates": {"preset": "last_month"}}}),
+        origin: None,
     };
     h.run(defs.update(&row.id, next.version, &standard))
         .expect_err("a kind change is refused");
@@ -752,4 +754,160 @@ pub fn a_preview_run_is_the_screen_run_cut_at_fifty(h: &Harness) {
             .map(|x| x.cells.clone())
     };
     assert_eq!(total(&cut), total(&whole));
+}
+
+/// U-218 (`report-builder-formula-sign-v1`, Q-A08ai): a formula over an
+/// Expenses section shown "Credits as positive" equals the same formula
+/// with the natural sign; only the Expenses rows change sign (A09 E1).
+pub fn a_flipped_section_leaves_its_formula_alone(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::REPORT_BUILDER_FORMULA_SIGN, "U-218") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbSignBank");
+    let sales = account(h, s, AccountType::Revenue, "RbSignSales");
+    let rent = account(h, s, AccountType::Expense, "RbSignRent");
+    post(
+        h,
+        s,
+        &je2(date(YEAR, 6, 3), "rb", bank.id, sales.id, "900.00"),
+    );
+    post(
+        h,
+        s,
+        &je2(date(YEAR, 6, 9), "rb", rent.id, bank.id, "350.25"),
+    );
+    let section = |id: &str, acct: String, polarity: Option<&str>| {
+        let mut v = json!({
+            "type": "section", "id": id, "caption": id, "source": "gl",
+            "measure": "amount",
+            "filters": [{"field": "account", "op": "in", "ids": [acct]}],
+            "groupBy": [{"key": "account"}], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false
+        });
+        if let Some(p) = polarity {
+            v["polarity"] = json!(p);
+        }
+        v
+    };
+    let def = |flip: bool| {
+        json!({
+            "schemaVersion": 1, "kind": "builder",
+            "dates": {"mode": "range"},
+            "columns": {"detailFields": [], "compare": [], "headers": {}},
+            "nodes": [
+                section("income", sales.id.to_string(), None),
+                section("expenses", rent.id.to_string(), flip.then_some("credit")),
+                {"type": "formula", "id": "net", "caption": "Net",
+                 "terms": [{"nodeId": "income", "sign": 1}, {"nodeId": "expenses", "sign": -1}]}
+            ]
+        })
+    };
+    let total = |r: &BuilderRun, kind: RowKind, node: &str| {
+        r.table
+            .rows
+            .iter()
+            .find(|x| x.kind == kind && x.path.0.first().is_some_and(|p| p == &format!("n:{node}")))
+            .map_or_else(|| panic!("{node} {kind:?}"), |x| x.cells[0].clone())
+    };
+    let natural = run(h, s, &request(reference(&def(false)), false)).expect("natural");
+    let flipped = run(h, s, &request(reference(&def(true)), false)).expect("flipped");
+    assert_eq!(
+        total(&natural, RowKind::Formula, "net"),
+        total(&flipped, RowKind::Formula, "net"),
+        "the formula ignores display polarity"
+    );
+    let amount = |c: Cell| match c {
+        Cell::Amount(d) => d,
+        other => panic!("not an amount: {other:?}"),
+    };
+    assert_eq!(
+        amount(total(&flipped, RowKind::Total, "expenses")),
+        -amount(total(&natural, RowKind::Total, "expenses")),
+        "the flipped section's own total shows the other sign"
+    );
+}
+
+/// A09 #2: an export of a line with more than 5,000 detail rows (the
+/// engine's rows per line in an export run) pages the rest through
+/// `run/detail` with the desktop's own fill: no `more` row is left, every
+/// row is there once, and the detail rows tie to their line. Its own fresh
+/// accounts, so no other test's postings count.
+pub fn an_export_pages_a_line_over_five_thousand_rows(h: &Harness) {
+    const ENTRIES: usize = 11;
+    const LINES: usize = 499;
+    use cl_api::resources::report_builder::fill::{ExportFill, MAX_EXPORT_ROWS};
+    use cl_api::{NewJournalEntry, Side};
+    if !caps(h) {
+        return;
+    }
+    let s = &h.s1;
+    let bank = account(h, s, AccountType::Asset, "RbBigBank");
+    let fuel = account(h, s, AccountType::Expense, "RbBigFuel");
+    // 11 entries of 499 one-dollar fuel lines: 5,489 detail rows.
+    for e in 0..ENTRIES {
+        let day = date(YEAR, 8, 1 + u32::try_from(e).expect("day"));
+        let mut lines: Vec<_> = (0..LINES)
+            .map(|_| crate::common::line(fuel.id, Side::Debit(crate::common::m("1.00"))))
+            .collect();
+        lines.push(crate::common::line(
+            bank.id,
+            Side::Credit(crate::common::m("499.00")),
+        ));
+        let entry = NewJournalEntry::new(day, Some("rb big".into()), cl_api::Basis::Both, lines)
+            .expect("balanced");
+        post(h, s, &entry);
+    }
+    let mut def = ledger(&[fuel.id.to_string()]);
+    def["columns"]["detailFields"] = json!(["date", "memo", "amount"]);
+    let mut req = request(reference(&def), true);
+    req.purpose = RunPurpose::Export;
+    let first = run(h, s, &req).expect("export run");
+    assert!(
+        first.table.rows.iter().any(|r| r.kind == RowKind::More),
+        "the run cuts the line at 5,000 rows"
+    );
+    let mut fill = ExportFill::new(&req, first, MAX_EXPORT_ROWS);
+    let mut pages = 0;
+    while let Some(dr) = fill.next_request() {
+        let r = fill.run();
+        let page = h
+            .run(s.report_builder().detail(&dr, &r.table.columns, &r.layout))
+            .expect("detail page");
+        fill.take(page);
+        pages += 1;
+        assert!(pages < 100, "no loop");
+    }
+    assert!(pages >= 1, "the engine's cursor paging was used");
+    let filled = fill.finish();
+    assert!(!filled.cut);
+    let t = &filled.run.table;
+    assert!(
+        t.rows.iter().all(|r| r.kind != RowKind::More),
+        "no more row left"
+    );
+    let line = t.rows.iter().find(|r| r.expandable).expect("the fuel line");
+    let details: Vec<_> = t
+        .rows
+        .iter()
+        .filter(|r| r.kind == RowKind::Detail && r.path == line.path)
+        .collect();
+    assert_eq!(details.len(), ENTRIES * LINES, "every row, once");
+    let col = t
+        .columns
+        .iter()
+        .position(|c| c.kind == cl_core::report::ColumnKind::Amount && !c.key.starts_with("f:"))
+        .expect("a value column");
+    let amount = |c: &Cell| match c {
+        Cell::Amount(x) => *x,
+        _ => rust_decimal::Decimal::ZERO,
+    };
+    // The test adds up (as Decimal) to check the tie; the app never does.
+    let sum: rust_decimal::Decimal = details.iter().map(|r| amount(&r.cells[col])).sum();
+    assert_eq!(
+        sum,
+        amount(&line.cells[col]),
+        "the detail rows tie to the line"
+    );
+    assert_eq!(sum, rust_decimal::Decimal::from(ENTRIES * LINES));
 }

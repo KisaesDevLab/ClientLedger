@@ -541,6 +541,88 @@ mod tests {
         assert!(strings.contains("1 values were too long"));
     }
 
+    /// The `<c ...>` tag of the cell holding `value` in `sheet`.
+    fn cell_tag<'a>(sheet: &'a str, value: &str) -> &'a str {
+        let at = sheet
+            .find(&format!("<v>{value}</v>"))
+            .unwrap_or_else(|| panic!("{value} in {sheet}"));
+        let start = sheet[..at].rfind("<c ").expect("cell");
+        let end = start + sheet[start..].find('>').expect("tag end");
+        &sheet[start..=end]
+    }
+
+    /// The `s="N"` style index of a cell tag.
+    fn style_of(tag: &str) -> &str {
+        let at = tag.find(" s=\"").map_or(tag.len(), |i| i + 4);
+        let rest = &tag[at..];
+        &rest[..rest.find('"').unwrap_or(0)]
+    }
+
+    /// A07-5 (A09 AC2): bold formula and total rows keep their numbers
+    /// numeric, in the bold amount format; an ordinary row is not bold.
+    #[test]
+    fn bold_formula_and_total_rows_stay_numeric() {
+        let mut t = table();
+        let r = |kind, caption: &str, v: &str| ReportRow {
+            kind,
+            level: 0,
+            path: RowPath::of([caption]),
+            caption: caption.into(),
+            cells: vec![Cell::Amount(d(v)), Cell::Percent(None)],
+            drill: None,
+            expandable: false,
+        };
+        t.rows = vec![
+            r(RowKind::Account, "Sales", "1200.75"),
+            r(RowKind::Formula, "Gross profit", "250.25"),
+            r(RowKind::Total, "Total expenses", "-40.1"),
+            r(RowKind::Subtotal, "Subtotal", "77.5"),
+        ];
+        let (bytes, fallbacks) = to_xlsx(&t, &[0, 1, 2, 3], &[], &tr).expect("xlsx");
+        assert_eq!(fallbacks, 0);
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut sheet = String::new();
+        zip.by_name("xl/worksheets/sheet1.xml")
+            .expect("sheet")
+            .read_to_string(&mut sheet)
+            .expect("read");
+        let plain = cell_tag(&sheet, "1200.75");
+        let formula = cell_tag(&sheet, "250.25");
+        let total = cell_tag(&sheet, "-40.1");
+        let subtotal = cell_tag(&sheet, "77.5");
+        for tag in [plain, formula, total, subtotal] {
+            // A number: no shared-string or inline-string type.
+            assert!(!tag.contains(" t=\""), "{tag}");
+        }
+        assert_eq!(style_of(formula), style_of(total), "{formula} {total}");
+        assert_eq!(style_of(formula), style_of(subtotal));
+        assert_ne!(style_of(formula), style_of(plain), "{formula} {plain}");
+        // That style is the amount format, bold.
+        let mut styles = String::new();
+        zip.by_name("xl/styles.xml")
+            .expect("styles")
+            .read_to_string(&mut styles)
+            .expect("read");
+        let xfs = &styles[styles.find("<cellXfs").expect("xfs")..];
+        let n: usize = style_of(formula).parse().expect("index");
+        let xf = xfs.split("<xf ").nth(n + 1).expect("xf");
+        let font: usize = xf
+            .split("fontId=\"")
+            .nth(1)
+            .and_then(|x| x.split('"').next())
+            .and_then(|x| x.parse().ok())
+            .expect("font");
+        let fonts = &styles[styles.find("<fonts").expect("fonts")..];
+        let f = fonts.split("<font>").nth(font + 1).expect("font entry");
+        assert!(
+            f.split("</font>")
+                .next()
+                .is_some_and(|f| f.contains("<b/>")),
+            "{f}"
+        );
+        assert!(xf.contains("numFmtId=\"16"), "{xf}");
+    }
+
     #[test]
     fn the_pdf_layout_uses_display_formatting() {
         let r = to_report(&table(), &[0, 2], "Profit & Loss", vec![], &tr);
@@ -578,6 +660,64 @@ mod tests {
     /// A07 QA-8: a 13-column monthly P&L (12 months and a Total) with
     /// 6-figure negatives builds a PDF (it failed with `DoesNotFit`, shown
     /// as "the file couldn't be saved"), every figure whole.
+    /// P28-4 re-check (A09): a wide table splits its columns across pages
+    /// and every figure prints: a 52-column Budget vs. Actual (13 periods ×
+    /// actual, budget, over, %) and a 36-period builder report.
+    #[test]
+    fn very_wide_reports_build_a_pdf_with_every_figure() {
+        for (name, cols, pct_every) in [
+            ("Budget vs. Actual", 52usize, 4usize),
+            ("Builder by month", 37, 0),
+        ] {
+            let columns: Vec<ColumnHead> = (0..cols)
+                .map(|i| {
+                    let pct = pct_every > 0 && i % pct_every == pct_every - 1;
+                    heading(
+                        &format!("c{i}"),
+                        if pct {
+                            ColumnKind::Percent
+                        } else {
+                            ColumnKind::Amount
+                        },
+                    )
+                })
+                .collect();
+            let cells: Vec<Cell> = columns
+                .iter()
+                .map(|c| match c.kind {
+                    ColumnKind::Percent => Cell::Percent(Some(d("104.5"))),
+                    _ => Cell::Amount(d("-1234567.89")),
+                })
+                .collect();
+            let amounts = cells
+                .iter()
+                .filter(|c| matches!(c, Cell::Amount(_)))
+                .count();
+            let t = ReportTable {
+                columns,
+                rows: vec![ReportRow {
+                    kind: RowKind::Account,
+                    level: 1,
+                    path: RowPath::of(["6100"]),
+                    caption: "6100 · Fuel".into(),
+                    cells,
+                    drill: None,
+                    expandable: false,
+                }],
+                meta: ReportMeta::default(),
+            };
+            let r = to_report(&t, &[0], name, vec![], &tr);
+            let text = printed(&r);
+            assert_eq!(
+                text.iter().filter(|s| *s == "-1,234,567.89").count(),
+                amounts,
+                "{name}: every amount prints"
+            );
+            let pdf = crate::reports::render_report(&r).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(pdf.starts_with(b"%PDF"), "{name}");
+        }
+    }
+
     #[test]
     fn a_thirteen_column_pl_builds_a_pdf() {
         let mut columns: Vec<ColumnHead> = (1..=12)
