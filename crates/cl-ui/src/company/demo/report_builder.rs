@@ -822,8 +822,27 @@ fn check_definition(books: &Books, def: &Value) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// What a rendered node adds up to (`None`: denied).
+/// What a rendered node adds up to in its normal sign (`None`: denied):
+/// formulas and named percent bases read these (U-218).
 type Totals = BTreeMap<String, Option<Vals>>;
+
+/// True when a section shows its figures with the other sign than its
+/// natural one (a polarity set against its accounts' normal side, as the
+/// demo tells it: one side per section). Its normal-sign total is then the
+/// shown total negated (U-218).
+fn shown_flipped(section: &Value) -> bool {
+    match section["polarity"].as_str() {
+        Some("debit") => natural_credit(section),
+        Some("credit") => !natural_credit(section),
+        _ => false,
+    }
+}
+
+/// The normal-sign total of a section from its shown total.
+fn normal_of(section: &Value, shown: Option<&Vals>) -> Option<Vals> {
+    let flip = shown_flipped(section);
+    shown.map(|v| v.iter().map(|x| if flip { -*x } else { *x }).collect())
+}
 
 struct Render<'a> {
     req: &'a RunRequest,
@@ -861,9 +880,17 @@ impl Render<'_> {
         Some(dec_cells(self.plan, vals.as_ref()))
     }
 
-    /// Renders `nodes`; returns what the sections among them add up to.
-    fn nodes(&mut self, d: &mut DemoState, nodes: &[Value], level: usize) -> Option<Vals> {
+    /// Renders `nodes`; returns what the sections among them add up to,
+    /// as shown (a group's subtotal row) and in the normal sign (what a
+    /// formula over the group reads, U-218).
+    fn nodes(
+        &mut self,
+        d: &mut DemoState,
+        nodes: &[Value],
+        level: usize,
+    ) -> (Option<Vals>, Option<Vals>) {
         let mut sum = Some(vec![Decimal::ZERO; self.plan.width()]);
+        let mut normal = Some(vec![Decimal::ZERO; self.plan.width()]);
         for node in nodes {
             let id = node["id"].as_str().unwrap_or_default().to_string();
             match node["type"].as_str() {
@@ -924,7 +951,7 @@ impl Render<'_> {
                     self.rows.push(r);
                     let children: Vec<Value> =
                         node["children"].as_array().cloned().unwrap_or_default();
-                    let total = self.nodes(d, &children, level + 1);
+                    let (total, total_normal) = self.nodes(d, &children, level + 1);
                     if node["showTotal"] == true {
                         let base = self.base(None);
                         let caption = node["totalCaption"].as_str().unwrap_or("Total");
@@ -936,20 +963,28 @@ impl Render<'_> {
                     if let (Some(s), Some(t)) = (sum.as_mut(), total.as_ref()) {
                         add_vals(s, t);
                     }
-                    self.totals.insert(id, total);
+                    if let (Some(s), Some(t)) = (normal.as_mut(), total_normal.as_ref()) {
+                        add_vals(s, t);
+                    }
+                    self.totals.insert(id, total_normal);
                 }
                 Some("section") => {
                     let total = self.section(d, node, &id, level);
+                    let total_normal = normal_of(node, total.as_ref());
                     match (sum.as_mut(), total.as_ref()) {
                         (Some(s), Some(t)) => add_vals(s, t),
                         _ => sum = None,
                     }
-                    self.totals.insert(id, total);
+                    match (normal.as_mut(), total_normal.as_ref()) {
+                        (Some(s), Some(t)) => add_vals(s, t),
+                        _ => normal = None,
+                    }
+                    self.totals.insert(id, total_normal);
                 }
                 _ => {}
             }
         }
-        sum
+        (sum, normal)
     }
 
     fn section(&mut self, d: &mut DemoState, node: &Value, id: &str, level: usize) -> Option<Vals> {
@@ -1388,6 +1423,35 @@ mod tests {
             );
         }
     }
+    /// U-218 parity: a formula adds its terms in their normal sign, so
+    /// flipping "Show as positive" on COGS changes the COGS rows only;
+    /// Gross profit and a % of Gross profit base are unchanged, and the
+    /// flipped section's own rows are negated.
+    #[test]
+    fn a_flipped_section_leaves_its_formula_alone() {
+        let mut d = DemoState::new();
+        let mut cols = plain_columns();
+        cols["percentOf"] = json!("gp");
+        let natural = gross_profit(&cols);
+        let mut flipped = natural.clone();
+        flipped["nodes"][1]["polarity"] = json!("credit");
+        let t1 = run(&mut d, &req(&natural, october(), Vec::new()), false)
+            .expect("run")
+            .table;
+        let t2 = run(&mut d, &req(&flipped, october(), Vec::new()), false)
+            .expect("run")
+            .table;
+        let gp = |t: &ReportTable| amount(&cell(t, RowKind::Formula, "gp", "total"));
+        assert_eq!(gp(&t1), gp(&t2));
+        let cogs = |t: &ReportTable| amount(&cell(t, RowKind::Total, "cogs", "total"));
+        assert_ne!(cogs(&t1), Decimal::ZERO, "the demo has cost of goods");
+        assert_eq!(cogs(&t2), -cogs(&t1));
+        // % of Gross profit: the base is the same, so the income row's
+        // percent is unchanged.
+        let pct = |t: &ReportTable| cell(t, RowKind::Total, "income", "total:pct");
+        assert_eq!(pct(&t1), pct(&t2));
+    }
+
     /// R16: overlapping periods are refused as the engine refuses them
     /// (a period starting on or before the end of the one before).
     #[test]

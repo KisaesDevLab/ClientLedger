@@ -599,34 +599,6 @@ fn total(s: &mut BuilderScreen, ui: &mut Ui, sec: &Section) {
             2 => Some(Polarity::Credit),
             _ => None,
         };
-        let id = n.id.clone();
         edit(s, n);
-        sign_status(s, &id);
-    }
-}
-
-/// After "Show as positive" changed on section `id`: formulas add their
-/// rows as shown (the engine's rule, Q-A08ai), so a formula that now adds
-/// it with the other sign is named in the status line (QA-12).
-pub(crate) fn sign_status(s: &mut BuilderScreen, id: &str) {
-    let def = s.ed.definition();
-    let hit = cl_model::report_def::outline::walk(&def.nodes)
-        .into_iter()
-        .filter_map(|v| match v.node {
-            Node::Formula(f) => Some(f),
-            _ => None,
-        })
-        .find(|f| {
-            cl_model::report_def::editor::choices::flipped_terms(def, &f.id)
-                .iter()
-                .any(|x| x == id)
-        })
-        .map(|f| f.caption.clone());
-    if let Some(formula) = hit {
-        let section = super::outline::caption_of(s, id);
-        s.status = Some(crate::i18n::t_with(
-            "builder.status.formula_sign",
-            &[("formula", &formula), ("section", &section)],
-        ));
     }
 }

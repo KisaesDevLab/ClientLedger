@@ -39,8 +39,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.status.fix_first", "Fix the problems listed under Preview first."),
     ("builder.status.filters_dropped", "The report's filters aren't carried into the Report Builder. Add them under Include only."),
     ("builder.status.not_an_amount", "That isn't an amount in dollars and cents. Type digits with up to two decimals, such as 1,450.00."),
-    ("builder.status.formula_sign", "{formula} adds {section} as it's shown, so its result changes too. Check the formula's + and \u{2212}."),
-    ("builder.formula.sign_note", "{rows} shows the other sign than usual (Show as positive). A formula adds rows as they're shown, so check + and \u{2212} here."),
     ("builder.status.removed_rows", "Removed {n} rows."),
     ("builder.status.removed_rows.one", "Removed 1 row."),
     ("builder.status.removed_terms", "{n} formula parts that used them were removed too."),

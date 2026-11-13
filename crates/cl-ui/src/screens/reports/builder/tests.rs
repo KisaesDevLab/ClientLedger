@@ -1721,35 +1721,19 @@ fn the_amount_filter_refuses_sub_cents() {
     );
 }
 
-/// QA-12 (Q-A08ai): flipping a section's sign that a formula adds says so
-/// in the status line; the formula's Row tab shows the note.
+/// U-218 (Q-A08ai, Q-A09o): formulas use each section's normal sign, so
+/// flipping "Show as positive" on a section a formula adds says nothing
+/// about the formula (the warning is gone with the engine change).
 #[test]
-fn flipping_a_sign_a_formula_uses_says_so() {
+fn flipping_a_sign_a_formula_uses_needs_no_warning() {
     let (_d, _l, mut s) = editor(BuilderSeed::Blank);
-    let (_inc, cogs, gp) = gross_profit(&mut s);
+    let (_inc, cogs, _gp) = gross_profit(&mut s);
     let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
         panic!("section");
     };
     n.polarity = Some(cl_model::report_def::Polarity::Credit);
-    s.apply(Op::Edit(Node::Section(n)));
-    super::sources::sign_status(&mut s, &cogs);
-    let status = s.status.clone().expect("a status line");
-    assert!(
-        status.contains("Gross profit") && status.contains("Cost of goods sold"),
-        "{status}"
-    );
-    assert_eq!(
-        cl_model::report_def::editor::choices::flipped_terms(s.ed.definition(), &gp),
-        std::slice::from_ref(&cogs)
-    );
-    // Back to the usual direction: no note.
-    let Some(Node::Section(mut n)) = tree::find(&s.ed.definition().nodes, &cogs).cloned() else {
-        panic!("section");
-    };
-    n.polarity = None;
-    s.apply(Op::Edit(Node::Section(n)));
     s.status = None;
-    super::sources::sign_status(&mut s, &cogs);
+    s.apply(Op::Edit(Node::Section(n)));
     assert_eq!(s.status, None);
 }
 
