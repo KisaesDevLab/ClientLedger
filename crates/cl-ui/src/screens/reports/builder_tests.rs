@@ -788,3 +788,54 @@ fn rows_without_figures_are_empty_across() {
         assert!(r.cells.iter().all(|c| *c == Cell::Empty), "{:?}", r.kind);
     }
 }
+
+/// A07-10 (A09): Load more after a Refresh on the same books fetches
+/// again: the refreshed run brings its `more` rows back, and Load more on
+/// one adds the page's rows once more.
+#[test]
+fn load_more_after_a_refresh_on_the_same_books_fetches_again() {
+    let (_d, link) = demo();
+    let mut w = starter(&link, "transaction_detail_by_account");
+    let first = w.table.clone().expect("table");
+    let load_more = |w: &mut ReportWindow| {
+        let more = w
+            .table
+            .as_ref()
+            .and_then(|t| t.rows.iter().find(|r| r.kind == RowKind::More).cloned())
+            .expect("a more row");
+        super::drill::open(w, more.drill.as_ref().expect("page"));
+        w.poll();
+    };
+    load_more(&mut w);
+    let paged = count(w.table.as_ref().expect("table"), RowKind::Detail);
+    assert!(paged > count(&first, RowKind::Detail));
+    assert!(w.command(CommandId::new("reports.refresh")));
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let again = w.table.clone().expect("table");
+    assert_eq!(
+        count(&again, RowKind::Detail),
+        count(&first, RowKind::Detail),
+        "the rerun shows its first page"
+    );
+    load_more(&mut w);
+    assert_eq!(
+        count(w.table.as_ref().expect("table"), RowKind::Detail),
+        paged,
+        "the page was fetched again"
+    );
+}
+
+/// A07-11 (Q-A09n): a detail tab shows its dates as text, with why they
+/// can't change; a report tab has no such line.
+#[test]
+fn a_detail_tab_shows_its_dates_read_only() {
+    let (_d, link) = demo();
+    let (w, tab) = ledger_line_tab(&link);
+    assert_eq!(super::filters::detail_dates_text(&w), None);
+    let text = super::filters::detail_dates_text(&tab).expect("dates");
+    assert!(
+        text.contains('/') && (text.contains(" to ") || text.starts_with("As of")),
+        "{text}"
+    );
+}

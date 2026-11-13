@@ -183,6 +183,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.page_label", "Page {n} of {m}"),
     ("reports.truncated", "Showing {shown} of {total} lines. Narrow the dates or filters to see the rest."),
     ("reports.header.as_of", "As of {date}"),
+    // A07-11 (Q-A09n): a builder detail tab's dates, read-only.
+    ("reports.detail.dates", "{from} to {to}"),
+    ("reports.detail.dates_fixed", "Dates come from the line you opened."),
     ("reports.header.run", "Run {time}"),
     ("reports.basis.accrual", "Accrual"),
     ("reports.basis.cash", "Cash"),
