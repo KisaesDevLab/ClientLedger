@@ -433,3 +433,21 @@ fn a_failed_expand_all_reverts_the_flag_and_too_large_keeps_the_table() {
     assert!(s.is_open_all());
     assert!(run_of(&s.refresh()).expect("run").3);
 }
+
+/// A09 (Q-A09h): an export asks for the lists of the table shown, not a
+/// change still inside the debounce.
+#[test]
+fn shown_lists_are_the_lists_behind_the_table() {
+    let mut s = shown();
+    assert_eq!(s.shown_lists(), (Vec::new(), Vec::new(), false));
+    s.expand(&p(&["n:a", "account:2"]), 0);
+    let (generation, ..) = run_of(&s.tick(DEBOUNCE_MS)).expect("run");
+    s.run_ok(generation, 7, &[p(&["n:a", "account:2"])]);
+    assert_eq!(
+        s.shown_lists(),
+        (vec![p(&["n:a", "account:2"])], Vec::new(), false)
+    );
+    // Pending, not run yet: the table shown still came from the old lists.
+    s.collapse(&p(&["n:a", "account:2"]), 10);
+    assert_eq!(s.shown_lists().0, [p(&["n:a", "account:2"])]);
+}

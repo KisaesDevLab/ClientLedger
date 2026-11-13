@@ -778,13 +778,17 @@ pub fn a_flipped_section_leaves_its_formula_alone(h: &Harness) {
         &je2(date(YEAR, 6, 9), "rb", rent.id, bank.id, "350.25"),
     );
     let section = |id: &str, acct: String, polarity: Option<&str>| {
-        json!({
+        let mut v = json!({
             "type": "section", "id": id, "caption": id, "source": "gl",
-            "measure": "amount", "polarity": polarity,
+            "measure": "amount",
             "filters": [{"field": "account", "op": "in", "ids": [acct]}],
             "groupBy": [{"key": "account"}], "display": "summary",
             "defaultExpanded": false, "showTotal": true, "hideZero": false
-        })
+        });
+        if let Some(p) = polarity {
+            v["polarity"] = json!(p);
+        }
+        v
     };
     let def = |flip: bool| {
         json!({

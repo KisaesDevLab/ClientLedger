@@ -274,6 +274,17 @@ impl BuilderRunState {
         self.stamp
     }
 
+    /// The open and collapsed lists and Expand all that made the table
+    /// shown: an export run asks for the same (A09, Q-A09h).
+    #[must_use]
+    pub fn shown_lists(&self) -> (Vec<RowPath>, Vec<RowPath>, bool) {
+        (
+            self.committed.open.iter().cloned().collect(),
+            self.committed.collapsed.iter().cloned().collect(),
+            self.committed.expand_all,
+        )
+    }
+
     /// The open paths the screen follows (pending ones first).
     #[must_use]
     pub fn open_paths(&self) -> &BTreeSet<RowPath> {
