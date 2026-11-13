@@ -334,15 +334,30 @@ pub fn replace_is_refused_for_a_non_author_and_a_kind_change(h: &Harness) {
         origin: Some("import".into()),
     };
 
-    // Another user: 403 NOT_AUTHOR (Q-310).
-    let (_, bk) = h.bookkeeper();
+    // Another user: 403 NOT_AUTHOR (Q-310). The bookkeeper is shared by the
+    // whole run and other tests leave their own permission overrides on it,
+    // so this test sets the one it needs (report access) first.
+    let (user, bk) = h.bookkeeper();
+    let p = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&json!({ "overrides": { "reports": "view" } })),
+        ))
+        .expect("permissions");
+    assert_eq!(p.status, 200, "{}", p.body);
     let e = h
         .run(
             bk.report_definitions()
                 .update(&row.id, row.version, &replace),
         )
         .expect_err("not the author");
-    assert_eq!(definition_refusal(&e), Some(DefinitionRefusal::NotAuthor));
+    assert_eq!(
+        definition_refusal(&e),
+        Some(DefinitionRefusal::NotAuthor),
+        "{e:?}"
+    );
 
     // The author, with another kind: refused, the row unchanged.
     let standard_body = DefinitionWrite {
