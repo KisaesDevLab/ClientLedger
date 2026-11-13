@@ -14,8 +14,8 @@ use cl_api::resources::reports::definitions::{Choices, PreviewReport, TransferRe
 use cl_model::report_def::clreport::{FileReport, RefKind, Reference, free_name};
 use serde_json::Value;
 
-/// The answer to a name clash.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The answer to a name clash. `Debug` names nothing (S-L5).
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Clash {
     /// No report has the name.
     None,
@@ -26,17 +26,30 @@ pub(crate) enum Clash {
     Replace,
 }
 
+impl std::fmt::Debug for Clash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Clash::None => "None",
+            Clash::Rename(_) => "Rename(..)",
+            Clash::Replace => "Replace",
+        })
+    }
+}
+
 /// Why Replace isn't offered (an i18n key).
 pub(crate) const REPLACE_NOT_AUTHOR: &str = "report_file.replace.not_author";
 /// Why Replace isn't offered: the kinds differ.
 pub(crate) const REPLACE_OTHER_KIND: &str = "report_file.replace.other_kind";
+/// Two reports of the file would Replace the same report (I2).
+pub(crate) const REPLACE_TWICE: &str = "report_file.replace.twice";
 
-/// What Continue does with one report.
-#[derive(Clone, Debug, PartialEq)]
+/// What Continue does with one report. `Debug` names nothing (S-L5).
+#[derive(Clone, PartialEq)]
 pub(crate) struct Planned {
     /// The index in the file.
     pub(crate) index: usize,
-    /// The name it is saved under.
+    /// The name it is saved under (a Replace keeps the replaced report's
+    /// own name and group: neither is sent).
     pub(crate) name: String,
     /// This company's group (`None`: no group, or one to create).
     pub(crate) group_id: Option<String>,
@@ -51,8 +64,20 @@ pub(crate) struct Planned {
     pub(crate) replace: Option<(String, u64)>,
 }
 
-/// The review.
-#[derive(Clone, Debug, Default)]
+impl std::fmt::Debug for Planned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Planned")
+            .field("index", &self.index)
+            .field("kind", &self.kind)
+            .field("grouped", &self.group_id.is_some())
+            .field("new_group", &self.new_group.is_some())
+            .field("replace", &self.replace.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The review. `Debug` shows counts only (S-L5).
+#[derive(Clone, Default)]
 pub(crate) struct Review {
     /// The file's reports, as the preview takes them.
     pub(crate) file: Vec<TransferReport>,
@@ -64,6 +89,21 @@ pub(crate) struct Review {
     pub(crate) clashes: Vec<Clash>,
     /// The memorized report names of this company (for a free name).
     pub(crate) names: Vec<String>,
+    /// The file had several reports: it ends with Memorize all, even when
+    /// one is left after a stop (#7).
+    pub(crate) several: bool,
+}
+
+impl std::fmt::Debug for Review {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Review")
+            .field("file", &self.file.len())
+            .field("choices", &self.choices.len())
+            .field("reports", &self.reports)
+            .field("clashes", &self.clashes)
+            .field("names", &self.names.len())
+            .finish()
+    }
 }
 
 /// The preview's report body for a file report (`group` → `groupName`).
@@ -88,6 +128,15 @@ pub(crate) fn file_report_of(r: &TransferReport) -> FileReport {
     }
 }
 
+/// The items of `v` at the indexes `keep`, in order.
+fn keep_only<T>(v: Vec<T>, keep: &[usize]) -> Vec<T> {
+    v.into_iter()
+        .enumerate()
+        .filter(|(i, _)| keep.contains(i))
+        .map(|(_, x)| x)
+        .collect()
+}
+
 fn same(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
 }
@@ -101,12 +150,13 @@ impl Review {
             reports: Vec::new(),
             clashes: vec![Clash::None; file.len()],
             names,
+            several: file.len() > 1,
         }
     }
 
     /// True for a file of one report (it opens unsaved, Q-A09j).
     pub(crate) fn single(&self) -> bool {
-        self.file.len() == 1
+        self.file.len() == 1 && !self.several
     }
 
     /// Takes a preview answer. A clash seen for the first time gets Rename
@@ -123,7 +173,10 @@ impl Review {
                         Clash::Rename(free_name(&r.name, |n| taken.iter().any(|t| same(t, n))));
                 }
                 (Some(_), Clash::Replace) if Self::replace_refused(&reports[i]).is_some() => {
-                    self.clashes[i] = Clash::Rename(r.name.clone());
+                    // Replace can't stand now: a free name, not the taken one.
+                    let taken = self.taken_names(i);
+                    self.clashes[i] =
+                        Clash::Rename(free_name(&r.name, |n| taken.iter().any(|t| same(t, n))));
                 }
                 _ => {}
             }
@@ -193,10 +246,31 @@ impl Review {
         }
     }
 
+    /// The report that report `i` would Replace (its id), if any.
+    fn replace_target(&self, i: usize) -> Option<&str> {
+        match self.clashes.get(i)? {
+            Clash::Replace => self
+                .reports
+                .get(i)?
+                .name_taken
+                .as_ref()
+                .map(|t| t.id.as_str()),
+            _ => None,
+        }
+    }
+
     /// A problem with report `i`'s clash answer (an i18n key), if any.
     pub(crate) fn clash_problem(&self, i: usize) -> Option<&'static str> {
         match self.clashes.get(i)? {
-            Clash::None | Clash::Replace => None,
+            Clash::None => None,
+            // Two reports of the file can't Replace the same one (I2): the
+            // second would be refused after the first overwrote it.
+            Clash::Replace => {
+                let target = self.replace_target(i)?;
+                (0..i)
+                    .any(|j| self.replace_target(j) == Some(target))
+                    .then_some(REPLACE_TWICE)
+            }
             Clash::Rename(n) => {
                 let n = n.trim();
                 if n.is_empty() {
@@ -241,6 +315,35 @@ impl Review {
             .is_some_and(|r| r.kind != RefKind::Budget)
     }
 
+    /// Takes the reports at `saved` (file indexes, already memorized) out
+    /// of the review: their choices go and the others' are re-keyed
+    /// (minor 7: a Memorize all stopped by a name taken meanwhile comes back
+    /// to the review with the rest; the names are read again).
+    pub(crate) fn remove(&mut self, saved: &[usize]) {
+        let keep: Vec<usize> = (0..self.file.len())
+            .filter(|i| !saved.contains(i))
+            .collect();
+        let mut choices = Choices::new();
+        for (new, &old) in keep.iter().enumerate() {
+            let prefix = format!("{old}:");
+            for (k, v) in &self.choices {
+                if let Some(token) = k.strip_prefix(&prefix) {
+                    choices.insert(choice_key(new, token), v.clone());
+                }
+            }
+        }
+        self.file = keep_only(std::mem::take(&mut self.file), &keep);
+        self.clashes = keep_only(std::mem::take(&mut self.clashes), &keep);
+        // The preview is asked again; until then nothing is ready.
+        self.reports.clear();
+        self.choices = choices;
+    }
+
+    /// Unresolved references across every report of the last preview.
+    pub(crate) fn unresolved_total(&self) -> usize {
+        self.reports.iter().map(|r| r.unresolved.len()).sum()
+    }
+
     /// True when any answer is Replace.
     pub(crate) fn replaces(&self) -> bool {
         self.clashes.contains(&Clash::Replace)
@@ -262,17 +365,26 @@ impl Review {
                     };
                     let name = match &self.clashes[i] {
                         Clash::Rename(n) => n.trim().to_string(),
-                        _ => r.name.trim().to_string(),
+                        // A Replace keeps the existing report's name as
+                        // it is written (#15); the name isn't sent.
+                        Clash::Replace => self
+                            .names
+                            .iter()
+                            .find(|n| same(n, &r.name))
+                            .map_or_else(|| r.name.trim().to_string(), |n| n.trim().to_string()),
+                        Clash::None => r.name.trim().to_string(),
                     };
                     let file_group = self.file[i].group_name.clone();
+                    let replacing = replace.is_some();
                     Planned {
                         index: i,
                         name,
-                        group_id: r.group_id.clone(),
-                        new_group: if r.group_id.is_none() {
-                            file_group
-                        } else {
+                        // A Replace keeps the report's own group (#1).
+                        group_id: if replacing { None } else { r.group_id.clone() },
+                        new_group: if replacing || r.group_id.is_some() {
                             None
+                        } else {
+                            file_group
                         },
                         kind: r.kind.clone(),
                         definition: r.definition.clone(),

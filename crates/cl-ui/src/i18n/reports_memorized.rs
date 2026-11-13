@@ -50,6 +50,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.memorized.delete_group_question.one", "Delete the group \u{201c}{name}\u{201d}? Its 1 report moves to no group."),
     ("reports.memorized.delete_group_ok", "Delete group"),
     ("reports.memorized.group_name_needed", "Type a name for the group."),
+    ("reports.memorized.group_name_too_long", "That group name is too long. Use 100 characters or fewer."),
+    ("reports.memorized.name_too_long", "That name is too long. Use 200 characters or fewer."),
     ("reports.memorized.group_taken", "Another group has that name. Choose another."),
     // Copy names: "<name> (copy)", "<name> (copy 2)".
     ("reports.memorized.copy_suffix", "(copy)"),

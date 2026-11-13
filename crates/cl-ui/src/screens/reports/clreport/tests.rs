@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use cl_api::resources::reports::definitions::{
-    DefinitionWrite, NameTaken, PreviewReport, TransferReport,
+    DefinitionPatch, DefinitionWrite, NameTaken, PreviewReport, TransferReport,
 };
 use serde_json::{Value, json};
 
@@ -310,11 +310,18 @@ fn one_builder_report_opens_unsaved_in_the_builder_and_cancel_writes_nothing() {
     let before = count(&link);
 
     // Cancel at the review: nothing written, the window closes.
+    let groups = |link: &CompanyLink| {
+        let mut d = link.demo_state().expect("demo");
+        report_store::definitions(&mut d).1
+    };
+    let groups_before = groups(&link);
     let mut w = import(&link, &path);
     assert_eq!(w.stage_name(), "review", "{:?}", w.message);
     w.cancel();
     assert!(w.take_close_request());
     assert_eq!(count(&link), before);
+    assert_eq!(groups(&link), groups_before, "no group made");
+    assert!(!dir.path().join("Backups").exists(), "no backup copy");
 
     // Continue: the builder opens on it, unsaved, with origin Imported.
     let mut w = import(&link, &path);
@@ -437,12 +444,43 @@ fn several_reports_are_reviewed_then_memorized_all() {
     }
 }
 
+/// The report a Replace overwrites is grouped and its body differs from
+/// the file's: the copy holds the old body, the report keeps its group and
+/// its own name (letter case too), and gets the file's body (#1, #9, #15).
 #[test]
 fn replace_asks_then_writes_a_verified_copy_before_overwriting() {
     let (dir, link) = demo();
     let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
     let path = dir.path().join("one.clreport");
-    export_to(&link, Target::Report(Box::new(row.clone())), &path);
+    // The file: the same report under another letter case, a new caption.
+    {
+        let mut d = link.demo_state().expect("demo");
+        let mut out = crate::company::demo::report_transfer::export(
+            &mut d,
+            &ExportWhat::Ids(vec![row.id.clone()]),
+        )
+        .expect("export");
+        out[0].name = "SHOP COSTS".into();
+        out[0].definition["title"] = json!("SHOP COSTS");
+        out[0].definition["nodes"][0]["caption"] = json!("From the file");
+        std::fs::write(&path, file_bytes(&out).expect("bytes")).expect("write");
+    }
+    // The existing report is grouped, and is moved into the group after
+    // the export (its version is what the preview reads).
+    let row = {
+        let mut d = link.demo_state().expect("demo");
+        let g = report_store::create_group(&mut d, "For the bank").expect("group");
+        report_store::patch_definition(
+            &mut d,
+            &row.id,
+            row.version,
+            &DefinitionPatch {
+                group_id: Some(Some(g.id)),
+                ..DefinitionPatch::default()
+            },
+        )
+        .expect("move")
+    };
     let mut w = import(&link, &path);
     w.set_clash(0, Clash::Replace);
     w.finish(false);
@@ -464,10 +502,19 @@ fn replace_asks_then_writes_a_verified_copy_before_overwriting() {
     assert_eq!(files.len(), 1);
     let copy = clreport::read(&std::fs::read(files[0].path()).expect("read")).expect("valid");
     assert_eq!(copy.reports[0].name, "Shop costs");
+    assert_eq!(
+        copy.reports[0].definition["nodes"][0]["caption"], "Shop costs",
+        "the copy holds the old body"
+    );
+    assert_eq!(copy.reports[0].group.as_deref(), Some("For the bank"));
     // Then the report was overwritten (a new version), and it opens.
     let mut d = link.demo_state().expect("demo");
     let now = report_store::definition(&mut d, &row.id).expect("row");
     assert!(now.version > row.version);
+    assert_eq!(now.definition["nodes"][0]["caption"], "From the file");
+    assert_eq!(now.group_id, row.group_id, "still in its group");
+    assert_eq!(now.name, "Shop costs", "its own name, as written");
+    assert_eq!(now.definition["title"], "Shop costs", "Q-A08r");
     drop(d);
     assert_eq!(w.last, Some("replaced"));
     assert!(w.take_close_request());
@@ -659,4 +706,288 @@ fn every_starter_and_standard_report_writes_as_a_file() {
     for r in &reports {
         assert!(file_bytes(std::slice::from_ref(r)).is_ok(), "{}", r.name);
     }
+}
+
+// ------------------------------------------------------------ fix pass
+
+/// #6: a preview that fails after a choice keeps the review; the choice is
+/// taken back, the card says why, and Try again asks once more.
+#[test]
+fn a_failed_preview_after_a_choice_keeps_the_review() {
+    let (_d, link) = demo();
+    let mut w = import(&link, &fixture("from_accountant.clreport"));
+    let before = w.review().expect("review").clone();
+    // An id this company doesn't have: the preview refuses it.
+    w.choose(0, "$ref:1", Some("not-a-row".into()));
+    w.poll_import();
+    assert_eq!(w.stage_name(), "review", "{:?}", w.message);
+    let Stage::Review(rv) = &w.stage else {
+        unreachable!()
+    };
+    assert_eq!(rv.error, Some("report_file.error.engine"));
+    assert!(rv.review.choices.is_empty(), "the choice was taken back");
+    assert_eq!(rv.review.reports, before.reports, "the review stays");
+    w.retry();
+    w.poll_import();
+    let Stage::Review(rv) = &w.stage else {
+        unreachable!()
+    };
+    assert_eq!(rv.error, None);
+}
+
+/// Two memorized reports exported, then deleted (another company's file).
+fn two_report_file(link: &Arc<CompanyLink>, path: &Path) {
+    let def = builder_def(link);
+    let a = memorize(link, "Shop costs", "builder", def.clone(), None);
+    let b = memorize(link, "Fuel costs", "builder", def, None);
+    let mut d = link.demo_state().expect("demo");
+    let out = crate::company::demo::report_transfer::export(
+        &mut d,
+        &ExportWhat::Ids(vec![a.id.clone(), b.id.clone()]),
+    )
+    .expect("export");
+    for r in [a, b] {
+        let v = report_store::definition(&mut d, &r.id)
+            .expect("row")
+            .version;
+        report_store::delete_definition(&mut d, &r.id, v).expect("delete");
+    }
+    drop(d);
+    std::fs::write(path, file_bytes(&out).expect("bytes")).expect("write");
+}
+
+/// #7: a name taken meanwhile stops Memorize all after the first report;
+/// the rest comes back to the review with its clash choices, and saving
+/// again finishes without saving the first twice.
+#[test]
+fn a_name_taken_meanwhile_comes_back_to_the_review() {
+    let (dir, link) = demo();
+    let path = dir.path().join("two.clreport");
+    two_report_file(&link, &path);
+    let mut w = import(&link, &path);
+    assert!(w.review().expect("review").can_continue());
+    let before = count(&link);
+    // Another window memorizes "Fuel costs" meanwhile.
+    memorize(&link, "Fuel costs", "builder", builder_def(&link), None);
+    w.finish(false);
+    for _ in 0..10 {
+        w.poll_import();
+    }
+    assert_eq!(w.last, Some("review_again"));
+    let m = w.message.clone().unwrap_or_default();
+    assert!(
+        m.contains("Fuel costs") && m.contains("1 report memorized"),
+        "{m}"
+    );
+    let r = w.review().expect("back in the review");
+    assert_eq!(r.file.len(), 1, "the saved report left the review");
+    assert_eq!(r.clashes[0], Clash::Rename("Fuel costs (2)".into()));
+    w.finish(false);
+    for _ in 0..10 {
+        w.poll_import();
+    }
+    assert_eq!(w.last, Some("imported"), "{:?}", w.message);
+    // The other window's report, Shop costs once, and Fuel costs (2).
+    assert_eq!(count(&link), before + 3);
+    let mut d = link.demo_state().expect("demo");
+    let rows = report_store::definitions(&mut d).0;
+    assert_eq!(rows.iter().filter(|r| r.name == "Shop costs").count(), 1);
+    assert!(rows.iter().any(|r| r.name == "Fuel costs (2)"));
+}
+
+/// #7: a stop before anything was saved says nothing was memorized.
+#[test]
+fn a_stop_with_nothing_saved_says_so() {
+    let (dir, link) = demo();
+    let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
+    let path = dir.path().join("one.clreport");
+    export_to(&link, Target::Report(Box::new(row)), &path);
+    std::fs::write(dir.path().join("Backups"), b"x").expect("block");
+    let mut w = import(&link, &path);
+    w.set_clash(0, Clash::Replace);
+    w.finish(true);
+    for _ in 0..10 {
+        w.poll_import();
+    }
+    let m = w.message.clone().unwrap_or_default();
+    assert!(m.contains("Nothing was memorized"), "{m}");
+    assert!(!m.contains("before it were memorized"), "{m}");
+}
+
+/// #8: a standard report this build can't show fails in the Report File
+/// window (which says so) instead of closing it with nothing opened.
+#[test]
+fn a_standard_report_that_cant_open_says_so_before_closing() {
+    let (_d, link) = demo();
+    let mut w = ReportFileWindow::new(Arc::clone(&link));
+    let _ = link.drain();
+    w.open_unsaved(&Planned {
+        index: 0,
+        name: "Odd".into(),
+        group_id: None,
+        new_group: None,
+        kind: "standard".into(),
+        definition: json!({"schemaVersion": 1, "kind": "standard", "reportKey": "no_such_report", "options": {}}),
+        replace: None,
+    });
+    assert_eq!(w.stage_name(), "failed");
+    assert_eq!(w.last, Some("report_file.error.invalid"));
+    assert!(!w.take_close_request());
+    assert!(link.drain().is_empty(), "nothing opened");
+}
+
+/// S-L2: a backup export that answers fewer reports than asked replaces
+/// nothing.
+#[test]
+fn a_short_backup_answer_replaces_nothing() {
+    let (_d, link) = demo();
+    let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
+    let mut w = ReportFileWindow::new(Arc::clone(&link));
+    let ids = vec![row.id.clone()];
+    let what = ExportWhat::Ids(ids);
+    let w2 = what.clone();
+    let mut s = Saving {
+        plan: Vec::new(),
+        groups: BTreeMap::new(),
+        backed_up: false,
+        next: 0,
+        step: Some(Step::Backup(
+            engine::read(
+                &link,
+                None,
+                move |d| crate::company::demo::report_transfer::export(d, &w2),
+                move |s| async move { s.report_definitions().export(&what).await },
+            ),
+            2,
+        )),
+        saved: Vec::new(),
+        single: false,
+        review: Review::default(),
+    };
+    let mut outcome = Advance::Waiting;
+    for _ in 0..50 {
+        outcome = w.advance(&mut s);
+        if !matches!(outcome, Advance::Waiting) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(matches!(
+        outcome,
+        Advance::Stop("report_file.backup.failed")
+    ));
+    assert!(!s.backed_up);
+}
+
+/// S-L3: a folder (or anything not a regular file) is refused without
+/// being read.
+#[test]
+fn a_path_that_isnt_a_file_is_refused() {
+    let dir = tempfile::tempdir().expect("tmp");
+    assert_eq!(read_file(dir.path()), Err(FileError::NotReportFile));
+}
+
+/// S-L6: the engine's export (audited as a download) starts only after
+/// the Save dialog gave a path; a cancelled dialog exports nothing.
+#[test]
+fn an_export_asks_for_the_path_before_exporting() {
+    let (_d, link) = demo();
+    let row = memorize(&link, "Shop costs", "builder", builder_def(&link), None);
+    let mut w = ReportFileWindow::new(Arc::clone(&link));
+    w.open_with(OpenPayload::ReportFile(Box::new(Start::Export(
+        Target::Report(Box::new(row)),
+    ))));
+    w.poll_export();
+    let Stage::Export(x) = &w.stage else {
+        unreachable!()
+    };
+    assert!(
+        x.job.is_none() && x.what.is_some(),
+        "no export before a path"
+    );
+    w.answer_save(None);
+    w.poll_export();
+    let Stage::Export(x) = &w.stage else {
+        unreachable!()
+    };
+    assert!(
+        x.job.is_none() && x.built.is_none(),
+        "cancelled: never exported"
+    );
+    assert!(w.take_close_request());
+}
+
+/// I2 and #14: two reports of a file can't Replace the same report; a
+/// Replace that can't stand falls back to a free name, not the taken one.
+#[test]
+fn two_replaces_of_one_report_are_refused_and_a_fallback_is_free() {
+    let mut r = review_of(&["Shop costs", "SHOP COSTS"]);
+    r.take(vec![
+        preview("Shop costs", true, Some((true, "builder"))),
+        preview("SHOP COSTS", true, Some((true, "builder"))),
+    ]);
+    r.set_clash(0, Clash::Replace);
+    r.set_clash(1, Clash::Replace);
+    assert_eq!(r.clash_problem(1), Some(review::REPLACE_TWICE));
+    assert!(!r.can_continue());
+    assert!(crate::i18n::has(review::REPLACE_TWICE));
+    r.take(vec![
+        preview("Shop costs", true, Some((false, "builder"))),
+        preview("SHOP COSTS", true, Some((true, "builder"))),
+    ]);
+    assert!(
+        matches!(&r.clashes[0], Clash::Rename(n) if n != "Shop costs"),
+        "{:?}",
+        r.clash_problem(0)
+    );
+    assert_eq!(r.clash_problem(0), None, "the fallback name is free");
+}
+
+/// #15 and #1: the plan of a Replace keeps the existing name as written
+/// and sends no group.
+#[test]
+fn a_replace_plan_keeps_the_existing_name_and_group() {
+    let mut r = review_of(&["SHOP COSTS"]);
+    let mut p = preview("SHOP COSTS", true, Some((true, "builder")));
+    p.group_id = Some("g-file".into());
+    r.take(vec![p]);
+    r.set_clash(0, Clash::Replace);
+    let plan = r.plan().expect("plan");
+    assert_eq!(plan[0].name, "Shop costs");
+    assert_eq!(
+        (plan[0].group_id.as_deref(), plan[0].new_group.as_deref()),
+        (None, None)
+    );
+}
+
+/// S-L5: `Debug` of the review and its plan names nothing.
+#[test]
+fn review_debug_names_nothing() {
+    let mut r = review_of(&["Secret payroll"]);
+    r.take(vec![preview(
+        "Secret payroll",
+        true,
+        Some((true, "builder")),
+    )]);
+    let plan = r.plan().expect("plan");
+    let text = format!("{r:?} {plan:?}");
+    assert!(!text.contains("Secret") && !text.contains("Shop"), "{text}");
+}
+
+/// S-L4: the review draws at most MAX_DRAWN_UNRESOLVED references; the
+/// rest are counted.
+#[test]
+fn the_review_counts_what_it_doesnt_draw() {
+    let mut r = review_of(&["A"]);
+    let mut p = preview("A", false, None);
+    p.unresolved = (0..MAX_DRAWN_UNRESOLVED + 7)
+        .map(|n| {
+            serde_json::from_value(
+                json!({"ref": format!("$ref:{n}"), "reference": {"kind": "account", "name": "x"}}),
+            )
+            .expect("u")
+        })
+        .collect();
+    r.take(vec![p]);
+    assert_eq!(r.unresolved_total() - MAX_DRAWN_UNRESOLVED, 7);
 }

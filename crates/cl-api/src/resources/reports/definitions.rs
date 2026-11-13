@@ -120,6 +120,10 @@ pub struct DefinitionPatch {
     /// with `title` = the new name, Q-A08r).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub definition: Option<Value>,
+    /// `Some("import")` for a Replace from a `.clreport` file (A09, U-220:
+    /// audited with `after.origin`); `None` otherwise (not sent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// Why the engine refused a memorized-report change.
@@ -240,8 +244,9 @@ impl std::fmt::Debug for Candidate {
     }
 }
 
-/// A reference no single row of this company matched.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+/// A reference no single row of this company matched. `Debug` shows its
+/// token and candidate count only (the reference names owner data).
+#[derive(Clone, PartialEq, Deserialize)]
 pub struct Unresolved {
     /// `$ref:N`.
     #[serde(rename = "ref")]
@@ -251,6 +256,16 @@ pub struct Unresolved {
     /// The rows that could be meant (≤ 20; none when nothing matched).
     #[serde(default)]
     pub candidates: Vec<Candidate>,
+}
+
+impl std::fmt::Debug for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Unresolved")
+            .field("reference_token", &self.reference_token)
+            .field("kind", &self.reference.get("kind").and_then(Value::as_str))
+            .field("candidates", &self.candidates.len())
+            .finish()
+    }
 }
 
 /// A reference the owner left out, and what that did to the report.
@@ -724,6 +739,35 @@ mod tests {
         "version": 3, "createdBy": null, "createdByName": "Kurt",
         "updatedAt": "2026-11-04T15:41:00.000Z"
     }"#;
+
+    /// A09 #1: a Replace sends the body and the origin only, so the
+    /// replaced report keeps its own name and group.
+    #[test]
+    fn a_replace_patch_sends_the_body_and_the_origin_only() {
+        let p = DefinitionPatch {
+            definition: Some(serde_json::json!({"kind": "builder"})),
+            origin: Some("import".into()),
+            ..DefinitionPatch::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&p).expect("json"),
+            serde_json::json!({"definition": {"kind": "builder"}, "origin": "import"})
+        );
+    }
+
+    /// A09 S-L5: `Debug` of an unresolved reference names nothing.
+    #[test]
+    fn an_unresolved_reference_debug_names_nothing() {
+        let u: Unresolved = serde_json::from_value(serde_json::json!({
+            "ref": "$ref:0",
+            "reference": {"kind": "account", "name": "Secret supplies", "number": "6100"},
+            "candidates": [{"id": "a1", "label": "6100 · Secret supplies"}]
+        }))
+        .expect("json");
+        let d = format!("{u:?}");
+        assert!(!d.contains("Secret") && !d.contains("6100"), "{d}");
+        assert!(d.contains("account") && d.contains("candidates: 1"), "{d}");
+    }
 
     #[test]
     fn a_patch_sends_only_what_changes() {

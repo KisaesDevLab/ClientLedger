@@ -37,8 +37,8 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use cl_api::resources::reports::definitions::{
-    DefinitionGroup, DefinitionRefusal, DefinitionRow, DefinitionWrite, ExportWhat, PreviewReport,
-    TransferReport, definition_refusal,
+    DefinitionGroup, DefinitionPatch, DefinitionRefusal, DefinitionRow, DefinitionWrite,
+    ExportWhat, PreviewReport, TransferReport, definition_refusal,
 };
 use cl_api::{ApiError, Capabilities, OrphanLabel, RequestGroup};
 use cl_model::CommandId;
@@ -197,15 +197,10 @@ pub fn make(link: &Arc<CompanyLink>) -> Box<dyn Screen> {
 /// Memorize dialog open with the file's name and the matched group, and
 /// its Memorize sent with `origin: 'import'`.
 pub(crate) fn open_imported(w: &mut super::ReportWindow, open: ImportedOpen) -> bool {
-    let Ok(cl_model::reports::definition::Memorized::Standard(def)) =
-        cl_model::reports::definition::read_memorized(&open.definition)
-    else {
+    let Some((spec, options)) = standard_of(&open.definition) else {
         return false;
     };
-    let Some(spec) = cl_model::reports::find(&def.report_key) else {
-        return false;
-    };
-    w.show_report(spec, def.options);
+    w.show_report(spec, options);
     w.memo.current = None;
     w.memo.saved = None;
     w.memo.origin = Some("import".into());
@@ -214,6 +209,23 @@ pub(crate) fn open_imported(w: &mut super::ReportWindow, open: ImportedOpen) -> 
     d.group = open.group_id;
     w.memo.dialog = Some(d);
     true
+}
+
+/// The catalog report and options of a standard definition, when this
+/// build can show it.
+fn standard_of(
+    definition: &serde_json::Value,
+) -> Option<(
+    &'static cl_model::reports::ReportSpec,
+    cl_model::reports::ReportOptions,
+)> {
+    let Ok(cl_model::reports::definition::Memorized::Standard(def)) =
+        cl_model::reports::definition::read_memorized(definition)
+    else {
+        return None;
+    };
+    let spec = cl_model::reports::find(&def.report_key)?;
+    Some((spec, def.options))
 }
 
 /// The folder replaced reports are copied to: the chosen backup folder, or
@@ -266,16 +278,27 @@ fn write_verified_copy(folder: &Path, report: &TransferReport) -> Result<PathBuf
     Ok(path)
 }
 
-/// Reads and checks a picked file: its size before reading it, then the
+/// Reads and checks a picked file: a regular file (never a pipe or a
+/// device, which could block), its size before reading it, at most one
+/// byte over the cap read (a file growing meanwhile, S-L3), then the
 /// envelope.
 fn read_file(path: &Path) -> Result<ReportFile, FileError> {
-    let size = std::fs::metadata(path)
-        .map_err(|_| FileError::NotReportFile)?
-        .len();
-    if usize::try_from(size).map_or(true, |n| n > clreport::MAX_FILE_BYTES) {
+    use std::io::Read as _;
+    let meta = std::fs::metadata(path).map_err(|_| FileError::NotReportFile)?;
+    if !meta.is_file() {
+        return Err(FileError::NotReportFile);
+    }
+    if usize::try_from(meta.len()).map_or(true, |n| n > clreport::MAX_FILE_BYTES) {
         return Err(FileError::TooLarge);
     }
-    let bytes = std::fs::read(path).map_err(|_| FileError::NotReportFile)?;
+    let f = std::fs::File::open(path).map_err(|_| FileError::NotReportFile)?;
+    let mut bytes = Vec::new();
+    f.take(clreport::MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| FileError::NotReportFile)?;
+    if bytes.len() > clreport::MAX_FILE_BYTES {
+        return Err(FileError::TooLarge);
+    }
     clreport::read(&bytes)
 }
 
@@ -337,6 +360,8 @@ type PickList = Vec<(String, String)>;
 /// An export under way.
 #[derive(Default)]
 struct Exporting {
+    /// What to export, until the path is chosen and the job starts.
+    what: Option<ExportWhat>,
     job: Option<Job<Vec<TransferReport>>>,
     /// The file, once the engine answered and it was checked.
     built: Option<Result<Vec<u8>, &'static str>>,
@@ -361,12 +386,19 @@ struct Reviewing {
     confirm: bool,
     lists: BTreeMap<&'static str, PickList>,
     list_jobs: BTreeMap<&'static str, Job<PickList>>,
+    /// The last preview after a choice failed (an i18n key): the review
+    /// stays, the choice is taken back, Try again asks once more (#6).
+    error: Option<&'static str>,
+    /// The last choice (its key and the value before it), taken back when
+    /// the preview it asked for fails.
+    undo: Option<(String, Option<Option<String>>)>,
 }
 
 /// One step of saving the reviewed reports.
 enum Step {
-    /// The replaced reports exported for their copies.
-    Backup(Job<Vec<TransferReport>>),
+    /// The replaced reports exported for their copies (and how many were
+    /// asked for: each must come back, S-L2).
+    Backup(Job<Vec<TransferReport>>, usize),
     /// A group being created (its name).
     Group(String, Job<DefinitionGroup>),
     /// A group whose name was taken meanwhile: the groups read again.
@@ -388,6 +420,8 @@ struct Saving {
     saved: Vec<DefinitionRow>,
     /// Open the result after: the review had one report.
     single: bool,
+    /// The review, to go back to when a name was taken meanwhile (#7).
+    review: Review,
 }
 
 /// Where the window is.
@@ -477,19 +511,13 @@ impl ReportFileWindow {
 
     // ------------------------------------------------------------ export
 
+    /// An export asks for the path first; the engine's export (which
+    /// audits a `download` per report) starts only once there is one, so a
+    /// cancelled Save dialog leaves no audit row (S-L6).
     fn begin_export(&mut self, target: &Target) {
         let (what, name) = target.request();
-        let job = engine::read(
-            &self.link,
-            self.group.as_ref(),
-            {
-                let what = what.clone();
-                move |d| crate::company::demo::report_transfer::export(d, &what)
-            },
-            move |s| async move { s.report_definitions().export(&what).await },
-        );
         self.stage = Stage::Export(Exporting {
-            job: Some(job),
+            what: Some(what),
             name: format!(
                 "{}.{}",
                 cl_print::files::safe_component(&name),
@@ -514,20 +542,31 @@ impl ReportFileWindow {
         let Stage::Export(x) = &mut self.stage else {
             return;
         };
-        if let Some(r) = engine::poll(&mut x.job) {
-            x.built = Some(match r {
-                Ok(reports) => file_bytes(&reports).map_err(file_error_key),
-                Err(e) => Err(refusal_key(&e)),
-            });
-        }
         if let Some(chosen) = file_picker::poll(&mut x.dialog) {
             x.cancelled = chosen.is_none();
             x.path = chosen;
         }
         if x.cancelled {
-            // Cancelled: nothing written.
+            // Cancelled: nothing exported, nothing written.
             self.close = true;
             return;
+        }
+        if x.path.is_some()
+            && let Some(what) = x.what.take()
+        {
+            let w2 = what.clone();
+            x.job = Some(engine::read(
+                &self.link,
+                self.group.as_ref(),
+                move |d| crate::company::demo::report_transfer::export(d, &w2),
+                move |s| async move { s.report_definitions().export(&what).await },
+            ));
+        }
+        if let Some(r) = engine::poll(&mut x.job) {
+            x.built = Some(match r {
+                Ok(reports) => file_bytes(&reports).map_err(file_error_key),
+                Err(e) => Err(refusal_key(&e)),
+            });
         }
         let (Some(built), Some(path)) = (x.built.clone(), x.path.clone()) else {
             return;
@@ -604,8 +643,13 @@ impl ReportFileWindow {
     }
 
     fn begin_review(&mut self, file: &ReportFile) {
+        self.begin_review_of(Review::new(&file.reports, Vec::new()));
+    }
+
+    /// Reads this company's report names, then previews `review`.
+    fn begin_review_of(&mut self, review: Review) {
         let rv = Box::new(Reviewing {
-            review: Review::new(&file.reports, Vec::new()),
+            review,
             ..Reviewing::default()
         });
         let names = engine::read(
@@ -665,17 +709,43 @@ impl ReportFileWindow {
         match r {
             Ok(reports) => {
                 rv.review.take(reports);
+                rv.error = None;
+                rv.undo = None;
                 if std::mem::take(&mut rv.again) {
                     let mut rv = std::mem::take(rv);
                     self.send_preview(&mut rv);
                     self.stage = Stage::Review(rv);
                 }
             }
-            Err(e) => {
+            // The first preview: nothing to go back to.
+            Err(e) if rv.review.reports.is_empty() => {
                 let key = refusal_key(&e);
                 self.fail(key, true);
             }
+            // A later one: the review and the other choices stay; the
+            // last choice is taken back and the card says why (#6).
+            Err(e) => {
+                rv.again = false;
+                if let Some((k, before)) = rv.undo.take() {
+                    match before {
+                        Some(v) => rv.review.choices.insert(k, v),
+                        None => rv.review.choices.remove(&k),
+                    };
+                }
+                rv.error = Some(refusal_key(&e));
+            }
         }
+    }
+
+    /// Try again after a failed preview.
+    pub(crate) fn retry(&mut self) {
+        let Stage::Review(rv) = &mut self.stage else {
+            return;
+        };
+        rv.error = None;
+        let mut rv = std::mem::take(rv);
+        self.send_preview(&mut rv);
+        self.stage = Stage::Review(rv);
     }
 
     /// A choice in the review: the preview is asked again.
@@ -683,6 +753,9 @@ impl ReportFileWindow {
         let Stage::Review(rv) = &mut self.stage else {
             return;
         };
+        let key = cl_api::resources::reports::definitions::choice_key(i, token);
+        rv.undo = Some((key.clone(), rv.review.choices.get(&key).cloned()));
+        rv.error = None;
         rv.review.choose(i, token, id);
         let mut rv = std::mem::take(rv);
         self.send_preview(&mut rv);
@@ -695,6 +768,8 @@ impl ReportFileWindow {
             return;
         };
         rv.review.start_over(i);
+        rv.undo = None;
+        rv.error = None;
         let mut rv = std::mem::take(rv);
         self.send_preview(&mut rv);
         self.stage = Stage::Review(rv);
@@ -746,6 +821,7 @@ impl ReportFileWindow {
             step: None,
             saved: Vec::new(),
             single,
+            review: rv.review.clone(),
         };
         self.next_step(&mut s);
         self.stage = Stage::Saving(Box::new(s));
@@ -781,6 +857,12 @@ impl ReportFileWindow {
                 },
             );
         } else {
+            // Checked here, while the window can still say so: the report
+            // window can't open it once this one has closed (#8).
+            if standard_of(&p.definition).is_none() {
+                self.fail("report_file.error.invalid", true);
+                return;
+            }
             self.link.push(CompanyEvent::OpenWith(
                 CommandId::new(super::KIND),
                 Box::new(OpenPayload::ImportedReport(Box::new(ImportedOpen {
@@ -804,14 +886,18 @@ impl ReportFileWindow {
                 .filter_map(|p| p.replace.as_ref().map(|r| r.0.clone()))
                 .collect();
             if !ids.is_empty() {
+                let n = ids.len();
                 let what = ExportWhat::Ids(ids);
                 let w2 = what.clone();
-                s.step = Some(Step::Backup(engine::read(
-                    &self.link,
-                    self.group.as_ref(),
-                    move |d| crate::company::demo::report_transfer::export(d, &w2),
-                    move |s| async move { s.report_definitions().export(&what).await },
-                )));
+                s.step = Some(Step::Backup(
+                    engine::read(
+                        &self.link,
+                        self.group.as_ref(),
+                        move |d| crate::company::demo::report_transfer::export(d, &w2),
+                        move |s| async move { s.report_definitions().export(&what).await },
+                    ),
+                    n,
+                ));
                 return;
             }
             s.backed_up = true;
@@ -850,33 +936,57 @@ impl ReportFileWindow {
                 .filter(|_| !s.single)
                 .and_then(|g| s.groups.get(&g.to_lowercase()).cloned())
         });
-        let w = DefinitionWrite {
-            name: p.name.clone(),
-            group_id,
-            kind: p.kind.clone(),
-            definition: p.definition.clone(),
-            origin: Some("import".into()),
-        };
-        let (w2, target) = (w.clone(), p.replace.clone());
-        let t2 = target.clone();
-        // One key per report of this Memorize all: a retried send stores one.
-        let key = cl_api::IdempotencyKey::new();
-        s.step = Some(Step::Report(
-            s.next,
+        let job = if let Some((id, version)) = p.replace.clone() {
+            // A Replace sends the body and the origin only: the report keeps
+            // its own name and group (#1, #15). A builder body's title is the
+            // report's name (Q-A08r), so it carries the kept name.
+            let mut definition = p.definition.clone();
+            if p.kind == "builder"
+                && let Some(m) = definition.as_object_mut()
+                && m.contains_key("title")
+            {
+                m.insert("title".into(), serde_json::Value::String(p.name.clone()));
+            }
+            let patch = DefinitionPatch {
+                definition: Some(definition),
+                origin: Some("import".into()),
+                ..DefinitionPatch::default()
+            };
+            let (p2, id2, kind) = (patch.clone(), id.clone(), p.kind.clone());
             engine::write(
                 &self.link,
                 self.group.as_ref(),
                 label(),
-                move |d| crate::company::demo::report_store::save_definition(d, t2, &w2),
-                move |s| async move {
-                    let d = s.report_definitions();
-                    match target {
-                        Some((id, version)) => d.update(&id, version, &w).await,
-                        None => d.create(&w, key).await,
-                    }
+                move |d| {
+                    crate::company::demo::report_store::patch_definition(d, &id2, version, &p2)
                 },
-            ),
-        ));
+                move |s| async move {
+                    s.report_definitions()
+                        .patch(&id, version, &kind, &patch)
+                        .await
+                },
+            )
+        } else {
+            let w = DefinitionWrite {
+                name: p.name.clone(),
+                group_id,
+                kind: p.kind.clone(),
+                definition: p.definition.clone(),
+                origin: Some("import".into()),
+            };
+            let w2 = w.clone();
+            // One key per report of this Memorize all: a retried send stores
+            // one.
+            let key = cl_api::IdempotencyKey::new();
+            engine::write(
+                &self.link,
+                self.group.as_ref(),
+                label(),
+                move |d| crate::company::demo::report_store::save_definition(d, None, &w2),
+                move |s| async move { s.report_definitions().create(&w, key).await },
+            )
+        };
+        s.step = Some(Step::Report(s.next, job));
     }
 
     fn poll_saving(&mut self) {
@@ -893,6 +1003,7 @@ impl ReportFileWindow {
                 step: None,
                 saved: Vec::new(),
                 single: false,
+                review: Review::default(),
             }),
         );
         let outcome = self.advance(&mut s);
@@ -912,7 +1023,11 @@ impl ReportFileWindow {
                     .get(s.next)
                     .map(|p| p.name.clone())
                     .unwrap_or_default();
-                self.finished(*s, Some(&(name, key)));
+                if key == NAME_TAKEN && !s.single {
+                    self.review_again(*s, &name);
+                } else {
+                    self.finished(*s, Some(&(name, key)));
+                }
             }
         }
     }
@@ -923,12 +1038,18 @@ impl ReportFileWindow {
             return Advance::Next;
         };
         match step {
-            Step::Backup(job) => {
+            Step::Backup(job, asked) => {
+                let asked = *asked;
                 let Some(r) = job.take() else {
                     return Advance::Waiting;
                 };
                 s.step = None;
-                let Ok(reports) = r else {
+                // Every replaced report must have its copy: a short answer
+                // replaces nothing (non-negotiable 9, S-L2).
+                let Ok(reports) = r
+                    .map_err(|_| ())
+                    .and_then(|v| if v.len() == asked { Ok(v) } else { Err(()) })
+                else {
                     return Advance::Stop("report_file.backup.failed");
                 };
                 let folder = backup_folder(&self.link);
@@ -1007,6 +1128,26 @@ impl ReportFileWindow {
         }
     }
 
+    /// A name taken meanwhile (another window, another user) stopped
+    /// Memorize all: what was saved leaves the review, the rest comes back
+    /// with a fresh preview and its clash choices (plan §5, #7).
+    fn review_again(&mut self, s: Saving, name: &str) {
+        let saved: Vec<usize> = s.plan.iter().take(s.saved.len()).map(|p| p.index).collect();
+        if !s.saved.is_empty() {
+            self.link.bus().publish(crate::data_bus::Change::Reports);
+        }
+        let mut review = s.review;
+        review.remove(&saved);
+        let mut text = t_with("report_file.save.again", &[("name", name)]);
+        if !s.saved.is_empty() {
+            text.push(' ');
+            text.push_str(&t_count("report_file.save.done", s.saved.len(), &[]));
+        }
+        self.message = Some(text);
+        self.last = Some("review_again");
+        self.begin_review_of(review);
+    }
+
     /// Ends the save: one report opens; several are listed.
     fn finished(&mut self, s: Saving, stopped: Option<&(String, &'static str)>) {
         if s.single
@@ -1039,6 +1180,11 @@ impl ReportFileWindow {
             "imported"
         });
         self.message = Some(match stopped {
+            // Separate words when nothing was saved (#7).
+            Some((name, key)) if s.saved.is_empty() => t_with(
+                "report_file.save.stopped_none",
+                &[("name", name), ("why", &t(key))],
+            ),
             Some((name, key)) => t_with(
                 "report_file.save.stopped",
                 &[("name", name), ("why", &t(key))],
@@ -1173,16 +1319,46 @@ impl ReportFileWindow {
             RichText::new(t_count("report_file.review.intro", n, &[])).color(tokens.text_secondary),
         );
         ui.add_space(6.0);
+        let mut retry = false;
+        if let Some(key) = rv.error {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{} {}",
+                        t("report_file.review.failed_choice"),
+                        t(key)
+                    ))
+                    .color(tokens.warn_text),
+                );
+                if ui.button(t("report_file.review.retry")).clicked() {
+                    retry = true;
+                }
+            });
+            ui.add_space(6.0);
+        }
+        // A hostile file can name thousands of rows: only the first
+        // MAX_DRAWN_UNRESOLVED needing a choice are drawn (S-L4).
+        let mut budget = MAX_DRAWN_UNRESOLVED;
         egui::ScrollArea::vertical()
             .id_salt("report-file-review")
             .auto_shrink([false, true])
             .max_height(ui.available_height() - 48.0)
             .show(ui, |ui| {
                 for i in 0..n {
-                    if card(ui, tokens, rv, i, &mut chosen, &mut want_lists) {
+                    if card(ui, tokens, rv, i, &mut budget, &mut chosen, &mut want_lists) {
                         again.push(i);
                     }
                     ui.add_space(8.0);
+                }
+                let hidden = rv
+                    .review
+                    .unresolved_total()
+                    .saturating_sub(MAX_DRAWN_UNRESOLVED);
+                if hidden > 0 {
+                    ui.label(
+                        RichText::new(t_count("report_file.review.more", hidden, &[]))
+                            .color(tokens.text_secondary),
+                    );
                 }
             });
         let can = rv.review.can_continue() && !busy;
@@ -1233,6 +1409,9 @@ impl ReportFileWindow {
                     });
                 });
         }
+        if retry {
+            self.retry();
+        }
         for k in want_lists {
             self.load_list(k);
         }
@@ -1268,6 +1447,9 @@ impl ReportFileWindow {
         rv.list_jobs.insert(kind, job);
     }
 }
+
+/// The refusal key of a name taken at save.
+const NAME_TAKEN: &str = "report_file.save.name_taken";
 
 /// How a save step went.
 enum Advance {
@@ -1346,12 +1528,17 @@ const fn wire_kind(k: cl_model::report_def::clreport::RefKind) -> &'static str {
     }
 }
 
-/// One report's card. True when the owner pressed Start over.
+/// The most unresolved references drawn at once (S-L4).
+pub(crate) const MAX_DRAWN_UNRESOLVED: usize = 50;
+
+/// One report's card, drawing at most `budget` unresolved references
+/// (taken from it). True when the owner pressed Start over.
 fn card(
     ui: &mut Ui,
     tokens: &Tokens,
     rv: &mut Reviewing,
     i: usize,
+    budget: &mut usize,
     chosen: &mut Vec<(usize, String, Option<String>)>,
     want_lists: &mut Vec<&'static str>,
 ) -> bool {
@@ -1389,7 +1576,9 @@ fn card(
                     .color(tokens.text_secondary),
             );
         }
-        for u in &r.unresolved {
+        let drawn = r.unresolved.len().min(*budget);
+        *budget -= drawn;
+        for u in &r.unresolved[..drawn] {
             let reference = rv.review.reference(i, &u.reference_token);
             let (what, kind) = match &reference {
                 Some(x) => (
@@ -1404,30 +1593,29 @@ fn card(
             ui.add_space(4.0);
             ui.label(t_with("report_file.card.unresolved", &[("what", &what)]));
             ui.horizontal_wrapped(|ui| {
-                let mut options: Vec<(String, String)> = u
-                    .candidates
-                    .iter()
-                    .map(|c| (c.id.clone(), c.label.clone()))
-                    .collect();
-                if let Some(k) = kind {
-                    want_lists.push(k);
-                    if let Some(all) = rv.lists.get(k) {
-                        options.extend(
-                            all.iter()
-                                .filter(|(id, _)| !u.candidates.iter().any(|c| c.id == *id))
-                                .cloned(),
-                        );
-                    }
-                }
                 let combo_label = t("report_file.card.pick");
                 let l = ui.label(combo_label.as_str());
+                // The options (candidates, then the full list) are built
+                // only while the combo is open, and the full list is asked
+                // for then (S-L4).
                 egui::ComboBox::from_id_salt(("report-file-pick", i, u.reference_token.as_str()))
                     .width(260.0)
                     .selected_text(t("report_file.card.pick_one"))
                     .show_ui(ui, |ui| {
-                        for (id, text) in &options {
-                            if ui.selectable_label(false, text.as_str()).clicked() {
-                                chosen.push((i, u.reference_token.clone(), Some(id.clone())));
+                        for c in &u.candidates {
+                            if ui.selectable_label(false, c.label.as_str()).clicked() {
+                                chosen.push((i, u.reference_token.clone(), Some(c.id.clone())));
+                            }
+                        }
+                        if let Some(k) = kind {
+                            want_lists.push(k);
+                            for (id, text) in rv.lists.get(k).into_iter().flatten() {
+                                if u.candidates.iter().any(|c| c.id == *id) {
+                                    continue;
+                                }
+                                if ui.selectable_label(false, text.as_str()).clicked() {
+                                    chosen.push((i, u.reference_token.clone(), Some(id.clone())));
+                                }
                             }
                         }
                     })

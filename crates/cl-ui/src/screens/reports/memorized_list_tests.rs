@@ -199,6 +199,26 @@ fn a_taken_name_stays_on_the_card() {
     assert_eq!(s.problem, Some("reports.memorize.name_taken"));
 }
 
+/// A09 #16: a name over the engine's 200 characters is refused on the
+/// card, which stays open with the reason; nothing is sent.
+#[test]
+fn a_name_over_200_characters_stays_on_the_card() {
+    let (_d, link) = demo();
+    let mut s = list(&link);
+    select(&mut s, "Monthly P&L for the bank");
+    s.ask_rename();
+    if let Some(Edit::Rename { name, .. }) = s.edit.as_mut() {
+        *name = "n".repeat(201);
+    }
+    s.confirm();
+    s.poll();
+    assert_eq!(s.state()["edit"], "rename");
+    assert_eq!(s.problem, Some("reports.memorized.name_too_long"));
+    assert!(crate::i18n::has("reports.memorized.name_too_long"));
+    assert!(crate::i18n::has("reports.memorized.group_name_too_long"));
+    let _ = row(&s, "Monthly P&L for the bank");
+}
+
 /// 409 `STALE_VERSION`: the list says so and reloads.
 #[test]
 fn a_report_changed_elsewhere_reloads_and_asks_to_try_again() {

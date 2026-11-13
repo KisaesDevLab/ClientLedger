@@ -561,6 +561,12 @@ impl MemorizedList {
             self.problem = Some("reports.memorize.name_needed");
             return;
         }
+        // The engine's cap, checked here so the card stays open with the
+        // reason (A09 #16).
+        if name.chars().count() > cl_model::report_def::clreport::MAX_NAME_CHARS {
+            self.problem = Some("reports.memorized.name_too_long");
+            return;
+        }
         // A builder row's title follows its name (Q-A08r); a standard row
         // sends its name only.
         let definition = (row.kind == "builder").then(|| titled(&row.definition, &name));
@@ -569,8 +575,8 @@ impl MemorizedList {
             &row,
             DefinitionPatch {
                 name: Some(name),
-                group_id: None,
                 definition,
+                ..DefinitionPatch::default()
             },
         );
     }
@@ -676,6 +682,10 @@ impl MemorizedList {
             self.problem = Some("reports.memorized.group_name_needed");
             return;
         }
+        if name.chars().count() > cl_model::report_def::clreport::MAX_GROUP_CHARS {
+            self.problem = Some("reports.memorized.group_name_too_long");
+            return;
+        }
         let job = engine::write(
             &self.link,
             self.group.as_ref(),
@@ -708,6 +718,10 @@ impl MemorizedList {
         let name = name.trim().to_string();
         if name.is_empty() {
             self.problem = Some("reports.memorized.group_name_needed");
+            return;
+        }
+        if name.chars().count() > cl_model::report_def::clreport::MAX_GROUP_CHARS {
+            self.problem = Some("reports.memorized.group_name_too_long");
             return;
         }
         let job = engine::write(

@@ -200,7 +200,7 @@ fn the_list_renames_moves_and_manages_groups_by_the_engines_rules() {
         &DefinitionPatch {
             name: Some("Bank P&L".into()),
             group_id: Some(Some(g.id.clone())),
-            definition: None,
+            ..DefinitionPatch::default()
         },
     )
     .expect("rename and move");

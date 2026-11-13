@@ -13,8 +13,8 @@
 //!   with `origin: 'import'` in `after`.
 
 use cl_api::resources::reports::definitions::{
-    Choices, DefinitionRefusal, DefinitionRow, DefinitionWrite, ExportWhat, PreviewReport,
-    TransferReport, choice_key, definition_refusal,
+    Choices, DefinitionPatch, DefinitionRefusal, DefinitionRow, DefinitionWrite, ExportWhat,
+    PreviewReport, TransferReport, choice_key, definition_refusal,
 };
 use cl_api::{Account, AccountType, Capabilities, Method, Session, TagGroupFields};
 use serde_json::{Value, json};
@@ -374,18 +374,53 @@ pub fn replace_is_refused_for_a_non_author_and_a_kind_change(h: &Harness) {
     assert_eq!(read.kind, "builder");
     assert_eq!(read.version, row.version);
 
-    // The author's Replace of the same kind: audited as an import.
+    // The author's Replace of the same kind, as the desktop sends it (A09
+    // #1): the body and the origin only, so a grouped report stays in its
+    // group under its own name; audited as an import.
+    let group = h
+        .run(s.report_definitions().create_group(&unique("Kept group")))
+        .expect("group");
+    let grouped = h
+        .run(s.report_definitions().patch(
+            &row.id,
+            row.version,
+            "builder",
+            &DefinitionPatch {
+                group_id: Some(Some(group.id.clone())),
+                ..DefinitionPatch::default()
+            },
+        ))
+        .expect("move");
+    let mut body = row.definition.clone();
+    body["nodes"][0]["caption"] = json!("Fuel, replaced");
     let done = h
+        .run(s.report_definitions().patch(
+            &row.id,
+            grouped.version,
+            "builder",
+            &DefinitionPatch {
+                definition: Some(body.clone()),
+                origin: Some("import".into()),
+                ..DefinitionPatch::default()
+            },
+        ))
+        .expect("replace");
+    assert!(done.version > grouped.version);
+    assert_eq!(done.group_id.as_deref(), Some(group.id.as_str()), "kept");
+    assert_eq!(done.name, row.name, "kept");
+    assert_eq!(done.definition["nodes"][0]["caption"], "Fuel, replaced");
+    // The full write (name, group, kind, body) is refused by nobody either.
+    let full = h
         .run(
             s.report_definitions()
-                .update(&row.id, row.version, &replace),
+                .update(&row.id, done.version, &replace),
         )
-        .expect("replace");
-    assert!(done.version > row.version);
+        .expect("full replace");
+    assert!(full.version > done.version);
     let rows = audit_rows(h, s, &row.id);
-    let update = rows
+    let imports = rows
         .iter()
-        .find(|r| r["action"] == "update")
-        .expect("update audited");
-    assert_eq!(image(&update["after_data"])["origin"], "import");
+        .filter(|r| r["action"] == "update" && image(&r["after_data"])["origin"] == "import")
+        .count();
+    assert_eq!(imports, 2, "both Replaces audited as an import");
 }
