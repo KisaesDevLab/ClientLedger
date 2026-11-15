@@ -29,6 +29,13 @@ pub enum RetryClass {
     /// Auth and company creation: never retried (rate limits, token
     /// rotation, duplicate companies).
     Never,
+    /// A POST that saves nothing (an AI model call: Ask a question, Describe
+    /// the report; the engine writes at most an audit row). No idempotency
+    /// key; retried only when the request provably never reached the engine
+    /// (connect refused); never re-sent after that (a second model call and
+    /// a second audit row), and a 5xx, a timeout or a dropped connection is
+    /// returned as is, never as an unknown save outcome (A10 QA-1).
+    Query,
 }
 
 impl RetryClass {
@@ -66,6 +73,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
+            RetryClass::Query => "query",
         }
     }
 
@@ -1849,28 +1857,37 @@ pub(crate) const REPORT_EMAIL: Operation = keyable_in(
     Method::Post,
     "/api/v1/reports/email",
 );
-/// Maps a question to a catalog report (changes nothing; not keyed; a
-/// model call can take a while, so the long class).
+/// Maps a question to a catalog report (changes nothing; a query, never an
+/// unknown save, A10 QA-1; a model call can take a while, so the long
+/// class).
 pub(crate) const REPORT_ASK: Operation = op(
     Method::Post,
     "/api/v1/reports/ask",
-    RetryClass::PreHandlerOnly,
+    RetryClass::Query,
     RouteKind::Session,
     TimeoutClass::Import,
     true,
 );
 
 /// A10: drafts a builder definition from the owner's description (U-120,
-/// `report-builder-ai-v1`; changes nothing but an audit row, not keyed; a
-/// model call can take a while, so the long class).
+/// `report-builder-ai-v1`; changes nothing but an audit row: a query, never
+/// an unknown save, A10 QA-1; a model call can take a while, so the long
+/// class).
 pub(crate) const REPORT_BUILDER_DRAFT: Operation = op(
     Method::Post,
     "/api/v1/report-builder/draft",
-    RetryClass::PreHandlerOnly,
+    RetryClass::Query,
     RouteKind::Session,
     TimeoutClass::Import,
     true,
 );
+
+#[cfg(test)]
+/// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
+const QUERY_POSTS: [(&str, &str); 2] = [
+    ("POST", "/api/v1/reports/ask"),
+    ("POST", "/api/v1/report-builder/draft"),
+];
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -2463,6 +2480,9 @@ mod tests {
                 (false, false, Some(set)) => {
                     assert_eq!(o.retry(), RetryClass::Keyable(set), "{o:?}");
                     assert_eq!(o.key_set(), Some(set), "{o:?}");
+                }
+                (false, false, None) if QUERY_POSTS.contains(&route) => {
+                    assert_eq!(o.retry(), RetryClass::Query, "{o:?}");
                 }
                 (false, false, None) => {
                     assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}");

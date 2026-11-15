@@ -280,7 +280,13 @@ pub fn draft_refusal(e: &ApiError) -> Option<DraftRefusal> {
             }
             c
         }
-        ApiError::OfflineUnavailable { .. } => return Some(DraftRefusal::Unavailable),
+        // A model call that took too long or whose answer was lost: it
+        // saves nothing, so it is "couldn't reach the AI service", never
+        // an unknown save (A10 QA-1).
+        ApiError::OfflineUnavailable { .. }
+        | ApiError::Timeout
+        | ApiError::EngineUnavailable { permanent: false }
+        | ApiError::OutcomeUnknown { .. } => return Some(DraftRefusal::Unavailable),
         _ => return None,
     };
     match code {

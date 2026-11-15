@@ -258,3 +258,30 @@ fn refusals_are_recognised() {
     );
     assert_eq!(draft_refusal(&invalid), Some(DraftRefusal::Invalid));
 }
+
+/// A10 QA-1: a draft saves nothing, so a timeout or a lost answer is "the
+/// AI service didn't answer", never "could not tell whether that was saved".
+#[test]
+fn a_timeout_or_lost_answer_is_unavailable_never_an_unknown_save() {
+    for e in [
+        ApiError::Timeout,
+        ApiError::EngineUnavailable { permanent: false },
+        ApiError::OutcomeUnknown {
+            request_id: cl_core::ids::RequestId::from_uuid(uuid::Uuid::nil()),
+            idempotency_key: None,
+            keyed: false,
+        },
+    ] {
+        assert_eq!(draft_refusal(&e), Some(DraftRefusal::Unavailable), "{e:?}");
+        assert_eq!(
+            crate::resources::reports::ask::ask_refusal(&e),
+            Some(crate::resources::reports::ask::AskRefusal::Unavailable),
+            "{e:?}"
+        );
+    }
+    // The engine itself gone for good is not the AI service's doing.
+    assert_eq!(
+        draft_refusal(&ApiError::EngineUnavailable { permanent: true }),
+        None
+    );
+}

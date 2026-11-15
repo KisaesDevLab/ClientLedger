@@ -602,7 +602,12 @@ impl Executor {
                 .instrument(span)
                 .await;
         }
-        if !call.method.is_read() && call.idempotency_key.is_none() {
+        // A query saves nothing (A10 QA-1): no key, so nothing ever treats
+        // it as a save whose outcome is to be found out.
+        let query = op.retry() == RetryClass::Query;
+        if query {
+            call.idempotency_key = None;
+        } else if !call.method.is_read() && call.idempotency_key.is_none() {
             call.idempotency_key = Some(IdempotencyKey::new());
         }
         let idempotency_v1 = self.idempotency_v1.load(Ordering::Relaxed);
@@ -620,7 +625,7 @@ impl Executor {
         // it: its route sets under their capabilities, and `/batch/save`
         // (its own `batch-idempotent-v1`). Without it every mutation sends
         // the key as before (the engine ignores it there).
-        call.send_key = !idempotency_v1 || replayed_route || *op == BATCH_SAVE;
+        call.send_key = !query && (!idempotency_v1 || replayed_route || *op == BATCH_SAVE);
         let span = tracing::debug_span!(
             "engine_request",
             method = call.method.as_str(),
@@ -657,7 +662,11 @@ impl Executor {
                 // The company was switched (pinned requests): nothing of
                 // this attempt was sent, but an earlier one may have
                 // committed in the previous company.
-                Err(ApiError::StaleScope) if r.maybe_committed && !call.method.is_read() => {
+                Err(ApiError::StaleScope)
+                    if r.maybe_committed
+                        && !call.method.is_read()
+                        && class != RetryClass::Query =>
+                {
                     tracing::info!(outcome = "unknown", reconciled = false, "mutation outcome");
                     return Err(ApiError::OutcomeUnknown {
                         request_id: call.request_id,
@@ -729,7 +738,10 @@ impl Executor {
                             Step::Done(Err(keyed_give_up(ctx, r, give_up(e))))
                         }
                     }
-                    RetryClass::Never => Step::Done(Err(give_up(e))),
+                    // A query is never re-sent once it may have reached the
+                    // engine, and saves nothing: the timeout or lost
+                    // connection is returned as is (A10 QA-1).
+                    RetryClass::Never | RetryClass::Query => Step::Done(Err(give_up(e))),
                     // `Keyable` is never in effect (`effective` maps it);
                     // were it, the unkeyed rule is the safe one.
                     RetryClass::PreHandlerOnly | RetryClass::Keyable(_) => {
@@ -1889,6 +1901,39 @@ pub(crate) mod tests {
             .mount(&server)
             .await;
         server
+    }
+
+    /// A10 QA-1: an AI query (Describe the report, Ask a question) saves
+    /// nothing. Its 503 comes back as the engine's refusal, sent once, with
+    /// no key, never as an unknown save outcome, even with a reconciler.
+    #[tokio::test]
+    async fn a_query_s_503_is_the_engine_s_refusal_never_an_unknown_save() {
+        for route in ["/api/v1/report-builder/draft", "/api/v1/reports/ask"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(
+                    503,
+                    r#"{"error":{"message":"x","code":"AI_UNAVAILABLE","details":{"provider":"ollama"}}}"#,
+                ))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            let op = *find(Method::Post, route).expect("covered");
+            assert_eq!(op.retry(), RetryClass::Query);
+            let call = Call::at(Method::Post, route).json_body(b"{}".to_vec());
+            let rec = Script::new(vec!["not_committed"]);
+            let e = ex
+                .run(&op, call, &none(), Some(&rec))
+                .await
+                .expect_err("refused");
+            assert!(
+                matches!(&e, ApiError::Server { status: 503, code: Some(c) } if c.as_str() == "AI_UNAVAILABLE"),
+                "{route}: {e:?}"
+            );
+            let reqs = server.received_requests().await.expect("r");
+            assert_eq!(reqs.len(), 1, "{route}: sent once");
+            assert!(reqs[0].headers.get("idempotency-key").is_none(), "{route}");
+        }
     }
 
     #[tokio::test]
