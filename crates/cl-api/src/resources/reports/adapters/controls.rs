@@ -239,7 +239,7 @@ pub fn field_label(k: &str) -> String {
 }
 
 /// Records the trail names in plain words (`@reports.audit.entity.*`).
-pub const AUDIT_ENTITIES: [&str; 15] = [
+pub const AUDIT_ENTITIES: [&str; 16] = [
     "transaction",
     "account",
     "contact",
@@ -254,6 +254,7 @@ pub const AUDIT_ENTITIES: [&str; 15] = [
     "report_email",
     "report_definition",
     "report_definition_group",
+    "report_builder_draft",
     "payment_applications",
 ];
 
@@ -273,6 +274,18 @@ pub fn entity_label(e: &str) -> String {
 /// 'clreport'`, and a save from a file as `create` / `update` with
 /// `after.origin = 'import'`.
 fn report_file_action(e: &Value, entity: &str) -> Option<&'static str> {
+    // A10 (Q-A10i, Q-A10k): one row per AI draft. `after.outcome` says
+    // whether it was used: "refused" reads "Asked AI to draft a report (not
+    // used)"; "drafted", or a row without it (an older engine), "Drafted a
+    // report with AI".
+    if entity == "report_builder_draft" && text(e, "action") == Some("create") {
+        let refused = e.pointer("/after_data/outcome").and_then(Value::as_str) == Some("refused");
+        return Some(if refused {
+            "@reports.audit.action.drafted_ai_refused"
+        } else {
+            "@reports.audit.action.drafted_ai"
+        });
+    }
     if !matches!(entity, "report_definition" | "report_definition_group") {
         return None;
     }
@@ -295,6 +308,15 @@ fn record_label(e: &Value, entity: &str) -> String {
         .find_map(|p| e.pointer(p).and_then(Value::as_str))
         .map(str::trim)
         .filter(|n| !n.is_empty());
+    // A10 (Q-A10i): which AI service drafted it; the description and the
+    // draft are never stored.
+    let provider = e
+        .pointer("/after_data/provider")
+        .and_then(Value::as_str)
+        .filter(|p| p.len() <= 20 && p.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'));
+    if let ("report_builder_draft", Some(p)) = (entity, provider) {
+        return format!("@reports.audit.entity.report_builder_draft_by {p}");
+    }
     match (entity, name) {
         ("report_definition" | "report_definition_group", Some(n)) => {
             format!("@reports.audit.entity.{entity}_named {n}")
@@ -352,6 +374,9 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
         }
         head.expandable = true;
         let report_row = matches!(entity, "report_definition" | "report_definition_group");
+        // An AI draft's row says who and which service in its heading; its
+        // ids and counts are not field lines (Q-A10i).
+        let draft_row = entity == "report_builder_draft";
         rows.push(head);
         let before = e.get("before_data").and_then(Value::as_object);
         let after = e.get("after_data").and_then(Value::as_object);
@@ -371,6 +396,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
                 // A memorized report's action already says it came from a
                 // file (A09 QA-4: "Imported").
                 || (report_row && key == "origin")
+                || draft_row
                 || secret(key)
             {
                 continue;
@@ -535,6 +561,43 @@ mod tests {
         );
         // The origin is the action's word, not a field line.
         assert!(t.rows.iter().all(|r| r.caption != "origin"));
+    }
+
+    /// A10 (Q-A10i): an AI draft reads "Drafted a report with AI" with its
+    /// service; its ids and counts are not field lines.
+    #[test]
+    fn an_ai_draft_is_named_in_plain_words() {
+        let v = json!({"data": [{"action": "create", "entity_type": "report_builder_draft",
+            "entity_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60", "userName": "Owner",
+            "created_at": "2026-11-15T10:00:00.000Z", "before_data": null,
+            "after_data": {"companyId": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a61", "provider": "ollama",
+                           "model": "llama3", "reader": "self_hosted", "nodes": 2, "unresolved": 1}}],
+            "total": 1});
+        let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+        assert_eq!(t.rows.len(), 1, "a heading only");
+        assert_eq!(
+            (&t.rows[0].cells[2], &t.rows[0].cells[3]),
+            (
+                &Cell::Text("@reports.audit.action.drafted_ai".into()),
+                &Cell::Text("@reports.audit.entity.report_builder_draft_by ollama".into())
+            )
+        );
+        // Q-A10k: the outcome names the action; it is never a field line.
+        let action = |outcome: &str| {
+            let mut v = v.clone();
+            v["data"][0]["after_data"]["outcome"] = json!(outcome);
+            let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+            assert_eq!(t.rows.len(), 1, "a heading only");
+            t.rows[0].cells[2].clone()
+        };
+        assert_eq!(
+            action("drafted"),
+            Cell::Text("@reports.audit.action.drafted_ai".into())
+        );
+        assert_eq!(
+            action("refused"),
+            Cell::Text("@reports.audit.action.drafted_ai_refused".into())
+        );
     }
 }
 

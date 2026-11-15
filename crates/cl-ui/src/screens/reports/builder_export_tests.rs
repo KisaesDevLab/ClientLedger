@@ -238,9 +238,11 @@ fn print_fills_then_opens_the_pdf() {
     let mut w = ledger(&link);
     let _ = link.drain();
     assert!(w.command(CommandId::new("file.print")));
-    // The pages are read and the PDF built on worker threads. The run alone
-    // takes ~40 s in a debug build, so wait on a wall-clock deadline (a
-    // loaded CI runner is several times slower), not a fixed poll count.
+    // The pages are read and the PDF built on worker threads. The run takes
+    // ~12 s in a debug build (~48 s before Q-A10a: the demo re-read its
+    // books for each of 423 pages, and the PDF re-parsed font tables per
+    // character), so wait on a wall-clock deadline (a loaded CI runner is
+    // several times slower), not a fixed poll count.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
     while std::time::Instant::now() < deadline {
         crate::screens::reports::export::poll(&mut w);

@@ -95,8 +95,16 @@ pub(crate) fn start(w: &ReportWindow) -> Option<FillJob> {
         w.group.as_ref(),
         move |d| {
             let run = crate::company::demo::report_builder::run(d, &req, false)?;
+            // One read of the demo books for every page (Q-A10a).
+            let books = crate::company::demo::report_builder::books(d);
             fill_with(&req, run, MAX_EXPORT_ROWS, &demo_cancel, |dr, run| {
-                crate::company::demo::report_builder::detail(d, dr, &run.table.columns, &run.layout)
+                crate::company::demo::report_builder::detail_on(
+                    d,
+                    &books,
+                    dr,
+                    &run.table.columns,
+                    &run.layout,
+                )
             })
         },
         move |s| async move {

@@ -115,7 +115,11 @@ fn write_of(
     name: &str,
     group: Option<String>,
 ) -> Option<(DefinitionWrite, Sent)> {
-    let def = titled(s.ed.definition().clone(), name);
+    // Never a definition with an AI draft's placeholder in it (A10).
+    let def = titled(
+        cl_model::report_def::draft::sendable(s.ed.definition())?.clone(),
+        name,
+    );
     let definition = serde_json::to_value(&def).ok()?;
     let name = name.trim().to_string();
     Some((
@@ -150,6 +154,10 @@ fn fits(s: &BuilderScreen) -> bool {
 /// Opens the Memorize dialog, prefilled with the report's name and group.
 pub(crate) fn open_memorize(s: &mut BuilderScreen, closing: bool) {
     if s.save.job.is_some() {
+        return;
+    }
+    if !s.ed.can_memorize() {
+        s.status = Some(t("builder.ai.pick_first"));
         return;
     }
     s.save.close_after = closing;
@@ -337,6 +345,13 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
                 s.save.memo_key = None;
             }
             s.ed.mark_saved(saved_of(sent, &row));
+            // A draft saved while under review was kept: the banner and
+            // Discard go (A10 review S3). Only when what was saved is what
+            // is on screen (a draft that came during the save stays under
+            // review).
+            if !s.ed.dirty() {
+                super::ai_draft::end_review(s);
+            }
             // Open report windows list it (QA-16).
             s.link.bus().publish(crate::data_bus::Change::Reports);
             // Memorized from Guided: its name is Guided's too, so a later

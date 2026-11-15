@@ -9,9 +9,12 @@
 
 // A09 WP-A: `.clreport` report files (Q-A09a).
 pub mod clreport;
+// A10: AI drafts (Q-A10b–i).
+pub mod draft;
 pub mod editor;
 pub mod fields;
 pub mod guided;
+pub mod number_words;
 pub mod outline;
 pub mod problems;
 pub mod ranges;

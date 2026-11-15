@@ -1860,6 +1860,18 @@ pub(crate) const REPORT_ASK: Operation = op(
     true,
 );
 
+/// A10: drafts a builder definition from the owner's description (U-120,
+/// `report-builder-ai-v1`; changes nothing but an audit row, not keyed; a
+/// model call can take a while, so the long class).
+pub(crate) const REPORT_BUILDER_DRAFT: Operation = op(
+    Method::Post,
+    "/api/v1/report-builder/draft",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -1872,7 +1884,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 420] = [
+pub const OPERATIONS: [Operation; 421] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2312,6 +2324,7 @@ pub const OPERATIONS: [Operation; 420] = [
     // A09 (U-220)
     REPORT_DEFS_EXPORT,
     REPORT_DEFS_IMPORT_PREVIEW,
+    REPORT_BUILDER_DRAFT,
 ];
 
 /// Looks up a covered operation.

@@ -40,6 +40,18 @@ In **Advanced**, the report is a list of rows on the left, the selected row's se
 - **Ctrl+Z** undoes a change and **Ctrl+Y** redoes it. Something that needs fixing shows under **Problems to fix**, with **Go to row**; the report runs again once it is fixed.
 - **Memorize** (**Ctrl+M**) saves the report under its name. **Save changes** updates a memorized report you made (or any, if you are an owner). If someone else changed it meanwhile, you can keep yours as a copy or load theirs.
 
+### Describing a report
+
+Instead of building it row by row, you can describe the report in your own words and let AI draft it: **Describe it** when starting a new report, or **Describe the report…** in the Report Builder toolbar. Type something like "fuel by month this year" or "what I spent with each vendor" and press **Draft** (**Ctrl+Enter**).
+
+- It uses the same AI switch as **Ask a question** (Preferences, AI, "Ask a question in Reports"). With it off, nothing is sent and the panel tells you how to turn it on.
+- **What is sent:** your description, with any amounts and other numbers in it hidden, and the names in your books — account, customer, vendor, item and tag names. No amounts, balances or transactions. With Ollama, nothing leaves your computer.
+- A draft whose headings state a number (in figures or in words, such as "over five hundred") is not used: try again, or name the rows yourself.
+- **AI never produces amounts.** If your description mentions one ("bills over $500"), the draft leaves the amount out and tells you to add an Amount filter yourself. Every figure in the report comes from your books when it runs.
+- The draft fills the Report Builder as an **unsaved** report under a "Drafted by AI — check it" banner. If the report already had rows, you're asked before they're replaced. A name the AI couldn't match is marked on its row: pick the right one or **Remove** it. Until every name is settled the report doesn't run or save.
+- **Keep** makes the draft your report (still unsaved until you **Memorize** it); **Discard** puts back what was there before. To change a draft, edit it by hand or describe the report again.
+- The Audit Trail records each draft: who, when and which AI service. Your description and the draft are not stored.
+
 ## Changing what a report shows
 
 - **Dates**: pick a range like *Last month* or *Year to date*, or type your own **From** and **To**. Reports that show a balance take one **As of** date.

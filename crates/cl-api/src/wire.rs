@@ -589,6 +589,9 @@ impl Capabilities {
     pub const REPORTS_EMAIL: &'static str = "reports-email-v1";
     /// U-206 (PR-G): `POST /reports/ask`.
     pub const REPORTS_ASK: &'static str = "reports-ask-v1";
+    /// U-120 (A10): `POST /report-builder/draft`, AI drafting of a builder
+    /// definition from the owner's description.
+    pub const REPORT_BUILDER_AI: &'static str = "report-builder-ai-v1";
 
     // ---- A07: Report Builder (engine PR-A to PR-D; Q-220 until they merge)
     /// PR-A: `report_definitions.kind = 'builder'` (migration 0276) and the

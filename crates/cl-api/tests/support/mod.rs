@@ -921,6 +921,83 @@ pub struct OllamaStub {
     /// `http://127.0.0.1:<port>`.
     pub base_url: String,
     server: wiremock::MockServer,
+    /// The reply [`OllamaStub::serve_chat_first`] set, and its generation.
+    first: Arc<Mutex<FirstReply>>,
+}
+
+/// The chat reply that answers ahead of every other one while its
+/// [`ChatReply`] guard lives. Kept here rather than as a scoped wiremock
+/// mock: wiremock 0.6.5 sorts its mock list by priority in place on every
+/// request, while a `MockGuard` deactivates by the index it was mounted at,
+/// so dropping a priority-1 guard switched off some other mock and left the
+/// reply answering the next test.
+#[derive(Default)]
+struct FirstReply {
+    generation: u64,
+    body: Option<String>,
+}
+
+/// Matches `POST /api/chat` only while a first reply is set.
+struct FirstReplySet(Arc<Mutex<FirstReply>>);
+
+impl wiremock::Match for FirstReplySet {
+    fn matches(&self, _: &wiremock::Request) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .body
+            .is_some()
+    }
+}
+
+/// Answers with the first reply (a 404 if it was cleared in between).
+struct FirstReplyBody(Arc<Mutex<FirstReply>>);
+
+impl wiremock::Respond for FirstReplyBody {
+    fn respond(&self, _: &wiremock::Request) -> wiremock::ResponseTemplate {
+        match self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .body
+            .clone()
+        {
+            Some(body) => {
+                wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json")
+            }
+            None => wiremock::ResponseTemplate::new(404),
+        }
+    }
+}
+
+/// Keeps a [`OllamaStub::serve_chat_first`] reply answering; dropping it
+/// clears the reply unless a later one replaced it.
+#[must_use = "the reply is cleared when the guard is dropped"]
+pub struct ChatReply {
+    first: Arc<Mutex<FirstReply>>,
+    generation: u64,
+}
+
+impl Drop for ChatReply {
+    fn drop(&mut self) {
+        let mut first = self.first.lock().unwrap_or_else(PoisonError::into_inner);
+        if first.generation == self.generation {
+            first.body = None;
+        }
+    }
+}
+
+/// A non-streaming Ollama chat reply whose message is `content`.
+fn chat_body(content: &str) -> String {
+    serde_json::json!({
+        "model": "llama3.1:8b",
+        "message": { "role": "assistant", "content": content },
+        "done": true,
+        "done_reason": "stop",
+        "prompt_eval_count": 1,
+        "eval_count": 1,
+    })
+    .to_string()
 }
 
 impl OllamaStub {
@@ -943,6 +1020,8 @@ impl OllamaStub {
                 .collect::<Vec<_>>()
                 .join(",")
         );
+        let first = Arc::new(Mutex::new(FirstReply::default()));
+        let (m, r) = (FirstReplySet(first.clone()), FirstReplyBody(first.clone()));
         let server = h.run(async move {
             let server = wiremock::MockServer::start().await;
             wiremock::Mock::given(method("GET"))
@@ -952,11 +1031,19 @@ impl OllamaStub {
                 )
                 .mount(&server)
                 .await;
+            wiremock::Mock::given(method("POST"))
+                .and(path("/api/chat"))
+                .and(m)
+                .respond_with(r)
+                .with_priority(1)
+                .mount(&server)
+                .await;
             server
         });
         OllamaStub {
             base_url: server.uri(),
             server,
+            first,
         }
     }
 
@@ -965,15 +1052,7 @@ impl OllamaStub {
     /// AI paths, on loopback only.
     pub fn serve_chat(&self, h: &Harness, content: &str) {
         use wiremock::matchers::{method, path};
-        let body = serde_json::json!({
-            "model": "llama3.1:8b",
-            "message": { "role": "assistant", "content": content },
-            "done": true,
-            "done_reason": "stop",
-            "prompt_eval_count": 1,
-            "eval_count": 1,
-        })
-        .to_string();
+        let body = chat_body(content);
         h.run(async {
             wiremock::Mock::given(method("POST"))
                 .and(path("/api/chat"))
@@ -985,30 +1064,19 @@ impl OllamaStub {
         });
     }
 
-    /// Answers `POST /api/chat` with `content` ahead of any reply mounted
-    /// earlier (wiremock's priority 1): the shared stub serves several
-    /// tests in one binary.
-    pub fn serve_chat_first(&self, h: &Harness, content: &str) {
-        use wiremock::matchers::{method, path};
-        let body = serde_json::json!({
-            "model": "llama3.1:8b",
-            "message": { "role": "assistant", "content": content },
-            "done": true,
-            "done_reason": "stop",
-            "prompt_eval_count": 1,
-            "eval_count": 1,
-        })
-        .to_string();
-        h.run(async {
-            wiremock::Mock::given(method("POST"))
-                .and(path("/api/chat"))
-                .respond_with(
-                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
-                )
-                .with_priority(1)
-                .mount(&self.server)
-                .await;
-        });
+    /// Answers `POST /api/chat` with `content` ahead of every
+    /// [`OllamaStub::serve_chat`] reply, for as long as the returned guard
+    /// lives: the shared stub serves several tests in one binary, and a
+    /// later test must never get an earlier test's reply. A second call
+    /// replaces the reply.
+    pub fn serve_chat_first(&self, _h: &Harness, content: &str) -> ChatReply {
+        let mut first = self.first.lock().unwrap_or_else(PoisonError::into_inner);
+        first.generation += 1;
+        first.body = Some(chat_body(content));
+        ChatReply {
+            first: self.first.clone(),
+            generation: first.generation,
+        }
     }
     /// The bodies of the `POST /api/chat` requests served so far.
     pub fn chat_bodies(&self, h: &Harness) -> Vec<String> {

@@ -77,7 +77,15 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.commit_pending();
             super::save::save_changes(s, false);
         }
-        if tool(ui, &t("builder.toolbar.memorize"), "Ctrl M", true, "") {
+        // A draft's names are picked first: nothing with a placeholder is
+        // saved (A10).
+        if tool(
+            ui,
+            &t("builder.toolbar.memorize"),
+            "Ctrl M",
+            s.ed.can_memorize(),
+            &t("builder.ai.pick_first"),
+        ) {
             s.commit_pending();
             super::save::open_memorize(s, false);
         }
@@ -120,6 +128,18 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             &t("builder.toolbar.guided_off"),
         ) {
             s.show_guided();
+        }
+        ui.separator();
+        // A10 (Q-A10c): a draft from the owner's words. A short label so
+        // the toolbar fits one line at 1440 px; its accessible name (and
+        // tooltip) stay the full "Describe the report…".
+        let full = t("builder.toolbar.describe");
+        let r = ui
+            .button(t("builder.toolbar.describe_short"))
+            .on_hover_text(t("builder.toolbar.describe_tip"));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, full.as_str()));
+        if r.clicked() {
+            super::ai_draft::open_panel(s);
         }
     });
     if s.export_menu {
@@ -233,6 +253,7 @@ pub(super) fn hint_text(s: &BuilderScreen) -> (String, Option<(String, OpenPaylo
     let origin = match s.ed.origin() {
         cl_model::report_def::editor::Origin::Blank => t("builder.origin.blank"),
         cl_model::report_def::editor::Origin::Guided => t("builder.origin.guided"),
+        cl_model::report_def::editor::Origin::Drafted => t("builder.origin.drafted"),
         // A saved report's hint already says "Saved … · Author": a report
         // memorized here never "started from a memorized report" (QA-2).
         cl_model::report_def::editor::Origin::Memorized if s.ed.saved().is_none() => {

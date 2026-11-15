@@ -1154,14 +1154,35 @@ pub fn detail(
     columns: &[ColumnHead],
     layout: &ColumnLayout,
 ) -> Result<DetailPage, ApiError> {
+    let books = Books::load(d);
+    detail_on(d, &books, req, columns, layout)
+}
+
+/// The demo books as one export run reads them: an export's pages are read
+/// against one load, not one per page (Q-A10a: reloading the books for
+/// each of 400 pages made a demo print take most of a minute).
+pub(crate) fn books(d: &DemoState) -> Books {
+    Books::load(d)
+}
+
+/// [`detail`] on books already read.
+///
+/// # Errors
+/// As [`detail`].
+pub(crate) fn detail_on(
+    d: &mut DemoState,
+    books: &Books,
+    req: &DetailRequest,
+    columns: &[ColumnHead],
+    layout: &ColumnLayout,
+) -> Result<DetailPage, ApiError> {
     if req.fingerprint != fingerprint(&req.reference) {
         return Err(engine_refusal(
             409,
             &json!({"error": {"message": "The report changed.", "code": "RUN_CHANGED", "details": {"reason": "params"}}}),
         ));
     }
-    let books = Books::load(d);
-    if req.stamp != stamp(&books) {
+    if req.stamp != stamp(books) {
         return Err(engine_refusal(
             409,
             &json!({"error": {"message": "The books changed.", "code": "RUN_CHANGED", "details": {"reason": "books"}}}),
@@ -1205,7 +1226,7 @@ pub fn detail(
             &json!({"error": {"message": "That part of the report can't be opened.", "code": "INVALID_PARAM"}}),
         ));
     }
-    let s = section_lines(d, &books, &node, &plan);
+    let s = section_lines(d, books, &node, &plan);
     if s.denied {
         return Err(engine_refusal(
             403,

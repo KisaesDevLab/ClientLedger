@@ -48,6 +48,9 @@ pub enum Origin {
     /// A report read from a `.clreport` file, not memorized yet (A09
     /// WP-A): its Memorize is sent with `origin: 'import'`.
     Imported,
+    /// Drafted by AI from the owner's description (A10), not memorized
+    /// yet.
+    Drafted,
 }
 
 /// The kind of the memorized row an editor came from. The engine never
@@ -610,7 +613,23 @@ impl BuilderEditor {
     /// within the size cap.
     #[must_use]
     pub fn can_run(&self) -> bool {
-        self.problems.is_empty() && self.engine_problem.is_none() && !self.too_large()
+        self.problems.is_empty()
+            && self.engine_problem.is_none()
+            && !self.too_large()
+            && !self.has_placeholders()
+    }
+
+    /// True while an AI draft's name is still to pick or remove (A10): the
+    /// definition is then never run, previewed or saved.
+    #[must_use]
+    pub fn has_placeholders(&self) -> bool {
+        super::draft::has_placeholders(&self.def)
+    }
+
+    /// True when Memorize may send the report: nothing left to pick.
+    #[must_use]
+    pub fn can_memorize(&self) -> bool {
+        !self.has_placeholders()
     }
 
     /// The engine refused the definition (`DEFINITION_INVALID {path,
@@ -640,6 +659,7 @@ impl BuilderEditor {
             .as_ref()
             .is_some_and(|s| s.kind == SavedKind::Builder && s.can_edit)
             && self.dirty()
+            && !self.has_placeholders()
     }
 
     /// The row was saved (Memorize, Save changes): it is the new baseline.
@@ -697,6 +717,15 @@ impl BuilderEditor {
     #[must_use]
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
+    }
+
+    /// Forgets every undo and redo step: nothing before this point comes
+    /// back. An AI draft's review ends here (Keep, or a Memorize during
+    /// it), so an undo never brings back a name still to pick once the
+    /// names list is gone (A10).
+    pub fn fence_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 
     /// Undoes the last change. Returns false when there is none.

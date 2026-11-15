@@ -103,7 +103,14 @@ impl Font {
     /// The parsed face.
     pub(crate) fn face(self) -> Result<Face, PrintError> {
         skrifa::FontRef::new(self.bytes())
-            .map(|font| Face { font })
+            .map(|font| Face {
+                // Parsed once per face, not once per character (Q-A10a: a
+                // 3,000-row report spent most of its PDF time re-reading
+                // the cmap and hmtx tables for every glyph).
+                charmap: font.charmap(),
+                advances: font.glyph_metrics(Size::unscaled(), LocationRef::default()),
+                font,
+            })
             .map_err(|e| PrintError::Font(format!("{}: {e}", self.ps_name())))
     }
 
@@ -123,16 +130,21 @@ impl Font {
     /// (the font's ascender at `size_pt`).
     #[must_use]
     pub fn ascent_mm(self, size_pt: f32) -> f32 {
-        let Ok(face) = self.face() else {
+        // The metrics alone: no cmap or advances to read (A10 review
+        // Minor 9).
+        let Ok(font) = skrifa::FontRef::new(self.bytes()) else {
             return size_pt * 0.8 * MM_PER_PT;
         };
-        face.ascender() / f32::from(face.units_per_em()) * size_pt * MM_PER_PT
+        let m = font.metrics(Size::unscaled(), LocationRef::default());
+        m.ascent / f32::from(m.units_per_em) * size_pt * MM_PER_PT
     }
 }
 
 /// A parsed font (metrics in font units).
 pub(crate) struct Face {
     font: skrifa::FontRef<'static>,
+    charmap: skrifa::charmap::Charmap<'static>,
+    advances: skrifa::metrics::GlyphMetrics<'static>,
 }
 
 impl Face {
@@ -146,7 +158,7 @@ impl Face {
 
     /// The glyph for `c`, else for `?`, else `.notdef`.
     pub(crate) fn glyph(&self, c: char) -> u16 {
-        let map = self.font.charmap();
+        let map = &self.charmap;
         map.map(c)
             .or_else(|| map.map('?'))
             .and_then(|g| u16::try_from(g.to_u32()).ok())
@@ -155,8 +167,7 @@ impl Face {
 
     /// Advance width of glyph `gid`.
     pub(crate) fn advance(&self, gid: u16) -> f32 {
-        self.font
-            .glyph_metrics(Size::unscaled(), LocationRef::default())
+        self.advances
             .advance_width(skrifa::GlyphId::new(u32::from(gid)))
             .unwrap_or(0.0)
     }
