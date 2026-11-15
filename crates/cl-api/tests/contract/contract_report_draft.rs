@@ -134,11 +134,13 @@ pub fn draft_off_then_ollama(h: &Harness) {
         stub.chat_bodies(h).len() > before,
         "the loopback model was asked"
     );
-    // What the model was sent carries no amount.
+    // What the model was sent carries the description's amount masked (the
+    // prompt's own example says "over $500", so the typed words are looked
+    // for).
+    let sent = stub.chat_bodies(h)[before..].concat();
     assert!(
-        stub.chat_bodies(h)[before..]
-            .iter()
-            .all(|b| !b.contains("500")),
-        "the description's amount was masked"
+        !sent.contains("by month over $500"),
+        "the amount was masked"
     );
+    assert!(sent.contains("[AMOUNT]"), "the amount was masked");
 }
