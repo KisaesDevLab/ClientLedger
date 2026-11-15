@@ -83,6 +83,7 @@ mod contract_templates;
 // trip of memorized reports (AC3, WP-B).
 mod contract_report_defs_archive;
 mod contract_report_defs_transfer;
+mod contract_report_draft;
 mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
@@ -1435,6 +1436,14 @@ fn main() -> std::process::ExitCode {
         (
             "reports_p28::ask_off_then_ollama",
             contract_reports_p28::ask_off_then_ollama,
+        ),
+        (
+            "report_draft::the_capability_is_listed",
+            contract_report_draft::the_capability_is_listed,
+        ),
+        (
+            "report_draft::draft_off_then_ollama",
+            contract_report_draft::draft_off_then_ollama,
         ),
         (
             "reports_p28::email_without_smtp",
