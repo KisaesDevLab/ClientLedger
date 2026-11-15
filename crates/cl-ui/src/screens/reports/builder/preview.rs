@@ -471,10 +471,10 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     } else if let Some(b) = s.preview.state.banner() {
         form::inline_note(ui, tokens, &t(banner_key(b)));
     }
-    if s.ed.definition().nodes.is_empty() {
+    if let Some(key) = empty_state(s) {
         ui.add_space(24.0);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new(t("builder.preview.empty")).color(tokens.text_secondary));
+            ui.label(RichText::new(t(key)).color(tokens.text_secondary));
         });
         return;
     }
@@ -493,6 +493,18 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     header(s, ui, tokens);
     rows(s, ui, tokens, &table, dim);
     footnote(ui, tokens);
+}
+
+/// The message shown instead of a table: no rows yet, or an AI draft with
+/// a name still to pick (no figures until it can run, A10 UI review S5).
+pub(crate) fn empty_state(s: &BuilderScreen) -> Option<&'static str> {
+    if s.ed.definition().nodes.is_empty() {
+        Some("builder.preview.empty")
+    } else if s.ed.has_placeholders() {
+        Some("builder.preview.names_first")
+    } else {
+        None
+    }
 }
 
 /// The note under the table (the mockup's footnote).

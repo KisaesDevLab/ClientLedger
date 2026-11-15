@@ -1032,6 +1032,7 @@ impl BuilderScreen {
             "saved": self.ed.saved().map(|s| json!({"version": s.version, "can_edit": s.can_edit})),
             "save": self.save.state_name(),
             "preview": self.preview.state_json(),
+            "preview_note": preview::empty_state(self).map(|k| k.rsplit('.').next().unwrap_or_default()),
         })
     }
 }

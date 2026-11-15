@@ -72,6 +72,12 @@ pub(crate) struct AiDraft {
     pub(crate) open: bool,
     /// The box takes the keyboard next frame.
     focus_box: bool,
+    /// The box's text when the panel opened: Esc puts it back (A10 UI
+    /// review S1).
+    revert_to: String,
+    /// What had the keyboard at the end of the panel's last frame: Esc acts
+    /// on the panel only when it was one of its widgets, or nothing.
+    last_focus: Option<egui::Id>,
     /// The owner's words and the request's phase.
     pub(crate) describe: Describe,
     gate: Option<Gate>,
@@ -120,10 +126,21 @@ impl AiDraft {
             "confirm_replace": self.confirm.is_some(),
             "drafted": review.is_some(),
             "unresolved": review.map_or(0, |r| r.draft.open(def).len()),
-            "notes": review.map(|r| r.draft.notes.iter().map(|n| n.key().rsplit('.').next().unwrap_or_default().to_string()).collect::<Vec<_>>()),
+            "notes": review.map(|r| shown_notes(&r.draft, def).iter().map(|n| n.key().rsplit('.').next().unwrap_or_default().to_string()).collect::<Vec<_>>()),
             "provider": review.and_then(|r| r.draft.provider.clone()),
         })
     }
+}
+
+/// The draft's notes as shown: "Some names need you" only while a name is
+/// still to pick (A10 UI review S2; an undo can bring one back).
+pub(crate) fn shown_notes(d: &Draft, def: &BuilderDefinition) -> Vec<Note> {
+    let open = !d.open(def).is_empty();
+    d.notes
+        .iter()
+        .filter(|n| open || !matches!(n, Note::PickUnresolved))
+        .cloned()
+        .collect()
 }
 
 /// True when the engine drafts reports (the demo always does).
@@ -136,8 +153,22 @@ pub(crate) fn open_panel(s: &mut BuilderScreen) {
     s.commit_pending();
     s.ai.open = true;
     s.ai.focus_box = true;
+    s.ai.revert_to = s.ai.describe.text.clone();
+    s.ai.last_focus = None;
     s.ai.message = None;
     s.ai.error = None;
+    // An earlier "discarded" or "kept" line is old news (A10 UI review M3).
+    s.status = None;
+    // The panel takes over from an open menu: Esc in the box must not
+    // close the Add menu and hand the keyboard back to it (an empty
+    // outline reopens it).
+    s.add_menu = false;
+    s.export_menu = false;
+    // The provider is named before the first draft (A10 UI review S6): the
+    // switches are read now; nothing is sent until Draft.
+    if s.ai.gate.is_none() && s.ai.gate_job.is_none() && available(s) {
+        read_gate(s);
+    }
     // The books' names, for the number-word check of a draft (a heading
     // that is exactly a books name passes, Q-A10l) and the name picker.
     for w in [
@@ -222,34 +253,39 @@ pub(crate) fn send(s: &mut BuilderScreen) {
     if !s.ai.describe.can_send() {
         return;
     }
-    #[allow(clippy::single_match_else, reason = "the read below is the usual case")]
-    match s.ai.gate {
-        Some((true, _)) => start_draft(s),
-        // Not read yet, or off last time: read again (the owner may have
-        // turned it on since).
-        _ => {
-            s.ai.describe.phase = Phase::Checking;
-            s.ai.gate_job = Some(engine::read(
-                &s.link,
-                s.group.as_ref(),
-                // The demo company's AI switch (its report task is on).
-                |d| Ok((d.ai.enabled, Some("demo".to_string()))),
-                |s| async move {
-                    let c = s.company_ai_disclosure().await?;
-                    let on =
-                        c.ai_enabled && !c.is_stale && c.enabled_tasks.report_summary == Some(true);
-                    // The provider is read where the user may read it (an
-                    // admin); otherwise the panel names none.
-                    let provider = if on {
-                        s.ai_config().await.ok().and_then(|c| drafting_provider(&c))
-                    } else {
-                        None
-                    };
-                    Ok((on, provider))
-                },
-            ));
-        }
+    if let Some((true, _)) = s.ai.gate {
+        start_draft(s);
+        return;
     }
+    // Not read yet, or off last time: read again (the owner may have
+    // turned it on since); a read already on its way is waited for.
+    s.ai.describe.phase = Phase::Checking;
+    if s.ai.gate_job.is_none() || matches!(s.ai.gate, Some((false, _))) {
+        read_gate(s);
+    }
+}
+
+/// Reads the company's switches and the provider. What happens when they
+/// come is [`poll`]'s: a draft only when Draft is waiting for them.
+fn read_gate(s: &mut BuilderScreen) {
+    s.ai.gate_job = Some(engine::read(
+        &s.link,
+        s.group.as_ref(),
+        // The demo company's AI switch (its report task is on).
+        |d| Ok((d.ai.enabled, Some("demo".to_string()))),
+        |s| async move {
+            let c = s.company_ai_disclosure().await?;
+            let on = c.ai_enabled && !c.is_stale && c.enabled_tasks.report_summary == Some(true);
+            // The provider is read where the user may read it (an
+            // admin); otherwise the panel names none.
+            let provider = if on {
+                s.ai_config().await.ok().and_then(|c| drafting_provider(&c))
+            } else {
+                None
+            };
+            Ok((on, provider))
+        },
+    ));
 }
 
 fn start_draft(s: &mut BuilderScreen) {
@@ -271,11 +307,15 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
         let gate = r.unwrap_or((false, None));
         let on = gate.0;
         s.ai.gate = Some(gate);
-        s.ai.describe.phase = Phase::Idle;
-        if on {
-            start_draft(s);
-        } else {
-            s.ai.message = Some("builder.ai.ai_off");
+        // A read made when the panel opened only names the provider; a
+        // draft goes out only when Draft is waiting for it.
+        if s.ai.describe.phase == Phase::Checking {
+            s.ai.describe.phase = Phase::Idle;
+            if on {
+                start_draft(s);
+            } else {
+                s.ai.message = Some("builder.ai.ai_off");
+            }
         }
     }
     if let Some(r) = engine::poll(&mut s.ai.job) {
@@ -442,6 +482,10 @@ pub(crate) fn take(s: &mut BuilderScreen, reply: &DraftReply) {
     s.tab = PropTab::Row;
     s.pane = Pane::Outline;
     s.focus_to = Some(Pane::Outline);
+    // The figures on screen are the earlier report's: they never show under
+    // the draft's title (A10 UI review S5). Discard runs that one again.
+    s.preview.table = None;
+    s.preview.ran_at = None;
     s.preview.edited(&s.ed);
     s.ai.open = false;
     s.ai.confirm = None;
@@ -549,6 +593,8 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let mut go = false;
     let mut close = false;
     let mut settings = false;
+    let mut ids: Vec<egui::Id> = Vec::new();
+    let mut box_id = None;
     let can = available(s);
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -565,15 +611,21 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             .labelled_by(l.id);
         if std::mem::take(&mut s.ai.focus_box) {
             r.request_focus();
+            // A description kept from last time is selected, so typing
+            // replaces it (A10 UI review M2).
+            let mut st = egui::TextEdit::load_state(ui.ctx(), r.id).unwrap_or_default();
+            st.cursor
+                .set_char_range(Some(egui::text_selection::CCursorRange::select_all_str(
+                    &s.ai.describe.text,
+                )));
+            st.store(ui.ctx(), r.id);
         }
+        ids.push(r.id);
         // Ctrl+Enter drafts from the box (Enter is a new line).
         if r.has_focus() && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter)) {
             go = true;
         }
-        if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
-        let provider = s.ai.gate.as_ref().and_then(|g| g.1.as_deref());
+        let provider = panel_provider(s);
         ui.label(
             RichText::new(t("builder.ai.what_is_sent"))
                 .size(12.0)
@@ -602,7 +654,10 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             if b.clicked() {
                 go = true;
             }
-            if ui.button(t("builder.ai.cancel")).clicked() {
+            ids.push(b.id);
+            let cancel = ui.button(t("builder.ai.cancel"));
+            ids.push(cancel.id);
+            if cancel.clicked() {
                 close = true;
             }
             match s.ai.describe.phase {
@@ -617,14 +672,41 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         }
         if let Some(m) = s.ai.message {
             form::inline_note(ui, tokens, &t(m));
-            if m == "builder.ai.ai_off" && ui.link(t("reports.ask.open_settings")).clicked() {
-                settings = true;
+            if m == "builder.ai.ai_off" {
+                let l = ui.link(t("reports.ask.open_settings"));
+                ids.push(l.id);
+                if l.clicked() {
+                    settings = true;
+                }
             }
         }
         if let Some(e) = &s.ai.error {
             form::inline_error_details(ui, tokens, e, "report_draft");
         }
+        box_id = Some(r.id);
     });
+    // Esc (A10 UI review S1; the app rule): in the box with something
+    // typed, it puts back what the box held when the panel opened and the
+    // box keeps the keyboard; otherwise (nothing typed, a panel button, or
+    // nothing focused, e.g. while drafting) it closes the panel. egui has
+    // already taken focus from the widget this frame, so what had it is
+    // what the panel saw last frame.
+    if ui.input(|i| i.key_pressed(egui::Key::Escape))
+        && s.ai.last_focus.is_none_or(|f| ids.contains(&f))
+    {
+        match esc_action(
+            s.ai.last_focus.is_some() && s.ai.last_focus == box_id,
+            &s.ai.describe.text,
+            &s.ai.revert_to,
+        ) {
+            Esc::Revert => {
+                s.ai.describe.text.clone_from(&s.ai.revert_to);
+                s.ai.focus_box = true;
+            }
+            Esc::Close => close = true,
+        }
+    }
+    s.ai.last_focus = ui.memory(egui::Memory::focused);
     if go {
         send(s);
     }
@@ -637,6 +719,30 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             .push(CompanyEvent::OpenWindow(cl_model::CommandId::new(
                 "edit.preferences",
             )));
+    }
+}
+
+/// The provider the panel names: read when it opened (A10 UI review S6),
+/// None until then or when the user may not read it.
+pub(crate) fn panel_provider(s: &BuilderScreen) -> Option<&str> {
+    s.ai.gate.as_ref().and_then(|g| g.1.as_deref())
+}
+
+/// What Esc does in the describe panel.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Esc {
+    /// The box gets back what it held when the panel opened.
+    Revert,
+    /// The panel closes.
+    Close,
+}
+
+/// Esc in the box with something typed reverts it; anything else closes.
+pub(crate) fn esc_action(in_box: bool, text: &str, opened_with: &str) -> Esc {
+    if in_box && text != opened_with {
+        Esc::Revert
+    } else {
+        Esc::Close
     }
 }
 
@@ -702,7 +808,7 @@ fn review(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     };
     let def = s.ed.definition().clone();
     let open: Vec<DraftName> = r.draft.open(&def).into_iter().cloned().collect();
-    let notes = r.draft.notes.clone();
+    let notes = shown_notes(&r.draft, &def);
     let provider = provider_text(r.draft.provider.as_deref());
     let mut answers: Vec<(String, Answer)> = Vec::new();
     let mut want: Vec<Which> = Vec::new();
@@ -795,28 +901,11 @@ fn name_row(
     go: &mut Option<String>,
 ) {
     let rows = model::rows_with(def, &n.token);
-    let row = rows
-        .first()
-        .map(|id| row_caption(def, id))
-        .unwrap_or_default();
-    let what = n.name.as_deref().map_or_else(
-        || t(&format!("builder.ai.kind.{}", kind_key(n.kind))),
-        |name| {
-            t_with(
-                super::super::clreport::ref_kind_key(n.kind),
-                &[("name", name)],
-            )
-        },
-    );
-    let key = if n.ambiguous {
-        "builder.ai.name_ambiguous"
-    } else {
-        "builder.ai.name_not_found"
-    };
+    let w = name_words(def, n);
     ui.add_space(4.0);
-    ui.label(t_with(key, &[("what", &what), ("row", &row)]));
+    ui.label(&w.line);
     ui.horizontal_wrapped(|ui| {
-        let l = ui.label(t("builder.ai.use"));
+        ui.label(t("builder.ai.use"));
         let list = which(n.kind);
         egui::ComboBox::from_id_salt(("ai-draft-pick", s.id.0, n.token.as_str()))
             .width(260.0)
@@ -841,20 +930,87 @@ fn name_row(
                 }
             })
             .response
-            .labelled_by(l.id);
+            .accessible_name(w.use_label.as_str());
+        // Short on screen; the accessible names say which name and row
+        // (A10 UI review S3), so two names to pick are told apart.
         if ui
             .button(t("builder.ai.remove"))
+            .accessible_name(w.remove_label.as_str())
             .on_hover_text(t("builder.ai.remove_tip"))
             .clicked()
         {
             answers.push((n.token.clone(), Answer::Remove));
         }
         if let Some(id) = rows.first()
-            && ui.link(t("builder.problems.go")).clicked()
+            && ui
+                .link(t("builder.problems.go"))
+                .accessible_name(w.go_label.as_str())
+                .clicked()
         {
             *go = Some(id.clone());
         }
     });
+}
+
+/// The words for one name to pick: the line saying what is wrong, and the
+/// accessible names of Use, Remove and Go to row.
+#[derive(Debug)]
+pub(crate) struct NameWords {
+    pub(crate) line: String,
+    pub(crate) use_label: String,
+    pub(crate) remove_label: String,
+    pub(crate) go_label: String,
+}
+
+/// "the row Supplies", "a row with no caption", or "the report".
+fn row_phrase(def: &BuilderDefinition, id: Option<&String>) -> String {
+    use cl_model::report_def::{Node, outline};
+    let caption = id.and_then(|id| match outline::find(&def.nodes, id) {
+        Some(Node::Section(x)) => Some(x.caption.trim().to_string()),
+        Some(Node::Group(x)) => Some(x.caption.trim().to_string()),
+        _ => None,
+    });
+    match caption {
+        Some(c) if c.is_empty() => t("builder.ai.row_blank"),
+        Some(c) => t_with("builder.ai.row_named", &[("row", &c)]),
+        None => t("builder.problem.the_report"),
+    }
+}
+
+pub(crate) fn name_words(def: &BuilderDefinition, n: &DraftName) -> NameWords {
+    let rows = model::rows_with(def, &n.token);
+    let row = row_phrase(def, rows.first());
+    let kind = t(&format!("builder.ai.kind.{}", kind_key(n.kind)));
+    let name = n.name.as_deref().map(str::trim).filter(|x| !x.is_empty());
+    let line = match (name, n.ambiguous) {
+        (Some(name), true) => t_with(
+            "builder.ai.name_ambiguous",
+            &[("kind", &kind), ("name", name), ("row", &row)],
+        ),
+        (Some(name), false) => t_with(
+            "builder.ai.name_not_found",
+            &[("name", name), ("row", &row)],
+        ),
+        (None, true) => t_with(
+            "builder.ai.name_ambiguous_unnamed",
+            &[("kind", &kind), ("row", &row)],
+        ),
+        (None, false) => t_with(
+            "builder.ai.name_not_found_unnamed",
+            &[("kind", &kind), ("row", &row)],
+        ),
+    };
+    let subject = name.map_or_else(
+        || t_with("builder.ai.this_kind", &[("kind", &kind)]),
+        str::to_string,
+    );
+    let pair: [(&str, &str); 2] = [("name", &subject), ("row", &row)];
+    NameWords {
+        line,
+        use_label: t_with("builder.ai.use_a11y", &pair),
+        remove_label: t_with("builder.ai.remove_a11y", &pair),
+        go_label: t_with("builder.ai.go_a11y", &[("row", &row)]),
+    }
 }
 
 const fn kind_key(k: RefKind) -> &'static str {

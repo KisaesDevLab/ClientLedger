@@ -2301,6 +2301,131 @@ fn a_number_word_heading_is_refused_unless_it_is_a_books_name() {
     assert!(s.ai.review.is_some(), "a books name passes as itself");
 }
 
+/// A10 UI review S1: Esc in the box first puts back what it held, then
+/// closes the panel; with nothing typed it closes at once.
+#[test]
+fn esc_in_the_describe_box_reverts_then_closes() {
+    use super::ai_draft::{Esc, esc_action};
+    assert_eq!(esc_action(true, "Fuel", ""), Esc::Revert);
+    assert_eq!(esc_action(true, "", ""), Esc::Close);
+    assert_eq!(esc_action(true, "Fuel", "Fuel"), Esc::Close);
+    assert_eq!(esc_action(false, "Fuel", ""), Esc::Close);
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    // The outline takes the keyboard when the editor opens; then the panel.
+    frames(&ctx, &mut s);
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    s.ai.describe.text = "Fuel by month".into();
+    frames(&ctx, &mut s);
+    assert!(
+        ctx.memory(egui::Memory::focused).is_some(),
+        "the box has the keyboard"
+    );
+    let esc = || vec![key_event(egui::Key::Escape, egui::Modifiers::NONE)];
+    frame_with(&ctx, &mut s, 50.0, esc());
+    frame(&ctx, &mut s, 50.1);
+    frame(&ctx, &mut s, 50.2);
+    assert!(!s.add_menu, "the empty outline's Add menu stays shut");
+    assert!(s.ai.open, "the first Esc reverts the box");
+    assert_eq!(s.ai.describe.text, "");
+    assert!(
+        ctx.memory(egui::Memory::focused).is_some(),
+        "the box keeps the keyboard"
+    );
+    frame_with(&ctx, &mut s, 51.0, esc());
+    assert!(!s.ai.open, "the second Esc closes the panel");
+    // Reopened with nothing typed: one Esc closes.
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    frame_with(&ctx, &mut s, 52.0, esc());
+    assert!(!s.ai.open);
+}
+
+/// A10 UI review S2 and S5: "Some names need you" and the empty preview
+/// last only while a name is still to pick; no earlier figures show under
+/// the draft; Discard runs the earlier report again.
+#[test]
+fn the_pick_note_and_the_empty_preview_go_with_the_last_name() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    frames(&ctx, &mut s);
+    describe(&ctx, &mut s, "Supplies by customer");
+    replace_with_draft(&mut s);
+    assert!(s.preview.table.is_none(), "the earlier figures are gone");
+    assert_eq!(
+        super::preview::empty_state(&s),
+        Some("builder.preview.names_first")
+    );
+    assert_eq!(s.state()["preview_note"], "names_first");
+    assert_eq!(s.state()["ai"]["notes"][0], "pick_unresolved");
+    pick_first_name(&ctx, &mut s);
+    assert_eq!(super::preview::empty_state(&s), None);
+    let notes = s.state()["ai"]["notes"].clone();
+    assert!(
+        !notes
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|n| n == "pick_unresolved"),
+        "{notes}"
+    );
+    // An undo brings the name, and its note, back.
+    press(&mut s, Mods::CMD, Key::Letter('Z'));
+    assert_eq!(s.state()["ai"]["notes"][0], "pick_unresolved");
+    super::ai_draft::discard(&mut s);
+    assert_eq!(super::preview::empty_state(&s), None);
+    assert!(s.preview.busy(), "the earlier report runs again");
+}
+
+/// A10 UI review S3 and S4: each name to pick reads in plain words, and its
+/// Use, Remove and Go to row say which name and row they are for.
+#[test]
+fn name_words_say_which_name_and_row() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Supplies by customer");
+    let def = s.ed.definition().clone();
+    let n = s.ai.review.as_ref().expect("review").draft.open(&def)[0].clone();
+    let w = super::ai_draft::name_words(&def, &n);
+    assert_eq!(
+        w.line,
+        "More than one account is called Supplies. Pick the one to use in the row Supplies."
+    );
+    assert_eq!(w.use_label, "Use for Supplies in the row Supplies");
+    assert_eq!(w.remove_label, "Remove Supplies from the row Supplies");
+    assert_eq!(w.go_label, "Go to the row Supplies");
+    let mut other = n.clone();
+    other.name = Some("Rent".into());
+    other.ambiguous = false;
+    let o = super::ai_draft::name_words(&def, &other);
+    assert_eq!(
+        o.line,
+        "Nothing in your books is called Rent. Pick a name or remove it from the row Supplies."
+    );
+    assert_ne!(o.use_label, w.use_label, "two names are told apart");
+    other.name = None;
+    assert!(
+        super::ai_draft::name_words(&def, &other)
+            .remove_label
+            .contains("this account")
+    );
+}
+
+/// A10 UI review S6: the panel names the provider before the first draft,
+/// and opening it sends nothing.
+#[test]
+fn the_panel_names_the_provider_before_the_first_draft() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    assert_eq!(s.state()["ai"]["phase"], "idle");
+    assert!(s.ai.review.is_none() && s.ai.confirm.is_none() && !s.ai.busy());
+    assert_eq!(super::ai_draft::panel_provider(&s), Some("demo"));
+}
+
 #[test]
 fn ai_off_sends_nothing_and_other_words_are_demo_only() {
     let (_d, link, mut s) = editor(BuilderSeed::Blank);
