@@ -55,6 +55,72 @@ fn placeholders_are_found_at_any_depth() {
     assert!(is_placeholder("$ref:12"));
     assert!(!is_placeholder("$ref:"));
     assert!(!is_placeholder(ACCT));
+    // The same cap as cl-api's re-check (A10 review S1).
+    assert!(is_placeholder("$ref:9999"));
+    assert!(!is_placeholder("$ref:10000"));
+    assert!(!is_placeholder("$ref:\u{ff11}"));
+}
+
+/// Q-A10l: a heading or text row with a number word is refused, unless it
+/// is exactly a books name.
+#[test]
+fn number_words_in_headings_are_found() {
+    let none = BTreeSet::new();
+    assert!(!states_a_number(&drafted(), &none));
+    let set = |f: &dyn Fn(&mut BuilderDefinition)| {
+        let mut d = drafted();
+        f(&mut d);
+        d
+    };
+    let cases: Vec<BuilderDefinition> = vec![
+        set(&|d| d.title = Some("Bills over five hundred dollars".into())),
+        set(&|d| {
+            if let Node::Section(s) = &mut d.nodes[0] {
+                s.caption = "Top ten vendors".into();
+            }
+        }),
+        set(&|d| {
+            if let Node::Section(s) = &mut d.nodes[0] {
+                s.total_caption = Some("Total over a thousand".into());
+            }
+        }),
+        set(&|d| {
+            if let Node::Group(g) = &mut d.nodes[1] {
+                g.caption = "Twenty-five more".into();
+            }
+        }),
+        set(&|d| {
+            d.columns
+                .headers
+                .insert("total".into(), "Five hundred and up".into());
+        }),
+        set(&|d| {
+            d.nodes.push(Node::Text(crate::report_def::schema::TextRow {
+                id: "note".into(),
+                text: "Only bills over two thousand".into(),
+            }));
+        }),
+    ];
+    for d in &cases {
+        assert!(states_a_number(d, &none), "{d:?}");
+    }
+    // An ordinary word passes; a books name passes as itself only.
+    let one_time = set(&|d| d.title = Some("One-time customers".into()));
+    assert!(!states_a_number(&one_time, &none));
+    let vendor = set(&|d| {
+        if let Node::Section(s) = &mut d.nodes[0] {
+            s.caption = "Two Rivers Supply".into();
+        }
+    });
+    let known: BTreeSet<String> = ["Two Rivers Supply".to_string()].into();
+    assert!(states_a_number(&vendor, &none));
+    assert!(!states_a_number(&vendor, &known));
+    let more = set(&|d| {
+        if let Node::Section(s) = &mut d.nodes[0] {
+            s.caption = "Two Rivers Supply over five hundred".into();
+        }
+    });
+    assert!(states_a_number(&more, &known));
 }
 
 /// A definition with a placeholder is never handed out to send.

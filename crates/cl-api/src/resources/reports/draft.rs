@@ -7,9 +7,11 @@
 //!
 //! The reply is checked again here ([`validate`]), as Ask a question's is:
 //! a JSON number other than `schemaVersion: 1` and a formula term's ±1, a
-//! digit in any text other than an id, a placeholder, an aging bucket key
-//! or a preset that was sent, an amount filter, a placeholder that is not
-//! listed as unresolved (or the other way round) are refused as
+//! digit of any script in text or in an object key other than an id or a
+//! placeholder at an id field, an aging bucket key where bucket keys go or
+//! the preset that was sent at `dates.preset`, an amount filter, a
+//! placeholder that is not listed as unresolved (or the other way round)
+//! are refused as
 //! [`ApiError::ReportShape`], and the builder shows nothing from it
 //! (non-negotiable 4: the AI never produces a number).
 
@@ -304,51 +306,75 @@ fn is_uuid(s: &str) -> bool {
         })
 }
 
-/// `$ref:N`.
+/// `$ref:N` (N: 1–4 ASCII digits; the same rule as
+/// `cl_model::report_def::draft::is_placeholder`).
 fn is_token(s: &str) -> bool {
     s.strip_prefix("$ref:")
         .is_some_and(|n| !n.is_empty() && n.len() <= 4 && n.bytes().all(|c| c.is_ascii_digit()))
 }
 
-/// Walks every value of the definition: numbers only where the structure
-/// has them, digits in text only in ids, placeholders, aging keys and the
-/// presets sent; every placeholder is gathered.
+/// True when `s` holds a digit of any script (fullwidth, Arabic-Indic,
+/// Roman numerals and other Unicode numbers too, as the engine's `\p{N}`).
+#[must_use]
+pub fn has_digit(s: &str) -> bool {
+    s.chars().any(char::is_numeric)
+}
+
+/// True when the object keys on `path` end with `tail`.
+fn at(path: &[&str], tail: &[&str]) -> bool {
+    path.ends_with(tail)
+}
+
+/// A renamed header's key may name an aging bucket (`d1_30` or
+/// `bucket:d1_30`); no other key in a draft holds a digit.
+fn header_key_ok(k: &str) -> bool {
+    AGING_KEYS.contains(&k.strip_prefix("bucket:").unwrap_or(k))
+}
+
+/// Walks every value of the definition. `path` holds the object keys from
+/// the definition down to `v` (array indexes are left out). Numbers only
+/// where the structure has them (`schemaVersion: 1`, a term's sign ±1);
+/// a digit in text only where the schema puts one: an id or a placeholder
+/// in `filters.*.ids.*` or `groupBy.*.tagGroupId`, an aging bucket key in
+/// `filters.*.values.*`, the preset sent at `dates.preset`. Object keys
+/// hold no digit (an aging bucket header key aside). Every placeholder is
+/// gathered.
 fn check_value(
     v: &Value,
-    key: &str,
+    path: &mut Vec<String>,
     presets: &[String],
     tokens: &mut BTreeSet<String>,
 ) -> Result<(), ApiError> {
+    let p: Vec<&str> = path.iter().map(String::as_str).collect();
     match v {
         Value::Number(n) => {
-            let ok = match key {
-                "schemaVersion" => n.as_u64() == Some(1),
-                "sign" => matches!(n.as_i64(), Some(1 | -1)),
-                _ => false,
+            let ok = if p == ["schemaVersion"] {
+                n.as_u64() == Some(1)
+            } else if at(&p, &["terms", "sign"]) {
+                matches!(n.as_i64(), Some(1 | -1))
+            } else {
+                false
             };
             if ok { Ok(()) } else { Err(bad()) }
         }
         Value::String(s) => {
-            if is_token(s) {
+            let id_site = at(&p, &["filters", "ids"]) || at(&p, &["groupBy", "tagGroupId"]);
+            if id_site && is_token(s) {
                 tokens.insert(s.clone());
                 return Ok(());
             }
-            if !s.bytes().any(|c| c.is_ascii_digit())
-                || is_uuid(s)
-                || AGING_KEYS.contains(&s.as_str())
-                || presets.iter().any(|p| p == s)
-            {
-                Ok(())
-            } else {
-                Err(bad())
-            }
+            let ok = !has_digit(s)
+                || (id_site && is_uuid(s))
+                || (at(&p, &["filters", "values"]) && AGING_KEYS.contains(&s.as_str()))
+                || (p == ["dates", "preset"] && presets.iter().any(|x| x == s));
+            if ok { Ok(()) } else { Err(bad()) }
         }
         Value::Array(a) => a
             .iter()
-            .try_for_each(|x| check_value(x, key, presets, tokens)),
+            .try_for_each(|x| check_value(x, path, presets, tokens)),
         Value::Object(m) => {
             // No amount filter of any shape (non-negotiable 4, Q-A10e).
-            if key == "filters" || (m.contains_key("op") && m.contains_key("field")) {
+            if p.last() == Some(&"filters") || (m.contains_key("op") && m.contains_key("field")) {
                 let op = m.get("op").and_then(Value::as_str).unwrap_or("");
                 let field = m.get("field").and_then(Value::as_str).unwrap_or("");
                 if m.contains_key("value")
@@ -358,8 +384,17 @@ fn check_value(
                     return Err(bad());
                 }
             }
-            m.iter()
-                .try_for_each(|(k, x)| check_value(x, k, presets, tokens))
+            let headers = p == ["columns", "headers"];
+            for (k, x) in m {
+                if has_digit(k) && !(headers && header_key_ok(k)) {
+                    return Err(bad());
+                }
+                path.push(k.clone());
+                let r = check_value(x, path, presets, tokens);
+                path.pop();
+                r?;
+            }
+            Ok(())
         }
         Value::Bool(_) | Value::Null => Ok(()),
     }
@@ -376,13 +411,15 @@ fn unresolved_of(u: &Value) -> Result<DraftUnresolved, ApiError> {
         .and_then(Value::as_str)
         .and_then(DraftKind::of)
         .ok_or_else(bad)?;
+    let reason = text(u, "reason").unwrap_or_default();
+    // An ambiguous name is a books name ("Studio 54"), shown in the picker
+    // and never part of the definition: it may hold a digit. Any other name
+    // (the owner's words, nothing matched) never does, as the engine's rule.
     let name = match u.get("name") {
         None | Some(Value::Null) => None,
-        // A name is never a number (the engine refuses one with a digit).
-        Some(Value::String(s)) if !s.bytes().any(|c| c.is_ascii_digit()) => Some(s.clone()),
+        Some(Value::String(s)) if reason == "ambiguous" || !has_digit(s) => Some(s.clone()),
         Some(_) => return Err(bad()),
     };
-    let reason = text(u, "reason").unwrap_or_default();
     let sites = u
         .get("sites")
         .and_then(Value::as_array)
@@ -442,7 +479,7 @@ pub fn validate(req: &DraftRequest, v: &Value) -> Result<DraftReply, ApiError> {
         return Err(bad());
     }
     let mut tokens = BTreeSet::new();
-    check_value(def, "definition", &req.date_presets, &mut tokens)?;
+    check_value(def, &mut Vec::new(), &req.date_presets, &mut tokens)?;
     let unresolved = v
         .get("unresolved")
         .and_then(Value::as_array)

@@ -31,11 +31,12 @@ pub fn description_ok(description: &str) -> bool {
     !d.is_empty() && d.encode_utf16().count() <= MAX_DESCRIPTION_CHARS
 }
 
-/// True for a `$ref:N` placeholder.
+/// True for a `$ref:N` placeholder (N: 1–4 ASCII digits; the same rule as
+/// `cl-api`'s re-check of a draft).
 #[must_use]
 pub fn is_placeholder(s: &str) -> bool {
     s.strip_prefix(PREFIX)
-        .is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+        .is_some_and(|n| !n.is_empty() && n.len() <= 4 && n.bytes().all(|c| c.is_ascii_digit()))
 }
 
 fn walk<'a>(nodes: &'a [Node], f: &mut impl FnMut(&'a Node)) {
@@ -110,6 +111,38 @@ pub fn rows_with(def: &BuilderDefinition, token: &str) -> Vec<String> {
         }
     });
     out
+}
+
+/// Every heading and text the draft would print: the title, row and total
+/// captions, text rows and renamed column headers.
+fn texts(def: &BuilderDefinition) -> Vec<&str> {
+    let mut out: Vec<&str> = def.title.iter().map(String::as_str).collect();
+    out.extend(def.columns.headers.values().map(String::as_str));
+    walk(&def.nodes, &mut |n| match n {
+        Node::Section(s) => {
+            out.push(&s.caption);
+            out.extend(s.total_caption.as_deref());
+        }
+        Node::Group(g) => {
+            out.push(&g.caption);
+            out.extend(g.total_caption.as_deref());
+        }
+        Node::Formula(f) => out.push(&f.caption),
+        Node::Text(t) => out.push(&t.text),
+        Node::Blank(_) | Node::PageBreak(_) => {}
+    });
+    out
+}
+
+/// True when a heading or text of an AI draft states a number in words
+/// (Q-A10l, [`super::number_words`]) and isn't exactly a books name in
+/// `known` (a vendor called "Two Rivers Supply"). Such a draft is refused
+/// whole, as one with a digit is (non-negotiable 4).
+#[must_use]
+pub fn states_a_number(def: &BuilderDefinition, known: &BTreeSet<String>) -> bool {
+    texts(def)
+        .into_iter()
+        .any(|t| super::number_words::states_a_number(t) && !known.contains(t.trim()))
 }
 
 /// What the owner does with a name.

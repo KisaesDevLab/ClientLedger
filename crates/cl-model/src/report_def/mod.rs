@@ -14,6 +14,7 @@ pub mod draft;
 pub mod editor;
 pub mod fields;
 pub mod guided;
+pub mod number_words;
 pub mod outline;
 pub mod problems;
 pub mod ranges;

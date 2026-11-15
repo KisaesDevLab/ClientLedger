@@ -108,12 +108,60 @@ fn numbers_and_amount_filters_are_refused() {
             "/definition/nodes/0/filters",
             json!([{"field": "account", "op": "in", "ids": ["$ref:0", "not-an-id-42"]}]),
         ),
+        // Digits of any script (A10 review S1).
+        ("/definition/nodes/0/caption", json!("Rent \u{ff15}\u{ff10}\u{ff10}")),
+        ("/definition/nodes/0/caption", json!("Rent \u{665}\u{660}\u{660}")),
+        ("/definition/nodes/0/caption", json!("Rent \u{216b}")),
+        ("/definition/nodes/1/caption", json!("Net \u{967}")),
+        // Structural text only where the schema puts it.
+        ("/definition/nodes/0/caption", json!(ACCT)),
+        ("/definition/nodes/0/caption", json!("$ref:0")),
+        ("/definition/nodes/0/caption", json!("d1_30")),
+        (
+            "/definition/columns",
+            json!({"detailFields": [], "compare": [], "headers": {}, "percentOf": ACCT}),
+        ),
+        ("/definition/nodes/0/id", json!("$ref:0")),
+        (
+            "/definition/nodes/0/filters",
+            json!([{"field": "account", "op": "in", "ids": ["$ref:0", ACCT], "values": [ACCT]}]),
+        ),
+        (
+            "/definition/nodes/0/groupBy",
+            json!([{"key": "tag", "tagGroupId": "$ref:1"}, {"key": "d1_30"}]),
+        ),
+        // A digit in an object key.
+        ("/definition/columns/headers", json!({"over500": "Big"})),
+        ("/definition/columns/headers", json!({"f:\u{ff15}": "Big"})),
     ];
     for (at, bad_value) in cases {
         let mut v = answer();
         *v.pointer_mut(at).expect(at) = bad_value.clone();
         assert!(validate(&req(), &v).is_err(), "{at} = {bad_value}");
     }
+    // A preset that was sent, outside `dates.preset`.
+    let mut v = answer();
+    v["definition"]["nodes"][0]["caption"] = json!("last_12_months");
+    let mut r = req();
+    r.date_presets.push("last_12_months".into());
+    assert!(validate(&r, &v).is_err());
+    // ... and at `dates.preset` it passes.
+    let mut v = answer();
+    v["definition"]["dates"]["preset"] = json!("last_12_months");
+    assert!(validate(&r, &v).is_ok());
+    // A preset the client didn't send, even a well-formed one.
+    let mut v = answer();
+    v["definition"]["dates"]["preset"] = json!("last_month");
+    let mut r = req();
+    r.date_presets = vec!["this_year".into()];
+    assert!(validate(&r, &v).is_err());
+}
+
+#[test]
+fn a_digit_key_anywhere_is_refused() {
+    let mut v = answer();
+    v["definition"]["dates"]["from2026"] = json!("x");
+    assert!(validate(&req(), &v).is_err());
 }
 
 #[test]
@@ -134,16 +182,26 @@ fn placeholders_and_the_unresolved_list_must_agree() {
     let mut v = answer();
     v["unresolved"][0]["candidates"][0]["id"] = json!("x");
     assert!(validate(&req(), &v).is_err());
-    // A name with a digit.
+    // A not-found name with a digit (the owner's words): refused, in any
+    // script.
+    for name in ["Rent 500", "Rent \u{ff15}\u{ff10}\u{ff10}"] {
+        let mut v = answer();
+        v["unresolved"][1]["name"] = json!(name);
+        assert!(validate(&req(), &v).is_err(), "{name}");
+    }
+    // An ambiguous books name with a digit is the books' text, shown in the
+    // picker and not part of the definition (A10 review S6).
     let mut v = answer();
-    v["unresolved"][0]["name"] = json!("Rent 500");
-    assert!(validate(&req(), &v).is_err());
+    v["unresolved"][0]["name"] = json!("Studio 54");
+    v["unresolved"][0]["candidates"][0]["label"] = json!("Studio 54 (customer)");
+    let d = validate(&req(), &v).expect("an ambiguous books name");
+    assert_eq!(d.unresolved[0].name.as_deref(), Some("Studio 54"));
 }
 
 #[test]
 fn structural_digits_pass() {
     let mut v = answer();
-    v["definition"]["columns"]["headers"] = json!({"d1_30": "Recent"});
+    v["definition"]["columns"]["headers"] = json!({"d1_30": "Recent", "bucket:over_90": "Old"});
     v["definition"]["nodes"][0]["filters"] = json!([{"field": "account", "op": "in", "ids": ["$ref:0", ACCT]},
                {"field": "aging", "op": "in", "values": ["d31_60", "over_90"]}]);
     assert!(validate(&req(), &v).is_ok());
