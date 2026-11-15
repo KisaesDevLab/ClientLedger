@@ -629,14 +629,7 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         send(s);
     }
     if close {
-        s.ai.open = false;
-        s.ai.message = None;
-        s.ai.error = None;
-        // A request on its way is dropped: its answer is never shown.
-        s.ai.job = None;
-        s.ai.gate_job = None;
-        s.ai.describe.phase = Phase::Idle;
-        s.focus_to = Some(Pane::Outline);
+        close_panel(s);
     }
     if settings {
         s.ai.gate = None;
@@ -647,9 +640,39 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     }
 }
 
+/// Tests: `reply` came and waits for the books' names.
+#[cfg(test)]
+pub(crate) fn hold_for_test(s: &mut BuilderScreen, reply: DraftReply) {
+    s.ai.describe.phase = Phase::Drafting;
+    s.ai.arrived = Some(Box::new(reply));
+}
+
+/// Cancel or Esc: the panel closes, and a request on its way (or a draft
+/// waiting for the books' names) is dropped: its answer is never shown.
+pub(crate) fn close_panel(s: &mut BuilderScreen) {
+    s.ai.open = false;
+    s.ai.message = None;
+    s.ai.error = None;
+    s.ai.job = None;
+    s.ai.gate_job = None;
+    s.ai.arrived = None;
+    s.ai.describe.phase = Phase::Idle;
+    s.focus_to = Some(Pane::Outline);
+}
+
+/// The replace question: over a draft still being checked, Discard puts
+/// back what was there before the first draft, not the draft.
+pub(crate) fn replace_question(s: &BuilderScreen) -> &'static str {
+    if s.ai.review.is_some() {
+        "builder.ai.replace_question_draft"
+    } else {
+        "builder.ai.replace_question"
+    }
+}
+
 fn confirm(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let mut replace = None;
-    form::inline_note(ui, tokens, &t("builder.ai.replace_question"));
+    form::inline_note(ui, tokens, &t(replace_question(s)));
     ui.horizontal(|ui| {
         let r = ui.button(t("builder.ai.replace"));
         if r.clicked() {

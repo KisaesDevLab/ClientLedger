@@ -2138,8 +2138,9 @@ fn memorize_during_the_review_keeps_the_draft() {
     let ctx = themed();
     describe(&ctx, &mut s, "Fuel by month this year");
     assert!(s.ai.review.is_some());
-    memorize_as(&ctx, &mut s, "Fuel by month");
-    assert!(s.ed.saved().is_some());
+    // A name of the owner's own, not the draft's title.
+    memorize_as(&ctx, &mut s, "My fuel report");
+    assert!(s.ed.saved().is_some() && !s.ed.dirty());
     assert!(s.ai.review.is_none(), "the banner went");
     let saved = s.ed.definition().clone();
     super::ai_draft::discard(&mut s);
@@ -2163,6 +2164,80 @@ fn a_late_draft_is_not_applied_to_another_report() {
     frames(&ctx, &mut s);
     assert_eq!(s.ed.definition(), &mine);
     assert!(s.ai.review.is_none() && s.ai.confirm.is_none() && !s.ai.busy());
+}
+
+/// Cancel drops a draft held while the books' names are read.
+#[test]
+fn cancel_drops_a_draft_waiting_for_the_names() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    // The reply is held (the names are still being read); the owner
+    // cancels before it is shown.
+    super::ai_draft::open_panel(&mut s);
+    super::ai_draft::hold_for_test(&mut s, worded_reply("Fuel", None));
+    super::ai_draft::close_panel(&mut s);
+    frames(&ctx, &mut s);
+    assert!(
+        s.ai.review.is_none()
+            && s.ai.confirm.is_none()
+            && !s.ai.busy()
+            && s.ed.definition().nodes.is_empty()
+    );
+}
+
+/// The panel names the provider the engine drafts with, or none; "can't be
+/// reached" names the internet only for a cloud service (A10 review
+/// Minors 2 and 8).
+#[test]
+fn the_provider_and_unreachable_wording() {
+    use super::ai_draft::{drafting_provider, unavailable_key};
+    let config = |chat: Option<&str>, cat: Option<&str>| cl_api::AiConfig {
+        fallback_chain: vec!["openai".into()],
+        chat_provider: chat.map(str::to_string),
+        categorization_provider: cat.map(str::to_string),
+        ..cl_api::AiConfig::default()
+    };
+    assert_eq!(
+        drafting_provider(&config(Some("ollama"), Some("anthropic"))).as_deref(),
+        Some("ollama")
+    );
+    assert_eq!(
+        drafting_provider(&config(None, Some("anthropic"))).as_deref(),
+        Some("anthropic")
+    );
+    assert_eq!(
+        drafting_provider(&config(None, None)),
+        None,
+        "never a guess"
+    );
+    for (p, internet) in [
+        (Some("anthropic"), true),
+        (Some("openai"), true),
+        (Some("ollama"), false),
+        (None, false),
+    ] {
+        let text = crate::i18n::t(unavailable_key(p));
+        assert_eq!(text.contains("internet"), internet, "{p:?}");
+    }
+    assert!(crate::i18n::t(unavailable_key(Some("ollama"))).contains("Ollama"));
+}
+
+/// Replacing a draft under review says Discard brings back what was there
+/// before the first draft.
+#[test]
+fn replacing_a_draft_under_review_says_what_discard_restores() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    assert_eq!(
+        super::ai_draft::replace_question(&s),
+        "builder.ai.replace_question"
+    );
+    describe(&ctx, &mut s, "Supplies by customer");
+    assert_eq!(
+        super::ai_draft::replace_question(&s),
+        "builder.ai.replace_question_draft"
+    );
+    assert!(crate::i18n::has("builder.ai.replace_question_draft"));
 }
 
 /// A draft reply with one section captioned `caption`, and an ambiguous

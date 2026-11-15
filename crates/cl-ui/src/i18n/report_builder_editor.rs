@@ -349,6 +349,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.ai.invalid", "That description couldn't be sent. Keep it under 1,000 characters and try again."),
     ("builder.ai.demo_only", "Drafting from your own words isn't available in the practice company. Try one of these: fuel by month, supplies by customer, or vendors I paid over a certain amount."),
     ("builder.ai.replace_question", "This report already has rows. Replace them with the draft? You can still Discard the draft afterwards to get them back."),
+    ("builder.ai.replace_question_draft", "Replace the draft you are checking with this one? Discard afterwards puts back what was here before the first draft."),
     ("builder.ai.replace", "Replace with the draft"),
     ("builder.ai.keep_mine", "Keep my rows"),
     ("builder.ai.banner", "Drafted by AI \u{2014} check it"),
