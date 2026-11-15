@@ -24,6 +24,20 @@ steps:
   - assert_exists: {label_contains: "your description, with any amounts and other numbers in it hidden"}
   - assert_exists: {label_contains: "No amounts, balances or transactions are sent."}
   - assert_focused: {label: Describe the report you want, index: 1}
+  # Esc (A10 UI review S1): the first puts back the empty box, the second
+  # closes the panel; the builder stays open.
+  - type: {text: "Fuel"}
+  - key: Escape
+  - assert_state: {key: screen.ai.panel, equals: true}
+  - assert_state: {key: screen.ai.described, equals: false}
+  - assert_focused: {label: Describe the report you want, index: 1}
+  - key: Escape
+  - assert_state: {key: screen.ai.panel, equals: false}
+  - assert_state: {key: screen.screen, equals: report_builder}
+  - click: {role: button, label: Describe it}
+  - assert_state: {key: screen.ai.panel, equals: true}
+  - assert_exists: {label_contains: "Answered by: prepared drafts in the practice company"}
+  - assert_focused: {label: Describe the report you want, index: 1}
   - type: {text: "Fuel by month this year"}
   - key: Ctrl+Enter
   - wait: {ms: 400}
@@ -75,12 +89,24 @@ steps:
   - assert_state: {key: screen.ai.unresolved, equals: 1}
   - assert_state: {key: screen.can_memorize, equals: false}
   - assert_state: {key: screen.can_run, equals: false}
+  # The preview shows no earlier figures while a name is to pick (S5); the
+  # picker's widgets say which name and row (S3).
+  - assert_state: {key: screen.preview_note, equals: names_first}
+  - assert_exists: {label: "The preview appears once every name is picked."}
+  - assert_exists: {label_contains: "More than one account is called Supplies."}
+  - assert_exists: {role: button, label: "Remove Supplies from the row Supplies"}
+  - assert_exists: {label: "Go to the row Supplies"}
+  - assert_exists: {label_contains: "Some names need you"}
   - screenshot: draft-unresolved
-  - click: {role: combo_box, label: Use}
+  - click: {role: combo_box, label: "Use for Supplies in the row Supplies"}
   - wait: {ms: 200}
   - click: {label_contains: "Office Supplies"}
   - wait: {ms: 300}
   - assert_state: {key: screen.ai.unresolved, equals: 0}
+  # The "names need you" line goes with the last name (S2).
+  - assert_not_exists: {label_contains: "Some names need you"}
+  - assert_state: {key: screen.preview_note, equals: null}
+  - assert_enabled: {role: button, label: Keep}
   - assert_state: {key: screen.can_memorize, equals: true}
   - click: {role: button, label: Keep}
   - assert_state: {key: screen.ai.drafted, equals: false}
