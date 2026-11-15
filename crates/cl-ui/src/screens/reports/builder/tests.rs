@@ -2008,7 +2008,11 @@ fn an_unmatched_name_blocks_run_and_memorize_until_it_is_picked() {
     assert_eq!(open.len(), 1);
     assert!(!s.ed.can_run() && !s.ed.can_memorize());
     assert!(s.ed.row_has_problem("row_a"), "the row is marked");
-    assert_eq!(s.ed.name(), "Supplies by customer", "the draft names the report");
+    assert_eq!(
+        s.ed.name(),
+        "Supplies by customer",
+        "the draft names the report"
+    );
     // Memorize says why and opens nothing; Keep waits.
     super::save::open_memorize(&mut s, false);
     assert!(s.save.memorize.is_none());
@@ -2167,7 +2171,9 @@ fn worded_reply(
     caption: &str,
     name: Option<&str>,
 ) -> cl_api::resources::reports::draft::DraftReply {
-    use cl_api::resources::reports::draft::{DraftCandidate, DraftKind, DraftReply, DraftUnresolved};
+    use cl_api::resources::reports::draft::{
+        DraftCandidate, DraftKind, DraftReply, DraftUnresolved,
+    };
     let acct = "11111111-1111-4111-8111-111111111111";
     let ids = if name.is_some() { "$ref:0" } else { acct };
     DraftReply {
@@ -2207,7 +2213,10 @@ fn a_number_word_heading_is_refused_unless_it_is_a_books_name() {
     let ctx = themed();
     super::ai_draft::open_panel(&mut s);
     frames(&ctx, &mut s);
-    super::ai_draft::arrived(&mut s, worded_reply("Bills over five hundred dollars", None));
+    super::ai_draft::arrived(
+        &mut s,
+        worded_reply("Bills over five hundred dollars", None),
+    );
     assert_eq!(s.ai.message, Some("builder.ai.unmapped"));
     assert!(s.ai.review.is_none() && s.ed.definition().nodes.is_empty());
     super::ai_draft::arrived(

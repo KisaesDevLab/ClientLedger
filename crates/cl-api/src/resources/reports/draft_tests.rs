@@ -109,8 +109,14 @@ fn numbers_and_amount_filters_are_refused() {
             json!([{"field": "account", "op": "in", "ids": ["$ref:0", "not-an-id-42"]}]),
         ),
         // Digits of any script (A10 review S1).
-        ("/definition/nodes/0/caption", json!("Rent \u{ff15}\u{ff10}\u{ff10}")),
-        ("/definition/nodes/0/caption", json!("Rent \u{665}\u{660}\u{660}")),
+        (
+            "/definition/nodes/0/caption",
+            json!("Rent \u{ff15}\u{ff10}\u{ff10}"),
+        ),
+        (
+            "/definition/nodes/0/caption",
+            json!("Rent \u{665}\u{660}\u{660}"),
+        ),
         ("/definition/nodes/0/caption", json!("Rent \u{216b}")),
         ("/definition/nodes/1/caption", json!("Net \u{967}")),
         // Structural text only where the schema puts it.

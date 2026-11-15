@@ -241,10 +241,7 @@ pub(crate) fn send(s: &mut BuilderScreen) {
                     // The provider is read where the user may read it (an
                     // admin); otherwise the panel names none.
                     let provider = if on {
-                        s.ai_config()
-                            .await
-                            .ok()
-                            .and_then(|c| drafting_provider(&c))
+                        s.ai_config().await.ok().and_then(|c| drafting_provider(&c))
                     } else {
                         None
                     };
@@ -292,10 +289,10 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
     }
     // Held until the books' names are read (they are asked for when the
     // panel opens).
-    if s.ai.arrived.is_some() && !s.lists.busy() {
-        if let Some(reply) = s.ai.arrived.take() {
-            arrived(s, *reply);
-        }
+    if !s.lists.busy()
+        && let Some(reply) = s.ai.arrived.take()
+    {
+        arrived(s, *reply);
     }
 }
 

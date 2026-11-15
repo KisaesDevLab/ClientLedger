@@ -130,8 +130,15 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.show_guided();
         }
         ui.separator();
-        // A10 (Q-A10c): a draft from the owner's words.
-        if tool(ui, &t("builder.toolbar.describe"), "", true, "") {
+        // A10 (Q-A10c): a draft from the owner's words. A short label so
+        // the toolbar fits one line at 1440 px; its accessible name (and
+        // tooltip) stay the full "Describe the report…".
+        let full = t("builder.toolbar.describe");
+        let r = ui
+            .button(t("builder.toolbar.describe_short"))
+            .on_hover_text(t("builder.toolbar.describe_tip"));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, full.as_str()));
+        if r.clicked() {
             super::ai_draft::open_panel(s);
         }
     });

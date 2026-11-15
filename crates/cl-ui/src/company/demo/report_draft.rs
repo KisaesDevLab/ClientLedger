@@ -44,7 +44,14 @@ fn definition(title: &str, node: &Value, periods: Option<&str>, preset: &str) ->
 
 /// The words before a number that make it an amount filter ("over 500").
 const AMOUNT_WORDS: [&str; 8] = [
-    "over", "under", "above", "below", "more than", "less than", "at least", "at most",
+    "over",
+    "under",
+    "above",
+    "below",
+    "more than",
+    "less than",
+    "at least",
+    "at most",
 ];
 
 /// What the engine notes about numbers in the description: an amount (a
@@ -201,7 +208,11 @@ mod tests {
         assert!(!v.definition.to_string().contains("500"));
         // Each draft names the report; node ids are the engine's shape.
         for r in [&fuel, &sup, &v] {
-            assert!(r.definition["title"].as_str().is_some_and(|t| !t.is_empty()));
+            assert!(
+                r.definition["title"]
+                    .as_str()
+                    .is_some_and(|t| !t.is_empty())
+            );
             assert_eq!(r.definition["nodes"][0]["id"], "row_a");
         }
         // A number that isn't an amount is only "not used" (as the engine).

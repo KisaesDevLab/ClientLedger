@@ -322,6 +322,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.problem.unresolved", "{row} names something the AI couldn't match in your books. Pick the right name for it, or remove that filter or grouping from the row."),
     // A10: Describe the report (Q-A10b–i)
     ("builder.toolbar.describe", "Describe the report\u{2026}"),
+    ("builder.toolbar.describe_short", "Describe\u{2026}"),
+    ("builder.toolbar.describe_tip", "Describe the report in your own words, and AI drafts it for you to check."),
     ("builder.guided.describe", "Describe it"),
     ("builder.origin.drafted", "a description (drafted by AI)"),
     ("builder.ai.panel_title", "Describe the report you want"),
