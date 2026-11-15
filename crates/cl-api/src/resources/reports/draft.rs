@@ -13,7 +13,10 @@
 //! placeholder that is not listed as unresolved (or the other way round)
 //! are refused as
 //! [`ApiError::ReportShape`], and the builder shows nothing from it
-//! (non-negotiable 4: the AI never produces a number).
+//! (non-negotiable 4: the AI never produces a number). A digit in printed
+//! text (title, captions, text rows, headers) is the one exception: it is
+//! let through for the caller to refuse unless the text is exactly a name
+//! in the books (owner 2026-11-15, Q-A10j, Q-A10p).
 
 use std::collections::BTreeSet;
 
@@ -337,6 +340,21 @@ fn header_key_ok(k: &str) -> bool {
     AGING_KEYS.contains(&k.strip_prefix("bucket:").unwrap_or(k))
 }
 
+/// Text the report prints as written: the title, a row's caption or total
+/// caption, a text row, a renamed column header. A digit here is let
+/// through only for the caller to check against the books (owner
+/// 2026-11-15, Q-A10j: "401(k) Match" as a heading): the caller must
+/// refuse the draft unless each such text is exactly a books name
+/// (`cl_model::report_def::draft::states_a_number`).
+fn kept_text_site(p: &[&str]) -> bool {
+    let node_field = |f: &str| matches!(p, [.., parent, last] if *last == f && matches!(*parent, "nodes" | "children"));
+    p == ["title"]
+        || matches!(p, ["columns", "headers", _])
+        || node_field("caption")
+        || node_field("totalCaption")
+        || node_field("text")
+}
+
 /// Walks every value of the definition. `path` holds the object keys from
 /// the definition down to `v` (array indexes are left out). Numbers only
 /// where the structure has them (`schemaVersion: 1`, a term's sign ±1);
@@ -370,6 +388,13 @@ fn check_value(
                 return Ok(());
             }
             let ok = !has_digit(s)
+                // Never an id, a placeholder, a bucket key or a preset
+                // copied into text: no books name looks like one.
+                || (kept_text_site(&p)
+                    && !is_uuid(s.trim())
+                    && !s.contains("$ref:")
+                    && !AGING_KEYS.contains(&s.trim())
+                    && !presets.iter().any(|x| x == s.trim()))
                 || (id_site && is_uuid(s))
                 || (at(&p, &["filters", "values"]) && AGING_KEYS.contains(&s.as_str()))
                 || (p == ["dates", "preset"] && presets.iter().any(|x| x == s));

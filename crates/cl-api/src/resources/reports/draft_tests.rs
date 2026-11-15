@@ -91,7 +91,6 @@ fn a_clean_draft_is_savable() {
 #[test]
 fn numbers_and_amount_filters_are_refused() {
     let cases: Vec<(&str, serde_json::Value)> = vec![
-        ("/definition/nodes/0/caption", json!("Rent over 500")),
         ("/definition/nodes/0/caption", json!(500)),
         ("/definition/nodes/1/terms/0/sign", json!(2)),
         ("/definition/schemaVersion", json!(2)),
@@ -108,17 +107,6 @@ fn numbers_and_amount_filters_are_refused() {
             "/definition/nodes/0/filters",
             json!([{"field": "account", "op": "in", "ids": ["$ref:0", "not-an-id-42"]}]),
         ),
-        // Digits of any script (A10 review S1).
-        (
-            "/definition/nodes/0/caption",
-            json!("Rent \u{ff15}\u{ff10}\u{ff10}"),
-        ),
-        (
-            "/definition/nodes/0/caption",
-            json!("Rent \u{665}\u{660}\u{660}"),
-        ),
-        ("/definition/nodes/0/caption", json!("Rent \u{216b}")),
-        ("/definition/nodes/1/caption", json!("Net \u{967}")),
         // Structural text only where the schema puts it.
         ("/definition/nodes/0/caption", json!(ACCT)),
         ("/definition/nodes/0/caption", json!("$ref:0")),
@@ -144,6 +132,26 @@ fn numbers_and_amount_filters_are_refused() {
         let mut v = answer();
         *v.pointer_mut(at).expect(at) = bad_value.clone();
         assert!(validate(&req(), &v).is_err(), "{at} = {bad_value}");
+    }
+    // Q-A10j (owner 2026-11-15): a digit of any script in printed text (a
+    // title, caption, total caption, text row or header) is left for the
+    // desktop to check against the books' names (a heading "401(k) Match");
+    // never a digit anywhere else.
+    for (at, text) in [
+        ("/definition/nodes/0/caption", "Rent over 500"),
+        (
+            "/definition/nodes/0/caption",
+            "Rent \u{ff15}\u{ff10}\u{ff10}",
+        ),
+        ("/definition/nodes/0/caption", "Rent \u{665}\u{660}\u{660}"),
+        ("/definition/nodes/0/caption", "Rent \u{216b}"),
+        ("/definition/nodes/1/caption", "Net \u{967}"),
+        ("/definition/title", "401(k) Match"),
+    ] {
+        let mut v = answer();
+        v["definition"]["title"] = json!("Spend");
+        *v.pointer_mut(at).expect(at) = json!(text);
+        assert!(validate(&req(), &v).is_ok(), "{at} = {text}");
     }
     // A preset that was sent, outside `dates.preset`.
     let mut v = answer();
