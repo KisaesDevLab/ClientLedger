@@ -130,10 +130,13 @@ impl Font {
     /// (the font's ascender at `size_pt`).
     #[must_use]
     pub fn ascent_mm(self, size_pt: f32) -> f32 {
-        let Ok(face) = self.face() else {
+        // The metrics alone: no cmap or advances to read (A10 review
+        // Minor 9).
+        let Ok(font) = skrifa::FontRef::new(self.bytes()) else {
             return size_pt * 0.8 * MM_PER_PT;
         };
-        face.ascender() / f32::from(face.units_per_em()) * size_pt * MM_PER_PT
+        let m = font.metrics(Size::unscaled(), LocationRef::default());
+        m.ascent / f32::from(m.units_per_em) * size_pt * MM_PER_PT
     }
 }
 
