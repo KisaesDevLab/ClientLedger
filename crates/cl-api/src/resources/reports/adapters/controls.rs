@@ -239,7 +239,7 @@ pub fn field_label(k: &str) -> String {
 }
 
 /// Records the trail names in plain words (`@reports.audit.entity.*`).
-pub const AUDIT_ENTITIES: [&str; 16] = [
+pub const AUDIT_ENTITIES: [&str; 19] = [
     "transaction",
     "account",
     "contact",
@@ -256,6 +256,10 @@ pub const AUDIT_ENTITIES: [&str; 16] = [
     "report_definition_group",
     "report_builder_draft",
     "payment_applications",
+    // A10 QA-6: the company's AI switches and consent.
+    "company_ai_tasks",
+    "company_ai_consent_accepted",
+    "company_ai_consent_revoked",
 ];
 
 /// A record kind's caption: the plain-words key, else its own name with
@@ -276,15 +280,18 @@ pub fn entity_label(e: &str) -> String {
 fn report_file_action(e: &Value, entity: &str) -> Option<&'static str> {
     // A10 (Q-A10i, Q-A10k): one row per AI draft. `after.outcome` says
     // whether it was used: "refused" reads "Asked AI to draft a report (not
-    // used)"; "drafted", or a row without it (an older engine), "Drafted a
-    // report with AI".
+    // used)"; "failed" (the service didn't answer after the names were
+    // sent, owner 2026-11-15, Q-A10k) "Asked AI to draft a report (the AI
+    // service didn't answer)"; "drafted", or a row without it (an older
+    // engine), "Drafted a report with AI".
     if entity == "report_builder_draft" && text(e, "action") == Some("create") {
-        let refused = e.pointer("/after_data/outcome").and_then(Value::as_str) == Some("refused");
-        return Some(if refused {
-            "@reports.audit.action.drafted_ai_refused"
-        } else {
-            "@reports.audit.action.drafted_ai"
-        });
+        return Some(
+            match e.pointer("/after_data/outcome").and_then(Value::as_str) {
+                Some("refused") => "@reports.audit.action.drafted_ai_refused",
+                Some("failed") => "@reports.audit.action.drafted_ai_failed",
+                _ => "@reports.audit.action.drafted_ai",
+            },
+        );
     }
     if !matches!(entity, "report_definition" | "report_definition_group") {
         return None;
@@ -315,6 +322,13 @@ fn record_label(e: &Value, entity: &str) -> String {
         .and_then(Value::as_str)
         .filter(|p| p.len() <= 20 && p.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'));
     if let ("report_builder_draft", Some(p)) = (entity, provider) {
+        // The service by its own name, not the engine's key (A10 QA-6).
+        let p = match p {
+            "anthropic" => "Anthropic",
+            "openai" => "OpenAI",
+            "ollama" => "Ollama",
+            other => other,
+        };
         return format!("@reports.audit.entity.report_builder_draft_by {p}");
     }
     match (entity, name) {
@@ -579,7 +593,7 @@ mod tests {
             (&t.rows[0].cells[2], &t.rows[0].cells[3]),
             (
                 &Cell::Text("@reports.audit.action.drafted_ai".into()),
-                &Cell::Text("@reports.audit.entity.report_builder_draft_by ollama".into())
+                &Cell::Text("@reports.audit.entity.report_builder_draft_by Ollama".into())
             )
         );
         // Q-A10k: the outcome names the action; it is never a field line.
@@ -598,6 +612,32 @@ mod tests {
             action("refused"),
             Cell::Text("@reports.audit.action.drafted_ai_refused".into())
         );
+        // A10 QA-6: the service didn't answer after the names were sent.
+        assert_eq!(
+            action("failed"),
+            Cell::Text("@reports.audit.action.drafted_ai_failed".into())
+        );
+        // ... and a failed row without a provider still reads in words.
+        let mut bare = v.clone();
+        bare["data"][0]["after_data"] = json!({"outcome": "failed"});
+        let t = audit_trail(&bare, &req(Source::AuditLog)).expect("table");
+        assert_eq!(
+            t.rows[0].cells[3],
+            Cell::Text("@reports.audit.entity.report_builder_draft".into())
+        );
+    }
+
+    /// A10 QA-6: the company's AI settings and consent read in plain words,
+    /// not as the engine's table names.
+    #[test]
+    fn ai_settings_rows_are_named_in_plain_words() {
+        for e in [
+            "company_ai_tasks",
+            "company_ai_consent_accepted",
+            "company_ai_consent_revoked",
+        ] {
+            assert_eq!(entity_label(e), format!("@reports.audit.entity.{e}"));
+        }
     }
 }
 
