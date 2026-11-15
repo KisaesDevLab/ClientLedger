@@ -115,7 +115,9 @@ fn a_grand(s: &str, w: &[(String, usize, usize)]) -> bool {
 #[must_use]
 pub fn states_a_number(s: &str) -> bool {
     let w = words(s);
-    w.iter().any(|(word, _, _)| NUMBER_WORDS.contains(&word.as_str())) || a_grand(s, &w)
+    w.iter()
+        .any(|(word, _, _)| NUMBER_WORDS.contains(&word.as_str()))
+        || a_grand(s, &w)
 }
 
 #[cfg(test)]

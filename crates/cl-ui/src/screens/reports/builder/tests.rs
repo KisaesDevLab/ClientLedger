@@ -2301,6 +2301,38 @@ fn a_number_word_heading_is_refused_unless_it_is_a_books_name() {
     assert!(s.ai.review.is_some(), "a books name passes as itself");
 }
 
+/// Q-A10j (owner 2026-11-15): a heading with a digit passes only as an
+/// exact books name; a name nothing matched is not a books name; a draft
+/// waits until every list of names is read.
+#[test]
+fn a_digit_heading_passes_only_as_a_books_name() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    // "Studio 54" is a candidate label from the books: it passes.
+    super::ai_draft::arrived(&mut s, worded_reply("Studio 54", Some("Studio 54")));
+    assert!(s.ai.review.is_some(), "an exact books name with a digit");
+    super::ai_draft::discard(&mut s);
+    // The same words, but only as a name nothing matched: refused.
+    let mut r = worded_reply("Top 10 vendors", Some("Top 10 vendors"));
+    r.unresolved[0].reason = "not_found".into();
+    r.unresolved[0].candidates.clear();
+    s.ai.message = None;
+    super::ai_draft::arrived(&mut s, r);
+    assert_eq!(s.ai.message, Some("builder.ai.unmapped"));
+    assert!(s.ai.review.is_none());
+    // Held while a list of names is unread, then judged.
+    s.ai.message = None;
+    s.lists = super::lists::Lists::default();
+    super::ai_draft::hold_for_test(&mut s, worded_reply("Rent 2026", None));
+    super::ai_draft::poll(&mut s);
+    assert!(s.ai.busy(), "held until the lists are read");
+    assert_eq!(s.ai.message, None);
+    frames(&ctx, &mut s);
+    assert_eq!(s.ai.message, Some("builder.ai.unmapped"));
+}
+
 /// A10 UI review S1: Esc in the box first puts back what it held, then
 /// closes the panel; with nothing typed it closes at once.
 #[test]
