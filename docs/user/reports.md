@@ -45,7 +45,8 @@ In **Advanced**, the report is a list of rows on the left, the selected row's se
 Instead of building it row by row, you can describe the report in your own words and let AI draft it: **Describe it** when starting a new report, or **Describe the report…** in the Report Builder toolbar. Type something like "fuel by month this year" or "what I spent with each vendor" and press **Draft** (**Ctrl+Enter**).
 
 - It uses the same AI switch as **Ask a question** (Preferences, AI, "Ask a question in Reports"). With it off, nothing is sent and the panel tells you how to turn it on.
-- **What is sent:** your description and the names in your books — account, customer, vendor, item and tag names. Never amounts or balances. With Ollama, nothing leaves your computer.
+- **What is sent:** your description, with any amounts and other numbers in it hidden, and the names in your books — account, customer, vendor, item and tag names. No amounts, balances or transactions. With Ollama, nothing leaves your computer.
+- A draft whose headings state a number (in figures or in words, such as "over five hundred") is not used: try again, or name the rows yourself.
 - **AI never produces amounts.** If your description mentions one ("bills over $500"), the draft leaves the amount out and tells you to add an Amount filter yourself. Every figure in the report comes from your books when it runs.
 - The draft fills the Report Builder as an **unsaved** report under a "Drafted by AI — check it" banner. If the report already had rows, you're asked before they're replaced. A name the AI couldn't match is marked on its row: pick the right one or **Remove** it. Until every name is settled the report doesn't run or save.
 - **Keep** makes the draft your report (still unsaved until you **Memorize** it); **Discard** puts back what was there before. To change a draft, edit it by hand or describe the report again.

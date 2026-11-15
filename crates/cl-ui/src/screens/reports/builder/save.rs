@@ -345,6 +345,13 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
                 s.save.memo_key = None;
             }
             s.ed.mark_saved(saved_of(sent, &row));
+            // A draft saved while under review was kept: the banner and
+            // Discard go (A10 review S3). Only when what was saved is what
+            // is on screen (a draft that came during the save stays under
+            // review).
+            if !s.ed.dirty() {
+                super::ai_draft::end_review(s);
+            }
             // Open report windows list it (QA-16).
             s.link.bus().publish(crate::data_bus::Change::Reports);
             // Memorized from Guided: its name is Guided's too, so a later

@@ -53,6 +53,10 @@ pub struct AiConfig {
     /// Provider for categorization.
     #[serde(default)]
     pub categorization_provider: Option<String>,
+    /// Provider for chat tasks (Ask a question, a report draft); the
+    /// engine falls back to the categorization provider without one.
+    #[serde(default)]
+    pub chat_provider: Option<String>,
     /// Model for categorization.
     #[serde(default)]
     pub categorization_model: Option<String>,

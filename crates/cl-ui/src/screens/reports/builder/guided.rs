@@ -167,6 +167,9 @@ fn toolbar(s: &mut BuilderScreen, ui: &mut Ui) {
         }
         if ui.button(t("builder.guided.blank_advanced")).clicked() {
             s.guided = None;
+            // A new blank report: a draft on its way or under review is let
+            // go, never applied to it.
+            s.ai.forget();
             s.ed = cl_model::report_def::editor::BuilderEditor::blank();
             s.preview.edited(&s.ed);
             s.pane = Pane::Outline;

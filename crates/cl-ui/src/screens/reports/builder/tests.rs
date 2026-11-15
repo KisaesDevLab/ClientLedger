@@ -2007,7 +2007,8 @@ fn an_unmatched_name_blocks_run_and_memorize_until_it_is_picked() {
             .collect();
     assert_eq!(open.len(), 1);
     assert!(!s.ed.can_run() && !s.ed.can_memorize());
-    assert!(s.ed.row_has_problem("supplies"), "the row is marked");
+    assert!(s.ed.row_has_problem("row_a"), "the row is marked");
+    assert_eq!(s.ed.name(), "Supplies by customer", "the draft names the report");
     // Memorize says why and opens nothing; Keep waits.
     super::save::open_memorize(&mut s, false);
     assert!(s.save.memorize.is_none());
@@ -2064,6 +2065,156 @@ fn rows_already_there_are_replaced_only_after_asking_and_discard_restores_them()
     super::ai_draft::discard(&mut s);
     assert_eq!(s.ed.definition(), &mine, "Discard puts my rows back");
     assert!(s.ai.review.is_none());
+}
+
+/// The draft that came (asked first when there were rows): Replace.
+fn replace_with_draft(s: &mut BuilderScreen) {
+    if let Some(reply) = s.ai.confirm.take() {
+        super::ai_draft::take(s, &reply);
+    }
+}
+
+/// A10 review S2: a second draft over one under review keeps what was
+/// there before the first; Discard puts that back.
+#[test]
+fn a_second_draft_keeps_the_first_before_for_discard() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    let mine = s.ed.definition().clone();
+    describe(&ctx, &mut s, "Supplies by customer");
+    replace_with_draft(&mut s);
+    assert!(s.ed.has_placeholders(), "draft A holds a name to pick");
+    describe(&ctx, &mut s, "Fuel by month");
+    replace_with_draft(&mut s);
+    assert!(s.ai.review.is_some() && !s.ed.has_placeholders());
+    super::ai_draft::discard(&mut s);
+    assert_eq!(s.ed.definition(), &mine, "the report from before draft A");
+    assert!(!s.ed.has_placeholders() && s.ai.review.is_none());
+}
+
+/// Picks the first candidate for the first name still open.
+fn pick_first_name(ctx: &egui::Context, s: &mut BuilderScreen) {
+    let def = s.ed.definition().clone();
+    let n = s.ai.review.as_ref().expect("review").draft.open(&def)[0].clone();
+    let (id, _) = n.candidates[0].clone();
+    super::ai_draft::answer(s, &n.token, &cl_model::report_def::draft::Answer::Pick(id));
+    frames(ctx, s);
+}
+
+/// A10 review S3 (b): after Keep, Ctrl+Z never brings back a name to pick
+/// with no names list.
+#[test]
+fn undo_after_keep_never_brings_back_a_name_to_pick() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Supplies by customer");
+    pick_first_name(&ctx, &mut s);
+    // During the review an undo brings the name back, with its list.
+    press(&mut s, Mods::CMD, Key::Letter('Z'));
+    assert!(s.ed.has_placeholders() && s.ai.review.is_some());
+    assert!(s.command(CommandId::new("builder.redo")));
+    assert!(!s.ed.has_placeholders());
+    super::ai_draft::keep(&mut s);
+    assert!(s.ai.review.is_none());
+    press(&mut s, Mods::CMD, Key::Letter('Z'));
+    frames(&ctx, &mut s);
+    assert!(
+        !s.ed.has_placeholders(),
+        "no placeholder comes back once the names list is gone"
+    );
+    assert!(s.ed.can_run() && s.ed.can_memorize());
+}
+
+/// A10 review S3 (a): Memorize during the review counts as Keep; Discard
+/// is not offered after it.
+#[test]
+fn memorize_during_the_review_keeps_the_draft() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Fuel by month this year");
+    assert!(s.ai.review.is_some());
+    memorize_as(&ctx, &mut s, "Fuel by month");
+    assert!(s.ed.saved().is_some());
+    assert!(s.ai.review.is_none(), "the banner went");
+    let saved = s.ed.definition().clone();
+    super::ai_draft::discard(&mut s);
+    assert_eq!(s.ed.definition(), &saved, "nothing to discard any more");
+    assert_eq!(s.state()["ai"]["drafted"], false);
+}
+
+/// A10 review Minor 3: a draft still on its way when another report takes
+/// the builder is dropped, never applied there.
+#[test]
+fn a_late_draft_is_not_applied_to_another_report() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    s.ai.describe.text = "Fuel by month".into();
+    super::ai_draft::send(&mut s);
+    assert!(s.ai.busy());
+    assert!(s.open_with(OpenPayload::BuilderEditor(Box::new(BuilderSeed::Blank))));
+    gross_profit(&mut s);
+    let mine = s.ed.definition().clone();
+    frames(&ctx, &mut s);
+    assert_eq!(s.ed.definition(), &mine);
+    assert!(s.ai.review.is_none() && s.ai.confirm.is_none() && !s.ai.busy());
+}
+
+/// A draft reply with one section captioned `caption`, and an ambiguous
+/// name `name` when given.
+fn worded_reply(
+    caption: &str,
+    name: Option<&str>,
+) -> cl_api::resources::reports::draft::DraftReply {
+    use cl_api::resources::reports::draft::{DraftCandidate, DraftKind, DraftReply, DraftUnresolved};
+    let acct = "11111111-1111-4111-8111-111111111111";
+    let ids = if name.is_some() { "$ref:0" } else { acct };
+    DraftReply {
+        definition: serde_json::json!({"schemaVersion": 1, "kind": "builder",
+            "dates": {"mode": "range"},
+            "columns": {"detailFields": [], "compare": [], "headers": {}},
+            "nodes": [{"type": "section", "id": "rowa", "caption": caption, "source": "gl",
+                "measure": "amount", "filters": [{"field": "contact", "op": "in", "ids": [ids]}],
+                "groupBy": [], "display": "summary", "defaultExpanded": false,
+                "showTotal": true, "hideZero": false}]}),
+        savable: name.is_none(),
+        unresolved: name
+            .map(|n| DraftUnresolved {
+                token: "$ref:0".into(),
+                kind: DraftKind::Contact,
+                name: Some(n.into()),
+                reason: "ambiguous".into(),
+                sites: vec![],
+                candidates: vec![DraftCandidate {
+                    id: acct.into(),
+                    label: n.into(),
+                }],
+            })
+            .into_iter()
+            .collect(),
+        notes: vec![],
+        reader: None,
+        provider: Some("demo".into()),
+    }
+}
+
+/// Q-A10l: a heading with a number word is refused unless it is exactly a
+/// books name.
+#[test]
+fn a_number_word_heading_is_refused_unless_it_is_a_books_name() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    super::ai_draft::arrived(&mut s, worded_reply("Bills over five hundred dollars", None));
+    assert_eq!(s.ai.message, Some("builder.ai.unmapped"));
+    assert!(s.ai.review.is_none() && s.ed.definition().nodes.is_empty());
+    super::ai_draft::arrived(
+        &mut s,
+        worded_reply("Two Rivers Supply", Some("Two Rivers Supply")),
+    );
+    assert!(s.ai.review.is_some(), "a books name passes as itself");
 }
 
 #[test]

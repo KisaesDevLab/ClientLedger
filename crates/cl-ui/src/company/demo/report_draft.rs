@@ -28,14 +28,37 @@ fn section(id: &str, caption: &str, filters: &Value, group_by: &Value) -> Value 
            "hideZero": true})
 }
 
-fn definition(node: &Value, periods: Option<&str>, preset: &str) -> Value {
+/// A draft's definition; `title` becomes the Report name.
+fn definition(title: &str, node: &Value, periods: Option<&str>, preset: &str) -> Value {
     let mut columns = json!({"detailFields": [], "compare": [], "headers": {}});
     if let Some(p) = periods {
         columns["periods"] = json!(p);
     }
-    json!({"schemaVersion": 1, "kind": "builder",
-           "dates": {"mode": "range", "preset": preset},
-           "columns": columns, "nodes": [node.clone()]})
+    let mut dates = json!({"mode": "range"});
+    if !preset.is_empty() {
+        dates["preset"] = json!(preset);
+    }
+    json!({"schemaVersion": 1, "kind": "builder", "title": title,
+           "dates": dates, "columns": columns, "nodes": [node.clone()]})
+}
+
+/// The words before a number that make it an amount filter ("over 500").
+const AMOUNT_WORDS: [&str; 8] = [
+    "over", "under", "above", "below", "more than", "less than", "at least", "at most",
+];
+
+/// What the engine notes about numbers in the description: an amount (a
+/// currency sign, or a comparison word with a digit) is left to the owner;
+/// any other number ("in 2026") just wasn't used.
+fn number_note(q: &str) -> Option<&'static str> {
+    let digit = cl_api::resources::reports::draft::has_digit(q);
+    if q.contains('$') || (digit && AMOUNT_WORDS.iter().any(|w| q.contains(w))) {
+        Some("amount_filter_left_out")
+    } else if digit {
+        Some("numbers_not_used")
+    } else {
+        None
+    }
 }
 
 fn refused(status: u16, code: &str, details: &Value) -> ApiError {
@@ -90,8 +113,8 @@ pub fn draft(d: &mut DemoState, req: &DraftRequest) -> Result<DraftReply, ApiErr
             return Err(unmapped());
         };
         json!({
-            "definition": definition(
-                &section("fuel", "Fuel",
+            "definition": definition("Fuel by month",
+                &section("row_a", "Fuel",
                         &json!([{"field": "account", "op": "in", "ids": [id]}]),
                         &json!([{"key": "account"}])),
                 Some("month"), year),
@@ -108,15 +131,15 @@ pub fn draft(d: &mut DemoState, req: &DraftRequest) -> Result<DraftReply, ApiErr
             .map(|(id, label)| json!({"id": id, "label": label}))
             .collect();
         json!({
-            "definition": definition(
-                &section("supplies", "Supplies",
+            "definition": definition("Supplies by customer",
+                &section("row_a", "Supplies",
                         &json!([{"field": "account", "op": "in", "ids": ["$ref:0"]}]),
                         &json!([{"key": "contact"}])),
                 None, year),
             "savable": false,
             "unresolved": [{"ref": "$ref:0", "kind": "account", "name": "Supplies",
                 "reason": "ambiguous",
-                "sites": [{"nodeId": "supplies", "path": "definition.nodes.0.filters.0.ids.0"}],
+                "sites": [{"nodeId": "row_a", "path": "definition.nodes.0.filters.0.ids.0"}],
                 "candidates": candidates}],
             "notes": [{"code": "pick_unresolved", "message": "Pick the account."}],
             "reader": "demo", "provider": "demo"
@@ -124,14 +147,13 @@ pub fn draft(d: &mut DemoState, req: &DraftRequest) -> Result<DraftReply, ApiErr
     } else if q.contains("vendor") {
         // The engine masks any amount before the model sees the words and
         // never puts it back: the draft has no amount filter, only a note.
-        let had_amount = q.bytes().any(|c| c.is_ascii_digit());
-        let mut notes = Vec::new();
-        if had_amount {
-            notes.push(json!({"code": "amount_filter_left_out", "message": "Add the amount filter yourself.", "nodeId": "spend"}));
-        }
+        let notes: Vec<Value> = number_note(&q)
+            .map(|code| json!({"code": code, "message": "x", "nodeId": "row_a"}))
+            .into_iter()
+            .collect();
         json!({
-            "definition": definition(
-                &section("spend", "Spending by vendor",
+            "definition": definition("Spending by vendor",
+                &section("row_a", "Spending by vendor",
                         &json!([{"field": "account_type", "op": "in", "values": ["expense"]}]),
                         &json!([{"key": "contact"}])),
                 None, year),
@@ -177,6 +199,17 @@ mod tests {
         );
         // The amount is nowhere in the draft.
         assert!(!v.definition.to_string().contains("500"));
+        // Each draft names the report; node ids are the engine's shape.
+        for r in [&fuel, &sup, &v] {
+            assert!(r.definition["title"].as_str().is_some_and(|t| !t.is_empty()));
+            assert_eq!(r.definition["nodes"][0]["id"], "row_a");
+        }
+        // A number that isn't an amount is only "not used" (as the engine).
+        let y = draft(&mut d, &req("Vendors in 2026")).expect("vendor");
+        assert_eq!(
+            y.notes.first().map(|n| n.code),
+            Some(cl_api::resources::reports::draft::NoteCode::NumbersNotUsed)
+        );
     }
 
     #[test]

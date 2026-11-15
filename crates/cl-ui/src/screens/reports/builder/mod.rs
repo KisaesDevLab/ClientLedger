@@ -482,9 +482,9 @@ impl BuilderScreen {
         self.guided = None;
         self.status = None;
         self.band.custom = None;
-        // Another report in place: a draft under review is let go.
-        self.ai.review = None;
-        self.ai.confirm = None;
+        // Another report in place: a draft under review is let go, and one
+        // still on its way is dropped, never applied here.
+        self.ai.forget();
         match seed {
             BuilderSeed::Guided => {
                 self.guided = Some(GuidedState::new());
@@ -1021,6 +1021,7 @@ impl BuilderScreen {
             "layout": self.layout.name(),
             "outline_focused": self.outline_focused,
             "dirty": self.ed.dirty(),
+            "has_name": !self.ed.name().trim().is_empty(),
             "can_run": self.ed.can_run(),
             "can_save_changes": self.ed.can_save_changes(),
             "can_memorize": self.ed.can_memorize(),

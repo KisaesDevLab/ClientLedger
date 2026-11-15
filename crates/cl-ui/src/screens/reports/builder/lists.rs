@@ -222,6 +222,11 @@ pub(crate) fn ensure(s: &mut BuilderScreen, w: Which) {
 /// The caption of `id` in `w`, else a short placeholder (an id never
 /// shows, plan §4).
 pub(crate) fn caption_of(s: &BuilderScreen, w: Which, id: &str) -> String {
+    // A name an AI draft left for the owner to pick (A10), not one gone
+    // from the company.
+    if cl_model::report_def::draft::is_placeholder(id) {
+        return crate::i18n::t("builder.filter.pick_name");
+    }
     s.lists
         .get(w)
         .and_then(|l| l.iter().find(|(x, _)| x == id))

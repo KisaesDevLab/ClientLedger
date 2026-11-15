@@ -719,6 +719,15 @@ impl BuilderEditor {
         !self.redo.is_empty()
     }
 
+    /// Forgets every undo and redo step: nothing before this point comes
+    /// back. An AI draft's review ends here (Keep, or a Memorize during
+    /// it), so an undo never brings back a name still to pick once the
+    /// names list is gone (A10).
+    pub fn fence_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
     /// Undoes the last change. Returns false when there is none.
     pub fn undo(&mut self) -> bool {
         let Some(s) = self.undo.pop() else {

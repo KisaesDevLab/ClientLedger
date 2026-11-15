@@ -5,8 +5,11 @@
 //!
 //! - Started from "Describe it" beside Guided's ready-made and blank
 //!   choices, or "Describe the report…" in the Advanced toolbar (Q-A10c).
-//! - Only the owner's words go out; the engine sends the model names from
-//!   the books, never amounts, and masks any amount typed (Q-A10e). With AI
+//! - The owner's words go out; the engine sends the model those words with
+//!   amounts and other numbers hidden, and names from the books, never
+//!   amounts, balances or transactions (Q-A10e, Q-A10l). A draft whose
+//!   heading states a number in words is refused here too, unless the
+//!   heading is exactly a books name. With AI
 //!   off for reports (the Ask a question opt-in, Q-A10b) or an engine
 //!   without `report-builder-ai-v1`, nothing is sent and the panel says how
 //!   to turn it on.
@@ -22,6 +25,8 @@
 //!   owner's.
 //!
 //! Nothing here logs the description, a name or the draft.
+
+use std::collections::BTreeSet;
 
 use cl_api::resources::reports::draft::{
     DraftKind, DraftRefusal, DraftReply, DraftRequest, NoteCode, draft_refusal,
@@ -72,6 +77,9 @@ pub(crate) struct AiDraft {
     gate: Option<Gate>,
     gate_job: Option<Job<Gate>>,
     job: Option<Job<DraftReply>>,
+    /// A draft that came while the books' names are still being read: it
+    /// is checked for number words once they are (Q-A10l).
+    arrived: Option<Box<DraftReply>>,
     /// A draft that came while the builder had rows: Replace asks first.
     pub(crate) confirm: Option<Box<DraftReply>>,
     /// A refusal or a plain message (an i18n key).
@@ -85,7 +93,19 @@ pub(crate) struct AiDraft {
 impl AiDraft {
     /// True while the switches or the draft are on their way.
     pub(crate) fn busy(&self) -> bool {
-        self.gate_job.is_some() || self.job.is_some()
+        self.gate_job.is_some() || self.job.is_some() || self.arrived.is_some()
+    }
+
+    /// Drops any request on its way and any draft not yet taken: the
+    /// builder now shows another report (a late answer is never applied
+    /// to it). The review goes too.
+    pub(crate) fn forget(&mut self) {
+        self.job = None;
+        self.gate_job = None;
+        self.arrived = None;
+        self.confirm = None;
+        self.review = None;
+        self.describe.phase = Phase::Idle;
     }
 
     /// For the control channel: codes and counts only.
@@ -118,6 +138,65 @@ pub(crate) fn open_panel(s: &mut BuilderScreen) {
     s.ai.focus_box = true;
     s.ai.message = None;
     s.ai.error = None;
+    // The books' names, for the number-word check of a draft (a heading
+    // that is exactly a books name passes, Q-A10l) and the name picker.
+    for w in [
+        Which::Accounts,
+        Which::Contacts,
+        Which::Items,
+        Which::Tags,
+        Which::TagGroups,
+    ] {
+        lists::ensure(s, w);
+    }
+}
+
+/// The names from the books the desktop knows: the lists read, and the
+/// names and candidate labels the engine sent with the draft. An account
+/// is known both as "6100 · Rent" and as "Rent".
+fn known_names(s: &BuilderScreen, reply: &DraftReply) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let lists = [
+        Which::Accounts,
+        Which::Contacts,
+        Which::Items,
+        Which::Tags,
+        Which::TagGroups,
+    ];
+    let listed = lists
+        .into_iter()
+        .filter_map(|w| s.lists.get(w))
+        .flatten()
+        .map(|(_, n)| n.as_str());
+    let sent = reply.unresolved.iter().flat_map(|u| {
+        u.name
+            .as_deref()
+            .into_iter()
+            .chain(u.candidates.iter().map(|c| c.label.as_str()))
+    });
+    for n in listed.chain(sent) {
+        let n = n.trim();
+        out.insert(n.to_string());
+        if let Some((_, plain)) = n.split_once(" \u{b7} ") {
+            out.insert(plain.trim().to_string());
+        }
+    }
+    out
+}
+
+/// A draft that came: refused when a heading states a number in words
+/// (Q-A10l), else shown (asking first when the builder has rows).
+pub(crate) fn arrived(s: &mut BuilderScreen, reply: DraftReply) {
+    s.ai.describe.phase = Phase::Idle;
+    let states_number = serde_json::from_value::<BuilderDefinition>(reply.definition.clone())
+        .is_ok_and(|d| model::states_a_number(&d, &known_names(s, &reply)));
+    if states_number {
+        s.ai.message = Some("builder.ai.unmapped");
+    } else if s.ed.definition().nodes.is_empty() {
+        take(s, &reply);
+    } else {
+        s.ai.confirm = Some(Box::new(reply));
+    }
 }
 
 /// The request for the owner's words: the builder's preset keys only.
@@ -165,7 +244,7 @@ pub(crate) fn send(s: &mut BuilderScreen) {
                         s.ai_config()
                             .await
                             .ok()
-                            .and_then(|c| c.fallback_chain.first().cloned())
+                            .and_then(|c| drafting_provider(&c))
                     } else {
                         None
                     };
@@ -203,16 +282,19 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
         }
     }
     if let Some(r) = engine::poll(&mut s.ai.job) {
-        s.ai.describe.phase = Phase::Idle;
         match r {
-            Ok(reply) => {
-                if s.ed.definition().nodes.is_empty() {
-                    take(s, &reply);
-                } else {
-                    s.ai.confirm = Some(Box::new(reply));
-                }
+            Ok(reply) => s.ai.arrived = Some(Box::new(reply)),
+            Err(e) => {
+                s.ai.describe.phase = Phase::Idle;
+                refused(s, e);
             }
-            Err(e) => refused(s, e),
+        }
+    }
+    // Held until the books' names are read (they are asked for when the
+    // panel opens).
+    if s.ai.arrived.is_some() && !s.lists.busy() {
+        if let Some(reply) = s.ai.arrived.take() {
+            arrived(s, *reply);
         }
     }
 }
@@ -231,7 +313,9 @@ fn refused(s: &mut BuilderScreen, e: ApiError) {
             Some("builder.ai.demo_only")
         }
         Some(DraftRefusal::Unmapped { .. }) => Some("builder.ai.unmapped"),
-        Some(DraftRefusal::Unavailable) => Some("builder.ai.unavailable"),
+        Some(DraftRefusal::Unavailable) => Some(unavailable_key(
+            s.ai.gate.as_ref().and_then(|g| g.1.as_deref()),
+        )),
         Some(DraftRefusal::Invalid) => Some("builder.ai.invalid"),
         None if matches!(e, ApiError::ReportShape { .. }) => Some("builder.ai.unmapped"),
         None if matches!(e, ApiError::Local(cl_api::LocalValidation::Unsupported)) => {
@@ -242,6 +326,30 @@ fn refused(s: &mut BuilderScreen, e: ApiError) {
             None
         }
     };
+}
+
+/// "Can't be reached", worded for where the provider is: the internet is
+/// named only for a cloud service; Ollama is on this computer (A10 review
+/// Minor 8); an unknown one names neither.
+pub(crate) fn unavailable_key(provider: Option<&str>) -> &'static str {
+    match provider {
+        Some("anthropic" | "openai") => "builder.ai.unavailable_cloud",
+        Some("ollama") => "builder.ai.unavailable_local",
+        _ => "builder.ai.unavailable",
+    }
+}
+
+/// The provider the engine drafts with, when the admin settings say:
+/// its chat provider, else its categorization provider (the engine's
+/// `chatProvider || categorizationProvider`). None otherwise: the panel
+/// then names no service rather than guess.
+pub(crate) fn drafting_provider(c: &cl_api::resources::ai::AiConfig) -> Option<String> {
+    c.chat_provider
+        .as_deref()
+        .or(c.categorization_provider.as_deref())
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
 }
 
 const fn ref_kind(k: DraftKind) -> RefKind {
@@ -308,11 +416,17 @@ pub(crate) fn take(s: &mut BuilderScreen, reply: &DraftReply) {
     };
     s.commit_pending();
     let draft = draft_of(reply);
-    let before = Box::new(Before {
-        ed: s.ed.clone(),
-        guided: s.guided.take(),
-        custom: s.band.custom.take(),
-    });
+    // A draft over a draft still under review keeps what was there before
+    // the first one: Discard always puts that back (A10 review S2,
+    // Q-A10d), never the earlier draft.
+    let before = match s.ai.review.take() {
+        Some(r) => r.before,
+        None => Box::new(Before {
+            ed: s.ed.clone(),
+            guided: s.guided.take(),
+            custom: s.band.custom.take(),
+        }),
+    };
     let name = def.title.clone().unwrap_or_default();
     let mut ed = BuilderEditor::new(def, &name, Origin::Drafted, None);
     // The first row with a name to pick is selected; else the first row.
@@ -343,8 +457,20 @@ pub(crate) fn keep(s: &mut BuilderScreen) {
     if s.ed.has_placeholders() {
         return;
     }
-    s.ai.review = None;
+    end_review(s);
     s.status = Some(t("builder.ai.kept"));
+}
+
+/// The review ends (Keep, or a Memorize or Save changes during it): the
+/// banner and Discard go, and so do the undo steps taken while names were
+/// picked, so an undo never brings back a name to pick with no list to
+/// pick it from (A10 review S3). True when a review was on.
+pub(crate) fn end_review(s: &mut BuilderScreen) -> bool {
+    if s.ai.review.take().is_none() {
+        return false;
+    }
+    s.ed.fence_history();
+    true
 }
 
 /// Discard: what was there before comes back.

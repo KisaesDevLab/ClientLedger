@@ -21,7 +21,8 @@ steps:
   # --- Entry point 1: Describe it, beside the ready-made and blank choices ---
   - click: {role: button, label: Describe it}
   - assert_state: {key: screen.ai.panel, equals: true}
-  - assert_exists: {label_contains: "Never amounts."}
+  - assert_exists: {label_contains: "your description, with any amounts and other numbers in it hidden"}
+  - assert_exists: {label_contains: "No amounts, balances or transactions are sent."}
   - assert_focused: {label: Describe the report you want, index: 1}
   - type: {text: "Fuel by month this year"}
   - key: Ctrl+Enter
@@ -31,6 +32,7 @@ steps:
   - assert_state: {key: screen.ai.unresolved, equals: 0}
   - assert_state: {key: screen.dirty, equals: true}
   - assert_state: {key: screen.saved, equals: null}
+  - assert_state: {key: screen.has_name, equals: true}
   - assert_exists: {label: "Drafted by AI — check it"}
   - screenshot: draft-clean
   - click: {role: button, label: Keep}
@@ -82,6 +84,8 @@ steps:
   - assert_state: {key: screen.can_memorize, equals: true}
   - click: {role: button, label: Keep}
   - assert_state: {key: screen.ai.drafted, equals: false}
+  # After Keep an undo never brings back a name to pick (A10 review S3).
+  - assert_state: {key: screen.can_undo, equals: false}
   - key: Ctrl+M
   - assert_state: {key: screen.save, equals: memorize}
   - key: Ctrl+A
