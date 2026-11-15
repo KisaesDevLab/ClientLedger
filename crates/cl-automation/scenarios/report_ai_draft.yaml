@@ -1,0 +1,95 @@
+# Describe the report (ADD-03 A10, Q-A10c/d/e/h) against `clientledger
+# --demo`: the demo answers fixed descriptions with prepared drafts, no AI.
+# "Describe it" from Guided drafts Fuel by month (clean): it opens in
+# Advanced, unsaved, under the "Drafted by AI" banner; Keep. "Describe the
+# report…" from the toolbar: a vendor draft with an amount asks before
+# replacing the rows, leaves the amount out with a note, and Discard puts
+# the fuel report back. Supplies matches two accounts: Memorize is off until
+# one is picked, then Keep and Memorize (Ctrl+M). Other words are "not in
+# the demo". Synthetic.
+name: report_ai_draft
+description: Report Builder AI draft - both entry points, three prepared drafts, replace prompt, amount note, Discard, resolve a name, Keep, Memorize.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 800}
+  - click: {role: button, label: "New report…"}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.screen, equals: report_builder}
+  - assert_state: {key: screen.mode, equals: guided}
+  # --- Entry point 1: Describe it, beside the ready-made and blank choices ---
+  - click: {role: button, label: Describe it}
+  - assert_state: {key: screen.ai.panel, equals: true}
+  - assert_exists: {label_contains: "Never amounts."}
+  - assert_focused: {label: Describe the report you want, index: 1}
+  - type: {text: "Fuel by month this year"}
+  - key: Ctrl+Enter
+  - wait: {ms: 400}
+  - assert_state: {key: screen.mode, equals: advanced}
+  - assert_state: {key: screen.ai.drafted, equals: true}
+  - assert_state: {key: screen.ai.unresolved, equals: 0}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.saved, equals: null}
+  - assert_exists: {label: "Drafted by AI — check it"}
+  - screenshot: draft-clean
+  - click: {role: button, label: Keep}
+  - assert_state: {key: screen.ai.drafted, equals: false}
+  # --- Entry point 2: the toolbar; an amount is left to the owner ----------
+  - click: {role: button, label: "Describe the report…"}
+  - assert_state: {key: screen.ai.panel, equals: true}
+  - click: {label: Describe the report you want, index: 1}
+  - key: Ctrl+A
+  - type: {text: "Vendors I paid over $500 this year"}
+  - key: Ctrl+Enter
+  - wait: {ms: 400}
+  - assert_state: {key: screen.ai.confirm_replace, equals: true}
+  - screenshot: draft-replace-prompt
+  - click: {role: button, label: Replace with the draft}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.ai.drafted, equals: true}
+  - assert_state: {key: screen.ai.notes.0, equals: amount_filter_left_out_row}
+  - assert_exists: {label_contains: "add an Amount filter"}
+  - screenshot: draft-amount-note
+  - click: {role: button, label: Discard}
+  - assert_state: {key: screen.ai.drafted, equals: false}
+  - assert_state: {key: screen.rows, equals: 1}
+  # --- Other words: not in the demo -----------------------------------------
+  - click: {role: button, label: "Describe the report…"}
+  - click: {label: Describe the report you want, index: 1}
+  - key: Ctrl+A
+  - type: {text: "Profit by planet"}
+  - key: Ctrl+Enter
+  - wait: {ms: 300}
+  - assert_state: {key: screen.ai.message, equals: demo_only}
+  # --- An ambiguous name: pick it, Keep, Memorize ---------------------------
+  - click: {label: Describe the report you want, index: 1}
+  - key: Ctrl+A
+  - type: {text: "Supplies by customer"}
+  - key: Ctrl+Enter
+  - wait: {ms: 300}
+  - click: {role: button, label: Replace with the draft}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.ai.unresolved, equals: 1}
+  - assert_state: {key: screen.can_memorize, equals: false}
+  - assert_state: {key: screen.can_run, equals: false}
+  - screenshot: draft-unresolved
+  - click: {role: combo_box, label: Use}
+  - wait: {ms: 200}
+  - click: {label_contains: "Office Supplies"}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.ai.unresolved, equals: 0}
+  - assert_state: {key: screen.can_memorize, equals: true}
+  - click: {role: button, label: Keep}
+  - assert_state: {key: screen.ai.drafted, equals: false}
+  - key: Ctrl+M
+  - assert_state: {key: screen.save, equals: memorize}
+  - key: Ctrl+A
+  - type: {text: "Supplies drafted {theme}"}
+  - key: Enter
+  - wait: {ms: 300}
+  - assert_state: {key: screen.save, equals: idle}
+  - assert_state: {key: screen.dirty, equals: false}
+  - screenshot: draft-memorized
+  - command: file.close_window
+  - wait: {ms: 300}

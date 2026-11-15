@@ -1218,6 +1218,10 @@ impl Screen for BuilderScreen {
                 self.ed.unfold_or_child();
                 self.focus_to = Some(Pane::Outline);
             }
+            // Ctrl+Enter in the describe panel drafts (A10).
+            "builder.refresh_preview" if self.ai.open && self.ai.describe.can_send() => {
+                ai_draft::send(self);
+            }
             "builder.refresh_preview" => {
                 self.commit_pending();
                 self.preview.run_now();
