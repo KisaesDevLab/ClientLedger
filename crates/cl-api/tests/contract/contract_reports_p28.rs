@@ -157,7 +157,7 @@ pub fn ask_off_then_ollama(h: &Harness) {
     let s = &h.s1;
     let stub = OllamaStub::shared(h);
     // The model would answer, but with AI off it is never asked.
-    stub.serve_chat_first(
+    let _reply = stub.serve_chat_first(
         h,
         r#"{"reportKey":"profit_loss","datePreset":"last_month","from":null,"to":null,"asOf":null,"basis":"cash","columns":null,"extras":[],"filters":{"accountNames":[],"contactNames":[],"tagNames":[]}}"#,
     );

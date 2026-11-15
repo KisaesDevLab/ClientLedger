@@ -65,7 +65,7 @@ pub fn draft_off_then_ollama(h: &Harness) {
                   "filters": [{"field": "account", "op": "in", "names": [fuel, "Nosuchaccountname"]}],
                   "groupBy": [{"key": "account"}], "amountCondition": true}]
     });
-    stub.serve_chat_first(h, &answer.to_string());
+    let _reply = stub.serve_chat_first(h, &answer.to_string());
     let before = stub.chat_bodies(h).len();
     let off = h
         .run(s.draft_report(&req("Fuel by month over $500")))
@@ -115,7 +115,7 @@ pub fn draft_off_then_ollama(h: &Harness) {
         key(),
     ))
     .expect("AI off");
-    let d = drafted.unwrap_or_else(|e| panic!("draft through Ollama: {e}"));
+    let d = drafted.unwrap_or_else(|e| panic!("draft through Ollama: {e} ({e:?})"));
     let text = d.definition.to_string();
     assert!(
         text.contains(&acct.id.to_string()),
