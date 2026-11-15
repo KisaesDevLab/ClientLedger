@@ -102,7 +102,9 @@ pub fn draft_off_then_ollama(h: &Harness) {
         ..AiTaskToggles::default()
     };
     h.run(s.set_ai_tasks(&toggles(true), key())).expect("on");
-    let drafted = h.run(s.draft_report(&req(&format!("{fuel} by month over $500"))));
+    // A distinctive amount: the harness's names carry hex suffixes, so a
+    // short figure could turn up in a books name.
+    let drafted = h.run(s.draft_report(&req(&format!("{fuel} by month over $98,765.43"))));
     // Off again before asserting, so a failure leaves the product default.
     h.run(s.set_ai_tasks(&toggles(false), key())).expect("off");
     h.run(s.update_ai_config(
@@ -119,7 +121,10 @@ pub fn draft_off_then_ollama(h: &Harness) {
         text.contains(&acct.id.to_string()),
         "the books name became its id"
     );
-    assert!(!text.contains("500"), "the amount is nowhere in the draft");
+    assert!(
+        !text.contains("98765") && !text.contains("98,765"),
+        "the amount is nowhere in the draft"
+    );
     assert!(!d.savable);
     assert_eq!(d.unresolved.len(), 1, "{:?}", d.unresolved);
     assert!(text.contains(&d.unresolved[0].token));
@@ -134,13 +139,25 @@ pub fn draft_off_then_ollama(h: &Harness) {
         stub.chat_bodies(h).len() > before,
         "the loopback model was asked"
     );
-    // What the model was sent carries the description's amount masked (the
-    // prompt's own example says "over $500", so the typed words are looked
-    // for).
-    let sent = stub.chat_bodies(h)[before..].concat();
+    // Nothing the model was sent carries an amount (A10 review S4): not the
+    // owner's, which is masked, and not one of the engine's own (its prompt
+    // example "over $500" becomes "over [AMOUNT]" in the engine fix pass;
+    // an engine exe built before that fix fails the "$" check below).
+    let bodies = stub.chat_bodies(h)[before..].to_vec();
+    for b in &bodies {
+        assert!(
+            !b.contains("98765") && !b.contains("98,765"),
+            "the description's amount was masked"
+        );
+        assert!(
+            !b.as_bytes()
+                .windows(2)
+                .any(|w| w[0] == b'$' && w[1].is_ascii_digit()),
+            "no dollar amount in the prompt itself"
+        );
+    }
     assert!(
-        !sent.contains("by month over $500"),
+        bodies.iter().any(|b| b.contains("[AMOUNT]")),
         "the amount was masked"
     );
-    assert!(sent.contains("[AMOUNT]"), "the amount was masked");
 }
