@@ -378,6 +378,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // A09 QA-4: memorized reports and report files.
     ("reports.audit.action.exported", "Exported"),
     ("reports.audit.action.drafted_ai", "Drafted a report with AI"),
+    ("reports.audit.action.drafted_ai_refused", "Asked AI to draft a report (not used)"),
     ("reports.audit.entity.report_builder_draft", "Report draft"),
     ("reports.audit.entity.report_builder_draft_by", "Report draft ({name})"),
     ("reports.audit.action.imported", "Imported"),

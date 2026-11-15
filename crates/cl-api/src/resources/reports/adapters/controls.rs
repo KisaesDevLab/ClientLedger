@@ -274,9 +274,17 @@ pub fn entity_label(e: &str) -> String {
 /// 'clreport'`, and a save from a file as `create` / `update` with
 /// `after.origin = 'import'`.
 fn report_file_action(e: &Value, entity: &str) -> Option<&'static str> {
-    // A10 (Q-A10i): one row per AI draft, "Drafted a report with AI".
+    // A10 (Q-A10i, Q-A10k): one row per AI draft. `after.outcome` says
+    // whether it was used: "refused" reads "Asked AI to draft a report (not
+    // used)"; "drafted", or a row without it (an older engine), "Drafted a
+    // report with AI".
     if entity == "report_builder_draft" && text(e, "action") == Some("create") {
-        return Some("@reports.audit.action.drafted_ai");
+        let refused = e.pointer("/after_data/outcome").and_then(Value::as_str) == Some("refused");
+        return Some(if refused {
+            "@reports.audit.action.drafted_ai_refused"
+        } else {
+            "@reports.audit.action.drafted_ai"
+        });
     }
     if !matches!(entity, "report_definition" | "report_definition_group") {
         return None;
@@ -573,6 +581,22 @@ mod tests {
                 &Cell::Text("@reports.audit.action.drafted_ai".into()),
                 &Cell::Text("@reports.audit.entity.report_builder_draft_by ollama".into())
             )
+        );
+        // Q-A10k: the outcome names the action; it is never a field line.
+        let action = |outcome: &str| {
+            let mut v = v.clone();
+            v["data"][0]["after_data"]["outcome"] = json!(outcome);
+            let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+            assert_eq!(t.rows.len(), 1, "a heading only");
+            t.rows[0].cells[2].clone()
+        };
+        assert_eq!(
+            action("drafted"),
+            Cell::Text("@reports.audit.action.drafted_ai".into())
+        );
+        assert_eq!(
+            action("refused"),
+            Cell::Text("@reports.audit.action.drafted_ai_refused".into())
         );
     }
 }
