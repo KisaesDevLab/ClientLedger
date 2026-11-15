@@ -2340,6 +2340,15 @@ fn esc_in_the_describe_box_reverts_then_closes() {
     frames(&ctx, &mut s);
     frame_with(&ctx, &mut s, 52.0, esc());
     assert!(!s.ai.open);
+    // While drafting the box is off and nothing has the keyboard: Esc
+    // closes the panel and drops the request.
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    s.ai.describe.phase = cl_model::report_def::draft::Phase::Drafting;
+    frames(&ctx, &mut s);
+    frame_with(&ctx, &mut s, 53.0, esc());
+    assert!(!s.ai.open);
+    assert_eq!(s.state()["ai"]["phase"], "idle");
 }
 
 /// A10 UI review S2 and S5: "Some names need you" and the empty preview
