@@ -42,24 +42,113 @@ fn definition(title: &str, node: &Value, periods: Option<&str>, preset: &str) ->
            "dates": dates, "columns": columns, "nodes": [node.clone()]})
 }
 
-/// The words before a number that make it an amount filter ("over 500").
-const AMOUNT_WORDS: [&str; 8] = [
+/// Words right before a number that make it an amount or a limit ("over
+/// 500", "costing 40"): the engine's `COMPARISON` list (`draft-numbers.ts`).
+const AMOUNT_BEFORE: [&str; 51] = [
     "over",
     "under",
     "above",
     "below",
     "more than",
     "less than",
+    "fewer than",
     "at least",
     "at most",
+    "greater than",
+    "exceeding",
+    "exceeds",
+    "exceed",
+    "bigger than",
+    "larger than",
+    "smaller than",
+    "higher than",
+    "lower than",
+    "minimum of",
+    "minimum",
+    "maximum of",
+    "maximum",
+    "min",
+    "max",
+    "up to",
+    "between",
+    "of",
+    "totalling",
+    "totaling",
+    "totals",
+    "total",
+    "total of",
+    "worth",
+    "costing",
+    "cost",
+    "costs",
+    "equal to",
+    "equals",
+    "equal",
+    "amount",
+    "amounts",
+    "amounting to",
+    "limit",
+    "limit of",
+    "threshold",
+    "threshold of",
+    "value",
+    "value of",
+    "balance",
+    "balance of",
+    "sum of",
 ];
 
-/// What the engine notes about numbers in the description: an amount (a
-/// currency sign, or a comparison word with a digit) is left to the owner;
-/// any other number ("in 2026") just wasn't used.
+/// Words right after a number that make it an amount ("500 dollars", "5k",
+/// "500 or more"): the engine's amount units and `AMOUNT_AFTER`.
+const AMOUNT_AFTER: [&str; 18] = [
+    "dollars", "dollar", "bucks", "buck", "grand", "cents", "cent", "usd", "k", "m", "mm", "bn",
+    "+", "plus", "or more", "or less", "and up", "and over",
+];
+
+/// True when `rest` starts with `w` as a whole word (or sign).
+fn starts_word(rest: &str, w: &str) -> bool {
+    rest.strip_prefix(w).is_some_and(|after| {
+        !w.chars().all(char::is_alphanumeric) || !after.starts_with(char::is_alphanumeric)
+    })
+}
+
+/// What the engine notes about numbers in the description (its
+/// `draftNotes`, A10 review Minor 4): a number that reads as an amount or a
+/// limit (a currency sign before it, a comparison word right before it, an
+/// amount unit or "or more" right after it) is left to the owner; any other
+/// number ("Vendors in 2026") just wasn't used. Digits only: the demo
+/// doesn't read numbers in words.
 fn number_note(q: &str) -> Option<&'static str> {
-    let digit = cl_api::resources::reports::draft::has_digit(q);
-    if q.contains('$') || (digit && AMOUNT_WORDS.iter().any(|w| q.contains(w))) {
+    let q = q.to_lowercase();
+    let mut digit = false;
+    let mut amount = false;
+    let mut chars = q.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if !c.is_numeric() {
+            continue;
+        }
+        digit = true;
+        let mut end = i + c.len_utf8();
+        while let Some(&(j, n)) = chars.peek() {
+            if n.is_numeric() || n == ',' || n == '.' {
+                end = j + n.len_utf8();
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let before = q[..i].trim_end();
+        let after = q[end..].trim_start();
+        let word_before = AMOUNT_BEFORE.iter().any(|w| {
+            before
+                .strip_suffix(w)
+                .is_some_and(|b| !b.ends_with(char::is_alphanumeric))
+        });
+        amount |= before.ends_with(['$', '\u{20ac}', '\u{a3}', '<', '>', '='])
+            || word_before
+            || AMOUNT_AFTER.iter().any(|w| starts_word(after, w));
+    }
+    if amount {
         Some("amount_filter_left_out")
     } else if digit {
         Some("numbers_not_used")
@@ -221,6 +310,31 @@ mod tests {
             y.notes.first().map(|n| n.code),
             Some(cl_api::resources::reports::draft::NoteCode::NumbersNotUsed)
         );
+    }
+
+    /// A10 review Minor 4: the engine's rule for which note a number gets.
+    #[test]
+    fn the_number_note_follows_the_engine_s_rule() {
+        for q in [
+            "Vendors I paid over $500",
+            "Vendors over 500",
+            "Bills of at least 1,000",
+            "Vendors 500 dollars",
+            "Vendors 5k",
+            "Vendors 500 or more",
+            "Bills costing 40",
+        ] {
+            assert_eq!(number_note(q), Some("amount_filter_left_out"), "{q}");
+        }
+        for q in [
+            "Vendors in 2026",
+            "Vendors over the year 2026",
+            "Top 10 vendors",
+            "Vendors since 2025",
+        ] {
+            assert_eq!(number_note(q), Some("numbers_not_used"), "{q}");
+        }
+        assert_eq!(number_note("Vendors by month"), None);
     }
 
     #[test]
