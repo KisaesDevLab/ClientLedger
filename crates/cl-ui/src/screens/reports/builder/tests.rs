@@ -1936,3 +1936,146 @@ fn export_says_it_writes_the_memorized_version() {
     assert_eq!(export_note(true, false), None);
     assert!(crate::i18n::has("report_file.export.memorized_version"));
 }
+
+// ---- A10: Describe the report (Q-A10b–i) ----
+
+/// Types `text` and presses Draft; the demo answers at once.
+fn describe(ctx: &egui::Context, s: &mut BuilderScreen, text: &str) {
+    super::ai_draft::open_panel(s);
+    s.ai.describe.text = text.into();
+    super::ai_draft::send(s);
+    frames(ctx, s);
+}
+
+/// A digit in the draft's definition other than the structure's: its
+/// schema version, ids and placeholders (non-negotiable 4).
+fn stray_digits(def: &cl_model::report_def::BuilderDefinition) -> Vec<String> {
+    fn walk(v: &serde_json::Value, key: &str, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Number(_) if key != "schemaVersion" && key != "sign" => {
+                out.push(v.to_string());
+            }
+            serde_json::Value::String(s)
+                if s.bytes().any(|c| c.is_ascii_digit())
+                    && s.len() != 36
+                    && !cl_model::report_def::draft::is_placeholder(s) =>
+            {
+                out.push(s.clone());
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, key, out)),
+            serde_json::Value::Object(m) => m.iter().for_each(|(k, x)| walk(x, k, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&serde_json::to_value(def).expect("json"), "", &mut out);
+    out
+}
+
+#[test]
+fn a_draft_fills_the_builder_unsaved_and_keep_ends_the_review() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Guided);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Fuel by month this year");
+    assert!(s.guided.is_none(), "the draft opens in Advanced");
+    assert_eq!(s.ed.origin(), &Origin::Drafted);
+    assert!(s.ed.saved().is_none() && s.ed.dirty(), "unsaved");
+    assert!(s.ai.review.is_some(), "the banner shows");
+    assert!(s.ed.can_run() && s.ed.can_memorize());
+    assert_eq!(stray_digits(s.ed.definition()), Vec::<String>::new());
+    super::ai_draft::keep(&mut s);
+    assert!(s.ai.review.is_none());
+    // Nothing was memorized: that is the owner's Memorize.
+    memorize_as(&ctx, &mut s, "Fuel by month");
+    assert!(s.ed.saved().is_some());
+}
+
+#[test]
+fn an_unmatched_name_blocks_run_and_memorize_until_it_is_picked() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Supplies by customer");
+    let def = s.ed.definition().clone();
+    let open: Vec<_> =
+        s.ai.review
+            .as_ref()
+            .expect("review")
+            .draft
+            .open(&def)
+            .into_iter()
+            .cloned()
+            .collect();
+    assert_eq!(open.len(), 1);
+    assert!(!s.ed.can_run() && !s.ed.can_memorize());
+    assert!(s.ed.row_has_problem("supplies"), "the row is marked");
+    // Memorize says why and opens nothing; Keep waits.
+    super::save::open_memorize(&mut s, false);
+    assert!(s.save.memorize.is_none());
+    super::ai_draft::keep(&mut s);
+    assert!(s.ai.review.is_some());
+    let state = s.state();
+    assert_eq!(state["ai"]["unresolved"], 1);
+    assert_eq!(state["can_memorize"], false);
+    let (id, _) = open[0].candidates[0].clone();
+    super::ai_draft::answer(
+        &mut s,
+        &open[0].token,
+        &cl_model::report_def::draft::Answer::Pick(id),
+    );
+    frames(&ctx, &mut s);
+    assert!(
+        s.ed.can_run() && s.ed.can_memorize(),
+        "{:?}",
+        s.ed.problems()
+    );
+    super::ai_draft::keep(&mut s);
+    assert!(s.ai.review.is_none());
+    memorize_as(&ctx, &mut s, "Supplies by customer");
+    assert!(
+        s.ed.saved().is_some(),
+        "memorized once every name is settled"
+    );
+}
+
+#[test]
+fn an_amount_is_left_to_the_owner_with_a_note() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    describe(&ctx, &mut s, "Vendors I paid over $500 this year");
+    let state = s.state();
+    assert_eq!(state["ai"]["notes"][0], "amount_filter_left_out_row");
+    assert_eq!(stray_digits(s.ed.definition()), Vec::<String>::new());
+    let text = serde_json::to_string(s.ed.definition()).expect("json");
+    assert!(!text.contains("500") && !text.contains("\"value\""));
+}
+
+#[test]
+fn rows_already_there_are_replaced_only_after_asking_and_discard_restores_them() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    gross_profit(&mut s);
+    let mine = s.ed.definition().clone();
+    describe(&ctx, &mut s, "Fuel by month");
+    assert!(s.ai.confirm.is_some(), "asked first");
+    assert_eq!(s.ed.definition(), &mine, "nothing replaced yet");
+    let reply = s.ai.confirm.take().expect("reply");
+    super::ai_draft::take(&mut s, &reply);
+    assert_ne!(s.ed.definition(), &mine);
+    super::ai_draft::discard(&mut s);
+    assert_eq!(s.ed.definition(), &mine, "Discard puts my rows back");
+    assert!(s.ai.review.is_none());
+}
+
+#[test]
+fn ai_off_sends_nothing_and_other_words_are_demo_only() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    link.demo_state().expect("demo").ai.enabled = false;
+    describe(&ctx, &mut s, "Fuel by month");
+    assert_eq!(s.ai.message, Some("builder.ai.ai_off"));
+    assert!(s.ai.review.is_none() && s.ed.definition().nodes.is_empty());
+    link.demo_state().expect("demo").ai.enabled = true;
+    describe(&ctx, &mut s, "Profit by planet");
+    assert_eq!(s.ai.message, Some("builder.ai.demo_only"));
+    assert!(s.ai.review.is_none());
+}
