@@ -13,6 +13,7 @@
 //! `save.rs` Memorize and Save changes; `lists.rs` the names filters pick
 //! from; `picker.rs` the small controls.
 
+mod ai_draft;
 mod chrome;
 mod columns;
 mod formula;
@@ -368,6 +369,8 @@ pub struct BuilderScreen {
     /// An outline key (Tab, Shift+Tab, an arrow) acted on the tree this
     /// frame: egui must not also move the focus with it (QA-11).
     pub(crate) keep_focus: bool,
+    /// Describe the report (A10): the panel and a draft under review.
+    pub(crate) ai: ai_draft::AiDraft,
 }
 
 impl BuilderScreen {
@@ -431,6 +434,7 @@ impl BuilderScreen {
             next_at: None,
             row_at: HashMap::new(),
             keep_focus: false,
+            ai: ai_draft::AiDraft::default(),
         }
     }
 
@@ -478,6 +482,9 @@ impl BuilderScreen {
         self.guided = None;
         self.status = None;
         self.band.custom = None;
+        // Another report in place: a draft under review is let go.
+        self.ai.review = None;
+        self.ai.confirm = None;
         match seed {
             BuilderSeed::Guided => {
                 self.guided = Some(GuidedState::new());
@@ -993,6 +1000,7 @@ impl BuilderScreen {
         }
         self.lists.poll();
         save::poll(self);
+        ai_draft::poll(self);
     }
 
     /// Control-channel state: no names, captions or amounts.
@@ -1015,6 +1023,8 @@ impl BuilderScreen {
             "dirty": self.ed.dirty(),
             "can_run": self.ed.can_run(),
             "can_save_changes": self.ed.can_save_changes(),
+            "can_memorize": self.ed.can_memorize(),
+            "ai": self.ai.state_json(self.ed.definition()),
             "can_undo": self.ed.can_undo(),
             "can_redo": self.ed.can_redo(),
             "problems": problems,
@@ -1081,6 +1091,7 @@ impl Screen for BuilderScreen {
             || self.fiscal_job.is_some()
             || self.lists.busy()
             || self.starters_job.is_some()
+            || self.ai.busy()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1113,6 +1124,7 @@ impl Screen for BuilderScreen {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             chrome::toolbar(self, ui, &tokens);
+                            ai_draft::draw(self, ui, &tokens);
                             chrome::band(self, ui, &tokens);
                             ui.separator();
                             self.panes(ui, &tokens, room);
@@ -1122,6 +1134,7 @@ impl Screen for BuilderScreen {
                         });
                 } else {
                     chrome::toolbar(self, ui, &tokens);
+                    ai_draft::draw(self, ui, &tokens);
                     chrome::band(self, ui, &tokens);
                     ui.separator();
                     self.panes(ui, &tokens, room);

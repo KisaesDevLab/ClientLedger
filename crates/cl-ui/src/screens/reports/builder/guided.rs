@@ -95,6 +95,7 @@ pub(crate) fn draw(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     if s.starter_menu {
         starter_menu(s, ui);
     }
+    super::ai_draft::draw(s, ui, tokens);
     ui.separator();
     let w = ui.available_width();
     let h = ui.available_height();
@@ -158,6 +159,11 @@ fn toolbar(s: &mut BuilderScreen, ui: &mut Ui) {
             s.starter_menu = !s.starter_menu;
             s.starter_menu_new = s.starter_menu;
             s.load_starters();
+        }
+        // A10 (Q-A10c): a draft from the owner's words, beside the
+        // ready-made and blank choices.
+        if ui.button(t("builder.guided.describe")).clicked() {
+            super::ai_draft::open_panel(s);
         }
         if ui.button(t("builder.guided.blank_advanced")).clicked() {
             s.guided = None;

@@ -51,6 +51,8 @@ pub mod feed_review;
 // P27: Reconcile (the mockup's October statement).
 pub mod reconcile;
 pub mod report_builder;
+// A10: Describe the report's prepared drafts (Q-A10h).
+pub mod report_draft;
 pub mod report_store;
 // A09 WP-A: `.clreport` export and import preview (U-220 parity).
 pub mod report_transfer;

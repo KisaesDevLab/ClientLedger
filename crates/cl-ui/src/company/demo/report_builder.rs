@@ -1226,7 +1226,7 @@ pub(crate) fn detail_on(
             &json!({"error": {"message": "That part of the report can't be opened.", "code": "INVALID_PARAM"}}),
         ));
     }
-    let s = section_lines(d, &books, &node, &plan);
+    let s = section_lines(d, books, &node, &plan);
     if s.denied {
         return Err(engine_refusal(
             403,

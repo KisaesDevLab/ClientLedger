@@ -164,7 +164,9 @@ fn now_ms(ui: &Ui) -> u64 {
 /// The reference a run of the editor's report sends now (the same as its
 /// Run report tab's, AC8).
 pub(crate) fn reference(s: &BuilderScreen) -> Result<RunRef, &'static str> {
-    let def = s.ed.definition();
+    // Never a definition with an AI draft's placeholder in it (A10).
+    let def =
+        cl_model::report_def::draft::sendable(s.ed.definition()).ok_or("builder.ai.pick_first")?;
     let json = serde_json::to_value(def).map_err(|_| "reports.problem.fiscal")?;
     let (spec, options) = s.run_options();
     super::super::builder_ref::run_ref(&super::super::builder_ref::RunInput {

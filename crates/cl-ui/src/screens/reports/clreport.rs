@@ -382,7 +382,7 @@ fn effect_key(effect: &str) -> &'static str {
 }
 
 /// The kind's i18n key.
-const fn ref_kind_key(k: cl_model::report_def::clreport::RefKind) -> &'static str {
+pub(crate) const fn ref_kind_key(k: cl_model::report_def::clreport::RefKind) -> &'static str {
     use cl_model::report_def::clreport::RefKind;
     match k {
         RefKind::Account => "report_file.ref.account",
