@@ -2340,15 +2340,109 @@ fn esc_in_the_describe_box_reverts_then_closes() {
     frames(&ctx, &mut s);
     frame_with(&ctx, &mut s, 52.0, esc());
     assert!(!s.ai.open);
-    // While drafting the box is off and nothing has the keyboard: Esc
-    // closes the panel and drops the request.
+    // While drafting the box is off and nothing has the keyboard: the first
+    // Esc stops the draft and keeps the panel (A10 QA-7); the next closes.
     super::ai_draft::open_panel(&mut s);
     frames(&ctx, &mut s);
     s.ai.describe.phase = cl_model::report_def::draft::Phase::Drafting;
     frames(&ctx, &mut s);
     frame_with(&ctx, &mut s, 53.0, esc());
-    assert!(!s.ai.open);
+    assert!(s.ai.open, "the first Esc only stops the draft");
     assert_eq!(s.state()["ai"]["phase"], "idle");
+    frame(&ctx, &mut s, 53.1);
+    frame(&ctx, &mut s, 53.2);
+    frame_with(&ctx, &mut s, 54.0, esc());
+    assert!(!s.ai.open, "then Esc closes");
+}
+
+/// A10 QA-7: after a Draft whose answer is a refusal, the box has the
+/// keyboard again: the first Esc puts back what it held, the second closes.
+#[test]
+fn esc_after_a_draft_reverts_the_box_before_it_closes() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    s.ai.describe.text = "Profit by planet".into();
+    frames(&ctx, &mut s);
+    super::ai_draft::send(&mut s);
+    frames(&ctx, &mut s);
+    assert_eq!(s.ai.message, Some("builder.ai.demo_only"));
+    assert!(
+        ctx.memory(egui::Memory::focused).is_some(),
+        "the box has the keyboard back"
+    );
+    let esc = || vec![key_event(egui::Key::Escape, egui::Modifiers::NONE)];
+    frame_with(&ctx, &mut s, 60.0, esc());
+    frame(&ctx, &mut s, 60.1);
+    assert!(s.ai.open, "the first Esc after Draft reverts the box");
+    assert_eq!(s.ai.describe.text, "");
+    frame(&ctx, &mut s, 60.2);
+    frame_with(&ctx, &mut s, 61.0, esc());
+    assert!(!s.ai.open, "the second Esc closes the panel");
+}
+
+/// A10 QA-1: the AI service not answering (503 AI_UNAVAILABLE, a timeout,
+/// a lost answer) is the draft's own "can't reach" message, worded for
+/// Ollama on this computer, never the unknown-save message with Copy
+/// details.
+#[test]
+fn ollama_not_answering_is_the_draft_s_own_message() {
+    let (_d, _link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    s.ai.describe.text = "Fuel and supplies by month".into();
+    let down = cl_api::engine_refusal(
+        503,
+        &serde_json::json!({"error": {"message": "x", "code": "AI_UNAVAILABLE",
+            "details": {"provider": "ollama", "reason": "provider_error"}}}),
+    );
+    let lost = cl_api::ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::from_uuid(uuid::Uuid::nil()),
+        idempotency_key: None,
+        keyed: false,
+    };
+    for e in [down, cl_api::ApiError::Timeout, lost] {
+        s.ai.gate = Some((true, Some("ollama".into())));
+        super::ai_draft::refused(&mut s, e);
+        frames(&ctx, &mut s);
+        assert_eq!(s.ai.message, Some("builder.ai.unavailable_local"));
+        assert!(s.ai.error.is_none(), "no Copy details");
+        assert_eq!(s.state()["ai"]["error"], false);
+        assert!(s.ai.open && s.ed.definition().nodes.is_empty());
+    }
+    assert!(crate::i18n::t("builder.ai.unavailable_local").starts_with("Ollama on this computer"));
+}
+
+/// A10 QA-3 and QA-4: the switches are read each time the panel opens and
+/// again when Preferences saves AI settings; with AI off the panel says
+/// how to turn it on before anything is typed, and names no service.
+#[test]
+fn the_panel_reads_the_switches_at_open_and_after_a_preferences_save() {
+    let (_d, link, mut s) = editor(BuilderSeed::Blank);
+    let ctx = themed();
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    assert_eq!(s.state()["ai"]["ai_on"], true);
+    assert_eq!(s.state()["ai"]["panel_provider"], "demo");
+    super::ai_draft::close_panel(&mut s);
+    // Turned off since: the panel says so as it opens.
+    link.demo_state().expect("demo").ai.enabled = false;
+    super::ai_draft::open_panel(&mut s);
+    frames(&ctx, &mut s);
+    assert_eq!(s.state()["ai"]["ai_on"], false);
+    assert_eq!(s.state()["ai"]["message"], "ai_off");
+    assert_eq!(super::ai_draft::panel_provider(&s), None);
+    assert_eq!(s.ai.message, None, "nothing was refused: nothing was sent");
+    // Turned on in Preferences while the panel is open.
+    link.demo_state().expect("demo").ai.enabled = true;
+    link.bus().publish(crate::data_bus::Change::Ai);
+    frames(&ctx, &mut s);
+    assert_eq!(s.state()["ai"]["ai_on"], true);
+    assert_eq!(s.state()["ai"]["panel_provider"], "demo");
+    assert!(s.state()["ai"]["message"].is_null());
 }
 
 /// A10 UI review S2 and S5: "Some names need you" and the empty preview

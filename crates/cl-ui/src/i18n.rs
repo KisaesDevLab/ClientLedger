@@ -894,7 +894,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.ai.feat_docs", "Read bills and receipts"),
     ("prefs.ai.feat_docs_desc", "Fill vendor, date, ref. no., and total from a PDF or photo for you to check"),
     ("prefs.ai.feat_ask", "Ask a question in Reports"),
-    ("prefs.ai.feat_ask_desc", "Pick the right report and dates; numbers always come from your books"),
+    ("prefs.ai.feat_ask_desc", "Pick the right report and dates, and draft reports in the Report Builder; numbers always come from your books"),
     ("prefs.ai.feat_rules", "Suggest rules"),
     ("prefs.ai.feat_rules_desc", "Offer a Bank Feed rule after you accept the same suggestion a few times"),
     ("prefs.ai.usage", "Online AI usage"),

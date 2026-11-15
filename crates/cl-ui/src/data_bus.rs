@@ -53,6 +53,9 @@ pub enum Change {
     /// Memorized reports were saved, changed or deleted (A08 QA-16): an
     /// open report window's Memorized list reads them again.
     Reports,
+    /// The company's AI settings were saved in Preferences (A10 QA-4): an
+    /// open Describe the report panel reads its switches again.
+    Ai,
 }
 
 impl Change {
@@ -101,6 +104,8 @@ pub struct Changes {
     pub bank_feed: bool,
     /// Memorized reports (A08 QA-16).
     pub reports: bool,
+    /// The company's AI settings (A10 QA-4).
+    pub ai: bool,
 }
 
 impl Changes {
@@ -119,6 +124,7 @@ impl Changes {
             printing: true,
             bank_feed: true,
             reports: true,
+            ai: true,
         }
     }
 
@@ -174,6 +180,7 @@ impl Changes {
             Change::Printing => self.printing = true,
             Change::BankFeed => self.bank_feed = true,
             Change::Reports => self.reports = true,
+            Change::Ai => self.ai = true,
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }

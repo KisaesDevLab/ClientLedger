@@ -1026,6 +1026,11 @@ impl PreferencesScreen {
         if after.flags.inventory_enabled != self.committed.flags.inventory_enabled {
             self.link.bus().publish(crate::data_bus::Change::Items);
         }
+        // A10 QA-4: an open Describe the report panel reads the AI switches
+        // and the provider again.
+        if after.ai != self.committed.ai || outcome.consent.is_some() {
+            self.link.bus().publish(crate::data_bus::Change::Ai);
+        }
         match &outcome.intake {
             Some(stored) => self.finish_intake_save(stored, &mut after),
             // Not sent (unchanged, or no engine to take it): the baseline
