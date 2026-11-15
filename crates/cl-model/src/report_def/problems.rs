@@ -23,6 +23,9 @@ pub enum ProblemCode {
     NotOnCash,
     /// A code this build doesn't know (a newer engine).
     Other,
+    /// A name an AI draft couldn't match: pick a row or remove it (A10;
+    /// desktop only, the placeholder is never sent).
+    Unresolved,
 }
 
 impl ProblemCode {
@@ -44,6 +47,7 @@ impl ProblemCode {
             ProblemCode::NotInCompany => "NOT_IN_COMPANY",
             ProblemCode::NotOnCash => "NOT_ON_CASH",
             ProblemCode::Other => "OTHER",
+            ProblemCode::Unresolved => "UNRESOLVED",
         };
         format!("builder.problem.{}", code.to_ascii_lowercase())
     }
@@ -127,7 +131,34 @@ pub fn from_issues(def: &BuilderDefinition, list: &[Issue]) -> Vec<Problem> {
 /// Every client-side problem in `def`.
 #[must_use]
 pub fn of(def: &BuilderDefinition) -> Vec<Problem> {
-    from_issues(def, &issues(def))
+    let list = issues(def);
+    // An AI draft's placeholder (A10) fails the id rule; it is its own
+    // problem, "pick or remove the name", not a broken id.
+    let held = |path: &str| {
+        let at = path
+            .strip_prefix("definition")
+            .unwrap_or(path)
+            .replace('.', "/");
+        (path.ends_with(".tagGroupId") || path.contains(".ids."))
+            && serde_json::to_value(def).is_ok_and(|v| {
+                v.pointer(&at)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(super::draft::is_placeholder)
+            })
+    };
+    let mut out: Vec<Problem> = Vec::new();
+    for i in &list {
+        let code = if held(&i.path) {
+            ProblemCode::Unresolved
+        } else {
+            ProblemCode::Rule(i.code)
+        };
+        let p = map(def, &i.path, code);
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -236,6 +267,7 @@ mod tests {
                 ProblemCode::NotInCompany,
                 ProblemCode::NotOnCash,
                 ProblemCode::Other,
+                ProblemCode::Unresolved,
             ]
             .map(ProblemCode::key),
         );
