@@ -5,8 +5,8 @@
 //! The engine refuses a permission map with a key it does not know, so
 //! [`wire_map`] sends only keys the running engine has: `financial_reports`
 //! with `report-areas-v1` (U-227), `sensitive_accounts` with
-//! `sensitive-accounts-v1` (U-33), and never `item_costs` (U-228 has no
-//! engine key yet).
+//! `sensitive-accounts-v1` (U-33). (There is no `item_costs`: U-228 was cut
+//! and inventory value follows `items`.)
 
 use std::collections::BTreeMap;
 
@@ -69,8 +69,8 @@ impl Group {
     }
 }
 
-/// The group a right shows under (None: not shown; `item_costs` waits for
-/// U-228).
+/// The group a right shows under (every right has one; `Option` kept for
+/// callers).
 #[must_use]
 pub const fn group_of(r: Resource) -> Option<Group> {
     use Resource as R;
@@ -92,7 +92,6 @@ pub const fn group_of(r: Resource) -> Option<Group> {
         | R::CompanySettings
         | R::AiChat
         | R::AuditLog => Group::Manage,
-        R::ItemCosts => return None,
     })
 }
 
@@ -117,7 +116,6 @@ impl EngineKeys {
     pub fn knows(self, r: Resource) -> bool {
         match r {
             Resource::FinancialReports => self.report_areas,
-            Resource::ItemCosts => false,
             _ => true,
         }
     }
@@ -256,10 +254,10 @@ mod tests {
     };
 
     #[test]
-    fn every_right_but_item_costs_has_a_group() {
+    fn every_right_has_a_group() {
         for r in Resource::ALL {
-            assert_eq!(group_of(*r).is_none(), *r == Resource::ItemCosts, "{r:?}");
-            assert_eq!(ALL_KEYS.knows(*r), *r != Resource::ItemCosts, "{r:?}");
+            assert!(group_of(*r).is_some(), "{r:?}");
+            assert!(ALL_KEYS.knows(*r), "{r:?}");
         }
         assert_eq!(Group::ALL.len(), 9);
     }

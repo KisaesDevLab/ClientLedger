@@ -164,9 +164,9 @@ resources! {
     AuditLog = "audit_log", false, None;
     /// U-227: the P&L, Balance Sheet, ledger reports, packs and Ask.
     FinancialReports = "financial_reports", false, Some(Resource::Reports);
-    /// U-228: item costs and inventory value ("See costs").
-    ItemCosts = "item_costs", false, Some(Resource::Items);
 }
+// No `item_costs`: U-228 was cut, and the engine's report areas put the
+// inventory value reports on `items` (services/report-areas.ts).
 
 impl Resource {
     /// The resource with this engine key.
@@ -181,7 +181,7 @@ impl Resource {
     }
 }
 
-const N: usize = 31;
+const N: usize = 30;
 
 /// The rights of the signed-in user in the open company.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -413,17 +413,20 @@ pub const fn report_area(source: Source) -> Resource {
         | Source::Ap1099Prep => Resource::Bills,
         Source::SalesTaxLiability => Resource::SalesTax,
         Source::DepositDetail | Source::CheckRegister | Source::BankBalances => Resource::Banking,
-        Source::InventoryValuation | Source::InventoryValuationDetail => Resource::ItemCosts,
-        Source::InventoryStockStatus => Resource::Items,
+        Source::InventoryValuation
+        | Source::InventoryValuationDetail
+        | Source::InventoryStockStatus => Resource::Items,
         Source::AuditLog | Source::ClosingDateExceptions => Resource::AuditLog,
         Source::Duplicates => Resource::Duplicates,
     }
 }
 
-/// The audit trail and the closing-date exceptions stay on `audit_log`
-/// alone (plan §2: "closing-date-exceptions stays on `audit_log`").
+/// The audit trail (`/audit-log`) needs `audit_log` alone. The closing-date
+/// exceptions route lives under the engine's reports router, which checks
+/// `reports` read before the route's own `audit_log` check, so it needs
+/// both.
 const fn report_needs_reports(source: Source) -> bool {
-    !matches!(source, Source::AuditLog | Source::ClosingDateExceptions)
+    !matches!(source, Source::AuditLog)
 }
 
 /// A screen outside the Reports window that reads a `/reports/*` route
@@ -605,12 +608,7 @@ impl BuiltinRole {
             (_, R::TrialBalance | R::TaxEstimator | R::AiChat) => No,
             (
                 BuiltinRole::Bookkeeper,
-                R::CompanySettings
-                | R::Reports
-                | R::FinancialReports
-                | R::Dashboard
-                | R::ItemCosts
-                | R::AuditLog,
+                R::CompanySettings | R::Reports | R::FinancialReports | R::Dashboard | R::AuditLog,
             ) => View,
             (BuiltinRole::Bookkeeper, _) => Full,
             // A/R
@@ -644,13 +642,7 @@ impl BuiltinRole {
             ) => Full,
             (
                 BuiltinRole::Payables,
-                R::Tags
-                | R::Items
-                | R::Accounts
-                | R::Reports
-                | R::Dashboard
-                | R::CompanySettings
-                | R::ItemCosts,
+                R::Tags | R::Items | R::Accounts | R::Reports | R::Dashboard | R::CompanySettings,
             ) => View,
             (BuiltinRole::Payables, _) => No,
         }
@@ -874,7 +866,13 @@ mod tests {
         assert!(!ar.allows(CommandId::new("vendors.enter_bill")));
         assert!(!ar.allows(CommandId::new("banking.deposit")), "Q-P29x");
         assert!(!ar.allows_report(Source::ApAgingSummary));
-        assert!(!ar.allows_report(Source::InventoryValuation));
+        // The engine puts inventory value on `items` (A/R views items).
+        assert!(ar.allows_report(Source::InventoryValuation));
+        assert!(ar.allows_report(Source::InventoryValuationDetail));
+        assert!(
+            !ar.allows_report(Source::ProfitLoss),
+            "financial reports none"
+        );
         assert!(ar.allows_report(Source::ArAgingSummary));
     }
 
@@ -887,7 +885,10 @@ mod tests {
         m.insert("items".into(), "full");
         let r = Rights::from_engine("bookkeeper", false, &m);
         assert_eq!(r.level(Resource::FinancialReports), Level::View);
-        assert_eq!(r.level(Resource::ItemCosts), Level::View);
+        assert!(
+            r.allows_report(Source::InventoryValuation),
+            "inventory value follows items"
+        );
         assert!(r.allows(CommandId::new("reports.profit_loss")));
         assert!(
             !r.allows(CommandId::new("reports.ar_aging")),
@@ -905,7 +906,11 @@ mod tests {
         let mut r = Rights::none();
         r.set(Resource::AuditLog, Level::View);
         assert!(r.allows_report(Source::AuditLog));
+        // Under the engine's reports router: `reports` read too.
+        assert!(!r.allows_report(Source::ClosingDateExceptions));
+        r.set(Resource::Reports, Level::View);
         assert!(r.allows_report(Source::ClosingDateExceptions));
+        r.set(Resource::Reports, Level::None);
         assert!(!r.allows_report(Source::ProfitLoss));
         assert!(r.allows(CommandId::new("company.audit_trail")));
     }
