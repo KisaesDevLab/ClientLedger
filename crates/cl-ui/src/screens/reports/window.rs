@@ -173,6 +173,9 @@ pub struct ReportWindow {
     pub(super) bus: crate::data_bus::Subscription,
     /// A Report Builder report shown under the stand-in spec (A07).
     pub(super) builder: Option<Box<super::builder_run::Builder>>,
+    /// A standard memorized report's gone names (the row's `missing`,
+    /// U-226): it doesn't run while its options use one (Q-PRA2c).
+    pub(crate) std_missing: Vec<cl_api::resources::reports::definitions::MissingRef>,
     /// The Report Builder starters (catalog column).
     pub(super) starters: super::builder_run::Starters,
     /// A Customize in waiting (A08).
@@ -266,6 +269,7 @@ impl ReportWindow {
             after_run: None,
             bus: crate::data_bus::Subscription::detached(),
             builder: None,
+            std_missing: Vec::new(),
             starters: super::builder_run::Starters::default(),
             edit: super::builder_run::Edit::default(),
             view: next_view(),
@@ -280,7 +284,27 @@ impl ReportWindow {
     /// Switches to `spec` with `options` (catalog click, drill-down,
     /// memorized report) and runs it.
     pub(crate) fn show_report(&mut self, spec: &'static ReportSpec, options: ReportOptions) {
+        self.show_report_missing(spec, options, Vec::new());
+    }
+
+    /// [`Self::show_report`] for a memorized report whose saved options
+    /// may name deleted or merged records (`missing`, Q-PRA2c): it waits
+    /// for them with Customize open.
+    pub(crate) fn show_report_missing(
+        &mut self,
+        spec: &'static ReportSpec,
+        options: ReportOptions,
+        missing: Vec<cl_api::resources::reports::definitions::MissingRef>,
+    ) {
         self.new_view();
+        self.std_missing = missing;
+        if self
+            .std_missing
+            .iter()
+            .any(|m| super::std_missing::uses(&options, m))
+        {
+            self.customize = true;
+        }
         // Another report on screen is not the imported one (A09 WP-A).
         self.memo.origin = None;
         self.builder = None;
@@ -306,7 +330,10 @@ impl ReportWindow {
 
     /// New options: run again when the engine's answer would change;
     /// collapse, sort and header changes are local.
-    pub(crate) fn set_options(&mut self, next: ReportOptions) {
+    pub(crate) fn set_options(&mut self, mut next: ReportOptions) {
+        if self.builder.is_none() {
+            super::std_missing::settle(&self.std_missing, &self.options, &mut next);
+        }
         let rerun = self.options.needs_run(&next);
         self.options = next;
         if rerun {
@@ -411,6 +438,15 @@ impl ReportWindow {
         }
         self.sync_dates();
         self.load_picks();
+        // A saved filter names a deleted or merged record: never the empty
+        // "No activity" report it would match (Q-PRA2c).
+        let gone = super::std_missing::pending(self);
+        if !gone.is_empty() {
+            self.problem = Some(super::builder_run::missing_key(&gone));
+            self.table = None;
+            self.state = RunState::Failed;
+            return;
+        }
         if let Some(k) = self.spec.missing_pick_in(&self.options) {
             self.problem = Some(match k {
                 cl_model::reports::FilterKind::BankAccount => "reports.pick.choose_bank_account",
@@ -859,6 +895,7 @@ impl ReportWindow {
         if let Some(p) = self.problem {
             form::inline_warning(ui, tokens, &t(p));
         }
+        super::std_missing::ui(self, ui, tokens);
         super::builder_run::banner(self, ui, tokens);
         if let Some(e) = &self.error {
             form::inline_error_details(ui, tokens, e, "reports.run");

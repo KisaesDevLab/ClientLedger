@@ -813,6 +813,9 @@ fn span(dates: &RunDates) -> (CalendarDate, CalendarDate) {
 /// A tag group the demo's books deleted (PR-A2, Q-PRA2c): a definition
 /// grouping by it is refused with the engine's `missing` list (U-226).
 pub(crate) const DELETED_TAG_GROUP: &str = "00000000-0000-4000-8000-00000000dead";
+/// A tag the demo's books deleted: a standard memorized report filtered on
+/// it lists it in `missing` (PR-A2, Q-PRA2c).
+pub(crate) const DELETED_TAG: &str = "00000000-0000-4000-8000-00000000dea1";
 
 fn check_definition(books: &Books, def: &Value) -> Result<(), ApiError> {
     let refuse = |path: &str, code: &str| {
