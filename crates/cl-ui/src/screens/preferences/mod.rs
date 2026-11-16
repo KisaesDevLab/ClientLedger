@@ -2334,6 +2334,34 @@ mod tests {
         assert!(!Screen::command(&mut s, CommandId::new("edit.undo")));
     }
 
+    /// P29 WP7 (Q-276): the tag options reach the forms' rules; only an
+    /// Admin may change them.
+    #[test]
+    fn tag_options_save_and_reach_the_forms_rules() {
+        let (_d, mut s) = demo_screen(true);
+        let tag = s
+            .link
+            .demo_state()
+            .expect("demo")
+            .tags_mut()
+            .iter()
+            .find(|t| t.is_active)
+            .expect("tag")
+            .id;
+        assert!(!s.link.tag_rules().every_line, "off by default");
+        assert!(
+            s.loaded.tags.iter().any(|(id, _)| *id == tag),
+            "the picker lists it"
+        );
+        s.edits_mut().company.require_tag_every_line = true;
+        s.edits_mut().company.default_tag = Some(tag);
+        assert!(s.save());
+        let rules = s.link.tag_rules();
+        assert!(rules.every_line);
+        assert_eq!(rules.default_tag, Some(tag));
+        assert!(s.link.rights().is_admin());
+    }
+
     /// Q-P26l: the Bank Feed's transfer window is kept within 1-10 days.
     #[test]
     fn the_transfer_window_is_1_to_10_days() {

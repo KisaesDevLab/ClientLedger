@@ -33,8 +33,10 @@ pub(crate) struct Saving {
 impl BulkEntryScreen {
     /// The tag rules on the filled rows, named by section and row (P29 WP7).
     pub(crate) fn tag_gate(&self) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
         use cl_model::forms::tag_rule::{Place, TagLine};
-        let list = &self.books.tag_list;
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
         let lines: Vec<TagLine> = self
             .batch()
             .sections
@@ -52,7 +54,7 @@ impl BulkEntryScreen {
                     })
             })
             .collect();
-        crate::forms::tag_gate::check(list, &lines, &self.books.accounts)
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
     }
 
     /// Save all. True when the batch saved at once.

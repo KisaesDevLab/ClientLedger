@@ -862,9 +862,11 @@ impl JournalScreen {
         &self,
         form: &cl_model::forms::journal::JournalForm,
     ) -> Result<(), Vec<String>> {
-        let lines =
-            cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &self.books.tag_list, false);
-        crate::forms::tag_gate::check(&self.books.tag_list, &lines, &self.books.accounts)
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &list, false);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
     }
 
     /// A refused save's problems, checked again against the form as it is

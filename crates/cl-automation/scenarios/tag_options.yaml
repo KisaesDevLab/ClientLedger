@@ -1,0 +1,96 @@
+# Company tag options (P29 WP7, Q-276) against `clientledger --demo`: an
+# Admin turns on "Require a tag on every line" in Preferences › Tags; Write
+# Check then refuses a line without a tag and names it ("Expenses tab,
+# line 1"); a tag at the top of the form fills every line; Bulk Entry
+# refuses an untagged row by section and row. (A template's Use opens the
+# form, whose save is the one checked here.) The option goes off again at the
+# end so the dark run starts the same. Synthetic data only.
+name: tag_options
+description: Tag on every line refuses untagged lines in Write Check and Bulk Entry.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- Preferences › Tags (Admin) -------------------------------------------
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: Tags}
+  - assert_state: {key: screen.category, equals: tags}
+  - assert_exists: {role: check_box, label: Require a tag on every line}
+  - assert_exists: {role: combo_box, label: Default tag}
+  - click: {role: check_box, label: Require a tag on every line}
+  - assert_state: {key: screen.dirty, equals: true}
+  - screenshot: preferences-tags
+  - click: {role: button, label: Save}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+  - wait: {ms: 200}
+
+  # --- Write Check: an untagged line is refused and named ---------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "100", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  # Payee prefill brought two tagged lines over (accounts and tags, never
+  # amounts); a third line has no tag.
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "60"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "30"}
+  - key: Tab
+  - click: {label: "Account, line 3"}
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: "10"}
+  - key: Tab
+  - key: Alt+N
+  - wait: {ms: 300}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {label_contains: "Expenses tab, line 3: Add a tag"}
+  - screenshot: check-refused
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - wait: {ms: 200}
+
+  # --- Bulk Entry: an untagged row is named by section and row ---------------
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label: "Date, line 1"}
+  - type: {text: "T"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "Hollister Fuel"}
+  - key: Tab
+  - key: Tab
+  - type: {text: "12.00"}
+  - key: Tab
+  - key: Enter
+  - assert_state: {key: screen.problems, equals: 0}
+  - key: Alt+S
+  - wait: {ms: 300}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {label_contains: "Section 1, row 1: Add a tag"}
+  - screenshot: bulk-entry-refused
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - wait: {ms: 200}
+
+  # --- Back to off for the next run -----------------------------------------
+  - command: edit.preferences
+  - click: {role: button, label: Tags}
+  - click: {role: check_box, label: Require a tag on every line}
+  - click: {role: button, label: Save}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+  - wait: {ms: 200}

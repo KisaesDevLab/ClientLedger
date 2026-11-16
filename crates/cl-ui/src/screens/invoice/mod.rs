@@ -1089,8 +1089,11 @@ impl InvoiceScreen {
 
     /// The tag rules on the form's lines (P29 WP7, Q-276).
     pub(crate) fn tag_gate(&self, form: &InvoiceForm) -> Result<(), Vec<String>> {
-        let lines = cl_model::forms::tag_rule::invoice_lines(form, &self.books.tag_list);
-        crate::forms::tag_gate::check(&self.books.tag_list, &lines, &self.books.accounts)
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::invoice_lines(form, &list);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
     }
 
     /// Q-276: a new, untouched form starts with the company's default tag

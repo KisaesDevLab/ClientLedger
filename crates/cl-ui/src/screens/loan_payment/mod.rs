@@ -1628,13 +1628,11 @@ impl LoanPaymentScreen {
     /// The tag rules on the extra lines (P29 WP7, Q-276). The principal
     /// and interest lines have no tag field and are not checked.
     pub(crate) fn tag_gate(&self, form: &LoanPaymentForm) -> Result<(), Vec<String>> {
-        let lines = cl_model::forms::tag_rule::expense_lines(
-            &[],
-            &form.extras,
-            &self.books.tag_list,
-            false,
-        );
-        crate::forms::tag_gate::check(&self.books.tag_list, &lines, &self.books.accounts)
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.extras, &list, false);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
     }
 
     /// A refused save's problems, checked again against the form as it is

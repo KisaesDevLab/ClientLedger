@@ -335,13 +335,16 @@ impl WriteCheckScreen {
 
     /// The tag rules on the check as composed (P29 WP7).
     pub(crate) fn tag_gate(&self, form: &CheckForm) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
         let lines = cl_model::forms::tag_rule::tabbed_lines(
             &form.header_tags,
             &form.lines,
             &form.items,
-            &self.tag_list,
+            &list,
         );
-        crate::forms::tag_gate::check(&self.tag_list, &lines, &self.accounts)
+        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
     }
 
     /// The problems a refused save showed, checked again against the form
