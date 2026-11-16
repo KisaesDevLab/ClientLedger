@@ -207,9 +207,18 @@ impl EnterBillScreen {
             (BillKind::Bill, "bill.kind.bill"),
             (BillKind::Credit, "bill.kind.credit"),
         ] {
+            let allowed = self.kind_allowed(k);
+            let why = if allowed {
+                "bill.kind.locked"
+            } else {
+                "bill.kind.not_allowed"
+            };
             if ui
-                .add_enabled(can_switch, egui::RadioButton::new(kind == k, t(key)))
-                .on_disabled_hover_text(t("bill.kind.locked"))
+                .add_enabled(
+                    can_switch && (allowed || kind == k),
+                    egui::RadioButton::new(kind == k, t(key)),
+                )
+                .on_disabled_hover_text(t(why))
                 .clicked()
             {
                 self.set_kind(k);

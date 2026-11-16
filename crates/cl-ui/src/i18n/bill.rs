@@ -65,6 +65,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.kind.bill", "Bill"),
     ("bill.kind.credit", "Vendor credit"),
     ("bill.kind.locked", "A saved bill stays a bill and a saved credit stays a credit."),
+    ("bill.kind.not_allowed", "Your role can't enter this. Ask the company's Admin for the right to enter vendor credits (or bills)."),
     ("bill.vendor", "Vendor"),
     ("bill.vendor.pick", "Choose a vendor from the list (Ctrl+L), or add the vendor first."),
     ("bill.date", "Date"),

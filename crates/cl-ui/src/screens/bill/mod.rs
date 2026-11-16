@@ -945,9 +945,21 @@ impl EnterBillScreen {
         self.inputs.rev = self.header.revision();
     }
 
+    /// P29 review S7: the role may enter this kind. The engine guards
+    /// vendor credits (`POST /vendor-credits`, the credit mode's route) with
+    /// `vendor_credits` and bills with `bills`.
+    pub(crate) fn kind_allowed(&self, kind: BillKind) -> bool {
+        use cl_model::permissions::{Action, Resource};
+        let r = match kind {
+            BillKind::Bill => Resource::Bills,
+            BillKind::Credit => Resource::VendorCredits,
+        };
+        self.link.rights().can(r, Action::Write)
+    }
+
     /// Bill or vendor credit (the radio).
     pub(crate) fn set_kind(&mut self, kind: BillKind) {
-        if self.kind() == kind || self.editing.is_some() {
+        if self.kind() == kind || self.editing.is_some() || !self.kind_allowed(kind) {
             return;
         }
         self.header.edit_step(|h| h.kind = kind);

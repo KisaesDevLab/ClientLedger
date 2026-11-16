@@ -291,15 +291,16 @@ impl Rights {
 
     /// The least rights a role can have when the engine's map could not be
     /// read: an Admin keeps everything; any other role is view-only at most
-    /// (fail closed; the engine still decides).
+    /// and sees no sensitive account (fail closed; the engine still
+    /// decides; P29 review M1).
     #[must_use]
     pub fn from_role_only(role: &str, is_super_admin: bool) -> Rights {
         if is_admin_role(role, is_super_admin) {
             Rights::all()
         } else if matches!(role, "readonly" | "bookkeeper" | "accountant") {
-            Rights::view_only()
+            Rights::view_only().hiding_sensitive()
         } else {
-            Rights::none()
+            Rights::none().hiding_sensitive()
         }
     }
 
@@ -329,7 +330,13 @@ impl Rights {
     pub fn allows_report(&self, source: Source) -> bool {
         let area = report_area(source);
         let base = report_needs_reports(source);
-        (!base || self.can(Resource::Reports, Action::Read)) && self.can(area, Action::Read)
+        // P29 review S6: Budget vs. Actual is served by the engine's budgets
+        // router, which checks `budgets` read as well.
+        let budgets =
+            !matches!(source, Source::BudgetVsActual) || self.can(Resource::Budgets, Action::Read);
+        (!base || self.can(Resource::Reports, Action::Read))
+            && self.can(area, Action::Read)
+            && budgets
     }
 
     /// May the user run this need.
@@ -814,6 +821,39 @@ mod tests {
         assert_eq!(Resource::from_key("payroll"), None);
     }
 
+    /// P29 review S6: Budget vs. Actual also needs `budgets` read (the
+    /// engine's budgets router serves it); other financial reports don't.
+    #[test]
+    fn budget_vs_actual_needs_budgets_read() {
+        let mut r = Rights::none();
+        r.set(Resource::Reports, Level::View);
+        r.set(Resource::FinancialReports, Level::View);
+        assert!(r.allows_report(Source::ProfitLoss));
+        assert!(!r.allows_report(Source::BudgetVsActual));
+        r.set(Resource::Budgets, Level::View);
+        assert!(r.allows_report(Source::BudgetVsActual));
+        // The built-in roles without budgets don't get it.
+        assert!(
+            !BuiltinRole::Payables
+                .rights()
+                .allows_report(Source::BudgetVsActual)
+        );
+    }
+
+    /// P29 review M1: when the engine's map can't be read, a non-Admin is
+    /// treated as not seeing sensitive accounts (fail closed).
+    #[test]
+    fn role_only_rights_hide_sensitive_for_non_admins() {
+        for role in ["readonly", "bookkeeper", "accountant", "someone"] {
+            assert!(
+                Rights::from_role_only(role, false).hides_sensitive,
+                "{role}"
+            );
+        }
+        assert!(!Rights::from_role_only("owner", false).hides_sensitive);
+        assert!(!Rights::from_role_only("bookkeeper", true).hides_sensitive);
+    }
+
     #[test]
     fn every_command_has_a_row() {
         let missing: Vec<&str> = COMMANDS
@@ -940,11 +980,11 @@ mod tests {
         assert_eq!(Rights::from_role_only("owner", false), Rights::all());
         assert_eq!(
             Rights::from_role_only("bookkeeper", false),
-            Rights::view_only()
+            Rights::view_only().hiding_sensitive()
         );
         assert_eq!(
             Rights::from_role_only("client_viewer", false),
-            Rights::none()
+            Rights::none().hiding_sensitive()
         );
         let v = Rights::view_only();
         assert!(v.allows(CommandId::new("reports.profit_loss")));

@@ -61,6 +61,13 @@ const AP_REPORTS: &[(&str, bool)] = &[
     ("/api/v1/reports/inventory-stock-status", false),
     // Inventory value follows `items` (U-228 was cut; no `item_costs`).
     ("/api/v1/reports/inventory-valuation", false),
+    // P29 review: the routes the first tables skipped.
+    ("/api/v1/reports/vendor-statement", false),
+    ("/api/v1/reports/ap-1099-prep", false),
+    ("/api/v1/reports/reconciliation-detail", true),
+    ("/api/v1/reports/reconciliation-discrepancy", true),
+    ("/api/v1/reports/inventory-valuation-detail", false),
+    ("/api/v1/reports/reorder", false),
 ];
 
 /// `(route, hidden for A/R)`: the same routes for the A/R built-in (sales
@@ -97,6 +104,12 @@ const AR_REPORTS: &[(&str, bool)] = &[
     ("/api/v1/reports/vendor-1099-summary", true),
     ("/api/v1/reports/inventory-stock-status", false),
     ("/api/v1/reports/inventory-valuation", false),
+    ("/api/v1/reports/vendor-statement", true),
+    ("/api/v1/reports/ap-1099-prep", true),
+    ("/api/v1/reports/reconciliation-detail", true),
+    ("/api/v1/reports/reconciliation-discrepancy", true),
+    ("/api/v1/reports/inventory-valuation-detail", false),
+    ("/api/v1/reports/reorder", false),
 ];
 
 fn status(h: &Harness, s: &Session, route: &str) -> u16 {

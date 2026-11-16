@@ -239,6 +239,28 @@ fn a_closed_period_bill_is_refused_without_the_engine_update_and_asks_with_it() 
     assert_eq!(s.state()["saved_count"], 1);
 }
 
+/// P29 review S7: credit mode posts to `/vendor-credits`, which the engine
+/// guards with `vendor_credits`; a role with bills but not vendor credits
+/// can't switch to it.
+#[test]
+fn credit_mode_needs_the_vendor_credits_right() {
+    use cl_model::permissions::{Level, Resource, Rights};
+    let (_d, link) = link();
+    let mut r = Rights::all().without_admin();
+    r.set(Resource::VendorCredits, Level::View);
+    link.set_rights(r);
+    let mut s = screen(&link);
+    assert!(s.kind_allowed(BillKind::Bill));
+    assert!(!s.kind_allowed(BillKind::Credit));
+    s.set_kind(BillKind::Credit);
+    assert_eq!(s.kind(), BillKind::Bill, "stays a bill");
+    let mut r = Rights::all().without_admin();
+    r.set(Resource::VendorCredits, Level::Full);
+    link.set_rights(r);
+    s.set_kind(BillKind::Credit);
+    assert_eq!(s.kind(), BillKind::Credit);
+}
+
 #[test]
 fn a_vendor_credit_posts_the_other_way_and_is_read_only_without_ap_edit() {
     let (_d, link) = link();
