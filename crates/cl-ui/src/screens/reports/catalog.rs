@@ -19,7 +19,12 @@ pub(super) fn show(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             .desired_width(210.0),
     )
     .labelled_by(l.id);
-    let hits = search(&w.search, |s| t(s.title));
+    // P29: only the reports the user's role includes (U-227 areas).
+    let rights = w.link.rights();
+    let hits: Vec<_> = search(&w.search, |s| t(s.title))
+        .into_iter()
+        .filter(|s| rights.allows_report(s.source))
+        .collect();
     let mut pick = None;
     let mut memorized = 0;
     egui::ScrollArea::vertical()

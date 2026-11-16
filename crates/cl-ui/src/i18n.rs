@@ -316,6 +316,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.not_for_role", "Not available for your role in this company."),
     ("rights.not_for_role", "Not available for your role"),
+    ("rights.report_not_for_role", "This report isn't available for your role in this company. Ask the company's Admin if you need it."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay
     ("palette.hint", "Go to a screen or command"),

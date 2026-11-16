@@ -963,6 +963,21 @@ impl Shell {
             }
             return;
         }
+        // P29: a list the role may only look at takes no changes (New,
+        // Make inactive, Merge, Delete); the engine would refuse them.
+        if let Some(resource) = target
+            .and_then(|w| self.windows.get(w))
+            .and_then(|w| read_only_list(&self.rights(), id, w.kind))
+        {
+            tracing::debug!(
+                resource = resource.key(),
+                "list change refused for the role"
+            );
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "toast.not_for_role");
+            }
+            return;
+        }
         if cmd.opens {
             let kind = cmd.id;
             if self.company_link.is_some()
@@ -1807,6 +1822,30 @@ pub(crate) type MakeScreen = fn(
     Option<(cl_core::ids::TenantId, String)>,
     CalendarDate,
 ) -> Option<Box<dyn Screen>>;
+
+/// The resource a list change would write when the role may only read it
+/// (P29): `id` is a list-changing command and `window` a list the role
+/// opens with read access only.
+fn read_only_list(
+    rights: &cl_model::permissions::Rights,
+    id: CommandId,
+    window: CommandId,
+) -> Option<cl_model::permissions::Resource> {
+    use cl_model::permissions::{Action, Need, need};
+    const CHANGES: &[&str] = &[
+        "list.new",
+        "list.toggle_active",
+        "list.merge",
+        "list.delete",
+    ];
+    if !CHANGES.contains(&id.as_str()) {
+        return None;
+    }
+    match need(window)? {
+        Need::Read(r) if !rights.can(r, Action::Write) => Some(r),
+        _ => None,
+    }
+}
 
 /// A screen for `kind` without borrowing the shell (layout restore). The
 /// developer-only screens are built only with `--demo` (`demo`); every

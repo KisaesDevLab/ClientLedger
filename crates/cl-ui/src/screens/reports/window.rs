@@ -43,6 +43,8 @@ pub(crate) enum RunState {
     Failed,
     /// The engine can't run this report yet (Q-220).
     Unavailable,
+    /// The user's role does not include this report's area (P29).
+    NotForRole,
 }
 
 impl RunState {
@@ -54,6 +56,7 @@ impl RunState {
             RunState::Stale => "stale",
             RunState::Failed => "failed",
             RunState::Unavailable => "unavailable",
+            RunState::NotForRole => "not_for_role",
         }
     }
 }
@@ -429,6 +432,14 @@ impl ReportWindow {
         if self.builder.is_some() {
             self.sync_dates();
             super::builder_run::run(self);
+            return;
+        }
+        // P29: a report outside the role's areas is never asked for (the
+        // engine would refuse it; U-227).
+        if !self.link.rights().allows_report(self.spec.source) {
+            self.state = RunState::NotForRole;
+            self.table = None;
+            self.job = None;
             return;
         }
         if !available(&self.link, self.spec) {
@@ -887,6 +898,10 @@ impl ReportWindow {
         match self.state {
             RunState::Unavailable => {
                 form::inline_warning(ui, tokens, &t("reports.needs_update"));
+                return;
+            }
+            RunState::NotForRole => {
+                form::inline_warning(ui, tokens, &t("rights.report_not_for_role"));
                 return;
             }
             RunState::Empty | RunState::Running if self.table.is_none() => {
@@ -1442,7 +1457,9 @@ impl ReportWindow {
                 Some(AfterRun::Export(kind)) => super::export::start(self, ctx, kind),
                 None => {}
             },
-            RunState::Failed | RunState::Unavailable => self.after_run = None,
+            RunState::Failed | RunState::Unavailable | RunState::NotForRole => {
+                self.after_run = None;
+            }
             _ => {}
         }
     }

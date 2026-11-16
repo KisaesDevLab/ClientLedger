@@ -68,6 +68,7 @@ mod contract_report_defs;
 mod contract_reports_exact;
 mod contract_reports_p28;
 mod contract_resources;
+mod contract_rights;
 mod contract_run_due;
 mod contract_sales_receipts;
 mod contract_sales_tax_documents;
@@ -1308,6 +1309,18 @@ fn main() -> std::process::ExitCode {
         (
             "reconcile::undo_admin_only",
             contract_reconcile::undo_admin_only,
+        ),
+        (
+            "rights::me_reports_the_role_and_the_map",
+            contract_rights::me_reports_the_role_and_the_map,
+        ),
+        (
+            "rights::ap_is_refused_invoices_and_runs_ap_aging",
+            contract_rights::ap_is_refused_invoices_and_runs_ap_aging,
+        ),
+        (
+            "rights::ap_hidden_reports_are_refused",
+            contract_rights::ap_hidden_reports_are_refused,
         ),
         (
             "reconcile::discrepancy_lists_changed_and_backdated_entries",

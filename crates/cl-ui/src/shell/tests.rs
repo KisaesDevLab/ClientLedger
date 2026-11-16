@@ -1733,3 +1733,32 @@ fn an_ap_user_cannot_open_invoices() {
             .any(|r| r.id == invoice)
     );
 }
+
+/// P29: a view-only user's lists take no changes from the keyboard.
+#[test]
+fn a_view_only_list_takes_no_changes() {
+    use cl_model::permissions::{Resource, Rights};
+    let accounts = CommandId::new("lists.chart_of_accounts");
+    let view = Rights::view_only();
+    assert_eq!(
+        super::read_only_list(&view, CommandId::new("list.new"), accounts),
+        Some(Resource::Accounts)
+    );
+    assert_eq!(
+        super::read_only_list(&view, CommandId::new("list.show_inactive"), accounts),
+        None
+    );
+    assert_eq!(
+        super::read_only_list(&Rights::all(), CommandId::new("list.new"), accounts),
+        None
+    );
+    // Not a list window: nothing to refuse here.
+    assert_eq!(
+        super::read_only_list(
+            &view,
+            CommandId::new("list.new"),
+            CommandId::new("nav.home")
+        ),
+        None
+    );
+}
