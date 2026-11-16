@@ -1421,6 +1421,10 @@ fn main() -> std::process::ExitCode {
             contract_report_refs::a_two_level_trial_balance_totals_once,
         ),
         (
+            "report_refs::a_trial_balance_by_account_and_tag_keeps_negative_slices",
+            contract_report_refs::a_trial_balance_by_account_and_tag_keeps_negative_slices,
+        ),
+        (
             "report_refs::a_contact_merge_keeps_a_memorized_figure",
             contract_report_refs::a_contact_merge_keeps_a_memorized_figure,
         ),

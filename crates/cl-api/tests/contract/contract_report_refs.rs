@@ -89,11 +89,20 @@ fn reference(definition: Option<Value>, id: Option<String>, by_month: bool, as_o
 }
 
 fn run(h: &Harness, s: &Session, reference: RunRef) -> Result<BuilderRun, ApiError> {
+    run_open(h, s, reference, false)
+}
+
+fn run_open(
+    h: &Harness,
+    s: &Session,
+    reference: RunRef,
+    expand_all: bool,
+) -> Result<BuilderRun, ApiError> {
     let req = RunRequest {
         reference,
         open: Vec::new(),
         collapsed: Vec::new(),
-        expand_all: false,
+        expand_all,
         purpose: RunPurpose::Screen,
     };
     for _ in 0..10 {
@@ -277,6 +286,142 @@ pub fn a_two_level_trial_balance_totals_once(h: &Harness) {
     assert!(
         one.iter().any(|c| amount(c) == Decimal::new(146_000, 2)),
         "debits {one:?}"
+    );
+}
+
+/// (b2) A Trial Balance section grouped by account then tag (fix 2, B-1):
+/// an account with a +1,000.00 slice on one tag and a -100.00 slice on
+/// another shows Debit 900.00, and both slices sit in its Debit column, the
+/// second negative (never moved to Credit or shown positive). The slices
+/// add up to the account's figure and the section Total equals the
+/// one-level Trial Balance total.
+pub fn a_trial_balance_by_account_and_tag_keeps_negative_slices(h: &Harness) {
+    if !ties(h) {
+        return;
+    }
+    let s = &h.s1;
+    let savings = account(h, s, AccountType::Asset, "TieTbSavings");
+    let sales = account(h, s, AccountType::Revenue, "TieTbTagSales");
+    // A tag group-by names its group (the builder's rule).
+    let jobs = h
+        .run(s.tags().create_group(
+            &TagGroupFields {
+                name: unique("TieTbJobs"),
+                description: None,
+                is_single_select: false,
+            },
+            key(),
+        ))
+        .expect("tag group")
+        .id;
+    let tag = |prefix: &str| {
+        h.run(s.tags().create(
+            &cl_api::TagFields {
+                name: unique(prefix),
+                color: None,
+                group_id: Some(jobs),
+                description: None,
+                tag_number: None,
+            },
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("tag: {e}"))
+        .record
+    };
+    let (job_a, job_b) = (tag("TieJobA"), tag("TieJobB"));
+    let tagged = |debit, credit, amount: &str, t: cl_core::ids::TagId| {
+        let mut d = line(debit, Side::Debit(m(amount)));
+        let mut c = line(credit, Side::Credit(m(amount)));
+        d.tag = Some(t);
+        c.tag = Some(t);
+        NewJournalEntry::new(
+            date(YEAR, 4, 1),
+            Some("tb tag".into()),
+            Basis::Both,
+            vec![d, c],
+        )
+        .expect("balanced entry")
+    };
+    post(h, s, &tagged(savings.id, sales.id, "1000.00", job_a.id));
+    post(h, s, &tagged(sales.id, savings.id, "100.00", job_b.id));
+    let ids = [savings.id.to_string(), sales.id.to_string()];
+    let table = |group_by: Value| {
+        let def = builder(
+            "asOf",
+            None,
+            json!([section("tb", "tb_net", &ids, group_by)]),
+        );
+        run_open(h, s, reference(Some(def), None, false, true), true)
+            .expect("TB run")
+            .table
+    };
+    let one = table(json!([{"key": "account"}]));
+    let two = table(json!([{"key": "account"}, {"key": "tag", "tagGroupId": jobs.to_string()}]));
+    let money_cols: Vec<usize> = two
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.kind == ColumnKind::Amount)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(money_cols.len(), 2, "Debit and Credit: {:?}", two.columns);
+    let (debit, credit) = (money_cols[0], money_cols[1]);
+    let parent = two
+        .rows
+        .iter()
+        .find(|x| x.caption.contains("TieTbSavings"))
+        .expect("the savings line");
+    let slices: Vec<_> = two
+        .rows
+        .iter()
+        .filter(|x| x.path.is_under(&parent.path) && x.kind == RowKind::Group)
+        .collect();
+    assert_eq!(slices.len(), 2, "one line per tag: {slices:?}");
+    // The account's own figure: its line, or its subtotal when the line
+    // only heads its slices.
+    let figure = if amount(&parent.cells[debit]) == Decimal::ZERO {
+        two.rows
+            .iter()
+            .find(|x| x.kind == RowKind::Subtotal && x.path.is_under(&parent.path))
+            .map_or(Decimal::ZERO, |x| amount(&x.cells[debit]))
+    } else {
+        amount(&parent.cells[debit])
+    };
+    assert_eq!(
+        figure,
+        Decimal::new(90_000, 2),
+        "Savings nets to Debit 900.00"
+    );
+    let mut found: Vec<Decimal> = slices.iter().map(|x| amount(&x.cells[debit])).collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [Decimal::new(-10_000, 2), Decimal::new(100_000, 2)],
+        "both slices in the Debit column, job B negative"
+    );
+    assert!(
+        slices
+            .iter()
+            .all(|x| amount(&x.cells[credit]) == Decimal::ZERO),
+        "no slice moved to Credit"
+    );
+    assert_eq!(
+        found.iter().copied().sum::<Decimal>(),
+        figure,
+        "slices add up"
+    );
+    let total = |t: &cl_core::report::ReportTable| -> Vec<Cell> {
+        let row = t
+            .rows
+            .iter()
+            .find(|x| x.kind == RowKind::Total)
+            .expect("the section total");
+        money_cols.iter().map(|&i| row.cells[i].clone()).collect()
+    };
+    assert_eq!(
+        total(&two),
+        total(&one),
+        "the Total equals the one-level TB"
     );
 }
 
