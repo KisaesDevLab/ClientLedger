@@ -235,7 +235,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 6. The demo's on-screen expanded balance line still lists earlier transactions without the opening row, and the demo has no Trial Balance.
 7. The opening row in an export is tested in cl-print only, not through a drill tab.
 8. Hands-on QA round 1 (`target/reviews/PR-A2-qa.md`): a balance in a date range passed with figures, Trial Balance partly (account then Tag not tested); QA-1 minor: a single-month drill keeps the three month headers.
-9. QA round 2 (merge, delete, import, cash-basis starters) was in progress when this entry was written.
+9. QA round 2 spent its budget on setup: merge, report-file import, Trial Balance by tag and the cash-basis starters were not tried by hand on the real engine, and the "uses a name that was deleted" message was never seen there (live contract tests, engine tests and the demo scenario `report_missing_ref` cover them). Rerun these by hand in P29 QA. Found: the engine refuses to delete a tag that is in use ("make it inactive instead"), so the deleted-name message arises from deleting a tag group, an unused tag or a budget, and from records merged earlier. The merge warning now says memorized reports switch to the name kept.
 10. All review runs were accrual only, except the Trial Balance re-check, which ran both bases.
 11. U-226's standard-report `missing` was confirmed from engine source, not a live test.
 12. Q-PRA2a-Q-PRA2g are defaults for the owner to confirm.
