@@ -1384,6 +1384,14 @@ fn main() -> std::process::ExitCode {
             contract_closing_admin::closed_period_edit_is_in_the_exceptions_report,
         ),
         (
+            "closing_admin::closed_period_void_delete_and_batch_are_in_the_exceptions_report",
+            contract_closing_admin::closed_period_void_delete_and_batch_are_in_the_exceptions_report,
+        ),
+        (
+            "closing_admin::bookkeeper_closed_period_edit_is_in_the_exceptions_report",
+            contract_closing_admin::bookkeeper_closed_period_edit_is_in_the_exceptions_report,
+        ),
+        (
             "reconcile::discrepancy_lists_changed_and_backdated_entries",
             contract_reconcile::discrepancy_lists_changed_and_backdated_entries,
         ),
