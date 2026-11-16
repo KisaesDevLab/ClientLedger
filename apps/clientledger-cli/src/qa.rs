@@ -433,6 +433,27 @@ async fn standard_report(
     Ok(())
 }
 
+/// The custom role "QA Custom (bills, no reports)": A/P's map with every
+/// full right cut to view, then bills and contacts full and reports none.
+/// "See sensitive accounts" stays none (from the built-in).
+fn custom_role_map(keys: EngineKeys) -> std::collections::BTreeMap<String, String> {
+    let mut custom = builtin_wire(BuiltinRole::Payables, keys);
+    for v in custom.values_mut() {
+        if v == "full" {
+            *v = "view".into();
+        }
+    }
+    for k in ["bills", "contacts"] {
+        if custom.contains_key(k) {
+            custom.insert(k.into(), "full".into());
+        }
+    }
+    if custom.contains_key("reports") {
+        custom.insert("reports".into(), "none".into());
+    }
+    custom
+}
+
 #[allow(clippy::too_many_lines, reason = "one linear seed, step by step")]
 async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
     let mut pace = Pace::default();
@@ -530,13 +551,6 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
             .map_err(api("payroll entry"))?;
     }
     summary.push("expense account QA Payroll - Wages with 2 entries in 10/2026".into());
-    if caps.has("sensitive-accounts-v1") {
-        notes.push(
-            "QA Payroll - Wages is NOT marked sensitive: no cl-api call on this branch; mark it in Chart of Accounts".into(),
-        );
-    } else {
-        notes.push("the engine has no sensitive accounts (sensitive-accounts-v1)".into());
-    }
 
     // 3. Two budgets.
     let budgets = s.budgets();
@@ -621,6 +635,23 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
         Err(e) => notes.push(format!("deleting QA Retired yard was refused: {e}")),
     }
 
+    // The payroll account marked sensitive (U-33) by the main Admin, after
+    // its entries, budget line and memorized report exist. Only the
+    // Admins see it; the Bookkeeper, A/R, A/P, View-only and Custom roles
+    // have "See sensitive accounts" at none.
+    if caps.has("sensitive-accounts-v1") {
+        s.accounts()
+            .set_sensitive(payroll, true, key())
+            .await
+            .map_err(api("payroll sensitive"))?;
+        summary.push(
+            "QA Payroll - Wages is marked SENSITIVE: only the Admins see it; the Bookkeeper, A/R, A/P, View-only and Custom users don't"
+                .into(),
+        );
+    } else {
+        notes.push("the engine has no sensitive accounts (sensitive-accounts-v1)".into());
+    }
+
     // 6. A mergeable customer pair, one invoice each (after the closing
     // date).
     println!("qa: customers and invoices");
@@ -669,20 +700,7 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
         };
         ids.insert(b.template_name(), id);
     }
-    let mut custom = builtin_wire(BuiltinRole::Payables, keys);
-    for v in custom.values_mut() {
-        if v == "full" {
-            *v = "view".into();
-        }
-    }
-    for k in ["bills", "contacts"] {
-        if custom.contains_key(k) {
-            custom.insert(k.into(), "full".into());
-        }
-    }
-    if custom.contains_key("reports") {
-        custom.insert("reports".into(), "none".into());
-    }
+    let custom = custom_role_map(keys);
     let custom_id = match template(CUSTOM_ROLE) {
         Some(id) => id,
         None => {
@@ -776,6 +794,32 @@ mod tests {
         assert!(parse(&args(&["seed", "--bogus"])).is_err());
         assert!(parse(&args(&["wipe"])).is_err());
         assert_eq!(parse(&args(&["--help"])), Ok(None));
+    }
+
+    /// Only the Admins see the sensitive payroll account: no other QA role
+    /// holds "See sensitive accounts".
+    #[test]
+    fn no_qa_role_but_admin_sees_sensitive_accounts() {
+        let keys = EngineKeys {
+            report_areas: true,
+            sensitive: true,
+        };
+        let key = cl_model::roles::SENSITIVE_KEY;
+        for b in [
+            BuiltinRole::Bookkeeper,
+            BuiltinRole::Receivables,
+            BuiltinRole::Payables,
+        ] {
+            assert_eq!(
+                builtin_wire(b, keys).get(key).map(String::as_str),
+                Some("none"),
+                "{b:?}"
+            );
+        }
+        assert_eq!(
+            custom_role_map(keys).get(key).map(String::as_str),
+            Some("none")
+        );
     }
 
     #[test]
