@@ -419,7 +419,16 @@ pub(crate) fn problem_text(s: &BuilderScreen, p: &Problem) -> String {
         || t("builder.problem.the_report"),
         |id| super::outline::caption_of(s, id),
     );
-    t_with(&p.code.key(), &[("row", &caption)])
+    // A memorized report's missing name isn't the AI's (Q-PRA2c).
+    let key = match p.code {
+        cl_model::report_def::problems::ProblemCode::Unresolved
+            if s.ai.review.as_ref().is_some_and(|r| r.missing) =>
+        {
+            "builder.problem.unresolved_missing".to_string()
+        }
+        _ => p.code.key(),
+    };
+    t_with(&key, &[("row", &caption)])
 }
 
 fn go_to(s: &mut BuilderScreen, p: &Problem) {

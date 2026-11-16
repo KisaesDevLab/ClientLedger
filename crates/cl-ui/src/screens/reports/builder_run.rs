@@ -1815,11 +1815,20 @@ fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
         let Some(def) = b.def.clone() else {
             return;
         };
-        let origin = b
-            .origin
-            .clone()
-            .unwrap_or_else(|| Origin::Starter(b.key.clone()));
-        (def, b.saved.clone(), origin)
+        // A memorized builder report opened from the list or catalog: its
+        // row (Save changes follows Q-310), not a ready-made report.
+        let memorized = w
+            .memo
+            .current
+            .as_ref()
+            .filter(|r| r.kind == "builder" && b.saved.is_none())
+            .map(|r| saved_of(r, def.clone(), SavedKind::Builder));
+        let origin = match (&b.origin, &memorized) {
+            (Some(o), _) => o.clone(),
+            (None, Some(_)) => Origin::Memorized,
+            (None, None) => Origin::Starter(b.key.clone()),
+        };
+        (def, b.saved.clone().or(memorized), origin)
     };
     let Some(b) = w.builder.as_ref() else {
         return;

@@ -1,0 +1,28 @@
+# A memorized report that uses a deleted name (PR-A2, Q-PRA2c, U-226)
+# against `clientledger --demo`. The demo's "Sales by job" groups by a tag
+# group the demo deleted. The report window says so in place of a report
+# (never "No activity", never "Try again"); "Fix in the builder" opens the
+# editor with the name to pick or remove on the marked row (the A10
+# picker), and nothing runs until it is settled. Nothing is saved, so the
+# light and dark runs start alike. Synthetic.
+name: report_missing_ref
+description: Memorized report with a deleted name - message in place of the report, the builder's picker.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: reports.center
+  - wait: {ms: 400}
+  - click: {label: Sales by job, index: 0}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.state, equals: failed}
+  - assert_state: {key: screen.problem, equals: missing_deleted}
+  - assert_exists: {label_contains: "This report uses a name that was deleted"}
+  - assert_exists: {role: button, label: Fix in the builder}
+  - screenshot: message
+  - click: {role: button, label: Fix in the builder}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.screen, equals: report_builder}
+  - assert_state: {key: screen.ai.drafted, equals: true}
+  - assert_state: {key: screen.ai.unresolved, equals: 1}
+  - assert_exists: {label_contains: "The tag group on the row Sales was deleted."}
+  - screenshot: picker

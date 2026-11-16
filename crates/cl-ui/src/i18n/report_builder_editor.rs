@@ -319,6 +319,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("builder.problem.not_in_company", "A filter in {row} names an account or name that is no longer in this company. Remove it."),
     ("builder.problem.not_on_cash", "{row} adds up quantities, which count on accrual basis only. Pick Accrual."),
     ("builder.problem.other", "The books can't run {row} yet. Update ClientLedger."),
+    ("builder.problem.unresolved_missing", "{row} uses a name that was deleted or merged. Pick another name, or remove it, in the box above."),
     ("builder.problem.unresolved", "{row} uses a name the AI couldn't match in your books. Pick the one you mean, or remove it, in the \"Drafted by AI\" box above."),
     // A10: Describe the report (Q-A10b–i)
     ("builder.toolbar.describe", "Describe the report\u{2026}"),
