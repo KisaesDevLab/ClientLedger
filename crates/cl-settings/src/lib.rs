@@ -31,6 +31,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ai;
+pub mod autologin;
 pub mod bank_import;
 pub mod company_prefs;
 pub mod email_templates;
@@ -47,6 +48,7 @@ pub mod user_prefs;
 pub use ai::{
     AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, is_ollama_cloud_model, validate_ollama_url,
 };
+pub use autologin::{AUTO_SIGN_IN_FILE, AutoSignIn, AutoSignInError};
 pub use bank_import::{CsvProfile, CsvProfiles, CsvProfilesStore};
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FEED_TRANSFER_WINDOW_DEFAULT, FolderError, HereNote,
@@ -68,8 +70,8 @@ pub use unconfirmed_checks::{
     UnconfirmedChecksStore,
 };
 pub use user_prefs::{
-    DateFormat, DateWarnings, NegativeStyle, StartScreen, ThemeChoice, UpdateCheck, UserPrefs,
-    UserPrefsStore,
+    DateFormat, DateWarnings, IDLE_LOCK_STEPS, NegativeStyle, StartScreen, ThemeChoice,
+    UpdateCheck, UserPrefs, UserPrefsStore,
 };
 
 /// Returns the crate name; placeholder kept from the skeleton.
