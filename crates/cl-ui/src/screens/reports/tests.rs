@@ -1005,3 +1005,105 @@ fn audit_words_for_report_files_read_plainly() {
         assert_eq!(super::label(key), text);
     }
 }
+
+/// PR-A2 (engine fix 2): a builder Trial Balance grouped below the account
+/// can send a negative Debit cell (a tag slice against its account's
+/// side). The window shows it in the app's negative format and the CSV,
+/// workbook and PDF keep its sign; nothing clamps, drops or flips it.
+#[test]
+fn a_negative_trial_balance_cell_shows_and_exports_with_its_sign() {
+    use cl_core::report::{ColumnHead, ColumnKind, ReportMeta, ReportRow, ReportTable, RowPath};
+    use rust_decimal::Decimal;
+    let (_d, link) = demo();
+    let mut w = window(&link);
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    let head = |key: &str| ColumnHead {
+        key: key.into(),
+        caption: key.into(),
+        kind: ColumnKind::Amount,
+        range: None,
+        drill: None,
+    };
+    let amt = |s: &str| Cell::Amount(s.parse::<Decimal>().expect("decimal"));
+    let row = |kind, level, path: &[&str], cells| ReportRow {
+        kind,
+        level,
+        path: RowPath::of(path.iter().copied()),
+        caption: (*path.last().expect("caption")).to_string(),
+        cells,
+        drill: None,
+        expandable: false,
+    };
+    let table = ReportTable {
+        columns: vec![head("Debit"), head("Credit")],
+        rows: vec![
+            row(
+                RowKind::Group,
+                0,
+                &["Savings"],
+                vec![amt("900.00"), Cell::Empty],
+            ),
+            row(
+                RowKind::Group,
+                1,
+                &["Savings", "Job A"],
+                vec![amt("1000.00"), Cell::Empty],
+            ),
+            row(
+                RowKind::Group,
+                1,
+                &["Savings", "Job B"],
+                vec![amt("-100.00"), Cell::Empty],
+            ),
+            row(
+                RowKind::Total,
+                0,
+                &["Total"],
+                vec![amt("900.00"), amt("0.00")],
+            ),
+        ],
+        meta: ReportMeta::default(),
+    };
+    w.set_table(table);
+    let shown = w.shown_rows();
+    let t = w.table.as_ref().expect("table");
+    assert!(
+        shown.iter().any(|&i| t.rows[i].caption == "Job B"),
+        "the negative slice is on screen"
+    );
+    let job_b = &t.rows[2].cells[0];
+    for style in [
+        cl_core::MoneyStyle::default(),
+        cl_core::MoneyStyle {
+            negative: cl_core::NegativeStyle::Parens,
+            ..cl_core::MoneyStyle::default()
+        },
+    ] {
+        let text = super::window::cell_text(job_b, style);
+        assert_eq!(
+            text,
+            cl_core::report::display_amount(Decimal::new(-10_000, 2), style)
+        );
+        assert!(text.contains('-') || text.starts_with('('), "{text}");
+    }
+    let csv = String::from_utf8(super::export::bytes(&w, super::export::Kind::Csv).expect("csv"))
+        .expect("utf8");
+    assert!(csv.contains("Job B,-100.00,"), "{csv}");
+    assert!(!csv.contains("Job B,,100.00"), "never moved to Credit");
+    // The workbook is written from this snapshot (cl-print checks the
+    // negative stays a negative number in the sheet).
+    let snap = super::export::snapshot(&w).expect("snapshot");
+    let file_b = snap
+        .table()
+        .rows
+        .iter()
+        .find(|r| r.caption == "Job B")
+        .expect("Job B in the file");
+    assert_eq!(file_b.cells[0], amt("-100.00"));
+    assert_eq!(file_b.cells[1], Cell::Empty);
+    let xlsx = super::export::bytes(&w, super::export::Kind::Xlsx).expect("xlsx");
+    assert_eq!(&xlsx[..2], b"PK");
+    let pdf = super::export::bytes(&w, super::export::Kind::Pdf).expect("pdf");
+    assert!(pdf.starts_with(b"%PDF"));
+}
