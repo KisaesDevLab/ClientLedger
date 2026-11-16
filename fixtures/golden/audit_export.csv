@@ -1,4 +1,4 @@
 When,User,Action,Record,Record ID,Source,Field,Before,After
 11/02/2026 10:15 AM,Pat Owner,Changed,Transaction,7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01,Entered by Pat Owner,memo,'=SUM(A1:A9),"Paid, with thanks"
-11/02/2026 10:15 AM,Pat Owner,Changed,Transaction,7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01,Entered by Pat Owner,total,'-12.3400,12.3400
+11/02/2026 10:15 AM,Pat Owner,Changed,Transaction,7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01,Entered by Pat Owner,total,-12.3400,12.3400
 11/01/2026 09:00 AM,,Added,Tag,,Automatic,,,

@@ -22,15 +22,11 @@ use eframe::egui::{self, Align, Layout, Margin, RichText, Sense, Ui, Vec2};
 
 use super::HomeScreen;
 use super::balances::{failed, heading, note};
-use cl_model::permissions::ReportUse;
-
 use crate::i18n::{t, t_with};
-
 use crate::screens::lists::center::model::report_text;
-
 use crate::theme::Tokens;
-
 use crate::widgets::bar_chart::{Bar, BarChart, BarGroup};
+use cl_model::permissions::ReportUse;
 
 /// Months on the chart.
 pub(crate) const MONTHS: usize = 6;

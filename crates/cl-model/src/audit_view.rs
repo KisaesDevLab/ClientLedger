@@ -7,7 +7,9 @@
 //! - Secrets, taxpayer ids and bookkeeping fields never show, at any depth
 //!   (`cl_core::audit::hidden_field`, NN11).
 //! - Every CSV cell is text and goes through `csv_formula_safe`, so no cell
-//!   a spreadsheet opens starts with `=`, `+`, `-` or `@`.
+//!   a spreadsheet opens starts with `=`, `+`, `-` or `@`, except a
+//!   plain decimal such as `-12.3400`, which a spreadsheet reads as a
+//!   number, never a formula: it is written verbatim (P29 review M5).
 
 use std::collections::BTreeSet;
 
@@ -201,11 +203,31 @@ pub struct ExportRow {
     pub fields: Vec<(String, String, String)>,
 }
 
+/// A plain decimal (`-12.3400`, `7`): an optional minus, digits, and an
+/// optional point with digits; nothing else.
+fn plain_decimal(s: &str) -> bool {
+    let body = s.strip_prefix('-').unwrap_or(s);
+    let (int, frac) = body.split_once('.').unwrap_or((body, "0"));
+    !int.is_empty()
+        && !frac.is_empty()
+        && int.bytes().all(|b| b.is_ascii_digit())
+        && frac.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// One CSV cell: a plain decimal verbatim, anything else formula-safe.
+fn audit_cell(s: String) -> String {
+    if plain_decimal(&s) {
+        s
+    } else {
+        csv_formula_safe(s)
+    }
+}
+
 /// The CSV heading line (captions already translated).
 #[must_use]
 pub fn csv_heading(captions: &[String]) -> String {
     let mut out = String::new();
-    let cells: Vec<String> = captions.iter().cloned().map(csv_formula_safe).collect();
+    let cells: Vec<String> = captions.iter().cloned().map(audit_cell).collect();
     push_csv_line(&mut out, &cells);
     out
 }
@@ -234,7 +256,7 @@ pub fn csv_lines(r: &ExportRow) -> String {
             .iter()
             .cloned()
             .chain([f.clone(), b.clone(), a.clone()])
-            .map(csv_formula_safe)
+            .map(audit_cell)
             .collect();
         push_csv_line(&mut out, &cells);
     }
@@ -414,8 +436,10 @@ mod tests {
             let csv = csv_lines(&row) + &csv_heading(&texts);
             for cell in cells(&csv) {
                 let first = cell.trim_start_matches(' ').chars().next();
+                // P29 review M5: a plain decimal is a number, not a formula.
                 prop_assert!(
-                    !matches!(first, Some('=' | '+' | '-' | '@' | '\t' | '\r')),
+                    plain_decimal(&cell)
+                        || !matches!(first, Some('=' | '+' | '-' | '@' | '\t' | '\r')),
                     "{cell:?}"
                 );
             }
@@ -472,5 +496,15 @@ mod tests {
         let golden =
             include_str!("../../../fixtures/golden/audit_export.csv").replace("\r\n", "\n");
         assert_eq!(csv, golden);
+    }
+
+    #[test]
+    fn only_plain_decimals_skip_the_apostrophe() {
+        for ok in ["-12.3400", "12", "0.5", "-7"] {
+            assert_eq!(audit_cell(ok.into()), ok);
+        }
+        for risky in ["-1+1", "-", "-.5", "- 3", "-3e2", "=1", "-12.", "+5"] {
+            assert!(audit_cell(risky.into()).starts_with('\''), "{risky}");
+        }
     }
 }

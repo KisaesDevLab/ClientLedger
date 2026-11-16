@@ -699,7 +699,8 @@ impl Shell {
         tracing::info!("signed out");
     }
 
-    /// Close the open company: save or prompt for open forms first, wait    /// for pending writes, then return to the Open Company window.
+    /// Close the open company: save or prompt for open forms first, wait
+    /// for pending writes, then return to the Open Company window.
     fn close_company(&mut self) {
         let Some(link) = self.company_link.clone() else {
             return;
@@ -1576,7 +1577,8 @@ impl Shell {
         self.idle.locked()
     }
 
-    /// Tell the grid screens of `viewport` today's date, the formats and    /// whether a modal is open, and share the remembered column widths.
+    /// Tell the grid screens of `viewport` today's date, the formats and
+    /// whether a modal is open, and share the remembered column widths.
     fn publish_grid_facts(&self, ctx: &Context, viewport: egui::ViewportId) {
         let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
         crate::grid_env::publish(ctx, viewport, frame);
