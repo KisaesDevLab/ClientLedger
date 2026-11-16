@@ -644,7 +644,8 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
             .set_sensitive(payroll, true, key())
             .await
             .map_err(api("payroll sensitive"))?;
-        summary.push(
+        // A note, so credentials.txt says which account it is.
+        notes.push(
             "QA Payroll - Wages is marked SENSITIVE: only the Admins see it; the Bookkeeper, A/R, A/P, View-only and Custom users don't"
                 .into(),
         );
