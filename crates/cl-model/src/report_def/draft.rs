@@ -134,15 +134,30 @@ fn texts(def: &BuilderDefinition) -> Vec<&str> {
     out
 }
 
-/// True when a heading or text of an AI draft states a number in words
-/// (Q-A10l, [`super::number_words`]) and isn't exactly a books name in
-/// `known` (a vendor called "Two Rivers Supply"). Such a draft is refused
-/// whole, as one with a digit is (non-negotiable 4).
+/// A name or heading as compared with the books: white space collapsed,
+/// trimmed, lowercase (the engine's `norm`, but for its NFKC fold).
+#[must_use]
+pub fn name_key(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// True when a heading or text of an AI draft states a number, in digits
+/// of any script or in words (Q-A10l, [`super::number_words`]), and isn't
+/// exactly a name in this company's books listed in `known` ("401(k)
+/// Match", "Studio 54", a vendor called "Two Rivers Supply"; owner
+/// 2026-11-15, Q-A10j; compared by [`name_key`]). Such a draft is refused
+/// whole (non-negotiable 4). `known` must be the books' own names, never
+/// words the owner or the model typed.
 #[must_use]
 pub fn states_a_number(def: &BuilderDefinition, known: &BTreeSet<String>) -> bool {
-    texts(def)
-        .into_iter()
-        .any(|t| super::number_words::states_a_number(t) && !known.contains(t.trim()))
+    let known: BTreeSet<String> = known.iter().map(|k| name_key(k)).collect();
+    texts(def).into_iter().any(|t| {
+        (t.chars().any(char::is_numeric) || super::number_words::states_a_number(t))
+            && !known.contains(&name_key(t))
+    })
 }
 
 /// What the owner does with a name.

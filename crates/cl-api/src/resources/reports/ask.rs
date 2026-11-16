@@ -150,7 +150,13 @@ pub fn ask_refusal(e: &ApiError) -> Option<AskRefusal> {
             c.as_str()
         }
         ApiError::Validation(v) => v.code().map_or("", crate::errors::ErrorCode::as_str),
-        ApiError::OfflineUnavailable { .. } => return Some(AskRefusal::Unavailable),
+        // A model call that took too long or whose answer was lost: it
+        // saves nothing, so it is "couldn't reach the AI service", never
+        // an unknown save (A10 QA-1).
+        ApiError::OfflineUnavailable { .. }
+        | ApiError::Timeout
+        | ApiError::EngineUnavailable { permanent: false }
+        | ApiError::OutcomeUnknown { .. } => return Some(AskRefusal::Unavailable),
         _ => return None,
     };
     match code {

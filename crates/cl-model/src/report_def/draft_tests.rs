@@ -104,9 +104,12 @@ fn number_words_in_headings_are_found() {
     for d in &cases {
         assert!(states_a_number(d, &none), "{d:?}");
     }
-    // An ordinary word passes; a books name passes as itself only.
+    // "one" counts even hyphenated, as the engine's rule (A10 QA); a books
+    // name passes as itself only.
     let one_time = set(&|d| d.title = Some("One-time customers".into()));
-    assert!(!states_a_number(&one_time, &none));
+    assert!(states_a_number(&one_time, &none));
+    let first = set(&|d| d.title = Some("First quarter by vendor".into()));
+    assert!(!states_a_number(&first, &none));
     let vendor = set(&|d| {
         if let Node::Section(s) = &mut d.nodes[0] {
             s.caption = "Two Rivers Supply".into();
@@ -121,6 +124,44 @@ fn number_words_in_headings_are_found() {
         }
     });
     assert!(states_a_number(&more, &known));
+}
+
+/// Q-A10j (owner 2026-11-15): a heading with a digit passes only when it
+/// is exactly a name in the books (any case, spacing aside); anything else
+/// with a digit of any script is refused.
+#[test]
+fn a_digit_passes_only_as_an_exact_books_name() {
+    let caption = |c: &str| {
+        let mut d = drafted();
+        if let Node::Section(s) = &mut d.nodes[0] {
+            s.caption = c.into();
+        }
+        d
+    };
+    let none = BTreeSet::new();
+    let known: BTreeSet<String> = [
+        "6100 \u{b7} 401(k) Match".to_string(),
+        "401(k) Match".to_string(),
+        "Studio 54".to_string(),
+    ]
+    .into();
+    for ok in ["401(k) Match", "401(k)  match", " Studio 54 "] {
+        assert!(states_a_number(&caption(ok), &none), "{ok} without names");
+        assert!(!states_a_number(&caption(ok), &known), "{ok}");
+    }
+    for refused in [
+        "401(k) Match over 500",
+        "Studio 54 top 10",
+        "Top 10 vendors",
+        "Rent 2026",
+        "Rent \u{0662}\u{0660}",
+        "Studio 54 and one more",
+    ] {
+        assert!(states_a_number(&caption(refused), &known), "{refused}");
+    }
+    let mut title = drafted();
+    title.title = Some("Studio 54".into());
+    assert!(!states_a_number(&title, &known));
 }
 
 /// A definition with a placeholder is never handed out to send.

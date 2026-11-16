@@ -1,17 +1,26 @@
 //! English number words (A10, Q-A10l): the AI never states a number, in
-//! digits or in words. A draft's heading or text row that uses a number
-//! word as a quantity ("Bills over five hundred dollars", "Top ten
-//! customers") is refused, unless the text is exactly a name from the books
-//! (a vendor called "Two Rivers Supply"). The one list of words lives here.
+//! digits or in words. A draft's heading or text row with a number word
+//! ("Bills over five hundred dollars", "Top ten customers") is refused,
+//! unless the text is exactly a name from the books (a vendor called "Two
+//! Rivers Supply"). The one list of words lives here.
 //!
-//! A number word joined by a hyphen to a word that is not a number word is
-//! part of an ordinary word, not a quantity: "One-time customers",
-//! "Three-way match", "No-one". Ordinals ("First", "Second") and "grand"
-//! ("Grand total") are not in the list.
+//! The rule and the list are the engine's (`draft-numbers.ts`
+//! `NUMBER_WORDS`, `hasNumberWord`; A10 QA, Q-A10j): the text is split into
+//! words at anything that is not a letter, and any word on the list counts,
+//! hyphenated or not ("one" counts: "One-time customers" is refused; being
+//! over-careful is the safe side). "a grand" and "half a grand" count too,
+//! but not "Grand total". Ordinals ("First", "Second") and "quarter" are
+//! period words and allowed.
+//!
+//! One difference remains: the engine first folds the text with Unicode
+//! NFKC and drops format characters (zero-width spaces), so fullwidth
+//! letters ("ｏｎｅ") or a word split by a zero-width space count there and
+//! not here. The engine's check runs first on every draft, so such a
+//! heading never reaches the desktop.
 
 /// The words that state a quantity: the cardinals, the tens and the scale
-/// words.
-pub const NUMBER_WORDS: [&str; 34] = [
+/// words, with the plurals the engine lists.
+pub const NUMBER_WORDS: [&str; 41] = [
     "zero",
     "one",
     "two",
@@ -35,17 +44,24 @@ pub const NUMBER_WORDS: [&str; 34] = [
     "twenty",
     "thirty",
     "forty",
+    "fourty",
     "fifty",
     "sixty",
     "seventy",
     "eighty",
     "ninety",
     "hundred",
+    "hundreds",
     "thousand",
+    "thousands",
     "million",
+    "millions",
     "billion",
+    "billions",
     "trillion",
+    "trillions",
     "dozen",
+    "dozens",
 ];
 
 /// True when `w` (any case) is one of [`NUMBER_WORDS`].
@@ -55,54 +71,53 @@ pub fn is_number_word(w: &str) -> bool {
     NUMBER_WORDS.contains(&w.as_str())
 }
 
-/// The words of `s` with what joins each to the next: `(word, hyphen
-/// after)`. A word is a run of letters (and apostrophes inside it).
-fn words(s: &str) -> Vec<(&str, bool)> {
-    let mut out: Vec<(&str, bool)> = Vec::new();
+/// The words of `s` (lowercased) with their byte spans: runs of letters,
+/// split at anything else (the engine's `split(/[^\p{L}]+/u)`).
+fn words(s: &str) -> Vec<(String, usize, usize)> {
+    let mut out = Vec::new();
     let mut start: Option<usize> = None;
-    let mut last_end = 0;
     for (i, c) in s.char_indices() {
-        let part = c.is_alphabetic() || (c == '\'' && start.is_some());
-        match (part, start) {
-            (true, None) => {
-                // A hyphen right before this word joins it to the last one.
-                start = Some(i);
-            }
+        match (c.is_alphabetic(), start) {
+            (true, None) => start = Some(i),
             (false, Some(b)) => {
-                out.push((&s[b..i], false));
+                out.push((s[b..i].to_lowercase(), b, i));
                 start = None;
-                last_end = i;
             }
             _ => {}
         }
-        if c == '-'
-            && start.is_none()
-            && last_end == i
-            && let Some(prev) = out.last_mut()
-        {
-            prev.1 = true;
-        }
     }
     if let Some(b) = start {
-        out.push((&s[b..], false));
+        out.push((s[b..].to_lowercase(), b, s.len()));
     }
     out
 }
 
-/// True when `s` uses a number word as a quantity (see the module docs).
+/// Only white space between two words.
+fn spaced(s: &str, from: usize, to: usize) -> bool {
+    from < to && s[from..to].chars().all(char::is_whitespace)
+}
+
+/// "a grand" or "half a grand" (slang for a thousand dollars), not "a
+/// grand total".
+fn a_grand(s: &str, w: &[(String, usize, usize)]) -> bool {
+    w.windows(2).enumerate().any(|(i, p)| {
+        let (a, g) = (&p[0], &p[1]);
+        a.0 == "a"
+            && g.0 == "grand"
+            && spaced(s, a.2, g.1)
+            && !w
+                .get(i + 2)
+                .is_some_and(|t| t.0.starts_with("total") && spaced(s, g.2, t.1))
+    })
+}
+
+/// True when `s` holds a number word (see the module docs).
 #[must_use]
 pub fn states_a_number(s: &str) -> bool {
     let w = words(s);
-    w.iter().enumerate().any(|(i, (word, joined_next))| {
-        if !is_number_word(word) {
-            return false;
-        }
-        // Joined to a word that isn't a number word: part of an ordinary
-        // word ("one-time", "no-one").
-        let next_plain = *joined_next && w.get(i + 1).is_some_and(|(n, _)| !is_number_word(n));
-        let prev_plain = i > 0 && w[i - 1].1 && !is_number_word(w[i - 1].0);
-        !(next_plain || prev_plain)
-    })
+    w.iter()
+        .any(|(word, _, _)| NUMBER_WORDS.contains(&word.as_str()))
+        || a_grand(s, &w)
 }
 
 #[cfg(test)]
@@ -119,7 +134,20 @@ mod tests {
             "Sales above one thousand",
             "Spend (a dozen vendors)",
             "two",
+            "Hundreds of bills",
+            "Fourty days",
+            "Dozens of vendors",
+            "Spend over a grand",
+            "Half a grand or more",
         ] {
+            assert!(states_a_number(s), "{s}");
+        }
+    }
+
+    /// As the engine: "one" counts even in a hyphenated word (Q-A10j).
+    #[test]
+    fn hyphenated_number_words_count_as_the_engine_s() {
+        for s in ["One-time customers", "Three-way match", "No-one assigned"] {
             assert!(states_a_number(s), "{s}");
         }
     }
@@ -127,14 +155,13 @@ mod tests {
     #[test]
     fn ordinary_words_pass() {
         for s in [
-            "One-time customers",
-            "Three-way match",
-            "No-one assigned",
             "Grand total",
+            "A grand total",
             "First quarter",
             "Someone's often tonight",
             "Fuel by month",
             "Network costs",
+            "Alone at last",
             "",
         ] {
             assert!(!states_a_number(s), "{s}");

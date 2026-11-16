@@ -37,6 +37,9 @@ steps:
   - click: {role: button, label: Describe it}
   - assert_state: {key: screen.ai.panel, equals: true}
   - assert_exists: {label_contains: "Answered by: prepared drafts in the practice company"}
+  # A10 QA-3/QA-4: the switches are read as the panel opens.
+  - assert_state: {key: screen.ai.ai_on, equals: true}
+  - assert_state: {key: screen.ai.panel_provider, equals: demo}
   - assert_focused: {label: Describe the report you want, index: 1}
   - type: {text: "Fuel by month this year"}
   - key: Ctrl+Enter
@@ -78,6 +81,11 @@ steps:
   - key: Ctrl+Enter
   - wait: {ms: 300}
   - assert_state: {key: screen.ai.message, equals: demo_only}
+  # A10 QA-7: after Draft the box has the keyboard back, so the first Esc
+  # puts back what it held and the panel stays open.
+  - assert_focused: {label: Describe the report you want, index: 1}
+  - key: Escape
+  - assert_state: {key: screen.ai.panel, equals: true}
   # --- An ambiguous name: pick it, Keep, Memorize ---------------------------
   - click: {label: Describe the report you want, index: 1}
   - key: Ctrl+A

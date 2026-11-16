@@ -22,7 +22,9 @@
 # keyable-finance-charges (idempotency-finance-charges-v1, U-141) and
 # keyable-sales-doc-email (sales-doc-email-v1, U-144) routes are
 # upgraded;
-# never = auth and company-creation routes.
+# never = auth and company-creation routes; query = a POST that saves nothing
+# (an AI model call): no key, retried only when not sent, a 5xx or timeout
+# returned as is (never an unknown save outcome; A10 QA-1).
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
 # `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
@@ -499,9 +501,9 @@ POST    /api/v1/budgets/{id}/copy-from/{sourceId} keyable-budgets
 POST    /api/v1/budgets/{id}/adjust-by-percent  keyable-budgets
 GET     /api/v1/budgets/{id}/vs-actual          idempotent
 POST    /api/v1/reports/email                   keyable-reports-email
-POST    /api/v1/reports/ask                     pre-handler-only
+POST    /api/v1/reports/ask                     query
 # A09: .clreport files (U-220 report-defs-transfer-v1; export audits a download row per report, the preview writes nothing)
 POST    /api/v1/report-builder/definitions/export pre-handler-only
 POST    /api/v1/report-builder/definitions/import/preview pre-handler-only
 # A10: AI drafting (U-120 report-builder-ai-v1; one audit row per draft, nothing else written)
-POST    /api/v1/report-builder/draft            pre-handler-only
+POST    /api/v1/report-builder/draft            query

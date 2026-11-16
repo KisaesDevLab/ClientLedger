@@ -80,7 +80,7 @@ pub(crate) struct AiDraft {
     last_focus: Option<egui::Id>,
     /// The owner's words and the request's phase.
     pub(crate) describe: Describe,
-    gate: Option<Gate>,
+    pub(crate) gate: Option<Gate>,
     gate_job: Option<Job<Gate>>,
     job: Option<Job<DraftReply>>,
     /// A draft that came while the books' names are still being read: it
@@ -90,6 +90,9 @@ pub(crate) struct AiDraft {
     pub(crate) confirm: Option<Box<DraftReply>>,
     /// A refusal or a plain message (an i18n key).
     pub(crate) message: Option<&'static str>,
+    /// Preferences saves (A10 QA-4): the switches and the provider are read
+    /// again when AI settings change while the panel is open.
+    sub: Option<crate::data_bus::Subscription>,
     /// Any other failure ("Copy details").
     pub(crate) error: Option<ApiError>,
     /// The draft on screen, until Keep or Discard.
@@ -121,13 +124,22 @@ impl AiDraft {
             "panel": self.open,
             "phase": format!("{:?}", self.describe.phase).to_lowercase(),
             "described": !self.describe.text.trim().is_empty(),
-            "message": self.message.map(|m| m.rsplit('.').next().unwrap_or_default()),
+            // What the panel shows: with AI off, the how-to-turn-on note
+            // before any Draft (A10 QA-3).
+            "message": self
+                .message
+                .or(matches!(self.gate, Some((false, _))).then_some("builder.ai.ai_off"))
+                .map(|m| m.rsplit('.').next().unwrap_or_default()),
             "error": self.error.is_some(),
             "confirm_replace": self.confirm.is_some(),
             "drafted": review.is_some(),
             "unresolved": review.map_or(0, |r| r.draft.open(def).len()),
             "notes": review.map(|r| shown_notes(&r.draft, def).iter().map(|n| n.key().rsplit('.').next().unwrap_or_default().to_string()).collect::<Vec<_>>()),
             "provider": review.and_then(|r| r.draft.provider.clone()),
+            // The switches as last read (A10 QA-3, QA-4): on, and the
+            // service the panel names.
+            "ai_on": self.gate.as_ref().map(|g| g.0),
+            "panel_provider": self.gate.as_ref().and_then(|g| g.1.clone()),
         })
     }
 }
@@ -165,8 +177,14 @@ pub(crate) fn open_panel(s: &mut BuilderScreen) {
     s.add_menu = false;
     s.export_menu = false;
     // The provider is named before the first draft (A10 UI review S6): the
-    // switches are read now; nothing is sent until Draft.
-    if s.ai.gate.is_none() && s.ai.gate_job.is_none() && available(s) {
+    // switches are read each time the panel opens, so a Preferences change
+    // since the last read shows at once (A10 QA-4); nothing is sent until
+    // Draft. With AI off the panel says so before anything is typed (QA-3).
+    if s.ai.sub.is_none() {
+        s.ai.sub = Some(s.link.bus().subscribe());
+    }
+    if available(s) && !s.ai.describe.busy() {
+        s.ai.gate = None;
         read_gate(s);
     }
     // The books' names, for the number-word check of a draft (a heading
@@ -182,19 +200,23 @@ pub(crate) fn open_panel(s: &mut BuilderScreen) {
     }
 }
 
-/// The names from the books the desktop knows: the lists read, and the
-/// names and candidate labels the engine sent with the draft. An account
-/// is known both as "6100 · Rent" and as "Rent".
+/// The books' lists a draft's headings are checked against (Q-A10j).
+const BOOKS: [Which; 5] = [
+    Which::Accounts,
+    Which::Contacts,
+    Which::Items,
+    Which::Tags,
+    Which::TagGroups,
+];
+
+/// The names in this company's books the desktop knows: the lists read,
+/// and the names several rows share and the candidate labels the engine
+/// sent with the draft (a name nothing matched is the owner's or the
+/// model's words, never a books name). An account is known both as
+/// "6100 · Rent" and as "Rent".
 fn known_names(s: &BuilderScreen, reply: &DraftReply) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let lists = [
-        Which::Accounts,
-        Which::Contacts,
-        Which::Items,
-        Which::Tags,
-        Which::TagGroups,
-    ];
-    let listed = lists
+    let listed = BOOKS
         .into_iter()
         .filter_map(|w| s.lists.get(w))
         .flatten()
@@ -202,6 +224,7 @@ fn known_names(s: &BuilderScreen, reply: &DraftReply) -> BTreeSet<String> {
     let sent = reply.unresolved.iter().flat_map(|u| {
         u.name
             .as_deref()
+            .filter(|_| u.reason == "ambiguous")
             .into_iter()
             .chain(u.candidates.iter().map(|c| c.label.as_str()))
     });
@@ -215,8 +238,9 @@ fn known_names(s: &BuilderScreen, reply: &DraftReply) -> BTreeSet<String> {
     out
 }
 
-/// A draft that came: refused when a heading states a number in words
-/// (Q-A10l), else shown (asking first when the builder has rows).
+/// A draft that came: refused when a heading states a number, in digits or
+/// in words, and isn't exactly a books name (Q-A10j, Q-A10l), else shown
+/// (asking first when the builder has rows).
 pub(crate) fn arrived(s: &mut BuilderScreen, reply: DraftReply) {
     s.ai.describe.phase = Phase::Idle;
     let states_number = serde_json::from_value::<BuilderDefinition>(reply.definition.clone())
@@ -324,21 +348,41 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
             Err(e) => {
                 s.ai.describe.phase = Phase::Idle;
                 refused(s, e);
+                // The box takes the keyboard back, so Esc puts back what it
+                // held before it closes the panel (A10 QA-7).
+                s.ai.focus_box = s.ai.open;
             }
         }
     }
-    // Held until the books' names are read (they are asked for when the
-    // panel opens).
-    if !s.lists.busy()
-        && let Some(reply) = s.ai.arrived.take()
-    {
-        arrived(s, *reply);
+    // Held until every list of the books' names is read (Q-A10j): a heading
+    // is never judged against half the names. A failed read is an empty
+    // list: a heading with a number is then refused, never let through.
+    if s.ai.arrived.is_some() {
+        for w in BOOKS {
+            lists::ensure(s, w);
+        }
+        if BOOKS.iter().all(|w| s.lists.get(*w).is_some())
+            && let Some(reply) = s.ai.arrived.take()
+        {
+            arrived(s, *reply);
+            s.ai.focus_box = s.ai.open;
+        }
+    }
+    // AI settings saved in Preferences while the panel is open (A10 QA-4):
+    // read the switches and the provider again.
+    let changed = match s.ai.sub.as_mut() {
+        Some(sub) => s.link.bus().take(sub).ai,
+        None => false,
+    };
+    if changed && s.ai.open && !s.ai.describe.busy() && available(s) {
+        s.ai.gate = None;
+        read_gate(s);
     }
 }
 
 /// A refusal in the owner's words with a fix; anything else with "Copy
 /// details".
-fn refused(s: &mut BuilderScreen, e: ApiError) {
+pub(crate) fn refused(s: &mut BuilderScreen, e: ApiError) {
     s.ai.message = match draft_refusal(&e) {
         Some(DraftRefusal::ConsentRequired) => {
             s.ai.gate = Some((false, None));
@@ -596,6 +640,11 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let mut ids: Vec<egui::Id> = Vec::new();
     let mut box_id = None;
     let can = available(s);
+    // The switches say AI is off (A10 QA-3): the panel says so and how to
+    // turn it on before anything is typed; the box stays so the owner may
+    // write first, as in Ask a question, but Draft is off.
+    let off = can && matches!(s.ai.gate, Some((false, _)));
+    let message = s.ai.message.or(off.then_some("builder.ai.ai_off"));
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let l = ui.label(RichText::new(t("builder.ai.panel_title")).strong());
@@ -631,23 +680,29 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 .size(12.0)
                 .color(tokens.text_secondary),
         );
-        ui.label(
-            RichText::new(t_with(
-                "builder.ai.sent_to",
-                &[("provider", &provider_text(provider))],
-            ))
-            .size(12.0)
-            .color(tokens.text_secondary),
-        );
+        // No service is named while AI is off, or before the switches are
+        // read (never a stale one, A10 QA-4).
+        if !off && s.ai.gate.is_some() {
+            ui.label(
+                RichText::new(t_with(
+                    "builder.ai.sent_to",
+                    &[("provider", &provider_text(provider))],
+                ))
+                .size(12.0)
+                .color(tokens.text_secondary),
+            );
+        }
         ui.horizontal_wrapped(|ui| {
-            let why = if can {
-                t("builder.ai.draft_off")
-            } else {
+            let why = if !can {
                 t("builder.ai.unsupported")
+            } else if off {
+                t("builder.ai.ai_off")
+            } else {
+                t("builder.ai.draft_off")
             };
             let b = ui
                 .add_enabled(
-                    can && s.ai.describe.can_send(),
+                    can && !off && s.ai.describe.can_send(),
                     egui::Button::new(t("builder.ai.draft")).shortcut_text("Ctrl Enter"),
                 )
                 .on_disabled_hover_text(why);
@@ -670,7 +725,7 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         if !can {
             form::inline_note(ui, tokens, &t("builder.ai.unsupported"));
         }
-        if let Some(m) = s.ai.message {
+        if let Some(m) = message {
             form::inline_note(ui, tokens, &t(m));
             if m == "builder.ai.ai_off" {
                 let l = ui.link(t("reports.ask.open_settings"));
@@ -688,22 +743,28 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     // Esc (A10 UI review S1; the app rule): in the box with something
     // typed, it puts back what the box held when the panel opened and the
     // box keeps the keyboard; otherwise (nothing typed, a panel button, or
-    // nothing focused, e.g. while drafting) it closes the panel. egui has
-    // already taken focus from the widget this frame, so what had it is
-    // what the panel saw last frame.
+    // nothing focused) it closes the panel. While a draft is on its way the
+    // box is off and has no keyboard: the first Esc stops the draft (its
+    // answer is never shown) and gives the box the keyboard back; only a
+    // later one closes (A10 QA-7). egui has already taken focus from the
+    // widget this frame, so what had it is what the panel saw last frame.
     if ui.input(|i| i.key_pressed(egui::Key::Escape))
         && s.ai.last_focus.is_none_or(|f| ids.contains(&f))
     {
-        match esc_action(
-            s.ai.last_focus.is_some() && s.ai.last_focus == box_id,
-            &s.ai.describe.text,
-            &s.ai.revert_to,
-        ) {
-            Esc::Revert => {
-                s.ai.describe.text.clone_from(&s.ai.revert_to);
-                s.ai.focus_box = true;
+        if s.ai.describe.busy() {
+            stop_draft(s);
+        } else {
+            match esc_action(
+                s.ai.last_focus.is_some() && s.ai.last_focus == box_id,
+                &s.ai.describe.text,
+                &s.ai.revert_to,
+            ) {
+                Esc::Revert => {
+                    s.ai.describe.text.clone_from(&s.ai.revert_to);
+                    s.ai.focus_box = true;
+                }
+                Esc::Close => close = true,
             }
-            Esc::Close => close = true,
         }
     }
     s.ai.last_focus = ui.memory(egui::Memory::focused);
@@ -723,9 +784,13 @@ fn panel(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
 }
 
 /// The provider the panel names: read when it opened (A10 UI review S6),
-/// None until then or when the user may not read it.
+/// None until then, while AI is off (A10 QA-3), or when the user may not
+/// read it.
 pub(crate) fn panel_provider(s: &BuilderScreen) -> Option<&str> {
-    s.ai.gate.as_ref().and_then(|g| g.1.as_deref())
+    s.ai.gate
+        .as_ref()
+        .filter(|g| g.0)
+        .and_then(|g| g.1.as_deref())
 }
 
 /// What Esc does in the describe panel.
@@ -751,6 +816,16 @@ pub(crate) fn esc_action(in_box: bool, text: &str, opened_with: &str) -> Esc {
 pub(crate) fn hold_for_test(s: &mut BuilderScreen, reply: DraftReply) {
     s.ai.describe.phase = Phase::Drafting;
     s.ai.arrived = Some(Box::new(reply));
+}
+
+/// Esc while drafting (A10 QA-7): the draft on its way (or waiting for
+/// the books' names) is dropped and never shown; the panel stays open with
+/// the description in the box, which takes the keyboard.
+pub(crate) fn stop_draft(s: &mut BuilderScreen) {
+    s.ai.job = None;
+    s.ai.arrived = None;
+    s.ai.describe.phase = Phase::Idle;
+    s.ai.focus_box = true;
 }
 
 /// Cancel or Esc: the panel closes, and a request on its way (or a draft
