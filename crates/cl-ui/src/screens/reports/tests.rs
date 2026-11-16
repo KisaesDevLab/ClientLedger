@@ -65,6 +65,67 @@ fn a_report_the_engine_cant_run_yet_says_so() {
     assert!(crate::i18n::has("reports.needs_update"));
 }
 
+/// The labels one frame of `w` draws (AccessKit names).
+fn drawn_labels(w: &mut ReportWindow) -> Vec<String> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..2 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 820.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| crate::windows::Screen::ui(w, ui));
+        });
+        out.textures_delta.clear();
+        if let Some(t) = out.platform_output.accesskit_update {
+            all = t
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| n.label().or_else(|| n.value()).map(str::to_string))
+                .collect();
+        }
+    }
+    all
+}
+
+/// U-33 (Q-P29a, Q-P29b): a report with accounts hidden for this role says
+/// so under the title; a report the engine refuses outright says why in
+/// plain words, with no Try again.
+#[test]
+fn hidden_accounts_show_the_notice_and_a_refusal_says_why() {
+    let (_d, link) = demo();
+    if let Some(mut d) = link.demo_state() {
+        d.sensitive.insert(crate::company::demo::account_id(6550));
+        d.hides_sensitive = true;
+    }
+    let mut w = window(&link);
+    w.poll();
+    assert_eq!(w.state, RunState::Shown);
+    assert_eq!(w.state_json_for_test()["hidden_notice"], true);
+    let notice = crate::i18n::t("sensitive.notice");
+    assert!(
+        drawn_labels(&mut w).contains(&notice),
+        "the notice is drawn"
+    );
+    w.answer_for_test(Err(cl_api::ApiError::Sensitive(
+        cl_api::SensitiveRefusal::Report,
+    )));
+    assert_eq!(w.state, RunState::Failed);
+    let st = w.state_json_for_test();
+    assert_eq!(st["problem"], "report_refused");
+    assert_eq!(st["hidden_notice"], false, "no table, no notice");
+    let refused = crate::i18n::t("sensitive.report_refused");
+    let drawn = drawn_labels(&mut w);
+    assert!(drawn.iter().any(|l| l.contains(&refused)), "{drawn:?}");
+    let retry = crate::i18n::t("reports.retry");
+    assert!(!drawn.contains(&retry), "no Try again: {drawn:?}");
+}
+
 #[test]
 fn the_exact_reports_run_on_the_demo() {
     let (_d, link) = demo();

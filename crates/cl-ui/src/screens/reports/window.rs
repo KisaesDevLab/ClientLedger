@@ -1273,6 +1273,14 @@ impl ReportWindow {
         self.state_json()
     }
 
+    /// The engine's answer to the run in flight, as it would arrive (tests).
+    #[cfg(test)]
+    pub(crate) fn answer_for_test(&mut self, r: Result<ReportTable, ApiError>) {
+        self.generation += 1;
+        self.job = Some((self.generation, Job::Done(Some(r))));
+        self.poll();
+    }
+
     fn state_json(&self) -> Value {
         let rows = self.shown_rows();
         json!({
