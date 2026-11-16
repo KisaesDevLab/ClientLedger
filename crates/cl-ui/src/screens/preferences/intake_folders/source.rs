@@ -23,10 +23,6 @@ use crate::company::demo::intake::DemoIntakeError;
 /// The engine capability for intake settings (U-93).
 pub const CAPABILITY: &str = Capabilities::INTAKE_SETTINGS;
 
-/// The engine role that is ClientLedger's Admin (Q-A01k; P29 Q-P29k adds
-/// the super admin, see `cl_model::permissions::is_admin_role`).
-pub const ADMIN_ROLE: &str = "owner";
-
 /// The company's folders as the engine stores them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stored {

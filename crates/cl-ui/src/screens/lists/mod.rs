@@ -21,6 +21,26 @@ use cl_model::CommandId;
 use crate::company::CompanyLink;
 use crate::windows::Screen;
 
+/// May the signed-in user change rows in the list window `kind` (P29).
+/// Lists the role only reads keep New/Merge/Delete/Make inactive disabled.
+#[must_use]
+pub(crate) fn can_change(link: &CompanyLink, kind: &'static str) -> bool {
+    link.rights().can_change_list(CommandId::new(kind))
+}
+
+/// A list toolbar button that is disabled, with a plain-words tooltip, when
+/// the role may only read the list.
+pub(crate) fn change_button(
+    ui: &mut eframe::egui::Ui,
+    enabled: bool,
+    label: String,
+    tip: String,
+) -> eframe::egui::Response {
+    ui.add_enabled(enabled, eframe::egui::Button::new(label))
+        .on_hover_text(tip)
+        .on_disabled_hover_text(crate::i18n::t("rights.list_read_only"))
+}
+
 /// The list window for `kind`, if it is one.
 #[must_use]
 pub fn make(

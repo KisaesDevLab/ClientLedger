@@ -155,9 +155,12 @@ mod reports;
 // A09: the Memorized Reports list, and `.clreport` files.
 mod reports_memorized;
 mod reports_transfer;
+// P29: the Audit Trail viewer.
+mod audit;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 55] = [
+const TABLES: [&[(&str, &str)]; 56] = [
+    audit::ENGLISH,
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -316,7 +319,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.not_for_role", "Not available for your role in this company."),
     ("rights.not_for_role", "Not available for your role"),
-    ("rights.report_not_for_role", "This report isn't available for your role in this company. Ask the company's Admin if you need it."),
+    ("rights.list_read_only", "Your role can look at this list but not change it. Ask the company's Admin if you need to."),
+    ("rights.report_not_for_role","This report isn't available for your role in this company. Ask the company's Admin if you need it."),
     // P29: Set Closing Date.
     ("orphan.closing_date", "a closing date change"),
     ("closing.admin.intro", "Transactions dated on or before the closing date are locked. Changing one needs the closing-date password, and every change is kept in the audit trail."),

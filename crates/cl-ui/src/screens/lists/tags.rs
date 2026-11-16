@@ -1364,7 +1364,16 @@ impl TagsScreen {
             .and_then(|id| self.list.tag(id))
             .map(|e| e.active);
         let merge = self.merge_available();
+        let write = super::can_change(&self.link, KIND);
         ui.horizontal_wrapped(|ui| {
+            let tip = |key: &str, cmd: &str| {
+                let hint = shortcut_hint(cmd);
+                if hint.is_empty() {
+                    t(key)
+                } else {
+                    format!("{} ({hint})", t(key))
+                }
+            };
             let b = |ui: &mut Ui, key: &str, cmd: &str| {
                 let hint = shortcut_hint(cmd);
                 let r = ui.button(t(key));
@@ -1374,10 +1383,13 @@ impl TagsScreen {
                     r.on_hover_text(format!("{} ({hint})", t(key)))
                 }
             };
-            if b(ui, "tags.new", "list.new").clicked() {
+            let w = |ui: &mut Ui, key: &str, cmd: &str| {
+                super::change_button(ui, write, t(key), tip(key, cmd))
+            };
+            if w(ui, "tags.new", "list.new").clicked() {
                 self.open_new_tag();
             }
-            if ui.button(t("tags.new_group")).clicked() {
+            if super::change_button(ui, write, t("tags.new_group"), t("tags.new_group")).clicked() {
                 self.open_group(None);
             }
             if b(ui, "tags.edit", "edit.edit_transaction").clicked() {
@@ -1388,14 +1400,15 @@ impl TagsScreen {
             } else {
                 "tags.make_inactive"
             };
-            if b(ui, toggle_key, "list.toggle_active").clicked() {
+            if w(ui, toggle_key, "list.toggle_active").clicked() {
                 self.toggle_active();
             }
-            if b(ui, "tags.delete", "form.delete_item").clicked() {
+            if w(ui, "tags.delete", "form.delete_item").clicked() {
                 self.delete_tag();
             }
             // Hidden for a tag used on lines or as a default (U-41).
-            if merge && ui.button(t("tags.merge")).clicked() {
+            if merge && super::change_button(ui, write, t("tags.merge"), t("tags.merge")).clicked()
+            {
                 self.open_merge();
             }
             ui.separator();

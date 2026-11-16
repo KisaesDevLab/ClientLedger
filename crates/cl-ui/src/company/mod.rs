@@ -415,7 +415,9 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         match self.demo_state() {
-            Some(d) if d.intake.role() != "owner" => r.without_admin(),
+            Some(d) if !cl_model::permissions::is_admin_role(&d.intake.role(), false) => {
+                r.without_admin()
+            }
             _ => r,
         }
     }

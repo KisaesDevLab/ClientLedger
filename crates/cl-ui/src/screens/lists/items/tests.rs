@@ -79,6 +79,46 @@ impl Rig {
     }
 }
 
+/// (button name, disabled) for every button drawn in the screen.
+fn buttons(r: &mut Rig) -> Vec<(String, bool)> {
+    r.ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..2 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 820.0))),
+            ..RawInput::default()
+        };
+        let s = &mut r.s;
+        let mut out = r.ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(t) = out.platform_output.accesskit_update {
+            all = t
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.role() == egui::accesskit::Role::Button)
+                .filter_map(|(_, n)| n.label().map(|l| (l.to_string(), n.is_disabled())))
+                .collect();
+        }
+    }
+    all
+}
+
+#[test]
+fn a_view_only_role_sees_new_disabled() {
+    let mut r = Rig::new();
+    let new = crate::i18n::t("items.new");
+    let b = buttons(&mut r);
+    assert!(b.contains(&(new.clone(), false)), "{b:?}");
+    r.link
+        .set_rights(cl_model::permissions::Rights::view_only());
+    let b = buttons(&mut r);
+    assert!(b.contains(&(new, true)), "{b:?}");
+    // Edit still opens the item to look at.
+    assert!(b.contains(&(crate::i18n::t("items.edit"), false)), "{b:?}");
+}
+
 #[test]
 fn loads_the_demo_items_without_the_inactive_one() {
     let r = Rig::new();

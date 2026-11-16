@@ -342,6 +342,18 @@ impl Rights {
         need(id).is_some_and(|n| self.allows_need(n))
     }
 
+    /// May the user add, merge, delete or turn off rows in the list window
+    /// `window` (P29). A list the role opens with read access only keeps
+    /// its New/Merge/Delete buttons disabled; any other window is not a
+    /// read-gated list and is left alone.
+    #[must_use]
+    pub fn can_change_list(&self, window: CommandId) -> bool {
+        match need(window) {
+            Some(Need::Read(r)) => self.can(r, Action::Write),
+            _ => true,
+        }
+    }
+
     /// The same rights without Admin (the demo's non-owner roles).
     #[must_use]
     pub fn without_admin(mut self) -> Rights {
@@ -805,6 +817,12 @@ mod tests {
 
     #[test]
     fn admin_is_the_owner_or_the_super_admin() {
+        let view = Rights::view_only();
+        assert!(!view.can_change_list(CommandId::new("lists.chart_of_accounts")));
+        assert!(!view.can_change_list(CommandId::new("clients.center")));
+        assert!(Rights::all().can_change_list(CommandId::new("lists.tags")));
+        // A window that is not a read-gated list is left alone.
+        assert!(view.can_change_list(CommandId::new("nav.home")));
         assert!(is_admin_role("owner", false));
         assert!(is_admin_role("bookkeeper", true));
         assert!(!is_admin_role("accountant", false));
