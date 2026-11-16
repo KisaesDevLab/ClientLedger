@@ -1233,6 +1233,13 @@ impl Screen for RegisterScreen {
 
     fn state(&self) -> Value {
         let total = self.model.total();
+        // U-33: loaded rows whose other side is hidden for this role.
+        let hidden = crate::i18n::t("sensitive.hidden_account");
+        let n = usize::try_from(total.unwrap_or(0)).unwrap_or(0);
+        let hidden_rows = (0..n)
+            .filter_map(|i| self.model.row_at(i))
+            .filter(|r| r.account_memo.starts_with(&hidden))
+            .count();
         json!({
             "screen": "register",
             "layout": self.layout.json(),
@@ -1243,6 +1250,7 @@ impl Screen for RegisterScreen {
             "load_error": self.load_error.is_some(),
             "no_accounts": self.accounts_loaded && self.account.is_none(),
             "rows": total,
+            "hidden_rows": hidden_rows,
             "range": self.prefs.range.to_pref(),
             "range_start": self.query.as_ref().map(|q| q.start.to_wire()),
             "range_end": self.query.as_ref().map(|q| q.end.to_wire()),

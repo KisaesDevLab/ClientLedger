@@ -9,6 +9,7 @@
 //! would change other tests in the same run.
 
 use cl_api::{AccountType, ApiError, Capabilities, Method, SensitiveRefusal, Session};
+use cl_core::report::{Cell, DateRange, ReportDates, ReportRequest, ReportTable, Source};
 use serde_json::{Value, json};
 
 use crate::common::{account, je2, key, post};
@@ -105,6 +106,9 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
         .run(owner.accounts().set_sensitive(wages.id, true, key()))
         .expect("owner marks");
     assert!(marked.is_sensitive);
+    // Unmarked even when an assert below fails: while anything is marked,
+    // every unconverted report route refuses this Bookkeeper.
+    let _unmark = Unmark { h, id: wages.id };
 
     // The account list leaves it out.
     let list = h
@@ -112,33 +116,29 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
         .expect("list");
     assert!(list.iter().all(|a| a.id != wages.id));
 
-    // P&L: no wages row, the visible expense only, and the notice.
-    let range = [("startDate", DAY), ("endDate", DAY)];
-    let (st, pl) = get(h, &bk, "/api/v1/reports/profit-loss", &range);
-    assert_eq!(st, 200, "{pl}");
-    let text = pl.to_string();
-    assert!(!text.contains(&wages_name), "no hidden name");
-    assert!(
-        !text.contains("250.00") && !text.contains("350.00"),
-        "no hidden amount"
+    // P&L (exact, through the desktop's adapter): no wages row, the visible
+    // expense only, and the notice; the owner sees both and no notice.
+    let pl = ReportRequest::new(
+        Source::ProfitLoss,
+        ReportDates::Range(DateRange { from: day, to: day }),
     );
-    assert!(text.contains("100.00"), "the visible expense");
-    assert_eq!(pl["hiddenNotice"], json!(true));
-    // The owner still sees it, and gets no notice.
-    let (_, owner_pl) = get(h, owner, "/api/v1/reports/profit-loss", &range);
-    let owner_text = owner_pl.to_string();
-    assert!(owner_text.contains(&wages_name));
-    assert!(owner_text.contains("350.00"), "owner total");
-    assert!(owner_pl.get("hiddenNotice").is_none_or(Value::is_null));
+    let t = h.run(bk.reports().run(&pl)).expect("bookkeeper P&L");
+    assert!(t.meta.hidden_notice, "the notice");
+    assert!(!captions(&t).iter().any(|c| c.contains(&wages_name)));
+    let amounts = amounts(&t);
+    assert!(amounts.contains(&"100".to_string()), "{amounts:?}");
+    assert!(!amounts.contains(&"250".to_string()), "{amounts:?}");
+    assert!(!amounts.contains(&"350".to_string()), "{amounts:?}");
+    let t = h.run(owner.reports().run(&pl)).expect("owner P&L");
+    assert!(!t.meta.hidden_notice);
+    assert!(captions(&t).iter().any(|c| c.contains(&wages_name)));
+    assert!(amounts_of(&t, "350"), "the owner's total");
 
-    // The bank register keeps the paycheck's own line, other side hidden.
+    // The bank register keeps the paycheck's own line, other side hidden;
+    // the owner sees the wages account there.
     let reg = format!("/api/v1/accounts/{}/register", bank.id);
-    let (st, page) = get(
-        h,
-        &bk,
-        &reg,
-        &[("start_date", DAY), ("end_date", DAY), ("exact", "1")],
-    );
+    let q = [("start_date", DAY), ("end_date", DAY), ("exact", "1")];
+    let (st, page) = get(h, &bk, &reg, &q);
     assert_eq!(st, 200, "{page}");
     let lines = page["lines"].as_array().cloned().unwrap_or_default();
     assert!(
@@ -146,6 +146,8 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
         "{page}"
     );
     assert!(!page.to_string().contains(&wages_name));
+    let (_, owner_page) = get(h, owner, &reg, &q);
+    assert!(owner_page.to_string().contains(&wages_name), "{owner_page}");
     // The register of the hidden account itself is not there.
     let (st, _) = get(
         h,
@@ -155,11 +157,18 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
     );
     assert_eq!(st, 404);
 
-    // Drill-down (General Ledger over the day): no hidden lines.
-    let (st, gl) = get(h, &bk, "/api/v1/reports/general-ledger", &range);
-    assert_eq!(st, 200, "{gl}");
-    assert!(!gl.to_string().contains(&wages_name));
-    assert!(!gl.to_string().contains("250.00"));
+    // Drill-down (the General Ledger over the day): no hidden lines; the
+    // owner's has them.
+    let gl = ReportRequest::new(
+        Source::GeneralLedger,
+        ReportDates::Range(DateRange { from: day, to: day }),
+    );
+    let t = h.run(bk.reports().run(&gl)).expect("bookkeeper GL");
+    assert!(t.meta.hidden_notice);
+    assert!(!captions(&t).iter().any(|c| c.contains(&wages_name)));
+    assert!(!amounts_of(&t, "250"));
+    let t = h.run(owner.reports().run(&gl)).expect("owner GL");
+    assert!(amounts_of(&t, "250"), "the owner's paycheck line");
 
     // The paycheck can't be opened or posted to by the Bookkeeper.
     let open = h
@@ -174,10 +183,41 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
         ))
         .expect_err("refused");
     assert_eq!(posted, ApiError::Sensitive(SensitiveRefusal::Transaction));
+}
 
-    // Clean up: nothing marked for the rest of the run.
-    let unmarked = h
-        .run(owner.accounts().set_sensitive(wages.id, false, key()))
-        .expect("unmark");
-    assert!(!unmarked.is_sensitive);
+/// Unmarks the account when dropped (also after a failed assert).
+struct Unmark<'a> {
+    h: &'a Harness,
+    id: cl_core::ids::AccountId,
+}
+
+impl Drop for Unmark<'_> {
+    fn drop(&mut self) {
+        let r = self
+            .h
+            .run(self.h.s1.accounts().set_sensitive(self.id, false, key()));
+        if let Ok(a) = r {
+            assert!(!a.is_sensitive || std::thread::panicking());
+        }
+    }
+}
+
+fn captions(t: &ReportTable) -> Vec<String> {
+    t.rows.iter().map(|r| r.caption.clone()).collect()
+}
+
+/// Every amount cell, normalized (`100.0000` reads `100`).
+fn amounts(t: &ReportTable) -> Vec<String> {
+    t.rows
+        .iter()
+        .flat_map(|r| r.cells.iter())
+        .filter_map(|c| match c {
+            Cell::Amount(d) => Some(d.abs().normalize().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn amounts_of(t: &ReportTable, want: &str) -> bool {
+    amounts(t).iter().any(|a| a == want)
 }

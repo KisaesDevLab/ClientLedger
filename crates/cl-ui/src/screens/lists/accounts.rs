@@ -1010,6 +1010,24 @@ impl ChartScreen {
             }
             Err(_) => self.warn = Some("sensitive.not_saved"),
         }
+        self.refresh_panel(id);
+    }
+
+    /// An open, unchanged panel on `id` shows the mark the engine now
+    /// holds: the mark lands after the account save, so a panel rebuilt
+    /// before it would read unmarked and a second Save would unmark it.
+    fn refresh_panel(&mut self, id: AccountId) {
+        let Panel::Form(f) = &self.panel else {
+            return;
+        };
+        if f.editing != Some(id) || f.form.is_dirty() || f.task.is_some() {
+            return;
+        }
+        if let Some(entry) = self.model.chart().entry(id) {
+            let mut panel = FormPanel::new(Some(id), AccountDraft::from_entry(entry));
+            panel.focus = None;
+            self.panel = Panel::Form(Box::new(panel));
+        }
     }
 
     fn poll(&mut self) {

@@ -183,7 +183,8 @@ fn build(
                     balance: RegisterAmount::Exact(running),
                     cleared,
                     has_splits: matches!(category, Category::Split),
-                    engine_editable: cleared != ClearState::Reconciled && !void,
+                    // U-33: a line whose other side is hidden can't be edited.
+                    engine_editable: cleared != ClearState::Reconciled && !void && !hides,
                     status: if void {
                         TxnStatus::Void
                     } else {
