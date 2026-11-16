@@ -4,7 +4,8 @@
 # Profit & Loss without a Wages row and with "Some amounts are hidden for
 # your role", the drill behind an amount with the same notice, and the
 # checking register showing "Hidden account" as the other side of a
-# paycheck. Back to Admin and the mark removed; then a Vehicles register
+# paycheck; the Reports list leaves out the reports the engine still refuses
+# (P29 review B2). Back to Admin and the mark removed; then a Vehicles register
 # open while the role changes closes with a plain message. Marks removed at
 # the end, so the dark run starts the same. Synthetic.
 name: sensitive_accounts
@@ -43,6 +44,12 @@ steps:
   - assert_exists: {label_contains: "Some amounts are hidden for your role"}
   - assert_not_exists: {label: Wages}
   - screenshot: profit-loss
+  # P29 review B2: reports the engine still refuses this role while an
+  # account is hidden are not in the list; filtered ones stay.
+  - assert_not_exists: {label: Sales Tax Liability}
+  - assert_not_exists: {label: 1099 Summary}
+  - assert_exists: {label: A/R Aging}
+  - screenshot: reports-list
   # The drill behind an amount says the same (link 0 is "Manage…").
   - click: {role: link, index: 1}
   - wait: {ms: 500}
