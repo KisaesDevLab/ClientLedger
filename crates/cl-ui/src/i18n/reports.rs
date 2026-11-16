@@ -457,7 +457,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.missing.deleted_in", "{filter}: a name it uses was deleted."),
     ("reports.missing.merged_in", "{filter}: a name it uses was merged into {name}."),
     ("reports.missing.remove", "Remove it from {filter}"),
-    ("reports.missing.fix", "Or pick another name in Customize.The report runs once no deleted name is left; Memorize saves the change."),
+    ("reports.missing.fix", "Or pick another name in Customize. The report runs once no deleted name is left; Memorize saves the change."),
     ("reports.pick.choose_budget_short", "Choose a budget"),
     ("reports.pick.choose_budget", "Choose a budget above to run this report, or use Edit budgets to make one."),
     // Budgets (Q-65)
