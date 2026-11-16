@@ -828,3 +828,46 @@ fn a_matched_entrys_bank_line_change_says_the_line_waits() {
         "another bank account"
     );
 }
+
+/// P29 review S2: Journal Entry and the tag options: on, each untagged
+/// line is refused and named and nothing is sent; tagging the lines lets it
+/// save; off, an untagged entry saves. (No header tag: the default tag is
+/// not put on its lines, Q-276.)
+#[test]
+fn tag_options_on_journal_entries() {
+    let (mut s, link, _dir) = screen();
+    let tag = {
+        let mut d = link.demo_state().expect("demo");
+        let t = d.tags_mut().iter().find(|t| t.is_active).expect("tag").id;
+        d.require_tag_every_line = true;
+        d.default_tag = Some(t);
+        t
+    };
+    let lines = [(6100, "50.00", "", None), (1010, "", "50.00", None)];
+    set_lines(&mut s, &lines);
+    let before = journal_count(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(journal_count(&link), before, "nothing sent");
+    assert_eq!(
+        s.state_json()["save"]["tag_refusal"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    s.lines.form_mut().edit_step(|v| {
+        v.lines
+            .iter_mut()
+            .filter(|l| l.account.is_some())
+            .for_each(|l| l.tag = Some(tag));
+    });
+    s.recheck_problems();
+    assert!(s.start_save(SaveIntent::SaveAndNew, None) || s.saved_count > 0);
+    assert_eq!(s.saved_count, 1, "tagged lines save");
+    // The new entry's lines carry no default tag.
+    assert!(s.lines.value().lines.iter().all(|l| l.tag.is_none()));
+    // Off: an untagged entry saves.
+    link.demo_state().expect("demo").require_tag_every_line = false;
+    set_lines(&mut s, &lines);
+    assert!(s.start_save(SaveIntent::Save, None) || s.saved_count > 1);
+    assert_eq!(s.saved_count, 2);
+}

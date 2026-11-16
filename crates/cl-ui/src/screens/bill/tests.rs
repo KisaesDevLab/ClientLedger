@@ -1021,3 +1021,50 @@ fn prefill_arriving_while_a_line_is_typed_keeps_the_keystrokes() {
     assert!(s.expenses.typing(), "the keystrokes are still there");
     assert_eq!(s.expenses.value().lines[0].account, None);
 }
+
+/// P29 review S2: the tag options on Enter Bill and vendor credits (table
+/// over both kinds): with "tag on every line" on an untagged line is
+/// refused and named; off, it saves; the default tag fills a new form's
+/// header only, never an edit.
+#[test]
+fn tag_options_on_bills_and_vendor_credits() {
+    for kind in [BillKind::Bill, BillKind::Credit] {
+        let (_d, link) = link();
+        let tag = {
+            let mut d = link.demo_state().expect("demo");
+            let t = d.tags_mut().iter().find(|t| t.is_active).expect("tag").id;
+            d.require_tag_every_line = true;
+            t
+        };
+        // On: refused, nothing sent, the line named.
+        let mut s = screen(&link);
+        s.set_kind(kind);
+        fill(
+            &mut s,
+            demo_bills::STORY_VENDOR,
+            "150.00",
+            &[("6210", "150.00")],
+        );
+        let before = writes(&link);
+        assert!(!s.start_save(SaveIntent::Save, None), "{kind:?}");
+        assert_eq!(writes(&link), before, "{kind:?}: nothing sent");
+        let refusal = s.state()["tag_refusal"].clone();
+        assert_eq!(refusal.as_array().map(Vec::len), Some(1), "{kind:?}");
+        assert!(
+            refusal[0].as_str().is_some_and(|r| r.contains("line 1")),
+            "{refusal}"
+        );
+        // Off: the same form saves.
+        link.demo_state().expect("demo").require_tag_every_line = false;
+        assert!(s.start_save(SaveIntent::Save, None), "{kind:?} saves");
+        assert_eq!(s.state()["mode"], "edit");
+        // The saved form is an edit: the default never goes on it.
+        link.demo_state().expect("demo").default_tag = Some(tag);
+        s.tag_list = crate::forms::tag_gate::form_list(&s.tags, &s.link);
+        s.fill_default_tag();
+        assert_eq!(s.state()["header_tags"], 0, "{kind:?}: not on an edit");
+        // A new form starts with it.
+        let s = screen(&link);
+        assert_eq!(s.state()["header_tags"], 1, "{kind:?}: on a new form");
+    }
+}

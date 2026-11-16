@@ -920,3 +920,33 @@ fn a_matched_charges_amount_change_says_the_line_waits() {
     fill(&mut other, "40.00", &[("6250", "40.00")]);
     assert_eq!(other.state()["feed"]["notice"], false);
 }
+
+/// P29 review S2: card charges and the tag options: on, an untagged line
+/// is refused and nothing posts; off, it saves; a new form starts with the
+/// default tag in its header, a saved one shown for editing doesn't get it.
+#[test]
+fn tag_options_on_card_charges() {
+    let (_d, link) = link();
+    let tag = {
+        let mut d = link.demo_state().expect("demo");
+        let t = d.tags_mut().iter().find(|t| t.is_active).expect("tag").id;
+        d.require_tag_every_line = true;
+        t
+    };
+    let mut s = screen(&link);
+    assert_eq!(s.state()["header_tags"], 0, "no default set");
+    fill(&mut s, "25.00", &[("6250", "25.00")]);
+    let before = posted(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(posted(&link), before, "nothing posted");
+    assert_eq!(
+        s.state()["save"]["tag_refusal"].as_array().map(Vec::len),
+        Some(1)
+    );
+    link.demo_state().expect("demo").require_tag_every_line = false;
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    assert_eq!(posted(&link), before + 1);
+    link.demo_state().expect("demo").default_tag = Some(tag);
+    let s = screen(&link);
+    assert_eq!(s.state()["header_tags"], 1, "a new form");
+}
