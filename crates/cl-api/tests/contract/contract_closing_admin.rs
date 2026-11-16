@@ -257,6 +257,20 @@ pub fn bookkeeper_closed_period_edit_is_in_the_exceptions_report(h: &Harness) {
     }
     let s = &h.s1;
     let (user, bk) = h.bookkeeper();
+    // The shared bookkeeper keeps the overrides the last test set (first
+    // live run: an earlier test left `transactions` off); set the ones this
+    // edit needs.
+    let perms = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&json!({ "overrides": {
+                "transactions": "full", "banking": "full", "checks": "full", "accounts": "full"
+            } })),
+        ))
+        .expect("bookkeeper permissions");
+    assert_eq!(perms.status, 200, "{}", perms.body);
     let settings = |body: serde_json::Value| {
         h.run(s.raw_mapped(Method::Put, "/api/v1/company/settings", Some(&body)))
             .expect("company settings");
