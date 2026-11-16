@@ -126,6 +126,48 @@ fn hidden_accounts_show_the_notice_and_a_refusal_says_why() {
     assert!(!drawn.contains(&retry), "no Try again: {drawn:?}");
 }
 
+/// P29 review B2: while an account is hidden from the role, the reports
+/// the engine still refuses are not in the list; the filtered ones stay,
+/// and an Admin sees them all.
+#[test]
+fn reports_the_engine_refuses_are_not_listed_while_accounts_are_hidden() {
+    use cl_model::permissions::{BuiltinRole, Rights};
+    let (_d, link) = demo();
+    if let Some(mut d) = link.demo_state() {
+        d.sensitive.insert(crate::company::demo::account_id(6550));
+    }
+    let title = |key: &str| crate::i18n::t(find(key).expect("spec").title);
+    link.set_rights(BuiltinRole::Bookkeeper.rights().hiding_sensitive());
+    let mut w = window(&link);
+    w.poll();
+    let drawn = drawn_labels(&mut w);
+    for gone in [
+        "sales_tax_liability",
+        "vendor_1099_summary",
+        "inventory_valuation",
+        "expenses_by_vendor",
+    ] {
+        assert!(
+            !drawn.contains(&title(gone)),
+            "{gone} is not offered: {drawn:?}"
+        );
+    }
+    assert!(drawn.contains(&title("ar_aging_summary")), "{drawn:?}");
+    // Nothing marked: the same role sees them again.
+    if let Some(mut d) = link.demo_state() {
+        d.sensitive.clear();
+    }
+    let drawn = drawn_labels(&mut w);
+    assert!(drawn.contains(&title("sales_tax_liability")), "{drawn:?}");
+    // An Admin with something marked sees everything.
+    if let Some(mut d) = link.demo_state() {
+        d.sensitive.insert(crate::company::demo::account_id(6550));
+    }
+    link.set_rights(Rights::all());
+    let drawn = drawn_labels(&mut w);
+    assert!(drawn.contains(&title("sales_tax_liability")), "{drawn:?}");
+}
+
 #[test]
 fn the_exact_reports_run_on_the_demo() {
     let (_d, link) = demo();

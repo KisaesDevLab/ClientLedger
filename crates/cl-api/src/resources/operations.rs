@@ -1934,6 +1934,9 @@ pub(crate) const COMPANY_1099_THRESHOLDS: Operation = read("/api/v1/company/1099
 pub(crate) const COMPANY_1099_THRESHOLDS_PUT: Operation =
     write(Method::Put, "/api/v1/company/1099-thresholds");
 
+// ---- P29 review B2 (`sensitive-accounts-doors-v1`) ----
+pub(crate) const SENSITIVE_DOORS: Operation = read("/api/v1/sensitive-doors");
+
 #[cfg(test)]
 /// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
 const QUERY_POSTS: [(&str, &str); 2] = [
@@ -1955,7 +1958,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 438] = [
+pub const OPERATIONS: [Operation; 439] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2416,6 +2419,8 @@ pub const OPERATIONS: [Operation; 438] = [
     // P29 WP8 1099 thresholds (U-215)
     COMPANY_1099_THRESHOLDS,
     COMPANY_1099_THRESHOLDS_PUT,
+    // P29 review B2
+    SENSITIVE_DOORS,
 ];
 
 /// Looks up a covered operation.

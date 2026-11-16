@@ -926,6 +926,18 @@ fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)>
     if matches!(e, ApiError::ReportShape { .. }) {
         return Some(("error.api.report_shape", Some("fix.api.update_engine")));
     }
+    // P29 review: a bank, card or built-in account created, moved or
+    // retyped under a sensitive account (422 `SENSITIVE_NOT_ALLOWED`).
+    if is_sensitive_not_allowed(e) {
+        return Some((
+            "error.api.sensitive_not_allowed",
+            Some("fix.api.sensitive_not_allowed"),
+        ));
+    }
+    // The desktop audit trail export is the owner's (403 `OWNER_REQUIRED`).
+    if matches!(e, ApiError::Forbidden { code: Some(c) } if c.as_str() == "OWNER_REQUIRED") {
+        return Some(("error.api.owner_required", Some("fix.api.owner_required")));
+    }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
             return Some((

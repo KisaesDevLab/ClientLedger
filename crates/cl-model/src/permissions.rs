@@ -18,6 +18,9 @@
 //! Nothing here does I/O.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+pub use cl_core::sensitive_doors::SensitiveDoors;
 
 use cl_core::report::Source;
 
@@ -191,6 +194,10 @@ pub struct Rights {
     /// Sensitive accounts are hidden from this user (U-33, the sensitive
     /// plan). Always false until the engine reports it.
     pub hides_sensitive: bool,
+    /// The routes the engine still refuses this user while an account is
+    /// hidden (`sensitive-accounts-doors-v1`, P29 review B2). Nothing
+    /// refused for an Admin, an older engine, or when nothing is marked.
+    doors: Arc<SensitiveDoors>,
 }
 
 impl Default for Rights {
@@ -224,6 +231,7 @@ impl Rights {
             levels: [Level::Full; N],
             admin: true,
             hides_sensitive: false,
+            doors: Arc::default(),
         }
     }
 
@@ -234,6 +242,7 @@ impl Rights {
             levels: [Level::None; N],
             admin: false,
             hides_sensitive: false,
+            doors: Arc::default(),
         }
     }
 
@@ -244,6 +253,7 @@ impl Rights {
             levels: [Level::View; N],
             admin: false,
             hides_sensitive: false,
+            doors: Arc::default(),
         }
     }
 
@@ -278,6 +288,7 @@ impl Rights {
             levels,
             admin,
             hides_sensitive: hides_sensitive(admin, map),
+            doors: Arc::default(),
         }
     }
 
@@ -328,6 +339,12 @@ impl Rights {
     /// May the user run the catalog report with this source.
     #[must_use]
     pub fn allows_report(&self, source: Source) -> bool {
+        self.allows_report_area(source) && !self.refuses("GET", source.route())
+    }
+
+    /// The same without the sensitive-doors check (a panel that reads
+    /// another route than the report's own, [`ReportUse::reads`]).
+    fn allows_report_area(&self, source: Source) -> bool {
         let area = report_area(source);
         let base = report_needs_reports(source);
         // P29 review S6: Budget vs. Actual is served by the engine's budgets
@@ -356,6 +373,38 @@ impl Rights {
     #[must_use]
     pub fn allows(&self, id: CommandId) -> bool {
         need(id).is_some_and(|n| self.allows_need(n))
+            && command_door(id).is_none_or(|d| self.door_open(d))
+    }
+
+    /// The engine's list of refused routes for this user (P29 review B2).
+    /// An Admin keeps nothing refused.
+    #[must_use]
+    pub fn with_doors(mut self, doors: impl Into<Arc<SensitiveDoors>>) -> Rights {
+        self.doors = if self.admin {
+            Arc::default()
+        } else {
+            doors.into()
+        };
+        self
+    }
+
+    /// The list kept by [`Rights::with_doors`].
+    #[must_use]
+    pub fn doors(&self) -> &SensitiveDoors {
+        &self.doors
+    }
+
+    /// Would the engine refuse `method route` because an account is hidden
+    /// from this user (the matcher, [`SensitiveDoors::refuses`]).
+    #[must_use]
+    pub fn refuses(&self, method: &str, route: &str) -> bool {
+        !self.admin && self.doors.refuses(method, route)
+    }
+
+    /// Is every route behind this door served for this user.
+    #[must_use]
+    pub fn door_open(&self, door: Door) -> bool {
+        !door.routes().iter().any(|(m, r)| self.refuses(m, r))
     }
 
     /// May the user add, merge, delete or turn off rows in the list window
@@ -585,9 +634,146 @@ impl Rights {
     /// May a screen outside the Reports window show this report panel.
     #[must_use]
     pub fn allows_use(&self, u: ReportUse) -> bool {
-        self.allows_report(u.source())
+        self.allows_report_area(u.source()) && !u.reads().iter().any(|r| self.refuses("GET", r))
     }
 }
+
+impl ReportUse {
+    /// The routes the panel itself reads (narrower than [`ReportUse::routes`],
+    /// which lists the area's reports): the sensitive-doors check uses
+    /// these, so a panel that reads only served routes stays.
+    #[must_use]
+    pub const fn reads(self) -> &'static [&'static str] {
+        match self {
+            ReportUse::HomeReceivables => &["/api/v1/reports/ar-aging-detail"],
+            ReportUse::HomePayables => &["/api/v1/reports/ap-aging-summary"],
+            // charts::read asks for the P&L only.
+            ReportUse::HomeCharts => &["/api/v1/reports/profit-loss"],
+            // The footer reads `/sales-tax/owed`, not the liability report.
+            ReportUse::HomeSalesTax => &["/api/v1/sales-tax/owed"],
+            ReportUse::CustomerStatement => &[
+                "/api/v1/reports/customer-statement",
+                "/api/v1/reports/customer-statements",
+            ],
+            ReportUse::VendorStatement => &["/api/v1/reports/vendor-statement"],
+            ReportUse::Vendor1099 => &[
+                "/api/v1/reports/vendor-1099-summary",
+                "/api/v1/reports/ap-1099-prep",
+            ],
+            ReportUse::ReconcileReports => &[
+                "/api/v1/reports/reconciliation-detail",
+                "/api/v1/reports/reconciliation-discrepancy",
+            ],
+            ReportUse::SalesTaxReports => &["/api/v1/reports/sales-tax-payments"],
+            ReportUse::InventoryReports => &["/api/v1/reports/reorder"],
+            ReportUse::AccountReport => &["/api/v1/reports/account-report"],
+            ReportUse::UnpaidBills => &["/api/v1/reports/unpaid-bills"],
+        }
+    }
+}
+
+/// A door outside the Reports list that reads a route the engine may still
+/// refuse while an account is hidden (P29 review B2). Each screen asks
+/// [`Rights::door_open`] and hides or disables the piece; a unit test in
+/// `cl-ui` keeps every refused desktop operation claimed by a door, a
+/// catalog report, or an Admin-only screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Door {
+    /// File › Export All Data.
+    ExportAll,
+    /// Opening balances sent from company setup.
+    OpeningBalances,
+    /// A vendor's 1099 box and tax details (vendor center and form).
+    Vendor1099Profile,
+    /// Preferences › 1099 account mappings.
+    Box1099Mappings,
+    /// Email a report.
+    ReportEmail,
+    /// Budgets' Fill from actuals, Copy and Adjust by percent.
+    BudgetTools,
+    /// Reconcile's detail and discrepancy reports.
+    ReconcileReports,
+    /// Sales tax payments list.
+    SalesTaxPayments,
+    /// Exemption certificates expiring soon.
+    ExemptionsExpiring,
+    /// Items to Reorder's report.
+    ReorderReport,
+    /// AI usage counts and the AI task switches.
+    AiUsage,
+}
+
+impl Door {
+    /// Every door.
+    pub const ALL: &'static [Door] = &[
+        Door::ExportAll,
+        Door::OpeningBalances,
+        Door::Vendor1099Profile,
+        Door::Box1099Mappings,
+        Door::ReportEmail,
+        Door::BudgetTools,
+        Door::ReconcileReports,
+        Door::SalesTaxPayments,
+        Door::ExemptionsExpiring,
+        Door::ReorderReport,
+        Door::AiUsage,
+    ];
+
+    /// The engine routes behind it (method, route template).
+    #[must_use]
+    pub const fn routes(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Door::ExportAll => &[
+                ("GET", "/api/v1/export/full"),
+                ("GET", "/api/v1/export/full/{fileName}"),
+            ],
+            Door::OpeningBalances => &[("POST", "/api/v1/export/opening-balances")],
+            Door::Vendor1099Profile => &[
+                ("GET", "/api/v1/practice/1099/vendors/{contactId}/profile"),
+                ("PUT", "/api/v1/practice/1099/vendors/{contactId}/profile"),
+            ],
+            Door::Box1099Mappings => &[("PUT", "/api/v1/practice/1099/account-mappings/{formBox}")],
+            Door::ReportEmail => &[("POST", "/api/v1/reports/email")],
+            Door::BudgetTools => &[
+                ("POST", "/api/v1/budgets/{id}/fill-from-actuals"),
+                ("POST", "/api/v1/budgets/{id}/copy-from/{sourceId}"),
+                ("POST", "/api/v1/budgets/{id}/adjust-by-percent"),
+            ],
+            Door::ReconcileReports => &[
+                ("GET", "/api/v1/reports/reconciliation-detail"),
+                ("GET", "/api/v1/reports/reconciliation-discrepancy"),
+            ],
+            Door::SalesTaxPayments => &[("GET", "/api/v1/reports/sales-tax-payments")],
+            Door::ExemptionsExpiring => &[("GET", "/api/v1/reports/exemptions-expiring")],
+            Door::ReorderReport => &[("GET", "/api/v1/reports/reorder")],
+            Door::AiUsage => &[
+                ("GET", "/api/v1/ai/usage"),
+                ("GET", "/api/v1/ai/usage/summary"),
+                ("PATCH", "/api/v1/ai/consent/{companyId}/tasks"),
+            ],
+        }
+    }
+}
+
+/// The door a whole command depends on (its window shows nothing else).
+#[must_use]
+pub fn command_door(id: CommandId) -> Option<Door> {
+    match id.as_str() {
+        "file.export_all" => Some(Door::ExportAll),
+        _ => None,
+    }
+}
+
+/// Admin-only desktop screens: their routes may stay refused for others
+/// (an Admin is never refused).
+pub const ADMIN_ONLY_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/api/v1/ai/admin/config"),
+    ("PUT", "/api/v1/ai/admin/config"),
+    ("GET", "/api/v1/ai/admin/disclosure"),
+    ("POST", "/api/v1/ai/admin/disclosure/accept"),
+    ("POST", "/api/v1/ai/admin/test/{provider}"),
+    ("GET", "/api/v1/ai/admin/models/{provider}"),
+];
 
 /// Built-in roles the Users screen offers (plan §1 table, Q-P29v). Admin
 /// and View-only are engine roles; the others are a `bookkeeper` with a
@@ -810,6 +996,83 @@ mod tests {
     use super::*;
     use crate::commands::COMMANDS;
     use proptest::prelude::*;
+
+    /// The pinned engine's answer for a viewer with a hidden account.
+    pub(crate) fn engine_doors() -> SensitiveDoors {
+        serde_json::from_str(cl_core::sensitive_doors::ENGINE_ANSWER_JSON).expect("fixture")
+    }
+
+    #[test]
+    fn refused_doors_are_not_offered_to_a_restricted_user() {
+        let bk = BuiltinRole::Bookkeeper.rights().with_doors(engine_doors());
+        // Reports the engine filters stay; the ones it still refuses go.
+        assert!(bk.allows_report(Source::ArAgingSummary));
+        assert!(bk.allows_report(Source::ExpenseByCategory));
+        assert!(
+            bk.allows_report(Source::ClosingDateExceptions)
+                || !bk.can(Resource::AuditLog, Action::Read)
+        );
+        for s in [
+            Source::SalesTaxLiability,
+            Source::Vendor1099Summary,
+            Source::Ap1099Prep,
+            Source::ExpenseByVendor,
+            Source::VendorBalanceDetail,
+            Source::RevenueByCategory,
+            Source::DepositDetail,
+            Source::AccountActivitySummary,
+            Source::InventoryValuation,
+            Source::InventoryValuationDetail,
+            Source::InventoryStockStatus,
+            Source::BudgetVsActual,
+        ] {
+            assert!(!bk.allows_report(s), "{s:?} is refused by the engine");
+        }
+        // Commands follow: the report commands and Export All Data.
+        assert!(!bk.allows(CommandId::new("reports.inventory_value")));
+        assert!(!bk.allows(CommandId::new("file.export_all")));
+        assert!(!bk.door_open(Door::Vendor1099Profile));
+        assert!(!bk.door_open(Door::ReportEmail));
+        // Home: the sales tax footer reads `/sales-tax/owed` (served); the
+        // chart reads the P&L (served).
+        assert!(bk.allows_use(ReportUse::HomeSalesTax));
+        assert!(
+            bk.allows_use(ReportUse::HomeCharts)
+                || !bk.can(Resource::FinancialReports, Action::Read)
+        );
+        assert!(!bk.allows_use(ReportUse::Vendor1099));
+    }
+
+    #[test]
+    fn admins_and_unmarked_companies_keep_every_door() {
+        let admin = Rights::all().with_doors(engine_doors());
+        assert!(admin.allows_report(Source::SalesTaxLiability));
+        assert!(admin.allows(CommandId::new("file.export_all")));
+        assert!(Door::ALL.iter().all(|d| admin.door_open(*d)));
+        // Nothing marked: the engine answers false and empty lists.
+        let bk = BuiltinRole::Bookkeeper
+            .rights()
+            .with_doors(SensitiveDoors::none());
+        let before = BuiltinRole::Bookkeeper.rights();
+        for s in Source::ALL {
+            assert_eq!(bk.allows_report(s), before.allows_report(s), "{s:?}");
+        }
+        assert!(Door::ALL.iter().all(|d| bk.door_open(*d)));
+        // An older engine: no list read at all.
+        assert!(before.allows(CommandId::new("file.export_all")));
+    }
+
+    #[test]
+    fn every_door_route_is_refused_by_the_pinned_engine() {
+        // A door whose routes were all converted is stale: drop it.
+        let d = engine_doors();
+        for door in Door::ALL {
+            assert!(d.refuses_any(door.routes()), "{door:?} is served now");
+        }
+        for (m, r) in ADMIN_ONLY_ROUTES {
+            assert!(d.refuses(m, r), "{m} {r}");
+        }
+    }
 
     #[test]
     fn the_resource_table_matches_the_engine() {

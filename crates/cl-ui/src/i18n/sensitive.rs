@@ -22,4 +22,13 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("sensitive.kept_local.one", "1 account can't be marked sensitive (bank, card or built-in account)."),
     ("sensitive.definition_read_only", "This report uses an account hidden for your role, so you can't change it. You can still run it."),
     ("sensitive.definition_refused", "This saved report uses an account hidden for your role, so you can't change it. You can still run it."),
+    // P29 review B2: a piece of a screen the engine still refuses while an
+    // account is hidden from the role.
+    ("sensitive.door_closed", "Not available while sensitive accounts are hidden from your role."),
+    // A bank, card or built-in account placed under a sensitive one (422).
+    ("error.api.sensitive_not_allowed", "Bank, credit card and built-in accounts can't go under a sensitive account."),
+    ("fix.api.sensitive_not_allowed", "Choose a parent account that isn't marked sensitive, or ask your Admin to unmark it."),
+    // The engine's owner-only refusals (audit trail export, 1099 settings).
+    ("error.api.owner_required", "Only the company's owner can do this."),
+    ("fix.api.owner_required", "Ask the owner (the Admin) to do it."),
 ];

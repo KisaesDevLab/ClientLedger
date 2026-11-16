@@ -527,3 +527,5 @@ PUT     /api/v1/company/users/{userId}/permissions pre-handler-only
 # P29 WP8: the company's own 1099 threshold per box (U-215 1099-thresholds-v1; owner or super admin writes)
 GET     /api/v1/company/1099-thresholds         idempotent
 PUT     /api/v1/company/1099-thresholds         pre-handler-only
+# P29 review B2: routes still refused while an account is hidden (sensitive-accounts-doors-v1)
+GET     /api/v1/sensitive-doors                 idempotent

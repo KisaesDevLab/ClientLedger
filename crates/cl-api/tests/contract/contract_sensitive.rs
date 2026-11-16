@@ -202,6 +202,101 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
     assert_eq!(posted, ApiError::Sensitive(SensitiveRefusal::Transaction));
 }
 
+/// P29 review B2 (`sensitive-accounts-doors-v1`): with an account marked,
+/// the restricted Bookkeeper's `/sensitive-doors` answer is the committed
+/// fixture the app and the demo use, and for every desktop operation under
+/// a refused prefix the engine refuses (403 `SENSITIVE_HIDDEN`) exactly
+/// when the matcher says so: a door the app offers is never refused, and
+/// nothing the engine serves is hidden. Operations outside the prefixes
+/// can't be refused this way and are not sent (some of them sign out or
+/// make companies). Path values are made up (a new UUID), so a served
+/// write finds nothing and saves nothing.
+pub fn doors_match_the_engine(h: &Harness) {
+    use cl_core::sensitive_doors::{ENGINE_ANSWER_JSON, SensitiveDoors};
+    if !h.require_cap(Capabilities::SENSITIVE_DOORS, "P29 review B2") {
+        return;
+    }
+    let owner = &h.s1;
+    let none = h.run(owner.sensitive_doors()).expect("owner doors");
+    let bk = as_restricted_bookkeeper(h);
+    let before = h.run(bk.sensitive_doors()).expect("doors before");
+    let wages = h
+        .run(owner.accounts().create(
+            &cl_api::AccountFields {
+                name: unique("Doors Wages"),
+                account_number: None,
+                account_type: AccountType::Expense,
+                detail_type: None,
+                description: None,
+                parent_id: None,
+            },
+            key(),
+        ))
+        .expect("wages")
+        .record;
+    h.run(owner.accounts().set_sensitive(wages.id, true, key()))
+        .expect("owner marks");
+    let _unmark = Unmark { h, id: wages.id };
+    // Nothing hidden from the owner; nothing marked before: nothing refused.
+    assert_eq!(none, Some(SensitiveDoors::none()));
+    assert_eq!(before, Some(SensitiveDoors::none()), "nothing marked yet");
+    let owner_after = h.run(owner.sensitive_doors()).expect("owner doors");
+    assert_eq!(owner_after, Some(SensitiveDoors::none()), "an Admin sees all");
+    let doors = h
+        .run(bk.sensitive_doors())
+        .expect("doors")
+        .expect("capability");
+    let pinned: SensitiveDoors = serde_json::from_str(ENGINE_ANSWER_JSON).expect("fixture");
+    assert_eq!(
+        doors, pinned,
+        "the engine's list changed: update crates/cl-core/fixtures/sensitive_doors.json and the gates"
+    );
+    let fake = uuid::Uuid::new_v4().to_string();
+    let concrete = |route: &str| -> String {
+        route
+            .split('/')
+            .map(|s| match s {
+                "{fileName}" => "accounts.csv".to_string(),
+                "{provider}" => "anthropic".to_string(),
+                "{formBox}" => "nec-1".to_string(),
+                s if s.starts_with('{') => fake.clone(),
+                s => s.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    let mut wrong = Vec::new();
+    let mut sent = 0;
+    for op in &cl_api::OPERATIONS {
+        let m = op.method();
+        let path = concrete(op.route());
+        let under = doors.refuse_prefixes.iter().any(|p| {
+            let lower = path.to_ascii_lowercase();
+            lower == *p || lower.starts_with(&format!("{p}/"))
+        });
+        if !under {
+            continue;
+        }
+        sent += 1;
+        let body = (m != Method::Get && m != Method::Delete).then(|| json!({}));
+        let r = h
+            .run(bk.raw(m, &path, &[], body.as_ref()))
+            .unwrap_or_else(|e| panic!("{} {path}: {e}", m.as_str()));
+        let hidden = r.status == 403 && r.body.to_string().contains("SENSITIVE_HIDDEN");
+        let says = doors.refuses(m.as_str(), &path);
+        if hidden != says {
+            wrong.push(format!(
+                "{} {} -> {} (matcher says refused: {says})",
+                m.as_str(),
+                op.route(),
+                r.status
+            ));
+        }
+    }
+    assert!(sent > 50, "only {sent} operations under the prefixes");
+    assert!(wrong.is_empty(), "matcher and engine disagree: {wrong:#?}");
+}
+
 /// Unmarks the account when dropped (also after a failed assert).
 struct Unmark<'a> {
     h: &'a Harness,

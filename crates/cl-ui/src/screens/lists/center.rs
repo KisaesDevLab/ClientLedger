@@ -885,7 +885,14 @@ impl CenterScreen {
         if let Some(old) = self.detail.take().filter(|o| o.id == id) {
             d.profile_value = old.profile_value;
         }
-        let want_profile = vendor && self.role == Role::Vendor && d.profile_value.is_none();
+        // P29 review B2: not asked while the engine refuses it.
+        let want_profile = vendor
+            && self.role == Role::Vendor
+            && d.profile_value.is_none()
+            && self
+                .link
+                .rights()
+                .door_open(cl_model::permissions::Door::Vendor1099Profile);
         if self.link.is_demo() {
             if let Some(state) = self.link.demo_state() {
                 let (rows, total) =

@@ -21,6 +21,24 @@ fn body(code: &str, message: &str) -> String {
     format!(r#"{{"error":{{"message":"{message}","code":"{code}"}}}}"#)
 }
 
+/// P29 review: placing a bank or card account under a sensitive one (422)
+/// and the owner-only audit export (403) read in plain words.
+#[test]
+fn not_allowed_placement_and_owner_only_refusals_have_plain_words() {
+    let e = from_response_for_tests(
+        422,
+        body("SENSITIVE_NOT_ALLOWED", "Not under a sensitive account").as_bytes(),
+    );
+    assert!(is_sensitive_not_allowed(&e), "{e:?}");
+    let m = e.owner_message();
+    assert_eq!(m.key, "error.api.sensitive_not_allowed");
+    assert_eq!(m.suggestion_key, Some("fix.api.sensitive_not_allowed"));
+    let e = from_response_for_tests(403, body("OWNER_REQUIRED", "Owner only").as_bytes());
+    let m = e.owner_message();
+    assert_eq!(m.key, "error.api.owner_required");
+    assert_eq!(m.suggestion_key, Some("fix.api.owner_required"));
+}
+
 #[test]
 fn the_two_403_codes_are_typed_refusals_with_plain_words() {
     let e = from_response_for_tests(

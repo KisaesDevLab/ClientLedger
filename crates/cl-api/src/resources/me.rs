@@ -17,7 +17,7 @@ use serde::Deserialize;
 
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
-use crate::resources::operations::AUTH_ME;
+use crate::resources::operations::{AUTH_ME, SENSITIVE_DOORS};
 use crate::session::{Session, decode};
 
 /// What `/auth/me` says about the user in the active company.
@@ -80,6 +80,33 @@ impl Session {
             .await?;
         let wire: Wire = decode(&reply, "who am I")?;
         Ok(from_wire(wire))
+    }
+
+    /// The routes the engine still refuses the signed-in user because an
+    /// account is hidden from them (`GET /sensitive-doors`, P29 review B2).
+    /// `Ok(None)` on an engine without `sensitive-accounts-doors-v1`: the
+    /// caller behaves as before.
+    ///
+    /// # Errors
+    /// Any [`ApiError`] of the request; `Decode` for an unreadable answer.
+    pub async fn sensitive_doors(
+        &self,
+    ) -> Result<Option<cl_core::sensitive_doors::SensitiveDoors>, ApiError> {
+        if !self
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::SENSITIVE_DOORS)
+        {
+            return Ok(None);
+        }
+        let reply = self
+            .send(
+                &SENSITIVE_DOORS,
+                Call::at(Method::Get, SENSITIVE_DOORS.route()),
+                None,
+            )
+            .await?;
+        decode(&reply, "sensitive doors").map(Some)
     }
 }
 

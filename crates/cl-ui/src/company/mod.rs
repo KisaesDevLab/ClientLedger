@@ -526,10 +526,21 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         match self.demo_state() {
-            Some(d) if !cl_model::permissions::is_admin_role(&d.intake.role(), false) => {
-                r.without_admin()
+            Some(d) => {
+                let r = if cl_model::permissions::is_admin_role(&d.intake.role(), false) {
+                    r
+                } else {
+                    r.without_admin()
+                };
+                // P29 review B2: the demo answers `/sensitive-doors` as the
+                // pinned engine does once something is marked.
+                if d.hidden_notice() {
+                    r.with_doors(demo_doors())
+                } else {
+                    r
+                }
             }
-            _ => r,
+            None => r,
         }
     }
 
@@ -733,8 +744,39 @@ pub async fn read_rights(
     fallback_role: &str,
 ) -> cl_model::permissions::Rights {
     match session.me().await {
-        Ok(me) => rights_from_me(&me, tenant, fallback_role),
+        Ok(me) => with_doors(session, rights_from_me(&me, tenant, fallback_role)).await,
         Err(_) => cl_model::permissions::Rights::from_role_only(fallback_role, false),
+    }
+}
+
+/// The pinned engine's `/sensitive-doors` answer for a viewer with a
+/// hidden account (the demo's answer; nothing refused if unreadable, which
+/// a cl-model test rules out).
+#[must_use]
+pub fn demo_doors() -> std::sync::Arc<cl_model::permissions::SensitiveDoors> {
+    static DOORS: std::sync::LazyLock<std::sync::Arc<cl_model::permissions::SensitiveDoors>> =
+        std::sync::LazyLock::new(|| {
+            std::sync::Arc::new(
+                serde_json::from_str(cl_core::sensitive_doors::ENGINE_ANSWER_JSON)
+                    .unwrap_or_default(),
+            )
+        });
+    std::sync::Arc::clone(&DOORS)
+}
+
+/// P29 review B2: for a user from whom sensitive accounts are hidden, the
+/// engine's list of routes it still refuses (`/sensitive-doors`), so the
+/// app doesn't offer them. An older engine or a failed read: as before.
+pub async fn with_doors(
+    session: &Session,
+    r: cl_model::permissions::Rights,
+) -> cl_model::permissions::Rights {
+    if !r.hides_sensitive {
+        return r;
+    }
+    match session.sensitive_doors().await {
+        Ok(Some(d)) => r.with_doors(d),
+        Ok(None) | Err(_) => r,
     }
 }
 
@@ -744,7 +786,7 @@ pub async fn read_rights(
 #[derive(Default)]
 pub struct RightsWatch {
     seen: u64,
-    task: Option<(RequestGroup, Task<cl_api::Me>)>,
+    task: Option<(RequestGroup, Task<cl_model::permissions::Rights>)>,
 }
 
 impl std::fmt::Debug for RightsWatch {
@@ -774,12 +816,11 @@ impl RightsWatch {
                 return true;
             };
             self.task = None;
-            if let Ok(me) = r {
-                let r = rights_from_me(&me, tenant, role);
-                if r != link.rights() {
-                    tracing::info!("the signed-in user's rights changed; menus follow");
-                    link.set_rights(r);
-                }
+            if let Ok(r) = r
+                && r != link.rights()
+            {
+                tracing::info!("the signed-in user's rights changed; menus follow");
+                link.set_rights(r);
             }
             return false;
         }
@@ -791,7 +832,12 @@ impl RightsWatch {
         let Some(Ok(group)) = link.group() else {
             return false;
         };
-        if let Ok(p) = group.read(&session, |s| async move { s.me().await }) {
+        let role = role.to_owned();
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let me = s.me().await?;
+            let r = rights_from_me(&me, tenant, &role);
+            Ok(with_doors(&s, r).await)
+        }) {
             self.task = Some((group, Task::Pending(p)));
         }
         self.task.is_some()
@@ -824,6 +870,37 @@ pub fn user_text(display_name: &str, role: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P29 review B2: every desktop operation the pinned engine refuses a
+    /// viewer with a hidden account is claimed by a gate: a catalog
+    /// report's own route (the Reports list and its commands), a
+    /// [`cl_model::permissions::Door`], or an Admin-only screen. A new
+    /// operation under a refused prefix fails here until it has one.
+    #[test]
+    fn every_refused_desktop_operation_has_a_gate() {
+        use cl_model::permissions::{ADMIN_ONLY_ROUTES, Door};
+        let doors = demo_doors();
+        let claimed = |m: &str, r: &str| {
+            cl_core::report::Source::ALL
+                .iter()
+                .any(|s| m == "GET" && s.route().replace(":id", "{id}") == r)
+                || Door::ALL
+                    .iter()
+                    .any(|d| d.routes().iter().any(|(dm, dr)| *dm == m && *dr == r))
+                || ADMIN_ONLY_ROUTES
+                    .iter()
+                    .any(|(am, ar)| *am == m && *ar == r)
+        };
+        let mut open = Vec::new();
+        for op in &cl_api::OPERATIONS {
+            let m = op.method().as_str();
+            if doors.refuses(m, op.route()) && !claimed(m, op.route()) {
+                open.push(format!("{m} {}", op.route()));
+            }
+        }
+        assert!(open.is_empty(), "refused but offered: {open:#?}");
+        assert!(doors.hides_sensitive, "the demo answer hides");
+    }
 
     #[test]
     fn demo_link_has_no_engine_and_queues_events() {

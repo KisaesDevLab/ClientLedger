@@ -56,8 +56,16 @@ impl ReorderScreen {
         s
     }
 
+    /// P29 review B2: the engine refuses the reorder report while an
+    /// account is hidden from this role.
+    fn door_open(&self) -> bool {
+        self.link
+            .rights()
+            .door_open(cl_model::permissions::Door::ReorderReport)
+    }
+
     fn refresh(&mut self) {
-        if !self.available {
+        if !self.available || !self.door_open() {
             return;
         }
         self.error = None;
@@ -133,6 +141,10 @@ impl ReorderScreen {
         );
         if !self.available {
             form::hint(ui, &tokens, &t("inventory.needs_update"));
+            return;
+        }
+        if !self.door_open() {
+            form::hint(ui, &tokens, &t("sensitive.door_closed"));
             return;
         }
         form::hint(ui, &tokens, &t("inventory.reorder.intro"));
