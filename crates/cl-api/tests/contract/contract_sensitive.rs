@@ -125,10 +125,19 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
     let t = h.run(bk.reports().run(&pl)).expect("bookkeeper P&L");
     assert!(t.meta.hidden_notice, "the notice");
     assert!(!captions(&t).iter().any(|c| c.contains(&wages_name)));
-    let amounts = amounts(&t);
-    assert!(amounts.contains(&"100".to_string()), "{amounts:?}");
-    assert!(!amounts.contains(&"250".to_string()), "{amounts:?}");
-    assert!(!amounts.contains(&"350".to_string()), "{amounts:?}");
+    let seen_amounts = amounts(&t);
+    assert!(
+        seen_amounts.contains(&"100".to_string()),
+        "{seen_amounts:?}"
+    );
+    assert!(
+        !seen_amounts.contains(&"250".to_string()),
+        "{seen_amounts:?}"
+    );
+    assert!(
+        !seen_amounts.contains(&"350".to_string()),
+        "{seen_amounts:?}"
+    );
     let t = h.run(owner.reports().run(&pl)).expect("owner P&L");
     assert!(!t.meta.hidden_notice);
     assert!(captions(&t).iter().any(|c| c.contains(&wages_name)));
@@ -166,9 +175,17 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
     let t = h.run(bk.reports().run(&gl)).expect("bookkeeper GL");
     assert!(t.meta.hidden_notice);
     assert!(!captions(&t).iter().any(|c| c.contains(&wages_name)));
-    assert!(!amounts_of(&t, "250"));
+    // The bank account's own side of the paycheck stays (Q-P29e), so the
+    // amount still appears there; the wages side and its section total don't.
+    let count = |t: &ReportTable| amounts(t).iter().filter(|a| *a == "250").count();
+    let seen = count(&t);
     let t = h.run(owner.reports().run(&gl)).expect("owner GL");
-    assert!(amounts_of(&t, "250"), "the owner's paycheck line");
+    assert!(captions(&t).iter().any(|c| c.contains(&wages_name)));
+    assert!(
+        count(&t) > seen,
+        "the owner sees the wages side too: owner {} vs bookkeeper {seen}",
+        count(&t)
+    );
 
     // The paycheck can't be opened or posted to by the Bookkeeper.
     let open = h
