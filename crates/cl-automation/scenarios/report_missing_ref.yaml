@@ -12,6 +12,20 @@ steps:
   - set_zoom: {percent: 100}
   - command: reports.center
   - wait: {ms: 400}
+  # A standard report (Q-PRA2c): its Tags filter names a deleted tag. The
+  # message names the filter in place of an empty report; removing the
+  # name runs it (unsaved).
+  - click: {label: "Year-end P&L for a closed job", index: 0}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.state, equals: failed}
+  - assert_state: {key: screen.problem, equals: missing_deleted}
+  - assert_exists: {label_contains: "Tags filter: a name it uses was deleted."}
+  - assert_exists: {role: button, label: Remove it from Tags filter}
+  - screenshot: standard_message
+  - click: {role: button, label: Remove it from Tags filter}
+  - wait: {ms: 600}
+  - assert_state: {key: screen.state, equals: shown}
+  - assert_not_exists: {label_contains: "a name it uses was deleted"}
   - click: {label: Sales by job, index: 0}
   - wait: {ms: 600}
   - assert_state: {key: screen.state, equals: failed}

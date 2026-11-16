@@ -93,11 +93,7 @@ pub(crate) fn remove(o: &mut ReportOptions, m: &MissingRef) {
                 o.columns = ColumnBy::Total;
             }
         }
-        "budgetId" => {
-            if o.budget_id.as_ref().is_some_and(|b| gone(b)) {
-                o.budget_id = None;
-            }
-        }
+        "budgetId" if o.budget_id.as_ref().is_some_and(|b| gone(b)) => o.budget_id = None,
         _ => {}
     }
 }
@@ -106,7 +102,7 @@ pub(crate) fn remove(o: &mut ReportOptions, m: &MissingRef) {
 /// names; a list keeps one of each. False when `to` isn't an id of that
 /// kind.
 pub(crate) fn replace(o: &mut ReportOptions, m: &MissingRef, to: &str) -> bool {
-    fn swap<T: Clone + PartialEq + ToString>(list: &mut Vec<T>, ids: &[String], to: T) {
+    fn swap<T: Clone + PartialEq + ToString>(list: &mut Vec<T>, ids: &[String], to: &T) {
         let mut out: Vec<T> = Vec::with_capacity(list.len());
         for x in list.drain(..) {
             let x = if ids.iter().any(|id| same(&x, id)) {
@@ -122,10 +118,14 @@ pub(crate) fn replace(o: &mut ReportOptions, m: &MissingRef, to: &str) -> bool {
     }
     let ids = &m.ids;
     match m.field.as_str() {
-        "filters.accountIds" => to.parse().map(|v| swap(&mut o.filters.account_ids, ids, v)),
-        "filters.contactIds" => to.parse().map(|v| swap(&mut o.filters.contact_ids, ids, v)),
-        "filters.tagIds" => to.parse().map(|v| swap(&mut o.filters.tag_ids, ids, v)),
-        "filters.itemIds" => to.parse().map(|v| swap(&mut o.filters.item_ids, ids, v)),
+        "filters.accountIds" => to
+            .parse()
+            .map(|v| swap(&mut o.filters.account_ids, ids, &v)),
+        "filters.contactIds" => to
+            .parse()
+            .map(|v| swap(&mut o.filters.contact_ids, ids, &v)),
+        "filters.tagIds" => to.parse().map(|v| swap(&mut o.filters.tag_ids, ids, &v)),
+        "filters.itemIds" => to.parse().map(|v| swap(&mut o.filters.item_ids, ids, &v)),
         "tagSplit.tagGroupId" => to.parse().map(|v| {
             if let Some(s) = o.tag_split.as_mut() {
                 s.tag_group_id = v;
@@ -168,16 +168,16 @@ fn field_name(field: &str) -> String {
 /// The lines under the message: each filter that uses a gone name, with
 /// "Use <name>" for a merge and "Remove it" for any.
 pub(crate) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
+    enum Click {
+        Use(usize, String),
+        Remove(usize),
+    }
     if w.builder.is_some() {
         return;
     }
     let list = pending(w);
     if list.is_empty() {
         return;
-    }
-    enum Click {
-        Use(usize, String),
-        Remove(usize),
     }
     let mut click = None;
     for (i, m) in list.iter().enumerate() {

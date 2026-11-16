@@ -697,7 +697,7 @@ mod tag_tests {
         for _ in 0..5 {
             w.poll();
         }
-        assert!(w.options.filters.tag_ids.is_empty());
+        assert_eq!(w.options.filters.tag_ids, Vec::<cl_core::ids::TagId>::new());
         assert_eq!(w.problem, None);
         assert_eq!(w.state, RunState::Shown);
         assert!(w.table.is_some());
@@ -719,7 +719,7 @@ mod tag_tests {
         next.filters.tag_ids.push(live);
         w.set_options(next);
         assert_eq!(w.options.filters.tag_ids, vec![live]);
-        assert!(pending(&w).is_empty());
+        assert_eq!(pending(&w).len(), 0);
         // Merged: the survivor takes its place, once.
         let mut merged = row.missing[0].clone();
         merged.reason = "merged".into();
@@ -753,6 +753,6 @@ mod tag_tests {
             Some(row.id.as_str())
         );
         assert_eq!(w.builder.as_ref().map(|b| b.missing.len()), Some(1));
-        assert!(w.std_missing.is_empty());
+        assert_eq!(w.std_missing.len(), 0);
     }
 }

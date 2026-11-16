@@ -443,6 +443,9 @@ impl ReportWindow {
         let gone = super::std_missing::pending(self);
         if !gone.is_empty() {
             self.problem = Some(super::builder_run::missing_key(&gone));
+            // A run still out for the report before must not fill this one.
+            self.job = None;
+            self.generation += 1;
             self.table = None;
             self.state = RunState::Failed;
             return;
