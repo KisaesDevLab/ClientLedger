@@ -196,6 +196,30 @@ fn prior_of(base: &str, s: Slot) -> Slot {
 
 /// The engine's columns for `def` run with `r` (periods, compare, % of,
 /// aging, renamed headers).
+/// True when every section's measure is a balance (`balance`, `tb_net`,
+/// an open-item balance): the engine gives such a report no Total.
+fn balances_only(def: &Value) -> bool {
+    fn walk(nodes: &[Value], out: &mut Vec<String>) {
+        for n in nodes {
+            if n["type"] == "section" {
+                out.push(n["measure"].as_str().unwrap_or_default().to_string());
+            }
+            if let Some(c) = n["children"].as_array() {
+                walk(c, out);
+            }
+        }
+    }
+    let mut measures = Vec::new();
+    walk(
+        def["nodes"].as_array().map_or(&[][..], Vec::as_slice),
+        &mut measures,
+    );
+    !measures.is_empty()
+        && measures
+            .iter()
+            .all(|m| matches!(m.as_str(), "balance" | "tb_net" | "open_balance"))
+}
+
 fn plan(def: &Value, r: &cl_api::resources::report_builder::RunRef) -> Result<Plan, ApiError> {
     let cols_def = &def["columns"];
     let headers = &cols_def["headers"];
@@ -341,7 +365,9 @@ fn plan(def: &Value, r: &cl_api::resources::report_builder::RunRef) -> Result<Pl
             specs.push(Spec::Percent(cur));
         }
     }
-    if multi && as_of.is_none() {
+    // Balances are never added across periods (U-225, Q-PRA2a): a report
+    // of balances only has no Total column, as the engine's.
+    if multi && as_of.is_none() && !balances_only(def) {
         let tot = cols.len();
         cols.push(json!({"key": "total", "caption": caption("total", "Total"), "kind": "total"}));
         specs.push(Spec::Sum((0..base.len()).collect()));
@@ -784,6 +810,10 @@ fn span(dates: &RunDates) -> (CalendarDate, CalendarDate) {
 /// The engine's checks on a definition before it runs: its rules
 /// (`DEFINITION_INVALID {path, code}`, the client's own validation, which
 /// matches the engine's), then the ids it names (`NOT_IN_COMPANY`).
+/// A tag group the demo's books deleted (PR-A2, Q-PRA2c): a definition
+/// grouping by it is refused with the engine's `missing` list (U-226).
+pub(crate) const DELETED_TAG_GROUP: &str = "00000000-0000-4000-8000-00000000dead";
+
 fn check_definition(books: &Books, def: &Value) -> Result<(), ApiError> {
     let refuse = |path: &str, code: &str| {
         engine_refusal(
@@ -805,6 +835,19 @@ fn check_definition(books: &Books, def: &Value) -> Result<(), ApiError> {
         let cl_model::report_def::Node::Section(s) = v.node else {
             continue;
         };
+        for (j, g) in s.group_by.iter().enumerate() {
+            if g.tag_group_id.as_deref() == Some(DELETED_TAG_GROUP) {
+                let path = format!("{}.groupBy.{j}.tagGroupId", v.path);
+                let entry = json!({"path": path, "nodeId": s.id, "field": "groupBy.tagGroupId",
+                    "kind": "tagGroup", "ids": [DELETED_TAG_GROUP], "reason": "deleted"});
+                return Err(engine_refusal(
+                    400,
+                    &json!({"error": {"message": "The report uses a name that was deleted.",
+                        "code": "DEFINITION_INVALID",
+                        "details": {"path": path, "code": "NOT_IN_COMPANY", "missing": [entry]}}}),
+                ));
+            }
+        }
         for (j, f) in s.filters.iter().enumerate() {
             let stale = f
                 .ids
@@ -1405,6 +1448,53 @@ mod tests {
 
     fn october() -> RunDates {
         range(day(2026, 10, 1), day(2026, 10, 31))
+    }
+
+    /// PR-A2 (U-225, Q-PRA2a): by-month balances get no summed Total; a
+    /// report with a flow keeps it; a deleted tag group is refused with
+    /// the `missing` list (U-226).
+    #[test]
+    fn balances_get_no_total_and_a_deleted_group_is_missing() {
+        let mut d = DemoState::new();
+        let months = vec![
+            DateRange {
+                from: day(2026, 9, 1),
+                to: day(2026, 9, 30),
+            },
+            DateRange {
+                from: day(2026, 10, 1),
+                to: day(2026, 10, 31),
+            },
+        ];
+        let by_month = |measure: &str| {
+            let mut sec = section("banks", "Banks", &["asset"]);
+            sec["measure"] = json!(measure);
+            let def = json!({"schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+                "columns": {"detailFields": [], "periods": "month", "compare": [], "headers": {}},
+                "nodes": [sec]});
+            let mut r = req(&def, range(day(2026, 9, 1), day(2026, 10, 31)), Vec::new());
+            r.reference.period_ranges.clone_from(&months);
+            r
+        };
+        let t = run(&mut d, &by_month("balance"), false).expect("run").table;
+        assert!(
+            t.columns.iter().all(|c| c.key != "total"),
+            "no summed balances"
+        );
+        let t = run(&mut d, &by_month("amount"), false).expect("run").table;
+        assert!(
+            t.columns.iter().any(|c| c.key == "total"),
+            "flows keep their Total"
+        );
+        let mut sec = section("banks", "Banks", &["asset"]);
+        sec["groupBy"] = json!([{"key": "tag", "tagGroupId": DELETED_TAG_GROUP}]);
+        let def = json!({"schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+            "columns": plain_columns(), "nodes": [sec]});
+        let e = run(&mut d, &req(&def, october(), Vec::new()), false).expect_err("missing");
+        assert!(matches!(
+            cl_api::resources::report_builder::builder_refusal(&e),
+            Some(BuilderRefusal::MissingReference(m)) if m.len() == 1 && m[0].kind == "tagGroup"
+        ));
     }
 
     /// UI review H2: the builder's P&L sections tie to the standard Profit &

@@ -114,6 +114,7 @@ fn amount(c: &Cell) -> Decimal {
     }
 }
 
+#[allow(clippy::needless_pass_by_value, reason = "json! reads it in place")]
 fn section(id: &str, measure: &str, ids: &[String], group_by: Value) -> Value {
     json!({
         "type": "section", "id": id, "caption": "Section", "source": "gl",
@@ -124,6 +125,7 @@ fn section(id: &str, measure: &str, ids: &[String], group_by: Value) -> Value {
     })
 }
 
+#[allow(clippy::needless_pass_by_value, reason = "json! reads it in place")]
 fn builder(mode: &str, periods: Option<&str>, nodes: Value) -> Value {
     let mut columns = json!({"detailFields": ["date", "amount"], "compare": [], "headers": {}});
     if let Some(p) = periods {

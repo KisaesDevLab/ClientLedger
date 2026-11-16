@@ -344,6 +344,18 @@ fn poll(s: &mut BuilderScreen) {
                 s.ed.set_engine_problem(&path, &code);
                 return;
             }
+            // A name the definition uses is gone (U-226, Q-PRA2c): the row
+            // that uses it is marked, as for any name not in the company.
+            if let Some(cl_api::resources::report_builder::BuilderRefusal::MissingReference(m)) =
+                cl_api::resources::report_builder::builder_refusal(&e)
+                && let Some(first) = m.first()
+            {
+                p.state
+                    .run_failed(generation, super::super::builder_run::failure(&e));
+                let path = cl_core::report::scrub_definition_path(&first.path);
+                s.ed.set_engine_problem(&path, "NOT_IN_COMPANY");
+                return;
+            }
             let why = super::super::builder_run::failure(&e);
             p.state.run_failed(generation, why);
             p.failed = failed_key(p.state.phase(), p.state.banner());
