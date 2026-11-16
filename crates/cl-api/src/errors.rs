@@ -587,6 +587,11 @@ pub enum ApiError {
     /// Never echoed.
     #[error("sign-in password rejected (ACCOUNT_PASSWORD_INVALID)")]
     AccountPasswordRejected,
+    /// The user signed in with a temporary password and must choose a new
+    /// one before anything else works (403 `PASSWORD_CHANGE_REQUIRED`,
+    /// U-230). Not counted as a rights refusal.
+    #[error("a new password is needed first (PASSWORD_CHANGE_REQUIRED)")]
+    PasswordChangeRequired,
     /// The engine sent money as a JSON number where cl-api needs the exact
     /// decimal string (for example a register from an engine without
     /// `register-exact-v1`). Amounts that may have been rounded are never
@@ -1010,6 +1015,10 @@ impl OwnerFacing for ApiError {
                 ("error.api.closing_password_attempts", Some("fix.api.wait"))
             }
             ApiError::AccountPasswordRejected => ("error.api.account_password_wrong", None),
+            ApiError::PasswordChangeRequired => (
+                "error.api.password_change_required",
+                Some("fix.api.password_change_required"),
+            ),
             ApiError::InexactMoney { .. } => ("error.api.inexact_money", Some("fix.api.report")),
             ApiError::OfflineUnavailable { .. } => ("error.api.offline", Some("fix.api.offline")),
             ApiError::FeatureNotEnabled { .. } => {
@@ -1460,6 +1469,7 @@ pub fn engine_refusal(status: u16, body: &Value) -> ApiError {
 }
 
 /// The §2.4 table.
+#[allow(clippy::too_many_lines, reason = "one arm per engine status and code")]
 fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: RouteKind) -> Mapped {
     let parsed = EngineErrorBody::parse(body);
     let code = parsed.as_ref().and_then(|b| b.code.clone());
@@ -1521,6 +1531,7 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
             fin(ApiError::ClosingPasswordOwnerRequired)
         }
         403 if has("ACCOUNT_PASSWORD_INVALID") => fin(ApiError::AccountPasswordRejected),
+        403 if has("PASSWORD_CHANGE_REQUIRED") => fin(ApiError::PasswordChangeRequired),
         403 => fin(ApiError::Forbidden { code }),
         404 => match code {
             Some(c) if c.as_str() == "NOT_AVAILABLE_IN_DESKTOP" => {

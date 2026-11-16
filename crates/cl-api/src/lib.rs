@@ -115,7 +115,9 @@ pub use resources::reconciliations::{
     StatementCharge, UndoMode, last_finished_date, reconcile_refusal, reconciliation_from,
     report_from as reconciliation_report_from, screen_supported as reconcile_screen_supported,
 };
-pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
+pub use resources::recovery::{
+    PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key, password_fits,
+};
 pub use resources::register::{
     Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,
     RegisterAccount, RegisterAmount, RegisterLine, RegisterPage, RegisterQuery, RegisterSort,

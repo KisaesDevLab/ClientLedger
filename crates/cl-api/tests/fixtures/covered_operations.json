@@ -419,5 +419,6 @@
   {"method":"POST","path":"/api/v1/reports/ask","inSpec":true,"fragmentHash":"18e329f3d46ad78f9c7b8000a962479fbc55a3567eeccdcd7c7817945ea771ce"},
   {"method":"POST","path":"/api/v1/report-builder/definitions/export","inSpec":true,"fragmentHash":"e07ab655b3078a8f61288a6f03749be3a09af5a99079ab208f595cbca28d02cb"},
   {"method":"POST","path":"/api/v1/report-builder/definitions/import/preview","inSpec":true,"fragmentHash":"7d2fcf3470a5bceea039bd2355334891c08ed51aaf11b9aea224dc69a0820591"},
-  {"method":"POST","path":"/api/v1/report-builder/draft","inSpec":true,"fragmentHash":"a373751d258768f5c12885d00f1c17d7bcbb475cdfbd94c2123e7ee27f172752"}
+  {"method":"POST","path":"/api/v1/report-builder/draft","inSpec":true,"fragmentHash":"a373751d258768f5c12885d00f1c17d7bcbb475cdfbd94c2123e7ee27f172752"},
+  {"method":"POST","path":"/api/v1/auth/change-password","inSpec":true,"fragmentHash":"fca368e9602ba019b36ed8c93456261c0e09a2e1ea9fddeb253a93b8f1ea01b9"}
 ]

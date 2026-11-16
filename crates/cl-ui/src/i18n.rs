@@ -157,10 +157,13 @@ mod reports_memorized;
 mod reports_transfer;
 // P29: the Audit Trail viewer.
 mod audit;
+// P29: sign-in, recovery, Users and Roles.
+mod auth;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 56] = [
+const TABLES: [&[(&str, &str)]; 57] = [
     audit::ENGLISH,
+    auth::ENGLISH,
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,

@@ -507,3 +507,5 @@ POST    /api/v1/report-builder/definitions/export pre-handler-only
 POST    /api/v1/report-builder/definitions/import/preview pre-handler-only
 # A10: AI drafting (U-120 report-builder-ai-v1; one audit row per draft, nothing else written)
 POST    /api/v1/report-builder/draft            query
+# P29: change your own password (U-230 clears must-change; ends every other session)
+POST    /api/v1/auth/change-password            never

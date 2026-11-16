@@ -498,6 +498,11 @@ pub(crate) const CREATE_TENANT: Operation = op(
     false,
 );
 pub(crate) const AUTH_ME: Operation = session_read("/api/v1/auth/me");
+/// P29: change your own password (also ends a temporary password's
+/// must-change, U-230). The engine ends every session and answers with a
+/// fresh token pair for this one.
+pub(crate) const CHANGE_PASSWORD: Operation =
+    auth("/api/v1/auth/change-password", RouteKind::Session);
 /// Read without `X-Company-Id`: used while opening a company to learn its id.
 pub(crate) const COMPANY_GET: Operation = session_read("/api/v1/company");
 
@@ -1901,7 +1906,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 421] = [
+pub const OPERATIONS: [Operation; 422] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2342,6 +2347,8 @@ pub const OPERATIONS: [Operation; 421] = [
     REPORT_DEFS_EXPORT,
     REPORT_DEFS_IMPORT_PREVIEW,
     REPORT_BUILDER_DRAFT,
+    // P29 (U-230)
+    CHANGE_PASSWORD,
 ];
 
 /// Looks up a covered operation.

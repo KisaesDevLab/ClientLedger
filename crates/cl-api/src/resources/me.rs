@@ -32,6 +32,9 @@ pub struct Me {
     pub is_super_admin: bool,
     /// The effective map, as the engine words it.
     pub permissions: BTreeMap<String, String>,
+    /// U-230: the user must choose a new password before anything else
+    /// works (false on engines without it).
+    pub password_change_required: bool,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +57,8 @@ struct WireUser {
     role: Option<String>,
     #[serde(default)]
     is_super_admin: Option<bool>,
+    #[serde(default)]
+    password_change_required: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -100,6 +105,11 @@ fn from_wire(wire: Wire) -> Me {
                 .flatten()
         })
         .unwrap_or_default();
+    let password_change_required = wire
+        .user
+        .as_ref()
+        .and_then(|u| u.password_change_required)
+        .unwrap_or(false);
     let permissions = wire
         .permissions
         .into_iter()
@@ -110,6 +120,7 @@ fn from_wire(wire: Wire) -> Me {
         role,
         is_super_admin,
         permissions,
+        password_change_required,
     }
 }
 
