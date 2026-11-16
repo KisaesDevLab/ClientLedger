@@ -305,6 +305,76 @@ fn report_file_action(e: &Value, entity: &str) -> Option<&'static str> {
     }
 }
 
+/// A service's own name, not the engine's key (A10 QA-6).
+fn provider_name(p: &str) -> Option<&'static str> {
+    Some(match p {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "ollama" => "Ollama",
+        _ => return None,
+    })
+}
+
+/// PR-A2 (U-226): rows whose action needs more than the code.
+/// - An AI draft whose names went to more than one service (`after.sentTo`,
+///   6-S1, Q-PRA2e): "Drafted a report with AI (Ollama on this computer;
+///   names were also sent to Anthropic, which didn't answer)".
+/// - A merge that rewrote memorized reports (`after.moved.reportDefinitions`,
+///   Q-PRA2b): "Merged and updated 2 memorized reports".
+///
+/// Only provider keys the app knows and counts are read: no names.
+fn extra_action(e: &Value, entity: &str) -> Option<String> {
+    if let Some(n) = e
+        .pointer("/after_data/moved/reportDefinitions")
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)
+    {
+        return Some(if n == 1 {
+            "@reports.audit.action.merged_report_one".into()
+        } else {
+            format!("@reports.audit.action.merged_reports {n}")
+        });
+    }
+    if entity != "report_builder_draft" || text(e, "action") != Some("create") {
+        return None;
+    }
+    let outcome = e.pointer("/after_data/outcome").and_then(Value::as_str);
+    if outcome == Some("failed") {
+        return None;
+    }
+    let sent = e.pointer("/after_data/sentTo").and_then(Value::as_array)?;
+    if sent.len() < 2 {
+        return None;
+    }
+    let field = |s: &Value, k: &str| {
+        s.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let answered = sent.iter().find(|s| field(s, "outcome") != "failed")?;
+    let name = provider_name(&field(answered, "provider"))?;
+    let local = field(answered, "reader") == "self_hosted" || name == "Ollama";
+    let mut others: Vec<&str> = sent
+        .iter()
+        .filter(|s| field(s, "outcome") == "failed")
+        .filter_map(|s| provider_name(&field(s, "provider")))
+        .collect();
+    others.dedup();
+    if others.is_empty() {
+        return None;
+    }
+    let head = if local {
+        format!("{name} on this computer")
+    } else {
+        name.to_string()
+    };
+    Some(format!(
+        "@reports.audit.action.drafted_ai_also {head}; names were also sent to {}",
+        others.join(", ")
+    ))
+}
+
 /// The Record cell: the record kind, with its name when the audit row
 /// carries one (`after.name`, else `before.name`) for a memorized report
 /// or a report group (A09 QA-4). Engine cf0cb239 doesn't put the name in
@@ -367,9 +437,10 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             vec![
                 read(e, F::Date("created_at"))?,
                 read(e, F::Text("userName"))?,
-                match report_file_action(e, entity) {
-                    Some(key) => Cell::Text(key.into()),
-                    None => read(e, F::Code("reports.audit.action", "action"))?,
+                match (extra_action(e, entity), report_file_action(e, entity)) {
+                    (Some(text), _) => Cell::Text(text),
+                    (None, Some(key)) => Cell::Text(key.into()),
+                    (None, None) => read(e, F::Code("reports.audit.action", "action"))?,
                 },
                 Cell::Text(record_label(e, entity)),
                 Cell::Empty,
@@ -625,6 +696,55 @@ mod tests {
             t.rows[0].cells[3],
             Cell::Text("@reports.audit.entity.report_builder_draft".into())
         );
+    }
+
+    /// PR-A2 6-S1 (Q-PRA2e): a draft whose names went to two services says
+    /// so; a merge that rewrote memorized reports counts them (Q-PRA2b).
+    #[test]
+    fn a_draft_sent_twice_and_a_merge_say_so() {
+        let v = json!({"data": [{"action": "create", "entity_type": "report_builder_draft",
+            "entity_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a60", "userName": "Owner",
+            "created_at": "2026-11-15T10:00:00.000Z", "before_data": null,
+            "after_data": {"provider": "ollama", "reader": "cloud", "outcome": "drafted",
+                "sentTo": [
+                    {"provider": "anthropic", "model": "m", "reader": "cloud", "outcome": "failed"},
+                    {"provider": "ollama", "model": "llama3", "reader": "self_hosted", "outcome": "drafted"}]}}],
+            "total": 1});
+        let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+        assert_eq!(t.rows.len(), 1, "a heading only");
+        assert_eq!(
+            t.rows[0].cells[2],
+            Cell::Text(
+                "@reports.audit.action.drafted_ai_also Ollama on this computer; names were \
+                 also sent to Anthropic"
+                    .into()
+            )
+        );
+        // One service: as before.
+        let mut one = v.clone();
+        one["data"][0]["after_data"]["sentTo"] = json!([{"provider": "ollama", "model": "llama3", "reader": "self_hosted", "outcome": "drafted"}]);
+        let t = audit_trail(&one, &req(Source::AuditLog)).expect("table");
+        assert_eq!(
+            t.rows[0].cells[2],
+            Cell::Text("@reports.audit.action.drafted_ai".into())
+        );
+        let merge = |n: u64| {
+            let v = json!({"data": [{"action": "merge", "entity_type": "contact",
+                "entity_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a62", "userName": "Owner",
+                "created_at": "2026-11-15T10:00:00.000Z", "before_data": null,
+                "after_data": {"moved": {"reportDefinitions": n}}}], "total": 1});
+            audit_trail(&v, &req(Source::AuditLog)).expect("table").rows[0].cells[2].clone()
+        };
+        assert_eq!(
+            merge(2),
+            Cell::Text("@reports.audit.action.merged_reports 2".into())
+        );
+        assert_eq!(
+            merge(1),
+            Cell::Text("@reports.audit.action.merged_report_one".into())
+        );
+        // No report rewritten: the action as before.
+        assert_ne!(merge(0), merge(1));
     }
 
     /// A10 QA-6: the company's AI settings and consent read in plain words,

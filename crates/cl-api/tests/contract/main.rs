@@ -84,6 +84,7 @@ mod contract_templates;
 mod contract_report_defs_archive;
 mod contract_report_defs_transfer;
 mod contract_report_draft;
+mod contract_report_refs;
 mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
@@ -1408,6 +1409,32 @@ fn main() -> std::process::ExitCode {
         (
             "report_builder::an_export_pages_a_line_over_five_thousand_rows",
             contract_report_builder::an_export_pages_a_line_over_five_thousand_rows,
+        ),
+        // PR-A2 (engine PR #58: U-225 report-builder-ties-v1, U-226
+        // report-refs-v1).
+        (
+            "report_refs::a_balance_drill_adds_up_with_its_opening_row",
+            contract_report_refs::a_balance_drill_adds_up_with_its_opening_row,
+        ),
+        (
+            "report_refs::a_two_level_trial_balance_totals_once",
+            contract_report_refs::a_two_level_trial_balance_totals_once,
+        ),
+        (
+            "report_refs::a_trial_balance_by_account_and_tag_keeps_negative_slices",
+            contract_report_refs::a_trial_balance_by_account_and_tag_keeps_negative_slices,
+        ),
+        (
+            "report_refs::a_contact_merge_keeps_a_memorized_figure",
+            contract_report_refs::a_contact_merge_keeps_a_memorized_figure,
+        ),
+        (
+            "report_refs::a_deleted_tag_group_is_missing",
+            contract_report_refs::a_deleted_tag_group_is_missing,
+        ),
+        (
+            "report_refs::a_same_number_other_name_account_is_a_candidate",
+            contract_report_refs::a_same_number_other_name_account_is_a_candidate,
         ),
         (
             "budgets::hand_fixture_and_writes",

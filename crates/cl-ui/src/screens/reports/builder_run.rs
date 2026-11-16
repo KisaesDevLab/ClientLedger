@@ -147,6 +147,9 @@ pub(crate) struct Builder {
     origin: Option<Origin>,
     /// The memorized row behind the editor's report.
     saved: Option<Saved>,
+    /// Names the definition uses that were deleted or merged away (U-226,
+    /// Q-PRA2c): the window says so in place of a report.
+    pub(crate) missing: Vec<cl_api::resources::reports::definitions::MissingRef>,
 }
 
 impl Builder {
@@ -170,6 +173,7 @@ impl Builder {
             editor: None,
             origin: None,
             saved: None,
+            missing: Vec::new(),
         }
     }
 
@@ -805,6 +809,7 @@ fn poll_run(w: &mut ReportWindow) {
             if !b.state.run_ok(generation, run.stamp, &run.expanded) {
                 return;
             }
+            b.missing.clear();
             let denied = !run.denied.is_empty();
             let table = dress(b.def.as_ref(), run.table, denied);
             let mut detail_columns = run.detail_columns;
@@ -832,6 +837,17 @@ fn poll_run(w: &mut ReportWindow) {
                 return;
             }
             b.state.run_failed(generation, why);
+            // A name the report uses is gone (Q-PRA2c): never an empty
+            // report or "Try again"; the window says which and offers the
+            // fix (one click for a merge).
+            if let Some(BuilderRefusal::MissingReference(list)) = builder_refusal(&e) {
+                b.missing = list;
+                w.table = None;
+                w.error = None;
+                w.state = RunState::Failed;
+                w.problem = Some(missing_key(&b.missing));
+                return;
+            }
             match b.state.phase() {
                 Phase::Shown => w.state = RunState::Shown,
                 Phase::Unavailable(cl_model::report_def::run_state::Cap::NeedsEngineUpdate) => {
@@ -908,7 +924,10 @@ pub(crate) fn shown_rows(b: &Builder, table: &ReportTable, serial: u64) -> Vec<u
         .rows
         .iter()
         .map(|r| {
-            let leaf = matches!(r.kind, RowKind::Detail | RowKind::Earnings | RowKind::More);
+            let leaf = matches!(
+                r.kind,
+                RowKind::Detail | RowKind::Earnings | RowKind::Opening | RowKind::More
+            );
             (r.path.clone(), r.expandable, leaf)
         })
         .collect();
@@ -1099,6 +1118,26 @@ impl DrillBase {
             stamp: self.stamp,
         }
     }
+}
+
+/// Puts `json` in as the window's builder definition (tests).
+#[cfg(test)]
+pub(crate) fn set_json_for_test(w: &mut ReportWindow, json: Value) {
+    if let Some(b) = w.builder.as_mut() {
+        b.def = serde_json::to_string(&json)
+            .ok()
+            .and_then(|s| cl_model::report_def::parse(&s).ok());
+        b.json = json;
+    }
+}
+
+/// The window's builder definition (tests).
+#[cfg(test)]
+pub(crate) fn json_for_test(w: &ReportWindow) -> Value {
+    w.builder
+        .as_ref()
+        .map(|b| b.json.clone())
+        .unwrap_or_default()
 }
 
 /// [`detail_open`] for tests.
@@ -1329,8 +1368,114 @@ fn poll_detail(w: &mut ReportWindow) {
     w.state = RunState::Shown;
 }
 
+/// The window's words for missing names: deleted, or merged into another.
+pub(crate) fn missing_key(
+    missing: &[cl_api::resources::reports::definitions::MissingRef],
+) -> &'static str {
+    if missing.iter().all(|m| m.merged().is_some()) {
+        "reports.builder.missing_merged"
+    } else {
+        "reports.builder.missing_deleted"
+    }
+}
+
+/// `json` with every id `from` replaced by `to` (a list keeps one of each).
+pub(crate) fn replace_id(json: &mut Value, from: &str, to: &str) {
+    match json {
+        Value::String(s) if s == from => *s = to.to_string(),
+        Value::Array(a) => {
+            for x in a.iter_mut() {
+                replace_id(x, from, to);
+            }
+            let mut seen: Vec<Value> = Vec::new();
+            a.retain(|x| {
+                if x.is_string() && seen.contains(x) {
+                    return false;
+                }
+                seen.push(x.clone());
+                true
+            });
+        }
+        Value::Object(m) => {
+            for x in m.values_mut() {
+                replace_id(x, from, to);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// "Use <name>": the report takes the name its merged one went into and
+/// runs again (unsaved; Memorize or Save changes as usual, Q-310).
+pub(crate) fn use_merged(w: &mut ReportWindow, index: usize) {
+    let Some(b) = w.builder.as_mut() else { return };
+    let Some(m) = b.missing.get(index).cloned() else {
+        return;
+    };
+    let Some(into) = m.merged() else { return };
+    for id in &m.ids {
+        replace_id(&mut b.json, id, &into.id);
+    }
+    b.missing.remove(index);
+    if let Ok(text) = serde_json::to_string(&b.json)
+        && let Ok(def) = cl_model::report_def::parse(&text)
+    {
+        b.def = Some(def);
+    }
+    if b.missing.is_empty() {
+        w.problem = None;
+        w.run();
+    } else {
+        w.problem = Some(missing_key(&b.missing));
+    }
+}
+
+/// The missing names under the message: "Use <name>" for each merge, and
+/// for a deleted name where to fix it.
+fn missing_ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
+    let Some(b) = w.builder.as_ref() else { return };
+    let mut used = None;
+    for (i, m) in b.missing.iter().enumerate() {
+        if let Some(into) = m.merged() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(t_with(
+                    "reports.builder.missing_merged_into",
+                    &[("name", &into.label)],
+                ));
+                if ui
+                    .button(t_with(
+                        "reports.builder.use_merged",
+                        &[("name", &into.label)],
+                    ))
+                    .clicked()
+                {
+                    used = Some(i);
+                }
+            });
+        }
+    }
+    let mut fix = false;
+    if b.missing.iter().any(|m| m.merged().is_none()) {
+        form::inline_note(ui, tokens, &t("reports.builder.missing_fix"));
+    }
+    if b.def.is_some() && ui.button(t("reports.builder.fix_in_builder")).clicked() {
+        fix = true;
+    }
+    if let Some(i) = used {
+        use_merged(w, i);
+    } else if fix {
+        // The editor opens on this report with each missing name to pick
+        // or remove (the A10 picker, Q-PRA2c).
+        seed_from_builder(w, None);
+    }
+}
+
 /// The message over the table.
 pub(crate) fn banner(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
+    if w.builder.as_ref().is_some_and(|b| !b.missing.is_empty()) {
+        missing_ui(w, ui, tokens);
+        return;
+    }
     let Some(b) = w.builder.as_ref() else {
         return;
     };
@@ -1649,6 +1794,7 @@ pub(crate) fn edit_row(
         adjusting: None,
         filters_dropped: false,
         editor: None,
+        missing: row.missing.clone(),
     };
     super::builder::open(link, BuilderSeed::Customize(Box::new(seed)));
     Ok(())
@@ -1669,11 +1815,20 @@ fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
         let Some(def) = b.def.clone() else {
             return;
         };
-        let origin = b
-            .origin
-            .clone()
-            .unwrap_or_else(|| Origin::Starter(b.key.clone()));
-        (def, b.saved.clone(), origin)
+        // A memorized builder report opened from the list or catalog: its
+        // row (Save changes follows Q-310), not a ready-made report.
+        let memorized = w
+            .memo
+            .current
+            .as_ref()
+            .filter(|r| r.kind == "builder" && b.saved.is_none())
+            .map(|r| saved_of(r, def.clone(), SavedKind::Builder));
+        let origin = match (&b.origin, &memorized) {
+            (Some(o), _) => o.clone(),
+            (None, Some(_)) => Origin::Memorized,
+            (None, None) => Origin::Starter(b.key.clone()),
+        };
+        (def, b.saved.clone().or(memorized), origin)
     };
     let Some(b) = w.builder.as_ref() else {
         return;
@@ -1703,6 +1858,7 @@ fn seed_from_builder(w: &mut ReportWindow, row: Option<DefinitionRow>) {
         adjusting: None,
         filters_dropped: false,
         editor: b.editor,
+        missing: b.missing.clone(),
     };
     super::builder::open(&w.link, BuilderSeed::Customize(Box::new(seed)));
 }
@@ -1735,6 +1891,7 @@ fn seed_from_standard(w: &mut ReportWindow, st: &Starter) {
         filters_dropped: o.filters != cl_model::reports::options::Filters::default()
             || o.tag_split.is_some(),
         editor: None,
+        missing: Vec::new(),
     };
     super::builder::open(&w.link, BuilderSeed::Customize(Box::new(seed)));
 }

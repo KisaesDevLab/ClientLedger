@@ -68,6 +68,84 @@ pub struct DefinitionRow {
     /// changes then stays off and a refusal is never invited (A08).
     #[serde(default)]
     pub can_edit: bool,
+    /// Names the definition uses that were deleted or merged away (U-226,
+    /// `report-refs-v1`; Q-PRA2c). Empty: every name is there.
+    #[serde(default)]
+    pub missing: Vec<MissingRef>,
+}
+
+/// The name a missing reference was merged into.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+pub struct MergedInto {
+    /// The surviving row's id.
+    pub id: String,
+    /// Its label (owner data: never in `Debug`).
+    pub label: String,
+}
+
+impl std::fmt::Debug for MergedInto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergedInto").finish_non_exhaustive()
+    }
+}
+
+/// A name a memorized definition uses that is no longer there (U-226):
+/// `{path, nodeId|null, field, kind, ids, reason, mergedInto?}`. `Debug`
+/// shows its kind, field and reason only.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingRef {
+    /// Where in the definition (`definition.nodes.0.groupBy.0.tagGroupId`).
+    #[serde(default)]
+    pub path: String,
+    /// The builder row (`None`: a standard report's option).
+    #[serde(default)]
+    pub node_id: Option<String>,
+    /// The builder filter field, `groupBy.tagGroupId`, or the standard
+    /// option path (`filters.tagIds`, `columnTagGroupId`).
+    #[serde(default)]
+    pub field: String,
+    /// `account`, `contact`, `item`, `tag`, `tagGroup`, `budget`.
+    pub kind: String,
+    /// The ids that are gone.
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// `deleted` or `merged`.
+    pub reason: String,
+    /// The survivor of a merge, when this company sees it.
+    #[serde(default)]
+    pub merged_into: Option<MergedInto>,
+}
+
+impl MissingRef {
+    /// True when the name was merged into one this company sees.
+    #[must_use]
+    pub fn merged(&self) -> Option<&MergedInto> {
+        self.merged_into
+            .as_ref()
+            .filter(|_| self.reason == "merged")
+    }
+}
+
+impl std::fmt::Debug for MissingRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MissingRef")
+            .field("kind", &self.kind)
+            .field("field", &self.field)
+            .field("reason", &self.reason)
+            .field("ids", &self.ids.len())
+            .field("merged_into", &self.merged_into.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The `missing` list of a refusal's details (`REPORT_REFERENCE_MISSING`,
+/// or `DEFINITION_INVALID {code: NOT_IN_COMPANY, missing}`), when sent.
+pub(crate) fn missing_of(details: &crate::ConflictDetails) -> Option<Vec<MissingRef>> {
+    let list = details.raw("missing")?;
+    serde_json::from_value::<Vec<MissingRef>>(list.clone())
+        .ok()
+        .filter(|m| !m.is_empty())
 }
 
 /// One group of memorized reports.

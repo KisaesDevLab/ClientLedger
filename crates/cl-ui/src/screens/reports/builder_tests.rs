@@ -491,6 +491,7 @@ fn an_unreadable_memorized_builder_report_says_why() {
             created_by_name: None,
             updated_at: None,
             can_edit: true,
+            missing: Vec::new(),
         };
     super::memorized::open_row(
         &mut w,
@@ -865,5 +866,60 @@ fn a_detail_tab_shows_its_dates_read_only() {
     assert!(
         text.contains('/') && (text.contains(" to ") || text.starts_with("As of")),
         "{text}"
+    );
+}
+
+/// PR-A2 (Q-PRA2c): a report that uses a deleted name says so in place of
+/// a report (never "No activity", never "Try again"); a merged name is one
+/// click away from running again.
+#[test]
+fn a_missing_name_says_so_instead_of_an_empty_report() {
+    use super::builder_run::{json_for_test, set_json_for_test, use_merged};
+    use crate::company::demo::report_builder::DELETED_TAG_GROUP;
+    let (_d, link) = demo();
+    let mut w = starter(&link, "profit_loss");
+    let good = json_for_test(&w);
+    let mut bad = good.clone();
+    bad["nodes"][0]["groupBy"] =
+        serde_json::json!([{"key": "tag", "tagGroupId": DELETED_TAG_GROUP}]);
+    set_json_for_test(&mut w, bad);
+    w.run();
+    for _ in 0..5 {
+        w.poll();
+    }
+    assert_eq!(w.state, RunState::Failed);
+    assert!(w.table.is_none(), "no empty report");
+    assert_eq!(w.problem, Some("reports.builder.missing_deleted"));
+    assert!(w.error.is_none(), "no Try again");
+    // A merge: "Use <name>" puts the survivor in and runs again.
+    let merged: cl_api::resources::reports::definitions::MissingRef = serde_json::from_value(
+        serde_json::json!({"path": "p", "nodeId": null, "field": "groupBy.tagGroupId",
+            "kind": "tagGroup", "ids": [DELETED_TAG_GROUP], "reason": "merged",
+            "mergedInto": {"id": "kept-group", "label": "Jobs"}}),
+    )
+    .expect("entry");
+    assert_eq!(
+        super::builder_run::missing_key(std::slice::from_ref(&merged)),
+        "reports.builder.missing_merged"
+    );
+    w.builder.as_mut().expect("builder").missing = vec![merged];
+    use_merged(&mut w, 0);
+    let json = json_for_test(&w);
+    assert_eq!(json["nodes"][0]["groupBy"][0]["tagGroupId"], "kept-group");
+    assert_eq!(w.builder.as_ref().expect("builder").missing.len(), 0);
+    assert_eq!(w.problem, None);
+}
+
+/// Q-PRA2a: an opening row reads "Balance before <date>" in the app's
+/// date format.
+#[test]
+fn an_opening_row_reads_balance_before_its_date() {
+    let d = cl_core::CalendarDate::from_ymd(2026, 1, 1).expect("day");
+    assert_eq!(
+        super::label(&format!(
+            "@reports.builder.opening_before {}",
+            crate::shell::us_date(d)
+        )),
+        "Balance before 01/01/2026"
     );
 }

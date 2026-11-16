@@ -378,6 +378,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // A09 QA-4: memorized reports and report files.
     ("reports.audit.action.exported", "Exported"),
     ("reports.audit.action.drafted_ai", "Drafted a report with AI"),
+    ("reports.audit.action.drafted_ai_also", "Drafted a report with AI ({name}, which didn't answer)"),
+    ("reports.audit.action.merged_report_one", "Merged and updated 1 memorized report"),
+    ("reports.audit.action.merged_reports", "Merged and updated {name} memorized reports"),
     ("reports.audit.action.drafted_ai_refused", "Asked AI to draft a report (not used)"),
     ("reports.audit.action.drafted_ai_failed", "Asked AI to draft a report (the AI service didn't answer)"),
     // A10 QA-6: the company's AI switches and consent.
@@ -442,6 +445,19 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.col.bva_over_total", "Total over budget"),
     ("reports.col.bva_pct_total", "Total % of budget"),
     ("reports.pick.budget", "Budget"),
+    // A standard memorized report that names a deleted or merged record (PR-A2, Q-PRA2c)
+    ("reports.missing.field.accounts", "Accounts filter"),
+    ("reports.missing.field.contacts", "Name filter"),
+    ("reports.missing.field.tags", "Tags filter"),
+    ("reports.missing.field.items", "Items filter"),
+    ("reports.missing.field.tag_split", "Show tagged amounts separately"),
+    ("reports.missing.field.tag_group_columns", "Tag group columns"),
+    ("reports.missing.field.budget", "Budget"),
+    ("reports.missing.field.other", "A filter"),
+    ("reports.missing.deleted_in", "{filter}: a name it uses was deleted."),
+    ("reports.missing.merged_in", "{filter}: a name it uses was merged into {name}."),
+    ("reports.missing.remove", "Remove it from {filter}"),
+    ("reports.missing.fix", "Or pick another name in Customize. The report runs once no deleted name is left; Memorize saves the change."),
     ("reports.pick.choose_budget_short", "Choose a budget"),
     ("reports.pick.choose_budget", "Choose a budget above to run this report, or use Edit budgets to make one."),
     // Budgets (Q-65)

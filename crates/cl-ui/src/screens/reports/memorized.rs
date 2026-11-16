@@ -125,6 +125,8 @@ pub(super) fn poll(w: &mut ReportWindow) {
                 w.memo.saved = w.memo.sending.take().or_else(|| Some(w.options.clone()));
                 if row.kind == "builder" {
                     super::builder_run::memorized(w, &row);
+                } else {
+                    w.std_missing.clone_from(&row.missing);
                 }
                 w.memo.current = Some(row);
                 w.memo.dialog = None;
@@ -376,7 +378,9 @@ pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
         options.filters.tag_ids.clear();
         options.filters.untagged = false;
     }
-    w.show_report(spec, options.clone());
+    // A saved filter that names a deleted or merged record holds the run
+    // with the message (U-226 `missing`, Q-PRA2c).
+    w.show_report_missing(spec, options.clone(), row.missing.clone());
     if dropped {
         w.notice = Some(t("reports.memorize.tag_dropped"));
     }
@@ -624,6 +628,7 @@ mod tag_tests {
             created_by_name: None,
             updated_at: None,
             can_edit: true,
+            missing: Vec::new(),
         };
         super::open_row(&mut w, &row);
         assert_eq!(
@@ -631,5 +636,123 @@ mod tag_tests {
             Some(crate::i18n::t("reports.memorize.tag_dropped").as_str())
         );
         assert_eq!(w.options.filters.tag_ids, Vec::<cl_core::ids::TagId>::new());
+    }
+
+    fn window(link: &Arc<crate::company::CompanyLink>) -> super::ReportWindow {
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("d");
+        let spec = find("profit_loss").expect("pl");
+        let mut w = super::ReportWindow::new(
+            Arc::clone(link),
+            CommandId::new(super::super::KIND),
+            None,
+            spec,
+            today,
+        );
+        for _ in 0..3 {
+            w.poll();
+        }
+        w
+    }
+
+    fn seeded(
+        w: &super::ReportWindow,
+        name: &str,
+    ) -> cl_api::resources::reports::definitions::DefinitionRow {
+        w.memo
+            .list
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .expect("seeded row")
+    }
+
+    /// PR-A2 (Q-PRA2c): a standard memorized report whose tag filter names
+    /// a deleted tag says so, names the filter and opens Customize; it
+    /// never runs as an empty report. Removing the name runs it.
+    #[test]
+    fn a_standard_report_with_a_deleted_tag_says_so_and_runs_once_removed() {
+        use super::super::window::RunState;
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let mut w = window(&link);
+        let row = seeded(&w, "Year-end P&L for a closed job");
+        assert_eq!(row.missing.len(), 1);
+        super::open_row(&mut w, &row);
+        for _ in 0..3 {
+            w.poll();
+        }
+        assert_eq!(w.state, RunState::Failed);
+        assert!(w.table.is_none(), "never an empty report");
+        assert!(w.error.is_none(), "no Try again");
+        assert_eq!(w.problem, Some("reports.builder.missing_deleted"));
+        assert!(w.customize, "the filter controls are open");
+        assert_eq!(
+            w.memo.current.as_ref().map(|c| c.id.as_str()),
+            Some(row.id.as_str())
+        );
+        // Remove it: the report runs, unsaved (Q-310).
+        let mut next = w.options.clone();
+        super::super::std_missing::remove(&mut next, &row.missing[0]);
+        w.set_options(next);
+        for _ in 0..5 {
+            w.poll();
+        }
+        assert_eq!(w.options.filters.tag_ids, Vec::<cl_core::ids::TagId>::new());
+        assert_eq!(w.problem, None);
+        assert_eq!(w.state, RunState::Shown);
+        assert!(w.table.is_some());
+        assert!(super::changed(&w), "Memorize can save the repair");
+    }
+
+    /// A pick in the Tags filter drops the deleted tag (the list can't
+    /// untick it); a merged tag is one click from its survivor.
+    #[test]
+    fn another_pick_or_the_survivor_settles_a_missing_tag() {
+        use super::super::std_missing::{pending, replace};
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let mut w = window(&link);
+        let row = seeded(&w, "Year-end P&L for a closed job");
+        super::open_row(&mut w, &row);
+        let live: cl_core::ids::TagId = "33333333-3333-4333-8333-333333333333".parse().expect("t");
+        let mut next = w.options.clone();
+        next.filters.tag_ids.push(live);
+        w.set_options(next);
+        assert_eq!(w.options.filters.tag_ids, vec![live]);
+        assert_eq!(pending(&w).len(), 0);
+        // Merged: the survivor takes its place, once.
+        let mut merged = row.missing[0].clone();
+        merged.reason = "merged".into();
+        let mut o = cl_model::reports::ReportOptions::for_spec(find("profit_loss").expect("pl"));
+        o.filters.tag_ids = vec![
+            crate::company::demo::report_builder::DELETED_TAG
+                .parse()
+                .expect("t"),
+            live,
+        ];
+        assert!(replace(&mut o, &merged, &live.to_string()));
+        assert_eq!(o.filters.tag_ids, vec![live]);
+    }
+
+    /// PR-A2 item 5: a memorized builder report opened from the catalog
+    /// (not the Memorized Reports list) shows the message and keeps its
+    /// row, so "Fix in the builder" edits that report.
+    #[test]
+    fn a_builder_report_from_the_catalog_keeps_its_row_and_missing_names() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let mut w = window(&link);
+        let row = seeded(&w, "Sales by job");
+        super::open_row(&mut w, &row);
+        for _ in 0..5 {
+            w.poll();
+        }
+        assert_eq!(w.problem, Some("reports.builder.missing_deleted"));
+        assert_eq!(
+            w.memo.current.as_ref().map(|c| c.id.as_str()),
+            Some(row.id.as_str())
+        );
+        assert_eq!(w.builder.as_ref().map(|b| b.missing.len()), Some(1));
+        assert_eq!(w.std_missing.len(), 0);
     }
 }

@@ -563,9 +563,13 @@ pub enum RowKind {
     More,
     /// A section the user's role can't see (Q-A07i).
     Denied,
-    /// The engine's earnings or opening row inside a builder drill or
-    /// equity section (prior years' and this year's net income).
+    /// The engine's earnings row inside a builder equity section (prior
+    /// years' and this year's net income).
     Earnings,
+    /// A builder drill's opening row: a balance before the drill's first
+    /// date ("Balance before Jan 1, 2026", U-225, Q-PRA2a). A summary row
+    /// with no drill; the engine's own figures, never summed here.
+    Opening,
 }
 
 impl RowKind {
@@ -589,6 +593,7 @@ impl RowKind {
                 | RowKind::More
                 | RowKind::Denied
                 | RowKind::Earnings
+                | RowKind::Opening
         )
     }
 
@@ -613,6 +618,7 @@ impl RowKind {
             RowKind::More => "more",
             RowKind::Denied => "denied",
             RowKind::Earnings => "earnings",
+            RowKind::Opening => "opening",
         }
     }
 }
@@ -1379,6 +1385,7 @@ mod tests {
             RowKind::More,
             RowKind::Denied,
             RowKind::Earnings,
+            RowKind::Opening,
         ] {
             assert!(k.is_pinned(), "{k:?}");
             let name = serde_json::to_value(k).expect("json");

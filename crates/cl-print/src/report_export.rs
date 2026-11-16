@@ -192,6 +192,7 @@ pub fn to_xlsx(
                 | RowKind::Header
                 | RowKind::Subtotal
                 | RowKind::Formula
+                | RowKind::Opening
         );
         let caption = format!(
             "{}{}",
@@ -813,6 +814,95 @@ mod tests {
         // Into a folder that doesn't exist: an error, nothing left behind.
         let bad = dir.path().join("missing").join("x.csv");
         assert!(write_atomic(&bad, b"x").is_err());
+    }
+
+    /// PR-A2: a balance drill's file. The "Balance before" row prints once,
+    /// first, on page 1 only (never repeated on later pages); the footer
+    /// is the engine's subtotal as given; a negative Debit cell (a Trial
+    /// Balance slice against its account's side, engine fix 2) keeps its
+    /// sign in the CSV, the workbook and the PDF.
+    #[test]
+    fn a_balance_drill_file_has_one_opening_row_and_keeps_negative_cells() {
+        let r = |kind, caption: &str, cells| ReportRow {
+            kind,
+            level: 0,
+            path: RowPath::of([caption]),
+            caption: caption.into(),
+            cells,
+            drill: None,
+            expandable: false,
+        };
+        let amt = |s: &str| Cell::Amount(d(s));
+        let mut rows = vec![r(
+            RowKind::Opening,
+            "Balance before 02/01/2033",
+            vec![amt("1000.00"), Cell::Empty],
+        )];
+        for i in 0..150 {
+            rows.push(r(
+                RowKind::Detail,
+                &format!("Line {i}"),
+                vec![amt("1.00"), Cell::Empty],
+            ));
+        }
+        rows.push(r(
+            RowKind::Detail,
+            "Job B",
+            vec![amt("-100.00"), Cell::Empty],
+        ));
+        // The engine's subtotal, as sent (never re-added here).
+        rows.push(r(
+            RowKind::Total,
+            "Subtotal",
+            vec![amt("1050.00"), Cell::Empty],
+        ));
+        let t = ReportTable {
+            columns: vec![
+                heading("debit", ColumnKind::Amount),
+                heading("credit", ColumnKind::Amount),
+            ],
+            rows,
+            meta: ReportMeta::default(),
+        };
+        let all: Vec<usize> = (0..t.rows.len()).collect();
+        let opening = "Balance before 02/01/2033";
+        // CSV: once, first after the heading; the negative and the footer
+        // exact.
+        let csv = to_csv(&t, &all, &[], &tr);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.iter().filter(|l| l.contains(opening)).count(), 1);
+        assert!(lines[1].starts_with(opening), "{}", lines[1]);
+        assert!(lines.contains(&"Job B,-100.00,"), "{csv}");
+        assert_eq!(lines.last().copied(), Some("Subtotal,1050.00,"));
+        // Workbook: the negative stays a negative number; one opening row.
+        let (bytes, _) = to_xlsx(&t, &all, &[], &tr).expect("xlsx");
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut sheet = String::new();
+        zip.by_name("xl/worksheets/sheet1.xml")
+            .expect("sheet")
+            .read_to_string(&mut sheet)
+            .expect("read");
+        assert!(sheet.contains("<v>-100</v>"), "{sheet}");
+        assert!(sheet.contains("<v>1050</v>"), "{sheet}");
+        let mut strings = String::new();
+        zip.by_name("xl/sharedStrings.xml")
+            .expect("strings")
+            .read_to_string(&mut strings)
+            .expect("read");
+        assert_eq!(strings.matches(opening).count(), 1);
+        // PDF: more than one page, the opening row on page 1 only.
+        let doc = to_report(&t, &all, "Detail", Vec::new(), &tr);
+        let pages = crate::layout::resolve(&crate::reports::layout_report(&doc)).expect("fits");
+        assert!(pages.len() > 1, "the drill spans pages");
+        let on = |p: &crate::layout::ResolvedPage, s: &str| {
+            p.runs.iter().filter(|run| run.text == s).count()
+        };
+        assert_eq!(on(&pages[0], opening), 1);
+        assert!(pages[1..].iter().all(|p| on(p, opening) == 0));
+        let neg = cl_core::report::display_amount(d("-100.00"), MoneyStyle::default());
+        let last = pages.last().expect("page");
+        assert_eq!(on(last, &neg), 1, "the negative prints as {neg}");
+        assert_eq!(on(last, "1,050.00"), 1, "the footer is the subtotal");
     }
 
     /// A08 QA-13: a Report Builder page break starts a new PDF page and is

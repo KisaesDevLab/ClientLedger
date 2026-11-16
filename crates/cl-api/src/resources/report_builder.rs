@@ -281,6 +281,10 @@ pub enum BuilderRefusal {
     Denied,
     /// The definition is over 256 KB (413).
     DefinitionTooLarge,
+    /// The definition uses names that were deleted or merged away (U-226:
+    /// a saved run's 422 `REPORT_REFERENCE_MISSING`, an inline run's 400
+    /// `DEFINITION_INVALID {code: NOT_IN_COMPANY, missing}`; Q-PRA2c).
+    MissingReference(Vec<crate::resources::reports::definitions::MissingRef>),
 }
 
 /// The builder refusal in `e`, if it is one.
@@ -304,6 +308,18 @@ pub fn builder_refusal(e: &ApiError) -> Option<BuilderRefusal> {
         }
         ApiError::Server { status: 503, code } if code_is(code.as_ref(), "REPORT_TIMEOUT") => {
             BuilderRefusal::Timeout
+        }
+        // A name the definition uses is gone (U-226): never read as an
+        // empty report (Q-PRA2c). Checked before the generic rule refusal.
+        ApiError::Validation(v)
+            if matches!(
+                v.code().map(crate::ErrorCode::as_str),
+                Some("REPORT_REFERENCE_MISSING" | "DEFINITION_INVALID")
+            ) && crate::resources::reports::definitions::missing_of(v.details()).is_some() =>
+        {
+            BuilderRefusal::MissingReference(
+                crate::resources::reports::definitions::missing_of(v.details()).unwrap_or_default(),
+            )
         }
         ApiError::Validation(v) => match v.code().map(crate::ErrorCode::as_str) {
             Some("REPORT_TOO_LARGE") => BuilderRefusal::TooLarge,
@@ -388,7 +404,9 @@ impl ReportBuilder<'_> {
         let v: Value = serde_json::from_slice(&reply.body).map_err(|_| ApiError::Decode {
             what: "report detail",
         })?;
-        read_detail(&v, columns, layout)
+        let mut page = read_detail(&v, columns, layout)?;
+        date_openings(&mut page.rows, detail_from(req));
+        Ok(page)
     }
 
     /// The engine's field catalogue, as sent (`cl-model` reads it).
@@ -603,7 +621,8 @@ fn row_kind(s: &str) -> Result<RowKind, ApiError> {
         "page_break" => RowKind::PageBreak,
         "more" => RowKind::More,
         "denied" => RowKind::Denied,
-        "earnings" | "opening" => RowKind::Earnings,
+        "earnings" => RowKind::Earnings,
+        "opening" => RowKind::Opening,
         _ => return Err(shape("row kind")),
     })
 }
@@ -922,6 +941,11 @@ pub fn read_run(v: &Value, adjusting: Option<Adjusting>) -> Result<BuilderRun, A
         .get("stamp")
         .and_then(Value::as_u64)
         .ok_or(shape("stamp"))?;
+    // An expanded balance line's inline rows start with its opening row:
+    // the balance before the run's first day (U-225).
+    if let Some(ReportDates::Range(r)) = meta.dates {
+        date_openings(&mut rows, Some(r.from));
+    }
     let (detail_columns, detail_layout) = (cols.clone(), layout.clone());
     let (cols, layout) = drop_empty_fields(cols, layout, &mut rows);
     Ok(BuilderRun {
@@ -990,6 +1014,33 @@ fn drop_empty_fields(
             shown,
         },
     )
+}
+
+/// A drill's first date: its column's (an as-of column has none), else
+/// the run's. An opening row is the balance before it (U-225).
+#[must_use]
+pub fn detail_from(req: &DetailRequest) -> Option<CalendarDate> {
+    match req.range {
+        Some(r) if r.from == CalendarDate::min() => None,
+        Some(r) => Some(r.from),
+        None => req.reference.dates.from,
+    }
+}
+
+/// The opening rows' caption with the date they stand before ("Balance
+/// before 01/01/2026", Q-PRA2a): `@reports.builder.opening_before <date>`
+/// (the window's `@key name` form). Without a date the caption stays
+/// "Opening balance". Nothing is summed: the engine's cells stay as sent.
+pub fn date_openings(rows: &mut [ReportRow], from: Option<CalendarDate>) {
+    let Some(d) = from else { return };
+    for r in rows.iter_mut().filter(|r| r.kind == RowKind::Opening) {
+        r.caption = format!(
+            "@reports.builder.opening_before {:02}/{:02}/{}",
+            d.month(),
+            d.day(),
+            d.year()
+        );
+    }
 }
 
 /// Reads a `/run/detail` answer (`{rows, cursor, subtotal}`): its cells

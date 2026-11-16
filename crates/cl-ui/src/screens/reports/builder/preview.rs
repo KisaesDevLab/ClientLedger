@@ -344,6 +344,18 @@ fn poll(s: &mut BuilderScreen) {
                 s.ed.set_engine_problem(&path, &code);
                 return;
             }
+            // A name the definition uses is gone (U-226, Q-PRA2c): the row
+            // that uses it is marked, as for any name not in the company.
+            if let Some(cl_api::resources::report_builder::BuilderRefusal::MissingReference(m)) =
+                cl_api::resources::report_builder::builder_refusal(&e)
+                && let Some(first) = m.first()
+            {
+                p.state
+                    .run_failed(generation, super::super::builder_run::failure(&e));
+                let path = cl_core::report::scrub_definition_path(&first.path);
+                s.ed.set_engine_problem(&path, "NOT_IN_COMPANY");
+                return;
+            }
             let why = super::super::builder_run::failure(&e);
             p.state.run_failed(generation, why);
             p.failed = failed_key(p.state.phase(), p.state.banner());
@@ -407,7 +419,16 @@ pub(crate) fn problem_text(s: &BuilderScreen, p: &Problem) -> String {
         || t("builder.problem.the_report"),
         |id| super::outline::caption_of(s, id),
     );
-    t_with(&p.code.key(), &[("row", &caption)])
+    // A memorized report's missing name isn't the AI's (Q-PRA2c).
+    let key = match p.code {
+        cl_model::report_def::problems::ProblemCode::Unresolved
+            if s.ai.review.as_ref().is_some_and(|r| r.missing) =>
+        {
+            "builder.problem.unresolved_missing".to_string()
+        }
+        _ => p.code.key(),
+    };
+    t_with(&key, &[("row", &caption)])
 }
 
 fn go_to(s: &mut BuilderScreen, p: &Problem) {
@@ -655,7 +676,10 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
         .rows
         .iter()
         .map(|r| {
-            let leaf = matches!(r.kind, RowKind::Detail | RowKind::Earnings | RowKind::More);
+            let leaf = matches!(
+                r.kind,
+                RowKind::Detail | RowKind::Earnings | RowKind::Opening | RowKind::More
+            );
             (r.path.clone(), r.expandable, leaf)
         })
         .collect();
@@ -750,6 +774,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                         | RowKind::Grand
                         | RowKind::Formula
                         | RowKind::Header
+                        | RowKind::Opening
                 );
                 let text = RichText::new(caption);
                 let text = if dim { text.color(ink) } else { text };

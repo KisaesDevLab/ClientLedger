@@ -205,7 +205,11 @@ pub fn detail_pages_echo_and_go_stale(h: &Harness) {
         )
         .expect("page");
     assert_eq!(page.cursor, None);
-    assert_eq!(page.rows[0].kind, RowKind::Earnings, "the opening row");
+    assert_eq!(page.rows[0].kind, RowKind::Opening, "the opening row");
+    assert_eq!(
+        page.rows[0].caption, "@reports.builder.opening_before 01/01/2034",
+        "the drill's first date"
+    );
     assert_eq!(
         page.rows
             .iter()

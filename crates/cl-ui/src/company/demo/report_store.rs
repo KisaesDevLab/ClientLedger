@@ -115,6 +115,7 @@ impl DemoReportStore {
                 created_by_name: Some("Kurt".into()),
                 updated_at: Some(DemoState::now()),
                 can_edit: true,
+                missing: Vec::new(),
             });
         }
         // Another user's report (A09): the Memorized Reports list shows
@@ -138,6 +139,66 @@ impl DemoReportStore {
                 created_by_name: Some("Dana".into()),
                 updated_at: Some(DemoState::now()),
                 can_edit: false,
+                missing: Vec::new(),
+            });
+        }
+        // PR-A2 (Q-PRA2c): a builder report grouped by a tag group the
+        // demo's books deleted; it opens with "This report uses a name that
+        // was deleted" and the builder's picker (U-226 `missing`).
+        let deleted = super::report_builder::DELETED_TAG_GROUP;
+        let body = serde_json::json!({
+            "schemaVersion": 1, "kind": "builder", "title": "Sales by job",
+            "dates": {"mode": "range", "preset": "this_year_to_date"},
+            "columns": {"detailFields": [], "compare": [], "headers": {}},
+            "nodes": [{"type": "section", "id": "sales", "caption": "Sales", "source": "gl",
+                "measure": "amount", "polarity": "credit",
+                "filters": [{"field": "account_type", "op": "in", "values": ["revenue"]}],
+                "groupBy": [{"key": "tag", "tagGroupId": deleted}], "display": "summary",
+                "defaultExpanded": false, "showTotal": true, "hideZero": true}]});
+        let missing = serde_json::from_value(serde_json::json!([{
+            "path": "definition.nodes.0.groupBy.0.tagGroupId", "nodeId": "sales",
+            "field": "groupBy.tagGroupId", "kind": "tagGroup", "ids": [deleted],
+            "reason": "deleted"}]))
+        .unwrap_or_default();
+        let id = self.id("report");
+        self.definitions.push(DefinitionRow {
+            id,
+            group_id: None,
+            name: "Sales by job".into(),
+            kind: "builder".into(),
+            definition: body,
+            version: 1,
+            created_by: None,
+            created_by_name: Some("Kurt".into()),
+            updated_at: Some(DemoState::now()),
+            can_edit: true,
+            missing,
+        });
+        // PR-A2 (Q-PRA2c): a standard P&L memorized with a tag filter on a
+        // tag the demo deleted; it opens with the message naming the Tags
+        // filter, never an empty "No activity" report.
+        if let Some(spec) = cl_model::reports::find("profit_loss")
+            && let Ok(tag) = super::report_builder::DELETED_TAG.parse()
+        {
+            let mut o = cl_model::reports::ReportOptions::for_spec(spec);
+            o.filters.tag_ids = vec![tag];
+            let body =
+                serde_json::to_value(cl_model::reports::StandardDefinition::new("profit_loss", o))
+                    .unwrap_or(Value::Null);
+            let missing = demo_missing(&body);
+            let id = self.id("report");
+            self.definitions.push(DefinitionRow {
+                id,
+                group_id: None,
+                name: "Year-end P&L for a closed job".into(),
+                kind: "standard".into(),
+                definition: body,
+                version: 1,
+                created_by: None,
+                created_by_name: Some("Kurt".into()),
+                updated_at: Some(DemoState::now()),
+                can_edit: true,
+                missing,
             });
         }
         let mut lines = BTreeMap::new();
@@ -320,6 +381,7 @@ pub fn save_definition(
         r.name = name.to_string();
         r.group_id.clone_from(&w.group_id);
         r.definition = w.definition.clone();
+        r.missing = demo_missing(&r.definition);
         r.version += 1;
         r.updated_at = Some(DemoState::now());
         Ok(r.clone())
@@ -336,6 +398,7 @@ pub fn save_definition(
             created_by_name: Some("Kurt".into()),
             updated_at: Some(DemoState::now()),
             can_edit: true,
+            missing: Vec::new(),
         };
         s.definitions.push(row.clone());
         Ok(row)
@@ -400,6 +463,7 @@ pub fn patch_definition(
     }
     if let Some(body) = &p.definition {
         r.definition = body.clone();
+        r.missing = demo_missing(&r.definition);
     }
     r.version += 1;
     r.updated_at = Some(DemoState::now());
@@ -954,3 +1018,28 @@ pub fn ask(req: &AskRequest) -> Result<AskMapping, ApiError> {
 #[cfg(test)]
 #[path = "report_store_tests.rs"]
 mod tests;
+
+/// The demo's `missing` list for a stored body (U-226): its deleted tag
+/// group, when the body still uses it.
+fn demo_missing(body: &Value) -> Vec<cl_api::resources::reports::definitions::MissingRef> {
+    let text = body.to_string();
+    let mut out = Vec::new();
+    let group = super::report_builder::DELETED_TAG_GROUP;
+    if text.contains(group) {
+        out.push(serde_json::json!({
+            "path": "definition", "nodeId": null, "field": "groupBy.tagGroupId",
+            "kind": "tagGroup", "ids": [group], "reason": "deleted"}));
+    }
+    // A standard report's tag filter (the engine's field is the option path).
+    let tag = super::report_builder::DELETED_TAG;
+    if body["kind"] == "standard"
+        && body["options"]["filters"]["tagIds"]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|v| v == tag))
+    {
+        out.push(serde_json::json!({
+            "path": "definition.options.filters.tagIds", "nodeId": null,
+            "field": "filters.tagIds", "kind": "tag", "ids": [tag], "reason": "deleted"}));
+    }
+    serde_json::from_value(Value::Array(out)).unwrap_or_default()
+}

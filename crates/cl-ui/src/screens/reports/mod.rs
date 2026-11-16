@@ -29,6 +29,7 @@ mod filters;
 mod memorized;
 // A09: the Memorized Reports list.
 pub mod memorized_list;
+mod std_missing;
 mod window;
 
 #[cfg(test)]

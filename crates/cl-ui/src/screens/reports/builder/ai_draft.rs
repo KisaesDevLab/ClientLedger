@@ -59,6 +59,101 @@ struct Before {
 pub(crate) struct Review {
     pub(crate) draft: Draft,
     before: Box<Before>,
+    /// Names a memorized report uses that were deleted or merged away
+    /// (U-226, Q-PRA2c), not an AI draft: the same picker, its own words,
+    /// and no Discard (the report can't run as it was).
+    pub(crate) missing: bool,
+}
+
+/// The engine's kind of a missing name, as a reference kind.
+fn missing_kind(k: &str) -> Option<RefKind> {
+    Some(match k {
+        "account" => RefKind::Account,
+        "contact" => RefKind::Contact,
+        "item" => RefKind::Item,
+        "tag" => RefKind::Tag,
+        "tagGroup" => RefKind::TagGroup,
+        "budget" => RefKind::Budget,
+        _ => return None,
+    })
+}
+
+/// Opens the editor's report with each missing name as a name to pick or
+/// remove (Q-PRA2c): every gone id becomes a `$ref:N` placeholder, so the
+/// preview, Run and Save stay off until each is settled (`sendable`), the
+/// rows are marked, and the A10 picker offers the merged-into name first.
+/// An id the definition doesn't hold (a standard report's option) is left
+/// for the window's message.
+pub(crate) fn start_missing(
+    s: &mut BuilderScreen,
+    missing: &[cl_api::resources::reports::definitions::MissingRef],
+) {
+    let Ok(mut json) = serde_json::to_value(s.ed.definition()) else {
+        return;
+    };
+    let mut names = Vec::new();
+    for m in missing {
+        let Some(kind) = missing_kind(&m.kind) else {
+            continue;
+        };
+        for id in &m.ids {
+            if names.len() >= 9999 {
+                break;
+            }
+            let token = format!("$ref:{}", names.len() + 1);
+            let before = json.clone();
+            crate::screens::reports::builder_run::replace_id(&mut json, id, &token);
+            if json == before {
+                continue;
+            }
+            names.push(DraftName {
+                token,
+                kind,
+                name: None,
+                ambiguous: m.merged().is_some(),
+                candidates: m
+                    .merged()
+                    .map(|x| vec![(x.id.clone(), x.label.clone())])
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    if names.is_empty() {
+        return;
+    }
+    let Ok(def) = serde_json::from_value::<BuilderDefinition>(json) else {
+        return;
+    };
+    let before = Box::new(Before {
+        ed: s.ed.clone(),
+        guided: s.guided.take(),
+        custom: s.band.custom,
+    });
+    let name = s.ed.name().to_string();
+    let group_id = s.ed.group_id().map(str::to_string);
+    s.apply(Op::Load {
+        def: Box::new(def),
+        name,
+        group_id,
+    });
+    let first = names.first().and_then(|n| {
+        model::rows_with(s.ed.definition(), &n.token)
+            .into_iter()
+            .next()
+    });
+    s.ed.select(first.as_deref());
+    s.preview.table = None;
+    s.preview.ran_at = None;
+    s.preview.edited(&s.ed);
+    s.ai.review = Some(Review {
+        draft: Draft {
+            names,
+            notes: Vec::new(),
+            provider: None,
+        },
+        before,
+        missing: true,
+    });
 }
 
 /// The company's switches, read before the first draft: on, and the
@@ -534,7 +629,11 @@ pub(crate) fn take(s: &mut BuilderScreen, reply: &DraftReply) {
     s.ai.open = false;
     s.ai.confirm = None;
     s.ai.message = None;
-    s.ai.review = Some(Review { draft, before });
+    s.ai.review = Some(Review {
+        draft,
+        before,
+        missing: false,
+    });
 }
 
 /// Keep: the draft is the report (still unsaved until Memorize).
@@ -542,8 +641,13 @@ pub(crate) fn keep(s: &mut BuilderScreen) {
     if s.ed.has_placeholders() {
         return;
     }
+    let missing = s.ai.review.as_ref().is_some_and(|r| r.missing);
     end_review(s);
-    s.status = Some(t("builder.ai.kept"));
+    s.status = Some(t(if missing {
+        "builder.missing.kept"
+    } else {
+        "builder.ai.kept"
+    }));
 }
 
 /// The review ends (Keep, or a Memorize or Save changes during it): the
@@ -885,6 +989,7 @@ fn review(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let open: Vec<DraftName> = r.draft.open(&def).into_iter().cloned().collect();
     let notes = shown_notes(&r.draft, &def);
     let provider = provider_text(r.draft.provider.as_deref());
+    let missing = r.missing;
     let mut answers: Vec<(String, Answer)> = Vec::new();
     let mut want: Vec<Which> = Vec::new();
     let mut go: Option<String> = None;
@@ -898,17 +1003,25 @@ fn review(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(t("builder.ai.banner")).strong());
-                ui.label(
-                    RichText::new(t_with("builder.ai.banner_by", &[("provider", &provider)]))
-                        .size(12.0)
-                        .color(tokens.text_secondary),
-                );
+                if missing {
+                    ui.label(RichText::new(t("builder.missing.banner")).strong());
+                } else {
+                    ui.label(RichText::new(t("builder.ai.banner")).strong());
+                    ui.label(
+                        RichText::new(t_with("builder.ai.banner_by", &[("provider", &provider)]))
+                            .size(12.0)
+                            .color(tokens.text_secondary),
+                    );
+                }
             });
             ui.label(
-                RichText::new(t("builder.ai.banner_hint"))
-                    .size(12.0)
-                    .color(tokens.text_secondary),
+                RichText::new(t(if missing {
+                    "builder.missing.banner_hint"
+                } else {
+                    "builder.ai.banner_hint"
+                }))
+                .size(12.0)
+                .color(tokens.text_secondary),
             );
             for n in &open {
                 name_row(s, ui, &def, n, &mut answers, &mut want, &mut go);
@@ -938,10 +1051,11 @@ fn review(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
                 if k.clicked() {
                     do_keep = true;
                 }
-                if ui
-                    .button(t("builder.ai.discard"))
-                    .on_hover_text(t("builder.ai.discard_tip"))
-                    .clicked()
+                if !missing
+                    && ui
+                        .button(t("builder.ai.discard"))
+                        .on_hover_text(t("builder.ai.discard_tip"))
+                        .clicked()
                 {
                     do_discard = true;
                 }
@@ -976,7 +1090,11 @@ fn name_row(
     go: &mut Option<String>,
 ) {
     let rows = model::rows_with(def, &n.token);
-    let w = name_words(def, n);
+    let mut w = name_words(def, n);
+    let missing = s.ai.review.as_ref().is_some_and(|r| r.missing);
+    if missing {
+        w.line = missing_line(def, n);
+    }
     ui.add_space(4.0);
     ui.label(&w.line);
     ui.horizontal_wrapped(|ui| {
@@ -1025,6 +1143,21 @@ fn name_row(
             *go = Some(id.clone());
         }
     });
+}
+
+/// A missing name's line: "The tag group on the row Sales was deleted." or
+/// "A customer on the row Sales was merged into Rivera Remodel." (Q-PRA2c).
+pub(crate) fn missing_line(def: &BuilderDefinition, n: &DraftName) -> String {
+    let rows = model::rows_with(def, &n.token);
+    let row = row_phrase(def, rows.first());
+    let kind = t(&format!("builder.ai.kind.{}", kind_key(n.kind)));
+    match n.candidates.first() {
+        Some((_, label)) => t_with(
+            "builder.missing.merged",
+            &[("kind", &kind), ("row", &row), ("name", label)],
+        ),
+        None => t_with("builder.missing.deleted", &[("kind", &kind), ("row", &row)]),
+    }
 }
 
 /// The words for one name to pick: the line saying what is wrong, and the

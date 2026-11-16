@@ -1290,3 +1290,42 @@ fn a_single_report_import_makes_its_missing_group() {
         assert_eq!(groups(&link).len(), n);
     }
 }
+
+/// Q-PRA2d: a file account whose number this company has under another
+/// name is explained, and offered as a candidate only (never picked).
+#[test]
+fn a_same_number_other_name_account_is_explained() {
+    use cl_api::resources::reports::definitions::Candidate;
+    use cl_model::report_def::clreport::Reference;
+    let r = Reference::of(&json!({"kind": "account", "name": "Rent", "number": "6100"}));
+    let c = |id: &str, label: &str| Candidate {
+        id: id.into(),
+        label: label.into(),
+    };
+    let text = same_number_text(r.as_ref(), &[c("a1", "6100 \u{b7} Payroll Taxes")]);
+    assert_eq!(
+        text.as_deref(),
+        Some(
+            "The file's account 6100 \u{b7} Rent has the same number as 6100 \u{b7} Payroll \
+             Taxes in this company, but a different name. Pick the account to use."
+        )
+    );
+    // The same name (case and spacing aside) is not this case.
+    assert_eq!(
+        same_number_text(r.as_ref(), &[c("a1", "6100 \u{b7} rent ")]),
+        None
+    );
+    // Another number, or no number in the file: the usual words.
+    assert_eq!(
+        same_number_text(r.as_ref(), &[c("a1", "6200 \u{b7} Payroll Taxes")]),
+        None
+    );
+    let unnumbered = Reference::of(&json!({"kind": "account", "name": "Rent"}));
+    assert_eq!(
+        same_number_text(unnumbered.as_ref(), &[c("a1", "6100 \u{b7} Payroll Taxes")]),
+        None
+    );
+    // Never pre-selected: the review has no choice until the owner picks.
+    let review = Review::new(&[], Vec::new());
+    assert!(review.choices.is_empty());
+}

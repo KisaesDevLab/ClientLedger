@@ -306,8 +306,12 @@ fn a_detail_section_types_its_field_columns() {
         ]
     );
     let opening = &t.rows[2];
-    assert_eq!(opening.kind, RowKind::Earnings);
-    assert_eq!(opening.caption, "@reports.builder.opening");
+    assert_eq!(opening.kind, RowKind::Opening);
+    // Dated by the run's first day (U-225, Q-PRA2a).
+    assert_eq!(
+        opening.caption,
+        "@reports.builder.opening_before 01/01/2026"
+    );
     assert_eq!(opening.cells[6], Cell::Amount(d("500.0000")));
     let detail = &t.rows[3];
     assert_eq!(detail.kind, RowKind::Detail);
@@ -407,7 +411,7 @@ fn a_detail_page_reads_against_the_runs_columns() {
     )
     .expect("page");
     assert_eq!(p.rows.len(), 2);
-    assert_eq!(p.rows[0].kind, RowKind::Earnings, "the opening row");
+    assert_eq!(p.rows[0].kind, RowKind::Opening, "the opening row");
     assert_eq!(p.rows[0].level, 0);
     assert!(matches!(
         &p.rows[1].drill,
@@ -782,4 +786,190 @@ fn a_preview_run_reads_its_cut() {
         serde_json::to_value(RunPurpose::Preview).expect("json"),
         serde_json::json!("preview")
     );
+}
+
+// ---- PR-A2 (U-225, U-226): opening rows, the balance Total, missing names
+
+/// A by-month run of `n` period columns, plus a `total` column when
+/// `total` (the engine leaves it out of a balances-only report).
+fn periods_run(total: Option<&str>, opening: bool) -> Value {
+    let mut columns = vec![
+        json!({"key": "p0", "caption": "Jan 2026", "kind": "period",
+               "range": {"from": "2026-01-01", "to": "2026-01-31"}}),
+        json!({"key": "p1", "caption": "Feb 2026", "kind": "period",
+               "range": {"from": "2026-02-01", "to": "2026-02-28"}}),
+    ];
+    let line = |a: &str, b: &str| -> Vec<Value> {
+        let mut v = vec![json!(a), json!(b)];
+        if let Some(t) = total {
+            v.push(json!(t));
+        }
+        v
+    };
+    if total.is_some() {
+        columns.push(json!({"key": "total", "caption": "Total", "kind": "total",
+                            "range": {"from": "2026-01-01", "to": "2026-02-28"}}));
+    }
+    let mut rows = vec![json!({"kind": "line", "nodeId": "banks", "level": 1,
+        "path": ["n:banks", "account:a"], "caption": "Checking",
+        "cells": line("1000.0000", "1250.0000"), "expandable": true, "expanded": opening})];
+    if opening {
+        let mut cells = vec![json!("1000.0000"), json!("1000.0000")];
+        if total.is_some() {
+            cells.push(Value::Null);
+        }
+        rows.push(json!({"kind": "opening", "nodeId": "banks", "level": 0,
+            "path": ["n:banks", "account:a"], "caption": "Balance before Jan 1, 2026",
+            "cells": cells, "expandable": false, "expanded": false}));
+    }
+    json!({"columns": columns, "rows": rows,
+        "meta": {"basis": "accrual", "dates": {"from": "2026-01-01", "to": "2026-02-28"},
+                 "notes": [], "truncated": false, "denied": []},
+        "fingerprint": "f".repeat(64), "stamp": 1})
+}
+
+/// Q-PRA2a/1-B1b: a balances-only report has no Total column; the adapter
+/// adds none and sums nothing.
+#[test]
+fn a_balances_only_run_has_no_total_column() {
+    let r = read_run(&periods_run(None, false), None).expect("run");
+    let keys: Vec<&str> = r.table.columns.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(keys, ["p0", "p1"]);
+    assert_eq!(
+        r.table.rows[0].cells,
+        [Cell::Amount(d("1000.0000")), Cell::Amount(d("1250.0000"))]
+    );
+}
+
+/// A mixed report's Total of a balance is its last period, as sent (never
+/// 1000 + 1250).
+#[test]
+fn a_mixed_runs_balance_total_is_the_engines() {
+    let r = read_run(&periods_run(Some("1250.0000"), false), None).expect("run");
+    let total = r.table.columns.iter().position(|c| c.key == "total");
+    assert_eq!(total, Some(2));
+    assert_eq!(r.table.rows[0].cells[2], Cell::Amount(d("1250.0000")));
+}
+
+/// An inline opening row is its own kind, dated by the run's first day, with
+/// the engine's cells.
+#[test]
+fn an_inline_opening_row_is_dated_by_the_run() {
+    let r = read_run(&periods_run(None, true), None).expect("run");
+    let o = &r.table.rows[1];
+    assert_eq!(o.kind, RowKind::Opening);
+    assert_eq!(o.caption, "@reports.builder.opening_before 01/01/2026");
+    assert_eq!(o.drill, None, "a summary row, never a link");
+    assert_eq!(o.cells[0], Cell::Amount(d("1000.0000")));
+}
+
+/// A drill's opening row is dated by its column's range, else the run's.
+#[test]
+fn a_drills_opening_row_is_dated_by_its_first_day() {
+    let mut req = DetailRequest {
+        reference: RunRef {
+            definition: None,
+            definition_id: Some("x".into()),
+            version: None,
+            dates: RunDates::range(DateRange {
+                from: day(2026, 1, 1),
+                to: day(2026, 2, 28),
+            }),
+            period_ranges: Vec::new(),
+            compare_ranges: Vec::new(),
+            fiscal_year_starts: Vec::new(),
+            basis: None,
+            adjusting: None,
+        },
+        node_id: "banks".into(),
+        path: RowPath::of(["n:banks"]),
+        range: None,
+        cursor: None,
+        fingerprint: String::new(),
+        stamp: 0,
+    };
+    assert_eq!(detail_from(&req), Some(day(2026, 1, 1)));
+    req.range = Some(DateRange {
+        from: day(2026, 2, 1),
+        to: day(2026, 2, 28),
+    });
+    assert_eq!(detail_from(&req), Some(day(2026, 2, 1)));
+    req.range = Some(DateRange {
+        from: CalendarDate::min(),
+        to: day(2026, 2, 28),
+    });
+    assert_eq!(detail_from(&req), None, "an as-of column has no first day");
+    let mut rows = vec![ReportRow {
+        kind: RowKind::Opening,
+        level: 0,
+        path: RowPath::of(["n:banks"]),
+        caption: "@reports.builder.opening".into(),
+        cells: vec![Cell::Amount(d("1000.0000"))],
+        drill: None,
+        expandable: false,
+    }];
+    date_openings(&mut rows, None);
+    assert_eq!(rows[0].caption, "@reports.builder.opening");
+    date_openings(&mut rows, Some(day(2026, 2, 1)));
+    assert_eq!(
+        rows[0].caption,
+        "@reports.builder.opening_before 02/01/2026"
+    );
+    assert_eq!(rows[0].cells, [Cell::Amount(d("1000.0000"))]);
+}
+
+/// A row kind the adapter doesn't know is off contract (an error), never a
+/// panic.
+#[test]
+fn an_unknown_row_kind_is_off_contract() {
+    let mut v = periods_run(None, false);
+    v["rows"][0]["kind"] = json!("someday");
+    assert!(matches!(
+        read_run(&v, None),
+        Err(ApiError::ReportShape { .. })
+    ));
+}
+
+/// U-226: a saved run's 422 and an inline run's 400 with `missing` are a
+/// missing name, never a rule refusal or an empty report.
+#[test]
+fn a_missing_name_refusal_carries_the_list() {
+    let entry = json!({"path": "definition.nodes.0.groupBy.0.tagGroupId", "nodeId": "revenue",
+        "field": "groupBy.tagGroupId", "kind": "tagGroup", "ids": ["g1"], "reason": "deleted"});
+    let merged = json!({"path": "definition.nodes.0.filters.0.ids", "nodeId": "revenue",
+        "field": "contact", "kind": "contact", "ids": ["c1"], "reason": "merged",
+        "mergedInto": {"id": "c2", "label": "Rivera Remodel (customer)"}});
+    let saved = crate::engine_refusal(
+        422,
+        &json!({"error": {"code": "REPORT_REFERENCE_MISSING", "message": "x",
+            "details": {"path": "definition.nodes.0.groupBy.0.tagGroupId", "missing": [entry, merged]}}}),
+    );
+    let Some(BuilderRefusal::MissingReference(m)) = builder_refusal(&saved) else {
+        panic!("{:?}", builder_refusal(&saved));
+    };
+    assert_eq!(m.len(), 2);
+    assert_eq!(m[0].kind, "tagGroup");
+    assert!(m[0].merged().is_none());
+    assert_eq!(m[1].merged().map(|x| x.id.as_str()), Some("c2"));
+    // No names in Debug (S-L5).
+    assert!(!format!("{m:?}").contains("Rivera"));
+    let inline = crate::engine_refusal(
+        400,
+        &json!({"error": {"code": "DEFINITION_INVALID", "message": "x",
+            "details": {"path": "definition.nodes.0", "code": "NOT_IN_COMPANY", "missing": [entry]}}}),
+    );
+    assert!(matches!(
+        builder_refusal(&inline),
+        Some(BuilderRefusal::MissingReference(m)) if m.len() == 1
+    ));
+    // Without `missing` it stays a rule refusal.
+    let plain = crate::engine_refusal(
+        400,
+        &json!({"error": {"code": "DEFINITION_INVALID", "message": "x",
+            "details": {"path": "definition.nodes.0", "code": "NOT_IN_COMPANY"}}}),
+    );
+    assert!(matches!(
+        builder_refusal(&plain),
+        Some(BuilderRefusal::Invalid { .. })
+    ));
 }
