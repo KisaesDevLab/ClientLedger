@@ -326,6 +326,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("rights.report_not_for_role","This report isn't available for your role in this company. Ask the company's Admin if you need it."),
     // P29: Set Closing Date.
     ("orphan.closing_date", "a closing date change"),
+    ("orphan.my_sign_in", "a password change"),
     ("closing.admin.intro", "Transactions dated on or before the closing date are locked. Changing one needs the closing-date password, and every change is kept in the audit trail."),
     ("closing.admin.loading", "Reading the closing date\u{2026}"),
     ("closing.admin.closed_through", "The books are closed through {date}."),

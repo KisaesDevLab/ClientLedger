@@ -77,6 +77,7 @@ pub mod reports;
 pub mod audit_trail;
 pub mod closing_date;
 pub mod login;
+pub mod my_sign_in;
 pub mod recovery;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).

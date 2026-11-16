@@ -267,7 +267,7 @@ impl IdleLock {
 
 /// Signs in again with `email` and `password` as proof: the answer must be
 /// the same user as `own`; the proof session is signed out at once.
-async fn proof_of_password(
+pub(crate) async fn proof_of_password(
     client: &cl_api::Client,
     own: &cl_api::Session,
     email: &str,

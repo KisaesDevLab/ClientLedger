@@ -508,6 +508,8 @@ pub const COMMANDS: &[Command] = &[
     built("company.information", "Company Information", Some(Menu::Company), 0, None),
     built("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None),
     screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
+    // P29 WP2: change your own password, automatic sign-in, idle lock
+    built("company.my_sign_in", "My Sign-in", Some(Menu::Company), 1, None),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
     built("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None),
     // Window
@@ -870,6 +872,7 @@ mod tests {
             // P29
             "company.closing_date",
             "company.audit_trail",
+            "company.my_sign_in",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

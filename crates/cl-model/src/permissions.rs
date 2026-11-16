@@ -777,6 +777,8 @@ pub fn need(id: CommandId) -> Option<Need> {
         "company.closing_date" | "company.users" => AdminOnly,
         "company.send_to_accountant" => Read(R::CompanySettings),
         "company.audit_trail" => Read(R::AuditLog),
+        // Your own password, automatic sign-in and idle lock.
+        "company.my_sign_in" => Always,
         "nav.home" => Always,
         other if INSIDE.iter().any(|p| other.starts_with(p)) => Always,
         _ => return None,

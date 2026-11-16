@@ -624,6 +624,14 @@ impl Shell {
                         tracing::warn!(error = %e, "could not save preferences");
                     }
                 }
+                CompanyEvent::IdleLockMinutes(m) => {
+                    self.prefs.idle_lock_minutes = m;
+                    if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
+                        && let Err(e) = store.save_prefs(&self.prefs)
+                    {
+                        tracing::warn!(error = %e, "could not save preferences");
+                    }
+                }
                 CompanyEvent::PromptDirty => {
                     if let Some(id) = self.windows.dirty_ids().first().copied() {
                         self.return_after_prompt = self.windows.active_id();
@@ -2017,6 +2025,9 @@ fn make_any(
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
             }
+        }
+        if let Some(s) = crate::screens::my_sign_in::make(kind, link, prefs.idle_lock_minutes) {
+            return s;
         }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
             return s;

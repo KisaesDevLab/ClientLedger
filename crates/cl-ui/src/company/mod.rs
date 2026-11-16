@@ -87,6 +87,9 @@ pub enum CompanyEvent {
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),
+    /// Company › My Sign-in chose a new idle-lock time (P29, Q-P29p): the
+    /// shell changes only that field of its own preferences.
+    IdleLockMinutes(u16),
     /// Home read the rail's counts (clients, vendors, bank items waiting;
     /// P16). Counts only.
     RailCounts(crate::shell::RailCounts),
