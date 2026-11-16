@@ -12,6 +12,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("tags.problem.description_too_long", "The description is too long. Use 2,000 characters or fewer."),
     ("tags.line.one_per_group", "Only one tag from the group {group} can go on a line."),
     ("tags.line.required_missing", "Lines on this account need a tag from the group {group}."),
+    ("tags.line.required_missing_any", "Lines on this account need a tag from a required tag group."),
+    ("tags.line.missing", "Add a tag. This company asks for a tag on every line."),
     ("tags.line.tag_unavailable", "One of the tags is inactive or was removed. Choose another tag."),
     ("tags.line.too_many_for_engine", "A line can have only one tag for now. Keep one tag on this line."),
     ("tags.col.name", "Tag"),

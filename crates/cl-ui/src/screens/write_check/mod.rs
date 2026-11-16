@@ -173,6 +173,8 @@ pub(crate) struct SaveState {
     /// The idempotency key of the request being retried.
     pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
     pub problems: Vec<CheckProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub tag_refusal: Vec<String>,
     pub error: Option<ApiError>,
     /// The number the engine refused as used, and the one offered instead.
     pub duplicate: Option<(u32, u32)>,
@@ -329,14 +331,6 @@ pub struct WriteCheckScreen {
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
     pub(crate) draft: draft::CheckDraftMode,
-}
-
-/// The tag list `check` needs for the header-tag defaults.
-fn tag_list(tags: &[Tag]) -> TagList {
-    TagList::new(
-        Vec::new(),
-        tags.iter().map(crate::tag_names::entry).collect(),
-    )
 }
 
 /// A blank check form (no lines: the grid holds them).
@@ -717,7 +711,8 @@ impl WriteCheckScreen {
         self.lists = Arc::new(lists);
         self.lines.set_lists(Arc::clone(&self.lists));
         self.items.set_base(&self.lists);
-        self.tag_list = tag_list(&self.tags);
+        self.tag_list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
+        self.fill_default_tag();
         if !self.line_billable() {
             self.lines.set_locked(vec![L_CUSTOMER, L_BILLABLE]);
             self.items.grid.set_locked(vec![
@@ -726,6 +721,27 @@ impl WriteCheckScreen {
             ]);
         }
         self.inputs.rev = u64::MAX;
+    }
+
+    /// Q-276: a new, untouched check starts with the company's default
+    /// tag in its header (part of the clean form, so it is not "unsaved").
+    /// Never on a check being edited, nor once the owner touched it.
+    pub(crate) fn fill_default_tag(&mut self) {
+        let tags = cl_model::forms::tag_rule::new_form_header_tags(&self.tag_list);
+        // A check saved in this window stays as saved (Save & New starts
+        // the next one with the default itself).
+        if tags.is_empty()
+            || self.editing.is_some()
+            || self.save.count > 0
+            || self.nav.at.is_some()
+            || self.header.is_dirty()
+            || !self.header.current().header_tags.is_empty()
+        {
+            return;
+        }
+        let mut f = self.header.current().clone();
+        f.header_tags = tags;
+        self.header.load(f);
     }
 
     /// The bank account to start on: the last one used in this run, else
@@ -1347,6 +1363,13 @@ impl WriteCheckScreen {
                 json!(self.editing.is_some() && self.feed_watch.linked()),
             );
             m.insert("feed_notice".into(), json!(self.feed_notice()));
+            // P29 WP7: the tag rules' refusal (place words only) and the
+            // header tag count (the default fills new checks).
+            m.insert("tag_refusal".into(), json!(self.save.tag_refusal));
+            m.insert(
+                "header_tags".into(),
+                json!(self.header.current().header_tags.len()),
+            );
         }
         let wp7 = json!({
             "prefill": {

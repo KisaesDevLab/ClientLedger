@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use cl_core::Timestamp;
-use cl_core::ids::{AccountId, IntakeFolderId, TagGroupId};
+use cl_core::ids::{AccountId, IntakeFolderId, TagGroupId, TagId};
 use cl_core::intake::IntakeFolder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,6 +49,9 @@ impl Default for AiConsentNote {
 /// Everything local to one company.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+// Independent owner switches (account numbers, checklist, logo, tags), not
+// a state machine: an enum would not fit.
+#[allow(clippy::struct_excessive_bools)]
 pub struct CompanyPrefs {
     /// P17's single folder watched for new receipts and bills (Q-54);
     /// `None` = off. **Legacy** since A01: intake folders live in the
@@ -95,6 +98,12 @@ pub struct CompanyPrefs {
     /// 1-10; the engine takes 1-10). Read through
     /// [`CompanyPrefs::transfer_window`].
     pub feed_transfer_window_days: u8,
+    /// Q-276: every line of a posting needs a tag (the forms refuse the
+    /// save and name the lines). Off by default; Admins change it.
+    pub require_tag_every_line: bool,
+    /// Q-276: the tag new forms and new Bulk Entry sections start with
+    /// (never put on edits). An inactive or removed tag fills nothing.
+    pub default_tag: Option<TagId>,
 }
 
 /// The Bank Feed's transfer window by default (Q-P26l).
@@ -125,6 +134,8 @@ impl Default for CompanyPrefs {
             email: EmailPrefs::default(),
             billable_income: BTreeMap::new(),
             feed_transfer_window_days: FEED_TRANSFER_WINDOW_DEFAULT,
+            require_tag_every_line: false,
+            default_tag: None,
         }
     }
 }
@@ -233,6 +244,8 @@ impl CompanyPrefs {
             email: self.email.clone(),
             billable_income: self.billable_income.clone(),
             feed_transfer_window_days: self.feed_transfer_window_days,
+            require_tag_every_line: self.require_tag_every_line,
+            default_tag: self.default_tag,
         }
     }
 
@@ -272,6 +285,8 @@ impl CompanyPrefs {
             email: archive.email.clone(),
             billable_income: archive.billable_income.clone(),
             feed_transfer_window_days: archive.feed_transfer_window_days,
+            require_tag_every_line: archive.require_tag_every_line,
+            default_tag: archive.default_tag,
         };
         out.normalize();
         out
@@ -403,6 +418,16 @@ mod tests {
         let back = CompanyPrefs::merged_from_archive(&chart.for_archive(), Some(&local));
         assert_eq!(back.required_tag_groups.len(), 1);
         assert!(back.required_tag_groups[&g].contains("expense"));
+        // The tag options travel too (Q-276); older records read them off.
+        let t = TagId::parse("7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        chart.require_tag_every_line = true;
+        chart.default_tag = Some(t);
+        let back = CompanyPrefs::merged_from_archive(&chart.for_archive(), Some(&local));
+        assert!(back.require_tag_every_line);
+        assert_eq!(back.default_tag, Some(t));
+        let text = serde_json::to_string(&chart).expect("json");
+        let again: CompanyPrefs = serde_json::from_str(&text).expect("parse");
+        assert_eq!(again.default_tag, Some(t));
         let old: CompanyPrefs = serde_json::from_str(r#"{"bills_due_days":7}"#).expect("old");
         assert!(
             old.account_numbers,
@@ -410,6 +435,7 @@ mod tests {
         );
         // Hiding Home's setup checklist travels with the company (Q-63, P16).
         assert!(!old.setup_checklist_dismissed, "shown until hidden");
+        assert!(!old.require_tag_every_line && old.default_tag.is_none());
         let mut hidden = local.clone();
         hidden.setup_checklist_dismissed = true;
         assert!(hidden.for_archive().setup_checklist_dismissed);

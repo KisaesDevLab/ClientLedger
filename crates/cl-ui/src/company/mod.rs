@@ -136,6 +136,8 @@ pub struct CompanyLink {
     /// The signed-in user's rights in the open company (P29). Everything
     /// while no company is open (nothing but Open Company works then).
     rights: Mutex<cl_model::permissions::Rights>,
+    /// The company open now (P29 WP7: its local tag rules).
+    open_tenant: Mutex<Option<TenantId>>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -202,6 +204,7 @@ impl CompanyLink {
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
             rights: Mutex::new(cl_model::permissions::Rights::all()),
+            open_tenant: Mutex::new(None),
         }
     }
 
@@ -225,6 +228,7 @@ impl CompanyLink {
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
             rights: Mutex::new(cl_model::permissions::Rights::all()),
+            open_tenant: Mutex::new(None),
         }
     }
 
@@ -428,14 +432,60 @@ impl CompanyLink {
         self.push(CompanyEvent::Rights(r));
     }
 
+    /// The company just opened (None once closed).
+    pub fn set_open_tenant(&self, t: Option<TenantId>) {
+        *self
+            .open_tenant
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = t;
+    }
+
+    /// The open company's tag rules (Q-180 required groups, Q-276 every
+    /// line and the default tag), read from its local preferences each
+    /// time, so a change in Preferences or the Tags window shows at the
+    /// next form or save. The one place the forms' rules come from.
+    #[must_use]
+    pub fn tag_rules(&self) -> cl_model::lists::tags::TagRules {
+        use cl_model::lists::tags::TagRules;
+        if let Some(d) = self.demo_state() {
+            return TagRules::from_prefs(
+                d.require_tag_every_line,
+                d.default_tag,
+                &d.required_tag_groups,
+            );
+        }
+        let open = *self
+            .open_tenant
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        open.and_then(|t| {
+            self.store.load().ok().and_then(|l| {
+                l.get(t).map(|r| {
+                    TagRules::from_prefs(
+                        r.prefs.require_tag_every_line,
+                        r.prefs.default_tag,
+                        &r.prefs.required_tag_groups,
+                    )
+                })
+            })
+        })
+        .unwrap_or_default()
+    }
+
     /// No company open: back to everything (only Open Company works).
     pub fn reset_rights(&self) {
+        self.set_open_tenant(None);
         *self.rights.lock().unwrap_or_else(PoisonError::into_inner) =
             cl_model::permissions::Rights::all();
     }
 
     /// Queue an event for the shell.
     pub fn push(&self, e: CompanyEvent) {
+        // Every way of opening a company tells the shell with `Opened`:
+        // the link learns which company's local rules apply from it.
+        if let CompanyEvent::Opened { tenant_id, .. } = &e {
+            self.set_open_tenant(Some(*tenant_id));
+        }
         self.events
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

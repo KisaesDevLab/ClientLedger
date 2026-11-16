@@ -164,6 +164,74 @@ fn a_fixed_problem_goes_away_before_the_next_save() {
     assert_eq!(s.state()["totals"], "balanced");
 }
 
+/// P29 WP7 (Q-276): turns "tag on every line" on in the demo company and
+/// returns an active tag.
+fn tag_every_line(link: &Arc<CompanyLink>, default: bool) -> cl_core::ids::TagId {
+    let mut d = link.demo_state().expect("demo");
+    let tag = d
+        .tags_mut()
+        .iter()
+        .find(|t| t.is_active)
+        .expect("an active tag")
+        .id;
+    d.require_tag_every_line = true;
+    d.default_tag = default.then_some(tag);
+    tag
+}
+
+#[test]
+fn tag_on_every_line_refuses_untagged_lines_by_tab_and_line() {
+    let (_d, link) = link();
+    let tag = tag_every_line(&link, false);
+    let mut s = screen(&link);
+    assert_eq!(s.state()["header_tags"], 0, "no default set");
+    fill(&mut s, "100.00", &[("5100", "60.00"), ("5110", "40.00")]);
+    s.lines.form_mut().edit_step(|v| v.lines[0].tag = Some(tag));
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before, "nothing reached the engine");
+    assert_eq!(
+        s.state()["tag_refusal"][0],
+        "Expenses tab, line 2: Add a tag. This company asks for a tag on every line."
+    );
+    assert_eq!(s.state()["tag_refusal"].as_array().map(Vec::len), Some(1));
+    // Tagging the line clears the refusal before the next save.
+    s.lines.form_mut().edit_step(|v| v.lines[1].tag = Some(tag));
+    s.recheck_problems();
+    assert_eq!(s.state()["tag_refusal"].as_array().map(Vec::len), Some(0));
+    assert!(s.start_save(SaveIntent::Save, None) || s.save.task.is_some());
+    for _ in 0..5 {
+        s.poll();
+    }
+    assert_eq!(writes(&link), before + 1, "saved");
+    // The saved check is an edit: the default never goes on it.
+    link.demo_state().expect("demo").default_tag = Some(tag);
+    s.tag_list = crate::forms::tag_gate::form_list(&s.tags, &s.link);
+    s.fill_default_tag();
+    assert_eq!(s.state()["header_tags"], 0);
+}
+
+#[test]
+fn a_header_tag_satisfies_every_line_and_the_default_fills_new_checks() {
+    let (_d, link) = link();
+    let tag = tag_every_line(&link, true);
+    let mut s = screen(&link);
+    assert_eq!(s.state()["header_tags"], 1, "the default is in the header");
+    assert!(!s.is_dirty(), "the default is part of the blank check");
+    assert_eq!(s.header.current().header_tags, vec![tag]);
+    fill(&mut s, "100.00", &[("5100", "60.00"), ("5110", "40.00")]);
+    let before = writes(&link);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None) || s.save.task.is_some());
+    for _ in 0..5 {
+        s.poll();
+    }
+    assert_eq!(writes(&link), before + 1, "the header tag fills every line");
+    assert_eq!(s.state()["tag_refusal"].as_array().map(Vec::len), Some(0));
+    // Save & New: the next check starts with the default too.
+    assert_eq!(s.header.current().header_tags, vec![tag]);
+    assert!(!s.is_dirty());
+}
+
 #[test]
 fn save_and_new_posts_the_check_and_proposes_the_next_number() {
     let (_d, link) = link();

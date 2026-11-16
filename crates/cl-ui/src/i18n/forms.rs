@@ -6,6 +6,9 @@
 pub const ENGLISH: &[(&str, &str)] = &[
     ("forms.line_where.expenses", "Expenses tab, line {line}: {problem}"),
     ("forms.line_where.items", "Items tab, line {line}: {problem}"),
+    ("forms.line_where.line", "Line {line}: {problem}"),
+    ("forms.line_where.row", "Section {section}, row {row}: {problem}"),
+    ("forms.tags_refused", "This can't be saved yet. Add the tags below, then save again."),
     ("lines.label", "Lines"),
     ("lines.col.account", "Account"),
     ("lines.col.amount", "Amount"),

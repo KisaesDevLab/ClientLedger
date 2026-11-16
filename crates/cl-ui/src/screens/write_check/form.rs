@@ -1079,6 +1079,7 @@ impl WriteCheckScreen {
             let text = crate::forms::line_problem_text(p.row(), p.key().0, position);
             ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
         }
+        crate::forms::tag_gate::show(ui, tokens, &self.save.tag_refusal);
         if let Some((refused, offer)) = self.save.duplicate {
             let mut take = false;
             ui.horizontal_wrapped(|ui| {

@@ -19,6 +19,7 @@ pub mod lines_grid;
 pub mod lost_save;
 pub mod nav_prompt;
 pub mod suggest;
+pub mod tag_gate;
 pub mod template;
 
 use std::collections::BTreeSet;

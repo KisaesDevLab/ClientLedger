@@ -49,6 +49,8 @@ pub mod owner_money;
 pub mod bounced_check;
 pub mod payment;
 pub mod personal_funds;
+// P29 WP7: the tag gate every posting save goes through (Q-276).
+pub mod tag_rule;
 pub mod transfer;
 // P22: credit memos, sales receipts (the invoice form's kind), refunds,
 // statements and finance charges.

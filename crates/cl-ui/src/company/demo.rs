@@ -112,6 +112,10 @@ pub struct DemoState {
     /// preference, Q-180).
     pub required_tag_groups:
         std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
+    /// Q-276: the demo company's "tag on every line" option.
+    pub require_tag_every_line: bool,
+    /// Q-276: the demo company's default tag.
+    pub default_tag: Option<cl_core::ids::TagId>,
     /// Tags merged or deleted in the demo (their usage moved or gone).
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
     /// Transactions recorded or changed in the demo registers (P12).
@@ -284,6 +288,8 @@ impl DemoState {
             tags: None,
             tag_groups: None,
             required_tag_groups: std::collections::BTreeMap::new(),
+            require_tag_every_line: false,
+            default_tag: None,
             tags_gone: std::collections::BTreeSet::new(),
             ledger: register::DemoLedger::default(),
             checks: checks::DemoChecks::default(),

@@ -329,6 +329,37 @@ impl EnterBillScreen {
         self.save.problems = problems;
     }
 
+    /// The tag rules on the bill as composed (P29 WP7, Q-276).
+    pub(crate) fn tag_gate(&self, form: &BillForm) -> Result<(), Vec<String>> {
+        let lines = cl_model::forms::tag_rule::tabbed_lines(
+            &form.header_tags,
+            &form.expenses,
+            &form.items,
+            &self.tag_list,
+        );
+        crate::forms::tag_gate::check(&self.tag_list, &lines, &self.accounts)
+    }
+
+    /// Q-276: a new, untouched bill starts with the company's default tag
+    /// in its header (part of the clean form). Never on an edit.
+    pub(crate) fn fill_default_tag(&mut self) {
+        let tags = cl_model::forms::tag_rule::new_form_header_tags(&self.tag_list);
+        // A bill saved in this window stays as saved (Save & New starts the
+        // next one with the default itself).
+        if tags.is_empty()
+            || self.editing.is_some()
+            || self.save.count > 0
+            || self.nav.at.is_some()
+            || self.header.is_dirty()
+            || !self.header.current().header_tags.is_empty()
+        {
+            return;
+        }
+        let mut f = self.header.current().clone();
+        f.header_tags = tags;
+        self.header.load(f);
+    }
+
     /// The context the checks run in.
     pub(crate) fn context_check(&self, form: &BillForm) -> Result<CheckedBill, Vec<BillProblem>> {
         let ctx = BillContext {
@@ -344,6 +375,10 @@ impl EnterBillScreen {
     /// The problems a refused save showed, checked again against the form
     /// as it is now (each frame while any show).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.save.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.save.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.save.problems.is_empty() {
             return;
         }
@@ -423,6 +458,7 @@ impl EnterBillScreen {
         }
         self.left_lines();
         self.save.problems.clear();
+        self.save.tag_refusal.clear();
         self.save.error = None;
         self.save.refusal = None;
         self.save.stale = false;
@@ -444,6 +480,11 @@ impl EnterBillScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&form) {
+            self.save.tag_refusal = texts;
+            return false;
+        }
         // Another bill of this vendor uses the ref (WP8, Q-P17n): ask "Save
         // anyway / Go back" first; it warns, never blocks. A save waiting
         // for the check is sent once it answers.
@@ -809,7 +850,9 @@ impl EnterBillScreen {
         } else {
             self.today
         };
-        self.header.load(blank(kind, date));
+        let mut fresh = blank(kind, date);
+        fresh.header_tags = cl_model::forms::tag_rule::new_form_header_tags(&self.tag_list);
+        self.header.load(fresh);
         let (expenses, items) = self.blank_lines();
         self.load_lines(expenses, items);
         self.editing = None;
@@ -818,6 +861,7 @@ impl EnterBillScreen {
         self.void = super::VoidPrompt::default();
         self.history = super::HistoryView::default();
         self.save.problems.clear();
+        self.save.tag_refusal.clear();
         self.save.stale = false;
         self.save.refusal = None;
         self.nav_prompt = None;

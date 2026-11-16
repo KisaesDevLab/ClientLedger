@@ -232,6 +232,8 @@ pub(crate) struct SaveState {
     /// The idempotency key of the request being retried.
     pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
     pub problems: Vec<BillProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub tag_refusal: Vec<String>,
     pub error: Option<ApiError>,
     /// The engine's refusal of the save, void or delete (i18n key).
     pub refusal: Option<&'static str>,
@@ -403,14 +405,6 @@ pub struct EnterBillScreen {
     /// A04 draft mode: the document draft this form enters (Accept is
     /// Save & Close / Save & New, sent to `convert`; `draft.rs`).
     pub(crate) draft: Option<crate::screens::doc_review::review::DraftSession>,
-}
-
-/// The tag list `check` needs for the header-tag defaults.
-fn tag_list(tags: &[Tag]) -> TagList {
-    TagList::new(
-        Vec::new(),
-        tags.iter().map(crate::tag_names::entry).collect(),
-    )
 }
 
 /// A blank header dated `date` (no lines: the grids hold them).
@@ -722,7 +716,8 @@ impl EnterBillScreen {
             Arc::clone(&self.lists),
             &self.items_list,
         )));
-        self.tag_list = tag_list(&self.tags);
+        self.tag_list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
+        self.fill_default_tag();
         self.apply_locks();
         self.inputs.rev = u64::MAX;
     }
@@ -1146,6 +1141,8 @@ impl EnterBillScreen {
         });
         let more = json!({
             "dirty": self.is_dirty(),
+            "tag_refusal": self.save.tag_refusal,
+            "header_tags": form.header_tags.len(),
             "saving": self.save.task.is_some(),
             "saved_count": self.save.count,
             "save": {

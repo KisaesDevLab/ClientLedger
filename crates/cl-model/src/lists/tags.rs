@@ -100,6 +100,48 @@ pub struct TagFilter {
 pub struct TagList {
     groups: Vec<GroupEntry>,
     tags: Vec<TagEntry>,
+    rules: TagRules,
+}
+
+/// The company's tag rules the forms follow (Q-180, Q-276), read from the
+/// company's local preferences in one place (`CompanyLink::tag_rules`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagRules {
+    /// Q-276: every line of a posting needs a tag.
+    pub every_line: bool,
+    /// Q-276: the tag new forms and new Bulk Entry sections start with.
+    pub default_tag: Option<TagId>,
+    /// Q-180: groups a line must use for the account types listed.
+    pub required: BTreeMap<TagGroupId, BTreeSet<AccountKind>>,
+}
+
+impl TagRules {
+    /// The rules from the company preferences' wire form (account types
+    /// as engine names such as `expense`; unknown names are dropped).
+    #[must_use]
+    pub fn from_prefs(
+        every_line: bool,
+        default_tag: Option<TagId>,
+        required: &BTreeMap<TagGroupId, BTreeSet<String>>,
+    ) -> TagRules {
+        TagRules {
+            every_line,
+            default_tag,
+            required: required
+                .iter()
+                .map(|(g, kinds)| {
+                    (
+                        *g,
+                        kinds
+                            .iter()
+                            .filter_map(|w| AccountKind::from_wire(w))
+                            .collect::<BTreeSet<_>>(),
+                    )
+                })
+                .filter(|(_, k)| !k.is_empty())
+                .collect(),
+        }
+    }
 }
 
 fn by_name(a: &str, b: &str) -> Ordering {
@@ -135,7 +177,74 @@ impl TagList {
                 .cmp(&rank(b))
                 .then_with(|| a.sort_key().cmp(&b.sort_key()))
         });
-        TagList { groups, tags }
+        TagList {
+            groups,
+            tags,
+            rules: TagRules::default(),
+        }
+    }
+
+    /// The forms' list (they read tags, not groups): `tags` with the
+    /// company's rules. A tag keeps its group when that group is required.
+    #[must_use]
+    pub fn for_forms(tags: Vec<TagEntry>, rules: TagRules) -> TagList {
+        TagList {
+            groups: Vec::new(),
+            tags,
+            rules: TagRules::default(),
+        }
+        .with_rules(rules)
+    }
+
+    /// The list with the company's tag rules (Q-180, Q-276). A required
+    /// group the list doesn't hold is added without a name. Call it on a
+    /// list built with its groups (or through [`TagList::for_forms`]):
+    /// [`TagList::new`] already dropped the group of a tag whose group it
+    /// didn't know.
+    #[must_use]
+    pub fn with_rules(self, rules: TagRules) -> TagList {
+        let mut groups = self.groups;
+        for g in &mut groups {
+            if let Some(kinds) = rules.required.get(&g.id) {
+                g.required_for.clone_from(kinds);
+            }
+        }
+        for (id, kinds) in &rules.required {
+            if !groups.iter().any(|g| g.id == *id) {
+                groups.push(GroupEntry {
+                    id: *id,
+                    name: String::new(),
+                    description: None,
+                    single: false,
+                    required_for: kinds.clone(),
+                    order: i64::MAX,
+                });
+            }
+        }
+        let mut out = TagList::new(groups, self.tags);
+        out.rules = rules;
+        out
+    }
+
+    /// The company's tag rules.
+    #[must_use]
+    pub fn rules(&self) -> &TagRules {
+        &self.rules
+    }
+
+    /// Q-276: every posting line needs a tag.
+    #[must_use]
+    pub fn every_line(&self) -> bool {
+        self.rules.every_line
+    }
+
+    /// Q-276: the default tag for new forms, when it is still an active
+    /// tag (a removed or inactive default fills nothing).
+    #[must_use]
+    pub fn default_tag(&self) -> Option<TagId> {
+        self.rules
+            .default_tag
+            .filter(|id| self.tag(*id).is_some_and(|t| t.active))
     }
 
     /// Groups, in order.
@@ -524,8 +633,11 @@ pub fn check_group(
 }
 
 /// Why a line's tags break a rule (Q-179, Q-180, U-45).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineTagProblem {
+    /// The company asks for a tag on every line (Q-276) and the line has
+    /// none.
+    Missing,
     /// Two or more tags of one one-per-group group.
     OnePerGroup(TagGroupId),
     /// The line's account type needs a tag of this group.
@@ -541,6 +653,7 @@ impl LineTagProblem {
     #[must_use]
     pub const fn key(&self) -> TextKey {
         TextKey(match self {
+            LineTagProblem::Missing => "tags.line.missing",
             LineTagProblem::OnePerGroup(_) => "tags.line.one_per_group",
             LineTagProblem::RequiredMissing(_) => "tags.line.required_missing",
             LineTagProblem::TagUnavailable(_) => "tags.line.tag_unavailable",
@@ -550,8 +663,10 @@ impl LineTagProblem {
 }
 
 /// Checks the tags of one line on an account of `kind` (Q-179, Q-180),
-/// and, unless the engine keeps several tags per line (`several`, U-45),
-/// that there is at most one.
+/// that it has one when the company asks for a tag on every line (Q-276,
+/// [`TagList::every_line`]), and, unless the engine keeps several tags per
+/// line (`several`, U-45), that there is at most one. `tags` are the line's
+/// effective tags (after the header fill, Q-178).
 #[must_use]
 pub fn check_line_tags(
     list: &TagList,
@@ -560,6 +675,9 @@ pub fn check_line_tags(
     several: bool,
 ) -> Vec<LineTagProblem> {
     let mut problems = Vec::new();
+    if list.every_line() && tags.is_empty() {
+        problems.push(LineTagProblem::Missing);
+    }
     let mut seen: BTreeMap<TagGroupId, usize> = BTreeMap::new();
     for id in tags {
         match list.tag(*id) {
