@@ -175,6 +175,8 @@ pub struct DemoState {
     pub card_digits: bool,
     /// P29: the demo's closing-date password (`None`: none set).
     pub closing_password: Option<String>,
+    /// P29 WP8: the demo company's own 1099 amounts per box code.
+    pub thresholds_1099: std::collections::BTreeMap<String, cl_core::Money>,
     /// P29: the demo's users, sign-in and recovery key.
     pub auth: auth::DemoAuth,
     /// Invoices the demo engine keeps (P20).
@@ -320,6 +322,7 @@ impl DemoState {
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
             closing_password: Some(register::DEMO_CLOSING_PASSWORD.to_owned()),
+            thresholds_1099: std::collections::BTreeMap::new(),
             auth: auth::DemoAuth::default(),
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
@@ -465,6 +468,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
             named(&accounts, 6960, "Bad Debts"),
         ],
         sales_taxes: Vec::new(),
+        thresholds: None,
         done: true,
     }
 }

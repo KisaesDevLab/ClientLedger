@@ -24,6 +24,7 @@ pub mod ai_cloud_reading;
 pub mod company;
 pub mod email;
 pub mod intake_folders;
+pub mod thresholds_1099;
 pub mod user;
 
 use std::sync::Arc;
@@ -74,6 +75,8 @@ pub enum Category {
     Inventory,
     /// Tag options (P29 WP7, Q-276), Admin only.
     Tags,
+    /// The company's 1099 reporting amounts (P29 WP8, U-215), Admin only.
+    Form1099,
     /// The AI panel.
     Ai,
     /// Reading documents with an online service (A03, Q-A03k).
@@ -91,7 +94,7 @@ pub enum Category {
 
 impl Category {
     /// Every category in list order.
-    pub const ALL: [Category; 14] = [
+    pub const ALL: [Category; 15] = [
         Category::LookAndFeel,
         Category::DatesNumbers,
         Category::Reminders,
@@ -100,6 +103,7 @@ impl Category {
         Category::SalesTax,
         Category::Inventory,
         Category::Tags,
+        Category::Form1099,
         Category::Ai,
         Category::AiCloudReading,
         Category::Email,
@@ -129,6 +133,7 @@ impl Category {
             Category::SalesTax => "prefs.cat.sales_tax",
             Category::Inventory => "prefs.cat.inventory",
             Category::Tags => "prefs.cat.tags",
+            Category::Form1099 => "prefs.cat.1099",
             Category::Ai => "prefs.cat.ai",
             Category::AiCloudReading => "prefs.cat.cloud_reading",
             Category::Email => "prefs.cat.email",
@@ -150,6 +155,7 @@ impl Category {
             Category::SalesTax => "sales_tax",
             Category::Inventory => "inventory",
             Category::Tags => "tags",
+            Category::Form1099 => "1099",
             Category::Ai => "ai",
             Category::AiCloudReading => "ai_cloud_reading",
             Category::Email => "email",
@@ -170,6 +176,9 @@ impl Category {
             Category::SalesTax => "tax rate finance charge interest late overdue",
             Category::Inventory => "stock items cost",
             Category::Tags => "tag tags every line default required class",
+            Category::Form1099 => {
+                "1099 contractor vendor threshold nec misc irs rents royalties attorney"
+            }
             Category::Ai => "ai anthropic openai ollama key suggestions cap usage",
             Category::AiCloudReading => {
                 "ai online cloud document reading text pictures images consent anthropic openai"
@@ -217,6 +226,9 @@ pub struct Loaded {
     /// P23: the active sales taxes and groups (the default picker), with
     /// their rates as owners read them.
     pub sales_taxes: Vec<(cl_core::ids::SalesTaxItemId, String)>,
+    /// P29 WP8: the company's 1099 thresholds (read for an Admin on an
+    /// engine with `1099-thresholds-v1`, or the demo).
+    pub thresholds: Option<cl_api::Thresholds1099>,
     /// The reads finished (with or without answers).
     pub done: bool,
 }
@@ -233,6 +245,7 @@ impl std::fmt::Debug for Loaded {
             .field("expenses", &self.expenses.len())
             .field("tags", &self.tags.len())
             .field("sales_taxes", &self.sales_taxes.len())
+            .field("thresholds", &self.thresholds.is_some())
             .field("done", &self.done)
             .finish()
     }
@@ -270,6 +283,8 @@ pub struct Edits {
     /// The Document intake panel (the engine's folder list and this
     /// window's pending confirmations).
     pub intake: intake_folders::IntakeEdits,
+    /// P29 WP8: the 1099 amounts as typed.
+    pub thresholds: thresholds_1099::ThresholdEdits,
 }
 
 impl std::fmt::Debug for Edits {
@@ -305,6 +320,9 @@ pub enum SaveBlock {
     /// Turning inventory off while stock or value remains (P24, 409
     /// `INVENTORY_IN_USE`, Q-P24j).
     InventoryInUse,
+    /// A 1099 amount is not blank or an amount of zero or more (the box
+    /// code).
+    Threshold1099(String),
 }
 
 impl SaveBlock {
@@ -323,6 +341,7 @@ impl SaveBlock {
             SaveBlock::Folder(e) => intake_folders::legacy::folder_error_key(*e),
             SaveBlock::NotLoaded => "prefs.err.not_loaded",
             SaveBlock::InventoryInUse => "inventory.refusal.in_use",
+            SaveBlock::Threshold1099(_) => "prefs.1099.err",
         }
     }
 }
@@ -342,6 +361,9 @@ pub struct SaveOutcome {
     /// Reading documents online as the engine stores it after the save
     /// (read back, A03 review B1); `None` when it couldn't be read.
     pub cloud_reading: Option<ai_cloud_reading::CloudReadingEdits>,
+    /// P29 WP8: the 1099 thresholds the engine holds after this save's
+    /// change (`None`: none sent).
+    pub thresholds: Option<cl_api::Thresholds1099>,
 }
 
 /// Reading documents online after a save, and whether the owner is told
@@ -449,6 +471,7 @@ impl PreferencesScreen {
             accounting: company::AccountingEdits::default(),
             email: email::EmailEdits::default(),
             intake: intake_folders::IntakeEdits::default(),
+            thresholds: thresholds_1099::ThresholdEdits::default(),
         };
         let mut screen = PreferencesScreen {
             link,
@@ -547,6 +570,10 @@ impl PreferencesScreen {
                 .demo_state()
                 .map(|mut d| tag_choices(d.tags_mut()))
                 .unwrap_or_default();
+            loaded.thresholds = self
+                .link
+                .demo_state()
+                .map(|d| thresholds_1099::demo_read(&d.thresholds_1099));
             self.apply_loaded(loaded);
             return;
         }
@@ -554,7 +581,10 @@ impl PreferencesScreen {
             self.loaded.done = true;
             return;
         };
-        let pending = group.read(&session, |s| async move {
+        // Only an Admin reads them (a bookkeeper's read could be refused,
+        // and only an Admin may change them).
+        let read_1099 = self.thresholds_on_engine() && self.link.rights().is_admin();
+        let pending = group.read(&session, move |s| async move {
             let mut l = Loaded {
                 settings: s.company_settings().await.ok(),
                 ai: s.ai_config().await.ok(),
@@ -575,6 +605,11 @@ impl PreferencesScreen {
                     .await
                     .map(|v| tag_choices(&v))
                     .unwrap_or_default(),
+                thresholds: if read_1099 {
+                    s.form1099().thresholds().await.ok()
+                } else {
+                    None
+                },
                 done: true,
             };
             l.done = true;
@@ -618,6 +653,7 @@ impl PreferencesScreen {
             ai_cloud_reading::CloudReadingEdits::from_consent(loaded.consent.as_ref());
         base.email
             .apply_engine(loaded.smtp.as_ref(), base.company.smtp_security);
+        base.thresholds = thresholds_1099::ThresholdEdits::from_engine(loaded.thresholds.as_ref());
         self.committed = base;
         if !dirty {
             self.edits = self.committed.clone();
@@ -634,6 +670,43 @@ impl PreferencesScreen {
                 .link
                 .capabilities()
                 .has(cl_api::Capabilities::COMPANY_INVENTORY_FLAG)
+    }
+
+    /// The engine keeps company 1099 thresholds (`1099-thresholds-v1`, or
+    /// the demo engine).
+    fn thresholds_on_engine(&self) -> bool {
+        self.link.is_demo() || self.link.capabilities().has(cl_api::THRESHOLDS_1099)
+    }
+
+    /// Whether Preferences › 1099 can show and change the amounts.
+    #[must_use]
+    pub fn thresholds_available(&self) -> thresholds_1099::Availability {
+        use thresholds_1099::Availability;
+        if !self.thresholds_on_engine() {
+            Availability::NeedsEngine
+        } else if !self.link.rights().is_admin() {
+            Availability::NotAdmin
+        } else if self.loaded.thresholds.is_none() {
+            Availability::NotLoaded
+        } else {
+            Availability::Ready
+        }
+    }
+
+    /// The 1099 amounts to send: the boxes that changed, or nothing when
+    /// the panel can't change them.
+    fn threshold_changes(
+        &self,
+        e: &Edits,
+    ) -> Result<std::collections::BTreeMap<String, Option<cl_core::Money>>, SaveBlock> {
+        match (&self.loaded.thresholds, self.thresholds_available()) {
+            (Some(l), thresholds_1099::Availability::Ready)
+                if e.thresholds != self.committed.thresholds =>
+            {
+                e.thresholds.changes(l).map_err(SaveBlock::Threshold1099)
+            }
+            _ => Ok(std::collections::BTreeMap::new()),
+        }
     }
 
     /// The edits as the control channel and tests see them.
@@ -718,6 +791,7 @@ impl PreferencesScreen {
             }
         }
         e.email.validate()?;
+        self.threshold_changes(&e)?;
         Ok(e)
     }
 
@@ -893,6 +967,15 @@ impl PreferencesScreen {
         let cloud_ready = self.cloud_reading_available() == ai_cloud_reading::Availability::Ready;
         let cloud_put = (cloud_ready && edits.cloud_reading != self.committed.cloud_reading)
             .then(|| edits.cloud_reading.toggles());
+        // P29 WP8: only the 1099 boxes that changed (validated above).
+        let thresholds_put = self.threshold_changes(&edits).unwrap_or_default();
+        if !thresholds_put.is_empty() {
+            // Box codes only, never amounts (Q-118 logging rules).
+            tracing::info!(
+                boxes = ?thresholds_put.keys().collect::<Vec<_>>(),
+                "company 1099 thresholds changed"
+            );
+        }
         let mut after = edits.clone();
         after.ai.clear_typed();
         after.email.clear_typed();
@@ -922,6 +1005,8 @@ impl PreferencesScreen {
                 None,
                 edits.ai.enabled,
             );
+            // P29 WP8: the demo company keeps its 1099 amounts.
+            thresholds_1099::demo_write(&mut demo.thresholds_1099, &thresholds_put);
             // P29 WP7: the demo company keeps its tag options.
             demo.require_tag_every_line = edits.company.require_tag_every_line;
             demo.default_tag = edits.company.default_tag;
@@ -975,6 +1060,10 @@ impl PreferencesScreen {
                     // The demo engine follows the engine's rules
                     // (`cloud_after_save` without a read-back).
                     cloud_reading: None,
+                    thresholds: (!thresholds_put.is_empty())
+                        .then(|| self.link.demo_state())
+                        .flatten()
+                        .map(|d| thresholds_1099::demo_read(&d.thresholds_1099)),
                 },
                 after,
             );
@@ -1033,6 +1122,14 @@ impl PreferencesScreen {
             // What the engine now stores, after the consent and the change
             // (review B1).
             outcome.cloud_reading = stored_cloud_reading(&session).await;
+            if !thresholds_put.is_empty() {
+                outcome.thresholds = Some(
+                    session
+                        .form1099()
+                        .set_thresholds(&thresholds_put, cl_api::IdempotencyKey::new())
+                        .await?,
+                );
+            }
             if let Some((folders, expected)) = intake_put {
                 outcome.intake = Some(
                     intake_folders::source::engine_put(&session, &folders, expected.as_deref())
@@ -1053,6 +1150,12 @@ impl PreferencesScreen {
             after.ai.enabled,
         );
         after.cloud_reading = cloud;
+        // P29 WP8: the 1099 amounts as the engine now holds them (typed
+        // "600" shows as "600.00" and is not dirty).
+        if let Some(t) = &outcome.thresholds {
+            after.thresholds = thresholds_1099::ThresholdEdits::from_engine(Some(t));
+            self.loaded.thresholds = Some(t.clone());
+        }
         let typed_intake = after.intake.clone();
         // P24: "Track inventory" changed: the forms with an Items tab read
         // the switch again.
@@ -1309,6 +1412,16 @@ impl PreferencesScreen {
             Category::Tags => {
                 let admin = self.link.rights().is_admin();
                 company::tags(ui, tokens, &mut self.edits, &self.loaded.tags, admin);
+            }
+            Category::Form1099 => {
+                let available = self.thresholds_available();
+                thresholds_1099::panel(
+                    ui,
+                    tokens,
+                    &mut self.edits.thresholds,
+                    self.loaded.thresholds.as_ref(),
+                    available,
+                );
             }
             Category::SalesTax => {
                 if self.link.is_demo()
@@ -1735,6 +1848,11 @@ impl Screen for PreferencesScreen {
             ),
             "email": self.edits.email.state(&self.secrets_saved),
             "account_numbers": self.edits.company.account_numbers,
+            "thresholds_1099": thresholds_1099::state_json(
+                &self.edits.thresholds,
+                self.loaded.thresholds.as_ref(),
+                self.thresholds_available(),
+            ),
             "intake": self.intake.state(
                 &self.edits.intake,
                 &self.committed.intake,
@@ -1940,6 +2058,60 @@ mod tests {
             assert!(crate::i18n::has(k), "{k}");
         }
     }
+
+    /// P29 WP8: an Admin's 1099 amounts are saved (only changed boxes), a
+    /// typed "600" reads back as "600.00" without a dirty dot, a blank box
+    /// goes back to the standard amount, and a bad amount blocks the save.
+    #[test]
+    fn thresholds_1099_save_round_trip_and_block() {
+        let (_d, mut s) = demo_screen(true);
+        assert_eq!(
+            s.thresholds_available(),
+            thresholds_1099::Availability::Ready
+        );
+        assert_eq!(s.edits().thresholds.typed["NEC-1"], "");
+        s.edits_mut()
+            .thresholds
+            .typed
+            .insert("NEC-1".into(), "600".into());
+        assert!(s.dirty());
+        assert!(s.save());
+        let money = |t: &str| cl_core::Money::parse_wire(t).expect("m");
+        assert_eq!(
+            s.link
+                .demo_state()
+                .expect("demo")
+                .thresholds_1099
+                .get("NEC-1")
+                .copied(),
+            Some(money("600"))
+        );
+        assert_eq!(s.edits().thresholds.typed["NEC-1"], "600.00");
+        assert!(!s.dirty(), "the engine's text replaces the typed one");
+        s.edits_mut()
+            .thresholds
+            .typed
+            .insert("MISC-2".into(), "-3".into());
+        assert!(!s.save());
+        assert_eq!(s.block, Some(SaveBlock::Threshold1099("MISC-2".into())));
+        s.edits_mut()
+            .thresholds
+            .typed
+            .insert("MISC-2".into(), String::new());
+        s.edits_mut()
+            .thresholds
+            .typed
+            .insert("NEC-1".into(), String::new());
+        assert!(s.save());
+        assert!(
+            s.link
+                .demo_state()
+                .expect("demo")
+                .thresholds_1099
+                .is_empty()
+        );
+    }
+
     /// A03 step 21: the switches start off, the owner's change is stored,
     /// and AI turned off (as a re-consent) turns them off again, shown on
     /// their own screen.
