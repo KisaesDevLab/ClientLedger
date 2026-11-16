@@ -77,10 +77,11 @@ fn the_list_shows_every_report_with_its_author_and_report() {
     add_builder(&link, "Builder P&L");
     let s = list(&link);
     assert!(s.loaded);
-    assert_eq!(s.rows.len(), 3);
+    // The demo's two standard reports, its "Sales by job" (PR-A2) and this.
+    assert_eq!(s.rows.len(), 4);
     let st = s.state();
     assert_eq!(st["screen"], "memorized_reports");
-    assert_eq!(st["shown"], 3);
+    assert_eq!(st["shown"], 4);
     assert_eq!(report_title(row(&s, "Builder P&L")), "Report Builder");
     assert_eq!(
         report_title(row(&s, "Monthly P&L for the bank")),
@@ -356,7 +357,7 @@ fn delete_asks_first_and_esc_cancels() {
     assert_eq!(s.state()["edit"], "delete");
     assert!(s.command(CommandId::new("form.revert")));
     assert!(s.edit.is_none());
-    assert_eq!(s.rows.len(), 2);
+    assert_eq!(s.rows.len(), 3);
     s.command(CommandId::new("list.delete"));
     s.confirm();
     s.poll();

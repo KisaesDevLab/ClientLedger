@@ -38,6 +38,7 @@ fn customize(editor: Option<EditorId>) -> BuilderSeed {
         adjusting: None,
         filters_dropped: false,
         editor,
+        missing: Vec::new(),
     }))
 }
 
@@ -798,6 +799,7 @@ fn someone_elses_change_offers_a_copy_or_their_version() {
         adjusting: None,
         filters_dropped: false,
         editor: None,
+        missing: Vec::new(),
     }));
     assert!(theirs.open_with(OpenPayload::BuilderEditor(Box::new(seed))));
     rename_first(&mut theirs, "Sales");
@@ -1130,6 +1132,7 @@ fn a_result_tab_memorized_as_a_new_report_opens_a_new_editor() {
         adjusting: None,
         filters_dropped: false,
         editor: Some(s.id),
+        missing: Vec::new(),
     }));
     assert!(!s.takes_in_place(&OpenPayload::BuilderEditor(Box::new(seed))));
 }
@@ -1223,6 +1226,7 @@ fn an_untouched_customize_of_a_memorized_standard_report_is_clean() {
         adjusting: None,
         filters_dropped: false,
         editor: None,
+        missing: Vec::new(),
     }));
     let (_d, _l, s) = editor(seed);
     assert_eq!(
@@ -1580,6 +1584,7 @@ fn an_as_of_report_carried_in_shows_its_date() {
         adjusting: None,
         filters_dropped: false,
         editor: None,
+        missing: Vec::new(),
     }));
     let (_d, _l, mut s) = editor(seed);
     let ctx = themed();
@@ -2572,5 +2577,73 @@ fn ai_off_sends_nothing_and_other_words_are_demo_only() {
     link.demo_state().expect("demo").ai.enabled = true;
     describe(&ctx, &mut s, "Profit by planet");
     assert_eq!(s.ai.message, Some("builder.ai.demo_only"));
+    assert!(s.ai.review.is_none());
+}
+
+/// PR-A2 (Q-PRA2c): a memorized report whose tag grouping was deleted and
+/// whose customer filter was merged opens with both names to settle in
+/// the A10 picker: the preview and Save wait (placeholders), the merged
+/// name offers its survivor first, a deleted grouping can be removed, and
+/// there is no Discard back to a report that can't run.
+#[test]
+fn a_missing_name_opens_in_the_shared_picker() {
+    use cl_api::resources::reports::definitions::MissingRef;
+    use cl_model::report_def::draft::Answer;
+    let def: cl_model::report_def::BuilderDefinition = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+        "columns": {"detailFields": [], "compare": [], "headers": {}},
+        "nodes": [{"type": "section", "id": "sales", "caption": "Sales", "source": "gl",
+            "measure": "amount", "polarity": "credit",
+            "filters": [{"field": "contact", "op": "in", "ids": ["gone-customer"]}],
+            "groupBy": [{"key": "tag", "tagGroupId": "gone-group"}], "display": "summary",
+            "defaultExpanded": false, "showTotal": true, "hideZero": false}]}))
+    .expect("definition");
+    let missing: Vec<MissingRef> = serde_json::from_value(serde_json::json!([
+        {"path": "definition.nodes.0.groupBy.0.tagGroupId", "nodeId": "sales",
+         "field": "groupBy.tagGroupId", "kind": "tagGroup", "ids": ["gone-group"], "reason": "deleted"},
+        {"path": "definition.nodes.0.filters.0.ids", "nodeId": "sales", "field": "contact",
+         "kind": "contact", "ids": ["gone-customer"], "reason": "merged",
+         "mergedInto": {"id": "kept-customer", "label": "Rivera Remodel (customer)"}}]))
+    .expect("missing");
+    let seed = BuilderSeed::Customize(Box::new(CustomizeSeed {
+        def,
+        title: "Sales by job".into(),
+        origin: Origin::Memorized,
+        saved: None,
+        dates: None,
+        basis: None,
+        adjusting: None,
+        filters_dropped: false,
+        editor: None,
+        missing,
+    }));
+    let (_d, _link, mut s) = editor(seed);
+    let ctx = themed();
+    frames(&ctx, &mut s);
+    let review = s.ai.review.as_ref().expect("the names to settle");
+    assert!(review.missing, "not an AI draft");
+    assert!(s.ed.has_placeholders(), "nothing runs or saves yet");
+    let def = s.ed.definition().clone();
+    let open: Vec<_> = review.draft.open(&def).into_iter().cloned().collect();
+    assert_eq!(open.len(), 2);
+    assert_eq!(
+        super::ai_draft::missing_line(&def, &open[0]),
+        "The tag group on the row Sales was deleted."
+    );
+    let merged = &open[1];
+    assert_eq!(
+        merged.candidates[0].0, "kept-customer",
+        "the survivor first"
+    );
+    assert!(super::ai_draft::missing_line(&def, merged).contains("merged into Rivera Remodel"));
+    assert!(review.draft.row_open(&def, "sales"), "the row is marked");
+    super::ai_draft::answer(&mut s, &open[0].token, &Answer::Remove);
+    super::ai_draft::answer(&mut s, &merged.token, &Answer::Pick("kept-customer".into()));
+    frames(&ctx, &mut s);
+    assert!(!s.ed.has_placeholders());
+    let json = serde_json::to_value(s.ed.definition()).expect("json");
+    assert_eq!(json["nodes"][0]["filters"][0]["ids"][0], "kept-customer");
+    assert_eq!(json["nodes"][0]["groupBy"], serde_json::json!([]));
+    super::ai_draft::keep(&mut s);
     assert!(s.ai.review.is_none());
 }

@@ -12,7 +12,7 @@ fn day(y: i32, m: u32, d: u32) -> CalendarDate {
 fn the_mockups_memorized_report_and_a_budget_are_there_once() {
     let mut d = DemoState::new();
     let (list, _) = definitions(&mut d);
-    assert_eq!(list.len(), 2);
+    assert_eq!(list.len(), 3);
     assert_eq!(list[0].name, "Monthly P&L for the bank");
     // A09: another user's report, which this user can't change.
     assert_eq!(list[1].created_by_name.as_deref(), Some("Dana"));
@@ -21,7 +21,10 @@ fn the_mockups_memorized_report_and_a_budget_are_there_once() {
         serde_json::from_value(list[0].definition.clone()).expect("definition");
     assert!(def.check().is_ok());
     assert_eq!(budgets(&mut d).len(), 1);
-    assert_eq!(definitions(&mut d).0.len(), 2, "seeded once");
+    // PR-A2: a builder report whose tag group was deleted (U-226).
+    assert_eq!(list[2].kind, "builder");
+    assert_eq!(list[2].missing.len(), 1);
+    assert_eq!(definitions(&mut d).0.len(), 3, "seeded once");
 }
 
 #[test]

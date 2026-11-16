@@ -138,6 +138,9 @@ pub struct CustomizeSeed {
     /// The editor whose result tab this is: it takes the seed back in
     /// place (Q-A08x). `None`: a new editor.
     pub editor: Option<EditorId>,
+    /// Names the report uses that were deleted or merged away (U-226,
+    /// Q-PRA2c): the editor opens with each one to pick or remove.
+    pub missing: Vec<cl_api::resources::reports::definitions::MissingRef>,
 }
 
 impl std::fmt::Debug for BuilderSeed {
@@ -529,6 +532,9 @@ impl BuilderScreen {
                 self.ed = BuilderEditor::new(def, &c.title, c.origin, saved);
                 if c.filters_dropped {
                     self.status = Some(t("builder.status.filters_dropped"));
+                }
+                if !c.missing.is_empty() {
+                    ai_draft::start_missing(self, &c.missing);
                 }
             }
         }
