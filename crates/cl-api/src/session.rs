@@ -485,6 +485,9 @@ struct SessionInner {
     /// Probes of saves whose outcome stayed unknown, newest last (bounded),
     /// for the owner's recheck (B2).
     lost: Mutex<VecDeque<(IdempotencyKey, crate::resources::reconcile::LostProbe)>>,
+    /// Requests the engine refused with 403 (P29): the app reads
+    /// `/auth/me` again when this grows, because rights may have changed.
+    forbidden: std::sync::atomic::AtomicU64,
 }
 
 /// How many unknown saves a session keeps a probe for.
@@ -621,6 +624,7 @@ impl Session {
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
                 lost: Mutex::new(VecDeque::new()),
+                forbidden: std::sync::atomic::AtomicU64::new(0),
             }),
             pin: None,
         })
@@ -940,11 +944,13 @@ impl Session {
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
         if !op.company_scoped() {
-            return self
+            let out = self
                 .client()
                 .exec()
                 .run(op, call, self.inner.as_ref(), reconciler)
                 .await;
+            self.count_forbidden(&out);
+            return out;
         }
         let pin = self.pin_now();
         match pin.scope {
@@ -955,7 +961,26 @@ impl Session {
             inner: self.inner.as_ref(),
             epoch: pin.epoch,
         };
-        self.client().exec().run(op, call, &auth, reconciler).await
+        let out = self.client().exec().run(op, call, &auth, reconciler).await;
+        self.count_forbidden(&out);
+        out
+    }
+
+    fn count_forbidden<T>(&self, out: &Result<T, ApiError>) {
+        if matches!(out, Err(ApiError::Forbidden { .. })) {
+            self.inner
+                .forbidden
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// How many requests the engine refused with 403 so far (P29:
+    /// the shell re-reads the rights when this grows).
+    #[must_use]
+    pub fn forbidden_seen(&self) -> u64 {
+        self.inner
+            .forbidden
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -1258,6 +1283,7 @@ pub fn stub_session(port: u16) -> Session {
             rotate: tokio::sync::Mutex::new(()),
             created: Mutex::new(VecDeque::new()),
             lost: Mutex::new(VecDeque::new()),
+            forbidden: std::sync::atomic::AtomicU64::new(0),
         }),
         pin: None,
     }
@@ -1358,6 +1384,7 @@ pub(crate) mod tests {
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
                 lost: Mutex::new(VecDeque::new()),
+                forbidden: std::sync::atomic::AtomicU64::new(0),
             }),
             pin: None,
         }

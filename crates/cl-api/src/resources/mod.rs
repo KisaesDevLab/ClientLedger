@@ -38,7 +38,9 @@ pub mod invoice_layouts;
 pub mod invoices;
 pub mod items;
 pub mod ledger;
+// P29: the user's role and rights in the open company.
 pub mod list_csv;
+pub mod me;
 pub mod operations;
 pub mod payments;
 pub mod posting;

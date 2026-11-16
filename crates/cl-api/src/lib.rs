@@ -101,6 +101,7 @@ pub use resources::items::{
 };
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
+pub use resources::me::Me;
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::reconcile::Recheck;
