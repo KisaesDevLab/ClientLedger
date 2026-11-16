@@ -378,6 +378,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // A09 QA-4: memorized reports and report files.
     ("reports.audit.action.exported", "Exported"),
     ("reports.audit.action.drafted_ai", "Drafted a report with AI"),
+    ("reports.audit.action.drafted_ai_also", "Drafted a report with AI ({name}, which didn't answer)"),
+    ("reports.audit.action.merged_report_one", "Merged and updated 1 memorized report"),
+    ("reports.audit.action.merged_reports", "Merged and updated {name} memorized reports"),
     ("reports.audit.action.drafted_ai_refused", "Asked AI to draft a report (not used)"),
     ("reports.audit.action.drafted_ai_failed", "Asked AI to draft a report (the AI service didn't answer)"),
     // A10 QA-6: the company's AI switches and consent.

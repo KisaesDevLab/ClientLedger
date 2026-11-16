@@ -1628,6 +1628,43 @@ fn unresolved_key(r: Option<&cl_model::report_def::clreport::Reference>) -> &'st
     }
 }
 
+/// Q-PRA2d (U-226): the file's account has this company's number under
+/// another name. The engine offers that account as a candidate, never a
+/// match; the card says why, and nothing is picked for the owner.
+pub(crate) fn same_number_text(
+    r: Option<&cl_model::report_def::clreport::Reference>,
+    candidates: &[cl_api::resources::reports::definitions::Candidate],
+) -> Option<String> {
+    let r = r?;
+    if r.kind != cl_model::report_def::clreport::RefKind::Account {
+        return None;
+    }
+    let number = r
+        .number
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())?;
+    let name = r.name.as_deref().map(str::trim).filter(|n| !n.is_empty())?;
+    let key = |s: &str| {
+        s.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let here = candidates.iter().find(|c| {
+        c.label
+            .split_once(" \u{b7} ")
+            .is_some_and(|(n, rest)| n.trim() == number && key(rest) != key(name))
+    })?;
+    Some(t_with(
+        "report_file.card.same_number",
+        &[
+            ("file", &format!("{number} \u{b7} {name}")),
+            ("here", &here.label),
+        ],
+    ))
+}
+
 /// The wire kind of a reference kind.
 const fn wire_kind(k: cl_model::report_def::clreport::RefKind) -> &'static str {
     use cl_model::report_def::clreport::RefKind;
@@ -1727,10 +1764,11 @@ fn card(
                 None => (t("report_file.ref.unknown"), None),
             };
             ui.add_space(4.0);
-            ui.label(t_with(
-                unresolved_key(reference.as_ref()),
-                &[("what", &what)],
-            ));
+            ui.label(
+                same_number_text(reference.as_ref(), &u.candidates).unwrap_or_else(|| {
+                    t_with(unresolved_key(reference.as_ref()), &[("what", &what)])
+                }),
+            );
             ui.horizontal_wrapped(|ui| {
                 let combo_label = t("report_file.card.pick");
                 let l = ui.label(combo_label.as_str());
