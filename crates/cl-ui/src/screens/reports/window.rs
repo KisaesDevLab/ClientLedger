@@ -209,6 +209,20 @@ impl ReportWindow {
     ) -> ReportWindow {
         let group = link.group().and_then(Result::ok);
         let calendar = company_calendar(&link, open.as_ref());
+        // P29: the Reports list opens on a report the role includes.
+        let spec = if kind.as_str() == "reports.center" {
+            let rights = link.rights();
+            if rights.allows_report(spec.source) {
+                spec
+            } else {
+                cl_model::reports::CATALOG
+                    .iter()
+                    .find(|s| rights.allows_report(s.source) && super::available(&link, s))
+                    .unwrap_or(spec)
+            }
+        } else {
+            spec
+        };
 
         let fiscal_job = Some(fiscal_read(&link, group.as_ref()));
         let tag_groups_job = Some(engine::read(

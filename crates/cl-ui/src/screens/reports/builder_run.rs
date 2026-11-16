@@ -1506,11 +1506,16 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         return;
     }
     let words: Vec<String> = w.search.split_whitespace().map(str::to_lowercase).collect();
+    // P29: a starter that ties to a catalog report follows that report's
+    // area (U-227); the engine gates the rest.
+    let rights = w.link.rights();
     let shown: Vec<&Starter> = list
         .iter()
         .filter(|s| {
             let title = s.title.to_lowercase();
             words.iter().all(|x| title.contains(x.as_str()))
+                && cl_model::reports::find(&s.key)
+                    .is_none_or(|spec| rights.allows_report(spec.source))
         })
         .collect();
     let new_report = new_report_matches(&words);

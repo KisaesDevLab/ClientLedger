@@ -390,14 +390,25 @@ pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
 
 /// The catalog's "Memorized" section, narrowed by the catalog's search
 /// (every word in the name). Returns how many it lists.
+/// P29: a memorized standard report is listed only when the role includes
+/// its report's area (U-227); Report Builder rows are left to the engine.
+pub(super) fn role_includes(rights: &cl_model::permissions::Rights, r: &DefinitionRow) -> bool {
+    r.definition
+        .get("reportKey")
+        .and_then(serde_json::Value::as_str)
+        .and_then(cl_model::reports::find)
+        .is_none_or(|spec| rights.allows_report(spec.source))
+}
+
 pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usize {
     if !available(&w.link) {
         return 0;
     }
     let words: Vec<String> = w.search.split_whitespace().map(str::to_lowercase).collect();
+    let rights = w.link.rights();
     let matches = |r: &DefinitionRow| {
         let name = r.name.to_lowercase();
-        words.iter().all(|x| name.contains(x.as_str()))
+        words.iter().all(|x| name.contains(x.as_str())) && role_includes(&rights, r)
     };
     let shown = w.memo.list.iter().filter(|r| matches(r)).count();
     if !words.is_empty() && shown == 0 {

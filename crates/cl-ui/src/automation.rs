@@ -1337,6 +1337,8 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         // The rail's Bank Feed badge (a count only).
         "rail": {"bank_feed": shell.counts.bank_feed},
         "palette_open": shell.palette.open,
+        // P29: the signed-in user is an Admin in the open company.
+        "is_admin": shell.rights().is_admin(),
         "shortcuts_open": shell.shortcuts_open(),
         "about_open": shell.about_open(),
         "error_dialog_open": shell.error_dialog().is_some(),
