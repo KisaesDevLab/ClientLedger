@@ -6,6 +6,7 @@
 //! all do the same thing: queue a command id. [`Shell::dispatch`] is the only
 //! place a command takes effect, so every entry point behaves alike.
 
+pub mod idle_lock;
 pub mod menu;
 pub mod outbox;
 pub mod palette;
@@ -199,6 +200,10 @@ pub struct Shell {
     /// P29: the signed-in user's role in the open company (the engine's
     /// word), the fallback when `/auth/me` names none.
     company_role: String,
+    /// P29 WP2: the idle lock (Q-P29p).
+    idle: idle_lock::IdleLock,
+    /// P29 WP2: File › Sign Out waits for the company to close.
+    sign_out_after_close: bool,
 }
 
 impl Shell {
@@ -251,6 +256,8 @@ impl Shell {
             viewer_outbox: outbox::ViewerOutbox::new(),
             rights_watch: crate::company::RightsWatch::default(),
             company_role: String::new(),
+            idle: idle_lock::IdleLock::default(),
+            sign_out_after_close: false,
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -579,6 +586,9 @@ impl Shell {
                     self.counts = RailCounts::default();
                     self.company_key = "default".into();
                     self.last_saved_layout = Some(self.windows.snapshot());
+                    if std::mem::take(&mut self.sign_out_after_close) {
+                        self.finish_sign_out(&link);
+                    }
                     self.dispatch_now(CommandId::new("file.open_company"));
                 }
                 CompanyEvent::OpenWindow(id) => {
@@ -651,8 +661,34 @@ impl Shell {
         }
     }
 
-    /// Close the open company: save or prompt for open forms first, wait
-    /// for pending writes, then return to the Open Company window.
+    /// File › Sign Out (P29 WP2): close the company first (unsaved windows
+    /// are asked about), then end the session; the Open Company window
+    /// asks for a sign-in. Automatic sign-in waits for the next start.
+    fn sign_out(&mut self) {
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        if !link.signed_in() {
+            return;
+        }
+        if self.open_tenant.is_some() || self.company.is_some() {
+            self.sign_out_after_close = true;
+            self.close_company();
+            return;
+        }
+        self.finish_sign_out(&link);
+        self.dispatch_now(CommandId::new("file.open_company"));
+    }
+
+    fn finish_sign_out(&mut self, link: &Arc<CompanyLink>) {
+        link.sign_out();
+        self.idle.reset();
+        self.signed_in_name = None;
+        self.status.user = None;
+        tracing::info!("signed out");
+    }
+
+    /// Close the open company: save or prompt for open forms first, wait    /// for pending writes, then return to the Open Company window.
     fn close_company(&mut self) {
         let Some(link) = self.company_link.clone() else {
             return;
@@ -890,6 +926,18 @@ impl Shell {
         self.shortcuts_open
     }
 
+    /// True while the lock screen covers the app (P29 WP2).
+    #[must_use]
+    pub fn idle_locked(&self) -> bool {
+        self.idle.locked()
+    }
+
+    /// The lock screen's message key, if any.
+    #[must_use]
+    pub fn idle_message(&self) -> Option<&'static str> {
+        self.idle.message()
+    }
+
     /// True while About or the privacy notice is open.
     #[must_use]
     pub fn about_open(&self) -> bool {
@@ -957,6 +1005,10 @@ impl Shell {
     /// to that window (a popped-out window's own keys, S2), the rest are
     /// app-wide.
     fn run_for(&mut self, ctx: Option<&Context>, id: CommandId, target: Option<WindowId>) {
+        // P29 WP2: nothing runs behind the lock screen.
+        if self.idle.locked() {
+            return;
+        }
         let Some(cmd) = self.find_command(id.as_str()) else {
             return;
         };
@@ -1012,6 +1064,12 @@ impl Shell {
         }
         match id.as_str() {
             "file.close_company" => self.close_company(),
+            "file.sign_out" => self.sign_out(),
+            "file.lock" => {
+                if self.company_link.as_ref().is_some_and(|l| l.signed_in()) {
+                    self.idle.lock_now();
+                }
+            }
             // Q-P19ao: Open Company opens the practice company the way it
             // opens any other (unsaved windows are asked about first).
             "file.open_practice" => {
@@ -1078,6 +1136,17 @@ impl Shell {
                         "dev.demo_rights_bookkeeper" => BuiltinRole::Bookkeeper.rights(),
                         _ => Rights::all(),
                     });
+                }
+            }
+            // P29 WP2 (demo only): the sign-in scenarios start and end with
+            // the demo's own users, passwords and recovery key.
+            "dev.demo_auth_reset" => {
+                if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo())
+                    && let Some(mut d) = link.demo_state()
+                {
+                    let signed_in = d.auth.signed_in.clone();
+                    d.auth = crate::company::demo::auth::DemoAuth::default();
+                    d.auth.signed_in = signed_in;
                 }
             }
             "help.current" => {
@@ -1286,7 +1355,11 @@ impl Shell {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.request_quit(Some(ctx));
         }
-        self.handle_keys(ctx);
+        // P29 WP2: behind the lock no shortcut is read (Enter belongs to the
+        // password field, not to the form in front).
+        if !self.idle.locked() {
+            self.handle_keys(ctx);
+        }
         if let Some(toast) = &self.toast
             && ctx.input(|i| i.time) > toast.until
         {
@@ -1399,6 +1472,9 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        if self.show_idle_lock(ui) {
+            return;
+        }
         self.doc_viewer.publish(&ctx);
         // A04 WP-C: last frame's pop-out compare events, before the forms
         // draw.
@@ -1450,8 +1526,33 @@ impl Shell {
         }
     }
 
-    /// Tell the grid screens of `viewport` today's date, the formats and
-    /// whether a modal is open, and share the remembered column widths.
+    /// The idle timer and, while locked, the lock screen instead of the
+    /// app (P29 WP2). True while locked: nothing else is drawn.
+    fn show_idle_lock(&mut self, ui: &mut egui::Ui) -> bool {
+        let ctx = ui.ctx().clone();
+        let Some(link) = self.company_link.clone() else {
+            return false;
+        };
+        self.idle
+            .tick(&ctx, self.prefs.idle_lock_minutes, link.signed_in());
+        if !self.idle.locked() {
+            return false;
+        }
+        // Commands asked for behind the lock are dropped, not kept for later.
+        self.pending.clear();
+        let dirty = self.windows.dirty_ids().len();
+        let user = self.signed_in_name.clone();
+        match self.idle.show(ui, &link, user.as_deref(), dirty) {
+            Some(idle_lock::LockAction::SignOut) if dirty == 0 => {
+                self.idle.reset();
+                self.sign_out();
+            }
+            Some(_) | None => {}
+        }
+        self.idle.locked()
+    }
+
+    /// Tell the grid screens of `viewport` today's date, the formats and    /// whether a modal is open, and share the remembered column widths.
     fn publish_grid_facts(&self, ctx: &Context, viewport: egui::ViewportId) {
         let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
         crate::grid_env::publish(ctx, viewport, frame);

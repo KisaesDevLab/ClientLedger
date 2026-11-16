@@ -88,6 +88,10 @@ pub struct OpenCompanyScreen {
     practice_pending: bool,
     /// The role of the company being opened, sent with its Opened.
     opening_role: Option<String>,
+    /// P29 WP2: the sign-in form (moved to `screens::login`).
+    signin: crate::screens::login::SignInPanel,
+    /// P29 WP2: `Forgot password?` was chosen.
+    forgot_open: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -124,11 +128,14 @@ impl OpenCompanyScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>) -> OpenCompanyScreen {
         let group = link.group().and_then(Result::ok);
-        let stage = if link.is_demo() || link.session().is_some() {
+        let stage = if link.signed_in() {
             Stage::Ready
+        } else if link.is_demo() {
+            Stage::SignIn
         } else {
             Stage::Probing
         };
+        let signin = crate::screens::login::SignInPanel::new(Arc::clone(&link));
         OpenCompanyScreen {
             link,
             group,
@@ -157,6 +164,8 @@ impl OpenCompanyScreen {
             retry_open: None,
             practice_pending: false,
             opening_role: None,
+            signin,
+            forgot_open: false,
         }
     }
 
@@ -269,29 +278,6 @@ impl OpenCompanyScreen {
                         .recovery_key
                         .map(|k| Secret::new(k.expose().to_string())),
                 }),
-                LoginOutcome::TfaRequired(_) => Err(CompanyError::Unavailable("tfa")),
-            }
-        })
-        .ok();
-    }
-
-    fn start_sign_in(&mut self) {
-        let (Some(group), Some(client)) = (self.group.as_ref(), self.link.client().cloned()) else {
-            return;
-        };
-        let email = self.email.trim().to_string();
-        let password = Secret::new(std::mem::take(&mut self.password));
-        self.busy = Some("open.signin.working");
-        self.signin_task = spawn_lifecycle(&self.link, group, move || async move {
-            match client.login(&email, &password).await? {
-                LoginOutcome::Session(session) => {
-                    let display = email.split('@').next().unwrap_or("Owner").to_string();
-                    Ok(SignedIn {
-                        session,
-                        user: display.clone(),
-                        recovery_key: None,
-                    })
-                }
                 LoginOutcome::TfaRequired(_) => Err(CompanyError::Unavailable("tfa")),
             }
         })
@@ -470,6 +456,8 @@ impl OpenCompanyScreen {
             match r {
                 Ok(s) => {
                     self.link.set_session(Some(s.session));
+                    self.link
+                        .set_signed_in_email(Some(self.email.trim().to_string()));
                     self.link.push(CompanyEvent::SignedIn { user: s.user });
                     if let Some(key) = s.recovery_key {
                         // Shown once by the recovery-key window (Q-210).
@@ -714,20 +702,40 @@ impl OpenCompanyScreen {
     }
 
     fn signin_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("open.signin.title"));
-            form::field(ui, &t("open.setup.email"), &mut self.email);
-            let r = form::password(ui, &t("open.setup.password"), &mut self.password);
-            ui.add_space(6.0);
-            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if self.busy.is_some() {
-                form::progress_line(ui, tokens, &t("open.signin.working"));
-            } else if primary_button(ui, &t("open.signin.go")).clicked() || enter {
-                self.start_sign_in();
+        use crate::screens::login::SignInEvent;
+        self.signin.try_auto();
+        match self.signin.ui(ui, tokens) {
+            Some(SignInEvent::SignedIn {
+                session,
+                name,
+                email,
+                password_changed,
+            }) => {
+                if session.is_some() {
+                    self.link.set_session(session);
+                }
+                if password_changed {
+                    // Q-P29o: a new password ends automatic sign-in.
+                    self.link.clear_auto_sign_in();
+                }
+                self.link.set_signed_in_email(Some(email));
+                self.link.push(CompanyEvent::SignedIn { user: name });
+                self.stage = Stage::Ready;
+                self.loaded_once = false;
+                self.forgot_open = false;
+                self.error = None;
+                self.notice = None;
             }
-        });
+            Some(SignInEvent::Forgot) => self.forgot_open = true,
+            None => {}
+        }
+        if self.forgot_open {
+            ui.add_space(8.0);
+            form::card(ui, tokens, |ui| {
+                form::hint(ui, tokens, &t("login.forgot_hint"));
+            });
+        }
     }
-
     fn restore_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("open.restore.title"));
@@ -883,6 +891,17 @@ impl Screen for OpenCompanyScreen {
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         self.poll();
+        // P29 WP2: after Sign out the window asks for a sign-in again.
+        if self.stage == Stage::Ready && !self.link.signed_in() && self.busy.is_none() {
+            self.stage = if self.link.is_demo() {
+                Stage::SignIn
+            } else {
+                Stage::Probing
+            };
+            self.companies.clear();
+            self.loaded_once = false;
+            self.signin = crate::screens::login::SignInPanel::new(Arc::clone(&self.link));
+        }
         // A window opened before the engine was up asks again once it runs;
         // otherwise it would say "still starting up" for good.
         if self.stage == Stage::EngineNotReady {
@@ -1035,6 +1054,9 @@ impl OpenCompanyScreen {
             "busy": self.busy.is_some(),
             "error": self.error.is_some(),
             "practice_pending": self.practice_pending,
+            "signin_message": self.signin.message(),
+            "must_change": self.signin.must_change(),
+            "forgot_open": self.forgot_open,
         })
     }
 }

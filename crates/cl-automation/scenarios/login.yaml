@@ -1,0 +1,92 @@
+# Sign-in (P29 WP2) against `clientledger --demo`: File > Sign Out shows the
+# sign-in form; a wrong password reads "doesn't match"; a locked and a
+# turned-off sign-in say so in plain words (only after the right password,
+# as the engine does); a temporary password asks for a new one first; then
+# the owner signs back in. Every email and password is synthetic demo data.
+# The demo's users are reset at the start and the end.
+name: login
+description: Sign out, refused sign-ins in plain words, a temporary password changed, the owner back in.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_auth_reset
+  # Sign out closes the company first; the demo's unsaved check asks.
+  - command: file.sign_out
+  - wait: {ms: 200}
+  - click_if_present: {role: button, label: Discard changes}
+  - wait: {ms: 300}
+  - assert_state: {key: signed_in, equals: false}
+  - assert_state: {key: screen.stage, equals: signin}
+  - assert_exists: {role: link, label: Forgot password?}
+  - screenshot: sign-in
+  # A wrong password.
+  - click: {role: text_input, label: Email}
+  - type: {text: owner@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Sign in}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.signin_message, equals: login.msg.wrong}
+  - assert_state: {key: signed_in, equals: false}
+  - screenshot: wrong-password
+  # A locked sign-in (the right password, told only now).
+  - click: {role: text_input, label: Email}
+  - key: Ctrl+A
+  - type: {text: kim@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: kim-password-1}
+  - click: {role: button, label: Sign in}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.signin_message, equals: login.msg.locked}
+  - screenshot: locked
+  # A turned-off sign-in.
+  - click: {role: text_input, label: Email}
+  - key: Ctrl+A
+  - type: {text: alex@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: alex-password-1}
+  - click: {role: button, label: Sign in}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.signin_message, equals: login.msg.turned_off}
+  # Forgot password? explains who to ask.
+  - click: {role: link, label: Forgot password?}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.forgot_open, equals: true}
+  # A temporary password: choose a new one first.
+  - click: {role: text_input, label: Email}
+  - key: Ctrl+A
+  - type: {text: lee@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: TEMP-0000-DEMO-1}
+  - click: {role: button, label: Sign in}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.must_change, equals: true}
+  - assert_state: {key: signed_in, equals: false}
+  - screenshot: must-change
+  - click: {role: password_input, label: New password}
+  - type: {text: short}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: short}
+  - click: {role: button, label: Save new password}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.signin_message, equals: login.msg.policy}
+  - click: {role: password_input, label: New password}
+  - type: {text: lee-chosen-password}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: lee-chosen-password}
+  - click: {role: button, label: Save new password}
+  - wait: {ms: 400}
+  - assert_state: {key: signed_in, equals: true}
+  - assert_state: {key: screen.stage, equals: ready}
+  - screenshot: signed-in
+  # Back to the owner.
+  - command: file.sign_out
+  - wait: {ms: 300}
+  - click: {role: text_input, label: Email}
+  - type: {text: owner@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: demo-password-1}
+  - key: Enter
+  - wait: {ms: 400}
+  - assert_state: {key: signed_in, equals: true}
+  - command: dev.demo_auth_reset

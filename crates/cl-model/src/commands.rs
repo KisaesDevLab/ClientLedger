@@ -228,6 +228,9 @@ pub const COMMANDS: &[Command] = &[
     built("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O')),
     built("file.new_company", "New Company", Some(Menu::File), 0, None),
     cmd("file.close_company", "Close Company", Some(Menu::File), 0, None, Scope::Global),
+    // P29 WP2: sign out (another user signs in) and lock the app now.
+    cmd("file.sign_out", "Sign Out", Some(Menu::File), 0, None, Scope::Global),
+    cmd("file.lock", "Lock ClientLedger", Some(Menu::File), 0, None, Scope::Global),
     // P19 (Q-P19ao): close the company the normal way and open the practice company.
     cmd("file.open_practice", "Open Practice Company", Some(Menu::File), 0, None, Scope::Global),
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
@@ -698,6 +701,8 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Rights: Accounts Payable (developer)",
     ),
     dev_action("dev.demo_rights_all", "Demo Rights: Admin (developer)"),
+    // P29 WP2: the sign-in scenarios reset the demo's users.
+    dev_action("dev.demo_auth_reset", "Reset Demo Sign-ins (developer)"),
     // P29 WP6: a Bookkeeper reads the audit trail but can't export it.
     dev_action(
         "dev.demo_rights_bookkeeper",

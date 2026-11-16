@@ -138,6 +138,11 @@ pub struct CompanyLink {
     rights: Mutex<cl_model::permissions::Rights>,
     /// The company open now (P29 WP7: its local tag rules).
     open_tenant: Mutex<Option<TenantId>>,
+    /// P29 WP2: the signed-in email, kept in memory only (the idle unlock
+    /// signs in again with it; never logged).
+    sign_in_email: Mutex<Option<String>>,
+    /// P29 WP2: Sign out skips automatic sign-in for the rest of the run.
+    skip_auto_sign_in: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -205,6 +210,8 @@ impl CompanyLink {
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
             rights: Mutex::new(cl_model::permissions::Rights::all()),
             open_tenant: Mutex::new(None),
+            sign_in_email: Mutex::new(None),
+            skip_auto_sign_in: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -229,6 +236,8 @@ impl CompanyLink {
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
             rights: Mutex::new(cl_model::permissions::Rights::all()),
             open_tenant: Mutex::new(None),
+            sign_in_email: Mutex::new(None),
+            skip_auto_sign_in: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -352,6 +361,99 @@ impl CompanyLink {
     /// Replace the session (after sign-in or sign-out).
     pub fn set_session(&self, s: Option<Session>) {
         *self.session.lock().unwrap_or_else(PoisonError::into_inner) = s;
+    }
+
+    /// True while someone is signed in (the demo starts signed in).
+    #[must_use]
+    pub fn signed_in(&self) -> bool {
+        match self.demo_state() {
+            Some(d) => d.auth.signed_in.is_some(),
+            None => self.session().is_some(),
+        }
+    }
+
+    /// The signed-in email (memory only; the demo's own when it runs).
+    #[must_use]
+    pub fn signed_in_email(&self) -> Option<String> {
+        if let Some(d) = self.demo_state() {
+            return d.auth.signed_in.clone();
+        }
+        self.sign_in_email
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Remember who signed in (P29 WP2).
+    pub fn set_signed_in_email(&self, email: Option<String>) {
+        *self
+            .sign_in_email
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = email;
+    }
+
+    /// Automatic sign-in for this app data folder (Q-P29o).
+    #[must_use]
+    pub fn auto_sign_in(&self) -> cl_settings::AutoSignIn {
+        let dir = self
+            .store
+            .path()
+            .parent()
+            .map_or_else(|| self.backup_dir.clone(), Path::to_path_buf);
+        cl_settings::AutoSignIn::in_dir(&dir)
+    }
+
+    /// Turns automatic sign-in off (a password change, a recovery, a
+    /// temporary password or a second user, Q-P29o). Best effort: a
+    /// keychain refusal is logged without the value.
+    pub fn clear_auto_sign_in(&self) {
+        if let Err(e) = self.auto_sign_in().clear(self.secrets.as_ref()) {
+            tracing::warn!(error = %e, "automatic sign-in could not be cleared from the keychain");
+        }
+    }
+
+    /// True once Sign out ran: automatic sign-in waits for the next start.
+    #[must_use]
+    pub fn auto_sign_in_skipped(&self) -> bool {
+        self.skip_auto_sign_in
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Skip automatic sign-in for the rest of this run.
+    pub fn skip_auto_sign_in(&self) {
+        self.skip_auto_sign_in
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Signs out (File › Sign Out, P29 WP2): the session ends on the engine
+    /// (best effort, never aborted), the email is forgotten and automatic
+    /// sign-in waits for the next start. The caller closes the company
+    /// first.
+    pub fn sign_out(&self) {
+        self.skip_auto_sign_in();
+        self.set_signed_in_email(None);
+        self.reset_rights();
+        if let Some(mut d) = self.demo_state() {
+            d.auth.signed_in = None;
+            d.open = None;
+            return;
+        }
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let (Some(session), Some(live)) = (session, self.live.as_ref())
+            && let Ok(group) = live.queue.group()
+        {
+            let label = cl_api::OrphanLabel {
+                what: "orphan.lifecycle",
+                key: None,
+            };
+            let _ = group.write(&live.client, label, move |_c| async move {
+                Ok(session.logout().await.is_ok())
+            });
+        }
     }
 
     /// Capabilities of the engine (empty in demo).

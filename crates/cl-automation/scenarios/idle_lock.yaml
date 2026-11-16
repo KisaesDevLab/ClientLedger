@@ -1,0 +1,52 @@
+# Idle lock (P29 WP2, Q-P29p) against `clientledger --demo`: with an
+# unsaved Make Journal Entry open, File > Lock ClientLedger covers the app.
+# Nothing behind the lock is reachable (the form's fields are gone from the
+# screen and commands are refused); a wrong password reads "doesn't
+# match"; Sign out waits while a window is unsaved; the right password
+# brings the form back exactly as it was. The password is the demo's
+# synthetic one. The form is cleared at the end.
+name: idle_lock
+description: Lock with an unsaved form, refused commands, wrong then right password, the form intact.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_auth_reset
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Memo}
+  - type: {text: Kept behind the lock}
+  - wait: {ms: 200}
+  - command: file.lock
+  - wait: {ms: 300}
+  - assert_state: {key: locked, equals: true}
+  - assert_not_exists: {role: text_input, label: Memo}
+  - assert_exists: {role: label, label: ClientLedger is locked}
+  - assert_exists: {role: label, label_contains: unsaved changes are kept}
+  - screenshot: locked
+  # Commands are refused while locked.
+  - command: file.open_company
+  - wait: {ms: 200}
+  - assert_state: {key: locked, equals: true}
+  - assert_not_exists: {role: text_input, label: Memo}
+  # A wrong password.
+  - click: {role: password_input, label: Password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Unlock}
+  - wait: {ms: 300}
+  - assert_state: {key: lock_message, equals: login.msg.wrong}
+  - assert_state: {key: locked, equals: true}
+  - screenshot: wrong-password
+  # The right one: the form is back as it was.
+  - click: {role: password_input, label: Password}
+  - type: {text: demo-password-1}
+  - click: {role: button, label: Unlock}
+  - wait: {ms: 300}
+  - assert_state: {key: locked, equals: false}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Kept behind the lock"}
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - screenshot: unlocked
+  # Leave nothing behind for the next run.
+  - click: {role: button, label: Clear}
+  - wait: {ms: 200}
+  - command: dev.demo_auth_reset

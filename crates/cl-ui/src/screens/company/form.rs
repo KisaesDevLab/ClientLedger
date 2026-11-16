@@ -35,6 +35,18 @@ impl SecretText {
         self.0.trim()
     }
 
+    /// The text as typed (borrowed; never copied).
+    #[must_use]
+    pub fn text(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The text as typed, as a [`cl_core::Secret`] to send.
+    #[must_use]
+    pub fn to_secret(&self) -> cl_core::Secret {
+        cl_core::Secret::new(self.0.as_str())
+    }
+
     /// Wipes the text.
     pub fn clear(&mut self) {
         zeroize::Zeroize::zeroize(&mut *self.0);

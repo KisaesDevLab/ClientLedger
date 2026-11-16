@@ -76,6 +76,7 @@ pub mod reports;
 // P29: Set Closing Date and the Audit Trail.
 pub mod audit_trail;
 pub mod closing_date;
+pub mod login;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [

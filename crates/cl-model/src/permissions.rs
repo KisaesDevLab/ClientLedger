@@ -701,8 +701,8 @@ pub fn need(id: CommandId) -> Option<Need> {
     let n = match id {
         // File
         "file.open_company" | "file.new_company" | "file.close_company" | "file.open_practice"
-        | "file.restore" | "file.print" | "file.print_forms" | "file.printer_setup"
-        | "file.close_window" | "file.quit" => Always,
+        | "file.sign_out" | "file.lock" | "file.restore" | "file.print" | "file.print_forms"
+        | "file.printer_setup" | "file.close_window" | "file.quit" => Always,
         "file.backup" | "file.export_all" => Read(R::CompanySettings),
         "file.full_backup" | "file.delete_company" => AdminOnly,
         // Edit (Preferences hold personal settings too; company tabs check

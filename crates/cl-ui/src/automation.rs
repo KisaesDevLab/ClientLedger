@@ -1349,6 +1349,9 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "quit_approved": shell.quit_approved(),
         "company_open": shell.company.is_some(),
         "signed_in": shell.status.user.is_some(),
+        // P29 WP2: the lock screen covers the app.
+        "locked": shell.idle_locked(),
+        "lock_message": shell.idle_message(),
         "screen": shell.active_screen_state(),
         // A02: the pop-out viewer (geometry, ids and the viewer's flags;
         // never a file or form name).

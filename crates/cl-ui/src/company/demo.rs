@@ -7,6 +7,8 @@ use cl_settings::{ACCENT_PALETTE, Accent};
 
 // P29: the Audit Trail viewer's synthetic rows.
 pub mod audit;
+// P29: sign-in, passwords and recovery.
+pub mod auth;
 pub mod batch;
 // P20: Create Invoice (the engine's sales money rule, held to the golden file).
 pub mod billable;
@@ -172,6 +174,8 @@ pub struct DemoState {
     pub card_digits: bool,
     /// P29: the demo's closing-date password (`None`: none set).
     pub closing_password: Option<String>,
+    /// P29: the demo's users, sign-in and recovery key.
+    pub auth: auth::DemoAuth,
     /// Invoices the demo engine keeps (P20).
     pub invoices: invoices::DemoInvoices,
     /// Price levels and the clients on them (P20).
@@ -315,6 +319,7 @@ impl DemoState {
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
             closing_password: Some(register::DEMO_CLOSING_PASSWORD.to_owned()),
+            auth: auth::DemoAuth::default(),
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),
