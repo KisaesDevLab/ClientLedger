@@ -48,10 +48,16 @@ steps:
   - click: {role: button, label: Sign in}
   - wait: {ms: 300}
   - assert_state: {key: screen.signin_message, equals: login.msg.turned_off}
-  # Forgot password? explains who to ask.
+  # Forgot password? opens the recovery-key reset (WP4), which says who
+  # else to ask; Back to sign in returns to the form.
   - click: {role: link, label: Forgot password?}
   - wait: {ms: 200}
   - assert_state: {key: screen.forgot_open, equals: true}
+  - assert_exists: {role: button, label: Reset password}
+  - screenshot: forgot
+  - click: {role: button, label: Back to sign in}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.forgot_open, equals: false}
   # A temporary password: choose a new one first.
   - click: {role: text_input, label: Email}
   - key: Ctrl+A

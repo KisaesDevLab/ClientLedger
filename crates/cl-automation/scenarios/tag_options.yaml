@@ -55,7 +55,42 @@ steps:
   - assert_state: {key: screen.saved_count, equals: 0}
   - assert_exists: {label_contains: "Expenses tab, line 3: Add a tag"}
   - screenshot: check-refused
+  # Save as Template is not gated (it saves no entry): the untagged line
+  # goes into a template.
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.dialog.title, equals: templates.dialog.title.new}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: "{theme} tag rule check"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.dialog, equals: null}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
   - click: {role: button, label: Clear}
+  - command: file.close_window
+  - wait: {ms: 200}
+
+  # --- Template Use: the filled form's save is refused the same way ----------
+  - command: lists.templates
+  - assert_state: {key: screen.screen, equals: templates}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label_contains: "tag rule check"}
+  - click: {role: button, label: Use}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.mode, equals: new}
+  - key: Alt+N
+  - wait: {ms: 300}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {label_contains: "Expenses tab, line 3: Add a tag"}
+  - screenshot: template-use-refused
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - wait: {ms: 200}
+  # The template is deleted so the dark run starts the same.
+  - click: {role: tab, label_contains: "Templates"}
+  - click: {role: button, label_contains: "tag rule check"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_not_exists: {role: button, label_contains: "tag rule check"}
   - command: file.close_window
   - wait: {ms: 200}
 

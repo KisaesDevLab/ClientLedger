@@ -4,8 +4,9 @@
 # Profit & Loss without a Wages row and with "Some amounts are hidden for
 # your role", the drill behind an amount with the same notice, and the
 # checking register showing "Hidden account" as the other side of a
-# paycheck. Back to Admin and the mark removed at the end, so the dark run
-# starts the same. Synthetic.
+# paycheck. Back to Admin and the mark removed; then a Vehicles register
+# open while the role changes closes with a plain message. Marks removed at
+# the end, so the dark run starts the same. Synthetic.
 name: sensitive_accounts
 description: Admin marks Wages sensitive; a Bookkeeper's P&L, drill and register hide it with a notice.
 steps:
@@ -78,6 +79,47 @@ steps:
   - wait: {ms: 300}
   - assert_state: {key: screen.loaded, equals: true}
   - type: {text: "6550"}
+  - key: Ctrl+E
+  - click: {role: check_box, label: Sensitive account}
+  - key: Alt+S
+  - assert_state: {key: screen.selected_sensitive, equals: false}
+  - command: file.close_window
+  - wait: {ms: 200}
+  # --- 4. A register whose account turns hidden mid-session closes ---------
+  - command: lists.chart_of_accounts
+  - wait: {ms: 300}
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: "1510"}
+  - key: Ctrl+E
+  - click: {role: check_box, label: Sensitive account}
+  - key: Alt+S
+  - assert_state: {key: screen.selected_sensitive, equals: true}
+  - key: Ctrl+G
+  - wait: {ms: 500}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.hidden_closed, equals: false}
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: This month}
+  - assert_state: {key: screen.loaded, equals: true}
+  # The role changes while the register is open; its next read is refused.
+  - command: dev.demo_rights_bookkeeper_hidden
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: Last 90 days}
+  - wait: {ms: 400}
+  - assert_not_exists: {role: tab, label_contains: "Vehicles"}
+  - assert_exists: {label_contains: "This account is now hidden for your role"}
+  - screenshot: register-closed
+  # Back to Admin; Vehicles unmarked so the dark run starts the same.
+  - command: dev.demo_rights_all
+  - command: lists.chart_of_accounts
+  - wait: {ms: 200}
+  - command: file.close_window
+  - wait: {ms: 200}
+  - command: lists.chart_of_accounts
+  - wait: {ms: 300}
+  - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: "1510"}
   - key: Ctrl+E
   - click: {role: check_box, label: Sensitive account}
   - key: Alt+S

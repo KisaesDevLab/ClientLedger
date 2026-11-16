@@ -19,7 +19,8 @@ steps:
   - assert_exists: {role: label, label: "1099 reporting amounts"}
   - assert_exists: {role: text_input, label: "Nonemployee pay (1099-NEC box 1)"}
   - assert_exists: {role: text_input, label: "Payments to an attorney (1099-MISC box 10)"}
-  - assert_exists: {role: label, label: "2,000.00"}
+  # Several boxes share the 2026 standard amount of 2,000.00.
+  - assert_exists: {role: label, label: "2,000.00", index: 0}
   - assert_no_clipping: {}
   - screenshot: thresholds-blank
 
@@ -31,7 +32,9 @@ steps:
   - assert_state: {key: screen.dirty, equals: true}
   - screenshot: thresholds-refused
 
-  # A good amount saves and reads back in dollars and cents.
+  # A good amount saves and reads back in dollars and cents. (Save took the
+  # focus: outside a field Ctrl+A opens the Chart of Accounts.)
+  - click: {role: text_input, label: "Royalties (1099-MISC box 2)"}
   - key: Ctrl+A
   - type: {text: "25"}
   - type: {text: "1500", target: {role: text_input, label: "Nonemployee pay (1099-NEC box 1)"}}

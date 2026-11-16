@@ -265,7 +265,15 @@ impl Screen for RecoveryKeyScreen {
                 form::hint(ui, &tokens, &t("recovery.copied"));
             }
             ui.add_space(8.0);
-            form::field(ui, &t("recovery.save_path"), &mut self.save_path);
+            // A whole path is long: the field takes the card's width (the
+            // shared 360-point field cut it off), the full path also on hover.
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("recovery.save_path")).selectable(false));
+                let w = ui.available_width().max(120.0);
+                ui.add_sized([w, 24.0], egui::TextEdit::singleline(&mut self.save_path))
+                    .labelled_by(l.id)
+                    .on_hover_text(self.save_path.clone());
+            });
             if ui.button(t("recovery.save")).clicked() {
                 self.save_file();
             }
