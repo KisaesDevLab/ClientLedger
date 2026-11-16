@@ -69,6 +69,7 @@ mod tests {
             created_at: None,
             updated_at: None,
             card_last4: None,
+            is_sensitive: false,
         }
     }
 

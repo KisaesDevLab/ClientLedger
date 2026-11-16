@@ -18,6 +18,7 @@
   {"method":"GET","path":"/api/v1/accounts/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"PUT","path":"/api/v1/accounts/{id}","inSpec":true,"fragmentHash":"1f625b7dd7b2ec2f944f8cc53b55e0a7730f4cdee992d732a6255ccdb5d4d95c"},
   {"method":"DELETE","path":"/api/v1/accounts/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"PUT","path":"/api/v1/accounts/{id}/sensitive","inSpec":true,"fragmentHash":"ea2919bd14d91dab02f8f67f27ed661b58ccd894f4b9a222d001bfe23e40271d"},
   {"method":"GET","path":"/api/v1/contacts","inSpec":true,"fragmentHash":"169d1609273f067c010abdab6216a71e17aecbeb40c6d5102cb445ec1560ce2e"},
   {"method":"POST","path":"/api/v1/contacts","inSpec":true,"fragmentHash":"40b947d0fd823d03a8fd6d09ecde91bb427da7feb7c62a1c38b17a74a7b449d4"},
   {"method":"GET","path":"/api/v1/contacts/{id}","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},

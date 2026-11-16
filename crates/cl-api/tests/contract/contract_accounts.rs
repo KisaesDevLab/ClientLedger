@@ -239,16 +239,30 @@ pub fn parent_rules_u32(h: &Harness) {
     }
 }
 
-/// U-33: the old placeholder (an `isSensitive` field on account create,
-/// capability `account-sensitive-v1`). The engine shipped
-/// `sensitive-accounts-v1` with `PUT /accounts/:id/sensitive` instead; the
-/// live checks belong in `contract_sensitive.rs` (written with the desktop's
-/// sensitive-accounts calls). PENDING until then.
+/// U-33: a create never marks an account sensitive (only the Admin's
+/// `PUT /accounts/{id}/sensitive` does); with `sensitive-accounts-v1` the
+/// account carries `isSensitive: false`, before it no key at all.
 pub fn sensitive_flag_u33(h: &Harness) {
-    h.pending(
-        "U-33",
-        "superseded by sensitive-accounts-v1 (PUT /accounts/:id/sensitive): see contract_sensitive.rs",
-    );
+    let s = &h.s1;
+    let raw = h
+        .run(s.raw(
+            Method::Post,
+            "/api/v1/accounts",
+            &[],
+            Some(&json!({
+                "name": unique("Owner draws"),
+                "accountType": "equity",
+                "isSensitive": true,
+            })),
+        ))
+        .expect("raw");
+    assert_eq!(raw.status, 201, "{}", raw.body);
+    let flag = &raw.body["account"]["isSensitive"];
+    if h.require_cap(Capabilities::ACCOUNT_SENSITIVE, "U-33") {
+        assert_eq!(flag, &json!(false), "create ignores the flag");
+    } else {
+        assert!(flag.is_null(), "not stored today: {flag}");
+    }
 }
 
 /// U-34: today a full bank number is dropped and nothing masked comes back.

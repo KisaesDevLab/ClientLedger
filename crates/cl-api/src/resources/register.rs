@@ -266,6 +266,10 @@ pub enum Category {
     Split,
     /// No other account (for example a one-sided line).
     None,
+    /// The other side is an account hidden for this role (U-33,
+    /// `hiddenSplit`): the row's own amount and balance still show; the
+    /// transaction can't be opened.
+    Hidden,
 }
 
 impl fmt::Debug for Category {
@@ -274,6 +278,7 @@ impl fmt::Debug for Category {
             Category::Account { id, .. } => write!(f, "Account({id})"),
             Category::Split => f.write_str("Split"),
             Category::None => f.write_str("None"),
+            Category::Hidden => f.write_str("Hidden"),
         }
     }
 }
@@ -582,6 +587,9 @@ struct WireLine {
     #[serde(default)]
     is_editable: bool,
     status: TxnStatus,
+    /// U-33: the other side is hidden for this role (absent otherwise).
+    #[serde(default)]
+    hidden_split: bool,
 }
 
 #[derive(Deserialize)]
@@ -620,6 +628,7 @@ const SPLIT_NAME: &str = "— Split —";
 impl WireLine {
     fn into_line(self) -> Result<RegisterLine, ApiError> {
         let category = match (self.category_account_id, self.category_name) {
+            _ if self.hidden_split => Category::Hidden,
             (Some(id), name) => Category::Account { id, name },
             (None, Some(n)) if n == SPLIT_NAME => Category::Split,
             (None, _) if self.has_splits => Category::Split,

@@ -693,7 +693,11 @@ pub struct TemplatesRunner {
 fn link_final(e: &ApiError) -> bool {
     matches!(
         e,
-        ApiError::Validation(_) | ApiError::NotFound { .. } | ApiError::Forbidden { .. }
+        ApiError::Validation(_)
+            | ApiError::NotFound { .. }
+            | ApiError::Forbidden { .. }
+            // U-33: a template on an account hidden for this role.
+            | ApiError::Sensitive(_)
     ) || matches!(e, ApiError::Conflict { .. } if !cl_api::is_occurrence_taken(e))
 }
 
@@ -984,7 +988,9 @@ impl TemplatesRunner {
         self.retry = match &error {
             None
             | Some(
-                ApiError::Forbidden { .. } | ApiError::Local(LocalValidation::RunDueUnavailable),
+                ApiError::Forbidden { .. }
+                | ApiError::Sensitive(_)
+                | ApiError::Local(LocalValidation::RunDueUnavailable),
             ) => None,
             Some(_) => current,
         };
@@ -999,7 +1005,7 @@ impl TemplatesRunner {
             }),
         };
         match error {
-            None | Some(ApiError::Forbidden { .. }) => {}
+            None | Some(ApiError::Forbidden { .. } | ApiError::Sensitive(_)) => {}
             Some(ApiError::Local(LocalValidation::RunDueUnavailable)) => self.off = true,
             Some(e) => {
                 tracing::warn!(error = %e, "templates catch-up stopped; trying again later");

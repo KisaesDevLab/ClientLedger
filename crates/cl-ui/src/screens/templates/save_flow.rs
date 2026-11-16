@@ -317,7 +317,8 @@ impl SaveFlow {
                 Err(
                     ApiError::Validation(_)
                     | ApiError::NotFound { .. }
-                    | ApiError::Forbidden { .. },
+                    | ApiError::Forbidden { .. }
+                    | ApiError::Sensitive(_),
                 ) => {
                     self.resolve_failed = true;
                     if let Some((id, date)) = done {

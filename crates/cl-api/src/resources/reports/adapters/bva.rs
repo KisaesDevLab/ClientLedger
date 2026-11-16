@@ -419,7 +419,7 @@ pub fn table(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiError> {
             truncated: None,
             note: None,
             note_drill: None,
-            hidden_notice: false,
+            hidden_notice: super::hidden_notice(v),
         },
     })
 }

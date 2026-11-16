@@ -143,7 +143,7 @@ pub fn journal(v: &Value, req: &ReportRequest, range: DateRange) -> Result<Repor
             truncated,
             note: None,
             note_drill: None,
-            hidden_notice: false,
+            hidden_notice: super::hidden_notice(v),
         },
     })
 }

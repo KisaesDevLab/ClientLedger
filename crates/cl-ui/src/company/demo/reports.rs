@@ -182,6 +182,10 @@ impl Books {
     /// The demo's chart and postings (voided transactions left out).
     pub(crate) fn load(d: &DemoState) -> Books {
         let mut chart = d.chart.clone().unwrap_or_else(super::chart);
+        // U-33: accounts hidden from this user are left out at the account
+        // join, so every total follows (Q-P29a), as the engine does.
+        let hidden = d.hidden_accounts(&chart);
+        chart.retain(|a| !hidden.contains(&a.id));
         let system = cl_company::Sample::load().company.system_accounts;
         // The fixture's opening balances sit on an equity account the demo
         // chart doesn't list; the reports show it so the books balance.
@@ -207,6 +211,7 @@ impl Books {
                 created_at: None,
                 updated_at: None,
                 card_last4: None,
+                is_sensitive: false,
             });
         }
         let mut by_number: BTreeMap<&str, &Account> = chart
@@ -1253,6 +1258,12 @@ pub(crate) fn statement(d: &DemoState, req: &ReportRequest) -> Result<ReportTabl
         Source::GeneralLedger if !columns => general_ledger(&b, req, span),
         _ => return Err(unsupported),
     };
+    let mut v = v;
+    if d.hidden_notice()
+        && let Some(m) = v.as_object_mut()
+    {
+        m.insert("hiddenNotice".into(), Value::Bool(true));
+    }
     let mut table = adapt_exact(req, &v)?;
     // What `Reports::run` adds from the chart's roles (B2, S5).
     if cl_api::resources::reports::adapters::statements::wants_roles(req, &v) {

@@ -710,6 +710,11 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_rights_bookkeeper",
         "Demo Rights: Bookkeeper (developer)",
     ),
+    // P29 (U-33): a Bookkeeper without "See sensitive accounts".
+    dev_action(
+        "dev.demo_rights_bookkeeper_hidden",
+        "Demo Rights: Bookkeeper without sensitive accounts (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

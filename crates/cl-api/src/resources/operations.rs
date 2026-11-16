@@ -513,6 +513,9 @@ pub(crate) const ACCOUNTS_CREATE: Operation = keyable(Method::Post, "/api/v1/acc
 pub(crate) const ACCOUNT_GET: Operation = read("/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_PUT: Operation = write(Method::Put, "/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_DELETE: Operation = write(Method::Delete, "/api/v1/accounts/{id}");
+/// U-33: mark or unmark an account sensitive (Admin only).
+pub(crate) const ACCOUNT_SENSITIVE_PUT: Operation =
+    write(Method::Put, "/api/v1/accounts/{id}/sensitive");
 pub(crate) const CONTACTS_LIST: Operation = read("/api/v1/contacts");
 pub(crate) const CONTACTS_CREATE: Operation = keyable(Method::Post, "/api/v1/contacts");
 pub(crate) const CONTACT_GET: Operation = read("/api/v1/contacts/{id}");
@@ -1952,7 +1955,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 437] = [
+pub const OPERATIONS: [Operation; 438] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1972,6 +1975,7 @@ pub const OPERATIONS: [Operation; 437] = [
     ACCOUNT_GET,
     ACCOUNT_PUT,
     ACCOUNT_DELETE,
+    ACCOUNT_SENSITIVE_PUT,
     CONTACTS_LIST,
     CONTACTS_CREATE,
     CONTACT_GET,

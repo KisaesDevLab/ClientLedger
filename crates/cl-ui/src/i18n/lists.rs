@@ -105,7 +105,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lists.accounts.form.parent_gone", "An account no longer in the chart"),
     ("lists.accounts.form.description", "Description"),
     ("lists.accounts.form.sensitive", "Sensitive account"),
-    ("lists.accounts.form.sensitive_hint", "Marks the account as sensitive, such as owner pay. Hiding sensitive accounts from other users arrives with Users and Permissions."),
+    ("lists.accounts.form.sensitive_hint", "Hides this account and its amounts from users whose role can't see sensitive accounts, such as owner pay or wages."),
     ("lists.accounts.form.bank_number", "Bank or card number"),
     ("lists.accounts.form.bank_number_later", "Keeping the full account number, shown masked, is not available yet."),
     ("lists.accounts.form.saving", "Saving the account\u{2026}"),

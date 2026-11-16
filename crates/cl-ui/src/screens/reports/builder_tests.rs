@@ -492,6 +492,8 @@ fn an_unreadable_memorized_builder_report_says_why() {
             updated_at: None,
             can_edit: true,
             missing: Vec::new(),
+            hidden_refs: false,
+            hidden: Vec::new(),
         };
     super::memorized::open_row(
         &mut w,

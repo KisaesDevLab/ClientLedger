@@ -365,6 +365,7 @@ fn refusal_key(e: &ApiError) -> &'static str {
         Some(DefinitionRefusal::Stale) => "report_file.save.stale",
         Some(DefinitionRefusal::NotAuthor) => "report_file.save.not_author",
         Some(DefinitionRefusal::TooLarge) => "report_file.error.too_large",
+        Some(DefinitionRefusal::Hidden) => "sensitive.definition_refused",
         None if matches!(e, ApiError::NotFound { .. }) => "report_file.error.gone",
         None => "report_file.error.engine",
     }

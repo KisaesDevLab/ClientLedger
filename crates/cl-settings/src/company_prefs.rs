@@ -75,8 +75,10 @@ pub struct CompanyPrefs {
     pub smtp_security: SmtpSecurity,
     /// Show account numbers in lists and pickers (Q-79, on by default).
     pub account_numbers: bool,
-    /// Accounts marked sensitive (Q-157). Kept here until the engine stores
-    /// the flag (U-33); hiding them from other roles waits for P29.
+    /// Legacy (Q-157): accounts marked sensitive on this computer before the
+    /// engine stored the flag. With `sensitive-accounts-v1` an Admin's open
+    /// moves them into the engine (U-33, P29) and only the ones it refused
+    /// stay; kept so older preferences and backups still load.
     pub sensitive_accounts: BTreeSet<AccountId>,
     /// Tag groups a line must use for the account types listed (engine
     /// account-type names such as `expense`, Q-180). Kept here and checked

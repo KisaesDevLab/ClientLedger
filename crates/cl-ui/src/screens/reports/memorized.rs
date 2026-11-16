@@ -150,6 +150,9 @@ pub(super) fn poll(w: &mut ReportWindow) {
                         Some(DefinitionRefusal::NotAuthor) => {
                             d.problem = Some("reports.memorize.not_author");
                         }
+                        Some(DefinitionRefusal::Hidden) => {
+                            d.problem = Some("sensitive.definition_refused");
+                        }
                         Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid { .. }) => {
                             d.problem = Some("reports.memorize.invalid");
                         }
@@ -640,6 +643,8 @@ mod tag_tests {
             updated_at: None,
             can_edit: true,
             missing: Vec::new(),
+            hidden_refs: false,
+            hidden: Vec::new(),
         };
         super::open_row(&mut w, &row);
         assert_eq!(

@@ -46,6 +46,11 @@ pub use errors::{
     ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
     is_deposit_links_dropped, reconciled_statement_date,
 };
+// P29: sensitive accounts (U-33).
+pub use errors::{
+    SENSITIVE_ACCOUNT, SENSITIVE_DEFINITION, SENSITIVE_HIDDEN, SENSITIVE_NOT_ALLOWED,
+    SensitiveRefusal, is_sensitive_not_allowed,
+};
 // A04 WP-D: the demo engine's refusals read as the engine's.
 pub use errors::engine_refusal;
 pub use idempotency::IdempotencyKey;

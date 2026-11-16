@@ -581,6 +581,14 @@ impl ReportWindow {
                             .to_string(),
                     );
                 }
+                // U-33: a report the engine still refuses to a user with
+                // hidden accounts says so plainly, never an error with
+                // Try again (it would be refused again).
+                Err(cl_api::ApiError::Sensitive(_)) => {
+                    self.problem = Some("sensitive.report_refused");
+                    self.table = None;
+                    self.state = RunState::Failed;
+                }
                 Err(e) => {
                     self.error = Some(e);
                     self.state = RunState::Failed;
@@ -983,6 +991,15 @@ impl ReportWindow {
                     }
                 }
             }
+            // U-33 (Q-P29a, Q-P29b): the engine left accounts hidden for this
+            // role out; totals may not balance for this user.
+            if self.table.as_ref().is_some_and(|t| t.meta.hidden_notice) {
+                ui.label(
+                    RichText::new(t("sensitive.notice"))
+                        .size(12.0)
+                        .color(tokens.warn_text),
+                );
+            }
         });
         if let Some(d) = follow {
             super::drill::open(self, &d);
@@ -1281,6 +1298,8 @@ impl ReportWindow {
             "memorized_changed": super::memorized::changed(self),
             "problem": self.problem.map(|p| p.rsplit('.').next().unwrap_or_default()),
             "error": self.error.is_some(),
+            // U-33: the engine left accounts hidden for this role out.
+            "hidden_notice": self.table.as_ref().is_some_and(|t| t.meta.hidden_notice),
             "export": self.export.state(),
             "search": !self.search.is_empty(),
             "budget": self.budgets.state_json(),

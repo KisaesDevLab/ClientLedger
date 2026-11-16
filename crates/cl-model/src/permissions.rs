@@ -273,11 +273,20 @@ impl Rights {
                 own.min(Level::View)
             };
         }
+        let admin = is_admin_role(role, is_super_admin);
         Rights {
             levels,
-            admin: is_admin_role(role, is_super_admin),
-            hides_sensitive: false,
+            admin,
+            hides_sensitive: hides_sensitive(admin, map),
         }
+    }
+
+    /// The same rights without the "See sensitive accounts" right (the
+    /// demo's restricted Bookkeeper, U-33); an Admin always sees them.
+    #[must_use]
+    pub fn hiding_sensitive(mut self) -> Rights {
+        self.hides_sensitive = !self.admin;
+        self
     }
 
     /// The least rights a role can have when the engine's map could not be
@@ -369,6 +378,17 @@ impl Rights {
             level.min(Level::View)
         };
     }
+}
+
+/// U-33: an engine with `sensitive-accounts-v1` sends `sensitive_accounts`
+/// (none or view); without the right, accounts the Admin marked are hidden.
+/// An older engine sends no key and hides nothing. Whether any account is
+/// marked is the engine's `hiddenNotice`, not this.
+fn hides_sensitive<S: AsRef<str>>(admin: bool, map: &BTreeMap<String, S>) -> bool {
+    !admin
+        && map
+            .get(crate::roles::SENSITIVE_KEY)
+            .is_some_and(|v| Level::parse(v.as_ref()) == Level::None)
 }
 
 /// Owner or super admin. An engine `accountant` (only a `MyBooks` transfer
@@ -963,6 +983,24 @@ mod tests {
         assert!(bk.allows(CommandId::new("clients.create_invoice")));
         assert!(bk.allows(CommandId::new("company.audit_trail")));
         assert!(!bk.allows(CommandId::new("company.users")));
+    }
+
+    #[test]
+    fn sensitive_accounts_hide_only_without_the_right() {
+        let mut m: BTreeMap<String, &str> = BTreeMap::new();
+        m.insert("reports".into(), "view");
+        // An engine before U-33 sends no key: nothing is hidden.
+        assert!(!Rights::from_engine("bookkeeper", false, &m).hides_sensitive);
+        m.insert("sensitive_accounts".into(), "none");
+        assert!(Rights::from_engine("bookkeeper", false, &m).hides_sensitive);
+        assert!(!Rights::from_engine("owner", false, &m).hides_sensitive);
+        assert!(!Rights::from_engine("bookkeeper", true, &m).hides_sensitive);
+        m.insert("sensitive_accounts".into(), "view");
+        assert!(!Rights::from_engine("bookkeeper", false, &m).hides_sensitive);
+        // The demo's restricted Bookkeeper; an Admin never hides.
+        let bk = BuiltinRole::Bookkeeper.rights().hiding_sensitive();
+        assert!(bk.hides_sensitive);
+        assert!(!Rights::all().hiding_sensitive().hides_sensitive);
     }
 
     fn arb_rights() -> impl Strategy<Value = Rights> {

@@ -117,7 +117,8 @@ steps:
   # --- The bank number field is switched off until the engine keeps it -------
   # A new account takes the selected account's type: a bank account here.
   - key: Ctrl+N
-  - assert_exists: {role: check_box, label: Sensitive account}
+  # U-33 (Q-P29d): a bank account can't be marked sensitive, so no switch.
+  - assert_not_exists: {role: check_box, label: Sensitive account}
   - assert_disabled: {role: text_input, label: Bank or card number}
   - assert_exists: {label_contains: "shown masked, is not available yet"}
   - screenshot: new-bank-account
@@ -150,7 +151,8 @@ steps:
   - assert_exists: {role: text_input, label: Card ends in}
   - key: Tab
   - type: {text: "Fuel Card {theme}"}
-  - key: Tab
+  # Number, sub-account of, description, then the card digits (no
+  # sensitive switch on a credit card account, Q-P29d).
   - key: Tab
   - key: Tab
   - key: Tab

@@ -79,6 +79,7 @@ mod contract_sales_tax_liability;
 mod contract_sales_tax_pay;
 mod contract_sales_tax_setup;
 mod contract_sales_tax_ssuta;
+mod contract_sensitive;
 mod contract_session;
 mod contract_tags;
 mod contract_team;
@@ -1337,6 +1338,10 @@ fn main() -> std::process::ExitCode {
         (
             "rights::ar_hidden_reports_are_refused",
             contract_rights::ar_hidden_reports_are_refused,
+        ),
+        (
+            "sensitive::payroll_hidden_from_bookkeeper",
+            contract_sensitive::payroll_hidden_from_bookkeeper,
         ),
         (
             "auth::temporary_password_must_be_changed",
