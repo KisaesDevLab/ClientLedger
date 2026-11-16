@@ -47,12 +47,13 @@ use sha2::{Digest, Sha256};
 /// report, reorder and unit-set routes are.
 /// P28 (Q-220): the memorized-report routes (U-118, engine PR-F) are outside
 /// the pinned spec until PR-F merges and the pin moves; remove them then.
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// Since pin b73cdc36 (U-23, `recovery-key-v1`) the recovery-key rotate
+/// route is in the spec.
+pub const OUTSIDE_SPEC: [(&str, &str); 7] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
-    ("POST", "/api/v1/auth/recovery-key/rotate"),
     // E6 (P09): session secrets.
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
