@@ -1070,12 +1070,13 @@ impl Shell {
                 }
             }
             // P29 (demo only): the rights scenario's A/P user and back.
-            "dev.demo_rights_ap" | "dev.demo_rights_all" => {
+            "dev.demo_rights_ap" | "dev.demo_rights_all" | "dev.demo_rights_bookkeeper" => {
                 if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo()) {
-                    link.set_rights(if id.as_str() == "dev.demo_rights_ap" {
-                        cl_model::permissions::BuiltinRole::Payables.rights()
-                    } else {
-                        cl_model::permissions::Rights::all()
+                    use cl_model::permissions::{BuiltinRole, Rights};
+                    link.set_rights(match id.as_str() {
+                        "dev.demo_rights_ap" => BuiltinRole::Payables.rights(),
+                        "dev.demo_rights_bookkeeper" => BuiltinRole::Bookkeeper.rights(),
+                        _ => Rights::all(),
                     });
                 }
             }

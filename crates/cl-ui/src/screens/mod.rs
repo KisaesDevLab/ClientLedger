@@ -74,6 +74,7 @@ pub mod reconcile;
 // P28: the report window.
 pub mod reports;
 // P29: Set Closing Date and the Audit Trail.
+pub mod audit_trail;
 pub mod closing_date;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
@@ -142,7 +143,8 @@ pub(crate) const P28_SCREENS: [crate::shell::MakeScreen; 1] = [reports::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 /// P29 screens.
-pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 1] = [closing_date::make];
+pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 2] =
+    [closing_date::make, audit_trail::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

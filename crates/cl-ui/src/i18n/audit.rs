@@ -51,6 +51,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("audit.export.admin_only", "Only the company's Admin can export the audit trail."),
     ("audit.export.busy", "Exporting..."),
     ("audit.export.saved", "Saved {file} ({n} changes)."),
+    ("audit.export.saved.one", "Saved {file} (1 change)."),
     ("audit.export.failed", "The file couldn't be saved. Choose another folder and try again; nothing was written."),
     ("audit.export.title", "Audit Trail"),
     ("audit.export.file", "Audit Trail"),

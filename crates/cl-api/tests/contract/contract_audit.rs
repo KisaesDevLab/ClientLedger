@@ -211,3 +211,68 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
         .expect_err("void after delete");
     assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
 }
+
+/// P29 WP6: the viewer's list reads pages that don't overlap, honours the
+/// action and record-type filters, and (with `audit-filters-v1`) the record
+/// filter. The update above leaves at least one `update` row.
+pub fn viewer_pages_and_filters(h: &Harness) {
+    use cl_api::AuditFilter;
+    let s = &h.s1;
+    let a = accounts(h, s);
+    let memo = unique("audit-view");
+    let made = h
+        .run(s.transactions().create_bank_posting(
+            &check(&a, date(2026, 6, 4), &memo, ("3.0000", "0.0000")),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("check");
+    let all = h
+        .run(s.audit().list(&AuditFilter::default(), 2, 0))
+        .expect("first page");
+    assert!(all.total >= 1);
+    let next = h
+        .run(s.audit().list(&AuditFilter::default(), 2, 2))
+        .expect("second page");
+    for r in &next.rows {
+        assert!(all.rows.iter().all(|f| f.id != r.id), "pages don't overlap");
+    }
+    let creates = h
+        .run(s.audit().list(
+            &AuditFilter {
+                action: Some("create".into()),
+                entity_type: Some("transaction".into()),
+                ..AuditFilter::default()
+            },
+            50,
+            0,
+        ))
+        .expect("filtered");
+    assert!(
+        creates
+            .rows
+            .iter()
+            .all(|r| r.action == "create" && r.entity_type == "transaction")
+    );
+    if !h.caps.has("audit-filters-v1") {
+        eprintln!("PENDING(audit-filters-v1): the record filter");
+        return;
+    }
+    let one = h
+        .run(s.audit().list(
+            &AuditFilter {
+                entity_id: Some(*made.record.id.as_uuid()),
+                ..AuditFilter::default()
+            },
+            50,
+            0,
+        ))
+        .expect("one record");
+    assert_ne!(one.rows.len(), 0, "the record has rows");
+    let id = made.record.id.to_string();
+    assert!(
+        one.rows
+            .iter()
+            .all(|r| r.entity_id.as_deref() == Some(id.as_str()))
+    );
+}

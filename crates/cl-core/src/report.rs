@@ -1038,6 +1038,18 @@ pub fn canonical_decimal(d: Decimal) -> String {
     d.normalize().to_string()
 }
 
+/// Text a spreadsheet would read as a formula (`=`, `+`, `-`, `@`, a tab
+/// or a carriage return first, after any spaces) gets a leading
+/// apostrophe, so an owner's payee or memo never runs as one when a CSV is
+/// opened. Callers apply it to text cells only.
+#[must_use]
+pub fn csv_formula_safe(s: String) -> String {
+    match s.trim_start_matches(' ').chars().next() {
+        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{s}"),
+        _ => s,
+    }
+}
+
 /// Appends one CSV line (RFC 4180 quoting) ending in `\n`.
 pub fn push_csv_line(out: &mut String, cells: &[String]) {
     for (i, c) in cells.iter().enumerate() {

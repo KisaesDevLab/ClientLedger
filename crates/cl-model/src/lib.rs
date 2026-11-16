@@ -18,6 +18,7 @@
 )]
 
 pub mod amount_entry;
+pub mod audit_view;
 pub mod bank_feed;
 pub mod closing;
 pub mod commands;

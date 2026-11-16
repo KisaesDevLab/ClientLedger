@@ -534,6 +534,10 @@ fn main() -> std::process::ExitCode {
             contract_audit::delete_keeps_every_line_in_the_audit_trail,
         ),
         (
+            "audit::viewer_pages_and_filters",
+            contract_audit::viewer_pages_and_filters,
+        ),
+        (
             "money::seeded_amounts_round_trip_string_equal",
             contract_money::seeded_amounts_round_trip_string_equal,
         ),

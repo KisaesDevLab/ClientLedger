@@ -506,7 +506,7 @@ pub const COMMANDS: &[Command] = &[
     built("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None),
     screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
-    screen("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None, "P29"),
+    built("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None),
     // Window
     built("nav.home", "Home", Some(Menu::Window), 0, alt('H')),
     cmd("window.next", "Next Window", Some(Menu::Window), 1, key(Mods::CMD, Key::Tab), Scope::Global),
@@ -698,6 +698,11 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Rights: Accounts Payable (developer)",
     ),
     dev_action("dev.demo_rights_all", "Demo Rights: Admin (developer)"),
+    // P29 WP6: a Bookkeeper reads the audit trail but can't export it.
+    dev_action(
+        "dev.demo_rights_bookkeeper",
+        "Demo Rights: Bookkeeper (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -859,6 +864,7 @@ mod tests {
             "reports.report_file",
             // P29
             "company.closing_date",
+            "company.audit_trail",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

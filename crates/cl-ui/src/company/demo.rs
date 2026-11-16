@@ -5,6 +5,8 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+// P29: the Audit Trail viewer's synthetic rows.
+pub mod audit;
 pub mod batch;
 // P20: Create Invoice (the engine's sales money rule, held to the golden file).
 pub mod billable;

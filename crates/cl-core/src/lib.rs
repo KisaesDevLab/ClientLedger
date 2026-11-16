@@ -14,6 +14,7 @@
     clippy::cast_precision_loss
 )]
 
+pub mod audit;
 pub mod balance_token;
 pub mod dates;
 pub mod errors;

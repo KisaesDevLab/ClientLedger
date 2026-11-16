@@ -62,7 +62,10 @@ pub use resources::ai::{
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
     ProviderTest, UsageSummaryRow, UsageTotals,
 };
-pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
+pub use resources::audit::{
+    Audit, AuditAction, AuditEntity, AuditEntry, AuditFilter, AuditImage, AuditLine, AuditPage,
+    AuditRow,
+};
 pub use resources::bank_postings::{
     BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
     DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
