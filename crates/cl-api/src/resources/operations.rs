@@ -2484,6 +2484,31 @@ mod tests {
         assert_eq!(rows, table);
     }
 
+    /// P29 fix pass: the user and secret routes are never sent again after
+    /// a transport error. Invite, temporary password, recovery, change
+    /// password and a new recovery key are `Never` (single-shot even on a
+    /// refused connect). Marking an account sensitive is an idempotent PUT
+    /// sent without an outcome reconciler, so `PreHandlerOnly` gives a
+    /// timeout or lost connection back as an unknown outcome
+    /// (`Transport::ambiguous` with no reconciler), never a resend; only a
+    /// connect refused before anything was sent is tried again.
+    #[test]
+    fn user_and_secret_routes_are_never_resent() {
+        for o in [
+            TEAM_INVITE,
+            TEAM_TEMP_PASSWORD,
+            RECOVER_PASSWORD,
+            CHANGE_PASSWORD,
+            RECOVERY_KEY_ROTATE,
+        ] {
+            assert_eq!(o.retry(), RetryClass::Never, "{}", o.route());
+            assert_eq!(o.key_set(), None, "{}", o.route());
+        }
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.retry(), RetryClass::PreHandlerOnly);
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.key_set(), None);
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.method(), Method::Put);
+    }
+
     #[test]
     #[allow(clippy::too_many_lines, reason = "one branch per keyed route set")]
     fn classification_rules_hold() {
