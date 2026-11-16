@@ -42,7 +42,7 @@ use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLo
 use cl_model::forms::{AfterSave, FormState, SaveIntent, SaveStart};
 use cl_model::lists::accounts::{
     AccountDraft, AccountKind, CardEnding, ChartFilter, DraftField, DraftProblem, check,
-    holds_bank_or_card_number, takes_card_digits,
+    holds_bank_or_card_number, sensitive_offered, takes_card_digits,
 };
 use cl_model::{CommandId, Scope, commands};
 use eframe::egui::{self, RichText, Ui};
@@ -188,6 +188,13 @@ pub struct ChartScreen {
     load_error: Option<ApiError>,
     toggle: Option<(AccountId, Task<Versioned<Account>>)>,
     toggle_error: Option<ApiError>,
+    /// U-33: the Admin's sensitive mark on its way to the engine.
+    mark: Option<(AccountId, Task<Account>)>,
+    /// U-33: marks kept on this computer that the engine refused (bank,
+    /// card or built-in accounts), shown once as a note.
+    kept_local: usize,
+    /// The marks kept on this computer (legacy, Q-157).
+    local_marks: BTreeSet<AccountId>,
     panel: Panel,
     /// A plain note (i18n key) under the toolbar.
     note: Option<&'static str>,
@@ -245,6 +252,9 @@ impl ChartScreen {
             load_error: None,
             toggle: None,
             toggle_error: None,
+            mark: None,
+            kept_local: 0,
+            local_marks: BTreeSet::new(),
             panel: Panel::None,
             note: None,
             warn: None,
@@ -284,6 +294,7 @@ impl ChartScreen {
             if !self.link.is_demo() {
                 self.sensitive.clone_from(&rec.prefs.sensitive_accounts);
             }
+            self.local_marks.clone_from(&rec.prefs.sensitive_accounts);
         }
     }
 
@@ -304,6 +315,9 @@ impl ChartScreen {
                         a.balance = Some(clearing);
                     }
                 }
+                // U-33: the demo engine leaves hidden accounts out of the list.
+                let hidden = d.hidden_accounts(&accounts);
+                accounts.retain(|a| !hidden.contains(&a.id));
                 accounts
             });
             self.load = Some(Task::ready(accounts.unwrap_or_default()));
@@ -321,9 +335,37 @@ impl ChartScreen {
         }
     }
 
+    /// U-33: the engine keeps the sensitive marks (sensitive-accounts-v1);
+    /// the demo plays the engine with its own set.
+    fn engine_marks(&self) -> bool {
+        !self.link.is_demo()
+            && self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::ACCOUNT_SENSITIVE)
+    }
+
     fn apply_accounts(&mut self, accounts: Vec<Account>) {
         let keep = self.want_cursor.take().or_else(|| self.selected());
         self.accounts = accounts;
+        if self.engine_marks() {
+            self.sensitive = self
+                .accounts
+                .iter()
+                .filter(|a| a.is_sensitive)
+                .map(|a| a.id)
+                .collect();
+            // Marks still on this computer for accounts the engine did not
+            // mark: the move at open refused them (Q-P29d).
+            self.kept_local = if self.link.rights().is_admin() {
+                self.accounts
+                    .iter()
+                    .filter(|a| !a.is_sensitive && self.local_marks.contains(&a.id))
+                    .count()
+            } else {
+                0
+            };
+        }
         self.model
             .set_accounts(&self.accounts, &self.sensitive, self.numbers, &self.filter);
         self.loaded = true;
@@ -880,6 +922,14 @@ impl ChartScreen {
         if self.sensitive.contains(&id) == on {
             return;
         }
+        if on && !self.mark_allowed(id) {
+            self.warn = Some("sensitive.not_allowed");
+            return;
+        }
+        if self.engine_marks() {
+            self.start_mark(id, on);
+            return;
+        }
         if on {
             self.sensitive.insert(id);
         } else {
@@ -907,7 +957,63 @@ impl ChartScreen {
         }
     }
 
+    /// The engine's rule (Q-P29d), checked first so the demo answers as
+    /// the engine does: never a bank, credit card or built-in account.
+    fn mark_allowed(&self, id: AccountId) -> bool {
+        self.accounts.iter().find(|a| a.id == id).is_none_or(|a| {
+            let kind = model::kind_of(a.fields.account_type);
+            sensitive_offered(kind, a.fields.detail_type.as_deref(), a.is_system)
+        })
+    }
+
+    /// Sends the Admin's mark to the engine (U-33, `PUT .../sensitive`).
+    fn start_mark(&mut self, id: AccountId, on: bool) {
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.warn = Some("sensitive.not_saved");
+            return;
+        };
+        let key = IdempotencyKey::new();
+        let label = OrphanLabel {
+            what: "orphan.account_save",
+            key: Some(key.clone()),
+        };
+        match group.write(&session, label, move |s| async move {
+            s.accounts().set_sensitive(id, on, key).await
+        }) {
+            Ok(p) => self.mark = Some((id, Task::Pending(p))),
+            Err(_) => self.warn = Some("sensitive.not_saved"),
+        }
+    }
+
+    /// Takes the engine's answer to a mark.
+    fn poll_mark(&mut self) {
+        let Some((id, task)) = self.mark.as_mut() else {
+            return;
+        };
+        let Some(result) = task.try_take() else {
+            return;
+        };
+        let id = *id;
+        self.mark = None;
+        match result {
+            Ok(account) => {
+                if let Some(a) = self.accounts.iter_mut().find(|a| a.id == id) {
+                    *a = account;
+                }
+                self.want_cursor = Some(id);
+                let accounts = std::mem::take(&mut self.accounts);
+                self.apply_accounts(accounts);
+                self.publish(false);
+            }
+            Err(e) if cl_api::is_sensitive_not_allowed(&e) => {
+                self.warn = Some("sensitive.not_allowed");
+            }
+            Err(_) => self.warn = Some("sensitive.not_saved"),
+        }
+    }
+
     fn poll(&mut self) {
+        self.poll_mark();
         if let Some(task) = self.load.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -1043,6 +1149,16 @@ impl ChartScreen {
         } else if let Some(n) = self.note {
             ui.label(RichText::new(t(n)).color(tokens.text_secondary));
         }
+        if self.kept_local > 0 {
+            ui.label(
+                RichText::new(crate::i18n::t_count(
+                    "sensitive.kept_local",
+                    self.kept_local,
+                    &[],
+                ))
+                .color(tokens.text_secondary),
+            );
+        }
     }
 
     fn chart_ui(&mut self, ui: &mut Ui, reserve: f32) {
@@ -1107,6 +1223,15 @@ impl ChartScreen {
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let numbers = self.numbers;
         let card_on = self.card_digits_on();
+        // U-33: only the Admin marks accounts sensitive; never a built-in.
+        let admin = self.link.rights().is_admin();
+        let editing_system = match &self.panel {
+            Panel::Form(f) => f
+                .editing
+                .and_then(|id| self.accounts.iter().find(|a| a.id == id))
+                .is_some_and(|a| a.is_system),
+            _ => false,
+        };
         let chart = self.model.chart();
         let Panel::Form(panel) = &mut self.panel else {
             return;
@@ -1255,15 +1380,20 @@ impl ChartScreen {
                     .form
                     .edit(F_DESCRIPTION, |x| x.description = description);
             }
-            // Sensitive (Q-157): kept now, enforced with user roles (P29).
-            let mut sensitive = d.sensitive;
-            if ui
-                .checkbox(&mut sensitive, t("lists.accounts.form.sensitive"))
-                .changed()
-            {
-                panel.form.edit(F_SENSITIVE, |x| x.sensitive = sensitive);
+            // Sensitive (Q-157, U-33): the Admin marks it; never offered on a
+            // bank, credit card or built-in account (Q-P29d).
+            if sensitive_offered(d.kind, Some(d.detail.as_str()), editing_system) {
+                let mut sensitive = d.sensitive;
+                let r = ui.add_enabled(
+                    admin,
+                    egui::Checkbox::new(&mut sensitive, t("lists.accounts.form.sensitive")),
+                );
+                let r = r.on_disabled_hover_text(t("sensitive.admin_only"));
+                if r.changed() {
+                    panel.form.edit(F_SENSITIVE, |x| x.sensitive = sensitive);
+                }
+                form::hint(ui, tokens, &t("lists.accounts.form.sensitive_hint"));
             }
-            form::hint(ui, tokens, &t("lists.accounts.form.sensitive_hint"));
             // Bank or card number (Q-154): not available until U-34.
             if holds_bank_or_card_number(d.kind, Some(d.detail.as_str())) {
                 ui.add_space(4.0);
@@ -1461,6 +1591,7 @@ pub(crate) fn demo_save(
             created_at: Some(crate::company::demo::DemoState::now()),
             updated_at: Some(crate::company::demo::DemoState::now()),
             card_last4: None,
+            is_sensitive: false,
         }
     };
     if let Some(chart) = chart {
@@ -1830,6 +1961,8 @@ impl Screen for ChartScreen {
             "toggling": self.toggle.is_some(),
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
+            "sensitive_kept_local": self.kept_local,
+            "sensitive_marking": self.mark.is_some(),
             "report_lines": report_lines,
             "report_loaded": report_loaded,
             "merge_available": false,

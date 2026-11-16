@@ -79,6 +79,7 @@ POST    /api/v1/accounts                        keyable
 GET     /api/v1/accounts/{id}                   idempotent
 PUT     /api/v1/accounts/{id}                   pre-handler-only
 DELETE  /api/v1/accounts/{id}                   pre-handler-only
+PUT     /api/v1/accounts/{id}/sensitive         pre-handler-only
 GET     /api/v1/contacts                        idempotent
 POST    /api/v1/contacts                        keyable
 GET     /api/v1/contacts/{id}                   idempotent

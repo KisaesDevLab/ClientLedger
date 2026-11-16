@@ -564,6 +564,9 @@ impl Shell {
                     // Catch-up runs after every open (P15, Q-P15h).
                     self.runner.opened(&link, tenant_id);
                     self.rights_watch.opened(&link);
+                    // U-33: an Admin's local sensitive marks move into the
+                    // engine (once; refused ones stay with a note).
+                    crate::company::sensitive::start(&link, tenant_id);
                     // This company's unknown saves (kept for the session).
                     link.lost_saves().set_company(Some(tenant_id));
                 }
@@ -1136,12 +1139,18 @@ impl Shell {
                 }
             }
             // P29 (demo only): the rights scenario's A/P user and back.
-            "dev.demo_rights_ap" | "dev.demo_rights_all" | "dev.demo_rights_bookkeeper" => {
+            "dev.demo_rights_ap"
+            | "dev.demo_rights_all"
+            | "dev.demo_rights_bookkeeper"
+            | "dev.demo_rights_bookkeeper_hidden" => {
                 if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo()) {
                     use cl_model::permissions::{BuiltinRole, Rights};
                     link.set_rights(match id.as_str() {
                         "dev.demo_rights_ap" => BuiltinRole::Payables.rights(),
                         "dev.demo_rights_bookkeeper" => BuiltinRole::Bookkeeper.rights(),
+                        "dev.demo_rights_bookkeeper_hidden" => {
+                            BuiltinRole::Bookkeeper.rights().hiding_sensitive()
+                        }
                         _ => Rights::all(),
                     });
                 }

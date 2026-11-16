@@ -336,7 +336,9 @@ pub fn builder_refusal(e: &ApiError) -> Option<BuilderRefusal> {
             _ => return None,
         },
         ApiError::NotFound { .. } => BuilderRefusal::Deleted,
-        ApiError::Forbidden { .. } => BuilderRefusal::Denied,
+        // An engine before `sensitive-accounts-builder-v1` refuses the
+        // builder to a user with hidden accounts (U-33): never "Try again".
+        ApiError::Forbidden { .. } | ApiError::Sensitive(_) => BuilderRefusal::Denied,
         ApiError::PayloadTooLarge => BuilderRefusal::DefinitionTooLarge,
         _ => return None,
     })

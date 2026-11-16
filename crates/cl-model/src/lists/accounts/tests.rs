@@ -511,3 +511,27 @@ mod number_order {
         }
     }
 }
+
+#[test]
+fn sensitive_is_offered_except_on_bank_card_and_built_in_accounts() {
+    assert!(sensitive_offered(
+        AccountKind::Expense,
+        Some("payroll_expenses"),
+        false
+    ));
+    assert!(sensitive_offered(
+        AccountKind::Liability,
+        Some("payroll_liabilities"),
+        false
+    ));
+    assert!(!sensitive_offered(AccountKind::Asset, Some("bank"), false));
+    assert!(!sensitive_offered(
+        AccountKind::Liability,
+        Some("credit_card"),
+        false
+    ));
+    assert!(
+        !sensitive_offered(AccountKind::Equity, None, true),
+        "built-in"
+    );
+}

@@ -466,6 +466,13 @@ fn exact_operation(source: Source) -> Option<&'static Operation> {
 /// `Local(BadRange)` for dates the route doesn't take; `Local(Unsupported)`
 /// for a source outside the exact family.
 pub fn adapt_exact(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, ApiError> {
+    let mut table = adapt_exact_table(req, v)?;
+    // U-33: every exact answer may say accounts were left out.
+    table.meta.hidden_notice |= adapters::hidden_notice(v);
+    Ok(table)
+}
+
+fn adapt_exact_table(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, ApiError> {
     use adapters::{categories, ledger, statements};
     match req.source {
         Source::ProfitLoss | Source::BalanceSheet if adapters::columns::is_columns(v) => {

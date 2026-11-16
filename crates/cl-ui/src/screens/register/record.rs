@@ -151,6 +151,9 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
         | ApiError::ClosingPasswordOwnerRequired
         | ApiError::ClosingPasswordRateLimited { .. }
         | ApiError::AccountPasswordRejected
+        // U-33: a refusal of a transaction that uses a hidden account;
+        // nothing was saved and another try is refused the same way.
+        | ApiError::Sensitive(_)
         | ApiError::InexactMoney { .. }
         | ApiError::OfflineUnavailable { .. }
         | ApiError::FeatureNotEnabled { .. }

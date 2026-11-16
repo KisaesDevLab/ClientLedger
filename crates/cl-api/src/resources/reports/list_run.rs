@@ -174,6 +174,13 @@ pub fn query(req: &ReportRequest) -> Result<Vec<(String, String)>, ApiError> {
 /// [`ApiError::ReportShape`] when an exact field is missing;
 /// `Local(Unsupported)` for a source outside the lists.
 pub fn adapt(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, ApiError> {
+    let mut table = adapt_table(req, v)?;
+    // U-33: the converted lists say when accounts were left out.
+    table.meta.hidden_notice |= super::adapters::hidden_notice(v);
+    Ok(table)
+}
+
+fn adapt_table(req: &ReportRequest, v: &serde_json::Value) -> Result<ReportTable, ApiError> {
     match req.source {
         Source::InvoiceList if matches!(req.dates, ReportDates::AsOf(_)) => {
             lists::table(v, req, lists::open_invoices())

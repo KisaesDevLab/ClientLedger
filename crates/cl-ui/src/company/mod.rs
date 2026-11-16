@@ -8,6 +8,8 @@
 //! through [`Task`]; the egui thread never blocks.
 
 pub mod demo;
+// P29: sensitive marks move into the engine on open (U-33).
+pub mod sensitive;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -533,6 +535,10 @@ impl CompanyLink {
 
     /// Keeps new rights and tells the shell (`CompanyEvent::Rights`).
     pub fn set_rights(&self, r: cl_model::permissions::Rights) {
+        // U-33: the demo engine hides what the real one would.
+        if let Some(mut d) = self.demo_state() {
+            d.hides_sensitive = r.hides_sensitive;
+        }
         *self.rights.lock().unwrap_or_else(PoisonError::into_inner) = r.clone();
         self.push(CompanyEvent::Rights(r));
     }

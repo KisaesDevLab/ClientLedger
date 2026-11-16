@@ -116,6 +116,8 @@ impl DemoReportStore {
                 updated_at: Some(DemoState::now()),
                 can_edit: true,
                 missing: Vec::new(),
+                hidden_refs: false,
+                hidden: Vec::new(),
             });
         }
         // Another user's report (A09): the Memorized Reports list shows
@@ -140,6 +142,8 @@ impl DemoReportStore {
                 updated_at: Some(DemoState::now()),
                 can_edit: false,
                 missing: Vec::new(),
+                hidden_refs: false,
+                hidden: Vec::new(),
             });
         }
         // PR-A2 (Q-PRA2c): a builder report grouped by a tag group the
@@ -173,6 +177,8 @@ impl DemoReportStore {
             updated_at: Some(DemoState::now()),
             can_edit: true,
             missing,
+            hidden_refs: false,
+            hidden: Vec::new(),
         });
         // PR-A2 (Q-PRA2c): a standard P&L memorized with a tag filter on a
         // tag the demo deleted; it opens with the message naming the Tags
@@ -199,6 +205,8 @@ impl DemoReportStore {
                 updated_at: Some(DemoState::now()),
                 can_edit: true,
                 missing,
+                hidden_refs: false,
+                hidden: Vec::new(),
             });
         }
         let mut lines = BTreeMap::new();
@@ -399,6 +407,8 @@ pub fn save_definition(
             updated_at: Some(DemoState::now()),
             can_edit: true,
             missing: Vec::new(),
+            hidden_refs: false,
+            hidden: Vec::new(),
         };
         s.definitions.push(row.clone());
         Ok(row)

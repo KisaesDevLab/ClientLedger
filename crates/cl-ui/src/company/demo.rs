@@ -94,6 +94,9 @@ pub struct DemoState {
     pub chart: Option<Vec<cl_api::Account>>,
     /// Accounts marked sensitive in the demo (Q-157).
     pub sensitive: std::collections::BTreeSet<cl_core::ids::AccountId>,
+    /// The signed-in demo user lacks the `sensitive_accounts` right (U-33):
+    /// the demo engine leaves the marked accounts out, as the engine does.
+    pub hides_sensitive: bool,
     /// The open company's clients and vendors as the demo "engine" keeps
     /// them (built on first use from the sample fixture, P11).
     pub contacts: Option<Vec<cl_api::Contact>>,
@@ -285,6 +288,7 @@ impl DemoState {
             open: Some(id(1)),
             chart: None,
             sensitive: std::collections::BTreeSet::new(),
+            hides_sensitive: false,
             contacts: None,
             contact_names: std::collections::BTreeMap::new(),
             merged: Vec::new(),
@@ -333,6 +337,39 @@ impl DemoState {
             units: units::DemoUnits::default(),
             report_store: report_store::DemoReportStore::default(),
         }
+    }
+
+    /// The accounts hidden from the signed-in demo user (U-33): the marked
+    /// accounts and every sub-account under them; empty when the user sees
+    /// them.
+    #[must_use]
+    pub fn hidden_accounts(
+        &self,
+        chart: &[cl_api::Account],
+    ) -> std::collections::BTreeSet<cl_core::ids::AccountId> {
+        let mut out = std::collections::BTreeSet::new();
+        if !self.hides_sensitive {
+            return out;
+        }
+        out.extend(self.sensitive.iter().copied());
+        loop {
+            let before = out.len();
+            for a in chart {
+                if a.fields.parent_id.is_some_and(|p| out.contains(&p)) {
+                    out.insert(a.id);
+                }
+            }
+            if out.len() == before {
+                return out;
+            }
+        }
+    }
+
+    /// The engine's `hiddenNotice`: the user lacks the right and something
+    /// is marked (Q-P29b).
+    #[must_use]
+    pub fn hidden_notice(&self) -> bool {
+        self.hides_sensitive && !self.sensitive.is_empty()
     }
 
     /// The story date of the mockups.
@@ -668,6 +705,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 created_at: Some(DemoState::now()),
                 updated_at: Some(DemoState::now()),
                 card_last4: None,
+                is_sensitive: false,
             }
         })
         .collect()

@@ -560,9 +560,11 @@ impl RegisterScreen {
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            return crate::company::demo::register::page(
+            let hidden = demo.hidden_accounts(&chart);
+            return crate::company::demo::register::page_hiding(
                 &demo.ledger,
                 &chart,
+                &hidden,
                 account,
                 query,
                 page,

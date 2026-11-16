@@ -203,6 +203,10 @@ fn head_lines(w: &ReportWindow, source: &cl_core::report::ReportTable) -> (Strin
     if let Some(note) = &source.meta.note {
         head.push(super::label(note));
     }
+    // U-33: every file says amounts are hidden, as the screen does.
+    if source.meta.hidden_notice {
+        head.push(t("sensitive.notice"));
+    }
     if let Some(n) = source.meta.truncated {
         head.push(t_with(
             "reports.truncated",

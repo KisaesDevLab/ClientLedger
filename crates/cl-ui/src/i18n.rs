@@ -159,11 +159,14 @@ mod reports_transfer;
 mod audit;
 // P29: sign-in, recovery, Users and Roles.
 mod auth;
+// P29: sensitive accounts (U-33).
+mod sensitive;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 57] = [
+const TABLES: [&[(&str, &str)]; 58] = [
     audit::ENGLISH,
     auth::ENGLISH,
+    sensitive::ENGLISH,
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,

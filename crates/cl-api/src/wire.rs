@@ -54,8 +54,14 @@ impl Capabilities {
     /// U-32 checked sub-accounts (same type, no cycles) and an engine
     /// subtree balance.
     pub const ACCOUNT_TREE: &'static str = "account-tree-v1";
-    /// U-33 per-account sensitive flag stored and enforced by the engine.
-    pub const ACCOUNT_SENSITIVE: &'static str = "account-sensitive-v1";
+    /// U-33 per-account sensitive flag stored and enforced by the engine
+    /// (`PUT /accounts/:id/sensitive`, `isSensitive`, `hiddenNotice`,
+    /// `hiddenSplit`, 403 `SENSITIVE_ACCOUNT` / `SENSITIVE_HIDDEN`).
+    pub const ACCOUNT_SENSITIVE: &'static str = "sensitive-accounts-v1";
+    /// U-33 part 2: the Report Builder, saved reports (`hiddenRefs`,
+    /// `hidden`, 403 `SENSITIVE_DEFINITION`), report files and AI draft
+    /// leave hidden accounts out instead of refusing.
+    pub const SENSITIVE_BUILDER: &'static str = "sensitive-accounts-builder-v1";
     /// U-34 masked bank/card number with an audited Admin reveal.
     pub const ACCOUNT_MASKED_NUMBER: &'static str = "account-masked-number-v1";
     /// U-35 projects under a client (status, type, start and end dates).

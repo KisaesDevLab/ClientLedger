@@ -225,6 +225,7 @@ pub fn set_entity_type(state: &mut DemoState, entity: EntityType) {
             created_at: Some(DemoState::now()),
             updated_at: Some(DemoState::now()),
             card_last4: None,
+            is_sensitive: false,
         });
     }
 }

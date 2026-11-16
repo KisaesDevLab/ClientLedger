@@ -72,6 +72,47 @@ pub struct DefinitionRow {
     /// `report-refs-v1`; Q-PRA2c). Empty: every name is there.
     #[serde(default)]
     pub missing: Vec<MissingRef>,
+    /// It names an account hidden for this role (U-33 part 2,
+    /// `sensitive-accounts-builder-v1`; Q-309): read-only for this user,
+    /// who can still run it by id. `false` when absent.
+    #[serde(default)]
+    pub hidden_refs: bool,
+    /// Where it names hidden accounts (`{path, nodeId, field, kind, ids}`;
+    /// never a name). Empty when nothing is hidden.
+    #[serde(default)]
+    pub hidden: Vec<HiddenRef>,
+}
+
+/// A place a saved report names an account hidden for this role (U-33).
+/// `Debug` shows its kind and field only.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HiddenRef {
+    /// Where in the definition.
+    #[serde(default)]
+    pub path: String,
+    /// The builder row (`None`: a standard report's option).
+    #[serde(default)]
+    pub node_id: Option<String>,
+    /// The filter field.
+    #[serde(default)]
+    pub field: String,
+    /// `account`.
+    #[serde(default)]
+    pub kind: String,
+    /// The hidden ids.
+    #[serde(default)]
+    pub ids: Vec<String>,
+}
+
+impl std::fmt::Debug for HiddenRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiddenRef")
+            .field("kind", &self.kind)
+            .field("field", &self.field)
+            .field("ids", &self.ids.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// The name a missing reference was merged into.
@@ -225,6 +266,9 @@ pub enum DefinitionRefusal {
     },
     /// Over 64 KB (413 `DEFINITION_TOO_LARGE`).
     TooLarge,
+    /// It names an account hidden for this role, so this user can't
+    /// change or delete it (403 `SENSITIVE_DEFINITION`, U-33, Q-309).
+    Hidden,
 }
 
 /// The memorized-report refusal in `e`, if it is one.
@@ -256,6 +300,7 @@ pub fn definition_refusal(e: &ApiError) -> Option<DefinitionRefusal> {
         "NAME_TAKEN" => DefinitionRefusal::NameTaken,
         "NOT_AUTHOR" => DefinitionRefusal::NotAuthor,
         "DEFINITION_TOO_LARGE" => DefinitionRefusal::TooLarge,
+        crate::errors::SENSITIVE_DEFINITION => DefinitionRefusal::Hidden,
         _ => return None,
     })
 }

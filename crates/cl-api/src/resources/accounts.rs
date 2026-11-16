@@ -142,6 +142,11 @@ pub struct Account {
     /// (`document-drafts-v1`; `None` without it or when not set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card_last4: Option<CardLast4>,
+    /// Marked sensitive by the Admin (U-33, `sensitive-accounts-v1`;
+    /// `false` without it). Changed only through
+    /// [`Accounts::set_sensitive`], never by an account save.
+    #[serde(default, deserialize_with = "null_false")]
+    pub is_sensitive: bool,
 }
 
 /// The last four digits of a payment card (`"1234"`). `Debug` never shows
@@ -407,6 +412,44 @@ impl Accounts<'_> {
             key,
         )
         .await
+    }
+
+    /// Marks (`on`) or unmarks an account sensitive (U-33, `PUT
+    /// /accounts/{id}/sensitive`). Admin only; idempotent on the engine.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `sensitive-accounts-v1` (nothing
+    /// sent); `Validation` with code `SENSITIVE_NOT_ALLOWED` for a bank,
+    /// credit card or built-in account or a parent of one
+    /// ([`crate::is_sensitive_not_allowed`]); `Forbidden` for a non-Admin;
+    /// `NotFound`; any [`ApiError`].
+    pub async fn set_sensitive(
+        &self,
+        id: AccountId,
+        on: bool,
+        key: IdempotencyKey,
+    ) -> Result<Account, ApiError> {
+        use crate::resources::operations::ACCOUNT_SENSITIVE_PUT;
+        if !self
+            .0
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::ACCOUNT_SENSITIVE)
+        {
+            return Err(ApiError::Local(crate::errors::LocalValidation::Unsupported));
+        }
+        let body = serde_json::json!({ "isSensitive": on });
+        let mut call = crate::client::Call::new(
+            crate::client::Method::Put,
+            ACCOUNT_SENSITIVE_PUT.route(),
+            format!("/api/v1/accounts/{id}/sensitive"),
+        )
+        .json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&ACCOUNT_SENSITIVE_PUT, call, None).await?;
+        let v: Value = crate::session::decode(&reply, "account")?;
+        serde_json::from_value(v.get("account").cloned().unwrap_or(Value::Null))
+            .map_err(|_| ApiError::SavedUnreadable { what: "account" })
     }
 
     /// Deactivates an account (`DELETE`; refused while it has a balance).

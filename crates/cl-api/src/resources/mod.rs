@@ -77,4 +77,6 @@ pub mod versioning;
 #[cfg(test)]
 mod journal_tests;
 #[cfg(test)]
+mod sensitive_tests;
+#[cfg(test)]
 pub(crate) mod testkit;
