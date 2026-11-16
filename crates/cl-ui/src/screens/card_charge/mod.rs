@@ -107,6 +107,8 @@ pub struct CardChargeScreen {
     pub(crate) inputs: Inputs,
     pub(crate) flow: SaveFlow,
     pub(crate) problems: Vec<CardProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
     /// The lists are being read again while the form has unsaved edits:
@@ -171,6 +173,7 @@ impl CardChargeScreen {
             },
             flow: SaveFlow::default(),
             problems: Vec::new(),
+            tag_refusal: Vec::new(),
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             lists_keep_inputs: false,
@@ -252,6 +255,17 @@ impl CardChargeScreen {
                 f.card = Some(card);
                 self.header.load(f);
                 self.balances.fetch(&self.link, self.group.as_ref(), card);
+            }
+            if let Some(tags) = kit::default_header_tags(
+                &self.flow,
+                &self.books.tag_list,
+                self.header.is_dirty(),
+                &self.header.current().header_tags,
+            ) {
+                // Part of the blank form, like the starting card.
+                let mut f = self.header.current().clone();
+                f.header_tags = tags;
+                self.header.load(f);
             }
         }
         self.balances.poll();
@@ -652,6 +666,7 @@ impl CardChargeScreen {
         }
         self.left_lines();
         self.problems.clear();
+        self.tag_refusal.clear();
         self.flow.reset_messages();
         // A file still being read, sent or listed would be left in its
         // draft (review B2): the owner saves once it is attached. Checked
@@ -677,6 +692,11 @@ impl CardChargeScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&form) {
+            self.tag_refusal = texts;
+            return false;
+        }
         // A04 draft mode: Accept is the convert, never a plain posting.
         if self.draft.on() {
             return self.accept_draft(&checked, intent, password);
@@ -871,7 +891,9 @@ impl CardChargeScreen {
         };
         let mut f = CardForm::new(current.card, Some(date));
         f.mode = current.mode;
+        f.header_tags = cl_model::forms::tag_rule::new_form_header_tags(&self.books.tag_list);
         self.header.load(f);
+        self.tag_refusal.clear();
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
@@ -1319,11 +1341,12 @@ impl CardChargeScreen {
                 }
             }
         };
-        let texts: Vec<String> = self
+        let mut texts: Vec<String> = self
             .problems
             .iter()
             .map(|p| crate::forms::line_problem_text(p.row(), p.key().0, position))
             .collect();
+        texts.extend(self.tag_refusal.iter().cloned());
         kit::problem_texts(ui, tokens, &texts);
         if let Some(ev) = kit::status(
             ui,
@@ -1650,6 +1673,7 @@ impl CardChargeScreen {
             "save": {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
+                "tag_refusal": self.tag_refusal,
             },
             "grid": {
                 "focused": self.lines.has_focus(),
@@ -1876,9 +1900,24 @@ impl RecordForm for CardChargeScreen {
 }
 
 impl CardChargeScreen {
+    /// The tag rules on the form as composed (P29 WP7, Q-276).
+    pub(crate) fn tag_gate(&self, form: &CardForm) -> Result<(), Vec<String>> {
+        let lines = cl_model::forms::tag_rule::tabbed_lines(
+            &form.header_tags,
+            &form.lines,
+            &form.items,
+            &self.books.tag_list,
+        );
+        crate::forms::tag_gate::check(&self.books.tag_list, &lines, &self.books.accounts)
+    }
+
     /// A refused save's problems, checked again against the form as it is
     /// now (a fixed problem goes away at once, P13).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.problems.is_empty() {
             return;
         }

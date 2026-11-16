@@ -692,6 +692,7 @@ impl DailySalesScreen {
         for p in &self.save.problems {
             ui.add(egui::Label::new(RichText::new(t(p.key())).color(tokens.warn_text)).wrap());
         }
+        crate::forms::tag_gate::show(ui, tokens, &self.save.tag_refusal);
         if let Some(e) = &self.save.error {
             form::inline_error(ui, tokens, e);
         }

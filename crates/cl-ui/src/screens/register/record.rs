@@ -511,6 +511,38 @@ impl RegisterScreen {
             .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))
     }
 
+    /// The tag rules' refusals for the lines an entry posts, as text keys
+    /// (P29 WP7). One message per kind of problem; the register shows the
+    /// entry row, so no line number is needed for a single line.
+    fn tag_problems(&self, lines: &[PLine]) -> Vec<TextKey> {
+        use cl_model::forms::tag_rule::{Place, TagLine, check_form_tags};
+        use cl_model::lists::tags::{LineTagProblem, TagList};
+        let list = TagList::for_forms(self.lists.tag_entries().to_vec(), self.link.tag_rules());
+        let tagged: Vec<TagLine> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| TagLine {
+                place: Place::Line(i),
+                account: Some(l.account),
+                tags: l.tag.into_iter().collect(),
+            })
+            .collect();
+        let Err(r) = check_form_tags(&list, &tagged, |a| self.lists.kind(a)) else {
+            return Vec::new();
+        };
+        let mut keys = Vec::new();
+        for (_, p) in r.lines {
+            let k = match p {
+                LineTagProblem::RequiredMissing(_) => TextKey("tags.line.required_missing_any"),
+                other => other.key(),
+            };
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+        keys
+    }
+
     /// The draft (and the Splits lines) as a posting, or the problems and
     /// the column to put the keyboard in.
     fn prepare(
@@ -634,6 +666,13 @@ impl RegisterScreen {
         {
             problems.push((TextKey("register.splits.customer_deposits_only"), E_ACCOUNT));
         }
+        // P29 WP7: the company's tag rules (Q-276, Q-180) on every line the
+        // entry posts (the Splits lines, or the one line).
+        problems.extend(
+            self.tag_problems(&p.lines)
+                .into_iter()
+                .map(|k| (k, E_ACCOUNT)),
+        );
         if problems.is_empty() {
             Ok(p)
         } else {

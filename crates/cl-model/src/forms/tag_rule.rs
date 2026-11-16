@@ -154,6 +154,23 @@ pub fn tabbed_lines(
     out
 }
 
+/// An invoice's, sales receipt's or credit memo's used lines with the tag
+/// each is saved with (one grid; an item line without its own account
+/// skips the required groups).
+#[must_use]
+pub fn invoice_lines(form: &crate::forms::invoice::InvoiceForm, list: &TagList) -> Vec<TagLine> {
+    form.lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.is_blank())
+        .map(|(i, l)| TagLine {
+            place: Place::Line(i),
+            account: l.account,
+            tags: one(line_tag_default(&form.header_tags, l.tag, list)),
+        })
+        .collect()
+}
+
 /// Every posting form and entry path, for the test that keeps the gate
 /// complete: a new posting form must say whether it carries line tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

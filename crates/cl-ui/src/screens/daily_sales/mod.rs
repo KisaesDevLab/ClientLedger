@@ -536,6 +536,8 @@ pub(crate) struct SaveState {
     pub intent: Option<cl_model::forms::SaveIntent>,
     pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
     pub problems: Vec<DailyProblem>,
+    /// P29 WP7: what the tag rules refused, in words (Q-276).
+    pub tag_refusal: Vec<String>,
     pub error: Option<ApiError>,
     /// A plain note under the toolbar (i18n key).
     pub notice: Option<&'static str>,

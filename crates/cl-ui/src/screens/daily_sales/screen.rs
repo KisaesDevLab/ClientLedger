@@ -54,6 +54,19 @@ impl DailySalesScreen {
             self.tags_task = None;
             if let Ok(tags) = r {
                 self.tags = tags;
+                // Q-276: a new, untouched day starts with the default tag.
+                let default =
+                    crate::forms::tag_gate::form_list(&self.tags, &self.link).default_tag();
+                if let Some(d) = default.filter(|_| {
+                    self.saved.is_none()
+                        && self.save.count == 0
+                        && !self.header.is_dirty()
+                        && self.header.current().tag.is_none()
+                }) {
+                    let mut f = self.header.current().clone();
+                    f.tag = Some(d);
+                    self.header.load(f);
+                }
             }
         }
         if let Some(r) = self.settings_task.as_mut().and_then(Task::try_take) {
@@ -343,6 +356,7 @@ impl DailySalesScreen {
             "save": {
                 "refused": self.save.problems.first().map(|p| p.code()),
                 "problems": self.save.problems.len(),
+            "tag_refusal": self.save.tag_refusal,
                 "error": self.save.error.is_some(),
             },
             "last_action": self.save.last_action,

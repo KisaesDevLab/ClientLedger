@@ -72,6 +72,8 @@ pub enum Category {
     SalesTax,
     /// Inventory on/off.
     Inventory,
+    /// Tag options (P29 WP7, Q-276), Admin only.
+    Tags,
     /// The AI panel.
     Ai,
     /// Reading documents with an online service (A03, Q-A03k).
@@ -89,7 +91,7 @@ pub enum Category {
 
 impl Category {
     /// Every category in list order.
-    pub const ALL: [Category; 13] = [
+    pub const ALL: [Category; 14] = [
         Category::LookAndFeel,
         Category::DatesNumbers,
         Category::Reminders,
@@ -97,6 +99,7 @@ impl Category {
         Category::ChecksForms,
         Category::SalesTax,
         Category::Inventory,
+        Category::Tags,
         Category::Ai,
         Category::AiCloudReading,
         Category::Email,
@@ -125,6 +128,7 @@ impl Category {
             Category::ChecksForms => "prefs.cat.checks",
             Category::SalesTax => "prefs.cat.sales_tax",
             Category::Inventory => "prefs.cat.inventory",
+            Category::Tags => "prefs.cat.tags",
             Category::Ai => "prefs.cat.ai",
             Category::AiCloudReading => "prefs.cat.cloud_reading",
             Category::Email => "prefs.cat.email",
@@ -145,6 +149,7 @@ impl Category {
             Category::ChecksForms => "checks",
             Category::SalesTax => "sales_tax",
             Category::Inventory => "inventory",
+            Category::Tags => "tags",
             Category::Ai => "ai",
             Category::AiCloudReading => "ai_cloud_reading",
             Category::Email => "email",
@@ -164,6 +169,7 @@ impl Category {
             Category::ChecksForms => "check number print form",
             Category::SalesTax => "tax rate finance charge interest late overdue",
             Category::Inventory => "stock items cost",
+            Category::Tags => "tag tags every line default required class",
             Category::Ai => "ai anthropic openai ollama key suggestions cap usage",
             Category::AiCloudReading => {
                 "ai online cloud document reading text pictures images consent anthropic openai"
@@ -206,6 +212,8 @@ pub struct Loaded {
     pub incomes: Vec<(cl_core::ids::AccountId, String)>,
     /// Active expense accounts (write-off and bank-fee pickers, P21).
     pub expenses: Vec<(cl_core::ids::AccountId, String)>,
+    /// P29 WP7: the active tags (the default-tag picker).
+    pub tags: Vec<(cl_core::ids::TagId, String)>,
     /// P23: the active sales taxes and groups (the default picker), with
     /// their rates as owners read them.
     pub sales_taxes: Vec<(cl_core::ids::SalesTaxItemId, String)>,
@@ -223,6 +231,7 @@ impl std::fmt::Debug for Loaded {
             .field("usage", &self.usage.is_some())
             .field("incomes", &self.incomes.len())
             .field("expenses", &self.expenses.len())
+            .field("tags", &self.tags.len())
             .field("sales_taxes", &self.sales_taxes.len())
             .field("done", &self.done)
             .finish()
@@ -533,6 +542,11 @@ impl PreferencesScreen {
                 s.sales_tax_ssuta = Some(st.ssuta);
             }
             loaded.sales_taxes = company::sales_tax_choices(&taxes);
+            loaded.tags = self
+                .link
+                .demo_state()
+                .map(|mut d| tag_choices(d.tags_mut()))
+                .unwrap_or_default();
             self.apply_loaded(loaded);
             return;
         }
@@ -554,6 +568,12 @@ impl PreferencesScreen {
                     .items(false)
                     .await
                     .map(|v| company::sales_tax_choices(&v))
+                    .unwrap_or_default(),
+                tags: s
+                    .tags()
+                    .list_all(&cl_api::TagFilter::default())
+                    .await
+                    .map(|v| tag_choices(&v))
                     .unwrap_or_default(),
                 done: true,
             };
@@ -883,6 +903,16 @@ impl PreferencesScreen {
         // in this same save goes after the consent, so it stands.
         after.cloud_reading = self.committed.cloud_reading;
         self.cloud_sent = cloud_put.is_some().then_some(edits.cloud_reading);
+        // Q-P29q: the tag options change is recorded in the app log, ids only.
+        if edits.company.require_tag_every_line != self.committed.company.require_tag_every_line
+            || edits.company.default_tag != self.committed.company.default_tag
+        {
+            tracing::info!(
+                every_line = edits.company.require_tag_every_line,
+                default_tag = ?edits.company.default_tag,
+                "company tag options changed"
+            );
+        }
         if let Some(mut demo) = self.link.demo_state() {
             // The demo engine keeps the AI switches Write Check reads, and
             // the document switches by the engine's rules.
@@ -892,6 +922,9 @@ impl PreferencesScreen {
                 None,
                 edits.ai.enabled,
             );
+            // P29 WP7: the demo company keeps its tag options.
+            demo.require_tag_every_line = edits.company.require_tag_every_line;
+            demo.default_tag = edits.company.default_tag;
             demo.ai = crate::company::demo::DemoAi {
                 enabled: edits.ai.enabled,
                 categorization: edits.ai.bank_feed,
@@ -1273,6 +1306,10 @@ impl PreferencesScreen {
             Category::Reminders => user::reminders(ui, tokens, &mut self.edits),
             Category::Accounting => company::accounting(ui, tokens, &mut self.edits, &self.loaded),
             Category::ChecksForms => company::checks_forms(ui, tokens),
+            Category::Tags => {
+                let admin = self.link.rights().is_admin();
+                company::tags(ui, tokens, &mut self.edits, &self.loaded.tags, admin);
+            }
             Category::SalesTax => {
                 if self.link.is_demo()
                     || self
@@ -1720,6 +1757,15 @@ static REQUESTED: std::sync::Mutex<Option<Category>> = std::sync::Mutex::new(Non
 
 /// Show `category` when Preferences opens next, or at once when it is
 /// already open (the caller then opens or brings forward the window).
+/// The active tags as the default-tag picker lists them.
+fn tag_choices(tags: &[cl_api::Tag]) -> Vec<(cl_core::ids::TagId, String)> {
+    crate::tag_names::sorted(tags)
+        .into_iter()
+        .filter(|t| t.is_active)
+        .map(|t| (t.id, crate::tag_names::entry(t).label()))
+        .collect()
+}
+
 pub fn open_at(category: Category) {
     *REQUESTED
         .lock()

@@ -176,6 +176,8 @@ pub struct JournalScreen {
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
     pub(crate) problems: Vec<JournalProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
     pub(crate) stale: bool,
@@ -274,6 +276,7 @@ impl JournalScreen {
             intent: None,
             key: None,
             problems: Vec::new(),
+            tag_refusal: Vec::new(),
             error: None,
             notice: None,
             stale: false,
@@ -813,6 +816,7 @@ impl JournalScreen {
             "save": {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
+                "tag_refusal": self.tag_refusal,
                 "error": self.error.is_some(),
                 "stale": self.stale,
             },
@@ -852,9 +856,24 @@ impl JournalScreen {
         v
     }
 
+    /// The tag rules on the entry's lines (P29 WP7, Q-276). A journal
+    /// entry has no header tag.
+    pub(crate) fn tag_gate(
+        &self,
+        form: &cl_model::forms::journal::JournalForm,
+    ) -> Result<(), Vec<String>> {
+        let lines =
+            cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &self.books.tag_list, false);
+        crate::forms::tag_gate::check(&self.books.tag_list, &lines, &self.books.accounts)
+    }
+
     /// A refused save's problems, checked again against the form as it is
     /// now (a fixed problem goes away at once, P13).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.problems.is_empty() {
             return;
         }

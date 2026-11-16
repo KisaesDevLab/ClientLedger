@@ -165,6 +165,7 @@ impl InvoiceScreen {
             return false;
         }
         self.problems.clear();
+        self.tag_refusal.clear();
         self.error = None;
         self.notice = None;
         self.stale = false;
@@ -175,6 +176,11 @@ impl InvoiceScreen {
         let Some(req) = check_or_refuse(self) else {
             return false;
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&self.compose()) {
+            self.tag_refusal = texts;
+            return false;
+        }
         self.inventory_note = None;
         if let Some(text) = self.inventory_closed(&req) {
             self.inventory_note = Some(text);

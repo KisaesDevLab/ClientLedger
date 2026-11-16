@@ -307,6 +307,22 @@ pub(crate) fn refusal_key(r: &FeedRefusal) -> &'static str {
     }
 }
 
+/// P29 WP7: the owner's values would post a line without a tag while the
+/// company asks for one on every line.
+fn needs_tag(s: &BankFeedScreen, id: FeedItemId, c: &cl_api::FeedChoice) -> bool {
+    if !s.link.tag_rules().every_line {
+        return false;
+    }
+    let row_tag = s
+        .row(id)
+        .is_some_and(|r| r.assigned_tag.is_some() || r.suggested_tag.is_some());
+    if c.splits.is_empty() {
+        c.tag.is_none() && !row_tag
+    } else {
+        c.splits.iter().any(|l| l.tag.is_none()) && c.tag.is_none()
+    }
+}
+
 /// The row an action is about (for the stale list).
 fn row_of(send: &Send) -> Option<FeedItemId> {
     match send {
@@ -381,6 +397,15 @@ pub(crate) fn fold_single_for_tests(
 )]
 pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>) {
     if s.view_only || s.act.is_some() {
+        return;
+    }
+    // P29 WP7 (Q-276): with "tag on every line" on, the owner's values
+    // need a tag (theirs, or the one the row already carries). Required
+    // tag groups are left to the forms: the feed reads no tag groups.
+    if let Send::Categorize(id, Some(c)) = &send
+        && needs_tag(s, *id, c)
+    {
+        s.notice = Some(("bank_feed.notice.tag_needed", 1));
         return;
     }
     // PR-5: a line already in the books, or an Undo of a ticked entry,

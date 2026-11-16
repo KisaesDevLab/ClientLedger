@@ -208,6 +208,7 @@ impl JournalScreen {
         self.totals_ui(ui, tokens, enabled);
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
+        kit::problem_texts(ui, tokens, &self.tag_refusal);
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }

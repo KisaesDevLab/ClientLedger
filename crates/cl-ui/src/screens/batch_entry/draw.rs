@@ -391,6 +391,7 @@ impl BulkEntryScreen {
         } else if let Some(b) = self.refused {
             ui.label(RichText::new(blocker_text(b)).color(tokens.warn_text));
         }
+        crate::forms::tag_gate::show(ui, tokens, &self.tag_refusal);
         let locked = self.batch().locked_rows(closing).len();
         if locked > 0 {
             form::hint(

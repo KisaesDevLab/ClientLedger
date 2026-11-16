@@ -149,6 +149,8 @@ pub struct BulkEntryScreen {
     // ------------------------------------------------------------ save (D3)
     /// Why the last Save all was refused.
     pub(crate) refused: Option<cl_model::forms::batch::Blocker>,
+    /// P29 WP7: the rows the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     /// Save all waits for the rows being checked.
     pub(crate) save_after_check: Option<cl_model::forms::SaveIntent>,
     pub(crate) save_task: Option<save::Saving>,
@@ -269,6 +271,7 @@ impl BulkEntryScreen {
             pasted_rows: 0,
             suggest: suggest::BatchSuggest::default(),
             refused: None,
+            tag_refusal: Vec::new(),
             save_after_check: None,
             save_task: None,
             key: None,
@@ -612,6 +615,7 @@ impl BulkEntryScreen {
             })),
             "confirm_remove": self.confirm_remove.is_some(),
             "refused": self.refused.map(validate::blocker_name),
+            "tag_refusal": self.tag_refusal,
             "summary": if self.summary_open { self.summary.as_ref().map(summary::Summary::state_json) } else { None },
             "mapping": self.mapping_json(),
             "import_open": self.import_open,

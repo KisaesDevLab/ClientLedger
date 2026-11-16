@@ -448,6 +448,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         consent,
         smtp: None,
         usage: Some(usage),
+        tags: Vec::new(),
         // The chart's own names (4000 is "Service Income" there).
         incomes: vec![
             named(&accounts, 4000, "Service Income"),

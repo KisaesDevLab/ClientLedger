@@ -59,6 +59,8 @@ pub(crate) struct Books {
     pub tags: Vec<Tag>,
     pub lists: Arc<RegisterLists>,
     pub tag_list: TagList,
+    /// The company's tag rules (Q-180, Q-276), read when the books start.
+    pub tag_rules: cl_model::lists::tags::TagRules,
     pub closing: Option<CalendarDate>,
     /// The legal form (`None`: unknown; the defaults then fall back).
     pub entity: Option<Entity>,
@@ -115,17 +117,33 @@ pub(crate) fn demo_roles(
         .collect()
 }
 
-/// The tag list `check` needs for the header-tag defaults.
-pub(crate) fn tag_list(tags: &[Tag]) -> TagList {
-    TagList::new(
-        Vec::new(),
+/// The tag list `check` and the tag gate need: the tags with the
+/// company's rules (P29 WP7).
+pub(crate) fn tag_list(tags: &[Tag], rules: &cl_model::lists::tags::TagRules) -> TagList {
+    TagList::for_forms(
         tags.iter().map(crate::tag_names::entry).collect(),
+        rules.clone(),
     )
+}
+
+/// Q-276 (P29 WP7): the header tags an untouched new form starts with,
+/// when it should take the company's default now; `None` for an edit, a
+/// form saved in this window, one the owner touched, or one with tags.
+pub(crate) fn default_header_tags(
+    flow: &SaveFlow,
+    tag_list: &TagList,
+    dirty: bool,
+    current: &[cl_core::ids::TagId],
+) -> Option<Vec<cl_core::ids::TagId>> {
+    let tags = cl_model::forms::tag_rule::new_form_header_tags(tag_list);
+    (!tags.is_empty() && flow.editing.is_none() && flow.count == 0 && !dirty && current.is_empty())
+        .then_some(tags)
 }
 
 impl Books {
     /// Starts reading everything (the demo answers at once).
     pub(crate) fn start(&mut self, link: &CompanyLink, group: Option<&RequestGroup>) {
+        self.tag_rules = link.tag_rules();
         if let Some(mut demo) = link.demo_state() {
             // The roles first: the demo engine may seed role accounts.
             let demo_equity = crate::company::demo::money::equity_roles(&mut demo);
@@ -251,7 +269,7 @@ impl Books {
             lists.set_contacts(&self.contacts);
             lists.set_tags(&self.tags);
             self.lists = Arc::new(lists);
-            self.tag_list = tag_list(&self.tags);
+            self.tag_list = tag_list(&self.tags, &self.tag_rules);
         }
         changed
     }

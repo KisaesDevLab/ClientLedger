@@ -613,6 +613,7 @@ impl DepositScreen {
         for p in &self.save.problems {
             ui.add(egui::Label::new(RichText::new(t(p.key().0)).color(tokens.warn_text)).wrap());
         }
+        crate::forms::tag_gate::show(ui, tokens, &self.save.tag_refusal);
         if self.save.stale {
             let mut reload = false;
             ui.horizontal_wrapped(|ui| {
