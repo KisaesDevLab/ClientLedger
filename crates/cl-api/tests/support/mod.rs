@@ -597,10 +597,17 @@ impl Harness {
                 .as_str()
                 .expect("temporary password")
                 .to_string();
-            let bk = match self.run(self.client.login(&email, &Secret::new(pw))) {
+            let temp = Secret::new(pw);
+            let bk = match self.run(self.client.login(&email, &temp)) {
                 Ok(LoginOutcome::Session(b)) => b,
                 other => panic!("bookkeeper login: {other:?}"),
             };
+            // U-230: a desktop invite's temporary password must be changed
+            // before anything else works.
+            if bk.password_change_required() {
+                self.run(bk.change_password(&temp, &Secret::new("synthetic-bookkeeper-pw1")))
+                    .unwrap_or_else(|e| panic!("bookkeeper new password: {e}"));
+            }
             self.run(bk.open_company(self.contract_co))
                 .unwrap_or_else(|e| panic!("bookkeeper opens: {e}"));
             (user, bk)

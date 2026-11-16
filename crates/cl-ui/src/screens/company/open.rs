@@ -90,8 +90,8 @@ pub struct OpenCompanyScreen {
     opening_role: Option<String>,
     /// P29 WP2: the sign-in form (moved to `screens::login`).
     signin: crate::screens::login::SignInPanel,
-    /// P29 WP2: `Forgot password?` was chosen.
-    forgot_open: bool,
+    /// P29 WP4: `Forgot password?`: the recovery form.
+    recovery: Option<crate::screens::recovery::RecoveryPanel>,
 }
 
 #[derive(Clone, Debug)]
@@ -165,7 +165,7 @@ impl OpenCompanyScreen {
             practice_pending: false,
             opening_role: None,
             signin,
-            forgot_open: false,
+            recovery: None,
         }
     }
 
@@ -722,18 +722,35 @@ impl OpenCompanyScreen {
                 self.link.push(CompanyEvent::SignedIn { user: name });
                 self.stage = Stage::Ready;
                 self.loaded_once = false;
-                self.forgot_open = false;
+                self.recovery = None;
                 self.error = None;
                 self.notice = None;
             }
-            Some(SignInEvent::Forgot) => self.forgot_open = true,
+            Some(SignInEvent::Forgot) => {
+                self.recovery = Some(crate::screens::recovery::RecoveryPanel::new(
+                    Arc::clone(&self.link),
+                    &self.signin.email,
+                ));
+            }
             None => {}
         }
-        if self.forgot_open {
-            ui.add_space(8.0);
-            form::card(ui, tokens, |ui| {
-                form::hint(ui, tokens, &t("login.forgot_hint"));
-            });
+    }
+
+    /// Forgot password? (P29 WP4): the recovery form in place of sign-in.
+    fn recovery_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        use crate::screens::recovery::RecoveryEvent;
+        let Some(panel) = self.recovery.as_mut() else {
+            return;
+        };
+        match panel.ui(ui, tokens) {
+            Some(RecoveryEvent::Recovered(email)) => {
+                self.recovery = None;
+                self.signin = crate::screens::login::SignInPanel::new(Arc::clone(&self.link));
+                self.signin.email = email;
+                self.notice = Some(t("reset.done"));
+            }
+            Some(RecoveryEvent::Cancel) => self.recovery = None,
+            None => {}
         }
     }
     fn restore_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -1022,6 +1039,9 @@ impl OpenCompanyScreen {
                                 form::hint(ui, &tokens, &t("open.engine_not_ready"));
                             }
                             Stage::FirstRun => self.setup_panel(ui, &tokens),
+                            Stage::SignIn if self.recovery.is_some() => {
+                                self.recovery_panel(ui, &tokens);
+                            }
                             Stage::SignIn => self.signin_panel(ui, &tokens),
                             Stage::Ready => {}
                         }
@@ -1056,7 +1076,8 @@ impl OpenCompanyScreen {
             "practice_pending": self.practice_pending,
             "signin_message": self.signin.message(),
             "must_change": self.signin.must_change(),
-            "forgot_open": self.forgot_open,
+            "forgot_open": self.recovery.is_some(),
+            "recovery_message": self.recovery.as_ref().and_then(crate::screens::recovery::RecoveryPanel::message),
         })
     }
 }

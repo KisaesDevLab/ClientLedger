@@ -91,6 +91,17 @@ impl RecoveryKeyScreen {
     /// Makes a new key on the owner's explicit request; the old key stops
     /// working the moment the engine answers.
     fn rotate(&mut self) {
+        // P29 WP4: the demo makes its next synthetic key (the old one stops
+        // working, as on the engine).
+        let demo = self.link.demo_state().map(|mut d| d.auth.rotate());
+        if let Some(key) = demo {
+            self.revealed = false;
+            self.confirmed = false;
+            self.saved_to = None;
+            self.copied = false;
+            self.task = Some(Task::ready(Ok(key)));
+            return;
+        }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };

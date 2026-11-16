@@ -13,6 +13,7 @@ mod common;
 mod contract_accounts;
 mod contract_ap_void;
 mod contract_audit;
+mod contract_auth;
 mod contract_bank_import;
 mod contract_bank_postings;
 mod contract_batch;
@@ -1326,6 +1327,18 @@ fn main() -> std::process::ExitCode {
         (
             "rights::ap_hidden_reports_are_refused",
             contract_rights::ap_hidden_reports_are_refused,
+        ),
+        (
+            "auth::temporary_password_must_be_changed",
+            contract_auth::temporary_password_must_be_changed,
+        ),
+        (
+            "auth::five_wrong_passwords_lock_until_unlocked",
+            contract_auth::five_wrong_passwords_lock_until_unlocked,
+        ),
+        (
+            "auth::recovery_key_works_once",
+            contract_auth::recovery_key_works_once,
         ),
         (
             "closing_admin::bookkeeper_cannot_move_the_closing_date",

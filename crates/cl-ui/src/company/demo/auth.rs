@@ -15,7 +15,7 @@ pub const OWNER_EMAIL: &str = "owner@example.com";
 /// The demo owner's password (synthetic).
 pub const OWNER_PASSWORD: &str = "demo-password-1";
 /// The demo recovery key at start (synthetic).
-pub const RECOVERY_KEY: &str = "DEM2K-EY234-ABCDE-FGHJK-LMNPQ";
+pub const RECOVERY_KEY: &str = super::DEMO_RECOVERY_KEY;
 /// The key a demo recovery hands out next (synthetic).
 pub const NEXT_RECOVERY_KEY: &str = "NEW2K-EY567-ABCDE-FGHJK-LMNPQ";
 
