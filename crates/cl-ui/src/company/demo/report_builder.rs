@@ -642,10 +642,19 @@ fn post_lines(books: &Books, section: &Value, plan: &Plan) -> Vec<Line> {
     let sales = section["source"] == "sales";
     let key = section["groupBy"][0]["key"].as_str().unwrap_or("account");
     let n = plan.width();
+    // A balance is everything up to each column's end, also in a range
+    // report (PR-A2, U-225): never only the range's activity.
+    let balance = is_balance(section);
     let mut lines: BTreeMap<String, Line> = BTreeMap::new();
     for p in &books.posts {
         let hits: Vec<usize> = (0..plan.slots.len())
-            .filter(|&i| plan.slots[i].holds(p.date))
+            .filter(|&i| {
+                if balance {
+                    p.date <= plan.slots[i].to
+                } else {
+                    plan.slots[i].holds(p.date)
+                }
+            })
             .collect();
         if hits.is_empty() {
             continue;
@@ -699,6 +708,34 @@ fn post_lines(books: &Books, section: &Value, plan: &Plan) -> Vec<Line> {
         });
     }
     group_lines(lines)
+}
+
+/// A section whose measure is a running balance of the ledger.
+fn is_balance(section: &Value) -> bool {
+    section["source"] == "gl" && section["measure"] == "balance"
+}
+
+/// A balance drill from `from`: the lines before it become one opening row
+/// (their figures summed per column, as the engine's `opening` row), the
+/// rest stay as they are (PR-A2, U-225).
+fn split_opening(
+    details: Vec<&Detail>,
+    from: Option<CalendarDate>,
+    width: usize,
+) -> (Option<Vec<Decimal>>, Vec<&Detail>) {
+    let Some(from) = from else {
+        return (None, details);
+    };
+    let mut opening = vec![Decimal::ZERO; width];
+    let mut rest = Vec::with_capacity(details.len());
+    for x in details {
+        if x.date < from {
+            add_vals(&mut opening, &x.vals);
+        } else {
+            rest.push(x);
+        }
+    }
+    (Some(opening), rest)
 }
 
 /// `ar_open`: every client's open A/R items as of each slot's end, by
@@ -1284,22 +1321,33 @@ pub(crate) fn detail_on(
         .iter()
         .filter(|l| req.path.0.len() == 1 || req.path.0.get(1) == Some(&l.seg))
         .collect();
+    let balance = is_balance(&node);
     let details: Vec<&Detail> = lines
         .iter()
         .flat_map(|l| l.details.iter())
-        // One period column: only its lines (U-119e).
+        // One period column: only its lines (U-119e); a balance's earlier
+        // lines become its opening row.
         .filter(|x| {
             req.range.is_none_or(|r| {
-                x.date <= r.to && (r.from == CalendarDate::min() || x.date >= r.from)
+                x.date <= r.to && (balance || r.from == CalendarDate::min() || x.date >= r.from)
             })
         })
         .collect();
+    let (opening, details) = if balance {
+        split_opening(
+            details,
+            cl_api::resources::report_builder::detail_from(req),
+            plan.width(),
+        )
+    } else {
+        (None, details)
+    };
     let start: usize = req
         .cursor
         .as_deref()
         .and_then(|c| c.parse().ok())
         .unwrap_or(0);
-    let page: Vec<Value> = details
+    let mut page: Vec<Value> = details
         .iter()
         .skip(start)
         .take(DEMO_PAGE)
@@ -1309,6 +1357,15 @@ pub(crate) fn detail_on(
             r
         })
         .collect();
+    // The opening row comes first, on the first page only.
+    if let Some(o) = opening.filter(|_| start == 0) {
+        page.insert(
+            0,
+            json!({"kind": "opening", "nodeId": node["id"], "level": 0, "path": req.path.0,
+                "caption": "", "cells": cells_of(&plan, Some(&o), None, None),
+                "drill": null, "expandable": false, "expanded": false}),
+        );
+    }
     let next = (start + DEMO_PAGE < details.len()).then(|| (start + DEMO_PAGE).to_string());
     let mut total = vec![Decimal::ZERO; plan.width()];
     for l in &lines {
@@ -1451,6 +1508,107 @@ mod tests {
 
     fn october() -> RunDates {
         range(day(2026, 10, 1), day(2026, 10, 31))
+    }
+
+    /// PR-A2 (U-225): a balance over a date range is the balance at its
+    /// end (never only the range's activity), and its drill starts with
+    /// the "Balance before" row; opening plus rows is the footer.
+    #[test]
+    fn a_range_balance_is_a_balance_and_its_drill_opens_with_the_balance_before() {
+        let mut d = DemoState::new();
+        let one = |measure: &str, dates: RunDates| {
+            let mut sec = section("banks", "Banks", &["asset"]);
+            sec["measure"] = json!(measure);
+            let def = json!({"schemaVersion": 1, "kind": "builder", "dates": {"mode": "range"},
+                "columns": {"detailFields": ["date", "amount"], "compare": [], "headers": {}},
+                "nodes": [sec]});
+            req(&def, dates, Vec::new())
+        };
+        let bal = one("balance", october());
+        let b = run(&mut d, &bal, false).expect("run");
+        let since_ever = one("amount", range(day(2000, 1, 1), day(2026, 10, 31)));
+        let flow = run(&mut d, &since_ever, false).expect("run").table;
+        let total = |t: &ReportTable| {
+            t.rows
+                .iter()
+                .find(|r| r.kind == RowKind::Total)
+                .expect("total")
+                .cells
+                .iter()
+                .find_map(|c| match c {
+                    Cell::Amount(a) => Some(*a),
+                    _ => None,
+                })
+                .expect("amount")
+        };
+        assert_eq!(total(&b.table), total(&flow), "the balance at Oct 31");
+        let october_only = run(&mut d, &one("amount", october()), false)
+            .expect("run")
+            .table;
+        assert_ne!(
+            total(&b.table),
+            total(&october_only),
+            "not October's activity"
+        );
+        let dr = cl_api::resources::report_builder::DetailRequest {
+            reference: bal.reference.clone(),
+            node_id: "banks".into(),
+            path: cl_core::report::RowPath::of(["n:banks"]),
+            range: None,
+            cursor: None,
+            fingerprint: b.fingerprint.clone(),
+            stamp: b.stamp,
+        };
+        let mut rows = Vec::new();
+        let mut cursor = None;
+        let footer = loop {
+            let page = detail(
+                &mut d,
+                &cl_api::resources::report_builder::DetailRequest {
+                    cursor: cursor.clone(),
+                    ..dr.clone()
+                },
+                &b.table.columns,
+                &b.layout,
+            )
+            .expect("drill");
+            rows.extend(page.rows);
+            cursor = page.cursor;
+            if cursor.is_none() {
+                break page.subtotal;
+            }
+        };
+        assert_eq!(rows[0].kind, RowKind::Opening);
+        assert_eq!(
+            rows[0].caption,
+            "@reports.builder.opening_before 10/01/2026"
+        );
+        assert_eq!(
+            rows.iter().filter(|r| r.kind == RowKind::Opening).count(),
+            1,
+            "once, on the first page"
+        );
+        // The figure's column: the one the section total fills.
+        let col = b
+            .table
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Total)
+            .and_then(|r| r.cells.iter().position(|c| matches!(c, Cell::Amount(_))))
+            .expect("the figure's column");
+        let sum: Decimal = rows
+            .iter()
+            .map(|r| match &r.cells[col] {
+                Cell::Amount(a) => *a,
+                _ => Decimal::ZERO,
+            })
+            .sum();
+        assert_eq!(
+            Cell::Amount(sum),
+            footer[col],
+            "opening + rows = the footer"
+        );
+        assert_eq!(footer[col], Cell::Amount(total(&b.table)));
     }
 
     /// PR-A2 (U-225, Q-PRA2a): by-month balances get no summed Total; a
