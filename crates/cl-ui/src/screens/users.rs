@@ -737,6 +737,25 @@ enum Act {
     TempPassword,
 }
 
+/// The main Admin (the engine's super admin), when the team list shows it:
+/// on the desktop the first sign-in made is the owner who set the company
+/// up. `None` unless every row has its creation time and the earliest is an
+/// Admin; the engine's `SUPER_ADMIN_TARGET` refusal stays the backstop.
+#[must_use]
+pub fn main_admin(users: &[TeamUser]) -> Option<cl_core::ids::UserId> {
+    if users.iter().any(|u| u.created_at.is_none()) {
+        return None;
+    }
+    let first = users
+        .iter()
+        .min_by(|a, b| a.created_at.cmp(&b.created_at))?;
+    let ties = users
+        .iter()
+        .filter(|u| u.created_at == first.created_at)
+        .count();
+    (ties == 1 && matches!(first.role.as_str(), "owner" | "super_admin")).then_some(first.id)
+}
+
 // ---- drawing ----------------------------------------------------------------
 
 impl UsersScreen {
@@ -801,7 +820,8 @@ impl UsersScreen {
         if let Some(id) = self.selected
             && let Some(u) = users.iter().find(|u| u.id == id).cloned()
         {
-            self.selected_card(ui, tokens, &u, Some(id) == me);
+            let main = main_admin(&users) == Some(id);
+            self.selected_card(ui, tokens, &u, Some(id) == me, main);
             ui.add_space(8.0);
         }
         self.add_card(ui, tokens);
@@ -834,7 +854,9 @@ impl UsersScreen {
         });
     }
 
-    fn selected_card(&mut self, ui: &mut Ui, tokens: &Tokens, u: &TeamUser, me: bool) {
+    /// `main`: the row is the main Admin (no temporary password: they use
+    /// the recovery key; the engine refuses it with `SUPER_ADMIN_TARGET`).
+    fn selected_card(&mut self, ui: &mut Ui, tokens: &Tokens, u: &TeamUser, me: bool, main: bool) {
         let busy = self.write.is_some();
         let mut act: Option<Act> = None;
         let mut change: Option<RolePlan> = None;
@@ -865,14 +887,18 @@ impl UsersScreen {
                     if u.locked && ui.button(t("users.unlock")).clicked() {
                         act = Some(Act::Unlock);
                     }
-                    if ui
-                        .button(t("users.temp_password"))
-                        .on_hover_text(t("users.temp_password.tip"))
-                        .clicked()
+                    if !main
+                        && ui
+                            .button(t("users.temp_password"))
+                            .on_hover_text(t("users.temp_password.tip"))
+                            .clicked()
                     {
                         act = Some(Act::TempPassword);
                     }
                 });
+                if main {
+                    form::hint(ui, tokens, &t("users.msg.main_admin"));
+                }
             });
         });
         if let Some(p) = change {
@@ -1179,6 +1205,32 @@ impl Screen for UsersScreen {
 mod tests {
     use super::*;
     use crate::company::demo::team::DEMO_TEMP_PASSWORD;
+
+    #[test]
+    fn the_main_admin_is_the_earliest_owner_only_when_known() {
+        let u = |n: usize, role: &str, at: Option<&str>| TeamUser {
+            id: crate::company::demo::auth::demo_user_id(n),
+            email: format!("u{n}@example.com"),
+            display_name: format!("U{n}"),
+            role: role.into(),
+            active: true,
+            locked: false,
+            failed_tries: 0,
+            must_change: false,
+            last_sign_in: None,
+            created_at: at.map(str::to_owned),
+        };
+        let a = "2026-01-01T08:00:00.000Z";
+        let b = "2026-02-01T08:00:00.000Z";
+        let team = [u(1, "owner", Some(a)), u(2, "owner", Some(b))];
+        assert_eq!(main_admin(&team), Some(team[0].id));
+        let team = [u(1, "bookkeeper", Some(a)), u(2, "owner", Some(b))];
+        assert_eq!(main_admin(&team), None, "earliest is not an Admin");
+        let team = [u(1, "owner", Some(a)), u(2, "owner", None)];
+        assert_eq!(main_admin(&team), None, "a row without its time");
+        let team = [u(1, "owner", Some(a)), u(2, "owner", Some(a))];
+        assert_eq!(main_admin(&team), None, "a tie");
+    }
 
     fn screen() -> (tempfile::TempDir, UsersScreen) {
         let dir = tempfile::tempdir().expect("tmp");

@@ -58,7 +58,8 @@ impl DemoAuth {
     pub fn team(&self) -> Vec<TeamUser> {
         self.users
             .iter()
-            .map(|u| TeamUser {
+            .enumerate()
+            .map(|(i, u)| TeamUser {
                 id: u.id,
                 email: u.email.clone(),
                 display_name: u.display_name.clone(),
@@ -68,6 +69,9 @@ impl DemoAuth {
                 failed_tries: u32::from(u.failed),
                 must_change: u.must_change,
                 last_sign_in: u.last_sign_in.clone(),
+                // Made in list order: the main Admin first, as on the
+                // desktop engine.
+                created_at: Some(format!("2026-01-01T08:{:02}:00.000Z", i.min(59))),
             })
             .collect()
     }

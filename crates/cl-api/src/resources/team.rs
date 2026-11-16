@@ -57,6 +57,9 @@ pub struct TeamUser {
     pub must_change: bool,
     /// The last sign-in, as the engine wrote it (ISO 8601).
     pub last_sign_in: Option<String>,
+    /// When the sign-in was made (ISO 8601): on the desktop the earliest
+    /// is the main Admin, who set the company up.
+    pub created_at: Option<String>,
 }
 
 impl fmt::Debug for TeamUser {
@@ -179,6 +182,8 @@ struct WireUser {
     password_change_required: bool,
     #[serde(default)]
     last_login_at: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
 }
 
 fn yes() -> bool {
@@ -200,6 +205,7 @@ impl From<WireUser> for TeamUser {
             failed_tries: w.login_failed_attempts.unwrap_or(0),
             must_change: w.password_change_required,
             last_sign_in: w.last_login_at,
+            created_at: w.created_at,
         }
     }
 }
