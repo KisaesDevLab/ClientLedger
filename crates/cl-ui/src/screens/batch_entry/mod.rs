@@ -359,8 +359,9 @@ impl BulkEntryScreen {
         if lists_changed {
             self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
             self.default_contexts();
-            self.fill_default_tag();
         }
+        // After any read: the tags may arrive after the accounts.
+        self.fill_default_tag();
         if lists_changed || self.books.closing != closing_before {
             // A name, account or tag the engine resolved may be gone, and
             // the closed-period rows may differ: ask again.
@@ -378,7 +379,9 @@ impl BulkEntryScreen {
     /// header where it can be changed or cleared; part of the blank window
     /// (no unsaved mark). Once done, a cleared tag stays cleared.
     pub(crate) fn fill_default_tag(&mut self) {
-        if !self.tag_default_due || !self.books.loaded {
+        // Not before every list is read (the tags may come after the
+        // accounts that mark the books loaded).
+        if !self.tag_default_due || !self.books.loaded || self.books.busy() {
             return;
         }
         self.tag_default_due = false;

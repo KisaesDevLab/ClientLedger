@@ -951,9 +951,9 @@ impl UsersScreen {
         form::card(ui, tokens, |ui| {
             ui.label(RichText::new(t_with("users.temp.title", &[("name", name)])).strong());
             form::hint(ui, tokens, &t("users.temp.intro"));
-            // Security review minor 6: no plain `String` copy of the secret
-            // is kept per frame here; the text is borrowed into egui's label
-            // (egui lays it out and drops its own copy with the frame).
+            // Security review minor 6 (not fully fixed): the secret is borrowed
+            // here, but egui's label still makes its own text copy each frame
+            // while the dialog is open.
             let dots = "\u{2022}".repeat(16);
             let text: &str = if masked { &dots } else { secret.expose() };
             let r = ui
