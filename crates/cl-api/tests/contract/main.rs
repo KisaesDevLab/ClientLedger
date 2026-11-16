@@ -25,6 +25,7 @@ mod contract_cash_basis_spf;
 mod contract_census;
 mod contract_check_panel;
 mod contract_closed_period;
+mod contract_closing_admin;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
@@ -1321,6 +1322,10 @@ fn main() -> std::process::ExitCode {
         (
             "rights::ap_hidden_reports_are_refused",
             contract_rights::ap_hidden_reports_are_refused,
+        ),
+        (
+            "closing_admin::bookkeeper_cannot_move_the_closing_date",
+            contract_closing_admin::bookkeeper_cannot_move_the_closing_date,
         ),
         (
             "reconcile::discrepancy_lists_changed_and_backdated_entries",

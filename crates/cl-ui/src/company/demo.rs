@@ -10,6 +10,8 @@ pub mod batch;
 pub mod billable;
 pub mod bills;
 pub mod checks;
+// P29: Set Closing Date.
+pub mod closing;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
@@ -162,6 +164,8 @@ pub struct DemoState {
     /// developer command `dev.demo_card_digits` turns it on and off for
     /// the Chart of Accounts scenario.
     pub card_digits: bool,
+    /// P29: the demo's closing-date password (`None`: none set).
+    pub closing_password: Option<String>,
     /// Invoices the demo engine keeps (P20).
     pub invoices: invoices::DemoInvoices,
     /// Price levels and the clients on them (P20).
@@ -302,6 +306,7 @@ impl DemoState {
             // The demo engine has document drafts and attach (A04).
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
+            closing_password: Some(register::DEMO_CLOSING_PASSWORD.to_owned()),
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),

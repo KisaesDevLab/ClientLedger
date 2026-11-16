@@ -49,6 +49,9 @@ pub enum CompanyEvent {
         /// Closing date, when set.
         closed_through: Option<cl_core::CalendarDate>,
     },
+    /// The closing date was set, moved or cleared (P29 Set Closing Date):
+    /// the title bar follows.
+    ClosingDate(Option<cl_core::CalendarDate>),
     /// No company is open now.
     Closed,
     /// Open a window (a screen asked for another screen, for example the

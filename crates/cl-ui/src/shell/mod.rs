@@ -509,6 +509,11 @@ impl Shell {
                 // Menus, the rail and the palette read the link's rights
                 // each frame; nothing to keep here.
                 CompanyEvent::Rights(_) => {}
+                CompanyEvent::ClosingDate(d) => {
+                    if let Some(b) = self.company.as_mut() {
+                        b.closed_through = d;
+                    }
+                }
                 CompanyEvent::Opened {
                     tenant_id,
                     name,
@@ -1905,6 +1910,7 @@ fn make_any(
             .chain(&crate::screens::P26_SCREENS)
             .chain(&crate::screens::P27_SCREENS)
             .chain(&crate::screens::P28_SCREENS)
+            .chain(&crate::screens::P29_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
