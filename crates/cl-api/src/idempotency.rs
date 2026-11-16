@@ -900,9 +900,14 @@ impl Executor {
             // batch groups since U-128): the engine rolled back and stored
             // nothing, so the same request goes once more with the same
             // key after a short pause; a second RETRY is the caller's
-            // ("try again").
+            // ("try again"). Never a query (an AI draft or question): a
+            // resend would call the model again with the same names and
+            // audit it twice (PR-A2 6-M1).
             (_, ApiError::Conflict { code: Some(c), .. })
-                if c.as_str() == RETRY_CODE && !ctx.call.method.is_read() && !r.deadlock_resent =>
+                if c.as_str() == RETRY_CODE
+                    && !ctx.call.method.is_read()
+                    && ctx.class != RetryClass::Query
+                    && !r.deadlock_resent =>
             {
                 r.deadlock_resent = true;
                 let wait = Duration::from_millis(DEADLOCK_PAUSE_MS);
@@ -1933,6 +1938,26 @@ pub(crate) mod tests {
             let reqs = server.received_requests().await.expect("r");
             assert_eq!(reqs.len(), 1, "{route}: sent once");
             assert!(reqs[0].headers.get("idempotency-key").is_none(), "{route}");
+        }
+    }
+
+    /// PR-A2 6-M1: a query's 409 `RETRY` is returned as is, sent once: a
+    /// resend would call the model again and audit it twice.
+    #[tokio::test]
+    async fn a_query_s_deadlock_retry_is_not_resent() {
+        for route in ["/api/v1/report-builder/draft", "/api/v1/reports/ask"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(409, r#"{"error":{"message":"x","code":"RETRY"}}"#))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            let op = *find(Method::Post, route).expect("covered");
+            let call = Call::at(Method::Post, route).json_body(b"{}".to_vec());
+            let e = ex.run(&op, call, &none(), None).await.expect_err("refused");
+            assert!(matches!(e, ApiError::Conflict { .. }), "{route}: {e:?}");
+            let reqs = server.received_requests().await.expect("r");
+            assert_eq!(reqs.len(), 1, "{route}: sent once");
         }
     }
 
