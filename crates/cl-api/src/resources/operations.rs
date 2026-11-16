@@ -1887,6 +1887,45 @@ pub(crate) const REPORT_BUILDER_DRAFT: Operation = op(
     true,
 );
 
+// ---- P29 WP3 team management (owner or super admin; the list is ungated) ----
+
+/// A company-scoped write that is never retried (it mints a credential).
+const fn team_once(route: &'static str) -> Operation {
+    op(
+        Method::Post,
+        route,
+        RetryClass::Never,
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+pub(crate) const TEAM_USERS: Operation = read("/api/v1/company/users");
+pub(crate) const TEAM_INVITE: Operation = team_once("/api/v1/company/invite-user");
+pub(crate) const TEAM_USER_PATCH: Operation =
+    write(Method::Patch, "/api/v1/company/users/{userId}");
+pub(crate) const TEAM_DEACTIVATE: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/deactivate");
+pub(crate) const TEAM_REACTIVATE: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/reactivate");
+pub(crate) const TEAM_UNLOCK: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/unlock");
+/// U-230 (`temp-password-v1`): the reply holds a password, shown once.
+pub(crate) const TEAM_TEMP_PASSWORD: Operation =
+    team_once("/api/v1/company/users/{userId}/temporary-password");
+pub(crate) const TEAM_TEMPLATES: Operation = read("/api/v1/company/permission-templates");
+pub(crate) const TEAM_TEMPLATES_CREATE: Operation =
+    write(Method::Post, "/api/v1/company/permission-templates");
+pub(crate) const TEAM_TEMPLATE_PUT: Operation =
+    write(Method::Put, "/api/v1/company/permission-templates/{id}");
+pub(crate) const TEAM_TEMPLATE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/company/permission-templates/{id}");
+pub(crate) const TEAM_USER_PERMISSIONS: Operation =
+    read("/api/v1/company/users/{userId}/permissions");
+pub(crate) const TEAM_USER_PERMISSIONS_PUT: Operation =
+    write(Method::Put, "/api/v1/company/users/{userId}/permissions");
+
 #[cfg(test)]
 /// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
 const QUERY_POSTS: [(&str, &str); 2] = [
@@ -1897,16 +1936,18 @@ const QUERY_POSTS: [(&str, &str); 2] = [
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 5] = [
+const NEVER_RETRIED: [(&str, &str); 7] = [
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
     ("PUT", "/api/v1/company/closing-password"),
     ("POST", "/api/v1/company/closing-password/reset"),
+    ("POST", "/api/v1/company/invite-user"),
+    ("POST", "/api/v1/company/users/{userId}/temporary-password"),
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 422] = [
+pub const OPERATIONS: [Operation; 435] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2349,6 +2390,20 @@ pub const OPERATIONS: [Operation; 422] = [
     REPORT_BUILDER_DRAFT,
     // P29 (U-230)
     CHANGE_PASSWORD,
+    // P29 WP3 team management
+    TEAM_USERS,
+    TEAM_INVITE,
+    TEAM_USER_PATCH,
+    TEAM_DEACTIVATE,
+    TEAM_REACTIVATE,
+    TEAM_UNLOCK,
+    TEAM_TEMP_PASSWORD,
+    TEAM_TEMPLATES,
+    TEAM_TEMPLATES_CREATE,
+    TEAM_TEMPLATE_PUT,
+    TEAM_TEMPLATE_DELETE,
+    TEAM_USER_PERMISSIONS,
+    TEAM_USER_PERMISSIONS_PUT,
 ];
 
 /// Looks up a covered operation.

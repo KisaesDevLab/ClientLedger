@@ -146,6 +146,10 @@ pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{
     Tag, TagFields, TagFilter, TagGroup, TagGroupFields, TagUpdate, TagUsage, Tags,
 };
+pub use resources::team::{
+    Added, NewTeamUser, PermissionMap, PermissionRow, RolePlan, RoleTemplate, Team, TeamFailure,
+    TeamStep, TeamUser,
+};
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
     DOCUMENT_DRAFTS_OMITTED, DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob,

@@ -509,3 +509,17 @@ POST    /api/v1/report-builder/definitions/import/preview pre-handler-only
 POST    /api/v1/report-builder/draft            query
 # P29: change your own password (U-230 clears must-change; ends every other session)
 POST    /api/v1/auth/change-password            never
+# P29 WP3: team management (users, roles as permission templates, permission rows; plan section 1 fail-closed order)
+GET     /api/v1/company/users                   idempotent
+POST    /api/v1/company/invite-user             never
+PATCH   /api/v1/company/users/{userId}          pre-handler-only
+POST    /api/v1/company/users/{userId}/deactivate pre-handler-only
+POST    /api/v1/company/users/{userId}/reactivate pre-handler-only
+POST    /api/v1/company/users/{userId}/unlock   pre-handler-only
+POST    /api/v1/company/users/{userId}/temporary-password never
+GET     /api/v1/company/permission-templates    idempotent
+POST    /api/v1/company/permission-templates    pre-handler-only
+PUT     /api/v1/company/permission-templates/{id} pre-handler-only
+DELETE  /api/v1/company/permission-templates/{id} pre-handler-only
+GET     /api/v1/company/users/{userId}/permissions idempotent
+PUT     /api/v1/company/users/{userId}/permissions pre-handler-only

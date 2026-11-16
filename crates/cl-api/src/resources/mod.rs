@@ -65,6 +65,7 @@ pub mod setup;
 pub mod smtp;
 pub mod system;
 pub mod tags;
+pub mod team;
 pub mod templates;
 pub mod tenants;
 pub mod transactions;
