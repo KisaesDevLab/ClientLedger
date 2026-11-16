@@ -89,7 +89,10 @@ pub use resources::contacts::{
     NewContact,
 };
 pub use resources::export::{ExportFile, ExportManifest};
-pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
+pub use resources::form1099::{
+    Form1099, THRESHOLDS_1099, Threshold1099Box, Thresholds1099, TinType, Vendor1099Profile,
+    Vendor1099Update,
+};
 pub use resources::inventory::{
     ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
     AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,

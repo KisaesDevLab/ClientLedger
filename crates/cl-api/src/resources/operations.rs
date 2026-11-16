@@ -1926,6 +1926,11 @@ pub(crate) const TEAM_USER_PERMISSIONS: Operation =
 pub(crate) const TEAM_USER_PERMISSIONS_PUT: Operation =
     write(Method::Put, "/api/v1/company/users/{userId}/permissions");
 
+// ---- P29 WP8 (U-215, `1099-thresholds-v1`): the company's 1099 thresholds ----
+pub(crate) const COMPANY_1099_THRESHOLDS: Operation = read("/api/v1/company/1099-thresholds");
+pub(crate) const COMPANY_1099_THRESHOLDS_PUT: Operation =
+    write(Method::Put, "/api/v1/company/1099-thresholds");
+
 #[cfg(test)]
 /// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
 const QUERY_POSTS: [(&str, &str); 2] = [
@@ -1947,7 +1952,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 435] = [
+pub const OPERATIONS: [Operation; 437] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2404,6 +2409,9 @@ pub const OPERATIONS: [Operation; 435] = [
     TEAM_TEMPLATE_DELETE,
     TEAM_USER_PERMISSIONS,
     TEAM_USER_PERMISSIONS_PUT,
+    // P29 WP8 1099 thresholds (U-215)
+    COMPANY_1099_THRESHOLDS,
+    COMPANY_1099_THRESHOLDS_PUT,
 ];
 
 /// Looks up a covered operation.

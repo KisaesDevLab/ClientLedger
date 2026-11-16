@@ -83,6 +83,7 @@ mod contract_session;
 mod contract_tags;
 mod contract_team;
 mod contract_templates;
+mod contract_thresholds_1099;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
 // trip of memorized reports (AC3, WP-B).
 mod contract_report_defs_archive;
@@ -1360,6 +1361,14 @@ fn main() -> std::process::ExitCode {
         (
             "team::temporary_password_is_refused_for_yourself",
             contract_team::temporary_password_is_refused_for_yourself,
+        ),
+        (
+            "thresholds_1099::admin_sets_and_clears_thresholds",
+            contract_thresholds_1099::admin_sets_and_clears_thresholds,
+        ),
+        (
+            "thresholds_1099::bookkeeper_is_refused_threshold_changes",
+            contract_thresholds_1099::bookkeeper_is_refused_threshold_changes,
         ),
         (
             "closing_admin::bookkeeper_cannot_move_the_closing_date",

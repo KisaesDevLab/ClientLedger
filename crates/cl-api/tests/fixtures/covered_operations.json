@@ -433,5 +433,7 @@
   {"method":"PUT","path":"/api/v1/company/permission-templates/{id}","inSpec":true,"fragmentHash":"39a6b008270e9b10eda3c455bb26a390bbdd32c8d29703efd51a2c89675d23aa"},
   {"method":"DELETE","path":"/api/v1/company/permission-templates/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/company/users/{userId}/permissions","inSpec":true,"fragmentHash":"b75be6f7b12a5d6d995bc9a1778a84e5767e22736fa368371b7915e4ee79c18e"},
-  {"method":"PUT","path":"/api/v1/company/users/{userId}/permissions","inSpec":true,"fragmentHash":"33268c3f678410377ce0efb05d3b94c4db76b56d538c22efaada3fecba7afdc6"}
+  {"method":"PUT","path":"/api/v1/company/users/{userId}/permissions","inSpec":true,"fragmentHash":"33268c3f678410377ce0efb05d3b94c4db76b56d538c22efaada3fecba7afdc6"},
+  {"method":"GET","path":"/api/v1/company/1099-thresholds","inSpec":true,"fragmentHash":"e51ffa768e223c7cf3fa07e5dea249e13e891901f438b71c36de61d991381df1"},
+  {"method":"PUT","path":"/api/v1/company/1099-thresholds","inSpec":true,"fragmentHash":"5d0640b0061a4c1f18cabb8bcdc0245171d3bb7c824816fdd44b4d1afa932100"}
 ]

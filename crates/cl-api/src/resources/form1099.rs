@@ -6,15 +6,16 @@
 //! Profile data is owner data (names, tax IDs, addresses): never logged.
 //! `Debug` of the update body never shows a tax ID.
 
-use cl_core::Timestamp;
 use cl_core::ids::{AccountId, ContactId};
+use cl_core::{Money, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::{
-    FORM_1099_ACCOUNT_MAPPINGS_PUT, VENDOR_1099_PROFILE, VENDOR_1099_PROFILE_PUT,
+    COMPANY_1099_THRESHOLDS, COMPANY_1099_THRESHOLDS_PUT, FORM_1099_ACCOUNT_MAPPINGS_PUT,
+    VENDOR_1099_PROFILE, VENDOR_1099_PROFILE_PUT,
 };
 use crate::session::{Session, decode, json_body};
 
@@ -217,6 +218,176 @@ impl Form1099<'_> {
     }
 }
 
+// ---- P29 WP8 (U-215): the company's own 1099 threshold per box ----
+
+/// The engine capability for [`Form1099::thresholds`] and
+/// [`Form1099::set_thresholds`] (U-215).
+pub const THRESHOLDS_1099: &str = "1099-thresholds-v1";
+
+/// One 1099 box and its reporting threshold, as the engine reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Threshold1099Box {
+    /// The engine's box code (`NEC-1`, `MISC-1`, ...). Kept as text so a
+    /// newer engine's extra box still reads.
+    pub code: String,
+    /// The form (`1099-NEC`, `1099-MISC`).
+    pub form: String,
+    /// The box number on the form (`1`, `10`).
+    pub box_number: String,
+    /// The engine's label for the box.
+    pub label: String,
+    /// The company's own amount; `None` means the year's standard amount
+    /// applies.
+    pub amount: Option<Money>,
+    /// The year's standard amount, when the engine reports it.
+    pub standard: Option<Money>,
+    /// The amount the 1099 reports use, when the engine reports it.
+    pub effective: Option<Money>,
+}
+
+/// The company's 1099 thresholds for one year.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Thresholds1099 {
+    /// The year the standard amounts are for.
+    pub year: i32,
+    /// One row per box, in the engine's order.
+    pub boxes: Vec<Threshold1099Box>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireThresholdBox {
+    #[serde(rename = "box")]
+    code: String,
+    #[serde(default)]
+    form: String,
+    #[serde(default)]
+    box_number: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    amount: Option<String>,
+    #[serde(default)]
+    default_exact: Option<String>,
+    #[serde(default)]
+    effective_exact: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WireThresholds {
+    year: i32,
+    boxes: Vec<WireThresholdBox>,
+}
+
+fn threshold_money(s: Option<&str>) -> Result<Option<Money>, ApiError> {
+    s.map(|s| {
+        Money::parse_wire(s).map_err(|_| ApiError::Decode {
+            what: "1099 threshold",
+        })
+    })
+    .transpose()
+}
+
+impl TryFrom<WireThresholds> for Thresholds1099 {
+    type Error = ApiError;
+
+    fn try_from(w: WireThresholds) -> Result<Self, ApiError> {
+        let boxes = w
+            .boxes
+            .into_iter()
+            .map(|b| {
+                Ok(Threshold1099Box {
+                    amount: threshold_money(b.amount.as_deref())?,
+                    standard: threshold_money(b.default_exact.as_deref())?,
+                    effective: threshold_money(b.effective_exact.as_deref())?,
+                    code: b.code,
+                    form: b.form,
+                    box_number: b.box_number,
+                    label: b.label,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        Ok(Thresholds1099 {
+            year: w.year,
+            boxes,
+        })
+    }
+}
+
+/// The body of a thresholds change: box code → amount (`None` clears it).
+/// Only boxes in `changes` are sent; the engine keeps the others.
+///
+/// # Errors
+/// `Local(InvalidValue)` for a negative amount or a box code that isn't
+/// letters, digits and a dash.
+fn thresholds_body(
+    changes: &std::collections::BTreeMap<String, Option<Money>>,
+) -> Result<serde_json::Value, ApiError> {
+    let mut map = serde_json::Map::new();
+    for (code, amount) in changes {
+        let ok_code =
+            !code.is_empty() && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        if !ok_code || amount.is_some_and(Money::is_negative) {
+            return Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue,
+            ));
+        }
+        map.insert(
+            code.clone(),
+            amount.map_or(serde_json::Value::Null, |m| {
+                serde_json::Value::String(m.to_wire())
+            }),
+        );
+    }
+    Ok(serde_json::json!({ "thresholds": map }))
+}
+
+impl Form1099<'_> {
+    /// The company's 1099 thresholds for the current year (U-215,
+    /// [`THRESHOLDS_1099`]).
+    ///
+    /// # Errors
+    /// `Forbidden` without company-settings rights; any [`ApiError`].
+    pub async fn thresholds(&self) -> Result<Thresholds1099, ApiError> {
+        let call = Call::new(
+            Method::Get,
+            COMPANY_1099_THRESHOLDS.route(),
+            COMPANY_1099_THRESHOLDS.route().to_owned(),
+        );
+        let reply = self.0.send(&COMPANY_1099_THRESHOLDS, call, None).await?;
+        decode::<WireThresholds>(&reply, "1099 thresholds")?.try_into()
+    }
+
+    /// Sets or clears the company's own threshold for the boxes in
+    /// `changes` (`None` = back to the year's standard amount) and returns
+    /// what the engine now holds. Setting the same amounts again changes
+    /// nothing, so the write may be resent.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a negative amount or a bad box code;
+    /// `Forbidden` (`OWNER_REQUIRED`) for anyone but an Admin;
+    /// `Validation`; any [`ApiError`].
+    pub async fn set_thresholds(
+        &self,
+        changes: &std::collections::BTreeMap<String, Option<Money>>,
+        key: IdempotencyKey,
+    ) -> Result<Thresholds1099, ApiError> {
+        let body = thresholds_body(changes)?;
+        let mut call = Call::new(
+            Method::Put,
+            COMPANY_1099_THRESHOLDS_PUT.route(),
+            COMPANY_1099_THRESHOLDS_PUT.route().to_owned(),
+        )
+        .json_body(json_body(&body)?);
+        call.idempotency_key = Some(key);
+        let reply = self
+            .0
+            .send(&COMPANY_1099_THRESHOLDS_PUT, call, None)
+            .await?;
+        decode::<WireThresholds>(&reply, "1099 thresholds")?.try_into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +446,82 @@ mod tests {
             put,
             serde_json::json!({"tinType": null, "backupWithholding": true})
         );
+    }
+
+    const THRESHOLDS: &str = r#"{"year":2026,"boxes":[
+        {"box":"NEC-1","form":"1099-NEC","boxNumber":"1","label":"Nonemployee compensation",
+         "amount":"1000.0000","defaultExact":"2000.0000","effectiveExact":"1000.0000"},
+        {"box":"MISC-2","form":"1099-MISC","boxNumber":"2","label":"Royalties",
+         "amount":null,"defaultExact":"10.0000","effectiveExact":"10.0000"},
+        {"box":"MISC-99","form":"1099-MISC","boxNumber":"99","label":"Future box","amount":null}]}"#;
+
+    #[tokio::test]
+    async fn thresholds_read_as_money_and_only_changes_are_sent() {
+        let server = MockServer::start().await;
+        let route = "/api/v1/company/1099-thresholds";
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(json(200, THRESHOLDS))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path(route))
+            .respond_with(json(200, THRESHOLDS))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let t = s.form1099().thresholds().await.expect("read");
+        assert_eq!(t.year, 2026);
+        assert_eq!(t.boxes.len(), 3, "an unknown box still reads");
+        let nec = &t.boxes[0];
+        assert_eq!(nec.code, "NEC-1");
+        assert_eq!(nec.amount, Some(Money::parse_wire("1000").expect("m")));
+        assert_eq!(nec.standard, Some(Money::parse_wire("2000").expect("m")));
+        assert_eq!(t.boxes[1].amount, None);
+        assert_eq!(t.boxes[2].standard, None, "never invented");
+
+        let mut changes = std::collections::BTreeMap::new();
+        changes.insert(
+            "NEC-1".to_owned(),
+            Some(Money::parse_wire("750.5").expect("m")),
+        );
+        changes.insert("MISC-2".to_owned(), None);
+        s.form1099()
+            .set_thresholds(&changes, IdempotencyKey::new())
+            .await
+            .expect("put");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(
+            put,
+            serde_json::json!({"thresholds": {"NEC-1": "750.5000", "MISC-2": null}})
+        );
+    }
+
+    #[test]
+    fn thresholds_body_refuses_negatives_and_bad_codes() {
+        let mut c = std::collections::BTreeMap::new();
+        c.insert(
+            "NEC-1".to_owned(),
+            Some(Money::parse_wire("-1").expect("m")),
+        );
+        assert!(thresholds_body(&c).is_err());
+        let mut c = std::collections::BTreeMap::new();
+        c.insert("NEC 1".to_owned(), None);
+        assert!(thresholds_body(&c).is_err());
+        let mut c = std::collections::BTreeMap::new();
+        c.insert("NEC-1".to_owned(), Some(Money::ZERO));
+        assert_eq!(
+            thresholds_body(&c).expect("ok"),
+            serde_json::json!({"thresholds": {"NEC-1": "0.0000"}})
+        );
+    }
+
+    #[test]
+    fn a_malformed_amount_is_a_decode_error() {
+        let w: WireThresholds =
+            serde_json::from_str(r#"{"year":2026,"boxes":[{"box":"NEC-1","amount":"1e3"}]}"#)
+                .expect("json");
+        assert!(Thresholds1099::try_from(w).is_err());
     }
 }
