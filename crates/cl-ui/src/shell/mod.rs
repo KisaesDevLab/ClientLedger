@@ -194,6 +194,11 @@ pub struct Shell {
     doc_follow: Option<WindowId>,
     /// A04 WP-C: the pop-out's compare events, for next frame.
     viewer_outbox: outbox::ViewerOutbox,
+    /// P29: reads the rights again after a 403.
+    rights_watch: crate::company::RightsWatch,
+    /// P29: the signed-in user's role in the open company (the engine's
+    /// word), the fallback when `/auth/me` names none.
+    company_role: String,
 }
 
 impl Shell {
@@ -244,6 +249,8 @@ impl Shell {
             doc_viewer,
             doc_follow: None,
             viewer_outbox: outbox::ViewerOutbox::new(),
+            rights_watch: crate::company::RightsWatch::default(),
+            company_role: String::new(),
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -301,6 +308,15 @@ impl Shell {
     #[must_use]
     pub fn company_link(&self) -> Option<&Arc<CompanyLink>> {
         self.company_link.as_ref()
+    }
+
+    /// The signed-in user's rights in the open company (P29): everything
+    /// without an engine link (tests) or before a company is open.
+    #[must_use]
+    pub fn rights(&self) -> cl_model::permissions::Rights {
+        self.company_link
+            .as_ref()
+            .map_or_else(cl_model::permissions::Rights::all, |l| l.rights())
     }
 
     /// The open company (tenant id and name), if any.
@@ -456,6 +472,12 @@ impl Shell {
         };
         link.set_dirty_windows(self.windows.dirty_ids().len());
         self.poll_closing(&link, ctx);
+        let tenant = self.open_tenant.as_ref().map(|(t, _)| *t);
+        if self.rights_watch.poll(&link, tenant, &self.company_role)
+            && let Some(ctx) = ctx
+        {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         // A08: a window whose own save finished asks to close (that window,
         // never another of its kind).
         let closing: Vec<WindowId> = self
@@ -482,7 +504,11 @@ impl Shell {
                     if let Some(name) = &self.signed_in_name {
                         self.status.user = Some(crate::company::user_text(name, &role));
                     }
+                    self.company_role = role;
                 }
+                // Menus, the rail and the palette read the link's rights
+                // each frame; nothing to keep here.
+                CompanyEvent::Rights(_) => {}
                 CompanyEvent::Opened {
                     tenant_id,
                     name,
@@ -525,6 +551,7 @@ impl Shell {
                     }
                     // Catch-up runs after every open (P15, Q-P15h).
                     self.runner.opened(&link, tenant_id);
+                    self.rights_watch.opened(&link);
                     // This company's unknown saves (kept for the session).
                     link.lost_saves().set_company(Some(tenant_id));
                 }
@@ -534,6 +561,8 @@ impl Shell {
                         self.status.user = Some(name.clone());
                     }
                     self.runner.closed(&link);
+                    link.reset_rights();
+                    self.company_role.clear();
                     self.doc_viewer.close_window();
                     link.lost_saves().set_company(None);
                     self.save_layout();
@@ -926,6 +955,14 @@ impl Shell {
         let Some(cmd) = self.find_command(id.as_str()) else {
             return;
         };
+        // P29: a command the user's role does not include (a shortcut, a
+        // script, a stale menu) says so; the engine would refuse it.
+        if commands::find(id.as_str()).is_some() && !self.rights().allows(id) {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "toast.not_for_role");
+            }
+            return;
+        }
         if cmd.opens {
             let kind = cmd.id;
             if self.company_link.is_some()
@@ -1010,6 +1047,16 @@ impl Shell {
             "help.kofi" => {
                 if let Some(ctx) = ctx {
                     crate::links::open_external(ctx, crate::screens::home::support::KOFI_URL);
+                }
+            }
+            // P29 (demo only): the rights scenario's A/P user and back.
+            "dev.demo_rights_ap" | "dev.demo_rights_all" => {
+                if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo()) {
+                    link.set_rights(if id.as_str() == "dev.demo_rights_ap" {
+                        cl_model::permissions::BuiltinRole::Payables.rights()
+                    } else {
+                        cl_model::permissions::Rights::all()
+                    });
                 }
             }
             "help.current" => {
@@ -1616,10 +1663,13 @@ impl Shell {
     }
 
     fn show_overlays(&mut self, ctx: &Context) {
-        if let Some(id) = palette::show(ctx, &mut self.palette, &self.keymap) {
+        let rights = self.rights();
+        if let Some(id) = palette::show(ctx, &mut self.palette, &self.keymap, &rights) {
             self.pending.push(id);
         }
-        if self.shortcuts_open && shortcuts::show(ctx, self.focus_scope(), &self.keymap) {
+        if self.shortcuts_open
+            && shortcuts::show(ctx, self.focus_scope(), &self.keymap, &self.rights())
+        {
             self.shortcuts_open = false;
         }
         self.about.show(ctx);
@@ -1777,6 +1827,11 @@ fn make_any(
         return Box::new(Placeholder::for_command(kind));
     }
     if let Some(link) = link {
+        // P29: every way a window opens (a command, a screen's request,
+        // a remembered layout) comes here; a refused kind shows why.
+        if commands::find(kind.as_str()).is_some() && !link.rights().allows(kind) {
+            return Box::new(Placeholder::refused(kind));
+        }
         if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
             return s;
         }

@@ -692,6 +692,12 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_reconcile_close_books",
         "Close the Demo Books Through 11/01 for Reconcile (developer)",
     ),
+    // P29: the rights scenario signs the demo in as an A/P user and back.
+    dev_action(
+        "dev.demo_rights_ap",
+        "Demo Rights: Accounts Payable (developer)",
+    ),
+    dev_action("dev.demo_rights_all", "Demo Rights: Admin (developer)"),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).

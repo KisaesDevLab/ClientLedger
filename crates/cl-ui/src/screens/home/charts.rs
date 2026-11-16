@@ -22,9 +22,14 @@ use eframe::egui::{self, Align, Layout, Margin, RichText, Sense, Ui, Vec2};
 
 use super::HomeScreen;
 use super::balances::{failed, heading, note};
+use cl_model::permissions::ReportUse;
+
 use crate::i18n::{t, t_with};
+
 use crate::screens::lists::center::model::report_text;
+
 use crate::theme::Tokens;
+
 use crate::widgets::bar_chart::{Bar, BarChart, BarGroup};
 
 /// Months on the chart.
@@ -260,6 +265,12 @@ pub(crate) fn empty(views: &[MonthView]) -> bool {
 /// The Income and expenses card.
 pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<Action> {
     heading(ui, tokens, &t("home.chart.title"));
+    // P29: the chart reads the P&L; a role without financial reports sees
+    // why there is no chart (hiding the card would leave a hole on Home).
+    if !home.link.rights().allows_use(ReportUse::HomeCharts) {
+        note(ui, tokens, &t("rights.not_for_role"));
+        return None;
+    }
     let slot = &home.data.chart;
     let Some(months) = slot.value.as_ref() else {
         if let Some(e) = &slot.error {

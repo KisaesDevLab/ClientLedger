@@ -213,6 +213,18 @@ pub(crate) fn footer_view(home: &HomeScreen, footer: LaneFooter, style: MoneySty
             }
         }
         LaneFooter::SalesTaxOwed => {
+            if !home
+                .link
+                .rights()
+                .allows_use(cl_model::permissions::ReportUse::HomeSalesTax)
+            {
+                return FooterView {
+                    label: t("home.footer.sales_tax_owed"),
+                    value: None,
+                    money: true,
+                    tip: Some(t("rights.not_for_role")),
+                };
+            }
             // The engine's owed total (P23, Q-P23l), every agency, today.
             let slot = &home.data.sales_tax;
             let value = slot.value.map(|m| m.format(style));
@@ -296,7 +308,14 @@ fn lane(
             );
             ui.add_space(6.0);
             ui.spacing_mut().item_spacing.y = 8.0;
-            for id in lane.actions {
+            // P29: only the actions the user's role includes.
+            let rights = home.link.rights();
+            for id in lane
+                .actions
+                .iter()
+                .copied()
+                .filter(|id| rights.allows(cl_model::CommandId::new(id)))
+            {
                 let r = action_row(ui, tokens, &action_label(id), &trailing(home, id));
                 if activated(&r) {
                     *clicked = Some(id);

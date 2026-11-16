@@ -342,6 +342,13 @@ impl Rights {
         need(id).is_some_and(|n| self.allows_need(n))
     }
 
+    /// The same rights without Admin (the demo's non-owner roles).
+    #[must_use]
+    pub fn without_admin(mut self) -> Rights {
+        self.admin = false;
+        self
+    }
+
     /// Sets one level (Custom roles, tests).
     pub fn set(&mut self, r: Resource, level: Level) {
         self.levels[r.index()] = if r.writable() {

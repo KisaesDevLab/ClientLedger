@@ -103,7 +103,13 @@ struct Row {
 }
 
 /// What opening a company learned (tenant, name, colour, closing date).
-type Opened = (TenantId, String, Accent, Option<cl_core::CalendarDate>);
+type Opened = (
+    TenantId,
+    String,
+    Accent,
+    Option<cl_core::CalendarDate>,
+    cl_model::permissions::Rights,
+);
 
 #[derive(Clone, Debug)]
 struct SignedIn {
@@ -312,6 +318,8 @@ impl OpenCompanyScreen {
             demo.open = Some(row.tenant_id);
             drop(demo);
             self.link.push(CompanyEvent::CompanyRole(row.role.clone()));
+            // The demo has every right; a developer command narrows them.
+            self.link.set_rights(cl_model::permissions::Rights::all());
             self.link.push(CompanyEvent::Opened {
                 tenant_id: row.tenant_id,
                 name: row.name,
@@ -338,11 +346,14 @@ impl OpenCompanyScreen {
                 .unwrap_or_default();
             crate::screens::preferences::ai::push_at_open(&session, secrets.as_ref(), &prefs).await;
             let settings = session.company_settings().await.ok();
+            // P29: the role is per company, so its rights are read again.
+            let rights = crate::company::read_rights(&session, row.tenant_id, &row.role).await;
             Ok((
                 row.tenant_id,
                 row.name,
                 row.accent,
                 settings.and_then(|s| s.lock_date),
+                rights,
             ))
         })
         .ok();
@@ -495,10 +506,11 @@ impl OpenCompanyScreen {
             self.open_task = None;
             self.busy = None;
             match r {
-                Ok((tenant_id, name, accent, closed_through)) => {
+                Ok((tenant_id, name, accent, closed_through, rights)) => {
                     if let Some(role) = self.opening_role.take() {
                         self.link.push(CompanyEvent::CompanyRole(role));
                     }
+                    self.link.set_rights(rights);
                     self.link.push(CompanyEvent::Opened {
                         tenant_id,
                         name,
@@ -518,6 +530,7 @@ impl OpenCompanyScreen {
                 Ok(c) => {
                     // Made by this user, who owns it.
                     self.link.push(CompanyEvent::CompanyRole("owner".into()));
+                    self.link.set_rights(cl_model::permissions::Rights::all());
                     self.link.push(CompanyEvent::Opened {
                         tenant_id: c.tenant_id,
                         name: cl_company::SAMPLE_NAME.into(),

@@ -37,6 +37,9 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, tokens: &Tokens) {
         .collect();
     let mut queued: Vec<CommandId> = Vec::new();
     let mut activate = None;
+    // P29: only the entries the user's role includes.
+    let rights = shell.rights();
+    let shown = |id: &&&str| commands::find(id).is_some_and(|c| rights.allows(c.id));
     egui::Panel::left("rail")
         .exact_size(WIDTH)
         .resizable(false)
@@ -53,11 +56,11 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, tokens: &Tokens) {
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
                     section(ui, "shell.rail.workspace", 0.0);
-                    for id in cl_model::commands::ALL.rail_workspace {
+                    for id in cl_model::commands::ALL.rail_workspace.iter().filter(shown) {
                         entry(ui, id, active_kind, counts, &mut queued);
                     }
                     section(ui, "shell.rail.tools", 14.0);
-                    for id in cl_model::commands::ALL.rail_tools {
+                    for id in cl_model::commands::ALL.rail_tools.iter().filter(shown) {
                         entry(ui, id, active_kind, counts, &mut queued);
                     }
                     section(ui, "shell.rail.open_windows", 14.0);

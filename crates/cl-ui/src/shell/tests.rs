@@ -599,7 +599,7 @@ fn about_and_privacy_open_from_help() {
 #[test]
 fn kofi_opens_from_the_help_menu_only_when_chosen() {
     use egui::{PointerButton, Pos2};
-    let rows = super::menu::rows(Menu::Help);
+    let rows = super::menu::rows(Menu::Help, &cl_model::permissions::Rights::all());
     let row = rows
         .iter()
         .find(|r| r.id.as_str() == "help.kofi")
@@ -1017,7 +1017,7 @@ fn make_portable_copy_is_removed_q268() {
     let shell = Shell::new(ShellOptions::default());
     assert!(shell.find_command("file.portable_copy").is_none());
     assert!(commands::find("file.portable_copy").is_none());
-    let file: Vec<String> = super::menu::rows(Menu::File)
+    let file: Vec<String> = super::menu::rows(Menu::File, &cl_model::permissions::Rights::all())
         .iter()
         .map(|r| r.label.to_ascii_lowercase())
         .collect();
@@ -1681,4 +1681,55 @@ fn close_company_switches_back_even_when_its_group_is_dropped() {
     assert!(matches!(r, Ok(Ok(()))), "{r:?}");
     assert_eq!(session.scope(), cl_api::Scope::Workspace);
     let _ = q.shutdown(Duration::from_secs(1), None);
+}
+
+/// P29: an A/P user (the demo's developer switch) has no Create Invoice
+/// anywhere: not in the menu, not in the palette, and a forced command or
+/// a screen's request to open it shows the refusal instead of the form.
+#[test]
+fn an_ap_user_cannot_open_invoices() {
+    let mut shell = demo();
+    shell.dispatch_now(CommandId::new("dev.demo_rights_ap"));
+    let rights = shell.rights();
+    assert!(!rights.is_admin());
+    let invoice = CommandId::new("clients.create_invoice");
+    assert!(
+        !super::menu::rows(Menu::Clients, &rights)
+            .iter()
+            .any(|r| r.id == invoice)
+    );
+    assert!(
+        !super::palette::matches_for("create invoice", false, &rights)
+            .iter()
+            .any(|c| c.id == invoice)
+    );
+    // A forced command (a shortcut, a script) opens nothing.
+    shell.dispatch_now(invoice);
+    assert!(shell.windows.find_kind(invoice).is_none());
+    // A screen's request goes through the same door and says why.
+    if let Some(link) = shell.company_link().cloned() {
+        link.push(crate::company::CompanyEvent::OpenWindow(invoice));
+    }
+    shell.apply_events_now();
+    let id = shell.windows.find_kind(invoice).expect("refusal window");
+    assert_eq!(
+        shell.windows.get(id).expect("w").screen.state()["refused"],
+        true
+    );
+    // Enter Bill is the A/P user's own.
+    let bill = CommandId::new("vendors.enter_bill");
+    shell.dispatch_now(bill);
+    let bill_id = shell.windows.find_kind(bill).expect("bill");
+    assert_ne!(
+        shell.windows.get(bill_id).expect("w").screen.state()["refused"],
+        true
+    );
+    // Back to Admin: everything again.
+    shell.dispatch_now(CommandId::new("dev.demo_rights_all"));
+    assert!(shell.rights().is_admin());
+    assert!(
+        super::menu::rows(Menu::Clients, &shell.rights())
+            .iter()
+            .any(|r| r.id == invoice)
+    );
 }

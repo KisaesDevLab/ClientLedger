@@ -33,6 +33,11 @@ pub enum CompanyEvent {
     /// [`CompanyEvent::Opened`] (A09 QA-9: the status bar said "Admin" for
     /// every user).
     CompanyRole(String),
+    /// The signed-in user's rights in the company being opened (P29),
+    /// sent before [`CompanyEvent::Opened`] and again whenever they are
+    /// read anew (a 403 from the engine). The shell re-filters its menus,
+    /// rail and palette; screens read [`CompanyLink::rights`].
+    Rights(cl_model::permissions::Rights),
     /// A company was opened or switched to.
     Opened {
         /// The tenant.
@@ -125,6 +130,9 @@ pub struct CompanyLink {
     /// Messages waiting in the Outbox (P20, Q-P20d), as last read; shown on
     /// Home and in the status bar.
     outbox: Mutex<Option<u32>>,
+    /// The signed-in user's rights in the open company (P29). Everything
+    /// while no company is open (nothing but Open Company works then).
+    rights: Mutex<cl_model::permissions::Rights>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -190,6 +198,7 @@ impl CompanyLink {
             outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
+            rights: Mutex::new(cl_model::permissions::Rights::all()),
         }
     }
 
@@ -212,6 +221,7 @@ impl CompanyLink {
             outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
+            rights: Mutex::new(cl_model::permissions::Rights::all()),
         }
     }
 
@@ -391,6 +401,34 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The signed-in user's rights in the open company (P29). In the demo,
+    /// a non-owner role set on the demo (`demo.intake.role`) is not an
+    /// Admin.
+    #[must_use]
+    pub fn rights(&self) -> cl_model::permissions::Rights {
+        let r = self
+            .rights
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match self.demo_state() {
+            Some(d) if d.intake.role() != "owner" => r.without_admin(),
+            _ => r,
+        }
+    }
+
+    /// Keeps new rights and tells the shell (`CompanyEvent::Rights`).
+    pub fn set_rights(&self, r: cl_model::permissions::Rights) {
+        *self.rights.lock().unwrap_or_else(PoisonError::into_inner) = r.clone();
+        self.push(CompanyEvent::Rights(r));
+    }
+
+    /// No company open: back to everything (only Open Company works).
+    pub fn reset_rights(&self) {
+        *self.rights.lock().unwrap_or_else(PoisonError::into_inner) =
+            cl_model::permissions::Rights::all();
+    }
+
     /// Queue an event for the shell.
     pub fn push(&self, e: CompanyEvent) {
         self.events
@@ -497,6 +535,101 @@ where
         Ok(f().await)
     })?;
     Ok(Task::Pending(pending))
+}
+
+/// The rights `/auth/me` reported (P29). The role comes from the engine's
+/// row for the open company, else from the company list (`fallback_role`).
+/// An answer without a permission map, or for another company, falls back
+/// to the role alone (view-only at most unless Admin: fail closed).
+#[must_use]
+pub fn rights_from_me(
+    me: &cl_api::Me,
+    tenant: TenantId,
+    fallback_role: &str,
+) -> cl_model::permissions::Rights {
+    use cl_model::permissions::Rights;
+    let role = if me.role.is_empty() {
+        fallback_role
+    } else {
+        me.role.as_str()
+    };
+    if me.active_tenant.is_some_and(|t| t != tenant) || me.permissions.is_empty() {
+        return Rights::from_role_only(role, me.is_super_admin);
+    }
+    Rights::from_engine(role, me.is_super_admin, &me.permissions)
+}
+
+/// Reads the rights in the company just opened (`/auth/me`); on any error
+/// the role alone decides (fail closed).
+pub async fn read_rights(
+    session: &Session,
+    tenant: TenantId,
+    fallback_role: &str,
+) -> cl_model::permissions::Rights {
+    match session.me().await {
+        Ok(me) => rights_from_me(&me, tenant, fallback_role),
+        Err(_) => cl_model::permissions::Rights::from_role_only(fallback_role, false),
+    }
+}
+
+/// Reads the rights again after the engine refused something with 403
+/// (P29 §5: rights may have changed mid-session). The shell polls it each
+/// frame; one read at a time, and the rights change only when they differ.
+#[derive(Default)]
+pub struct RightsWatch {
+    seen: u64,
+    task: Option<(RequestGroup, Task<cl_api::Me>)>,
+}
+
+impl std::fmt::Debug for RightsWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RightsWatch")
+            .field("seen", &self.seen)
+            .field("reading", &self.task.is_some())
+            .finish()
+    }
+}
+
+impl RightsWatch {
+    /// A company was opened: refusals before now belong to the last one.
+    pub fn opened(&mut self, link: &CompanyLink) {
+        self.seen = link.session().map_or(0, |s| s.forbidden_seen());
+        self.task = None;
+    }
+
+    /// Starts a read when a new 403 came back; applies a finished read.
+    /// Returns true while a read runs.
+    pub fn poll(&mut self, link: &CompanyLink, tenant: Option<TenantId>, role: &str) -> bool {
+        let (Some(session), Some(tenant)) = (link.session(), tenant) else {
+            return false;
+        };
+        if let Some((_, task)) = self.task.as_mut() {
+            let Some(r) = task.try_take() else {
+                return true;
+            };
+            self.task = None;
+            if let Ok(me) = r {
+                let r = rights_from_me(&me, tenant, role);
+                if r != link.rights() {
+                    tracing::info!("the signed-in user's rights changed; menus follow");
+                    link.set_rights(r);
+                }
+            }
+            return false;
+        }
+        let n = session.forbidden_seen();
+        if n <= self.seen {
+            return false;
+        }
+        self.seen = n;
+        let Some(Ok(group)) = link.group() else {
+            return false;
+        };
+        if let Ok(p) = group.read(&session, |s| async move { s.me().await }) {
+            self.task = Some((group, Task::Pending(p)));
+        }
+        self.task.is_some()
+    }
 }
 
 /// Status-bar text for the signed-in user in a company (name and role; no

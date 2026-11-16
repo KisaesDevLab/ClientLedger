@@ -339,7 +339,11 @@ impl IntakePanel {
     /// Whether the user may change the folders.
     #[must_use]
     pub fn is_admin(&self) -> bool {
-        self.role.as_deref() == Some(source::ADMIN_ROLE)
+        // P29 (Q-P29k): Admin is the engine `owner`; the desktop's super
+        // admin is its first user, an owner, so the company role decides.
+        self.role
+            .as_deref()
+            .is_some_and(|r| cl_model::permissions::is_admin_role(r, false))
     }
 
     /// Whether the folders can be edited now.

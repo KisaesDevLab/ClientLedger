@@ -324,10 +324,11 @@ impl ReconcileScreen {
         ));
     }
 
-    /// The user is an Admin (engine role `owner`, Q-A01k): Undo is shown
-    /// only then (Q-P27s; the engine still refuses anyone else).
+    /// The user is an Admin (the engine `owner` or the super admin,
+    /// Q-P29k): Undo is shown only then (Q-P27s; the engine still refuses
+    /// anyone else). Nothing is shown until the role was read.
     pub(crate) fn is_admin(&self) -> bool {
-        self.role.as_deref() == Some(intake_source::ADMIN_ROLE)
+        self.role.is_some() && self.link.rights().is_admin()
     }
 
     /// The engine has what the window needs (the demo always does).

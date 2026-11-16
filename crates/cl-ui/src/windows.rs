@@ -275,9 +275,27 @@ pub struct Placeholder {
     title: String,
     arrives: Option<&'static str>,
     dirty: bool,
+    /// P29: the user's role may not open this window.
+    refused: bool,
 }
 
 impl Placeholder {
+    /// The window the user's role may not open (P29): it says so in plain
+    /// words instead of an engine error.
+    #[must_use]
+    pub fn refused(kind: CommandId) -> Placeholder {
+        let mut p = Placeholder::for_command(kind);
+        p.arrives = None;
+        p.refused = true;
+        p
+    }
+
+    /// True for [`Placeholder::refused`].
+    #[must_use]
+    pub fn is_refused(&self) -> bool {
+        self.refused
+    }
+
     /// A placeholder for the command `kind`.
     #[must_use]
     pub fn for_command(kind: CommandId) -> Placeholder {
@@ -287,6 +305,7 @@ impl Placeholder {
             title: cmd.map_or_else(|| kind.to_string(), |c| t(&format!("cmd.{}", c.id))),
             arrives: cmd.and_then(|c| c.arrives),
             dirty: false,
+            refused: false,
         }
     }
 
@@ -330,14 +349,24 @@ impl Screen for Placeholder {
             ui.heading(&self.title);
         });
         ui.add_space(6.0);
-        ui.label(
-            eframe::egui::RichText::new(t("window.placeholder.coming"))
-                .color(tokens.text_secondary),
-        );
+        let key = if self.refused {
+            "window.placeholder.refused"
+        } else {
+            "window.placeholder.coming"
+        };
+        ui.label(eframe::egui::RichText::new(t(key)).color(tokens.text_secondary));
     }
 
     fn dirty(&self) -> bool {
         self.dirty
+    }
+
+    fn state(&self) -> serde_json::Value {
+        if self.refused {
+            serde_json::json!({ "refused": true })
+        } else {
+            serde_json::Value::Null
+        }
     }
 }
 

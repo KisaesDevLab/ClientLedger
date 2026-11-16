@@ -13,11 +13,21 @@ use crate::theme::Tokens;
 /// scope first, in table order.
 #[must_use]
 pub fn rows_for(focus: Scope) -> Vec<(Scope, &'static Command)> {
+    rows_for_rights(focus, &cl_model::permissions::Rights::all())
+}
+
+/// [`rows_for`], without the commands the user's role does not include
+/// (P29).
+#[must_use]
+pub fn rows_for_rights(
+    focus: Scope,
+    rights: &cl_model::permissions::Rights,
+) -> Vec<(Scope, &'static Command)> {
     let mut rows = Vec::new();
     for scope in focus.active_from() {
         for c in COMMANDS
             .iter()
-            .filter(|c| c.scope == *scope && c.shortcut.is_some())
+            .filter(|c| c.scope == *scope && c.shortcut.is_some() && rights.allows(c.id))
         {
             rows.push((*scope, c));
         }
@@ -27,7 +37,12 @@ pub fn rows_for(focus: Scope) -> Vec<(Scope, &'static Command)> {
 
 /// Draw the overlay. Returns true when it should close.
 #[must_use]
-pub fn show(ctx: &Context, focus: Scope, keymap: &Keymap) -> bool {
+pub fn show(
+    ctx: &Context,
+    focus: Scope,
+    keymap: &Keymap,
+    rights: &cl_model::permissions::Rights,
+) -> bool {
     let tokens = Tokens::of(ctx);
     let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     egui::Window::new(t("shortcuts.title"))
@@ -42,7 +57,7 @@ pub fn show(ctx: &Context, focus: Scope, keymap: &Keymap) -> bool {
                 ui.label(RichText::new(t("shortcuts.intro")).color(tokens.text_secondary));
                 ui.add_space(8.0);
                 let mut last: Option<Scope> = None;
-                for (scope, c) in rows_for(focus) {
+                for (scope, c) in rows_for_rights(focus, rights) {
                     if last != Some(scope) {
                         ui.add_space(6.0);
                         ui.label(

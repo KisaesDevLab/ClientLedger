@@ -267,6 +267,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("tabs.more", "More tabs ({count} out of view)"),
     // Windows
     ("window.placeholder.coming", "This screen is not available yet. It arrives in a later release."),
+    ("window.placeholder.refused", "Your role in this company doesn't include this screen. Ask the company's Admin if you need it."),
     ("window.prompt.title", "Unsaved changes"),
     ("window.prompt.message", "\"{title}\" has changes that are not saved. What would you like to do?"),
     ("window.prompt.message_unconfirmed", "We could not confirm the last save in \"{title}\". It may already be in the books — look in the register before you save it again. What would you like to do?"),
@@ -313,6 +314,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.next_step", "next step"),
     ("status.hint.bank_formats", "Accepts QIF, QFX, OFX, and CSV"),
     ("toast.not_here", "That does not apply to this screen."),
+    ("toast.not_for_role", "Not available for your role in this company."),
+    ("rights.not_for_role", "Not available for your role"),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay
     ("palette.hint", "Go to a screen or command"),
