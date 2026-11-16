@@ -126,7 +126,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("users.temp.label", "Temporary password"),
     ("users.temp.copy", "Copy"),
     ("users.temp.done", "Done"),
-    ("users.temp.copied", "Copied. Paste it somewhere only they will see."),
+    ("users.temp.copied", "Copied. Paste it somewhere only they will see. The clipboard is cleared after 30 seconds or when you close this, so paste it now."),
     ("users.msg.added", "Added. Give them the temporary password below."),
     ("users.msg.add_missing", "Enter the person's name and email."),
     ("users.msg.add_failed", "The person couldn't be added. Nothing was changed."),

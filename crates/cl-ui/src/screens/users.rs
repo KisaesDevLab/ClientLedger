@@ -96,6 +96,16 @@ struct RoleEdit {
     sensitive: Level,
 }
 
+/// Security review minor 5: closing the window with a temporary password
+/// on screen clears a copy of it from the clipboard.
+impl Drop for UsersScreen {
+    fn drop(&mut self) {
+        if self.shown.is_some() {
+            crate::secret_clipboard::clear_soon();
+        }
+    }
+}
+
 /// The screen.
 pub struct UsersScreen {
     link: Arc<CompanyLink>,
@@ -941,11 +951,11 @@ impl UsersScreen {
         form::card(ui, tokens, |ui| {
             ui.label(RichText::new(t_with("users.temp.title", &[("name", name)])).strong());
             form::hint(ui, tokens, &t("users.temp.intro"));
-            let text = if masked {
-                "\u{2022}".repeat(16)
-            } else {
-                secret.expose().to_owned()
-            };
+            // Security review minor 6: no plain `String` copy of the secret
+            // is kept per frame here; the text is borrowed into egui's label
+            // (egui lays it out and drops its own copy with the frame).
+            let dots = "\u{2022}".repeat(16);
+            let text: &str = if masked { &dots } else { secret.expose() };
             let r = ui
                 .add(egui::Label::new(RichText::new(text).monospace().size(18.0)).selectable(true));
             r.widget_info(|| {
@@ -953,7 +963,7 @@ impl UsersScreen {
             });
             ui.horizontal(|ui| {
                 if ui.button(t("users.temp.copy")).clicked() {
-                    ui.ctx().copy_text(secret.expose().to_owned());
+                    crate::secret_clipboard::copy(ui.ctx(), secret.expose().to_owned());
                     self.copied = true;
                 }
                 if ui.button(t("users.temp.done")).clicked() {
@@ -967,6 +977,7 @@ impl UsersScreen {
         if close {
             self.shown = None;
             self.copied = false;
+            crate::secret_clipboard::clear_soon();
         }
     }
 

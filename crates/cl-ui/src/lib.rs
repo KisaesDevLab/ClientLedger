@@ -35,6 +35,7 @@ pub mod logging;
 pub mod prefs;
 pub mod reading;
 pub mod screens;
+pub mod secret_clipboard;
 pub mod shell;
 pub mod tag_names;
 pub mod templates_runner;

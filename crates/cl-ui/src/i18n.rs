@@ -526,7 +526,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("recovery.show", "Show"),
     ("recovery.hide", "Hide"),
     ("recovery.copy", "Copy"),
-    ("recovery.copied", "Copied. Paste it somewhere safe, then clear your clipboard."),
+    ("recovery.copied", "Copied. Paste it somewhere safe now: the clipboard is cleared after 30 seconds or when you finish here."),
     ("recovery.save_path", "Save to file"),
     ("recovery.save", "Save"),
     ("recovery.saved", "Saved to {path}. Move that file somewhere safe."),

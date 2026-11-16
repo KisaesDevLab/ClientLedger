@@ -1762,3 +1762,18 @@ fn a_view_only_list_takes_no_changes() {
         None
     );
 }
+
+/// Security review minor 8: behind the idle lock the control channel's
+/// screen state says only that the app is locked.
+#[test]
+fn the_control_channel_sees_only_locked_behind_the_idle_lock() {
+    let mut shell = demo();
+    shell.run(None, cl_model::CommandId::new("vendors.write_check"));
+    let open = shell.active_screen_state();
+    assert_eq!(open["screen"], "write_check");
+    shell.idle.lock_now();
+    assert_eq!(
+        shell.active_screen_state(),
+        serde_json::json!({ "locked": true })
+    );
+}

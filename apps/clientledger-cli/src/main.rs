@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 mod host;
+#[cfg(feature = "qa-seed")]
 mod qa;
 mod read;
 mod ui;
@@ -19,7 +20,7 @@ Usage:
   clientledger-cli read <file> [--json]
   clientledger-cli ui --control <path> <method> [arguments]
   clientledger-cli tools
-  clientledger-cli qa seed --data-dir <dir> --credentials <file>
+  clientledger-cli qa seed --data-dir <dir> --credentials <file>   (QA builds only)
 
 Run `clientledger-cli host --help` for the host options,
 `clientledger-cli read --help` for reading a document on this computer and
@@ -32,7 +33,13 @@ fn main() -> ExitCode {
         Some("read") => read::run(&args[1..]),
         Some("ui") => ui::run_ui(&args[1..]),
         Some("tools") => ui::run_tools(),
+        #[cfg(feature = "qa-seed")]
         Some("qa") => qa::run(&args[1..]),
+        #[cfg(not(feature = "qa-seed"))]
+        Some("qa") => {
+            eprintln!("This build has no QA commands. Use `cargo xtask qa-company`.");
+            ExitCode::from(host::EXIT_USAGE)
+        }
         Some("--help" | "-h" | "help") => {
             println!("{USAGE}");
             ExitCode::SUCCESS

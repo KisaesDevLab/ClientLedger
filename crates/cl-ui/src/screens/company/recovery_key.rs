@@ -21,6 +21,13 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::windows::Screen;
 
+/// Security review minor 5: closing the window clears a copied key.
+impl Drop for RecoveryKeyScreen {
+    fn drop(&mut self) {
+        crate::secret_clipboard::clear_soon();
+    }
+}
+
 /// The recovery-key window.
 pub struct RecoveryKeyScreen {
     link: Arc<CompanyLink>,
@@ -257,7 +264,7 @@ impl Screen for RecoveryKeyScreen {
                     self.revealed = !self.revealed;
                 }
                 if ui.button(t("recovery.copy")).clicked() {
-                    ui.ctx().copy_text(Self::groups(key.expose()));
+                    crate::secret_clipboard::copy(ui.ctx(), Self::groups(key.expose()));
                     self.copied = true;
                 }
             });
@@ -294,6 +301,7 @@ impl Screen for RecoveryKeyScreen {
             if form::actions(ui, &t("recovery.done"), &[]).is_some() {
                 self.done = true;
                 self.key = None;
+                crate::secret_clipboard::clear_soon();
                 self.link.push(CompanyEvent::OpenWindow(CommandId::new(
                     "company.opening_balances",
                 )));

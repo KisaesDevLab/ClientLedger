@@ -78,6 +78,9 @@ pub fn qa_company(args: &[String]) -> Result<()> {
             "run",
             "-p",
             "clientledger-cli",
+            // Security review minor 9: `qa seed` exists only in this build.
+            "--features",
+            "qa-seed",
             "--",
             "qa",
             "seed",

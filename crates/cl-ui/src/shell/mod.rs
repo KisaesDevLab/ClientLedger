@@ -1002,6 +1002,11 @@ impl Shell {
     /// State of the window in front, for the control channel.
     #[must_use]
     pub fn active_screen_state(&self) -> serde_json::Value {
+        // Security review minor 8: behind the idle lock the channel learns
+        // only that the app is locked, nothing of the window in front.
+        if self.idle.locked() {
+            return serde_json::json!({ "locked": true });
+        }
         self.windows
             .active()
             .map_or(serde_json::Value::Null, |w| w.screen.state())
@@ -1489,6 +1494,8 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        // Security review minor 5: a copied secret leaves the clipboard.
+        crate::secret_clipboard::tick(&ctx);
         if self.show_idle_lock(ui) {
             return;
         }
