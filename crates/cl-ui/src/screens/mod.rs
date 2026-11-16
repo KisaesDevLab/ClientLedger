@@ -79,6 +79,7 @@ pub mod closing_date;
 pub mod login;
 pub mod my_sign_in;
 pub mod recovery;
+pub mod users;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -146,8 +147,8 @@ pub(crate) const P28_SCREENS: [crate::shell::MakeScreen; 1] = [reports::make];
 
 /// Every A04 screen's `make` (the shell tries each after P17's).
 /// P29 screens.
-pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 2] =
-    [closing_date::make, audit_trail::make];
+pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 3] =
+    [closing_date::make, audit_trail::make, users::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

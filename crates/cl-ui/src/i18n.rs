@@ -327,6 +327,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // P29: Set Closing Date.
     ("orphan.closing_date", "a closing date change"),
     ("orphan.my_sign_in", "a password change"),
+    ("orphan.team", "a change to your team"),
     ("closing.admin.intro", "Transactions dated on or before the closing date are locked. Changing one needs the closing-date password, and every change is kept in the audit trail."),
     ("closing.admin.loading", "Reading the closing date\u{2026}"),
     ("closing.admin.closed_through", "The books are closed through {date}."),
@@ -829,7 +830,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.tags.every_line_hint", "Checks, bills, card charges, journal entries, deposits, sales forms, Bulk Entry and the Bank Feed won't save a line without a tag. A tag at the top of a form counts for every line."),
     ("prefs.tags.default", "Default tag"),
     ("prefs.tags.default_none", "None"),
-    ("prefs.tags.default_hint", "New checks, bills, card charges, sales forms and Daily Sales start with this tag at the top. Saved entries are never changed."),
+    ("prefs.tags.default_hint", "New checks, bills, card charges, sales forms and Daily Sales start with this tag at the top, and Bulk Entry rows without a tag are saved with it. Saved entries are never changed."),
     ("prefs.cat.ai", "AI suggestions"),
     ("prefs.cat.email", "Email"),
     ("prefs.cat.inbox", "Receipt inbox"),

@@ -109,8 +109,11 @@ pub struct AuditTrailScreen {
     page: Option<AuditPage>,
     read: Option<Job<AuditPage>>,
     selected: Option<u64>,
-    /// People seen in the rows read so far (no user list read here).
+    /// The User filter's people: the team (P29 WP3, read once) and anyone
+    /// else seen in the rows read so far (a removed user, Automatic).
     users: BTreeMap<UserId, String>,
+    /// The team read for the User filter.
+    team: Option<Job<Vec<(UserId, String)>>>,
     export: Option<Export>,
     /// Rows in the last file saved.
     exported: Option<usize>,
@@ -380,10 +383,30 @@ impl AuditTrailScreen {
             selected: None,
             users: BTreeMap::new(),
             export: None,
+            team: None,
             exported: None,
             message: None,
             error: None,
         };
+        s.team = Some(engine::read(
+            &s.link,
+            s.group.as_ref(),
+            |d| {
+                Ok(d.auth
+                    .team()
+                    .into_iter()
+                    .map(|u| (u.id, u.display_name))
+                    .collect())
+            },
+            |s| async move {
+                Ok(s.team()
+                    .users()
+                    .await?
+                    .into_iter()
+                    .map(|u| (u.id, u.display_name))
+                    .collect())
+            },
+        ));
         s.load();
         s
     }
@@ -498,6 +521,11 @@ impl AuditTrailScreen {
     }
 
     fn poll(&mut self) {
+        // The team names win over names copied into old rows; a failed read
+        // leaves the names seen in the rows.
+        if let Some(Ok(team)) = engine::poll(&mut self.team) {
+            self.users.extend(team);
+        }
         if let Some(r) = engine::poll(&mut self.read) {
             match r {
                 Ok(p) => {
@@ -937,6 +965,17 @@ mod tests {
         let today = CalendarDate::from_ymd(2026, 11, 16).expect("d");
         let s = AuditTrailScreen::new(link, today);
         (dir, s)
+    }
+
+    /// P29 WP3: the User filter lists the whole team, not only people
+    /// seen in the rows read so far.
+    #[test]
+    fn the_user_filter_lists_the_team() {
+        let (_d, s) = screen();
+        let names: Vec<&str> = s.users.values().map(String::as_str).collect();
+        for n in ["Pat Owner", "Lee Bookkeeper", "Kim Payables", "Alex Viewer"] {
+            assert!(names.contains(&n), "{n}");
+        }
     }
 
     #[test]

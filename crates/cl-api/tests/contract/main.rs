@@ -81,6 +81,7 @@ mod contract_sales_tax_setup;
 mod contract_sales_tax_ssuta;
 mod contract_session;
 mod contract_tags;
+mod contract_team;
 mod contract_templates;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
 // trip of memorized reports (AC3, WP-B).
@@ -1339,6 +1340,18 @@ fn main() -> std::process::ExitCode {
         (
             "auth::recovery_key_works_once",
             contract_auth::recovery_key_works_once,
+        ),
+        (
+            "team::add_is_view_only_until_the_row_is_written",
+            contract_team::add_is_view_only_until_the_row_is_written,
+        ),
+        (
+            "team::non_admin_is_refused_team_changes",
+            contract_team::non_admin_is_refused_team_changes,
+        ),
+        (
+            "team::temporary_password_is_refused_for_yourself",
+            contract_team::temporary_password_is_refused_for_yourself,
         ),
         (
             "closing_admin::bookkeeper_cannot_move_the_closing_date",

@@ -1,0 +1,82 @@
+# Users and Roles (P29 WP3, Admin only) against `clientledger --demo`: the
+# built-in roles are created when missing, a locked person is unlocked and
+# given a temporary password (shown once; masked in screenshots), their
+# role changes, a person is added (view-only first, then their role), and a
+# built-in role is copied into a custom role on the none/view/full grid.
+# Every name, email and password is synthetic; the demo's team is reset at
+# the start and the end.
+name: users_roles
+description: Users list, unlock, temporary password, role change, add a person, a custom role.
+steps:
+  - resize: {width: 1280, height: 960}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_all
+  - command: dev.demo_auth_reset
+  - command: company.users
+  - wait: {ms: 400}
+  - assert_state: {key: screen.tab, equals: users}
+  - assert_state: {key: screen.users, equals: 4}
+  - assert_exists: {role: label, label: "Full access — choose a role", index: 0}
+  - screenshot: users
+  # Kim is locked: unlock, then a temporary password.
+  - click: {label: Kim Payables}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.selected_locked, equals: true}
+  - click: {role: button, label: Unlock}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: users.msg.unlocked}
+  - assert_state: {key: screen.selected_locked, equals: false}
+  - click: {role: button, label: Set a temporary password}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: users.msg.temp_set}
+  - assert_state: {key: screen.temp_password_shown, equals: true}
+  - assert_exists: {role: button, label: Copy}
+  - screenshot: temporary-password
+  - click: {role: button, label: Done}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.temp_password_shown, equals: false}
+  # Kim becomes Accounts payable.
+  - click: {role: combo_box, label: Role}
+  - click: {role: button, label: Accounts payable}
+  - click: {role: button, label: Change role}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: users.msg.role_changed}
+  - assert_state: {key: screen.selected_role, equals: roles.kind.payables}
+  # Add a person as Accounts receivable.
+  - click: {role: text_input, label: Name}
+  - type: {text: Rio Sales}
+  - click: {role: text_input, label: Email}
+  - type: {text: rio@example.com}
+  - click: {role: combo_box, label: "New person's role"}
+  - click: {role: button, label: Accounts receivable}
+  - click: {role: button, label: Add person}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.message, equals: users.msg.added}
+  - assert_state: {key: screen.users, equals: 5}
+  - assert_state: {key: screen.selected_role, equals: roles.kind.receivables}
+  - assert_state: {key: screen.temp_password_shown, equals: true}
+  - screenshot: added
+  - click: {role: button, label: Done}
+  # Roles: a built-in is copied into a custom role.
+  - click: {label: Roles}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.tab, equals: roles}
+  - click: {label: Accounts payable (built in)}
+  - click: {role: button, label: Edit role}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.editing_role, equals: true}
+  - assert_state: {key: screen.message, equals: roles.msg.builtin_copy}
+  - click: {role: text_input, label: Role name}
+  - key: Ctrl+A
+  - type: {text: Front desk}
+  - click: {role: radio_button, label: "Bills: View"}
+  - screenshot: role-grid
+  - click: {role: button, label: Save role}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: roles.msg.saved}
+  - assert_state: {key: screen.editing_role, equals: false}
+  - screenshot: roles
+  - command: file.close_window
+  - wait: {ms: 200}
+  - click_if_present: {role: button, label: Discard changes}
+  - command: dev.demo_auth_reset

@@ -507,7 +507,7 @@ pub const COMMANDS: &[Command] = &[
     // P19: logo, form footers and document numbering (no shortcut)
     built("company.information", "Company Information", Some(Menu::Company), 0, None),
     built("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None),
-    screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
+    built("company.users", "Users and Permissions", Some(Menu::Company), 1, None),
     // P29 WP2: change your own password, automatic sign-in, idle lock
     built("company.my_sign_in", "My Sign-in", Some(Menu::Company), 1, None),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
@@ -873,6 +873,7 @@ mod tests {
             "company.closing_date",
             "company.audit_trail",
             "company.my_sign_in",
+            "company.users",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
