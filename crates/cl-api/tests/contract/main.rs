@@ -1326,8 +1326,16 @@ fn main() -> std::process::ExitCode {
             contract_rights::ap_is_refused_invoices_and_runs_ap_aging,
         ),
         (
+            "rights::ap_saves_a_bill_and_ar_saves_an_invoice",
+            contract_rights::ap_saves_a_bill_and_ar_saves_an_invoice,
+        ),
+        (
             "rights::ap_hidden_reports_are_refused",
             contract_rights::ap_hidden_reports_are_refused,
+        ),
+        (
+            "rights::ar_hidden_reports_are_refused",
+            contract_rights::ar_hidden_reports_are_refused,
         ),
         (
             "auth::temporary_password_must_be_changed",
@@ -1356,6 +1364,10 @@ fn main() -> std::process::ExitCode {
         (
             "closing_admin::bookkeeper_cannot_move_the_closing_date",
             contract_closing_admin::bookkeeper_cannot_move_the_closing_date,
+        ),
+        (
+            "closing_admin::closed_period_edit_is_in_the_exceptions_report",
+            contract_closing_admin::closed_period_edit_is_in_the_exceptions_report,
         ),
         (
             "reconcile::discrepancy_lists_changed_and_backdated_entries",

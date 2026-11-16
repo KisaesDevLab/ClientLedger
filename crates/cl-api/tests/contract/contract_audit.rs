@@ -222,7 +222,9 @@ pub fn viewer_pages_and_filters(h: &Harness) {
     let memo = unique("audit-view");
     let made = h
         .run(s.transactions().create_bank_posting(
-            &check(&a, date(2026, 6, 4), &memo, ("3.0000", "0.0000")),
+            // Both lines positive: a zero line is refused locally
+            // (`NonPositiveAmount`) before anything is sent.
+            &check(&a, date(2026, 6, 4), &memo, ("3.0000", "1.0000")),
             &PostingOptions::default(),
             key(),
         ))
@@ -254,8 +256,7 @@ pub fn viewer_pages_and_filters(h: &Harness) {
             .iter()
             .all(|r| r.action == "create" && r.entity_type == "transaction")
     );
-    if !h.caps.has("audit-filters-v1") {
-        eprintln!("PENDING(audit-filters-v1): the record filter");
+    if !h.require_cap("audit-filters-v1", "audit-filters-v1") {
         return;
     }
     let one = h

@@ -47,6 +47,7 @@ const EQUITY_ROLE_NUMBERS: [&str; 2] = ["30160", "30170"];
 fn tenant_c(h: &Harness) -> TenantId {
     static ONCE: std::sync::OnceLock<TenantId> = std::sync::OnceLock::new();
     *ONCE.get_or_init(|| {
+        h.auth_slots(1);
         h.run(h.s1.create_company(&NewCompany {
             company_name: unique("Lifecycle Co"),
             business_type: Some("default".into()),
@@ -430,6 +431,7 @@ pub fn ten_switches_under_two_seconds(h: &Harness) {
     let budget_left = 8u64.saturating_sub(h.observer.auth_calls());
     let extra = budget_left.saturating_sub(1).min(3);
     for i in 0..extra {
+        h.auth_slots(1);
         h.run(s.create_company(&NewCompany {
             company_name: unique(&format!("Switch {i}")),
             business_type: Some("default".into()),

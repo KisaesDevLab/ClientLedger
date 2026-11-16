@@ -61,6 +61,7 @@ pub fn temporary_password_must_be_changed(h: &Harness) {
     }
     let (_, email, pw) = invite(h);
     let temp = Secret::new(pw);
+    h.auth_slots(1);
     let Ok(LoginOutcome::Session(s)) = h.run(h.client.login(&email, &temp)) else {
         panic!("login");
     };
@@ -90,11 +91,13 @@ pub fn five_wrong_passwords_lock_until_unlocked(h: &Harness) {
     }
     let (id, email, pw) = invite(h);
     for _ in 0..5 {
+        h.auth_slots(1);
         let e = h
             .run(h.client.login(&email, &Secret::new("not-the-password")))
             .expect_err("wrong");
         assert_eq!(e, ApiError::Unauthorized(AuthFailure::InvalidCredentials));
     }
+    h.auth_slots(1);
     let e = h
         .run(h.client.login(&email, &Secret::new(pw.clone())))
         .expect_err("locked");
@@ -111,6 +114,7 @@ pub fn five_wrong_passwords_lock_until_unlocked(h: &Harness) {
         ))
         .expect("unlock");
     assert_eq!(r.status, 200, "{}", r.body);
+    h.auth_slots(1);
     assert!(matches!(
         h.run(h.client.login(&email, &Secret::new(pw))),
         Ok(LoginOutcome::Session(_))
@@ -143,6 +147,7 @@ pub fn recovery_key_works_once(h: &Harness) {
         again,
         ApiError::Unauthorized(_) | ApiError::RateLimited { .. }
     ));
+    h.auth_slots(1);
     assert!(matches!(
         h.run(h.client.login(OWNER_EMAIL, &new_pw)),
         Ok(LoginOutcome::Session(_))

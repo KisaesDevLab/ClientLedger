@@ -20,8 +20,8 @@ const REPORT_AREAS: &str = "report-areas-v1";
 /// U-230's capability.
 const TEMP_PASSWORD: &str = "temp-password-v1";
 
-/// The A/P built-in, only keys the engine knows (`item_costs` waits for
-/// U-228; `financial_reports` needs U-227).
+/// The A/P built-in, only keys the engine knows (`financial_reports` needs
+/// U-227; there is no `item_costs`).
 fn ap_map(with_areas: bool) -> PermissionMap {
     let mut m: PermissionMap = [
         ("recurring", "full"),
