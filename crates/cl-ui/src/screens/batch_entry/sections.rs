@@ -125,13 +125,17 @@ impl BulkEntryScreen {
             return;
         }
         let context = self.default_context(kind);
+        // P29 review S3: a new section starts with the default tag.
+        let tag = self.default_tag();
         let today = self.today;
         let a = self.grid.adapter_mut();
         let highest = a.highest.clone();
         let mut keys = std::mem::take(&mut a.keys);
         let mut index = 0;
         self.grid.edit_step(|b| {
-            b.sections.push(Section::new(kind, context));
+            let mut s = Section::new(kind, context);
+            s.tag = tag;
+            b.sections.push(s);
             index = b.sections.len() - 1;
             grid::ensure_entry(b, index, &mut keys, today, &highest);
         });
@@ -200,7 +204,10 @@ impl BulkEntryScreen {
         let mut keys = std::mem::take(&mut a.keys);
         self.grid.edit_step(|b| {
             if let Some(s) = b.sections.get_mut(i) {
+                // The section's tag stays (the owner's choice).
+                let tag = s.tag;
                 *s = Section::new(kind, context);
+                s.tag = tag;
             }
             grid::ensure_entry(b, i, &mut keys, today, &highest);
         });
@@ -352,6 +359,7 @@ impl BulkEntryScreen {
         let mut kind_pick = None;
         let mut account_pick = None;
         let mut add_names = None;
+        let mut tag_pick: Option<Option<cl_core::ids::TagId>> = None;
         ui.add_enabled_ui(enabled, |ui| {
             crate::forms::header::wrap_row(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
@@ -408,6 +416,42 @@ impl BulkEntryScreen {
                         });
                     });
                 }
+                // P29 review S3: the section's tag (the company's default on
+                // new sections), changed or cleared here.
+                kit::wrap_item(ui, "batch_entry/tag", |ui| {
+                    ui.vertical(|ui| {
+                        let l = kit::above(ui, tokens, &t("batch_entry.section_tag"));
+                        let none = t("batch_entry.section_tag.none");
+                        let shown = s
+                            .tag
+                            .and_then(|id| self.books.tags.iter().find(|x| x.id == id))
+                            .map_or_else(|| none.clone(), |x| x.fields.name.clone());
+                        egui::ComboBox::from_id_salt(("batch_entry/tag", i))
+                            .width(170.0)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(s.tag.is_none(), &none).clicked() {
+                                    tag_pick = Some(None);
+                                }
+                                for x in self
+                                    .books
+                                    .tags
+                                    .iter()
+                                    .filter(|x| x.is_active || Some(x.id) == s.tag)
+                                {
+                                    if ui
+                                        .selectable_label(s.tag == Some(x.id), &x.fields.name)
+                                        .clicked()
+                                    {
+                                        tag_pick = Some(Some(x.id));
+                                    }
+                                }
+                            })
+                            .response
+                            .labelled_by(l.id)
+                            .on_hover_text(t("batch_entry.section_tag.tip"));
+                    });
+                });
                 kit::wrap_item(ui, "batch_entry/add_names", |ui| {
                     ui.add_space(18.0);
                     let mut on = self.batch().add_new_names;
@@ -429,6 +473,13 @@ impl BulkEntryScreen {
         }
         if let Some(on) = add_names {
             self.grid.edit_step(|b| b.add_new_names = on);
+        }
+        if let Some(tag) = tag_pick {
+            self.grid.edit_step(|b| {
+                if let Some(sec) = b.sections.get_mut(i) {
+                    sec.tag = tag;
+                }
+            });
         }
     }
 }

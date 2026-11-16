@@ -76,6 +76,7 @@ fn checks() -> Section {
     rows[1].print_later = true;
     rows[1].number.clear();
     Section {
+        tag: None,
         kind: SectionKind::Checks,
         context: Some(acct(BANK)),
         rows,
@@ -229,6 +230,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
         assert_eq!(s, before, "{f:?}");
     }
     let mut je = Section {
+        tag: None,
         kind: SectionKind::JournalEntries,
         context: None,
         rows: vec![
@@ -285,6 +287,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
 #[test]
 fn copy_down_in_a_section_without_other_rows_is_off() {
     let s = Section {
+        tag: None,
         kind: SectionKind::Expenses,
         context: Some(acct(BANK)),
         rows: vec![RowDraft::new(RowKey(1))],
@@ -668,6 +671,7 @@ fn any_section() -> impl Strategy<Value = Section> {
             (Just(kind), Just(context), rows)
         })
         .prop_map(|(kind, context, rows)| Section {
+            tag: None,
             kind,
             context: (context && kind.needs_context().is_some()).then(|| acct(BANK)),
             rows,
@@ -812,6 +816,7 @@ fn journal() -> Section {
     undated.date = None;
     undated.number = "3".into();
     Section {
+        tag: None,
         kind: SectionKind::JournalEntries,
         context: None,
         rows: vec![

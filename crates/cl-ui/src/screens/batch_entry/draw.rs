@@ -392,7 +392,12 @@ impl BulkEntryScreen {
             ui.label(RichText::new(blocker_text(b)).color(tokens.warn_text));
         }
         crate::forms::tag_gate::show(ui, tokens, &self.tag_refusal);
-        if self.batch().default_tag.is_some() {
+        if self
+            .batch()
+            .sections
+            .get(self.selected())
+            .is_some_and(|s| s.tag.is_some())
+        {
             form::hint(ui, tokens, &t("batch_entry.default_tag"));
         }
         let locked = self.batch().locked_rows(closing).len();

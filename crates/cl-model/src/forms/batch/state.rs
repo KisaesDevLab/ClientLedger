@@ -533,6 +533,7 @@ impl BulkBatch {
         let mut h = Fnv::new();
         h.byte(section.kind.hash_tag());
         h.opt(section.context.map(|a| a.to_string()).as_deref());
+        section.feed_tag(&mut h);
         row.feed(&mut h);
         if let Some(group) = section.je_group_of(row) {
             for r in section
@@ -560,6 +561,7 @@ impl BulkBatch {
             }
             h.byte(s.kind.hash_tag());
             h.opt(s.context.map(|a| a.to_string()).as_deref());
+            s.feed_tag(&mut h);
             h.bytes(&(rows.len() as u64).to_le_bytes());
             for r in rows {
                 r.feed(&mut h);
@@ -625,7 +627,7 @@ impl BulkBatch {
                     continue;
                 };
                 let mut o = out_row(s.kind, r, date, next, closing);
-                o.tag = self.row_tag(r);
+                o.tag = s.row_tag(r);
                 rows.push(o);
                 out.sent.insert(
                     next,

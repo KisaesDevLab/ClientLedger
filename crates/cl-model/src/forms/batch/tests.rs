@@ -58,6 +58,7 @@ fn je_row(
 
 fn section(kind: SectionKind, context: Option<u8>, rows: Vec<RowDraft>) -> Section {
     Section {
+        tag: None,
         kind,
         context: context.map(acct),
         rows,
@@ -288,7 +289,6 @@ fn duplicate_check_numbers_within_and_across_sections() {
             section(SectionKind::Expenses, Some(BANK), vec![numbered(4, "1002")]),
         ],
         add_new_names: false,
-        default_tag: None,
     };
     let p = batch.local_problems(None);
     assert_eq!(problems_of(&p, 1), [Problem::DuplicateNumber]);

@@ -285,6 +285,7 @@ fn parsed_rows_round_to_the_cent_and_keep_text() {
     );
 
     let s = Section {
+        tag: None,
         kind: SectionKind::Checks,
         context: None,
         rows: rows.into_iter().map(|r| r.row).collect(),

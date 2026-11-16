@@ -187,6 +187,9 @@ pub struct BulkEntryScreen {
     pub(crate) select_all_armed: Option<(cl_grid::CellPos, u64)>,
     /// What the last bulk action did ("Set on 3 rows."), under the grid.
     pub(crate) bulk_note: Option<String>,
+    /// P29 review S3: the company's default tag still goes on the blank
+    /// sections once the tags are read (a new window or a new batch).
+    pub(crate) tag_default_due: bool,
 }
 
 /// Half a second after the last change, the changed rows go to the engine.
@@ -217,8 +220,6 @@ impl BulkEntryScreen {
         let kind = SectionKind::Checks;
         let mut keys = RowKeyGen::new();
         let mut batch = BulkBatch::new(Section::new(kind, None));
-        // Q-276: rows saved without a tag take the company's default.
-        batch.default_tag = link.tag_rules().default_tag;
         grid::ensure_entry(&mut batch, 0, &mut keys, today, &BTreeMap::new());
         let adapter = BulkAdapter::new(Arc::clone(&books.lists), keys, today);
         let g = grid::new_grid(kind, &ColumnChoice::default_for(kind));
@@ -292,6 +293,7 @@ impl BulkEntryScreen {
             kept_apart: 0,
             select_all_armed: None,
             bulk_note: None,
+            tag_default_due: true,
         };
         s.load_columns();
         s.seen_rev = s.grid.form().revision();
@@ -357,11 +359,50 @@ impl BulkEntryScreen {
         if lists_changed {
             self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
             self.default_contexts();
+            self.fill_default_tag();
         }
         if lists_changed || self.books.closing != closing_before {
             // A name, account or tag the engine resolved may be gone, and
             // the closed-period rows may differ: ask again.
             self.forget_engine_results();
+        }
+    }
+
+    /// The company's active default tag (Q-276), as the forms read it.
+    pub(crate) fn default_tag(&self) -> Option<cl_core::ids::TagId> {
+        crate::forms::tag_gate::form_list(&self.books.tags, &self.link).default_tag()
+    }
+
+    /// P29 review S3: blank sections of a new window or batch start with the
+    /// company's default tag as their section tag, shown in the section
+    /// header where it can be changed or cleared; part of the blank window
+    /// (no unsaved mark). Once done, a cleared tag stays cleared.
+    pub(crate) fn fill_default_tag(&mut self) {
+        if !self.tag_default_due || !self.books.loaded {
+            return;
+        }
+        self.tag_default_due = false;
+        let Some(tag) = self.default_tag() else {
+            return;
+        };
+        let mut b = self.batch().clone();
+        let mut changed = false;
+        for s in b
+            .sections
+            .iter_mut()
+            .filter(|s| s.tag.is_none() && s.filled_count() == 0)
+        {
+            s.tag = Some(tag);
+            changed = true;
+        }
+        if !changed {
+            return;
+        }
+        let lists = Arc::clone(&self.books.lists);
+        if self.grid.form().is_dirty() {
+            self.grid.edit_step(|v| *v = b);
+        } else {
+            self.grid.load(b, &*lists);
         }
     }
 
