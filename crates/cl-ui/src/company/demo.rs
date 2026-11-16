@@ -10,6 +10,7 @@ pub mod audit;
 // P29: sign-in, passwords and recovery.
 pub mod auth;
 pub mod batch;
+pub mod team;
 // P20: Create Invoice (the engine's sales money rule, held to the golden file).
 pub mod billable;
 pub mod bills;

@@ -39,6 +39,7 @@ pub mod quick_add;
 pub mod reconcile;
 pub mod register;
 pub mod reports;
+pub mod roles;
 pub mod rowkey;
 pub mod statement_match;
 pub mod tags;

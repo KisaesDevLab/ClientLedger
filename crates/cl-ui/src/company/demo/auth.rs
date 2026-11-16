@@ -38,6 +38,12 @@ pub struct DemoUser {
     pub must_change: bool,
     /// The main Admin (the desktop's first user).
     pub super_admin: bool,
+    /// The user's id (synthetic).
+    pub id: cl_core::ids::UserId,
+    /// The last sign-in (ISO 8601).
+    pub last_sign_in: Option<String>,
+    /// The permission row: None without one, else its template.
+    pub row: Option<Option<uuid::Uuid>>,
     password: String,
 }
 
@@ -62,8 +68,25 @@ impl DemoUser {
             locked: false,
             must_change: false,
             super_admin: false,
+            id: demo_user_id(0),
+            last_sign_in: None,
+            row: None,
             password: password.into(),
         }
+    }
+}
+
+impl DemoUser {
+    /// A user an Admin just added: view-only with a temporary password.
+    pub(super) fn invited(email: &str, name: &str, temporary: &str) -> DemoUser {
+        let mut u = DemoUser::new(email, name, "readonly", temporary);
+        u.must_change = true;
+        u
+    }
+
+    /// Sets the password (a temporary one from an Admin).
+    pub(super) fn set_password(&mut self, password: &str) {
+        password.clone_into(&mut self.password);
     }
 }
 
@@ -83,6 +106,11 @@ pub struct DemoAuth {
     pub users: Vec<DemoUser>,
     /// Who is signed in (`None` after Sign out).
     pub signed_in: Option<String>,
+    /// The company's role templates (none at start: the Users window
+    /// creates the built-ins, Q-P29v).
+    pub templates: Vec<cl_api::RoleTemplate>,
+    /// Tests and scenarios: the team step that fails next (once).
+    pub fail_at: Option<cl_api::TeamStep>,
     recovery_key: String,
 }
 
@@ -112,12 +140,29 @@ impl Default for DemoAuth {
             "alex-password-1",
         );
         off.active = false;
+        owner.last_sign_in = Some("2026-11-04T14:05:00Z".into());
+        temp.last_sign_in = Some("2026-10-28T16:40:00Z".into());
+        let mut users = vec![owner, temp, locked, off];
+        for (i, u) in users.iter_mut().enumerate() {
+            u.id = demo_user_id(i);
+        }
         DemoAuth {
-            users: vec![owner, temp, locked, off],
+            users,
             signed_in: Some(OWNER_EMAIL.into()),
+            templates: Vec::new(),
+            fail_at: None,
             recovery_key: RECOVERY_KEY.into(),
         }
     }
+}
+
+/// The demo team's ids (synthetic): user `n` of the list, from 1.
+#[must_use]
+pub fn demo_user_id(n: usize) -> cl_core::ids::UserId {
+    let n = u128::try_from(n).unwrap_or(0) + 1;
+    cl_core::ids::UserId::from_uuid(uuid::Uuid::from_u128(
+        0x5a1e_0000_0000_4000_8000_0000_0000_0100 + n,
+    ))
 }
 
 fn same_email(a: &str, b: &str) -> bool {
