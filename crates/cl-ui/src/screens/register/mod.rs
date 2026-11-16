@@ -161,6 +161,10 @@ pub struct RegisterScreen {
     /// Scroll to the newest line once it arrives (date order, oldest first).
     jump_to_end: bool,
     load_error: Option<ApiError>,
+    /// U-33: the account turned hidden for this role (the engine's 404 on
+    /// its register); the window asks the shell to close it once.
+    hidden_closed: bool,
+    close_request: bool,
     custom: CustomRange,
     parts: EnvParts,
     /// The fixed bars' sizes last frame (Q-265).
@@ -293,6 +297,8 @@ impl RegisterScreen {
             allowed: Vec::new(),
             jump_to_end: false,
             load_error: None,
+            hidden_closed: false,
+            close_request: false,
             custom: CustomRange::default(),
             parts: EnvParts::default(),
             layout: crate::layout::FrameReport::default(),
@@ -528,13 +534,40 @@ impl RegisterScreen {
             self.goto.jump.map(|(i, _)| i..i + 1)
         };
         for req in self.model.wanted(rows) {
-            match self.fetch_page(account, &query, req) {
-                Some(task) => self.pages.push((req, task)),
-                None => {
-                    self.model.fail(req);
+            if let Some(task) = self.fetch_page(account, &query, req) {
+                self.pages.push((req, task));
+            } else {
+                self.model.fail(req);
+                if self.demo_hides(account) {
+                    self.close_hidden();
                 }
             }
         }
+    }
+
+    /// The demo's 404 for a register of an account hidden for this role.
+    fn demo_hides(&self, account: AccountId) -> bool {
+        self.link.demo_state().is_some_and(|mut d| {
+            let chart = d
+                .chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .clone();
+            d.hidden_accounts(&chart).contains(&account)
+        })
+    }
+
+    /// U-33: the account is now hidden for this role. The tab closes and
+    /// the shell says why in plain words (not an inline load error).
+    fn close_hidden(&mut self) {
+        if self.hidden_closed {
+            return;
+        }
+        self.hidden_closed = true;
+        self.close_request = true;
+        self.load_error = None;
+        tracing::info!("register closed: the account is hidden for this role");
+        self.link
+            .push(CompanyEvent::Toast("sensitive.register_closed"));
     }
 
     fn fetch_page(
@@ -631,6 +664,17 @@ impl RegisterScreen {
                         self.load_error = None;
                     }
                     self.model.accept(req, &page, &self.mapping);
+                }
+                // U-33: with sensitive accounts a 404 on a register means
+                // the account is hidden for this role now.
+                Err(ApiError::NotFound { .. })
+                    if self
+                        .link
+                        .capabilities()
+                        .has(crate::screens::users::SENSITIVE_ACCOUNTS) =>
+                {
+                    self.model.fail(req);
+                    self.close_hidden();
                 }
                 Err(e) => {
                     if self.model.is_current(&req) && self.model.total().is_none() {
@@ -1088,6 +1132,10 @@ impl RegisterScreen {
 }
 
 impl Screen for RegisterScreen {
+    fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_request)
+    }
+
     fn title(&self) -> String {
         self.account_record().map_or_else(
             || t("cmd.banking.register"),
@@ -1248,6 +1296,7 @@ impl Screen for RegisterScreen {
             "account_class": self.account.map(|_| filters::class_name(self.class)),
             "loaded": self.accounts_loaded && total.is_some(),
             "load_error": self.load_error.is_some(),
+            "hidden_closed": self.hidden_closed,
             "no_accounts": self.accounts_loaded && self.account.is_none(),
             "rows": total,
             "hidden_rows": hidden_rows,
