@@ -37,6 +37,7 @@ impl BulkEntryScreen {
         // them since this window read its lists).
         use cl_model::forms::tag_rule::{Place, TagLine};
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let default = self.batch().default_tag;
         let lines: Vec<TagLine> = self
             .batch()
             .sections
@@ -50,7 +51,7 @@ impl BulkEntryScreen {
                     .map(move |(i, r)| TagLine {
                         place: Place::Row(s, i),
                         account: r.account,
-                        tags: r.tag.into_iter().collect(),
+                        tags: r.tag.or(default).into_iter().collect(),
                     })
             })
             .collect();

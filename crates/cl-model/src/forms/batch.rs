@@ -703,6 +703,10 @@ pub struct BulkBatch {
     pub sections: Vec<Section>,
     /// "Add new names to the list" (off by default, Q-P15Ad).
     pub add_new_names: bool,
+    /// Q-276: the company's default tag. Every Bulk Entry row is a new
+    /// transaction, so a row saved without a tag takes it; it is not put in
+    /// the cell, so an untouched row stays blank.
+    pub default_tag: Option<TagId>,
 }
 
 impl BulkBatch {
@@ -712,7 +716,14 @@ impl BulkBatch {
         BulkBatch {
             sections: vec![first],
             add_new_names: false,
+            default_tag: None,
         }
+    }
+
+    /// The tag a row is saved with: its own, else the default (Q-276).
+    #[must_use]
+    pub fn row_tag(&self, row: &RowDraft) -> Option<TagId> {
+        row.tag.or(self.default_tag)
     }
 
     /// Every row that is not blank, with its section index.

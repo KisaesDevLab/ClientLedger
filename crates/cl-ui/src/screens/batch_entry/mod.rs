@@ -217,6 +217,8 @@ impl BulkEntryScreen {
         let kind = SectionKind::Checks;
         let mut keys = RowKeyGen::new();
         let mut batch = BulkBatch::new(Section::new(kind, None));
+        // Q-276: rows saved without a tag take the company's default.
+        batch.default_tag = link.tag_rules().default_tag;
         grid::ensure_entry(&mut batch, 0, &mut keys, today, &BTreeMap::new());
         let adapter = BulkAdapter::new(Arc::clone(&books.lists), keys, today);
         let g = grid::new_grid(kind, &ColumnChoice::default_for(kind));

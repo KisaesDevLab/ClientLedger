@@ -288,6 +288,7 @@ fn duplicate_check_numbers_within_and_across_sections() {
             section(SectionKind::Expenses, Some(BANK), vec![numbered(4, "1002")]),
         ],
         add_new_names: false,
+        default_tag: None,
     };
     let p = batch.local_problems(None);
     assert_eq!(problems_of(&p, 1), [Problem::DuplicateNumber]);

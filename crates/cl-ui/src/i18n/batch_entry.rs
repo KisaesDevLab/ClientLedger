@@ -213,4 +213,5 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.copy.kept_apart", "This would join two journal entries with the same date and Entry No., so {n} rows were left as they were."),
     ("batch_entry.columns.shown_for_problem", "The {column} column is shown again: a row has a problem in it."),
     ("batch_entry.copy.kept_apart.one", "This would join two journal entries with the same date and Entry No., so 1 row was left as it was."),
+    ("batch_entry.default_tag", "Rows without a tag are saved with the company's default tag (Company \u{203a} Preferences \u{203a} Tags)."),
 ];

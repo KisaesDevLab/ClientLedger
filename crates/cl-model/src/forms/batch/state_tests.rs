@@ -115,6 +115,7 @@ fn mixed() -> BulkBatch {
             ),
         ],
         add_new_names: false,
+        default_tag: None,
     }
 }
 
@@ -583,6 +584,7 @@ fn batch_from(cents: &[i64], je: &[i64]) -> BulkBatch {
             section(SectionKind::JournalEntries, None, je_rows),
         ],
         add_new_names: false,
+        default_tag: None,
     }
 }
 
@@ -688,4 +690,27 @@ proptest! {
             }
         }
     }
+}
+
+/// Q-276: rows saved without a tag take the company's default; a row's
+/// own tag wins, and the default never makes a blank row count.
+#[test]
+fn rows_without_a_tag_are_sent_with_the_default_tag() {
+    let mut b = mixed();
+    let default = TagId::parse("7a900000-0000-4000-8000-000000000001").expect("id");
+    let own = TagId::parse("7a900000-0000-4000-8000-000000000002").expect("id");
+    let filled_before = b.filled().count();
+    b.default_tag = Some(default);
+    assert_eq!(b.filled().count(), filled_before);
+    if let Some(r) = b.sections[0].rows.first_mut() {
+        r.tag = Some(own);
+    }
+    let out = b.outgoing(None, None);
+    let tags: Vec<Option<TagId>> = out
+        .groups
+        .iter()
+        .flat_map(|g| g.rows.iter().map(|r| r.tag))
+        .collect();
+    assert_eq!(tags.first().copied().flatten(), Some(own));
+    assert!(tags.iter().skip(1).all(|t| *t == Some(default)), "{tags:?}");
 }

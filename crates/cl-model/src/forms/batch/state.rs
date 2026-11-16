@@ -624,7 +624,9 @@ impl BulkBatch {
                 let Some(hash) = self.row_hash(r.key) else {
                     continue;
                 };
-                rows.push(out_row(s.kind, r, date, next, closing));
+                let mut o = out_row(s.kind, r, date, next, closing);
+                o.tag = self.row_tag(r);
+                rows.push(o);
                 out.sent.insert(
                     next,
                     SentRow {
