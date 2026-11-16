@@ -61,7 +61,7 @@
   {"method":"POST","path":"/api/v1/tenant-archives/import","inSpec":true,"fragmentHash":"2ff18fc79418aaa1b020d4a01168f3ada968a6d945942054c09e4be4433a8c2a"},
   {"method":"POST","path":"/api/v1/tenants/{id}/delete","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/desktop/recover-password","inSpec":false,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/auth/recovery-key/rotate","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/auth/recovery-key/rotate","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/ai/admin/config","inSpec":true,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/ai/admin/config","inSpec":true,"fragmentHash":"c260288ef5c3a9525185386b6ab0072cd4748a2560dfb23f39cf07db0274069d"},
   {"method":"GET","path":"/api/v1/ai/admin/disclosure","inSpec":true,"fragmentHash":null},
