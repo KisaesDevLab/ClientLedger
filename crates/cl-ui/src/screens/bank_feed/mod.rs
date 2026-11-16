@@ -24,6 +24,7 @@ pub mod detail;
 pub mod receipts;
 pub mod rules;
 pub mod send;
+pub(crate) mod tag_check;
 pub mod view;
 
 use std::sync::Arc;
@@ -93,6 +94,9 @@ pub(crate) struct FeedAccount {
 pub(crate) struct Meta {
     accounts: Vec<FeedAccount>,
     chart: Vec<(AccountId, String)>,
+    /// P29 B1: the tags and the chart's account types for the tag gate.
+    tags: Vec<cl_api::Tag>,
+    kinds: std::collections::BTreeMap<AccountId, cl_model::lists::accounts::AccountKind>,
     ai_on: bool,
     view_only: bool,
     accept_route: bool,
@@ -129,6 +133,13 @@ pub struct BankFeedScreen {
     pub(crate) accounts: Vec<FeedAccount>,
     pub(crate) account: usize,
     pub(crate) chart: Vec<(AccountId, String)>,
+    /// P29 B1: the tags as read (the tag gate's list).
+    pub(crate) tags: Vec<cl_api::Tag>,
+    /// P29 B1: each account's type (required tag groups, Q-180).
+    pub(crate) kinds: std::collections::BTreeMap<AccountId, cl_model::lists::accounts::AccountKind>,
+    /// P29 B1: rows the last accept left out because they need a tag
+    /// (date · description, shown under the notice).
+    pub(crate) tag_skipped: Vec<String>,
     pub(crate) segment: Segment,
     pub(crate) show: Show,
     pub(crate) voided_only: bool,
@@ -217,6 +228,9 @@ impl BankFeedScreen {
             accounts: Vec::new(),
             account: 0,
             chart: Vec::new(),
+            tags: Vec::new(),
+            kinds: std::collections::BTreeMap::new(),
+            tag_skipped: Vec::new(),
             segment: Segment::All,
             show: Show::Waiting,
             voided_only: false,
@@ -377,7 +391,10 @@ impl BankFeedScreen {
             self.group.as_ref(),
             None,
             |d| {
-                let chart = chart_names(crate::company::demo::chart());
+                let all = crate::company::demo::chart();
+                let kinds = kinds_of(&all);
+                let tags = d.tags_mut().clone();
+                let chart = chart_names(all);
                 let conns = demo::connections(d);
                 let accounts = conns
                     .into_iter()
@@ -391,6 +408,8 @@ impl BankFeedScreen {
                 Ok(Meta {
                     accounts,
                     chart,
+                    tags,
+                    kinds,
                     ai_on: d.ai.enabled && d.ai.categorization,
                     view_only: d.feed_review.view_only,
                     accept_route: true,
@@ -460,6 +479,8 @@ impl BankFeedScreen {
                         .and_then(|c| self.accounts.iter().position(|a| a.connection == c))
                         .unwrap_or(0);
                     self.chart = m.chart;
+                    self.tags = m.tags;
+                    self.kinds = m.kinds;
                     self.ai_on = m.ai_on;
                     self.view_only = self.view_only || m.view_only;
                     self.accept_route = m.accept_route;
@@ -847,6 +868,21 @@ fn merge(into: &mut cl_api::FeedPage, more: cl_api::FeedPage) {
         .sort_by(|a, b| b.date.cmp(&a.date).then(a.id.cmp(&b.id)));
 }
 
+/// Each account's type (the tag gate's required groups, Q-180).
+fn kinds_of(
+    accounts: &[cl_api::Account],
+) -> std::collections::BTreeMap<AccountId, cl_model::lists::accounts::AccountKind> {
+    accounts
+        .iter()
+        .map(|a| {
+            (
+                a.id,
+                crate::screens::lists::accounts::model::kind_of(a.fields.account_type),
+            )
+        })
+        .collect()
+}
+
 fn chart_names(accounts: Vec<cl_api::Account>) -> Vec<(AccountId, String)> {
     let mut v: Vec<(AccountId, String)> = accounts
         .into_iter()
@@ -883,11 +919,19 @@ async fn live_meta(
 ) -> Result<Meta, ApiError> {
     let caps = s.client().capabilities();
     let supported = caps.has(Capabilities::FEED_REVIEW);
-    let chart = chart_names(
-        s.accounts()
-            .list_all(&cl_api::AccountFilter::default())
-            .await?,
-    );
+    let all = s
+        .accounts()
+        .list_all(&cl_api::AccountFilter::default())
+        .await?;
+    let kinds = kinds_of(&all);
+    let chart = chart_names(all);
+    // The tag gate's list: a read that fails leaves it empty (the rules
+    // then refuse every untagged line, as they should).
+    let tags = s
+        .tags()
+        .list_all(&cl_api::TagFilter::default())
+        .await
+        .unwrap_or_default();
     let mut accounts = Vec::new();
     if supported {
         for c in s.feed().connections().await? {
@@ -915,6 +959,8 @@ async fn live_meta(
     Ok(Meta {
         accounts,
         chart,
+        tags,
+        kinds,
         ai_on,
         view_only,
         accept_route: caps.has(Capabilities::FEED_ACCEPT),
@@ -1130,6 +1176,7 @@ impl Screen for BankFeedScreen {
             "busy": self.act.is_some() || self.load.is_some(),
             "load_failed": self.load_failed,
             "notice": self.notice.map(|(k, _)| k),
+            "tag_skipped": self.tag_skipped.len(),
             "detail": detail::state(self),
             "rules": rules::state(self),
             "receipts": receipts::state(self),

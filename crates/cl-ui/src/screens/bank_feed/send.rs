@@ -307,22 +307,6 @@ pub(crate) fn refusal_key(r: &FeedRefusal) -> &'static str {
     }
 }
 
-/// P29 WP7: the owner's values would post a line without a tag while the
-/// company asks for one on every line.
-fn needs_tag(s: &BankFeedScreen, id: FeedItemId, c: &cl_api::FeedChoice) -> bool {
-    if !s.link.tag_rules().every_line {
-        return false;
-    }
-    let row_tag = s
-        .row(id)
-        .is_some_and(|r| r.assigned_tag.is_some() || r.suggested_tag.is_some());
-    if c.splits.is_empty() {
-        c.tag.is_none() && !row_tag
-    } else {
-        c.splits.iter().any(|l| l.tag.is_none()) && c.tag.is_none()
-    }
-}
-
 /// The row an action is about (for the stale list).
 fn row_of(send: &Send) -> Option<FeedItemId> {
     match send {
@@ -399,13 +383,20 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
     if s.view_only || s.act.is_some() {
         return;
     }
-    // P29 WP7 (Q-276): with "tag on every line" on, the owner's values
-    // need a tag (theirs, or the one the row already carries). Required
-    // tag groups are left to the forms: the feed reads no tag groups.
-    if let Send::Categorize(id, Some(c)) = &send
-        && needs_tag(s, *id, c)
+    // P29 review B1 (Q-276, Q-180): every posting send is checked with the
+    // tag each line posts with. A rule's accept goes whole or not at all
+    // (the engine picks its rows): the rule must set a tag and every listed
+    // row of it must post with one.
+    s.tag_skipped.clear();
+    if let Send::Rule(r) = &send
+        && let Some(left) = super::tag_check::rule_refused(s, r)
     {
-        s.notice = Some(("bank_feed.notice.tag_needed", 1));
+        s.tag_skipped = super::tag_check::names(s, &left);
+        s.notice = Some(("bank_feed.notice.tag_rule", left.len()));
+        return;
+    }
+    if let Some(key) = super::tag_check::refusal(s, &send) {
+        s.notice = Some((key, 1));
         return;
     }
     // PR-5: a line already in the books, or an Undo of a ticked entry,
