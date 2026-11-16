@@ -176,7 +176,7 @@ fn report_tab(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
     let line = match s.ed.saved() {
         None => t("builder.report.who_new"),
         Some(x) if x.can_edit => t("builder.report.who_can"),
-        Some(_) => t("builder.save.not_author"),
+        Some(x) => t(super::save::read_only_key(x)),
     };
     ui.add(egui::Label::new(RichText::new(line).size(12.0).color(tokens.text_secondary)).wrap());
     ui.add_space(8.0);

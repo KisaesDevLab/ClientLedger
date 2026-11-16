@@ -1747,12 +1747,28 @@ fn saved_of(row: &DefinitionRow, def: BuilderDefinition, kind: SavedKind) -> Sav
         version: row.version,
         kind,
         can_edit: row.can_edit,
+        hidden_refs: row.hidden_refs,
+        hidden_ids: hidden_ids(row),
         def,
         name: row.name.clone(),
         group_id: row.group_id.clone(),
         author: row.created_by_name.clone(),
         updated_at: row.updated_at,
     }
+}
+
+/// The account ids a memorized row names that are hidden for this role
+/// (U-33), each once.
+pub(crate) fn hidden_ids(row: &DefinitionRow) -> Vec<String> {
+    let mut ids: Vec<String> = row
+        .hidden
+        .iter()
+        .filter(|h| h.kind.is_empty() || h.kind == "account")
+        .flat_map(|h| h.ids.iter().cloned())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 /// A definition's text read, or the notice that says why it can't be.

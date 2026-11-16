@@ -77,6 +77,14 @@ pub struct Saved {
     /// True when this user may change it (the engine's `canEdit`: the
     /// author, an owner or a super admin, Q-310).
     pub can_edit: bool,
+    /// It names an account hidden for this role (the engine's
+    /// `hiddenRefs`, U-33): read-only for this user, for that reason
+    /// rather than authorship.
+    pub hidden_refs: bool,
+    /// The account ids it names that are hidden for this role (the
+    /// engine's `hidden[].ids`; never a name). Their chips read "Hidden
+    /// account" instead of "name not found".
+    pub hidden_ids: Vec<String>,
     /// The definition as saved (dirty compares with it). For a
     /// [`SavedKind::Standard`] row, whose body is not a builder definition,
     /// it is the mapped starter's definition the editor opened on (with the
@@ -101,6 +109,7 @@ impl std::fmt::Debug for Saved {
             .field("version", &self.version)
             .field("kind", &self.kind)
             .field("can_edit", &self.can_edit)
+            .field("hidden_refs", &self.hidden_refs)
             .finish_non_exhaustive()
     }
 }
@@ -675,6 +684,16 @@ impl BuilderEditor {
     pub fn not_author(&mut self) {
         if let Some(s) = self.saved.as_mut() {
             s.can_edit = false;
+        }
+    }
+
+    /// The engine said the row names an account hidden for this role (403
+    /// `SENSITIVE_DEFINITION`, U-33): read-only for this user, the edits
+    /// stay (it can still be run or memorized as a copy).
+    pub fn hidden_refs(&mut self) {
+        if let Some(s) = self.saved.as_mut() {
+            s.can_edit = false;
+            s.hidden_refs = true;
         }
     }
 

@@ -62,10 +62,9 @@ pub(crate) fn toolbar(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens) {
             s.preview.run_now();
         }
         ui.separator();
-        let save_why = if s.ed.saved().is_some_and(|x| !x.can_edit) {
-            t("builder.save.not_author")
-        } else {
-            t("builder.toolbar.save_off")
+        let save_why = match s.ed.saved() {
+            Some(x) if !x.can_edit => t(super::save::read_only_key(x)),
+            _ => t("builder.toolbar.save_off"),
         };
         if tool(
             ui,
