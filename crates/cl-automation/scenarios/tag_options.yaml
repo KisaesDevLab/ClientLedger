@@ -6,7 +6,7 @@
 # form, whose save is the one checked here.) The option goes off again at the
 # end so the dark run starts the same. Synthetic data only.
 name: tag_options
-description: Tag on every line refuses untagged lines in Write Check and Bulk Entry.
+description: Tag on every line refuses untagged lines in Write Check, Bulk Entry and the Bank Feed.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -117,6 +117,32 @@ steps:
   - assert_exists: {label_contains: "Section 1, row 1: Add a tag"}
   - screenshot: bulk-entry-refused
   - click: {role: button, label: Clear}
+  - command: file.close_window
+  - wait: {ms: 200}
+
+  # --- Bank Feed (P29 review B1): untagged lines aren't recorded ------------
+  # The sample's lines carry no tag: Accept selected leaves them waiting and
+  # names them; A on one says it needs a tag. Nothing posts.
+  - command: banking.import_file
+  - command: dev.demo_bank_import_reset
+  - command: banking.feed
+  - command: dev.demo_feed_reset
+  - assert_state: {key: screen.screen, equals: bank_feed}
+  - click: {role: button, label: Ready 28}
+  - click: {role: button, label_contains: "Bank line 1 of 28:"}
+  - key: Space
+  - key: J
+  - key: Space
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.busy, equals: false}
+  - assert_state: {key: screen.counts.accepted, equals: 0}
+  - assert_state: {key: screen.notice, equals: bank_feed.notice.tag_needed}
+  - assert_state: {key: screen.tag_skipped, equals: 2}
+  - assert_exists: {label_contains: "Left waiting because they need a tag:"}
+  - screenshot: bank-feed-refused
+  - key: A
+  - assert_state: {key: screen.counts.accepted, equals: 0}
+  - assert_state: {key: screen.notice, equals: bank_feed.notice.tag_needed}
   - command: file.close_window
   - wait: {ms: 200}
 
