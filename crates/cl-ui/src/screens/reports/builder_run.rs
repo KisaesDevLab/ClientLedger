@@ -908,7 +908,10 @@ pub(crate) fn shown_rows(b: &Builder, table: &ReportTable, serial: u64) -> Vec<u
         .rows
         .iter()
         .map(|r| {
-            let leaf = matches!(r.kind, RowKind::Detail | RowKind::Earnings | RowKind::More);
+            let leaf = matches!(
+                r.kind,
+                RowKind::Detail | RowKind::Earnings | RowKind::Opening | RowKind::More
+            );
             (r.path.clone(), r.expandable, leaf)
         })
         .collect();

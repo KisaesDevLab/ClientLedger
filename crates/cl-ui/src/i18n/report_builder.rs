@@ -20,6 +20,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.builder.denied", "Your role can't see this part of the report"),
     ("reports.builder.more", "Load more"),
     ("reports.builder.opening", "Opening balance"),
+    ("reports.builder.opening_before", "Balance before {name}"),
     ("reports.builder.subtotal", "Total"),
     ("reports.builder.no_activity", "No activity for these dates."),
     ("reports.builder.unreadable", "This report can't be read by this version of ClientLedger."),

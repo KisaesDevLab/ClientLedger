@@ -987,6 +987,7 @@ impl ReportWindow {
                                 | RowKind::Grand
                                 | RowKind::Subtotal
                                 | RowKind::Formula
+                                | RowKind::Opening
                         );
                         fixed_box(
                             ui,

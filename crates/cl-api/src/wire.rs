@@ -622,6 +622,16 @@ impl Capabilities {
     /// percent-of bases use each section's normal sign; "Show as positive"
     /// changes only the section's own rows (Q-A08ai).
     pub const REPORT_BUILDER_FORMULA_SIGN: &'static str = "report-builder-formula-sign-v1";
+    /// U-225 (engine PR #58, PR-A2): a balance in a range report drills to
+    /// an opening row plus its rows; a report of balances only has no Total
+    /// column (a mixed one gives a balance's last period); Trial Balance
+    /// debit and credit come from the innermost lines (Q-PRA2a).
+    pub const REPORT_BUILDER_TIES: &'static str = "report-builder-ties-v1";
+    /// U-226 (engine PR #58, PR-A2): saved reports follow contact and tag
+    /// merges; a definition GET lists `missing` names; a run with one is
+    /// refused (422 `REPORT_REFERENCE_MISSING`, 400 `NOT_IN_COMPANY`); a
+    /// `.clreport` account matches by number only with its name (Q-PRA2b–d).
+    pub const REPORT_REFS: &'static str = "report-refs-v1";
     /// U-219 (engine PR #53): the Assets, Liabilities and Equity by Account
     /// summaries total each account's balance at the end date (Q-A09b);
     /// Equity by Account shows posted balances only (no computed earnings).

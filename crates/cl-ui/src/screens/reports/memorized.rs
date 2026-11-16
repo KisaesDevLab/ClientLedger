@@ -624,6 +624,7 @@ mod tag_tests {
             created_by_name: None,
             updated_at: None,
             can_edit: true,
+            missing: Vec::new(),
         };
         super::open_row(&mut w, &row);
         assert_eq!(

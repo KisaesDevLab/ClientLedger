@@ -1269,7 +1269,12 @@ pub(crate) fn detail_on(
         add_vals(&mut total, &l.vals);
     }
     let v = json!({"rows": page, "cursor": next, "subtotal": cells_of(&plan, Some(&total), None, None)});
-    read_detail(&v, columns, layout)
+    let mut page = read_detail(&v, columns, layout)?;
+    cl_api::resources::report_builder::date_openings(
+        &mut page.rows,
+        cl_api::resources::report_builder::detail_from(req),
+    );
+    Ok(page)
 }
 
 #[cfg(test)]

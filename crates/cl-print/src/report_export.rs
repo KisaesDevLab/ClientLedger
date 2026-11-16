@@ -192,6 +192,7 @@ pub fn to_xlsx(
                 | RowKind::Header
                 | RowKind::Subtotal
                 | RowKind::Formula
+                | RowKind::Opening
         );
         let caption = format!(
             "{}{}",

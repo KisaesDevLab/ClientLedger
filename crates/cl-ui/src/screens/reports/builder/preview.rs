@@ -655,7 +655,10 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
         .rows
         .iter()
         .map(|r| {
-            let leaf = matches!(r.kind, RowKind::Detail | RowKind::Earnings | RowKind::More);
+            let leaf = matches!(
+                r.kind,
+                RowKind::Detail | RowKind::Earnings | RowKind::Opening | RowKind::More
+            );
             (r.path.clone(), r.expandable, leaf)
         })
         .collect();
@@ -750,6 +753,7 @@ fn rows(s: &mut BuilderScreen, ui: &mut Ui, tokens: &Tokens, table: &ReportTable
                         | RowKind::Grand
                         | RowKind::Formula
                         | RowKind::Header
+                        | RowKind::Opening
                 );
                 let text = RichText::new(caption);
                 let text = if dim { text.color(ink) } else { text };

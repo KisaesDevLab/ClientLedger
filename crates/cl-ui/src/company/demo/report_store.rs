@@ -115,6 +115,7 @@ impl DemoReportStore {
                 created_by_name: Some("Kurt".into()),
                 updated_at: Some(DemoState::now()),
                 can_edit: true,
+                missing: Vec::new(),
             });
         }
         // Another user's report (A09): the Memorized Reports list shows
@@ -138,6 +139,7 @@ impl DemoReportStore {
                 created_by_name: Some("Dana".into()),
                 updated_at: Some(DemoState::now()),
                 can_edit: false,
+                missing: Vec::new(),
             });
         }
         let mut lines = BTreeMap::new();
@@ -336,6 +338,7 @@ pub fn save_definition(
             created_by_name: Some("Kurt".into()),
             updated_at: Some(DemoState::now()),
             can_edit: true,
+            missing: Vec::new(),
         };
         s.definitions.push(row.clone());
         Ok(row)
