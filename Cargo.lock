@@ -1040,12 +1040,18 @@ name = "clientledger-cli"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "cl-api",
  "cl-automation",
+ "cl-company",
  "cl-core",
  "cl-docread",
  "cl-host",
+ "cl-model",
+ "cl-pg",
+ "cl-settings",
  "ctrlc",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

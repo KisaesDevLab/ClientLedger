@@ -22,6 +22,7 @@ mod ocr_models;
 mod pdfium_fetch;
 mod pg_fetch;
 mod preview;
+mod qa_company;
 mod run;
 mod ui_check;
 mod unsafe_check;
@@ -74,6 +75,9 @@ usage: cargo xtask <command>
   golden-reports [--bless]
                      golden company reports against the real engine: cross-checks, then compare
                      (or write, --bless) fixtures/golden/reports
+  qa-company [--out DIR] [--fresh]
+                     a seeded synthetic QA company (P29, Q-PRA2i) in target/qa-company,
+                     file-based secrets, sign-ins in its git-ignored credentials.txt
   run [--no-prepare] [-- <app args>]
                      build the engine and fetch PostgreSQL and PDFium if needed, then start the desktop app
   ui-check <screen> [--compare] [--no-build]
@@ -189,6 +193,7 @@ fn main() -> Result<()> {
         Some("ocr-build") => ocr_build::ocr_build(&args[1..]),
         Some("ocr-models") => ocr_models::ocr_models(&args[1..]),
         Some("preview") => preview::preview(&args[1..]),
+        Some("qa-company") => qa_company::qa_company(&args[1..]),
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),

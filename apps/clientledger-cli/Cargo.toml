@@ -14,6 +14,13 @@ cl-core = { path = "../../crates/cl-core" }
 # A03 step 19: `read` prints the worker's reading (types only, no worker parsers).
 cl-docread = { path = "../../crates/cl-docread" }
 cl-host = { path = "../../crates/cl-host" }
+# P29 WP9 `qa seed`: the QA company through real engine routes.
+cl-api = { path = "../../crates/cl-api" }
+cl-company = { path = "../../crates/cl-company" }
+cl-model = { path = "../../crates/cl-model" }
+cl-pg = { path = "../../crates/cl-pg" }
+cl-settings = { path = "../../crates/cl-settings" }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "time"] }
 # `read`: the owner's today. MIT OR Apache-2.0 (already used by cl-ui).
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 ctrlc = "3.5.2"
