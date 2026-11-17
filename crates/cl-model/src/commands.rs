@@ -471,7 +471,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
     built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
-    screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
+    built("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None),
     // Reports
     built("reports.center", "Reports", Some(Menu::Reports), 0, None),
     built("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None),
@@ -884,6 +884,8 @@ mod tests {
             "company.my_sign_in",
             "company.users",
             "reports.closing_date_exceptions",
+            // P30
+            "payroll.import",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

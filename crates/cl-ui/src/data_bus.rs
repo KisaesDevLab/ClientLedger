@@ -50,6 +50,8 @@ pub enum Change {
     /// Bank file rows were added to or taken out of the Bank Feed (P25):
     /// Home's waiting count and the Bank Feed read again.
     BankFeed,
+    /// Payroll imports (P30): Home's unposted count.
+    Payroll,
     /// Memorized reports were saved, changed or deleted (A08 QA-16): an
     /// open report window's Memorized list reads them again.
     Reports,
@@ -178,7 +180,8 @@ impl Changes {
             Change::Items => self.items = true,
             Change::Templates => self.templates = true,
             Change::Printing => self.printing = true,
-            Change::BankFeed => self.bank_feed = true,
+            // P30: Home's payroll count reads with the feed's.
+            Change::BankFeed | Change::Payroll => self.bank_feed = true,
             Change::Reports => self.reports = true,
             Change::Ai => self.ai = true,
             Change::Bills(vendor) => {

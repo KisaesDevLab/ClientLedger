@@ -834,6 +834,9 @@ pub enum PayrollRefusal {
     },
     /// 422 `PAYROLL_DISCARD_UNSUPPORTED`: a check-register import.
     DiscardUnsupported,
+    /// 422 `PAYROLL_AMOUNT_INVALID`: a ready-made file's amount isn't whole
+    /// cents (rows named in details; never cell text).
+    AmountInvalid,
 }
 
 /// Classifies `e` (`None` for anything else: closed periods, passwords,
@@ -878,6 +881,7 @@ pub fn payroll_refusal(e: &ApiError) -> Option<PayrollRefusal> {
                 .unwrap_or_default(),
         },
         "PAYROLL_DISCARD_UNSUPPORTED" => PayrollRefusal::DiscardUnsupported,
+        "PAYROLL_AMOUNT_INVALID" => PayrollRefusal::AmountInvalid,
         _ => return None,
     })
 }

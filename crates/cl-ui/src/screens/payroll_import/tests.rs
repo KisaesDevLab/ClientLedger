@@ -1,0 +1,372 @@
+//! Import Payroll against the demo engine (P30): the whole wizard per
+//! fixture, the tag gate on and off, duplicates, overlaps, the closing
+//! password, no automatic resend, generic re-import without remapping, and
+//! a restricted viewer. The scenarios drive the drawn window.
+
+use std::sync::Arc;
+
+use super::*;
+use crate::company::CompanyLink;
+
+fn today() -> CalendarDate {
+    CalendarDate::from_ymd(2025, 11, 4).expect("date")
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    link: Arc<CompanyLink>,
+}
+
+fn fixture() -> Fixture {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    {
+        // The demo story's books are closed after every payroll fixture.
+        let mut d = link.demo_state().expect("demo");
+        let open = d.open.expect("open");
+        if let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open) {
+            c.closed_through = None;
+        }
+    }
+    Fixture { _dir: dir, link }
+}
+
+fn screen(f: &Fixture) -> PayrollImportScreen {
+    let mut s = PayrollImportScreen::new(Arc::clone(&f.link), today());
+    s.poll();
+    s
+}
+
+fn cmd(s: &mut PayrollImportScreen, id: &str) {
+    let id: &'static str = Box::leak(id.to_string().into_boxed_str());
+    assert!(s.command(CommandId::new(id)), "{id}");
+    s.poll();
+}
+
+/// Next until `step` (each answer is taken at once from the demo).
+fn next_to(s: &mut PayrollImportScreen, step: Step) {
+    for _ in 0..8 {
+        if s.step == step {
+            return;
+        }
+        assert!(s.can_next(), "stuck on {:?} ({:?})", s.step, s.trouble);
+        s.next();
+        s.poll();
+    }
+    assert_eq!(s.step, step, "{}", s.state());
+}
+
+fn state_text(s: &PayrollImportScreen) -> String {
+    s.state().to_string()
+}
+
+#[test]
+fn every_fixture_posts_one_entry_per_pay_date() {
+    for (stem, entries) in [
+        ("gusto", 2),
+        ("adp_run_gli", 1),
+        ("quickbooks_payroll", 1),
+        ("paychex_flex_gls", 1),
+        ("square", 1),
+        ("onpay_gl_summary", 1),
+        ("generic_period1", 1),
+    ] {
+        let f = fixture();
+        let mut s = screen(&f);
+        cmd(&mut s, &format!("dev.payroll_demo_file_{stem}"));
+        if s.provider.is_generic() {
+            s.next();
+            s.poll();
+            assert_eq!(s.step, Step::Map, "{stem}: no saved layout yet");
+            for (field, header) in [
+                ("employee_name", "Worker"),
+                ("check_date", "Paid On"),
+                ("gross_pay", "Wages"),
+                ("federal_income_tax", "Fed WH"),
+                ("state_income_tax", "State WH"),
+                ("social_security_ee", "SS EE"),
+                ("medicare_ee", "Medicare EE"),
+                ("social_security_er", "SS ER"),
+                ("medicare_er", "Medicare ER"),
+                ("net_pay", "Take Home"),
+            ] {
+                s.set_column(field, Some(header.into()));
+            }
+        }
+        next_to(&mut s, Step::Preview);
+        let p = s.preview.clone().expect("preview");
+        assert_eq!(p.entries.len(), entries, "{stem}");
+        assert!(p.is_balanced(), "{stem}");
+        next_to(&mut s, Step::Done);
+        assert_eq!(s.posted.as_ref().map(Vec::len), Some(entries), "{stem}");
+        assert_eq!(s.posts_sent, 1, "{stem}: sent once");
+        let st = state_text(&s);
+        assert!(
+            !st.contains("Test Worker") && !st.contains(".csv"),
+            "{stem}: {st}"
+        );
+    }
+}
+
+#[test]
+fn gusto_departments_split_expenses_and_tag_them() {
+    let f = fixture();
+    let tag = {
+        let d = f.link.demo_state().expect("demo");
+        d.tags.clone().unwrap_or_default().first().map(|t| t.id)
+    };
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_gusto");
+    next_to(&mut s, Step::Map);
+    assert_eq!(s.layout_choice, Some(LayoutChoice::Builtin));
+    assert_eq!(
+        s.departments,
+        vec!["Front".to_string(), "Kitchen".to_string()]
+    );
+    s.department_tags.insert("Kitchen".into(), tag);
+    assert_eq!(
+        s.sample("employee_name"),
+        None,
+        "the worker column is never shown"
+    );
+    assert!(s.sample("gross_pay").is_some());
+    next_to(&mut s, Step::Preview);
+    let p = s.preview.clone().expect("preview");
+    for e in &p.entries {
+        let clearing = e
+            .lines
+            .iter()
+            .filter(|l| l.line_type == "payroll_clearing")
+            .count();
+        assert_eq!(clearing, 1, "net pay stays one line");
+        assert!(e.lines.iter().filter(|l| l.department.is_some()).count() >= 3);
+        if tag.is_some() {
+            assert!(
+                e.lines
+                    .iter()
+                    .any(|l| l.department.as_deref() == Some("Kitchen") && l.tag == tag)
+            );
+        }
+    }
+}
+
+#[test]
+fn the_tag_gate_refuses_when_required_and_posts_when_off_or_defaulted() {
+    let f = fixture();
+    let first_tag = f
+        .link
+        .demo_state()
+        .expect("demo")
+        .tags
+        .clone()
+        .unwrap_or_default()
+        .first()
+        .map(|t| t.id);
+    {
+        let mut d = f.link.demo_state().expect("demo");
+        d.require_tag_every_line = true;
+        d.default_tag = None;
+    }
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Preview, "refused before /post");
+    assert!(s.untagged.is_some(), "names the line");
+    assert_eq!(s.posts_sent, 0);
+    // Gate on with a default tag: it fills the lines and posts.
+    if let Some(tag) = first_tag {
+        s.plan.default_tag = Some(tag);
+        s.next();
+        s.poll();
+        assert_eq!(s.step, Step::Done);
+    }
+    // Gate off: posts without tags.
+    let f2 = fixture();
+    f2.link.demo_state().expect("demo").require_tag_every_line = false;
+    let mut s2 = screen(&f2);
+    cmd(&mut s2, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s2, Step::Done);
+}
+
+#[test]
+fn the_same_file_twice_is_refused_and_points_to_history() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_onpay_gl_summary");
+    next_to(&mut s, Step::Done);
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_onpay_gl_summary");
+    next_to(&mut s, Step::Accounts);
+    assert_eq!(s.state()["duplicate_warning"], true);
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["trouble"], "duplicate");
+    assert_eq!(s.step, Step::Preview);
+}
+
+#[test]
+fn an_overlap_asks_and_post_anyway_uses_a_new_key() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_generic_period1");
+    s.next();
+    s.poll();
+    for (field, header) in [
+        ("employee_name", "Worker"),
+        ("gross_pay", "Wages"),
+        ("net_pay", "Take Home"),
+        ("check_date", "Paid On"),
+    ] {
+        s.set_column(field, Some(header.into()));
+    }
+    // Map only these: the other columns stay unmatched, so this posts an
+    // unbalanced entry in the demo? No: the demo's entries are the golden's.
+    next_to(&mut s, Step::Done);
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_generic_period2");
+    s.period_text = [
+        "07/01/2025".into(),
+        "07/25/2025".into(),
+        "07/25/2025".into(),
+    ];
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["overlap_open"], 1);
+    let first = s.key.as_ref().map(|k| k.1.clone()).expect("key");
+    s.post_anyway();
+    s.poll();
+    assert_eq!(s.step, Step::Done);
+    assert_ne!(
+        s.key.as_ref().map(|k| k.1.clone()),
+        Some(first),
+        "a changed body gets a new key"
+    );
+    assert_eq!(s.posts_sent, 2);
+}
+
+#[test]
+fn a_generic_file_re_imports_without_remapping() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_generic_period1");
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Map);
+    for (field, header) in [
+        ("employee_name", "Worker"),
+        ("check_date", "Paid On"),
+        ("gross_pay", "Wages"),
+        ("net_pay", "Take Home"),
+    ] {
+        s.set_column(field, Some(header.into()));
+    }
+    next_to(&mut s, Step::Done);
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_generic_period2");
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Accounts, "the saved layout is applied");
+    assert_eq!(s.state()["layout"], "saved");
+    next_to(&mut s, Step::Done);
+    let visited = s.state()["steps_visited"].to_string();
+    assert!(!visited.contains("map"), "{visited}");
+}
+
+#[test]
+fn a_closed_period_asks_for_the_password() {
+    let f = fixture();
+    {
+        let mut d = f.link.demo_state().expect("demo");
+        let open = d.open.expect("open");
+        if let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open) {
+            c.closed_through = CalendarDate::from_ymd(2025, 3, 31).ok();
+        }
+    }
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = "wrong".into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.state()["trouble"], "password_wrong");
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.step, Step::Done);
+    assert_eq!(s.posts_sent, 3, "one send per click, never on its own");
+    // Reverse it from History: the password again (its own key).
+    s.show_history();
+    s.poll();
+    let id = s.history.as_ref().expect("history").sessions[0].id;
+    s.reverse(id, "Wrong file");
+    s.poll();
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    s.poll();
+    assert_eq!(s.reversed, Some(1));
+}
+
+#[test]
+fn a_lost_answer_is_never_sent_again_on_its_own() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    // As if the first answer was lost.
+    s.trouble = Some(Trouble::Unknown);
+    for _ in 0..5 {
+        s.poll();
+    }
+    assert_eq!(s.posts_sent, 0, "nothing goes out without a click");
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 0);
+    s.try_again();
+    s.poll();
+    assert_eq!(s.posts_sent, 1);
+    assert_eq!(s.step, Step::Done);
+    s.trouble = Some(Trouble::Unknown);
+    s.try_again();
+    s.poll();
+    assert_eq!(s.posts_sent, 2);
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 2);
+    let o = f.link.demo_state().expect("demo").payroll.sessions(None);
+    assert_eq!(
+        o.sessions.len(),
+        1,
+        "the same key replays: one import, posted once"
+    );
+}
+
+#[test]
+fn a_viewer_with_hidden_accounts_cannot_import() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_restricted");
+    assert!(!s.allowed());
+    cmd(&mut s, "dev.payroll_demo_file_gusto");
+    assert!(!s.can_next());
+    assert_eq!(s.state()["trouble"], "restricted");
+    assert!(
+        !f.link.rights().door_open(Door::PayrollImport),
+        "Home asks the same door"
+    );
+}
+
+#[test]
+fn cancel_after_upload_discards_the_draft() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_square");
+    next_to(&mut s, Step::Map);
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
+    s.cancel();
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 0);
+}
