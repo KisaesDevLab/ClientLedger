@@ -848,6 +848,44 @@ fn company_screens_render_in_the_demo_shell() {
     assert!(shell.toast_text().is_none() || shell.toast_text().is_some());
 }
 
+/// P29 QA-16: signing out leaves nothing of this user's windows for the
+/// next person who opens the company (a plain close keeps them).
+#[test]
+fn signing_out_forgets_the_open_windows() {
+    let dir = std::env::temp_dir().join(format!("cl-ui-signout-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = crate::prefs::UiStore::new(&dir);
+    let ctx = context();
+    let mut shell = Shell::new(ShellOptions {
+        demo: true,
+        store: Some(store.clone()),
+        ..ShellOptions::default()
+    });
+    settle(&ctx, &mut shell, WIDE);
+    shell.dispatch_now(CommandId::new("vendors.pay_bills"));
+    settle(&ctx, &mut shell, WIDE);
+    let key = shell.company_key.clone();
+    shell.dispatch_now(CommandId::new("file.sign_out"));
+    let mut rounds = 0;
+    while shell.windows.prompt().is_some() {
+        let _ = shell
+            .windows
+            .answer_prompt(crate::windows::PromptAnswer::Discard);
+        shell.dispatch_now(CommandId::new("file.sign_out"));
+        rounds += 1;
+        assert!(rounds < 10, "the sign-out keeps prompting");
+    }
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_none());
+    let kept = store.load_layout(&key);
+    assert!(
+        kept.as_ref()
+            .is_none_or(|l| !format!("{l:?}").contains("vendors.pay_bills")),
+        "the next user does not get Pay Bills back: {kept:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The interview moves through its pages with the form commands, refuses
 /// to leave the first page without a name, and Esc reverts then closes.
 #[test]

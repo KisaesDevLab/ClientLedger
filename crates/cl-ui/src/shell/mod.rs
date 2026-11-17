@@ -589,9 +589,17 @@ impl Shell {
                     self.company_role.clear();
                     self.doc_viewer.close_window();
                     link.lost_saves().set_company(None);
-                    self.save_layout();
+                    // P29 QA-16: a sign-out leaves nothing of this user's
+                    // windows for the next person who opens the company.
+                    let signing_out = self.sign_out_after_close;
+                    if !signing_out {
+                        self.save_layout();
+                    }
                     for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
                         self.windows.close_now(id);
+                    }
+                    if signing_out {
+                        self.save_layout();
                     }
                     self.open_tenant = None;
                     self.company = None;
