@@ -193,7 +193,9 @@ fn field_text(path: &str) -> String {
         .join(" > ")
 }
 
-fn changes(r: &AuditRow) -> Vec<(String, String, String)> {
+/// `for_screen`: amounts as money text (the details panel); the export keeps
+/// every value verbatim (P29 QA-18).
+fn changes(r: &AuditRow, for_screen: bool) -> Vec<(String, String, String)> {
     let (yes, no) = (t("reports.audit.yes"), t("reports.audit.no"));
     audit_view::diff(
         r.before.as_ref().map(cl_api::AuditImage::raw),
@@ -201,11 +203,43 @@ fn changes(r: &AuditRow) -> Vec<(String, String, String)> {
     )
     .into_iter()
     .map(|c| {
-        let v =
-            |x: Option<audit_view::FieldValue>| x.map(|x| x.text(&yes, &no)).unwrap_or_default();
+        let money = for_screen && is_amount_field(&c.path);
+        let v = |x: Option<audit_view::FieldValue>| {
+            x.map(|x| {
+                let text = x.text(&yes, &no);
+                // P29 QA-18: an amount reads as money text from the
+                // stored string (no arithmetic); anything else as given.
+                if money && let Ok(m) = cl_core::Money::parse_wire(&text) {
+                    m.format(cl_core::MoneyStyle::default())
+                } else {
+                    text
+                }
+            })
+            .unwrap_or_default()
+        };
         (field_text(&c.path), v(c.before), v(c.after))
     })
     .collect()
+}
+
+/// The fields the engine keeps amounts in (the last part of the path).
+fn is_amount_field(path: &str) -> bool {
+    let leaf = path.rsplit('.').next().unwrap_or(path);
+    let leaf = leaf.split('[').next().unwrap_or(leaf);
+    matches!(
+        leaf,
+        "total"
+            | "amount"
+            | "amountPaid"
+            | "balanceDue"
+            | "creditsApplied"
+            | "subtotal"
+            | "taxAmount"
+            | "debit"
+            | "credit"
+            | "unitPrice"
+            | "discountAmount"
+    )
 }
 
 fn export_row(r: &AuditRow) -> ExportRow {
@@ -216,7 +250,7 @@ fn export_row(r: &AuditRow) -> ExportRow {
         record: entity_text(&r.entity_type),
         record_id: r.entity_id.clone().unwrap_or_default(),
         source: source_text(r),
-        fields: changes(r),
+        fields: changes(r, false),
     }
 }
 
@@ -825,7 +859,7 @@ impl AuditTrailScreen {
             form::hint(ui, tokens, &t("audit.details.pick"));
             return;
         };
-        let rows = changes(r);
+        let rows = changes(r, true);
         if rows.is_empty() {
             form::hint(ui, tokens, &t("audit.details.none"));
             return;
@@ -937,7 +971,7 @@ impl Screen for AuditTrailScreen {
             "offset": self.offset,
             "first_id": rows.and_then(|r| r.first()).map(|r| r.id),
             "selected": self.selected,
-            "fields": self.selected_row().map_or(0, |r| changes(r).len()),
+            "fields": self.selected_row().map_or(0, |r| changes(r, true).len()),
             "can_export": self.admin(),
             "exporting": self.export.is_some(),
             "exported": self.exported,
@@ -1017,7 +1051,7 @@ mod tests {
         let (_d, mut s) = screen();
         // The newest: a nested change.
         s.selected = Some(130);
-        let rows = changes(s.selected_row().expect("row"));
+        let rows = changes(s.selected_row().expect("row"), true);
         assert!(
             rows.iter()
                 .any(|(_, b, a)| b == "Office chairs" && a == "=Office chairs")
@@ -1028,7 +1062,7 @@ mod tests {
         );
         // The contact: its taxpayer id never shows.
         s.selected = Some(128);
-        let shown = format!("{:?}", changes(s.selected_row().expect("row")));
+        let shown = format!("{:?}", changes(s.selected_row().expect("row"), true));
         assert!(shown.contains("65802"), "{shown}");
         assert!(!shown.contains("12-3456789") && !shown.contains("98-7654321"));
     }

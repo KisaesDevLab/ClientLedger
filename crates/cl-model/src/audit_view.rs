@@ -120,7 +120,13 @@ pub fn diff(before: Option<&Value>, after: Option<&Value>) -> Vec<FieldChange> {
         .into_iter()
         .filter_map(|p| {
             let (bv, av) = (find(&b, p), find(&a, p));
-            if (both && bv == av) || (bv.is_none() && av.is_none()) {
+            if (both && same(bv.as_ref(), av.as_ref())) || (bv.is_none() && av.is_none()) {
+                return None;
+            }
+            // P29 QA-18: an after image names only what the change set; a
+            // field it leaves out of a record or line it does have did not
+            // change (an explicit null did; a line it lacks was removed).
+            if both && !a.iter().any(|(q, _)| q == p) && parent_in(&a, p) {
                 return None;
             }
             Some(FieldChange {
@@ -130,6 +136,31 @@ pub fn diff(before: Option<&Value>, after: Option<&Value>) -> Vec<FieldChange> {
             })
         })
         .collect()
+}
+
+/// Equal values, where `"0.0000"` and `0` are the same number (a compare,
+/// no arithmetic; P29 QA-18: the engine's images write numbers both ways).
+fn same(a: Option<&FieldValue>, b: Option<&FieldValue>) -> bool {
+    use std::str::FromStr as _;
+    let num = |v: Option<&FieldValue>| match v {
+        Some(FieldValue::Text(s) | FieldValue::Number(s)) => {
+            rust_decimal::Decimal::from_str(s.trim()).ok()
+        }
+        _ => None,
+    };
+    a == b || num(a).is_some_and(|x| num(b) == Some(x))
+}
+
+/// The record or line holding `path` is in `side` (the top level always).
+fn parent_in(side: &[(String, Option<FieldValue>)], path: &str) -> bool {
+    let Some(i) = path.rfind('.') else {
+        return true;
+    };
+    let parent = &path[..i];
+    side.iter().any(|(q, _)| {
+        q.strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
+    })
 }
 
 /// Who or what made a change (Q-P29s).
@@ -340,6 +371,22 @@ mod tests {
         for secret in ["12-3456789", "98-7654321", "\"k\"", "\"p\"", "\"q\""] {
             assert!(!shown.contains(secret), "{secret} in {shown}");
         }
+    }
+
+    /// P29 QA-18: an after image that holds only what the edit set lists
+    /// only that, not every field of the before image with an empty After.
+    #[test]
+    fn a_partial_after_image_lists_only_what_it_changed() {
+        let before = json!({
+            "memo": "Old", "amountPaid": "0.0000", "billReceived": true,
+            "lines": [{"lineOrder": 1, "description": "Gravel", "amount": "10.0000",
+                       "taxAmount": "0.0000"}]
+        });
+        let after = json!({"memo": "Old P29QA edit",
+                           "lines": [{"description": "Stone", "taxAmount": 0}]});
+        let d = diff(Some(&before), Some(&after));
+        let paths: Vec<&str> = d.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["lines[1].description", "memo"]);
     }
 
     #[test]
