@@ -1971,6 +1971,30 @@ fn write_owned_prefs(
     // P20: the email templates and BCC-self (Q-P20j).
     to.email.clone_from(&from.email);
     to.email.normalize();
+    // P29 WP7 (Q-276): the tag options (P29 QA-11: left out here, so a
+    // save on the real engine never kept them).
+    to.require_tag_every_line = from.require_tag_every_line;
+    to.default_tag = from.default_tag;
+    // Every field is either written above or owned elsewhere: a new field
+    // fails to build here until it is placed (P29 QA-11).
+    let cl_settings::CompanyPrefs {
+        receipt_inbox_dir: _,         // above, legacy only
+        intake_here: _,               // after the engine took the list
+        bills_due_days: _,            // above
+        ai: _,                        // above (switch, cap); the count by the AI calls
+        ai_consent: _,                // after the engine recorded the accept
+        smtp_security: _,             // above
+        account_numbers: _,           // above
+        sensitive_accounts: _,        // Chart of Accounts and the open's migration
+        required_tag_groups: _,       // the Tags window
+        setup_checklist_dismissed: _, // Home
+        hide_logo: _,                 // Company Information
+        email: _,                     // above
+        billable_income: _,           // Add Billable Costs
+        feed_transfer_window_days: _, // above
+        require_tag_every_line: _,    // above
+        default_tag: _,               // above
+    } = from;
 }
 
 /// The active expense accounts, for the write-off and bank-fee pickers
@@ -2555,6 +2579,28 @@ mod tests {
         assert!(rules.every_line);
         assert_eq!(rules.default_tag, Some(tag));
         assert!(s.link.rights().is_admin());
+        // P29 QA-11: the live path reads the company's record on this
+        // computer, not the demo state; the save must write it there.
+        let (id, _) = s.tenant.clone().expect("open");
+        let store = s.link.store().clone();
+        let live = crate::company::store_tag_rules(&store, Some(id));
+        assert!(live.every_line, "the record keeps 'every line'");
+        assert_eq!(live.default_tag, Some(tag), "the record keeps the default");
+        // A new window (a reopen) reads them back.
+        let again = PreferencesScreen::new(
+            s.link.clone(),
+            s.tenant.clone(),
+            UserPrefs::default(),
+            Category::Tags,
+        );
+        assert!(again.edits.company.require_tag_every_line);
+        assert_eq!(again.edits.company.default_tag, Some(tag));
+        // Turning them off is kept too.
+        s.edits_mut().company.require_tag_every_line = false;
+        s.edits_mut().company.default_tag = None;
+        assert!(s.save());
+        let off = crate::company::store_tag_rules(&store, Some(id));
+        assert!(!off.every_line && off.default_tag.is_none());
     }
 
     /// Q-P26l: the Bank Feed's transfer window is kept within 1-10 days.

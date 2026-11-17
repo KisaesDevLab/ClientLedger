@@ -580,18 +580,7 @@ impl CompanyLink {
             .open_tenant
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        open.and_then(|t| {
-            self.store.load().ok().and_then(|l| {
-                l.get(t).map(|r| {
-                    TagRules::from_prefs(
-                        r.prefs.require_tag_every_line,
-                        r.prefs.default_tag,
-                        &r.prefs.required_tag_groups,
-                    )
-                })
-            })
-        })
-        .unwrap_or_default()
+        store_tag_rules(&self.store, open)
     }
 
     /// No company open: back to everything (only Open Company works).
@@ -747,6 +736,29 @@ pub async fn read_rights(
         Ok(me) => with_doors(session, rights_from_me(&me, tenant, fallback_role)).await,
         Err(_) => cl_model::permissions::Rights::from_role_only(fallback_role, false),
     }
+}
+
+/// The tag rules kept on this computer for `tenant` (the live path of
+/// [`CompanyLink::tag_rules`]); nothing open or no record: no rules.
+#[must_use]
+pub fn store_tag_rules(
+    store: &cl_settings::RecentStore,
+    tenant: Option<TenantId>,
+) -> cl_model::lists::tags::TagRules {
+    use cl_model::lists::tags::TagRules;
+    tenant
+        .and_then(|t| {
+            store.load().ok().and_then(|l| {
+                l.get(t).map(|r| {
+                    TagRules::from_prefs(
+                        r.prefs.require_tag_every_line,
+                        r.prefs.default_tag,
+                        &r.prefs.required_tag_groups,
+                    )
+                })
+            })
+        })
+        .unwrap_or_default()
 }
 
 /// The pinned engine's `/sensitive-doors` answer for a viewer with a
