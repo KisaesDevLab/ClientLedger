@@ -5,7 +5,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer};
 
 use super::*;
-use crate::resources::testkit::{company_session, json as reply, query, requests};
+use crate::resources::testkit::{COMPANY, company_session, json as reply, query, requests};
 
 const ACC1: &str = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const ACC2: &str = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
@@ -201,15 +201,15 @@ async fn each_count_asks_the_engine_list_for_its_total() {
             ),
             (
                 "/api/v1/payroll-import/sessions".into(),
-                "status=uploaded&limit=1".into()
+                format!("status=uploaded&limit=1&companyId={COMPANY}")
             ),
             (
                 "/api/v1/payroll-import/sessions".into(),
-                "status=mapped&limit=1".into()
+                format!("status=mapped&limit=1&companyId={COMPANY}")
             ),
             (
                 "/api/v1/payroll-import/sessions".into(),
-                "status=validated&limit=1".into()
+                format!("status=validated&limit=1&companyId={COMPANY}")
             ),
             (
                 "/api/v1/banking/reconciliations".into(),
