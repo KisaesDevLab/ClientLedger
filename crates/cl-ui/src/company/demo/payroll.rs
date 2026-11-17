@@ -488,7 +488,7 @@ impl DemoPayroll {
         {
             return Err(conflict(
                 "PAYROLL_DUPLICATE_FILE",
-                json!({"priorSessionId": prior.id.to_string(), "postedAt": prior.check_date.to_wire()}),
+                json!({"priorSessionId": prior.id.to_string(), "postedAt": format!("{}T12:00:00.000Z", prior.check_date.to_wire())}),
             ));
         }
         let dates: Vec<CalendarDate> = golden.iter().map(|e| e.date).collect();

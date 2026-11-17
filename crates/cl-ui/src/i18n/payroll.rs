@@ -153,7 +153,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payroll.posting", "Posting\u{2026}"),
     ("payroll.untagged", "Pay date {date}, {line}: add a tag. This company requires a tag on every line ({n} lines without one)."),
     // Refusals and trouble.
-    ("payroll.refused.duplicate", "This payroll was already posted ({date}). Reverse it in History first."),
+    ("payroll.refused.duplicate", "This payroll was already posted on {date}. Reverse it in History first."),
+    ("payroll.refused.duplicate_undated", "This payroll was already posted. Reverse it in History first."),
     ("payroll.refused.already_posted", "Someone else posted this import. It's in History."),
     ("payroll.refused.not_ready", "This import changed since it was checked. Check it again."),
     ("payroll.refused.preview_changed", "The entries changed since you reviewed them. Review them again, then post."),

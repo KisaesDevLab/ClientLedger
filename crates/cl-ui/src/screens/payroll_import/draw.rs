@@ -208,10 +208,12 @@ impl PayrollImportScreen {
         let text = match &tr {
             Trouble::Refused(r) => match r {
                 PayrollRefusal::DuplicateFile { posted_at, .. }
-                | PayrollRefusal::DuplicateRun { posted_at, .. } => t_with(
-                    "payroll.refused.duplicate",
-                    &[("date", posted_at.as_deref().unwrap_or_default())],
-                ),
+                | PayrollRefusal::DuplicateRun { posted_at, .. } => {
+                    match posted_at.as_deref().and_then(posted_day) {
+                        Some(d) => t_with("payroll.refused.duplicate", &[("date", &show_date(d))]),
+                        None => t("payroll.refused.duplicate_undated"),
+                    }
+                }
                 PayrollRefusal::AlreadyPosted => t("payroll.refused.already_posted"),
                 PayrollRefusal::NotReady => t("payroll.refused.not_ready"),
                 PayrollRefusal::PreviewChanged => t("payroll.refused.preview_changed"),
@@ -950,4 +952,10 @@ impl PayrollImportScreen {
             }
         });
     }
+}
+
+/// The day of the engine's `postedAt` (an ISO timestamp, U-244; a bare
+/// date reads too).
+pub(crate) fn posted_day(s: &str) -> Option<cl_core::CalendarDate> {
+    cl_core::CalendarDate::parse_wire(s.get(..10)?).ok()
 }

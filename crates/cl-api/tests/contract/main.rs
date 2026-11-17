@@ -1077,8 +1077,24 @@ fn main() -> std::process::ExitCode {
             contract_payroll::generic_layout_is_reused,
         ),
         (
-            "payroll::duplicates_replays_and_reverse",
-            contract_payroll::duplicates_replays_and_reverse,
+            "payroll::bank_withdrawals_match",
+            contract_payroll::bank_withdrawals_match,
+        ),
+        (
+            "payroll::duplicates_overlap_concurrency_and_reverse",
+            contract_payroll::duplicates_overlap_concurrency_and_reverse,
+        ),
+        (
+            "payroll::a_failed_post_leaves_nothing",
+            contract_payroll::a_failed_post_leaves_nothing,
+        ),
+        (
+            "payroll::closed_period_needs_the_password",
+            contract_payroll::closed_period_needs_the_password,
+        ),
+        (
+            "payroll::restricted_viewer_sees_no_payroll",
+            contract_payroll::restricted_viewer_sees_no_payroll,
         ),
         // P25 bank file import (U-06): its own accounts in Contract Co.
         (
