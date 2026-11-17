@@ -95,6 +95,20 @@ pub(crate) struct Widths {
     /// Text columns whose longest text is a short code or status (a
     /// number, "Below $2,000"): [`fit`] doesn't cut them.
     short: Vec<bool>,
+    /// The narrowest [`fit`] may make each column: a text column keeps its
+    /// heading whole (P29 QA-9), at least [`TEXT_MIN`].
+    floor: Vec<f32>,
+}
+
+/// The table's widths after [`fit`] and whether it is still wider than the
+/// window (it then scrolls across, with a hint above it, P29 QA-9).
+#[derive(Clone, Default)]
+pub(crate) struct Fitted {
+    #[cfg_attr(not(test), allow(dead_code, reason = "the widths are read by tests"))]
+    pub(crate) caption: f32,
+    #[cfg_attr(not(test), allow(dead_code, reason = "the widths are read by tests"))]
+    pub(crate) cells: Vec<f32>,
+    pub(crate) scrolls: bool,
 }
 
 /// A text column with no text longer than this keeps its width.
@@ -163,6 +177,8 @@ pub struct ReportWindow {
     /// The measured column widths and the rows' horizontal scroll, which
     /// the heading row follows.
     widths: Option<Widths>,
+    /// The widths as last drawn (after [`fit`]).
+    fitted: Fitted,
     /// The fiscal year's read failed; Refresh reads it again (S8).
     fiscal_failed: bool,
     h_offset: f32,
@@ -279,6 +295,7 @@ impl ReportWindow {
             drill_job: None,
             drill_id: None,
             widths: None,
+            fitted: Fitted::default(),
             fiscal_failed: false,
             h_offset: 0.0,
             catalog_open: None,
@@ -617,6 +634,12 @@ impl ReportWindow {
         self.widths.as_ref().map(|w| (w.caption, w.cells.clone()))
     }
 
+    /// The widths as last drawn, after fitting to the window (tests).
+    #[cfg(test)]
+    pub(crate) fn fitted_for_test(&self) -> &Fitted {
+        &self.fitted
+    }
+
     /// A row's caption: a tag row under the tag split in the owner's label
     /// style (Q-271), anything else as the table says.
     pub(crate) fn caption_of(&self, table: &ReportTable, i: usize) -> String {
@@ -830,6 +853,7 @@ impl ReportWindow {
                 caption: CAPTION_MIN,
                 cells: Vec::new(),
                 short: Vec::new(),
+                floor: Vec::new(),
             };
         };
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
@@ -850,6 +874,7 @@ impl ReportWindow {
         let mut chars = vec![0usize; table.columns.len()];
         let mut widest = vec![String::new(); table.columns.len()];
         let mut longest: (usize, f32, String) = (0, 0.0, String::new());
+        let mut captioned = false;
         for &i in rows {
             let r = &table.rows[i];
             for (ci, c) in r.cells.iter().enumerate().take(chars.len()) {
@@ -861,6 +886,7 @@ impl ReportWindow {
                 }
             }
             let caption = self.caption_of(table, i);
+            captioned |= r.expandable || !caption.is_empty();
             let indent = f32::from(r.level) * 16.0 + if r.expandable { 22.0 } else { 0.0 };
             if caption.chars().count() + usize::from(r.level) * 2 > longest.0 {
                 longest = (
@@ -870,8 +896,14 @@ impl ReportWindow {
                 );
             }
         }
-        let caption =
-            (measure(&longest.2, &body) * 1.08 + longest.1 + PAD).clamp(CAPTION_MIN, CAPTION_MAX);
+        // A list with no row captions (Closing Date Exceptions) gives the
+        // room to its columns (P29 QA-9).
+        let caption = if captioned {
+            (measure(&longest.2, &body) * 1.08 + longest.1 + PAD).clamp(CAPTION_MIN, CAPTION_MAX)
+        } else {
+            0.0
+        };
+        let mut floor = Vec::with_capacity(table.columns.len());
         #[allow(clippy::cast_precision_loss, reason = "a character count")]
         let cells = table
             .columns
@@ -880,11 +912,13 @@ impl ReportWindow {
             .map(|(c, (n, text))| {
                 let heading = measure(&label(&c.caption), &head) + PAD;
                 let cell = (*n as f32 * glyph).max(measure(text, &mono)) + PAD;
-                if c.kind.is_numeric() {
+                let w = if c.kind.is_numeric() {
                     cell.max(heading.min(140.0)).max(NUM_MIN)
                 } else {
                     cell.max(heading.min(TEXT_MAX)).clamp(TEXT_MIN, TEXT_MAX)
-                }
+                };
+                floor.push(heading.clamp(TEXT_MIN, TEXT_MAX).min(w));
+                w
             })
             .collect();
         let short = chars.iter().map(|n| *n <= SHORT_TEXT).collect();
@@ -893,6 +927,7 @@ impl ReportWindow {
             caption,
             cells,
             short,
+            floor,
         };
         self.widths = Some(w.clone());
         w
@@ -1020,10 +1055,30 @@ impl ReportWindow {
         let Some(table) = self.table.as_ref() else {
             return;
         };
+        // A list with no row captions has no caption column.
+        let has_caption = widths.caption > 0.0;
         // Each cell is followed by the layout's spacing.
         #[allow(clippy::cast_precision_loss, reason = "a column count")]
-        let gaps = ui.spacing().item_spacing.x * (table.columns.len() + 1) as f32;
-        fit(&mut widths, table, ui.available_width() - gaps - 16.0);
+        let gaps =
+            ui.spacing().item_spacing.x * (table.columns.len() + usize::from(has_caption)) as f32;
+        let room = ui.available_width() - gaps - 16.0;
+        fit(&mut widths, table, room);
+        let scrolls = widths.caption + widths.cells.iter().sum::<f32>() > room + 0.5;
+        // A table still wider than the window says so and shows a solid
+        // scroll bar, not only on hover (P29 QA-9, as the builder preview).
+        if scrolls {
+            ui.label(
+                RichText::new(t("reports.scroll_across"))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+            );
+            ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+        }
+        let fitted = Fitted {
+            caption: widths.caption,
+            cells: widths.cells.clone(),
+            scrolls,
+        };
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         let mut action: Option<GridAction> = None;
         let width_of = |ci: usize| widths.cells.get(ci).copied().unwrap_or(NUM_MIN);
@@ -1036,7 +1091,12 @@ impl ReportWindow {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.allocate_exact_size(Vec2::new(widths.caption, ROW_H), egui::Sense::hover());
+                    if has_caption {
+                        ui.allocate_exact_size(
+                            Vec2::new(widths.caption, ROW_H),
+                            egui::Sense::hover(),
+                        );
+                    }
                     for (ci, c) in table.columns.iter().enumerate() {
                         cell_box(ui, width_of(ci), c.kind.is_numeric(), |ui| {
                             let text = RichText::new(label(&c.caption)).strong().size(12.0);
@@ -1075,53 +1135,55 @@ impl ReportWindow {
                                 | RowKind::Formula
                                 | RowKind::Opening
                         );
-                        fixed_box(
-                            ui,
-                            Vec2::new(widths.caption, ROW_H),
-                            Layout::left_to_right(Align::Center),
-                            |ui| {
-                                ui.add_space(f32::from(r.level) * 16.0);
-                                let caption = self.caption_of(table, i);
-                                if r.expandable {
-                                    let open = match &self.builder {
-                                        Some(b) => b.state.is_open(&r.path),
-                                        None => !collapsed.contains(&r.path),
-                                    };
-                                    let arrow = if open { "\u{2212}" } else { "+" };
-                                    let key = if open {
-                                        "reports.collapse_row"
-                                    } else {
-                                        "reports.expand_row"
-                                    };
-                                    let name = t_with(key, &[("row", &caption)]);
-                                    let resp = ui.add(egui::Button::new(arrow).frame(false));
-                                    resp.widget_info(|| {
-                                        egui::WidgetInfo::labeled(
-                                            egui::Role::Button,
-                                            true,
-                                            name.clone(),
-                                        )
-                                    });
-                                    if resp.clicked() {
-                                        action = Some(GridAction::Collapse(r.path.clone()));
+                        if has_caption {
+                            fixed_box(
+                                ui,
+                                Vec2::new(widths.caption, ROW_H),
+                                Layout::left_to_right(Align::Center),
+                                |ui| {
+                                    ui.add_space(f32::from(r.level) * 16.0);
+                                    let caption = self.caption_of(table, i);
+                                    if r.expandable {
+                                        let open = match &self.builder {
+                                            Some(b) => b.state.is_open(&r.path),
+                                            None => !collapsed.contains(&r.path),
+                                        };
+                                        let arrow = if open { "\u{2212}" } else { "+" };
+                                        let key = if open {
+                                            "reports.collapse_row"
+                                        } else {
+                                            "reports.expand_row"
+                                        };
+                                        let name = t_with(key, &[("row", &caption)]);
+                                        let resp = ui.add(egui::Button::new(arrow).frame(false));
+                                        resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                true,
+                                                name.clone(),
+                                            )
+                                        });
+                                        if resp.clicked() {
+                                            action = Some(GridAction::Collapse(r.path.clone()));
+                                        }
                                     }
-                                }
-                                // A capped path's `more` row pages the rest.
-                                if r.kind == RowKind::More
-                                    && let Some(d) = &r.drill
-                                {
-                                    if ui.button(label(&r.caption)).clicked() {
-                                        action = Some(GridAction::Drill(d.clone()));
+                                    // A capped path's `more` row pages the rest.
+                                    if r.kind == RowKind::More
+                                        && let Some(d) = &r.drill
+                                    {
+                                        if ui.button(label(&r.caption)).clicked() {
+                                            action = Some(GridAction::Drill(d.clone()));
+                                        }
+                                        return;
                                     }
-                                    return;
-                                }
-                                let text = RichText::new(caption);
-                                ui.add(
-                                    egui::Label::new(if strong { text.strong() } else { text })
-                                        .truncate(),
-                                );
-                            },
-                        );
+                                    let text = RichText::new(caption);
+                                    ui.add(
+                                        egui::Label::new(if strong { text.strong() } else { text })
+                                            .truncate(),
+                                    );
+                                },
+                            );
+                        }
                         for (ci, cell) in r.cells.iter().enumerate() {
                             let Some(col) = table.columns.get(ci) else {
                                 continue;
@@ -1209,6 +1271,7 @@ impl ReportWindow {
             );
         }
         self.h_offset = new_offset;
+        self.fitted = fitted;
         match action {
             Some(GridAction::Collapse(p)) if self.builder.is_some() => {
                 super::builder_run::toggle(self, &p, ui);
@@ -1291,6 +1354,8 @@ impl ReportWindow {
             "rows": rows.len(),
             "columns": self.table.as_ref().map_or(0, |t| t.columns.len()),
             "column_keys": self.table.as_ref().map(|t| t.columns.iter().map(|c| c.key.clone()).collect::<Vec<_>>()),
+            // P29 QA-9: wider than the window (a hint and a solid scroll bar).
+            "scrolls_across": self.fitted.scrolls,
             "collapsed": self.options.collapsed.len(),
             // The Collapse button's label (A07 QA-9).
             "collapse_label": if self.collapse_expands() { "expand_all" } else { "collapse" },
@@ -1364,10 +1429,11 @@ fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
         .map(|(i, _)| i)
         .filter(|i| *i < w.cells.len() && !w.short.get(*i).copied().unwrap_or(false))
         .collect();
+    let floor = |i: usize| w.floor.get(i).copied().unwrap_or(TEXT_MIN);
     let slack: f32 = (w.caption - CAPTION_FIT_MIN).max(0.0)
         + text
             .iter()
-            .map(|&i| (w.cells[i] - TEXT_MIN).max(0.0))
+            .map(|&i| (w.cells[i] - floor(i)).max(0.0))
             .sum::<f32>();
     if slack <= 0.0 {
         return;
@@ -1376,7 +1442,7 @@ fn fit(w: &mut Widths, table: &ReportTable, room: f32) {
     let cut = (w.caption - CAPTION_FIT_MIN).max(0.0) * share;
     w.caption -= cut;
     for &i in &text {
-        let c = (w.cells[i] - TEXT_MIN).max(0.0) * share;
+        let c = (w.cells[i] - floor(i)).max(0.0) * share;
         w.cells[i] -= c;
     }
 }

@@ -784,6 +784,141 @@ fn wide_prior_amounts_fit_their_cells() {
     assert_eq!(checked, 8);
 }
 
+/// P29 QA-9: Closing Date Exceptions in the room the report pane has at
+/// 1600 px fits: no empty caption column, every heading ("Allowed by" too)
+/// whole, dates and amounts at full width, nothing past the edge. In a
+/// narrower window it scrolls across and says so.
+#[test]
+fn closing_exceptions_fit_or_say_they_scroll() {
+    use cl_core::report::{ColumnHead, ColumnKind, ReportMeta, ReportRow, ReportTable, RowPath};
+    let dec = |s: &str| s.parse::<rust_decimal::Decimal>().expect("decimal");
+    let date = |s: &str| {
+        let (y, rest) = s.split_at(4);
+        let m: u32 = rest[1..3].parse().expect("month");
+        let d: u32 = rest[4..6].parse().expect("day");
+        Cell::Date(CalendarDate::from_ymd(y.parse().expect("year"), m, d).expect("date"))
+    };
+    let col = |key: &str, caption: &str, kind| ColumnHead {
+        key: key.into(),
+        caption: format!("@reports.col.{caption}"),
+        kind,
+        range: None,
+        drill: None,
+    };
+    let table = ReportTable {
+        columns: vec![
+            col("changed", "changed_on", ColumnKind::Date),
+            col("user", "user", ColumnKind::Text),
+            col("action", "action", ColumnKind::Text),
+            col("type", "type", ColumnKind::Text),
+            col("number", "number", ColumnKind::Text),
+            col("date_before", "date_before", ColumnKind::Date),
+            col("date_after", "date_after", ColumnKind::Date),
+            col("closing_date", "closing_date", ColumnKind::Date),
+            col("method", "method", ColumnKind::Text),
+            col("amount_before", "amount_before", ColumnKind::Amount),
+            col("amount_after", "amount_after", ColumnKind::Amount),
+        ],
+        rows: vec![ReportRow {
+            kind: RowKind::Detail,
+            level: 1,
+            path: RowPath::of(["rows", "0"]),
+            caption: String::new(),
+            cells: vec![
+                date("2026-11-17"),
+                Cell::Text("Synthetic Bookkeeper".into()),
+                Cell::Text("@reports.audit.action.update".into()),
+                Cell::Text("Journal entry".into()),
+                Cell::Text("JE-1042".into()),
+                date("2026-09-23"),
+                date("2026-09-23"),
+                date("2026-09-30"),
+                Cell::Text("@reports.closing.method.password".into()),
+                Cell::Amount(dec("1813.37")),
+                Cell::Amount(dec("1913.37")),
+            ],
+            drill: None,
+            expandable: false,
+        }],
+        meta: ReportMeta::default(),
+    };
+    let (_d, link) = demo();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let draw = |width: f32| {
+        let mut w = window(&link);
+        w.poll();
+        w.catalog_open = Some(false);
+        w.set_table(table.clone());
+        w.state = RunState::Shown;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 900.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| crate::windows::Screen::ui(&mut w, ui));
+            });
+            out.textures_delta.clear();
+        }
+        w
+    };
+    // The report pane at 1600 px (QA's screenshot): about 1100 points.
+    let w = draw(1100.0);
+    let fitted = w.fitted_for_test();
+    assert_eq!(fitted.caption, 0.0, "no empty caption column");
+    assert_eq!(fitted.cells.len(), 11);
+    assert!(!fitted.scrolls, "every column fits: {:?}", fitted.cells);
+    // Dates and amounts keep their measured width; only long names and
+    // "Allowed by" values give room (ending in "…", whole on hover).
+    let (_, measured) = w.widths_for_test().expect("measured");
+    for (i, c) in table.columns.iter().enumerate() {
+        if c.kind != ColumnKind::Text {
+            assert_eq!(fitted.cells[i], measured[i], "{} keeps its width", c.key);
+        }
+    }
+    assert_eq!(w.state_json_for_test()["scrolls_across"], false);
+    let heading = |key: &str| {
+        let mut x = 0.0;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            x = egui::WidgetText::from(
+                egui::RichText::new(crate::i18n::t(key)).strong().size(12.0),
+            )
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Body,
+            )
+            .size()
+            .x;
+        });
+        x
+    };
+    // Every heading is whole ("Allowed by" was cut to "Allowed b").
+    for (i, c) in table.columns.iter().enumerate() {
+        let key = c.caption.trim_start_matches('@');
+        assert!(
+            heading(key) < fitted.cells[i],
+            "{key} is whole ({} in {})",
+            heading(key),
+            fitted.cells[i]
+        );
+    }
+    // A narrow window: the table scrolls across, with the hint.
+    let narrow = draw(640.0);
+    assert!(narrow.fitted_for_test().scrolls);
+    assert_eq!(narrow.state_json_for_test()["scrolls_across"], true);
+    assert!(
+        heading("reports.col.method") < narrow.fitted_for_test().cells[8],
+        "headings stay whole when it scrolls"
+    );
+}
+
 /// PR6-QA-3: every drill out of a cash-basis P&L, Balance Sheet, Trial
 /// Balance or General Ledger (classic and column layouts, the A/R-A/P
 /// note's link too) opens its report on cash basis, through the window.

@@ -346,6 +346,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.col.method", "Allowed by"),
     ("reports.col.amount_before", "Amount before"),
     ("reports.col.amount_after", "Amount after"),
+    (
+        "reports.scroll_across",
+        "This report is wider than the window. Scroll right for more columns.",
+    ),
     ("reports.col.record", "Record"),
     ("reports.col.before", "Before"),
     ("reports.col.after", "After"),
