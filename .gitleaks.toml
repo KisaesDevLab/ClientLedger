@@ -7,7 +7,9 @@ useDefault = true
 # credential. Allowed by exact value only.
 [allowlist]
 description = "synthetic test ids"
-regexes = ['''3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0[12]''']
+# 0123456789CANARY is the made-up temporary password in a cl-api mock reply
+# (team.rs, P29); allowed by exact value only.
+regexes = ['''3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0[12]''', '''0123456789CANARY''']
 # The bank import dedupe golden file (P25, U-06) is a byte copy of the engine's;
 # its SHA-256 dedupe keys look like API keys to the generic-api-key rule. The
 # engine repo allowlists the same file. Synthetic data only.
