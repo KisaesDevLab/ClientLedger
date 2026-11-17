@@ -14,7 +14,9 @@
 //! itself once everything is done.
 
 use cl_api::{ApiError, CompanyProfileUpdate};
+use cl_model::CommandId;
 use cl_model::home::{Checklist, ChecklistItem};
+use cl_model::permissions::Rights;
 use cl_model::register::AccountClass;
 use eframe::egui::{
     self, Align, Layout, Margin, Pos2, RichText, Role, Sense, Stroke, Ui, Vec2, WidgetInfo,
@@ -85,7 +87,27 @@ pub(crate) async fn read(s: &cl_api::Session) -> Result<Facts, ApiError> {
     })
 }
 
-/// The checklist as it stands, or `None` until the reads are in.
+/// Whether the role may take the step's action (P29 QA-5): the company
+/// profile and email are company Preferences sections, the Admin's
+/// (QA-17); adding a bank account changes the chart; the others need their
+/// window's command. An Admin may take every step.
+#[must_use]
+pub(crate) fn allowed(rights: &Rights, item: ChecklistItem) -> bool {
+    let cmd = CommandId::new(item.opens());
+    match item {
+        ChecklistItem::CompanyInfo | ChecklistItem::Email => rights.is_admin(),
+        ChecklistItem::BankAccount | ChecklistItem::OpeningBalances => {
+            rights.allows(cmd) && rights.can_change_list(cmd)
+        }
+        ChecklistItem::FirstTransaction | ChecklistItem::BankFile | ChecklistItem::FirstBackup => {
+            rights.allows(cmd)
+        }
+    }
+}
+
+/// The checklist as it stands, or `None` until the reads are in or when
+/// the role may take none of the steps. Only the steps the role may take
+/// are listed.
 #[must_use]
 pub(crate) fn checklist(home: &HomeScreen) -> Option<Checklist> {
     let facts = home.data.checklist.value?;
@@ -93,7 +115,16 @@ pub(crate) fn checklist(home: &HomeScreen) -> Option<Checklist> {
     let bank = accounts
         .iter()
         .any(|a| a.is_active && crate::screens::register::class_of(a) == Some(AccountClass::Bank));
-    let mut c = Checklist::new(&ITEMS);
+    let rights = home.link.rights();
+    let items: Vec<ChecklistItem> = ITEMS
+        .iter()
+        .copied()
+        .filter(|&i| allowed(&rights, i))
+        .collect();
+    if items.is_empty() {
+        return None;
+    }
+    let mut c = Checklist::new(&items);
     c.set(ChecklistItem::CompanyInfo, facts.company_info);
     c.set(ChecklistItem::BankAccount, bank);
     c.set(ChecklistItem::FirstTransaction, facts.transaction);
@@ -185,8 +216,9 @@ pub(super) fn top_line(ui: &mut Ui, tokens: &Tokens, c: &Checklist) -> Option<Ac
 }
 
 /// The full list: each step with its tick, a link for the open ones, and
-/// Hide checklist.
-pub(super) fn card(ui: &mut Ui, tokens: &Tokens, c: &Checklist) -> Option<Action> {
+/// Hide checklist (an Admin's: it hides the list for everyone in the
+/// company, P29 QA-5).
+pub(super) fn card(ui: &mut Ui, tokens: &Tokens, c: &Checklist, can_hide: bool) -> Option<Action> {
     let mut action = None;
     heading(
         ui,
@@ -241,10 +273,11 @@ pub(super) fn card(ui: &mut Ui, tokens: &Tokens, c: &Checklist) -> Option<Action
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
-                if ui
-                    .button(t("home.checklist.hide"))
-                    .on_hover_text(t("home.checklist.hide.tip"))
-                    .clicked()
+                if can_hide
+                    && ui
+                        .button(t("home.checklist.hide"))
+                        .on_hover_text(t("home.checklist.hide.tip"))
+                        .clicked()
                 {
                     action = Some(Action::Dismiss);
                 }

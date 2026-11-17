@@ -1166,7 +1166,8 @@ fn the_setup_checklist_ticks_from_the_reads() {
 }
 
 /// P29 QA-5: an A/P user's Home shows nothing of what clients owe, no
-/// past-due invoices and no setup checklist.
+/// past-due invoices and no setup checklist (the demo's only open step,
+/// email, is the Admin's, so the A/P user's steps are all done).
 #[test]
 fn an_ap_home_shows_no_receivables() {
     let (_d, link) = demo_link();
@@ -1175,7 +1176,7 @@ fn an_ap_home_shows_no_receivables() {
     let nodes = tree(&mut h, 1440.0);
     assert!(
         !nodes.iter().any(|(_, n)| n.contains("Setup checklist")),
-        "setting up is the Admin's"
+        "no step left for the A/P user"
     );
     assert!(
         !nodes.iter().any(|(_, n)| n.contains("past due")),
@@ -1187,6 +1188,67 @@ fn an_ap_home_shows_no_receivables() {
         owe.tip.as_deref(),
         Some(crate::i18n::t("rights.not_for_role").as_str())
     );
+}
+
+/// P29 QA-5 (narrowed): the setup checklist lists the steps the role may
+/// take. An Admin sees all six; an A/P user sees the steps they can do
+/// (a first check, a bank file) but not company info or email (company
+/// Preferences are the Admin's) nor adding a bank account; a view-only user
+/// sees no checklist at all.
+#[test]
+fn the_setup_checklist_lists_the_steps_the_role_may_take() {
+    use cl_model::home::ChecklistItem as I;
+    use cl_model::permissions::{BuiltinRole, Rights};
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let nothing_done = |h: &mut HomeScreen| {
+        h.data.checklist = Slot::ready(checklist::Facts::default());
+        h.data.accounts = Slot::ready(Vec::new());
+        h.local.last_backup = None;
+    };
+    let steps = |h: &HomeScreen| -> Vec<I> {
+        h.checklist_shown()
+            .map(|c| c.items().map(|(i, _)| i).collect())
+            .unwrap_or_default()
+    };
+    nothing_done(&mut h);
+    assert_eq!(
+        steps(&h),
+        checklist::ITEMS.to_vec(),
+        "the Admin sees every step"
+    );
+
+    // A/P: checks full, company settings view (a backup is a read),
+    // accounts view (no new bank account), banking none (no bank file).
+    link.set_rights(BuiltinRole::Payables.rights());
+    nothing_done(&mut h);
+    assert_eq!(steps(&h), vec![I::FirstTransaction, I::FirstBackup]);
+    assert_eq!(
+        h.checklist_shown().and_then(|c| c.first_open()),
+        Some(I::FirstTransaction)
+    );
+    // Hiding the list is the Admin's: it hides it for everyone.
+    h.checklist_action(checklist::Action::Dismiss);
+    assert!(!h.local.checklist_dismissed, "an A/P user can't hide it");
+    assert!(h.checklist_shown().is_some());
+    let nodes = tree(&mut h, 1440.0);
+    assert!(
+        !nodes.iter().any(|(_, n)| n.contains("Set up email")),
+        "QA-5: the A/P user isn't asked to set up email"
+    );
+
+    // View-only changes nothing; a backup is a read (file.backup needs
+    // company settings read), so that step alone may remain.
+    link.set_rights(Rights::view_only());
+    nothing_done(&mut h);
+    assert!(
+        steps(&h).iter().all(|&i| i == I::FirstBackup),
+        "view-only: {:?}",
+        steps(&h)
+    );
+    // A role that may take no step sees no checklist.
+    link.set_rights(Rights::default());
+    assert!(h.checklist_shown().is_none());
 }
 
 /// The demo's title row: "Setup checklist 5 of 6 done · Set up email for

@@ -638,7 +638,7 @@ impl HomeScreen {
             if let Some(c) = list.as_ref().filter(|_| self.checklist_expanded()) {
                 let mut picked = None;
                 card(ui, &tokens, 0.0, |ui| {
-                    picked = checklist::card(ui, &tokens, c);
+                    picked = checklist::card(ui, &tokens, c, self.link.rights().is_admin());
                 });
                 todo = todo.or(picked);
                 ui.add_space(GAP + 6.0);
@@ -733,11 +733,8 @@ impl HomeScreen {
     }
 
     /// The setup checklist when Home shows it: read, not hidden, not done,
-    /// and to an Admin (setting the company up is theirs, P29 QA-5).
+    /// listing only the steps the role may take (P29 QA-5).
     pub(crate) fn checklist_shown(&self) -> Option<cl_model::home::Checklist> {
-        if !self.link.rights().is_admin() {
-            return None;
-        }
         checklist::checklist(self).filter(|c| c.visible(self.local.checklist_dismissed))
     }
 
@@ -761,7 +758,11 @@ impl HomeScreen {
 
     /// Hides the checklist for this company (`setup_checklist_dismissed`,
     /// kept with the company's preferences).
+    /// Only an Admin may: it hides the list for everyone (P29 QA-5, QA-17).
     pub(crate) fn dismiss_checklist(&mut self) {
+        if !self.link.rights().is_admin() {
+            return;
+        }
         self.local.checklist_dismissed = true;
         if let Some((id, name)) = &self.tenant
             && let Err(e) = self.link.store().update(|l| {
