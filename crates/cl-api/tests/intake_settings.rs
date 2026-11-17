@@ -22,14 +22,14 @@ use std::time::{Duration, Instant};
 
 use cl_api::{
     ApiError, ArchiveRequest, Capabilities, ConflictReason, ImportRequest, IntakeSettings,
-    JobState, LocalValidation, LoginOutcome, Method, Session,
+    JobState, LocalValidation, Method, Session,
 };
 use cl_core::Secret;
 use cl_core::ids::{IntakeFolderId, TenantId};
 use cl_core::intake::{IntakeFolder, IntakeKind};
 use serde_json::{Value, json};
 
-use support::{EngineMode, Harness, TestFn, run_suite, unique};
+use support::{EngineMode, Harness, Member, TestFn, run_suite, unique};
 
 const ROUTE: &str = "/api/v1/company/intake-settings";
 /// Host part of every test path: it must never show up in an audit row,
@@ -441,33 +441,9 @@ fn readonly_cannot_save(h: &Harness) {
         return;
     }
     let stored = replace(h, s, &two_folders());
-    let email = format!(
-        "ro-{}@example.com",
-        &cl_api::IdempotencyKey::new().as_header()[..12]
-    );
-    let made = h
-        .run(s.raw(
-            Method::Post,
-            "/api/v1/company/invite-user",
-            &[],
-            Some(&json!({
-                "email": email,
-                "displayName": "Synthetic Read-only",
-                "role": "readonly",
-            })),
-        ))
-        .expect("invite");
-    assert_eq!(made.status, 201, "{}", made.body);
-    let pw = made.body["temporaryPassword"]
-        .as_str()
-        .expect("temporary password")
-        .to_string();
-    let ro = match h.run(h.client.login(&email, &Secret::new(pw))) {
-        Ok(LoginOutcome::Session(r)) => r,
-        other => panic!("read-only login: {other:?}"),
-    };
-    h.run(ro.open_company(h.contract_co))
-        .unwrap_or_else(|e| panic!("read-only opens: {e}"));
+    // The shared read-only member: invited by S1, signed in, temporary
+    // password changed first (U-230), Contract Co open.
+    let (_, ro) = h.member(Member::ViewOnly);
 
     let read = h
         .run(ro.intake().get())
@@ -487,7 +463,6 @@ fn readonly_cannot_save(h: &Harness) {
         .expect("raw");
     assert_eq!(raw.status, 403, "{}", raw.body);
     assert_eq!(get(h, s), stored, "nothing changed");
-    let _ = h.run(ro.logout());
 }
 
 /// Polls an archive job to its end.
