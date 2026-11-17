@@ -57,6 +57,7 @@ mod contract_merges;
 mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
+mod contract_payroll;
 mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
@@ -85,6 +86,8 @@ mod contract_tags;
 mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
+#[path = "../support/payroll_expect.rs"]
+mod payroll_expect;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
 // trip of memorized reports (AC3, WP-B).
 mod contract_report_defs_archive;
@@ -1062,6 +1065,20 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
+        ),
+        // P30 payroll import (U-242 to U-251): PENDING until the pin has
+        // the three payroll capabilities.
+        (
+            "payroll::providers_post_their_expected_entries",
+            contract_payroll::providers_post_their_expected_entries,
+        ),
+        (
+            "payroll::generic_layout_is_reused",
+            contract_payroll::generic_layout_is_reused,
+        ),
+        (
+            "payroll::duplicates_replays_and_reverse",
+            contract_payroll::duplicates_replays_and_reverse,
         ),
         // P25 bank file import (U-06): its own accounts in Contract Co.
         (
