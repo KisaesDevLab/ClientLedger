@@ -100,12 +100,9 @@ fn tag_combo(
     show_label: bool,
 ) -> Option<Option<TagId>> {
     let mut chosen = None;
-    let l = if show_label {
-        ui.label(label)
-    } else {
-        ui.add(egui::Label::new(RichText::new(label).size(1.0)))
-    };
-    egui::ComboBox::from_id_salt(id)
+    let l = show_label.then(|| ui.label(label));
+    let r = egui::ComboBox::from_id_salt(id)
+        .width(150.0)
         .selected_text(tag_name(tags, current))
         .show_ui(ui, |ui| {
             if ui
@@ -123,8 +120,15 @@ fn tag_combo(
                 }
             }
         })
-        .response
-        .labelled_by(l.id);
+        .response;
+    match l {
+        Some(l) => {
+            r.labelled_by(l.id);
+        }
+        // No visible label (a grid column says it): the name is the
+        // widget's own, for AccessKit and the control channel.
+        None => r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, label)),
+    }
     chosen
 }
 
@@ -522,33 +526,47 @@ impl PayrollImportScreen {
             });
         }
         let chart = self.chart.clone();
+        // Labels in one column, pickers lined up in the next.
         if self.provider.mode() == FileMode::Prebuilt {
-            for i in 0..self.descriptions.len() {
-                let d = self.descriptions[i].clone();
-                ui.horizontal(|ui| {
-                    if let Some(a) =
-                        account_combo(ui, ("payroll.desc", i), &d.description, &chart, d.account)
-                    {
-                        self.descriptions[i].account = Some(a);
+            egui::Grid::new("payroll.accounts.desc")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    for i in 0..self.descriptions.len() {
+                        let d = self.descriptions[i].clone();
+                        if let Some(a) = account_combo(
+                            ui,
+                            ("payroll.desc", i),
+                            &d.description,
+                            &chart,
+                            d.account,
+                        ) {
+                            self.descriptions[i].account = Some(a);
+                        }
+                        ui.end_row();
                     }
                 });
-            }
         } else {
-            for line in self.needed_lines() {
-                let label = if line == cl_model::payroll_import::NET_PAY_LINE {
-                    t("payroll.accounts.net_pay")
-                } else {
-                    t(&format!("payroll.line.{line}"))
-                };
-                ui.horizontal(|ui| {
-                    let current = self.line_accounts.get(line).copied();
-                    if let Some(a) =
-                        account_combo(ui, ("payroll.acct", line), &label, &chart, current)
-                    {
-                        self.line_accounts.insert(line.to_string(), a);
+            let lines = self.needed_lines();
+            egui::Grid::new("payroll.accounts.lines")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    for line in lines {
+                        let label = if line == cl_model::payroll_import::NET_PAY_LINE {
+                            t("payroll.accounts.net_pay")
+                        } else {
+                            t(&format!("payroll.line.{line}"))
+                        };
+                        let current = self.line_accounts.get(line).copied();
+                        if let Some(a) =
+                            account_combo(ui, ("payroll.acct", line), &label, &chart, current)
+                        {
+                            self.line_accounts.insert(line.to_string(), a);
+                        }
+                        ui.end_row();
                     }
                 });
-            }
             if !self.net_pay_from_bank() {
                 warn(ui, tokens, &t("payroll.accounts.not_bank"));
             }

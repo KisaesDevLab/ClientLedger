@@ -52,7 +52,8 @@ steps:
   - click: {role: button, label: Reverse import}
   - assert_state: {key: screen.password_open, equals: true}
   - screenshot: closed-period
-  - click: {role: text_input, label: Closing date password}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - click: {role: password_input, label: Closing-date password}
   - type: {text: "demo-close"}
   - click: {role: button, label: Continue}
   - assert_state: {key: screen.reversed, equals: 2}

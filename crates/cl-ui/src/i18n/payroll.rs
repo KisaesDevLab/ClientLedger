@@ -175,7 +175,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payroll.password_wait", "Too many tries. Wait a minute, then try again."),
     ("payroll.closed.heading", "This is in a closed period"),
     ("payroll.closed.text", "A pay date is on or before the closing date ({date}). Enter the closing date password to continue. The change is recorded in the audit trail."),
-    ("payroll.closed.password", "Closing date password"),
+    ("payroll.closed.password", "Closing-date password"),
     ("payroll.closed.continue", "Continue"),
     ("payroll.overlap.heading", "This may already be in the books"),
     ("payroll.overlap.text", "Payroll you already posted covers the same dates:"),

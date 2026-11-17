@@ -665,13 +665,19 @@ impl DemoPayroll {
     /// Suggested accounts by name, as the engine's auto-map does.
     #[must_use]
     pub fn suggest(chart: &[Account]) -> BTreeMap<String, AccountId> {
+        // The first word that names an account wins (so "payroll" beats
+        // "tax"); sales tax is never a payroll account.
         let find = |kind: AccountType, words: &[&str]| {
-            chart
+            words
                 .iter()
-                .filter(|a| a.is_active && a.fields.account_type == kind)
-                .find(|a| {
-                    let n = a.fields.name.to_lowercase();
-                    words.iter().any(|w| n.contains(w))
+                .find_map(|w| {
+                    chart.iter().find(|a| {
+                        let n = a.fields.name.to_lowercase();
+                        a.is_active
+                            && a.fields.account_type == kind
+                            && !n.contains("sales")
+                            && n.contains(w)
+                    })
                 })
                 .or_else(|| {
                     chart
