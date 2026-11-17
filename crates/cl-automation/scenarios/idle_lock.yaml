@@ -34,7 +34,7 @@ steps:
   - type: {text: not-the-password}
   - click: {role: button, label: Unlock}
   - wait: {ms: 300}
-  - assert_state: {key: lock_message, equals: login.msg.wrong}
+  - assert_state: {key: lock_message, equals: lock.msg.wrong}
   - assert_state: {key: locked, equals: true}
   - screenshot: wrong-password
   # The right one: the form is back as it was.
