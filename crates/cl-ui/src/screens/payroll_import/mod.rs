@@ -1980,6 +1980,8 @@ impl Screen for PayrollImportScreen {
                     return false;
                 };
                 d.payroll.reset();
+                // A previous theme's run may have turned the tag rule on.
+                d.require_tag_every_line = false;
                 // The demo story's books are closed through 09/30/2026,
                 // after every payroll fixture: the scenarios open them
                 // (dev.payroll_demo_close_books closes them again).
