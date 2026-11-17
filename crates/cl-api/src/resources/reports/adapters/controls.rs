@@ -127,7 +127,7 @@ fn audit_value(v: Option<&Value>) -> Cell {
 
 /// Fields the audit trail names in plain words (`@reports.audit.field.*`,
 /// camelCase); any other field shows its own name.
-pub const AUDIT_FIELDS: [&str; 16] = [
+pub const AUDIT_FIELDS: [&str; 17] = [
     "txnDate",
     "txnNumber",
     "total",
@@ -144,6 +144,8 @@ pub const AUDIT_FIELDS: [&str; 16] = [
     "balanceDue",
     "amountPaid",
     "voidReason",
+    // A password change ends the user's other sign-ins (P29b).
+    "sessionsRevoked",
 ];
 
 /// Secrets and taxpayer ids never show (`cl_core::audit`, shared with the
@@ -180,7 +182,7 @@ pub fn field_label(k: &str) -> String {
 }
 
 /// Records the trail names in plain words (`@reports.audit.entity.*`).
-pub const AUDIT_ENTITIES: [&str; 19] = [
+pub const AUDIT_ENTITIES: [&str; 20] = [
     "transaction",
     "account",
     "contact",
@@ -201,7 +203,22 @@ pub const AUDIT_ENTITIES: [&str; 19] = [
     "company_ai_tasks",
     "company_ai_consent_accepted",
     "company_ai_consent_revoked",
+    // P29b: a user changed their own password (no secret in the row).
+    "user_password_change",
 ];
+
+/// Rows whose action reads better as one phrase than as the engine's verb
+/// and record kind (P29b: `update` on `user_password_change` reads
+/// "Password changed"). The i18n key, without the `@`.
+#[must_use]
+pub fn plain_action(action: &str, entity: &str) -> Option<&'static str> {
+    match (action, entity) {
+        ("update" | "create", "user_password_change") => {
+            Some("reports.audit.action.password_changed")
+        }
+        _ => None,
+    }
+}
 
 /// A record kind's caption: the plain-words key, else its own name with
 /// spaces.
@@ -381,7 +398,10 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
                 match (extra_action(e, entity), report_file_action(e, entity)) {
                     (Some(text), _) => Cell::Text(text),
                     (None, Some(key)) => Cell::Text(key.into()),
-                    (None, None) => read(e, F::Code("reports.audit.action", "action"))?,
+                    (None, None) => match plain_action(text(e, "action").unwrap_or(""), entity) {
+                        Some(key) => Cell::Text(format!("@{key}")),
+                        None => read(e, F::Code("reports.audit.action", "action"))?,
+                    },
                 },
                 Cell::Text(record_label(e, entity)),
                 Cell::Empty,
@@ -747,6 +767,33 @@ mod tests {
         ] {
             assert_eq!(entity_label(e), format!("@reports.audit.entity.{e}"));
         }
+    }
+
+    /// P29b: the engine's row for a user's own password change reads
+    /// "Password changed", with who and when, and no secret.
+    #[test]
+    fn a_password_change_reads_password_changed() {
+        let v = json!({"data": [{"id": "41", "action": "update",
+            "entity_type": "user_password_change",
+            "entity_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a62",
+            "user_id": "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a62", "userName": "Lee Bookkeeper",
+            "created_at": "2026-11-17T15:00:00.000Z", "before_data": null,
+            "after_data": {"sessionsRevoked": true}}], "total": 1});
+        let t = audit_trail(&v, &req(Source::AuditLog)).expect("table");
+        let head = &t.rows[0];
+        assert_eq!(head.cells[1], Cell::Text("Lee Bookkeeper".into()));
+        assert_eq!(
+            head.cells[2],
+            Cell::Text("@reports.audit.action.password_changed".into())
+        );
+        assert_eq!(
+            head.cells[3],
+            Cell::Text("@reports.audit.entity.user_password_change".into())
+        );
+        assert_eq!(t.rows[1].caption, "@reports.audit.field.sessionsRevoked");
+        assert_eq!(t.rows[1].cells[5], Cell::Text("@reports.audit.yes".into()));
+        assert_eq!(plain_action("delete", "user_password_change"), None);
+        assert_eq!(plain_action("update", "contact"), None);
     }
 }
 

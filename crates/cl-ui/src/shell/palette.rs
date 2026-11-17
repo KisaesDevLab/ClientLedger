@@ -356,7 +356,10 @@ mod tests {
             cl_model::permissions::Level::View,
         );
         assert!(found("closing date exc", &viewer).contains(&"reports.closing_date_exceptions"));
-        assert!(found("closing date exc", &Rights::none()).is_empty());
+        assert_eq!(
+            found("closing date exc", &Rights::none()),
+            Vec::<&str>::new()
+        );
     }
 
     #[test]

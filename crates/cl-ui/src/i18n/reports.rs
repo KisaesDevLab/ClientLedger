@@ -414,6 +414,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.audit.entity.report_definition_group", "Report group"),
     ("reports.audit.entity.report_definition_group_named", "Report group: {name}"),
     ("reports.audit.entity.payment_applications", "Payment applied"),
+    // P29b: a user changed their own password.
+    ("reports.audit.entity.user_password_change", "Sign-in password"),
+    ("reports.audit.action.password_changed", "Password changed"),
+    ("reports.audit.field.sessionsRevoked", "Signed out everywhere else"),
     ("reports.audit.field.txnDate", "Date"),
     ("reports.audit.field.txnNumber", "Number"),
     ("reports.audit.field.total", "Amount"),
