@@ -987,6 +987,7 @@ pub fn need(id: CommandId) -> Option<Need> {
         "reports.inventory_value" => Report(Source::InventoryValuation),
         "reports.inventory_value_detail" => Report(Source::InventoryValuationDetail),
         "reports.stock_status" => Report(Source::InventoryStockStatus),
+        "reports.closing_date_exceptions" => Report(Source::ClosingDateExceptions),
         "reports.refresh"
         | "reports.memorize"
         | "reports.collapse"

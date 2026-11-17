@@ -321,6 +321,44 @@ mod tests {
         );
     }
 
+    /// P29 QA: the closing-date and audit windows are found by name, for
+    /// roles that may open them only.
+    #[test]
+    fn the_p29_windows_are_found_by_name() {
+        let found = |q: &str, r: &Rights| -> Vec<&str> {
+            matches_for(q, false, r)
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect()
+        };
+        let all = Rights::all();
+        assert_eq!(
+            found("Closing Date Exceptions", &all).first(),
+            Some(&"reports.closing_date_exceptions")
+        );
+        assert!(found("closing date", &all).contains(&"company.closing_date"));
+        assert!(found("audit", &all).contains(&"company.audit_trail"));
+        assert!(found("users", &all).contains(&"company.users"));
+        let ap = cl_model::permissions::BuiltinRole::Payables.rights();
+        let can = ap.allows(cl_model::CommandId::new("reports.closing_date_exceptions"));
+        assert_eq!(
+            found("Closing Date Exceptions", &ap).contains(&"reports.closing_date_exceptions"),
+            can
+        );
+        assert!(!found("closing date", &ap).contains(&"company.closing_date"));
+        let mut viewer = Rights::none();
+        viewer.set(
+            cl_model::permissions::Resource::AuditLog,
+            cl_model::permissions::Level::View,
+        );
+        viewer.set(
+            cl_model::permissions::Resource::Reports,
+            cl_model::permissions::Level::View,
+        );
+        assert!(found("closing date exc", &viewer).contains(&"reports.closing_date_exceptions"));
+        assert!(found("closing date exc", &Rights::none()).is_empty());
+    }
+
     #[test]
     fn few_rows_fit_in_a_small_window() {
         assert_eq!(rows_that_fit(320.0), 5);

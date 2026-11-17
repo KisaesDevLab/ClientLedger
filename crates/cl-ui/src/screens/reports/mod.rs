@@ -73,6 +73,7 @@ fn key_of(kind: &str) -> Option<&'static str> {
         "reports.balance_sheet" => "balance_sheet",
         "reports.trial_balance" => "trial_balance",
         "reports.ar_aging" => "ar_aging_summary",
+        "reports.closing_date_exceptions" => "closing_date_exceptions",
         _ => return None,
     })
 }
