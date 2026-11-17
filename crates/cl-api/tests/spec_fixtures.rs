@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 17] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 18] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -347,6 +347,13 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 17] = [
         "keyable-feed-undo",
         cl_api::KeySet::FeedUndoV1,
         1,
+    ),
+    // P30 (U-244): payroll post and reverse.
+    (
+        "idempotency_payroll_v1_routes.txt",
+        "keyable-payroll",
+        cl_api::KeySet::PayrollV1,
+        2,
     ),
 ];
 
@@ -518,6 +525,11 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         ("idempotency_feed_post_v1_routes.txt", "feed-match-post-v1"),
         ("idempotency_feed_accept_v1_routes.txt", "feed-accept-v1"),
         ("idempotency_feed_undo_v1_routes.txt", "feed-undo-v1"),
+        // P30 (U-244): PENDING until the pin has payroll-import-post-v1.
+        (
+            "idempotency_payroll_v1_routes.txt",
+            "payroll-import-post-v1",
+        ),
     ]
     .iter()
     .map(|(f, cap)| {

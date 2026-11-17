@@ -243,9 +243,12 @@ pub use resources::bank_import::{
     ImportBatchSummary, ImportPostProcessing, ImportRowReason, ImportRowResult, ImportRowStatus,
     ImportUndoOutcome, LinkedElsewhere, bank_import_refusal, takes_bank_file, wire_decimal,
 };
+// P30: payroll import types are used as `cl_api::payroll::…` (their names
+// are generic: Preview, Overlap, SessionStatus).
 pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
 };
+pub use resources::payroll;
 // P26: bank feed review.
 pub use resources::feed_accept::{
     ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, DraftLink,

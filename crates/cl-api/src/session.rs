@@ -177,6 +177,8 @@ impl Client {
             info.capabilities.has(Capabilities::FEED_ACCEPT),
             info.capabilities.has(Capabilities::FEED_UNDO),
         );
+        self.exec()
+            .set_payroll_v1(info.capabilities.has(Capabilities::PAYROLL_IMPORT_POST));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

@@ -71,6 +71,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::FeedPostV1) => "keyable-feed-post",
             RetryClass::Keyable(KeySet::FeedAcceptV1) => "keyable-feed-accept",
             RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
+            RetryClass::Keyable(KeySet::PayrollV1) => "keyable-payroll",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
             RetryClass::Query => "query",
@@ -172,6 +173,9 @@ pub enum KeySet {
     FeedAcceptV1,
     /// `feed-undo-v1` (U-169, P26 E3): the one undo route (key required).
     FeedUndoV1,
+    /// `payroll-import-post-v1` (U-244, P30): payroll post and reverse (key
+    /// required; one transaction each).
+    PayrollV1,
 }
 
 impl KeySet {
@@ -207,6 +211,7 @@ impl KeySet {
             KeySet::FeedPostV1 => crate::wire::Capabilities::FEED_MATCH_POST,
             KeySet::FeedAcceptV1 => crate::wire::Capabilities::FEED_ACCEPT,
             KeySet::FeedUndoV1 => crate::wire::Capabilities::FEED_UNDO,
+            KeySet::PayrollV1 => crate::wire::Capabilities::PAYROLL_IMPORT_POST,
         }
     }
 }
@@ -914,6 +919,91 @@ pub(crate) const DASHBOARD_SUMMARY: Operation = read("/api/v1/dashboard/summary"
 pub(crate) const BILLS_LIST: Operation = read("/api/v1/bills");
 /// Payroll imports by status (Home counts the unposted ones).
 pub(crate) const PAYROLL_SESSIONS: Operation = read("/api/v1/payroll-import/sessions");
+/// Uploads a payroll file (P30): the Import time class, one attempt. Not
+/// keyed: a lost answer leaves at most an unposted draft, which History and
+/// Home offer to discard.
+pub(crate) const PAYROLL_UPLOAD: Operation = op(
+    Method::Post,
+    "/api/v1/payroll-import/upload",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// One payroll import.
+pub(crate) const PAYROLL_SESSION: Operation = read("/api/v1/payroll-import/sessions/{id}");
+/// Discards an unposted payroll import.
+pub(crate) const PAYROLL_SESSION_DELETE: Operation =
+    write(Method::Delete, "/api/v1/payroll-import/sessions/{id}");
+/// A payroll import's first rows (owner data; the screen never asks).
+pub(crate) const PAYROLL_PREVIEW: Operation = read("/api/v1/payroll-import/sessions/{id}/preview");
+/// Maps a Mode A file's columns.
+pub(crate) const PAYROLL_APPLY_MAPPING: Operation = write(
+    Method::Post,
+    "/api/v1/payroll-import/sessions/{id}/apply-mapping",
+);
+/// A Mode B file's descriptions and their accounts.
+pub(crate) const PAYROLL_DESCRIPTION_MAP: Operation =
+    read("/api/v1/payroll-import/sessions/{id}/description-map");
+/// Saves a Mode B description map (per company and provider).
+pub(crate) const PAYROLL_DESCRIPTION_MAP_SAVE: Operation = write(
+    Method::Put,
+    "/api/v1/payroll-import/sessions/{id}/description-map",
+);
+/// Checks a payroll import's rows.
+pub(crate) const PAYROLL_VALIDATE: Operation = write(
+    Method::Post,
+    "/api/v1/payroll-import/sessions/{id}/validate",
+);
+/// The entries a payroll import would post (saves nothing).
+pub(crate) const PAYROLL_GENERATE_JE: Operation = write(
+    Method::Post,
+    "/api/v1/payroll-import/sessions/{id}/generate-je",
+);
+/// Posts a payroll import (`payroll-import-post-v1`, U-244; key required).
+/// The Import time class: one attempt of up to 120 s; the client never
+/// sends it again beyond the engine's replay of the same key.
+pub(crate) const PAYROLL_POST: Operation = op(
+    Method::Post,
+    "/api/v1/payroll-import/sessions/{id}/post",
+    RetryClass::Keyable(KeySet::PayrollV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Reverses a posted payroll import (U-244; key required). As for post.
+pub(crate) const PAYROLL_REVERSE: Operation = op(
+    Method::Post,
+    "/api/v1/payroll-import/sessions/{id}/reverse",
+    RetryClass::Keyable(KeySet::PayrollV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Column layouts (system and the company's own).
+pub(crate) const PAYROLL_TEMPLATES: Operation = read("/api/v1/payroll-import/templates");
+/// Saves a new column layout.
+pub(crate) const PAYROLL_TEMPLATE_CREATE: Operation =
+    write(Method::Post, "/api/v1/payroll-import/templates");
+/// Changes a column layout.
+pub(crate) const PAYROLL_TEMPLATE_UPDATE: Operation =
+    write(Method::Put, "/api/v1/payroll-import/templates/{id}");
+/// Deletes a column layout.
+pub(crate) const PAYROLL_TEMPLATE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/payroll-import/templates/{id}");
+/// The company's payroll line type → account map.
+pub(crate) const PAYROLL_ACCOUNT_MAPPINGS: Operation =
+    read("/api/v1/payroll-import/account-mappings/{companyId}");
+/// Saves the company's payroll account map.
+pub(crate) const PAYROLL_ACCOUNT_MAPPINGS_SAVE: Operation = write(
+    Method::Put,
+    "/api/v1/payroll-import/account-mappings/{companyId}",
+);
+/// Suggested accounts for each payroll line type (saves nothing).
+pub(crate) const PAYROLL_AUTO_MAP: Operation = write(
+    Method::Post,
+    "/api/v1/payroll-import/account-mappings/{companyId}/auto-map",
+);
 /// One account's reconciliations, newest statement first.
 pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliations");
 /// Imported bank statements.
@@ -1958,7 +2048,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 439] = [
+pub const OPERATIONS: [Operation; 457] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2421,6 +2511,25 @@ pub const OPERATIONS: [Operation; 439] = [
     COMPANY_1099_THRESHOLDS_PUT,
     // P29 review B2
     SENSITIVE_DOORS,
+    // P30
+    PAYROLL_UPLOAD,
+    PAYROLL_SESSION,
+    PAYROLL_SESSION_DELETE,
+    PAYROLL_PREVIEW,
+    PAYROLL_APPLY_MAPPING,
+    PAYROLL_DESCRIPTION_MAP,
+    PAYROLL_DESCRIPTION_MAP_SAVE,
+    PAYROLL_VALIDATE,
+    PAYROLL_GENERATE_JE,
+    PAYROLL_POST,
+    PAYROLL_REVERSE,
+    PAYROLL_TEMPLATES,
+    PAYROLL_TEMPLATE_CREATE,
+    PAYROLL_TEMPLATE_UPDATE,
+    PAYROLL_TEMPLATE_DELETE,
+    PAYROLL_ACCOUNT_MAPPINGS,
+    PAYROLL_ACCOUNT_MAPPINGS_SAVE,
+    PAYROLL_AUTO_MAP,
 ];
 
 /// Looks up a covered operation.
@@ -2575,6 +2684,8 @@ mod tests {
                 Some(KeySet::FeedAcceptV1)
             } else if route == ("POST", "/api/v1/banking/feed/undo") {
                 Some(KeySet::FeedUndoV1)
+            } else if KEYABLE_PAYROLL.contains(&route) {
+                Some(KeySet::PayrollV1)
             } else {
                 None
             };
@@ -2622,6 +2733,7 @@ mod tests {
                 + KEYABLE_BANK_IMPORT.len()
                 + KEYABLE_FEED.len()
                 + KEYABLE_FEED_POST.len()
+                + KEYABLE_PAYROLL.len()
                 + 3,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
@@ -2813,6 +2925,12 @@ mod tests {
         ("PUT", "/api/v1/banking/feed/{id}/match"),
         ("POST", "/api/v1/banking/feed/{id}/duplicate"),
         ("POST", "/api/v1/banking/feed/{id}/review-again"),
+    ];
+
+    /// `payroll-import-post-v1` (U-244, P30).
+    const KEYABLE_PAYROLL: [(&str, &str); 2] = [
+        ("POST", "/api/v1/payroll-import/sessions/{id}/post"),
+        ("POST", "/api/v1/payroll-import/sessions/{id}/reverse"),
     ];
 
     /// `feed-match-post-v1` (U-171, P26 E4).
