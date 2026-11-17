@@ -576,6 +576,9 @@ impl Shell {
                     // U-33: an Admin's local sensitive marks move into the
                     // engine (once; refused ones stay with a note).
                     crate::company::sensitive::start(&link, tenant_id);
+                    // Q-P29ac: an Admin's sign-in puts the built-in
+                    // Bookkeeper's sensitive right back (old shape only).
+                    crate::company::builtin_roles::start(&link);
                     // This company's unknown saves (kept for the session).
                     link.lost_saves().set_company(Some(tenant_id));
                 }

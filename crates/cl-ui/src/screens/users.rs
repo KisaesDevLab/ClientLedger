@@ -51,8 +51,9 @@ pub const REPORT_AREAS: &str = "report-areas-v1";
 pub const SENSITIVE_ACCOUNTS: &str = "sensitive-accounts-v1";
 /// The engine lets a role carry "See sensitive accounts" (owner
 /// 2026-11-17: the built-in Bookkeeper does). With it the Bookkeeper
-/// template is put back with the right the next time an Admin opens Users
-/// and Roles (the put-back below; built-ins can't be edited in place).
+/// template is put back with the right after an Admin signs in
+/// (`company::builtin_roles`, Q-P29ac) and when an Admin opens Users and
+/// Roles (the put-back below; built-ins can't be edited in place).
 pub const SENSITIVE_GRANT: &str = "sensitive-accounts-grant-v1";
 
 /// The window for `kind`, if it is this one.
@@ -230,12 +231,7 @@ impl UsersScreen {
     }
 
     fn keys(&self) -> EngineKeys {
-        let caps = self.link.capabilities();
-        EngineKeys {
-            report_areas: self.link.is_demo() || caps.has(REPORT_AREAS),
-            sensitive: caps.has(SENSITIVE_ACCOUNTS),
-            sensitive_grant: caps.has(SENSITIVE_GRANT),
-        }
+        crate::company::builtin_roles::engine_keys(&self.link)
     }
 
     fn reload(&mut self) {
