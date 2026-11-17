@@ -36,6 +36,7 @@ steps:
   - command: lists.chart_of_accounts
   - wait: {ms: 300}
   - assert_state: {key: screen.loaded, equals: true}
+  - type: {text: "6550"}
   - assert_exists: {role: row, label_contains: "6550 Wages"}
   - screenshot: bookkeeper-sees-wages
   - command: file.close_window
