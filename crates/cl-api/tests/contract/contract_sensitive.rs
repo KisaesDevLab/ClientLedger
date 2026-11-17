@@ -259,18 +259,7 @@ pub fn doors_match_the_engine(h: &Harness) {
         .run(bk.sensitive_doors())
         .expect("doors")
         .expect("capability");
-    let mut pinned: SensitiveDoors = serde_json::from_str(ENGINE_ANSWER_JSON).expect("fixture");
-    // P30 (U-247): the payroll prefix arrives with payroll-import-sensitive-v1.
-    if !owner
-        .client()
-        .capabilities()
-        .has(cl_api::Capabilities::PAYROLL_IMPORT_SENSITIVE)
-    {
-        eprintln!("PENDING(U-247): the engine does not refuse payroll routes yet");
-        pinned
-            .refuse_prefixes
-            .retain(|p| p != "/api/v1/payroll-import");
-    }
+    let pinned: SensitiveDoors = serde_json::from_str(ENGINE_ANSWER_JSON).expect("fixture");
     assert_eq!(
         doors, pinned,
         "the engine's list changed: update crates/cl-core/fixtures/sensitive_doors.json and the gates"
