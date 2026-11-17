@@ -649,6 +649,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Require Tags for Demo Payroll (developer)",
     ),
     dev_action(
+        "dev.payroll_demo_forget_left_out",
+        "Forget Left-out Payroll Columns (developer)",
+    ),
+    dev_action(
         "dev.payroll_demo_file_gusto",
         "Demo Payroll File: Gusto (developer)",
     ),

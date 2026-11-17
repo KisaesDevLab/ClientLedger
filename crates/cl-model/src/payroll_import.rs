@@ -11,6 +11,9 @@
 //!
 //! Nothing here reads or adds an amount: the engine sums (non-negotiable 7).
 
+// M10: no floating point anywhere near payroll (as in cl-api and cl-core).
+#![deny(clippy::float_arithmetic)]
+
 use std::collections::BTreeMap;
 
 use cl_core::CalendarDate;
@@ -310,7 +313,7 @@ impl SampleGuard {
     #[must_use]
     pub fn displayable(cell: &str) -> Option<&str> {
         let c = cell.trim();
-        if c.is_empty() || c.len() > 24 {
+        if c.is_empty() || c.len() > 24 || looks_like_ssn(c) {
             return None;
         }
         let numeric = c.chars().any(|ch| ch.is_ascii_digit())
@@ -323,6 +326,30 @@ impl SampleGuard {
             && c.chars().filter(|ch| matches!(ch, '/' | '-')).count() == 2;
         (numeric || date).then_some(c)
     }
+
+    /// True when the cell is shaped like an amount (digits with money
+    /// marks; not a date). Shape only: nothing is parsed.
+    #[must_use]
+    pub fn is_amount(cell: &str) -> bool {
+        let c = cell.trim();
+        c.chars().any(|ch| ch.is_ascii_digit())
+            && c.chars().all(|ch| {
+                ch.is_ascii_digit() || matches!(ch, '$' | ',' | '.' | '-' | '(' | ')' | ' ')
+            })
+            && !looks_like_ssn(c)
+            && c.chars().filter(|ch| *ch == '-').count() < 2
+    }
+}
+
+/// `123-45-6789` or `123 45 6789`: a taxpayer number, never shown (M9).
+fn looks_like_ssn(c: &str) -> bool {
+    if c.len() == 9 && c.chars().all(|ch| ch.is_ascii_digit()) {
+        return true;
+    }
+    let groups: Vec<&str> = c.split(['-', ' ']).collect();
+    groups.len() == 3
+        && groups.iter().map(|g| g.len()).eq([3, 2, 4])
+        && groups.iter().all(|g| g.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 /// One column → field pair of a layout.
@@ -517,6 +544,62 @@ pub struct SavedLayout<T> {
     pub layout: ColumnLayout,
     /// Department (as in the file) → tag, remembered with the layout.
     pub department_tags: BTreeMap<String, Option<TagId>>,
+    /// The file's columns the owner left out when the layout was saved
+    /// (seen on Match columns, not matched). `None`: a layout saved before
+    /// this was kept, so every unmatched column counts as new (S4).
+    pub left_out: Option<Vec<String>>,
+}
+
+/// The columns of a file (`headers`, with sample `rows`) that a saved
+/// `layout` neither matches nor left out, and whose sample cells hold
+/// amounts (S4): such a file stops on Match columns instead of applying the
+/// layout silently. Judged by the cells' shape only ([`SampleGuard`]);
+/// nothing is parsed. Returns the headers, in file order.
+#[must_use]
+pub fn new_amount_columns<T>(
+    saved: &SavedLayout<T>,
+    headers: &[String],
+    rows: &[Vec<String>],
+) -> Vec<String> {
+    let known: Vec<String> = saved
+        .layout
+        .columns
+        .iter()
+        .map(|c| normalize_header(&c.header))
+        .chain(
+            saved
+                .left_out
+                .iter()
+                .flatten()
+                .map(|h| normalize_header(h)),
+        )
+        .collect();
+    headers
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| !h.trim().is_empty() && !known.contains(&normalize_header(h)))
+        .filter(|(i, _)| {
+            rows.iter()
+                .filter_map(|r| r.get(*i))
+                .any(|c| SampleGuard::is_amount(c))
+        })
+        .map(|(_, h)| h.clone())
+        .collect()
+}
+
+/// The file's columns `layout` does not match (saved as left out).
+#[must_use]
+pub fn unmatched_columns(layout: &ColumnLayout, headers: &[String]) -> Vec<String> {
+    let mapped: Vec<String> = layout
+        .columns
+        .iter()
+        .map(|c| normalize_header(&c.header))
+        .collect();
+    headers
+        .iter()
+        .filter(|h| !h.trim().is_empty() && !mapped.contains(&normalize_header(h)))
+        .cloned()
+        .collect()
 }
 
 /// Which layout the Map step starts from (WP3).

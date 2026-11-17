@@ -222,7 +222,70 @@ fn saved(id: u8, provider: &str, cols: &[(&'static str, &str)], updated: &str) -
             None,
         ),
         department_tags: BTreeMap::new(),
+        left_out: None,
     }
+}
+
+fn rows(r: &[&[&str]]) -> Vec<Vec<String>> {
+    r.iter()
+        .map(|x| x.iter().map(|c| (*c).to_string()).collect())
+        .collect()
+}
+
+/// S4: a saved layout applied to a file with new amount columns names
+/// them; columns it left out, text columns and an unchanged file don't.
+#[test]
+fn new_amount_columns_are_named_before_a_layout_applies() {
+    let mut layout = saved(
+        1,
+        "custom",
+        &[
+            ("employee_name", "Worker"),
+            ("gross_pay", "Wages"),
+            ("net_pay", "Take Home"),
+        ],
+        "2025-07-12T00:00:00Z",
+    );
+    layout.left_out = Some(vec!["Fed WH".into()]);
+    let h = headers(&["Worker", "Wages", "Fed WH", "Take Home", "Notes", "SS ER", "medicare  er"]);
+    let r = rows(&[&[
+        "Test Worker 01",
+        "1,000.00",
+        "100.05",
+        "800.00",
+        "on leave",
+        "$62.00",
+        "(14.50)",
+    ]]);
+    assert_eq!(
+        new_amount_columns(&layout, &h, &r),
+        vec!["SS ER".to_string(), "medicare  er".to_string()]
+    );
+    // The same columns as when it was saved: nothing new.
+    let same = headers(&["Worker", "Wages", "Fed WH", "Take Home"]);
+    assert!(new_amount_columns(&layout, &same, &r).is_empty());
+    // A layout saved before left-out columns were kept: every unmatched
+    // amount column is new (stop once on Match columns).
+    layout.left_out = None;
+    assert_eq!(new_amount_columns(&layout, &same, &r), vec!["Fed WH".to_string()]);
+    assert_eq!(
+        unmatched_columns(&layout.layout, &h),
+        vec!["Fed WH", "Notes", "SS ER", "medicare  er"]
+    );
+}
+
+/// M9: taxpayer-number-shaped cells are never shown, nor read as amounts.
+#[test]
+fn ssn_shaped_cells_are_never_shown() {
+    for c in ["123-45-6789", " 123 45 6789 ", "123456789"] {
+        assert_eq!(SampleGuard::displayable(c), None, "{c}");
+        assert!(!SampleGuard::is_amount(c), "{c}");
+    }
+    assert_eq!(SampleGuard::displayable("1,234.56"), Some("1,234.56"));
+    assert_eq!(SampleGuard::displayable("2025-07-11"), Some("2025-07-11"));
+    assert!(SampleGuard::is_amount("-50.00"));
+    assert!(!SampleGuard::is_amount("07/11/2025"));
+    assert!(!SampleGuard::is_amount("2025-07-11"));
 }
 
 #[test]
