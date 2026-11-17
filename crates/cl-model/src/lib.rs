@@ -32,6 +32,8 @@ pub mod keymap;
 pub mod lists;
 pub mod lookup;
 pub mod numbering;
+// P30: payroll import wizard rules.
+pub mod payroll_import;
 // P29: who may do what (the engine's permission map).
 pub mod permissions;
 pub mod quick_add;

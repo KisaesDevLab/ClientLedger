@@ -720,6 +720,9 @@ pub enum Door {
     AiUsage,
     /// Preferences › AI: the company's AI settings, models and test.
     AiSettings,
+    /// Banking › Import Payroll, its History, Home's unposted-payroll link
+    /// (U-247: every payroll route is refused while an account is hidden).
+    PayrollImport,
 }
 
 impl Door {
@@ -737,6 +740,7 @@ impl Door {
         Door::ReorderReport,
         Door::AiUsage,
         Door::AiSettings,
+        Door::PayrollImport,
     ];
 
     /// The engine routes behind it (method, route template).
@@ -779,6 +783,36 @@ impl Door {
                 ("POST", "/api/v1/ai/admin/test/{provider}"),
                 ("GET", "/api/v1/ai/admin/models/{provider}"),
             ],
+            Door::PayrollImport => &[
+                ("GET", "/api/v1/payroll-import/sessions"),
+                ("POST", "/api/v1/payroll-import/upload"),
+                ("GET", "/api/v1/payroll-import/sessions/{id}"),
+                ("DELETE", "/api/v1/payroll-import/sessions/{id}"),
+                ("GET", "/api/v1/payroll-import/sessions/{id}/preview"),
+                ("POST", "/api/v1/payroll-import/sessions/{id}/apply-mapping"),
+                (
+                    "GET",
+                    "/api/v1/payroll-import/sessions/{id}/description-map",
+                ),
+                (
+                    "PUT",
+                    "/api/v1/payroll-import/sessions/{id}/description-map",
+                ),
+                ("POST", "/api/v1/payroll-import/sessions/{id}/validate"),
+                ("POST", "/api/v1/payroll-import/sessions/{id}/generate-je"),
+                ("POST", "/api/v1/payroll-import/sessions/{id}/post"),
+                ("POST", "/api/v1/payroll-import/sessions/{id}/reverse"),
+                ("GET", "/api/v1/payroll-import/templates"),
+                ("POST", "/api/v1/payroll-import/templates"),
+                ("PUT", "/api/v1/payroll-import/templates/{id}"),
+                ("DELETE", "/api/v1/payroll-import/templates/{id}"),
+                ("GET", "/api/v1/payroll-import/account-mappings/{companyId}"),
+                ("PUT", "/api/v1/payroll-import/account-mappings/{companyId}"),
+                (
+                    "POST",
+                    "/api/v1/payroll-import/account-mappings/{companyId}/auto-map",
+                ),
+            ],
         }
     }
 }
@@ -788,6 +822,7 @@ impl Door {
 pub fn command_door(id: CommandId) -> Option<Door> {
     match id.as_str() {
         "file.export_all" => Some(Door::ExportAll),
+        "payroll.import" => Some(Door::PayrollImport),
         _ => None,
     }
 }

@@ -9,7 +9,8 @@
     "/api/v1/chat",
     "/api/v1/ai",
     "/api/v2",
-    "/api/v1/practice/1099"
+    "/api/v1/practice/1099",
+    "/api/v1/payroll-import"
   ],
   "converted": [
     {
