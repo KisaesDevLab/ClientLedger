@@ -1089,6 +1089,14 @@ fn main() -> std::process::ExitCode {
             contract_payroll::a_failed_post_leaves_nothing,
         ),
         (
+            "payroll::two_drafts_of_one_file_post_once",
+            contract_payroll::two_drafts_of_one_file_post_once,
+        ),
+        (
+            "payroll::a_discard_racing_a_post_keeps_the_posted_import",
+            contract_payroll::a_discard_racing_a_post_keeps_the_posted_import,
+        ),
+        (
             "payroll::closed_period_needs_the_password",
             contract_payroll::closed_period_needs_the_password,
         ),

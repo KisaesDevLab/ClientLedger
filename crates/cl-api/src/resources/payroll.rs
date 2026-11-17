@@ -59,6 +59,8 @@ pub const MAX_DEPARTMENT_CHARS: usize = 100;
 pub const MAX_REASON_CHARS: usize = 500;
 /// History page size.
 pub const HISTORY_PAGE: u16 = 50;
+/// The most History pages read at once (1,000 imports).
+pub const HISTORY_MAX_PAGES: usize = 20;
 
 /// The capabilities the payroll screen needs, all three (Q-P30g).
 pub const REQUIRED_CAPABILITIES: [&str; 3] = [
@@ -369,6 +371,10 @@ pub struct ColumnMap {
     pub skip_rules: Vec<SkipRule>,
     /// Department (as in the file) → tag; `None` = no tag.
     pub department_tags: BTreeMap<String, Option<TagId>>,
+    /// The file's columns the owner left out (`clLeftOutColumns`, kept in a
+    /// saved template only); `None` for a template saved before it was
+    /// kept (S4).
+    pub left_out: Option<Vec<String>>,
 }
 
 impl ColumnMap {
@@ -422,6 +428,9 @@ impl ColumnMap {
                 .map(|(d, t)| (d.clone(), t.map_or(Value::Null, |t| json!(t.to_string()))))
                 .collect();
             m.insert("clDepartmentTags".into(), Value::Object(tags));
+            if let Some(l) = &self.left_out {
+                m.insert("clLeftOutColumns".into(), json!(l));
+            }
         }
         v
     }
@@ -484,6 +493,15 @@ impl ColumnMap {
             mappings,
             skip_rules,
             department_tags,
+            left_out: o
+                .get("clLeftOutColumns")
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                }),
         })
     }
 }
@@ -518,8 +536,9 @@ pub struct ValidationMessage {
     pub is_error: bool,
 }
 
-/// The engine's check of an import.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+/// The engine's check of an import. Debug shows counts only (department
+/// names stay out of logs).
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct ValidationSummary {
     /// Rows read.
     pub total_rows: u64,
@@ -529,6 +548,25 @@ pub struct ValidationSummary {
     pub warning_rows: u64,
     /// Every message.
     pub messages: Vec<ValidationMessage>,
+    /// Every distinct department in the file (`payroll-import-review-v1`,
+    /// S3); `None` from an engine without it (the screen then reads the
+    /// sample rows).
+    pub departments: Option<Vec<String>>,
+    /// The engine listed only the first departments (a very long list).
+    pub departments_truncated: bool,
+}
+
+impl std::fmt::Debug for ValidationSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidationSummary")
+            .field("total_rows", &self.total_rows)
+            .field("error_rows", &self.error_rows)
+            .field("warning_rows", &self.warning_rows)
+            .field("messages", &self.messages)
+            .field("departments", &self.departments.as_ref().map(Vec::len))
+            .field("departments_truncated", &self.departments_truncated)
+            .finish()
+    }
 }
 
 impl ValidationSummary {
@@ -962,8 +1000,19 @@ fn cell_text(v: &Value) -> String {
     }
 }
 
-pub(crate) fn preview_from(body: &[u8]) -> Result<Preview, ApiError> {
+/// Reads the entries; `token_required` (the engine advertises
+/// `payroll-import-post-v1`, which always sends `previewToken`) makes a
+/// missing token a contract break (`Decode`, S8) rather than a post that
+/// skips the engine's "entries changed" check.
+pub(crate) fn preview_from(body: &[u8], token_required: bool) -> Result<Preview, ApiError> {
     let v = parse_json(body)?;
+    let token = v["previewToken"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    if token_required && token.is_none() {
+        return Err(decode_err());
+    }
     let mut entries = Vec::new();
     for e in v["previews"].as_array().ok_or_else(decode_err)? {
         let mut lines = Vec::new();
@@ -994,10 +1043,7 @@ pub(crate) fn preview_from(body: &[u8]) -> Result<Preview, ApiError> {
             is_balanced: e["isBalanced"].as_bool().ok_or_else(decode_err)?,
         });
     }
-    Ok(Preview {
-        entries,
-        token: v["previewToken"].as_str().map(str::to_string),
-    })
+    Ok(Preview { entries, token })
 }
 
 pub(crate) fn validation_from(body: &[u8]) -> Result<ValidationSummary, ApiError> {
@@ -1015,11 +1061,22 @@ pub(crate) fn validation_from(body: &[u8]) -> Result<ValidationSummary, ApiError
                 .collect()
         })
         .unwrap_or_default();
+    // `payroll-import-review-v1` (S3): every distinct department in a Mode A
+    // file (names of departments, never of people).
+    let departments = v["departments"].as_array().map(|l| {
+        l.iter()
+            .filter_map(Value::as_str)
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .collect()
+    });
     Ok(ValidationSummary {
         total_rows: count(&v["totalRows"]),
         error_rows: count(&v["errorRows"]),
         warning_rows: count(&v["warningRows"]),
         messages,
+        departments,
+        departments_truncated: v["departmentsTruncated"].as_bool().unwrap_or(false),
     })
 }
 
@@ -1205,6 +1262,33 @@ impl Payroll<'_> {
         sessions_from(&reply.body)
     }
 
+    /// Every page of History for `status` (every import when `None`),
+    /// newest first, up to [`HISTORY_MAX_PAGES`] pages (M1: drafts past the
+    /// first page still show).
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn sessions_all(
+        &self,
+        status: Option<SessionStatus>,
+    ) -> Result<SessionPage, ApiError> {
+        let mut all = SessionPage {
+            total: 0,
+            sessions: Vec::new(),
+        };
+        for _ in 0..HISTORY_MAX_PAGES {
+            let offset = u64::try_from(all.sessions.len()).unwrap_or(u64::MAX);
+            let page = self.sessions(status, offset).await?;
+            all.total = page.total;
+            let got = page.sessions.len();
+            all.sessions.extend(page.sessions);
+            if got == 0 || u64::try_from(all.sessions.len()).unwrap_or(u64::MAX) >= all.total {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
     /// Maps a Mode A file's columns.
     ///
     /// # Errors
@@ -1317,7 +1401,13 @@ impl Payroll<'_> {
         let bytes = crate::session::json_body(&Value::Object(body))?;
         let call = at(&PAYROLL_GENERATE_JE, &id.to_string()).json_body(bytes);
         let reply = self.0.send(&PAYROLL_GENERATE_JE, call, None).await?;
-        preview_from(&reply.body)
+        preview_from(
+            &reply.body,
+            self.0
+                .client()
+                .capabilities()
+                .has(Capabilities::PAYROLL_IMPORT_POST),
+        )
     }
 
     /// Posts the import under `key` (made when the owner clicked Post; a

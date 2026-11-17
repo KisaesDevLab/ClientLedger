@@ -95,14 +95,119 @@ async fn preview_reads_exact_strings_and_the_token() {
 async fn a_json_number_amount_is_refused_never_rounded() {
     let body = PREVIEW.replace(r#""debit":"1191.04""#, r#""debit":1191.04"#);
     assert!(matches!(
-        preview_from(body.as_bytes()),
+        preview_from(body.as_bytes(), true),
         Err(ApiError::InexactMoney { .. })
     ));
     let no_diff = PREVIEW.replace(r#""difference":"0.00","#, "");
     assert!(
-        preview_from(no_diff.as_bytes()).is_err(),
+        preview_from(no_diff.as_bytes(), true).is_err(),
         "difference is required"
     );
+}
+
+/// S8: with `payroll-import-post-v1` the engine always sends the token; a
+/// preview without one is a contract break, never a post that skips the
+/// engine's "entries changed" check.
+#[tokio::test]
+async fn a_missing_preview_token_is_a_contract_break() {
+    for missing in [
+        PREVIEW.replace(r#""previewToken":"tok-1","#, ""),
+        PREVIEW.replace(r#""previewToken":"tok-1""#, r#""previewToken":"""#),
+    ] {
+        assert!(matches!(
+            preview_from(missing.as_bytes(), true),
+            Err(ApiError::Decode { .. })
+        ));
+        assert_eq!(
+            preview_from(missing.as_bytes(), false).expect("older").token,
+            None
+        );
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/api/v1/payroll-import/sessions/{SESSION}/generate-je"
+            )))
+            .respond_with(json(200, &missing))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        assert!(matches!(
+            s.payroll().preview(sid(), &BTreeMap::new()).await,
+            Err(ApiError::Decode { .. })
+        ));
+    }
+}
+
+/// M1: History sends the status and reads every page.
+#[tokio::test]
+async fn history_sends_the_status_and_reads_every_page() {
+    let row = |n: u32| {
+        format!(
+            r#"{{"id":"3a0c4e8e-6f6e-4c1d-8a37-{n:012}","status":"mapped","importMode":"employee_level",
+            "detectedProvider":"custom","payPeriodStart":"2025-07-01","payPeriodEnd":"2025-07-11",
+            "checkDate":"2025-07-11","rowCount":3,"errorCount":0,"journalEntryIds":[]}}"#
+        )
+    };
+    let first: Vec<String> = (0..50).map(row).collect();
+    let page1 = format!(r#"{{"data":[{}],"total":51}}"#, first.join(","));
+    let page2 = format!(r#"{{"data":[{}],"total":51}}"#, row(50));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/payroll-import/sessions"))
+        .and(wiremock::matchers::query_param("offset", "0"))
+        .respond_with(json(200, &page1))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/payroll-import/sessions"))
+        .and(wiremock::matchers::query_param("offset", "50"))
+        .respond_with(json(200, &page2))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let all = s
+        .payroll()
+        .sessions_all(Some(SessionStatus::Mapped))
+        .await
+        .expect("history");
+    assert_eq!(all.sessions.len(), 51);
+    assert_eq!(all.total, 51);
+    let sent: Vec<_> = requests(&server, "GET")
+        .await
+        .into_iter()
+        .filter(|r| r.url.path() == "/api/v1/payroll-import/sessions")
+        .collect();
+    assert_eq!(sent.len(), 2, "two pages");
+    for r in &sent {
+        assert!(
+            r.url.query().unwrap_or_default().contains("status=mapped"),
+            "{:?}",
+            r.url.query()
+        );
+    }
+}
+
+/// S3: the check lists every department in the file (with the review
+/// capability); an older engine's answer has none (the screen reads the
+/// sample rows). Debug never shows department names.
+#[test]
+fn the_check_lists_every_department() {
+    let v = validation_from(
+        br#"{"totalRows":30,"errorRows":0,"warningRows":0,"messages":[],
+        "departments":["Kitchen"," Front ","","Patio"],"departmentsTruncated":true}"#,
+    )
+    .expect("check");
+    assert_eq!(
+        v.departments.as_deref(),
+        Some(&["Kitchen".to_string(), "Front".into(), "Patio".into()][..])
+    );
+    assert!(v.departments_truncated);
+    let dbg = format!("{v:?}");
+    assert!(!dbg.contains("Kitchen") && !dbg.contains("Patio"), "{dbg}");
+    let old = validation_from(br#"{"totalRows":3,"errorRows":0,"warningRows":0,"messages":[]}"#)
+        .expect("old");
+    assert_eq!(old.departments, None);
+    assert!(!old.departments_truncated);
 }
 
 #[tokio::test]
@@ -416,13 +521,18 @@ fn column_maps_round_trip_through_a_template() {
     });
     map.department_tags
         .insert("Front".into(), Some(TAG.parse().expect("tag")));
+    // A layout saved before S4: no left-out list (every unmatched column
+    // is new next time).
+    let back = ColumnMap::from_value(&map.template_value()).expect("read back");
+    assert_eq!(back.left_out, None);
+    map.left_out = Some(vec!["Notes".into(), "Hours".into()]);
     let back = ColumnMap::from_value(&map.template_value()).expect("read back");
     assert_eq!(back.sources(), vec!["Wages".to_string()]);
     assert_eq!(back, map);
     let apply = map.apply_body();
     assert!(
-        apply.get("clDepartmentTags").is_none(),
-        "desktop-only key stays out of apply-mapping"
+        apply.get("clDepartmentTags").is_none() && apply.get("clLeftOutColumns").is_none(),
+        "desktop-only keys stay out of apply-mapping"
     );
     assert_eq!(apply["mappings"]["gross_pay"]["source"], "Wages");
 }

@@ -519,6 +519,11 @@ impl Capabilities {
     /// U-247 (P30): payroll routes refuse viewers with hidden accounts; the
     /// payroll overlap and match doors filter or refuse hidden lines.
     pub const PAYROLL_IMPORT_SENSITIVE: &'static str = "payroll-import-sensitive-v1";
+    /// P30 review fixes (engine B1, S1, S3, S5): a discard never removes a
+    /// posted import, one post per file at a time, every department in the
+    /// Mode A check (`departments`, `departmentsTruncated`), Mode B signed
+    /// amounts. Optional: the screen works without it (sample departments).
+    pub const PAYROLL_IMPORT_REVIEW: &'static str = "payroll-import-review-v1";
     /// U-175 (P26 QA-6): a bank file goes into any bank register account
     /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
     pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";

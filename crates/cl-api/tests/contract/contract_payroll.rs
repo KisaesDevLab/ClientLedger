@@ -187,6 +187,7 @@ fn column_map(stem: &str) -> Option<ColumnMap> {
             },
         ],
         department_tags: BTreeMap::new(),
+        left_out: None,
     })
 }
 
@@ -879,6 +880,89 @@ pub fn duplicates_overlap_concurrency_and_reverse(h: &Harness) {
     assert_eq!(after.status, SessionStatus::Cancelled);
 }
 
+/// The engine's P30 review fixes (`payroll-import-review-v1`): pending
+/// until the pin has them.
+fn review_caps(h: &Harness) -> bool {
+    caps(h) && h.require_cap(Capabilities::PAYROLL_IMPORT_REVIEW, "P30 review B1/S1/S3/S5")
+}
+
+/// Engine S1: two drafts of the same file posted at once — exactly one
+/// posts; the other is refused as a duplicate; the ledger holds one set.
+pub fn two_drafts_of_one_file_post_once(h: &Harness) {
+    if !review_caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Payroll race");
+    let a = map_accounts(h, &s);
+    let one = prepare(h, &s, "generic_period1", a);
+    let two = prepare(h, &s, "generic_period1", a);
+    let (mut r1, mut r2) = (one.request(), two.request());
+    r1.force_post = true;
+    r2.force_post = true;
+    let (p1, p2) = (s.payroll(), s.payroll());
+    let (x, y) = h.run(async {
+        tokio::join!(
+            p1.post(one.id, &r1, IdempotencyKey::new()),
+            p2.post(two.id, &r2, IdempotencyKey::new())
+        )
+    });
+    let oks = [&x, &y]
+        .iter()
+        .filter(|r| matches!(r, Ok(PostOutcome::Posted { .. })))
+        .count();
+    assert_eq!(oks, 1, "{x:?} {y:?}");
+    let refused = [x, y].into_iter().find_map(Result::err).expect("one refused");
+    assert!(
+        matches!(
+            payroll_refusal(&refused),
+            Some(PayrollRefusal::DuplicateFile { .. } | PayrollRefusal::DuplicateRun { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(ledger_payroll_entries(h, &s, &one.want[0].date), 1);
+}
+
+/// Engine B1: a discard racing a post never removes the posted import —
+/// afterwards the import is posted, listed, and reversible.
+pub fn a_discard_racing_a_post_keeps_the_posted_import(h: &Harness) {
+    if !review_caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Payroll discard race");
+    let a = map_accounts(h, &s);
+    let p = prepare(h, &s, "generic_period1", a);
+    let mut req = p.request();
+    req.force_post = true;
+    let (p1, p2) = (s.payroll(), s.payroll());
+    let (posted_r, discard_r) = h.run(async {
+        tokio::join!(
+            p1.post(p.id, &req, IdempotencyKey::new()),
+            p2.discard(p.id)
+        )
+    });
+    if let Ok(PostOutcome::Posted { entries, .. }) = &posted_r {
+        let sess = h.run(s.payroll().session(p.id)).expect("the import survives");
+        assert_eq!(sess.status, SessionStatus::Posted, "{discard_r:?}");
+        assert_eq!(&sess.entries, entries);
+        let listed = h
+            .run(s.payroll().sessions_all(None))
+            .expect("history")
+            .sessions
+            .iter()
+            .any(|x| x.id == p.id);
+        assert!(listed, "History still lists it");
+        h.run(
+            s.payroll()
+                .reverse(p.id, "Contract test", None, IdempotencyKey::new()),
+        )
+        .expect("still reversible");
+    } else {
+        // The discard won: nothing posted, nothing left behind.
+        assert!(discard_r.is_ok(), "{posted_r:?} {discard_r:?}");
+        assert_eq!(ledger_payroll_entries(h, &s, &p.want[0].date), 0);
+    }
+}
+
 /// U-244: a post whose second entry is refused by the ledger (all-zero
 /// amounts on the second pay date) leaves nothing posted.
 pub fn a_failed_post_leaves_nothing(h: &Harness) {
@@ -992,17 +1076,19 @@ pub fn closed_period_needs_the_password(h: &Harness) {
     );
     check_posted(h, &s, "gusto", a, &p.want, &entries);
     assert_eq!(entries.len(), 2, "two pay dates, one password");
-    for id in &entries {
-        let rows = h
-            .run(
-                s.audit()
-                    .for_record(AuditEntity::ClosingDateOverride, *id.as_uuid()),
-            )
-            .expect("audit");
-        assert!(
-            rows.iter().any(|r| r.action == AuditAction::Override),
-            "the closing-date exception is audited"
-        );
+    let overrides = |id: &TransactionId| {
+        h.run(
+            s.audit()
+                .for_record(AuditEntity::ClosingDateOverride, *id.as_uuid()),
+        )
+        .expect("audit")
+        .iter()
+        .filter(|r| r.action == AuditAction::Override)
+        .count()
+    };
+    let after_post: Vec<usize> = entries.iter().map(overrides).collect();
+    for n in &after_post {
+        assert!(*n >= 1, "the closing-date exception is audited");
     }
     let e = h
         .run(
@@ -1020,9 +1106,14 @@ pub fn closed_period_needs_the_password(h: &Harness) {
         ))
         .expect("reverse with the password");
     assert_eq!(usize::try_from(r.reversed).ok(), Some(entries.len()));
-    for id in &entries {
+    for (id, before) in entries.iter().zip(&after_post) {
         let t = h.run(s.transactions().get(*id)).expect("entry").record;
         assert_eq!(t.status, TxnStatus::Void, "every entry voided");
+        // S7: the reverse in the closed period is audited too.
+        assert!(
+            overrides(id) > *before,
+            "the reverse's closing-date exception is audited"
+        );
     }
 }
 
