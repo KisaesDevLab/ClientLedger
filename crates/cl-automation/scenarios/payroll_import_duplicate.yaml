@@ -1,0 +1,27 @@
+# Import Payroll (P30): the same ADP file twice. The second upload warns
+# before mapping; posting it is refused (409 PAYROLL_DUPLICATE_FILE in the
+# engine) with a way to History. Nothing is posted twice.
+name: payroll_import_duplicate
+description: ADP posted, then the same file again - warned, refused, History offered.
+steps:
+  - resize: {width: 1440, height: 940}
+  - command: payroll.import
+  - command: dev.payroll_demo_reset
+  - command: dev.payroll_demo_file_adp_run_gli
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: accounts}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - command: dev.payroll_start_over
+  - command: dev.payroll_demo_file_adp_run_gli
+  - key: Alt+N
+  - assert_state: {key: screen.duplicate_warning, equals: true}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.trouble, equals: duplicate}
+  - assert_exists: {role: button, label: Open History}
+  - screenshot: duplicate

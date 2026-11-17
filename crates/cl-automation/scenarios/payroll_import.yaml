@@ -1,0 +1,60 @@
+# Import Payroll (P30) against `clientledger --demo`: Gusto with two pay
+# dates and departments, the preview, Post, History, and Reverse in a
+# closed period with the closing-date password. The file is the synthetic
+# fixture `fixtures/payroll/gusto.csv`, loaded by a demo command with its
+# pay period (12/28/2024 - 01/24/2025, check date 01/24/2025). No mockup
+# exists; the screen follows Import Bank File's steps. The state carries
+# steps, counts and flags only (no names, amounts or file names).
+name: payroll_import
+description: Gusto payroll with departments - map, accounts, check, preview (2 entries), post, History, Reverse with the closing password.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: payroll.import
+  - command: dev.payroll_demo_reset
+  - assert_state: {key: screen.screen, equals: payroll.import}
+  - assert_state: {key: screen.step, equals: choose}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: choose-empty
+  - command: dev.payroll_demo_file_gusto
+  - assert_state: {key: screen.file_chosen, equals: true}
+  - assert_state: {key: screen.can_next, equals: true}
+  - screenshot: choose
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: map}
+  - assert_state: {key: screen.layout, equals: builtin}
+  - assert_state: {key: screen.departments, equals: 2}
+  - screenshot: map
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: accounts}
+  - assert_state: {key: screen.accounts_complete, equals: true}
+  - screenshot: accounts
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: check}
+  - assert_state: {key: screen.validation.errors, equals: 0}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.preview.entries, equals: 2}
+  - assert_state: {key: screen.preview.balanced, equals: true}
+  - screenshot: preview
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  - assert_state: {key: screen.posted, equals: 2}
+  - assert_state: {key: screen.posts_sent, equals: 1}
+  - screenshot: done
+  # History, then Reverse with the books closed through 03/31/2025.
+  - command: dev.payroll_demo_close_books
+  - click: {role: button, label: Open History}
+  - assert_state: {key: screen.view, equals: history}
+  - assert_state: {key: screen.history.posted, equals: 1}
+  - screenshot: history
+  - click: {role: button, label: Reverse}
+  - click: {role: button, label: Reverse import}
+  - assert_state: {key: screen.password_open, equals: true}
+  - screenshot: closed-period
+  - click: {role: text_input, label: Closing date password}
+  - type: {text: "demo-close"}
+  - click: {role: button, label: Continue}
+  - assert_state: {key: screen.reversed, equals: 2}
+  - assert_state: {key: screen.history.reversed, equals: 1}
+  - screenshot: reversed
