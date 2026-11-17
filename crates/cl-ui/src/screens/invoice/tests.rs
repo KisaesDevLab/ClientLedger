@@ -968,3 +968,18 @@ fn removing_parts_from_a_closed_document_ends_in_the_plain_message() {
     let note = s.inventory_note.clone().expect("the plain message");
     assert!(note.contains("even with the closing password"), "{note}");
 }
+
+/// P29 review S2: Invoice and the tag options: on, the untagged lines are
+/// refused and nothing is saved; off, it saves.
+#[test]
+fn tag_options_on_invoices() {
+    let (_d, mut s) = screen();
+    mockup(&mut s);
+    s.link.demo_state().expect("demo").require_tag_every_line = true;
+    s.start_save(SaveIntent::Save, None);
+    assert_eq!(s.saved_count, 0, "nothing saved");
+    assert!(s.editing.is_none());
+    s.link.demo_state().expect("demo").require_tag_every_line = false;
+    s.start_save(SaveIntent::Save, None);
+    assert_eq!(s.saved_count, 1, "{}", s.state_json());
+}

@@ -947,6 +947,9 @@ fn tag_options_on_card_charges() {
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
     assert_eq!(posted(&link), before + 1);
     link.demo_state().expect("demo").default_tag = Some(tag);
-    let s = screen(&link);
+    let mut s = screen(&link);
     assert_eq!(s.state()["header_tags"], 1, "a new form");
+    // None on edits: the saved (untagged) charge opens without the default.
+    assert!(s.command(CommandId::new("form.prev_record")));
+    assert_eq!(s.state()["header_tags"], 0, "an edit keeps its own tags");
 }

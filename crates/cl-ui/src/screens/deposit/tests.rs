@@ -774,3 +774,17 @@ fn a_matched_deposits_total_or_account_change_says_the_line_waits() {
     s.header.edit_step(|h| h.account = Some(account(1020)));
     assert_eq!(s.state_json()["feed"]["notice"], true, "another account");
 }
+
+/// P29 review S2: Make Deposits and the tag options: on, an untagged
+/// "other deposit" line is refused and nothing is sent; off, it saves.
+#[test]
+fn tag_options_on_deposits() {
+    let (mut s, log, _dir) = screen(all_caps());
+    s.link.demo_state().expect("demo").require_tag_every_line = true;
+    set_lines(&mut s, &[(6100, "25.00")]);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 0, "nothing sent");
+    s.link.demo_state().expect("demo").require_tag_every_line = false;
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state_json());
+    assert_eq!(log.lock().expect("log").saved.len(), 1);
+}

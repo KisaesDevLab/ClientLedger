@@ -322,6 +322,12 @@ fn tag_options_on_personal_funds() {
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
     assert_eq!(posted(&link), before + 1);
     link.demo_state().expect("demo").default_tag = Some(tag);
-    let s = screen(&link);
+    let mut s = screen(&link);
     assert_eq!(s.header.current().header_tags, vec![tag], "a new form");
+    // None on edits: the saved (untagged) entry opens without the default.
+    assert!(s.command(CommandId::new("form.prev_record")));
+    assert!(
+        s.header.current().header_tags.is_empty(),
+        "an edit keeps its own tags"
+    );
 }
