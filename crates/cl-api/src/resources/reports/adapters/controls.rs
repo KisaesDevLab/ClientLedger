@@ -69,7 +69,7 @@ pub fn closing_exceptions(v: &Value, req: &ReportRequest) -> Result<ReportTable,
             RowPath::of(["rows", i.to_string().as_str()]),
             String::new(),
             vec![
-                read(e, F::Date("at"))?,
+                read(e, F::LocalDate("at"))?,
                 read(e, F::Text("userName"))?,
                 read(e, F::Code("reports.audit.action", "action"))?,
                 read(e, F::TxnType("txnType"))?,
@@ -376,7 +376,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             RowPath::of(["rows", k.as_str()]),
             String::new(),
             vec![
-                read(e, F::Date("created_at"))?,
+                read(e, F::LocalDate("created_at"))?,
                 read(e, F::Text("userName"))?,
                 match (extra_action(e, entity), report_file_action(e, entity)) {
                     (Some(text), _) => Cell::Text(text),
@@ -495,6 +495,25 @@ mod tests {
         assert!(t.meta.truncated.is_none());
         let bad = json!({"data": [{"amountBeforeExact": 1234}]});
         assert!(closing_exceptions(&bad, &req(Source::ClosingDateExceptions)).is_err());
+        // P29 QA-8: "Changed on" is the date on this computer's clock, not
+        // the UTC timestamp's date (an evening edit in the US is "tomorrow"
+        // in UTC).
+        let at = "2026-11-17T00:53:00.000Z";
+        let local = chrono::DateTime::parse_from_rfc3339(at)
+            .expect("ts")
+            .with_timezone(&chrono::Local)
+            .date_naive();
+        let evening = json!({"data": [{"at": at, "userName": "QA"}]});
+        let t = closing_exceptions(&evening, &req(Source::ClosingDateExceptions)).expect("table");
+        assert_eq!(
+            t.rows[0].cells[0],
+            Cell::Date(cl_core::CalendarDate::from_naive(local).expect("day"))
+        );
+        assert_eq!(
+            super::super::lists::local_date("2026-09-30"),
+            Some(cl_core::CalendarDate::from_ymd(2026, 9, 30).expect("day")),
+            "a bare date is taken as given"
+        );
     }
 
     #[test]
