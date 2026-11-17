@@ -31,17 +31,33 @@ steps:
   - assert_state: {key: screen.message, equals: users.msg.temp_set}
   - assert_state: {key: screen.temp_password_shown, equals: true}
   - assert_exists: {role: button, label: Copy}
+  # Hidden until Show, so the Admin can read it out; Hide covers it again
+  # (screenshots mask it either way).
+  - assert_state: {key: screen.temp_password_revealed, equals: false}
+  - click: {role: button, label: Show}
+  - assert_state: {key: screen.temp_password_revealed, equals: true}
+  - assert_exists: {role: button, label: Hide}
   - screenshot: temporary-password
+  - click: {role: button, label: Hide}
+  - assert_state: {key: screen.temp_password_revealed, equals: false}
   - click: {role: button, label: Done}
   - wait: {ms: 200}
   - assert_state: {key: screen.temp_password_shown, equals: false}
+  # Kim has no role yet: nothing is chosen and Change role is off.
+  - assert_state: {key: screen.role_pick, equals: null}
+  - assert_state: {key: screen.change_role_ready, equals: false}
+  - assert_disabled: {role: button, label: Change role}
   # Kim becomes Accounts payable.
   - click: {role: combo_box, label: Role}
   - click: {role: button, label: Accounts payable}
+  - assert_state: {key: screen.change_role_ready, equals: true}
   - click: {role: button, label: Change role}
   - wait: {ms: 300}
   - assert_state: {key: screen.message, equals: users.msg.role_changed}
   - assert_state: {key: screen.selected_role, equals: roles.kind.payables}
+  # The dropdown now shows Kim's role, and Change role waits for another.
+  - assert_state: {key: screen.role_pick, equals: Accounts payable}
+  - assert_disabled: {role: button, label: Change role}
   # Add a person as Accounts receivable.
   - click: {role: text_input, label: Name}
   - type: {text: Rio Sales}

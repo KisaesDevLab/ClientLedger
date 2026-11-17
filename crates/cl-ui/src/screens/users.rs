@@ -116,13 +116,18 @@ pub struct UsersScreen {
     write: Option<Job<Wrote>>,
     ensured: bool,
     selected: Option<UserId>,
-    pick: Option<RolePlan>,
+    /// The role chosen in the selected user's panel, and for whom; until
+    /// the Admin picks one the panel shows the user's own role.
+    pick: Option<(UserId, RolePlan)>,
     new_email: String,
     new_name: String,
     new_role: RolePlan,
     /// The temporary password on show: whose (name) and the password.
     shown: Option<(String, Secret)>,
     copied: bool,
+    /// Show was pressed on the temporary password (hidden by default, so
+    /// the Admin can read it out without it sitting on screen).
+    revealed: bool,
     role_selected: Option<Uuid>,
     edit: Option<RoleEdit>,
     /// i18n key of the last message, its fill-ins, and whether it is good
@@ -209,6 +214,7 @@ impl UsersScreen {
             new_role: RolePlan::ViewOnly,
             shown: None,
             copied: false,
+            revealed: false,
             role_selected: None,
             edit: None,
             message: None,
@@ -424,6 +430,7 @@ impl UsersScreen {
                 let name = self.name_of(id);
                 self.shown = Some((name, secret));
                 self.copied = false;
+                self.revealed = false;
                 self.message = Some(("users.msg.temp_set", true));
             }
             Wrote::Builtins => {}
@@ -445,6 +452,7 @@ impl UsersScreen {
         if let Some(p) = added.temporary_password {
             self.shown = Some((self.new_name_or(added.user), p));
             self.copied = false;
+            self.revealed = false;
         }
     }
 
@@ -842,7 +850,6 @@ impl UsersScreen {
                             });
                             if r.clicked() {
                                 self.selected = Some(u.id);
-                                self.pick = None;
                             }
                             ui.label(&u.email);
                             ui.label(role);
@@ -891,6 +898,62 @@ impl UsersScreen {
         });
     }
 
+    /// [`Self::role_picker`] that may show nothing chosen (a user whose role
+    /// isn't one the Admin can give, such as one with no permission row).
+    fn role_picker_opt(&self, ui: &mut Ui, id: &str, label: &str, value: &mut Option<RolePlan>) {
+        let plans = self.plans();
+        ui.horizontal(|ui| {
+            let l = ui.label(label);
+            egui::ComboBox::from_id_salt(id)
+                .selected_text(value.map_or_else(|| t("users.role.choose"), |p| self.plan_text(p)))
+                .width(260.0)
+                .show_ui(ui, |ui| {
+                    for p in plans {
+                        ui.selectable_value(value, Some(p), self.plan_text(p));
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        });
+    }
+
+    /// The role the user has now, as one the Admin can give: None for a
+    /// user with no permission row, a full-but-not-Admin user, overrides
+    /// with no role, or an unknown engine word.
+    fn current_plan(&self, u: &TeamUser) -> Option<RolePlan> {
+        match self.kind_of(u) {
+            RoleKind::Admin => Some(RolePlan::Admin),
+            RoleKind::ViewOnly => Some(RolePlan::ViewOnly),
+            RoleKind::Builtin(_) | RoleKind::Custom(Some(_)) => self
+                .data
+                .as_ref()?
+                .rows
+                .get(&u.id)?
+                .as_ref()?
+                .template
+                .map(RolePlan::Template),
+            RoleKind::FullNotAdmin
+            | RoleKind::NoRow
+            | RoleKind::Custom(None)
+            | RoleKind::Other(_) => None,
+        }
+    }
+
+    /// What the selected user's dropdown shows: the Admin's pick for this
+    /// user, else the user's own role.
+    fn picked_for(&self, u: &TeamUser) -> Option<RolePlan> {
+        self.pick
+            .filter(|(id, _)| *id == u.id)
+            .map(|(_, p)| p)
+            .or_else(|| self.current_plan(u))
+    }
+
+    /// The change Change role would send: only a role different from the
+    /// one the user has.
+    fn role_change(current: Option<RolePlan>, pick: Option<RolePlan>) -> Option<RolePlan> {
+        pick.filter(|p| Some(*p) != current)
+    }
+
     /// `main`: the row is the main Admin (no temporary password: they use
     /// the recovery key; the engine refuses it with `SUPER_ADMIN_TARGET`).
     fn selected_card(&mut self, ui: &mut Ui, tokens: &Tokens, u: &TeamUser, me: bool, main: bool) {
@@ -906,13 +969,20 @@ impl UsersScreen {
                 form::hint(ui, tokens, &t("users.yourself"));
                 return;
             }
-            let mut pick = self.pick.unwrap_or(RolePlan::ViewOnly);
-            self.role_picker(ui, "users/role", &t("users.role"), &mut pick);
-            self.pick = Some(pick);
+            let current = self.current_plan(u);
+            let mut pick = self.picked_for(u);
+            self.role_picker_opt(ui, "users/role", &t("users.role"), &mut pick);
+            if let Some(p) = pick {
+                self.pick = Some((u.id, p));
+            }
+            let changed = Self::role_change(current, pick);
             ui.add_enabled_ui(!busy, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button(t("users.change_role")).clicked() {
-                        change = Some(pick);
+                    // Change role stays off until a different role is chosen.
+                    let b = ui
+                        .add_enabled(changed.is_some(), egui::Button::new(t("users.change_role")));
+                    if b.clicked() {
+                        change = changed;
                     }
                     if u.active {
                         if ui.button(t("users.turn_off")).clicked() {
@@ -970,11 +1040,14 @@ impl UsersScreen {
         let Some((name, secret)) = &self.shown else {
             return;
         };
-        let masked = ui.ctx().data(|d| {
+        // Screenshots always mask it; otherwise it shows only after Show.
+        let shooting = ui.ctx().data(|d| {
             d.get_temp::<std::time::Instant>(crate::automation::hide_secrets_id())
                 .is_some_and(|until| std::time::Instant::now() < until)
         });
+        let masked = shooting || !self.revealed;
         let mut close = false;
+        let mut toggle = false;
         form::card(ui, tokens, |ui| {
             ui.label(RichText::new(t_with("users.temp.title", &[("name", name)])).strong());
             form::hint(ui, tokens, &t("users.temp.intro"));
@@ -989,6 +1062,14 @@ impl UsersScreen {
                 egui::WidgetInfo::labeled(egui::Role::Label, true, t("users.temp.label"))
             });
             ui.horizontal(|ui| {
+                let word = if self.revealed {
+                    "users.temp.hide"
+                } else {
+                    "users.temp.show"
+                };
+                if ui.button(t(word)).clicked() {
+                    toggle = true;
+                }
                 if ui.button(t("users.temp.copy")).clicked() {
                     crate::secret_clipboard::copy(ui.ctx(), secret.expose().to_owned());
                     self.copied = true;
@@ -1001,9 +1082,13 @@ impl UsersScreen {
                 form::hint(ui, tokens, &t("users.temp.copied"));
             }
         });
+        if toggle {
+            self.revealed = !self.revealed;
+        }
         if close {
             self.shown = None;
             self.copied = false;
+            self.revealed = false;
             crate::secret_clipboard::clear_soon();
         }
     }
@@ -1225,6 +1310,15 @@ impl Screen for UsersScreen {
             "selected_role": self.selected.and_then(|id| {
                 data?.users.iter().find(|u| u.id == id).map(|u| self.kind_of(u).key())
             }),
+            // The selected user's dropdown, and whether Change role is on.
+            "role_pick": self.selected.and_then(|id| {
+                let u = data?.users.iter().find(|u| u.id == id)?;
+                self.picked_for(u).map(|p| self.plan_text(p))
+            }),
+            "change_role_ready": self.selected.and_then(|id| {
+                let u = data?.users.iter().find(|u| u.id == id)?;
+                Some(Self::role_change(self.current_plan(u), self.picked_for(u)).is_some())
+            }),
             "selected_locked": self.selected.and_then(|id| {
                 data?.users.iter().find(|u| u.id == id).map(|u| u.locked)
             }),
@@ -1232,6 +1326,7 @@ impl Screen for UsersScreen {
                 data?.users.iter().find(|u| u.id == id).map(|u| u.active)
             }),
             "temp_password_shown": self.shown.is_some(),
+            "temp_password_revealed": self.shown.is_some() && self.revealed,
             "editing_role": self.edit.is_some(),
             "message": self.message.map(|(k, _)| k),
             "busy": self.read.is_some() || self.write.is_some(),
@@ -1373,6 +1468,16 @@ mod tests {
                 .is_some_and(|(n, p)| n == "Kim Payables" && p.expose() == DEMO_TEMP_PASSWORD)
         );
         assert!(user(&s, "kim@example.com").must_change);
+        // Hidden until Show; a new password starts hidden again.
+        assert_eq!(s.state()["temp_password_revealed"], false);
+        s.revealed = true;
+        assert_eq!(s.state()["temp_password_revealed"], true);
+        s.act(kim.id, Act::TempPassword);
+        assert_eq!(s.state()["temp_password_revealed"], false);
+        assert!(
+            !s.state().to_string().contains(DEMO_TEMP_PASSWORD),
+            "never in state"
+        );
         // Not for yourself.
         let me = s.me().expect("me");
         s.act(me, Act::TempPassword);
@@ -1421,6 +1526,57 @@ mod tests {
         s.change_role(lee, RolePlan::ViewOnly);
         s.delete_role(fd.id);
         assert_eq!(s.state()["message"], "roles.msg.deleted");
+    }
+
+    /// P29 QA: the selected user's Role dropdown starts at the role they
+    /// have (a built-in or a custom role), never View-only by default, and
+    /// Change role waits until a different role is chosen.
+    #[test]
+    fn the_role_dropdown_starts_at_the_users_role() {
+        let (_d, mut s) = screen();
+        let bk = s
+            .template_by_builtin(BuiltinRole::Bookkeeper)
+            .expect("bk")
+            .id;
+        let lee = user(&s, "lee@example.com").id;
+        s.change_role(lee, RolePlan::Template(bk));
+        assert_eq!(s.state()["message"], "users.msg.role_changed");
+        s.selected = Some(lee);
+        let u = user(&s, "lee@example.com");
+        assert_eq!(s.current_plan(&u), Some(RolePlan::Template(bk)));
+        assert_eq!(s.state()["role_pick"], t("roles.kind.bookkeeper"));
+        assert_eq!(s.state()["change_role_ready"], false);
+        // Choosing View-only (a different role) turns Change role on;
+        // choosing Bookkeeper again turns it off.
+        s.pick = Some((lee, RolePlan::ViewOnly));
+        assert_eq!(s.state()["change_role_ready"], true);
+        s.pick = Some((lee, RolePlan::Template(bk)));
+        assert_eq!(s.state()["change_role_ready"], false);
+        // Another user's pick doesn't carry over.
+        s.pick = Some((user(&s, "kim@example.com").id, RolePlan::ViewOnly));
+        assert_eq!(s.state()["role_pick"], t("roles.kind.bookkeeper"));
+        // A custom role.
+        s.pick = None;
+        s.edit_role(bk);
+        let edit = s.edit.as_mut().expect("editing");
+        edit.name = "Front desk".into();
+        s.save_role();
+        let fd = s
+            .data()
+            .templates
+            .into_iter()
+            .find(|t| t.name == "Front desk")
+            .expect("saved")
+            .id;
+        s.change_role(lee, RolePlan::Template(fd));
+        let u = user(&s, "lee@example.com");
+        assert_eq!(s.current_plan(&u), Some(RolePlan::Template(fd)));
+        assert_eq!(s.state()["role_pick"], "Front desk");
+        assert_eq!(s.state()["change_role_ready"], false);
+        // Back to View-only; with no role and no pick nothing is sent.
+        s.change_role(lee, RolePlan::ViewOnly);
+        assert_eq!(s.state()["role_pick"], t("roles.kind.view_only"));
+        assert_eq!(UsersScreen::role_change(None, None), None);
     }
 
     #[test]
