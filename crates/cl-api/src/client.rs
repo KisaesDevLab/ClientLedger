@@ -204,6 +204,8 @@ impl Timeouts {
 /// One logical request, fixed across attempts. Its `Debug` shows only the
 /// method, route template, request id and body length: never the query
 /// (search text is owner data) or the body.
+// Independent per-call switches (key, secret, no key, once), not a state.
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Call {
     pub method: Method,
     /// Route template for logs (`/api/v1/accounts/{id}`); never the query.
@@ -233,6 +235,10 @@ pub(crate) struct Call {
     /// route: the engine refuses a key there, P25 U-06). Such a call changes
     /// nothing, so it is retried like a read.
     pub no_key: bool,
+    /// Send once and never again on its own, whatever the route's class
+    /// (payroll post and reverse, P30): the key still goes with it, so the
+    /// owner's own "Try again" replays.
+    pub once: bool,
 }
 
 impl std::fmt::Debug for Call {
@@ -267,6 +273,7 @@ impl Call {
             sensitive: false,
             content_type: None,
             no_key: false,
+            once: false,
         }
     }
 

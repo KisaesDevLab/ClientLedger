@@ -296,6 +296,10 @@ fn a_closed_period_asks_for_the_password() {
     s.give_password();
     s.poll();
     assert_eq!(s.state()["trouble"], "password_wrong");
+    assert!(
+        s.key.is_none(),
+        "another password is another body: a new key"
+    );
     s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
     s.give_password();
     s.poll();

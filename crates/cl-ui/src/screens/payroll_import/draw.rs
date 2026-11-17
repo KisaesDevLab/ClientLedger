@@ -150,7 +150,7 @@ impl PayrollImportScreen {
                             .selectable_label(self.view == View::Import, t("payroll.tab.import"))
                             .clicked()
                         {
-                            self.view = View::Import;
+                            self.show_import();
                         }
                         if ui
                             .selectable_label(self.view == View::History, t("payroll.tab.history"))
@@ -210,7 +210,7 @@ impl PayrollImportScreen {
                 PayrollRefusal::DuplicateFile { posted_at, .. }
                 | PayrollRefusal::DuplicateRun { posted_at, .. } => t_with(
                     "payroll.refused.duplicate",
-                    &[("date", posted_at.as_deref().unwrap_or("-"))],
+                    &[("date", posted_at.as_deref().unwrap_or_default())],
                 ),
                 PayrollRefusal::AlreadyPosted => t("payroll.refused.already_posted"),
                 PayrollRefusal::NotReady => t("payroll.refused.not_ready"),
@@ -323,7 +323,13 @@ impl PayrollImportScreen {
             let text = match &self.file {
                 Some((_, b)) => t_with(
                     "payroll.file.chosen",
-                    &[("size", &format!("{} KB", b.len().div_ceil(1024)))],
+                    &[(
+                        "size",
+                        &t_with(
+                            "payroll.file.kb",
+                            &[("n", &b.len().div_ceil(1024).to_string())],
+                        ),
+                    )],
                 ),
                 None => t("payroll.file.none"),
             };
@@ -415,10 +421,17 @@ impl PayrollImportScreen {
                     let current = self.layout.column(field).map(str::to_string);
                     let mut chosen: Option<Option<String>> = None;
                     egui::ComboBox::from_id_salt(("payroll.map", field))
-                        .selected_text(current.clone().unwrap_or_else(|| "—".into()))
+                        .selected_text(
+                            current
+                                .clone()
+                                .unwrap_or_else(|| t("payroll.map.no_column")),
+                        )
                         .width(220.0)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(current.is_none(), "—").clicked() {
+                            if ui
+                                .selectable_label(current.is_none(), t("payroll.map.no_column"))
+                                .clicked()
+                            {
                                 chosen = Some(None);
                             }
                             for h in &headers {
@@ -483,6 +496,13 @@ impl PayrollImportScreen {
     fn accounts_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         heading(ui, tokens, "payroll.accounts.heading");
         note(ui, tokens, &t("payroll.accounts.hint"));
+        if self
+            .upload
+            .as_ref()
+            .is_some_and(|u| u.is_duplicate || u.is_duplicate_by_key)
+        {
+            warn(ui, tokens, &t("payroll.duplicate_warning"));
+        }
         if let Some(LayoutChoice::Saved(id)) = &self.layout_choice
             && self.provider.is_generic()
             && !self.visited.contains(&Step::Map)
@@ -638,9 +658,19 @@ impl PayrollImportScreen {
                             .cloned();
                         let current = plan_line.as_ref().and_then(|x| self.plan.final_tag(x));
                         let label = format!("{} {}", t("payroll.preview.tag"), l.description);
-                        if let Some(c) =
-                            tag_combo(ui, ("payroll.tag", ei, li), &label, &tags, current, false)
-                        {
+                        let picked = ui
+                            .horizontal(|ui| {
+                                tag_combo(
+                                    ui,
+                                    ("payroll.tag", ei, li),
+                                    &label,
+                                    &tags,
+                                    current,
+                                    false,
+                                )
+                            })
+                            .inner;
+                        if let Some(c) = picked {
                             self.plan.set(ei, li, c);
                             self.untagged = None;
                         }
@@ -835,7 +865,7 @@ impl PayrollImportScreen {
                     "payroll.overlap.item",
                     &[
                         ("period", &period),
-                        ("posted", o.posted_on.as_deref().unwrap_or("-")),
+                        ("posted", o.posted_on.as_deref().unwrap_or_default()),
                     ],
                 ));
                 if !o.matching_dates.is_empty() {

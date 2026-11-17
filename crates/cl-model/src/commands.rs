@@ -630,6 +630,40 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
     ),
+    // P30: the payroll scenarios run light and dark in one app.
+    dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
+    dev_action(
+        "dev.payroll_start_over",
+        "Start Payroll Import Over (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_restricted",
+        "Demo Payroll as Restricted Viewer (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_close_books",
+        "Close Demo Books for Payroll (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_require_tag",
+        "Require Tags for Demo Payroll (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_gusto",
+        "Demo Payroll File: Gusto (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_adp_run_gli",
+        "Demo Payroll File: ADP (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_generic_period1",
+        "Demo Payroll File: Generic 1 (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_generic_period2",
+        "Demo Payroll File: Generic 2 (developer)",
+    ),
     // P26: the Bank Feed's other computers, roles and AI switch in the demo.
     dev_action(
         "dev.demo_feed_view_only",

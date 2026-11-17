@@ -192,6 +192,7 @@ pub struct PayrollImportScreen {
     // Map.
     templates_job: Option<Job<Vec<PayrollTemplate>>>,
     templates: Vec<PayrollTemplate>,
+    template_job: Option<Job<PayrollTemplate>>,
     pub(crate) layout: ColumnLayout,
     pub(crate) layout_choice: Option<LayoutChoice<uuid::Uuid>>,
     pub(crate) save_layout: bool,
@@ -353,6 +354,7 @@ impl PayrollImportScreen {
             upload: None,
             templates_job: None,
             templates: Vec::new(),
+            template_job: None,
             layout: ColumnLayout::default(),
             layout_choice: None,
             save_layout: true,
@@ -517,6 +519,11 @@ impl PayrollImportScreen {
         }
         if let Some(Ok(v)) = poll(&mut self.templates_job) {
             self.templates = v;
+        }
+        // A layout that couldn't be saved only means mapping again next time.
+        if let Some(Ok(t)) = poll(&mut self.template_job) {
+            self.templates.retain(|x| x.id != t.id);
+            self.templates.push(t);
         }
         if let Some(Ok(v)) = poll(&mut self.accounts_job) {
             for (k, a) in v {
@@ -906,7 +913,7 @@ impl PayrollImportScreen {
             let now = crate::company::demo::DemoState::now().to_wire();
             // The layout is saved alongside; a failure here doesn't stop
             // the import (the owner maps again next time).
-            let mut job = self.write(
+            let job = self.write(
                 "orphan.payroll_upload",
                 None,
                 move |d| Ok(d.payroll.save_template(existing, &n2, key, &m2, now)),
@@ -915,10 +922,7 @@ impl PayrollImportScreen {
                     async move { s.payroll().save_template(existing, &name, key, &m).await }
                 },
             );
-            if let Some(Ok(t)) = job.take() {
-                self.templates.retain(|x| x.id != t.id);
-                self.templates.push(t);
-            }
+            self.template_job = Some(job);
         }
         let map = column_map(&self.layout, &self.department_tags);
         let m2 = map.clone();
@@ -1121,7 +1125,13 @@ impl PayrollImportScreen {
         self.plan = TagPlan::new(lines, self.link.tag_rules().default_tag);
         self.untagged = None;
         self.preview = Some(p);
+        // A refusal that made us read the entries again stays on show.
+        let kept = self
+            .trouble
+            .take()
+            .filter(|t| matches!(t, Trouble::Refused(_)));
         self.go(Step::Preview);
+        self.trouble = kept;
     }
 
     // ---- Post (WP5) -------------------------------------------------------
@@ -1208,13 +1218,31 @@ impl PayrollImportScreen {
     /// "Try again" after a lost answer: the same body and key, on the
     /// owner's click only.
     pub(crate) fn try_again(&mut self) {
-        if self.trouble == Some(Trouble::Unknown) {
-            self.post();
+        if self.trouble != Some(Trouble::Unknown) {
+            return;
         }
+        match (self.view, self.reversing.clone()) {
+            (View::History, Some((id, reason))) => self.reverse(id, &reason),
+            (View::Import, _) => self.post(),
+            (View::History, None) => {}
+        }
+    }
+
+    /// Back to the wizard: a reverse in progress in History is dropped.
+    pub(crate) fn show_import(&mut self) {
+        self.view = View::Import;
+        self.reversing = None;
+        self.reverse_key = None;
+        self.password = None;
+        self.asking_password = None;
     }
 
     /// "Check status" after a lost answer.
     pub(crate) fn check_status(&mut self) {
+        if self.view == View::History {
+            self.load_history();
+            return;
+        }
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
@@ -1249,10 +1277,19 @@ impl PayrollImportScreen {
             ApiError::ClosingPasswordRejected => {
                 self.asking_password.get_or_insert(None);
                 self.password = None;
+                // The next body differs (another password): new keys.
+                self.key = None;
+                self.reverse_key = None;
             }
             _ => {}
         }
         let trouble = Trouble::of(e);
+        if self.view == View::History
+            && !matches!(trouble, Trouble::Unknown | Trouble::PasswordWrong)
+        {
+            self.reversing = None;
+            self.reverse_key = None;
+        }
         if matches!(
             trouble,
             Trouble::Refused(
@@ -1283,10 +1320,10 @@ impl PayrollImportScreen {
         }
         self.password = Some(Secret::new(std::mem::take(&mut self.password_text)));
         self.asking_password = None;
-        if let Some((id, reason)) = self.reversing.clone() {
-            self.reverse(id, &reason);
-        } else {
-            self.post();
+        match (self.view, self.reversing.clone()) {
+            (View::History, Some((id, reason))) => self.reverse(id, &reason),
+            (View::Import, _) => self.post(),
+            (View::History, None) => {}
         }
     }
 

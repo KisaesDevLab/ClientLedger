@@ -1342,6 +1342,7 @@ impl Payroll<'_> {
         let bytes = posting_body(self.0, body, &opts)?;
         let mut call = at(&PAYROLL_POST, &id.to_string()).json_body(bytes);
         call.idempotency_key = Some(key);
+        call.once = true;
         let reply = self.0.send(&PAYROLL_POST, call, None).await?;
         post_from(&reply.body, reply.replayed)
     }
@@ -1367,6 +1368,7 @@ impl Payroll<'_> {
         let bytes = posting_body(self.0, json!({"reason": reason}), &opts)?;
         let mut call = at(&PAYROLL_REVERSE, &id.to_string()).json_body(bytes);
         call.idempotency_key = Some(key);
+        call.once = true;
         let reply = self.0.send(&PAYROLL_REVERSE, call, None).await?;
         let v = parse_json(&reply.body)?;
         Ok(ReverseOutcome {

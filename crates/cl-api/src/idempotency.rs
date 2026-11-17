@@ -623,13 +623,17 @@ impl Executor {
         // Each keyed route set replays only under its own capability: an
         // engine with `idempotency-v1` alone does not replay the A/P routes.
         let replayed_route = op.key_set().is_some_and(|set| self.replays(set));
-        let class = op.retry().effective(
-            replayed_route
-                && call
-                    .idempotency_key
-                    .as_ref()
-                    .is_some_and(IdempotencyKey::replayable),
-        );
+        let class = if call.once {
+            RetryClass::Never
+        } else {
+            op.retry().effective(
+                replayed_route
+                    && call
+                        .idempotency_key
+                        .as_ref()
+                        .is_some_and(IdempotencyKey::replayable),
+            )
+        };
         // With `idempotency-v1` the key goes only where the engine replays
         // it: its route sets under their capabilities, and `/batch/save`
         // (its own `batch-idempotent-v1`). Without it every mutation sends

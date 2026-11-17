@@ -162,6 +162,32 @@ async fn post_always_asks_for_summary_and_discard_and_sends_the_key() {
 }
 
 #[tokio::test]
+async fn post_and_reverse_are_sent_once_even_on_a_gateway_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"/(post|reverse)$"))
+        .respond_with(json(503, r#"{"error":{"message":"busy"}}"#))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let _ = s
+        .payroll()
+        .post(sid(), &PostRequest::default(), IdempotencyKey::new())
+        .await
+        .expect_err("busy");
+    let _ = s
+        .payroll()
+        .reverse(sid(), "Wrong file", None, IdempotencyKey::new())
+        .await
+        .expect_err("busy");
+    assert_eq!(
+        requests(&server, "POST").await.len(),
+        2,
+        "one each, never retried"
+    );
+}
+
+#[tokio::test]
 async fn an_overlap_answer_needs_confirmation_and_drops_file_names() {
     let reply = r#"{"requiresConfirmation":true,"overlaps":[{"sessionId":"3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a09",
       "filename":"Test Worker payroll.csv","payPeriod":"2024-12-28 to 2025-01-10","postedDate":"1/11/2025",
