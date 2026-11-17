@@ -516,6 +516,35 @@ mod tests {
         );
     }
 
+    /// P29 QA-8: the engine's raw queries hand `timestamptz` over as
+    /// PostgreSQL's text (its driver keeps it as stored); those read as the
+    /// same instant, so the local date is the same as for the `Z` form.
+    #[test]
+    fn postgres_text_timestamps_take_the_local_date() {
+        use super::super::lists::local_date;
+        let local = |rfc: &str| {
+            cl_core::CalendarDate::from_naive(
+                chrono::DateTime::parse_from_rfc3339(rfc)
+                    .expect("ts")
+                    .with_timezone(&chrono::Local)
+                    .date_naive(),
+            )
+            .expect("day")
+        };
+        for (pg, same) in [
+            (
+                "2026-11-17 00:53:00.123456+00",
+                "2026-11-17T00:53:00.123456Z",
+            ),
+            ("2026-11-17 00:53:00+00", "2026-11-17T00:53:00Z"),
+            ("2026-11-16 18:53:00.5-06", "2026-11-17T00:53:00.5Z"),
+            ("2026-11-17 06:23:00+05:30", "2026-11-17T00:53:00Z"),
+            ("2026-11-17T00:53:00.000Z", "2026-11-17T00:53:00Z"),
+        ] {
+            assert_eq!(local_date(pg), Some(local(same)), "{pg}");
+        }
+    }
+
     #[test]
     fn the_audit_trail_lists_changed_fields_in_plain_words() {
         let v = json!({"data": [{

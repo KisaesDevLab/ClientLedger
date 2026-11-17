@@ -25,17 +25,26 @@ use crate::errors::{ApiError, LocalValidation};
 
 /// The date on this computer's clock of an engine timestamp (P29 QA-8:
 /// an edit made in the evening is not dated tomorrow); a bare
-/// `YYYY-MM-DD` is taken as given.
+/// `YYYY-MM-DD` is taken as given. Reads RFC 3339 (`…T…Z`) and
+/// PostgreSQL's own text (`2026-11-17 00:53:00.123456+00`), which the
+/// engine's raw queries pass through as stored (its database driver keeps
+/// `timestamptz` as text).
 pub(crate) fn local_date(s: &str) -> Option<cl_core::CalendarDate> {
-    let stamp = cl_core::Timestamp::parse_wire(s)
-        .or_else(|_| cl_core::Timestamp::parse_wire(&s.replacen(' ', "T", 1)));
-    match stamp {
-        Ok(t) => {
-            cl_core::CalendarDate::from_naive(t.as_utc().with_timezone(&chrono::Local).date_naive())
+    let utc = cl_core::Timestamp::parse_wire(s)
+        .ok()
+        .map(cl_core::Timestamp::as_utc)
+        .or_else(|| {
+            // `%#z`: an offset with or without minutes (`+00`, `-05:30`).
+            chrono::DateTime::parse_from_str(&s.replacen('T', " ", 1), "%Y-%m-%d %H:%M:%S%.f%#z")
                 .ok()
+                .map(|t| t.with_timezone(&chrono::Utc))
+        });
+    match utc {
+        Some(t) => {
+            cl_core::CalendarDate::from_naive(t.with_timezone(&chrono::Local).date_naive()).ok()
         }
         // Not a timestamp this build reads: its date part, as before.
-        Err(_) => cl_core::CalendarDate::parse_wire(s.get(..10).unwrap_or(s)).ok(),
+        None => cl_core::CalendarDate::parse_wire(s.get(..10).unwrap_or(s)).ok(),
     }
 }
 
