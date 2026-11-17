@@ -16,6 +16,7 @@
 //! `payroll-import-post-v1` and `payroll-import-sensitive-v1`.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use cl_api::payroll::{
     ColumnMap, ColumnSource, DescriptionMapping, ImportMode, PayrollRefusal, PayrollSessionId,
@@ -1220,7 +1221,7 @@ pub fn department_tags_reach_the_posted_lines(h: &Harness) {
     let pv = h
         .run(s.payroll().preview(p.id, &tags))
         .expect("preview with tags");
-    p.token = pv.token.clone();
+    p.token.clone_from(&pv.token);
     for e in &pv.entries {
         for l in &e.lines {
             let want = if l.debit.is_zero() {
@@ -1228,7 +1229,7 @@ pub fn department_tags_reach_the_posted_lines(h: &Harness) {
             } else {
                 tag_of(&l.department)
             };
-            assert_eq!(l.tag, want, "preview {:?}", l);
+            assert_eq!(l.tag, want, "preview {l:?}");
         }
     }
     let entries = posted(
@@ -1360,6 +1361,12 @@ pub fn mode_b_negatives_post_on_the_other_side(h: &Harness) {
     );
     assert_eq!(ledger_payroll_entries(h, &s, "2025-08-22"), 0);
     h.run(s.payroll().discard(bad)).expect("discard");
+    // A post after the discard answers 404 (what the screen reads as
+    // "discarded; nothing was posted").
+    let e = h
+        .run(s.payroll().post(bad, &req, IdempotencyKey::new()))
+        .expect_err("post after discard");
+    assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
 
     // The correction pair.
     let id = upload(payroll_expect::fixture_bytes(&format!("{stem}.csv")));
@@ -1446,8 +1453,8 @@ pub fn every_department_is_listed_and_tagged(h: &Harness) {
     let a = map_accounts(h, &s);
     let d = |x: &str| x.parse::<Decimal>().expect("decimal");
     let dept_of = |i: u32| match i {
-        30.. if i % 3 == 0 => "Bar",
-        _ if i % 2 == 0 => "Kitchen",
+        30.. if i.is_multiple_of(3) => "Bar",
+        _ if i.is_multiple_of(2) => "Kitchen",
         _ => "Front",
     };
     let mut csv = String::from(
@@ -1462,10 +1469,11 @@ pub fn every_department_is_listed_and_tagged(h: &Harness) {
         let take_home = wages - withheld;
         net += take_home;
         *expense.entry(dept_of(i)).or_default() += wages + d("62.00") + d("14.50");
-        csv.push_str(&format!(
-            "Test Worker {i:02},07/11/2025,{},{wages},100.00,30.00,62.00,14.50,62.00,14.50,{take_home}\n",
-            dept_of(i)
-        ));
+        let dept = dept_of(i);
+        let _ = writeln!(
+            csv,
+            "Test Worker {i:02},07/11/2025,{dept},{wages},100.00,30.00,62.00,14.50,62.00,14.50,{take_home}"
+        );
     }
     assert!(
         (1..=25).all(|i| dept_of(i) != "Bar"),
