@@ -303,12 +303,15 @@ impl Rights {
     /// The least rights a role can have when the engine's map could not be
     /// read: an Admin keeps everything; any other role is view-only at most
     /// and sees no sensitive account (fail closed; the engine still
-    /// decides; P29 review M1).
+    /// decides; P29 review M1) — except a `bookkeeper`, who sees them
+    /// (owner 2026-11-17: the engine's default for the role).
     #[must_use]
     pub fn from_role_only(role: &str, is_super_admin: bool) -> Rights {
         if is_admin_role(role, is_super_admin) {
             Rights::all()
-        } else if matches!(role, "readonly" | "bookkeeper" | "accountant") {
+        } else if role == "bookkeeper" {
+            Rights::view_only()
+        } else if matches!(role, "readonly" | "accountant") {
             Rights::view_only().hiding_sensitive()
         } else {
             Rights::none().hiding_sensitive()
@@ -880,6 +883,17 @@ impl BuiltinRole {
         }
     }
 
+    /// The "See sensitive accounts" level the template carries (owner
+    /// 2026-11-17, Q-P29c changed): the Bookkeeper sees them; A/R and A/P
+    /// don't.
+    #[must_use]
+    pub const fn sensitive(self) -> Level {
+        match self {
+            BuiltinRole::Bookkeeper => Level::View,
+            BuiltinRole::Receivables | BuiltinRole::Payables => Level::None,
+        }
+    }
+
     /// The rights a `bookkeeper` on this template has (no overrides).
     #[must_use]
     pub fn rights(self) -> Rights {
@@ -1124,10 +1138,12 @@ mod tests {
     }
 
     /// P29 review M1: when the engine's map can't be read, a non-Admin is
-    /// treated as not seeing sensitive accounts (fail closed).
+    /// treated as not seeing sensitive accounts (fail closed); a Bookkeeper
+    /// sees them (owner 2026-11-17).
     #[test]
     fn role_only_rights_hide_sensitive_for_non_admins() {
-        for role in ["readonly", "bookkeeper", "accountant", "someone"] {
+        assert!(!Rights::from_role_only("bookkeeper", false).hides_sensitive);
+        for role in ["readonly", "accountant", "someone"] {
             assert!(
                 Rights::from_role_only(role, false).hides_sensitive,
                 "{role}"
@@ -1263,6 +1279,10 @@ mod tests {
         assert_eq!(Rights::from_role_only("owner", false), Rights::all());
         assert_eq!(
             Rights::from_role_only("bookkeeper", false),
+            Rights::view_only()
+        );
+        assert_eq!(
+            Rights::from_role_only("readonly", false),
             Rights::view_only().hiding_sensitive()
         );
         assert_eq!(
@@ -1333,9 +1353,14 @@ mod tests {
         assert!(!Rights::from_engine("bookkeeper", true, &m).hides_sensitive);
         m.insert("sensitive_accounts".into(), "view");
         assert!(!Rights::from_engine("bookkeeper", false, &m).hides_sensitive);
-        // The demo's restricted Bookkeeper; an Admin never hides.
-        let bk = BuiltinRole::Bookkeeper.rights().hiding_sensitive();
-        assert!(bk.hides_sensitive);
+        // The demo's restricted viewer (View-only); an Admin never hides.
+        let vo = Rights::view_only().hiding_sensitive();
+        assert!(vo.hides_sensitive);
+        // Owner 2026-11-17: the built-in Bookkeeper sees them; A/R, A/P don't.
+        assert!(!BuiltinRole::Bookkeeper.rights().hides_sensitive);
+        assert_eq!(BuiltinRole::Bookkeeper.sensitive(), Level::View);
+        assert_eq!(BuiltinRole::Receivables.sensitive(), Level::None);
+        assert_eq!(BuiltinRole::Payables.sensitive(), Level::None);
         assert!(!Rights::all().hiding_sensitive().hides_sensitive);
     }
 

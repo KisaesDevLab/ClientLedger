@@ -108,6 +108,9 @@ pub struct EngineKeys {
     pub report_areas: bool,
     /// `sensitive-accounts-v1`: `sensitive_accounts` exists.
     pub sensitive: bool,
+    /// `sensitive-accounts-grant-v1`: a role may carry the right (owner
+    /// 2026-11-17: the built-in Bookkeeper does).
+    pub sensitive_grant: bool,
 }
 
 impl EngineKeys {
@@ -181,7 +184,12 @@ pub fn builtin_by_name(name: &str) -> Option<BuiltinRole> {
 /// The map a built-in template must hold on this engine.
 #[must_use]
 pub fn builtin_wire(b: BuiltinRole, keys: EngineKeys) -> BTreeMap<String, String> {
-    wire_map(&b.levels(), Level::None, keys)
+    let sensitive = if keys.sensitive_grant {
+        b.sensitive()
+    } else {
+        Level::None
+    };
+    wire_map(&b.levels(), sensitive, keys)
 }
 
 /// What a user's role reads as on the Users list.
@@ -251,6 +259,7 @@ mod tests {
     const ALL_KEYS: EngineKeys = EngineKeys {
         report_areas: true,
         sensitive: true,
+        sensitive_grant: true,
     };
 
     #[test]
@@ -264,6 +273,31 @@ mod tests {
 
     /// The engine refuses unknown keys: `item_costs` is never sent, the
     /// areas key only with U-227, the sensitive row only with U-33.
+    /// Owner 2026-11-17: the Bookkeeper template carries
+    /// `sensitive_accounts: view` on an engine with
+    /// `sensitive-accounts-grant-v1`; A/R and A/P carry none; an engine
+    /// without the grant capability gets none for every built-in.
+    #[test]
+    fn the_bookkeeper_template_sees_sensitive_accounts() {
+        let bk = builtin_wire(BuiltinRole::Bookkeeper, ALL_KEYS);
+        assert_eq!(bk[SENSITIVE_KEY], "view");
+        for b in [BuiltinRole::Receivables, BuiltinRole::Payables] {
+            assert_eq!(builtin_wire(b, ALL_KEYS)[SENSITIVE_KEY], "none", "{b:?}");
+        }
+        let older = EngineKeys {
+            sensitive_grant: false,
+            ..ALL_KEYS
+        };
+        assert_eq!(
+            builtin_wire(BuiltinRole::Bookkeeper, older)[SENSITIVE_KEY],
+            "none"
+        );
+        assert!(
+            !builtin_wire(BuiltinRole::Bookkeeper, EngineKeys::default())
+                .contains_key(SENSITIVE_KEY)
+        );
+    }
+
     #[test]
     fn the_wire_map_sends_only_keys_the_engine_knows() {
         let levels = BuiltinRole::Payables.levels();
@@ -309,8 +343,9 @@ mod tests {
         // Round trip of every built-in.
         for b in BuiltinRole::ALL {
             let sent = builtin_wire(*b, ALL_KEYS);
-            let (back, _) = levels_from_wire(&sent);
-            assert_eq!(wire_map(&back, Level::None, ALL_KEYS), sent, "{b:?}");
+            let (back, s) = levels_from_wire(&sent);
+            assert_eq!(s, b.sensitive(), "{b:?}");
+            assert_eq!(wire_map(&back, s, ALL_KEYS), sent, "{b:?}");
         }
     }
 

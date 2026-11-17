@@ -49,6 +49,11 @@ pub const KIND: &str = "company.users";
 pub const REPORT_AREAS: &str = "report-areas-v1";
 /// U-33's capability: the engine has `sensitive_accounts`.
 pub const SENSITIVE_ACCOUNTS: &str = "sensitive-accounts-v1";
+/// The engine lets a role carry "See sensitive accounts" (owner
+/// 2026-11-17: the built-in Bookkeeper does). With it the Bookkeeper
+/// template is put back with the right the next time an Admin opens Users
+/// and Roles (the put-back below; built-ins can't be edited in place).
+pub const SENSITIVE_GRANT: &str = "sensitive-accounts-grant-v1";
 
 /// The window for `kind`, if it is this one.
 #[must_use]
@@ -229,6 +234,7 @@ impl UsersScreen {
         EngineKeys {
             report_areas: self.link.is_demo() || caps.has(REPORT_AREAS),
             sensitive: caps.has(SENSITIVE_ACCOUNTS),
+            sensitive_grant: caps.has(SENSITIVE_GRANT),
         }
     }
 

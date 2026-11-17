@@ -1165,15 +1165,15 @@ impl Shell {
             "dev.demo_rights_ap"
             | "dev.demo_rights_all"
             | "dev.demo_rights_bookkeeper"
-            | "dev.demo_rights_bookkeeper_hidden" => {
+            | "dev.demo_rights_view_only" => {
                 if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo()) {
                     use cl_model::permissions::{BuiltinRole, Rights};
                     link.set_rights(match id.as_str() {
                         "dev.demo_rights_ap" => BuiltinRole::Payables.rights(),
                         "dev.demo_rights_bookkeeper" => BuiltinRole::Bookkeeper.rights(),
-                        "dev.demo_rights_bookkeeper_hidden" => {
-                            BuiltinRole::Bookkeeper.rights().hiding_sensitive()
-                        }
+                        // Owner 2026-11-17: the Bookkeeper sees sensitive
+                        // accounts; View-only (like A/R and A/P) doesn't.
+                        "dev.demo_rights_view_only" => Rights::view_only().hiding_sensitive(),
                         _ => Rights::all(),
                     });
                 }

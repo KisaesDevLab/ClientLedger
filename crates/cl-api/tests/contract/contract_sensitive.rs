@@ -1,5 +1,5 @@
 //! P29 acceptance 3 (U-33, `sensitive-accounts-v1`): a payroll account the
-//! Admin marks sensitive is hidden from a Bookkeeper without the right in
+//! Admin marks sensitive is hidden from a Bookkeeper restricted from it in
 //! the P&L, the register and the drill-down (General Ledger), and the Admin
 //! still sees it. Amounts are exact strings; nothing is added up here
 //! except to compare with what the engine sent.
@@ -15,10 +15,9 @@ use serde_json::{Value, json};
 use crate::common::{account, je2, key, post};
 use crate::support::{Harness, unique};
 
-/// A Bookkeeper who may do everything a Bookkeeper does but has no
-/// "See sensitive accounts" (an override map listing it as none).
-fn as_restricted_bookkeeper(h: &Harness) -> Session {
-    let (user, bk) = h.bookkeeper();
+/// The Bookkeeper built-in's rights (the keys these tests need), with
+/// "See sensitive accounts" at `sensitive`.
+fn bookkeeper_map(sensitive: &str) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     for k in [
         "transactions",
@@ -44,7 +43,17 @@ fn as_restricted_bookkeeper(h: &Harness) -> Session {
     ] {
         map.insert(k.into(), json!("view"));
     }
-    map.insert("sensitive_accounts".into(), json!("none"));
+    map.insert("sensitive_accounts".into(), json!(sensitive));
+    map
+}
+
+/// An explicitly restricted Bookkeeper: everything a Bookkeeper does but
+/// no "See sensitive accounts" (an override listing it as none). Since the
+/// owner's 2026-11-17 decision the built-in Bookkeeper sees them, so the
+/// hidden viewer must be restricted on purpose.
+fn as_restricted_bookkeeper(h: &Harness) -> Session {
+    let (user, bk) = h.bookkeeper();
+    let map = bookkeeper_map("none");
     let r = h
         .run(h.s1.raw(
             Method::Put,
@@ -299,6 +308,70 @@ pub fn doors_match_the_engine(h: &Harness) {
     }
     assert!(sent > 50, "only {sent} operations under the prefixes");
     assert!(wrong.is_empty(), "matcher and engine disagree: {wrong:#?}");
+}
+
+/// Owner 2026-11-17 (`sensitive-accounts-grant-v1`): a bookkeeper on a
+/// "Bookkeeper"-shaped template carrying `sensitive_accounts: view` sees a
+/// marked account; the same template without the key hides it. The member
+/// is left with the restricted overrides, as the tests above expect.
+pub fn builtin_bookkeeper_sees_sensitive_accounts(h: &Harness) {
+    if !h.require_cap(Capabilities::ACCOUNT_SENSITIVE, "U-33")
+        || !h.require_cap("sensitive-accounts-grant-v1", "U-33 follow-up (P29b)")
+    {
+        return;
+    }
+    let owner = &h.s1;
+    let team = owner.team();
+    let wages = h
+        .run(owner.accounts().create(
+            &cl_api::AccountFields {
+                name: unique("Granted Wages"),
+                account_number: None,
+                account_type: AccountType::Expense,
+                detail_type: None,
+                description: None,
+                parent_id: None,
+            },
+            key(),
+        ))
+        .expect("wages")
+        .record;
+    h.run(owner.accounts().set_sensitive(wages.id, true, key()))
+        .expect("owner marks");
+    let _unmark = Unmark { h, id: wages.id };
+    let (user, bk) = h.bookkeeper();
+    let user: cl_core::ids::UserId = user.parse().expect("user id");
+    let to_map = |m: serde_json::Map<String, Value>| -> cl_api::PermissionMap {
+        m.into_iter()
+            .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
+            .collect()
+    };
+    let sees = |sensitive: &str| -> bool {
+        let tpl = h
+            .run(team.create_template(
+                &unique("Contract Bookkeeper"),
+                None,
+                &to_map(bookkeeper_map(sensitive)),
+            ))
+            .unwrap_or_else(|e| panic!("template: {e}"));
+        h.run(team.set_role(user, cl_api::RolePlan::Template(tpl.id)))
+            .unwrap_or_else(|f| panic!("role: {:?} {}", f.step, f.error));
+        h.run(bk.accounts().list_all(&cl_api::AccountFilter::default()))
+            .expect("list")
+            .iter()
+            .any(|a| a.id == wages.id)
+    };
+    assert!(sees("view"), "the Bookkeeper template grants it");
+    assert!(!sees("none"), "a template without it hides it");
+    // Back to the restricted overrides the other tests set up themselves.
+    h.run(team.put_permissions(
+        user,
+        &cl_api::PermissionRow {
+            template: None,
+            overrides: to_map(bookkeeper_map("none")),
+        },
+    ))
+    .expect("restore");
 }
 
 /// Unmarks the account when dropped (also after a failed assert).

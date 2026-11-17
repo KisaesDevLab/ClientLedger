@@ -1,6 +1,6 @@
 # Sensitive accounts (P29, U-33, acceptance 3) against `clientledger --demo`:
 # the Admin marks 6550 Wages sensitive in the Chart of Accounts; a
-# Bookkeeper without "See sensitive accounts" (developer switch) gets the
+# View-only user (no "See sensitive accounts"; developer switch) gets the
 # Profit & Loss without a Wages row and with "Some amounts are hidden for
 # your role", the drill behind an amount with the same notice, and the
 # checking register showing "Hidden account" as the other side of a
@@ -9,7 +9,7 @@
 # open while the role changes closes with a plain message. Marks removed at
 # the end, so the dark run starts the same. Synthetic.
 name: sensitive_accounts
-description: Admin marks Wages sensitive; a Bookkeeper's P&L, drill and register hide it with a notice.
+description: Admin marks Wages sensitive; the Bookkeeper sees it; a View-only user's P&L, drill and register hide it with a notice.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -30,8 +30,18 @@ steps:
   - screenshot: marked
   - command: file.close_window
   - wait: {ms: 200}
-  # --- 2. A Bookkeeper without the right --------------------------------------
-  - command: dev.demo_rights_bookkeeper_hidden
+  # --- 2a. Owner 2026-11-17: the built-in Bookkeeper sees sensitive accounts --
+  - command: dev.demo_rights_bookkeeper
+  - assert_state: {key: is_admin, equals: false}
+  - command: lists.chart_of_accounts
+  - wait: {ms: 300}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: "6550 Wages"}
+  - screenshot: bookkeeper-sees-wages
+  - command: file.close_window
+  - wait: {ms: 200}
+  # --- 2b. A View-only user, without the right --------------------------------
+  - command: dev.demo_rights_view_only
   - assert_state: {key: is_admin, equals: false}
   - command: reports.center
   - wait: {ms: 300}
@@ -74,7 +84,7 @@ steps:
   - screenshot: register
   - command: file.close_window
   - wait: {ms: 200}
-  # The Bookkeeper's chart is closed so the Admin's reads the chart again.
+  # The View-only chart is closed so the Admin's reads the chart again.
   - command: lists.chart_of_accounts
   - wait: {ms: 200}
   - command: file.close_window
@@ -110,7 +120,7 @@ steps:
   - click: {role: button, label_contains: This month}
   - assert_state: {key: screen.loaded, equals: true}
   # The role changes while the register is open; its next read is refused.
-  - command: dev.demo_rights_bookkeeper_hidden
+  - command: dev.demo_rights_view_only
   - click: {role: combo_box, label: Show}
   - click: {role: button, label_contains: Last 90 days}
   - wait: {ms: 400}

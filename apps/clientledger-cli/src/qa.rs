@@ -636,19 +636,23 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
     }
 
     // The payroll account marked sensitive (U-33) by the main Admin, after
-    // its entries, budget line and memorized report exist. Only the
-    // Admins see it; the Bookkeeper, A/R, A/P, View-only and Custom roles
-    // have "See sensitive accounts" at none.
+    // its entries, budget line and memorized report exist. The Admins and
+    // (owner 2026-11-17, sensitive-accounts-grant-v1) the Bookkeeper see
+    // it; A/R, A/P, View-only and Custom have "See sensitive accounts" at
+    // none.
     if caps.has("sensitive-accounts-v1") {
         s.accounts()
             .set_sensitive(payroll, true, key())
             .await
             .map_err(api("payroll sensitive"))?;
         // A note, so credentials.txt says which account it is.
-        notes.push(
-            "QA Payroll - Wages is marked SENSITIVE: only the Admins see it; the Bookkeeper, A/R, A/P, View-only and Custom users don't"
-                .into(),
-        );
+        notes.push(if caps.has("sensitive-accounts-grant-v1") {
+            "QA Payroll - Wages is marked SENSITIVE: the Admins and the Bookkeeper see it; the A/R, A/P, View-only and Custom users don't"
+                .into()
+        } else {
+            "QA Payroll - Wages is marked SENSITIVE: only the Admins see it (this engine can't grant it to the Bookkeeper); the Bookkeeper, A/R, A/P, View-only and Custom users don't"
+                .into()
+        });
     } else {
         notes.push("the engine has no sensitive accounts (sensitive-accounts-v1)".into());
     }
@@ -684,6 +688,7 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
     let keys = EngineKeys {
         report_areas: caps.has("report-areas-v1"),
         sensitive: caps.has("sensitive-accounts-v1"),
+        sensitive_grant: caps.has("sensitive-accounts-grant-v1"),
     };
     let team = s.team();
     let existing = team.templates().await.map_err(api("templates"))?;
@@ -797,20 +802,23 @@ mod tests {
         assert_eq!(parse(&args(&["--help"])), Ok(None));
     }
 
-    /// Only the Admins see the sensitive payroll account: no other QA role
-    /// holds "See sensitive accounts".
+    /// The Admins and (owner 2026-11-17) the Bookkeeper see the sensitive
+    /// payroll account: no other QA role holds "See sensitive accounts".
     #[test]
-    fn no_qa_role_but_admin_sees_sensitive_accounts() {
+    fn only_admins_and_the_bookkeeper_see_sensitive_accounts() {
         let keys = EngineKeys {
             report_areas: true,
             sensitive: true,
+            sensitive_grant: true,
         };
         let key = cl_model::roles::SENSITIVE_KEY;
-        for b in [
-            BuiltinRole::Bookkeeper,
-            BuiltinRole::Receivables,
-            BuiltinRole::Payables,
-        ] {
+        assert_eq!(
+            builtin_wire(BuiltinRole::Bookkeeper, keys)
+                .get(key)
+                .map(String::as_str),
+            Some("view")
+        );
+        for b in [BuiltinRole::Receivables, BuiltinRole::Payables] {
             assert_eq!(
                 builtin_wire(b, keys).get(key).map(String::as_str),
                 Some("none"),

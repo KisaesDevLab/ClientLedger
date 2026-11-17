@@ -1348,6 +1348,10 @@ fn main() -> std::process::ExitCode {
             contract_sensitive::doors_match_the_engine,
         ),
         (
+            "sensitive::builtin_bookkeeper_sees_sensitive_accounts",
+            contract_sensitive::builtin_bookkeeper_sees_sensitive_accounts,
+        ),
+        (
             "auth::temporary_password_must_be_changed",
             contract_auth::temporary_password_must_be_changed,
         ),
