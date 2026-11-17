@@ -68,8 +68,49 @@ pub fn make(
     _open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
-    (kind.as_str() == KIND)
-        .then(|| Box::new(PayrollImportScreen::new(Arc::clone(link), today)) as Box<_>)
+    (kind.as_str() == KIND).then(|| {
+        let mut s = PayrollImportScreen::new(Arc::clone(link), today);
+        s.take_history_request();
+        Box::new(s) as Box<_>
+    })
+}
+
+/// Home's "payroll import not posted yet" link: the window opens (or comes
+/// to the front) on History, showing only the unposted imports.
+static HISTORY_UNPOSTED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+
+/// Asks the Import Payroll window to show History filtered to unposted
+/// imports (taken by the next window made, or the open one's next frame).
+pub fn open_history_unposted() {
+    *HISTORY_UNPOSTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+}
+
+fn take_history_unposted() -> bool {
+    std::mem::take(
+        &mut *HISTORY_UNPOSTED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+}
+
+/// Reads the payroll file the owner chose (on a background thread),
+/// refusing it before anything is sent when it is over the engine's limit.
+fn read_payroll_file(path: &std::path::Path) -> crate::screens::write_check::attach::FileRead {
+    let meta = std::fs::metadata(path).map_err(|_| "payroll.file.open")?;
+    if !meta.is_file() {
+        return Err("payroll.file.open");
+    }
+    if meta.len() > cl_api::payroll::MAX_UPLOAD_BYTES as u64 {
+        return Err("payroll.file.too_large");
+    }
+    let bytes = std::fs::read(path).map_err(|_| "payroll.file.open")?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok((name, bytes))
 }
 
 /// A request in flight or already answered (the demo answers at once).
@@ -183,6 +224,8 @@ pub struct PayrollImportScreen {
     // Choose.
     pub(crate) provider: Provider,
     pick_rx: Option<Receiver<Vec<std::path::PathBuf>>>,
+    /// The chosen file, being read off the egui thread.
+    reading: Option<Receiver<crate::screens::write_check::attach::FileRead>>,
     pub(crate) file: Option<(String, Vec<u8>)>,
     pub(crate) file_error: Option<&'static str>,
     pub(crate) period_text: [String; 3],
@@ -346,6 +389,7 @@ impl PayrollImportScreen {
             visited: BTreeSet::from([Step::Choose]),
             provider: Provider::Gusto,
             pick_rx: None,
+            reading: None,
             file: None,
             file_error: None,
             period_text: Default::default(),
@@ -511,6 +555,15 @@ impl PayrollImportScreen {
         {
             self.take_path(&p);
         }
+        if let Some(r) = crate::screens::write_check::attach::poll_file_read(&mut self.reading) {
+            match r {
+                Ok((name, bytes)) => self.take_file(name, bytes),
+                Err(k) => {
+                    self.file = None;
+                    self.file_error = Some(k);
+                }
+            }
+        }
         if let Some(Ok(v)) = poll(&mut self.chart_job) {
             self.chart = v;
         }
@@ -618,6 +671,7 @@ impl PayrollImportScreen {
 
     fn busy(&self) -> bool {
         self.pick_rx.is_some()
+            || self.reading.is_some()
             || self.upload_job.is_some()
             || self.map_job.is_some()
             || self.desc_job.is_some()
@@ -653,19 +707,12 @@ impl PayrollImportScreen {
         ));
     }
 
+    /// Starts reading the chosen file on a background thread (up to 10 MB
+    /// from a possibly slow disk or share); `poll` takes the bytes.
     pub(crate) fn take_path(&mut self, p: &std::path::Path) {
-        let name = p
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        match std::fs::metadata(p) {
-            Ok(m) if m.len() > cl_api::payroll::MAX_UPLOAD_BYTES as u64 => {
-                self.file_error = Some("payroll.file.too_large");
-            }
-            Ok(_) => match std::fs::read(p) {
-                Ok(bytes) => self.take_file(name, bytes),
-                Err(_) => self.file_error = Some("payroll.file.open"),
-            },
+        self.file_error = None;
+        match crate::screens::write_check::attach::read_in_background(p, read_payroll_file) {
+            Ok(rx) => self.reading = Some(rx),
             Err(_) => self.file_error = Some("payroll.file.open"),
         }
     }
@@ -1362,6 +1409,14 @@ impl PayrollImportScreen {
 
     // ---- History ------------------------------------------------------------
 
+    /// Home's link asked for History filtered to unposted imports.
+    fn take_history_request(&mut self) {
+        if take_history_unposted() && self.allowed() && self.supported() {
+            self.unposted_only = true;
+            self.show_history();
+        }
+    }
+
     pub(crate) fn show_history(&mut self) {
         self.view = View::History;
         self.reversed = None;
@@ -1549,6 +1604,19 @@ impl PayrollImportScreen {
     }
 }
 
+impl Drop for PayrollImportScreen {
+    /// Closing the window (the close prompt answered "Don't save", or the
+    /// app quitting) is Cancel: a draft uploaded and not posted is
+    /// discarded (Q-P30c). The write outlives the window (an orphan write).
+    fn drop(&mut self) {
+        if self.posted.is_none()
+            && let Some(u) = self.upload.take()
+        {
+            self.discard(u.session);
+        }
+    }
+}
+
 impl Screen for PayrollImportScreen {
     fn title(&self) -> String {
         t(&format!("cmd.{KIND}"))
@@ -1568,6 +1636,7 @@ impl Screen for PayrollImportScreen {
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
+        self.take_history_request();
         self.poll();
         if self.busy() {
             ui.ctx()

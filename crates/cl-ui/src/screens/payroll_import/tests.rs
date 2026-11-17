@@ -374,3 +374,117 @@ fn cancel_after_upload_discards_the_draft() {
     s.cancel();
     assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 0);
 }
+
+/// Closing the window with an unposted draft (the prompt's "Don't save",
+/// or quitting) is Cancel: the draft is discarded (Q-P30c).
+#[test]
+fn closing_the_window_discards_an_unposted_draft() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_square");
+    next_to(&mut s, Step::Map);
+    assert!(s.dirty(), "closing asks first");
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
+    drop(s);
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 0);
+}
+
+/// A posted import is not touched when its window closes.
+#[test]
+fn closing_after_posting_keeps_the_import() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_square");
+    next_to(&mut s, Step::Done);
+    assert!(!s.dirty());
+    drop(s);
+    let d = f.link.demo_state().expect("demo");
+    assert_eq!(d.payroll.unposted(), 0);
+    assert_eq!(
+        d.payroll
+            .sessions(None)
+            .sessions
+            .iter()
+            .filter(|x| x.status == SessionStatus::Posted)
+            .count(),
+        1
+    );
+}
+
+/// Home's "payroll import not posted yet" link opens History filtered to
+/// unposted imports, in a new window and in one already open.
+#[test]
+fn home_link_opens_history_on_unposted_imports() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_square");
+    next_to(&mut s, Step::Map);
+    // The draft stays when this window is set aside (not dropped).
+    let draft = s.upload.take();
+    drop(s);
+    assert!(draft.is_some());
+
+    open_history_unposted();
+    let made = make(CommandId::new(KIND), &f.link, None, today()).expect("window");
+    assert_eq!(made.state()["view"], "history");
+
+    // Already open (on the wizard): its next frame switches.
+    let mut open = screen(&f);
+    assert_eq!(open.view, View::Import);
+    open_history_unposted();
+    open.take_history_request();
+    open.poll();
+    assert_eq!(open.view, View::History);
+    assert!(open.unposted_only);
+    let st = open.state();
+    assert_eq!(st["history"]["rows"], 1, "{st}");
+    assert_eq!(st["history"]["unposted"], 1, "{st}");
+    // Asked once: the next window opens on the wizard.
+    assert_eq!(
+        make(CommandId::new(KIND), &f.link, None, today())
+            .expect("window")
+            .state()["view"],
+        "import"
+    );
+}
+
+/// The chosen file is read on a background thread; the step waits (busy)
+/// and then has the file. Over 10 MB is refused before any read.
+#[test]
+fn the_file_is_read_off_the_egui_thread() {
+    let f = fixture();
+    let mut s = screen(&f);
+    let dir = tempfile::tempdir().expect("tmp");
+    let path = dir.path().join("payroll.csv");
+    std::fs::write(
+        &path,
+        crate::company::demo::payroll::fixture_bytes("square").expect("fixture"),
+    )
+    .expect("write");
+    s.take_path(&path);
+    assert!(s.busy(), "reading");
+    for _ in 0..200 {
+        s.poll();
+        if !s.busy() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(s.file.is_some(), "{}", state_text(&s));
+    assert_eq!(s.file_error, None);
+
+    let big = dir.path().join("big.csv");
+    let file = std::fs::File::create(&big).expect("create");
+    file.set_len(cl_api::payroll::MAX_UPLOAD_BYTES as u64 + 1)
+        .expect("size");
+    s.take_path(&big);
+    for _ in 0..200 {
+        s.poll();
+        if !s.busy() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(s.file_error, Some("payroll.file.too_large"));
+    assert!(s.file.is_none());
+}
