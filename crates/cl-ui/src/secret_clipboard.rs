@@ -31,6 +31,7 @@ fn get() -> Option<Instant> {
 
 /// Copies `text` and schedules the clipboard to be cleared.
 pub fn copy(ctx: &Context, text: String) {
+    tracing::info!("secret clipboard: copied");
     ctx.copy_text(text);
     set(Some(Instant::now() + CLEAR_AFTER));
     ctx.request_repaint_after(CLEAR_AFTER);
@@ -39,6 +40,7 @@ pub fn copy(ctx: &Context, text: String) {
 /// The dialog holding the secret closed: clear at the next frame.
 pub fn clear_soon() {
     if get().is_some() {
+        tracing::info!("secret clipboard: clear asked by a closing dialog");
         set(Some(Instant::now()));
     }
 }
@@ -56,6 +58,7 @@ pub fn tick(ctx: &Context) {
     };
     let now = Instant::now();
     if now >= at {
+        tracing::info!("secret clipboard: cleared");
         ctx.copy_text(String::new());
         set(None);
     } else {
