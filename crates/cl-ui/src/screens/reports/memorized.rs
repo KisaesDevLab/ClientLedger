@@ -395,12 +395,16 @@ pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
 /// (every word in the name). Returns how many it lists.
 /// P29: a memorized standard report is listed only when the role includes
 /// its report's area (U-227); Report Builder rows are left to the engine.
+/// A Report Builder row the role can see no part of is not listed either
+/// (P29 QA-6).
 pub(super) fn role_includes(rights: &cl_model::permissions::Rights, r: &DefinitionRow) -> bool {
     r.definition
         .get("reportKey")
         .and_then(serde_json::Value::as_str)
         .and_then(cl_model::reports::find)
         .is_none_or(|spec| rights.allows_report(spec.source))
+        && !(r.definition["kind"] == "builder"
+            && super::builder_run::wholly_denied(&r.definition, rights))
 }
 
 pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usize {

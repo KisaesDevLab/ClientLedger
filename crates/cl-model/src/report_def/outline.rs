@@ -49,6 +49,36 @@ pub fn walk(nodes: &[Node]) -> Vec<Visit<'_>> {
     out
 }
 
+/// The tree's sections: how many, and how many of them the role surely
+/// can't see (it lacks a right their source always needs; P29 QA-3, QA-6).
+#[must_use]
+pub fn sections_denied(nodes: &[Node], rights: &crate::permissions::Rights) -> (usize, usize) {
+    let mut sections = 0;
+    let mut denied = 0;
+    for v in walk(nodes) {
+        if let Node::Section(s) = v.node {
+            sections += 1;
+            if s.source
+                .least_rights()
+                .iter()
+                .any(|r| !rights.can(*r, crate::permissions::Action::Read))
+            {
+                denied += 1;
+            }
+        }
+    }
+    (sections, denied)
+}
+
+/// True when the tree has sections and the role can see none of them: a
+/// starter or memorized report that would show only "Your role can't see
+/// this part" rows is not listed.
+#[must_use]
+pub fn wholly_denied(nodes: &[Node], rights: &crate::permissions::Rights) -> bool {
+    let (sections, denied) = sections_denied(nodes, rights);
+    sections > 0 && denied == sections
+}
+
 /// How many nodes the tree has, at every depth (one rule on both sides).
 #[must_use]
 pub fn count(nodes: &[Node]) -> usize {

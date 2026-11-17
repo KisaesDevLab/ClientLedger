@@ -169,6 +169,23 @@ impl SourceKey {
             SourceKey::Tax => "tax",
         }
     }
+
+    /// The rights the engine needs at least (read) to show a section of
+    /// this source (`RB_SOURCE_INFO[].rights`, U-227); a section's account
+    /// types may add more, so lacking one of these always means "denied".
+    #[must_use]
+    pub const fn least_rights(self) -> &'static [crate::permissions::Resource] {
+        use crate::permissions::Resource as R;
+        match self {
+            SourceKey::Sales | SourceKey::ArOpen => &[R::Reports, R::Invoices],
+            SourceKey::ItemSales => &[R::Reports, R::Invoices, R::Items],
+            SourceKey::Purchases | SourceKey::ApOpen => &[R::Reports, R::Bills],
+            SourceKey::ItemPurchases => &[R::Reports, R::Bills, R::Items],
+            SourceKey::Gl => &[R::Reports, R::FinancialReports],
+            SourceKey::Bank => &[R::Reports, R::Banking],
+            SourceKey::Tax => &[R::Reports, R::SalesTax],
+        }
+    }
 }
 
 /// What a section adds up (`RB_MEASURES`).
