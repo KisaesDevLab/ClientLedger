@@ -1,4 +1,4 @@
-U233 old status: | Open (later) | # UPSTREAM.md — changes to the MyBooks engine
+# UPSTREAM.md — changes to the MyBooks engine
 
 ClientLedger consumes the public engine repo **KisaesDevLab/kisaes-gl-engine** (since A12, 2026-11-08; before that the engine lived inside KisaesDevLab/Vibe-MyBooks, and PR numbers in rows up to U-178 refer to Vibe-MyBooks) as the `engine/` git submodule tracking `main` (Q-02; PolyForm Internal Use 1.0.0 plus the ClientLedger redistribution grant, Q-31). Engine changes are made on `clientledger/<feature>` branches, follow the engine's own conventions and tests, and go to the owner as pull requests on the engine repo; the owner reviews and merges (Q-29). Until merged, the submodule may point at the branch commit. Keep changes generic so MyBooks Online benefits.
 
