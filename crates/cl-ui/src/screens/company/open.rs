@@ -614,18 +614,31 @@ impl OpenCompanyScreen {
                 },
                 Color32::from_rgb(row.accent.0[0], row.accent.0[1], row.accent.0[2]),
             );
-            p.text(
+            // P29 QA-1: both lines end with "…" inside the card (clear of
+            // the Enter chip), never past its border.
+            let room = (rect.width() - 20.0 - if selected { 76.0 } else { 16.0 }).max(40.0);
+            let line = |text: &str, font: egui::FontId, color: Color32| {
+                let mut job =
+                    egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+                ui.painter().layout_job(job)
+            };
+            p.galley(
                 egui::pos2(rect.left() + 20.0, rect.top() + 14.0),
-                egui::Align2::LEFT_TOP,
-                &row.name,
-                egui::FontId::new(15.0, crate::fonts::bold()),
+                line(
+                    &row.name,
+                    egui::FontId::new(15.0, crate::fonts::bold()),
+                    tokens.text_primary,
+                ),
                 tokens.text_primary,
             );
-            p.text(
+            p.galley(
                 egui::pos2(rect.left() + 20.0, rect.top() + 38.0),
-                egui::Align2::LEFT_TOP,
-                &row.meta,
-                egui::FontId::proportional(12.0),
+                line(
+                    &row.meta,
+                    egui::FontId::proportional(12.0),
+                    tokens.text_secondary,
+                ),
                 tokens.text_secondary,
             );
             if selected {

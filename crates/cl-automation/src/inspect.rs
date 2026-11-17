@@ -47,6 +47,10 @@ pub struct Node {
     /// tooltip popup itself is not in the tree).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// A check box's or toggle's state (P29 QA-13); `None` for anything
+    /// that can't be checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
     /// Where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Bounds>,
@@ -504,6 +508,7 @@ pub(crate) mod fixture {
             label: label.map(Into::into),
             value: None,
             description: None,
+            checked: None,
             bounds: b.map(|(x, y, width, height)| Bounds {
                 x,
                 y,

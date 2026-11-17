@@ -48,6 +48,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lock.sign_out_unsaved", "Some windows have unsaved changes. Unlock first, then save or discard them before signing out."),
     ("lock.footer", "ClientLedger locks itself after the idle time you chose in Company \u{203a} My Sign-in."),
     ("lock.msg.missing", "Enter your password."),
+    ("lock.msg.wrong", "That password doesn't match. Try again."),
     ("reset.title", "Reset your password with the recovery key"),
     ("reset.intro", "Enter the email you sign in with and the recovery key you saved when you set up ClientLedger. The key works once; you'll get a new one to save."),
     ("reset.email", "Email"),

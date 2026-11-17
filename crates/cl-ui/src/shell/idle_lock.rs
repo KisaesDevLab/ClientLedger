@@ -169,7 +169,11 @@ impl IdleLock {
                 Some(LockAction::Unlocked)
             }
             Err(e) => {
-                self.message = Some(sign_in_message(&e));
+                // P29 QA-22: the lock screen asks for a password only.
+                self.message = Some(match sign_in_message(&e) {
+                    "login.msg.wrong" => "lock.msg.wrong",
+                    other => other,
+                });
                 None
             }
         }
@@ -232,28 +236,34 @@ impl IdleLock {
             r.request_focus();
         }
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if let Some(key) = self.message {
-            form::inline_warning(ui, tokens, &t(key));
-        }
+        // Own ids, so the message coming and going never renames the
+        // Unlock button for screen readers (P29 QA-22).
+        ui.push_id("lock-message", |ui| {
+            if let Some(key) = self.message {
+                form::inline_warning(ui, tokens, &t(key));
+            }
+        });
         ui.add_space(6.0);
         if self.task.is_some() {
             form::progress_line(ui, tokens, &t("lock.working"));
             return None;
         }
         let mut action = None;
-        ui.horizontal(|ui| {
-            if primary_button(ui, &t("lock.unlock")).clicked() || enter {
-                self.start_unlock(link);
-            }
-            let out = ui.add_enabled(dirty == 0, egui::Button::new(t("lock.sign_out")));
-            let out = if dirty > 0 {
-                out.on_disabled_hover_text(t("lock.sign_out_unsaved"))
-            } else {
-                out
-            };
-            if out.clicked() {
-                action = Some(LockAction::SignOut);
-            }
+        ui.push_id("lock-actions", |ui| {
+            ui.horizontal(|ui| {
+                if primary_button(ui, &t("lock.unlock")).clicked() || enter {
+                    self.start_unlock(link);
+                }
+                let out = ui.add_enabled(dirty == 0, egui::Button::new(t("lock.sign_out")));
+                let out = if dirty > 0 {
+                    out.on_disabled_hover_text(t("lock.sign_out_unsaved"))
+                } else {
+                    out
+                };
+                if out.clicked() {
+                    action = Some(LockAction::SignOut);
+                }
+            })
         });
         ui.add_space(4.0);
         ui.label(
@@ -312,7 +322,13 @@ mod tests {
         lock.start_unlock(&link);
         assert_eq!(lock.poll(), None);
         assert!(lock.locked());
-        assert_eq!(lock.message(), Some("login.msg.wrong"));
+        // P29 QA-22: no "email" on a screen that asks for a password only.
+        assert_eq!(lock.message(), Some("lock.msg.wrong"));
+        assert!(
+            !crate::i18n::t("lock.msg.wrong")
+                .to_lowercase()
+                .contains("email")
+        );
         assert!(lock.password.is_empty(), "wiped after sending");
         let failed = link
             .demo_state()

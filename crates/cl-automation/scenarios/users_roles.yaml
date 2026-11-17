@@ -19,7 +19,7 @@ steps:
   - assert_exists: {role: label, label: "Full access — choose a role", index: 0}
   - screenshot: users
   # Kim is locked: unlock, then a temporary password.
-  - click: {label: Kim Payables}
+  - click: {label_contains: "Kim Payables, "}
   - wait: {ms: 200}
   - assert_state: {key: screen.selected_locked, equals: true}
   - click: {role: button, label: Unlock}

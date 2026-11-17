@@ -348,6 +348,8 @@ fn build(
         label,
         value,
         description,
+        // P29 QA-13: what a screen reader announces for a check box.
+        checked: n.toggled().map(|t| t != accesskit::Toggled::False),
         bounds,
         focused: id == focus,
         enabled: !n.is_disabled(),

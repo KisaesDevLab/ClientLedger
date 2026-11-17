@@ -775,9 +775,10 @@ impl UsersScreen {
         if users.len() <= 1 {
             form::hint(ui, tokens, &t("users.only_you"));
         }
-        egui::ScrollArea::vertical()
+        // P29 QA-15: the page scrolls; the table only sideways when the
+        // window is narrow, so no user hides below a small box.
+        egui::ScrollArea::horizontal()
             .id_salt("users/list")
-            .max_height(240.0)
             .show(ui, |ui| {
                 egui::Grid::new("users/grid")
                     .striped(true)
@@ -802,18 +803,12 @@ impl UsersScreen {
                             } else {
                                 u.display_name.clone()
                             };
-                            if ui.selectable_label(on, name).clicked() {
-                                self.selected = Some(u.id);
-                                self.pick = None;
-                            }
-                            ui.label(&u.email);
-                            ui.label(Self::kind_text(&self.kind_of(u)));
-                            ui.label(t(if u.active {
+                            let role = Self::kind_text(&self.kind_of(u));
+                            let status = t(if u.active {
                                 "users.active"
                             } else {
                                 "users.turned_off"
-                            }));
-                            ui.label(when(u.last_sign_in.as_deref()));
+                            });
                             let mut notes = Vec::new();
                             if u.locked {
                                 notes.push(t("users.locked"));
@@ -821,7 +816,39 @@ impl UsersScreen {
                             if u.must_change {
                                 notes.push(t("users.must_change"));
                             }
-                            ui.label(notes.join(" \u{b7} "));
+                            let notes = notes.join(" \u{b7} ");
+                            // P29 QA-15: the row's button names the whole
+                            // row for screen readers (egui's grid has no
+                            // row nodes).
+                            let row_text = [
+                                name.as_str(),
+                                role.as_str(),
+                                status.as_str(),
+                                notes.as_str(),
+                            ]
+                            .iter()
+                            .filter(|s| !s.is_empty())
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                            let r = ui.selectable_label(on, name.as_str());
+                            r.widget_info(|| {
+                                egui::WidgetInfo::selected(
+                                    egui::Role::Button,
+                                    true,
+                                    on,
+                                    row_text.clone(),
+                                )
+                            });
+                            if r.clicked() {
+                                self.selected = Some(u.id);
+                                self.pick = None;
+                            }
+                            ui.label(&u.email);
+                            ui.label(role);
+                            ui.label(status);
+                            ui.label(when(u.last_sign_in.as_deref()));
+                            ui.label(notes);
                             ui.end_row();
                         }
                     });
