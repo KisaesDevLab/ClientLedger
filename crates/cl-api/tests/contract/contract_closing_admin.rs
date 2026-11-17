@@ -88,7 +88,21 @@ pub fn closed_period_edit_is_in_the_exceptions_report(h: &Harness) {
     let amount = |k: &str| m(row[k].as_str().unwrap_or_else(|| panic!("{k}: {row}")));
     assert_eq!(amount("amountBeforeExact"), m("12.00"), "{row}");
     assert_eq!(amount("amountAfterExact"), m("13.00"), "{row}");
+    // P29b: a numbered check's row carries its check number in
+    // `txnNumber` (ships with `sensitive-accounts-grant-v1`).
+    if h.caps.has(NUM_FIX) {
+        let num = made
+            .record
+            .check_number
+            .expect("a check has a number")
+            .to_string();
+        assert_eq!(row["txnNumber"], num.as_str(), "{row}");
+    }
 }
+
+/// The engine commit that returns a check's number in `txnNumber` (no
+/// capability of its own).
+const NUM_FIX: &str = "sensitive-accounts-grant-v1";
 
 /// A bookkeeper with full company-settings rights cannot set the closing
 /// date or the closing-date password; their other settings still save.
@@ -244,6 +258,20 @@ pub fn closed_period_void_delete_and_batch_are_in_the_exceptions_report(h: &Harn
                 .any(|r| r["action"] == action && r["method"] == "password"),
             "{action} listed with the password: {rows:#?}"
         );
+    }
+    // P29b: a deleted check's number comes from its before-image.
+    if h.caps.has(NUM_FIX) {
+        let num = to_delete
+            .record
+            .check_number
+            .expect("a check has a number")
+            .to_string();
+        let rows = rows_for(&report.body, &to_delete.record.id.to_string());
+        let del = rows
+            .iter()
+            .find(|r| r["action"] == "delete")
+            .expect("delete row");
+        assert_eq!(del["txnNumber"], num.as_str(), "{del}");
     }
 }
 

@@ -37,6 +37,7 @@ fn every_reports_command_opens_the_window() {
         "reports.balance_sheet",
         "reports.ar_aging",
         "reports.trial_balance",
+        "reports.closing_date_exceptions",
     ] {
         let cmd = cl_model::commands::find(kind).expect("command");
         assert!(cmd.opens && cmd.arrives.is_none(), "{kind} is built");

@@ -70,6 +70,9 @@ steps:
   - wait: {ms: 300}
   - assert_state: {key: screen.must_change, equals: true}
   - assert_state: {key: signed_in, equals: false}
+  # The practice company isn't offered until the new password is saved.
+  - assert_not_exists: {role: button, label_contains: "Try the practice company"}
+  - assert_state: {key: screen.practice_pending, equals: false}
   - screenshot: must-change
   - click: {role: password_input, label: New password}
   - type: {text: short}

@@ -7,6 +7,7 @@
 //! Every engine call runs on the `cl-api` queue and is polled each frame
 //! through [`Task`]; the egui thread never blocks.
 
+pub mod builtin_roles;
 pub mod demo;
 // P29: sensitive marks move into the engine on open (U-33).
 pub mod sensitive;

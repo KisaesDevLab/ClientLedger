@@ -46,6 +46,9 @@ steps:
   - key: Space
   - assert_state: {key: screen.panel, equals: merge}
   - assert_exists: {label_contains: "A merge can't be undone"}
+  # Nothing is chosen until the tag to keep is picked (QA-20).
+  - assert_state: {key: screen.merge_target, equals: null}
+  - assert_disabled: {role: button, label: Merge}
   - screenshot: merge
   - key: Escape
   - assert_state: {key: screen.panel, equals: none}

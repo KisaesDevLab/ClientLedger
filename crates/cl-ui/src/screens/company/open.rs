@@ -394,6 +394,12 @@ impl OpenCompanyScreen {
     /// Before sign-in (or while the list is read, or while a window has
     /// unsaved changes) it waits and runs by itself afterwards.
     fn practice(&mut self) {
+        // P29 QA: not while a new password must be chosen; nothing waits
+        // to open after the change either.
+        if self.signin.must_change() {
+            self.practice_pending = false;
+            return;
+        }
         self.practice_pending = true;
         if self.stage != Stage::Ready {
             self.notice = Some(t("open.practice_after_signin"));
@@ -1001,6 +1007,12 @@ impl OpenCompanyScreen {
     /// The Start column before sign-in: Try the practice company opens it
     /// right after signing in (Q-P19ao).
     fn early_start(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        // P29 QA: hidden while a forced password change is pending, and a
+        // practice open asked for earlier is dropped.
+        if self.stage == Stage::SignIn && self.signin.must_change() {
+            self.practice_pending = false;
+            return;
+        }
         ui.add_space(14.0);
         eyebrow(ui, &t("open.start"));
         ui.add_space(6.0);
@@ -1316,6 +1328,34 @@ mod tests {
             .into_iter()
             .any(|e| matches!(e, CompanyEvent::Opened { ref name, .. } if name.contains("sample")));
         assert!(opened, "the practice company opened");
+    }
+
+    /// P29 QA: while a temporary password must be replaced, Try the
+    /// practice company is hidden, File > Open Practice Company does
+    /// nothing, and nothing waits to open after the change.
+    #[test]
+    fn no_practice_company_during_a_forced_password_change() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        link.demo_state().expect("demo").auth.signed_in = None;
+        let mut s = OpenCompanyScreen::new(Arc::clone(&link));
+        s.stage = Stage::SignIn;
+        // Asked for before signing in...
+        assert!(s.command(CommandId::new("file.open_practice")));
+        assert!(s.practice_pending);
+        // ...then a temporary password: the change step shows.
+        assert!(
+            s.signin
+                .test_sign_in("lee@example.com", "TEMP-0000-DEMO-1")
+                .is_none()
+        );
+        assert!(s.signin.must_change());
+        let b = buttons(&mut s, Vec2::new(1440.0, 940.0));
+        assert!(!b.iter().any(|l| l == "Try the practice company"), "{b:?}");
+        assert!(!s.practice_pending, "dropped");
+        assert!(s.command(CommandId::new("file.open_practice")));
+        assert!(!s.practice_pending, "the command waits for nothing");
+        assert_eq!(s.state_json()["must_change"], true);
     }
 
     #[test]

@@ -40,6 +40,13 @@ deny = [
 version = 2
 yanked = "deny"
 unmaintained = "workspace"
+ignore = [
+    # chrono is marked unmaintained (no fixed version, no known vulnerability).
+    # It is used for dates and timestamps across the workspace and by
+    # pdfium-render; replacing it is its own change. Revisit when a
+    # successor is chosen (2026-11-17).
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no safe upgrade; replacement tracked separately" },
+]
 
 [sources]
 unknown-registry = "deny"

@@ -502,6 +502,9 @@ pub const COMMANDS: &[Command] = &[
     built("reports.inventory_value", "Inventory Value", Some(Menu::Reports), 2, None),
     built("reports.inventory_value_detail", "Inventory Value Detail", Some(Menu::Reports), 2, None),
     built("reports.stock_status", "Stock Status", Some(Menu::Reports), 2, None),
+    // P29 fix pass: the closing-date report, findable in Go to (no menu
+    // entry; also on the Reports list and Set Closing Date).
+    built("reports.closing_date_exceptions", "Closing Date Exceptions", None, 3, None),
     // Company
     built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
     // P19: logo, form footers and document numbering (no shortcut)
@@ -710,10 +713,11 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_rights_bookkeeper",
         "Demo Rights: Bookkeeper (developer)",
     ),
-    // P29 (U-33): a Bookkeeper without "See sensitive accounts".
+    // P29 (U-33): a View-only user, who doesn't see sensitive accounts
+    // (owner 2026-11-17: the Bookkeeper now does).
     dev_action(
-        "dev.demo_rights_bookkeeper_hidden",
-        "Demo Rights: Bookkeeper without sensitive accounts (developer)",
+        "dev.demo_rights_view_only",
+        "Demo Rights: View-only (developer)",
     ),
 ];
 
@@ -879,6 +883,7 @@ mod tests {
             "company.audit_trail",
             "company.my_sign_in",
             "company.users",
+            "reports.closing_date_exceptions",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

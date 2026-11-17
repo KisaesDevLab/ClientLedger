@@ -108,6 +108,9 @@ pub struct EngineKeys {
     pub report_areas: bool,
     /// `sensitive-accounts-v1`: `sensitive_accounts` exists.
     pub sensitive: bool,
+    /// `sensitive-accounts-grant-v1`: a role may carry the right (owner
+    /// 2026-11-17: the built-in Bookkeeper does).
+    pub sensitive_grant: bool,
 }
 
 impl EngineKeys {
@@ -181,7 +184,43 @@ pub fn builtin_by_name(name: &str) -> Option<BuiltinRole> {
 /// The map a built-in template must hold on this engine.
 #[must_use]
 pub fn builtin_wire(b: BuiltinRole, keys: EngineKeys) -> BTreeMap<String, String> {
-    wire_map(&b.levels(), Level::None, keys)
+    let sensitive = if keys.sensitive_grant {
+        b.sensitive()
+    } else {
+        Level::None
+    };
+    wire_map(&b.levels(), sensitive, keys)
+}
+
+/// The put-back after an Admin signs in (owner 2026-11-17, Q-P29ac): the
+/// map to send for built-in `b`'s stored template, or None to leave it.
+///
+/// Only on an engine with `sensitive-accounts-grant-v1`, and only when the
+/// stored map is what the built-in table gives apart from the
+/// `sensitive_accounts` key (an absent key reads as `none`, as the engine
+/// resolves it) and that key differs. Any other difference (an older
+/// engine's map, a hand edit) is left for Users and Roles; a custom role
+/// or a copy never has a built-in's name, so it is never passed here.
+#[must_use]
+pub fn sensitive_putback(
+    b: BuiltinRole,
+    stored: &BTreeMap<String, String>,
+    keys: EngineKeys,
+) -> Option<BTreeMap<String, String>> {
+    if !keys.sensitive_grant {
+        return None;
+    }
+    let want = builtin_wire(b, keys);
+    let level = |m: &BTreeMap<String, String>| {
+        m.get(SENSITIVE_KEY)
+            .map_or(Level::None, |s| Level::parse(s).min(Level::View))
+    };
+    let rest = |m: &BTreeMap<String, String>| {
+        let mut m = m.clone();
+        m.remove(SENSITIVE_KEY);
+        m
+    };
+    (level(stored) != level(&want) && rest(stored) == rest(&want)).then_some(want)
 }
 
 /// What a user's role reads as on the Users list.
@@ -251,6 +290,7 @@ mod tests {
     const ALL_KEYS: EngineKeys = EngineKeys {
         report_areas: true,
         sensitive: true,
+        sensitive_grant: true,
     };
 
     #[test]
@@ -264,6 +304,77 @@ mod tests {
 
     /// The engine refuses unknown keys: `item_costs` is never sent, the
     /// areas key only with U-227, the sensitive row only with U-33.
+    /// Owner 2026-11-17: the Bookkeeper template carries
+    /// `sensitive_accounts: view` on an engine with
+    /// `sensitive-accounts-grant-v1`; A/R and A/P carry none; an engine
+    /// without the grant capability gets none for every built-in.
+    #[test]
+    fn the_bookkeeper_template_sees_sensitive_accounts() {
+        let bk = builtin_wire(BuiltinRole::Bookkeeper, ALL_KEYS);
+        assert_eq!(bk[SENSITIVE_KEY], "view");
+        for b in [BuiltinRole::Receivables, BuiltinRole::Payables] {
+            assert_eq!(builtin_wire(b, ALL_KEYS)[SENSITIVE_KEY], "none", "{b:?}");
+        }
+        let older = EngineKeys {
+            sensitive_grant: false,
+            ..ALL_KEYS
+        };
+        assert_eq!(
+            builtin_wire(BuiltinRole::Bookkeeper, older)[SENSITIVE_KEY],
+            "none"
+        );
+        assert!(
+            !builtin_wire(BuiltinRole::Bookkeeper, EngineKeys::default())
+                .contains_key(SENSITIVE_KEY)
+        );
+    }
+
+    /// Q-P29ac: the sign-in put-back touches only an old-shape built-in.
+    #[test]
+    fn the_sign_in_putback_adds_the_key_to_an_old_shape_template_only() {
+        let old_keys = EngineKeys {
+            sensitive_grant: false,
+            ..ALL_KEYS
+        };
+        let want = builtin_wire(BuiltinRole::Bookkeeper, ALL_KEYS);
+        // Old shape (`none`, or no key at all): gets the key.
+        let old = builtin_wire(BuiltinRole::Bookkeeper, old_keys);
+        assert_eq!(
+            sensitive_putback(BuiltinRole::Bookkeeper, &old, ALL_KEYS),
+            Some(want.clone())
+        );
+        let mut absent = old.clone();
+        absent.remove(SENSITIVE_KEY);
+        assert_eq!(
+            sensitive_putback(BuiltinRole::Bookkeeper, &absent, ALL_KEYS),
+            Some(want.clone())
+        );
+        // Already updated: left alone.
+        assert_eq!(
+            sensitive_putback(BuiltinRole::Bookkeeper, &want, ALL_KEYS),
+            None
+        );
+        // Differs elsewhere (a hand edit): left alone.
+        let mut edited = old.clone();
+        edited.insert("bills".into(), "view".into());
+        assert_eq!(
+            sensitive_putback(BuiltinRole::Bookkeeper, &edited, ALL_KEYS),
+            None
+        );
+        // An engine without the grant capability: nothing.
+        assert_eq!(
+            sensitive_putback(BuiltinRole::Bookkeeper, &old, old_keys),
+            None
+        );
+        // A/R and A/P: an absent key already reads as none.
+        for b in [BuiltinRole::Receivables, BuiltinRole::Payables] {
+            let mut m = builtin_wire(b, ALL_KEYS);
+            assert_eq!(sensitive_putback(b, &m, ALL_KEYS), None, "{b:?}");
+            m.remove(SENSITIVE_KEY);
+            assert_eq!(sensitive_putback(b, &m, ALL_KEYS), None, "{b:?}");
+        }
+    }
+
     #[test]
     fn the_wire_map_sends_only_keys_the_engine_knows() {
         let levels = BuiltinRole::Payables.levels();
@@ -309,8 +420,9 @@ mod tests {
         // Round trip of every built-in.
         for b in BuiltinRole::ALL {
             let sent = builtin_wire(*b, ALL_KEYS);
-            let (back, _) = levels_from_wire(&sent);
-            assert_eq!(wire_map(&back, Level::None, ALL_KEYS), sent, "{b:?}");
+            let (back, s) = levels_from_wire(&sent);
+            assert_eq!(s, b.sensitive(), "{b:?}");
+            assert_eq!(wire_map(&back, s, ALL_KEYS), sent, "{b:?}");
         }
     }
 

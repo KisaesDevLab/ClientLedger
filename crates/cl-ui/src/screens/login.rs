@@ -150,6 +150,15 @@ impl SignInPanel {
         self.step == Step::MustChange
     }
 
+    /// Tests elsewhere: signs in with these words (demo link).
+    #[cfg(test)]
+    pub(crate) fn test_sign_in(&mut self, email: &str, pw: &str) -> Option<SignInEvent> {
+        self.email = email.into();
+        self.password = SecretText::from(pw);
+        self.submit();
+        self.poll()
+    }
+
     /// True while a sign-in or a password change runs.
     #[must_use]
     pub fn busy(&self) -> bool {

@@ -137,7 +137,12 @@ fn when_text(ts: Timestamp) -> String {
         .to_string()
 }
 
-fn action_text(a: &str) -> String {
+/// The action as the owner reads it: a phrase for rows that have one
+/// (P29b: "Password changed"), else the engine's verb.
+fn action_text(a: &str, entity: &str) -> String {
+    if let Some(key) = cl_api::resources::reports::adapters::controls::plain_action(a, entity) {
+        return t(key);
+    }
     let key = format!("reports.audit.action.{a}");
     if crate::i18n::has(&key) {
         t(&key)
@@ -246,7 +251,7 @@ fn export_row(r: &AuditRow) -> ExportRow {
     ExportRow {
         when: when_text(r.at),
         user: r.user_name.clone().unwrap_or_default(),
-        action: action_text(&r.action),
+        action: action_text(&r.action, &r.entity_type),
         record: entity_text(&r.entity_type),
         record_id: r.entity_id.clone().unwrap_or_default(),
         source: source_text(r),
@@ -714,11 +719,14 @@ impl AuditTrailScreen {
             let any = t("audit.any");
             let l = ui.add(egui::Label::new(t("audit.action")).selectable(false));
             egui::ComboBox::from_id_salt("audit/action")
-                .selected_text(self.action.map_or_else(|| any.clone(), action_text))
+                .selected_text(
+                    self.action
+                        .map_or_else(|| any.clone(), |a| action_text(a, "")),
+                )
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.action, None, any.clone());
                     for a in ACTIONS {
-                        ui.selectable_value(&mut self.action, Some(a), action_text(a));
+                        ui.selectable_value(&mut self.action, Some(a), action_text(a, ""));
                     }
                 })
                 .response
@@ -807,7 +815,7 @@ impl AuditTrailScreen {
                                 pick = Some(r.id);
                             }
                             ui.label(r.user_name.clone().unwrap_or_default());
-                            ui.label(action_text(&r.action));
+                            ui.label(action_text(&r.action, &r.entity_type));
                             ui.label(entity_text(&r.entity_type));
                             ui.label(source_text(r));
                             ui.end_row();
@@ -1116,6 +1124,47 @@ mod tests {
         s.link
             .set_rights(cl_model::permissions::Rights::view_only());
         assert_eq!(s.state()["can_export"], false);
+    }
+
+    /// P29b: the engine's own-password-change row (`update` /
+    /// `user_password_change`, after `{sessionsRevoked: true}`) reads as
+    /// "Password changed" with who and when, in the list and the export.
+    #[test]
+    fn a_password_change_reads_in_plain_words() {
+        let (_d, s) = screen();
+        let base = s.page.as_ref().expect("page").rows[0].clone();
+        let row = AuditRow {
+            id: 999,
+            action: "update".into(),
+            entity_type: "user_password_change".into(),
+            entity_id: Some("d0000000-0000-4000-8000-0000000000aa".into()),
+            user: base.user,
+            user_name: Some("Lee Bookkeeper".into()),
+            at: base.at,
+            before: None,
+            after: Some(cl_api::AuditImage::from_value(
+                serde_json::json!({"sessionsRevoked": true}),
+            )),
+        };
+        assert_eq!(
+            action_text(&row.action, &row.entity_type),
+            "Password changed"
+        );
+        assert_eq!(entity_text(&row.entity_type), "Sign-in password");
+        let out = export_row(&row);
+        assert_eq!(out.action, "Password changed");
+        assert_eq!(out.user, "Lee Bookkeeper");
+        assert_eq!(out.when, when_text(base.at));
+        assert_eq!(
+            changes(&row, true),
+            vec![(
+                "Signed out everywhere else".to_string(),
+                String::new(),
+                "Yes".to_string()
+            )]
+        );
+        // Other rows keep the engine's verb.
+        assert_eq!(action_text("update", "contact"), "Changed");
     }
 
     #[test]

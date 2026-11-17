@@ -387,7 +387,7 @@ fn merge_moves_history_and_makes_the_duplicate_inactive() {
         .iter()
         .position(|(_, n)| n == "Bear Creek Hauling")
         .expect("target");
-    m.choice = target_pos;
+    m.choice = Some(target_pos);
     let target = m.targets[target_pos].0;
     r.s.confirm_merge();
     r.frames(3);
@@ -407,6 +407,37 @@ fn merge_moves_history_and_makes_the_duplicate_inactive() {
             .find(|c| c.id == source)
             .expect("source");
     assert!(!gone.is_active);
+}
+
+/// Chooses the merge panel's first target, as the user would.
+fn pick_first_target(r: &mut Rig) {
+    let Panel::Merge(m) = &mut r.s.panel else {
+        panic!("merge panel");
+    };
+    m.choice = Some(0);
+}
+
+/// QA-20: the merge opens with nothing chosen, so a stray Merge (or Alt+S)
+/// can't fold the duplicate into an unrelated name; picking enables it.
+#[test]
+fn merge_opens_with_no_target_chosen() {
+    let mut r = Rig::new(Role::Vendor);
+    let source = r.id("Galena Gravel");
+    r.select("Galena Gravel");
+    r.cmd("list.merge");
+    assert_eq!(r.s.state()["panel"], "merge");
+    assert_eq!(r.s.state()["merge_target"], serde_json::Value::Null);
+    r.s.confirm_merge();
+    r.frames(3);
+    assert_eq!(r.s.state()["panel"], "merge", "nothing is merged");
+    assert_eq!(r.s.state()["merging"], false);
+    assert!(r.s.contacts.iter().any(|c| c.id == source && c.is_active));
+    pick_first_target(&mut r);
+    let Panel::Merge(m) = &r.s.panel else {
+        panic!("merge panel");
+    };
+    let first = m.targets[0].1.clone();
+    assert_eq!(r.s.state()["merge_target"], first.as_str());
 }
 
 fn closed(required: bool) -> cl_api::ApiError {
@@ -430,6 +461,7 @@ fn closed_period_merge_asks_for_the_closing_password() {
     r.cmd("list.merge");
     assert_eq!(r.s.state()["panel"], "merge");
     assert_eq!(r.s.state()["merge_closing"]["closing"], "idle");
+    pick_first_target(&mut r);
     r.s.merge_failed(closed(true));
     r.frames(2);
     let st = r.s.state();
@@ -461,6 +493,7 @@ fn closed_period_merge_without_the_capability_explains() {
     let mut r = Rig::new(Role::Vendor);
     r.select("Galena Gravel");
     r.cmd("list.merge");
+    pick_first_target(&mut r);
     r.s.merge_failed(closed(true));
     r.frames(2);
     assert_eq!(r.s.state()["merge_closing"]["closing"], "unavailable");
