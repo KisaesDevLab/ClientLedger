@@ -1101,6 +1101,18 @@ fn main() -> std::process::ExitCode {
             contract_payroll::closed_period_needs_the_password,
         ),
         (
+            "payroll::department_tags_reach_the_posted_lines",
+            contract_payroll::department_tags_reach_the_posted_lines,
+        ),
+        (
+            "payroll::mode_b_negatives_post_on_the_other_side",
+            contract_payroll::mode_b_negatives_post_on_the_other_side,
+        ),
+        (
+            "payroll::every_department_is_listed_and_tagged",
+            contract_payroll::every_department_is_listed_and_tagged,
+        ),
+        (
             "payroll::restricted_viewer_sees_no_payroll",
             contract_payroll::restricted_viewer_sees_no_payroll,
         ),

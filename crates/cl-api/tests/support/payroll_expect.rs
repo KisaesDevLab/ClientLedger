@@ -350,7 +350,9 @@ pub fn spec(stem: &str) -> Spec {
             description: "GL Account Description",
             amounts: ModeBAmounts::DebitCredit("Debit Amount", "Credit Amount"),
         },
-        "paychex_flex_gls" => Spec::B {
+        // Synthetic Mode B correction pair (P30 review S5); no golden: the
+        // contract test compares the engine to this expectation directly.
+        "paychex_flex_gls" | "paychex_correction" => Spec::B {
             date: "Check Date",
             description: "Description",
             amounts: ModeBAmounts::DebitCredit("Debit", "Credit"),
@@ -545,20 +547,28 @@ fn expect_b(
         }
         let (side, amount) = match amounts {
             ModeBAmounts::DebitCredit(d, c) => {
+                // A negative debit is a credit and a negative credit a debit
+                // (a correction pair; P30 review S5).
                 let (d, c) = (money(&r[col(header, d)]), money(&r[col(header, c)]));
                 if d > Decimal::ZERO {
                     (Side::Debit, d)
+                } else if d < Decimal::ZERO {
+                    (Side::Credit, -d)
+                } else if c < Decimal::ZERO {
+                    (Side::Debit, -c)
                 } else {
                     (Side::Credit, c)
                 }
             }
             ModeBAmounts::Category(a, c) => {
-                let amount = money(&r[col(header, a)]).abs();
+                // The category gives the side; a negative amount is the
+                // other side (S5).
+                let amount = money(&r[col(header, a)]);
                 let cat = r[col(header, c)].trim().to_ascii_lowercase();
-                if cat.starts_with("expense") || cat.starts_with("cost") {
-                    (Side::Debit, amount)
-                } else {
-                    (Side::Credit, amount)
+                let debit = cat.starts_with("expense") || cat.starts_with("cost");
+                match (debit, amount < Decimal::ZERO) {
+                    (true, false) | (false, true) => (Side::Debit, amount.abs()),
+                    _ => (Side::Credit, amount.abs()),
                 }
             }
         };

@@ -135,6 +135,31 @@ fn bank_file_withdrawals_equal_the_expected_net_pay() {
     );
 }
 
+/// S5: the Mode B correction pair reads as written by hand — the negative
+/// debit is a credit, the negative credit a debit — and still balances.
+#[test]
+fn a_mode_b_correction_pair_swaps_sides() {
+    let want = expect("paychex_correction", "2025-08-22");
+    assert_eq!(want.len(), 1);
+    let e = &want[0];
+    let d = |s: &str| s.parse::<Decimal>().expect("decimal");
+    let line = |desc: &str| {
+        let l = e
+            .lines
+            .iter()
+            .find(|l| l.line_type == desc)
+            .unwrap_or_else(|| panic!("{desc}"));
+        (l.side, l.amount)
+    };
+    assert_eq!(e.lines.len(), 8, "every row, the correction pair included");
+    assert_eq!(line("Wage Correction"), (Side::Credit, d("50.05")));
+    assert_eq!(line("Fed W/H Correction"), (Side::Debit, d("50.05")));
+    assert_eq!(line("Gross Wages"), (Side::Debit, d("2500.15")));
+    assert_eq!(line("Net Check"), (Side::Credit, d("2095.12")));
+    assert_eq!(e.total_debits, d("2705.21"));
+    assert_eq!(e.total_credits, d("2705.21"));
+}
+
 #[test]
 fn no_worker_name_reaches_a_golden() {
     let dir = payroll_expect::fixtures_dir().join("expected");

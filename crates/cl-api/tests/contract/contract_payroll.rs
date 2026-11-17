@@ -24,9 +24,9 @@ use cl_api::payroll::{
 use cl_api::{
     AccountType, ApiError, AuditAction, AuditEntity, BankFileFormat, BankImportRequest,
     BankImportRow, Capabilities, ClosedPeriodAuthorization, IdempotencyKey, Method, NewCompany,
-    Session, TxnStatus,
+    Session, TagFields, TxnStatus,
 };
-use cl_core::ids::{AccountId, TransactionId};
+use cl_core::ids::{AccountId, TagId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -1159,5 +1159,382 @@ pub fn restricted_viewer_sees_no_payroll(h: &Harness) {
     assert!(
         matches!(e, ApiError::Forbidden { .. } | ApiError::Sensitive { .. }),
         "{e:?}"
+    );
+}
+
+/// A tag in the open company.
+fn new_tag(h: &Harness, s: &Session, name: &str) -> TagId {
+    h.run(s.tags().create(
+        &TagFields {
+            name: unique(name),
+            color: None,
+            group_id: None,
+            description: None,
+            tag_number: None,
+        },
+        key(),
+    ))
+    .expect("tag")
+    .record
+    .id
+}
+
+/// Posted lines summed by (account, side, tag).
+type Tagged = BTreeMap<(AccountId, Side, Option<TagId>), Decimal>;
+
+fn posted_by_tag(h: &Harness, s: &Session, id: TransactionId) -> (String, Tagged) {
+    let t = h.run(s.transactions().get(id)).expect("entry").record;
+    let mut got = Tagged::new();
+    for l in &t.lines {
+        let (side, amt) = if l.debit.is_zero() {
+            (Side::Credit, l.credit)
+        } else {
+            (Side::Debit, l.debit)
+        };
+        *got.entry((l.account_id, side, l.tag_id)).or_default() += amt.as_decimal();
+    }
+    (t.txn_date.to_wire(), got)
+}
+
+/// Review S6: Gusto's departments mapped to two tags. Every split expense
+/// line carries its department's tag (the blank department none), every
+/// liability is untagged, and net pay is exactly one untagged line per
+/// pay date — in the preview and in the posted entries.
+pub fn department_tags_reach_the_posted_lines(h: &Harness) {
+    if !review_caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Payroll department tags");
+    let a = map_accounts(h, &s);
+    let kitchen = new_tag(h, &s, "Kitchen");
+    let front = new_tag(h, &s, "Front");
+    let tags: BTreeMap<String, Option<TagId>> = [
+        ("Kitchen".to_string(), Some(kitchen)),
+        ("Front".to_string(), Some(front)),
+    ]
+    .into();
+    let mut p = prepare(h, &s, "gusto", a);
+    p.departments = tags.clone();
+    let tag_of = |d: &Option<String>| d.as_ref().and_then(|d| tags.get(d).copied().flatten());
+    // The preview stamps the same tags.
+    let pv = h
+        .run(s.payroll().preview(p.id, &tags))
+        .expect("preview with tags");
+    p.token = pv.token.clone();
+    for e in &pv.entries {
+        for l in &e.lines {
+            let want = if l.debit.is_zero() {
+                None
+            } else {
+                tag_of(&l.department)
+            };
+            assert_eq!(l.tag, want, "preview {:?}", l);
+        }
+    }
+    let entries = posted(
+        h.run(s.payroll().post(p.id, &p.request(), IdempotencyKey::new()))
+            .expect("post"),
+        "gusto tagged",
+    );
+    assert_eq!(entries.len(), p.want.len());
+    let mut split_lines = 0;
+    for id in &entries {
+        let (date, got) = posted_by_tag(h, &s, *id);
+        let w = p
+            .want
+            .iter()
+            .find(|w| w.date == date)
+            .expect("expected date");
+        let mut exp = Tagged::new();
+        for l in &w.lines {
+            let tag = if l.side == Side::Debit {
+                tag_of(&l.department)
+            } else {
+                None
+            };
+            split_lines += usize::from(tag.is_some());
+            *exp.entry((a.of(&l.line_type, l.side), l.side, tag))
+                .or_default() += l.amount;
+        }
+        assert_eq!(got, exp, "{date}: lines by account, side and tag");
+        let t = h.run(s.transactions().get(*id)).expect("entry").record;
+        let net: Vec<_> = t.lines.iter().filter(|l| l.account_id == a.bank).collect();
+        assert_eq!(net.len(), 1, "{date}: one net-pay line");
+        assert_eq!(net[0].tag_id, None, "{date}: net pay is untagged");
+        assert_eq!(
+            Some(net[0].credit.as_decimal()),
+            w.net_pay(),
+            "{date}: net pay"
+        );
+    }
+    assert!(split_lines >= 2, "both tags were used");
+}
+
+/// Review S5: a Mode B file with a correction pair (Debit -50.05, Credit
+/// -50.05) posts each row on the other side, equal line by line to the
+/// independent expectation; the same file with an undated entry row is
+/// refused with `PAYROLL_DATE_INVALID` naming that row and posts nothing.
+pub fn mode_b_negatives_post_on_the_other_side(h: &Harness) {
+    if !review_caps(h) {
+        return;
+    }
+    let stem = "paychex_correction";
+    let s = fresh_company(h, "Payroll Mode B correction");
+    let want = payroll_expect::expect(stem, "2025-08-22");
+    assert_eq!(want.len(), 1);
+    // One account per description, so posted lines compare one to one.
+    let mut acct: BTreeMap<String, AccountId> = BTreeMap::new();
+    for l in &want[0].lines {
+        let (t, detail) = if l.line_type.contains("Net") {
+            (AccountType::Asset, Some("bank"))
+        } else if l.line_type.contains("Wage") || l.line_type == "OASDI/ER" {
+            (AccountType::Expense, None)
+        } else {
+            (AccountType::Liability, None)
+        };
+        acct.insert(
+            l.line_type.clone(),
+            account(h, &s, t, detail, &format!("Payroll {}", l.line_type)),
+        );
+    }
+    let upload = |bytes: Vec<u8>| {
+        let up = h
+            .run(s.payroll().upload(&UploadRequest {
+                mode: ImportMode::PrebuiltJe,
+                bytes,
+                file_name: format!("{stem}.csv"),
+                period_start: day("2025-08-09"),
+                period_end: day("2025-08-22"),
+                check_date: day("2025-08-22"),
+            }))
+            .expect("upload");
+        let descs: Vec<DescriptionMapping> = h
+            .run(s.payroll().description_map(up.session))
+            .expect("descriptions")
+            .into_iter()
+            .map(|d| DescriptionMapping {
+                account: acct.get(&d.description).copied(),
+                ..d
+            })
+            .collect();
+        assert_eq!(descs.len(), acct.len(), "every description is listed");
+        h.run(
+            s.payroll()
+                .save_description_map(up.session, "paychex_flex_gls", &descs),
+        )
+        .expect("description map");
+        up.session
+    };
+
+    // The undated row first: nothing may post from it.
+    let mut undated = payroll_expect::fixture_bytes(&format!("{stem}.csv"));
+    undated.extend_from_slice(b",2120,Fed W/H,0.00,10.00\n");
+    let bad = upload(undated);
+    let v = h.run(s.payroll().validate(bad)).expect("validate");
+    assert!(!v.can_continue(), "{v:?}");
+    assert!(
+        v.messages
+            .iter()
+            .any(|m| m.code == "DATE_INVALID" && m.row_number == Some(9) && m.is_error),
+        "{v:?}"
+    );
+    let e = h
+        .run(s.payroll().preview(bad, &BTreeMap::new()))
+        .expect_err("undated preview");
+    assert_eq!(
+        payroll_refusal(&e),
+        Some(PayrollRefusal::DateInvalid { rows: vec![9] }),
+        "{e:?}"
+    );
+    let req = PostRequest {
+        force_post: true,
+        ..PostRequest::default()
+    };
+    let e = h
+        .run(s.payroll().post(bad, &req, IdempotencyKey::new()))
+        .expect_err("undated post");
+    assert_eq!(
+        payroll_refusal(&e),
+        Some(PayrollRefusal::DateInvalid { rows: vec![9] }),
+        "{e:?}"
+    );
+    assert_eq!(ledger_payroll_entries(h, &s, "2025-08-22"), 0);
+    h.run(s.payroll().discard(bad)).expect("discard");
+
+    // The correction pair.
+    let id = upload(payroll_expect::fixture_bytes(&format!("{stem}.csv")));
+    let v = h.run(s.payroll().validate(id)).expect("validate");
+    assert!(v.can_continue(), "{v:?}");
+    let pv = h
+        .run(s.payroll().preview(id, &BTreeMap::new()))
+        .expect("preview");
+    assert_eq!(pv.entries.len(), 1);
+    let line_of = |side: Side, amt: Decimal| (side, amt);
+    let mut got: Vec<(String, Side, Decimal)> = pv.entries[0]
+        .lines
+        .iter()
+        .map(|l| {
+            let (side, amt) = if l.debit.is_zero() {
+                line_of(Side::Credit, l.credit.as_decimal())
+            } else {
+                line_of(Side::Debit, l.debit.as_decimal())
+            };
+            (l.line_type.clone(), side, amt)
+        })
+        .collect();
+    let mut exp: Vec<(String, Side, Decimal)> = want[0]
+        .lines
+        .iter()
+        .map(|l| (l.line_type.clone(), l.side, l.amount))
+        .collect();
+    got.sort();
+    exp.sort();
+    assert_eq!(got, exp, "preview line by line");
+    let req = PostRequest {
+        preview_token: pv.token.clone(),
+        ..PostRequest::default()
+    };
+    let entries = posted(
+        h.run(s.payroll().post(id, &req, IdempotencyKey::new()))
+            .expect("post"),
+        stem,
+    );
+    assert_eq!(entries.len(), 1);
+    let t = h
+        .run(s.transactions().get(entries[0]))
+        .expect("entry")
+        .record;
+    assert_eq!(t.txn_date.to_wire(), "2025-08-22");
+    let mut got: Vec<(AccountId, Side, Decimal)> = t
+        .lines
+        .iter()
+        .map(|l| {
+            if l.debit.is_zero() {
+                (l.account_id, Side::Credit, l.credit.as_decimal())
+            } else {
+                (l.account_id, Side::Debit, l.debit.as_decimal())
+            }
+        })
+        .collect();
+    let mut exp: Vec<(AccountId, Side, Decimal)> = want[0]
+        .lines
+        .iter()
+        .map(|l| (acct[&l.line_type], l.side, l.amount))
+        .collect();
+    got.sort();
+    exp.sort();
+    assert_eq!(got, exp, "posted line by line");
+    let (dr, cr) = t
+        .lines
+        .iter()
+        .fold((Decimal::ZERO, Decimal::ZERO), |(d, c), l| {
+            (d + l.debit.as_decimal(), c + l.credit.as_decimal())
+        });
+    assert_eq!(dr, want[0].total_debits);
+    assert_eq!(cr, want[0].total_credits);
+}
+
+/// Review S3: a 60-row employee file whose third department first appears
+/// at row 30 (past the 25 sample rows). Validate lists all three, and the
+/// post stamps each department's tag on its expense lines with the
+/// amounts computed here.
+pub fn every_department_is_listed_and_tagged(h: &Harness) {
+    if !review_caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Payroll sixty rows");
+    let a = map_accounts(h, &s);
+    let d = |x: &str| x.parse::<Decimal>().expect("decimal");
+    let dept_of = |i: u32| match i {
+        30.. if i % 3 == 0 => "Bar",
+        _ if i % 2 == 0 => "Kitchen",
+        _ => "Front",
+    };
+    let mut csv = String::from(
+        "Worker,Paid On,Dept,Wages,Fed WH,State WH,SS EE,Medicare EE,SS ER,Medicare ER,Take Home\n",
+    );
+    // Expected expense per department: wages plus the employer taxes.
+    let mut expense: BTreeMap<&str, Decimal> = BTreeMap::new();
+    let mut net = Decimal::ZERO;
+    let withheld = d("100.00") + d("30.00") + d("62.00") + d("14.50");
+    for i in 1..=60u32 {
+        let wages = d("1000.00") + Decimal::new(i64::from(i), 2);
+        let take_home = wages - withheld;
+        net += take_home;
+        *expense.entry(dept_of(i)).or_default() += wages + d("62.00") + d("14.50");
+        csv.push_str(&format!(
+            "Test Worker {i:02},07/11/2025,{},{wages},100.00,30.00,62.00,14.50,62.00,14.50,{take_home}\n",
+            dept_of(i)
+        ));
+    }
+    assert!(
+        (1..=25).all(|i| dept_of(i) != "Bar"),
+        "Bar is past the sample rows"
+    );
+    let up = h
+        .run(s.payroll().upload(&UploadRequest {
+            mode: ImportMode::EmployeeLevel,
+            bytes: csv.into_bytes(),
+            file_name: "sixty.csv".into(),
+            period_start: day("2025-06-28"),
+            period_end: day("2025-07-11"),
+            check_date: day("2025-07-11"),
+        }))
+        .expect("upload");
+    let mut map = column_map("generic_period1").expect("map");
+    map.mappings.insert(
+        "department".into(),
+        ColumnSource {
+            source: "Dept".into(),
+            format: None,
+        },
+    );
+    h.run(s.payroll().apply_mapping(up.session, &map))
+        .expect("mapping");
+    let v = h.run(s.payroll().validate(up.session)).expect("validate");
+    assert!(v.can_continue(), "{v:?}");
+    assert_eq!(v.total_rows, 60);
+    assert_eq!(
+        v.departments.as_deref(),
+        Some(&["Bar".to_string(), "Front".into(), "Kitchen".into()][..]),
+        "every department, sorted"
+    );
+    assert!(!v.departments_truncated);
+    let tags: BTreeMap<String, Option<TagId>> = ["Bar", "Front", "Kitchen"]
+        .into_iter()
+        .map(|n| (n.to_string(), Some(new_tag(h, &s, n))))
+        .collect();
+    let pv = h
+        .run(s.payroll().preview(up.session, &tags))
+        .expect("preview");
+    let req = PostRequest {
+        preview_token: pv.token.clone(),
+        department_tags: tags.clone(),
+        ..PostRequest::default()
+    };
+    let entries = posted(
+        h.run(s.payroll().post(up.session, &req, IdempotencyKey::new()))
+            .expect("post"),
+        "sixty rows",
+    );
+    assert_eq!(entries.len(), 1, "one pay date");
+    let (_, got) = posted_by_tag(h, &s, entries[0]);
+    for (dept, amount) in &expense {
+        let tag = tags[*dept];
+        assert_eq!(
+            got.get(&(a.wages, Side::Debit, tag)),
+            Some(amount),
+            "{dept}: its tag and amount"
+        );
+    }
+    assert!(
+        !got.keys()
+            .any(|(acct, side, tag)| *acct == a.wages && *side == Side::Debit && tag.is_none()),
+        "no untagged expense: every row has a department"
+    );
+    assert_eq!(
+        got.get(&(a.bank, Side::Credit, None)),
+        Some(&net),
+        "net pay: one untagged line"
     );
 }
