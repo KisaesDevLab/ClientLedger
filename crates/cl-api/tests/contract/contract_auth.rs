@@ -112,21 +112,11 @@ pub fn temporary_password_must_be_changed(h: &Harness) {
             0,
         ))
         .expect("audit log");
-    let Some(row) = rows
+    let row = rows
         .rows
         .iter()
         .find(|r| r.entity_id.as_deref() == Some(id.as_str()))
-    else {
-        // Engine fault found 2026-11-17: `changePassword` writes the row
-        // to `users.tenant_id`, and on the desktop every user is homed in
-        // the workspace tenant, whose audit log `/audit-log` refuses (409
-        // WORKSPACE_TENANT). No company's Audit Trail can show it.
-        h.pending(
-            "P29b password-change audit",
-            "the engine writes user_password_change to the workspace tenant, not the company",
-        );
-        return;
-    };
+        .expect("the password change is in the company audit log");
     assert_eq!(row.entity_type, "user_password_change");
     assert_eq!(
         row.user.map(|u| u.to_string()).as_deref(),
