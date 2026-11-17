@@ -436,6 +436,26 @@ async fn refusals_are_read_from_codes_and_details() {
         None
     );
 }
+
+#[tokio::test]
+async fn an_undated_row_is_named_by_row_number_only() {
+    let e = refusal(
+        422,
+        "PAYROLL_DATE_INVALID",
+        r#"{"rows":[{"rowNumber":7,"code":"DATE_INVALID"},{"rowNumber":3,"code":"DATE_INVALID"},{"rowNumber":7,"code":"DATE_INVALID"}]}"#,
+    )
+    .await;
+    assert_eq!(
+        payroll_refusal(&e),
+        Some(PayrollRefusal::DateInvalid { rows: vec![3, 7] })
+    );
+    // A body without rows still classifies (the screen says it generally).
+    let bare = refusal(422, "PAYROLL_DATE_INVALID", "{}").await;
+    assert_eq!(
+        payroll_refusal(&bare),
+        Some(PayrollRefusal::DateInvalid { rows: vec![] })
+    );
+}
 #[tokio::test]
 async fn upload_sends_the_period_and_a_neutral_file_name() {
     let server = MockServer::start().await;

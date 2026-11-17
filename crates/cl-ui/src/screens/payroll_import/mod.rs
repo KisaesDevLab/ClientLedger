@@ -158,6 +158,9 @@ pub(crate) enum Trouble {
     Unsupported,
     EngineDown,
     FileUnreadable,
+    /// 404 on post or Check status: the import was discarded (another
+    /// window, History or Home); nothing was posted.
+    Discarded,
     Other,
 }
 
@@ -192,6 +195,7 @@ impl Trouble {
                 PayrollRefusal::Unmapped { .. } => "unmapped",
                 PayrollRefusal::AmountInvalid => "amounts",
                 PayrollRefusal::DiscardUnsupported => "other",
+                PayrollRefusal::DateInvalid { .. } => "date_invalid",
             },
             Trouble::Unknown => "unknown",
             Trouble::PasswordWrong => "password_wrong",
@@ -200,6 +204,7 @@ impl Trouble {
             Trouble::Unsupported => "unsupported",
             Trouble::EngineDown => "engine_down",
             Trouble::FileUnreadable => "file_unreadable",
+            Trouble::Discarded => "discarded",
             Trouble::Other => "other",
         }
     }
@@ -690,6 +695,8 @@ impl PayrollImportScreen {
                     self.status_answer = Some(false);
                     self.clear_trouble();
                 }
+                // Discarded meanwhile: the lost post can't land either.
+                Err(ApiError::NotFound { .. }) => self.import_gone(),
                 Err(e) => self.trouble = Some(Trouble::of(&e)),
             }
         }
@@ -1536,8 +1543,22 @@ impl PayrollImportScreen {
         match r {
             Ok(PostOutcome::Posted { entries, .. }) => self.finish(entries),
             Ok(PostOutcome::NeedsConfirmation { overlaps }) => self.overlaps = Some(overlaps),
+            // payroll-import-review-v1: a discard that won the race with
+            // this post answers the waiting post 404; nothing was posted.
+            Err(ApiError::NotFound { .. }) => self.import_gone(),
             Err(e) => self.refused(&e),
         }
+    }
+
+    /// The import no longer exists (discarded elsewhere): nothing was
+    /// posted. This window lets go of it without a DELETE and starts over
+    /// at the file step.
+    fn import_gone(&mut self) {
+        self.post_unsettled = false;
+        self.upload = None;
+        self.forget_upload();
+        self.go(Step::Choose);
+        self.trouble = Some(Trouble::Discarded);
     }
 
     fn refused(&mut self, e: &ApiError) {

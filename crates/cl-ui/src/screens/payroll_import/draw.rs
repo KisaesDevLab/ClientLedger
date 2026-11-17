@@ -251,6 +251,7 @@ impl PayrollImportScreen {
                     )],
                 ),
                 PayrollRefusal::AmountInvalid => t("payroll.refused.amounts"),
+                PayrollRefusal::DateInvalid { rows } => undated_rows_text(rows),
                 PayrollRefusal::DiscardUnsupported => t("payroll.refused.other"),
             },
             Trouble::Unknown => t("payroll.unknown"),
@@ -260,6 +261,7 @@ impl PayrollImportScreen {
             Trouble::Unsupported => t("payroll.unsupported"),
             Trouble::EngineDown => t("payroll.engine_down"),
             Trouble::FileUnreadable => t("payroll.file.unreadable"),
+            Trouble::Discarded => t("payroll.refused.discarded"),
             Trouble::Other => t("payroll.refused.other"),
         };
         warn(ui, tokens, &text);
@@ -1071,4 +1073,29 @@ fn column_list_height(ui: &Ui, columns: usize) -> f32 {
 /// date reads too).
 pub(crate) fn posted_day(s: &str) -> Option<cl_core::CalendarDate> {
     cl_core::CalendarDate::parse_wire(s.get(..10)?).ok()
+}
+
+/// Rows shown by number in the undated-rows message before "and N more".
+const UNDATED_ROWS_SHOWN: usize = 10;
+
+/// 422 `PAYROLL_DATE_INVALID` in plain words: the file's row numbers only
+/// (never cell text).
+pub(crate) fn undated_rows_text(rows: &[u64]) -> String {
+    if rows.is_empty() {
+        return t("payroll.refused.dates");
+    }
+    let shown = rows
+        .iter()
+        .take(UNDATED_ROWS_SHOWN)
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let list = match rows.len().checked_sub(UNDATED_ROWS_SHOWN) {
+        Some(more) if more > 0 => t_with(
+            "payroll.refused.dates_more",
+            &[("rows", &shown), ("n", &more.to_string())],
+        ),
+        _ => shown,
+    };
+    t_with("payroll.refused.dates_rows", &[("rows", &list)])
 }

@@ -875,6 +875,13 @@ pub enum PayrollRefusal {
     /// 422 `PAYROLL_AMOUNT_INVALID`: a ready-made file's amount isn't whole
     /// cents (rows named in details; never cell text).
     AmountInvalid,
+    /// 422 `PAYROLL_DATE_INVALID`: a ready-made file has entry rows with no
+    /// date the books can read (`payroll-import-review-v1`). Only the row
+    /// numbers are kept; never cell text.
+    DateInvalid {
+        /// The file's row numbers, in order, without repeats.
+        rows: Vec<u64>,
+    },
 }
 
 /// Classifies `e` (`None` for anything else: closed periods, passwords,
@@ -920,6 +927,20 @@ pub fn payroll_refusal(e: &ApiError) -> Option<PayrollRefusal> {
         },
         "PAYROLL_DISCARD_UNSUPPORTED" => PayrollRefusal::DiscardUnsupported,
         "PAYROLL_AMOUNT_INVALID" => PayrollRefusal::AmountInvalid,
+        "PAYROLL_DATE_INVALID" => {
+            let mut rows: Vec<u64> = details
+                .and_then(|d| d.raw("rows"))
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|r| r.get("rowNumber").and_then(Value::as_u64))
+                        .collect()
+                })
+                .unwrap_or_default();
+            rows.sort_unstable();
+            rows.dedup();
+            PayrollRefusal::DateInvalid { rows }
+        }
         _ => return None,
     })
 }

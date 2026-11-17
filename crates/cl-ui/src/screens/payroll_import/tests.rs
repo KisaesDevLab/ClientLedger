@@ -641,6 +641,81 @@ fn a_definite_answer_lets_cancel_discard() {
     assert_eq!(discards(&f), 1);
 }
 
+/// payroll-import-review-v1: a discard that wins the race answers the
+/// waiting post 404. The window says nothing was posted, lets go of the
+/// draft without a DELETE and starts at the file step; Check status after
+/// a lost answer reads a 404 the same way.
+#[test]
+fn a_post_answered_404_after_a_discard_is_not_posted() {
+    for via_status in [false, true] {
+        let f = fixture();
+        let mut s = screen(&f);
+        cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+        next_to(&mut s, Step::Preview);
+        let id = s.upload.as_ref().map(|u| u.session).expect("upload");
+        // Another window discarded it.
+        f.link
+            .demo_state()
+            .expect("demo")
+            .payroll
+            .discard(id)
+            .expect("discard");
+        let before = discards(&f);
+        if via_status {
+            s.after_post(Err(lost()));
+            s.check_status();
+            s.poll();
+        } else {
+            s.after_post(Err(ApiError::NotFound {
+                code: cl_api::ErrorCode::parse("NOT_FOUND"),
+            }));
+        }
+        assert_eq!(s.state()["trouble"], "discarded", "status={via_status}");
+        assert_eq!(
+            t("payroll.refused.discarded"),
+            "This import was discarded, so nothing was posted. Choose the file again to import it."
+        );
+        assert!(!s.post_unsettled);
+        assert!(s.posted.is_none());
+        assert!(s.upload.is_none());
+        assert_eq!(s.step, Step::Choose);
+        assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 0);
+        drop(s);
+        assert_eq!(discards(&f), before, "no second DELETE");
+    }
+}
+
+/// 422 `PAYROLL_DATE_INVALID` names the rows by number only.
+#[test]
+fn undated_rows_are_named_by_number() {
+    let r = |rows: Vec<u64>| draw::undated_rows_text(&rows);
+    assert_eq!(
+        r(vec![4, 9]),
+        "These rows in the file have no date the books can read: 4, 9. Add the dates in the file, then choose it again. Nothing was posted."
+    );
+    let many = r((1..=13).collect());
+    assert!(
+        many.contains("1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 3 more"),
+        "{many}"
+    );
+    assert!(r(vec![]).starts_with("Some rows in the file have no date"));
+    assert_eq!(
+        Trouble::Refused(PayrollRefusal::DateInvalid { rows: vec![2] }).code(),
+        "date_invalid"
+    );
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    let e = ApiError::Validation(cl_api::ValidationError::coded(
+        "PAYROLL_DATE_INVALID",
+        serde_json::json!({"rows": [{"rowNumber": 5, "code": "DATE_INVALID"}]}),
+    ));
+    s.after_post(Err(e));
+    assert_eq!(s.state()["trouble"], "date_invalid");
+    assert!(!s.post_unsettled);
+}
+
 #[test]
 fn a_viewer_with_hidden_accounts_cannot_import() {
     let f = fixture();
