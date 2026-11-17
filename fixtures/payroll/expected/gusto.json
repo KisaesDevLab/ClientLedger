@@ -1,0 +1,215 @@
+{
+  "provider": "gusto",
+  "mode": "A",
+  "periodStart": "2024-12-28",
+  "periodEnd": "2025-01-24",
+  "checkDate": "2025-01-24",
+  "entries": [
+    {
+      "date": "2025-01-10",
+      "lines": [
+        {
+          "lineType": "gross_wages_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "1191.04"
+        },
+        {
+          "lineType": "gross_wages_expense",
+          "department": "Kitchen",
+          "side": "debit",
+          "amount": "2825.80"
+        },
+        {
+          "lineType": "gross_wages_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "2615.75"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "135.04"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": "Kitchen",
+          "side": "debit",
+          "amount": "309.43"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "286.43"
+        },
+        {
+          "lineType": "reimbursement_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "42.15"
+        },
+        {
+          "lineType": "fit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "646.11"
+        },
+        {
+          "lineType": "sit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "232.13"
+        },
+        {
+          "lineType": "ss_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "827.68"
+        },
+        {
+          "lineType": "medicare_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "193.58"
+        },
+        {
+          "lineType": "futa_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "40.04"
+        },
+        {
+          "lineType": "suta_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "180.23"
+        },
+        {
+          "lineType": "health_ins_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "205.60"
+        },
+        {
+          "lineType": "retirement_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "170.82"
+        },
+        {
+          "lineType": "payroll_clearing",
+          "department": null,
+          "side": "credit",
+          "amount": "4909.45"
+        }
+      ],
+      "totalDebits": "7405.64",
+      "totalCredits": "7405.64"
+    },
+    {
+      "date": "2025-01-24",
+      "lines": [
+        {
+          "lineType": "gross_wages_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "1170.80"
+        },
+        {
+          "lineType": "gross_wages_expense",
+          "department": "Kitchen",
+          "side": "debit",
+          "amount": "2913.54"
+        },
+        {
+          "lineType": "gross_wages_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "2615.75"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "130.20"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": "Kitchen",
+          "side": "debit",
+          "amount": "319.04"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "286.43"
+        },
+        {
+          "lineType": "reimbursement_expense",
+          "department": "Front",
+          "side": "debit",
+          "amount": "18.29"
+        },
+        {
+          "lineType": "fit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "649.81"
+        },
+        {
+          "lineType": "sit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "233.69"
+        },
+        {
+          "lineType": "ss_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "833.08"
+        },
+        {
+          "lineType": "medicare_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "194.84"
+        },
+        {
+          "lineType": "futa_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "40.30"
+        },
+        {
+          "lineType": "suta_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "181.41"
+        },
+        {
+          "lineType": "health_ins_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "205.60"
+        },
+        {
+          "lineType": "retirement_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "171.20"
+        },
+        {
+          "lineType": "payroll_clearing",
+          "department": null,
+          "side": "credit",
+          "amount": "4944.12"
+        }
+      ],
+      "totalDebits": "7454.05",
+      "totalCredits": "7454.05"
+    }
+  ]
+}

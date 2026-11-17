@@ -1,0 +1,58 @@
+{
+  "provider": "adp_run_gli",
+  "mode": "B",
+  "periodStart": "2025-02-01",
+  "periodEnd": "2025-02-14",
+  "checkDate": "2025-02-14",
+  "entries": [
+    {
+      "date": "2025-02-14",
+      "lines": [
+        {
+          "lineType": "Payroll - Salaries & Wages",
+          "department": null,
+          "side": "debit",
+          "amount": "6235.45"
+        },
+        {
+          "lineType": "ER Social Security",
+          "department": null,
+          "side": "debit",
+          "amount": "386.60"
+        },
+        {
+          "lineType": "ER Medicare",
+          "department": null,
+          "side": "debit",
+          "amount": "90.42"
+        },
+        {
+          "lineType": "Federal Withholding",
+          "department": null,
+          "side": "credit",
+          "amount": "623.55"
+        },
+        {
+          "lineType": "Social Security Withholding",
+          "department": null,
+          "side": "credit",
+          "amount": "773.20"
+        },
+        {
+          "lineType": "Medicare Withholding",
+          "department": null,
+          "side": "credit",
+          "amount": "180.84"
+        },
+        {
+          "lineType": "Net Pay",
+          "department": null,
+          "side": "credit",
+          "amount": "5134.88"
+        }
+      ],
+      "totalDebits": "6712.47",
+      "totalCredits": "6712.47"
+    }
+  ]
+}

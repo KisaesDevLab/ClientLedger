@@ -1,0 +1,64 @@
+{
+  "provider": "onpay_gl_summary",
+  "mode": "B",
+  "periodStart": "2025-05-31",
+  "periodEnd": "2025-06-13",
+  "checkDate": "2025-06-13",
+  "entries": [
+    {
+      "date": "2025-06-13",
+      "lines": [
+        {
+          "lineType": "Wages Expense",
+          "department": null,
+          "side": "debit",
+          "amount": "3875.65"
+        },
+        {
+          "lineType": "FICA - Employer",
+          "department": null,
+          "side": "debit",
+          "amount": "296.49"
+        },
+        {
+          "lineType": "FUTA Expense",
+          "department": null,
+          "side": "debit",
+          "amount": "23.25"
+        },
+        {
+          "lineType": "Federal Income Tax W/H",
+          "department": null,
+          "side": "credit",
+          "amount": "387.57"
+        },
+        {
+          "lineType": "FICA - Employee",
+          "department": null,
+          "side": "credit",
+          "amount": "296.49"
+        },
+        {
+          "lineType": "FICA - Employer Payable",
+          "department": null,
+          "side": "credit",
+          "amount": "296.49"
+        },
+        {
+          "lineType": "FUTA Payable",
+          "department": null,
+          "side": "credit",
+          "amount": "23.25"
+        },
+        {
+          "lineType": "Net Payroll",
+          "department": null,
+          "side": "credit",
+          "amount": "3191.59"
+        }
+      ],
+      "totalDebits": "4195.39",
+      "totalCredits": "4195.39"
+    }
+  ]
+}

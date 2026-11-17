@@ -1,0 +1,70 @@
+{
+  "provider": "square_payroll",
+  "mode": "A",
+  "periodStart": "2025-04-26",
+  "periodEnd": "2025-05-09",
+  "checkDate": "2025-05-09",
+  "entries": [
+    {
+      "date": "2025-05-09",
+      "lines": [
+        {
+          "lineType": "gross_wages_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "5200.39"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "569.44"
+        },
+        {
+          "lineType": "ss_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "322.42"
+        },
+        {
+          "lineType": "medicare_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "75.41"
+        },
+        {
+          "lineType": "futa_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "31.20"
+        },
+        {
+          "lineType": "suta_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "140.41"
+        },
+        {
+          "lineType": "other_deduction_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "158.87"
+        },
+        {
+          "lineType": "other_tax_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "826.87"
+        },
+        {
+          "lineType": "payroll_clearing",
+          "department": null,
+          "side": "credit",
+          "amount": "4214.65"
+        }
+      ],
+      "totalDebits": "5769.83",
+      "totalCredits": "5769.83"
+    }
+  ]
+}

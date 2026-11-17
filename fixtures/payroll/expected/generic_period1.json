@@ -1,0 +1,58 @@
+{
+  "provider": "custom",
+  "mode": "A",
+  "periodStart": "2025-06-28",
+  "periodEnd": "2025-07-11",
+  "checkDate": "2025-07-11",
+  "entries": [
+    {
+      "date": "2025-07-11",
+      "lines": [
+        {
+          "lineType": "gross_wages_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "4660.59"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "356.54"
+        },
+        {
+          "lineType": "fit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "452.70"
+        },
+        {
+          "lineType": "sit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "154.26"
+        },
+        {
+          "lineType": "ss_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "577.92"
+        },
+        {
+          "lineType": "medicare_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "135.16"
+        },
+        {
+          "lineType": "payroll_clearing",
+          "department": null,
+          "side": "credit",
+          "amount": "3697.09"
+        }
+      ],
+      "totalDebits": "5017.13",
+      "totalCredits": "5017.13"
+    }
+  ]
+}

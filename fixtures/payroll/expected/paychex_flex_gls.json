@@ -1,0 +1,70 @@
+{
+  "provider": "paychex_flex_gls",
+  "mode": "B",
+  "periodStart": "2025-03-29",
+  "periodEnd": "2025-04-11",
+  "checkDate": "2025-04-11",
+  "entries": [
+    {
+      "date": "2025-04-11",
+      "lines": [
+        {
+          "lineType": "Gross Wages",
+          "department": null,
+          "side": "debit",
+          "amount": "4410.35"
+        },
+        {
+          "lineType": "OASDI/ER",
+          "department": null,
+          "side": "debit",
+          "amount": "273.44"
+        },
+        {
+          "lineType": "MED/ER",
+          "department": null,
+          "side": "debit",
+          "amount": "63.95"
+        },
+        {
+          "lineType": "Fed W/H",
+          "department": null,
+          "side": "credit",
+          "amount": "441.05"
+        },
+        {
+          "lineType": "OASDI/EE",
+          "department": null,
+          "side": "credit",
+          "amount": "273.44"
+        },
+        {
+          "lineType": "MED/EE",
+          "department": null,
+          "side": "credit",
+          "amount": "63.95"
+        },
+        {
+          "lineType": "OASDI/ER Payable",
+          "department": null,
+          "side": "credit",
+          "amount": "273.44"
+        },
+        {
+          "lineType": "MED/ER Payable",
+          "department": null,
+          "side": "credit",
+          "amount": "63.95"
+        },
+        {
+          "lineType": "Net Check",
+          "department": null,
+          "side": "credit",
+          "amount": "3631.91"
+        }
+      ],
+      "totalDebits": "4747.74",
+      "totalCredits": "4747.74"
+    }
+  ]
+}
