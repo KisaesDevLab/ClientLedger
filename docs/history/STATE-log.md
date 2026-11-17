@@ -2,6 +2,16 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-11-13 — A09 Memorized Reports, transfer, export and print complete on `phase/A09-memorized-reports`; PR with auto-merge. Tier M.
+  - Shipped: the Memorized Reports list (open, rename, replace, delete, groups), `.clreport` export and import (preview with matching of accounts, customers, vendors, items, tags and budgets, review of choices, save check), export and print of builder reports, demo backend parity, scenarios `memorized_reports` and `report_file`, user docs.
+  - Owner decisions after A08: Q-A08ai formulas use the normal sign (engine #52, U-218); Q-A09b Assets/Liabilities/Equity by Account show ending balances (engine #53, U-219); Q-A09c cash speed goes to P37.
+  - Engine (kisaes-gl-engine, merged; pin cf0cb239): #52 U-218 `report-builder-formula-sign-v1`; #53 U-219 `reports-by-account-balance-v1`; #54 U-220 `report-defs-transfer-v1`. No migrations.
+  - MyBooks Online output changes (same engine code): formulas, their $ / % change and percent-of bases use each section's normal sign (a "% of" self with a flipped sign is now -100%); Assets, Liabilities and Equity by Account show ending balances (Equity posted balances only, no computed earnings).
+  - Reviews (local, not committed): reviewer opus (target/reviews/A09.md) 0 blocker, 3 major, 8 minor, 6 notes; security-reviewer opus (A09-security.md) 0 critical, 0 high, 0 medium, 9 low, 3 info. Hands-on QA (target/plans/A09-qa-findings.md): 0 high, 0 medium, 9 low. All fixed except as noted in Follow-ups from A09.
+  - Acceptance: [x] Memorized Reports list with groups and the rename, replace and delete rules; [x] `.clreport` export and import round trip with preview and review; [x] export and print of builder reports; [x] formulas and by-account balances follow Q-A08ai and Q-A09b; [x] keyboard reachable.
+  - Checks: `cargo xtask ci` green; contract 357/357 with `CL_API_REQUIRE=1`; goldens; ui-check memorized_reports, report_file, report_builder, reports-builder and reports light and dark.
+  - Decisions: Q-A09a-Q-A09aa (defaults Q-A09r-aa). Rows U-218, U-219, U-220 Merged; U-221-U-223 Open (later); S-L9 added to U-33.
+  - Agents: architect (opus); rust-implementer (opus) x2 (A, B) + 2 fresh opus fix passes; engine-implementer (opus) #52-#54; reviewer (opus); security-reviewer (opus); general-purpose (opus) QA; bookkeeper (sonnet).
 - 2026-11-12 — A08 Report Builder editor complete on `phase/A08-report-builder-editor`; PR with auto-merge. Tier M.
   - Shipped: the Report Builder editor (outline of six row kinds, Row and Columns tabs, Guided and Advanced start points, live preview through the request queue, problems callouts), Save changes and Memorize for builder reports, compare ranges sent by the desktop (prior period of October = September 1-30), "Edit in Report Builder" beside Customize, demo backend parity, `report_builder` scenario, KEYBOARD.md regenerated.
   - Owner decisions this phase: Q-A08b mockup approved; Q-A08c-g drafted defaults; Q-A08h net every report the account-detail function feeds (engine #50); Q-A08i customer and aging columns; Q-A08j engine preview mode (engine #51); Q-A08o remove-and-say-so.
